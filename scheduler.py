@@ -2179,7 +2179,7 @@ def _bg_engine_watchdog():
     only (no auto-fix); Claude-web reads open gaps + triggers fixes. Day-locked."""
     global _engine_watchdog_ran_on
     now = datetime.now(IST)
-    if not (now.hour == 8 and 45 <= now.minute < 59):
+    if not (now.hour == 5 and 58 <= now.minute < 60):   # cc#622 C: watchdog 08:45 -> 05:58 (LAST, after result-corner 05:55)
         return _SKIPPED
     today = now.date()
     if _engine_watchdog_ran_on == today:
@@ -2216,7 +2216,7 @@ def _bg_result_corner_verify():
     T+1 chain. Day-locked. Runs after the 08:00 T+1 so freshly-reconciled rows flow next cycle."""
     global _result_corner_ran_on
     now = datetime.now(IST)
-    if not (now.hour == 8 and 10 <= now.minute < 30):
+    if not (now.hour == 5 and 55 <= now.minute < 60):   # cc#622 C: result-corner 08:15 -> 05:55 (AFTER T+1 05:40)
         return _SKIPPED
     today = now.date()
     if _result_corner_ran_on == today:
@@ -2239,7 +2239,7 @@ def _bg_result_analysis_weekly_sweep():
     daily auto-regen + this weekly sweep = zero manual batches. Day-locked."""
     global _result_analysis_sweep_ran_on
     now = datetime.now(IST)
-    if not (now.weekday() == 6 and now.hour == 9 and now.minute < 15):
+    if not (now.weekday() == 6 and now.hour == 5 and now.minute < 15):   # cc#622 C: Sun sweep 09:00 -> 05:00 (clear 06:00-09:10)
         return _SKIPPED
     if _result_analysis_sweep_ran_on == now.date():
         return _SKIPPED
@@ -2362,7 +2362,7 @@ def _bg_ops_metrics_t1():
     ops-metrics doc discovery/extraction, one screener visit per company)."""
     global _ops_metrics_t1_armed_day
     now = datetime.now(IST)
-    if not (now.hour == 8 and now.minute < 10):
+    if not (now.hour == 5 and 40 <= now.minute < 50):   # cc#622 C: T+1 08:00 -> 05:40 (clear 06:00-09:10)
         return _SKIPPED
     day_key = now.date().isoformat()
     if _ops_metrics_t1_armed_day == day_key:
@@ -2646,9 +2646,12 @@ async def _scheduler_loop():
             log.warning("scheduler: guards reset by watchdog/fail-streak — firing recovery tick")
             if _is_market_hours(now):
                 _spawn(_bg_signal_writer)
-        if h == 6 and m == 0:
-            _spawn(_bg_fetch_global)
-            _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
+        # cc#622 C: morning prep pulled BEFORE 06:00 so the 06:00-09:10 pre-market window is empty
+        # (deploys/market-open never land on a scheduled batch). Ordered stagger 05:05-05:58.
+        if h == 5 and m == 15:
+            _spawn(_bg_fetch_global)        # cc#622 C: global indices 06:00 -> 05:15
+        if h == 5 and m == 20:
+            _spawn(_bg_fetch_market_news)   # cc#622 C: domestic + global RSS 06:00 -> 05:20 (task #38)
         # cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
         # universe -> raw_news (source_type='company', alias-filtered). Supersedes the cc#207
         # position_news quarantine fetch.
@@ -2662,20 +2665,20 @@ async def _scheduler_loop():
         # cc#611: revived dedicated per-open-position Google News, 3 slots/day (07:35/13:35/19:35 IST),
         # EVERY day (positions held over weekends still get fresh news). Off the fyers feed -> any hour
         # is safe; alerting + the cc#599 watchdog freshness check catch a silent stall like the 06-Jul one.
-        if m == 35 and h in (7, 13, 19):
+        if m == 35 and h in (5, 13, 19):               # cc#622 C: slot 1 07:35 -> 05:35 (slots 2/3 unchanged)
             _spawn(_bg_fetch_position_news)
-        if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
-            _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
+        if _is_trading_day(today) and ((h == 5 and m == 30) or (m == 20 and h in (16, 22))):
+            _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger. cc#622 C: morning slot 07:20 -> 05:30
         # cc#291: global intraday now runs 24x7 (was 06:00-23:30) — its symbols are commodities/
         # crypto/forex that trade near-continuously, so refresh them outside NSE hours too.
         if m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
-        if now.weekday() == 0 and h == 8 and m == 0:
-            _spawn(_bg_fu_sync)
-        if h == 6 and m == 15:
+        if now.weekday() == 0 and h == 5 and m == 40:
+            _spawn(_bg_fu_sync)               # cc#622 C: Mon universe sync 08:00 -> 05:40 (same slot as T+1)
+        if h == 5 and m == 10:
             # cc#420: EVERY day incl weekends/holidays — boards announce results over weekends and
             # Monday reporters confirm Sat/Sun dates; a trading-day guard here starved the calendar.
-            _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar BEFORE the 09:10 pre-market check
+            _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar. cc#622 C: 06:15 -> 05:10 (before T+1 + result-corner)
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         if h == 9 and m == 25:
@@ -2773,9 +2776,9 @@ async def _scheduler_loop():
         _spawn(_bg_futures_gap_backfill)       # cc#621 Issue 4: nightly ~00:15 IST futures gap-detect+backfill (self-gated, off-market)
         if _is_market_hours(now) and _is_trading_day(today) and m % 15 == 0:
             _spawn(_bg_watchdog_market)         # cc#618 Section D: 15-min market-hours writer-tick freshness
-        if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
-            _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside)
-        if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit
+        if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 0 and m == 45:
+            _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside). cc#622 B: 09:30 market-hours -> 00:45 night window
+        if h == 5 and m == 5:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit. cc#622 C: 08:45 -> 05:05 (clear 06:00-09:10)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         if h == 2 and m == 10:  _spawn(_bg_ops_peer_benchmark)   # cc#593: nightly ops peer-benchmark rebuild
@@ -2831,7 +2834,7 @@ def _bg_scheduler_master_daily_audit():
     "on app startup" half of the requirement; this covers days with no deploy)."""
     global _scheduler_master_audit_armed_day
     now = datetime.now(IST)
-    if not (now.hour == 8 and now.minute == 45):
+    if not (now.hour == 5 and now.minute == 5):   # cc#622 C: drift audit 08:45 -> 05:05 (clear 06:00-09:10)
         return _SKIPPED
     day_key = now.date().isoformat()
     if _scheduler_master_audit_armed_day == day_key:

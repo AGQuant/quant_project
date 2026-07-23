@@ -170,10 +170,18 @@ def _seed(conn):
                   ts_column=EXCLUDED.ts_column, scope_filter=EXCLUDED.scope_filter,
                   precondition_sql=EXCLUDED.precondition_sql, cadence=EXCLUDED.cadence,
                   sla_hours=EXCLUDED.sla_hours, severity=EXCLUDED.severity,
-                  suggested_action=EXCLUDED.suggested_action""",
+                  suggested_action=EXCLUDED.suggested_action, active=TRUE""",
                         (c["check_id"], c["job_name"], c["check_type"], c["output_table"], c["ts_column"],
                          c["scope_filter"], c["precondition_sql"], c["cadence"], c["sla_hours"],
                          c["severity"], c["suggested_action"]))
+        # cc#622 E1: the upsert never deletes, so a check REMOVED from SEED_CHECKS lingers active and
+        # keeps firing — e.g. the old single `fyers_feed_data` replaced by the eq/fut pair in cc#621
+        # double-fired beside the new pair. Self-heal: deactivate any SEED-managed row (notes='SEED')
+        # no longer in the current seed list. Bespoke rows (result_corner_freshness) and
+        # AUTO_REGISTERED ticks carry a different `notes` and are untouched.
+        cur.execute("""UPDATE watchdog_checks SET active=FALSE
+                       WHERE notes='SEED' AND active IS TRUE AND check_id <> ALL(%s)""",
+                    ([c["check_id"] for c in SEED_CHECKS],))
     conn.commit()
 
 
