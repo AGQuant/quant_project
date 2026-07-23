@@ -1728,8 +1728,78 @@ function _qoqArrow(values) {
   return null;
 }
 
+// cc#638: ONE shared chart modal for every statement table (replaces per-row charts). Metric dropdown
+// (all rows), large Line/Bar chart with point markers + native hover tooltip (period+value). cc#637:
+// in Bar mode, growth % vs the previous period is labelled above each bar (pp-delta for %-type rows).
+function FinChartModal({ title, periods, rows, onClose }) {
+  const [sel, setSel] = useState(0);
+  const [bar, setBar] = useState(false);
+  useEffect(() => { const h = e => { if (e.key === "Escape") onClose(); }; document.addEventListener("keydown", h); return () => document.removeEventListener("keydown", h); }, [onClose]);
+  if (!rows || !rows.length) return null;
+  const row = rows[Math.min(sel, rows.length - 1)] || rows[0];
+  const vals = (row && row.values) || [];
+  const isPct = row && row.unit === "pct";
+  const W = 640, H = 300, L = 48, R = 16, Tp = 22, Bm = 34, n = vals.length;
+  const nums = vals.filter(v => v != null);
+  const gLabel = i => {
+    if (i === 0) return null;
+    const v = vals[i], p = vals[i - 1];
+    if (v == null || p == null) return null;
+    if (isPct) { const d = Math.round((v - p) * 10) / 10; return { t: (d >= 0 ? "+" : "") + d.toFixed(1) + "pp", c: d >= 0.05 ? C.green : d <= -0.05 ? C.red : C.muted }; }
+    if (p === 0) return null;
+    const g = Math.round((v - p) / Math.abs(p) * 1000) / 10;
+    return { t: (g >= 0 ? "+" : "") + g.toFixed(1) + "%", c: g >= 0.1 ? C.green : g <= -0.1 ? C.red : C.muted };
+  };
+  let bodySvg;
+  if (!nums.length) bodySvg = <div style={{ padding: "80px 0", textAlign: "center", color: C.muted }}>no data for this metric</div>;
+  else {
+    const lo = Math.min(...nums), hi = Math.max(...nums), anchor = bar ? Math.min(0, lo) : lo;
+    const pad = (hi - anchor) * 0.14 || 1;
+    const ymin = bar ? anchor : lo - pad, ymax = hi + pad;
+    const X = i => L + (n === 1 ? 0.5 : i / (n - 1)) * (W - L - R);
+    const Y = v => Tp + (ymax - v) / (ymax - ymin) * (H - Tp - Bm);
+    const bw = Math.max(6, Math.min(40, (W - L - R) / Math.max(n, 1) * 0.5));
+    const line = vals.map((v, i) => v == null ? "" : ((i === 0 || vals[i - 1] == null ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1))).join(" ");
+    const y0 = Y(bar ? Math.max(0, ymin) : ymin);
+    const ticks = [0, 1, 2, 3].map(t => ymin + (ymax - ymin) * t / 3);
+    bodySvg = (
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {ticks.map((tv, i) => (<g key={i}>
+          <line x1={L} y1={Y(tv)} x2={W - R} y2={Y(tv)} stroke={C.gridLine} strokeWidth="0.5" strokeOpacity="0.5" />
+          <text x={L - 6} y={Y(tv) + 3} fontSize="9" fill={C.muted} textAnchor="end" fontFamily="monospace">{tv.toFixed(isPct ? 1 : 0)}</text>
+        </g>))}
+        {vals.map((v, i) => (<text key={"x" + i} x={X(i)} y={H - 8} fontSize="8.5" fill={C.muted} textAnchor="middle">{String(periods[i] == null ? "" : periods[i]).slice(0, 6)}</text>))}
+        {bar
+          ? vals.map((v, i) => v == null ? null : (<rect key={i} x={X(i) - bw / 2} y={Math.min(Y(v), y0)} width={bw} height={Math.abs(Y(v) - y0)} fill={v >= 0 ? C.accent : C.red} opacity="0.85" rx="2"><title>{periods[i]}: {_finFmt(v, row.unit)}</title></rect>))
+          : <path d={line} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" />}
+        {!bar && vals.map((v, i) => v == null ? null : (<circle key={i} cx={X(i)} cy={Y(v)} r="3" fill={C.accent}><title>{periods[i]}: {_finFmt(v, row.unit)}</title></circle>))}
+        {bar && vals.map((v, i) => { const g = gLabel(i); return (v == null || !g) ? null : (<text key={"g" + i} x={X(i)} y={Y(v) - 6} fontSize="8.5" fontWeight="700" fill={g.c} textAnchor="middle" fontFamily="monospace">{g.t}</text>); })}
+      </svg>
+    );
+  }
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(6,10,20,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, width: "min(720px,96vw)", maxHeight: "90vh", overflow: "auto", padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          <b style={{ fontSize: 15 }}>{title} Chart</b>
+          <select value={sel} onChange={e => setSel(+e.target.value)} style={{ background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 8px", fontSize: 12 }}>
+            {rows.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
+          </select>
+          <span style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+            {[["Line", false], ["Bar", true]].map(([lbl, b]) => (
+              <span key={lbl} onClick={() => setBar(b)} style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 12px", cursor: "pointer", background: bar === b ? C.accent : "transparent", color: bar === b ? "#fff" : C.muted }}>{lbl}</span>
+            ))}
+          </span>
+          <button onClick={onClose} style={{ border: "none", background: "none", color: C.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+        {bodySvg}
+      </div>
+    </div>
+  );
+}
+
 function FinTable({ title, table, trendLabel }) {
-  const [openRow, setOpenRow] = useState(null);   // one open row-chart per table at a time
+  const [chartOpen, setChartOpen] = useState(false);   // cc#638: one chart modal per table (header button)
   if (!table || !table.rows || !table.rows.length) return null;
   const displayRows = table.rows.filter(rw => rw.display !== false);
   if (!displayRows.length) return null;
@@ -1745,9 +1815,19 @@ function FinTable({ title, table, trendLabel }) {
   const rowVals = row => keep.map(i => row.values[i]);
   const periods = keep.map(i => srcP[i]);
   const ttmIdx = (table.ttm || isTTM(periods[periods.length - 1])) ? periods.length - 1 : -1;
+  const modalRows = displayRows.map(r => ({ ...r, values: rowVals(r) }));
   return (
     <div style={{ marginBottom: 22 }}>
-      <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>{title}</div>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text }}>{title}</div>
+        {/* cc#638: single table-level chart button (replaces per-row icons) */}
+        <span onClick={() => setChartOpen(true)} title={`${title} — chart`}
+          style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer",
+            fontSize: 11, fontWeight: 700, color: C.accent, border: `1px solid ${C.gridLine}`, borderRadius: 7, padding: "4px 10px" }}>
+          <ChartIcon />Chart
+        </span>
+      </div>
+      {chartOpen && <FinChartModal title={title} periods={periods} rows={modalRows} onClose={() => setChartOpen(false)} />}
       <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + 170, fontSize: 12.5 }}>
           <thead>
@@ -1769,7 +1849,6 @@ function FinTable({ title, table, trendLabel }) {
                 <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
                   <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontWeight: 600 }}>
-                      <ChartIcon onClick={() => setOpenRow(openRow === row.label ? null : row.label)} title={`${row.label} — tap for trend`} />
                       {row.label}
                       {trendLabel && row.label === trendLabel && _qoqArrow(row.values)}
                     </span>
@@ -1780,13 +1859,6 @@ function FinTable({ title, table, trendLabel }) {
                       background: i === ttmIdx ? C.gold + "08" : "transparent" }}>{_finFmt(v, row.unit)}</td>
                   ))}
                 </tr>
-                {openRow === row.label && (
-                  <tr>
-                    <td colSpan={periods.length + 1} style={{ padding: "6px 12px 16px", background: C.bg }}>
-                      <FinRowChart row={{ ...row, values: rowVals(row) }} periods={periods} />
-                    </td>
-                  </tr>
-                )}
               </React.Fragment>
             ))}
           </tbody>
@@ -1833,7 +1905,11 @@ function FinancialsSection({ financials }) {
       <FinTable title="Profit & Loss" table={cur.profit_loss} />
       <FinTable title="Balance Sheet" table={cur.balance_sheet} />
       <FinTable title="Cash Flow" table={cur.cash_flow} />
-      <FinTable title="Ratios" table={cur.ratios} />
+      {/* cc#638: Ratios V2 — five bucketed sub-tables (Growth, Profitability, Valuation, Solvency,
+          Efficiency), Solvency hidden for BFSI (server-side). Falls back to the flat Ratios table. */}
+      {(financials.ratios_v2 && financials.ratios_v2.buckets && financials.ratios_v2.buckets.length)
+        ? financials.ratios_v2.buckets.map((bk, i) => <FinTable key={i} title={bk.title} table={bk.table} />)
+        : <FinTable title="Ratios" table={cur.ratios} />}
       {cur.shareholding && cur.shareholding.rows && cur.shareholding.rows.length
         ? <FinTable title="Shareholding Pattern" table={cur.shareholding} trendLabel="Promoters" />
         : (

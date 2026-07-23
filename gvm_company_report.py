@@ -519,6 +519,130 @@ def _shareholding_table(periods: List[Dict[str, Any]]) -> Optional[Dict[str, Any
 _FH_SECTIONS = [("quarters", "quarter"), ("profit-loss", "annual"), ("balance-sheet", "annual"),
                 ("cash-flow", "annual"), ("ratios", "annual"), ("shareholding", "quarter")]
 
+# cc#638: canonical BFSI rule — the entire Solvency bucket is hidden for financials (D/E + interest
+# coverage are meaningless there). Segment keyword match on gvm_scores.segment.
+_BFSI_KEYS = ("Bank", "NBFC", "Insurance", "Finance", "AMC", "Broking", "Capital Markets",
+              "Exchanges", "Microfinance", "Housing Finance", "Financial")
+
+
+def _is_bfsi(segment):
+    s = segment or ""
+    return any(k in s for k in _BFSI_KEYS)
+
+
+def _cagr(latest, base, years):
+    if latest is None or base is None or base <= 0 or latest <= 0:
+        return None
+    return round((pow(latest / base, 1.0 / years) - 1.0) * 100.0, 1)
+
+
+def _g1y(latest, prev):
+    if latest is None or prev in (None, 0):
+        return None
+    return round((latest - prev) / abs(prev) * 100.0, 1)
+
+
+def _annual_vals(cur, symbol, section, key):
+    """Oldest->newest series of one metric across ANNUAL periods (consolidated-preferred)."""
+    cur.execute("""SELECT consolidated, metrics FROM fundamentals_history
+                   WHERE symbol=%s AND section=%s AND period_type='annual' ORDER BY period_end ASC""",
+                (symbol, section))
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    has_c = any(bool(r[0]) for r in rows)
+    return [_parse_metric((r[1] or {}).get(key)) for r in rows if bool(r[0]) == has_c]
+
+
+def _rat_row(label, unit, values):
+    if all(v is None for v in values):
+        return None
+    return {"label": label, "unit": unit, "chart_type": "line", "display": True, "values": values}
+
+
+def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
+    """cc#638 RATIOS V2: five bucketed sub-tables (Growth, Profitability, Valuation, Solvency,
+    Efficiency) from fundamentals_history annual series + screener_raw current. Solvency is HIDDEN for
+    BFSI. Missing metric = skipped row; an empty bucket is omitted. Zero new scraping."""
+    sym = (symbol or "").strip().upper()
+    cur.execute('''SELECT pe, "Price to book value", "EVEBITDA", dividend_yield, market_cap, "Sales",
+                          "Debt to equity", interest_coverage, roce, "Return on equity", opm,
+                          "Sales growth", sales_growth_3y, sales_growth_5y
+                   FROM screener_raw WHERE nse_code=%s LIMIT 1''', (sym,))
+    r = cur.fetchone()
+    k = {}
+    if r:
+        for name, val in zip(["pe", "pb", "evebitda", "divyield", "mcap", "sales", "de", "intcov",
+                              "roce", "roe", "opm", "sg1", "sg3", "sg5"], r):
+            k[name] = _parse_metric(val)
+    np_s = _annual_vals(cur, sym, "profit-loss", "Net Profit")
+    eps_s = _annual_vals(cur, sym, "profit-loss", "EPS in Rs")
+    sales_s = _annual_vals(cur, sym, "profit-loss", "Sales")
+    ta_s = _annual_vals(cur, sym, "balance-sheet", "Total Assets")
+
+    def _last(s, n=1):
+        return s[-n] if len(s) >= n else None
+    npm = (round(_last(np_s) / _last(sales_s) * 100.0, 1)
+           if (_last(np_s) is not None and _last(sales_s)) else None)
+    asset_turn = (round(_last(sales_s) / _last(ta_s), 2)
+                  if (_last(sales_s) is not None and _last(ta_s)) else None)
+    mcap_sales = (round(k.get("mcap") / k.get("sales"), 2)
+                  if (k.get("mcap") is not None and k.get("sales")) else None)
+
+    buckets = []
+
+    def _add(title, periods, rows):
+        rows = [x for x in rows if x is not None]
+        if rows:
+            buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
+
+    # 1) GROWTH — 1Y / 3Y CAGR / 5Y CAGR
+    _add("Growth", ["1Y", "3Y CAGR", "5Y CAGR"], [
+        _rat_row("Sales Growth", "pct", [k.get("sg1") if k.get("sg1") is not None else _g1y(_last(sales_s), _last(sales_s, 2)),
+                                          k.get("sg3") if k.get("sg3") is not None else _cagr(_last(sales_s), _last(sales_s, 4), 3),
+                                          k.get("sg5") if k.get("sg5") is not None else _cagr(_last(sales_s), _last(sales_s, 6), 5)]),
+        _rat_row("Net Profit Growth", "pct", [_g1y(_last(np_s), _last(np_s, 2)),
+                                              _cagr(_last(np_s), _last(np_s, 4), 3), _cagr(_last(np_s), _last(np_s, 6), 5)]),
+        _rat_row("EPS Growth", "pct", [_g1y(_last(eps_s), _last(eps_s, 2)), None, None]),
+    ])
+    # 2) PROFITABILITY (current)
+    _add("Profitability", ["Current"], [
+        _rat_row("ROCE %", "pct", [k.get("roce")]), _rat_row("ROE %", "pct", [k.get("roe")]),
+        _rat_row("OPM %", "pct", [k.get("opm")]), _rat_row("NPM %", "pct", [npm]),
+    ])
+    # 3) VALUATION (current)
+    _add("Valuation", ["Current"], [
+        _rat_row("PE", "x", [k.get("pe")]), _rat_row("PB", "x", [k.get("pb")]),
+        _rat_row("EV/EBITDA", "x", [k.get("evebitda")]), _rat_row("MCap/Sales", "x", [mcap_sales]),
+        _rat_row("Dividend Yield", "pct", [k.get("divyield")]),
+    ])
+    # 4) SOLVENCY (current) — HIDDEN for BFSI
+    if not _is_bfsi(segment):
+        _add("Solvency", ["Current"], [
+            _rat_row("Debt / Equity", "x", [k.get("de")]),
+            _rat_row("Interest Coverage", "x", [k.get("intcov")]),
+        ])
+    # 5) EFFICIENCY — existing annual ratios series + Asset Turnover (current)
+    _ra_all = _all_section(cur, sym, "ratios", "annual")
+    eff_rows = _variant_rows(_ra_all, any(bool(x[0]) for x in _ra_all), 12) if _ra_all else []
+    eff_tbl = _build_table(eff_rows, _RATIO_ROW_DEFS) if eff_rows else {"periods": [], "rows": []}
+    eff_periods = eff_tbl.get("periods") or ["Current"]
+    eff_final = list(eff_tbl.get("rows") or [])
+    if asset_turn is not None:
+        eff_final.append({"label": "Asset Turnover", "unit": "x", "chart_type": "line", "display": True,
+                          "values": [None] * (len(eff_periods) - 1) + [asset_turn]})
+    if eff_final:
+        buckets.append({"title": "Efficiency", "table": {"periods": eff_periods, "rows": eff_final}})
+
+    return {"buckets": buckets, "bfsi": _is_bfsi(segment)}
+
+
+def _all_section(cur, symbol, section, ptype):
+    cur.execute("""SELECT consolidated, period_label, period_end, metrics FROM fundamentals_history
+                   WHERE symbol=%s AND section=%s AND period_type=%s ORDER BY period_end ASC""",
+                (symbol, section, ptype))
+    return cur.fetchall()
+
 
 def _variant_rows(all_rows, want_consolidated, limit):
     """cc#636: rows for ONE variant (consolidated|standalone), oldest->newest, capped at `limit`."""
@@ -593,8 +717,18 @@ def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
     base = variants.get(default) or {"basis": None, "quarterly": None, "profit_loss": None,
                                      "balance_sheet": None, "cash_flow": None, "ratios": None,
                                      "shareholding": None}
-    # backward-compat: default variant's tables at top level, + the toggle metadata
-    return {**base, "variants": variants, "variants_available": available, "default_variant": default}
+    # cc#638: RATIOS V2 buckets (variant-agnostic — screener_raw current + fundamentals annual series).
+    ratios_v2 = None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT segment FROM gvm_scores WHERE symbol=%s ORDER BY score_date DESC LIMIT 1", (symbol,))
+            seg = cur.fetchone()
+            ratios_v2 = build_ratios_v2(cur, symbol, seg[0] if seg else None)
+    except Exception:
+        ratios_v2 = None
+    # backward-compat: default variant's tables at top level, + the toggle metadata + ratios_v2
+    return {**base, "variants": variants, "variants_available": available, "default_variant": default,
+            "ratios_v2": ratios_v2}
 
 
 # ─── cc#541: OPERATIONAL METRICS section — per-sector KPIs (NIM/GNPA/CASA for banks,
