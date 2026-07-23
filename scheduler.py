@@ -2152,6 +2152,31 @@ def _bg_ops_peer_benchmark():
     return None
 
 
+_result_corner_ran_on = None   # cc#602 day-lock: news-vs-calendar verify + reconcile once/day
+
+
+def _bg_result_corner_verify():
+    """cc#602 (RESULT_CORNER_SPEC_V1): daily ~08:15 IST — verify the polished_news result-announcement
+    set against earnings_calendar (alert if news leads = rule 7130 watchdog) + reconcile the missing
+    reported companies (news catches small/midcaps the NSE feed misses), enqueuing each into the
+    T+1 chain. Day-locked. Runs after the 08:00 T+1 so freshly-reconciled rows flow next cycle."""
+    global _result_corner_ran_on
+    now = datetime.now(IST)
+    if not (now.hour == 8 and 10 <= now.minute < 30):
+        return _SKIPPED
+    today = now.date()
+    if _result_corner_ran_on == today:
+        return _SKIPPED
+    _result_corner_ran_on = today
+    try:
+        import result_corner
+        res = result_corner.run_daily_verify()
+        log.info(f"_bg_result_corner_verify: {res}")
+    except Exception as e:
+        log.error(f"_bg_result_corner_verify: {e}")
+    return None
+
+
 _shareholding_q_running = False
 _shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
 
@@ -2602,6 +2627,7 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
+        _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
         if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
             _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside)
         if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit

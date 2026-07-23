@@ -68,6 +68,7 @@ from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from ops_metrics_pipeline import router as ops_metrics_router   # cc#523: sector KPI registry + concall pipeline
 from ops_peer_benchmark import router as ops_peer_benchmark_router   # cc#593: ops-metrics peer-benchmark compute
+from result_corner import router as result_corner_router   # cc#602: news-vs-calendar result coverage
 from scheduler_master import router as scheduler_master_router   # cc#525: scheduled-job registry + drift audit
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
@@ -287,6 +288,7 @@ app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(ops_metrics_router)   # cc#523
 app.include_router(ops_peer_benchmark_router)   # cc#593: /api/ops-peer/* peer-benchmark compute
+app.include_router(result_corner_router)   # cc#602: /api/admin/result_corner/* news-vs-calendar
 app.include_router(scheduler_master_router)   # cc#525
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
