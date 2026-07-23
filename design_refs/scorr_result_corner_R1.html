@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Result Corner · Scorr</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+:root{
+  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
+  --grn-d:rgba(47,212,139,.12); --red-d:rgba(255,92,108,.12);
+  --font:'Sora',sans-serif; --mono:'IBM Plex Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 22px 60px}
+
+/* ── header ─────────────────────────────────────────── */
+header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.h-title{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.h-title b{color:var(--cyan)}
+.h-season{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:2.5px;text-transform:uppercase;padding-bottom:5px}
+.h-spacer{flex:1}
+.h-stamp{font-family:var(--mono);font-size:11px;color:var(--mut);padding-bottom:5px}
+.h-stamp b{color:var(--grn)}
+
+/* ── section labels ─────────────────────────────────── */
+.sec-label{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--cyan);
+  letter-spacing:2.5px;text-transform:uppercase;margin:30px 0 12px;display:flex;align-items:center;gap:12px}
+.sec-label::after{content:'';flex:1;height:1px;background:var(--line)}
+.sec-label .cov{color:var(--dim);letter-spacing:.5px;font-size:10px;text-transform:none}
+
+/* ── 01 SEASON TAPE ─────────────────────────────────── */
+.tape{display:grid;grid-template-columns:230px 1fr 340px;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tape>div{background:var(--panel);padding:20px 22px}
+.tp-k{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-bottom:9px}
+.tp-big{font-family:var(--mono);font-size:34px;font-weight:700;line-height:1;letter-spacing:-1px}
+.tp-big small{font-size:15px;color:var(--dim);font-weight:500}
+.tp-sub{font-size:10.5px;color:var(--mut);margin-top:7px}
+.bar{height:7px;border-radius:4px;background:var(--bg2);margin-top:13px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blu));width:61%}
+
+/* segmented PAT meter — the season's shape in one strip */
+.seg{display:flex;height:30px;border-radius:8px;overflow:hidden;margin-top:11px;font-family:var(--mono)}
+.seg span{display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#0A0F1E}
+.seg .s-pos{background:var(--grn)}
+.seg .s-neg{background:var(--red)}
+.seg .s-flat{background:#3A4666;color:var(--mut)}
+.seg-legend{display:flex;gap:16px;margin-top:9px;font-size:10.5px;color:var(--mut)}
+.seg-legend b{font-family:var(--mono);color:var(--txt)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
+
+.medians{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px}
+.md-k{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
+.md-v{font-family:var(--mono);font-size:21px;font-weight:700;margin-top:3px}
+.md-v small{font-size:10px;color:var(--dim);font-weight:400;margin-left:5px}
+.pos{color:var(--grn)}.neg{color:var(--red)}
+
+.tiers{display:flex;gap:7px;margin-top:12px}
+.tier-chip{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:20px;
+  background:var(--bg2);border:1px solid var(--line2);color:var(--mut)}
+.tier-chip b{color:var(--txt)}
+
+/* ── 02 SECTOR TABLE ────────────────────────────────── */
+.tbl-card{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
+table{width:100%;border-collapse:collapse}
+th{font-family:var(--mono);font-size:9.5px;font-weight:600;color:var(--dim);letter-spacing:1.5px;
+  text-transform:uppercase;text-align:right;padding:11px 14px;background:var(--panel2);
+  border-bottom:1px solid var(--line2);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:10px 14px;text-align:right;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:12px;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr{cursor:pointer;transition:background .12s}
+tbody tr:hover{background:var(--bg2)}
+tbody tr.sel{background:rgba(55,211,232,.07);box-shadow:inset 3px 0 0 var(--cyan)}
+.sect-name{font-family:var(--font);font-weight:600;color:var(--txt);font-size:12.5px}
+.cov-cell{color:var(--dim);font-size:11px}
+.cov-cell b{color:var(--mut)}
+/* graded cells — intensity encodes magnitude */
+.g1{background:rgba(47,212,139,.06)}.g2{background:rgba(47,212,139,.13)}.g3{background:rgba(47,212,139,.22)}
+.r1{background:rgba(255,92,108,.06)}.r2{background:rgba(255,92,108,.13)}.r3{background:rgba(255,92,108,.22)}
+.gvm-chip{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:5px;font-family:var(--mono)}
+.gvm-good{background:var(--grn-d);color:var(--grn)}
+.gvm-avg{background:rgba(245,185,74,.12);color:var(--amber)}
+.gvm-weak{background:var(--red-d);color:var(--red)}
+.pct-pos-bar{display:inline-block;width:44px;height:5px;border-radius:3px;background:var(--bg2);margin-left:8px;vertical-align:2px;overflow:hidden}
+.pct-pos-bar i{display:block;height:100%;background:var(--grn)}
+
+/* ── 03 COMPANY TABLE ───────────────────────────────── */
+.filters{display:flex;gap:7px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+.f-chip{font-size:11.5px;font-weight:600;padding:6px 15px;border-radius:8px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line2);color:var(--mut);transition:.12s}
+.f-chip:hover{color:var(--txt)}
+.f-chip.on{background:var(--blu);border-color:var(--blu);color:#fff}
+.f-sector{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--cyan);
+  border:1px solid rgba(55,211,232,.35);border-radius:20px;padding:4px 12px;display:none;cursor:pointer}
+.f-sector.show{display:block}
+.co-name{font-family:var(--font);font-weight:700;color:var(--txt);font-size:12.5px;line-height:1.25}
+.co-tkr{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.5px}
+.qq{font-size:11px}
+.qq .yy{color:var(--dim);margin:0 3px}
+.gvm-cell{line-height:1.2}
+.gvm-cell b{font-size:13px}
+.gvm-cell span{font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;display:block}
+.v-good{color:var(--amber)}.v-exc{color:var(--grn)}.v-weak{color:var(--red)}.v-avg{color:var(--mut)}
+
+/* CARD cluster */
+.card-cluster{display:inline-flex;gap:5px}
+.cbtn{width:27px;height:27px;border-radius:7px;border:1px solid var(--line2);background:var(--bg2);
+  color:var(--mut);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;transition:.12s}
+.cbtn:hover{transform:translateY(-1px)}
+.cbtn.c:hover{border-color:var(--cyan);color:var(--cyan)}
+.cbtn.a:hover{border-color:var(--amber);color:var(--amber)}
+.cbtn.r:hover{border-color:var(--grn);color:var(--grn)}
+.cbtn.d:hover{border-color:var(--red);color:var(--red)}
+
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;letter-spacing:.5px}
+
+@media(max-width:860px){
+  .tape{grid-template-columns:1fr}
+  .tbl-scroll{overflow-x:auto}
+  .wrap{padding:18px 12px 50px}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <div class="h-title">Result <b>Corner</b></div>
+  </div>
+  <div class="h-season">Q1 FY27 · Results Season</div>
+  <div class="h-spacer"></div>
+  <div class="h-stamp">23 Jul 2026 · 17:40 IST · <b>LIVE</b></div>
+</header>
+
+<!-- ══ 01 SEASON SUMMARY ══════════════════════════════ -->
+<div class="sec-label">01 · Season Summary <span class="cov">same-quarter reporters only</span></div>
+<div class="tape">
+  <div>
+    <div class="tp-k">Reported</div>
+    <div class="tp-big">186<small> / 305</small></div>
+    <div class="tp-sub">61% of the universe has declared Q1</div>
+    <div class="bar"><i></i></div>
+  </div>
+  <div>
+    <div class="tp-k">PAT YoY · The season's shape</div>
+    <div class="seg">
+      <span class="s-pos" style="flex:118">118</span>
+      <span class="s-flat" style="flex:11">11</span>
+      <span class="s-neg" style="flex:57">57</span>
+    </div>
+    <div class="seg-legend">
+      <span><i class="dot" style="background:var(--grn)"></i>Growing <b>118</b></span>
+      <span><i class="dot" style="background:#3A4666"></i>Flat <b>11</b></span>
+      <span><i class="dot" style="background:var(--red)"></i>Declining <b>57</b></span>
+      <span style="margin-left:auto">Beat their sector: <b style="color:var(--grn)">74</b></span>
+    </div>
+    <div class="tiers">
+      <span class="tier-chip">Large <b>52/78</b></span>
+      <span class="tier-chip">Mid <b>67/104</b></span>
+      <span class="tier-chip">Small <b>67/123</b></span>
+    </div>
+  </div>
+  <div>
+    <div class="medians">
+      <div><div class="md-k">Median Sales YoY</div><div class="md-v pos">+12.4%</div></div>
+      <div><div class="md-k">Median PAT YoY</div><div class="md-v pos">+9.8%</div></div>
+      <div><div class="md-k">Median Sales QoQ</div><div class="md-v neg">−1.6%</div></div>
+      <div><div class="md-k">Median PAT QoQ</div><div class="md-v pos">+3.1%</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 02 SECTOR PERFORMANCE ══════════════════════════ -->
+<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by PAT YoY</span></div>
+<div class="tbl-card tbl-scroll">
+<table id="sectorTbl">
+<thead><tr>
+  <th>Sector</th><th>Reported</th><th>Sales YoY</th><th>PAT YoY</th><th>% Growing</th><th>Sector GVM</th>
+</tr></thead>
+<tbody>
+<tr data-sector="Capital Markets">
+  <td class="sect-name">Capital Markets</td>
+  <td class="cov-cell"><b>8</b> / 23</td>
+  <td class="g3 pos">+46.7%</td><td class="g3 pos">+39.2%</td>
+  <td>88%<span class="pct-pos-bar"><i style="width:88%"></i></span></td>
+  <td><span class="gvm-chip gvm-good">7.4</span></td>
+</tr>
+<tr data-sector="Power">
+  <td class="sect-name">Power &amp; Renewables</td>
+  <td class="cov-cell"><b>11</b> / 19</td>
+  <td class="g2 pos">+28.3%</td><td class="g2 pos">+24.6%</td>
+  <td>82%<span class="pct-pos-bar"><i style="width:82%"></i></span></td>
+  <td><span class="gvm-chip gvm-avg">6.6</span></td>
+</tr>
+<tr data-sector="Hotels">
+  <td class="sect-name">Hotels &amp; Tourism</td>
+  <td class="cov-cell"><b>5</b> / 12</td>
+  <td class="g1 pos">+13.9%</td><td class="g2 pos">+16.8%</td>
+  <td>80%<span class="pct-pos-bar"><i style="width:80%"></i></span></td>
+  <td><span class="gvm-chip gvm-good">7.1</span></td>
+</tr>
+<tr data-sector="Auto">
+  <td class="sect-name">Auto &amp; Ancillaries</td>
+  <td class="cov-cell"><b>14</b> / 31</td>
+  <td class="g1 pos">+11.2%</td><td class="g1 pos">+12.5%</td>
+  <td>71%<span class="pct-pos-bar"><i style="width:71%"></i></span></td>
+  <td><span class="gvm-chip gvm-good">7.0</span></td>
+</tr>
+<tr data-sector="Private Banks">
+  <td class="sect-name">Private Banks</td>
+  <td class="cov-cell"><b>9</b> / 14</td>
+  <td class="g1 pos">+6.4%</td><td class="g2 pos">+24.3%</td>
+  <td>78%<span class="pct-pos-bar"><i style="width:78%"></i></span></td>
+  <td><span class="gvm-chip gvm-avg">6.8</span></td>
+</tr>
+<tr data-sector="IT">
+  <td class="sect-name">IT Services</td>
+  <td class="cov-cell"><b>16</b> / 27</td>
+  <td class="g1 pos">+7.1%</td><td class="g1 pos">+5.4%</td>
+  <td>63%<span class="pct-pos-bar"><i style="width:63%"></i></span></td>
+  <td><span class="gvm-chip gvm-avg">6.4</span></td>
+</tr>
+<tr data-sector="FMCG">
+  <td class="sect-name">FMCG</td>
+  <td class="cov-cell"><b>7</b> / 18</td>
+  <td class="g1 pos">+4.8%</td><td class="g1 pos">+3.2%</td>
+  <td>57%<span class="pct-pos-bar"><i style="width:57%"></i></span></td>
+  <td><span class="gvm-chip gvm-avg">6.2</span></td>
+</tr>
+<tr data-sector="Pharma">
+  <td class="sect-name">Pharma &amp; Healthcare</td>
+  <td class="cov-cell"><b>12</b> / 29</td>
+  <td class="g1 pos">+8.9%</td><td class="r1 neg">−2.1%</td>
+  <td>50%<span class="pct-pos-bar"><i style="width:50%"></i></span></td>
+  <td><span class="gvm-chip gvm-good">7.2</span></td>
+</tr>
+<tr data-sector="Alco Bev">
+  <td class="sect-name">Alcoholic Beverages</td>
+  <td class="cov-cell"><b>3</b> / 7</td>
+  <td class="r1 neg">−8.6%</td><td class="r1 neg">−6.4%</td>
+  <td>33%<span class="pct-pos-bar"><i style="width:33%"></i></span></td>
+  <td><span class="gvm-chip gvm-avg">6.0</span></td>
+</tr>
+<tr data-sector="Oil & Gas">
+  <td class="sect-name">Oil &amp; Gas</td>
+  <td class="cov-cell"><b>6</b> / 11</td>
+  <td class="g2 pos">+21.4%</td><td class="r3 neg">−41.7%</td>
+  <td>33%<span class="pct-pos-bar"><i style="width:33%"></i></span></td>
+  <td><span class="gvm-chip gvm-weak">5.6</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- ══ 03 COMPANIES ═══════════════════════════════════ -->
+<div class="sec-label">03 · Companies <span class="cov">newest first · dash = quarter not in data yet</span></div>
+<div class="filters">
+  <span class="f-chip on" data-tier="all">All</span>
+  <span class="f-chip" data-tier="Large">Large</span>
+  <span class="f-chip" data-tier="Mid">Mid</span>
+  <span class="f-chip" data-tier="Small">Small</span>
+  <span class="f-sector" id="secFilter" title="Clear sector filter">✕ <span id="secName"></span></span>
+</div>
+<div class="tbl-card tbl-scroll">
+<table id="coTbl">
+<thead><tr>
+  <th>Company</th><th>Reported</th><th>Tier</th><th>GVM</th>
+  <th>Sales (Qtr)</th><th>QoQ / YoY</th><th>PAT (Qtr)</th><th>QoQ / YoY</th><th>Analysis</th>
+</tr></thead>
+<tbody>
+<tr data-tier="Large" data-sector="Power">
+  <td><div class="co-name">Adani Power</div><div class="co-tkr">ADANIPOWER</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Large</span></td>
+  <td class="gvm-cell"><b>7.5</b><span class="v-good">Good</span></td>
+  <td>18,902</td><td class="qq pos">+32.9%<span class="yy">/</span>+34.0%</td>
+  <td>4,867</td><td class="qq pos">+14.0%<span class="yy">/</span>+47.3%</td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Large" data-sector="FMCG">
+  <td><div class="co-name">Nestlé India</div><div class="co-tkr">NESTLEIND</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Large</span></td>
+  <td class="gvm-cell"><b>7.5</b><span class="v-good">Good</span></td>
+  <td>6,378</td><td class="qq"><span class="neg">−5.5%</span><span class="yy">/</span><span class="pos">+25.2%</span></td>
+  <td>959</td><td class="qq"><span class="neg">−13.7%</span><span class="yy">/</span><span class="pos">+48.2%</span></td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Large" data-sector="Auto">
+  <td><div class="co-name">TVS Motor</div><div class="co-tkr">TVSMOTOR</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Large</span></td>
+  <td class="gvm-cell"><b>8.0</b><span class="v-good">Good</span></td>
+  <td>15,053</td><td class="qq pos">+2.0%<span class="yy">/</span>+30.4%</td>
+  <td>820</td><td class="qq"><span class="neg">−8.0%</span><span class="yy">/</span><span class="pos">+17.5%</span></td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Large" data-sector="Oil & Gas">
+  <td><div class="co-name">Bharat Petroleum</div><div class="co-tkr">BPCL</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Large</span></td>
+  <td class="gvm-cell"><b>5.5</b><span class="v-weak">Weak</span></td>
+  <td>1,51,277</td><td class="qq pos">+27.4%<span class="yy">/</span>+34.4%</td>
+  <td class="neg">−1,873</td><td class="qq neg">−133.3%<span class="yy">/</span>−127.4%</td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Large" data-sector="Capital Markets">
+  <td><div class="co-name">Jio Financial Services</div><div class="co-tkr">JIOFIN</div></td>
+  <td class="cov-cell">16 Jul</td><td><span class="tier-chip">Large</span></td>
+  <td class="gvm-cell"><b>5.3</b><span class="v-weak">Weak</span></td>
+  <td>2,004</td><td class="qq pos">+227.3%<span class="yy">/</span>+119.2%</td>
+  <td>830</td><td class="qq pos">+174.4%<span class="yy">/</span>+156.0%</td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Mid" data-sector="IT">
+  <td><div class="co-name">Oracle Financial Services</div><div class="co-tkr">OFSS</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Mid</span></td>
+  <td class="gvm-cell"><b>8.4</b><span class="v-exc">Excellent</span></td>
+  <td>3,125</td><td class="qq pos">+51.3%<span class="yy">/</span>+68.7%</td>
+  <td>1,416</td><td class="qq pos">+68.2%<span class="yy">/</span>+120.6%</td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Mid" data-sector="Power">
+  <td><div class="co-name">JSW Energy</div><div class="co-tkr">JSWENERGY</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Mid</span></td>
+  <td class="gvm-cell"><b>6.5</b><span class="v-avg">Average</span></td>
+  <td>5,207</td><td class="qq pos">+15.7%<span class="yy">/</span>+1.2%</td>
+  <td>533</td><td class="qq neg">−7.1%<span class="yy">/</span>−36.2%</td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Mid" data-sector="Pharma">
+  <td><div class="co-name">Dr. Reddy's Laboratories</div><div class="co-tkr">DRREDDY</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Mid</span></td>
+  <td class="gvm-cell"><b>5.0</b><span class="v-weak">Weak</span></td>
+  <td>8,100</td><td class="qq"><span class="pos">+7.3%</span><span class="yy">/</span><span class="neg">−5.5%</span></td>
+  <td>436</td><td class="qq"><span class="pos">+97.3%</span><span class="yy">/</span><span class="neg">−69.1%</span></td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Mid" data-sector="Hotels">
+  <td><div class="co-name">Indian Hotels</div><div class="co-tkr">INDHOTEL</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Mid</span></td>
+  <td class="gvm-cell"><b>6.8</b><span class="v-avg">Average</span></td>
+  <td>2,765</td><td class="qq"><span class="neg">−2.7%</span><span class="yy">/</span><span class="pos">+14.0%</span></td>
+  <td>645</td><td class="qq"><span class="neg">−32.4%</span><span class="yy">/</span><span class="pos">+14.6%</span></td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+<tr data-tier="Mid" data-sector="Alco Bev">
+  <td><div class="co-name">United Spirits</div><div class="co-tkr">UNITDSPR</div></td>
+  <td class="cov-cell">22 Jul</td><td><span class="tier-chip">Mid</span></td>
+  <td class="gvm-cell"><b>6.3</b><span class="v-avg">Average</span></td>
+  <td>2,708</td><td class="qq neg">−11.3%<span class="yy">/</span>−10.4%</td>
+  <td>463</td><td class="qq"><span class="neg">−14.1%</span><span class="yy">/</span><span class="pos">+11.0%</span></td>
+  <td><span class="card-cluster">
+    <button class="cbtn c">C</button><button class="cbtn a">A</button>
+    <button class="cbtn r">R</button><button class="cbtn d">D</button></span></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+  <span>RESULT CORNER V2 · same-quarter aggregates · coverage always shown</span>
+  <span>C Chart · A Analysis · R Result · D Deriv</span>
+</footer>
+</div>
+
+<script>
+// sector row → filter companies
+let selSector = null;
+const secRows = document.querySelectorAll('#sectorTbl tbody tr');
+const coRows = document.querySelectorAll('#coTbl tbody tr');
+const secFilter = document.getElementById('secFilter');
+let tier = 'all';
+
+function apply(){
+  coRows.forEach(r=>{
+    const okT = tier==='all' || r.dataset.tier===tier;
+    const okS = !selSector || r.dataset.sector===selSector;
+    r.style.display = (okT && okS) ? '' : 'none';
+  });
+}
+secRows.forEach(row=>{
+  row.onclick = ()=>{
+    const s = row.dataset.sector;
+    if(selSector===s){ selSector=null; row.classList.remove('sel'); secFilter.classList.remove('show'); }
+    else{
+      secRows.forEach(x=>x.classList.remove('sel'));
+      selSector=s; row.classList.add('sel');
+      document.getElementById('secName').textContent=s;
+      secFilter.classList.add('show');
+      document.getElementById('coTbl').scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+    apply();
+  };
+});
+secFilter.onclick = ()=>{ selSector=null; secRows.forEach(x=>x.classList.remove('sel')); secFilter.classList.remove('show'); apply(); };
+document.querySelectorAll('.f-chip').forEach(ch=>{
+  ch.onclick=()=>{ document.querySelectorAll('.f-chip').forEach(x=>x.classList.remove('on'));
+    ch.classList.add('on'); tier=ch.dataset.tier; apply(); };
+});
+</script>
+</body>
+</html>
