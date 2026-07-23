@@ -768,6 +768,8 @@ const EP={
   paper:"/api/paper/status",
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
+  filterCfg:b=>`/api/v8/filter_config/${b}`,   // cc#618 Section C: registry-driven i-button/matrix
+
   brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
   srStockDetail:s=>`/api/v8/sr_stock_detail/${encodeURIComponent(s)}`,   // cc#378
   smStockDetail:s=>`/api/v8/sm_stock_detail/${encodeURIComponent(s)}`,   // cc#380
@@ -822,15 +824,6 @@ const BASKET_INFO={
   buy_reversal:{
     label:"Buy Reversal V6",side:"BUY",version:"V6",
     thesis:"S1-touch bounce with a strong larger frame and a green day. A stock dipped to touch its pivot S1 support in the last 4 trading days (or today's live session low), its monthly frame is strong (RSI 60-90) and today's change has turned positive. V6 (cc#606, 23-Jul-2026) removes the heavy TRUE-weekly-RSI>=70 stage — structurally empty with the S1-dip in this regime — and replaces it with day_1d>0 strict, so all 7 gates are now cheap (no per-symbol heavy stage). Replaces V5/the V3 inverse-sandwich. Fixed +/-3.0% exits (1:1), frozen at entry.",
-    filters:[
-      {m:"s1_touch",c:"prior-4-day low <= S1  OR  today's live day_low <= S1",dyn:false},
-      {m:"mom_2d",c:">= -0.5%",dyn:false},
-      {m:"week_return",c:">= -2.0%",dyn:false},
-      {m:"rsi_month",c:"60 - 90",dyn:false},
-      {m:"sector_week",c:"> 0  (strict)",dyn:false},
-      {m:"month_return",c:"< 5.0%",dyn:false},
-      {m:"day_1d",c:"> 0  (strict · replaces V5's true_weekly_rsi>=70, cc#606)",dyn:false},
-    ],
     gateType:"strict AND -- all 7 must pass · all cheap (no heavy stage) · no regime · standard slot pool",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry: live 5-min CMP on first qualification. Target +3.0% / stop -3.0%, both FIXED at entry (never move). Max hold 15 trading days (EOD sweep).",
@@ -840,25 +833,6 @@ const BASKET_INFO={
   buy_momentum:{
     label:"Buy Momentum V3",side:"BUY",version:"V3",
     thesis:"Strong uptrend continuation, TWO independent layers both required. 6 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. cc#502 rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler.",
-    filters:[
-      {m:"dma_50",c:"HARD: 5% - 12%",dyn:false},
-      {m:"dma_20",c:"HARD: > 0%",dyn:false},
-      {m:"week_index_52",c:"HARD: >= 75",dyn:false},
-      {m:"gvm_score",c:"HARD: >= 7",dyn:false},
-      {m:"day_1d",c:"HARD: > 0%",dyn:false},
-      {m:"hourly_pct",c:"HARD: > 0% AND NOT NULL (blocks entries before ~10:15)",dyn:false},
-      {m:"true_weekly_rsi",c:"HARD FINAL: 70 - 85",dyn:false},
-      {m:"gvm_score_score",c:"SCORE band: 7.0 - 10.0",dyn:false},
-      {m:"dma_50_score",c:"SCORE band: 8.0 - 25.0%",dyn:false},
-      {m:"dma_200",c:"SCORE band: 8.0 - 40.0%",dyn:false},
-      {m:"rsi_month",c:"SCORE band: 70 - 100",dyn:false},
-      {m:"week_return",c:"SCORE band: 0.5 - 12.0%",dyn:false},
-      {m:"month_return",c:"SCORE band: 2.0 - 30.0%",dyn:false},
-      {m:"mom_2d",c:"SCORE band: 0.0 - 6.0%",dyn:false},
-      {m:"sector_week",c:"SCORE band: 0.0 - 6.0",dyn:false},
-      {m:"sector_month",c:"SCORE band: 0.0 - 6.0",dyn:false},
-      {m:"true_weekly_rsi_score",c:"SCORE band: 60 - 85 (reuses the HARD-gate wRSI value)",dyn:false},
-    ],
     gateType:"6 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
@@ -868,19 +842,6 @@ const BASKET_INFO={
   sell_reversal:{
     label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
     thesis:"R1-rejection short with a weak larger frame. A stock touched (day HIGH >= R1) its pivot resistance in the last 3 trading days and is now fading -- weak day change, below its 20/50/200-DMA, weak 52-week index, weak sector, negative 2-day momentum, weak month, with real room to a dynamic S1/S2 target and a genuinely weak weekly frame (TRUE weekly RSI<=45). RAW gate: no market gate, no auto kill-switch (founder-locked, dedicated handler). Replaces V5-D (cc#502, 18-Jul-2026: twr tightened 40->45 stays the mirror cap, new R1-touch condition added).",
-    filters:[
-      {m:"r1_touch",c:"day HIGH >= R1 in the last 3 trading days",dyn:false},
-      {m:"day_1d",c:"-2.0% to 0.0%",dyn:false},
-      {m:"dma_20",c:"< 0",dyn:false},
-      {m:"dma_50",c:"< 0",dyn:false},
-      {m:"dma_200",c:"< 0",dyn:false},
-      {m:"week_index_52",c:"< 50",dyn:false},
-      {m:"sector_week",c:"< 0  (strict)",dyn:false},
-      {m:"mom_2d",c:"-4.0% to -1.0%",dyn:false},
-      {m:"month_return",c:">= -10.0%",dyn:false},
-      {m:"room",c:"target (S1 or S2) >= 2% away",dyn:false},
-      {m:"true_weekly_rsi",c:"<= 45  (FINAL heavy stage · TRUE calendar weekly RSI-14)",dyn:false},
-    ],
     gateType:"strict AND -- all 10 must pass · dedicated handler, no score fallback",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
@@ -890,17 +851,6 @@ const BASKET_INFO={
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
     thesis:"Structural downtrend caught with true 1:1 geometry. Weak monthly RSI, negative 2-day momentum, at/below the 200-DMA, weak week + sector, mid 52-week band, below the rolling pivot -- and support (S2) must sit >=3% below so it can't block the fall to the fixed 3% target, confirmed by a genuinely weak weekly frame (TRUE weekly RSI<=40). cc#502 (18-Jul-2026) rename from V3-N5: wRSI tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
-    filters:[
-      {m:"rsi_month",c:"< 40  (strict)",dyn:false},
-      {m:"mom_2d",c:"-4.0% to -2.0%",dyn:false},
-      {m:"dma_200",c:"<= 2.0%",dyn:false},
-      {m:"week_return",c:"-10.0% to -0.5%",dyn:false},
-      {m:"sector_week",c:"< 0  (strict)",dyn:false},
-      {m:"week_index_52",c:"20 - 60",dyn:false},
-      {m:"cmp_lt_pp",c:"CMP < PP",dyn:false},
-      {m:"s2_clearance",c:"(CMP-S2)/CMP >= 3%",dyn:false},
-      {m:"true_weekly_rsi",c:"<= 40  (FINAL heavy stage · TRUE calendar weekly RSI-14)",dyn:false},
-    ],
     gateType:"strict AND -- all 9 must pass · dedicated handler, no score fallback",
     target:"-3.0% fixed = entry x 0.97",stop:"+3.0% fixed = entry x 1.03 (true 1:1)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
@@ -908,6 +858,24 @@ const BASKET_INFO={
     sigs_5m:"205/yr",wr_5m:61.5,ev_5m:0.83,
   },
 };
+
+// cc#618 Section C: the basket FILTER lists are GENERATED from the BASKET_FILTERS registry
+// (v8_signal_writer.py) via /api/v8/filter_config — the i-button (openInfo) and the Strategy Matrix
+// read from FILTER_REG, never a hardcoded list. Drop a gate in the registry+handler and it vanishes
+// from funnel + pass-count + i-button + matrix in one deploy (the ghost-twr class can't recur).
+let FILTER_REG={};
+async function loadFilterRegistry(){
+  const bs=['buy_reversal','buy_momentum','sell_reversal','sell_momentum'];
+  try{
+    const res=await Promise.all(bs.map(b=>getJSON(EP.filterCfg(b)).catch(()=>null)));
+    bs.forEach((b,i)=>{const d=res[i];if(d&&Array.isArray(d.registry_gates)){
+      const cond={};d.registry_gates.forEach(g=>{if(cond[g.key]==null)cond[g.key]=g.cond;});
+      FILTER_REG[b]={gates:d.registry_gates,spec_label:d.spec_label,version:d.version,cond};
+    }});
+  }catch(e){}
+  try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}
+  if(_openInfoBasket&&document.getElementById('infoModal')&&document.getElementById('infoModal').classList.contains('open'))openInfo(_openInfoBasket);
+}
 
 // cc#510 (18-Jul-2026): the Basket Rules tab (cc#503) was removed by founder decision -- the
 // per-basket i-button popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt
@@ -960,9 +928,9 @@ const MATRIX_ROWS=[
 ];
 function _mxShort(c){return String(c).split(/\s*(?:\(|--|—|·|,)/)[0].trim();}
 function _mxCell(basketId,spec){
-  const inf=BASKET_INFO[basketId];if(!inf||spec==null)return null;
+  const reg=FILTER_REG[basketId];if(spec==null)return null;   // cc#618 Section C: from registry, not BASKET_INFO
   if(spec.lit)return spec.lit;
-  const byM=m=>{const f=(inf.filters||[]).find(x=>x.m===m);return f?_mxShort(f.c):null;};
+  const byM=m=>{const c=reg&&reg.cond?reg.cond[m]:null;return c?_mxShort(c):null;};
   if(Array.isArray(spec)){const parts=spec.map(byM).filter(Boolean);return parts.length?parts.join("; "):null;}
   return byM(spec);
 }
@@ -1100,11 +1068,17 @@ function renderOHOL(){
 }
 
 // -- Modal -------------------------------------------------------------------
+let _openInfoBasket=null;
 function openInfo(basket){
   const info=BASKET_INFO[basket];
   if(!info)return;
+  _openInfoBasket=basket;
+  const reg=FILTER_REG[basket];                     // cc#618 Section C: filter rows from the registry
+  if(!reg)loadFilterRegistry();                     // fetch once; re-renders this modal when it lands
   const sc=info.side==='BUY';
-  document.getElementById('mTitle').textContent=info.label;
+  const label=(reg&&reg.spec_label)||info.label;    // header pill / title from registry spec label
+  const version=(reg&&reg.version)||info.version;
+  document.getElementById('mTitle').textContent=label;
   document.getElementById('mSub').textContent=`${info.side} · 5-min ${info.wr_5m}% WR (${info.sigs_5m}) · 5yr EOD ${info.wr_eod}% WR (${info.sigs_eod})`;
   document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
 
@@ -1114,7 +1088,7 @@ function openInfo(basket){
     <span class="sp sp-b">5-min EV +${info.ev_5m}%/trade</span>
     <span class="sp sp-a">${info.sigs_5m} sigs</span>
     <span class="sp ${sc?'sp-g':'sp-r'}">${info.side}</span>
-    <span class="sp sp-c">${info.version}</span>
+    <span class="sp sp-c">${version}</span>
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Strategy thesis</div>
     <div style="font-size:13px;color:var(--txt);line-height:1.65">${info.thesis}</div>
@@ -1132,14 +1106,15 @@ function openInfo(basket){
     </div>
     <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the cc#502 rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
   </div>`;
+  // cc#618 Section C: filter rows GENERATED from the registry (FILTER_REG), never a hardcoded list.
+  const gateRows=(reg&&reg.gates)?reg.gates.map(g=>`<div class="frow">
+      <span class="fm">${String(g.label||g.key).replace(/_/g,' ')}</span>
+      <span class="fc">${g.cond||''}</span>
+      ${g.layer==='score'?'<span class="fdyn" style="background:var(--panel);color:var(--mut)">SCORE</span>':''}
+    </div>`).join('')
+    :`<div class="frow"><span class="fc" style="color:var(--dim)">Loading filters from registry…</span></div>`;
   html+=`<div class="msec"><div class="msec-title">Filters · <span style="color:var(--amber)">${info.gateType}</span></div>
-    <div style="background:var(--panel2);border-radius:10px;padding:4px 12px">
-    ${info.filters.map(f=>`<div class="frow">
-      <span class="fm">${f.m.replace(/_/g,' ')}</span>
-      <span class="fc">${f.c}</span>
-      ${f.dyn?'<span class="fdyn">DYNAMIC</span>':''}
-    </div>`).join('')}
-    </div>
+    <div style="background:var(--panel2);border-radius:10px;padding:4px 12px">${gateRows}</div>
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Entry / Exit</div>
     <div class="pf">${info.pivotEntry}</div>
@@ -1955,6 +1930,7 @@ TAB_ORDER.forEach(panelIdx=>{
 // cc#510: Basket Rules tab (and its panel3 render call) removed — see the TAB_ORDER comment
 // above. This also permanently disposes of the cc#508 stuck-loading issue on that tab.
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
+try{loadFilterRegistry();}catch(e){}   // cc#618 Section C: load BASKET_FILTERS registry -> re-render matrix + i-buttons from single source
 // cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
 try{document.getElementById('panel17').innerHTML=renderOHOL();}catch(e){}   // cc#388 · cc#447: static INACTIVE banner (no live poll)
 function selectTab(i){

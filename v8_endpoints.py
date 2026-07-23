@@ -10,9 +10,10 @@ is now exactly FOUR dedicated strict-AND handlers in v8_signal_writer.py -- the 
 FILTER_CONFIG score-gate loop is retired (kept dormant/unreachable in a couple of fallback code
 paths only). Each handler's FINAL heavy stage is the shared true_weekly_rsi() (wRSI) -- NEVER the
 synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
-  buy_reversal   BUY_REVERSAL_V5   (_write_buy_reversal_v5_qualified):   7 filters -- S1-touch
+  buy_reversal   BUY_REVERSAL_V6   (_write_buy_reversal_v6_qualified):   7 filters -- S1-touch
     (prior-4d raw_prices low OR today's live day_low <= S1), mom_2d>=-0.5, week_return>=-2,
-    rsi_month[60,90], sector_week>0, month_return<5, FINAL wRSI>=70. Fixed +/-3.0% exits.
+    rsi_month[60,90], sector_week>0, month_return<5, day_1d>0 strict. All cheap (cc#606 dropped the
+    heavy wRSI>=70 FINAL stage). Fixed +/-3.0% exits.
   buy_momentum   BUY_MOMENTUM_V3   (_write_buy_momentum_v3_qualified): TWO independent layers --
     6 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
     hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85], PLUS SCORE>=7-of-10 fixed-threshold V2 bands
@@ -1014,6 +1015,41 @@ def scan(limit: int = 25):
         raise HTTPException(500, f"scan failed: {e}")
 
 
+def _reg_cond(f):
+    """cc#618 Section C: human condition string for a BASKET_FILTERS row, derived from the registry
+    (single source) — strict-aware. Custom legs (s1_touch/r1_touch/room/…) carry their own text."""
+    if f.get("type") == "custom":
+        return (f.get("cond_min", "") + " " + f.get("cond_max", "")).strip()
+    mn, mx, strict = f.get("min"), f.get("max"), f.get("strict")
+    if mn is not None and mx is not None:
+        return f"{mn:g} to {mx:g}"
+    if mn is not None:
+        return (("> " if strict else ">= ") + f"{mn:g}") + (" (strict)" if strict else "")
+    if mx is not None:
+        return (("< " if strict else "<= ") + f"{mx:g}") + (" (strict)" if strict else "")
+    return ""
+
+
+def _registry_gates_payload(basket):
+    """cc#618 Section C: the i-button + Strategy Matrix generate their filter rows from THIS (the
+    BASKET_FILTERS registry) — no hardcoded dashboard filter lists. Each gate: key, display label,
+    condition string, type (band|custom), layer. buy_momentum also carries its separate SCORE-band
+    layer (the 10-of bands), flagged layer='score'. spec_label/version drive the header pill."""
+    spec = BASKET_SPEC.get(basket, {})
+    gates = [{"key": f["key"], "label": f["label"], "cond": _reg_cond(f),
+              "type": f["type"], "layer": "gate"} for f in BASKET_FILTERS.get(basket, [])]
+    if basket == "buy_momentum":
+        # the SCORE-band layer; suffix '_score' ONLY where the key also exists as a HARD gate (so the
+        # two layers don't collide), otherwise keep the plain key — matches the matrix's map keys.
+        hard_keys = {f["key"] for f in BASKET_FILTERS.get("buy_momentum", [])}
+        for k, (mn, mx) in FILTER_CONFIG["buy_momentum"].items():
+            rng = (f"{mn:g} to {mx:g}" if (mn is not None and mx is not None)
+                   else (f">= {mn:g}" if mn is not None else f"<= {mx:g}"))
+            gates.append({"key": (k + "_score") if k in hard_keys else k, "label": k,
+                          "cond": "SCORE band: " + rng, "type": "band", "layer": "score"})
+    return {"registry_gates": gates, "spec_label": spec.get("label"), "version": spec.get("version")}
+
+
 @router.get("/filter_config/{basket}")
 def filter_config(basket: str):
     basket = basket.lower()
@@ -1029,24 +1065,16 @@ def filter_config(basket: str):
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx,
                          "dynamic": False})
-        # cc#607 Phase A: the full ordered gate list (incl. the s1_touch custom leg) is served from
-        # the BASKET_FILTERS registry as `registry_gates` so the dashboard i-button can render it
-        # from the single source instead of a hardcoded list (the ghost-twr drift source). Each row:
-        # key, label, condition strings, type (band|custom). `spec_label` drives the header pill.
-        spec = BASKET_SPEC.get("buy_reversal", {})
-        registry_gates = [{"key": f["key"], "label": f["label"], "type": f["type"],
-                           "cond_min": f.get("cond_min", ""), "cond_max": f.get("cond_max", "")}
-                          for f in BASKET_FILTERS["buy_reversal"]]
-        # cc#502 V5 / cc#606 V6: no Nifty regime; daily-metric gates shown here, S1-touch enforced
-        # live in the dedicated handler. cc#606 dropped the heavy true_weekly_rsi>=70 FINAL stage —
-        # replaced by a cheap day_1d>0 gate (in the metric rows above).
+        # cc#606 V6: no Nifty regime; daily-metric gates shown here, S1-touch enforced live in the
+        # dedicated handler. cc#618 Section C: registry_gates + spec_label come from the BASKET_FILTERS
+        # registry (single source) so the dashboard i-button/matrix generate from it — no hardcoded list.
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "registry_gates": registry_gates, "spec_label": spec.get("label"), "version": spec.get("version"),
             "regime": "V6", "nifty_1m_return": round(nifty_1m, 2),
             "live_gates": ["S1-touch (prior-4-day low OR today's live day_low <= S1)"],
             "entry_exit": "entry live CMP, target +3.0% fixed, stop -3.0% fixed (true 1:1)",
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            **_registry_gates_payload(basket),
             **BASKET_META.get(basket, {})
         }
     if basket == "buy_momentum":
@@ -1068,6 +1096,7 @@ def filter_config(basket: str):
             "gate_note": "cc#502 V3: TWO independent layers -- 6 HARD gates + FINAL heavy wRSI, "
                          "PLUS SCORE>=7-of-10 (the 9 bands above + wRSI[60,85] reused as the 10th).",
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            **_registry_gates_payload(basket),
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_reversal":
@@ -1088,6 +1117,7 @@ def filter_config(basket: str):
             "stop": "1:1 mirror = entry + (entry - target)",
             "gate_note": "cc#502 V6.1: strict AND of 10, RAW -- no market gate, no auto kill-switch.",
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            **_registry_gates_payload(basket),
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_momentum":
@@ -1108,6 +1138,7 @@ def filter_config(basket: str):
             "gate_note": "cc#502 V4: strict AND of 9, dedicated handler; fixed +/-3% exits (true 1:1). "
                          "twr tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            **_registry_gates_payload(basket),
             **BASKET_META.get(basket, {})
         }
     rows = []
