@@ -205,8 +205,6 @@ def _cadence_due(cadence: str, now: datetime) -> bool:
         return _is_trading_day(now.date()) and (555 <= mins <= 930)
     if cadence in ("daily_trading", "5min_trading"):
         return _is_trading_day(now.date())
-    if cadence == "5min_trading":
-        return _is_trading_day(now.date())
     if cadence.startswith("quarterly_window"):
         months = {"Jul": 7, "Oct": 10, "Jan": 1, "Apr": 4}
         want = {months[m] for m in cadence.split(":", 1)[1].split(",")} if ":" in cadence else set()

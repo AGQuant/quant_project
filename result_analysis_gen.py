@@ -63,6 +63,15 @@ def _fq_label(period_end: date) -> Optional[str]:
     return f"Q{q} FY{str(fy)[-2:]}"
 
 
+def _qkey(card_text):
+    """cc#618 Section B: chronological sort key (fy, q) parsed from a card's leading 'Qn FYyy' label.
+    Q1 FY27 -> (2027, 1); Q4 FY26 -> (2026, 4). Tuple order == chronological order, so a downgrade is
+    exactly new_qkey < existing_qkey. None if the text has no quarter label."""
+    import re
+    m = re.match(r"\s*Q([1-4])\s+FY(\d{2})", card_text or "")
+    return (2000 + int(m.group(2)), int(m.group(1))) if m else None
+
+
 def _sign(v, plus=True):
     if v is None:
         return "n/a"
@@ -221,7 +230,7 @@ def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
     so once a company's Q1FY27 fundamentals arrive its card rebuilds to Q1FY27 automatically. BFSI
     mapping (banks: Revenue / Financing Margin %) is handled inside build_card."""
     since = since or date(2026, 6, 25)
-    written = unchanged = skipped = 0
+    written = unchanged = skipped = skipped_downgrade = 0
     with conn.cursor() as cur:
         syms = _regen_symbols(cur, since)
     for sym in syms:
@@ -237,8 +246,18 @@ def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
                 continue
             cur.execute("SELECT result_analysis FROM input_raw WHERE UPPER(nse_code)=%s", (sym,))
             row = cur.fetchone()
-            if row and row[0] == card:
+            existing = row[0] if row else None
+            if existing == card:
                 unchanged += 1          # no content change -> preserve the original vintage stamp
+                conn.commit()
+                continue
+            # cc#618 Section B DOWNGRADE GUARD (Fable catch): NEVER overwrite a card with an OLDER
+            # quarter. A name whose Q1FY27 fundamentals haven't re-scraped yet would otherwise be
+            # rebuilt as a Q4FY26 card with a fresh timestamp and render as 'current' (the JIOFIN bug
+            # reborn). Keep the fresher card; it upgrades naturally once the newer quarter lands.
+            new_q, old_q = _qkey(card), _qkey(existing)
+            if new_q and old_q and new_q < old_q:
+                skipped_downgrade += 1
                 conn.commit()
                 continue
             cur.execute("""UPDATE input_raw SET result_analysis=%s, last_result_analysis_updated=CURRENT_DATE
@@ -246,7 +265,7 @@ def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
             written += cur.rowcount
             conn.commit()
     summary = {"candidates": len(syms), "regenerated": written, "unchanged": unchanged,
-               "skipped_no_fundamentals": skipped,
+               "skipped_no_fundamentals": skipped, "skipped_downgrade": skipped_downgrade,
                "min_quarter_end": (str(min_quarter_end) if min_quarter_end else "latest")}
     try:
         import json
