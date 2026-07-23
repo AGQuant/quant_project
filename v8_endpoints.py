@@ -339,9 +339,9 @@ def _get_nifty_regime() -> tuple:
 
 
 def _get_buy_reversal_live_filters() -> dict:
-    # cc#502 V5: no Nifty-regime overrides — buy_reversal uses fixed absolute gates.
+    # cc#502 V5 / cc#606 V6: no Nifty-regime overrides — buy_reversal uses fixed absolute gates.
     _, nifty_1m = _get_nifty_regime()
-    return dict(FILTER_CONFIG["buy_reversal"]), "V5", nifty_1m
+    return dict(FILTER_CONFIG["buy_reversal"]), "V6", nifty_1m
 
 
 def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
@@ -1046,13 +1046,13 @@ def filter_config(basket: str):
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx,
                          "dynamic": False})
-        # cc#502 V5: no Nifty regime; 5 daily-metric gates shown here, 2 live/pivot gates
-        # (S1-touch, FINAL heavy true_weekly_rsi>=70) enforced live in the dedicated handler.
+        # cc#502 V5 / cc#606 V6: no Nifty regime; daily-metric gates shown here, S1-touch enforced
+        # live in the dedicated handler. cc#606 dropped the heavy true_weekly_rsi>=70 FINAL stage —
+        # replaced by a cheap day_1d>0 gate (in the metric rows above).
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "regime": "V5", "nifty_1m_return": round(nifty_1m, 2),
-            "live_gates": ["S1-touch (prior-4-day low OR today's live day_low <= S1)",
-                           "true_weekly_rsi >= 70 (true calendar weekly, FINAL heavy stage)"],
+            "regime": "V6", "nifty_1m_return": round(nifty_1m, 2),
+            "live_gates": ["S1-touch (prior-4-day low OR today's live day_low <= S1)"],
             "entry_exit": "entry live CMP, target +3.0% fixed, stop -3.0% fixed (true 1:1)",
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
             **BASKET_META.get(basket, {})
@@ -1510,10 +1510,11 @@ def _sr_dynamic_target(cmp, s1, s2):
     return None, None
 
 
-# cc#502 BUY_REVERSAL_V5 (replaces V3 inverse-sandwich entirely): the funnel is CAPTURED by the
-# writer (_write_buy_reversal_v5_qualified -> v8_funnel_counts) and reshaped here — never
-# recomputed from FILTER_CONFIG. Static stage order + display labels (labels carry spaces so the
-# dashboard renders them verbatim via metric.replace).
+# cc#502 BUY_REVERSAL_V5 / cc#606 V6: the funnel is CAPTURED by the writer
+# (_write_buy_reversal_v6_qualified -> v8_funnel_counts) and reshaped here — never recomputed from
+# FILTER_CONFIG. Static stage order + display labels (labels carry spaces so the dashboard renders
+# them verbatim via metric.replace). cc#606: dropped the heavy true_weekly_rsi>=70 FINAL stage for
+# this basket; replaced by a cheap day_1d>0 gate counted over the full universe like the others.
 _BR_V5_STAGES = [
     ("s1_touch",        "S1 touch (prior-4d low or today's low)", "<= S1",   ""),
     ("mom_2d",          "mom 2d",                                 ">= -0.5", ""),
@@ -1521,43 +1522,35 @@ _BR_V5_STAGES = [
     ("rsi_month",       "monthly RSI",                            ">= 60",   "<= 90"),
     ("sector_week",     "sector week",                            "> 0",     ""),
     ("month_return",    "month return",                           "",        "< 5"),
-    ("true_weekly_rsi", "true weekly RSI",                        ">= 70",   ""),
+    ("day_1d",          "day 1d",                                 "> 0",     ""),
 ]
 
 def br_funnel_detail():
-    """cc#502: 7-stage funnel for BUY_REVERSAL_V5, reshaped from the handler-written
+    """cc#502/cc#606: 7-stage funnel for BUY_REVERSAL_V6, reshaped from the handler-written
     v8_funnel_counts row (score_date=today). INDEPENDENT per-filter pass counts across the
-    universe (buy_momentum convention), NOT cumulative survivors — each of the 6 cheap gates is
-    passes/fails vs the whole universe; true_weekly_rsi (stage 7) is passes vs the stocks that
-    cleared all 6 cheap gates. Final still = strict-AND of all 7. Empty stages (all 0) until the
-    first live tick writes."""
+    universe (buy_momentum convention), NOT cumulative survivors — each of the 7 cheap gates is
+    passes/fails vs the whole universe. cc#606 dropped the heavy true_weekly_rsi>=70 FINAL stage;
+    day_1d>0 is now a cheap gate counted over the full universe like the rest. Final still =
+    strict-AND of all 7. Empty stages (all 0) until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             counts, _asof = _latest_funnel_counts(cur, "buy_reversal")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
-        stage6   = counts.get("_stage6_survivors")
-        stage6   = int(stage6) if stage6 is not None else None
         final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _BR_V5_STAGES:
             passes = int(counts.get(key, 0) or 0)
-            # true_weekly_rsi (stage 7) is only evaluated on the 6-gate survivors -> its denominator
-            # is that survivor count, not the full universe (the heavy read is skipped for the rest).
-            denom = (stage6 if stage6 is not None else universe) if key == "true_weekly_rsi" else universe
+            denom = universe
             fails = max(denom - passes, 0)
             stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
                      "passes": passes, "fails": fails,
                      "survivors": passes, "killed": fails,
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
-            if key == "true_weekly_rsi":
-                stage["denominator"] = denom
-                stage["note"] = f"of {denom} stocks passing all 6 cheap gates"
             stages.append(stage)
         return {
             "basket": "buy_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final,
             "filter_count": 7, "n_filters": 7,
-            "stage6_survivors": stage6,
             "gate_type": "independent per-filter counts; final = strict AND of all 7",
             "score_qualified": final, "pivot_pass": final,
             "stages": stages, **BASKET_META.get("buy_reversal", {}),
@@ -1566,9 +1559,9 @@ def br_funnel_detail():
         raise HTTPException(500, f"br_funnel_detail failed: {e}")
 
 
-# cc#502: BUY_REVERSAL_V5 pass-count gates — the 3 cheap daily-metric gates. sector_week (strict
-# >0) + month_return (strict <5) + s1_touch (prior-4d low / today's live low) are handled inline
-# in br_stock_passcount, mirroring _write_buy_reversal_v5_qualified exactly.
+# cc#502/cc#606: BUY_REVERSAL_V6 pass-count gates — the 3 cheap daily-metric gates. sector_week
+# (strict >0) + month_return (strict <5) + s1_touch (prior-4d low / today's live low) + day_1d
+# (strict >0) are handled inline in br_stock_passcount, mirroring _write_buy_reversal_v6_qualified.
 _BR_V5_PASSCOUNT_GATES = [
     ("mom_2d",      -0.5, None),   # (2)
     ("week_return", -2.0, None),   # (3)
@@ -1576,17 +1569,14 @@ _BR_V5_PASSCOUNT_GATES = [
 ]
 
 def br_stock_passcount():
-    """cc#502: BUY_REVERSAL_V5 pass-count = n/7, cheap-first. S1-touch + 3 cheap daily gates +
-    sector_week + month_return are evaluated for ALL stocks; true_weekly_rsi (stage 7, DB-heavy)
-    is computed ONLY for stocks that clear the first 6 — every other stock caps at <=6/7 with
-    true_weekly_rsi in the failed/skipped list. Display only — mirrors
-    _write_buy_reversal_v5_qualified, never qualifies."""
-    from v8_signal_writer import _true_weekly_rsi
+    """cc#502/cc#606: BUY_REVERSAL_V6 pass-count = n/7, all 7 gates cheap. S1-touch + 3 cheap daily
+    gates + sector_week + month_return + day_1d are evaluated for ALL stocks (cc#606 dropped the
+    DB-heavy true_weekly_rsi FINAL stage; day_1d>0 strict is the cheap replacement). Display only —
+    mirrors _write_buy_reversal_v6_qualified, never qualifies."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
             pivots   = _basket_pivots(cur)
-            cmp_map  = _basket_cmp(cur)
             syms     = [r["symbol"] for r in all_rows]
             prior4_low = _basket_prior4_low(cur, syms)
             today_low  = _basket_day_low_today(cur)
@@ -1615,14 +1605,10 @@ def br_stock_passcount():
                                         else (tlo if (tlo is not None and s1 is not None and tlo <= s1)
                                               else (p4lo if p4lo is not None else tlo)))
                 (passed if s1_ok else failed).append("s1_touch")
-                # heavy true_weekly_rsi — ONLY for stocks that cleared all 6 cheap gates
-                if len(passed) == 6:
-                    cmp = cmp_map.get(sym)
-                    twr = _true_weekly_rsi(conn, sym, cmp)
-                    actuals["true_weekly_rsi"] = twr
-                    (passed if (twr is not None and twr >= 70.0) else failed).append("true_weekly_rsi")
-                else:
-                    failed.append("true_weekly_rsi")   # skipped — not evaluated, caps at <=6/7
+                # cc#606: day_1d > 0 strict — cheap gate 7, evaluated for ALL stocks
+                d1 = s.get("day_1d")
+                actuals["day_1d"] = d1
+                (passed if (d1 is not None and float(d1) > 0.0) else failed).append("day_1d")
                 out.append({"symbol": sym, "passed": len(passed), "total": 7,
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
@@ -1637,23 +1623,20 @@ def br_stock_passcount():
 
 @router.get("/br_stock_detail/{symbol}")
 def br_stock_detail(symbol: str):
-    """cc#502: per-stock 7-filter breakdown for BUY_REVERSAL_V5 — ACTUAL value vs REQUIRED bound
-    + PASS/FAIL for each of the 7 gates, computed LIVE for ONE symbol. Powers the pass-count
+    """cc#502/cc#606: per-stock 7-filter breakdown for BUY_REVERSAL_V6 — ACTUAL value vs REQUIRED
+    bound + PASS/FAIL for each of the 7 gates, computed LIVE for ONE symbol. Powers the pass-count
     click-through modal so engine decisions can be verified by hand. Pass logic mirrors
-    br_stock_passcount / _write_buy_reversal_v5_qualified EXACTLY (incl. the stage-7 rule that
-    true_weekly_rsi only counts once all 6 cheap gates pass), so the green-row count equals the
-    n/7 on the box. true_weekly_rsi is always computed here (one stock, cheap) so the row is
-    never blank. Display only, never qualifies."""
-    from v8_signal_writer import _true_weekly_rsi
+    br_stock_passcount / _write_buy_reversal_v6_qualified EXACTLY. cc#606 dropped the DB-heavy
+    true_weekly_rsi FINAL stage; day_1d>0 strict is the cheap gate 7. Display only, never qualifies."""
     sym = symbol.upper()
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""SELECT gvm_score, mom_2d, week_return, rsi_month, sector_week, month_return
+            cur.execute("""SELECT gvm_score, mom_2d, week_return, rsi_month, sector_week, month_return, day_1d
                 FROM v8_metrics WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)""", (sym,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(404, f"No v8_metrics for {sym}")
-            gvm, mom2d, wret, rmon, swk, mret = [float(x) if x is not None else None for x in row]
+            gvm, mom2d, wret, rmon, swk, mret, d1 = [float(x) if x is not None else None for x in row]
             cur.execute("""SELECT pp, s1 FROM v8_paper_pivots WHERE symbol=%s
                 AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
             pv = cur.fetchone()
@@ -1664,7 +1647,6 @@ def br_stock_detail(symbol: str):
             cmp = float(cr[0]) if cr else None
             p4lo = _basket_prior4_low(cur, [sym]).get(sym)
             tlo  = _basket_day_low_today(cur).get(sym)
-            twr  = _true_weekly_rsi(conn, sym, cmp)   # one stock — always compute so the row is never blank
 
         def _fmt(v, d):
             return "--" if v is None else f"{v:.{d}f}"
@@ -1675,8 +1657,7 @@ def br_stock_detail(symbol: str):
         p_rm   = _passes_filter(rmon, 60.0, 90.0)
         p_sw   = swk is not None and swk > 0.0
         p_mret = mret is not None and mret < 5.0
-        cleared = all([s1_ok, p_mom, p_wret, p_rm, p_sw, p_mret])   # all 6 cheap gates
-        p_twr  = cleared and (twr is not None and twr >= 70.0)     # stage-7 engine rule
+        p_d1   = d1 is not None and d1 > 0.0     # cc#606 cheap gate 7
 
         low_lbl = f"prior4d {_fmt(p4lo,2)} / today {_fmt(tlo,2)} vs S1 {_fmt(s1,2)}"
         rows = [
@@ -1686,14 +1667,12 @@ def br_stock_detail(symbol: str):
             {"filter": "rsi_month",       "required": "60 to 90", "actual": _fmt(rmon, 1),       "pass": p_rm},
             {"filter": "sector_week",     "required": "> 0",      "actual": _fmt(swk, 2),        "pass": p_sw},
             {"filter": "month_return",    "required": "< 5",      "actual": _fmt(mret, 2) + "%", "pass": p_mret},
-            {"filter": "true_weekly_rsi", "required": ">= 70",    "actual": _fmt(twr, 1),        "pass": p_twr},
+            {"filter": "day_1d",          "required": "> 0",      "actual": _fmt(d1, 2) + "%",   "pass": p_d1},
         ]
-        if not cleared:
-            rows[6]["note"] = "engine evaluates true weekly RSI only after all 6 cheap gates pass"
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1,
                 "passed": passed, "total": 7, "rows": rows,
-                "spec": "BUY_REVERSAL_V5 cc#502"}
+                "spec": "BUY_REVERSAL_V6 cc#606"}
     except HTTPException:
         raise
     except Exception as e:
