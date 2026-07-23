@@ -103,11 +103,21 @@ SEED_CHECKS = [
      "output_table": "polished_news", "ts_column": "polished_at", "scope_filter": None,
      "precondition_sql": None, "cadence": "daily", "sla_hours": 30, "severity": "low",
      "suggested_action": "polished_news stale — check the news fetch + polish chain."},
-    {"check_id": "fyers_feed_data", "job_name": "bg_signal_writer", "check_type": "data",
+    # cc#621 issue 3: PER-SOURCE feed freshness — the old single check used source IN (fyers_eq,
+    # fyers_fut) with one MAX(ts), so equity bars alone kept it green while the 22-Jul FUT-ONLY outage
+    # went undetected. Split into two independent checks (eq + fut), market-hours 15-min cadence so
+    # run_market_checks evaluates them every cycle during the session (the daily 08:45 pass is
+    # pre-open and would false-alarm on an off-market 0.5h SLA).
+    {"check_id": "fyers_eq_data", "job_name": "bg_signal_writer", "check_type": "data",
      "output_table": "intraday_prices", "ts_column": "ts",
-     "scope_filter": "timeframe='5m' AND source IN ('fyers_eq','fyers_fut')",
-     "precondition_sql": None, "cadence": "5min_trading", "sla_hours": 0.5, "severity": "critical",
-     "suggested_action": "feed 5-min bars stale during market — check the fyers worker (mint-once / fut-verify) + heal_intraday."},
+     "scope_filter": "timeframe='5m' AND source='fyers_eq'",
+     "precondition_sql": None, "cadence": "market_15min", "sla_hours": 0.5, "severity": "critical",
+     "suggested_action": "fyers_eq 5-min bars stale during market — the equity feed stalled; check the fyers worker (mint-once) + heal_intraday."},
+    {"check_id": "fyers_fut_data", "job_name": "bg_signal_writer", "check_type": "data",
+     "output_table": "intraday_prices", "ts_column": "ts",
+     "scope_filter": "timeframe='5m' AND source='fyers_fut'",
+     "precondition_sql": None, "cadence": "market_15min", "sla_hours": 0.5, "severity": "critical",
+     "suggested_action": "fyers_fut 5-min bars stale during market — the FUTURES feed stalled (the 22-Jul fut-only outage class, invisible while eq bars flow); check the fyers worker (fut-verify / resubscribe) + nightly futures backfill."},
     {"check_id": "v8_writer_data", "job_name": "bg_signal_writer", "check_type": "data",
      "output_table": "v8_metrics", "ts_column": "score_date", "scope_filter": None,
      "precondition_sql": None, "cadence": "daily_trading", "sla_hours": 30, "severity": "critical",

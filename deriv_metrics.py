@@ -215,12 +215,15 @@ def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
 
 
 def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
-    """cc#427 fix_8 / cc#445 fix_7: last-5-session futures OI d/d %, each labelled with its DATE and
-    tagged with the OI/price quadrant (needs the day's price change alongside the OI change). Net-5d kept."""
+    """cc#427/445, cc#621 issue 1: last-5-session futures OI d/d %, each labelled with its DATE and
+    tagged with the OI/price quadrant. GAP-TOLERANT: select the last 6 DISTINCT trading dates PRESENT
+    in futures_basis (NOT gated on oi-not-null), so a missing/thin session — e.g. the 22-Jul fut-only
+    outage, or a null-OI day (cc#515) — no longer collapses the table. Each row's OI Δ% is computed vs
+    the previous AVAILABLE OI (carry-forward across gap/null days); the row still renders with a null Δ
+    when its own OI is missing. Up to 5 rows; Net = sum over rendered rows."""
     cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
-                   WHERE symbol=%s AND oi IS NOT NULL
-                   ORDER BY ts::date DESC, ts DESC LIMIT 6""", (sym,))
-    rows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest
+                   WHERE symbol=%s ORDER BY ts::date DESC, ts DESC LIMIT 6""", (sym,))
+    rows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest (present dates)
     if len(rows) < 2:
         return None
     # daily closes for the same dates (for price-change -> quadrant)
@@ -240,13 +243,17 @@ def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
         return round((c - prevc) / prevc * 100.0, 2) if (prevc and c) else None
 
     series = []
+    last_oi = rows[0][1]   # previous AVAILABLE OI (carry-forward base); may be None if the oldest is null
     for i in range(1, len(rows)):
-        prev, oi = rows[i - 1][1], rows[i][1]
-        pct = round((oi - prev) / prev * 100.0, 1) if (prev and prev > 0) else None
-        px = _px_chg(rows[i][0])
+        d, oi = rows[i]
+        pct = (round((oi - last_oi) / last_oi * 100.0, 1)
+               if (oi is not None and last_oi and last_oi > 0) else None)
+        px = _px_chg(d)
         q = _quadrant_tag(pct, px)
-        series.append({"date": str(rows[i][0]), "chg_pct": pct, "px_chg": px,
+        series.append({"date": str(d), "chg_pct": pct, "px_chg": px,
                        "quadrant": q["label"] if q else None, "quadrant_color": q["color"] if q else None})
+        if oi is not None:
+            last_oi = oi   # advance the base only on an available OI (gap-tolerant pairing)
     series = series[-5:]
     vals = [s["chg_pct"] for s in series if s["chg_pct"] is not None]
     net = round(sum(vals), 1) if vals else None

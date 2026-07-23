@@ -2255,6 +2255,63 @@ def _bg_result_analysis_weekly_sweep():
     return None
 
 
+_futures_gap_backfill_ran_on = None   # cc#621 Issue 4: nightly futures gap-detect+backfill day-lock
+
+def _bg_futures_gap_backfill():
+    """cc#621 Issue 4 (founder-approved 23-Jul): nightly ~00:15 IST futures gap-detect + backfill,
+    BEFORE the 01:00 nightly chain. Scan the last 7 trading days of fyers_fut (source='fyers_fut')
+    5-min bars in intraday_prices; a session is a GAP if it has zero bars or fewer than 30% of the
+    busiest day's count (thin/partial). If any gaps found, run the app-side futures backfill
+    (fyers_range_backfill._run_backfill_sync) for the gap date RANGE only (min→max gap date, DO
+    NOTHING upsert so present bars are never clobbered), then write outcome to ops_log. Day-locked,
+    idempotent, off-market (00:1x IST is well outside 09:15-15:30, and fyers_backfill's own
+    _assert_not_market_hours() is a second guard). NEVER touches the feed worker."""
+    global _futures_gap_backfill_ran_on
+    now = datetime.now(IST)
+    if not (now.hour == 0 and 15 <= now.minute < 45):
+        return _SKIPPED
+    today = now.date()
+    if _futures_gap_backfill_ran_on == today:
+        return _SKIPPED
+    _futures_gap_backfill_ran_on = today
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            # per-day fyers_fut bar counts across the last 7 DISTINCT present trading dates
+            cur.execute("""
+                SELECT d, cnt FROM (
+                    SELECT ts::date AS d, COUNT(*) AS cnt
+                    FROM intraday_prices
+                    WHERE source='fyers_fut' AND ts::date >= CURRENT_DATE - INTERVAL '10 days'
+                    GROUP BY ts::date
+                ) q ORDER BY d DESC LIMIT 7
+            """)
+            rows = cur.fetchall()   # [(date, count), ...] newest-first
+        if not rows:
+            log.info("_bg_futures_gap_backfill: no fyers_fut bars in window — nothing to scan")
+            return None
+        max_cnt = max(c for _, c in rows)
+        thin = 0.30 * max_cnt
+        gap_dates = sorted(d for d, c in rows if c == 0 or c < thin)
+        if not gap_dates:
+            log.info(f"_bg_futures_gap_backfill: no gaps (max/day={max_cnt}, days={len(rows)})")
+            return None
+        d_from, d_to = gap_dates[0], gap_dates[-1]
+        import fyers_range_backfill_endpoints as frb
+        res = frb._run_backfill_sync(str(d_from), str(d_to), None, None)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'futures_gap_backfill', %s, %s)""",
+                        ("cc621_nightly_futures_backfill",
+                         Json({"gap_dates": [str(x) for x in gap_dates],
+                               "range": [str(d_from), str(d_to)], "max_per_day": max_cnt,
+                               "result": res, "ist": now.isoformat()})))
+            conn.commit()
+        log.info(f"_bg_futures_gap_backfill: backfilled {gap_dates} -> {res}")
+    except Exception as e:
+        log.error(f"_bg_futures_gap_backfill: {e}")
+    return None
+
+
 _shareholding_q_running = False
 _shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
 
@@ -2713,6 +2770,7 @@ async def _scheduler_loop():
         _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
         _spawn(_bg_result_analysis_weekly_sweep)  # cc#618 Section B: Sunday ~09:00 IST full-season result_analysis catch-all (self-gated)
         _spawn(_bg_engine_watchdog)            # cc#599: daily ~08:45 IST engine watchdog outcome audit (self-gated)
+        _spawn(_bg_futures_gap_backfill)       # cc#621 Issue 4: nightly ~00:15 IST futures gap-detect+backfill (self-gated, off-market)
         if _is_market_hours(now) and _is_trading_day(today) and m % 15 == 0:
             _spawn(_bg_watchdog_market)         # cc#618 Section D: 15-min market-hours writer-tick freshness
         if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
