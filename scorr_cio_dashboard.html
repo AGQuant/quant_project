@@ -229,13 +229,16 @@ function TrendChart({ points }) {
 function ChartExpandModal({ mode, symbol, onClose }) {
   const [range, setRange] = useState("5y");
   const [data, setData] = useState(null);
+  const [err, setErr] = useState(false);   // cc: surface fetch failure instead of an eternal "loading…"
+  const [tries, setTries] = useState(0);
   const [showComp, setShowComp] = useState(true);
   useEffect(() => {
-    let alive = true; setData(null);
+    let alive = true; setData(null); setErr(false);
     apiGet(`/api/gvm/trend/${encodeURIComponent(symbol)}?range=${range}`)
-      .then(x => { if (alive && x && !x.error) setData(x); }).catch(() => {});
+      .then(x => { if (!alive) return; if (x && !x.error) setData(x); else setErr(true); })
+      .catch(() => { if (alive) setErr(true); });
     return () => { alive = false; };
-  }, [symbol, range]);
+  }, [symbol, range, tries]);
   useEffect(() => {
     const h = e => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", h); return () => document.removeEventListener("keydown", h);
@@ -245,7 +248,8 @@ function ChartExpandModal({ mode, symbol, onClose }) {
   const pts = (data ? (isGvm ? (data.gvm || []) : (data.price || [])) : []).filter(p => valOf(p) != null);
   const W = 680, H = 320, L = 46, R = 12, T = 16, B = 26;
   let content = null;
-  if (!data) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}>loading…</div>;
+  if (err) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}><span onClick={() => setTries(t => t + 1)} style={{ color: C.accent, cursor: "pointer", fontWeight: 700 }}>couldn't load · tap to retry</span></div>;
+  else if (!data) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}>loading…</div>;
   else if (pts.length < 2) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}>no data for this range</div>;
   else {
     let allV = []; const keys = isGvm ? (showComp ? ["gvm", "g", "v", "m"] : ["gvm"]) : ["close"];
@@ -1591,22 +1595,31 @@ function FibPopout({ symbol, onClose, side = "LONG" }) {
 // existing fibcheck endpoint for the ~3M EOD close path (no new data/engine). "expand" -> Fibcheck.
 function PriceSparkline({ symbol, onExpand }) {
   const [d, setD] = useState(null);
+  const [err, setErr] = useState(false);   // cc: silent .catch left the tile stuck on "loading…" forever
+  const [tries, setTries] = useState(0);    // bump to re-fetch on tap-to-retry
   useEffect(() => {
-    let alive = true; setD(null);
+    let alive = true; setD(null); setErr(false);
     apiGet(`/api/trade-check/fibcheck?symbol=${encodeURIComponent(symbol)}&lookback=3m`)
-      .then(x => { if (alive && x && !x.error) setD(x); }).catch(() => {});
+      .then(x => { if (!alive) return; if (x && !x.error && x.series) setD(x); else setErr(true); })
+      .catch(() => { if (alive) setErr(true); });
     return () => { alive = false; };
-  }, [symbol]);
+  }, [symbol, tries]);
   const ser = ((d && d.series) || []).filter(p => p.close != null);
   const W = 264, H = 74, PAD = 4;
   const wrap = kids => (
     <div onClick={onExpand} title="Tap to expand — up to 5Y" style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>{kids}</div>
   );
   if (ser.length < 2) {
+    // Distinguish the three states honestly: still loading, loaded-but-empty, or fetch failed (retry).
+    const failed = err || (d && ser.length < 2);
     return wrap(
       <React.Fragment>
         <div style={{ fontSize: 10, letterSpacing: ".08em", color: C.muted, textTransform: "uppercase" }}>Price · 3M</div>
-        <div style={{ fontSize: 11, color: C.muted, padding: "20px 0", textAlign: "center" }}>{d ? "no price path" : "loading…"}</div>
+        <div style={{ fontSize: 11, color: C.muted, padding: "20px 0", textAlign: "center" }}>
+          {err
+            ? <span onClick={e => { e.stopPropagation(); setTries(t => t + 1); }} style={{ color: C.accent, cursor: "pointer", fontWeight: 700 }}>couldn't load · tap to retry</span>
+            : (d ? "no price path" : "loading…")}
+        </div>
       </React.Fragment>
     );
   }
@@ -2110,12 +2123,18 @@ function GvmReport({ r, hist }) {
           </div>
 
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            {trendPoints && (
-              <div onClick={() => setChartExpand("gvm")} title="Tap to expand — up to 5Y"
-                   style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
-                <TrendChart points={trendPoints} />
-              </div>
-            )}
+            {/* Always render the GVM-trend tile so it never silently vanishes when the inline series is
+                absent (extras.trend missing AND the async gvm_history fetch not yet in / failed); the
+                tile stays tappable to open the 5Y expand modal, which loads its own series. */}
+            <div onClick={() => setChartExpand("gvm")} title="Tap to expand — up to 5Y"
+                 style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+              {trendPoints
+                ? <TrendChart points={trendPoints} />
+                : (<React.Fragment>
+                    <div style={{ fontSize: 10, letterSpacing: ".08em", color: C.muted, textTransform: "uppercase" }}>GVM Trend</div>
+                    <div style={{ fontSize: 11, color: C.muted, padding: "20px 0", textAlign: "center" }}>tap to view trend</div>
+                  </React.Fragment>)}
+            </div>
             {/* cc#634: whole price tile is the tap target -> 5Y expand modal (was a small "expand" text link) */}
             <PriceSparkline symbol={r.symbol} onExpand={() => setChartExpand("price")} />
           </div>
