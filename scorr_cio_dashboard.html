@@ -1936,6 +1936,8 @@ function FinancialsSection({ financials }) {
 function OpsMetricsSection({ ops }) {
   if (!ops || !ops.has_data || !ops.rows || !ops.rows.length) return null;
   const periods = ops.periods || [];
+  const peers = ops.peers || [];          // cc#641: top-5 same-segment peers with data at the latest qtr
+  const peerQ = ops.peer_quarter;
   const fmt = (v, unit) => {
     if (v === null || v === undefined) return "--";
     let n = v;
@@ -1953,16 +1955,20 @@ function OpsMetricsSection({ ops }) {
         <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Operational Metrics</div>
         {ops.sector && <Tag color={C.muted}>{String(ops.sector).replace(/_/g, " ")}</Tag>}
       </div>
-      <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Sector KPIs extracted from management commentary (earnings calls &amp; investor decks). QoQ / YoY are vs the latest reported quarter.</div>
+      <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Sector KPIs extracted from management commentary (earnings calls &amp; investor decks). QoQ / YoY are vs the latest reported quarter.{peers.length ? ` Peer columns are top-${peers.length} same-segment names by GVM with data for ${peerQ || "the same quarter"} (— where a peer hasn't reported that KPI).` : ""}</div>
       <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + 300, fontSize: 12.5 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + peers.length * 84 + 300, fontSize: 12.5 }}>
           <thead>
             <tr>
               <th style={{ position: "sticky", left: 0, background: C.card, zIndex: 2, textAlign: "left", padding: "8px 12px", borderBottom: `1px solid ${C.border}`, minWidth: 180, color: C.muted, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Metric</th>
               {periods.map((p, i) => (
-                <th key={i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>{p}</th>
+                <th key={i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: i === periods.length - 1 ? C.text : C.muted, fontWeight: i === periods.length - 1 ? 800 : 700, fontSize: 11, whiteSpace: "nowrap" }}>{p}{i === periods.length - 1 ? " ·" : ""}</th>
               ))}
-              <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 10.5 }}>QoQ</th>
+              {/* cc#641: peer columns — same-quarter comparison, company (bold last trend col) vs peers */}
+              {peers.map((ps, i) => (
+                <th key={"p" + i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, borderLeft: i === 0 ? `1px solid ${C.border}` : "none", color: C.muted, fontWeight: 700, fontSize: 10.5, whiteSpace: "nowrap" }}>{ps}</th>
+              ))}
+              <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, borderLeft: peers.length ? `1px solid ${C.border}` : "none", color: C.muted, fontWeight: 700, fontSize: 10.5 }}>QoQ</th>
               <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 10.5 }}>YoY</th>
             </tr>
           </thead>
@@ -1974,7 +1980,11 @@ function OpsMetricsSection({ ops }) {
                   <td key={i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
                     color: i === row.values.length - 1 ? C.text : C.muted, fontWeight: i === row.values.length - 1 ? 700 : 500 }}>{fmt(v, row.unit)}</td>
                 ))}
-                <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace" }}>{delta(row.qoq, row.unit)}</td>
+                {peers.map((ps, i) => (
+                  <td key={"p" + i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
+                    borderLeft: i === 0 ? `1px solid ${C.border}` : "none", color: C.muted, fontWeight: 500 }}>{fmt(row.peers ? row.peers[i] : null, row.unit)}</td>
+                ))}
+                <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace", borderLeft: peers.length ? `1px solid ${C.border}` : "none" }}>{delta(row.qoq, row.unit)}</td>
                 <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace" }}>{delta(row.yoy, row.unit)}</td>
               </tr>
             ))}

@@ -898,6 +898,39 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
             metric_rows.sort(key=lambda r: r["label"])
             if metric_rows:
                 out.update({"has_data": True, "periods": quarters, "rows": metric_rows})
+                # cc#641: same-quarter peer benchmark. Pick top-5 peers BY GVM in the company's segment
+                # that ACTUALLY have sector_ops_metrics rows for the company's latest quarter (available
+                # peers, not blind top-5-by-GVM), then align each metric row to that same quarter. A peer
+                # missing a specific metric = null (honest --, never faked). QoQ/YoY stay company-only —
+                # single-quarter extraction can't support peer deltas yet (widens as cc#632 lands).
+                latest_q = quarters[-1] if quarters else None
+                cur.execute("""SELECT segment FROM gvm_scores
+                               WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                               LIMIT 1""", (symbol,))
+                seg_row = cur.fetchone()
+                segment = seg_row[0] if seg_row else None
+                peers: List[str] = []
+                if segment and latest_q:
+                    cur.execute("""SELECT g.symbol FROM gvm_scores g
+                                   WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                                     AND g.segment=%s AND g.symbol<>%s
+                                     AND EXISTS (SELECT 1 FROM sector_ops_metrics s
+                                                 WHERE s.symbol=g.symbol AND s.quarter=%s
+                                                   AND s.metric_value IS NOT NULL)
+                                   ORDER BY g.gvm_score DESC NULLS LAST
+                                   LIMIT 5""", (segment, symbol, latest_q))
+                    peers = [r[0] for r in cur.fetchall()]
+                if peers:
+                    cur.execute("""SELECT symbol, metric_name, metric_value FROM sector_ops_metrics
+                                   WHERE symbol = ANY(%s) AND quarter=%s AND metric_value IS NOT NULL""",
+                                (peers, latest_q))
+                    peer_vals: Dict[tuple, Optional[float]] = {}
+                    for psym, mname, val in cur.fetchall():
+                        peer_vals[(psym, mname)] = _f(val)
+                    for row in metric_rows:
+                        row["peers"] = [peer_vals.get((p, row["metric_name"])) for p in peers]
+                    out["peers"] = peers
+                    out["peer_quarter"] = latest_q
 
         cur.execute("""SELECT quarter, summary, guidance, tone FROM concall_summaries
                        WHERE symbol=%s ORDER BY computed_at DESC LIMIT 1""", (symbol,))
