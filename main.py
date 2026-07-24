@@ -200,10 +200,12 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner"}   # cc#392/394/398/426/442/467/525/603: no-store + theme/logout pills
+                     "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
+                     "/adaptive"}   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
+PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) — gate + no-store
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
@@ -761,6 +763,11 @@ def health_report_page():
     """cc#398: Portfolio Health Report — upload holdings -> Scorr-native 13-section report."""
     with open("scorr_health.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/adaptive", response_class=HTMLResponse)
+def adaptive_dashboard_page():
+    """cc#651: Adaptive Dashboard — client-facing shelf of saved Portfolio Health Reports."""
+    with open("scorr_adaptive.html", "r", encoding="utf-8") as f: return f.read()
+
 # ── NAV_REGISTRY (cc#397, rule id=2987) — every GET-HTML route -> nav label -> status ──────────────
 # STATUS: nav = in cockpit web nav + cio dashboard nav + mobile launcher; redirect = 301s away;
 # INTERNAL = deliberately not in nav (test/dev). Keep this in sync when adding a page (nav-complete
@@ -795,6 +802,7 @@ NAV_REGISTRY = {
     "/v12":          ("V12 · Quant Basket Builder — QB-page button (removed from top nav)", "tab"),  # cc#557: folded into /quant-basket
     "/screener":     ("(-> /v13 · RETIRED)",  "redirect"),   # cc#407 301 (V13 = single screener)
     "/health":       ("Health Report",        "nav"),        # cc#398 rule id=2987
+    "/adaptive":     ("Adaptive Dashboard",   "nav"),        # cc#651 rule id=2987
     "/filters":      ("(-> /v13)",            "redirect"),   # cc#393 301
     "/test-cio":     ("(test harness)",       "INTERNAL"),   # test_cio_endpoints, dev-only
 }

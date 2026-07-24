@@ -277,6 +277,7 @@ PWA_JS = """
     ['/intraday', '\\u23f1', 'TC Scanner'],
     ['/v13', '\\u25a4', 'V13'],
     ['/health', '\\u2695', 'Health'],
+    ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],

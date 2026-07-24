@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Dashboard · Scorr</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Sora:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* cc#651 part_2 — Adaptive Dashboard: the client-facing shelf of Portfolio Health Reports.
+   Theme tokens mirror scorr_health.html (light default, dark via [data-theme="dark"]). */
+:root{
+  --bg:#ECEEF3; --paper:#F8F9FC; --mast:#07111F;
+  --ink:#07111F; --faint:#B8BECC; --muted:#5B667D;
+  --rule:rgba(7,17,31,.10); --hover:rgba(7,17,31,.03);
+  --blu:#1847DF; --grn:#0B6E42; --red:#B52432;
+}
+:root[data-theme="dark"]{
+  --bg:#0A0F1E; --paper:#101830; --mast:#060B16;
+  --ink:#E9EEFB; --faint:#5E6B8F; --muted:#8C99BD;
+  --rule:rgba(148,166,210,.14); --hover:rgba(148,166,210,.05);
+  --blu:#4D7CFE; --grn:#2FD48B; --red:#FF5C6C;
+}
+html,body{margin:0;padding:0;background:var(--bg);}
+.adx,.adx *,.adx *::before,.adx *::after{box-sizing:border-box;margin:0;padding:0;}
+.adx{color:var(--ink);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;max-width:1180px;margin:0 auto;}
+.adx .pos{color:var(--grn);} .adx .neg{color:var(--red);}
+.adx a{text-decoration:none;color:inherit;}
+/* masthead pill-safe (clears fixed theme/logout pills) */
+.adx .mast{background:var(--mast);color:#fff;padding:28px 120px 24px 32px;}
+.adx .mast .k{font-size:9px;font-weight:600;letter-spacing:1.2px;color:rgba(255,255,255,.35);text-transform:uppercase;margin-bottom:10px;}
+.adx .mast h1{font-family:'Sora',sans-serif;font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.05;}
+.adx .mast .sub{font-size:11px;color:rgba(255,255,255,.45);margin-top:6px;letter-spacing:.2px;}
+.adx .wrap{background:var(--paper);padding:24px 32px 60px;}
+.adx .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
+.adx .card{display:block;border:1px solid var(--rule);border-radius:8px;background:var(--bg);padding:16px 18px;transition:border-color .12s,background .12s;min-height:44px;}
+.adx .card:hover{border-color:var(--blu);background:var(--hover);}
+.adx .card .nm{font-size:15px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.adx .card .meta{font-size:10.5px;color:var(--muted);margin-top:3px;}
+.adx .card .strip{display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;}
+.adx .card .strip .b .l{font-size:8.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);}
+.adx .card .strip .b .v{font-size:14px;font-weight:600;margin-top:2px;letter-spacing:-.3px;}
+.adx .card .go{font-size:10px;font-weight:600;letter-spacing:.3px;color:var(--blu);margin-top:14px;}
+.adx .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:12px;}
+.adx .empty a{color:var(--blu);font-weight:600;}
+@media print{ .no-print,#scorr-lo,#scorr-th{display:none !important;} }
+@media (max-width:767px){
+  .adx .mast{padding:70px 20px 20px;}
+  .adx .mast h1{font-size:26px;}
+  .adx .wrap{padding:20px 16px 60px;}
+  .adx .grid{grid-template-columns:1fr;}
+  .adx .card .nm{font-size:16px;}
+  .adx .card .strip .b .v{font-size:15px;}
+}
+</style>
+</head>
+<body>
+<div id="scorr-nav"></div>
+<div class="adx">
+  <div class="mast">
+    <div class="k">Scorr · Client Reports</div>
+    <h1>Adaptive Dashboard</h1>
+    <div class="sub"><span id="adx-count">—</span> saved portfolios · tap a client to open their Portfolio Health Report</div>
+  </div>
+  <div class="wrap"><div id="adx-list"><div class="empty">Loading client reports…</div></div></div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var listEl=document.getElementById('adx-list'), countEl=document.getElementById('adx-count');
+  function inr(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '₹'+Math.round(n).toLocaleString('en-IN'); }
+  function dmy(iso){ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d)) return iso;
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
+  function esc(s){ var d=document.createElement('div'); d.textContent=(s==null)?'':String(s); return d.innerHTML; }
+  function pnlStr(pnl,pc){ if(pnl==null) return '—';
+    return (pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(pnl)).toLocaleString('en-IN')
+      +(pc==null?'':' ('+(pc>=0?'+':'−')+Math.abs(pc).toFixed(1)+'%)'); }
+  fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
+    var ps=(d&&d.portfolios)||[];
+    countEl.textContent=ps.length;
+    if(!ps.length){ listEl.innerHTML='<div class="empty">No saved portfolios yet. Build one on the <a href="/health">Health</a> tab.</div>'; return; }
+    // client reports are white-labelled by default (wl=1) — client-shareable, zero Scorr branding.
+    var cards=ps.map(function(p){
+      var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)'));
+      return '<a class="card" href="/health?pid='+p.id+'&wl=1">'
+        + '<div class="nm">'+esc(p.name||('Portfolio '+p.id))+'</div>'
+        + '<div class="meta">as of '+dmy(p.created_at)+' · '+(p.n_holdings||0)+' holdings</div>'
+        + '<div class="strip">'
+        +   '<div class="b"><div class="l">Invested</div><div class="v">'+inr(p.invested)+'</div></div>'
+        +   '<div class="b"><div class="l">Current</div><div class="v">'+inr(p.current)+'</div></div>'
+        +   '<div class="b"><div class="l">P&amp;L</div><div class="v" style="color:'+col+'">'+pnlStr(p.pnl,p.pnl_pct)+'</div></div>'
+        + '</div>'
+        + '<div class="go">View report →</div></a>';
+    }).join('');
+    listEl.innerHTML='<div class="grid">'+cards+'</div>';
+  }).catch(function(e){ listEl.innerHTML='<div class="empty">Could not load reports. '+esc(''+e)+'</div>'; });
+})();
+</script>
+</body>
+</html>
