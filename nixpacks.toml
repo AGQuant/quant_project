@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["python313", "gcc"]
+# cc#652: pango/cairo/gdk-pixbuf/fontconfig/glib/harfbuzz/libffi are WeasyPrint's runtime native libs
+# (HTML->PDF for the white-label Portfolio Health Report); dejavu_fonts gives the PDF a mono face.
+# WeasyPrint is imported lazily so if this build ever cannot resolve a lib, only the PDF endpoint 503s.
+nixPkgs = ["python313", "gcc", "pango", "cairo", "gdk-pixbuf", "fontconfig", "glib", "harfbuzz", "libffi", "dejavu_fonts"]
 
 [start]
 cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"

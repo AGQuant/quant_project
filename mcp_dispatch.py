@@ -139,6 +139,7 @@ MCP_TOOLS = [
     {"name":"v13_theme_save","description":"cc#461 V13 Theme Bridge: validate filter keys against the registry whitelist (rejects unknown keys with the valid list), run the screen, REFUSE the save when count=0 or count>500 (returns the count so you can tune), then upsert into v13_presets (scope=global). Args: name, filters, sort_key, sort_dir(-1 desc/1 asc), mode(insert|update), id. Returns {id, count}.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"filters":{"type":"object"},"sort_key":{"type":"string"},"sort_dir":{"type":"integer"},"mode":{"type":"string"},"id":{"type":"integer"}},"required":["name","filters"]}},
     {"name":"v13_theme_list","description":"cc#461 V13 Theme Bridge: list all global theme presets (id, name, compact filter summary, sort). Delete stays via run_sql (deliberate friction per guardrail).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"hr_report_generate","description":"cc#651 Portfolio Health: generate/refresh a client Portfolio Health Report using the EXACT /health template. Pass {portfolio_id} to (re)generate a saved portfolio (e.g. 4 = Vishal Bhosale), OR {name, holdings:[{symbol,qty,avg_price}]} to create one from scratch (symbols resolved to Scorr nse_code server-side). Runs the full pipeline and returns {portfolio_id, report_url}. white_label defaults true (client-shareable, zero Scorr branding).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"},"name":{"type":"string"},"holdings":{"type":"array","items":{"type":"object","properties":{"symbol":{"type":"string"},"qty":{"type":"number"},"avg_price":{"type":"number"}},"required":["symbol"]}},"white_label":{"type":"boolean"}},"required":[]}},
+    {"name":"hr_report_pdf","description":"cc#652 Portfolio Health: get a fetchable white-label PDF of a saved portfolio's Health Report. Returns {url} — an absolute, short-lived (~10 min) signed URL you can web_fetch directly (no login) and share in chat. Zero Scorr branding. Pass {portfolio_id} (e.g. 4 = Vishal Bhosale).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"}},"required":["portfolio_id"]}},
 ]
 
 async def _call_tool(name, args):
@@ -147,6 +148,7 @@ async def _call_tool(name, args):
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
         elif name == "hr_report_generate": r = await client.post(f"{BASE_URL}/api/health/generate", json=args, headers=h); return r.json()
+        elif name == "hr_report_pdf": r = await client.get(f"{BASE_URL}/api/health/report_pdf_link/{args['portfolio_id']}", headers=h); return r.json()
         elif name == "run_diagnosis": r = await client.get(f"{BASE_URL}/api/diagnosis"); return r.json()
         elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/daily"); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
