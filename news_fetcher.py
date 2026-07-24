@@ -46,7 +46,7 @@ UNPOLISHED_MAX_HOURS       = 48
 # ever). ONLY the company ingest path uses this; UNPOLISHED_MAX_HOURS=48 stays for domestic/global
 # RSS staleness AND the news_retention() 48h unpolished-deletion sweep (unchanged).
 COMPANY_STALE_HOURS        = 120
-POLISHED_MAX_DAYS          = 90     # cc#208: founder ask — store polished news 90 days
+POLISHED_MAX_DAYS          = 180    # cc#647: 90 -> 180 (founder, 24-Jul). Size trivial (~15-20MB at 180d)
 UNPOLISHED_ALERT_THRESHOLD = 800
 HTTP_TIMEOUT    = 12
 
@@ -571,11 +571,21 @@ def news_retention(conn=None):
     04-Jul one-time backlog cleanup permanent so unpolished news never piles up.
 
       (1) UNPOLISHED: delete raw_news with NO polished_news child once it is older
-          than 48h (by COALESCE(published_at, fetched_at) — publish time when
-          known, else ingest time).
-      (2) POLISHED: delete polished_news older than 90 days (cc#208: 30 -> 90, all
-          categories incl AI Editorial) AND its raw_news parent (delete the parent;
-          the FK CASCADE removes the polished child).
+          than 48h. cc#647 change_2a: the age test is now anchored on the INGEST clock
+          (COALESCE(fetched_at, published_at) — fetched_at first, published_at only as a
+          null-safety fallback), NOT the pre-fix COALESCE(published_at, fetched_at). A
+          publisher-supplied published_at can be garbage in EITHER direction: a
+          garbage-OLD stamp on a freshly-fetched row (2 live rows dated old but fetched
+          <48h ago) made the old predicate delete fresh content PREMATURELY; a
+          garbage-FUTURE stamp could make a stale row IMMORTAL. Anchoring on fetched_at
+          fixes both and guarantees "zero unpolished raw older than 48h by fetched_at".
+          cc#647 change_2b: source_type='editorial' and 'stock_view' STUBS are NEVER
+          purged by this sweep regardless of age (they are intentional stubs awaiting a
+          Claude-web polish batch; once polished they age via the polished retention below).
+      (2) POLISHED: delete polished_news older than POLISHED_MAX_DAYS (cc#647: 90 -> 180)
+          AND its raw_news parent (delete the parent; the FK CASCADE removes the polished
+          child). Keyed on polished_at, so a raw's garbage published_at never over-deletes
+          recent polished content (verify: polished_news MIN(published_time) unaffected).
 
     Writes an ops_log(category=news_retention) record every run with both counts,
     and alerts if the surviving unpolished backlog is implausibly large (>800 =>
@@ -585,15 +595,18 @@ def news_retention(conn=None):
         conn = _conn()
     try:
         with conn.cursor() as cur:
-            # (1) unpolished older than 48h, no polished child
+            # (1) unpolished older than 48h BY INGEST CLOCK (cc#647 change_2a: fetched_at first,
+            #     published_at only as a null fallback), no polished child, and NOT an
+            #     editorial/stock_view stub (cc#647 change_2b: those are protected regardless of age).
             cur.execute(
                 "DELETE FROM raw_news r "
-                "WHERE COALESCE(r.published_at, r.fetched_at) < NOW() - INTERVAL '%s hours' "
-                "  AND NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)"
+                "WHERE COALESCE(r.fetched_at, r.published_at) < NOW() - INTERVAL '%s hours' "
+                "  AND NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id) "
+                "  AND COALESCE(r.source_type, '') NOT IN ('editorial', 'stock_view')"
                 % int(UNPOLISHED_MAX_HOURS))
             deleted_unpolished = cur.rowcount
 
-            # (2) polished older than 90 days -> count, then delete raw parent (CASCADE)
+            # (2) polished older than POLISHED_MAX_DAYS (cc#647: 180) -> count, then delete raw parent (CASCADE)
             cur.execute("SELECT COUNT(*) FROM polished_news WHERE polished_at < NOW() - INTERVAL '%s days'"
                         % int(POLISHED_MAX_DAYS))
             deleted_polished = cur.fetchone()[0] or 0
@@ -610,8 +623,11 @@ def news_retention(conn=None):
         conn.commit()
 
         stats = {"deleted_unpolished_48h": deleted_unpolished,
-                 "deleted_polished_90d": deleted_polished,   # cc#208: 30 -> 90
-                 "unpolished_remaining": unpolished_remaining}
+                 "deleted_polished_180d": deleted_polished,   # cc#647: 90 -> 180
+                 "unpolished_remaining": unpolished_remaining,
+                 "retention": {"unpolished_max_hours": UNPOLISHED_MAX_HOURS,
+                               "polished_max_days": POLISHED_MAX_DAYS,
+                               "protected_source_types": ["editorial", "stock_view"]}}
         _write_ops_log(conn, "news_retention", "news_retention", stats)
         if unpolished_remaining > UNPOLISHED_ALERT_THRESHOLD:
             _write_ops_log(conn, "alert", "news_backlog_high",
@@ -619,8 +635,8 @@ def news_retention(conn=None):
                                        f"{UNPOLISHED_ALERT_THRESHOLD} after retention — upstream ingest/"
                                        f"polish likely broke",
                             "unpolished_remaining": unpolished_remaining})
-        log.info(f"news_retention: -{deleted_unpolished} unpolished(48h), "
-                 f"-{deleted_polished} polished(90d), {unpolished_remaining} unpolished remain")
+        log.info(f"news_retention: -{deleted_unpolished} unpolished(48h by fetched_at), "
+                 f"-{deleted_polished} polished({POLISHED_MAX_DAYS}d), {unpolished_remaining} unpolished remain")
         return {"ok": True, **stats}
     except Exception as e:
         log.error(f"news_retention: {e}")
