@@ -227,9 +227,16 @@ async def results_card(symbol: str, generate: bool = False):
             d["peer_comparison"] = peer_comparison
             return d
 
-        cur.execute("SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY ex_date DESC LIMIT 1", (sym,))
+        cur.execute("SELECT ex_date, status FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY ex_date DESC LIMIT 1", (sym,))
         er = cur.fetchone()
         today = date.today()
+        # cc#648 part_1: earnings_calendar.status='reported' is the AUTHORITATIVE "results are out" signal
+        # (an ex_date can pass without the company having reported — reschedules). The structured card is
+        # gated on status='reported'; the announced branch still fires on a passed ex_date so a
+        # reported-but-not-yet-flagged name shows the pending body rather than an "upcoming" one.
+        ex_dt = er[0] if er else None
+        reported = bool(er) and (er[1] or "").strip().lower() == "reported"
+        announced = reported or (ex_dt is not None and ex_dt <= today)
 
         # cc#623 POSITION_NEWS_CARD_V2 — two-branch flow, both surfaces (R button + Position News tab)
         # sharing the unified renderer. Sections common to BOTH branches, computed once:
@@ -254,26 +261,31 @@ async def results_card(symbol: str, generate: bool = False):
         card_q = _card_quarter(card) if card else None
         card_ts = str(ra[1]) if (ra and ra[1]) else None
 
-        # Branch A: ANNOUNCED (vintage <= today) — strict current-quarter gate on the structured card.
-        if er and er[0] is not None and er[0] <= today:
-            # TIER 1 structured: only when the stored card's quarter == the expected latest quarter
-            # (never surface a stale-quarter card as "current"). Order in renderer: result analysis ->
-            # FY27 -> RAW 48h -> POLISH 1mo.
+        # Branch A: ANNOUNCED — strict priority chain on the structured card.
+        if announced:
+            # TIER 1 structured: the stored card's quarter == the expected latest quarter. A
+            # current-quarter result_analysis card existing IS proof the company reported this quarter,
+            # so the quarter-match is the authoritative guard (a stale-quarter card — e.g. a name that
+            # is 'reported' but whose new card hasn't been generated — correctly falls through to
+            # pending). We do NOT additionally require status='reported' here: the earnings_calendar
+            # status lags reality (e.g. INFY reported Q1 FY27 but its row still reads 'upcoming'), so
+            # gating on it would hide a valid fresh card. status='reported' is instead used above as a
+            # first-class 'announced' trigger. Renderer order: result analysis -> FY27 -> RAW 48h -> POLISH 1mo.
             if card and card_q and card_q == expected_q:
                 return _sections({"symbol": sym, "status": "announced", "tier": "structured",
-                        "ex_date": str(er[0]), "result_analysis": card, "card_quarter": card_q,
+                        "ex_date": str(ex_dt) if ex_dt else None, "result_analysis": card, "card_quarter": card_q,
                         "expected_quarter": expected_q, "generated_at": card_ts, "gvm_verdict": gvm_verdict})
-            # Reported but no fresh current-quarter card -> pending body; FY27 + news sections still show.
+            # Announced but no fresh current-quarter card -> pending body; FY27 + news sections still show.
             return _sections({"symbol": sym, "status": "announced_no_analysis", "tier": "pending",
-                    "ex_date": str(er[0]), "expected_quarter": expected_q,
+                    "ex_date": str(ex_dt) if ex_dt else None, "expected_quarter": expected_q,
                     "card_quarter": card_q, "gvm_verdict": gvm_verdict})
 
         # Branch B: NOT ANNOUNCED (upcoming / date_tbd). cc#623 state-machine tweak — RENDER the existing
         # prior-quarter card EXPLICITLY as "LAST RESULT · <its own quarter>" (no freshness gate; it is
         # avowedly the last result), instead of suppressing it. Order: expected date + FY27 -> LAST
         # RESULT -> RAW 48h -> POLISH 1mo. fy27_outlook (retired/empty) is no longer read.
-        status = "upcoming" if (er and er[0] is not None) else "date_tbd"
-        ed = str(er[0]) if (er and er[0] is not None) else None
+        status = "upcoming" if (ex_dt is not None) else "date_tbd"
+        ed = str(ex_dt) if (ex_dt is not None) else None
         return _sections({"symbol": sym, "status": status, "tier": "last_result", "ex_date": ed,
                 "expected_quarter": expected_q,
                 "last_result_analysis": card, "last_card_quarter": card_q,
