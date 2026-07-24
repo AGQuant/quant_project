@@ -329,3 +329,112 @@ def health_portfolio(pid: int):
         cols = [d[0] for d in cur.description]
         holdings = [dict(zip(cols, r)) for r in cur.fetchall()]
     return {"id": p[0], "name": p[1], "source": p[2], "created_at": str(p[3]), "holdings": holdings}
+
+
+def _cmp_map(cur, syms):
+    """cc#651: symbol -> price, cmp_prices first then latest raw_prices close (mirrors hr_report._load_cmp)."""
+    out = {}
+    if not syms:
+        return out
+    cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE symbol = ANY(%s)", (syms,))
+    for s, c in cur.fetchall():
+        if c is not None:
+            out[s] = float(c)
+    missing = [s for s in syms if s not in out]
+    if missing:
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                       WHERE symbol = ANY(%s) ORDER BY symbol, price_date DESC""", (missing,))
+        for s, c in cur.fetchall():
+            if c is not None:
+                out[s] = float(c)
+    return out
+
+
+@router.get("/api/health/portfolios")
+def health_portfolios():
+    """cc#651 part_5/2: list every saved portfolio with a lightweight invested/current/P&L summary.
+    Powers the /health saved-portfolios list AND the /adaptive client shelf. CMP = cmp_prices with a
+    latest raw_prices.close fallback (a holding with no price falls back to its avg so it never breaks
+    the sum)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, source, created_at FROM hr_portfolios ORDER BY id DESC")
+        ports = cur.fetchall()
+        cur.execute("SELECT portfolio_id, symbol, qty, avg_price FROM hr_holdings")
+        rows = cur.fetchall()
+        px = _cmp_map(cur, list({r[1] for r in rows if r[1]}))
+    agg = {}
+    for pid_, sym, qty, avg in rows:
+        a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0})
+        q = float(qty or 0); ap = float(avg or 0)
+        a["n"] += 1
+        a["inv"] += q * ap
+        a["cur"] += q * px.get(sym, ap)
+    out = []
+    for id_, name, source, created in ports:
+        a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0})
+        inv, curv = a["inv"], a["cur"]
+        pnl = curv - inv
+        out.append({"id": id_, "name": name, "source": source, "created_at": str(created),
+                    "n_holdings": a["n"], "invested": round(inv, 2), "current": round(curv, 2),
+                    "pnl": round(pnl, 2), "pnl_pct": (round(pnl / inv * 100.0, 2) if inv else None)})
+    return {"portfolios": out}
+
+
+class HRGenReq(BaseModel):
+    portfolio_id: Optional[int] = None
+    name: Optional[str] = None
+    source: Optional[str] = "mcp"
+    holdings: Optional[List[HRHolding]] = None
+    white_label: Optional[bool] = True
+
+
+@router.post("/api/health/generate")
+def health_generate(body: HRGenReq):
+    """cc#651 part_1: single-call report generation for the MCP bridge (Scorr:hr_report_generate).
+    Pass {portfolio_id} to (re)generate a saved portfolio, OR {name + holdings[]} to create one. Runs
+    the FULL Portfolio Health pipeline server-side (symbol resolution + build_report) and returns
+    {portfolio_id, report_url}. Idempotent per portfolio_id — the report renders live on each load, so
+    a repeat call with the same id simply refreshes it; passing holdings WITH a portfolio_id replaces
+    that portfolio's holdings in place."""
+    pid = body.portfolio_id
+    with _conn() as conn, conn.cursor() as cur:
+        if body.holdings:
+            raw = [{"input": h.symbol, "qty": h.qty, "avg_price": h.avg_price}
+                   for h in body.holdings if h.symbol]
+            resolved = _resolve(cur, raw)
+            keep = [r for r in resolved if r["resolved"]]
+            if not keep:
+                return {"error": "no holdings resolved to a Scorr symbol",
+                        "unresolved": [r["input"] for r in resolved]}
+            if pid:
+                cur.execute("SELECT 1 FROM hr_portfolios WHERE id=%s", (pid,))
+                if not cur.fetchone():
+                    return {"error": f"portfolio {pid} not found"}
+                if body.name:
+                    cur.execute("UPDATE hr_portfolios SET name=%s WHERE id=%s", (body.name, pid))
+                cur.execute("DELETE FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+            else:
+                cur.execute("INSERT INTO hr_portfolios (name, source, created_at) VALUES (%s,%s,NOW()) RETURNING id",
+                            (body.name or "Client Portfolio", body.source or "mcp"))
+                pid = cur.fetchone()[0]
+            for r in keep:
+                cur.execute("""INSERT INTO hr_holdings (portfolio_id, symbol, company_name, qty, avg_price, resolved, raw_input)
+                               VALUES (%s,%s,%s,%s,%s,TRUE,%s::jsonb)""",
+                            (pid, r["symbol"].upper(), r["company_name"], r["qty"], r["avg_price"],
+                             json.dumps(r, default=str)))
+            conn.commit()
+        elif not pid:
+            return {"error": "provide portfolio_id OR name + holdings[]"}
+        else:
+            cur.execute("SELECT 1 FROM hr_portfolios WHERE id=%s", (pid,))
+            if not cur.fetchone():
+                return {"error": f"portfolio {pid} not found"}
+        priced = None
+        try:
+            from hr_report import build_report
+            rep = build_report(cur, pid)
+            priced = len((rep or {}).get("holdings") or [])
+        except Exception as e:
+            priced = f"warm-failed: {e}"
+    wl = "1" if (body.white_label is not False) else "0"
+    return {"portfolio_id": pid, "report_url": f"/health?pid={pid}&wl={wl}", "holdings_priced": priced}
