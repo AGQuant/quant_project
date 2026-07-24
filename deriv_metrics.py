@@ -216,40 +216,39 @@ def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
 
 
 def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
-    """cc#427/445, cc#621 issue 1: last-5-session futures OI d/d %, each labelled with its DATE and
-    tagged with the OI/price quadrant. GAP-TOLERANT: select the last 6 DISTINCT trading dates PRESENT
-    in futures_basis (NOT gated on oi-not-null), so a missing/thin session — e.g. the 22-Jul fut-only
-    outage, or a null-OI day (cc#515) — no longer collapses the table. Each row's OI Δ% is computed vs
-    the previous AVAILABLE OI (carry-forward across gap/null days); the row still renders with a null Δ
-    when its own OI is missing. Up to 5 rows; Net = sum over rendered rows."""
-    cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
-                   WHERE symbol=%s ORDER BY ts::date DESC, ts DESC LIMIT 6""", (sym,))
-    rows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest (present dates)
-    if len(rows) < 2:
-        return None
-    # daily closes for the same dates (for price-change -> quadrant)
+    """cc#427/445, cc#621, cc#648 part_4: last-5-TRADING-day futures OI d/d %, each labelled with its
+    DATE and tagged with the OI/price quadrant. The DATE SPINE is the trading calendar from raw_prices
+    (ALWAYS complete — it includes fut-outage days like 22-Jul that are ABSENT from futures_basis), so
+    the table always renders 5 CONSECUTIVE trading days. OI is LEFT-JOINed from futures_basis; a day
+    with no futures row (or a null OI) still renders its row, with a null OI Δ (surfaced as -- on the
+    cockpit). Each row's OI Δ% is vs the previous AVAILABLE OI (carry-forward across gap/null days) —
+    the Δ%/quadrant computation itself is unchanged. Net = sum over rendered rows."""
     cur.execute("""SELECT price_date, close FROM raw_prices WHERE symbol=%s
-                   AND price_date <= %s ORDER BY price_date DESC LIMIT 7""", (sym, rows[-1][0]))
-    closes = {r[0]: _f(r[1]) for r in cur.fetchall()}
-    _cdates = sorted(closes.keys())
+                   ORDER BY price_date DESC LIMIT 6""", (sym,))
+    prows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest TRADING days
+    if len(prows) < 2:
+        return None
+    dates = [d for d, _c in prows]
+    closes = {d: c for d, c in prows}
+    # OI per trading date (latest tick that day), LEFT-joined from futures_basis over the spine window
+    cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
+                   WHERE symbol=%s AND ts::date >= %s ORDER BY ts::date, ts DESC""", (sym, dates[0]))
+    oi_by_date = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
-    def _px_chg(d):
-        if d not in closes:
+    def _px_chg(i):
+        if i <= 0:
             return None
-        idx = _cdates.index(d) if d in _cdates else -1
-        if idx <= 0:
-            return None
-        prevc = closes.get(_cdates[idx - 1])
-        c = closes.get(d)
+        c, prevc = closes.get(dates[i]), closes.get(dates[i - 1])
         return round((c - prevc) / prevc * 100.0, 2) if (prevc and c) else None
 
     series = []
-    last_oi = rows[0][1]   # previous AVAILABLE OI (carry-forward base); may be None if the oldest is null
-    for i in range(1, len(rows)):
-        d, oi = rows[i]
+    last_oi = oi_by_date.get(dates[0])   # previous AVAILABLE OI (carry-forward base); may be None
+    for i in range(1, len(prows)):
+        d = dates[i]
+        oi = oi_by_date.get(d)
         pct = (round((oi - last_oi) / last_oi * 100.0, 1)
                if (oi is not None and last_oi and last_oi > 0) else None)
-        px = _px_chg(d)
+        px = _px_chg(i)
         q = _quadrant_tag(pct, px)
         series.append({"date": str(d), "chg_pct": pct, "px_chg": px,
                        "quadrant": q["label"] if q else None, "quadrant_color": q["color"] if q else None})

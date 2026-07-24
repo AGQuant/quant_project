@@ -1376,7 +1376,7 @@ function _dcInjectStyle(){
   #dcOv .back .ar{font-size:15px}
   #dcOv .ts{font-size:10.5px;color:var(--c-grn);letter-spacing:.5px;border:1px solid #17603f;background:var(--c-grnbg);border-radius:8px;padding:5px 11px}
   #dcOv .sym{display:flex;align-items:flex-end;justify-content:space-between}
-  #dcOv .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1}
+  #dcOv .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1;color:var(--c-tx)}   /* cc#648 part_4: explicit bright text — parity with the price numeral (was inheriting, read dim) */
   #dcOv .sym .l .tag{margin-top:6px;display:inline-block;font-size:10px;color:var(--c-mut);border:1px solid var(--c-bd);border-radius:5px;padding:2px 7px;letter-spacing:.5px}
   #dcOv .sym .r{text-align:right}
   #dcOv .sym .r .px{font-size:22px;font-weight:700}
@@ -1404,9 +1404,9 @@ function _dcInjectStyle(){
   #dcOv .quad.bear .v{color:var(--c-red)} #dcOv .quad.neu .v{color:var(--c-amb)}
   #dcOv .quad .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#6fbf95;margin-top:8px}
   #dcOv .strip{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',ui-monospace,monospace}
-  #dcOv .strip th{font-size:9.5px;color:var(--c-mut);text-align:right;font-weight:500;letter-spacing:.5px;padding:0 0 8px}
+  #dcOv .strip th{font-size:10.5px;color:var(--c-mut);text-align:right;font-weight:500;letter-spacing:.5px;padding:0 0 8px}
   #dcOv .strip th:first-child{text-align:left}
-  #dcOv .strip td{font-size:12px;padding:7px 0;border-top:1px solid var(--c-grid);text-align:right}
+  #dcOv .strip td{font-size:14px;padding:8px 0;border-top:1px solid var(--c-grid);text-align:right}   /* cc#648 part_4: bump OI numerals to FUTURES-BASIS scale (IBM Plex Mono, inherited from .strip) */
   #dcOv .strip td:first-child{text-align:left;color:var(--c-mut)}
   #dcOv .qd{display:inline-block;font-size:9px;padding:2px 6px;border-radius:4px;letter-spacing:.3px}
   /* cc#624 item_1: quadrant chip is bullish(green)/bearish(red) only — LB+SC green, LU+SB red */
@@ -1616,11 +1616,19 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const o5=F.oi_5d||{};
   let s3='';
   if(o5.series&&o5.series.length){
+    // cc#648 part_4: explicit missing-value rendering — "--" (muted) for NO DATA, "0.0%" for a TRUE
+    // zero, signed % (green/red) otherwise. A null cell no longer gets a green up-tint (the old
+    // `(v||0)>=0` coerced null->0 and painted it green); right-alignment comes from .strip td.
+    const _oiCell=v=>{
+      if(v==null) return `<td style="color:var(--c-mut)">--</td>`;
+      if(v===0)   return `<td>0.0%</td>`;
+      return `<td class="${v>0?'up':'dn'}">${sign(v,1)}%</td>`;
+    };
     const rows=o5.series.map(x=>{const qd=_dcQd(x.quadrant);
-      const qdH=qd?`<span class="qd ${qd[0]}">${qd[1]}</span>`:'<span style="color:var(--c-mut)">&middot;</span>';
+      const qdH=qd?`<span class="qd ${qd[0]}">${qd[1]}</span>`:'<span style="color:var(--c-mut)">--</span>';
       return `<tr><td>${_dcFmtDate(x.date)}</td>
-        <td class="${(x.chg_pct||0)>=0?'up':'dn'}">${x.chg_pct==null?'&middot;':sign(x.chg_pct,1)+'%'}</td>
-        <td class="${(x.px_chg||0)>=0?'up':'dn'}">${x.px_chg==null?'&middot;':sign(x.px_chg,1)+'%'}</td>
+        ${_oiCell(x.chg_pct)}
+        ${_oiCell(x.px_chg)}
         <td>${qdH}</td></tr>`;}).join('');
     s3=`<div class="sec"><div class="lbl"><span class="n">03</span> 5-DAY ROLLING OI</div>
       <table class="strip"><thead><tr><th>DATE</th><th>OI &Delta;%</th><th>PRICE &Delta;%</th><th>SIGNAL</th></tr></thead>
