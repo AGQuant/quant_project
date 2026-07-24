@@ -51,6 +51,13 @@ DATABASE_URL  = os.environ.get('DATABASE_URL')
 # Protects the Fyers account from a restart loop burning all 5 TOTP tries.
 ATTEMPT_COOLDOWN = 90
 
+# cc#645 fix_4: HARD cap on TOTP logins per rolling hour, PERSISTED in the DB so an
+# os._exit/restart loop can NEVER bypass it (24-Jul incident: the os._exit restart loop
+# re-ran a TOTP login every ~7 min, and each mint that then failed its boot self-test
+# triggered another restart — the account-block + Fyers-regime ban vector). At most this
+# many real TOTP attempts fire in any 60-min window, across restarts.
+MAX_LOGINS_PER_HOUR = 3
+
 # Vagator (login) + API v3 endpoints
 BASE_VAGATOR = 'https://api-t2.fyers.in/vagator/v2'
 BASE_API     = 'https://api-t1.fyers.in/api/v3'
@@ -97,6 +104,36 @@ def _stamp_attempt(conn):
             cur.execute("UPDATE fyers_tokens SET last_attempt=%s WHERE id=1", (now,))
         else:
             cur.execute("INSERT INTO fyers_tokens (id,last_attempt) VALUES (1,%s)", (now,))
+    conn.commit()
+
+
+# ---------------------------------------------------------------- rolling-hour login cap (cc#645 fix_4)
+
+def _ensure_attempts_table(conn):
+    """cc#645 fix_4: a tiny append-only table recording every real TOTP attempt, so the
+    rolling-hour cap survives os._exit / container restarts (in-memory counters do not)."""
+    with conn.cursor() as cur:
+        cur.execute("""CREATE TABLE IF NOT EXISTS fyers_login_attempts (
+                           id SERIAL PRIMARY KEY,
+                           attempted_at timestamp NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')
+                       )""")
+    conn.commit()
+
+def _hourly_cap_reached(conn):
+    """True if MAX_LOGINS_PER_HOUR real TOTP attempts already fired in the last 60 min."""
+    cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(hours=1)
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM fyers_login_attempts WHERE attempted_at >= %s", (cutoff,))
+        n = cur.fetchone()[0] or 0
+    return n >= MAX_LOGINS_PER_HOUR, n
+
+def _record_attempt(conn):
+    now = datetime.now(IST).replace(tzinfo=None)
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO fyers_login_attempts (attempted_at) VALUES (%s)", (now,))
+        # keep the table tiny — drop anything older than 2 days
+        cur.execute("DELETE FROM fyers_login_attempts WHERE attempted_at < %s",
+                    (now - timedelta(days=2),))
     conn.commit()
 
 
@@ -154,7 +191,11 @@ def get_auth_code():
 
 
 def exchange_auth_code(auth_code):
-    """Exchange auth_code for the final day-valid access token."""
+    """Exchange auth_code for the final day-valid access token.
+
+    cc#645 fix_2: the refresh_token Fyers returns is DISCARDED — the refresh-token flow is
+    discontinued (SEBI Apr-2026 framework), TOTP daily 2FA is the ONLY auth path. Return
+    the access token only."""
     r = requests.post(URL_VALIDATE, json={
         'grant_type': 'authorization_code',
         'appIdHash': _app_id_hash(),
@@ -162,20 +203,21 @@ def exchange_auth_code(auth_code):
     }, timeout=10).json()
     if r.get('code') != 200 or 'access_token' not in r:
         raise Exception(f"validate-authcode failed: {r}")
-    return r['access_token'], r.get('refresh_token')
+    return r['access_token']
 
 
-def save_token(conn, access, refresh):
+def save_token(conn, access):
+    """cc#645 fix_2: store the day-valid access token only — no refresh_token is written
+    (refresh flow discontinued). The legacy refresh_token column is left untouched."""
     now = datetime.now(IST).replace(tzinfo=None)
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM fyers_tokens WHERE id=1")
         if cur.fetchone():
-            cur.execute("""UPDATE fyers_tokens SET access_token=%s, refresh_token=%s,
-                           access_created=%s, refresh_created=%s, updated_at=NOW() WHERE id=1""",
-                        (access, refresh, now, now))
+            cur.execute("UPDATE fyers_tokens SET access_token=%s, access_created=%s, updated_at=NOW() WHERE id=1",
+                        (access, now))
         else:
-            cur.execute("""INSERT INTO fyers_tokens (id,access_token,refresh_token,access_created,refresh_created,updated_at)
-                           VALUES (1,%s,%s,%s,%s,NOW())""", (access, refresh, now, now))
+            cur.execute("INSERT INTO fyers_tokens (id,access_token,access_created,updated_at) VALUES (1,%s,%s,NOW())",
+                        (access, now))
     conn.commit()
 
 
@@ -194,14 +236,23 @@ def auto_login(conn=None):
     own_conn = psycopg2.connect(DATABASE_URL)
     try:
         _ensure_attempt_col(own_conn)
+        _ensure_attempts_table(own_conn)   # cc#645 fix_4
         if _too_soon(own_conn):
             raise SystemExit(
                 f"Auto-login SKIPPED — another attempt < {ATTEMPT_COOLDOWN}s ago "
                 "(account-block protection). Wait, then retry.")
+        # cc#645 fix_4: HARD rolling-hour cap, persisted so a restart loop can't bypass it.
+        capped, n = _hourly_cap_reached(own_conn)
+        if capped:
+            raise SystemExit(
+                f"Auto-login CAPPED — {n} TOTP logins already in the last hour "
+                f"(>= {MAX_LOGINS_PER_HOUR} rolling-hour cap, cc#645 fix_4). Backing off, "
+                "not attempting (do not exit/restart-loop).")
+        _record_attempt(own_conn)  # cc#645 fix_4: count BEFORE trying, so a crash still counts
         _stamp_attempt(own_conn)   # record BEFORE trying, so a crash still counts
         auth_code = get_auth_code()
-        access, refresh = exchange_auth_code(auth_code)
-        save_token(own_conn, access, refresh)
+        access = exchange_auth_code(auth_code)
+        save_token(own_conn, access)
         log.info("Auto-login OK - fresh token stored (valid for today)")
         return access
     finally:
@@ -218,13 +269,14 @@ def try_relogin(conn):
     most one real TOTP attempt per cooldown window (account-block protection)."""
     try:
         tok = auto_login(conn)
-        return {'ok': True, 'token': tok, 'skipped': False, 'error': None}
+        return {'ok': True, 'token': tok, 'skipped': False, 'capped': False, 'error': None}
     except SystemExit as e:
         msg = str(e)
-        skipped = ('SKIPPED' in msg) or ('cooldown' in msg.lower()) or ('block protection' in msg.lower())
-        return {'ok': False, 'token': None, 'skipped': skipped, 'error': msg}
+        capped = 'CAPPED' in msg
+        skipped = capped or ('SKIPPED' in msg) or ('cooldown' in msg.lower()) or ('block protection' in msg.lower())
+        return {'ok': False, 'token': None, 'skipped': skipped, 'capped': capped, 'error': msg}
     except Exception as e:
-        return {'ok': False, 'token': None, 'skipped': False, 'error': str(e)}
+        return {'ok': False, 'token': None, 'skipped': False, 'capped': False, 'error': str(e)}
 
 
 if __name__ == '__main__':

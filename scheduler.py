@@ -365,6 +365,22 @@ def _tick_age_minutes() -> Optional[float]:
         return None
 
 
+def _feed_starved_recent(minutes: int = 20) -> bool:
+    """cc#645 fix_6: True if the signal writer has recently logged writer_no_intraday_bars /
+    writer_stale_intraday_bars — i.e. the writer is skipping because the fyers feed is DOWN (no live
+    bars), NOT because of a writer CODE bug. Used to phrase the stall alert correctly (feed-starved
+    vs code bug), so ops don't chase a writer traceback when the real fault is upstream (the feed)."""
+    try:
+        with _conn(statement_timeout_ms=8000) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM ops_log "
+                        "WHERE title IN ('writer_no_intraday_bars','writer_stale_intraday_bars') "
+                        "AND session_ts >= NOW() - (%s || ' minutes')::interval LIMIT 1", (str(minutes),))
+            return cur.fetchone() is not None
+    except Exception as e:
+        log.error(f"_feed_starved_recent failed: {e}")
+        return False
+
+
 def _check_watchdog(now):
     """During market hours, if no signal tick landed in WATCHDOG_STALE_MIN, the
     writer has silently stalled — alert, reset guards, request restart."""
@@ -385,11 +401,19 @@ def _check_watchdog(now):
         # escalate the message: a human needs to look at the writer traceback.
         if _watchdog_last_alert is None or (now - _watchdog_last_alert) >= WATCHDOG_REALERT:
             escalate = (_last_restart_ts is not None and age > WATCHDOG_STALE_MIN + 6)
-            _log_alert("scheduler_stall",
-                       f"v8_metrics stale {age:.1f} min during market hours" +
-                       (" — restart did NOT recover it; likely a writer CODE bug needing a manual "
+            # cc#645 fix_6: distinguish a FEED outage from a writer code bug. When the writer is
+            # skipping because there are no live intraday bars (writer_no_intraday_bars), the stall
+            # is feed-starved — the fix is upstream (fyers_feed), not a writer traceback.
+            feed_starved = _feed_starved_recent()
+            if feed_starved:
+                tail = (" — restart did NOT recover it; writer is FEED-STARVED (no live intraday "
+                        "bars — fyers_feed down/halted, NOT a writer code bug); fix the feed upstream"
+                        if escalate else " — feed-starved (no live intraday bars); restarting live loop")
+            else:
+                tail = (" — restart did NOT recover it; likely a writer CODE bug needing a manual "
                         "fix (check signal_writer_crash / POST /api/v8/run_signal_writer traceback)"
-                        if escalate else " — restarting live loop"))
+                        if escalate else " — restarting live loop")
+            _log_alert("scheduler_stall", f"v8_metrics stale {age:.1f} min during market hours" + tail)
             # cc#580 fault_2: mirror the stall to Telegram, and if a prior restart failed to clear it
             # the shared pool is probably saturated by hung ticks — swap in a fresh one so the next
             # recovery _spawn is guaranteed a worker (fixes "restart never got a worker to run on").

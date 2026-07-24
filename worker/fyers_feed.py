@@ -68,6 +68,7 @@ USAGE:
 # (BAJAJHLDNG, 26/212 done) instead of waiting for the hourly idle check. No logic change.
 
 import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
+from collections import deque
 from datetime import datetime, timedelta, time as dt_time, date
 # cc#416: this file now lives in worker/. When run as the worker entry (`python worker/fyers_feed.py`)
 # sys.path[0] is worker/, so the repo-root modules it still uses (nse_holidays, fyers_backfill) are not
@@ -138,11 +139,38 @@ OPT_STOCK_SUB_MIN_TIME = dt_time(9, 25)  # cc#241: HARD floor — no stock-optio
                                           # anchors on a real print). Index options are NOT gated.
 OPT_STOCK_OVERFLOW_FRAC = 0.95           # cc#241: <95% stock underlyings subscribed -> overflow alert
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
-OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
+OI_POLL_MINS          = 5      # poll futures OI every N min (cc#645 fix_5: batched quotes, not per-sym depth)
 STOCK_OI_POLL_MIN_TIME = dt_time(9, 30)  # cc#482 fix_5: stock ATM OI poll held off till 09:30 (skips
                                           # the noisiest opening 15 min; index OI poll unaffected, still 09:15)
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
-OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
+OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit (per-symbol legacy path)
+
+# ── cc#645 fix_5: global REST rate governor + batched quotes ──────────────────────────────────────
+# 24-Jul incident: the per-symbol depth poll fired ~1030 REST calls / 5-min cycle. On a dead token
+# that hammered Fyers' new-regime enforcement and got the IP/app banned. Fyers data-API limits are
+# now 10/sec, 200/min, 100k/day. A GLOBAL governor caps every data-REST call under those limits, and
+# BATCHED quotes (up to 50 symbols/call) collapse the cycle from ~1030 to ~25 calls.
+REST_MAX_PER_SEC = 8           # stay comfortably under the 10/sec hard limit
+REST_MAX_PER_MIN = 180         # stay under the 200/min hard limit
+REST_DAILY_CAP   = 100000      # Fyers daily cap — logged hourly to ops_log
+QUOTE_BATCH_MAX  = 50          # Fyers quotes endpoint accepts up to 50 symbols/call
+
+# ── cc#645 fix_3: REST circuit breaker (halt-on-dead, canary-resume) ──────────────────────────────
+# After BREAKER_TRIP_THRESHOLD consecutive empty/401 REST responses the token is treated as dead:
+# the breaker OPENS and ALL polling loops (futures OI, options OI, index LTP) halt — they never run a
+# full cycle on a token that failed its last probe. While OPEN, a single canary probe fires every
+# BREAKER_CANARY_MINS; the breaker CLOSES (full polling resumes) only after BREAKER_CANARY_CLEAN_N
+# consecutive clean canary responses.
+BREAKER_TRIP_THRESHOLD  = 20
+BREAKER_CANARY_CLEAN_N  = 3
+BREAKER_CANARY_MINS     = 5
+
+# ── cc#645 fix_1: proactive daily pre-open TOTP login ─────────────────────────────────────────────
+# Mint a guaranteed-fresh, full-trading-day token at 08:30 IST (Fyers systems up, well before the
+# 09:15 open) so a token can never meet the open already-expired (24-Jul: token died ~06:00, the
+# feed polled ~3h on the corpse). Persisted mint-once flag makes it fire exactly once/day across
+# restarts; the lazy get_valid_token relogin remains only as a fallback.
+PROACTIVE_LOGIN_TIME = dt_time(8, 30)
 
 # ── feed heartbeat / health / watchdog (cc_task #84 + #85) ────────────────────
 # The WS stream for the 212 stock futures crashed at the 09:15 open on 25-Jun and
@@ -341,26 +369,24 @@ class OptionMaster:
 # ── DB / token ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
+    # cc#645 fix_2: refresh_token flow discontinued — only access_token + its created ts are read.
+    # Returns (access_token, access_created); callers index row[0]/row[1].
     with conn.cursor() as cur:
-        cur.execute("SELECT access_token, refresh_token, access_created, refresh_created "
-                    "FROM fyers_tokens WHERE id=1")
+        cur.execute("SELECT access_token, access_created FROM fyers_tokens WHERE id=1")
         return cur.fetchone()
 
-def save_tokens(conn, access=None, refresh=None, new_refresh=False):
+def save_tokens(conn, access=None):
+    """cc#645 fix_2: store the day-valid access token only. The refresh-token relogin path is
+    DELETED (Fyers discontinued it); the legacy refresh_token column is never written again."""
     now = datetime.now(IST).replace(tzinfo=None)
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM fyers_tokens WHERE id=1")
         if cur.fetchone():
-            if new_refresh:
-                cur.execute("""UPDATE fyers_tokens SET access_token=%s, refresh_token=%s,
-                               access_created=%s, refresh_created=%s, updated_at=NOW() WHERE id=1""",
-                            (access, refresh, now, now))
-            else:
-                cur.execute("UPDATE fyers_tokens SET access_token=%s, access_created=%s, updated_at=NOW() WHERE id=1",
-                            (access, now))
+            cur.execute("UPDATE fyers_tokens SET access_token=%s, access_created=%s, updated_at=NOW() WHERE id=1",
+                        (access, now))
         else:
-            cur.execute("""INSERT INTO fyers_tokens (id,access_token,refresh_token,access_created,refresh_created,updated_at)
-                           VALUES (1,%s,%s,%s,%s,NOW())""", (access, refresh, now, now))
+            cur.execute("INSERT INTO fyers_tokens (id,access_token,access_created,updated_at) VALUES (1,%s,%s,NOW())",
+                        (access, now))
     conn.commit()
 
 def bootstrap_from_authcode(conn, auth_code):
@@ -368,16 +394,16 @@ def bootstrap_from_authcode(conn, auth_code):
         'appIdHash':app_id_hash(),'code':auth_code}, timeout=10)
     d = r.json()
     if d.get('code') != 200: raise Exception(f"Auth-code exchange failed: {d}")
-    save_tokens(conn, access=d['access_token'], refresh=d.get('refresh_token'), new_refresh=True)
+    save_tokens(conn, access=d['access_token'])   # cc#645 fix_2: no refresh_token stored
     log.info("Bootstrap OK - access token stored (valid for today)")
     return d['access_token']
 
 def _token_is_live(token):
     try:
-        r = requests.get(QUOTES_URL,
-                         params={'symbols': 'NSE:NIFTY50-INDEX'},
-                         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
-                         timeout=8)
+        r = _rest_get(QUOTES_URL,
+                      params={'symbols': 'NSE:NIFTY50-INDEX'},
+                      headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
+                      timeout=8)
         return r.json().get('s') == 'ok'
     except Exception as e:
         log.warning(f"Token liveness check failed: {e}")
@@ -391,8 +417,8 @@ def get_valid_token(conn, auth_code=None):
             log.warning(f"Auth-code bootstrap failed ({e}); falling through")
 
     row = load_tokens(conn)
-    if row and row[0] and row[2]:
-        access_token, access_created = row[0], row[2]
+    if row and row[0] and row[1]:
+        access_token, access_created = row[0], row[1]   # cc#645 fix_2: (access_token, access_created)
         today = datetime.now(IST).replace(tzinfo=None).date()
         if access_created.date() == today:
             log.info("Stored same-day token found — verifying with Fyers...")
@@ -524,19 +550,130 @@ def _fut_bars_today():
                 pass
 
 
+# ── cc#645 fix_5: global REST rate governor (shared by every data-REST call) ──────────────────────
+class _RateGovernor:
+    """Token-bucket governor shared by EVERY data-REST GET. Blocks the caller until the call fits
+    under REST_MAX_PER_SEC and REST_MAX_PER_MIN, and counts calls against REST_DAILY_CAP per IST
+    day. Thread-safe. 24-Jul root cause: an ungoverned ~1030-call cycle on a dead token hammered
+    Fyers' new-regime enforcement into banning the IP/app."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._sec  = deque()
+        self._min  = deque()
+        self._day  = None
+        self._day_count = 0
+
+    def acquire(self):
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                while self._sec and now - self._sec[0] > 1.0:  self._sec.popleft()
+                while self._min and now - self._min[0] > 60.0: self._min.popleft()
+                if len(self._sec) < REST_MAX_PER_SEC and len(self._min) < REST_MAX_PER_MIN:
+                    self._sec.append(now); self._min.append(now)
+                    today = datetime.now(IST).date()
+                    if today != self._day:
+                        self._day = today; self._day_count = 0
+                    self._day_count += 1
+                    return
+                waits = []
+                if len(self._sec) >= REST_MAX_PER_SEC: waits.append(1.0 - (now - self._sec[0]))
+                if len(self._min) >= REST_MAX_PER_MIN: waits.append(60.0 - (now - self._min[0]))
+                wait = max(0.02, min(waits)) if waits else 0.02
+            time.sleep(wait)
+
+    def snapshot(self):
+        with self._lock:
+            return self._day_count, self._day
+
+GOV = _RateGovernor()
+
+def _rest_get(url, **kwargs):
+    """cc#645 fix_5: the ONE choke point for data-REST GETs — every call passes the global rate
+    governor first (<=8/sec, <=180/min, daily 100k counter). Returns the requests.Response."""
+    GOV.acquire()
+    return requests.get(url, **kwargs)
+
+
+# ── cc#645 fix_3: REST circuit breaker (halt-on-dead-token, canary-resume) ────────────────────────
+# 24-Jul incident: the worker kept running a full ~1030-call poll cycle on a dead token for ~3h. This
+# breaker HALTS all polling after BREAKER_TRIP_THRESHOLD consecutive empty/401 responses; while OPEN
+# only a single canary probe fires every BREAKER_CANARY_MINS, and full polling resumes only after
+# BREAKER_CANARY_CLEAN_N consecutive clean canary responses. A poll cycle NEVER runs on a token that
+# failed its last probe.
+_breaker_lock = threading.Lock()
+_breaker = {'consec_dead': 0, 'open': False, 'canary_clean': 0,
+            'opened_at': None, 'last_status': None, 'last_body': None}
+
+def breaker_note(dead, status=None, body=None):
+    """Feed the breaker from EVERY REST response while CLOSED. A dead response (empty body / HTTP
+    401) increments the consecutive counter and TRIPS OPEN at BREAKER_TRIP_THRESHOLD; a clean
+    response resets it. Stores status + body[:200] forensics (cc#645 fix_6). No-op while already
+    OPEN (only the canary drives recovery there)."""
+    with _breaker_lock:
+        if _breaker['open']:
+            return
+        if dead:
+            _breaker['consec_dead'] += 1
+            _breaker['last_status'] = status
+            _breaker['last_body']   = (str(body)[:200] if body is not None else None)
+            if _breaker['consec_dead'] >= BREAKER_TRIP_THRESHOLD:
+                _breaker['open'] = True
+                _breaker['canary_clean'] = 0
+                _breaker['opened_at'] = _ist_now_str()
+        else:
+            _breaker['consec_dead'] = 0
+
+def breaker_is_open():
+    with _breaker_lock:
+        return _breaker['open']
+
+def breaker_canary(clean):
+    """Drive recovery while OPEN: a clean canary increments the streak and CLOSES the breaker after
+    BREAKER_CANARY_CLEAN_N in a row (returns True on the close); any dirty canary resets the streak.
+    Returns False (and no-ops) when the breaker is already closed."""
+    with _breaker_lock:
+        if not _breaker['open']:
+            return False
+        if clean:
+            _breaker['canary_clean'] += 1
+            if _breaker['canary_clean'] >= BREAKER_CANARY_CLEAN_N:
+                _breaker['open'] = False
+                _breaker['consec_dead'] = 0
+                _breaker['canary_clean'] = 0
+                return True
+        else:
+            _breaker['canary_clean'] = 0
+        return False
+
+def breaker_open_info():
+    """cc#645 fix_6: snapshot of the tripping forensics (opened_at, last HTTP status, body[:200])."""
+    with _breaker_lock:
+        return {'opened_at': _breaker['opened_at'], 'last_status': _breaker['last_status'],
+                'last_body': _breaker['last_body']}
+
+
 def _rest_quote_ok(token):
     """cc#339 fix_2: ONE REST quote self-test (NSE:SBIN-EQ). Returns (ok, detail). An EMPTY body is
     the exact dead-token signature that produced the 09-Jul 'Expecting value: line 1 column 1' spam,
-    so it is treated as a hard failure (not a parse exception)."""
+    so it is treated as a hard failure (not a parse exception). cc#645: goes through the governor."""
+    ok, detail, _status = _rest_quote_probe(token)
+    return ok, detail
+
+
+def _rest_quote_probe(token):
+    """cc#645 fix_6: like _rest_quote_ok but also returns the HTTP status_code so failure forensics
+    (status + body[:200]) can be logged. Returns (ok, detail, status)."""
     try:
-        r = requests.get(QUOTES_URL, params={'symbols': 'NSE:SBIN-EQ'},
-                         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=8)
+        r = _rest_get(QUOTES_URL, params={'symbols': 'NSE:SBIN-EQ'},
+                      headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=8)
+        status = getattr(r, 'status_code', None)
         body = (r.text or '').strip()
         if not body:
-            return False, 'EMPTY_BODY'
-        return (r.json().get('s') == 'ok'), body[:180]
+            return False, 'EMPTY_BODY', status
+        return (r.json().get('s') == 'ok'), body[:180], status
     except Exception as e:
-        return False, f'exc:{e}'
+        return False, f'exc:{e}', None
 
 
 def _rest_quote_ok_settle(token, tries=4, delay=3):
@@ -556,50 +693,58 @@ def _rest_quote_ok_settle(token, tries=4, delay=3):
 
 
 def _boot_auth_selfcheck(conn, token):
-    """cc#339 fix_2: BEFORE subscribing, prove the token can actually fetch a REST quote. On failure:
-    CRITICAL log + ops_log(feed_token_dead) alert, retry auto-login ONCE, and if still dead exit(1)
-    so Railway's restart-loop + the alert make it LOUD instead of silent warning spam. Returns the
-    (possibly refreshed) valid token."""
-    ok, detail = _rest_quote_ok_settle(token)   # cc#564: tolerate fresh-token propagation delay
+    """cc#339 fix_2: BEFORE subscribing, prove the token can actually fetch a REST quote.
+
+    cc#645 fix_4: the OLD path os._exit(1)'d when the token was still dead after one relogin — that
+    was the 24-Jul restart-loop that re-attacked Fyers every ~7 min (each boot: a TOTP login + a
+    poll cycle) until the IP/app was banned. os._exit is REMOVED here. On a still-dead token we now:
+    log forensics (status + body[:200]), attempt ONE capped relogin (fyers_autologin enforces the
+    3/hour persisted cap — a genuine ban can't burn logins), and if still dead we OPEN the circuit
+    breaker and RETURN the token WITHOUT exiting. The process stays up; the housekeeping loop's
+    breaker canary + capped in-process relogin (5m/15m/30m backoff) drives recovery. No restart-loop.
+    Returns the (possibly refreshed) token."""
+    ok, detail, status = _rest_quote_probe(token)
+    if not ok:
+        # cc#564: tolerate fresh-token propagation delay before declaring dead
+        ok, detail = _rest_quote_ok_settle(token)
     if ok:
         log.info("BOOT AUTH OK — REST quote self-test passed (NSE:SBIN-EQ)")
         _ops_log(conn, 'info', 'feed_boot_ok',
                  {'selftest': 'NSE:SBIN-EQ', 'result': 'ok', 'ist': _ist_now_str()})
         return token
-    log.critical(f"TOKEN DEAD — REST returning empty/invalid bodies on boot self-test (detail={detail}). "
-                 "Retrying auto-login ONCE...")
+    log.critical(f"TOKEN DEAD — REST empty/invalid on boot self-test (status={status}, detail={detail}). "
+                 "Attempting ONE capped relogin...")
     _ops_log(conn, 'alert', 'feed_token_dead',
-             {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'detail': str(detail)[:180], 'ist': _ist_now_str()})
-    # cc#489 fix_1 (round 2, call site 2): try_relogin() swap-in, re-landed.
+             {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'status': status,
+              'body': str(detail)[:200], 'ist': _ist_now_str()})   # cc#645 fix_6 forensics
     import fyers_autologin
     res = fyers_autologin.try_relogin(conn)
-    if res.get('skipped'):
-        log.warning("Auto-login retry SKIPPED (90s account-block cooldown) — sleeping 90s then retrying once...")
-        time.sleep(90)
-        res = fyers_autologin.try_relogin(conn)
     if res.get('ok'):
         token = res['token']
-        log.info("Auto-login retry SUCCESS — re-testing REST quote...")
-    else:
-        e = res.get('error')
-        log.critical(f"Auto-login retry FAILED ({e}) — os._exit(1) for a loud Railway restart")
-        _ops_log(conn, 'alert', 'feed_token_dead',
-                 {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
-        os._exit(1)
-    ok2, detail2 = _rest_quote_ok_settle(token)   # cc#564: fresh token — allow propagation settle
-    if ok2:
-        log.info("BOOT AUTH OK after re-login — REST quote self-test passed")
-        _ops_log(conn, 'info', 'feed_boot_ok',
-                 {'selftest': 'NSE:SBIN-EQ', 'result': 'ok_after_relogin', 'ist': _ist_now_str()})
-        # cc#564: explicit, DATA-observable proof a fresh token was minted AND verified live.
-        _ops_log(conn, 'info', 'token_reminted_live',
-                 {'stage': 'boot_selfcheck', 'selftest': 'NSE:SBIN-EQ:ok', 'ist': _ist_now_str()})
-        return token
-    log.critical("TOKEN STILL DEAD after re-login — os._exit(1) so the failure is LOUD (Railway "
-                 "restart-loop + feed_token_dead alert) rather than 2900 silent 'Expecting value' warns")
+        ok2, detail2 = _rest_quote_ok_settle(token)
+        if ok2:
+            log.info("BOOT AUTH OK after re-login — REST quote self-test passed")
+            _ops_log(conn, 'info', 'feed_boot_ok',
+                     {'selftest': 'NSE:SBIN-EQ', 'result': 'ok_after_relogin', 'ist': _ist_now_str()})
+            _ops_log(conn, 'info', 'token_reminted_live',
+                     {'stage': 'boot_selfcheck', 'selftest': 'NSE:SBIN-EQ:ok', 'ist': _ist_now_str()})
+            return token
+        detail = detail2
+    # Still dead (relogin failed, was capped/skipped, or the fresh token is also rejected — the
+    # exact ban signature). cc#645 fix_4: NO os._exit. Open the breaker so no polling hammers the
+    # dead token, alert, and hand recovery to the housekeeping loop's in-process backoff.
+    breaker_note(True, status=status, body=str(detail)[:200])
+    with _breaker_lock:                       # force OPEN immediately at boot (don't wait for 20)
+        _breaker['open'] = True
+        _breaker['opened_at'] = _ist_now_str()
+    log.critical("TOKEN STILL DEAD after relogin — circuit breaker OPENED, NO os._exit "
+                 "(cc#645 fix_4: no restart-loop). Housekeeping breaker canary will drive recovery.")
     _ops_log(conn, 'alert', 'feed_token_dead',
-             {'selftest': 'NSE:SBIN-EQ', 'stage': 'post_relogin', 'detail': str(detail2)[:180], 'ist': _ist_now_str()})
-    os._exit(1)
+             {'selftest': 'NSE:SBIN-EQ', 'stage': 'post_relogin_breaker_open',
+              'relogin': ('capped' if res.get('capped') else ('skipped' if res.get('skipped') else 'failed')),
+              'error': str(res.get('error'))[:180], 'status': status, 'body': str(detail)[:200],
+              'ist': _ist_now_str()})
+    return token
 
 
 def _boot_gap_report(conn):
@@ -1430,9 +1575,11 @@ class OptionBarStore:
 # ── index LTP ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
+    if breaker_is_open():   # cc#645 fix_3: LTP poll halts too while the breaker is OPEN
+        return
     try:
-        r = requests.get(QUOTES_URL, params={'symbols': ','.join(INDEX_LTP_SYMBOLS.values())},
-                         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=5)
+        r = _rest_get(QUOTES_URL, params={'symbols': ','.join(INDEX_LTP_SYMBOLS.values())},
+                      headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=5)
         d = r.json()
         if d.get('s') != 'ok': return
         _ist = datetime.now(IST).replace(tzinfo=None)
@@ -1517,53 +1664,69 @@ def ensure_schemas(conn):
 
 _OI_POLL_LOCK = threading.Lock()
 
+
+def _fetch_oi_batched(token, syms, label):
+    """cc#645 fix_5: fetch OI for `syms` via BATCHED quotes (<=QUOTE_BATCH_MAX/call) through the
+    global rate governor — replaces the per-symbol depth poll (24-Jul: ~1030 ungoverned calls/cycle
+    hammered a dead token into an IP/app ban). The Fyers quotes 'v' node carries `oi` for F&O
+    instruments. Feeds the circuit breaker on every response; if the breaker trips mid-run it HALTS
+    immediately (does NOT finish the cycle — cc#645 fix_3) and returns halted=True.
+
+    Returns (oi_by_fsym: dict, calls: int, empty_batches: int, halted: bool)."""
+    headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
+    oi_by, calls, empty_batches = {}, 0, 0
+    for i in range(0, len(syms), QUOTE_BATCH_MAX):
+        if breaker_is_open():
+            return oi_by, calls, empty_batches, True
+        batch = syms[i:i + QUOTE_BATCH_MAX]
+        try:
+            r = _rest_get(QUOTES_URL, params={'symbols': ','.join(batch)}, headers=headers, timeout=10)
+            calls += 1
+            dead = _dead_signal(r)
+            breaker_note(dead, status=getattr(r, 'status_code', None), body=(r.text or '')[:200])
+            if dead:
+                empty_batches += 1
+                if breaker_is_open():   # this batch just tripped the breaker
+                    return oi_by, calls, empty_batches, True
+                continue
+            d = r.json()
+            if d.get('s') != 'ok':
+                empty_batches += 1
+                continue
+            for item in d.get('d', []):
+                fsym = item.get('n')
+                v    = item.get('v') or {}
+                oi   = v.get('oi')
+                if fsym and oi is not None:
+                    try:
+                        oi_by[fsym] = int(oi)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception as e:
+            empty_batches += 1
+            log.warning(f"OI batched fetch ({label}) batch {i // QUOTE_BATCH_MAX}: {e}")
+    return oi_by, calls, empty_batches, False
+
+
 def poll_futures_oi(token, fut_syms, agg):
-    """
-    Fyers quotes API has NO OI (KB-confirmed) — depth API is the only source.
-    1 symbol/call, rate-limited ~170 req/min. Runs in a background thread.
-    Latest OI → agg.last_oi → attached on next futures bar flush → futures_basis.
-    Debug: logs the raw response of the FIRST symbol each cycle for diagnosis.
-    """
+    """cc#645 fix_5: futures OI via BATCHED quotes (<=50 symbols/call) — ~210 futures collapse from
+    ~210 per-symbol depth calls to ~5 batched calls. cc#645 fix_3: skips entirely while the circuit
+    breaker is OPEN and halts mid-cycle if it trips. Latest OI -> agg.last_oi -> next futures bar."""
+    if breaker_is_open():
+        log.info("Futures OI poll skipped — circuit breaker OPEN (dead token; polling halted)")
+        return
     if not _OI_POLL_LOCK.acquire(blocking=False):
         log.info("OI poll skipped — previous cycle still running")
         return
     try:
-        log.info(f"OI poll starting: {len(fut_syms)} futures via depth API")
-        headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
-        got, first = 0, True
-        for fsym in fut_syms:
-            try:
-                r = requests.get(DEPTH_URL,
-                                 params={'symbol': fsym, 'ohlcv_flag': 1},
-                                 headers=headers, timeout=8)
-                if first:
-                    log.info(f"OI poll debug {fsym}: HTTP {r.status_code} body={r.text[:300]}")
-                    first = False
-                # cc#473: feed the dead-token detector — a char-0/401 response here is the
-                # exact expired-token signature that ran silent all 13-Jul morning.
-                if _dead_signal(r):
-                    _note_api(True)
-                    continue
-                _note_api(False)
-                d = r.json()
-                if d.get('s') != 'ok':
-                    continue
-                data_d = d.get('d')
-                node = {}
-                if isinstance(data_d, dict):
-                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
-                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
-                    node = data_d[0].get('v', data_d[0])
-                oi = node.get('oi') if isinstance(node, dict) else None
-                if oi is None:
-                    continue
-                nse = from_fyers_symbol(fsym)
-                agg.last_oi[nse] = int(oi)   # GIL-atomic dict write; no lock needed
-                got += 1
-            except Exception as e:
-                log.warning(f"poll_futures_oi {fsym}: {e}")
-            time.sleep(OI_CALL_SPACING_SEC)
-        log.info(f"OI poll (depth API): {got}/{len(fut_syms)} futures OI updated")
+        fut_syms = list(fut_syms)
+        oi_by, calls, _empty, halted = _fetch_oi_batched(token, fut_syms, "futures")
+        got = 0
+        for fsym, oi in oi_by.items():
+            agg.last_oi[from_fyers_symbol(fsym)] = oi   # GIL-atomic dict write; no lock needed
+            got += 1
+        log.info(f"Futures OI poll (batched quotes): {got}/{len(fut_syms)} OI in {calls} calls"
+                 f"{' — HALTED (breaker OPEN)' if halted else ''}")
     finally:
         _OI_POLL_LOCK.release()
 
@@ -1572,22 +1735,14 @@ _OPT_OI_POLL_LOCK = threading.Lock()
 _STOCK_OPT_OI_POLL_LOCK = threading.Lock()   # cc#375: separate lock so a slow stock OI cycle never blocks the index poll
 
 
-# ── cc#473: in-process DEAD-TOKEN detector ────────────────────────────────────────
-# 13-Jul incident: worker ran all morning on an expired token — every REST poll came
-# back char-0 EMPTY, but there was no in-process detector, so it needed a manual
-# Railway restart at 10:04. Fix: count CONSECUTIVE dead-token REST responses (empty
-# body or HTTP 401) across the OI poll + a 30s canonical probe; at DEAD_TOKEN_THRESHOLD
-# consecutive, raise a dead flag the housekeeping loop consumes to self-heal (inline
-# breaker-safe relogin -> clean reboot that REUSES the fresh same-day token). ANY
-# non-empty/structured response resets the counter (token is alive).
-DEAD_TOKEN_THRESHOLD = 10
-_auth_lock  = threading.Lock()
-_auth_state = {'consec': 0, 'dead_flag': False}
-
-
+# ── in-process DEAD-TOKEN signature helper ────────────────────────────────────────
+# cc#645: the old consecutive-counter self-heal (DEAD_TOKEN_THRESHOLD / _note_api /
+# _consume_dead_flag) is REPLACED by the circuit breaker above (breaker_note/breaker_is_open/
+# breaker_canary). _dead_signal stays — it's the shared response classifier both the breaker and
+# the pollers use.
 def _dead_signal(r):
     """True iff a REST response is the dead/expired-token signature: an HTTP 401 or a
-    char-0 EMPTY body (the exact 09-Jul/13-Jul signature). A NON-empty body — even an
+    char-0 EMPTY body (the exact 09-Jul/13-Jul/24-Jul signature). A NON-empty body — even an
     error/rate-limit JSON — is NOT a dead-token signal (token still authenticates)."""
     try:
         if r is None:
@@ -1598,94 +1753,40 @@ def _dead_signal(r):
     except Exception:
         return False
 
-
-def _note_api(dead: bool):
-    """Feed the consecutive dead-token counter. dead=True increments (and trips the
-    flag at the threshold); dead=False resets it (a live response clears the streak)."""
-    with _auth_lock:
-        if dead:
-            _auth_state['consec'] += 1
-            if _auth_state['consec'] >= DEAD_TOKEN_THRESHOLD:
-                _auth_state['dead_flag'] = True
-        else:
-            _auth_state['consec'] = 0
-
-
-def _consume_dead_flag():
-    """Return True once when the dead-token threshold has been crossed, and reset."""
-    with _auth_lock:
-        if _auth_state['dead_flag']:
-            _auth_state['dead_flag'] = False
-            _auth_state['consec'] = 0
-            return True
-        return False
-
 def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
-    """
-    Option OI via DEPTH REST. The WS feed strips OI (Fyers SDK pops the 'OI' field),
-    so depth is the only live source — same pattern as poll_futures_oi.
-    Index cycle (~136 NIFTY+BANKNIFTY ATM+/-10 syms ~= 48s) fits inside the 5-min bar.
-    cc#375: also called for the SUBSCRIBED stock options (bounded by stock_options_limit)
-    on a SEPARATE lock/thread, so their option_chain rows carry OI instead of NULL.
+    """cc#645 fix_5: option OI via BATCHED quotes (<=50 symbols/call) — replaces the per-symbol depth
+    poll (822 options: ~822 calls -> ~17). The Fyers quotes 'v' node carries `oi` for F&O contracts.
+    cc#645 fix_3: skips entirely while the circuit breaker is OPEN and halts mid-cycle if it trips.
     Latest OI -> opt_store.last_oi[fsym] -> attached on next option bar flush.
 
-    cc#482 fix_3: 13-Jul incident — an empty-body/failed depth response was silently
-    swallowed (Python logger only, never persisted), so the caller went on writing
-    stale carried-over OI with no visible trace. Empty/failed responses are now
-    counted and, if any occurred this cycle, logged as an ops_log WARNING
-    (category=data_audit) — the platform's telemetry table (MEMORY_TAXONOMY_V1
-    routes telemetry off session_log to ops_log; functionally the same "not
-    swallowed" requirement).
-    """
+    cc#482 fix_3: empty/failed batches are counted and, if any occurred, logged to ops_log
+    (category=data_audit) so a silent OI drop is never invisible."""
     lock = lock or _OPT_OI_POLL_LOCK
+    if breaker_is_open():
+        log.info(f"Option OI poll ({label}) skipped — circuit breaker OPEN (dead token; halted)")
+        return
     if not lock.acquire(blocking=False):
         log.info(f"Option OI poll ({label}) skipped — previous cycle still running")
         return
     try:
-        log.info(f"Option OI poll ({label}) starting: {len(opt_syms)} options via depth API")
-        headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
+        opt_syms = list(opt_syms)
+        oi_by, calls, empty_batches, halted = _fetch_oi_batched(token, opt_syms, label)
         got = 0
-        empty_fails = []
-        for fsym in opt_syms:
-            try:
-                r = requests.get(DEPTH_URL,
-                                 params={'symbol': fsym, 'ohlcv_flag': 1},
-                                 headers=headers, timeout=8)
-                body = (r.text or '').strip()
-                if not body or r.status_code == 401:
-                    empty_fails.append(fsym)
-                    continue
-                d = r.json()
-                if d.get('s') != 'ok':
-                    empty_fails.append(fsym)
-                    continue
-                data_d = d.get('d')
-                node = {}
-                if isinstance(data_d, dict):
-                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
-                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
-                    node = data_d[0].get('v', data_d[0])
-                oi = node.get('oi') if isinstance(node, dict) else None
-                if oi is None:
-                    continue
-                opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
-                got += 1
-            except Exception as e:
-                empty_fails.append(fsym)
-                log.warning(f"poll_options_oi ({label}) {fsym}: {e}")
-            time.sleep(OI_CALL_SPACING_SEC)
-        log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated")
+        for fsym, oi in oi_by.items():
+            opt_store.last_oi[fsym] = oi   # GIL-atomic dict write; no lock needed
+            got += 1
+        log.info(f"Option OI poll ({label}, batched quotes): {got}/{len(opt_syms)} OI in {calls} calls"
+                 f"{' — HALTED (breaker OPEN)' if halted else ''}")
         try:
-            # cc#495 change_4: was failure-only — the daily feed log needs a real
-            # success RATE (got/total), not just a count of empty responses.
             hc = get_db()
             _ops_log(hc, 'info', 'oi_poll_summary',
-                      {'label': label, 'got': got, 'total': len(opt_syms),
-                       'rate': round(got / len(opt_syms), 3) if opt_syms else None, 'ist': _ist_now_str()})
-            if empty_fails:
+                      {'label': label, 'got': got, 'total': len(opt_syms), 'calls': calls,
+                       'rate': round(got / len(opt_syms), 3) if opt_syms else None,
+                       'halted': halted, 'ist': _ist_now_str()})
+            if empty_batches:
                 _ops_log(hc, 'data_audit', 'oi_poll_empty_response',
-                          {'label': label, 'failed': len(empty_fails), 'total': len(opt_syms),
-                           'sample': empty_fails[:15], 'ist': _ist_now_str()})
+                          {'label': label, 'empty_batches': empty_batches, 'calls': calls,
+                           'total': len(opt_syms), 'halted': halted, 'ist': _ist_now_str()})
             hc.close()
         except Exception as _oe:
             log.warning(f"poll_options_oi ({label}) failed to log summary: {_oe}")
@@ -1760,8 +1861,8 @@ def _seed_cmp_from_rest(conn, token, equity_symbols):
         rows = []
         for attempt in range(3):
             try:
-                r = requests.get(QUOTES_URL, params={'symbols': ','.join(batch)},
-                                 headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=10)
+                r = _rest_get(QUOTES_URL, params={'symbols': ','.join(batch)},
+                              headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=10)
                 d = r.json()
                 if d.get('s') != 'ok':
                     raise RuntimeError(f"quotes s={d.get('s')} {str(d)[:120]}")
@@ -2371,42 +2472,57 @@ def run(auth_code=None):
             log.error(f"os.execv failed ({e}) — exiting for Railway to relaunch")
             os._exit(1)
 
+    # cc#645 fix_4: non-blocking, cap-aware self-heal state. `next_at` gates the next relogin
+    # attempt (escalating 5m/15m/30m backoff) WITHOUT sleeping the housekeeping thread; `attempts`
+    # counts consecutive failures for the backoff ladder and resets on success.
+    _heal_state = {'attempts': 0, 'next_at': None}
+
     def _self_heal_token(reason):
-        """cc#473 items 2-4: dead/stale token recovery WITHOUT manual intervention.
-        Inline breaker-safe relogin (fyers_autologin.try_relogin never raises SystemExit,
-        so a cooldown-skip can't crash-loop the loop — item 3). On success, mint is stored
-        and we _hard_restart: the clean reboot's get_valid_token finds the just-minted
-        SAME-DAY token, verifies it live and REUSES it (no second TOTP, no re-auth
-        coin-flip) then rebuilds+re-subscribes the WS — bars resume in seconds. On a
-        breaker-skip or failure we log + back off 90s and let the detector re-trip
-        (never a hard-exit crash-loop). Every event -> ops_log(category=feed_auth)."""
+        """cc#473/cc#645: dead/stale token recovery WITHOUT manual intervention and WITHOUT a
+        restart-loop. try_relogin enforces the persisted 3/hour login cap (cc#645 fix_4), so a
+        genuine Fyers ban can never burn logins here.
+
+        On relogin SUCCESS a fresh same-day token is stored and we _hard_restart ONCE — the clean
+        reboot reuses the just-minted token (no second TOTP) and rebuilds+re-subscribes the WS. The
+        3/hour cap bounds this to at most 3 restarts/hour (the 24-Jul storm was uncapped).
+
+        On a CAPPED/SKIPPED/FAILED relogin: NO exit, NO restart. We schedule the next attempt with a
+        5m/15m/30m escalating backoff (non-blocking — the loop keeps flushing bars and probing the
+        canary) and alert each attempt. Every event -> ops_log(category=feed_auth / feed_token_dead)."""
         import fyers_autologin
+        now_ist = datetime.now(IST).replace(tzinfo=None)
+        if _heal_state['next_at'] and now_ist < _heal_state['next_at']:
+            return   # still inside the current backoff window — do not attempt/hammer
         _ops_log(conn, 'alert', 'feed_auth',
                  {'event': 'dead_token_detected', 'reason': reason,
-                  'consecutive_threshold': DEAD_TOKEN_THRESHOLD, 'ist': _ist_now_str()})
-        log.critical(f"cc#473 TOKEN SELF-HEAL triggered: {reason} — attempting inline relogin")
+                  'attempt': _heal_state['attempts'] + 1, 'ist': _ist_now_str()})
+        log.critical(f"cc#645 TOKEN SELF-HEAL: {reason} — attempting capped relogin "
+                     f"(attempt {_heal_state['attempts'] + 1})")
         res = fyers_autologin.try_relogin(conn)
         if res.get('ok'):
+            _heal_state['attempts'] = 0
+            _heal_state['next_at'] = None
             _ops_log(conn, 'info', 'feed_auth',
                      {'event': 'relogin_ok', 'reason': reason, 'recovery': 'reboot_reuses_fresh_token',
                       'ist': _ist_now_str()})
-            # cc#564: DATA-observable re-mint marker (the reboot's boot self-test then confirms live).
             _ops_log(conn, 'info', 'token_reminted_live',
                      {'stage': 'self_heal', 'reason': reason, 'verify': 'on_reboot_selftest',
                       'ist': _ist_now_str()})
-            log.info("cc#473 relogin OK — restarting to rebuild WS on the fresh token (reused, no re-auth)")
+            log.info("cc#645 relogin OK — restarting once to rebuild WS on the fresh token (capped 3/hr)")
             _hard_restart(f"token self-heal — fresh token minted ({reason})")
             return  # not reached (execv)
-        if res.get('skipped'):
-            _ops_log(conn, 'info', 'feed_auth',
-                     {'event': 'relogin_skipped_cooldown', 'reason': reason, 'ist': _ist_now_str()})
-            log.warning("cc#473 relogin SKIPPED by 90s account-block breaker — backoff 90s, detector will re-trip")
-        else:
-            _ops_log(conn, 'alert', 'feed_auth',
-                     {'event': 'relogin_failed', 'reason': reason,
-                      'error': str(res.get('error'))[:180], 'ist': _ist_now_str()})
-            log.error(f"cc#473 relogin FAILED ({res.get('error')}) — backoff 90s, detector will re-trip")
-        time.sleep(90)
+        # capped / skipped / failed -> escalating backoff, NO exit, NO restart
+        n = _heal_state['attempts']
+        backoff = [300, 900, 1800][min(n, 2)]   # 5m / 15m / 30m
+        _heal_state['attempts'] = n + 1
+        _heal_state['next_at'] = now_ist + timedelta(seconds=backoff)
+        evt = 'relogin_capped' if res.get('capped') else ('relogin_skipped' if res.get('skipped') else 'relogin_failed')
+        _ops_log(conn, 'alert', 'feed_token_dead',
+                 {'event': evt, 'reason': reason, 'error': str(res.get('error'))[:180],
+                  'backoff_sec': backoff, 'next_attempt': _heal_state['next_at'].isoformat(),
+                  'ist': _ist_now_str()})
+        log.warning(f"cc#645 relogin {evt} — backoff {backoff}s (no exit, no restart); "
+                    f"next attempt after {_heal_state['next_at'].strftime('%H:%M:%S')} IST")
 
     def housekeeping():
         nonlocal conn
@@ -2423,7 +2539,9 @@ def run(auth_code=None):
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
         opt_gate_day         = None   # cc#189: reset the gate each trading day
         starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
-        relogin_day          = None   # cc#473: 09:05 daily staleness re-login fired once per trading day
+        relogin_day          = None   # cc#645 fix_1: 08:30 proactive pre-open login fired once per day
+        last_gov_log         = None   # cc#645 fix_5: hourly REST daily-cap usage log
+        last_canary          = None   # cc#645 fix_3: throttle the breaker-OPEN canary probe (>=5 min apart)
         consecutive_db_failures = 0   # cc#497 fix_2b: un-blind the watchdog — see _mark_db_error below
         sub_bounce_day       = None   # cc#497 fix_1_TIMING_FINAL: 09:14 pre-open socket bounce, once/day
         sub_seq_day          = None   # cc#497 fix_1_TIMING_FINAL: canary/full sequence trigger, once/day
@@ -2513,70 +2631,90 @@ def run(auth_code=None):
                                  {'event': 'fut_zero_0924_clean_restart', 'ist': _ist_now_str()})
                         _hard_restart('cc#605: 09:24 futures delivery = 0 — one clean restart + full resubscribe')
 
-            # ── cc#473 item 1 / cc#540: 09:05 IST daily token-staleness re-login (once/day).
-            # Never start the day on yesterday's token. Boot staleness is already covered by
-            # get_valid_token; this handles a worker running since before the IST midnight
-            # rollover (its in-memory token silently went stale).
-            # cc#540: dropped the is_trading_day(today) gate so this fires EVERY day incl.
-            # Sat/Sun/holidays — the founder works weekends and weekend research/backfill jobs
-            # (e.g. cc#538) were blocking on auth_error because no fresh token was ever minted.
-            # Fyers TOTP autologin is one 2FA/day (not per-trading-day) and the historical-data
-            # API is 24/7. The 09:05<=t<MARKET_OPEN(09:15) window applies uniformly every day;
-            # the token-created-today short-circuit below still avoids any needless 2FA.
+            # ── cc#645 fix_1: 08:30 IST PROACTIVE daily pre-open TOTP login (once/day). ──────────
+            # 24-Jul: the access token died ~06:00 and the feed met the 09:15 open on a corpse. Mint
+            # a guaranteed-fresh, full-trading-day token at 08:30 (Fyers systems up, well before open)
+            # so the token can NEVER be already-expired at the open. Also covers a worker that has
+            # been running since before the IST midnight rollover (its in-memory token silently went
+            # stale). Persisted mint-once flag = fires exactly once/day even across restarts (the
+            # post-restart boot reads it and skips — restart-loop guard). cc#540: fires every day
+            # (incl. weekends/holidays) — the founder's weekend backfill jobs need a live token too;
+            # the token-created-today short-circuit below avoids any needless 2FA.
             if (relogin_day != today
-                    and dt_time(9, 5) <= now.time() < MARKET_OPEN):
+                    and PROACTIVE_LOGIN_TIME <= now.time() < MARKET_OPEN):
                 relogin_day = today
                 try:
                     row = load_tokens(conn)
-                    created = row[2] if row else None
+                    created = row[1] if row else None   # cc#645 fix_2: (access_token, access_created)
                     if is_trading_day(today):
-                        # cc#564: UNCONDITIONAL fresh TOTP mint before the open on TRADING days.
-                        # The open must never depend on an overnight/weekend-surviving token — the
-                        # 20-Jul incident was a Sunday-minted token reused Monday whose data-endpoint
-                        # quotes came back empty. A pre-open (09:05<t<09:15) mint + clean reboot lands
-                        # a guaranteed-fresh, self-tested token before the 09:15 first tick.
-                        # cc#605 fix_1: MINT-ONCE across restarts. relogin_day is in-memory and resets
-                        # on every hard restart, so pre-cc#605 the mint->restart re-entered this
-                        # 09:05-09:15 window and re-minted+restarted (3x on 22-Jul, halted only by the
-                        # 90s account-block breaker — THE root-cause restart storm). A persisted
-                        # IST-dated flag makes the mint fire exactly once per day even across restarts;
-                        # the post-restart boot reads it and skips, ending the loop.
                         if _flag_get(conn, 'feed_preopen_mint_day') == today.isoformat():
-                            log.info("cc#605: 09:05 pre-open mint already done today (persisted flag) — "
-                                     "skip re-mint (restart-loop guard)")
+                            log.info("cc#645: 08:30 proactive pre-open mint already done today (persisted "
+                                     "flag) — skip re-mint (restart-loop guard)")
                         else:
                             _flag_set(conn, 'feed_preopen_mint_day', today.isoformat())   # persist BEFORE the restart
                             _ops_log(conn, 'info', 'feed_auth',
-                                     {'event': 'preopen_unconditional_remint',
+                                     {'event': 'proactive_0830_login',
                                       'token_created': str(created) if created else None, 'ist': _ist_now_str()})
-                            log.info("cc#564 09:05 pre-open UNCONDITIONAL fresh token mint (trading day)")
-                            _self_heal_token('09:05 pre-open unconditional fresh mint (trading day)')
+                            log.info("cc#645 fix_1: 08:30 proactive pre-open fresh token mint (trading day)")
+                            _self_heal_token('08:30 proactive pre-open fresh mint (trading day)')
                     elif not (created and created.date() == today):
-                        # Non-trading day: keep the cc#540 behaviour — mint only if the token isn't
-                        # from today (weekend research/backfill needs a live token, but no forced churn).
+                        # Non-trading day: mint only if the token isn't from today (weekend
+                        # research/backfill needs a live token, but no forced churn).
                         _ops_log(conn, 'alert', 'feed_auth',
-                                 {'event': 'stale_token_0905',
+                                 {'event': 'stale_token_0830',
                                   'token_created': str(created) if created else None, 'ist': _ist_now_str()})
-                        log.warning(f"cc#473 09:05 staleness: token created {created} (not today) — re-login")
-                        _self_heal_token('09:05 daily staleness — token not from today')
+                        log.warning(f"cc#645 08:30 staleness: token created {created} (not today) — re-login")
+                        _self_heal_token('08:30 daily staleness — token not from today')
                     else:
-                        log.info("cc#473 09:05 staleness check OK — token is from today (non-trading day)")
+                        log.info("cc#645 08:30 staleness check OK — token is from today (non-trading day)")
                 except Exception as _sc:
-                    if not _mark_db_error(_sc, '09:05 staleness check'):
-                        log.warning(f"cc#473 09:05 staleness check failed (non-fatal): {_sc}")
+                    if not _mark_db_error(_sc, '08:30 proactive login'):
+                        log.warning(f"cc#645 08:30 proactive login failed (non-fatal): {_sc}")
 
-            # ── cc#473 item 2: in-process dead-token detector. A 30s canonical REST probe
-            # feeds the same consecutive-empty counter as the OI poll; at DEAD_TOKEN_THRESHOLD
-            # consecutive char-0/401 responses the token is dead -> self-heal. Market hours only
-            # (off-hours the API is quiet and empties are expected).
+            # ── cc#645 fix_3: circuit-breaker canary/probe. When CLOSED, a light REST probe each loop
+            # feeds the breaker (20 consecutive empty/401 -> OPEN). When OPEN, ALL polling is halted;
+            # a SINGLE canary probe fires only every BREAKER_CANARY_MINS and drives recovery — the
+            # breaker CLOSES (full polling resumes) after 3 consecutive clean canaries. A capped
+            # in-process relogin (5m/15m/30m backoff) runs alongside to mint a fresh token if the
+            # dead token is genuinely gone. Market hours only (off-hours the API is quiet).
+            # cc#645 fix_5: hourly REST daily-cap usage log (vs the 100k Fyers cap).
+            if (last_gov_log is None or (now_dt - last_gov_log).total_seconds() >= 3600):
+                last_gov_log = now_dt
+                _gc, _gd = GOV.snapshot()
+                log.info(f"cc#645 REST governor: {_gc} calls today (cap {REST_DAILY_CAP})")
+                _ops_log(conn, 'info', 'rest_usage',
+                         {'calls_today': _gc, 'cap': REST_DAILY_CAP, 'day': str(_gd), 'ist': _ist_now_str()})
+
             if in_market:
-                try:
-                    _p_ok, _p_detail = _rest_quote_ok(token)
-                    _note_api(dead=((not _p_ok) and _p_detail == 'EMPTY_BODY'))
-                except Exception as _pe:
-                    log.warning(f"cc#473 dead-token probe failed (non-fatal): {_pe}")
-                if _consume_dead_flag():
-                    _self_heal_token(f"{DEAD_TOKEN_THRESHOLD} consecutive dead-token (empty/401) REST responses")
+                if breaker_is_open():
+                    # HALT: only a single canary probe every BREAKER_CANARY_MINS drives recovery.
+                    if (last_canary is None or (now_dt - last_canary).total_seconds() >= BREAKER_CANARY_MINS * 60):
+                        last_canary = now_dt
+                        _c_ok, _c_detail, _c_status = _rest_quote_probe(token)
+                        if breaker_canary(clean=_c_ok):
+                            log.info("cc#645 breaker CLOSED — 3 clean canary probes; resuming full polling")
+                            _ops_log(conn, 'info', 'feed_auth',
+                                     {'event': 'breaker_closed_resumed', 'ist': _ist_now_str()})
+                        else:
+                            log.warning(f"cc#645 breaker OPEN — canary probe (clean={_c_ok}, status={_c_status}); "
+                                        "polling halted. Attempting capped relogin.")
+                            _self_heal_token('circuit breaker OPEN — dead-token canary')
+                else:
+                    try:
+                        _p_ok, _p_detail, _p_status = _rest_quote_probe(token)
+                        breaker_note(dead=(not _p_ok) and _p_detail == 'EMPTY_BODY',
+                                     status=_p_status, body=_p_detail)
+                    except Exception as _pe:
+                        log.warning(f"cc#645 dead-token probe failed (non-fatal): {_pe}")
+                    if breaker_is_open():   # this probe (or a poll) just tripped it
+                        _info = breaker_open_info()
+                        log.critical(f"cc#645 circuit breaker TRIPPED OPEN — {BREAKER_TRIP_THRESHOLD} "
+                                     f"consecutive dead REST responses. Halting all polling. Forensics={_info}")
+                        _ops_log(conn, 'alert', 'feed_auth',
+                                 {'event': 'breaker_opened', 'threshold': BREAKER_TRIP_THRESHOLD,
+                                  'last_status': _info.get('last_status'), 'last_body': _info.get('last_body'),
+                                  'opened_at': _info.get('opened_at'), 'ist': _ist_now_str()})
+                        _self_heal_token(f"circuit breaker tripped — {BREAKER_TRIP_THRESHOLD} consecutive dead REST responses")
 
             # cc#189: reset the once-per-day 09:30 deadline alert each trading day.
             if opt_gate_day != today:
