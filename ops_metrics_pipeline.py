@@ -212,6 +212,10 @@ SECTOR_REGISTRY_SEED = {
         ("realization_per_unit", "Realization/Unit", "₹", "higher_better", "core"),
         ("ebitda_per_vehicle", "EBITDA/Vehicle", "₹", "higher_better", "core"),
         ("ev_mix_pct", "EV Mix", "%", "higher_better", "extended"),
+        # cc#633/648 part_3: volume growth + domestic/export split (only when disclosed; else absent row)
+        ("volume_growth_pct", "Volume Growth", "%", "higher_better", "extended"),
+        ("domestic_volume_growth_pct", "Domestic Volume Growth", "%", "higher_better", "extended"),
+        ("export_volume_growth_pct", "Export Volume Growth", "%", "higher_better", "extended"),
     ],
     "Cement": [
         ("volumes_mn_t", "Volumes", "mn t", "higher_better", "core"),
@@ -258,6 +262,9 @@ SECTOR_REGISTRY_SEED = {
         ("ebitda_per_t", "EBITDA/Tonne", "₹/t", "higher_better", "core"),
         ("net_debt_ebitda", "Net Debt/EBITDA", "x", "lower_better", "core"),
         ("capacity_util_pct", "Capacity Utilization", "%", "higher_better", "extended"),
+        # cc#633/648 part_3: domestic/export volume split (only when disclosed; else absent row)
+        ("domestic_volume_growth_pct", "Domestic Volume Growth", "%", "higher_better", "extended"),
+        ("export_volume_growth_pct", "Export Volume Growth", "%", "higher_better", "extended"),
     ],
     # cc#632 KPI TAXONOMY V2 (founder-specified, 23-Jul): sector-specific KPIs for the 10 sectors that
     # previously fell through to the generic 3-metric fallback (~225 symbols). Canonical lowercase
@@ -284,6 +291,9 @@ SECTOR_REGISTRY_SEED = {
         ("capacity_utilisation_pct", "Capacity Utilisation", "%", "higher_better", "core"),
         ("export_mix_pct", "Export Mix", "%", "higher_better", "extended"),
         ("gross_margin_pct", "Gross Margin", "%", "higher_better", "core"),
+        # cc#633/648 part_3: domestic/export volume split (mix already covered by export_mix_pct above)
+        ("domestic_volume_growth_pct", "Domestic Volume Growth", "%", "higher_better", "extended"),
+        ("export_volume_growth_pct", "Export Volume Growth", "%", "higher_better", "extended"),
     ],
     "Power_Energy": [
         ("plf_pct", "PLF", "%", "higher_better", "core"),
@@ -420,6 +430,10 @@ _SECTOR_CANON = {
 # metric renames beyond pure casing (the rest are handled by lower())
 _METRIC_CANON = {
     "ebitda_margin": "ebitda_margin_pct", "arpob_day": "arpob",
+    # cc#633/648 part_3: canonicalise common volume-growth name variants the extractor may emit
+    "total_volume_growth": "volume_growth_pct", "volume_growth": "volume_growth_pct",
+    "volume_growth_yoy": "volume_growth_pct", "domestic_volume_growth": "domestic_volume_growth_pct",
+    "export_volume_growth": "export_volume_growth_pct",
 }
 
 
