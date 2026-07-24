@@ -650,25 +650,43 @@ def _variant_rows(all_rows, want_consolidated, limit):
     return [{"period_label": r[1], "period_end": str(r[2]), "metrics": r[3] or {}} for r in filt]
 
 
+def _variant_or_fallback(all_rows, want_consolidated, limit):
+    """cc#639: rows for the requested variant; if that variant has ZERO rows for this section but the
+    OTHER variant has rows, fall back to the other variant and return a basis_note ("Consolidated" /
+    "Standalone") so single-basis sections (SHP, screener ratios) render on BOTH toggles with a tag.
+    Founder rule: a section not split standalone/consolidated shows in both places."""
+    rows = _variant_rows(all_rows, want_consolidated, limit)
+    if rows:
+        return rows, None
+    other = _variant_rows(all_rows, not want_consolidated, limit)
+    if other:
+        return other, ("Consolidated" if not want_consolidated else "Standalone")
+    return [], None
+
+
 def _build_one_variant(sections, want_consolidated):
-    """cc#636: full financials block for one variant, or None if the variant has no rows at all.
-    change_2: annual P&L renders the SAME canonical row set as Quarterly (no display trim)."""
-    q_rows  = _variant_rows(sections["quarters"],      want_consolidated, 13)
-    pl_rows = _variant_rows(sections["profit-loss"],   want_consolidated, 12)
-    bs_rows = _variant_rows(sections["balance-sheet"], want_consolidated, 12)
-    cf_rows = _variant_rows(sections["cash-flow"],     want_consolidated, 12)
-    ra_rows = _variant_rows(sections["ratios"],        want_consolidated, 12)
-    sh_rows = _variant_rows(sections["shareholding"],  want_consolidated, 12)
+    """cc#636/639: full financials block for one variant. Each section falls back to the other variant
+    when the requested one has no rows (with a per-section basis_note). Returns None only if NEITHER
+    variant has any rows anywhere. change_2: annual P&L renders the full canonical row set (no trim)."""
+    q_rows,  q_note  = _variant_or_fallback(sections["quarters"],      want_consolidated, 13)
+    pl_rows, pl_note = _variant_or_fallback(sections["profit-loss"],   want_consolidated, 12)
+    bs_rows, bs_note = _variant_or_fallback(sections["balance-sheet"], want_consolidated, 12)
+    cf_rows, cf_note = _variant_or_fallback(sections["cash-flow"],     want_consolidated, 12)
+    ra_rows, ra_note = _variant_or_fallback(sections["ratios"],        want_consolidated, 12)
+    sh_rows, sh_note = _variant_or_fallback(sections["shareholding"],  want_consolidated, 12)
     if not any([q_rows, pl_rows, bs_rows, cf_rows, ra_rows, sh_rows]):
         return None
     out = {"basis": "Consolidated" if want_consolidated else "Standalone",
            "quarterly": None, "profit_loss": None, "balance_sheet": None,
            "cash_flow": None, "ratios": None, "shareholding": None}
+
+    def _tag(tbl, note):
+        if tbl is not None and note:
+            tbl["basis_note"] = note
+        return tbl
     if q_rows:
-        out["quarterly"] = _build_table(q_rows, _QUARTER_ROW_DEFS)
+        out["quarterly"] = _tag(_build_table(q_rows, _QUARTER_ROW_DEFS), q_note)
     if pl_rows:
-        # cc#636 change_2: NO display_keys -> annual P&L shows the full canonical row order, identical
-        # to Quarterly Results (missing keys still skip the row via _build_table's all-None drop).
         pl_table = _build_table(pl_rows, _PL_ROW_DEFS)
         ttm = _build_ttm(q_rows) if q_rows else None
         pl_table["ttm"] = ttm is not None
@@ -676,15 +694,15 @@ def _build_one_variant(sections, want_consolidated):
             pl_table["periods"].append("TTM")
             for row in pl_table["rows"]:
                 row["values"].append(ttm.get(row["label"]))
-        out["profit_loss"] = pl_table
+        out["profit_loss"] = _tag(pl_table, pl_note)
     if bs_rows:
-        out["balance_sheet"] = _build_table(bs_rows, _BS_ROW_DEFS, display_keys=_BS_DISPLAY_KEYS)
+        out["balance_sheet"] = _tag(_build_table(bs_rows, _BS_ROW_DEFS, display_keys=_BS_DISPLAY_KEYS), bs_note)
     if cf_rows:
-        out["cash_flow"] = _build_table(cf_rows, _CF_ROW_DEFS)
+        out["cash_flow"] = _tag(_build_table(cf_rows, _CF_ROW_DEFS), cf_note)
     if ra_rows:
-        out["ratios"] = _build_table(ra_rows, _RATIO_ROW_DEFS)
+        out["ratios"] = _tag(_build_table(ra_rows, _RATIO_ROW_DEFS), ra_note)
     if sh_rows:
-        out["shareholding"] = _shareholding_table(sh_rows)
+        out["shareholding"] = _tag(_shareholding_table(sh_rows), sh_note)
     return out
 
 

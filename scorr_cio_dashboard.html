@@ -1818,8 +1818,10 @@ function FinTable({ title, table, trendLabel }) {
   const modalRows = displayRows.map(r => ({ ...r, values: rowVals(r) }));
   return (
     <div style={{ marginBottom: 22 }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text }}>{title}</div>
+        {/* cc#639: per-section basis tag when the row set fell back to the other variant */}
+        {table.basis_note && <span style={{ fontSize: 9.5, fontWeight: 700, color: C.muted, border: `1px solid ${C.gridLine}`, borderRadius: 5, padding: "1px 6px", textTransform: "uppercase", letterSpacing: ".04em" }}>{table.basis_note} basis</span>}
         {/* cc#638: single table-level chart button (replaces per-row icons) */}
         <span onClick={() => setChartOpen(true)} title={`${title} — chart`}
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer",
@@ -1905,11 +1907,12 @@ function FinancialsSection({ financials }) {
       <FinTable title="Profit & Loss" table={cur.profit_loss} />
       <FinTable title="Balance Sheet" table={cur.balance_sheet} />
       <FinTable title="Cash Flow" table={cur.cash_flow} />
-      {/* cc#638: Ratios V2 — five bucketed sub-tables (Growth, Profitability, Valuation, Solvency,
-          Efficiency), Solvency hidden for BFSI (server-side). Falls back to the flat Ratios table. */}
-      {(financials.ratios_v2 && financials.ratios_v2.buckets && financials.ratios_v2.buckets.length)
-        ? financials.ratios_v2.buckets.map((bk, i) => <FinTable key={i} title={bk.title} table={bk.table} />)
-        : <FinTable title="Ratios" table={cur.ratios} />}
+      {/* cc#638/639: Ratios section — the five ratios_v2 buckets (Solvency hidden for BFSI server-side)
+          PLUS the annual ratios table, pinned here (before Shareholding) so the section never jumps
+          position between toggles. */}
+      {financials.ratios_v2 && financials.ratios_v2.buckets
+        && financials.ratios_v2.buckets.map((bk, i) => <FinTable key={i} title={bk.title} table={bk.table} />)}
+      <FinTable title="Ratios" table={cur.ratios} />
       {cur.shareholding && cur.shareholding.rows && cur.shareholding.rows.length
         ? <FinTable title="Shareholding Pattern" table={cur.shareholding} trendLabel="Promoters" />
         : (
