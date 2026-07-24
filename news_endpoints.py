@@ -230,9 +230,10 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     days = max(1, min(days, 30))
     limit = max(1, min(limit, 200))
     cat = (category or "ai_editorial").lower()
-    GLOBAL_SET  = "('GLOBAL','GLOBAL_MACRO','GLOBAL_TECH')"
-    IPO_SET     = "('IPO','STARTUP')"
-    COMPANY_SET = "('COMPANY_UPDATES','COMPANY')"
+    GLOBAL_SET     = "('GLOBAL','GLOBAL_MACRO','GLOBAL_TECH')"
+    IPO_SET        = "('IPO','STARTUP')"
+    COMPANY_SET    = "('COMPANY_UPDATES','COMPANY')"
+    STOCK_VIEW_SET = "('STOCK VIEW','STOCK_VIEW')"   # cc#646: 5th canonical category
     # word count of full_summary (fallback summary) = spaces + 1 -> read-time badge
     _wc = ("(LENGTH(TRIM(COALESCE(full_summary,summary,''))) "
            "- LENGTH(REPLACE(TRIM(COALESCE(full_summary,summary,'')),' ','')) + 1)")
@@ -254,11 +255,15 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     elif cat in ("company_updates", "company"):
         cat = "company_updates"
         sql += f" AND UPPER(COALESCE(category,'')) IN {COMPANY_SET}"
-    else:  # ai_editorial — India editorial: all categories NOT in global/ipo/company
+    elif cat in ("stock_view", "stock view"):   # cc#646: 5th canonical category
+        cat = "stock_view"
+        sql += f" AND UPPER(COALESCE(category,'')) IN {STOCK_VIEW_SET}"
+    else:  # ai_editorial — India editorial: all categories NOT in global/ipo/company/stock_view
         cat = "ai_editorial"            # cc_task #70: no read-time gate (supersedes #69 >=2min)
         sql += (f" AND UPPER(COALESCE(category,'')) NOT IN {GLOBAL_SET}"
                 f" AND UPPER(COALESCE(category,'')) NOT IN {IPO_SET}"
-                f" AND UPPER(COALESCE(category,'')) NOT IN {COMPANY_SET}")
+                f" AND UPPER(COALESCE(category,'')) NOT IN {COMPANY_SET}"
+                f" AND UPPER(COALESCE(category,'')) NOT IN {STOCK_VIEW_SET}")   # cc#646
     sql += " ORDER BY display_time DESC NULLS LAST, polished_id DESC LIMIT %s"
     params.append(limit)
     with _conn() as conn, conn.cursor() as cur:
@@ -285,13 +290,19 @@ _CANON_CAT = {
     "domestic":        "Domestic",
     "global":          "Global",
     "ipo":             "IPO",
+    "stock_view":      "Stock View",   # cc#646: 5th canonical category (exact case-sensitive string)
 }
+
+# cc#646: the full canonical 5-value set (exact case-sensitive strings). Any category
+# validation/whitelist must use THIS set. Selection + writing of Stock View rows is done by
+# Claude web in polish batches (no generator) — this is the display + whitelist contract only.
+CANON_CATEGORIES = ("AI Editorial", "Domestic", "Global", "IPO", "Stock View")
 
 
 @router.get("/api/news/polished")
 def news_polished(request: Request, category: str = "all", limit: int = 20, offset: int = 0):
     """Polished news for the /news redesign (cc_task #79, spec 636).
-    category = all | ai_editorial | company_updates | global | ipo (strict exact match).
+    category = all | ai_editorial | company_updates | global | ipo | stock_view (strict exact match).
     Sorted polished_at DESC (newest first, all categories interleaved on 'all').
     limit (default 20, max 100) + offset paginate. Returns category_counts for tab badges.
     cc#160: endpoint-level auth (this route was reachable with no cookie, bypassing

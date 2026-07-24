@@ -317,12 +317,15 @@
 
 <script>
 const API = "";
+// cc#646: tab order per spec (All / Domestic / Global / AI Editorial / IPO / Stock View);
+// Learn (Knowledge Hub) stays last — it's a separate evergreen feed, not a news category.
 const CATS = [
   { id:"all",          label:"All" },
-  { id:"ai_editorial", label:"AI Editorial" },
   { id:"domestic",     label:"Domestic" },
   { id:"global",       label:"Global" },
+  { id:"ai_editorial", label:"AI Editorial" },
   { id:"ipo",          label:"IPO" },
+  { id:"stock_view",   label:"Stock View" },
   { id:"learn",        label:"Learn" },
 ];
 // cc#294: "Position News" tab relocated to v8_dashboard.html (Master Dashboard is where open
@@ -346,9 +349,10 @@ let _kbSearchDeb = null;
 let _abortCtrl = null;
 
 const PILL = {
-  "Domestic": { id:"domestic", label:"Domestic", bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
-  "Global":   { id:"global",   label:"Global",   bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
-  "IPO":      { id:"ipo",      label:"IPO",       bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
+  "Domestic":   { id:"domestic",   label:"Domestic",   bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
+  "Global":     { id:"global",     label:"Global",     bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
+  "IPO":        { id:"ipo",        label:"IPO",        bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
+  "Stock View": { id:"stock_view", label:"Stock View", bg:"#e6f7f0", fg:"#0f766e", bd:"#bfe8da" },  // cc#646
 };
 
 const SENT = {
@@ -458,7 +462,7 @@ function pick(cat){
 function _newsCatLabel(cat){
   // mirrors backend _CANON_CAT (news_endpoints.py) — used to read the right
   // count out of category_counts for the cap/hasMore calc below.
-  return {ai_editorial:"AI Editorial", domestic:"Domestic", global:"Global", ipo:"IPO"}[cat];
+  return {ai_editorial:"AI Editorial", domestic:"Domestic", global:"Global", ipo:"IPO", stock_view:"Stock View"}[cat];  // cc#646
 }
 
 async function load(){
@@ -489,11 +493,11 @@ async function load(){
     articles = d.articles || [];
     newsOffset = articles.length;
     const c = d.category_counts || {};
-    const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0);
+    const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0)+(c["Stock View"]||0);  // cc#646
     newsCatTotal = activeCat === "all" ? total : (c[_newsCatLabel(activeCat)] || 0);
     newsHasMore = articles.length < Math.min(newsCatTotal, NEWS_CAP) && articles.length >= NEWS_INITIAL;
     document.getElementById("meta").textContent =
-      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
+      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0} · Stock View ${c["Stock View"]||0}`;
     render();
   } catch(e){
     if(e.name === "AbortError") return; // tab switched — silently ignore
@@ -602,8 +606,12 @@ function artCompact(a, showPill){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
   const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
-  const sy = symStr(a);
-  const sym = sy ? `<span class="art-sym">${esc(sy)}</span><span>·</span>` : "";
+  // cc#646: symbol chip links to the GVM stock card (/company/SYM). Applies to every compact
+  // card (Domestic/Global/IPO/Stock View) — a tapped ticker jumps straight to its GVM report.
+  const syArr = Array.isArray(a.mentioned_symbols) ? a.mentioned_symbols.filter(Boolean) : [];
+  const symLinks = syArr.map(s =>
+    `<a class="art-sym" style="text-decoration:none" href="/company/${encodeURIComponent(s)}">${esc(s)}</a>`).join(", ");
+  const sym = symLinks ? `${symLinks}<span>·</span>` : "";
   const pill = showPill ? pillHTML(a.category) : "";
   const hasFull = !!(a.full_summary && String(a.full_summary).trim());
   const bodyRaw = hasFull ? a.full_summary : (a.summary || "");
