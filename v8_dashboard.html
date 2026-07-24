@@ -2231,12 +2231,16 @@ function renderMood(m){
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
       ${metricRow('openVix()','India VIX','vixInline')}
       ${metricRow('openAdr()','ADR','adrInline')}
-      <div style="margin-top:7px"><button onclick="openIdxPos()" title="Index open positions — live V10 NIFTY/BankNifty (read-only)" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--cyan);background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:7px 11px;min-height:36px;line-height:1">&#9673; Index Positions</button></div>
       ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
       <div class="moodChecks">${pills}</div>
       <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span></div>
+      <!-- cc#642: Index Positions moved from the left column (between ADR and NIFTY PCR) to the right
+           column, one paragraph-space below the slots line — compresses the card height. mood-right is
+           align-items:flex-end so it right-aligns on desktop; on mobile mood-right flips to flex-start
+           and the button stacks left below the slots naturally (no overlap). -->
+      <div style="margin-top:4px"><button onclick="openIdxPos()" title="Index open positions — live V10 NIFTY/BankNifty (read-only)" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--cyan);background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:7px 11px;min-height:36px;line-height:1">&#9673; Index Positions</button></div>
     </div>`;
   // cc#310: the innerHTML above ships EMPTY #vixInline/#niftyPcrInline/#bankniftyPcrInline
   // spans. Immediately re-inject the last known VIX/PCR values so a re-render never blanks
