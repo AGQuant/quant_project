@@ -560,10 +560,44 @@ def _rat_row(label, unit, values):
     return {"label": label, "unit": unit, "chart_type": "line", "display": True, "values": values}
 
 
+def _annual_frame(cur, symbol, section, limit=11):
+    """cc#640: oldest->newest ANNUAL periods for the dominant variant of a section.
+    Returns (labels, period_ends[date], [metrics dict]) so ratios can be derived year-wise."""
+    cur.execute("""SELECT consolidated, period_label, period_end, metrics FROM fundamentals_history
+                   WHERE symbol=%s AND section=%s AND period_type='annual' ORDER BY period_end ASC""",
+                (symbol, section))
+    rows = cur.fetchall()
+    if not rows:
+        return [], [], []
+    has_c = any(bool(r[0]) for r in rows)
+    filt = [r for r in rows if bool(r[0]) == has_c][-limit:]
+    return ([r[1] for r in filt], [r[2] for r in filt], [(r[3] or {}) for r in filt])
+
+
+def _label_map(cur, symbol, section):
+    """{period_label: metrics} for the dominant annual variant — used to align BS/ratios to the P&L axis."""
+    labels, _ends, metr = _annual_frame(cur, symbol, section)
+    return {labels[i]: metr[i] for i in range(len(labels))}
+
+
+def _mv(m, key):
+    return _parse_metric(m.get(key)) if m else None
+
+
+def _safe_div(a, b, pct=False, nd=2):
+    if a is None or b in (None, 0) or b == 0.0:
+        return None
+    return round(a / b * (100.0 if pct else 1.0), nd)
+
+
 def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
-    """cc#638 RATIOS V2: five bucketed sub-tables (Growth, Profitability, Valuation, Solvency,
-    Efficiency) from fundamentals_history annual series + screener_raw current. Solvency is HIDDEN for
-    BFSI. Missing metric = skipped row; an empty bucket is omitted. Zero new scraping."""
+    """cc#638/640 RATIOS V2: bucketed sub-tables. cc#640 makes Profitability / Valuation / Solvency
+    YEAR-WISE — annual FY columns (oldest->newest) plus a final 'Current' column from screener_raw —
+    just like the financials tables, instead of the single 'Current' column cc#638 hardcoded. Derived
+    from fundamentals_history annual series (P&L + BS + ratios) and FY-end close (raw_prices, last
+    trading day <= period_end). Growth stays 1Y/3Y/5Y. Efficiency = the annual ratios section (Debtor/
+    Inventory/Payable/CCC/WC days) minus ROCE (which moves into Profitability). Solvency HIDDEN for
+    BFSI. Zero new scraping — every column comes from data already in the DB."""
     sym = (symbol or "").strip().upper()
     cur.execute('''SELECT pe, "Price to book value", "EVEBITDA", dividend_yield, market_cap, "Sales",
                           "Debt to equity", interest_coverage, roce, "Return on equity", opm,
@@ -578,17 +612,53 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
     np_s = _annual_vals(cur, sym, "profit-loss", "Net Profit")
     eps_s = _annual_vals(cur, sym, "profit-loss", "EPS in Rs")
     sales_s = _annual_vals(cur, sym, "profit-loss", "Sales")
-    ta_s = _annual_vals(cur, sym, "balance-sheet", "Total Assets")
 
     def _last(s, n=1):
         return s[-n] if len(s) >= n else None
-    npm = (round(_last(np_s) / _last(sales_s) * 100.0, 1)
-           if (_last(np_s) is not None and _last(sales_s)) else None)
-    asset_turn = (round(_last(sales_s) / _last(ta_s), 2)
-                  if (_last(sales_s) is not None and _last(ta_s)) else None)
     mcap_sales = (round(k.get("mcap") / k.get("sales"), 2)
                   if (k.get("mcap") is not None and k.get("sales")) else None)
 
+    # --- year-wise axis: P&L annual labels/ends; BS + ratios aligned by label; FY-end closes ----------
+    pl_labels, pl_ends, pl_m = _annual_frame(cur, sym, "profit-loss", 11)
+    bs_map = _label_map(cur, sym, "balance-sheet")
+    ra_map = _label_map(cur, sym, "ratios")
+    closes = {}
+    if pl_ends:
+        cur.execute("""SELECT t.e, (SELECT close FROM raw_prices rp WHERE rp.symbol=%s
+                          AND rp.price_date <= t.e ORDER BY rp.price_date DESC LIMIT 1)
+                       FROM unnest(%s::date[]) AS t(e)""", (sym, pl_ends))
+        for pe, c in cur.fetchall():
+            closes[str(pe)] = _parse_metric(c)
+
+    n = len(pl_labels)
+    roce_y, roe_y, opm_y, npm_y, at_y = [], [], [], [], []
+    pe_y, pb_y, de_y, ic_y = [], [], [], []
+    for i in range(n):
+        m = pl_m[i]
+        bs = bs_map.get(pl_labels[i], {})
+        ra = ra_map.get(pl_labels[i], {})
+        np_ = _mv(m, "Net Profit"); sales = _mv(m, "Sales"); op = _mv(m, "Operating Profit")
+        eps = _mv(m, "EPS in Rs"); intr = _mv(m, "Interest"); pbt = _mv(m, "Profit before tax")
+        eqcap = _mv(bs, "Equity Capital"); res = _mv(bs, "Reserves")
+        ta = _mv(bs, "Total Assets"); borrow = _mv(bs, "Borrowings")
+        nw = (eqcap + res) if (eqcap is not None and res is not None) else None
+        close = closes.get(str(pl_ends[i]))
+        # Profitability
+        roce_y.append(_mv(ra, "ROCE %"))
+        roe_y.append(_safe_div(np_, nw, pct=True, nd=1))
+        opm_y.append(_safe_div(op, sales, pct=True, nd=1))
+        npm_y.append(_safe_div(np_, sales, pct=True, nd=1))
+        at_y.append(_safe_div(sales, ta, nd=2))
+        # Valuation (FY-end close basis). BVPS = net worth per share = (nw/np)*eps (avoids share count).
+        pe_y.append(_safe_div(close, eps, nd=1) if (eps and eps > 0) else None)
+        bvps = ((nw / np_) * eps if (nw is not None and np_ and np_ > 0 and eps) else None)
+        pb_y.append(_safe_div(close, bvps, nd=2) if (bvps and bvps > 0) else None)
+        # Solvency
+        de_y.append(_safe_div(borrow, nw, nd=2))
+        ebit = (pbt + intr) if (pbt is not None and intr is not None) else None
+        ic_y.append(_safe_div(ebit, intr, nd=1) if (intr and intr > 0) else None)
+
+    yr_periods = pl_labels + ["Current"]
     buckets = []
 
     def _add(title, periods, rows):
@@ -596,7 +666,7 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         if rows:
             buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
 
-    # 1) GROWTH — 1Y / 3Y CAGR / 5Y CAGR
+    # 1) GROWTH — 1Y / 3Y CAGR / 5Y CAGR (unchanged)
     _add("Growth", ["1Y", "3Y CAGR", "5Y CAGR"], [
         _rat_row("Sales Growth", "pct", [k.get("sg1") if k.get("sg1") is not None else _g1y(_last(sales_s), _last(sales_s, 2)),
                                           k.get("sg3") if k.get("sg3") is not None else _cagr(_last(sales_s), _last(sales_s, 4), 3),
@@ -605,34 +675,36 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
                                               _cagr(_last(np_s), _last(np_s, 4), 3), _cagr(_last(np_s), _last(np_s, 6), 5)]),
         _rat_row("EPS Growth", "pct", [_g1y(_last(eps_s), _last(eps_s, 2)), None, None]),
     ])
-    # 2) PROFITABILITY (current)
-    _add("Profitability", ["Current"], [
-        _rat_row("ROCE %", "pct", [k.get("roce")]), _rat_row("ROE %", "pct", [k.get("roe")]),
-        _rat_row("OPM %", "pct", [k.get("opm")]), _rat_row("NPM %", "pct", [npm]),
+    # 2) PROFITABILITY — YEAR-WISE + Current
+    _add("Profitability", yr_periods, [
+        _rat_row("ROCE %", "pct", roce_y + [k.get("roce")]),
+        _rat_row("ROE %",  "pct", roe_y  + [k.get("roe")]),
+        _rat_row("OPM %",  "pct", opm_y  + [k.get("opm")]),
+        _rat_row("NPM %",  "pct", npm_y  + [None]),
+        _rat_row("Asset Turnover", "x", at_y + [None]),
     ])
-    # 3) VALUATION (current)
-    _add("Valuation", ["Current"], [
-        _rat_row("PE", "x", [k.get("pe")]), _rat_row("PB", "x", [k.get("pb")]),
-        _rat_row("EV/EBITDA", "x", [k.get("evebitda")]), _rat_row("MCap/Sales", "x", [mcap_sales]),
-        _rat_row("Dividend Yield", "pct", [k.get("divyield")]),
+    # 3) VALUATION — PE/PB YEAR-WISE (FY-end close); EV/EBITDA + MCap/Sales + Div Yield Current-only
+    _add("Valuation", yr_periods, [
+        _rat_row("PE", "x", pe_y + [k.get("pe")]),
+        _rat_row("PB", "x", pb_y + [k.get("pb")]),
+        _rat_row("EV/EBITDA", "x", [None] * n + [k.get("evebitda")]),
+        _rat_row("MCap/Sales", "x", [None] * n + [mcap_sales]),
+        _rat_row("Dividend Yield", "pct", [None] * n + [k.get("divyield")]),
     ])
-    # 4) SOLVENCY (current) — HIDDEN for BFSI
+    # 4) SOLVENCY — YEAR-WISE + Current, HIDDEN for BFSI
     if not _is_bfsi(segment):
-        _add("Solvency", ["Current"], [
-            _rat_row("Debt / Equity", "x", [k.get("de")]),
-            _rat_row("Interest Coverage", "x", [k.get("intcov")]),
+        _add("Solvency", yr_periods, [
+            _rat_row("Debt / Equity", "x", de_y + [k.get("de")]),
+            _rat_row("Interest Coverage", "x", ic_y + [k.get("intcov")]),
         ])
-    # 5) EFFICIENCY — existing annual ratios series + Asset Turnover (current)
+    # 5) EFFICIENCY — annual ratios section (days metrics), ROCE excluded (now under Profitability)
     _ra_all = _all_section(cur, sym, "ratios", "annual")
     eff_rows = _variant_rows(_ra_all, any(bool(x[0]) for x in _ra_all), 12) if _ra_all else []
-    eff_tbl = _build_table(eff_rows, _RATIO_ROW_DEFS) if eff_rows else {"periods": [], "rows": []}
-    eff_periods = eff_tbl.get("periods") or ["Current"]
-    eff_final = list(eff_tbl.get("rows") or [])
-    if asset_turn is not None:
-        eff_final.append({"label": "Asset Turnover", "unit": "x", "chart_type": "line", "display": True,
-                          "values": [None] * (len(eff_periods) - 1) + [asset_turn]})
-    if eff_final:
-        buckets.append({"title": "Efficiency", "table": {"periods": eff_periods, "rows": eff_final}})
+    if eff_rows:
+        eff_defs = [d for d in _RATIO_ROW_DEFS if d[0] != "ROCE %"]
+        eff_tbl = _build_table(eff_rows, eff_defs)
+        if eff_tbl["rows"]:
+            buckets.append({"title": "Efficiency", "table": eff_tbl})
 
     return {"buckets": buckets, "bfsi": _is_bfsi(segment)}
 

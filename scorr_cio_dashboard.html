@@ -1907,12 +1907,13 @@ function FinancialsSection({ financials }) {
       <FinTable title="Profit & Loss" table={cur.profit_loss} />
       <FinTable title="Balance Sheet" table={cur.balance_sheet} />
       <FinTable title="Cash Flow" table={cur.cash_flow} />
-      {/* cc#638/639: Ratios section — the five ratios_v2 buckets (Solvency hidden for BFSI server-side)
-          PLUS the annual ratios table, pinned here (before Shareholding) so the section never jumps
-          position between toggles. */}
+      {/* cc#638/639/640: Ratios section — the ratios_v2 buckets (Growth 1Y/3Y/5Y; Profitability,
+          Valuation, Solvency now YEAR-WISE; Efficiency annual). Variant-agnostic (from financials.
+          ratios_v2, not cur) so the section holds its position across the Standalone/Consolidated
+          toggle. cc#640 drops the old flat annual Ratios table — Profitability (ROCE) + Efficiency
+          (days) fully cover it now. Solvency hidden for BFSI server-side. */}
       {financials.ratios_v2 && financials.ratios_v2.buckets
         && financials.ratios_v2.buckets.map((bk, i) => <FinTable key={i} title={bk.title} table={bk.table} />)}
-      <FinTable title="Ratios" table={cur.ratios} />
       {cur.shareholding && cur.shareholding.rows && cur.shareholding.rows.length
         ? <FinTable title="Shareholding Pattern" table={cur.shareholding} trendLabel="Promoters" />
         : (
