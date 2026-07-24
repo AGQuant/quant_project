@@ -65,18 +65,19 @@ def _fy27_growth(cur, sym):
     return _f(r[0]) if (r and r[0] is not None) else None
 
 
-def _raw_news(cur, sym, hours=48):
-    """cc#623 / cc#625 fix_2: RAW news section — the last-48h position_news headlines for this exact
-    symbol, date-sorted desc. The 48h cutoff is driven by the ARTICLE's published_at ONLY — never
-    COALESCE with fetched_at, which let a 13-day-stale article (published 10-Jul, fetched today) slip
-    through on ingest drift. published_at is 100% populated for the recent window; a null-published
-    row cannot prove freshness and is correctly excluded from the 48h section."""
+def _raw_news(cur, sym, hours=168):
+    """cc#623 / cc#625 / cc#650: RAW headlines section — position_news headlines for this exact symbol,
+    date-sorted desc, over the last 7 days (cc#650 widened from 48h; headlines-only list — no summaries).
+    The cutoff is driven by the ARTICLE's published_at ONLY — never COALESCE with fetched_at, which let
+    a stale article (published earlier, fetched today) slip through on ingest drift. published_at is
+    100% populated for the recent window; a null-published row cannot prove freshness and is correctly
+    excluded. Capped at the latest 10 so the card stays scannable."""
     cur.execute("""
         SELECT headline, source_name, url, published_at
         FROM position_news
         WHERE symbol = %s AND published_at >= NOW() - make_interval(hours => %s)
         ORDER BY published_at DESC, id DESC
-        LIMIT 12""", (sym, hours))
+        LIMIT 10""", (sym, hours))
     return [{"headline": r[0], "source": r[1], "url": r[2],
              "published_at": r[3].isoformat() if r[3] else None} for r in cur.fetchall()]
 
@@ -241,14 +242,14 @@ async def results_card(symbol: str, generate: bool = False):
         # cc#623 POSITION_NEWS_CARD_V2 — two-branch flow, both surfaces (R button + Position News tab)
         # sharing the unified renderer. Sections common to BOTH branches, computed once:
         #   fy27_growth  : input_raw.fy27_growth (FY27 Est. Growth row; hidden when null)
-        #   raw_news     : last-48h position_news for this symbol (RAW chip)
+        #   raw_news     : last-7-day position_news headlines for this symbol (RAW chip; cc#650)
         #   polished_news: last-30d polished_news via mentioned_symbols (symbol-section query — REPLACES
         #                  the cc#619 per-item url_hash lookup that hit ~2%)
         # Quarter labels reuse _fq_label / the card's own leading label (cc#618-B doctrine: never label a
         # quarter the data does not contain; the cc#622-A downgrade guard protects stored cards).
         expected_q = _expected_quarter(today)
         fy27 = _fy27_growth(cur, sym)
-        raw_news = _raw_news(cur, sym, hours=48)
+        raw_news = _raw_news(cur, sym, hours=168)   # cc#650: RAW headlines widened 48h -> 7 days
         pol_news = _polished_by_symbol(cur, sym, days=30)
 
         def _sections(base):

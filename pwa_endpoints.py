@@ -1021,6 +1021,24 @@ RESULTS_CARD_JS = """
   ov.addEventListener('click', function(e){ if (e.target === ov) close(); });
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
 
+  // cc#650: delegated "View more" toggle for collapsed polished-news items — one document listener
+  // covers BOTH surfaces (R modal + Position News tab inline) since neither re-wires per-item.
+  document.addEventListener('click', function(e){
+    var t = e.target && e.target.closest && e.target.closest('.rcard-viewmore');
+    if (!t) return;
+    e.preventDefault();
+    var it = t.closest('.rcard-pol-item'); if (!it) return;
+    var full = it.querySelector('.rcard-pol-full'), brief = it.querySelector('.rcard-pol-brief');
+    var open = !it.classList.contains('rcard-open');
+    it.classList.toggle('rcard-open', open);
+    if (full)  full.style.display  = open ? 'block' : 'none';
+    if (brief) brief.style.display = open ? 'none' : 'block';
+    t.textContent = open ? 'View less' : 'View more';
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-viewmore')){ e.preventDefault(); e.target.click(); }
+  });
+
   function esc(s){ return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];}); }
   function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
@@ -1058,10 +1076,11 @@ RESULTS_CARD_JS = """
     return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
       + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>';
   }
-  // cc#623: RAW news (last 48h) — headline + source, date desc; hidden when empty.
+  // cc#623/cc#650: RAW headlines (last 7 days) — headline + source + date only, date desc; no
+  // summaries; hidden when empty. Capped server-side at the latest 10 so the card stays scannable.
   function rawNewsHtml(items){
     if (!items || !items.length) return '';
-    var h = '<div class=\"rcard-lbl\">Raw news &middot; last 48h'+RAW_CHIP+'</div>';
+    var h = '<div class=\"rcard-lbl\">Raw headlines &middot; last 7 days'+RAW_CHIP+'</div>';
     for (var i=0;i<items.length;i++){ var it=items[i];
       var line = it.url ? '<a href=\"'+esc(it.url)+'\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--txt,#1c2536);text-decoration:none\">'+esc(it.headline)+'</a>' : esc(it.headline);
       h += '<div style=\"font-size:12.5px;line-height:1.5;margin-bottom:6px\">'+line
@@ -1073,13 +1092,25 @@ RESULTS_CARD_JS = """
   // source; date desc; hidden when empty. Intel-tab quality.
   function polNewsHtml(items){
     if (!items || !items.length) return '';
-    // cc#625 fix_1: clear whitespace + a rule above the POLISHED header (was flush against the block above).
+    // cc#650: POLISHED news is the LAST section and each item renders BRIEF by default — headline +
+    // first ~160 chars of summary + a >=44px "View more" affordance that expands THAT item inline to
+    // the full summary (delegated click handler below). AI Editorial items are collapsed too: their
+    // full body NEVER renders expanded by default. cc#625 fix_1: rule + gap above the header.
     var h = '<div class=\"rcard-lbl\" style=\"margin-top:18px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))\">Polished news &middot; last 30 days</div>';
     for (var i=0;i<items.length;i++){ var it=items[i];
-      h += '<div style=\"margin-bottom:9px\">'
-        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+'</div>'
-        + (it.summary ? '<div class=\"rcard-body\" style=\"margin-top:3px\">'+esc(it.summary)+'</div>' : '')
-        + '<div class=\"rcard-note\" style=\"margin-top:2px\">'+esc(it.source||'')+(it.published_time?' &middot; '+fmtDate(it.published_time):'')+'</div></div>';
+      var sum = it.summary || '';
+      var over = sum.length > 160;
+      var brief = over ? (esc(sum.slice(0,160).replace(/\\s+\\S*$/,'')) + '&hellip;') : esc(sum);
+      h += '<div class=\"rcard-pol-item\" style=\"margin-bottom:11px\">'
+        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+'</div>';
+      if (sum){
+        h += '<div class=\"rcard-pol-brief rcard-body\" style=\"margin-top:3px\">'+brief+'</div>';
+        if (over){
+          h += '<div class=\"rcard-pol-full rcard-body\" style=\"margin-top:3px;display:none\">'+esc(sum)+'</div>'
+            + '<span class=\"rcard-viewmore\" role=\"button\" tabindex=\"0\" style=\"display:inline-flex;align-items:center;min-height:44px;padding:0 2px;font-size:12px;font-weight:700;color:var(--accent,#2f6df4);cursor:pointer;-webkit-tap-highlight-color:transparent\">View more</span>';
+        }
+      }
+      h += '<div class=\"rcard-note\" style=\"margin-top:2px\">'+esc(it.source||'')+(it.published_time?' &middot; '+fmtDate(it.published_time):'')+'</div></div>';
     }
     return h;
   }
@@ -1120,11 +1151,12 @@ RESULTS_CARD_JS = """
           + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>';
       }
     }
-    // cc#625 fix_2: spec order — Result/FY27 -> RAW 48h -> POLISH 1mo; the peer block trails as a
-    // supplement (was between peer and polished, leaving polished flush against peer — fix_1).
-    h += rawNewsHtml(d && d.raw_news);       // cc#623: last 48h (RAW above POLISHED)
-    h += polNewsHtml(d && d.polished_news);  // cc#623: last 1 month via mentioned_symbols
+    // cc#650 order: Result/FY27 -> Peer comparison (stays with the result context) -> RAW headlines
+    // (7 days, headlines only) -> POLISHED news LAST (collapsed per item). Founder 24-Jul (TRENT):
+    // the heavy polished block was burying the card mid-way; it now trails at the bottom, compressed.
     h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
+    h += rawNewsHtml(d && d.raw_news);       // cc#650: RAW headlines, last 7 days
+    h += polNewsHtml(d && d.polished_news);  // cc#650: POLISHED news LAST, collapsed + view-more
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
     if (d && d.model) foot.push(esc(d.model));
