@@ -1833,11 +1833,17 @@ async function qaGvm(sym){
 // cc#630: shared TRAJECTORY + performance heat-grid renderers (from the enriched /api/gvm/snapshot).
 // cc#631: 3x3 tile matrix (rows GVM/Momentum/Sector GVM × cols Now/Δ1M/Δ6M) + large-font rank path.
 const _MONO="'IBM Plex Mono',ui-monospace,monospace";
+// cc#644: ONE shared heat-cell — identical styling/spacing/typography for BOTH the Performance grid
+// and the Trajectory grid (no forked second style). Grade fns differ (score deltas use tight bands,
+// % returns wide bands) but the cell render is the same 46px tinted mono tile. 'n' grade = neutral
+// surface, used for the Trajectory "Now" column (a level, not a signed delta).
+function _heatBg(g){return {g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';}
+function _heatTile(text,grade,col){return `<div style="flex:1;min-width:0;background:${_heatBg(grade)};border-radius:8px;height:46px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:13px;color:${col}">${text}</div>`;}
 function _deltaGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.05)return'n';return (v>0?'g':'r')+(a<0.25?'1':a<0.6?'2':'3');}
-function _trajTint(g){return {g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';}
-function _trajValTile(v){return `<div style="flex:1;min-width:0;background:var(--surface2);border-radius:8px;height:44px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:13px;color:var(--txt)">${v==null?'--':Number(v).toFixed(2)}</div>`;}
+function _trajValTile(v){return _heatTile(v==null?'--':Number(v).toFixed(2),'n','var(--txt)');}   // Now column: neutral tint
 function _trajDeltaTile(v,bf){const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
-  return `<div style="flex:1;min-width:0;background:${_trajTint(_deltaGrade(v))};border-radius:8px;height:44px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:12.5px;color:${col}">${v==null?'--':(v>0?'+':'')+v.toFixed(2)}${(bf&&v!=null)?'<span style="color:#F5B94A;font-size:9px;vertical-align:top">*</span>':''}</div>`;}
+  const t=(v==null?'--':(v>0?'+':'')+v.toFixed(2))+((bf&&v!=null)?'<span style="color:#F5B94A;font-size:9px;vertical-align:top">*</span>':'');
+  return _heatTile(t,_deltaGrade(v),col);}
 function trajHtml(t){
   if(!t)return'';
   const rowLbl=a=>`<div style="width:86px;min-width:86px;font-size:11px;font-weight:700;color:var(--txt)">${a}</div>`;
@@ -1849,21 +1855,13 @@ function trajHtml(t){
   h+=row('Momentum',t.m_now,t.m_d21,t.m_d126);
   h+=row('Sector GVM',t.sector_gvm_now,t.sector_gvm_d21,t.sector_gvm_d126);
   if(t.backfill_flag_6m)h+='<div style="font-size:9.5px;color:var(--dim);margin-top:2px">* 6M baseline partially backfilled</div>';
-  const rn=t.rank_now,r1=t.rank_1m,r6=t.rank_6m,N=t.segment_n;
-  if(rn!=null){
-    const imp=(r6!=null)?(rn<r6):null, rc=imp===true?'var(--grn)':imp===false?'var(--red)':'var(--txt)';
-    let path=`<span style="color:${rc}">#${rn}</span>`;
-    if(r1!=null)path+=' <span style="color:var(--dim);font-size:15px">&larr;</span> #'+r1;
-    if(r6!=null)path+=' <span style="color:var(--dim);font-size:15px">&larr;</span> #'+r6;
-    h+='<div style="font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:13px 0 3px">Sector rank &middot; now &larr; 1M &larr; 6M</div>';
-    h+=`<div style="font-family:${_MONO};font-size:22px;font-weight:800">${path}${N?`<span style="font-size:12px;color:var(--mut);font-weight:600;margin-left:8px">of ${N}</span>`:''}</div>`;
-  }
+  // cc#644: sector rank path REMOVED from the Trajectory grid — it now renders as one compact line
+  // inside the sector-rating box above (see the GVM Analysis block in qaAnalysis).
   return h;
 }
 function _perfGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.3)return'n';return (v>0?'g':'r')+(a<3?'1':a<10?'2':'3');}
-function _perfTile(v){const g=_perfGrade(v),bg={g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';
-  const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
-  return `<div style="flex:1;min-width:0;background:${bg};border-radius:8px;height:46px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px;color:${col}">${v==null?'--':(v>0?'+':'')+v.toFixed(1)+'%'}</div>`;}
+function _perfTile(v){const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
+  return _heatTile(v==null?'--':(v>0?'+':'')+v.toFixed(1)+'%',_perfGrade(v),col);}   // cc#644: shared _heatTile
 function heatHtml(d,stockName,segName){
   const sp=d.stock_perf,se=d.sector_perf;if(!sp&&!se)return'';
   const cols=['w1','m1','m3','y1'],hdr=['1W','1M','3M','1Y'];
@@ -1888,14 +1886,24 @@ async function qaAnalysis(sym){
     if(g){
       const pill=(lbl,v)=>`<div style="flex:1;text-align:center;padding:8px;background:var(--surface2);border:1px solid var(--line2);border-radius:8px"><div style="font-size:10px;color:var(--dim);font-weight:700">${lbl}</div><div style="font-size:16px;font-weight:800;font-family:'Sora',sans-serif">${v==null?'--':Number(v).toFixed(2)}</div></div>`;
       const dg=g.dgvm_180,dgs=(dg==null?'--':(dg>=0?'+':'')+Number(dg).toFixed(2));
-      const rank=(g.segment_rank!=null&&g.segment_total!=null)?('#'+g.segment_rank+' of '+g.segment_total):'--';
+      // cc#644 rank_move: sector rank path (now / 1M / 6M) folds INTO this box (removed from Trajectory).
+      // Prefer the trajectory rank series (rank_now/rank_1m/rank_6m/segment_n); fall back to snapshot rank.
+      const _tj=g.trajectory||{};
+      const _rn=(_tj.rank_now!=null?_tj.rank_now:g.segment_rank), _rN=(_tj.segment_n!=null?_tj.segment_n:g.segment_total);
+      const _imp=(_tj.rank_6m!=null&&_rn!=null)?(_rn<_tj.rank_6m):null, _rc=_imp===true?'var(--grn)':_imp===false?'var(--red)':'var(--txt)';
+      const _rankMain=(_rn!=null)?('#'+_rn+(_rN!=null?' of '+_rN:'')):'--';
+      const _rp=[]; if(_tj.rank_1m!=null)_rp.push('1M #'+_tj.rank_1m); if(_tj.rank_6m!=null)_rp.push('6M #'+_tj.rank_6m);
+      const _rankSub=_rp.length?` <span style="color:var(--dim);font-size:10px">(${_rp.join(', ')})</span>`:'';
       h+=secLbl('GVM Analysis');
-      h+=`<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px"><span style="font-size:26px;font-weight:800;font-family:'Sora',sans-serif">${g.gvm_score==null?'--':Number(g.gvm_score).toFixed(2)}</span><span style="font-size:12px;font-weight:700;color:var(--mut)">${newsEsc(g.verdict||'')}</span></div>`;
-      h+=`<div style="display:flex;gap:6px;margin-bottom:8px">${pill('Growth',g.g_score)}${pill('Value',g.v_score)}${pill('Momentum',g.m_score)}</div>`;
+      // cc#644 change_2: GVM number + verdict and the G/V/M pillar boxes share ONE row (headline left,
+      // pillars fill the right) — saves a full row. On narrow widths the pill group wraps below.
+      h+=`<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">`+
+        `<div style="display:flex;align-items:baseline;gap:8px;flex:0 0 auto"><span style="font-size:26px;font-weight:800;font-family:'Sora',sans-serif">${g.gvm_score==null?'--':Number(g.gvm_score).toFixed(2)}</span><span style="font-size:12px;font-weight:700;color:var(--mut)">${newsEsc(g.verdict||'')}</span></div>`+
+        `<div style="display:flex;gap:6px;flex:1;min-width:220px">${pill('Growth',g.g_score)}${pill('Value',g.v_score)}${pill('Momentum',g.m_score)}</div></div>`;
       h+=boxd(`<div style="display:flex;gap:10px;font-size:12px">`+
         `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Segment</span><br><b style="word-break:break-word">${newsEsc(g.segment||'--')}</b></div>`+
         `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Sector rating</span><br><b style="font-size:14px">${g.sector_rating==null?'--':Number(g.sector_rating).toFixed(2)}</b> <span style="color:var(--dim);font-size:10px">${newsEsc(g.sector_verdict||'')}</span></div>`+
-        `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Rank in segment</span><br><b style="font-size:14px">${rank}</b></div></div>`+
+        `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Rank in segment</span><br><b style="font-size:14px;color:${_rc}">${_rankMain}</b>${_rankSub}</div></div>`+
         `<div style="color:var(--dim);font-size:11px;margin-top:6px">180d Δ GVM ${dgs}</div>`);
     }
     // cc#630: TRAJECTORY block — score deltas + sector rank path (below the GVM pillars/sector box)
