@@ -1009,10 +1009,50 @@ def _bg_yahoo_daily_sync():
                 log.info(f"yahoo_ca_restate nightly: restated {len([r for r in ca if r['status']=='restated'])}/{len(cliffs)} {cliffs}")
         except Exception as e:
             log.error(f"yahoo_ca_restate nightly guard: {e}")
+        # cc#658 part_3: forward heal — any CA ex_date == today gets a proactive 5y restate this evening,
+        # before GVM (01:30). Supersedes reactive-only healing for KNOWN corporate actions.
+        try:
+            import ca_watchdog
+            fh = ca_watchdog.forward_heal()
+            if fh.get("symbols"):
+                log.info(f"ca forward_heal: {fh['symbols']}")
+        except Exception as e:
+            log.error(f"ca forward_heal: {e}")
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result} | index_heal: {heal}")
     except Exception as e: log.error(f"yahoo_daily: {e}")
     finally: _yahoo_daily_running = False
+
+
+def _bg_ca_daily_note():
+    """cc#658 part_4: 09:00 IST — CA / data-integrity morning note (written every day)."""
+    try:
+        import ca_watchdog
+        note = ca_watchdog.ca_daily_note()
+        log.info(f"ca_daily_note: {note.get('headline')}")
+    except Exception as e:
+        log.error(f"ca_daily_note: {e}")
+
+
+def _bg_master_watchdog_note():
+    """cc#658 part_5: 09:05 IST — consolidated master watchdog note (written every day)."""
+    try:
+        import ca_watchdog
+        note = ca_watchdog.master_watchdog_note()
+        log.info(f"master_watchdog_note [{note.get('status')}]: {note.get('headline')}")
+    except Exception as e:
+        log.error(f"master_watchdog_note: {e}")
+
+
+def _bg_ca_weekly_scan():
+    """cc#658 part_2: Sunday full 5y distortion scan (cliff x corporate_actions; auto-restate artefacts)."""
+    try:
+        import ca_watchdog
+        s = ca_watchdog.weekly_distortion_scan()
+        log.info(f"ca_weekly_scan: {s.get('cliff_events')} cliffs, {len(s.get('artefact_symbols') or [])} artefacts, "
+                 f"{len(s.get('genuine_crash_flags') or [])} genuine flags")
+    except Exception as e:
+        log.error(f"ca_weekly_scan: {e}")
 
 def _bg_gvm():
     global _gvm_ran_today
@@ -2714,6 +2754,12 @@ async def _scheduler_loop():
             # cc#420: EVERY day incl weekends/holidays — boards announce results over weekends and
             # Monday reporters confirm Sat/Sun dates; a trading-day guard here starved the calendar.
             _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar. cc#622 C: 06:15 -> 05:10 (before T+1 + result-corner)
+        if h == 9 and m == 0:
+            _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
+        if h == 9 and m == 5:
+            _spawn(_bg_master_watchdog_note)  # cc#658 part_5: 09:05 consolidated master watchdog note
+        if now.weekday() == 6 and h == 5 and m == 30:
+            _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         if h == 9 and m == 25:

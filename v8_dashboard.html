@@ -556,6 +556,9 @@
     &#128274; Market Closed &mdash; Final as of 15:30 IST &middot; figures frozen until 09:15 next trading day
   </div>
 
+  <!-- cc#658 part_6: one-line Data Integrity strip — CA watchdog headline; red if any unresolved anomaly. -->
+  <div id="dataIntegrityStrip" style="display:none;margin:0 0 12px;padding:7px 12px;border-radius:8px;font-size:11px;font-weight:600;letter-spacing:.02em"></div>
+
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
   <!-- cc#266: India VIX 5-day hourly line chart. cc#275: was an always-visible card; now a
        popout overlay triggered by the small chart button next to the mood FAILS pill. The
@@ -3395,6 +3398,24 @@ async function pollFeedHealth(){
 }
 pollFeedHealth();
 setInterval(pollFeedHealth,60*1000);
+
+// cc#658 part_6: Data Integrity strip — CA watchdog headline; red if any unresolved anomaly.
+async function loadDataIntegrity(){
+  var el=document.getElementById('dataIntegrityStrip'); if(!el) return;
+  try{
+    const d=await getJSON('/api/data-integrity/status');
+    const head=d.ca_headline||d.master_headline;
+    if(!head){ el.style.display='none'; return; }
+    const red=!!d.red;
+    el.style.display='block';
+    el.style.background=red?'rgba(217,45,60,.12)':'rgba(11,110,66,.10)';
+    el.style.border='1px solid '+(red?'rgba(217,45,60,.45)':'rgba(11,110,66,.35)');
+    el.style.color=red?'#d92d3c':'#0b6e42';
+    el.textContent=(red?'⚠ ':'✓ ')+'Data integrity: '+head;
+  }catch(e){ el.style.display='none'; }
+}
+loadDataIntegrity();
+setInterval(loadDataIntegrity,10*60*1000);
 </script>
 
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>

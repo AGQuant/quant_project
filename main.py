@@ -873,6 +873,20 @@ def build_health_report() -> dict:
             cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'"); table_count = cur.fetchone()[0]
             add_check("infrastructure", _check(table_count, "Tables in DB", lambda v: v >= 40))
 
+            # cc#658 part_6: data-integrity card — CA watchdog / cliff status from the daily notes.
+            report["sections"]["data_integrity"] = {"checks": [], "grade": "A"}
+            try:
+                import ca_watchdog
+                di = ca_watchdog.data_integrity_status()
+                add_check("data_integrity", _check(di.get("ca_headline") or "no note yet", "CA daily note",
+                          lambda v: ("ALL CLEAR" in str(v)) or ("no note" in str(v))))
+                add_check("data_integrity", _check(di.get("genuine_flags", 0), "Genuine-crash flags",
+                          lambda v: (v or 0) == 0))
+                add_check("data_integrity", _check(di.get("master_headline") or "no note yet", "Master watchdog",
+                          lambda v: ("ALL CLEAR" in str(v)) or ("no note" in str(v))))
+            except Exception as e:
+                add_check("data_integrity", _check(f"err:{str(e)[:60]}", "CA watchdog", lambda v: False))
+
             report["sections"]["data_feeds"] = {"checks": [], "grade": "A"}
             for tbl, q, max_d, label in [
                 ("raw_prices","SELECT MAX(price_date) FROM raw_prices",1,"EOD price data"),
@@ -1423,6 +1437,24 @@ async def restate_symbols_now(symbols: str = "", lookback: str = "5y", detect: b
     report = await asyncio.to_thread(ydu.restate_symbol_history, syms, lookback)
     return {"count": len(report), "restated": len([r for r in report if r.get("status") == "restated"]),
             "report": report}
+
+@app.get("/api/data-integrity/status")
+def data_integrity_status():
+    """cc#658 part_6: compact data-integrity status (latest CA note + master note headlines) for the
+    /health card and the V8 dashboard strip. Red when any unresolved anomaly."""
+    import ca_watchdog
+    return ca_watchdog.data_integrity_status()
+
+@app.post("/api/admin/ca_run")
+async def ca_run(action: str = "daily_note", x_admin_token: Optional[str] = Header(None)):
+    """cc#658: run a CA-watchdog job on demand — action=daily_note|master_note|weekly_scan|forward_heal."""
+    _check_admin(x_admin_token)
+    import ca_watchdog
+    fn = {"daily_note": ca_watchdog.ca_daily_note, "master_note": ca_watchdog.master_watchdog_note,
+          "weekly_scan": ca_watchdog.weekly_distortion_scan, "forward_heal": ca_watchdog.forward_heal}.get(action)
+    if not fn:
+        return {"error": "action must be daily_note|master_note|weekly_scan|forward_heal"}
+    return await asyncio.to_thread(fn)
 
 @app.post("/api/admin/backfill_indices")
 def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
