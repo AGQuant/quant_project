@@ -23,7 +23,7 @@ Path ordering: this router is included AFTER gvm_nightly_router in main.py so th
 static /recompute + /history routes are matched before the /{symbol} catch-all.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
@@ -180,12 +180,14 @@ _TREND_RANGE_DAYS = {"3m": 95, "1y": 372, "3y": 1100, "5y": 1830}
 
 
 @router.get("/api/gvm/trend/{symbol}")
-def get_gvm_trend(symbol: str, range: str = "5y"):
+def get_gvm_trend(symbol: str, rng: str = Query("5y", alias="range")):
     """cc#634: GVM + Price series for the click-to-expand chart (up to 5Y). gvm_history (composite +
     G/V/M) and raw_prices EOD close, over range 3m|1y|3y|5y, each downsampled to <=260 points for
     payload sanity (weekly-ish at 5Y). v_backfill_era flags that v_score was held constant pre-live
-    (method IS NOT NULL) — same honesty disclosure as the trajectory 6M asterisk."""
-    days = _TREND_RANGE_DAYS.get((range or "5y").lower(), 1830)
+    (method IS NOT NULL) — same honesty disclosure as the trajectory 6M asterisk.
+    cc#649: the query param is bound as `rng` (alias 'range') — the old `range: str` param shadowed the
+    builtin range(), so the >260-point downsample (only hit by 3Y/5Y) raised TypeError and 500'd."""
+    days = _TREND_RANGE_DAYS.get((rng or "5y").lower(), 1830)
     sym = symbol.upper()
 
     def _ds(rows):
@@ -203,7 +205,7 @@ def get_gvm_trend(symbol: str, range: str = "5y"):
                       WHERE symbol=%s AND price_date >= CURRENT_DATE - %s AND close IS NOT NULL
                       ORDER BY price_date ASC""", (sym, days))
     v_backfill = bool(isinstance(gv, list) and any(r.get("backfill") for r in gv))
-    return {"symbol": sym, "range": (range or "5y").lower(),
+    return {"symbol": sym, "range": (rng or "5y").lower(),
             "gvm": _ds(gv), "price": _ds(px), "v_backfill_era": v_backfill}
 
 
