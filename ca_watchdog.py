@@ -359,6 +359,14 @@ def master_watchdog_note():
             r = cur.fetchone(); lines["ca"] = r[0] if (r and r[0]) else "no CA note yet"
             if lines["ca"] not in ("ALL CLEAR", "no CA note yet"):
                 red.append(f"CA: {lines['ca']}")
+            # cc#667: ops-metrics extraction queue depth (CC drains in-session). Surface only when >0.
+            try:
+                cur.execute("SELECT COUNT(*) FROM ops_metrics_t1_queue WHERE status='pending'")
+                _omp = cur.fetchone()[0]
+                if _omp and _omp > 0:
+                    lines["ops_metrics_pending"] = _omp
+            except Exception:
+                pass
     except Exception as e:
         lines["db_probe"] = f"err:{str(e)[:80]}"
 

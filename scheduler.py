@@ -1066,6 +1066,64 @@ def _bg_ca_weekly_scan():
     except Exception as e:
         log.error(f"ca_weekly_scan: {e}")
 
+
+def _bg_weekly_ops_metrics_queue():
+    """cc#667: Saturday 06:10 IST — DETECT symbols needing sector-KPI extraction and QUEUE them into
+    ops_metrics_t1_queue. The scheduler ONLY detects + queues; CC drains the queue in-session per the
+    MAX_SUBSCRIPTION rule (id=8737) using the cc#648 doctrine (literal figures + verbatim source quotes).
+    Worklist = symbols with a STORED investor doc that is either uncovered (no sector_ops_metrics row
+    yet) or FRESHER than the symbol's latest extraction (a new doc landed since) — minus the
+    ops_metrics_honest_absent registry (id=8859 seed) and anything already queued 'pending'. Emits
+    ops_log(ops_metrics, WEEKLY_OPS_METRICS_QUEUE) with the newly-queued count + pending depth."""
+    try:
+        # cc#667: restrict to KPI-taxonomy sectors (those with a SPECIFIC registry, not the generic
+        # OTHER_SECTORS) via the same _infer_sector map the extraction uses — so the queue never fills
+        # with Diversified_Others generic-only names that have no sector KPI to extract.
+        try:
+            import ops_metrics_pipeline as _omp
+            _specific = set(_omp.SECTOR_REGISTRY_SEED.keys())
+        except Exception:
+            _omp, _specific = None, set()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS ops_metrics_honest_absent (
+                symbol TEXT PRIMARY KEY, sector TEXT,
+                reason TEXT DEFAULT 'doc read, no printed registry KPI',
+                reviewed_at TIMESTAMPTZ DEFAULT NOW())""")
+            cur.execute("""
+              WITH latest_doc AS (
+                SELECT symbol, MAX(fetched_at) AS fa FROM doc_texts
+                WHERE extract_status='stored' AND char_count>0 GROUP BY symbol),
+              latest_kpi AS (
+                SELECT symbol, MAX(created_at) AS ca FROM sector_ops_metrics GROUP BY symbol)
+              SELECT d.symbol FROM latest_doc d
+              LEFT JOIN latest_kpi k ON k.symbol=d.symbol
+              WHERE (k.ca IS NULL OR d.fa > k.ca)
+                AND d.symbol NOT IN (SELECT symbol FROM ops_metrics_honest_absent)
+                AND d.symbol NOT IN (SELECT symbol FROM ops_metrics_t1_queue WHERE status='pending')
+              ORDER BY d.symbol""")
+            cand = [r[0] for r in cur.fetchall()]
+            # taxonomy filter: keep only symbols whose segment maps to a specific-KPI sector
+            if _omp and cand:
+                cur.execute("SELECT DISTINCT symbol, segment FROM gvm_scores WHERE segment IS NOT NULL")
+                seg = {r[0]: r[1] for r in cur.fetchall()}
+                work = [s for s in cand if _omp._infer_sector(seg.get(s)) in _specific]
+            else:
+                work = cand
+            for sym in work:
+                cur.execute("INSERT INTO ops_metrics_t1_queue (symbol, queued_at, status) "
+                            "VALUES (%s, NOW(), 'pending')", (sym,))
+            cur.execute("SELECT COUNT(*) FROM ops_metrics_t1_queue WHERE status='pending'")
+            depth = cur.fetchone()[0]
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'ops_metrics', 'WEEKLY_OPS_METRICS_QUEUE', %s)""",
+                        (Json({"newly_queued": len(work), "queue_depth_pending": depth,
+                               "symbols": work[:80]}),))
+            conn.commit()
+        log.info(f"weekly_ops_metrics_queue: +{len(work)} queued, pending depth={depth}")
+    except Exception as e:
+        log.error(f"weekly_ops_metrics_queue: {e}")
+
+
 def _bg_gvm():
     global _gvm_ran_today
     today = _ist_now().date()
@@ -2650,6 +2708,8 @@ async def _scheduler_loop():
             _spawn(_bg_ca_sweep_daily)        # cc#659: DAILY (incl weekends) sharded full-universe CA scrape
         if now.weekday() == 6 and h == 5 and m == 30:
             _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
+        if now.weekday() == 5 and h == 6 and m == 10:
+            _spawn(_bg_weekly_ops_metrics_queue)   # cc#667: Sat 06:10 detect new docs -> ops-metrics queue
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         # cc#660: 09:25 feed-silent-at-open now handled inside feed_guardian.guardian_tick()

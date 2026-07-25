@@ -66,6 +66,18 @@ ORDER BY priority DESC, created_at ASC;
 ### Blocked tasks:
 If status='blocked' — skip, show Arpit why it is blocked.
 
+### Ops-metrics queue drain (cc#667, set 25-Jul-2026):
+At session start, AFTER claiming/handling cc_tasks: if `ops_metrics_t1_queue` has any `status='pending'`
+rows, DRAIN them in-session — CC is the model (MAX_SUBSCRIPTION_ONLY_RULE_V1 id=8737); the weekly
+scheduler job (Sat 06:10) only DETECTS + queues, it never extracts. For each queued symbol read the
+stored `doc_texts` and extract per the **cc#648 part_2 doctrine**: literal figures only + verbatim
+`source_quote` in `notes` + confidence tags (HIGH/MEDIUM/LOW). Write `sector_ops_metrics` rows, set the
+queue row `status='done', processed_at=NOW()`. A symbol whose doc prints NO registry KPI is honest-absent
+→ `INSERT INTO ops_metrics_honest_absent(symbol,sector,reason)` AND set its queue row `status='done'` (so
+the detector never re-queues it). Batch cap ~50 symbols/session, resumable; checkpoint per batch to
+`session_log(category='ops_metrics_pull')`. Queue depth surfaces in MASTER_WATCHDOG_NOTE as
+`ops_metrics_pending`.
+
 ### Claude.ai creates tasks via:
 INSERT INTO cc_tasks (title, spec, priority, category) VALUES ('TITLE', '{"description":"...","tasks":[...]}', 'high', 'ui');
 
