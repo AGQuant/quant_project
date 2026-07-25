@@ -230,9 +230,15 @@ def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
         return None
     dates = [d for d, _c in prows]
     closes = {d: c for d, c in prows}
-    # OI per trading date (latest tick that day), LEFT-joined from futures_basis over the spine window
+    # OI per trading date = the latest NON-NULL OI that day (cc#666 part_1 fix: the old query took the
+    # latest tick REGARDLESS of oi, but the day's final basis tick often carries a NULL oi — the OI feed
+    # stops before the basis feed — so every day resolved to NULL and the whole table rendered "--" even
+    # though futures_basis HAD day-end OI, e.g. LAURUSLABS 20/21/23-Jul). Filter oi IS NOT NULL so we
+    # pick each day's true end-of-day OI; genuinely absent days (22-Jul fut outage, 24-Jul dead feed)
+    # still have no row -> null -> "--". LEFT-joined over the raw_prices trading-day spine.
     cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
-                   WHERE symbol=%s AND ts::date >= %s ORDER BY ts::date, ts DESC""", (sym, dates[0]))
+                   WHERE symbol=%s AND ts::date >= %s AND oi IS NOT NULL
+                   ORDER BY ts::date, ts DESC""", (sym, dates[0]))
     oi_by_date = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
     def _px_chg(i):
