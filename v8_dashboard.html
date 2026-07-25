@@ -2025,10 +2025,64 @@ async function qaChartLoad(tf){
     const s=c.addCandlestickSeries({upColor:'#0a9e63',downColor:'#dd3a4a',borderVisible:false,
       wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a'});
     s.setData(data);c.timeScale().fitContent();_qaChartObj=c;_qaChartSeries=s;
+    box.style.position='relative';   // cc#664: anchor the fib zone SVG overlay
+    // cc#664: keep zone shading synced to the price scale on any pan/zoom
+    try{c.timeScale().subscribeVisibleTimeRangeChange(function(){qaDrawFibZones();});}catch(e){}
     msg.textContent=(isIntraday?'5m latest session · intraday_prices (fyers_eq)':tf+' · raw_prices (equity, adjusted)');
     qaApplyOverlays();   // cc#626 item_2: draw pivot/fib price lines if enabled
   }catch(e){msg.textContent='Chart failed to load.';}
 }
+// cc#664: Fib zone ladder — IDENTICAL to the GVM chart's shipped renderer (scorr_cio_dashboard.html
+// fibZoneKey/fibZoneColor; authority spec id=3019 R16 + id=6133 zone-colour-fix + cc#562). Zone colour
+// encodes the retracement's bullish/bearish MEANING — a deep-retracement-held 61.8-100% zone is
+// GREEN-tinted (structurally bullish), NOT red, and NOT keyed to position vs CMP. The two charts use
+// different engines (React SVG vs LightweightCharts) so a single renderer isn't extractable; this
+// ladder is kept in lockstep by citation and MUST NOT drift from the GVM chart.
+function _fibZoneKey(pct){
+  if(pct==null)return null;
+  if(pct>=100)return 'breakout';
+  if(pct>=78.6)return 'resist';
+  if(pct>=61.8)return 'strength';
+  if(pct>=38.2)return 'decision';
+  if(pct>=23.6)return 'weak';
+  return 'breakdown';
+}
+var _FIB_ZFILL={breakout:'rgba(10,158,99,.16)',resist:'rgba(10,158,99,.14)',strength:'rgba(10,158,99,.09)',
+                decision:'rgba(138,148,173,.10)',weak:'rgba(221,58,74,.07)',breakdown:'rgba(221,58,74,.15)'};
+var _FIB_ZLINE={breakout:'#0a9e63',resist:'#0a9e63',strength:'#12864f',decision:'#8a94ad',
+                weak:'#dd3a4a',breakdown:'#dd3a4a'};
+
+function _qaFibOverlayEl(box){
+  var ov=box.querySelector('#qaFibZones');
+  if(!ov){ ov=document.createElementNS('http://www.w3.org/2000/svg','svg'); ov.setAttribute('id','qaFibZones');
+    ov.style.cssText='position:absolute;left:0;top:0;pointer-events:none;z-index:2;'; box.appendChild(ov); }
+  return ov;
+}
+// cc#664: translucent zone shading between consecutive fib levels (band colour = zone ladder meaning),
+// drawn as an SVG overlay synced to the chart's live price scale via priceToCoordinate. Redraws on
+// pan/zoom/resize so it tracks the candles. Cleared when the Fib toggle is off.
+function qaDrawFibZones(){
+  var box=document.getElementById('qaChartBox'); if(!box)return;
+  var ov=_qaFibOverlayEl(box);
+  var fib=_qaFibCache[_qaChartSym];
+  if(!(_qaOv.fib&&fib&&fib.fib_levels&&_qaChartSeries)){ ov.innerHTML=''; return; }
+  var w=box.clientWidth, h=box.clientHeight||412;
+  ov.setAttribute('width',w); ov.setAttribute('height',h);
+  var lv=fib.fib_levels.filter(function(f){return f.price!=null&&f.pct!=null;})
+          .slice().sort(function(a,b){return a.pct-b.pct;});
+  var parts=[];
+  for(var i=0;i<lv.length-1;i++){
+    var yLo=_qaChartSeries.priceToCoordinate(+lv[i].price);
+    var yHi=_qaChartSeries.priceToCoordinate(+lv[i+1].price);
+    if(yLo==null||yHi==null)continue;
+    var top=Math.min(yLo,yHi), bh=Math.abs(yLo-yHi);
+    if(bh<0.5)continue;
+    var zk=_fibZoneKey((lv[i].pct+lv[i+1].pct)/2);
+    parts.push('<rect x="0" y="'+top.toFixed(1)+'" width="'+w+'" height="'+bh.toFixed(1)+'" fill="'+(_FIB_ZFILL[zk]||'rgba(138,148,173,.05)')+'"></rect>');
+  }
+  ov.innerHTML=parts.join('');
+}
+
 // cc#626 item_2: pivot + fib overlays as price lines, from the GVM chart's data source
 // (/api/trade-check/fibcheck: pivots=v8_paper_pivots, fib_levels=same swing derivation). Price-level
 // overlays apply across every timeframe. Cached per symbol.
@@ -2045,8 +2099,14 @@ async function qaApplyOverlays(){
       if(row[1]!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+row[1],color:row[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:row[0]}));});
   }
   if(_qaOv.fib&&fib&&fib.fib_levels){fib.fib_levels.forEach(f=>{
-    if(f.price!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:'#c98a12',lineWidth:1,lineStyle:3,axisLabelVisible:false,title:'Fib '+f.pct+'%'}));});
-  }
+    if(f.price==null)return;
+    // cc#664: colour each level by its zone (ladder meaning, not CMP side) + label ratio + price.
+    var zk=_fibZoneKey(f.pct), col=_FIB_ZLINE[zk]||'#8a94ad';
+    var ratio=(f.pct!=null)?(f.pct/100).toFixed(3):'';
+    var lbl=(ratio?ratio+' ':'')+(Math.round(+f.price*100)/100).toLocaleString('en-IN');
+    _qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:col,lineWidth:1,lineStyle:3,axisLabelVisible:true,title:lbl}));
+  });}
+  qaDrawFibZones();   // cc#664: translucent zone shading between levels
 }
 function qaToggleOverlay(kind){
   _qaOv[kind]=!_qaOv[kind];
