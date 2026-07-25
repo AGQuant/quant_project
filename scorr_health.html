@@ -123,7 +123,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
     <div style="font-family:'Sora',sans-serif;font-size:36px;font-weight:800;letter-spacing:-.5px;line-height:1.05;" id="hr-name">Anshu Kansal</div>
     <div style="font-size:13px;color:rgba(255,255,255,.45);margin-top:6px;letter-spacing:.2px;"><span id="hr-count">16</span> holdings &nbsp;·&nbsp; NSE/BSE &nbsp;·&nbsp; <span class="brandable" data-wl="Portfolio Analytics">Scorr GVM Engine</span></div>
     <div style="display:flex;gap:8px;margin-top:16px;" class="no-print">
-      <button onclick="window.print()" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:3px;border:none;background:var(--blu);color:#fff;letter-spacing:.3px;">&#8595; SAVE PDF</button>
+      <button id="hr-savepdf" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:3px;border:none;background:var(--blu);color:#fff;letter-spacing:.3px;cursor:pointer;">&#8595; SAVE PDF</button>
       <button id="hr-refresh" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;padding:8px 16px;border-radius:3px;border:1px solid rgba(255,255,255,.18);background:transparent;color:rgba(255,255,255,.7);letter-spacing:.3px;">&#8635; REFRESH</button>
     </div>
   </div>
@@ -727,6 +727,23 @@ html,body{margin:0;padding:0;background:var(--bg);}
       .catch(function(e){ showMsg('Failed to load report: '+e); });
   }
   var rf=$('hr-refresh'); if(rf) rf.addEventListener('click', function(){ if(pid) load('POST'); });
+
+  // cc#655: SAVE PDF -> mint a signed server-side WeasyPrint PDF link and download it directly.
+  // No window.print() / browser print dialog anywhere in the HR report flow.
+  function savePdf(btn){
+    if(!pid) return;
+    var orig=btn.innerHTML; btn.innerHTML='GENERATING&hellip;'; btn.disabled=true;
+    fetch('/api/health/report_pdf_self/'+encodeURIComponent(pid))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        if(!d || !d.url) throw new Error((d&&d.error)||'mint failed');
+        var a=document.createElement('a'); a.href=d.url; a.download=d.filename||'Portfolio_Health.pdf';
+        document.body.appendChild(a); a.click(); a.remove();
+        btn.innerHTML=orig; btn.disabled=false;
+      })
+      .catch(function(){ btn.innerHTML='&#8595; RETRY PDF'; btn.disabled=false; });
+  }
+  var sp=$('hr-savepdf'); if(sp) sp.addEventListener('click', function(){ savePdf(sp); });
 
   if(wl) applyWhiteLabel();   // static branding stripped immediately (before the async report data lands)
   if(pid) load('GET'); else renderUpload();

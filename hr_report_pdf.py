@@ -26,6 +26,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from hr_report import build_report, _conn
+try:
+    from scorr_auth import _is_authed   # cc#655: page-scoped mint gated on the browser login session
+except Exception:   # pragma: no cover — keep the module importable if auth wiring moves
+    def _is_authed(_request):
+        return True
 
 router = APIRouter()
 
@@ -196,6 +201,12 @@ def render_report_html(rep):
 * {{ box-sizing: border-box; }}
 body {{ font-family: 'DejaVu Sans Mono', monospace; color:#07111F; font-size:9.5px; margin:0; }}
 h1,h2,h3 {{ margin:0; }}
+/* cc#655 print pagination: keep the holdings header repeating, don't split rows/small blocks, never
+   orphan a section heading. Long tables still flow naturally (no forced page breaks -> no giant gaps). */
+thead {{ display: table-header-group; }}
+tr {{ page-break-inside: avoid; }}
+h3 {{ page-break-after: avoid; }}
+.strip, .take, .flag {{ page-break-inside: avoid; }}
 .mast {{ background:#07111F; color:#fff; padding:16px 18px; }}
 .mast .k {{ font-size:7.5px; letter-spacing:1px; color:rgba(255,255,255,.4); text-transform:uppercase; }}
 .mast .nm {{ font-size:22px; font-weight:800; margin-top:6px; }}
@@ -294,6 +305,28 @@ def report_pdf_link(pid: int, request: Request):
     sig = _sign(pid, exp)
     url = f"{_PUBLIC_BASE}/api/health/report_pdf/{pid}?exp={exp}&sig={sig}"
     return {"portfolio_id": pid, "url": url, "expires_in": _TOKEN_TTL}
+
+
+@router.get("/api/health/report_pdf_self/{pid}")
+def report_pdf_self(pid: int, request: Request):
+    """cc#655: page-scoped PDF link for the logged-in /health report page. Same signed-token PDF as the
+    admin/MCP path, but gated on the browser's login session (_is_authed) instead of the admin token, so
+    the SAVE PDF button can mint it directly. Returns a RELATIVE URL (same-origin -> the anchor download
+    attribute is honoured) + the filename."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "login required"}, status_code=403)
+    exp = int(time.time()) + _TOKEN_TTL
+    sig = _sign(pid, exp)
+    name = None
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT name FROM hr_portfolios WHERE id=%s", (pid,))
+            row = cur.fetchone()
+            name = row[0] if row else None
+    except Exception:
+        name = None
+    return {"portfolio_id": pid, "url": f"/api/health/report_pdf/{pid}?exp={exp}&sig={sig}",
+            "filename": _pdf_filename(name), "expires_in": _TOKEN_TTL}
 
 
 @router.get("/api/health/report_pdf/{pid}")
