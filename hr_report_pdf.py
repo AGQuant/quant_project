@@ -16,10 +16,13 @@ Design notes:
    carry the runtime deps; Claude-web verifies the Railway build per the task closure clause.
 """
 import os
+import sys
 import hmac
 import time
 import hashlib
 import html as _html
+import threading
+import subprocess
 from datetime import date
 
 from fastapi import APIRouter, Request
@@ -37,6 +40,73 @@ router = APIRouter()
 _SECRET = (os.getenv("ADMIN_TOKEN") or os.getenv("DATABASE_URL") or "hr-pdf-fallback-secret").encode()
 _PUBLIC_BASE = os.getenv("PUBLIC_BASE_URL", "https://scorr.in").rstrip("/")
 _TOKEN_TTL = 600   # 10 minutes
+
+
+# ── cc#662: crash-isolated PDF render ────────────────────────────────────────────
+# The reported symptom: SAVE PDF mints fine, then /report_pdf dies with "Site wasn't available"
+# (connection reset), deterministically. Root cause shape: WeasyPrint's NATIVE stack
+# (pango/cairo/gdk-pixbuf) can segfault or the render can OOM the ~85%-full Railway box — either
+# way it kills the uvicorn WORKER mid-response, so the client sees a reset, NOT the lazy-import 503.
+# Fix: render in a memory-capped SUBPROCESS (a crash there isolates -> the parent returns a clean
+# JSON 503), serialized to concurrency 1 via a module lock (no parallel render spikes).
+_render_lock = threading.Lock()
+RENDER_TIMEOUT = 45
+_MEM_LIMIT_BYTES = int(os.getenv("PDF_RENDER_MEM_MB", "1400")) * 1024 * 1024
+
+_RENDER_SNIPPET = (
+    "import sys\n"
+    "from weasyprint import HTML\n"
+    "data = sys.stdin.buffer.read().decode('utf-8')\n"
+    "sys.stdout.buffer.write(HTML(string=data).write_pdf())\n"
+)
+
+
+def _rss_mb():
+    """Current process RSS in MB (Linux /proc). None if unavailable — diagnostics only, never raises."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024.0, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _rlimit_preexec():   # pragma: no cover — runs in the child only
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (_MEM_LIMIT_BYTES, _MEM_LIMIT_BYTES))
+    except Exception:
+        pass
+
+
+def _render_pdf_isolated(html_str, timeout=RENDER_TIMEOUT):
+    """Render HTML->PDF in a memory-capped subprocess. Returns (pdf_bytes, None) or (None, error).
+    NEVER raises and NEVER lets a native crash reach the uvicorn worker."""
+    if not _render_lock.acquire(timeout=25):
+        return None, "PDF renderer busy — another report is rendering, retry shortly"
+    proc = None
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _RENDER_SNIPPET],
+            input=html_str.encode("utf-8"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+            preexec_fn=(_rlimit_preexec if os.name == "posix" else None))
+    except subprocess.TimeoutExpired:
+        return None, f"PDF render timed out after {timeout}s (likely render hang / low memory)"
+    except Exception as e:
+        return None, f"PDF subprocess launch failed: {str(e)[:200]}"
+    finally:
+        _render_lock.release()
+    if proc.returncode != 0 or not proc.stdout:
+        stderr = (proc.stderr or b"").decode("utf-8", "replace")[-400:].strip()
+        if proc.returncode is not None and proc.returncode < 0:
+            reason = f"renderer killed by signal {-proc.returncode} (native segfault or OOM)"
+        else:
+            reason = f"renderer exited {proc.returncode}"
+        return None, f"PDF render failed: {reason}{(' — ' + stderr) if stderr else ''}"[:400]
+    return proc.stdout, None
 
 
 # ── signed short-lived token ────────────────────────────────────────────────────
@@ -160,14 +230,26 @@ def render_report_html(rep):
             f'<td>{_pct(h.get("from_ath"), 0)}</td>'
             f'<td><span class="chip {_chip_cls((h.get("verdict")))}">{_esc(h.get("action") or h.get("verdict") or "—")}</span></td></tr>')
 
-    # result analysis
-    ra_rows = ""
-    for r in (rep.get("result_analysis") or []):
-        ra_rows += (f'<div class="flag"><b>{_esc(r.get("symbol"))}</b> '
-                    f'<span class="chip {_chip_cls(r.get("chip"))}">{_esc(r.get("chip") or "")}</span><br>'
-                    f'{_esc(r.get("analysis"))}</div>')
-    if not ra_rows:
-        ra_rows = '<div class="muted">No fresh results in the last 45 days.</div>'
+    # cc#662 / FORMAT_V1.1: Results This Quarter — compact table (Sales Gr. | Profit Gr. | FY27 Est.),
+    # not analysis prose. Announced-but-not-extracted rows show a "pending" marker, never dropped.
+    rtq = rep.get("results_this_quarter") or []
+    if rtq:
+        _rr = ""
+        for r in rtq:
+            if r.get("pending"):
+                sg = pg = '<span class="muted">pending</span>'
+            else:
+                sg, pg = _pct(r.get("sales_growth")), _pct(r.get("profit_growth"))
+            fy = _pct(r.get("fy27_est")) if r.get("fy27_est") is not None else "&#8212;"
+            _rr += (f'<tr><td class="l" style="font-weight:700;">{_esc(r.get("symbol"))}</td>'
+                    f'<td>{sg}</td><td>{pg}</td><td>{fy}</td></tr>')
+        _ytr = rep.get("results_yet_to_report") or 0
+        _foot = (f'<div class="note">{_ytr} of {len(rep.get("holdings") or [])} holdings yet to report.</div>'
+                 if _ytr else "")
+        ra_rows = (f'<table><tr><th>Symbol</th><th>Sales Gr.</th><th>Profit Gr.</th><th>FY27 Est.</th></tr>'
+                   f'{_rr}</table>{_foot}')
+    else:
+        ra_rows = '<div class="muted">No holdings have reported results this quarter yet.</div>'
 
     # red flags
     rf_rows = ""
@@ -193,7 +275,7 @@ def render_report_html(rep):
     overall = rt.get("overall")
     # cc#654: realised / unrealised breakdown under the P&L tile (shown only when realised lots exist)
     _rp = snap.get("realised_pnl")
-    pnl_split = (f'<div style="font-size:7.5px;color:#5B667D;margin-top:3px;">Realised {_money(_rp)} '
+    pnl_split = (f'<div style="font-size:9.5px;color:#5B667D;margin-top:4px;">Realised {_money(_rp)} '
                  f'&middot; Unrealised {_money(snap.get("unrealised_pnl"))}</div>') if _rp not in (None, 0) else ""
 
     # cc#656: dual money-return alpha (vs Nifty 50 + vs Nifty 500), each its own +/- colour, date once.
@@ -205,9 +287,11 @@ def render_report_html(rep):
     alpha_block = _alpha_line('vs Nifty 50', snap.get('alpha_n50')) + _alpha_line('vs Nifty 500', snap.get('alpha_n500'))
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-@page {{ size: A4; margin: 12mm 12mm 14mm; }}
+/* cc#662 / HEALTH_REPORT_CLIENT_FORMAT_V1.1: client docs use DejaVu SANS (not mono) at a 12.5px
+   base — a readable client deliverable, not a terminal dump. */
+@page {{ size: A4; margin: 14mm 14mm 16mm; }}
 * {{ box-sizing: border-box; }}
-body {{ font-family: 'DejaVu Sans Mono', monospace; color:#07111F; font-size:9.5px; margin:0; }}
+body {{ font-family: 'DejaVu Sans', sans-serif; color:#07111F; font-size:12.5px; line-height:1.55; margin:0; }}
 h1,h2,h3 {{ margin:0; }}
 /* cc#655 print pagination: keep the holdings header repeating, don't split rows/small blocks, never
    orphan a section heading. Long tables still flow naturally (no forced page breaks -> no giant gaps). */
@@ -216,37 +300,37 @@ tr {{ page-break-inside: avoid; }}
 h3 {{ page-break-after: avoid; }}
 .strip, .take, .flag {{ page-break-inside: avoid; }}
 .mast {{ background:#07111F; color:#fff; padding:16px 18px; }}
-.mast .k {{ font-size:7.5px; letter-spacing:1px; color:rgba(255,255,255,.4); text-transform:uppercase; }}
-.mast .nm {{ font-size:22px; font-weight:800; margin-top:6px; }}
-.mast .sub {{ font-size:8.5px; color:rgba(255,255,255,.5); margin-top:4px; }}
-.mast .rate {{ float:right; text-align:right; margin-top:-40px; }}
-.mast .rate .big {{ font-size:40px; font-weight:800; line-height:1; }}
+.mast .k {{ font-size:9px; letter-spacing:1px; color:rgba(255,255,255,.4); text-transform:uppercase; }}
+.mast .nm {{ font-size:30px; font-weight:800; margin-top:6px; }}
+.mast .sub {{ font-size:9.5px; color:rgba(255,255,255,.5); margin-top:4px; }}
+.mast .rate {{ float:right; text-align:right; margin-top:-48px; }}
+.mast .rate .big {{ font-size:52px; font-weight:800; line-height:1; }}
 .strip {{ display:table; width:100%; border-collapse:collapse; margin-top:0; }}
-.strip .c {{ display:table-cell; width:25%; padding:10px 14px; border-right:1px solid #E5E8EF; border-bottom:1px solid #E5E8EF; }}
-.lbl {{ font-size:7.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:#9098A8; }}
-.big {{ font-size:15px; font-weight:700; margin-top:3px; }}
-.sec {{ padding:12px 16px; border-bottom:1px solid #E5E8EF; }}
-.sec h3 {{ font-size:8px; letter-spacing:.7px; text-transform:uppercase; color:#9098A8; margin-bottom:8px; }}
+.strip .c {{ display:table-cell; width:25%; padding:16px 18px; border-right:1px solid #E5E8EF; border-bottom:1px solid #E5E8EF; }}
+.lbl {{ font-size:9.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:#9098A8; }}
+.big {{ font-size:21px; font-weight:700; margin-top:4px; }}
+.sec {{ padding:18px 18px; border-bottom:1px solid #E5E8EF; }}
+.sec h3 {{ font-size:11px; letter-spacing:.7px; text-transform:uppercase; color:#8B93A5; margin-bottom:10px; }}
 table {{ width:100%; border-collapse:collapse; }}
-th {{ font-size:7.5px; text-transform:uppercase; letter-spacing:.4px; color:#9098A8; text-align:right; padding:4px 6px; border-bottom:1px solid #E5E8EF; }}
+th {{ font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; color:#8B93A5; text-align:right; padding:7px 7px; border-bottom:1px solid #E5E8EF; }}
 th:first-child, td.l {{ text-align:left; }}
-td {{ font-size:9px; padding:5px 6px; border-bottom:1px solid #EEF0F4; text-align:right; white-space:nowrap; }}
-.track {{ height:3px; background:#E5E8EF; border-radius:2px; overflow:hidden; }}
-.fill {{ height:3px; }}
-td.rl {{ color:#5B667D; width:90px; }} td.rv {{ font-weight:700; width:40px; }}
-.chip {{ font-size:7.5px; font-weight:600; padding:1px 6px; border-radius:2px; }}
+td {{ font-size:11.5px; padding:8px 7px; border-bottom:1px solid #EEF0F4; text-align:right; white-space:nowrap; }}
+.track {{ height:6px; background:#E5E8EF; border-radius:3px; overflow:hidden; }}
+.fill {{ height:6px; }}
+td.rl {{ color:#5B667D; width:110px; }} td.rv {{ font-weight:700; width:46px; }}
+.chip {{ font-size:9.5px; font-weight:700; padding:3px 9px; border-radius:2px; }}
 .chip.g {{ background:rgba(11,110,66,.12); color:#0B6E42; }}
 .chip.r {{ background:rgba(181,36,50,.12); color:#B52432; }}
 .chip.a {{ background:rgba(143,92,7,.12); color:#8F5C07; }}
 .chip.b {{ background:rgba(24,71,223,.12); color:#1847DF; }}
 .mv {{ display:inline-block; margin-right:14px; }} .mv-s {{ font-weight:700; }} .mv-v {{ margin-left:5px; }}
-.flag {{ font-size:9px; color:#5B667D; margin:5px 0; line-height:1.5; }} .flag b {{ color:#07111F; }}
-.muted {{ font-size:9px; color:#9098A8; }}
-.cols {{ display:table; width:100%; }} .col {{ display:table-cell; width:50%; vertical-align:top; padding:12px 16px; }}
+.flag {{ font-size:11.5px; color:#5B667D; margin:8px 0; line-height:1.65; }} .flag b {{ color:#07111F; }}
+.muted {{ font-size:11.5px; color:#9098A8; }}
+.cols {{ display:table; width:100%; }} .col {{ display:table-cell; width:50%; vertical-align:top; padding:18px 18px; }}
 .col:first-child {{ border-right:1px solid #E5E8EF; }}
-ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin:3px 0; line-height:1.5; }}
-.note {{ font-size:8.5px; color:#5B667D; margin-top:6px; }}
-.take {{ background:#07111F; color:rgba(255,255,255,.85); padding:14px 16px; font-size:9.5px; line-height:1.7; }}
+ul {{ margin:0; padding-left:18px; }} li {{ font-size:11.5px; color:#5B667D; margin:6px 0; line-height:1.65; }}
+.note {{ font-size:11px; color:#5B667D; margin-top:8px; line-height:1.5; }}
+.take {{ background:#07111F; color:rgba(255,255,255,.88); padding:20px 20px; font-size:13.5px; line-height:1.85; }}
 </style></head><body>
 <div class="mast">
   <div class="k">Portfolio Health Report &middot; {today}</div>
@@ -260,7 +344,7 @@ ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin
   <div class="c"><div class="lbl">Invested</div><div class="big">{_money(snap.get('invested'))}</div></div>
   <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div></div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
-    <div style="font-size:9px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
+    <div style="font-size:11px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
   <div class="c" style="border-right:none;"><div class="lbl">Alpha{alpha_since_lbl}</div>{alpha_block}</div>
 </div>
 <div class="cols">
@@ -287,14 +371,14 @@ ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin
 <div class="sec"><h3>Holdings — Full Detail</h3>
   <table><tr><th>Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>Rating</th><th>From ATH</th><th>Verdict</th></tr>{hold_rows}</table></div>
 <div class="cols">
-  <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Latest Result Analysis</h3>{ra_rows}</div>
+  <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Results This Quarter</h3>{ra_rows}</div>
   <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Red Flags</h3>{rf_rows}</div>
 </div>
 <div class="sec"><h3>Replacement Ideas</h3>{rep_rows}
   <div class="note">{_esc(rep.get('replacement_note'))}</div></div>
 <div class="sec"><h3>Key Highlights</h3><ul>{hl}</ul></div>
 <div class="take"><div class="lbl" style="color:rgba(255,255,255,.35);margin-bottom:8px;">Expert Take</div>{_esc(rep.get('expert_take'))}
-  <div style="font-size:7.5px;color:rgba(255,255,255,.3);margin-top:12px;">Data as of report date &middot; Research only, not investment advice.</div></div>
+  <div style="font-size:9px;color:rgba(255,255,255,.3);margin-top:14px;">Data as of report date &middot; Research only, not investment advice.</div></div>
 </body></html>"""
 
 
@@ -333,6 +417,7 @@ def report_pdf_self(pid: int, request: Request):
     except Exception:
         name = None
     return {"portfolio_id": pid, "url": f"/api/health/report_pdf/{pid}?exp={exp}&sig={sig}",
+            "html_url": f"/api/health/report_html/{pid}?exp={exp}&sig={sig}&print=1",   # cc#662 fallback
             "filename": _pdf_filename(name), "expires_in": _TOKEN_TTL}
 
 
@@ -349,14 +434,60 @@ def report_pdf(pid: int, exp: str = "", sig: str = ""):
     if not rep or rep.get("error"):
         return JSONResponse({"error": (rep or {}).get("error", "report unavailable")}, status_code=404)
     html_str = render_report_html(rep)
-    try:
-        from weasyprint import HTML   # lazy — a missing native lib 503s here, never at app boot
-    except Exception as e:
-        return JSONResponse({"error": f"PDF renderer unavailable: {str(e)[:200]}"}, status_code=503)
-    try:
-        pdf_bytes = HTML(string=html_str).write_pdf()
-    except Exception as e:
-        return JSONResponse({"error": f"PDF render failed: {str(e)[:200]}"}, status_code=500)
+    # cc#662: crash-isolated render — a native segfault/OOM returns a clean 503 JSON (the frontend
+    # then falls back to the print-HTML), never a connection reset that reads as "Site wasn't available".
+    pdf_bytes, err = _render_pdf_isolated(html_str)
+    if err:
+        return JSONResponse({"error": err, "fallback": f"/api/health/report_html/{pid}"}, status_code=503)
     fname = _pdf_filename((rep.get("portfolio") or {}).get("name"))
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+@router.get("/api/health/pdf_selftest")
+def pdf_selftest(request: Request):
+    """cc#662: one-call diagnosis of the server PDF env (admin-gated). Imports weasyprint and renders
+    a 1-line HTML->PDF in the SAME isolated path the real endpoint uses, reporting version, timing,
+    RSS before/after, and the exact failure (import error / signal / stderr) if any. Turns the black
+    box into a diagnosis without a connection reset."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "admin token required"}, status_code=403)
+    out = {"ok": False, "rss_mb_before": _rss_mb(), "weasyprint_version": None, "pango_ok": None}
+    try:
+        import weasyprint
+        out["weasyprint_version"] = getattr(weasyprint, "__version__", "unknown")
+    except Exception as e:
+        out["stage"] = "import"; out["error"] = str(e)[:300]
+        return JSONResponse(out, status_code=200)
+    t0 = time.time()
+    pdf, err = _render_pdf_isolated("<!DOCTYPE html><html><body><p>Health Report PDF selftest</p></body></html>", timeout=30)
+    out["ms"] = int((time.time() - t0) * 1000)
+    out["rss_mb_after"] = _rss_mb()
+    out["pango_ok"] = bool(pdf)   # a successful render implies pango/cairo/gdk-pixbuf all resolved
+    if err:
+        out["stage"] = "render"; out["error"] = err
+        return JSONResponse(out, status_code=200)
+    out["ok"] = True; out["pdf_bytes"] = len(pdf)
+    return JSONResponse(out, status_code=200)
+
+
+@router.get("/api/health/report_html/{pid}")
+def report_html(pid: int, exp: str = "", sig: str = "", print: str = ""):
+    """cc#662: the white-label report as text/html (same signed token as the PDF). The SAVE PDF
+    button falls back here when the PDF engine 503s, so the user can browser-print -> Save as PDF
+    instead of hitting a silent Chrome download error. ?print=1 auto-opens the print dialog."""
+    if not _token_valid(pid, exp, sig):
+        return JSONResponse({"error": "invalid or expired token"}, status_code=403)
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            rep = build_report(cur, pid)
+    except Exception as e:
+        return JSONResponse({"error": f"report engine failed: {str(e)[:200]}"}, status_code=500)
+    if not rep or rep.get("error"):
+        return JSONResponse({"error": (rep or {}).get("error", "report unavailable")}, status_code=404)
+    html_str = render_report_html(rep)
+    if str(print).strip() not in ("", "0", "false"):
+        html_str = html_str.replace(
+            "</body>",
+            "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},350);});</script></body>")
+    return Response(content=html_str, media_type="text/html; charset=utf-8")

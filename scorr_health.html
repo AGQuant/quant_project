@@ -736,20 +736,44 @@ html,body{margin:0;padding:0;background:var(--bg);}
   }
   var rf=$('hr-refresh'); if(rf) rf.addEventListener('click', function(){ if(pid) load('POST'); });
 
-  // cc#655: SAVE PDF -> mint a signed server-side WeasyPrint PDF link and download it directly.
-  // No window.print() / browser print dialog anywhere in the HR report flow.
+  // cc#655/cc#662: SAVE PDF -> mint a signed WeasyPrint PDF and download it. The PDF is FETCHED as a
+  // blob (not an anchor navigation) so a server 503/connection-reset is caught cleanly; on any render
+  // failure we toast and fall back to the white-label print HTML (browser-print -> Save as PDF),
+  // never a silent Chrome "Site wasn't available". (cc#662 re-sanctions the print path for fallback.)
+  function hrToast(msg){
+    var t=document.createElement('div');
+    t.textContent=msg;
+    t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#07111F;color:#fff;padding:11px 18px;border-radius:4px;font-size:13px;z-index:9999;box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:90%;text-align:center;';
+    document.body.appendChild(t);
+    setTimeout(function(){ t.style.transition='opacity .4s'; t.style.opacity='0'; setTimeout(function(){t.remove();},400); }, 3400);
+  }
   function savePdf(btn){
     if(!pid) return;
     var orig=btn.innerHTML; btn.innerHTML='GENERATING&hellip;'; btn.disabled=true;
+    function done(){ btn.innerHTML=orig; btn.disabled=false; }
+    function fallback(hurl){
+      hrToast('PDF engine unavailable — generating print view instead');
+      if(hurl){ try{ window.open(hurl,'_blank'); }catch(e){} }
+      done();
+    }
     fetch('/api/health/report_pdf_self/'+encodeURIComponent(pid))
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(r){ if(!r.ok) throw new Error('mint HTTP '+r.status); return r.json(); })
       .then(function(d){
         if(!d || !d.url) throw new Error((d&&d.error)||'mint failed');
-        var a=document.createElement('a'); a.href=d.url; a.download=d.filename||'Portfolio_Health.pdf';
-        document.body.appendChild(a); a.click(); a.remove();
-        btn.innerHTML=orig; btn.disabled=false;
+        var hurl=d.html_url, fname=d.filename||'Portfolio_Health.pdf';
+        return fetch(d.url).then(function(pr){
+          var ct=pr.headers.get('content-type')||'';
+          if(!pr.ok || ct.indexOf('application/pdf')<0){ fallback(hurl); return; }
+          return pr.blob().then(function(b){
+            var u=URL.createObjectURL(b);
+            var a=document.createElement('a'); a.href=u; a.download=fname;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+            done();
+          });
+        }).catch(function(){ fallback(hurl); });
       })
-      .catch(function(){ btn.innerHTML='&#8595; RETRY PDF'; btn.disabled=false; });
+      .catch(function(){ hrToast('PDF service unavailable — please retry'); btn.innerHTML='&#8595; RETRY PDF'; btn.disabled=false; });
   }
   var sp=$('hr-savepdf'); if(sp) sp.addEventListener('click', function(){ savePdf(sp); });
 

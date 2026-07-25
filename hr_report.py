@@ -124,7 +124,8 @@ def _load_cmp(cur, syms):
 def _load_screener(cur, syms):
     cur.execute("""
         SELECT nse_code, pe, segment_pe, dividend_yield, "Promoter holding",
-               "Unpledged promoter holding", fii_change, dii_change, return_1y, "High price", market_cap
+               "Unpledged promoter holding", fii_change, dii_change, return_1y, "High price", market_cap,
+               "Sales growth", "Operating profit growth"
         FROM screener_raw WHERE nse_code = ANY(%s)
     """, (syms,))
     out = {}
@@ -132,7 +133,8 @@ def _load_screener(cur, syms):
         out[r[0]] = {"pe": _f(r[1]), "segment_pe": _f(r[2]), "yield": _f(r[3]),
                      "promoter": _f(r[4]), "unpledged": _f(r[5]), "fii_change": _f(r[6]),
                      "dii_change": _f(r[7]), "return_1y": _f(r[8]), "high52": _f(r[9]),
-                     "mcap": _f(r[10])}
+                     "mcap": _f(r[10]),
+                     "sales_growth": _f(r[11]), "profit_growth": _f(r[12])}   # cc#662 Results-This-Quarter
     return out
 
 
@@ -277,6 +279,16 @@ def _upcoming(cur, syms):
             for r in cur.fetchall()]
 
 
+def _announced(cur, syms):
+    """cc#662 V1.1: holdings that ANNOUNCED results in the current quarter (earnings_calendar ex_date
+    within the last 60 days). Returns {symbol: latest announced date}."""
+    cur.execute("""SELECT ticker, MAX(ex_date) FROM earnings_calendar
+                   WHERE ticker = ANY(%s) AND ex_date <= CURRENT_DATE
+                     AND ex_date >= (CURRENT_DATE - INTERVAL '60 days')
+                   GROUP BY ticker""", (syms,))
+    return {r[0]: str(r[1]) for r in cur.fetchall()}
+
+
 # ---- result-analysis strength chip --------------------------------------------
 _STRONG = ("strong", "beat", "robust", "healthy", "outperform", "record", "surge", "jump")
 _WEAK = ("weak", "miss", "decline", "fall", "drop", "muted", "disappoint", "loss", "de-grow", "degrow")
@@ -348,6 +360,7 @@ def build_report(cur, pid):
             "result_analysis": i.get("result_analysis"),
             "result_chip": _strength_chip(i.get("result_analysis")),
             "result_fresh": i.get("ra_fresh", False),
+            "sales_growth": s.get("sales_growth"), "profit_growth": s.get("profit_growth"),   # cc#662
         })
 
     # weights
@@ -521,6 +534,23 @@ def build_report(cur, pid):
                         "analysis": h["result_analysis"], "chip": h["result_chip"]}
                        for h in holdings if h["result_analysis"] and h["result_fresh"]]
 
+    # ---- (13b) cc#662 / FORMAT_V1.1: Results-This-Quarter compact table (replaces the analysis pane
+    # in the client PDF). Holdings that announced this quarter (earnings_calendar <=60d) OR carry fresh
+    # result text; columns Sales Growth % | Profit Growth % | FY27 Est. Announced-not-yet-extracted rows
+    # render with a pending marker — never silently dropped. Holdings not yet announced are absent. ----
+    announced = _announced(cur, syms)
+    results_tq = []
+    for h in holdings:
+        adate = announced.get(h["symbol"])
+        if not adate and not h.get("result_fresh"):
+            continue
+        sg, pg, fy27 = h.get("sales_growth"), h.get("profit_growth"), h.get("fwd_growth")
+        results_tq.append({"symbol": h["symbol"], "sales_growth": sg, "profit_growth": pg,
+                           "fy27_est": fy27, "announced": adate,
+                           "pending": (sg is None and pg is None)})
+    results_tq.sort(key=lambda x: (x["pending"], x["symbol"]))
+    results_yet_to_report = max(0, len(holdings) - len(results_tq))
+
     # ---- red flags ----
     red_flags = []
     for h in holdings:
@@ -595,6 +625,8 @@ def build_report(cur, pid):
         "replacement_note": replacement_note,
         "upcoming": upcoming,
         "result_analysis": result_analysis,
+        "results_this_quarter": results_tq,             # cc#662 V1.1 compact table
+        "results_yet_to_report": results_yet_to_report,  # cc#662 V1.1 footnote
         "red_flags": red_flags,
         "holdings": holdings,
         "highlights": highlights,
