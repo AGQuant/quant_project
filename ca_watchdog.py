@@ -362,6 +362,19 @@ def master_watchdog_note():
     except Exception as e:
         lines["db_probe"] = f"err:{str(e)[:80]}"
 
+    # (d) feed liveness — cc#660: consume feed_guardian's summary as the feed section
+    try:
+        import feed_guardian
+        g = feed_guardian.guardian_summary()
+        lines["feed_guardian"] = {"legs": g.get("legs"),
+                                  "worker_heartbeat_age_min": g.get("worker_heartbeat_age_min"),
+                                  "oi_degrade_pct": g.get("oi_degrade_pct"),
+                                  "open_repairs": g.get("open_repairs")}
+        for rf in (g.get("red_flags") or []):
+            red.append(f"feed: {rf}")
+    except Exception as e:
+        lines["feed_guardian"] = f"err:{str(e)[:60]}"
+
     note = {"status": "RED" if red else "OK",
             "headline": ("ALL CLEAR" if not red else " · ".join(red[:6])),
             "red_flags": red, "detail": lines}

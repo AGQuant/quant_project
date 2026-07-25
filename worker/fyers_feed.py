@@ -502,6 +502,48 @@ def _flag_set(conn, key, val):
     return False
 
 
+# ── cc#660 FEED_GUARDIAN_V1: worker heartbeat + guardian resubscribe-command channel ──────────────
+# The app-side feed_guardian is the brain (detect + decide); the worker is the hands. The worker
+# (a) touches worker_heartbeat every ~5 min ANY hour it runs, so the app's off-hours liveness tick
+# turns a weekend worker death into a <=45-min Telegram instead of a 13h blind spot (Sat 25-Jul);
+# (b) polls app_config['feed_guardian_cmd'] and executes a forced RESUBSCRIBE (or a RESTART when the
+# guardian escalates) at most ONCE per monotonic nonce, writing the outcome back to
+# app_config['feed_guardian_cmd_ack'] + ops_log. All best-effort — never raises into the loop.
+HEARTBEAT_WRITE_MIN = 5    # write cadence; well under the app's 45-min silence alarm for margin
+_GUARDIAN_CMD_KEY   = "feed_guardian_cmd"
+_GUARDIAN_ACK_KEY   = "feed_guardian_cmd_ack"
+
+
+def _write_heartbeat(conn, boot_ts):
+    """cc#660: upsert the single worker_heartbeat row (id=1). Fresh-conn fallback like _flag_set so
+    a stale shared conn never silently stops the heartbeat (which would trip a false worker-silent
+    alarm)."""
+    for target in ("shared", "fresh"):
+        hc = get_db() if target == "fresh" else conn
+        try:
+            with hc.cursor() as cur:
+                cur.execute("""CREATE TABLE IF NOT EXISTS worker_heartbeat (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    last_beat TIMESTAMP, boot_ts TIMESTAMP, note TEXT,
+                    CONSTRAINT worker_heartbeat_singleton CHECK (id = 1))""")
+                cur.execute("""INSERT INTO worker_heartbeat (id, last_beat, boot_ts, note)
+                               VALUES (1, NOW(), %s, %s)
+                               ON CONFLICT (id) DO UPDATE SET last_beat=NOW(),
+                                 boot_ts=EXCLUDED.boot_ts, note=EXCLUDED.note""",
+                            (boot_ts, "fyers_feed"))
+            hc.commit()
+            return True
+        except Exception as e:
+            log.warning(f"_write_heartbeat via {target}: {e}")
+        finally:
+            if target == "fresh":
+                try:
+                    hc.close()
+                except Exception:
+                    pass
+    return False
+
+
 def _fut_bars_today():
     """cc#605: count today's fyers_fut 5m bars. Returns -1 on DB error so a bad read NEVER triggers a
     false restart (the caller acts only on an exact 0)."""
@@ -2429,6 +2471,8 @@ def run(auth_code=None):
         sub_seq_day          = None   # cc#497 fix_1_TIMING_FINAL: canary/full sequence trigger, once/day
         last_fut_check       = None   # cc#605 fix_2: throttle the 09:24 futures-delivery probe (>=90s apart)
         fut_alerted          = False  # cc#605 fix_2: fired the "still 0 after the one restart" alert once
+        last_heartbeat       = None   # cc#660: last worker_heartbeat write (every HEARTBEAT_WRITE_MIN)
+        guardian_cmd_nonce   = None   # cc#660: highest feed_guardian_cmd nonce already executed
 
         def _mark_db_error(e, where):
             """cc#497 fix_2b: the 17-Jul root cause — every conn-based call in this loop caught
@@ -2454,6 +2498,52 @@ def run(auth_code=None):
             today  = now.date()
             now_dt = now.replace(tzinfo=None)
             in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE)
+
+            # ── cc#660: worker heartbeat (every HEARTBEAT_WRITE_MIN, ANY hour) ────────────────
+            if last_heartbeat is None or (now_dt - last_heartbeat).total_seconds() >= HEARTBEAT_WRITE_MIN * 60:
+                if _write_heartbeat(conn, boot_time.replace(tzinfo=None)):
+                    last_heartbeat = now_dt
+
+            # ── cc#660: feed_guardian resubscribe/restart command poll (once per nonce) ───────
+            # The app-side guardian sets feed_guardian_cmd when a leg is stale while another flows.
+            # We execute at most once per monotonic nonce: RESUBSCRIBE -> run the two-stage subscribe
+            # sequence (re-subscribes equity + full futures leg); RESTART -> hard re-exec. Outcome is
+            # written back to feed_guardian_cmd_ack + ops_log so the guardian can see it landed.
+            try:
+                raw_cmd = _flag_get(conn, _GUARDIAN_CMD_KEY)
+                if raw_cmd:
+                    cmd = json.loads(raw_cmd)
+                    nonce = int(cmd.get("nonce", 0))
+                    if guardian_cmd_nonce is None:
+                        # first poll after a (re)boot: adopt the current nonce WITHOUT acting, so a
+                        # restart can never replay a stale command into an execv loop.
+                        guardian_cmd_nonce = nonce
+                    elif nonce > guardian_cmd_nonce:
+                        guardian_cmd_nonce = nonce
+                        action = (cmd.get("action") or "resubscribe").lower()
+                        leg    = cmd.get("leg", "all")
+                        log.error(f"cc#660 guardian cmd nonce={nonce} action={action} leg={leg} "
+                                  f"— {cmd.get('reason','')}")
+                        _flag_set(conn, _GUARDIAN_ACK_KEY, json.dumps(
+                            {"nonce": nonce, "action": action, "leg": leg,
+                             "status": "executing", "ist": _ist_now_str()}))
+                        _ops_log(conn, 'alert', 'feed_guardian_cmd',
+                                 {'nonce': nonce, 'action': action, 'leg': leg,
+                                  'reason': cmd.get('reason', ''), 'ist': _ist_now_str()})
+                        if action == "restart":
+                            _flag_set(conn, _GUARDIAN_ACK_KEY, json.dumps(
+                                {"nonce": nonce, "action": action, "leg": leg,
+                                 "status": "restarting", "ist": _ist_now_str()}))
+                            _hard_restart(f"cc#660 guardian escalation: {leg} — {cmd.get('reason','')}")
+                        else:
+                            threading.Thread(target=_run_subscribe_sequence,
+                                             args=(f"guardian-{leg}",), daemon=True).start()
+                            _flag_set(conn, _GUARDIAN_ACK_KEY, json.dumps(
+                                {"nonce": nonce, "action": action, "leg": leg,
+                                 "status": "resubscribe_dispatched", "ist": _ist_now_str()}))
+            except Exception as e:
+                if not _mark_db_error(e, 'guardian cmd poll'):
+                    log.warning(f"cc#660 guardian cmd poll failed: {e}")
 
             # ── cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: subscription sequencing ──────────────
             # (replaces the old on_connect auto-subscribe; root_cause_1_ws_premarket_zombie).

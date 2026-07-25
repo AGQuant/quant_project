@@ -1393,24 +1393,43 @@ def _bg_nse_eod_ingest():
         log.error(f"nse_eod_ingest: {e}")
 
 
-def _bg_oi_feed_health():
-    """cc#515: universe-wide futures OI-staleness check (deriv_metrics.check_oi_feed_degradation).
-    Per-symbol staleness is already surfaced honestly in the cockpit itself; this is the feed-wide
-    tripwire — if >20% of active futures symbols have OI >2 sessions stale (the 16-Jul-incident
-    shape), fire ONE oi_feed_degraded alert instead of every cockpit silently degrading one symbol
-    at a time. Runs once/day (EOD) — cadence controlled here, not inside the diagnostic itself."""
+# cc#660 FEED_GUARDIAN_V1: the five legacy feed watchdogs (feed_staleness_watch cc#475,
+# feed_incident_relay cc#501, open_bars_alarm cc#229, oi_feed_health cc#515, writer-no-bars
+# reaction) are consolidated into feed_guardian.py — ONE detect->repair owner. These thin
+# wrappers dispatch its ticks on the scheduler pool. engine_watchdog / scheduler master /
+# CA watchdog stay separate (different domains).
+def _bg_guardian_tick():
+    """cc#660: 5-min market-hours per-leg detect->repair (resubscribe->restart, Telegram only on
+    repair FAIL). Replaces open_bars_alarm + feed_staleness_watch + intraday incident relay."""
     try:
-        import deriv_metrics
-        with _conn() as conn:
-            res = deriv_metrics.check_oi_feed_degradation(conn)
-        log.info(f"oi_feed_health: {res}")
-        if res.get("pct", 0.0) > 20.0:
-            _log_alert("oi_feed_degraded",
-                       f"{res['stale']}/{res['checked']} active futures symbols ({res['pct']}%) have "
-                       f"futures_basis.oi stale beyond session {res.get('cutoff_session')} — feed-wide "
-                       f"OI gap, not isolated symbols.")
+        import feed_guardian
+        res = feed_guardian.guardian_tick()
+        if res.get("actions"):
+            log.info(f"feed_guardian tick: legs={res.get('legs')} actions={res.get('actions')}")
     except Exception as e:
-        log.error(f"oi_feed_health: {e}")
+        log.error(f"guardian_tick: {e}")
+
+
+def _bg_guardian_offhours():
+    """cc#660: 15-min ALL-DAYS worker-liveness tick (heartbeat >45min -> Telegram) + off-hours
+    incident relay. Weekend worker death becomes a <=45-min alert, not a 13h discovery."""
+    try:
+        import feed_guardian
+        res = feed_guardian.offhours_liveness_tick()
+        if res.get("alerted"):
+            log.error(f"feed_guardian offhours: worker silent {res.get('heartbeat_age_min')}min")
+    except Exception as e:
+        log.error(f"guardian_offhours: {e}")
+
+
+def _bg_guardian_eod_oi():
+    """cc#660: post-close (16:15) universe-wide OI-degradation tripwire (cc#515 parity)."""
+    try:
+        import feed_guardian
+        res = feed_guardian.eod_oi_check()
+        log.info(f"feed_guardian eod_oi: {res}")
+    except Exception as e:
+        log.error(f"guardian_eod_oi: {e}")
 
 
 _v14_running = False
@@ -1608,6 +1627,15 @@ def _bg_feed_daily_log():
                 bars[source] = {"last_bar_ts": str(last_bar), "buckets": buckets,
                                  "gaps": max(0, EXPECTED_BUCKETS - buckets)}
 
+        # cc#660: fold in the feed_guardian liveness snapshot (per-leg age, worker heartbeat,
+        # open repairs, OI tripwire) so the daily log is one place, sourced from the guardian.
+        guardian = {}
+        try:
+            import feed_guardian
+            guardian = feed_guardian.guardian_summary()
+        except Exception as e:
+            guardian = {"error": str(e)[:120]}
+
         summary = {
             "date": str(_ist_now().date()),
             "ws_connects": counts.get("feed_ws_connect", 0),
@@ -1618,6 +1646,7 @@ def _bg_feed_daily_log():
             "health_floor_breaches": floor_breaches,
             "oi_poll_rates": oi_rates,
             "bars_by_source": bars,
+            "guardian": guardian,   # cc#660
         }
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
@@ -1630,32 +1659,8 @@ def _bg_feed_daily_log():
     except Exception as e:
         log.error(f"feed_daily_log failed: {e}")
 
-def _bg_open_bars_alarm():
-    """cc#229: 09:25 IST trading-day feed-silence alarm. If almost no intraday bars landed
-    since 09:15, the live feed is silent at open (cold-boot zombie / dead worker) — fire a
-    feed_silent_at_open alert. Independent of subscribe_verify (which can pass while bars are
-    still zero, so it must NOT suppress this).
-    Threshold: spec said <1000, but at 09:25 a healthy feed has only ~2 five-min buckets
-    (~420 eq+fut symbols x 2 ≈ 840 bars), so 1000 would false-alarm daily. Using <400 catches
-    genuine silence (~0) with margin below the healthy floor — founder can retune."""
-    try:
-        now = _ist_now()
-        if not _is_trading_day(now.date()):
-            return _SKIPPED
-        open_ts = now.replace(hour=9, minute=15, second=0, microsecond=0).replace(tzinfo=None)
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM intraday_prices WHERE ts >= %s AND timeframe='5m'",
-                        (open_ts,))
-            bars = cur.fetchone()[0]
-        if bars < 400:
-            _log_alert("feed_silent_at_open",
-                       f"09:25 IST: only {bars} intraday 5m bars since 09:15 — live feed appears "
-                       f"SILENT at open (cold-boot zombie / dead worker). Manual restart may be needed.")
-            log.error(f"FEED SILENT AT OPEN: {bars} 5m bars since 09:15 (<400)")
-        else:
-            log.info(f"open-bars alarm OK: {bars} 5m bars since 09:15")
-    except Exception as e:
-        log.error(f"open_bars_alarm: {e}")
+# cc#660: _bg_open_bars_alarm (cc#229 feed-silent-at-open) folded into feed_guardian.guardian_tick()
+# — the 09:20-09:30 open-silence check now lives there with the same <400-bars floor.
 
 # cc#217: _bg_fetch_company_news / _bg_company_news_wave2 / _bg_company_news_retry
 # removed — the 500-company Google waves were retired (cc#207) and fully deleted here.
@@ -2504,140 +2509,11 @@ def _bg_ops_metrics_season_sweep():
         log.error(f"_bg_ops_metrics_season_sweep: {e}")
 
 
-# cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
-# only restart the writer). This checks the FEED WORKER's own output (intraday_prices) from
-# the main app, so it survives the worker dying outright. Per-source alert/recovery state kept
-# in-process (module globals) — cheap, no DB table needed for a 5-min-cadence check.
-_FEED_ALERT_STATE = {}   # source -> {'alerted_at': datetime|None, 'was_stale': bool}
-FEED_STALE_MIN = 15
-FEED_ALERT_THROTTLE_MIN = 30
-FEED_SOURCES = ("fyers_eq", "fyers_fut")
-
-
-def _bg_feed_staleness_watch():
-    """cc#475: every 5 min, 09:20-15:30 IST on trading days — check MAX(ts) per source in
-    intraday_prices. Stale >15min -> Telegram alert (throttled 1/30min/source) + ops_log
-    (category=feed_alert). Recovery message + ops_log when bars resume. 09:35 first-bar-of-day
-    check: zero bars since open -> alert immediately (skip the 15-min wait)."""
-    now = _ist_now()
-    if not (_is_trading_day(now.date()) and dt_time(9, 20) <= now.time() <= dt_time(15, 30)):
-        return _SKIPPED
-    try:
-        import v10_st_ema
-        with _conn() as conn, conn.cursor() as cur:
-            for src in FEED_SOURCES:
-                cur.execute("SELECT MAX(ts) FROM intraday_prices WHERE source=%s AND ts::date=%s",
-                            (src, now.date()))
-                last = cur.fetchone()[0]
-                st = _FEED_ALERT_STATE.setdefault(src, {"alerted_at": None, "was_stale": False})
-
-                # first-bar-of-day: 09:35 and NOTHING since open -> alert now, don't wait for 15min math
-                if last is None:
-                    if now.time() >= dt_time(9, 35) and now.time() < dt_time(9, 40) and not st["alerted_at"]:
-                        msg = f"FEED STALE — no {src} bars since 09:15 open ({now.strftime('%H:%M')} IST). Worker likely down — check truthful-friendship."
-                        v10_st_ema.telegram_alert(msg)
-                        st["alerted_at"] = now; st["was_stale"] = True
-                        _log_feed_alert_ops(cur, src, "alert", msg, None)
-                        conn.commit()
-                    continue
-
-                age_min = (now - last).total_seconds() / 60.0
-                if age_min > FEED_STALE_MIN:
-                    can_alert = (st["alerted_at"] is None or
-                                 (now - st["alerted_at"]).total_seconds() >= FEED_ALERT_THROTTLE_MIN * 60)
-                    if can_alert:
-                        msg = (f"FEED STALE — last {src} bar {last.strftime('%H:%M:%S')} IST "
-                               f"({age_min:.0f} min ago). Worker likely down — check truthful-friendship.")
-                        v10_st_ema.telegram_alert(msg)
-                        st["alerted_at"] = now
-                        _log_feed_alert_ops(cur, src, "alert", msg, age_min)
-                        conn.commit()
-                    st["was_stale"] = True
-                elif st["was_stale"]:
-                    msg = f"FEED RECOVERED — {src} flowing, last bar {last.strftime('%H:%M:%S')} IST."
-                    v10_st_ema.telegram_alert(msg)
-                    st["was_stale"] = False
-                    st["alerted_at"] = None
-                    _log_feed_alert_ops(cur, src, "recovery", msg, age_min)
-                    conn.commit()
-    except Exception as e:
-        log.error(f"_bg_feed_staleness_watch: {e}")
-
-
-def _log_feed_alert_ops(cur, source, kind, message, age_min):
-    try:
-        cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
-                    "VALUES (CURRENT_DATE, NOW(), 'feed_alert', %s, %s)",
-                    (kind, Json({"source": source, "message": message,
-                                 "age_min": round(age_min, 1) if age_min is not None else None})))
-    except Exception as e:
-        log.warning(f"_log_feed_alert_ops: {e}")
-
-
-# cc#501 item_4 (merges cc#475's alert scope, weekend-gated, 18-Jul-2026 = Saturday): relay
-# worker-written ops_log(category='alert') incidents to Telegram -- feed_watchdog_reconnect,
-# feed_watchdog_exit, feed_boot_gap>15min during market hours, and the housekeeping 3-strikes
-# exit (housekeeping_db_dead_exit). feed_silent_at_open is already covered by
-# _bg_feed_staleness_watch's 09:35 first-bar-of-day check above -- not duplicated here. Runs in
-# the MAIN APP (not the worker) so the relay survives the worker dying outright -- same principle
-# as cc#475's staleness watch. High-water-mark persisted in app_config (NOT an in-process global
-# like _FEED_ALERT_STATE) so a main-app redeploy (auto-deploy fires ~90s after every push) never
-# replays old incidents; the first-ever run seeds the mark to the current max id with no alerts
-# (avoids a backlog blast on rollout) and only relays rows written after that.
-_FEED_INCIDENT_TITLES = ("feed_watchdog_reconnect", "feed_watchdog_exit",
-                         "housekeeping_db_dead_exit", "feed_boot_gap")
-_FEED_INCIDENT_LAST_ID_KEY = "feed_incident_relay_last_ops_log_id"
-
-def _bg_feed_incident_relay():
-    try:
-        import v10_st_ema
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS app_config (
-                key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT NOW())""")
-            conn.commit()
-            cur.execute("SELECT value FROM app_config WHERE key=%s", (_FEED_INCIDENT_LAST_ID_KEY,))
-            row = cur.fetchone()
-            if not row or row[0] is None:
-                cur.execute("SELECT COALESCE(MAX(id), 0) FROM ops_log")
-                seed_id = cur.fetchone()[0]
-                cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s,%s,NOW())
-                               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
-                            (_FEED_INCIDENT_LAST_ID_KEY, str(seed_id)))
-                conn.commit()
-                return
-            last_id = int(row[0])
-
-            cur.execute("""SELECT id, title, details FROM ops_log
-                           WHERE category='alert' AND title = ANY(%s) AND id > %s
-                           ORDER BY id ASC LIMIT 50""", (list(_FEED_INCIDENT_TITLES), last_id))
-            rows = cur.fetchall()
-            max_id = last_id
-            for rid, title, details in rows:
-                max_id = max(max_id, rid)
-                d = details if isinstance(details, dict) else {}
-                if title == "feed_boot_gap":
-                    gap = d.get("gap_min")
-                    if not (d.get("market_open") and gap is not None and float(gap) > 15):
-                        continue   # cc#501: only >15min during market hours, not every boot gap
-                    msg = f"FEED BOOT GAP — {float(gap):.0f} min since last bar at boot (market open). Check truthful-friendship."
-                elif title == "feed_watchdog_reconnect":
-                    msg = f"FEED WATCHDOG — forced reconnect ({d.get('detail','')})."
-                elif title == "feed_watchdog_exit":
-                    msg = f"FEED WATCHDOG — exiting for a Railway restart ({d.get('detail','')})."
-                elif title == "housekeeping_db_dead_exit":
-                    msg = f"FEED WORKER — housekeeping DB conn dead after 3 consecutive failures, exiting ({d.get('detail','')})."
-                else:
-                    continue
-                v10_st_ema.telegram_alert(msg)
-                _log_feed_alert_ops(cur, "worker", title, msg, None)
-                conn.commit()
-            if max_id != last_id:
-                cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s,%s,NOW())
-                               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
-                            (_FEED_INCIDENT_LAST_ID_KEY, str(max_id)))
-                conn.commit()
-    except Exception as e:
-        log.error(f"_bg_feed_incident_relay: {e}")
+# cc#660 FEED_GUARDIAN_V1: _bg_feed_staleness_watch (cc#475), _log_feed_alert_ops, and
+# _bg_feed_incident_relay (cc#501 item_4) are RETIRED — feed_guardian.py now owns per-source
+# staleness detection+repair (guardian_tick) and the worker-incident relay (Telegram only for
+# escalations, not routine reconnects — the 24-Jul alert-fatigue fix). Their in-process/app_config
+# state is superseded by feed_guardian's single app_config JSON state (survives app redeploy).
 
 
 _tc_scanner_running = False   # cc#464: single-flight guard for the 15-min scan+exit-check
@@ -2776,18 +2652,18 @@ async def _scheduler_loop():
             _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
-        if h == 9 and m == 25:
-            _spawn(_bg_open_bars_alarm)       # cc#229: 09:25 feed-silent-at-open alarm
+        # cc#660: 09:25 feed-silent-at-open now handled inside feed_guardian.guardian_tick()
+        # (runs every 5 min market-hours; its 09:20-09:30 window covers the open-silence case).
         # cc#445 fix_4: ATM-OI daily snapshot — post-open (09:20) + EOD (15:35), trading days.
         if now.weekday() < 5 and _is_trading_day(now.date()) and ((h == 9 and m == 20) or (h == 15 and m == 35)):
             _spawn(_bg_oi_snapshot)
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
-            _spawn(_bg_feed_staleness_watch)   # cc#475: independent feed-worker watchdog + Telegram alert
-        if m % 5 == 0:
-            # cc#501 item_4: NOT market-hours-gated — worker incidents (reconnect/exit/housekeeping
-            # 3-strikes) can happen any time the always-on worker is running, incl. pre/post-market.
-            _spawn(_bg_feed_incident_relay)
+            _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
+        if m % 15 == 0:
+            # cc#660: 15-min ALL-DAYS worker-liveness (heartbeat >45min) + off-hours incident relay.
+            # Replaces the m%5 feed_incident_relay — worker incidents any hour still surface here.
+            _spawn(_bg_guardian_offhours)
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
         # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
@@ -2821,8 +2697,8 @@ async def _scheduler_loop():
         if now.weekday() < 5 and h == 16 and m == 10:
             _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
         if h == 16 and m == 15:
-            _spawn(_bg_feed_daily_log)           # cc#495 change_4: daily feed health summary (every day, worker runs weekends too)
-            _spawn(_bg_oi_feed_health)           # cc#515: universe-wide futures OI-staleness tripwire (>20% -> oi_feed_degraded)
+            _spawn(_bg_feed_daily_log)           # cc#495 change_4: daily feed health summary (reads feed_guardian state, cc#660)
+            _spawn(_bg_guardian_eod_oi)          # cc#660: universe-wide futures OI-staleness tripwire (cc#515 parity)
         # cc#517: NSE EOD ingest suite, 18:30 IST + retries 19:30/20:30 (idempotent upserts --
         # a retry just fills whatever NSE hadn't published yet on the prior pass).
         if now.weekday() < 5 and h == 18 and m == 30: _spawn(_bg_nse_eod_ingest)
