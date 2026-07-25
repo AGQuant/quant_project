@@ -1656,15 +1656,25 @@ function _dcRender(sym,side,qty,entry,cmp,d){
       </div></div>`;
   }
 
-  // 05 LEVELS
+  // 05 LEVELS — cc#666 part_2: each level card carries a WEAK/STRONG/NAKED strength chip (VPOC today/
+  // prior, VWAP from touch-count + CMP distance; Delivery from deliv% vs its 21d avg). ATR is a
+  // volatility measure, NOT a level -> deliberately no chip.
   const vp=L.vpoc_today||{},vpp=L.vpoc_prior||{},vw=L.vwap||{},dv=E.delivery||{};
-  const lvc=(k,pin,v)=>v==null?'':`<div class="lvc"><div class="k">${k}${pin||''}</div><div class="v">${v}</div></div>`;
+  const strCh=s=>(s&&s.label)?`<span class="lvv ${s.color||'amb'}" style="margin-left:auto;font-size:8px;padding:1px 6px;letter-spacing:.3px">${s.label}</span>`:'';
+  const delCh=(function(){
+    if(dv.deliv_pct==null)return'';
+    let lab=null,col='amb';
+    if(dv.ratio!=null){ if(dv.ratio>=1.2){lab='STRONG';col='grn';} else if(dv.ratio<=0.7){lab='WEAK';col='red';} else {lab='AVG';col='amb';} }
+    else if(dv.avg21!=null){ lab=dv.deliv_pct>=dv.avg21?'STRONG':'WEAK'; col=dv.deliv_pct>=dv.avg21?'grn':'red'; }
+    return lab?strCh({label:lab,color:col}):'';
+  })();
+  const lvc=(k,pin,v,chip)=>v==null?'':`<div class="lvc"><div class="k">${k}${pin||''}${chip||''}</div><div class="v">${v}</div></div>`;
   let cards='';
-  cards+=lvc('VPOC &middot; TODAY',' <span class="pin mag">POC</span>',vp.value!=null?num(vp.value,0):null);
-  cards+=lvc('VPOC &middot; PRIOR',vpp.value!=null?(vpp.naked?' <span class="pin nak">NAKED</span>':' <span class="pin mag">TESTED</span>'):'',vpp.value!=null?num(vpp.value,0):null);
-  cards+=lvc('VWAP','',vw.value!=null?num(vw.value,1):null);
+  cards+=lvc('VPOC &middot; TODAY',' <span class="pin mag">POC</span>',vp.value!=null?num(vp.value,0):null,strCh(vp.strength));
+  cards+=lvc('VPOC &middot; PRIOR','',vpp.value!=null?num(vpp.value,0):null,strCh(vpp.strength));
+  cards+=lvc('VWAP','',vw.value!=null?num(vw.value,1):null,strCh(vw.strength));
   cards+=lvc('ATR &middot; 14D','',E.atr_daily!=null?num(E.atr_daily,1):null);
-  cards+=lvc('DELIVERY %','',dv.deliv_pct!=null?(num(dv.deliv_pct,1)+'<span style="font-size:12px;color:var(--c-mut)">%</span>'):null);
+  cards+=lvc('DELIVERY %','',dv.deliv_pct!=null?(num(dv.deliv_pct,1)+'<span style="font-size:12px;color:var(--c-mut)">%</span>'):null,delCh);
   // cc#624 item_4: structural LEVELS verdict chip (STRONG/MODERATE/WEAK · winning/non-neutral votes),
   // assembled server-side so it can never drift from the tiles. ATR coiling -> caution line, not a vote.
   const lv=L.verdict||{};

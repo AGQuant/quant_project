@@ -472,20 +472,49 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
             return None
         return max(buckets, key=buckets.get)
 
+    # cc#666 part_2: per-level STRENGTH chip. Deterministic rules (documented for retune):
+    #   touches = # of today's 5m bars whose [low,high] straddles the level within +-0.15%.
+    #   NAKED (amber)  = 0 touches -> untested, acts as a magnet.
+    #   STRONG (green) = >=3 touches AND price still in play near it (|dist|<=2%) -> tested & held.
+    #   WEAK (red)     = otherwise (barely tested, or price has decisively left the level).
+    def _touches(bars, level, tol=0.0015):
+        if not level:
+            return 0
+        lob, hib = level * (1 - tol), level * (1 + tol)
+        n = 0
+        for c, h, l, v, ts in bars:
+            h = _f(h); l = _f(l)
+            if h is None or l is None:
+                continue
+            if l <= hib and h >= lob:
+                n += 1
+        return n
+
+    def _lvl_strength(level, touches, dist_pct):
+        if not level:
+            return None
+        if touches == 0:
+            return {"label": "NAKED", "color": "amb"}
+        if touches >= 3 and (dist_pct is None or abs(dist_pct) <= 2.0):
+            return {"label": "STRONG", "color": "grn"}
+        return {"label": "WEAK", "color": "red"}
+
     tb = _bars(today)
     if tb:
         vpoc_t = _vpoc(tb)
         hi = max((_f(x[1]) for x in tb if _f(x[1]) is not None), default=None)
         lo = min((_f(x[2]) for x in tb if _f(x[2]) is not None), default=None)
-        out["vpoc_today"] = {"value": vpoc_t,
-                             "dist_pct": round((cmp_px - vpoc_t) / vpoc_t * 100.0, 2) if (vpoc_t and cmp_px) else None}
+        _vpt_dist = round((cmp_px - vpoc_t) / vpoc_t * 100.0, 2) if (vpoc_t and cmp_px) else None
+        out["vpoc_today"] = {"value": vpoc_t, "dist_pct": _vpt_dist,
+                             "strength": _lvl_strength(vpoc_t, _touches(tb, vpoc_t), _vpt_dist)}   # cc#666 part_2
         # VWAP
         num = sum((_f(x[0]) or 0) * (_f(x[3]) or 0) for x in tb)
         den = sum((_f(x[3]) or 0) for x in tb)
         if den:
             vwap = num / den
-            out["vwap"] = {"value": round(vwap, 2),
-                           "dist_pct": round((cmp_px - vwap) / vwap * 100.0, 2) if cmp_px else None}
+            _vw_dist = round((cmp_px - vwap) / vwap * 100.0, 2) if cmp_px else None
+            out["vwap"] = {"value": round(vwap, 2), "dist_pct": _vw_dist,
+                           "strength": _lvl_strength(vwap, _touches(tb, vwap), _vw_dist)}   # cc#666 part_2
         # fall-from-day-high. cc#516: day_hi kept for the interpretation-layer line ("rallied to X,
         # faded -Y% into close").
         out["day_hi"] = hi
@@ -532,7 +561,10 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
             vpoc_p = _vpoc(pb)
             if vpoc_p is not None:
                 naked = not (lo is not None and hi is not None and lo <= vpoc_p <= hi)
-                out["vpoc_prior"] = {"value": vpoc_p, "naked": naked}
+                # cc#666 part_2: naked prior VPOC = untested magnet (amber); tested = it framed today's
+                # range -> STRONG. (touch count uses today's bars via the naked test above.)
+                _pstr = {"label": "NAKED", "color": "amb"} if naked else {"label": "STRONG", "color": "grn"}
+                out["vpoc_prior"] = {"value": vpoc_p, "naked": naked, "strength": _pstr}
         # VolX — cumulative-volume multiple vs the prior sessions at the matched time-of-day.
         # cc#427 fix_7 / cc#445 fix_5 / cc#454: the anchor session must be RELIABLE. Off-market the latest
         # session can be corrupt/feed-frozen — Fri 10-Jul TRENT had 75 bars present but a full-day volume
