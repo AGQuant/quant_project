@@ -196,6 +196,14 @@ def render_report_html(rep):
     pnl_split = (f'<div style="font-size:7.5px;color:#5B667D;margin-top:3px;">Realised {_money(_rp)} '
                  f'&middot; Unrealised {_money(snap.get("unrealised_pnl"))}</div>') if _rp not in (None, 0) else ""
 
+    # cc#656: dual money-return alpha (vs Nifty 50 + vs Nifty 500), each its own +/- colour, date once.
+    def _alpha_line(lbl, v):
+        col = "#5B667D" if v is None else ("#0B6E42" if v >= 0 else "#B52432")
+        return (f'<div style="font-size:11px;font-weight:700;color:{col};margin-top:2px;">'
+                f'<span style="font-size:7.5px;color:#9098A8;font-weight:600;">{lbl}</span> {_pct(v)}</div>')
+    alpha_since_lbl = (' &middot; since ' + _esc(snap.get('alpha_label'))) if snap.get('alpha_label') else ''
+    alpha_block = _alpha_line('vs Nifty 50', snap.get('alpha_n50')) + _alpha_line('vs Nifty 500', snap.get('alpha_n500'))
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @page {{ size: A4; margin: 12mm 12mm 14mm; }}
 * {{ box-sizing: border-box; }}
@@ -253,8 +261,7 @@ ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin
   <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div></div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
     <div style="font-size:9px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
-  <div class="c" style="border-right:none;"><div class="lbl">Alpha vs Nifty 500{(' &middot; since ' + _esc(snap.get('alpha_label'))) if snap.get('alpha_label') else ''}</div>
-    <div class="big" style="color:#1847DF;">{_pct(snap.get('alpha'))}</div></div>
+  <div class="c" style="border-right:none;"><div class="lbl">Alpha{alpha_since_lbl}</div>{alpha_block}</div>
 </div>
 <div class="cols">
   <div class="col">

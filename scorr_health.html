@@ -152,8 +152,11 @@ html,body{margin:0;padding:0;background:var(--bg);}
     <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;" id="hr-pnl-split"></div>
   </div>
   <div style="padding:16px 20px;">
-    <div class="lbl" id="hr-alpha-lbl">Alpha vs Nifty 500</div>
-    <div style="font-size:22px;font-weight:600;margin-top:5px;letter-spacing:-.5px;color:var(--blu);" id="hr-alpha">+2.4%</div>
+    <div class="lbl" id="hr-alpha-lbl">Alpha</div>
+    <div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;">
+      <div style="font-size:16px;font-weight:600;letter-spacing:-.3px;" id="hr-alpha-n50">—</div>
+      <div style="font-size:16px;font-weight:600;letter-spacing:-.3px;" id="hr-alpha-n500">—</div>
+    </div>
   </div>
 </div>
 
@@ -456,7 +459,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
         splitEl.innerHTML='Realised <b style="color:'+rc+'">'+inrSigned(s.realised_pnl)+'</b> &middot; Unrealised <b style="color:'+uc+'">'+inrSigned(s.unrealised_pnl)+'</b>';
       } else { splitEl.textContent=''; }
     }
-    var alEl=$('hr-alpha'); if(alEl){ alEl.textContent=pct(s.alpha); alEl.style.color=(s.alpha>=0?'var(--blu)':'var(--red)'); }
+    // cc#656: dual money-return alpha — vs Nifty 50 AND vs Nifty 500, each its own +/- colour.
+    function setAlpha(id,label,val){ var el=$(id); if(!el) return;
+      var col=(val==null?'var(--muted)':(val>=0?'var(--grn)':'var(--red)'));
+      el.innerHTML='<span style="font-size:11px;color:var(--muted);font-weight:500;">'+label+'</span> <span style="color:'+col+'">'+pct(val)+'</span>'; }
+    setAlpha('hr-alpha-n50','vs Nifty 50', s.alpha_n50);
+    setAlpha('hr-alpha-n500','vs Nifty 500', s.alpha_n500);
     // cc#653: dynamic alpha window label — "Alpha vs Nifty 500 · SINCE 02 Feb 26" (never a static 1yr)
     var alL=$('hr-alpha-lbl'); if(alL){ alL.textContent='Alpha vs Nifty 500'+(s.alpha_label?(' · since '+s.alpha_label):''); }
 

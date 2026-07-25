@@ -201,6 +201,18 @@ def _nifty500_return_since(cur, start_date):
     return None
 
 
+def _nifty50_return_since(cur, start_date):
+    """cc#656: NIFTY50 index return from start_date -> live (raw_prices 'NIFTY50' close on/before the
+    start vs the latest close)."""
+    cur.execute("SELECT close FROM raw_prices WHERE symbol='NIFTY50' ORDER BY price_date DESC LIMIT 1")
+    now = cur.fetchone()
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY50' AND price_date<=%s
+                   ORDER BY price_date DESC LIMIT 1""", (start_date,))
+    then = cur.fetchone()
+    n, t = (_f(now[0]) if now else None), (_f(then[0]) if then else None)
+    return round((n - t) / t * 100.0, 2) if (n and t) else None
+
+
 def _segment_aggs(cur, segments):
     """Per-segment avg PE + avg dividend yield across all stocks (sector benchmark)."""
     if not segments:
@@ -350,51 +362,49 @@ def build_report(cur, pid):
     n50 = _nifty50_1y(cur)
     n500 = _nifty500_1y(cur)
 
-    # ---- (1a) variable-window alpha (cc#653): current-value-weighted portfolio return vs NIFTY500,
-    # both measured from alpha_start_date -> live. Fallback start = earliest holding entry date
-    # (min hr_holdings.created_at), NEVER a 1y default. Tile label carries the date.
-    a_start = alpha_start
-    if a_start is None:
-        cur.execute("SELECT MIN(created_at)::date FROM hr_holdings WHERE portfolio_id=%s", (pid,))
-        _m = cur.fetchone()
-        a_start = _m[0] if (_m and _m[0]) else None
-    alpha = alpha_since = alpha_label = None
-    if a_start is not None:
-        num = den = 0.0
-        for h in holdings:
-            p0 = _price_on_or_before(cur, h["symbol"], a_start)
-            c = h["cmp"]
-            cw = h["current"] or 0
-            if p0 and p0 > 0 and c is not None and cw > 0:
-                num += ((c / p0 - 1.0) * 100.0) * cw
-                den += cw
-        port_ret = round(num / den, 2) if den > 0 else None
-        n500_ret = _nifty500_return_since(cur, a_start)
-        if port_ret is not None and n500_ret is not None:
-            alpha = round(port_ret - n500_ret, 2)
-        alpha_since = str(a_start)
-        try:
-            alpha_label = a_start.strftime("%d %b %y").upper()
-        except Exception:
-            alpha_label = alpha_since
-
     # ---- (1b) realised P&L integration (cc#654) ----------------------------------------------------
     # invested_adjusted = holdings cost - realised gainloss; the P&L tile = current - invested_adjusted
-    # = realised + unrealised (reconciles). No hr_realised rows -> realised=0 -> behaviour unchanged
-    # (invested = holdings cost, P&L = unrealised only).
+    # = realised + unrealised (reconciles). No hr_realised rows -> realised=0 -> behaviour unchanged.
     cur.execute("SELECT COALESCE(SUM(gainloss), 0) FROM hr_realised WHERE portfolio_id=%s", (pid,))
     realised = _f(cur.fetchone()[0]) or 0.0
     holdings_cost = total_invested
     invested_adj = holdings_cost - realised
     unrealised = total_current - holdings_cost
     total_pnl = total_current - invested_adj   # == realised + unrealised
+    port_money_ret = round(total_pnl / invested_adj * 100.0, 2) if invested_adj else None
+
+    # ---- (1a) alpha = MONEY return vs BOTH benchmarks (cc#656) --------------------------------------
+    # cc#653 used the current-value-weighted PRICE return of surviving holdings -> survivorship bias
+    # (262 closed trades, net realised -1.1L, were invisible; a -1.2% book showed +13% alpha). Now the
+    # portfolio side IS the money return (total_pnl / invested_adj), and alpha is shown vs BOTH indices
+    # measured over the same window from alpha_start_date -> live. Fallback start = earliest holding
+    # entry date. Tile label carries the date once.
+    a_start = alpha_start
+    if a_start is None:
+        cur.execute("SELECT MIN(created_at)::date FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+        _m = cur.fetchone()
+        a_start = _m[0] if (_m and _m[0]) else None
+    alpha_n50 = alpha_n500 = alpha_since = alpha_label = None
+    if a_start is not None and port_money_ret is not None:
+        n50_ret = _nifty50_return_since(cur, a_start)
+        n500_ret = _nifty500_return_since(cur, a_start)
+        if n50_ret is not None:
+            alpha_n50 = round(port_money_ret - n50_ret, 2)
+        if n500_ret is not None:
+            alpha_n500 = round(port_money_ret - n500_ret, 2)
+        alpha_since = str(a_start)
+        try:
+            alpha_label = a_start.strftime("%d %b %y").upper()
+        except Exception:
+            alpha_label = alpha_since
 
     snapshot = {
         "invested": _r(invested_adj), "current": _r(total_current),
         "pnl_abs": _r(total_pnl),
-        "pnl_pct": round(total_pnl / invested_adj * 100, 2) if invested_adj else None,
+        "pnl_pct": port_money_ret,
         "realised_pnl": _r(realised), "unrealised_pnl": _r(unrealised), "holdings_cost": _r(holdings_cost),
-        "alpha": alpha, "alpha_since": alpha_since, "alpha_label": alpha_label,
+        "alpha": alpha_n500, "alpha_n50": alpha_n50, "alpha_n500": alpha_n500,
+        "alpha_since": alpha_since, "alpha_label": alpha_label,
         "holdings_count": len(holdings),
     }
 
@@ -532,9 +542,14 @@ def build_report(cur, pid):
                           f"{abs(snapshot['pnl_pct']):.1f}% (₹{snapshot['pnl_abs']:,.0f} P&L) on ₹{snapshot['invested']:,.0f} invested.")
     if ratings["verdict"]:
         highlights.append(f"Overall Scorr quality rating: {ratings['overall']}/10 ({ratings['verdict']}).")
-    if snapshot["alpha"] is not None:
+    if snapshot.get("alpha_n50") is not None or snapshot.get("alpha_n500") is not None:
         _since = f" since {snapshot['alpha_label']}" if snapshot.get("alpha_label") else ""
-        highlights.append(f"Alpha vs Nifty 500{_since}: {snapshot['alpha']:+.1f}%.")
+        _parts = []
+        if snapshot.get("alpha_n50") is not None:
+            _parts.append(f"{snapshot['alpha_n50']:+.1f}% vs Nifty 50")
+        if snapshot.get("alpha_n500") is not None:
+            _parts.append(f"{snapshot['alpha_n500']:+.1f}% vs Nifty 500")
+        highlights.append(f"Money-return alpha{_since}: " + ", ".join(_parts) + ".")
     highlights.append(wl_insight)
     highlights.append(q_insight)
     highlights.append(cap_insight)
