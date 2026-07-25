@@ -1970,6 +1970,7 @@ function _qaSpark(series){
 // LightweightCharts price lines (the GVM chart itself is React SVG; the dashboard popup is
 // LightweightCharts, so we reuse the DATA + overlay config, not the React component).
 let _qaChartObj=null,_qaChartSym=null,_qaChartSeries=null,_qaPriceLines=[],_qaTf='3M',_qaFibCache={};
+let _qaTfFib=null,_qaTfSwing=null;   // cc#668: per-timeframe fib (chart overlay only; R16 scoring untouched)
 let _qaOv={pivot:false,fib:false};
 try{const _o=localStorage.getItem('qa_chart_overlay')||'none';_qaOv={pivot:_o==='pivot'||_o==='both',fib:_o==='fib'||_o==='both'};}catch(e){}
 const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365};   // null => intraday 5m; else /api/candles days
@@ -2036,8 +2037,9 @@ async function qaChartLoad(tf){
       grid:{vertLines:{visible:false},horzLines:{color:'rgba(120,130,150,.12)'}},
       timeScale:{timeVisible:isIntraday,borderVisible:false},rightPriceScale:{borderVisible:false}});
     const s=c.addCandlestickSeries({upColor:'#0a9e63',downColor:'#dd3a4a',borderVisible:false,
-      wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a'});
+      wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a',autoscaleInfoProvider:_qaAutoscale});
     s.setData(data);c.timeScale().fitContent();_qaChartObj=c;_qaChartSeries=s;
+    _qaTfFib=_qaComputeFib(data);   // cc#668 change_2: fib anchored to THIS timeframe's swing (display-only)
     box.style.position='relative';   // cc#664: anchor the fib zone SVG overlay
     // cc#664: keep zone shading synced to the price scale on any pan/zoom
     try{c.timeScale().subscribeVisibleTimeRangeChange(function(){qaDrawFibZones();});}catch(e){}
@@ -2064,6 +2066,41 @@ var _FIB_ZFILL={breakout:'rgba(10,158,99,.16)',resist:'rgba(10,158,99,.14)',stre
                 decision:'rgba(138,148,173,.10)',weak:'rgba(221,58,74,.07)',breakdown:'rgba(221,58,74,.15)'};
 var _FIB_ZLINE={breakout:'#0a9e63',resist:'#0a9e63',strength:'#12864f',decision:'#8a94ad',
                 weak:'#dd3a4a',breakdown:'#dd3a4a'};
+// cc#668 change_3 (amendment 25-Jul, cap 123.6): fib ratios include the 123.6 extension above the
+// swing high; 161.8 dropped entirely. 0%=swing low, 100%=swing high, 123.6%=one extension above.
+var _QA_FIB_RATIOS=[0,23.6,38.2,50,61.8,78.6,100,123.6];
+// cc#668 change_2: compute fib levels from the SELECTED timeframe's swing (high/low of loaded candles).
+// Chart overlay ONLY — R16 scoring stays locked to the 3M backend swing (id=3019), untouched here.
+function _qaComputeFib(data){
+  if(!data||!data.length)return null;
+  var hi=-Infinity,lo=Infinity;
+  for(var i=0;i<data.length;i++){var d=data[i];
+    if(isFinite(d.high)&&d.high>hi)hi=d.high;
+    if(isFinite(d.low)&&d.low<lo)lo=d.low;}
+  if(!isFinite(hi)||!isFinite(lo)||hi<=lo){_qaTfSwing=null;return null;}
+  var rng=hi-lo;
+  _qaTfSwing={lo:lo,hi:hi};
+  return _QA_FIB_RATIOS.map(function(r){return {pct:r,price:lo+rng*r/100};});
+}
+// cc#668 change_3: extend the price-scale headroom so the 123.6 extension is visible when price
+// presses the 1.000 level. Only extends when the fib overlay is ON; otherwise defers to default.
+function _qaAutoscale(orig){
+  var base=orig();
+  if(!_qaOv.fib||!_qaTfSwing||!base||!base.priceRange)return base;
+  var top=_qaTfSwing.lo+(_qaTfSwing.hi-_qaTfSwing.lo)*1.236;   // 123.6% extension price
+  if(top==null||!isFinite(top))return base;
+  return {priceRange:{minValue:base.priceRange.minValue,maxValue:Math.max(base.priceRange.maxValue,top)},
+          margins:base.margins};
+}
+// cc#668 change_4 (addition 25-Jul): left-edge zone interpretation labels over the id=6133 coarse
+// ladder regions (one label per named region, centred). Mirrors the GVM chart fib-panel naming.
+var _FIB_ZLABEL_REGIONS=[
+  {lo:0,    hi:23.6, txt:'BREAKDOWN',                  col:'#dd3a4a', op:.55},
+  {lo:23.6, hi:38.2, txt:'WEAK',                       col:'#dd3a4a', op:.5},
+  {lo:38.2, hi:61.8, txt:'DECISION',                   col:'#8a94ad', op:.6},
+  {lo:61.8, hi:100,  txt:'STRENGTH / RESISTANCE TEST', col:'#12864f', op:.6},
+  {lo:100,  hi:123.6,txt:'EXTENSION',                  col:'#0a9e63', op:.65}
+];
 
 function _qaFibOverlayEl(box){
   var ov=box.querySelector('#qaFibZones');
@@ -2077,13 +2114,13 @@ function _qaFibOverlayEl(box){
 function qaDrawFibZones(){
   var box=document.getElementById('qaChartBox'); if(!box)return;
   var ov=_qaFibOverlayEl(box);
-  var fib=_qaFibCache[_qaChartSym];
-  if(!(_qaOv.fib&&fib&&fib.fib_levels&&_qaChartSeries)){ ov.innerHTML=''; return; }
+  if(!(_qaOv.fib&&_qaTfFib&&_qaTfSwing&&_qaChartSeries)){ ov.innerHTML=''; return; }
   var w=box.clientWidth, h=box.clientHeight||412;
   ov.setAttribute('width',w); ov.setAttribute('height',h);
-  var lv=fib.fib_levels.filter(function(f){return f.price!=null&&f.pct!=null;})
+  var lv=_qaTfFib.filter(function(f){return f.price!=null&&f.pct!=null;})
           .slice().sort(function(a,b){return a.pct-b.pct;});
   var parts=[];
+  // translucent fill bands between consecutive fib levels (colour = zone-ladder meaning)
   for(var i=0;i<lv.length-1;i++){
     var yLo=_qaChartSeries.priceToCoordinate(+lv[i].price);
     var yHi=_qaChartSeries.priceToCoordinate(+lv[i+1].price);
@@ -2093,6 +2130,19 @@ function qaDrawFibZones(){
     var zk=_fibZoneKey((lv[i].pct+lv[i+1].pct)/2);
     parts.push('<rect x="0" y="'+top.toFixed(1)+'" width="'+w+'" height="'+bh.toFixed(1)+'" fill="'+(_FIB_ZFILL[zk]||'rgba(138,148,173,.05)')+'"></rect>');
   }
+  // cc#668 change_4: one left-edge interpretation label per coarse zone region, vertically centred;
+  // hidden when the region renders too thin (<14px) to avoid overlap.
+  var loP=_qaTfSwing.lo, rng=_qaTfSwing.hi-_qaTfSwing.lo;
+  _FIB_ZLABEL_REGIONS.forEach(function(zr){
+    var yA=_qaChartSeries.priceToCoordinate(loP+rng*zr.lo/100);
+    var yB=_qaChartSeries.priceToCoordinate(loP+rng*zr.hi/100);
+    if(yA==null||yB==null)return;
+    var top=Math.min(yA,yB), hgt=Math.abs(yA-yB);
+    if(hgt<14)return;
+    var cy=top+hgt/2;
+    parts.push('<text x="7" y="'+cy.toFixed(1)+'" dominant-baseline="middle" font-size="9" font-weight="600" '+
+               'letter-spacing=".4" fill="'+zr.col+'" fill-opacity="'+zr.op+'">'+zr.txt+'</text>');
+  });
   ov.innerHTML=parts.join('');
 }
 
@@ -2103,23 +2153,27 @@ async function qaApplyOverlays(){
   if(!_qaChartSeries)return;
   (_qaPriceLines||[]).forEach(pl=>{try{_qaChartSeries.removePriceLine(pl);}catch(e){}});
   _qaPriceLines=[];
-  if(!_qaOv.pivot&&!_qaOv.fib)return;
-  let fib=_qaFibCache[_qaChartSym];
-  if(!fib){try{fib=await getJSON('/api/trade-check/fibcheck?symbol='+encodeURIComponent(_qaChartSym)+'&lookback=6m');_qaFibCache[_qaChartSym]=fib;}catch(e){return;}}
-  if(!_qaChartSeries)return;
-  if(_qaOv.pivot&&fib&&fib.pivots){const P=fib.pivots;
-    [['R2',P.r2,'#0a9e63'],['R1',P.r1,'#0a9e63'],['PP',P.pp,'#8a94ad'],['S1',P.s1,'#dd3a4a'],['S2',P.s2,'#dd3a4a']].forEach(row=>{
-      if(row[1]!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+row[1],color:row[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:row[0]}));});
+  try{_qaChartSeries.applyOptions({autoscaleInfoProvider:_qaAutoscale});}catch(e){}   // cc#668 change_3: re-scale for 123.6 headroom
+  if(!_qaOv.pivot&&!_qaOv.fib){qaDrawFibZones();return;}
+  // pivots still come from the backend (v8_paper_pivots via fibcheck) — fetch only when needed.
+  if(_qaOv.pivot){
+    let fib=_qaFibCache[_qaChartSym];
+    if(!fib){try{fib=await getJSON('/api/trade-check/fibcheck?symbol='+encodeURIComponent(_qaChartSym)+'&lookback=6m');_qaFibCache[_qaChartSym]=fib;}catch(e){fib=null;}}
+    if(_qaChartSeries&&fib&&fib.pivots){const P=fib.pivots;
+      [['R2',P.r2,'#0a9e63'],['R1',P.r1,'#0a9e63'],['PP',P.pp,'#8a94ad'],['S1',P.s1,'#dd3a4a'],['S2',P.s2,'#dd3a4a']].forEach(row=>{
+        if(row[1]!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+row[1],color:row[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:row[0]}));});
+    }
   }
-  if(_qaOv.fib&&fib&&fib.fib_levels){fib.fib_levels.forEach(f=>{
+  // cc#668 change_2: fib levels from THIS timeframe's swing (_qaTfFib). change_1: axisLabelVisible:false
+  // suppresses the duplicate right-axis price tag — the on-line pill (ratio + price) is the only label.
+  if(_qaOv.fib&&_qaTfFib&&_qaChartSeries){_qaTfFib.forEach(f=>{
     if(f.price==null)return;
-    // cc#664: colour each level by its zone (ladder meaning, not CMP side) + label ratio + price.
     var zk=_fibZoneKey(f.pct), col=_FIB_ZLINE[zk]||'#8a94ad';
     var ratio=(f.pct!=null)?(f.pct/100).toFixed(3):'';
     var lbl=(ratio?ratio+' ':'')+(Math.round(+f.price*100)/100).toLocaleString('en-IN');
-    _qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:col,lineWidth:1,lineStyle:3,axisLabelVisible:true,title:lbl}));
+    _qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:col,lineWidth:1,lineStyle:3,axisLabelVisible:false,title:lbl}));
   });}
-  qaDrawFibZones();   // cc#664: translucent zone shading between levels
+  qaDrawFibZones();   // cc#664/668: translucent zone shading + interpretation labels
 }
 function qaToggleOverlay(kind){
   _qaOv[kind]=!_qaOv[kind];
