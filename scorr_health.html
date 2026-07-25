@@ -200,15 +200,9 @@ html,body{margin:0;padding:0;background:var(--bg);}
     </div>
 
     <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
-      <div class="lbl" style="margin-bottom:12px;">Sector Split · <span id="hr-conc">top 5 hold 73%</span></div>
-      <div style="display:flex;height:36px;overflow:hidden;border:1px solid var(--rule);" id="hr-strip">
-        <div style="width:22%;background:#0B6E42;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Batteries 22%</div>
-        <div style="width:20%;background:#2A3650;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">C.Finance 20%</div>
-        <div style="width:14%;background:#1847DF;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Banks 14%</div>
-        <div style="width:10%;background:#9A3C1E;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Ins 10%</div>
-        <div style="width:7%;background:#4532A8;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">SC</div>
-        <div style="width:27%;background:#8892AA;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Others 27%</div>
-      </div>
+      <div class="lbl" style="margin-bottom:12px;">Sector Split · <span id="hr-conc">top 10 hold —%</span></div>
+      <div id="hr-strip" style="display:flex;flex-direction:column;gap:6px;"></div>
+      <div id="hr-strip-legend" style="margin-top:8px;line-height:1.9;"></div>
     </div>
 
     <div style="padding:22px 24px 0;"><div class="lbl" style="margin-bottom:12px;">Sector Ratings</div></div>
@@ -494,19 +488,49 @@ html,body{margin:0;padding:0;background:var(--bg);}
     }
     set('hr-val-note', v.insight||'');
 
-    // sector strip + concentration
-    var sec=d.sector||{}, strip=sec.strip||[];
-    var topN=Math.min(5,strip.length), topSum=0; for(var n2=0;n2<topN;n2++) topSum+=strip[n2].weight||0;
-    set('hr-conc', 'top '+topN+' hold '+Math.round(topSum)+'%');
+    // sector strip -> cc#663 two-row TOP-10 bar (row1 ranks 1-5, row2 ranks 6-10 + true-tail Others).
+    // Narrow segments (<~56px) drop their in-bar label into a legend chip row so nothing truncates.
+    var sec=d.sector||{};
+    var strip=(sec.strip||[]).slice().sort(function(a,b){return (b.weight||0)-(a.weight||0);});
+    var top10=strip.slice(0,10);
+    var top10Sum=top10.reduce(function(a,x){return a+(x.weight||0);},0);
+    var tail=strip.slice(10).reduce(function(a,x){return a+(x.weight||0);},0);
+    set('hr-conc', 'top 10 hold '+Math.round(top10Sum)+'%');
     var stripEl=$('hr-strip');
     if(stripEl){
-      var html='', shown=strip.slice(0,5), rest=strip.slice(5).reduce(function(a,x){return a+(x.weight||0);},0);
-      shown.forEach(function(sg,ix){
-        var lbl=(sg.segment||'').split(/[ -]/)[0];
-        html+='<div style="width:'+(sg.weight||0)+'%;background:'+SEG_COLORS[ix%SEG_COLORS.length]+';display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">'+esc(lbl)+' '+Math.round(sg.weight||0)+'%</div>';
+      var segStyle='display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;';
+      function segCell(sg, gi, sub){
+        var isOth=(sg.segment==='__OTHERS__');
+        var color=isOth?'#8892AA':SEG_COLORS[gi%SEG_COLORS.length];
+        var name=isOth?'Others':(sg.segment||'');
+        var w=sub>0?((sg.weight||0)/sub*100):0;
+        return '<div class="secseg" data-name="'+esc(name)+'" data-pct="'+Math.round(sg.weight||0)+'" data-color="'+color+'" '
+          +'style="width:'+w+'%;background:'+color+';'+segStyle+'">'+esc(name.split(/[ -]/)[0])+' '+Math.round(sg.weight||0)+'%</div>';
+      }
+      function buildRow(items, startGi){
+        var sub=items.reduce(function(a,x){return a+(x.weight||0);},0);
+        if(sub<=0) return '';
+        return '<div style="display:flex;height:18px;border:1px solid var(--rule);border-radius:3px;overflow:hidden;">'
+          +items.map(function(sg,j){return segCell(sg,startGi+j,sub);}).join('')+'</div>';
+      }
+      var row1=top10.slice(0,5), row2=top10.slice(5,10).slice();
+      if(tail>0.5) row2.push({segment:'__OTHERS__', weight:tail});
+      stripEl.innerHTML=buildRow(row1,0)+buildRow(row2,5);
+      // label-overflow pass: any segment too narrow for its label -> blank it, add to the legend row
+      var narrow=[];
+      stripEl.querySelectorAll('.secseg').forEach(function(el){
+        if(el.offsetWidth>0 && el.offsetWidth<56){
+          narrow.push({name:el.getAttribute('data-name'),pct:el.getAttribute('data-pct'),color:el.getAttribute('data-color')});
+          el.textContent='';
+        }
       });
-      if(rest>0.5) html+='<div style="width:'+rest+'%;background:#8892AA;display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Others '+Math.round(rest)+'%</div>';
-      stripEl.innerHTML=html;
+      var legEl=$('hr-strip-legend');
+      if(legEl){
+        legEl.innerHTML=narrow.map(function(x){
+          return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 4px 0;font-size:10px;font-weight:600;color:#07111F;">'
+            +'<span style="width:9px;height:9px;border-radius:2px;background:'+x.color+';display:inline-block;"></span>'+esc(x.name)+' '+x.pct+'%</span>';
+        }).join('');
+      }
     }
     // sector ratings table
     var stb=document.querySelector('#hr-sectors tbody');
