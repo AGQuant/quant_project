@@ -404,6 +404,16 @@ def create_tables():
         purchase_value NUMERIC, sale_value NUMERIC, gainloss NUMERIC, st_gain NUMERIC, lt_gain NUMERIC
     );
     CREATE INDEX IF NOT EXISTS idx_hr_realised_portfolio ON hr_realised(portfolio_id);
+    -- cc#658 CA_WATCHDOG: corporate actions (split/bonus/demerger/rights/special-dividend) per symbol.
+    -- Cross-checked against raw_prices cliffs so a >33% single-day drop WITH a matching ex_date is a
+    -- feed-adjustment artefact (auto-restate via cc#657) vs a genuine crash (review-only).
+    CREATE TABLE IF NOT EXISTS corporate_actions (
+        id BIGSERIAL PRIMARY KEY, symbol TEXT NOT NULL, action_type TEXT NOT NULL,
+        ex_date DATE, ratio_text TEXT, source TEXT, detected_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(symbol, action_type, ex_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_corporate_actions_exdate ON corporate_actions(ex_date);
+    CREATE INDEX IF NOT EXISTS idx_corporate_actions_symbol ON corporate_actions(symbol);
     -- cc#592: v8_history_cache DROPPED — one-time 05-Jun-2026 build, never refreshed, zero live
     -- readers (superseded by universe_technicals cc#154 + fyers_hist cc#377; 52W-breakout reads
     -- universe_technicals). CREATE removed so the weekend Railway-console DROP is not recreated.
