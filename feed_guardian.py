@@ -15,9 +15,10 @@ Two ticks (wired in scheduler.py):
   offhours_liveness_tick() — every 15 min, ALL DAYS: worker heartbeat liveness
 
 Founder directive (alert-fatigue fix, 24-Jul: 10+ alerts nobody could act on):
-DETECT -> REPAIR per leg; **Telegram ONLY when a repair FAILS**. A stale leg (while another
-leg still flows) triggers a forced RESUBSCRIBE the worker polls via app_config; if the leg is
-still stale RESUB_FAIL_LIMIT cycles later, escalate to a worker restart and Telegram then.
+DETECT -> REPAIR per leg; **Telegram ONLY when a repair escalates/fails**. A stale leg (while
+another leg still flows) runs a BOUNDED ladder the worker polls via app_config: resubscribe x2
+-> restart x2 -> STAND DOWN silent for the day (cc#661). Telegram fires on the restart escalation
+and on the single stand-down transition — never on routine resubscribes, never after stand-down.
 
 Repair is executed WORKER-SIDE (worker/fyers_feed.py polls feed_guardian_cmd) — the guardian is
 the brain, the worker is the hands. Guardian state lives in app_config (JSON) so escalation
@@ -44,7 +45,14 @@ STALE_MIN            = 10     # a leg whose newest bar is older than this (while
 OPEN_SILENCE_BARS    = 400    # <this many 5m bars since 09:15 by 09:25 = feed silent at open (cc#229 floor)
 OI_DEGRADE_PCT       = 20.0   # >this% of active futures with stale OI = feed-wide OI gap (cc#515)
 HEARTBEAT_STALE_MIN  = 45     # worker heartbeat older than this off-hours = worker dead (item_3)
-RESUB_FAIL_LIMIT     = 2      # resubscribe issued+failed this many cycles for a leg -> escalate to restart
+# cc#661 BOUNDED REPAIR LADDER: per leg (and "_all") the guardian escalates
+#   resubscribe x RESUB_ATTEMPTS -> restart x RESTART_ATTEMPTS -> STAND DOWN (silent for the day).
+# This caps repair actions at RESUB_ATTEMPTS+RESTART_ATTEMPTS per leg per trading day, killing the
+# cc#660 unbounded hammer (a fundamentally broken leg previously got a RESTART command EVERY 5-min
+# tick, ~70/session). On exhaustion the leg is marked failed_for_day and the guardian goes silent on
+# it (no commands, no Telegram) until a fresh day, a manual reset, or the leg self-recovers.
+RESUB_ATTEMPTS       = 2      # forced resubscribes before escalating to restart
+RESTART_ATTEMPTS     = 2      # worker restarts before standing down
 ALERT_THROTTLE_MIN   = 30     # min minutes between repeat Telegram alerts for the same key
 LEGS                 = ("fyers_eq", "fyers_fut")
 
@@ -59,6 +67,7 @@ _RELAY_TITLES = ("feed_watchdog_reconnect", "feed_watchdog_exit", "housekeeping_
 _STATE_KEY   = "feed_guardian_state"           # app_config JSON — persists across app redeploy
 _CMD_KEY     = "feed_guardian_cmd"             # app_config JSON — worker polls this
 _CMD_ACK_KEY = "feed_guardian_cmd_ack"         # app_config JSON — worker writes outcome here
+_RESET_KEY   = "feed_guardian_reset"           # cc#661 manual-reset flag (Claude web flips via run_sql)
 _HB_KEY_LEGACY = "worker_heartbeat_ts"         # fallback if worker_heartbeat table absent
 
 
@@ -224,16 +233,114 @@ def _relay_incidents(cur, state, now):
         state["relay_last_id"] = max_id
 
 
+# ── cc#661 bounded repair ladder + resets ────────────────────────────────────
+def _apply_resets(cur, state, now):
+    """cc#661 reset conditions, run at the top of every tick:
+    (a) MANUAL — app_config['feed_guardian_reset'] truthy -> clear ALL leg counters + failed_for_day,
+        delete the key, ops_log guardian_manual_reset (Claude web flips it after human intervention).
+    (b) AUTOMATIC daily — on the first tick of a new trading date, wipe the ladder so every leg starts
+        the day with a fresh budget (failed_for_day is date-stamped, so a new day frees a stood-down leg)."""
+    legs = state.setdefault("legs", {})
+    today = now.date().isoformat()
+
+    raw = _cfg_get(cur, _RESET_KEY)
+    if raw is not None and str(raw).strip().lower() not in ("", "0", "false", "no", "off"):
+        for st in legs.values():
+            if isinstance(st, dict):
+                st["attempts"] = 0; st["repairing"] = False
+                st["failed_for_day"] = None; st["stood_down_alerted"] = False
+        cur.execute("DELETE FROM app_config WHERE key=%s", (_RESET_KEY,))
+        state["budget_day"] = today
+        _oplog(cur, "guardian_manual_reset", {"cleared_legs": list(legs.keys())})
+        log.error("feed_guardian: MANUAL RESET — repair ladder cleared, budget refreshed")
+        return
+
+    if state.get("budget_day") != today:
+        for st in legs.values():
+            if isinstance(st, dict):
+                st["attempts"] = 0; st["repairing"] = False
+                st["failed_for_day"] = None; st["stood_down_alerted"] = False
+        state["budget_day"] = today
+
+
+def _leg_stood_down(legs, key, now):
+    st = legs.get(key)
+    return bool(st and st.get("failed_for_day") == now.date().isoformat())
+
+
+def _ladder_step(cur, state, legs, key, leg_for_cmd, now, reason, summary):
+    """Advance the bounded repair ladder for `key` ('_all' or a leg name):
+    resubscribe x RESUB_ATTEMPTS -> restart x RESTART_ATTEMPTS -> STAND DOWN (silent).
+    Returns the action taken. Telegram fires ONLY on restart escalation and on the single
+    stand-down transition — never on the routine resubscribe steps (alert-fatigue rule)."""
+    today = now.date().isoformat()
+    st = legs.setdefault(key, {"attempts": 0, "repairing": False,
+                               "failed_for_day": None, "stood_down_alerted": False})
+    # already exhausted today -> stay SILENT: no command, no Telegram, just mark the state
+    if st.get("failed_for_day") == today:
+        st["repairing"] = True
+        summary["actions"].append(f"{key}_standing_down")
+        return "standing_down"
+
+    attempts = int(st.get("attempts", 0)) + 1
+    st["attempts"] = attempts
+    st["repairing"] = True
+
+    if attempts <= RESUB_ATTEMPTS:
+        _issue_cmd(cur, "resubscribe", leg_for_cmd,
+                   f"{reason} — resubscribe {attempts}/{RESUB_ATTEMPTS}")
+        summary["actions"].append(f"{key}_resubscribe")
+        return "resubscribe"
+    elif attempts <= RESUB_ATTEMPTS + RESTART_ATTEMPTS:
+        rnum = attempts - RESUB_ATTEMPTS
+        _issue_cmd(cur, "restart", leg_for_cmd,
+                   f"{reason} — restart {rnum}/{RESTART_ATTEMPTS} after {RESUB_ATTEMPTS} resubscribes")
+        summary["actions"].append(f"{key}_restart")
+        if not _throttled(state, f"{key}_restart", now):
+            _telegram(f"FEED REPAIR ESCALATING — {key} still down ({reason}); worker restart "
+                      f"{rnum}/{RESTART_ATTEMPTS} issued.")
+            _mark_alert(state, f"{key}_restart", now)
+        return "restart"
+    else:
+        # ladder exhausted -> STAND DOWN for the day (no command issued)
+        st["failed_for_day"] = today
+        summary["actions"].append(f"{key}_stand_down")
+        if not st.get("stood_down_alerted"):
+            st["stood_down_alerted"] = True
+            _telegram(f"REPAIR EXHAUSTED — {key} — {RESUB_ATTEMPTS} resubscribes + {RESTART_ATTEMPTS} "
+                      f"restarts failed, standing down for the day, manual intervention needed.")
+            _oplog(cur, "guardian_stand_down", {"leg": key, "reason": reason, "attempts": attempts})
+            log.critical(f"feed_guardian: {key} REPAIR EXHAUSTED — standing down for {today}")
+        return "stand_down"
+
+
+def _ladder_clear(cur, legs, key, now, summary):
+    """Leg is flowing again -> clear its ladder. If it was mid-repair or STOOD DOWN, record a
+    guardian_recovery (after_standdown flag) so the recovery is visible; never Telegram."""
+    st = legs.get(key)
+    if not st:
+        return
+    was_repairing = bool(st.get("repairing"))
+    was_stood_down = (st.get("failed_for_day") == now.date().isoformat())
+    if was_repairing or was_stood_down:
+        _oplog(cur, "guardian_recovery", {"leg": key, "after_standdown": was_stood_down})
+        log.info(f"feed_guardian: {key} recovered (after_standdown={was_stood_down})")
+    st["attempts"] = 0
+    st["repairing"] = False
+    st["failed_for_day"] = None
+    st["stood_down_alerted"] = False
+
+
 # ── the 5-min market-hours tick ──────────────────────────────────────────────
 def guardian_tick():
     """Every 5 min during market hours: per-leg DETECT -> REPAIR. Returns a summary dict.
 
     Logic:
       - open-silence at 09:20-09:30: <OPEN_SILENCE_BARS bars since open -> full resubscribe + alert.
-      - per leg: stale >STALE_MIN while ANOTHER leg is fresh -> forced RESUBSCRIBE (worker cmd).
-        Still stale RESUB_FAIL_LIMIT cycles later -> escalate to worker RESTART + Telegram (repair failed).
-        Recovered -> reset the leg's fail counter (ops_log recovery, no Telegram).
-      - ALL legs stale -> full-feed silence -> restart cmd + Telegram.
+      - per leg: stale >STALE_MIN while ANOTHER leg is fresh -> bounded ladder (resubscribe x2 ->
+        restart x2 -> STAND DOWN silent for the day). Recovered -> clear the ladder (ops_log recovery).
+      - ALL legs stale -> full-feed silence -> same bounded ladder on "_all".
+      - stood-down legs stay VISIBLE via guardian_summary red_flags but issue no commands/Telegrams.
       - relay worker incidents (Telegram only for escalations).
       - OI-degradation tripwire (ops_log; surfaced in the daily summary)."""
     now = _ist_now()
@@ -241,6 +348,7 @@ def guardian_tick():
     try:
         with _conn() as conn, conn.cursor() as cur:
             state = _load_state(cur)
+            _apply_resets(cur, state, now)          # cc#661: manual + daily budget reset first
             legs = state.setdefault("legs", {})
             ages = _leg_ages(cur, now)
             summary["legs"] = {k: (round(v, 1) if v is not None else None) for k, v in ages.items()}
@@ -261,51 +369,28 @@ def guardian_tick():
                                   f"full resubscribe (nonce {n}). Check truthful-friendship.")
                         _mark_alert(state, "open_silence", now)
 
-            # (2) per-leg detect -> repair
+            # (2) per-leg detect -> REPAIR via the cc#661 bounded ladder (resubscribe x2 ->
+            #     restart x2 -> STAND DOWN silent). A stood-down leg issues NO command and NO
+            #     Telegram until a new day, a manual reset, or self-recovery.
             if all_stale and any(a is not None for a in ages.values()):
-                # full-feed silence during market hours — hardest case, restart
-                fst = legs.setdefault("_all", {"fails": 0})
-                fst["fails"] = int(fst.get("fails", 0)) + 1
-                action = "restart" if fst["fails"] >= RESUB_FAIL_LIMIT else "resubscribe"
-                n = _issue_cmd(cur, action, "all",
-                               f"ALL legs stale ({summary['legs']}) — cycle {fst['fails']}")
-                summary["actions"].append(f"all_stale_{action}")
-                if not _throttled(state, "all_stale", now):
-                    _telegram(f"FEED FULL SILENCE — all legs stale ({summary['legs']}). Guardian issued "
-                              f"{action} (nonce {n}). truthful-friendship likely down.")
+                # full-feed silence — run the ladder on "_all"; per-leg ladders stay untouched
+                # (they clear naturally once one leg returns). One first-detection heads-up only.
+                action = _ladder_step(cur, state, legs, "_all", "all", now,
+                                      f"ALL legs stale ({summary['legs']})", summary)
+                if action == "resubscribe" and not _throttled(state, "all_stale", now):
+                    _telegram(f"FEED FULL SILENCE — all legs stale ({summary['legs']}). "
+                              f"Guardian attempting recovery; truthful-friendship likely down.")
                     _mark_alert(state, "all_stale", now)
             else:
-                if legs.get("_all", {}).get("fails"):
-                    legs["_all"]["fails"] = 0
+                _ladder_clear(cur, legs, "_all", now, summary)
                 for src in LEGS:
-                    st = legs.setdefault(src, {"fails": 0, "repairing": False})
                     stale = (ages[src] is not None and ages[src] > STALE_MIN)
                     other_fresh = any(fresh[o] for o in LEGS if o != src)
                     if stale and other_fresh:
-                        # this leg is selectively dead while another flows -> repair
-                        st["fails"] = int(st.get("fails", 0)) + 1
-                        if st["fails"] >= RESUB_FAIL_LIMIT:
-                            n = _issue_cmd(cur, "restart", src,
-                                           f"{src} stale {ages[src]:.0f}min, resubscribe failed {st['fails']}x")
-                            summary["actions"].append(f"{src}_restart")
-                            if not _throttled(state, f"{src}_fail", now):
-                                _telegram(f"FEED REPAIR FAILED — {src} still stale "
-                                          f"({ages[src]:.0f}min) after {st['fails']} resubscribes; guardian "
-                                          f"escalated to worker restart (nonce {n}).")
-                                _mark_alert(state, f"{src}_fail", now)
-                        else:
-                            n = _issue_cmd(cur, "resubscribe", src,
-                                           f"{src} stale {ages[src]:.0f}min while other leg fresh")
-                            summary["actions"].append(f"{src}_resubscribe")
-                            # NO Telegram here — repair attempted, not yet failed
-                        st["repairing"] = True
+                        _ladder_step(cur, state, legs, src, src, now,
+                                     f"{src} stale {ages[src]:.0f}min while other leg fresh", summary)
                     else:
-                        if st.get("repairing"):
-                            _oplog(cur, "guardian_recovery",
-                                   {"leg": src, "age_min": summary["legs"].get(src)})
-                            log.info(f"feed_guardian: {src} recovered (age={summary['legs'].get(src)}min)")
-                        st["fails"] = 0
-                        st["repairing"] = False
+                        _ladder_clear(cur, legs, src, now, summary)
 
             # (3) incident relay (Telegram only for escalations)
             try:
@@ -339,6 +424,7 @@ def offhours_liveness_tick():
         with _conn() as conn, conn.cursor() as cur:
             _ensure_heartbeat_table(cur)
             state = _load_state(cur)
+            _apply_resets(cur, state, now)   # cc#661: honour a manual reset flipped off-hours (e.g. pre-Monday)
             cur.execute("SELECT last_beat FROM worker_heartbeat WHERE id=1")
             r = cur.fetchone()
             last_beat = r[0] if r else None
@@ -425,9 +511,17 @@ def guardian_summary():
                 if age > HEARTBEAT_STALE_MIN:
                     out["red_flags"].append(f"worker heartbeat {age:.0f}min old")
             state = _load_state(cur)
+            today = now.date().isoformat()
             for leg, st in (state.get("legs") or {}).items():
-                if isinstance(st, dict) and st.get("fails"):
-                    out["open_repairs"].append({"leg": leg, "fails": st["fails"]})
+                if not isinstance(st, dict):
+                    continue
+                if st.get("failed_for_day") == today:
+                    # cc#661: stood-down state must stay VISIBLE (just not noisy)
+                    out["open_repairs"].append({"leg": leg, "attempts": st.get("attempts"),
+                                                "stood_down": True})
+                    out["red_flags"].append(f"{leg} REPAIR-EXHAUSTED (stood down)")
+                elif st.get("attempts"):
+                    out["open_repairs"].append({"leg": leg, "attempts": st.get("attempts")})
             raw = _cfg_get(cur, _CMD_KEY)
             if raw:
                 try:
