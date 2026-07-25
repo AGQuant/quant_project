@@ -378,10 +378,22 @@ def build_report(cur, pid):
         except Exception:
             alpha_label = alpha_since
 
+    # ---- (1b) realised P&L integration (cc#654) ----------------------------------------------------
+    # invested_adjusted = holdings cost - realised gainloss; the P&L tile = current - invested_adjusted
+    # = realised + unrealised (reconciles). No hr_realised rows -> realised=0 -> behaviour unchanged
+    # (invested = holdings cost, P&L = unrealised only).
+    cur.execute("SELECT COALESCE(SUM(gainloss), 0) FROM hr_realised WHERE portfolio_id=%s", (pid,))
+    realised = _f(cur.fetchone()[0]) or 0.0
+    holdings_cost = total_invested
+    invested_adj = holdings_cost - realised
+    unrealised = total_current - holdings_cost
+    total_pnl = total_current - invested_adj   # == realised + unrealised
+
     snapshot = {
-        "invested": _r(total_invested), "current": _r(total_current),
-        "pnl_abs": _r(total_current - total_invested),
-        "pnl_pct": round((total_current - total_invested) / total_invested * 100, 2) if total_invested > 0 else None,
+        "invested": _r(invested_adj), "current": _r(total_current),
+        "pnl_abs": _r(total_pnl),
+        "pnl_pct": round(total_pnl / invested_adj * 100, 2) if invested_adj else None,
+        "realised_pnl": _r(realised), "unrealised_pnl": _r(unrealised), "holdings_cost": _r(holdings_cost),
         "alpha": alpha, "alpha_since": alpha_since, "alpha_label": alpha_label,
         "holdings_count": len(holdings),
     }

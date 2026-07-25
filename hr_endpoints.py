@@ -362,6 +362,9 @@ def health_portfolios():
         cur.execute("SELECT portfolio_id, symbol, qty, avg_price FROM hr_holdings")
         rows = cur.fetchall()
         px = _cmp_map(cur, list({r[1] for r in rows if r[1]}))
+        # cc#654: realised gainloss per portfolio -> invested_adjusted so the shelf reconciles with the report
+        cur.execute("SELECT portfolio_id, COALESCE(SUM(gainloss),0) FROM hr_realised GROUP BY portfolio_id")
+        realised_map = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
     agg = {}
     for pid_, sym, qty, avg in rows:
         a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0})
@@ -372,11 +375,14 @@ def health_portfolios():
     out = []
     for id_, name, source, created in ports:
         a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0})
-        inv, curv = a["inv"], a["cur"]
-        pnl = curv - inv
+        realised = realised_map.get(id_, 0.0)
+        inv_adj = a["inv"] - realised    # cc#654: holdings cost - realised gainloss
+        curv = a["cur"]
+        pnl = curv - inv_adj             # == realised + unrealised
         out.append({"id": id_, "name": name, "source": source, "created_at": str(created),
-                    "n_holdings": a["n"], "invested": round(inv, 2), "current": round(curv, 2),
-                    "pnl": round(pnl, 2), "pnl_pct": (round(pnl / inv * 100.0, 2) if inv else None)})
+                    "n_holdings": a["n"], "invested": round(inv_adj, 2), "current": round(curv, 2),
+                    "pnl": round(pnl, 2), "pnl_pct": (round(pnl / inv_adj * 100.0, 2) if inv_adj else None),
+                    "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - a["inv"], 2)})
     return {"portfolios": out}
 
 

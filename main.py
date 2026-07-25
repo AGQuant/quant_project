@@ -396,6 +396,14 @@ def create_tables():
         resolved BOOLEAN DEFAULT FALSE, raw_input JSONB, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_hr_holdings_portfolio ON hr_holdings(portfolio_id);
+    -- cc#654: realised (sold) lots for a portfolio -> realised P&L in the Health Report. Populated
+    -- externally (Claude web); CREATE IF NOT EXISTS here so build_report's SUM never fails on a fresh DB.
+    CREATE TABLE IF NOT EXISTS hr_realised (
+        id BIGSERIAL PRIMARY KEY, portfolio_id BIGINT, fullname TEXT, qty NUMERIC,
+        buy_rate NUMERIC, sell_rate NUMERIC, buy_date DATE, sell_date DATE,
+        purchase_value NUMERIC, sale_value NUMERIC, gainloss NUMERIC, st_gain NUMERIC, lt_gain NUMERIC
+    );
+    CREATE INDEX IF NOT EXISTS idx_hr_realised_portfolio ON hr_realised(portfolio_id);
     -- cc#592: v8_history_cache DROPPED — one-time 05-Jun-2026 build, never refreshed, zero live
     -- readers (superseded by universe_technicals cc#154 + fyers_hist cc#377; 52W-breakout reads
     -- universe_technicals). CREATE removed so the weekend Railway-console DROP is not recreated.

@@ -149,6 +149,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
     <div class="lbl">P&amp;L</div>
     <div style="font-size:22px;font-weight:600;margin-top:5px;letter-spacing:-.5px;color:var(--grn);" id="hr-pnl">+&#8377;42,477</div>
     <div style="font-size:13px;color:var(--grn);font-weight:500;margin-top:1px;" id="hr-pnl-pct">+3.1%</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;" id="hr-pnl-split"></div>
   </div>
   <div style="padding:16px 20px;">
     <div class="lbl" id="hr-alpha-lbl">Alpha vs Nifty 500</div>
@@ -446,6 +447,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
     set('hr-current', inr(s.current));
     var pnlEl=$('hr-pnl'); if(pnlEl){ pnlEl.textContent=inrSigned(s.pnl_abs); pnlEl.style.color=(s.pnl_abs>=0?'var(--grn)':'var(--red)'); }
     var ppEl=$('hr-pnl-pct'); if(ppEl){ ppEl.textContent=pct(s.pnl_pct); ppEl.style.color=(s.pnl_pct>=0?'var(--grn)':'var(--red)'); }
+    // cc#654: Realised / Unrealised breakdown sub-stat (total = realised + unrealised = the P&L tile).
+    // Shown only when realised lots exist; no hr_realised rows -> hidden, report renders unchanged.
+    var splitEl=$('hr-pnl-split');
+    if(splitEl){
+      if(s.realised_pnl!=null && s.realised_pnl!==0){
+        var rc=(s.realised_pnl>=0?'var(--grn)':'var(--red)'), uc=(s.unrealised_pnl>=0?'var(--grn)':'var(--red)');
+        splitEl.innerHTML='Realised <b style="color:'+rc+'">'+inrSigned(s.realised_pnl)+'</b> &middot; Unrealised <b style="color:'+uc+'">'+inrSigned(s.unrealised_pnl)+'</b>';
+      } else { splitEl.textContent=''; }
+    }
     var alEl=$('hr-alpha'); if(alEl){ alEl.textContent=pct(s.alpha); alEl.style.color=(s.alpha>=0?'var(--blu)':'var(--red)'); }
     // cc#653: dynamic alpha window label — "Alpha vs Nifty 500 · SINCE 02 Feb 26" (never a static 1yr)
     var alL=$('hr-alpha-lbl'); if(alL){ alL.textContent='Alpha vs Nifty 500'+(s.alpha_label?(' · since '+s.alpha_label):''); }

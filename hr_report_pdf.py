@@ -186,6 +186,10 @@ def render_report_html(rep):
 
     pnl_col = "#0B6E42" if (snap.get("pnl_abs") or 0) >= 0 else "#B52432"
     overall = rt.get("overall")
+    # cc#654: realised / unrealised breakdown under the P&L tile (shown only when realised lots exist)
+    _rp = snap.get("realised_pnl")
+    pnl_split = (f'<div style="font-size:7.5px;color:#5B667D;margin-top:3px;">Realised {_money(_rp)} '
+                 f'&middot; Unrealised {_money(snap.get("unrealised_pnl"))}</div>') if _rp not in (None, 0) else ""
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @page {{ size: A4; margin: 12mm 12mm 14mm; }}
@@ -237,7 +241,7 @@ ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin
   <div class="c"><div class="lbl">Invested</div><div class="big">{_money(snap.get('invested'))}</div></div>
   <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div></div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
-    <div style="font-size:9px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div></div>
+    <div style="font-size:9px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
   <div class="c" style="border-right:none;"><div class="lbl">Alpha vs Nifty 500{(' &middot; since ' + _esc(snap.get('alpha_label'))) if snap.get('alpha_label') else ''}</div>
     <div class="big" style="color:#1847DF;">{_pct(snap.get('alpha'))}</div></div>
 </div>
