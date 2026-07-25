@@ -238,7 +238,7 @@ ul {{ margin:0; padding-left:16px; }} li {{ font-size:9px; color:#5B667D; margin
   <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div></div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
     <div style="font-size:9px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div></div>
-  <div class="c" style="border-right:none;"><div class="lbl">Alpha vs Nifty 500 &middot; 1yr</div>
+  <div class="c" style="border-right:none;"><div class="lbl">Alpha vs Nifty 500{(' &middot; since ' + _esc(snap.get('alpha_label'))) if snap.get('alpha_label') else ''}</div>
     <div class="big" style="color:#1847DF;">{_pct(snap.get('alpha'))}</div></div>
 </div>
 <div class="cols">

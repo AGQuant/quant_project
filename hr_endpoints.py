@@ -386,6 +386,7 @@ class HRGenReq(BaseModel):
     source: Optional[str] = "mcp"
     holdings: Optional[List[HRHolding]] = None
     white_label: Optional[bool] = True
+    alpha_start_date: Optional[str] = None   # cc#653: alpha window start (YYYY-MM-DD); null -> earliest holding entry
 
 
 @router.post("/api/health/generate")
@@ -429,6 +430,10 @@ def health_generate(body: HRGenReq):
             cur.execute("SELECT 1 FROM hr_portfolios WHERE id=%s", (pid,))
             if not cur.fetchone():
                 return {"error": f"portfolio {pid} not found"}
+        # cc#653: persist the per-portfolio alpha window start (applies to create/update/pid-only paths)
+        if body.alpha_start_date and pid:
+            cur.execute("UPDATE hr_portfolios SET alpha_start_date=%s WHERE id=%s", (body.alpha_start_date, pid))
+            conn.commit()
         priced = None
         try:
             from hr_report import build_report

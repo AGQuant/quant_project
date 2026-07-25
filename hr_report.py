@@ -174,6 +174,33 @@ def _nifty500_1y(cur):
     return round(w, 2) if w is not None else None
 
 
+def _price_on_or_before(cur, sym, d):
+    """cc#653: latest raw_prices close on/before date d for a symbol (the alpha-window anchor price)."""
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date<=%s
+                   ORDER BY price_date DESC LIMIT 1""", (sym, d))
+    r = cur.fetchone()
+    return _f(r[0]) if r else None
+
+
+def _nifty500_return_since(cur, start_date):
+    """cc#653: mcap-weighted NIFTY500 return from start_date -> live, built from constituent raw_prices
+    (each symbol's close on/before start_date vs its latest close). Same mcap-weighted-proxy philosophy
+    as _nifty500_1y, but over an arbitrary window instead of a fixed 1y."""
+    cur.execute("""
+        WITH r AS (
+            SELECT b.weight,
+              (SELECT close FROM raw_prices rp WHERE rp.symbol=b.symbol AND price_date<=%s
+                 ORDER BY price_date DESC LIMIT 1) p0,
+              (SELECT close FROM raw_prices rp WHERE rp.symbol=b.symbol
+                 ORDER BY price_date DESC LIMIT 1) p1
+            FROM nifty500_benchmark b WHERE b.weight IS NOT NULL)
+        SELECT SUM((p1/p0-1)*weight), SUM(weight) FROM r WHERE p0>0 AND p1 IS NOT NULL""", (start_date,))
+    row = cur.fetchone()
+    if row and row[0] is not None and row[1]:
+        return round(float(row[0]) / float(row[1]) * 100.0, 2)
+    return None
+
+
 def _segment_aggs(cur, segments):
     """Per-segment avg PE + avg dividend yield across all stocks (sector benchmark)."""
     if not segments:
@@ -258,10 +285,11 @@ def _strength_chip(text):
 
 # ---- the engine ----------------------------------------------------------------
 def build_report(cur, pid):
-    cur.execute("SELECT id, name, source, created_at FROM hr_portfolios WHERE id=%s", (pid,))
+    cur.execute("SELECT id, name, source, created_at, alpha_start_date FROM hr_portfolios WHERE id=%s", (pid,))
     p = cur.fetchone()
     if not p:
         return {"error": "portfolio not found"}
+    alpha_start = p[4]   # cc#653: per-portfolio alpha window start (None -> earliest holding entry date)
     cur.execute("SELECT symbol, company_name, qty, avg_price FROM hr_holdings WHERE portfolio_id=%s ORDER BY id", (pid,))
     raw = cur.fetchall()
     if not raw:
@@ -321,12 +349,40 @@ def build_report(cur, pid):
     port_1y = _wavg(_wpairs("return_1y"))
     n50 = _nifty50_1y(cur)
     n500 = _nifty500_1y(cur)
-    bench_alpha = n500 if n500 is not None else n50   # template label: "Alpha vs Nifty 500"
+
+    # ---- (1a) variable-window alpha (cc#653): current-value-weighted portfolio return vs NIFTY500,
+    # both measured from alpha_start_date -> live. Fallback start = earliest holding entry date
+    # (min hr_holdings.created_at), NEVER a 1y default. Tile label carries the date.
+    a_start = alpha_start
+    if a_start is None:
+        cur.execute("SELECT MIN(created_at)::date FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+        _m = cur.fetchone()
+        a_start = _m[0] if (_m and _m[0]) else None
+    alpha = alpha_since = alpha_label = None
+    if a_start is not None:
+        num = den = 0.0
+        for h in holdings:
+            p0 = _price_on_or_before(cur, h["symbol"], a_start)
+            c = h["cmp"]
+            cw = h["current"] or 0
+            if p0 and p0 > 0 and c is not None and cw > 0:
+                num += ((c / p0 - 1.0) * 100.0) * cw
+                den += cw
+        port_ret = round(num / den, 2) if den > 0 else None
+        n500_ret = _nifty500_return_since(cur, a_start)
+        if port_ret is not None and n500_ret is not None:
+            alpha = round(port_ret - n500_ret, 2)
+        alpha_since = str(a_start)
+        try:
+            alpha_label = a_start.strftime("%d %b %y").upper()
+        except Exception:
+            alpha_label = alpha_since
+
     snapshot = {
         "invested": _r(total_invested), "current": _r(total_current),
         "pnl_abs": _r(total_current - total_invested),
         "pnl_pct": round((total_current - total_invested) / total_invested * 100, 2) if total_invested > 0 else None,
-        "alpha": round(port_1y - bench_alpha, 2) if (port_1y is not None and bench_alpha is not None) else None,
+        "alpha": alpha, "alpha_since": alpha_since, "alpha_label": alpha_label,
         "holdings_count": len(holdings),
     }
 
@@ -465,7 +521,8 @@ def build_report(cur, pid):
     if ratings["verdict"]:
         highlights.append(f"Overall Scorr quality rating: {ratings['overall']}/10 ({ratings['verdict']}).")
     if snapshot["alpha"] is not None:
-        highlights.append(f"1yr alpha vs NIFTY50: {snapshot['alpha']:+.1f}%.")
+        _since = f" since {snapshot['alpha_label']}" if snapshot.get("alpha_label") else ""
+        highlights.append(f"Alpha vs Nifty 500{_since}: {snapshot['alpha']:+.1f}%.")
     highlights.append(wl_insight)
     highlights.append(q_insight)
     highlights.append(cap_insight)

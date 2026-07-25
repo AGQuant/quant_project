@@ -389,6 +389,7 @@ def create_tables():
         id BIGSERIAL PRIMARY KEY, name TEXT, created_by TEXT, source TEXT,
         created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE hr_portfolios ADD COLUMN IF NOT EXISTS alpha_start_date DATE;   -- cc#653: per-portfolio alpha window start
     CREATE TABLE IF NOT EXISTS hr_holdings (
         id BIGSERIAL PRIMARY KEY, portfolio_id BIGINT REFERENCES hr_portfolios(id) ON DELETE CASCADE,
         symbol TEXT, company_name TEXT, qty NUMERIC, avg_price NUMERIC,
