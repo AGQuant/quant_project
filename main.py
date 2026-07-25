@@ -1452,7 +1452,7 @@ async def ca_run(action: str = "daily_note", x_admin_token: Optional[str] = Head
     import ca_watchdog
     fn = {"daily_note": ca_watchdog.ca_daily_note, "master_note": ca_watchdog.master_watchdog_note,
           "weekly_scan": ca_watchdog.weekly_distortion_scan, "forward_heal": ca_watchdog.forward_heal,
-          "sweep_daily": lambda: ca_watchdog.run_ca_sweep(near_exdate_days=7),
+          "sweep_daily": ca_watchdog.run_ca_sweep_daily,
           "sweep_full": ca_watchdog.run_ca_sweep}.get(action)
     if not fn:
         return {"error": "action must be daily_note|master_note|weekly_scan|forward_heal|sweep_daily|sweep_full"}

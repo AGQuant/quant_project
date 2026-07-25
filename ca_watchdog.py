@@ -162,11 +162,33 @@ def _upsert_ca(cur, rows):
     return n
 
 
-def run_ca_sweep(symbols=None, near_exdate_days=None):
-    """cc#658 part_1: populate corporate_actions. symbols=None -> full universe (weekly). near_exdate_days
-    restricts to symbols with an existing ex_date within N days (daily refresh). PRIMARY = NSE feed
-    (structured action_type + ex_date); cliff inference seeds any symbol NSE misses. ONE symbol at a
-    time, >=1s throttle. Logs which source won -> ops_log(data_integrity, CA_SWEEP)."""
+def _daily_ca_symbols(cur, shard_idx, shard_total):
+    """cc#659: the daily CA symbol set = PRIORITY (symbols with CA history or an upcoming ex-date, scanned
+    EVERY day) UNION a rotating 1/shard_total slice of the full scored universe (so every symbol refreshes
+    at least every shard_total days). Stable hash shard keeps the slice deterministic per day."""
+    cur.execute("SELECT DISTINCT symbol FROM corporate_actions")
+    priority = {r[0] for r in cur.fetchall()}
+    cur.execute("""SELECT symbol FROM gvm_scores WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                   AND mod(abs(hashtext(symbol)), %s) = %s""", (shard_total, shard_idx))
+    shard = {r[0] for r in cur.fetchall()}
+    return sorted(priority | shard)
+
+
+def run_ca_sweep_daily(shard_total=3):
+    """cc#659: DAILY (incl. weekends) CA scrape. Priority set (CA history + upcoming ex-dates) every day
+    PLUS a rotating 1/shard_total universe slice -> full coverage every shard_total days, <=24h detection
+    lag for the priority set. Idempotent upsert. ops_log(data_integrity, CA_SWEEP, mode=daily_shard...)."""
+    shard_idx = datetime.date.today().timetuple().tm_yday % shard_total
+    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+        syms = _daily_ca_symbols(cur, shard_idx, shard_total)
+    return run_ca_sweep(symbols=syms, label=f"daily_shard_{shard_idx + 1}of{shard_total}")
+
+
+def run_ca_sweep(symbols=None, near_exdate_days=None, label=None):
+    """cc#658 part_1 / cc#659: populate corporate_actions. symbols= -> explicit list; near_exdate_days ->
+    symbols with an existing ex_date within N days; else full universe. PRIMARY = NSE feed (structured
+    action_type + ex_date). ONE symbol at a time, >=1s throttle. Logs coverage -> ops_log(data_integrity,
+    CA_SWEEP). `label` names the run mode (e.g. the daily shard) in the log."""
     with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
         if symbols:
             syms = [s.strip().upper() for s in symbols]
@@ -204,7 +226,8 @@ def run_ca_sweep(symbols=None, near_exdate_days=None):
             pass
     summary = {"symbols_scanned": len(syms), "rows_upserted": total, "by_source": by_source,
                "nse_misses": len(misses),
-               "mode": ("explicit" if symbols else (f"near_exdate_{near_exdate_days}d" if near_exdate_days is not None else "full_universe"))}
+               "mode": (label or ("explicit" if symbols else
+                        (f"near_exdate_{near_exdate_days}d" if near_exdate_days is not None else "full_universe")))}
     _oplog("data_integrity", "CA_SWEEP", summary)
     log.info(f"run_ca_sweep: {summary}")
     return summary

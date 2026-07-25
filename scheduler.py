@@ -1045,23 +1045,15 @@ def _bg_master_watchdog_note():
 
 
 def _bg_ca_sweep_daily():
-    """cc#658 part_1: daily CA refresh — symbols with an ex_date within 7 days."""
+    """cc#659: DAILY (incl weekends) CA scrape — priority set (CA history + upcoming ex-dates) every day
+    plus a rotating universe shard (full coverage <=3 days). Same one/sec NSE discipline."""
     try:
         import ca_watchdog
-        s = ca_watchdog.run_ca_sweep(near_exdate_days=7)
-        log.info(f"ca_sweep_daily: {s.get('rows_upserted')} rows over {s.get('symbols_scanned')} symbols")
+        s = ca_watchdog.run_ca_sweep_daily()
+        log.info(f"ca_sweep_daily [{s.get('mode')}]: {s.get('rows_upserted')} rows over "
+                 f"{s.get('symbols_scanned')} symbols, {s.get('nse_misses')} NSE misses")
     except Exception as e:
         log.error(f"ca_sweep_daily: {e}")
-
-
-def _bg_ca_sweep_full():
-    """cc#658 part_1: Sunday full-universe CA sweep (NSE, one/sec)."""
-    try:
-        import ca_watchdog
-        s = ca_watchdog.run_ca_sweep()
-        log.info(f"ca_sweep_full: {s.get('rows_upserted')} rows, {s.get('nse_misses')} NSE misses")
-    except Exception as e:
-        log.error(f"ca_sweep_full: {e}")
 
 
 def _bg_ca_weekly_scan():
@@ -2778,10 +2770,8 @@ async def _scheduler_loop():
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:
             _spawn(_bg_master_watchdog_note)  # cc#658 part_5: 09:05 consolidated master watchdog note
-        if h == 5 and m == 20:
-            _spawn(_bg_ca_sweep_daily)        # cc#658 part_1: daily CA refresh for symbols w/ ex_date <=7d
-        if now.weekday() == 6 and h == 4 and m == 0:
-            _spawn(_bg_ca_sweep_full)         # cc#658 part_1: Sunday 04:00 full-universe CA sweep (NSE)
+        if h == 5 and m == 15:
+            _spawn(_bg_ca_sweep_daily)        # cc#659: DAILY (incl weekends) sharded full-universe CA scrape
         if now.weekday() == 6 and h == 5 and m == 30:
             _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
         if h == 9 and m == 10:
