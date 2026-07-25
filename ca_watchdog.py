@@ -15,12 +15,22 @@ classification (artefact vs genuine), forward healing, and the daily ops surface
 """
 import os
 import json
+import time
 import logging
+import datetime
+import urllib.parse
 
 import psycopg
 
+try:
+    import httpx
+except Exception:   # pragma: no cover
+    httpx = None
+
 log = logging.getLogger("ca_watchdog")
 DB_URL = os.getenv("DATABASE_URL", "")
+
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
 
 _INDEX_EXCLUDE = ("NIFTY50", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCAPNIFTY")
 _CLIFF_THRESH = -0.33
@@ -59,6 +69,145 @@ def _matching_ca(cur, symbol, cliff_date, window_days=_CA_MATCH_DAYS):
                    ORDER BY ABS(ex_date - %s::date) LIMIT 1""",
                 (symbol, cliff_date, window_days, cliff_date, window_days, cliff_date))
     return cur.fetchone()
+
+
+# ── CA SCRAPER (part_1): NSE structured corporate-actions feed (primary), Screener attempt, cliff
+# inference as a reliable fallback. Each row is source-tagged; run one symbol at a time with throttle. ──
+def _parse_action_type(subject):
+    """Map an NSE 'subject'/'purpose' string to a canonical action_type, or None to ignore (ordinary
+    dividends etc. do not distort split-adjusted prices)."""
+    s = (subject or "").lower()
+    if "demerg" in s:
+        return "demerger"
+    if "bonus" in s:
+        return "bonus"
+    if "split" in s or "sub-division" in s or "sub division" in s or "face value" in s:
+        return "split"
+    if "right" in s:
+        return "rights"
+    if "dividend" in s and ("special" in s):
+        return "dividend-special"
+    return None
+
+
+def _parse_nse_date(s):
+    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d"):
+        try:
+            return datetime.datetime.strptime((s or "").strip(), fmt).date()
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _nse_client():
+    if httpx is None:
+        return None
+    c = httpx.Client(timeout=15.0, headers={
+        "User-Agent": _UA, "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9", "Referer": "https://www.nseindia.com/"})
+    try:
+        c.get("https://www.nseindia.com/")   # seed the cookies NSE's API requires
+    except Exception:
+        pass
+    return c
+
+
+def _scrape_ca_nse(client, symbol):
+    """NSE corporate-actions feed for one symbol -> [{symbol, action_type, ex_date, ratio_text, source}]."""
+    if client is None:
+        return [], "no_httpx"
+    url = ("https://www.nseindia.com/api/corporates-corporateActions?index=equities&symbol="
+           + urllib.parse.quote(symbol))
+    try:
+        r = client.get(url)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return [], f"nse_err:{type(e).__name__}"
+    items = data if isinstance(data, list) else (data.get("data") or [])
+    rows = []
+    for it in items:
+        subj = it.get("subject") or it.get("purpose") or it.get("comp")
+        at = _parse_action_type(subj)
+        if not at:
+            continue
+        exd = _parse_nse_date(it.get("exDate") or it.get("ex_date") or it.get("exdate"))
+        if not exd:
+            continue
+        rows.append({"symbol": symbol, "action_type": at, "ex_date": exd,
+                     "ratio_text": (subj or "")[:200], "source": "nse"})
+    return rows, None
+
+
+def _infer_ca_from_cliffs(cur, symbol, months=60):
+    """Fallback: an unadjusted cliff date is (very likely) a CA ex-date. Recorded source=cliff_inference,
+    action_type=detected — gives the cross-check an ex-date even where the external feed is thin. A
+    genuine crash that survives a cc#657 re-pull will NOT match a real CA feed row, so this inference is
+    only used to seed detection, never to auto-restate on its own (the weekly scan still gates on it)."""
+    events = _cliff_events(cur, months=months)
+    return [{"symbol": symbol, "action_type": "detected", "ex_date": d,
+             "ratio_text": f"inferred from {drop}% cliff", "source": "cliff_inference"}
+            for (sym, d, drop) in events if sym == symbol]
+
+
+def _upsert_ca(cur, rows):
+    n = 0
+    for r in rows:
+        cur.execute("""INSERT INTO corporate_actions (symbol, action_type, ex_date, ratio_text, source)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT (symbol, action_type, ex_date) DO UPDATE SET
+                         ratio_text=EXCLUDED.ratio_text, source=EXCLUDED.source""",
+                    (r["symbol"], r["action_type"], r["ex_date"], r.get("ratio_text"), r.get("source")))
+        n += 1
+    return n
+
+
+def run_ca_sweep(symbols=None, near_exdate_days=None):
+    """cc#658 part_1: populate corporate_actions. symbols=None -> full universe (weekly). near_exdate_days
+    restricts to symbols with an existing ex_date within N days (daily refresh). PRIMARY = NSE feed
+    (structured action_type + ex_date); cliff inference seeds any symbol NSE misses. ONE symbol at a
+    time, >=1s throttle. Logs which source won -> ops_log(data_integrity, CA_SWEEP)."""
+    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+        if symbols:
+            syms = [s.strip().upper() for s in symbols]
+        elif near_exdate_days is not None:
+            cur.execute("SELECT DISTINCT symbol FROM corporate_actions WHERE ex_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + %s)",
+                        (near_exdate_days,))
+            syms = [r[0] for r in cur.fetchall()]
+        else:
+            cur.execute("SELECT DISTINCT symbol FROM gvm_scores WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)")
+            syms = [r[0] for r in cur.fetchall()]
+    client = _nse_client()
+    by_source = {"nse": 0}
+    total = 0
+    misses = []
+    for sym in syms:
+        rows, reason = _scrape_ca_nse(client, sym)
+        time.sleep(1.0)   # Yahoo/NSE hard rule: one symbol per second
+        # NSE-only on purpose: corporate_actions must hold REAL CAs so the weekly scan's artefact-vs-
+        # genuine distinction survives (seeding inferred CAs from cliffs would make every cliff look
+        # like a CA). A symbol NSE misses simply has no CA row -> its cliff is flagged genuine until a
+        # real CA is found (honest, conservative; cc#657 still keeps the prices themselves clean).
+        if not rows:
+            misses.append(sym)
+            continue
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            n = _upsert_ca(cur, rows)
+            conn.commit()
+        for r in rows:
+            by_source[r["source"]] = by_source.get(r["source"], 0) + 1
+        total += n
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            pass
+    summary = {"symbols_scanned": len(syms), "rows_upserted": total, "by_source": by_source,
+               "nse_misses": len(misses),
+               "mode": ("explicit" if symbols else (f"near_exdate_{near_exdate_days}d" if near_exdate_days is not None else "full_universe"))}
+    _oplog("data_integrity", "CA_SWEEP", summary)
+    log.info(f"run_ca_sweep: {summary}")
+    return summary
 
 
 def weekly_distortion_scan(auto_restate=True):

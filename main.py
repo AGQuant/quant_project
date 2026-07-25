@@ -1451,10 +1451,23 @@ async def ca_run(action: str = "daily_note", x_admin_token: Optional[str] = Head
     _check_admin(x_admin_token)
     import ca_watchdog
     fn = {"daily_note": ca_watchdog.ca_daily_note, "master_note": ca_watchdog.master_watchdog_note,
-          "weekly_scan": ca_watchdog.weekly_distortion_scan, "forward_heal": ca_watchdog.forward_heal}.get(action)
+          "weekly_scan": ca_watchdog.weekly_distortion_scan, "forward_heal": ca_watchdog.forward_heal,
+          "sweep_daily": lambda: ca_watchdog.run_ca_sweep(near_exdate_days=7),
+          "sweep_full": ca_watchdog.run_ca_sweep}.get(action)
     if not fn:
-        return {"error": "action must be daily_note|master_note|weekly_scan|forward_heal"}
+        return {"error": "action must be daily_note|master_note|weekly_scan|forward_heal|sweep_daily|sweep_full"}
     return await asyncio.to_thread(fn)
+
+@app.post("/api/admin/ca_sweep")
+async def ca_sweep_symbols(symbols: str = "", x_admin_token: Optional[str] = Header(None)):
+    """cc#658 part_1: scrape corporate actions for an explicit symbol list (comma/space) — used to
+    verify known events (LICI/VEDL/TRENT/TRIVENI) populate corporate_actions."""
+    _check_admin(x_admin_token)
+    import ca_watchdog
+    syms = [s.strip().upper() for s in (symbols or "").replace(",", " ").split() if s.strip()]
+    if not syms:
+        return {"error": "provide symbols"}
+    return await asyncio.to_thread(ca_watchdog.run_ca_sweep, syms)
 
 @app.post("/api/admin/backfill_indices")
 def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
