@@ -1362,9 +1362,13 @@ function _dcInjectStyle(){
   // the cockpit's own dark palette never leaks into (or inherits from) the host page theme.
   const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(3,5,12,.66);display:none}
   #dcOv.open{display:block}
-  #dcOv .dc-sheet{--c-bg:#0A0F1E;--c-panel:#0F1830;--c-bd:#1E2A44;--c-tx:#E6EDF7;--c-mut:#7A8AA5;--c-dim:#8a94ad;
-    --c-grn:#26D07C;--c-grnbg:#0E2A20;--c-red:#FF5169;--c-redbg:#2A0F16;--c-amb:#F5A623;--c-ambbg:#2A2110;
-    --c-blu:#4C8DFF;--c-blubg:#0E1E3C;--c-grid:#16223c;
+  /* cc#665: cockpit drill re-skinned to the Analysis-modal LIGHT chrome — the dark --c-* tokens now
+     map to the page's light palette (same vars the Analysis modal uses) so the whole sheet, header,
+     LONG/SHORT pill and LIVE clock read as the A-card. Rounded stat tiles (.oibox/.quad/.basis/.lvc)
+     become light tiles automatically; section 03 is rebuilt below with the shared _heatTile delta grid. */
+  #dcOv .dc-sheet{--c-bg:var(--panel,#fff);--c-panel:var(--surface2,#f6f8fb);--c-bd:var(--line2,#e8ecf2);--c-tx:var(--txt,#1c2536);--c-mut:var(--mut,#5a6b82);--c-dim:var(--dim,#8a94ad);
+    --c-grn:var(--grn,#0a9e63);--c-grnbg:rgba(47,212,139,.14);--c-red:var(--red,#dd3a4a);--c-redbg:rgba(255,92,108,.12);--c-amb:var(--amber,#c98a12);--c-ambbg:rgba(245,166,35,.15);
+    --c-blu:var(--blu,#1847DF);--c-blubg:rgba(24,71,223,.10);--c-grid:var(--line2,#e8ecf2);
     font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:min(94vw,460px);
     background:var(--c-bg);color:var(--c-tx);border-left:1px solid var(--c-bd);overflow-y:auto;
     transform:translateX(100%);transition:transform .24s ease}
@@ -1615,27 +1619,26 @@ function _dcRender(sym,side,qty,entry,cmp,d){
       </div>
     </div></div>`;
 
-  // 03 5-DAY ROLLING OI
+  // 03 5-DAY ROLLING OI — cc#665: rebuilt as the Analysis-modal TRAJECTORY-style heat grid using the
+  // SHARED _heatTile delta cell (green/red tinted, "--" muted for NO DATA, "0.0%" for a TRUE zero),
+  // replacing the old flat table. Renders exactly what cc#648 part_4 surfaces — present rows show real
+  // values, genuinely-missing rows stay "--" (never coerced to a green 0).
   const o5=F.oi_5d||{};
   let s3='';
   if(o5.series&&o5.series.length){
-    // cc#648 part_4: explicit missing-value rendering — "--" (muted) for NO DATA, "0.0%" for a TRUE
-    // zero, signed % (green/red) otherwise. A null cell no longer gets a green up-tint (the old
-    // `(v||0)>=0` coerced null->0 and painted it green); right-alignment comes from .strip td.
-    const _oiCell=v=>{
-      if(v==null) return `<td style="color:var(--c-mut)">--</td>`;
-      if(v===0)   return `<td>0.0%</td>`;
-      return `<td class="${v>0?'up':'dn'}">${sign(v,1)}%</td>`;
+    const _oiHeat=v=>{
+      if(v==null) return _heatTile('--','n','var(--dim)');
+      if(v===0)   return _heatTile('0.0%','n','var(--txt)');
+      const col=v>0?'var(--grn)':'var(--red)';
+      return _heatTile((v>0?'+':'')+v.toFixed(1)+'%',_perfGrade(v),col);
     };
-    const rows=o5.series.map(x=>{const qd=_dcQd(x.quadrant);
-      const qdH=qd?`<span class="qd ${qd[0]}">${qd[1]}</span>`:'<span style="color:var(--c-mut)">--</span>';
-      return `<tr><td>${_dcFmtDate(x.date)}</td>
-        ${_oiCell(x.chg_pct)}
-        ${_oiCell(x.px_chg)}
-        <td>${qdH}</td></tr>`;}).join('');
-    s3=`<div class="sec"><div class="lbl"><span class="n">03</span> 5-DAY ROLLING OI</div>
-      <table class="strip"><thead><tr><th>DATE</th><th>OI &Delta;%</th><th>PRICE &Delta;%</th><th>SIGNAL</th></tr></thead>
-      <tbody>${rows}</tbody></table>${o5.net_pct!=null?`<div class="sub mono" style="text-align:right;margin-top:8px;color:var(--c-mut)">net ${sign(o5.net_pct,1)}%</div>`:''}</div>`;
+    const hdr=x=>`<div style="flex:1;text-align:center;font-size:9.5px;color:var(--dim);font-family:${_MONO}">${x}</div>`;
+    const sigCell=x=>{const qd=_dcQd(x.quadrant);
+      const inner=qd?`<span class="qd ${qd[0]}">${qd[1]}</span>`:`<span style="color:var(--c-mut);font-family:${_MONO}">--</span>`;
+      return `<div style="flex:1;display:flex;align-items:center;justify-content:center">${inner}</div>`;};
+    let grid=`<div style="display:flex;gap:6px;margin-bottom:5px"><div style="width:62px;min-width:62px"></div>${hdr('OI &Delta;%')}${hdr('Price &Delta;%')}${hdr('Signal')}</div>`;
+    o5.series.forEach(x=>{ grid+=`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center"><div style="width:62px;min-width:62px;font-size:11px;font-weight:700;color:var(--txt);font-family:${_MONO}">${_dcFmtDate(x.date)}</div>${_oiHeat(x.chg_pct)}${_oiHeat(x.px_chg)}${sigCell(x)}</div>`; });
+    s3=`<div class="sec"><div class="lbl"><span class="n">03</span> 5-DAY ROLLING OI</div>${grid}${o5.net_pct!=null?`<div class="sub mono" style="text-align:right;margin-top:4px;color:var(--c-mut)">net ${sign(o5.net_pct,1)}%</div>`:''}</div>`;
   }
 
   // 04 FUTURES BASIS
