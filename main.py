@@ -1397,6 +1397,23 @@ async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     if scheduler._yahoo_daily_running: return {"status":"already_running"}
     asyncio.create_task(scheduler._bg_yahoo_daily()); return {"status":"started"}
 
+@app.post("/api/admin/restate_symbols")
+async def restate_symbols_now(symbols: str = "", lookback: str = "5y", detect: bool = False,
+                              x_admin_token: Optional[str] = Header(None)):
+    """cc#657: full 5y adjusted re-pull for corporate-action-polluted symbols (one/sec). Pass an explicit
+    comma/space list, or detect=true to auto-select the current cliff backlog. Synchronous — returns the
+    per-symbol report (bars / dates / residual_cliffs)."""
+    _check_admin(x_admin_token)
+    import yahoo_daily_update as ydu
+    syms = [s.strip().upper() for s in (symbols or "").replace(",", " ").split() if s.strip()]
+    if detect and not syms:
+        syms = await asyncio.to_thread(ydu.detect_cliff_symbols)
+    if not syms:
+        return {"error": "provide symbols (comma/space separated) or detect=true"}
+    report = await asyncio.to_thread(ydu.restate_symbol_history, syms, lookback)
+    return {"count": len(report), "restated": len([r for r in report if r.get("status") == "restated"]),
+            "report": report}
+
 @app.post("/api/admin/backfill_indices")
 def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return yahoo_index_backfill.backfill_indices(days=days)

@@ -999,6 +999,16 @@ def _bg_yahoo_daily_sync():
         with _conn() as conn:
             _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
             heal = ydu.heal_indices(conn)  # cc_task #72 bug_2: verify + self-heal index symbols post-EOD
+        # cc#657: corporate-action cliff guard — any symbol that cliffed in the last few days (fresh
+        # split/bonus/demerger that the range=10d UPSERT left un-restated) gets a same-night 5y adjusted
+        # re-pull, so the pollution never reopens (TRIVENI cliffed 22-Jul). ops_log = yahoo_ca_restate.
+        try:
+            cliffs = ydu.detect_cliff_symbols(recent_days=5)
+            if cliffs:
+                ca = ydu.restate_symbol_history(cliffs, lookback="5y")
+                log.info(f"yahoo_ca_restate nightly: restated {len([r for r in ca if r['status']=='restated'])}/{len(cliffs)} {cliffs}")
+        except Exception as e:
+            log.error(f"yahoo_ca_restate nightly guard: {e}")
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result} | index_heal: {heal}")
     except Exception as e: log.error(f"yahoo_daily: {e}")

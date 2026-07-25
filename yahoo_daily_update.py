@@ -353,6 +353,93 @@ def backfill_new_listings(specs, lookback="5y"):
     return report
 
 
+_CLIFF_EXCLUDE = ("NIFTY50", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCAPNIFTY")
+
+
+def _residual_cliffs(cur, symbol, thresh=-0.33):
+    """cc#657: count single-day cliffs (close/prev - 1 < thresh) still present for a symbol. After an
+    adjusted re-pull this should be 0 for a corporate-action artefact; a persisting cliff is the TRUE
+    market move (keep it)."""
+    cur.execute("""
+        SELECT COUNT(*) FROM (
+          SELECT close, LAG(close) OVER (ORDER BY price_date) prev
+          FROM raw_prices WHERE symbol=%s) x
+        WHERE prev IS NOT NULL AND prev > 0 AND (close/prev - 1) < %s""", (symbol, thresh))
+    return cur.fetchone()[0]
+
+
+def detect_cliff_symbols(recent_days=None, months=12, thresh=-0.33):
+    """cc#657: symbols carrying an unadjusted single-day cliff (close/prev - 1 < thresh). recent_days set
+    -> only bars within that many days (nightly guard); else the last `months` months (backlog scan).
+    LAG is computed over a bounded recent window so the query stays cheap. Indices excluded. Restating a
+    genuine crash is harmless (the adjusted re-pull returns the same bar)."""
+    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+        if recent_days is not None:
+            cur.execute("""
+                WITH d AS (SELECT symbol, price_date, close,
+                             LAG(close) OVER (PARTITION BY symbol ORDER BY price_date) prev
+                           FROM raw_prices WHERE price_date >= CURRENT_DATE - make_interval(days => %s))
+                SELECT DISTINCT symbol FROM d
+                WHERE price_date >= CURRENT_DATE - make_interval(days => %s)
+                  AND prev IS NOT NULL AND prev > 0 AND (close/prev - 1) < %s
+                  AND symbol <> ALL(%s)""",
+                (recent_days + 10, recent_days, thresh, list(_CLIFF_EXCLUDE)))
+        else:
+            cur.execute("""
+                WITH d AS (SELECT symbol, close,
+                             LAG(close) OVER (PARTITION BY symbol ORDER BY price_date) prev
+                           FROM raw_prices WHERE price_date >= CURRENT_DATE - make_interval(months => %s))
+                SELECT DISTINCT symbol FROM d
+                WHERE prev IS NOT NULL AND prev > 0 AND (close/prev - 1) < %s
+                  AND symbol <> ALL(%s)""",
+                (months, thresh, list(_CLIFF_EXCLUDE)))
+        return sorted(r[0] for r in cur.fetchall())
+
+
+def restate_symbol_history(symbols, lookback="5y"):
+    """cc#657: full-series adjusted re-pull for corporate-action-polluted symbols. Yahoo serves split/
+    bonus/demerger-adjusted prices as-of-fetch, and the nightly range=10d UPSERT never restates
+    pre-event history -> fake -34%..-90% single-day cliffs. This re-pulls the whole `lookback` adjusted
+    series ONE SYMBOL AT A TIME (Yahoo hard rule, sleep >= 1s) and UPSERTs it (restating every bar),
+    then reports residual cliffs. Returns a per-symbol report and writes an ops_log entry
+    (category=yahoo_ca_restate)."""
+    import time as _t
+    if isinstance(symbols, str):
+        symbols = symbols.replace(",", " ").split()
+    report = []
+    for raw in symbols:
+        sym = (raw or "").strip().upper()
+        if not sym:
+            continue
+        ticker = _to_yahoo_ticker(sym)
+        rows, reason = _fetch_history_ticker(ticker, sym, lookback)
+        _t.sleep(1.0)   # Yahoo hard rule: one symbol per second
+        if not rows:
+            report.append({"symbol": sym, "status": "failed", "ticker": ticker,
+                           "reason": reason or "no_series"})
+            continue
+        written = _commit_rows({sym: rows})
+        first, last = min(r[1] for r in rows), max(r[1] for r in rows)
+        resid = None
+        try:
+            with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+                resid = _residual_cliffs(cur, sym)
+        except Exception as e:
+            resid = f"check_failed:{str(e)[:80]}"
+        report.append({"symbol": sym, "status": "restated", "ticker": ticker, "bars": written,
+                       "first_date": str(first), "last_date": str(last), "residual_cliffs": resid})
+    try:
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'yahoo_ca_restate', 'RAW_PRICES_CA_RESTATE', %s::jsonb)",
+                        (json.dumps(report, default=str),))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"restate_symbol_history oplog: {e}")
+    log.info(f"restate_symbol_history: {len([r for r in report if r['status']=='restated'])}/{len(report)} restated")
+    return report
+
+
 def heal_indices(conn=None, indices=("NIFTY50", "BANKNIFTY")):
     """cc_task #72 bug_2: post-EOD verification + self-heal. After the nightly run,
     if an index's raw_prices lags the freshest universe trading day, re-fetch JUST
