@@ -23,7 +23,7 @@ from fastapi import APIRouter
 
 from nifty_dwm import live_nifty_dwm
 from r6_volume import volume_ratio
-from tc_v4_dual import (_f, _r, _derive, _gates, score_card, _verdict,
+from tc_v4_dual import (_f, _r, _derive, score_card, _verdict,
                         STYLES, _ist, SPEC_REF, VERSION,
                         _sector_aggs, _nifty_ret63)   # cc#586: R18/R19 sector + nifty-RS shared helpers
 
@@ -248,11 +248,9 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             continue
         if segment and (d.get("segment") or "") != segment:
             continue
+        # cc#677: ZERO-VETO — score every side/style; the verdict is score bands alone (no gate filter).
         cards = []
         for s in sides:
-            ok, _g = _gates(d, s)
-            if not ok:
-                continue
             for st in STYLES:
                 cards.append(score_card(d, st, s))
         if not cards:

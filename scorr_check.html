@@ -864,6 +864,16 @@ function _v4scoreCol(s,verdict){
   return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';
 }
 function _v4creditCls(c){c=parseFloat(c);return c>=1?'c1':c>=0.5?'c05':'c0';}
+// cc#677: TC alert chip (informational only — never gates). Colour by severity/state.
+function _v4alertChip(a){
+  if(!a)return '';
+  var C={red:['#fde8ea','#c0392b','#f2b8bf'],green:['#e7f7ee','#0a7d47','#b6e6cd'],
+         yellow:['#fdf3d9','#8a6d1a','#f0dfa6'],amber:['#fdf0dc','#a5641a','#f2d8ad'],
+         grey:['#eef1f6','#5a6781','#d8dee9']}[a.color]||['#eef1f6','#5a6781','#d8dee9'];
+  return '<span class="v4-alert" style="display:inline-flex;align-items:center;font:700 10.5px/1 Sora,sans-serif;'
+    +'padding:5px 9px;border-radius:7px;letter-spacing:.02em;background:'+C[0]+';color:'+C[1]+';border:1px solid '+C[2]+'">'
+    +String(a.label||'').replace(/</g,'&lt;')+'</span>';
+}
 // cc#513: compact ACTUAL-column formatter for the 4-col rule table — r.value is either a scalar
 // (R1/R5/R6/R14) or a small {key:val} dict (most rules); render "key val" pairs, drop nulls.
 function _v4Actual(val){
@@ -1076,31 +1086,14 @@ function _gateFail(g){
 function renderV4Dual(d, uiMode){
   const side=(uiMode==='SHORT')?'SELL':'BUY';
   const sideLabel=(uiMode==='SHORT')?'▼ SHORT':'▲ LONG';
-  const gate=(d.gates&&d.gates[side])||{pass:false,gates:[]};
-  // GVM (BUY gate G1 carries it)
-  let gvm=null;
-  (gate.gates||[]).forEach(g=>{if(g.gate==='G1'&&typeof g.value==='number')gvm=g.value;});
-  const gvmHtml = gvm!=null
-    ? '<span class="r-gvm '+(gvm>=7?'hi':gvm>=6?'mid':'lo')+'">GVM '+gvm.toFixed(2)+'</span>' : '';
-  const gatesHtml=(gate.gates||[]).map(g=>{
-    // cc#583: an advisory gate (G2 earnings) that "fails" is an amber heads-up, not a red block.
-    if(g.advisory && !g.pass) return '<span class="v4-gate adv">'+g.gate+' '+g.label+' ⚠</span>';
-    return '<span class="v4-gate '+(g.pass?'pass':'fail')+'">'+g.gate+' '+g.label+(g.pass?' ✓':' ✗')+'</span>';
-  }).join('');
+  // cc#677 (spec id=9035, ZERO-VETO): verdict = score bands alone. Risk conditions render as alert
+  // chips (F&O ban / result-date / GVM floor / DTE) — never gate. GVM is now one such chip, not a pill.
+  const gvmHtml='';
+  const alerts=(d.alerts||[]);
+  const alertsHtml=alerts.map(_v4alertChip).join('');
   const cards=(d.cards||[]);
   const cardHtml=c=>{
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
-    // cc#513: gates render in the same 4-col table, above the scored rules.
-    const gateRows=(gate.gates||[]).map(g=>{
-      const adv=(g.advisory && !g.pass);  // cc#583: earnings advisory row -> amber ⚠, not red ✗
-      const rowCls=g.pass?'rg':(adv?'ra radv':'rr');
-      const mark=g.pass?'✓':(adv?'⚠':'✗');
-      const col=g.pass?'var(--grn)':(adv?'var(--amber)':'var(--red)');
-      return '<div class="v4-rrow '+rowCls+'"><span class="rl">'+g.gate+'</span>'
-        +'<span class="rreq">'+g.label+'</span>'
-        +'<span class="ract">'+(g.value!=null?g.value:'—')+'</span>'
-        +'<span class="rc" style="color:'+col+'">'+mark+'</span></div>';
-    }).join('');
     const rules=(c.rules||[]).map(r=>{
       // cc#452/cc#513: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
@@ -1117,24 +1110,13 @@ function renderV4Dual(d, uiMode){
       +'<span style="font-size:11px;color:var(--dim)">/'+(c.max||15)+'</span>'
       +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'
       +'<div class="v4-rtable"><div class="v4-rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>'
-      +gateRows+rules+'</div></div>';
+      +rules+'</div></div>';   // cc#677: gate rows removed — no gates in the rule table
   };
   // cc#412: restore the spec-2926 display contract — ONE full card per side (higher score; tie -> MOM);
   // the losing style collapses to a one-line summary with an inline "view" toggle.
   const sorted=[...cards].sort((a,b)=> (b.score-a.score) || (a.style==='MOMENTUM'?-1:1));
   const winner=sorted[0]||null, loser=sorted[1]||null;
-  // cc#402: gate-fail no longer blanks the cards — show them all, with a GATED banner naming the fail.
-  // cc#583: advisory gates (G2 earnings) are excluded from hard fails — never trip the red banner.
-  const fails=(gate.fails&&gate.fails.length?gate.fails:(gate.gates||[]).filter(g=>!g.pass&&!g.advisory));
-  const gatedBanner = (gate.pass===false && fails.length)
-    ? '<div class="v4-gated">⛔ GATED — '+fails.map(_gateFail).join(' · ')   // cc#451 fix_3: failing gates only, deduped
-      +' — verdict held at REJECT; scorecards shown for context.</div>'
-    : '';
-  // cc#583: earnings blackout is now a HIGHLIGHT-ONLY amber advisory — verdict stands, trade around the print.
-  const eb=d.earnings||{};
-  const amberBanner = eb.blackout
-    ? '<div class="v4-amber">⚠ '+(eb.label||'Results imminent')+' — earnings inside 3 days; verdict stands, trade around the print.</div>'
-    : '';
+  // cc#677: ZERO-VETO — no GATED/earnings banners; risk conditions live in the alert chip row above.
   const cardsHtml = winner
     ? '<div class="v4-winner">'+cardHtml(winner)+'</div>'
       + (loser
@@ -1158,10 +1140,8 @@ function renderV4Dual(d, uiMode){
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
     +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?20:22))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥17.0 / VALID 12.9–17.0 / REJECT&lt;12.9':'STRONG≥18.5 / VALID 14.4–18.5 / REJECT&lt;14.4'))+'</div>'
-    +   '<div class="v4-gates">'+gatesHtml+'</div>'
+    +   (alertsHtml?'<div class="v4-alerts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">'+alertsHtml+'</div>':'')
     + '</div></div>'
-    + gatedBanner
-    + amberBanner
     + cardsHtml
     + '<div style="margin-top:12px"><button class="v4-detail-btn" onclick="loadDetail(\''+d.symbol+'\',\''+uiMode+'\')">⊞ View Detailed — rule-by-rule evidence</button></div>'
     + '<div class="v4-detail" id="v4Detail"></div>'

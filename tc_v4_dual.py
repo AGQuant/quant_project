@@ -15,10 +15,10 @@ never duplicated.
 Verdict bands (cc#586 CEILING FINAL, after R16 fib + R17 valuation + R18 momentum + R19 relative-
 strength + R20 GVM-trend): BUY max 22 — STRONG >= 18.5 | VALID 14.4 to <18.5 | REJECT < 14.4.
 SELL max 20 — STRONG >= 17.0 | VALID 12.9 to <17.0 | REJECT < 12.9.
-SELL side = v4.1 mirror (locked same session): G1 GVM skipped (v3.3.2 short convention); all rules
-mirrored per the spec's v4_1_sell_mirror table.
-Gates (cc#583): G1 GVM (BUY-only) + G3 futures/DTE are HARD (force REJECT). G2 earnings blackout is
-ADVISORY-ONLY — an amber "trade around the print" highlight; it no longer overrides the verdict.
+SELL side = v4.1 mirror (locked same session): all rules mirrored per the spec's v4_1_sell_mirror table.
+Gates (cc#677, founder-final spec id=9035): ZERO VETO. The verdict is SCORE BANDS ALONE. The old
+G1 GVM / G2 earnings / G3 futures-DTE gates AND the fo_ban check no longer reject anything — every
+risk condition is now an informational ALERT CHIP (F&O ban · result-date · GVM floor · DTE countdown).
 
 Endpoints (new paths — do NOT collide with the live /api/trade-check/v4):
   GET/POST /api/trade-check/v4/dual   — single symbol, both cards both sides (or a chosen side)
@@ -446,40 +446,71 @@ def _load_one(cur, symbol):
     d["event_blackout"] = _ev is not None
     d["event_date"] = _ev[0].isoformat() if _ev and _ev[0] else None
 
+    # cc#677 (spec id=9035, ZERO-VETO): alert-chip inputs. fo_ban = current F&O ban (MWPL); recency-
+    # guarded (last 5d) so a stale MAX(d) can't false-report a lifted ban. Result-date chip source =
+    # nearest UPCOMING (future) + most-recent REPORTED. All alert-only — never gate the verdict.
+    cur.execute("SELECT 1 FROM fo_ban WHERE UPPER(symbol)=UPPER(%s) AND d >= CURRENT_DATE - 5 LIMIT 1", (symbol,))
+    d["fo_ban"] = cur.fetchone() is not None
+    cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
+                   AND status='upcoming' AND ex_date >= CURRENT_DATE ORDER BY ex_date ASC LIMIT 1""", (symbol,))
+    _up = cur.fetchone()
+    cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
+                   AND status='reported' ORDER BY ex_date DESC LIMIT 1""", (symbol,))
+    _rep = cur.fetchone()
+    d["result_up"] = _up[0].isoformat() if _up and _up[0] else None
+    d["result_rep"] = _rep[0].isoformat() if _rep and _rep[0] else None
+
     return _derive(d)
 
 
-# ── hard gates ───────────────────────────────────────────────────────────────────
+# ── alert chips (cc#677: ZERO-VETO — informational only, never gate the verdict) ────
 
-def _gates(d, side):
-    """Hard gates -> REJECT, no scorecard. G1 (GVM) skipped for SELL (short convention).
-    cc#583: G2 earnings blackout DEMOTED to ADVISORY (amber highlight) — it NO LONGER forces REJECT
-    and NO LONGER overrides the computed verdict. Only G1 (BUY) + G3 remain hard (verdict-authoritative)
-    gates; G2 stays in the list for display + date citation but is excluded from `ok` and hard-fails."""
-    gates = []
-    ok = True
-    if side == "BUY":
-        g1 = (d.get("gvm_score") is not None and d["gvm_score"] >= 6.5)
-        gates.append({"gate": "G1", "label": "GVM >= 6.5", "value": _r(d.get("gvm_score")), "pass": g1})
-        ok = ok and g1
-    else:
-        gates.append({"gate": "G1", "label": "GVM n/a (short convention)", "value": None, "pass": True})
-    # cc#451: G2 label derives from the SAME single evaluation as the boolean — cite the imminent
-    # result date when failing ("Results 13-Jul (tomorrow)"), else the clear form. value carries the
-    # ISO date (or None) so downstream never re-derives its own boolean and disagrees with the chip.
-    # cc#583: marked advisory=True — highlight-only, verdict stands; trader trades around the print.
-    g2 = not d.get("event_blackout")
-    if g2:
-        _g2_label = "No results next 3d"
-    else:
-        _ed = _fmt_event_date(d.get("event_date"))
-        _g2_label = f"Results {_ed}" if _ed else "Results imminent (next 3d)"
-    gates.append({"gate": "G2", "label": _g2_label, "value": d.get("event_date"), "pass": g2,
-                  "advisory": True})
-    g3 = bool(d.get("is_future")) and (d.get("dte") is not None and d["dte"] >= 3)
-    gates.append({"gate": "G3", "label": "Futures & DTE >= 3", "value": d.get("dte"), "pass": g3})
-    ok = ok and g3
-    return ok, gates
+def _dm(dt):
+    """Uppercase 'DD MON' date label for the alert chips (e.g. '24 JUL', '04 AUG')."""
+    try:
+        return dt.strftime("%d %b").upper()
+    except Exception:
+        return "--"
+
+
+def _result_alert(d):
+    """RESULT chip from earnings_calendar. GREEN=recently reported (announced) · RED=due today/T+1 ·
+    YELLOW=upcoming beyond T+1 · GREY=no date known. Alert only."""
+    today = _ist().date()
+    up, rep = d.get("result_up"), d.get("result_rep")
+    def _p(iso):
+        try:
+            return date.fromisoformat(iso) if iso else None
+        except Exception:
+            return None
+    du = _p(up)
+    if du:
+        delta = (du - today).days
+        if delta <= 1:
+            return {"type": "result", "color": "red",
+                    "label": f"RESULT: {'TODAY' if delta <= 0 else 'TOMORROW'} ({_dm(du)})"}
+        return {"type": "result", "color": "yellow", "label": f"RESULT: {_dm(du)}"}
+    dr = _p(rep)
+    if dr and (today - dr).days <= 12:
+        return {"type": "result", "color": "green", "label": f"RESULT: ANNOUNCED {_dm(dr)}"}
+    return {"type": "result", "color": "grey", "label": "RESULT: --"}
+
+
+def _alerts(d):
+    """cc#677 (founder-final, spec id=9035): risk conditions render as ALERT CHIPS only — they NEVER
+    reject. F&O ban (MWPL, red) · result-date proximity (green/red/yellow/grey) · GVM floor (amber) ·
+    near-month DTE countdown (<5, amber). The verdict is SCORE BANDS ALONE — zero veto paths."""
+    out = []
+    if d.get("fo_ban"):
+        out.append({"type": "ban", "color": "red", "label": "F&O BAN · MWPL"})
+    out.append(_result_alert(d))
+    g = d.get("gvm_score")
+    if g is not None and g < 6.5:
+        out.append({"type": "gvm", "color": "amber", "label": f"GVM {g:.2f} BELOW FLOOR"})
+    dte = d.get("dte")
+    if d.get("is_future") and dte is not None and dte < 5:
+        out.append({"type": "dte", "color": "amber", "label": f"{dte} {'DAY' if dte == 1 else 'DAYS'} TO EXPIRY"})
+    return out
 
 
 # ── 15 scored rules (style + side aware) ─────────────────────────────────────────
@@ -897,43 +928,22 @@ def score_card(d, style, side):
 def _compute_result(d, symbol, side):
     """Score both style cards for each requested side and assemble the dual result. Shared by the
     dual endpoint and the detail endpoint (cc#408) so scores are identical by construction."""
-    # cc#402: gates keep verdict authority but never hide information — ALWAYS compute both style
-    # cards for each requested side, flag the gated ones, and let the caller render them with a
-    # GATED banner. Overall verdict stays REJECT whenever the best card's side gates failed.
+    # cc#677 (founder-final, spec id=9035): ZERO-VETO. The verdict is SCORE BANDS ALONE — no gate ever
+    # rejects. Every risk condition (F&O ban / result proximity / GVM floor / DTE) is an ALERT CHIP.
+    # Both style cards are scored for each requested side; the best card by score sets the verdict.
     sides = (["BUY", "SELL"] if side == "ALL" else [side])
-    cards, gate_map = [], {}
+    cards = []
     for s in sides:
-        ok, gates = _gates(d, s)
-        # cc#583: advisory gates (G2 earnings) are NOT hard fails — kept out of `fails` so the red
-        # GATED banner never fires on earnings alone; the frontend renders them as an amber highlight.
-        fails = [g for g in gates if not g.get("pass") and not g.get("advisory")]
-        gate_map[s] = {"pass": ok, "gates": gates, "fails": fails}
         for st in STYLES:
-            card = score_card(d, st, s)
-            card["gated"] = (not ok)
-            card["gate_fails"] = fails
-            cards.append(card)
-    passing = [c for c in cards if not c["gated"]]
-    pool = passing if passing else cards
-    best = max(pool, key=lambda c: c["score"], default=None)
-    best_gated = bool(best and best.get("gated"))
-    # cc#583: earnings advisory — highlight-only, does NOT gate. Frontend renders an amber
-    # "Results <date> (<N>d) — trade around the print" banner when active (verdict stands).
-    _eb = bool(d.get("event_blackout"))
-    _ed_iso = d.get("event_date")
-    earnings = {"blackout": _eb, "date": _ed_iso,
-                "label": (f"Results {_fmt_event_date(_ed_iso)}" if _eb and _ed_iso
-                          else ("Results imminent (next 3d)" if _eb else None))}
+            cards.append(score_card(d, st, s))
+    best = max(cards, key=lambda c: c["score"], default=None)
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
-        "gates": gate_map,
-        "earnings": earnings,
+        "alerts": _alerts(d),                       # cc#677: informational chips only (never gate)
         "best": best,
         "best_label": best["label"] if best else None,
         "best_score": best["score"] if best else None,
-        "best_verdict": ("REJECT" if best_gated else (best["verdict"] if best else "REJECT")),
-        "gated": best_gated,
-        "gate_fails": (best.get("gate_fails") if best else []),
+        "best_verdict": (best["verdict"] if best else "REJECT"),   # score bands alone
         "cards": cards,
         "pivots": {k: _r(v) for k, v in d["pivots"].items()},
         "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
@@ -1112,7 +1122,7 @@ def v4_dual_health():
     return {
         "version": VERSION, "spec_ref": SPEC_REF,
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
-        "gates": "G1 GVM>=6.5 (BUY only) · G3 futures & DTE>=3 [HARD] · G2 earnings = advisory amber (cc#583)",
+        "gates": "cc#677 ZERO-VETO — verdict = score bands alone; alert chips only (F&O ban · result-date · GVM floor · DTE)",
         "rules": "BUY R1-R20 (max 22) · SELL drops R6+R14 (max 20); +R17 val +R18 mom +R19 RS +R20 ΔGVM",
         "max_score": {"BUY": 22, "SELL": 20},
         "verdict": {"BUY": {"STRONG": ">=18.5", "VALID": "14.4 to <18.5", "REJECT": "<14.4"},

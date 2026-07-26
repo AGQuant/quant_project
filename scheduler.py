@@ -1471,6 +1471,26 @@ def _bg_nse_eod_ingest():
         log.error(f"nse_eod_ingest: {e}")
 
 
+def _bg_fo_ban_fetch():
+    """cc#677: daily F&O ban-list (MWPL) fetch ~08:45 IST so the TC ban ALERT is current. The ban is
+    alert-only now (zero-veto), but must reflect today's NSE list — a stale list makes the alert blind.
+    Trading days only; idempotent per-date replace via upsert_fo_ban."""
+    now = _ist_now()
+    if not _is_trading_day(now.date()):
+        return _SKIPPED
+    try:
+        import nse_eod_ingest as nse
+        sess = nse._nse_session()
+        rows = nse.fetch_fo_ban(sess, now.date())
+        with _conn() as conn, conn.cursor() as cur:
+            nse._ensure_fo_ban_table(cur)
+            nse.upsert_fo_ban(cur, now.date(), rows)
+            conn.commit()
+        log.info(f"fo_ban_fetch: {len(rows)} banned for {now.date()}")
+    except Exception as e:
+        log.error(f"fo_ban_fetch: {e}")
+
+
 # cc#660 FEED_GUARDIAN_V1: the five legacy feed watchdogs (feed_staleness_watch cc#475,
 # feed_incident_relay cc#501, open_bars_alarm cc#229, oi_feed_health cc#515, writer-no-bars
 # reaction) are consolidated into feed_guardian.py — ONE detect->repair owner. These thin
@@ -2720,6 +2740,8 @@ async def _scheduler_loop():
             # cc#420: EVERY day incl weekends/holidays — boards announce results over weekends and
             # Monday reporters confirm Sat/Sun dates; a trading-day guard here starved the calendar.
             _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar. cc#622 C: 06:15 -> 05:10 (before T+1 + result-corner)
+        if now.weekday() < 5 and h == 8 and m == 45:
+            _spawn(_bg_fo_ban_fetch)          # cc#677: daily F&O ban-list fetch (keeps the TC ban alert current)
         if h == 9 and m == 0:
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:
