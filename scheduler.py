@@ -1471,6 +1471,21 @@ def _bg_nse_eod_ingest():
         log.error(f"nse_eod_ingest: {e}")
 
 
+def _bg_fo_eod():
+    """cc#682: ~23:00 IST weekdays — ingest the day's NSE F&O bhavcopy for per-contract EOD open
+    interest; COALESCE-fills the day-end futures_basis OI where the live DEPTH feed missed it (permanent
+    OI fallback) + cross-checks vs the live value. Trading days only."""
+    now = _ist_now()
+    if not _is_trading_day(now.date()):
+        return _SKIPPED
+    try:
+        import nse_fo_eod
+        res = nse_fo_eod.run_nightly()
+        log.info(f"fo_eod: {res}")
+    except Exception as e:
+        log.error(f"fo_eod: {e}")
+
+
 def _bg_fo_ban_fetch():
     """cc#677: daily F&O ban-list (MWPL) fetch ~08:45 IST so the TC ban ALERT is current. The ban is
     alert-only now (zero-veto), but must reflect today's NSE list — a stale list makes the alert blind.
@@ -2742,6 +2757,8 @@ async def _scheduler_loop():
             _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar. cc#622 C: 06:15 -> 05:10 (before T+1 + result-corner)
         if now.weekday() < 5 and h == 8 and m == 45:
             _spawn(_bg_fo_ban_fetch)          # cc#677: daily F&O ban-list fetch (keeps the TC ban alert current)
+        if now.weekday() < 5 and h == 23 and m == 0:
+            _spawn(_bg_fo_eod)                # cc#682: 23:00 NSE F&O bhavcopy EOD OI ingest (permanent OI fallback)
         if h == 9 and m == 0:
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:

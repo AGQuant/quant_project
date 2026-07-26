@@ -309,6 +309,8 @@ from deriv_metrics import deriv_router          # cc#346: DERIVATIVE COCKPIT dat
 app.include_router(deriv_router)
 from nse_eod_ingest import nse_eod_router       # cc#517: NSE EOD ingest suite (delivery/FII-DII/participant OI/F&O ban)
 app.include_router(nse_eod_router)
+from nse_fo_eod import fo_eod_router            # cc#682: NSE F&O bhavcopy -> EOD open-interest ingest (permanent OI fallback)
+app.include_router(fo_eod_router)
 app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
