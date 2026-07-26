@@ -277,6 +277,8 @@ def gvm_company_report(symbol: str):
     if "error" in base:
         raise HTTPException(404, base["error"])
 
+    _log_search(sym)   # cc#689: recency-based quick-access history (best-effort, never blocks the report)
+
     segment      = base.get("segment")
     ladder_syms  = [row["symbol"] for row in (base.get("segment_ladder") or [])]
 
@@ -638,3 +640,46 @@ def gvm_search(q: str = "", limit: int = 8):
     with _conn() as conn:
         results = search_companies(conn, q, limit=lim)
     return {"q": q, "results": results}
+
+
+# ── cc#689: GVM search quick-access — last-N opened companies (recency, dedup by symbol) ──────────
+def _ensure_search_history(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS gvm_search_history (
+        symbol TEXT PRIMARY KEY, searched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        count INTEGER NOT NULL DEFAULT 1)""")
+
+
+def _log_search(sym: str):
+    """Best-effort upsert of an opened company into the recency history. Dedup is by the PRIMARY KEY
+    (symbol) — a repeat open just bumps searched_at + count. Never raises into the report path."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_search_history(cur)
+            cur.execute("""INSERT INTO gvm_search_history (symbol, searched_at, count)
+                           VALUES (%s, NOW(), 1)
+                           ON CONFLICT (symbol) DO UPDATE SET
+                             searched_at=NOW(), count=gvm_search_history.count+1""", (sym,))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"cc689 search-history log failed for {sym}: {e}")
+
+
+@router.get("/api/gvm/recent-searches")
+def gvm_recent_searches(limit: int = 20):
+    """cc#689: the last N distinct companies opened, most-recent first, each joined to the LIVE latest
+    gvm_score at render time. The JOIN also drops any history symbol no longer in the scored universe."""
+    lim = max(1, min(int(limit or 20), 50))
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_search_history(cur)
+            cur.execute("""SELECT h.symbol, g.gvm_score, g.company_name, g.verdict
+                           FROM gvm_search_history h
+                           JOIN gvm_scores g ON g.symbol=h.symbol
+                             AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                           ORDER BY h.searched_at DESC LIMIT %s""", (lim,))
+            rows = [{"symbol": r[0], "gvm_score": float(r[1]) if r[1] is not None else None,
+                     "company_name": r[2], "verdict": r[3]} for r in cur.fetchall()]
+        return {"recent": rows}
+    except Exception as e:
+        log.error(f"cc689 recent-searches failed: {e}")
+        return {"recent": []}

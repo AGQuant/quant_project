@@ -2731,18 +2731,34 @@ function GvmModule() {
   );
 }
 
+// cc#689: quick-access chips = the LAST 20 companies opened (recency, most-recent first, deduped by
+// symbol server-side), each with its LIVE GVM score. Falls back to top-rated picks when there is no
+// search history yet, so the landing is never blank.
 function GvmEmptyState({ onPick }) {
-  const [top, setTop] = useState([]);
-  useEffect(() => { mcpCall("get_top_stocks", { n: 8, verdict: "Excellent" }).then(d => setTop(Array.isArray(d) ? d : [])); }, []);
+  const [items, setItems] = useState([]);
+  const [recent, setRecent] = useState(false);
+  useEffect(() => {
+    let done = false;
+    const fallback = () => mcpCall("get_top_stocks", { n: 8, verdict: "Excellent" })
+      .then(d => { if (!done) { setItems(Array.isArray(d) ? d : []); setRecent(false); } })
+      .catch(() => {});
+    apiGet("/api/gvm/recent-searches?limit=20")
+      .then(d => {
+        const list = (d && d.recent) || [];
+        if (list.length) { done = true; setItems(list); setRecent(true); }
+        else return fallback();
+      })
+      .catch(fallback);
+  }, []);
   return (
     <div style={{ textAlign: "center", padding: "20px 0" }}>
-      <div style={{ fontSize: 14, color: C.muted, marginBottom: 16 }}>Search a company above, or start with a top-rated pick:</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 700, margin: "0 auto" }}>
-        {top.map(s => (
+      <div style={{ fontSize: 14, color: C.muted, marginBottom: 16 }}>{recent ? "Jump back to a recently viewed company:" : "Search a company above, or start with a top-rated pick:"}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 760, margin: "0 auto" }}>
+        {items.map(s => (
           <button key={s.symbol} onClick={() => onPick(s.symbol)}
             style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.gold}40`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{Number(s.gvm_score).toFixed(2)}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{s.gvm_score != null ? Number(s.gvm_score).toFixed(2) : "—"}</span>
           </button>
         ))}
       </div>
