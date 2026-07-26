@@ -1961,6 +1961,28 @@ def _t1_refresh_company(cur, symbol):
     return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok"}
 
 
+def _result_qend(ex_date) -> Optional[date]:
+    """cc#692: the standard quarter-end (Mar31/Jun30/Sep30/Dec31) most recently ENDED on/before the
+    result-announcement date — i.e. the quarter the just-reported result covers."""
+    if not isinstance(ex_date, date):
+        return None
+    ends = [date(ex_date.year, m, d) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31)) if date(ex_date.year, m, d) <= ex_date]
+    return max(ends) if ends else date(ex_date.year - 1, 12, 31)
+
+
+def _quarters_fresh(cur, symbol, ex_date) -> bool:
+    """cc#692: True once fundamentals_history's 'quarters' section carries a period_end >= the result
+    quarter-end. The T+1 'done' flag used to key off concall doc-staging alone, so a silently-failed
+    fundamentals re-scrape (only the shareholding section landing) left quarters stale while the queue
+    read done — the KARURVYSYA Q1FY27 gap. Gating done on this makes a partial re-scrape retry-able."""
+    qend = _result_qend(ex_date)
+    if qend is None:
+        return False
+    cur.execute("SELECT MAX(period_end) FROM fundamentals_history WHERE symbol=%s AND section='quarters'", (symbol,))
+    r = cur.fetchone()
+    return bool(r and r[0] and r[0] >= qend)
+
+
 def run_t1_refresh(conn=None):
     """cc#524 item 1: companies whose earnings_calendar row transitioned to status='reported'
     yesterday (IST) get queued and refreshed T+1. Reads the SAME status='reported' signal
@@ -2009,9 +2031,21 @@ def run_t1_refresh(conn=None):
                     fund_only += 1
                 if not success:
                     failed_syms.append(f"{sym}:{st}")
+                # cc#692: 'done' requires the FUNDAMENTALS quarters section to have actually landed the
+                # result quarter — concall doc-staging (success) alone masked a silent fundamentals
+                # re-scrape failure that left Result Analysis stale (KARURVYSYA Q1FY27). A stale/partial
+                # re-scrape -> 'failed' (Saturday retry re-attempts) + a result_review row for the founder.
+                q_fresh = _quarters_fresh(cur, sym, ex_date)
+                landed = q_fresh
+                if not landed:
+                    _oplog(cur, "T1_QUARTERS_STALE",
+                           {"symbol": sym, "ex_date": str(ex_date), "concall_staged": success,
+                            "reason": "fundamentals quarters section did not land the result quarter on T+1 "
+                                      "(silent re-scrape partial) — queued failed for Saturday retry"},
+                           category="result_review")
                 cur.execute("""UPDATE ops_metrics_t1_queue SET status=%s, processed_at=NOW()
                                WHERE symbol=%s AND ex_date=%s""",
-                            ("done" if success else "failed", sym, ex_date))
+                            ("done" if landed else "failed", sym, ex_date))
                 conn.commit()
             ok += 1 if success else 0
             fail += 0 if success else 1
