@@ -1662,6 +1662,7 @@ function _finFmt(v, unit) {
   if (v == null) return "—";
   if (unit === "eps") return fmt(v, 2);
   if (unit === "pct") return fmt(v, 1) + "%";
+  if (unit === "x")   return fmt(v, 1) + "x";   // cc#702: valuation ratios keep 1 decimal + x suffix (PE 11.9x, PB 0.6x, MCap/Sales 2.8x) — was fmt(v,0) which flattened 0.6->0
   return fmt(v, 0);   // "cr" | "days" | "count"
 }
 
@@ -1752,6 +1753,7 @@ function FinChartModal({ title, periods, rows, onClose }) {
   const row = rows[Math.min(sel, rows.length - 1)] || rows[0];
   const vals = (row && row.values) || [];
   const isPct = row && row.unit === "pct";
+  const isX = row && row.unit === "x";   // cc#702: x-unit ratios need decimal axis ticks (PB 0.6-2.0, not 0-2)
   const W = 640, H = 300, L = 48, R = 16, Tp = 22, Bm = 34, n = vals.length;
   const nums = vals.filter(v => v != null);
   const gLabel = i => {
@@ -1779,7 +1781,7 @@ function FinChartModal({ title, periods, rows, onClose }) {
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
         {ticks.map((tv, i) => (<g key={i}>
           <line x1={L} y1={Y(tv)} x2={W - R} y2={Y(tv)} stroke={C.gridLine} strokeWidth="0.5" strokeOpacity="0.5" />
-          <text x={L - 6} y={Y(tv) + 3} fontSize="9" fill={C.muted} textAnchor="end" fontFamily="monospace">{tv.toFixed(isPct ? 1 : 0)}</text>
+          <text x={L - 6} y={Y(tv) + 3} fontSize="9" fill={C.muted} textAnchor="end" fontFamily="monospace">{tv.toFixed(isPct || isX ? 1 : 0)}</text>
         </g>))}
         {vals.map((v, i) => (<text key={"x" + i} x={X(i)} y={H - 8} fontSize="8.5" fill={C.muted} textAnchor="middle">{String(periods[i] == null ? "" : periods[i]).slice(0, 6)}</text>))}
         {bar
