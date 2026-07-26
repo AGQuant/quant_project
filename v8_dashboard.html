@@ -1765,7 +1765,8 @@ function _qaInjectStyle(){
     #qaStrip button:hover,#qaStrip button:focus{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe);outline:none}
     .qa-tf{border:1px solid var(--line2,#e8ecf2);background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);
       border-radius:7px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
-    .qa-tf.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}`;
+    .qa-tf.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}
+    .qa-tf.qa-sub{padding:3px 7px;font-size:10px;font-weight:600;opacity:.9}`;
   document.head.appendChild(st);
 }
 function openQuickActions(ev,sym,side,qty,entry,cmp){
@@ -1971,9 +1972,31 @@ function _qaSpark(series){
 // LightweightCharts, so we reuse the DATA + overlay config, not the React component).
 let _qaChartObj=null,_qaChartSym=null,_qaChartSeries=null,_qaPriceLines=[],_qaTf='3M',_qaFibCache={};
 let _qaTfFib=null,_qaTfSwing=null;   // cc#668: per-timeframe fib (chart overlay only; R16 scoring untouched)
+let _qa5dRange=5;   // cc#669: 5m tab session range — 1D / 5D / 20D
 let _qaOv={pivot:false,fib:false};
 try{const _o=localStorage.getItem('qa_chart_overlay')||'none';_qaOv={pivot:_o==='pivot'||_o==='both',fib:_o==='fib'||_o==='both'};}catch(e){}
-const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365};   // null => intraday 5m; else /api/candles days
+const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365,'ALL':'all'};   // null=>intraday 5m; 'all'=>full history; else /api/candles days
+// cc#669: ALL user-facing chart times = IST (Asia/Kolkata), one shared formatter. Intraday bars carry
+// TRUE instants (epoch secs, IST-naive ts parsed as +05:30 upstream); daily bars are BusinessDay/date.
+var _IST_MON=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short'});
+var _IST_HM =new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false});
+var _IST_DHM=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+function _istDate(time){   // LWC time -> {d:Date(true instant), dateOnly}
+  if(time==null)return null;
+  if(typeof time==='number')return {d:new Date(time*1000),dateOnly:false};
+  if(typeof time==='object'&&time.year)return {d:new Date(Date.UTC(time.year,time.month-1,time.day)),dateOnly:true};
+  if(typeof time==='string'){var p=time.split('-');if(p.length>=3)return {d:new Date(Date.UTC(+p[0],+p[1]-1,+p[2])),dateOnly:true};}
+  return null;
+}
+function _istTick(time,tickType){   // axis ticks: date at day-boundary/daily ticks, HH:MM IST intraday
+  var o=_istDate(time); if(!o)return '';
+  if(o.dateOnly)return _IST_MON.format(o.d);
+  return (tickType!=null&&tickType<=2)?_IST_MON.format(o.d):_IST_HM.format(o.d);
+}
+function _istCross(time){   // crosshair/tooltip time label
+  var o=_istDate(time); if(!o)return '';
+  return o.dateOnly?_IST_MON.format(o.d):_IST_DHM.format(o.d);
+}
 function _qaOvStr(){return _qaOv.pivot&&_qaOv.fib?'both':_qaOv.pivot?'pivot':_qaOv.fib?'fib':'none';}
 function _qaChartEsc(e){if(e.key==='Escape')qaChartClose();}
 function qaChart(sym){
@@ -1990,6 +2013,13 @@ function qaChart(sym){
           <button id="qaTf_3M" class="qa-tf" onclick="qaChartLoad('3M')">3M</button>
           <button id="qaTf_6M" class="qa-tf" onclick="qaChartLoad('6M')">6M</button>
           <button id="qaTf_1Y" class="qa-tf" onclick="qaChartLoad('1Y')">1Y</button>
+          <button id="qaTf_ALL" class="qa-tf" onclick="qaChartLoad('ALL')" title="Full stored history (daily, weekly-downsampled beyond ~1500 bars)">ALL</button>
+          <span id="qa5dRange" style="display:none;gap:3px;align-items:center">
+            <span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>
+            <button id="qa5r_1" class="qa-tf qa-sub" onclick="qaSet5dRange(1)" title="latest session">1D</button>
+            <button id="qa5r_5" class="qa-tf qa-sub" onclick="qaSet5dRange(5)" title="last 5 trading sessions">5D</button>
+            <button id="qa5r_20" class="qa-tf qa-sub" onclick="qaSet5dRange(20)" title="last 20 trading sessions">20D</button>
+          </span>
           <span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>
           <button id="qaOvPiv" class="qa-tf" onclick="qaToggleOverlay('pivot')" title="Pivots — PP / R1 / R2 / S1 / S2 (v8_paper_pivots)">Pivots</button>
           <button id="qaOvFib" class="qa-tf" onclick="qaToggleOverlay('fib')" title="Fibonacci retracement levels (same derivation as the GVM chart)">Fib</button>
@@ -2008,9 +2038,17 @@ function qaChart(sym){
 }
 function _qaSyncBtns(){
   Object.keys(_QA_TF).forEach(k=>{const b=document.getElementById('qaTf_'+k);if(b)b.classList.toggle('on',k===_qaTf);});
+  // cc#669: 5m session-range control visible only on the 5m tab
+  const rng=document.getElementById('qa5dRange'); if(rng)rng.style.display=(_qaTf==='5m')?'inline-flex':'none';
+  [1,5,20].forEach(n=>{const b=document.getElementById('qa5r_'+n);if(b)b.classList.toggle('on',n===_qa5dRange);});
   const bp=document.getElementById('qaOvPiv'),bf=document.getElementById('qaOvFib');
-  if(bp)bp.classList.toggle('on',_qaOv.pivot);if(bf)bf.classList.toggle('on',_qaOv.fib);
+  // cc#669: pivots are meaningless at ALL (5y) scale — disable the toggle there
+  const pivOff=(_qaTf==='ALL');
+  if(bp){bp.disabled=pivOff;bp.style.opacity=pivOff?'.4':'';bp.style.cursor=pivOff?'not-allowed':'';bp.classList.toggle('on',_qaOv.pivot&&!pivOff);}
+  if(bf)bf.classList.toggle('on',_qaOv.fib);
 }
+// cc#669: 5m tab session range (1D/5D/20D) — reload the 5m view at the chosen depth
+function qaSet5dRange(n){_qa5dRange=n;qaChartLoad('5m');}
 async function qaChartLoad(tf){
   _qaTf=tf;
   const box=document.getElementById('qaChartBox'),msg=document.getElementById('qaChartMsg');
@@ -2020,14 +2058,19 @@ async function qaChartLoad(tf){
   _qaChartSeries=null;_qaPriceLines=[];
   box.innerHTML='';msg.textContent='Loading…';
   const isIntraday=(_QA_TF[tf]===null);
+  const isAll=(_QA_TF[tf]==='all');
   try{
     let data;
     if(!isIntraday){
-      const rows=await getJSON('/api/candles/'+encodeURIComponent(_qaChartSym)+'?days='+_QA_TF[tf]);
+      const dparam=isAll?0:_QA_TF[tf];   // cc#669: days<=0 => full stored history (ALL)
+      const rows=await getJSON('/api/candles/'+encodeURIComponent(_qaChartSym)+'?days='+dparam);
       data=(rows||[]).map(r=>({time:r.date,open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close));
     }else{
-      const rows=await getJSON('/api/intraday/'+encodeURIComponent(_qaChartSym)+'?days=1');
-      data=(rows||[]).map(r=>({time:Math.floor(new Date(String(r.ts).replace(' ','T')).getTime()/1000),
+      // cc#669: last N trading sessions (1D/5D/20D) from the fyers_eq+fyers_hist warehouse.
+      const rows=await getJSON('/api/intraday/'+encodeURIComponent(_qaChartSym)+'?sessions='+_qa5dRange);
+      // cc#669 IST fix: ts is IST-naive → parse as +05:30 for a TRUE instant; the shared Asia/Kolkata
+      // formatter (_istTick/_istCross) then renders IST on axis + crosshair (was browser-local → UTC leak).
+      data=(rows||[]).map(r=>({time:Math.floor(new Date(String(r.ts).replace(' ','T')+'+05:30').getTime()/1000),
         open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close)&&isFinite(d.time));
     }
     if(!data.length){msg.textContent='No '+(isIntraday?'5m':tf)+' data for '+_qaChartSym+'.';return;}
@@ -2035,15 +2078,26 @@ async function qaChartLoad(tf){
     const c=LightweightCharts.createChart(box,{width:box.clientWidth,height:412,
       layout:{background:{color:'transparent'},textColor:mut},
       grid:{vertLines:{visible:false},horzLines:{color:'rgba(120,130,150,.12)'}},
-      timeScale:{timeVisible:isIntraday,borderVisible:false},rightPriceScale:{borderVisible:false}});
+      localization:{locale:'en-IN',timeFormatter:_istCross},   // cc#669: IST crosshair/tooltip
+      timeScale:{timeVisible:isIntraday,borderVisible:false,tickMarkFormatter:_istTick},   // cc#669: IST axis ticks
+      rightPriceScale:{borderVisible:false}});
     const s=c.addCandlestickSeries({upColor:'#0a9e63',downColor:'#dd3a4a',borderVisible:false,
       wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a',autoscaleInfoProvider:_qaAutoscale});
     s.setData(data);c.timeScale().fitContent();_qaChartObj=c;_qaChartSeries=s;
-    _qaTfFib=_qaComputeFib(data);   // cc#668 change_2: fib anchored to THIS timeframe's swing (display-only)
+    _qaTfFib=_qaComputeFib(data);   // cc#668 change_2 / cc#669: fib swing = visible loaded range (incl. ALL)
     box.style.position='relative';   // cc#664: anchor the fib zone SVG overlay
     // cc#664: keep zone shading synced to the price scale on any pan/zoom
     try{c.timeScale().subscribeVisibleTimeRangeChange(function(){qaDrawFibZones();});}catch(e){}
-    msg.textContent=(isIntraday?'5m latest session · intraday_prices (fyers_eq)':tf+' · raw_prices (equity, adjusted)');
+    // cc#669: weekly downsample kicks in >1500 daily bars → ~7-day spacing. Average the first few
+    // gaps (a single Fri→Tue holiday gap would false-positive on a one-pair check).
+    var _weekly=false;
+    if(isAll&&data.length>6){var a=_istDate(data[0].time),b=_istDate(data[6].time);
+      if(a&&b)_weekly=((b.d-a.d)/6)>3.5*864e5;}   // >3.5 days/bar avg => weekly
+    msg.textContent=(isIntraday
+        ? '5m · last '+_qa5dRange+' session'+(_qa5dRange>1?'s':'')+' · intraday_prices (fyers_eq+fyers_hist, IST)'
+        : isAll
+        ? 'ALL · '+data.length+' bars · raw_prices ('+(_weekly?'weekly':'daily')+')'
+        : tf+' · raw_prices (equity, adjusted)');
     qaApplyOverlays();   // cc#626 item_2: draw pivot/fib price lines if enabled
   }catch(e){msg.textContent='Chart failed to load.';}
 }
@@ -2156,7 +2210,8 @@ async function qaApplyOverlays(){
   try{_qaChartSeries.applyOptions({autoscaleInfoProvider:_qaAutoscale});}catch(e){}   // cc#668 change_3: re-scale for 123.6 headroom
   if(!_qaOv.pivot&&!_qaOv.fib){qaDrawFibZones();return;}
   // pivots still come from the backend (v8_paper_pivots via fibcheck) — fetch only when needed.
-  if(_qaOv.pivot){
+  // cc#669: rolling-5-day pivots are meaningless at ALL (5y) scale — suppress them there.
+  if(_qaOv.pivot&&_qaTf!=='ALL'){
     let fib=_qaFibCache[_qaChartSym];
     if(!fib){try{fib=await getJSON('/api/trade-check/fibcheck?symbol='+encodeURIComponent(_qaChartSym)+'&lookback=6m');_qaFibCache[_qaChartSym]=fib;}catch(e){fib=null;}}
     if(_qaChartSeries&&fib&&fib.pivots){const P=fib.pivots;

@@ -262,16 +262,36 @@ def get_gvm_snapshot(symbol: str):
 
 @router.get("/api/candles/{symbol}")
 def get_candles(symbol: str, days: int = 90):
-    """cc#608: daily OHLC candles from raw_prices for the quick-action "C" chart popout (equity
-    symbols; the existing /api/v10/candles is index-only). Pairs with /api/intraday/{symbol} for
-    the 5m-today view. Read-only."""
+    """cc#608/cc#669: daily OHLC candles from raw_prices for the price-chart popout (equity symbols;
+    /api/v10/candles is index-only). Pairs with /api/intraday/{symbol} for the 5m view. Read-only.
+    ``days`` <= 0 => ALL tab: the symbol's COMPLETE stored history (MIN(price_date) per symbol, never
+    hardcoded). To keep the payload light (cc#649 pattern), history longer than ~1,500 daily bars is
+    downsampled server-side to WEEKLY candles (first-open / max-high / min-low / last-close / sum-vol);
+    shorter history returns daily. 1M/3M/6M/1Y pass their full calendar window (no truncation)."""
+    sym = symbol.upper()
+    if days <= 0:   # ALL — full stored history, weekly-downsampled above ~1,500 points
+        cnt = api_query("SELECT COUNT(*) AS c FROM raw_prices WHERE symbol=%s", (sym,), single=True)
+        if (cnt or {}).get("c", 0) > 1500:
+            return api_query("""SELECT to_char(date_trunc('week', price_date),'YYYY-MM-DD') AS date,
+                                       ROUND((array_agg(open  ORDER BY price_date ASC ))[1]::numeric,2) AS open,
+                                       ROUND(MAX(high)::numeric,2) AS high,
+                                       ROUND(MIN(low)::numeric,2)  AS low,
+                                       ROUND((array_agg(close ORDER BY price_date DESC))[1]::numeric,2) AS close,
+                                       SUM(volume) AS volume
+                                FROM raw_prices WHERE symbol=%s
+                                GROUP BY date_trunc('week', price_date) ORDER BY date ASC""", (sym,))
+        return api_query("""SELECT price_date::text AS date,
+                                   ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
+                                   ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
+                                   volume
+                            FROM raw_prices WHERE symbol=%s ORDER BY price_date ASC""", (sym,))
     days = min(max(days, 5), 365)
     return api_query("""SELECT price_date::text AS date,
                                ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
                                ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
                                volume
                         FROM raw_prices WHERE symbol=%s AND price_date >= CURRENT_DATE - %s
-                        ORDER BY price_date ASC""", (symbol.upper(), days))
+                        ORDER BY price_date ASC""", (sym, days))
 
 
 @router.get("/api/gvm/top/{n}")
@@ -367,23 +387,31 @@ def get_cmp(symbol: str):
 
 
 @router.get("/api/intraday/{symbol}")
-def get_intraday(symbol: str, days: int = 1):
-    """cc#626 item_1/item_3: EQUITY 5m bars ONLY (source='fyers_eq'). ROOT CAUSE of the universal
-    5m-blank bug: the old query had NO source filter, so an F&O symbol returned BOTH fyers_eq AND
-    fyers_fut rows at the SAME timestamps (257 collisions/3d for HDFCBANK) — LightweightCharts
-    setData() rejects duplicate/unordered times and threw for EVERY dashboard symbol (all are F&O).
-    Also anchor to the latest session that actually has equity bars (off-market/holiday fallback) so
-    the tab is never empty on a valid symbol instead of filtering on a wall-clock `now - days`."""
-    days = min(max(days, 1), 7)
+def get_intraday(symbol: str, days: int = 1, sessions: int = 0):
+    """cc#626/cc#669: EQUITY 5m bars from the 12-month warehouse — UNION of source IN
+    ('fyers_eq','fyers_hist') deduped on ts (prefer the live fyers_eq feed on any collision).
+    Returns the last N TRADING sessions (``sessions`` param — 1D/5D/20D range control; falls back
+    to legacy ``days`` when ``sessions`` is 0), anchored to the latest session that actually has
+    equity bars so the tab is never empty (off-market/holiday fallback). LightweightCharts spaces
+    bars by index, so overnight gaps compress automatically — no flat lines across closed hours.
+    ROOT CAUSE of the historic 5m-blank bug (kept fixed here): a source filter is mandatory, else an
+    F&O symbol returns fyers_fut rows at the SAME ts and setData() throws on duplicate times."""
+    n_sess = sessions if sessions and sessions > 0 else max(days, 1)
+    n_sess = min(max(n_sess, 1), 40)
     sym = symbol.upper()
-    latest = api_query("SELECT MAX(ts::date)::text AS d FROM intraday_prices "
-                       "WHERE symbol=%s AND source='fyers_eq'", (sym,), single=True)
-    if not latest or not latest.get("d"):
+    dts = api_query("""SELECT DISTINCT ts::date AS d FROM intraday_prices
+                       WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist')
+                       ORDER BY d DESC LIMIT %s""", (sym, n_sess))
+    if not dts:
         return []
-    return api_query("""SELECT symbol, ts, open, high, low, close, volume
-                        FROM intraday_prices
-                        WHERE symbol=%s AND source='fyers_eq' AND ts::date > (%s::date - %s)
-                        ORDER BY ts ASC""", (sym, latest["d"], days))
+    oldest = dts[-1]["d"]   # dts is DESC → last row is the oldest of the N sessions
+    return api_query("""SELECT symbol, ts, open, high, low, close, volume FROM (
+                          SELECT DISTINCT ON (ts) symbol, ts, open, high, low, close, volume
+                          FROM intraday_prices
+                          WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist')
+                            AND ts::date >= %s
+                          ORDER BY ts, CASE source WHEN 'fyers_eq' THEN 0 ELSE 1 END
+                        ) q ORDER BY ts ASC""", (sym, oldest))
 
 
 @router.get("/api/intraday_ondemand/{symbol}")
