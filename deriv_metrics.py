@@ -21,7 +21,11 @@ from datetime import date
 from typing import Optional, Dict, Any, List
 
 import psycopg
+import requests
 from fastapi import APIRouter, HTTPException
+
+FYERS_CLIENT_ID = os.getenv("FYERS_CLIENT_ID", "1A4STS8ZGD-100")
+_QUOTES_URL = "https://api-t1.fyers.in/data/quotes"
 
 log = logging.getLogger("scorr.deriv")
 deriv_router = APIRouter(tags=["deriv"])
@@ -1381,3 +1385,107 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
     except Exception as e:
         log.error(f"deriv_metrics {sym}: {e}", exc_info=True)
         raise HTTPException(500, f"deriv_metrics failed: {e}")
+
+
+# ── cc#666 part_3: on-demand ATM±10 strike chain with Black-Scholes fair value ───────────────────
+_SYM_MASTER_CACHE = {"t": 0.0, "text": None}   # symbol master is multi-MB — cache ~6h in-process
+
+
+def _rv20_annualized(cur, sym) -> Optional[float]:
+    """20-day realised vol (annualised), same computation as the _options_block RV20 fair-value input."""
+    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND close>0 ORDER BY price_date DESC LIMIT 21", (sym,))
+    closes = [float(r[0]) for r in cur.fetchall()]
+    if len(closes) < 21:
+        return None
+    closes = list(reversed(closes))
+    rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+    if len(rets) < 2:
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((x - mean) ** 2 for x in rets) / (len(rets) - 1)
+    return round(math.sqrt(var) * math.sqrt(252.0), 4)
+
+
+def _batch_quotes(tickers, token) -> Dict[str, float]:
+    """Live ltp per Fyers option ticker (batched, ~40/call — the quotes API caps the symbols list)."""
+    out: Dict[str, float] = {}
+    hdr = {"Authorization": f"{FYERS_CLIENT_ID}:{token}"}
+    for i in range(0, len(tickers), 40):
+        chunk = tickers[i:i + 40]
+        try:
+            r = requests.get(_QUOTES_URL, params={"symbols": ",".join(chunk)}, headers=hdr, timeout=10)
+            d = r.json()
+            for item in (d.get("d") or []):
+                n = item.get("n")
+                v = item.get("v") or {}
+                lp = v.get("lp") if v.get("lp") is not None else v.get("ltp")
+                if n and lp is not None:
+                    out[n] = float(lp)
+        except Exception as e:
+            log.warning(f"strike_chain quote chunk failed: {e}")
+    return out
+
+
+@deriv_router.get("/api/deriv/strike-chain/{symbol}")
+def strike_chain(symbol: str):
+    """cc#666 part_3: on-demand ATM±10 CE/PE chain with Black-Scholes fair value. Live ltp per contract
+    is fetched from Fyers (app-side), IV inverted from ltp via _bs_iv, fair computed via _bs_price with
+    sigma=RV20 (R_FREE=0.07). Premium-vs-fair tag: EXPENSIVE >+25% · REASONABLE 0..+25% · CHEAP <0%.
+    Strikes come from the Fyers symbol master (never guessed); ATM = strike nearest spot. No new
+    tables/columns — reuses the shipped BS machinery + the stock_options_backfill resolver."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        raise HTTPException(400, "symbol required")
+    try:
+        import stock_options_backfill as sob
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
+            r = cur.fetchone()
+            spot = float(r[0]) if r and r[0] else None
+            if not spot:
+                cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1", (sym,))
+                r = cur.fetchone()
+                spot = float(r[0]) if r and r[0] else None
+            if not spot:
+                raise HTTPException(404, f"no spot price for {sym}")
+            token = sob._load_token(conn)
+            rv20 = _rv20_annualized(cur, sym)
+        now_t = time.time()
+        if not _SYM_MASTER_CACHE["text"] or now_t - _SYM_MASTER_CACHE["t"] > 21600:
+            _SYM_MASTER_CACHE["text"] = sob._load_symbol_master()
+            _SYM_MASTER_CACHE["t"] = now_t
+        today = date.today()
+        code, exp, strikes = sob._resolve_strikes(_SYM_MASTER_CACHE["text"], sym, spot, today, each_side=10)
+        if not strikes:
+            return {"symbol": sym, "spot": round(spot, 2), "strikes": [],
+                    "error": "no listed strikes for this underlying in the Fyers symbol master"}
+        days = max((exp - today).days, 0)
+        T = days / 365.0
+        tickers = [sob.strike_ticker(sym, code, s, ot) for s in strikes for ot in ("CE", "PE")]
+        ltp = _batch_quotes(tickers, token)
+        atm = min(strikes, key=lambda s: abs(s - spot))
+        rows = []
+        for s in strikes:
+            row = {"strike": s, "atm": (s == atm)}
+            for ot, key in (("CE", "ce"), ("PE", "pe")):
+                px = ltp.get(sob.strike_ticker(sym, code, s, ot))
+                iv = _bs_iv(px, spot, s, T, ot) if px else None
+                fair = _bs_price(spot, s, T, rv20, ot) if rv20 else None
+                if px and fair and fair > 0:
+                    prem = round((px / fair - 1) * 100, 1)
+                    tag = "EXPENSIVE" if prem > 25 else ("CHEAP" if prem < 0 else "REASONABLE")
+                    ratio = round(px / fair, 2)
+                else:
+                    prem = tag = ratio = None
+                row[key] = {"ltp": round(px, 2) if px else None,
+                            "iv": round(iv * 100, 1) if iv else None,
+                            "fair": round(fair, 2) if fair else None,
+                            "prem_pct": prem, "tag": tag, "ratio": ratio}
+            rows.append(row)
+        return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp), "days_to_expiry": days,
+                "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"strike_chain {sym}: {e}", exc_info=True)
+        raise HTTPException(500, f"strike_chain failed: {e}")

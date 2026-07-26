@@ -120,10 +120,12 @@ def _load_symbol_master() -> str:
     return r.text
 
 
-def _resolve_strikes(master_text: str, underlying: str, spot: float, today: date):
+def _resolve_strikes(master_text: str, underlying: str, spot: float, today: date, each_side: int = ATM_EACH_SIDE):
     """Real listed strikes for the current monthly expiry from the symbol master.
     Regex over raw lines (no column-order assumptions); re.escape handles
-    digit/hyphen/& tickers. Returns (expiry_code, expiry_date, [7 strikes nearest spot])."""
+    digit/hyphen/& tickers. Returns (expiry_code, expiry_date, [(2*each_side+1) strikes nearest spot]).
+    cc#666 part_3: each_side is parametrised (default 3 for the backfill; the on-demand strike-chain
+    endpoint passes 10)."""
     pat = re.compile(r"NSE:" + re.escape(underlying) + r"(\d{2}[A-Z]{3})(\d+(?:\.\d+)?)(CE|PE)\b")
     by_code = {}
     for m in pat.finditer(master_text):
@@ -135,8 +137,14 @@ def _resolve_strikes(master_text: str, underlying: str, spot: float, today: date
         return None, None, []
     primary = _expiry_code(_current_expiry(today))
     code = primary if primary in by_code else min(by_code, key=lambda c: _code_to_expiry(c))
-    strikes = sorted(by_code[code], key=lambda s: abs(s - spot))[: 2 * ATM_EACH_SIDE + 1]
+    strikes = sorted(by_code[code], key=lambda s: abs(s - spot))[: 2 * each_side + 1]
     return code, _code_to_expiry(code), sorted(strikes)
+
+
+def strike_ticker(underlying: str, code: str, strike: float, otype: str) -> str:
+    """cc#666 part_3: canonical Fyers option ticker (same format _fetch_contract uses)."""
+    s = int(strike) if float(strike).is_integer() else strike
+    return f"NSE:{underlying}{code}{s}{otype}"
 
 
 def _fetch_contract(token, underlying, code, exp, strike, otype, start, end):

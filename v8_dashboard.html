@@ -1681,11 +1681,48 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const lvCaution=lv.caution?`<div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--c-amb);margin-top:8px">&#9888; ${lv.caution}</div>`:'';
   const s5=cards?`<div class="sec"><div class="lbl"><span class="n">05</span> LEVELS${lvChip}</div><div class="lv">${cards}</div>${lvCaution}</div>`:'';
 
+  // cc#666 part_3: OPTIONS strike chain — on-demand ATM±10 CE/PE with live ltp vs Black-Scholes fair.
+  const s6=`<div class="sec"><div class="lbl"><span class="n">06</span> OPTIONS &middot; STRIKE CHAIN
+      <button onclick="dcFetchStrikes('${sym}')" style="margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:.5px;border:1px solid var(--c-bd);background:var(--c-panel);color:var(--c-tx);border-radius:7px;padding:5px 10px;cursor:pointer">&#8862; FETCH STRIKES</button></div>
+    <div id="dcStrikeChain" style="font-size:11px;color:var(--c-mut);line-height:1.5">ATM &plusmn;10 CE/PE &middot; live ltp vs Black-Scholes fair (&sigma;=RV20) &middot; tap FETCH STRIKES.</div></div>`;
   const foot=`<div class="foot">DERIVATIVE COCKPIT v3 &middot; live from deriv_metrics${d.data_ts?(' &middot; options '+_dcFmtTs(d.data_ts)+' IST'):''}</div>`;
   // cc#674: section 01 VOLUME restored as the shared 3-tile row (RVOL | VolX | Vol 3D/21D) — same
   // component as the Analysis modal (cc#624 removed the old 2-tile; this is the new RVOL-led row).
   const s1=`<div class="sec"><div class="lbl"><span class="n">01</span> VOLUME <span class="n">RVOL · VolX · 3D/21D</span></div>`+_volTilesHtml(E,M)+`</div>`;
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+foot;
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+s6+foot;
+}
+// cc#666 part_3: fetch + render the ATM±10 strike chain (live ltp vs BS fair). Reuses the deployed
+// /api/deriv/strike-chain endpoint; live pricing verified at Monday open (sandbox fyers egress blocked).
+async function dcFetchStrikes(sym){
+  const box=document.getElementById('dcStrikeChain'); if(!box)return;
+  box.innerHTML='<div style="padding:10px 0;color:var(--c-mut)">Fetching live strikes for '+sym+'&hellip;</div>';
+  let d;
+  try{d=await getJSON('/api/deriv/strike-chain/'+encodeURIComponent(sym));}
+  catch(e){box.innerHTML='<div style="color:var(--c-red);padding:8px 0">Strike chain unavailable ('+((e&&e.message)||e)+').</div>';return;}
+  if(!d||d.error||!(d.strikes&&d.strikes.length)){box.innerHTML='<div style="color:var(--c-mut);padding:8px 0">'+((d&&d.error)||'No strikes returned.')+'</div>';return;}
+  const tagCol=t=>t==='EXPENSIVE'?'var(--c-red)':t==='CHEAP'?'var(--c-grn)':'var(--c-mut)';
+  const B='text-align:right;padding:5px 6px;border-top:1px solid var(--c-grid);white-space:nowrap';
+  const cell=o=>{
+    if(!o||o.ltp==null)return '<td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td>';
+    return '<td style="'+B+';font-weight:700">'+o.ltp+'</td>'
+      +'<td style="'+B+'">'+(o.iv!=null?o.iv+'%':'&mdash;')+'</td>'
+      +'<td style="'+B+';color:var(--c-mut)">'+(o.fair!=null?o.fair:'&mdash;')+'</td>'
+      +'<td style="'+B+'"><span style="font-size:9px;font-weight:800;color:'+tagCol(o.tag)+'">'+(o.tag||'&mdash;')+(o.ratio!=null?' '+o.ratio+'&times;':'')+'</span></td>';
+  };
+  const rows=d.strikes.map(r=>{
+    const hl=r.atm?' style="background:var(--c-blubg)"':'';
+    return '<tr'+hl+'>'+cell(r.ce)
+      +'<td style="text-align:center;padding:5px 8px;border-top:1px solid var(--c-grid);font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx)">'+r.strike+(r.atm?'&nbsp;ATM':'')+'</td>'
+      +cell(r.pe)+'</tr>';
+  }).join('');
+  const hcol='style="text-align:right;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';
+  box.innerHTML='<div style="font-size:10px;color:var(--c-dim);margin-bottom:6px">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d) &middot; RV20 '+(d.rv20!=null?d.rv20+'%':'&mdash;')+' &middot; '+d.quoted+' contracts quoted</div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
+    +'<thead><tr><td '+hcol+'>CE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td>'
+    +'<td style="text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
+    +'<td '+hcol+'>PE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>'
+    +'<div style="font-size:9px;color:var(--c-dim);margin-top:6px">Fair = Black-Scholes (&sigma;=RV20, r=7%). Tag: EXPENSIVE &gt;+25% &middot; REASONABLE 0..+25% &middot; CHEAP &lt;0% (ltp vs fair).</div>';
 }
 // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
 // Date()/timezone drift (the server stamp is already IST).
