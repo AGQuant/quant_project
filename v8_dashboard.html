@@ -1683,9 +1683,10 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const s5=cards?`<div class="sec"><div class="lbl"><span class="n">05</span> LEVELS${lvChip}</div><div class="lv">${cards}</div>${lvCaution}</div>`:'';
 
   const foot=`<div class="foot">DERIVATIVE COCKPIT v3 &middot; live from deriv_metrics${d.data_ts?(' &middot; options '+_dcFmtTs(d.data_ts)+' IST'):''}</div>`;
-  // cc#624 item_3: section 01 VOLUME removed from the cockpit display (volx/recent3d stay in the API
-  // payload — they feed the composite READ votes). Sections now: OI -> 5D-OI -> Basis -> Levels.
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s2+s3+s4+s5+foot;
+  // cc#674: section 01 VOLUME restored as the shared 3-tile row (RVOL | VolX | Vol 3D/21D) — same
+  // component as the Analysis modal (cc#624 removed the old 2-tile; this is the new RVOL-led row).
+  const s1=`<div class="sec"><div class="lbl"><span class="n">01</span> VOLUME <span class="n">RVOL · VolX · 3D/21D</span></div>`+_volTilesHtml(E,M)+`</div>`;
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+foot;
 }
 // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
 // Date()/timezone drift (the server stamp is already IST).
@@ -1903,6 +1904,36 @@ function heatHtml(d,stockName,segName){
   h+=`<div style="display:flex;gap:6px;align-items:center">${rowLbl(segName||'Sector','Sector')}${cols.map(k=>_perfTile(se?se[k]:null)).join('')}</div>`;
   return h;
 }
+// cc#674: shared VOLUME 3-tile row (RVOL | VolX | Vol 3D/21D) — used by BOTH the Analysis modal and the
+// cockpit drill (single component). Colour read: >=1.5 grn, 0.8-1.5 neutral, <0.8 amber (weak participation).
+function _volCol(v){ if(v==null)return 'var(--mut)'; return v>=1.5?'var(--grn)':v>=0.8?'var(--txt)':'#d68a1e'; }
+function _volTile(cap,val,sub,tipKey,badge){
+  var col=_volCol(val), vs=(val==null)?'--':(Number(val).toFixed(1)+'&times;');
+  return '<button onclick="qaVolExplain(\''+tipKey+'\')" style="flex:1;min-width:0;text-align:left;'
+    +'background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px;cursor:pointer;font:inherit">'
+    +'<div style="font-size:10px;color:var(--dim);font-weight:700;display:flex;align-items:center;gap:5px">'+cap+(badge||'')+'</div>'
+    +'<div style="font-size:22px;font-weight:800;font-family:\'Sora\',sans-serif;color:'+col+'">'+vs+'</div>'
+    +'<div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.35">'+sub+'</div></button>';
+}
+function _volTilesHtml(E,M){
+  E=E||{}; M=M||{}; var rv=E.rvol||{};
+  var rvv=(rv&&rv.rvol!=null)?rv.rvol:null;
+  var rvSub = rv&&rv.insufficient?'building profile ('+(rv.sessions_used||0)+' sess)'
+            : rv&&rv.closed?('last session · '+newsEsc(rv.asof||''))
+            : rv&&rv.slot?('vs typical by '+newsEsc(rv.slot)+' IST'):'vs typical pace';
+  var rvBadge = rv&&rv.early?'<span style="font-size:8px;font-weight:800;background:#d68a1e;color:#fff;padding:1px 4px;border-radius:4px">EARLY</span>':'';
+  return '<div style="display:flex;gap:6px">'
+    + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
+    + _volTile('VolX',E.volx,'last day vs 21d avg'+(E.volx_asof?(' · '+newsEsc(E.volx_asof)):''),'volx','')
+    + _volTile('Vol 3D/21D',E.recent3d_vol_ratio,newsEsc(M.recent3d_vol_ratio||'3d vs 21d avg'),'vol3d','')
+    + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
+}
+function qaVolExplain(k){
+  var t={rvol:'RVOL = today’s cumulative volume up to this 5-min slot ÷ the 21-session average volume by the SAME time of day. 1.0× = normal pace; >1 = trading faster than usual. NULL until the profile has ≥10 sessions; first two slots badged EARLY.',
+         volx:'VolX = the latest session’s total volume ÷ its 21-day average. Whole-day relative volume.',
+         vol3d:'Vol 3D/21D = 3-day average volume ÷ 21-day average volume. Participation trend — rising vs drying up.'}[k]||'';
+  var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
+}
 async function qaAnalysis(sym){
   _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory','<div class="empty">Loading…</div>');
   try{
@@ -1939,15 +1970,13 @@ async function qaAnalysis(sym){
     }
     // cc#630: TRAJECTORY block — score deltas + sector rank path (below the GVM pillars/sector box)
     if(g&&g.trajectory) h+=trajHtml(g.trajectory);
-    // (2) VOLUME — VolX + 3D/21D participation (cc#624 removed these from the cockpit; they live here now)
+    // (2) VOLUME — cc#674: three adjacent tiles RVOL | VolX | Vol 3D/21D (shared _volTilesHtml), each
+    // tap-to-explain. RVOL = time-of-day-adjusted relative volume (energy.rvol from rvol_profiles).
     const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
-    const vx=E.volx,r3=E.recent3d_vol_ratio;
+    const vx=E.volx,r3=E.recent3d_vol_ratio,rv=E.rvol;
     h+=secLbl('Volume');
-    if(vx==null&&r3==null){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
-    else{
-      const vtile=(cap,val,sub)=>`<div style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px"><div style="font-size:10px;color:var(--dim);font-weight:700">${cap}</div><div style="font-size:22px;font-weight:800;font-family:'Sora',sans-serif;color:${val!=null&&val>=1?'var(--grn)':'var(--txt)'}">${val==null?'--':Number(val).toFixed(1)}&times;</div><div style="font-size:10px;color:var(--dim);margin-top:2px">${sub}</div></div>`;
-      h+=`<div style="display:flex;gap:6px">${vtile('Rel Volume · VolX',vx,'vs 21-day avg'+(E.volx_asof?(' · '+newsEsc(E.volx_asof)):''))}${vtile('Vol 3D / 21D',r3,newsEsc(M.recent3d_vol_ratio||(r3==null?'--':(r3>=1?'participation rising':'participation drying'))))}</div>`;
-    }
+    if(vx==null&&r3==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
+    else{ h+=_volTilesHtml(E,M); }
     // (3) DELIVERY — deliv% vs own 21d avg + conviction/churn + 30d sparkline
     const dv=E.delivery||{};
     h+=secLbl('Delivery');

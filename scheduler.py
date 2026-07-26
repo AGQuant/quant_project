@@ -1400,6 +1400,26 @@ def _bg_universe_technicals():
         _log_alert("universe_technicals_error", f"nightly run failed for {today}: {e}")
 
 
+_rvol_ran_today: Optional[date] = None   # cc#674: RVOL profiles nightly guard
+
+
+def _bg_rvol_profiles():
+    """cc#674: ~02:10 IST (after universe_technicals) — rebuild the per-slot average cumulative-volume
+    profiles used by time-of-day-adjusted RVOL. Day-locked; ~212 symbols × ~75 slots."""
+    global _rvol_ran_today
+    today = _ist_now().date()
+    if _rvol_ran_today == today:
+        return _SKIPPED
+    try:
+        import rvol_engine
+        with _conn() as conn:
+            res = rvol_engine.build_profiles(conn)
+        _rvol_ran_today = today
+        log.info(f"rvol_profiles: {res}")
+    except Exception as e:
+        log.error(f"rvol_profiles: {e}")
+
+
 def _check_pivots_health():
     """cc_task #68 Bug 1: 10-min pivot watchdog (mirrors _bg_adr_pcr_retry). If the
     01:45 build produced no pivots for today, rebuild once at 01:55 + alert."""
@@ -2778,6 +2798,7 @@ async def _scheduler_loop():
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
         if h == 1 and m == 50:  _spawn(_bg_v9_paper_monthly)   # cc#629: V9 Brahmastra monthly rebalance (first trading day, month-locked)
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
+        if h == 2 and m == 10:  _spawn(_bg_rvol_profiles)  # cc#674: nightly RVOL cum-vol profiles (after universe_technicals)
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
         # the scrape build was a one-time model exercise, go-forward = data vendor. The three
         # UNCONDITIONAL jobs below (no flag gate -- they ran on their timer regardless of any human

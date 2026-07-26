@@ -1276,6 +1276,8 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             atr_d = _safe("atr_daily", lambda: _atr_daily(cur, sym))
             # cc#516 Part D: 3d/21d volume participation ratio
             recent3d = _safe("recent3d_vol_ratio", lambda: _recent3d_vol_ratio(cur, sym))
+            # cc#674: time-of-day-adjusted RVOL (today cum-vol / 21-session avg cum-vol at the same slot)
+            rvol = _safe("rvol", lambda: __import__("rvol_engine").live_rvol(cur, sym))
             # cc#516 Part C.1b/C.2: EOD futures-OI fallback (cc#517's nightly bhavcopy job) --
             # forward-compatible no-op until that table exists / carries a row for this symbol.
             eod_fut_oi = _safe("eod_fut_oi", lambda: _eod_fut_oi_fallback(cur, sym))
@@ -1369,6 +1371,7 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                        "atr_daily": atr_d, "tr_today": intr.get("tr_today"),
                        "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None,
                        "recent3d_vol_ratio": recent3d,     # cc#516 Part D
+                       "rvol": rvol,                       # cc#674: time-of-day-adjusted relative volume
                        "delivery": delivery},              # cc#517 Part A
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
