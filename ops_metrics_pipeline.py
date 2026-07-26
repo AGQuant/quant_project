@@ -434,6 +434,18 @@ _METRIC_CANON = {
     "total_volume_growth": "volume_growth_pct", "volume_growth": "volume_growth_pct",
     "volume_growth_yoy": "volume_growth_pct", "domestic_volume_growth": "domestic_volume_growth_pct",
     "export_volume_growth": "export_volume_growth_pct",
+    # cc#685: alias taxonomy — collapse duplicate KPI names splitting Peers rows / QoQ trends
+    "capacity_utilisation_pct": "capacity_util_pct", "capacity_utilisation": "capacity_util_pct",
+    "capacity_utilization": "capacity_util_pct", "capacity_utilization_pct": "capacity_util_pct",
+    "ebitda_per_mt": "ebitda_per_t", "ebitda_per_t": "ebitda_per_t",
+    "realisation_per_mt": "realization_per_t", "realization_per_t": "realization_per_t",
+    "realisation_per_t": "realization_per_t", "realization_per_mt": "realization_per_t",
+    "volume_mt": "volume_mn_t", "volumes_mn_t": "volume_mn_t",
+    "credit_growth": "credit_growth_yoy", "deposit_growth": "deposit_growth_yoy",
+    "pcr": "provision_coverage_pct", "provision_coverage": "provision_coverage_pct",
+    "deal_wins_tcv_cr": "deal_wins_tcv", "deal_wins_tcv_mn": "deal_wins_tcv",
+    "tcv_deal_wins": "deal_wins_tcv",
+    "volume_growth_uvg_pct": "volume_growth_pct",
 }
 
 
