@@ -55,7 +55,8 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 
 from fundamentals_scraper import (_fetch, _fetch_soup, UA, THROTTLE, BASE as SCREENER_BASE,
-                                   fetch_company as _fh_fetch_company, _write_symbol as _fh_write_symbol)
+                                   fetch_company as _fh_fetch_company, _write_symbol as _fh_write_symbol,
+                                   parse_all_sections as _fh_parse_all)   # cc#694: single-soup parse
 
 log = logging.getLogger("scorr.ops_metrics")
 router = APIRouter(tags=["ops_metrics"])
@@ -576,13 +577,15 @@ def _discover_docs(symbol):
     return result
 
 
-def _discover_docs_multi(symbol, max_quarters=4):
+def _discover_docs_multi(symbol, max_quarters=4, soup=None):
     """cc#524: same page/session as _discover_docs, but collects up to max_quarters distinct
     filings per doc_type instead of first-match-wins -- used for the one-time depth backfill
     (spec: "the 3 quarters BEFORE the latest"). Returns {"presentation": [{"url","quarter"},...],
-    "transcript": [...], "press_release": [...]}, newest first (screener's own list order)."""
+    "transcript": [...], "press_release": [...]}, newest first (screener's own list order).
+    cc#694: accepts an already-fetched soup (T+1 single-visit) so the company page isn't re-fetched."""
     result = {"presentation": [], "transcript": [], "press_release": []}
-    soup, _cons = _fetch_soup(symbol)
+    if soup is None:
+        soup, _cons = _fetch_soup(symbol)
     if soup is None:
         return result
 
@@ -1108,7 +1111,7 @@ def run_company_depth(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
             conn.close()
 
 
-def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
+def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS, soup=None):
     """cc#527 PHASE-SPLIT: fetch + store TEXT ONLY -- discover docs, fetch each PDF, extract
     plain text, write to doc_texts. NO anthropic_call, NO write_extraction, NO
     post_extraction_chain -- this is the fragile scrape step decoupled from extraction so a
@@ -1126,7 +1129,7 @@ def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
                 return {"symbol": symbol, "status": "dropped_sector"}
 
             try:
-                docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters)
+                docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters, soup=soup)  # cc#694: reuse T+1 soup
                 _upsert_doc_registry(cur, symbol, docs_multi)
                 conn.commit()
             except Exception as e:
@@ -1922,35 +1925,38 @@ def admin_storage():
 # no lru_cache/@cached anywhere in that file), so no cache-busting step is needed either.
 
 def _t1_refresh_company(cur, symbol):
-    """One screener visit, does everything for one company: fundamentals re-scrape (append-only
-    upsert) + ops-metrics doc discovery/extraction. Returns True on any success. Note: this
-    makes its own screener page fetch for fundamentals (fetch_company) separate from the one
-    run_company below makes for Documents/Concalls -- two page visits per company, not one, since
-    fundamentals_scraper's _fetch_soup and this module's own doc-discovery walk the same live
-    page independently. Acceptable for now (2x THROTTLE cost, not 2x company count); a shared
-    single-fetch path is a reasonable follow-up optimization, not a correctness issue."""
+    """cc#694 UNIFIED SINGLE-VISIT: ONE screener company-page fetch serves everything. From that single
+    soup: (a) parse all 6 fundamentals sections INCL shareholding -> fundamentals_history upsert (was a
+    separate fetch_company fetch + a third shareholding-job fetch); (b) discover doc links -> doc_registry
+    and stage PPT/transcript text (run_company_text_fetch reuses the same soup -> no re-fetch). Only the
+    PDF downloads are extra fetches. Returns sections_landed per company for the cc#693 job_runs row +
+    the cc#692 done-gate. Was 2-3 Screener visits/company; now 1 page visit."""
     fh_ok = False
+    landed = {"quarters": False, "profit_loss": False, "balance_sheet": False, "cash_flow": False,
+              "ratios": False, "shareholding": False, "docs": False}
+    soup = None
     try:
-        rows, cons = _fh_fetch_company(symbol)
-        if rows:
-            _fh_write_symbol(cur.connection, symbol, rows, cons)
-            fh_ok = True
+        soup, cons = _fetch_soup(symbol)   # cc#694: the ONE company-page fetch
+        if soup is not None:
+            rows = _fh_parse_all(soup)     # all 6 sections from that single soup (incl shareholding)
+            if rows:
+                _fh_write_symbol(cur.connection, symbol, rows, cons)
+                fh_ok = True
+                present = {row["section"] for row in rows}
+                landed.update({"quarters": "quarters" in present, "profit_loss": "profit-loss" in present,
+                               "balance_sheet": "balance-sheet" in present, "cash_flow": "cash-flow" in present,
+                               "ratios": "ratios" in present, "shareholding": "shareholding" in present})
     except Exception as e:
-        log.warning(f"_t1_refresh_company fundamentals re-scrape failed for {symbol}: {e}")
-    # cc#595 (23-Jul root cause): app-side LLM extraction was REMOVED on 19-Jul (commit ed54841 —
-    # the app ANTHROPIC key is out of credits + no subscription token is wired into the app;
-    # extraction was deliberately moved to Claude Code under the Max subscription). The T+1 path,
-    # though, kept calling run_company's dead anthropic extraction, which _anthropic_call swallows
-    # (returns empty) so run_company reported status='ok' with ZERO metrics written — that is why
-    # sector_ops_metrics froze at 19-Jul while the queue showed 'done' (masking one level below the
-    # cc#595/4fc356a fix). Correct fix, aligned with the 19-Jul architecture: the T+1 job stages the
-    # fresh concall doc TEXT into doc_texts (run_company_text_fetch — NO app anthropic call) so CC's
-    # extraction always has current source; sector_ops_metrics is then appended by CC from doc_texts.
-    r = run_company_text_fetch(symbol)
+        log.warning(f"_t1_refresh_company single-visit fundamentals failed for {symbol}: {e}")
+    # cc#595 architecture: the T+1 job only STAGES fresh concall doc TEXT into doc_texts (NO app anthropic
+    # call — extraction is CC's under the Max subscription). cc#694: pass the soup so doc discovery reuses
+    # it instead of re-fetching the company page; PDF downloads remain separate fetches.
+    r = run_company_text_fetch(symbol, soup=soup)
     st = r.get("status")
     # success = docs staged for CC ('ok') or legitimately nothing to stage ('no_docs' = no concall
     # filings this quarter). fetch_blocked / error are the real failures to surface.
     fetch_ok = st in ("ok", "no_docs")
+    landed["docs"] = (st == "ok")
     if not fetch_ok:
         try:
             _oplog(cur, "OPS_METRICS_T1_COMPANY_FAIL",
@@ -1958,7 +1964,8 @@ def _t1_refresh_company(cur, symbol):
                     "fundamentals_rescraped": fh_ok}, category="ops_metrics_pull")
         except Exception:
             pass
-    return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok"}
+    return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok",
+            "sections_landed": landed}
 
 
 def _result_qend(ex_date):
@@ -2047,6 +2054,26 @@ def run_t1_refresh(conn=None):
                                WHERE symbol=%s AND ex_date=%s""",
                             ("done" if landed else "failed", sym, ex_date))
                 conn.commit()
+            # cc#694: per-company job_runs row (control-plane spine) with the single-visit sections_landed.
+            # done gate = quarters landed (cc#692); partial = quarters ok but a section/docs missing ->
+            # Saturday retries the missing sections only; failed = quarters stale. Partial/failed also
+            # writes ops_log category=scrape_review via record_run (universal failure rule).
+            try:
+                import ops_control_plane
+                sl = res.get("sections_landed") or {}
+                _fund = ("quarters", "profit_loss", "balance_sheet", "cash_flow", "ratios", "shareholding")
+                if not q_fresh:
+                    cp = "failed"
+                elif all(sl.get(k) for k in _fund) and sl.get("docs"):
+                    cp = "ok"
+                else:
+                    cp = "partial"
+                ops_control_plane.record_run("screener_fundamentals", status=cp, sections_landed=sl,
+                    error=(None if cp == "ok" else ("quarters stale vs result qtr" if not q_fresh
+                           else "missing sections/docs: " + ",".join(k for k in list(_fund) + ["docs"] if not sl.get(k)))),
+                    scope=sym)
+            except Exception as e:
+                log.warning(f"cc#694 per-company record_run failed for {sym}: {e}")
             ok += 1 if success else 0
             fail += 0 if success else 1
             time.sleep(THROTTLE)

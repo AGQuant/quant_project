@@ -192,6 +192,21 @@ def fetch_company(symbol):
     return (rows, cons) if rows else ([], None)
 
 
+# cc#694: all 6 sections (5 financials + shareholding) — parsed from ONE already-fetched soup so the T+1
+# single-visit path needs just one company-page fetch instead of one per section-group.
+ALL_SECTIONS = dict(SECTIONS)
+ALL_SECTIONS["shareholding"] = "quarter"
+
+
+def parse_all_sections(soup):
+    """cc#694: parse every section (quarters/profit-loss/balance-sheet/cash-flow/ratios/shareholding)
+    from a pre-fetched soup. Returns the combined row list (same shape as fetch_company's rows)."""
+    rows = []
+    for sid, ptype in ALL_SECTIONS.items():
+        rows.extend(_parse_section(soup, sid, ptype))
+    return rows
+
+
 def fetch_shareholding(symbol):
     """cc#391 Phase 1B: the shareholding quarterly table only (Promoters/FIIs/DIIs/Government/Public/
     No. of Shareholders per quarter). Returns (rows, consolidated_flag, page_ok). cc#597: page_ok
