@@ -2019,9 +2019,12 @@ try{const _o=localStorage.getItem('qa_chart_overlay')||'none';_qaOv={pivot:_o===
 const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365,'ALL':'all'};   // null=>intraday 5m; 'all'=>full history; else /api/candles days
 // cc#669: ALL user-facing chart times = IST (Asia/Kolkata), one shared formatter. Intraday bars carry
 // TRUE instants (epoch secs, IST-naive ts parsed as +05:30 upstream); daily bars are BusinessDay/date.
-var _IST_MON=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short'});
-var _IST_HM =new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false});
-var _IST_DHM=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+// cc#673: date labels carry the YEAR (dd Mon YY / Mon YY) so multi-year windows (6M/1Y/ALL) aren't
+// ambiguous; crosshair always shows the full date incl. year. 5m keeps HH:MM with a dated edge tick.
+var _IST_MONY=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'2-digit'});
+var _IST_MY  =new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',month:'short',year:'2-digit'});
+var _IST_HM  =new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false});
+var _IST_DHMY=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 function _istDate(time){   // LWC time -> {d:Date(true instant), dateOnly}
   if(time==null)return null;
   if(typeof time==='number')return {d:new Date(time*1000),dateOnly:false};
@@ -2029,14 +2032,14 @@ function _istDate(time){   // LWC time -> {d:Date(true instant), dateOnly}
   if(typeof time==='string'){var p=time.split('-');if(p.length>=3)return {d:new Date(Date.UTC(+p[0],+p[1]-1,+p[2])),dateOnly:true};}
   return null;
 }
-function _istTick(time,tickType){   // axis ticks: date at day-boundary/daily ticks, HH:MM IST intraday
+function _istTick(time,tickType){   // axis ticks: Month ticks -> "Mon YY", day ticks -> "dd Mon YY", intraday -> HH:MM
   var o=_istDate(time); if(!o)return '';
-  if(o.dateOnly)return _IST_MON.format(o.d);
-  return (tickType!=null&&tickType<=2)?_IST_MON.format(o.d):_IST_HM.format(o.d);
+  if(o.dateOnly)return (tickType!=null&&tickType<=1)?_IST_MY.format(o.d):_IST_MONY.format(o.d);
+  return (tickType!=null&&tickType<=2)?_IST_MONY.format(o.d):_IST_HM.format(o.d);   // 5m: dated (w/ year) edge tick, else HH:MM
 }
-function _istCross(time){   // crosshair/tooltip time label
+function _istCross(time){   // crosshair/tooltip: always full date incl. year
   var o=_istDate(time); if(!o)return '';
-  return o.dateOnly?_IST_MON.format(o.d):_IST_DHM.format(o.d);
+  return o.dateOnly?_IST_MONY.format(o.d):_IST_DHMY.format(o.d);
 }
 function _qaOvStr(){return _qaOv.pivot&&_qaOv.fib?'both':_qaOv.pivot?'pivot':_qaOv.fib?'fib':'none';}
 function _qaChartEsc(e){if(e.key==='Escape')qaChartClose();}

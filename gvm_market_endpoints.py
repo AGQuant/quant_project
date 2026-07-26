@@ -29,6 +29,7 @@ from typing import Optional
 import psycopg
 import os
 import asyncio
+import json
 
 import yahoo_ondemand
 
@@ -54,6 +55,17 @@ def api_query(sql, params=None, single=False):
             return [dict(zip(cols, r)) for r in cur.fetchall()]
     except Exception as e:
         return {"error": str(e)}
+
+
+def _ops_log(category, title, details):
+    """cc#673: fire-and-forget ops_log write for chart-data invariants (silent on healthy symbols)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)", (category, title, json.dumps(details)))
+            conn.commit()
+    except Exception:
+        pass
 
 
 # ── GVM ─────────────────────────────────────────────────────────────────────
@@ -269,9 +281,17 @@ def get_candles(symbol: str, days: int = 90):
     downsampled server-side to WEEKLY candles (first-open / max-high / min-low / last-close / sum-vol);
     shorter history returns daily. 1M/3M/6M/1Y pass their full calendar window (no truncation)."""
     sym = symbol.upper()
+    # cc#673: anchor the window to MAX(price_date) for THIS symbol (not CURRENT_DATE) so the tail is
+    # ALWAYS the latest stored bar regardless of server clock / feed lag / holidays — fixes the
+    # "chart ends weeks early" class of bug. Then assert the last returned bar == MAX(price_date).
+    mx = api_query("SELECT MAX(price_date)::text AS d FROM raw_prices WHERE symbol=%s", (sym,), single=True)
+    maxd = mx.get("d") if isinstance(mx, dict) else None
+    if not maxd:
+        return []
     if days <= 0:   # ALL — full stored history, weekly-downsampled above ~1,500 points
         cnt = api_query("SELECT COUNT(*) AS c FROM raw_prices WHERE symbol=%s", (sym,), single=True)
-        if (cnt or {}).get("c", 0) > 1500:
+        if isinstance(cnt, dict) and (cnt.get("c") or 0) > 1500:
+            # weekly buckets: last bucket is the week-start of maxd (not maxd itself) → skip the invariant.
             return api_query("""SELECT to_char(date_trunc('week', price_date),'YYYY-MM-DD') AS date,
                                        ROUND((array_agg(open  ORDER BY price_date ASC ))[1]::numeric,2) AS open,
                                        ROUND(MAX(high)::numeric,2) AS high,
@@ -280,18 +300,24 @@ def get_candles(symbol: str, days: int = 90):
                                        SUM(volume) AS volume
                                 FROM raw_prices WHERE symbol=%s
                                 GROUP BY date_trunc('week', price_date) ORDER BY date ASC""", (sym,))
-        return api_query("""SELECT price_date::text AS date,
+        rows = api_query("""SELECT price_date::text AS date,
                                    ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
                                    ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
                                    volume
                             FROM raw_prices WHERE symbol=%s ORDER BY price_date ASC""", (sym,))
-    days = min(max(days, 5), 365)
-    return api_query("""SELECT price_date::text AS date,
-                               ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
-                               ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
-                               volume
-                        FROM raw_prices WHERE symbol=%s AND price_date >= CURRENT_DATE - %s
-                        ORDER BY price_date ASC""", (sym, days))
+    else:
+        days = min(max(days, 5), 365)
+        rows = api_query("""SELECT price_date::text AS date,
+                                   ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
+                                   ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
+                                   volume
+                            FROM raw_prices WHERE symbol=%s AND price_date > %s::date - %s
+                            ORDER BY price_date ASC""", (sym, maxd, days))
+    # cc#673 invariant: the last daily bar returned MUST be the symbol's latest stored bar.
+    if isinstance(rows, list) and rows and str(rows[-1].get("date")) != maxd:
+        _ops_log("chart_window", "chart_window_mismatch",
+                 {"symbol": sym, "last_bar": str(rows[-1].get("date")), "max_price_date": maxd, "days": days})
+    return rows
 
 
 @router.get("/api/gvm/top/{n}")
