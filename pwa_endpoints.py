@@ -987,7 +987,10 @@ RESULTS_CARD_JS = """
     + '.rcard-st-u{color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45)}'
     + '.rcard-st-t{color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3)}'
     + '.rcard-body{font-size:13px;line-height:1.55;white-space:pre-wrap;margin-top:6px}'
-    + '.rcard-lbl{font:700 10px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--mut,#667085);margin:14px 0 5px}'
+    /* cc#676: SectionSeparator (UI pattern #12) — thin top rule + generous space + uppercase muted
+       letter-spaced label, then ~11px before content. Every R-card section label is this component. */
+    + '.rcard-lbl{font:700 10.5px/1.3 Sora,sans-serif;text-transform:uppercase;letter-spacing:.1em;color:var(--mut,#667085);margin:18px 0 11px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))}'
+    + '.rcard-lbl:first-child{margin-top:2px;padding-top:0;border-top:none}'
     + '.rcard-note{font-size:11px;color:var(--dim,#8892a6);margin-top:8px}'
     + '.rcard-btn{margin-top:12px;border:1px solid var(--blu,#4D7CFE);background:rgba(77,124,254,.1);'
     + 'color:var(--blu,#4D7CFE);font:700 12px Sora,sans-serif;border-radius:8px;padding:8px 14px;cursor:pointer}'
@@ -1097,7 +1100,7 @@ RESULTS_CARD_JS = """
     // first ~160 chars of summary + a >=44px "View more" affordance that expands THAT item inline to
     // the full summary (delegated click handler below). AI Editorial items are collapsed too: their
     // full body NEVER renders expanded by default. cc#625 fix_1: rule + gap above the header.
-    var h = '<div class=\"rcard-lbl\" style=\"margin-top:18px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))\">Polished news &middot; last 30 days</div>';
+    var h = '<div class=\"rcard-lbl\">Polished news &middot; last 30 days</div>';   // cc#676: now the shared SectionSeparator
     for (var i=0;i<items.length;i++){ var it=items[i];
       var sum = it.summary || '';
       var over = sum.length > 160;
