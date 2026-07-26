@@ -1961,7 +1961,7 @@ def _t1_refresh_company(cur, symbol):
     return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok"}
 
 
-def _result_qend(ex_date) -> Optional[date]:
+def _result_qend(ex_date):
     """cc#692: the standard quarter-end (Mar31/Jun30/Sep30/Dec31) most recently ENDED on/before the
     result-announcement date — i.e. the quarter the just-reported result covers."""
     if not isinstance(ex_date, date):
