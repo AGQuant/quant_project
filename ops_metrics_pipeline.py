@@ -67,6 +67,8 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 import psycopg
 
+from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700: top-500 NSE scrape gate
+
 
 def _conn():
     return psycopg.connect(_DB)
@@ -2008,7 +2010,14 @@ def run_t1_refresh(conn=None):
                            WHERE status='reported' AND ex_date >= (CURRENT_DATE - INTERVAL '3 days')::date
                              AND ex_date < CURRENT_DATE AND ticker IS NOT NULL""")
             due = cur.fetchall()
+            skipped_universe = 0   # cc#700: reported-but-out-of-universe (not top-500 NSE)
             for sym, ex_date in due:
+                # cc#700: only top-500 NSE names enter the scrape path; out-of-universe reports are
+                # NEVER scrape-queued (Result Analysis serves them from the screener_raw fallback).
+                if not in_scrape_universe(cur, sym):
+                    if log_universe_skip(cur, sym, ex_date, "ops_metrics_pipeline.run_t1_refresh"):
+                        skipped_universe += 1
+                    continue
                 cur.execute("""INSERT INTO ops_metrics_t1_queue (symbol, ex_date, status)
                                VALUES (%s,%s,'pending') ON CONFLICT (symbol, ex_date) DO NOTHING""",
                             (sym, ex_date))
@@ -2081,6 +2090,7 @@ def run_t1_refresh(conn=None):
         with conn.cursor() as cur:
             summary = {"due": len(pending), "docs_staged": staged, "ok_or_complete": ok, "failed": fail,
                        "fundamentals_only": fund_only, "status_histogram": hist,
+                       "skipped_universe_top500": skipped_universe,   # cc#700
                        "note": "T+1 stages concall doc-text into doc_texts for CC extraction; "
                                "sector_ops_metrics is appended by CC (app anthropic retired 19-Jul)"}
             _oplog(cur, "OPS_METRICS_T1_RUN", summary)
