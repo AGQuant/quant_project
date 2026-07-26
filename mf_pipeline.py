@@ -2178,9 +2178,12 @@ def mf_fund(scheme_code: str):
                              AND segment = ANY(%s)""", (segs,))
             seg_ratings = {row[0]: {"sector_gvm": float(row[1]) if row[1] is not None else None,
                                     "verdict": row[2]} for row in cur.fetchall()}
-    # portfolio-weighted GVM (where resolved) — a real P0-A signal
-    wsum = sum((h["pct_weight"] or 0) for h in holdings if h.get("gvm") is not None)
-    pw_gvm = (sum((h["pct_weight"] or 0) * float(h["gvm"]) for h in holdings if h.get("gvm") is not None) / wsum) if wsum else None
+    # portfolio-weighted GVM (where resolved) — a real P0-A signal.
+    # cc#708: pct_weight is a numeric column -> psycopg returns Decimal, and Decimal * float(gvm)
+    # raises TypeError, which 500'd this endpoint (both look-through + segment sections fell to the
+    # frontend "unavailable" catch) while the header survived on precomputed mf_scores. Cast to float.
+    wsum = sum(float(h["pct_weight"] or 0) for h in holdings if h.get("gvm") is not None)
+    pw_gvm = (sum(float(h["pct_weight"] or 0) * float(h["gvm"]) for h in holdings if h.get("gvm") is not None) / wsum) if wsum else None
     # cc#550: segment exposure = SUM(pct_weight) grouped by the holding's GVM segment, joined to
     # the latest sector rating. Coverage = rated-segment weight / total disclosed weight; the UI
     # applies the same >=60% honesty gate the Q pillar uses before it shows the exposure read.
