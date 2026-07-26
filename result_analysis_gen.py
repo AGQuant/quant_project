@@ -91,6 +91,56 @@ def _emoji_vs(v, sector, higher_good=True):
     return _G if (diff > 0) == higher_good else _R
 
 
+def _reported_qend(cur, symbol: str):
+    """cc#692: the result quarter-end of the company's latest REPORTED earnings_calendar date (the
+    standard quarter-end on/before ex_date). Used to detect a fundamentals-quarters scrape that is
+    stale vs what the company has actually reported."""
+    cur.execute("SELECT MAX(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND status='reported'", (symbol,))
+    r = cur.fetchone()
+    ex = r[0] if r and r[0] else None
+    if not ex:
+        return None
+    ends = [date(ex.year, mm, dd) for mm, dd in ((3, 31), (6, 30), (9, 30), (12, 31)) if date(ex.year, mm, dd) <= ex]
+    return max(ends) if ends else date(ex.year - 1, 12, 31)
+
+
+def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
+    """cc#692 fallback: when fundamentals_history quarters is stale vs the reported quarter, render the
+    Result Analysis card from the alternate-day screener_raw export instead of sitting on the prior
+    quarter. The export carries GROWTH + MARGIN only (no absolute quarterly Sales/PAT) — Screener
+    semantics: qoq_sales_growth / qoq_profit_growth = latest-Q vs year-ago-Q (YoY); opm_latest_q vs
+    opm_prev_year_q = margin latest-Q vs LY-Q. Tagged 'via screener data' with the reported quarter."""
+    cur.execute('''SELECT qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q,
+                          "Sales growth", pe, segment_pe FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1''', (symbol,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    s_yoy, p_yoy, opm, opm_ly, ann_sg, pe_raw, pe_peer = [_num(x) for x in r]
+    if s_yoy is None and p_yoy is None and opm is None:
+        return None   # export has nothing renderable -> let the caller skip (result_review already logged)
+    cur.execute("SELECT company_name FROM input_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
+    rr = cur.fetchone()
+    company = (rr[0] if rr and rr[0] else None) or symbol
+    qlabel = _fq_label(qend) or "Latest"
+    e_sales = _G if (s_yoy is not None and s_yoy > 0) else _Y
+    e_pat = _G if (p_yoy is not None and p_yoy > 0) else _Y
+    e_marg = _G if (opm is not None and opm_ly is not None and opm >= opm_ly) else _Y
+    e_pe = _Y if (pe_raw is None or pe_peer is None) else (_G if pe_raw <= pe_peer else _R)
+    strong = sum(1 for x in (s_yoy, p_yoy) if x is not None and x > 0)
+    verdict_line = ("Strong quarter; sales and PAT both up YoY." if strong == 2
+                    else ("Soft quarter; growth down YoY." if strong == 0 else "Mixed quarter."))
+    parts = [
+        f"{qlabel} · {company}   (via screener data)", "",
+        f"{e_sales} Sales    {_sign(s_yoy) if s_yoy is not None else 'n/a'} YoY",
+        f"{e_pat} PAT      {_sign(p_yoy) if p_yoy is not None else 'n/a'} YoY",
+        f"{e_marg} Margins  {_sign(opm, plus=False) if opm is not None else 'n/a'} vs {_sign(opm_ly, plus=False) if opm_ly is not None else 'n/a'} LY",
+        f"{e_pe} PE       {(str(pe_raw) + 'x') if pe_raw is not None else 'n/a'} vs {(str(pe_peer) + 'x') if pe_peer is not None else 'n/a'} sector",
+        "", verdict_line,
+        "Growth & margins from Screener export; the full quarterly card lands on the next fundamentals scrape.",
+    ]
+    return "\n".join(parts)
+
+
 def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     """Compute the result-analysis card for one symbol from fundamentals_history + gvm_scores.
     Returns the card text, or None when the symbol has no quarter >= min_quarter_end (so it is
@@ -100,8 +150,18 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
                    ORDER BY period_end DESC LIMIT 6""", (symbol,))
     rows = cur.fetchall()
     if not rows:
-        return None
+        # cc#692: no fundamentals quarters at all — still try the screener_raw export for a reported name.
+        rq0 = _reported_qend(cur, symbol)
+        return _screener_fallback_card(cur, symbol, rq0) if rq0 else None
     latest_end = rows[0][0]
+    # cc#692: if the company has REPORTED a newer quarter than fundamentals_history holds (quarters
+    # scrape stale vs earnings_calendar), fall back to the screener_raw export (growth+margin) so the
+    # card never sits on the prior quarter. Scrape fix (cc#692/694) remains primary; this closes the gap.
+    rq = _reported_qend(cur, symbol)
+    if rq and rq > latest_end:
+        fb = _screener_fallback_card(cur, symbol, rq)
+        if fb:
+            return fb
     if min_quarter_end and latest_end < min_quarter_end:
         return None
     # BFSI metric mapping: banks/NBFCs report Revenue (not Sales) + Financing Margin % (not OPM %).
