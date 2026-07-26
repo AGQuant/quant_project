@@ -1047,27 +1047,26 @@ RESULTS_CARD_JS = """
   function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
 
-  // cc#590: peer-comparison block — latest QoQ sales/profit vs top-3-by-GVM segment peers.
+  // cc#697: compact peer line MERGED into the Result Analysis block (no separate bottom section, zero
+  // duplication). SAME-QUARTER peers only; YoY basis (screener qoq_* = latest-Q vs year-ago-Q). A metric
+  // with no same-quarter peer figure is skipped -> the top block's Sector line stands alone.
   function peerHtml(pc){
     if(!pc) return '';
     function row(lbl, o){
-      if(!o) return '';
-      var st=(o.stock!=null?o.stock+'%':'--'), pr=(o.peer!=null?o.peer+'%':'--');
+      if(!o || o.peer==null) return '';
+      var st=(o.stock!=null?o.stock+'%':'--');
       var beat=o.beat, cls=beat?'rcard-beat':'rcard-miss', tag=beat?'BEAT':'MISS';
-      return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+'</span>'
+      return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+' YoY</span>'
         +'<span class=\"rcard-peer-v\">'+esc(st)+'</span>'
-        +'<span class=\"rcard-peer-p\">vs '+esc(pr)+'</span>'
+        +'<span class=\"rcard-peer-p\">Top-'+(pc.peer_count||0)+' peers '+esc(o.peer+'%')+'</span>'
         +'<span class=\"'+cls+'\">'+tag+'</span></div>';
     }
-    var body=row('QoQ Sales',pc.sales)+row('QoQ Profit',pc.profit);
+    var body=row('Sales',pc.sales)+row('PAT',pc.profit);
     if(!body) return '';
-    // cc#625 fix_3(d): when fewer than 3 same-quarter peers exist the pool includes off-quarter peers
-    // — flag it honestly instead of silently blending quarters.
-    var mm = pc.quarter_mismatch ? ' &middot; mixed-quarter peers (under 3 same-quarter reporters)' : '';
-    return '<div class=\"rcard-lbl\">Latest result'+(pc.quarter?' ('+esc(pc.quarter)+')':'')+' vs top-3 peers</div>'
-      +'<div class=\"rcard-peer\">'+body+'</div>'
-      +'<div class=\"rcard-note\">Peers = top-3 by GVM in '+esc(pc.segment||'segment')
-      +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.'+mm+'</div>';
+    var cnt=(pc.same_quarter_peers!=null?pc.same_quarter_peers:0)+'/'+(pc.total_peers!=null?pc.total_peers:'?');
+    return '<div class=\"rcard-peer\">'+body+'</div>'
+      +'<div class=\"rcard-note\">vs top-'+(pc.peer_count||0)+' same-quarter peers by GVM in '+esc(pc.segment||'segment')
+      +' &middot; '+cnt+' reported '+esc(pc.quarter||'')+', self-excluded.</div>';
   }
 
   var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
@@ -1141,7 +1140,8 @@ RESULTS_CARD_JS = """
         + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+'</div>';
       if (d && d.result_analysis){
         h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
-          + '<div class=\"rcard-body\">'+esc(d.result_analysis)+'</div>';
+          + '<div class=\"rcard-body\">'+esc(d.result_analysis)+'</div>'
+          + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
       }
@@ -1153,13 +1153,12 @@ RESULTS_CARD_JS = """
       h += fy27Html(d && d.fy27_growth);
       if (d && d.last_result_analysis){
         h += '<div class=\"rcard-lbl\">Last result'+(d.last_card_quarter?' &middot; '+esc(d.last_card_quarter):'')+'</div>'
-          + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>';
+          + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>'
+          + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged into the (last) result block
       }
     }
-    // cc#650 order: Result/FY27 -> Peer comparison (stays with the result context) -> RAW headlines
-    // (7 days, headlines only) -> POLISHED news LAST (collapsed per item). Founder 24-Jul (TRENT):
-    // the heavy polished block was burying the card mid-way; it now trails at the bottom, compressed.
-    h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
+    // cc#650 order: Result/FY27 (peer line now merged INTO the result block above per cc#697) -> RAW
+    // headlines (7 days, headlines only) -> POLISHED news LAST (collapsed per item).
     h += rawNewsHtml(d && d.raw_news);       // cc#650: RAW headlines, last 7 days
     h += polNewsHtml(d && d.polished_news);  // cc#650: POLISHED news LAST, collapsed + view-more
     var foot = [];

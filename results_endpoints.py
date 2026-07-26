@@ -150,18 +150,17 @@ def _peer_comparison(cur, sym, segment):
                    WHERE g.segment=%s AND g.symbol<>%s""", (segment, sym))
     rows = [(_flt(r[0]), _flt(r[1]), _flt(r[2]), r[3]) for r in cur.fetchall()]
     same = [p for p in rows if subj_q is not None and p[3] == subj_q]
-    if len(same) >= 3:
-        peers, quarter_mismatch = same, False
-    else:
-        peers = rows   # fallback: full pool, flagged
-        quarter_mismatch = (subj_q is not None and len(same) < len(rows))
+    # cc#697 bug_1: SAME-QUARTER ONLY — never blend quarters. Rank the same-quarter reporters by GVM and
+    # take the top 3 (like cc#687); 1-2 -> compare vs those with an honest count; 0 -> caller shows the
+    # sector line only (peer figures come back null). The old <3 -> full-pool fallback is removed.
+    peers = same
 
     def _top3(idx):
         cand = [(p[0], p[idx]) for p in peers if p[idx] is not None and p[0] is not None]
         if not cand:
             return None, 0
         cand.sort(key=lambda x: -x[0])
-        use = cand[:3] if len(cand) >= 3 else cand
+        use = cand[:3]
         return sum(v for _, v in use) / len(use), len(use)
 
     peer_s, n_s = _top3(1)
@@ -173,13 +172,15 @@ def _peer_comparison(cur, sym, segment):
     if st_s is None and st_p is None and peer_s is None and peer_p is None:
         return None
     return {
-        "peer_basis": "top-3 by GVM in segment (self-excluded, same quarter)",
+        "peer_basis": "top-3 same-quarter reporters by GVM in segment (self-excluded)",
         "segment": segment,
         "quarter": quarter,
+        # cc#697 bug_2: screener_raw qoq_sales_growth / qoq_profit_growth are Screener-export LATEST-Q vs
+        # year-ago-Q figures (YoY semantics), NOT sequential QoQ. Label as YoY in the UI.
+        "growth_basis": "YoY",
         "peer_count": max(n_s, n_p),
         "same_quarter_peers": len(same),
-        "quarter_mismatch": quarter_mismatch,   # True -> pool includes off-quarter peers (flagged in UI)
-        "fallback": (n_s < 3 or n_p < 3),
+        "total_peers": len(rows),
         "sales": {"stock": _f(st_s), "peer": _f(peer_s),
                   "beat": (st_s is not None and peer_s is not None and st_s > peer_s)},
         "profit": {"stock": _f(st_p), "peer": _f(peer_p),
