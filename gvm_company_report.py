@@ -633,11 +633,14 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
     n = len(pl_labels)
     roce_y, roe_y, opm_y, npm_y, at_y = [], [], [], [], []
     pe_y, pb_y, de_y, ic_y = [], [], [], []
+    evebitda_y, mcaps_y, dy_y = [], [], []   # cc#691: year-wise EV/EBITDA, MCap/Sales, Div Yield
     for i in range(n):
         m = pl_m[i]
         bs = bs_map.get(pl_labels[i], {})
         ra = ra_map.get(pl_labels[i], {})
         np_ = _mv(m, "Net Profit"); sales = _mv(m, "Sales"); op = _mv(m, "Operating Profit")
+        if sales is None:
+            sales = _mv(m, "Revenue")   # cc#691: banks/NBFCs report the top line as "Revenue", not "Sales"
         eps = _mv(m, "EPS in Rs"); intr = _mv(m, "Interest"); pbt = _mv(m, "Profit before tax")
         eqcap = _mv(bs, "Equity Capital"); res = _mv(bs, "Reserves")
         ta = _mv(bs, "Total Assets"); borrow = _mv(bs, "Borrowings")
@@ -653,6 +656,16 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         pe_y.append(_safe_div(close, eps, nd=1) if (eps and eps > 0) else None)
         bvps = ((nw / np_) * eps if (nw is not None and np_ and np_ > 0 and eps) else None)
         pb_y.append(_safe_div(close, bvps, nd=2) if (bvps and bvps > 0) else None)
+        # cc#691: MCap(cr) = close * shares, shares = np/eps (avoids a share-count series). EV = MCap +
+        # Borrowings (gross debt — the historical BS series has no clean cash line, so net debt isn't
+        # reconstructable; a consistent gross-debt basis across years). EBITDA = Operating Profit.
+        # DivYield% = DPS/price = (EPS * payout%/100)/price*100 = EPS*payout/price. All None pre-price-window.
+        mcap_cr = (close * np_ / eps) if (close and np_ is not None and eps and eps > 0) else None
+        payout = _mv(m, "Dividend Payout %")
+        ev = (mcap_cr + borrow) if (mcap_cr is not None and borrow is not None) else mcap_cr
+        evebitda_y.append(_safe_div(ev, op, nd=1) if (ev is not None and op and op > 0) else None)
+        mcaps_y.append(_safe_div(mcap_cr, sales, nd=2) if (mcap_cr is not None and sales) else None)
+        dy_y.append(round(payout * eps / close, 2) if (payout is not None and eps and close and close > 0) else None)
         # Solvency
         de_y.append(_safe_div(borrow, nw, nd=2))
         ebit = (pbt + intr) if (pbt is not None and intr is not None) else None
@@ -683,14 +696,18 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         _rat_row("NPM %",  "pct", npm_y  + [None]),
         _rat_row("Asset Turnover", "x", at_y + [None]),
     ])
-    # 3) VALUATION — PE/PB YEAR-WISE (FY-end close); EV/EBITDA + MCap/Sales + Div Yield Current-only
-    _add("Valuation", yr_periods, [
+    # 3) VALUATION — cc#691: PE/PB/EV-EBITDA/MCap-Sales/Div-Yield ALL year-wise now (FY-end close +
+    # Current). EV/EBITDA is SUPPRESSED for BFSI (meaningless for financials — same _is_bfsi gate as the
+    # Solvency D/E + Interest-Coverage exclusion); MCap/Sales + Div Yield stay for BFSI.
+    _val_rows = [
         _rat_row("PE", "x", pe_y + [k.get("pe")]),
         _rat_row("PB", "x", pb_y + [k.get("pb")]),
-        _rat_row("EV/EBITDA", "x", [None] * n + [k.get("evebitda")]),
-        _rat_row("MCap/Sales", "x", [None] * n + [mcap_sales]),
-        _rat_row("Dividend Yield", "pct", [None] * n + [k.get("divyield")]),
-    ])
+    ]
+    if not _is_bfsi(segment):
+        _val_rows.append(_rat_row("EV/EBITDA", "x", evebitda_y + [k.get("evebitda")]))
+    _val_rows.append(_rat_row("MCap/Sales", "x", mcaps_y + [mcap_sales]))
+    _val_rows.append(_rat_row("Dividend Yield", "pct", dy_y + [k.get("divyield")]))
+    _add("Valuation", yr_periods, _val_rows)
     # 4) SOLVENCY — YEAR-WISE + Current, HIDDEN for BFSI
     if not _is_bfsi(segment):
         _add("Solvency", yr_periods, [
