@@ -1,10 +1,14 @@
 """cc#700: T+1 result-scrape universe gate.
 
-BOSS RULE (founder 26-Jul, session_log id=9178, SCRAPE_UNIVERSE_TOP500_NSE_V1):
-the T+1 result-scrape universe = NSE-LISTED companies in the TOP 500 BY MARKET CAP
-only (from screener_raw.market_cap; NSE code must be non-numeric — BSE-only numeric
-codes are excluded). Everything outside the top-500 NSE set is NEVER queued for a
-scrape; its Result Analysis serves from the screener_raw fallback ("limited review").
+BOSS RULE (founder 26-Jul, session_log id=9178):
+V1 (SCRAPE_UNIVERSE_TOP500_NSE_V1): scrape universe = NSE-LISTED companies in the
+TOP 500 BY MARKET CAP (from screener_raw.market_cap; NSE code must be non-numeric).
+V2 (universe_v2_inclusive, cc#701): INCLUSIVE UNION — a symbol qualifies if it is
+(a) NSE non-numeric AND top-500 by market_cap, OR (b) already present in
+sector_ops_metrics (any row) — so ops-tracked smalls (e.g. AMC_Wealth names below
+rank 500) stay scrape-eligible. ~613 symbols total. Everything else is NEVER queued
+for a scrape; its Result Analysis serves from the screener_raw fallback ("limited
+review"). BSE-only numeric codes are always excluded.
 
 Scope: scrape stack is PROTOTYPE tier — quality over coverage. Full-universe production
 data arrives with the vendor transition (CMOTS, post metrics-freeze). This module is the
@@ -17,21 +21,25 @@ TOP_N = 500
 
 
 def in_scrape_universe(cur, symbol: str) -> bool:
-    """True iff `symbol` is NSE-listed (non-numeric nse_code) AND ranks within the top-500
-    by market_cap in screener_raw at call time. Purely-numeric codes (BSE-only) and rank>500
-    are excluded. Ranking is evaluated live so the universe tracks the latest screener upload."""
+    """True iff `symbol` qualifies for the T+1 scrape (cc#701 inclusive union): NSE-listed
+    (non-numeric nse_code) AND in the top-500 by market_cap in screener_raw, OR already present
+    in sector_ops_metrics (any row). Purely-numeric codes (BSE-only) are always excluded. Ranking
+    is evaluated live so the top-500 tranche tracks the latest screener upload."""
     sym = (symbol or "").strip().upper()
     if not sym or sym.isdigit():
         return False
     cur.execute("""
         WITH ranked AS (
-            SELECT UPPER(nse_code) AS code,
-                   ROW_NUMBER() OVER (ORDER BY market_cap DESC NULLS LAST) AS rnk
+            SELECT UPPER(nse_code) AS code
             FROM screener_raw
             WHERE nse_code IS NOT NULL AND nse_code <> '' AND nse_code !~ '^[0-9]+$'
-              AND market_cap IS NOT NULL)
-        SELECT 1 FROM ranked WHERE code=%s AND rnk <= %s
-    """, (sym, TOP_N))
+              AND market_cap IS NOT NULL
+            ORDER BY market_cap DESC NULLS LAST
+            LIMIT %s)
+        SELECT 1
+        WHERE EXISTS (SELECT 1 FROM ranked WHERE code=%s)
+           OR EXISTS (SELECT 1 FROM sector_ops_metrics WHERE UPPER(symbol)=%s)
+    """, (TOP_N, sym, sym))
     return cur.fetchone() is not None
 
 
