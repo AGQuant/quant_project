@@ -1766,7 +1766,13 @@ function _qaInjectStyle(){
     .qa-tf{border:1px solid var(--line2,#e8ecf2);background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);
       border-radius:7px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
     .qa-tf.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}
-    .qa-tf.qa-sub{padding:3px 7px;font-size:10px;font-weight:600;opacity:.9}`;
+    .qa-tf.qa-sub{padding:3px 7px;font-size:10px;font-weight:600;opacity:.9}
+    .qa-tcbtn{flex:1;padding:11px 10px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
+      background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);font-weight:800;font-size:12.5px;cursor:pointer;
+      transition:background .12s,color .12s,border-color .12s}
+    .qa-tcbtn:hover{border-color:var(--blu,#4d7cfe)}
+    .qa-tcbtn.trade.on{background:var(--grn,#0a9e63);color:#fff;border-color:var(--grn,#0a9e63)}
+    .qa-tcbtn.invest.on{background:#7c3aed;color:#fff;border-color:#7c3aed}`;
   document.head.appendChild(st);
 }
 function openQuickActions(ev,sym,side,qty,entry,cmp){
@@ -1953,8 +1959,43 @@ async function qaAnalysis(sym){
     }
     // cc#630: performance heat grid — the closing visual (bottom of the panel), Volume/Delivery unchanged
     if(g&&(g.stock_perf||g.sector_perf)) h+=heatHtml(g, newsEsc((g&&g.company_name)||sym), newsEsc((g&&g.segment)||'Sector'));
+    // cc#671: footer — TC Trade Check / Investment Check. Buttons host the SAME navbar Check surface
+    // (id=3005) INLINE via an iframe embed of /check (single source, never diverges). Context isolation
+    // id=244 preserved: the Analysis card stays GVM/volume/delivery; the TC framework lives in its own
+    // document, never merged into V8 render.
+    h+=qaTcFooterHtml(sym);
     _qaSetBody(h||'<div class="empty">No analysis data for '+newsEsc(sym)+'.</div>');
   }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">Analysis failed to load.</div>');}
+}
+// cc#671: Analysis-modal TC footer + inline Check embed.
+function qaTcFooterHtml(sym){
+  var s=newsEsc(sym);
+  return '<div style="height:1px;background:var(--line);margin:18px 0 12px"></div>'
+    + '<div style="display:flex;gap:8px">'
+    +   '<button id="qaTcTrade" class="qa-tcbtn trade" onclick="qaTcEmbed(\''+s+'\',\'trade\')">&#9650; TC Trade Check</button>'
+    +   '<button id="qaTcInvest" class="qa-tcbtn invest" onclick="qaTcEmbed(\''+s+'\',\'investment\')">&#9670; Investment Check</button>'
+    + '</div>'
+    + '<div id="qaTcHost" style="margin-top:12px"></div>';
+}
+function qaTcEmbed(sym,style){
+  var host=document.getElementById('qaTcHost'); if(!host)return;
+  var bt=document.getElementById('qaTcTrade'), bi=document.getElementById('qaTcInvest');
+  if(bt)bt.classList.toggle('on',style==='trade'); if(bi)bi.classList.toggle('on',style==='investment');
+  var key=sym+'|'+style;
+  if(host.dataset.cur===key&&document.getElementById('qaTcFrame'))return;   // cc#671: cache per symbol+style for the modal session
+  host.dataset.cur=key;
+  // one-time listener: the embedded Check page posts its content height so the iframe fits without a nested scrollbar.
+  if(!window.__qaTcMsg){window.__qaTcMsg=true;window.addEventListener('message',function(e){
+    var d=e&&e.data; if(!d||d.type!=='scorrTcHeight')return;
+    var ifr=document.getElementById('qaTcFrame'); if(ifr&&d.height)ifr.style.height=Math.min(Math.max(d.height,240),1800)+'px';
+  });}
+  host.innerHTML='<div class="empty" style="padding:16px">Loading '+(style==='investment'?'Investment':'Trade')+' Check for '+newsEsc(sym)+'…</div>';
+  var ifr=document.createElement('iframe');
+  ifr.id='qaTcFrame';
+  ifr.src='/check?symbol='+encodeURIComponent(sym)+'&style='+style+'&embed=1';
+  ifr.setAttribute('title','Check — '+sym+' ('+style+')');
+  ifr.style.cssText='width:100%;height:440px;border:1px solid var(--line);border-radius:10px;background:var(--panel)';
+  host.innerHTML=''; host.appendChild(ifr);
 }
 // cc#627: compact 30d deliv% sparkline (SVG, theme cyan). <2 points -> omitted.
 function _qaSpark(series){

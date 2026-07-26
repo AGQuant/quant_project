@@ -2096,9 +2096,36 @@ function renderIntraday(){
 renderChips();
 </script>
 <script>
-if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-  var _mn=document.querySelector('.model-nav');if(_mn)_mn.style.display='none';
-}
+// cc#671: EMBED MODE — the Analysis modal (v8 dashboard) hosts this exact Check surface in an iframe
+// (single source; the modal never re-implements the TC renderer). When iframed or ?embed=1, strip the
+// page chrome to just the result, autorun from ?symbol + ?style, and report content height to the host.
+(function(){
+  var p=new URLSearchParams(location.search);
+  var isEmbed=(window.self!==window.top)||p.has('embed');
+  var symq=(p.get('symbol')||'').trim().toUpperCase();
+  var style=(p.get('style')||'').toLowerCase();
+  if(isEmbed){
+    document.body.classList.add('tc-embed');
+    var mn=document.querySelector('.model-nav'); if(mn)mn.style.display='none';
+    var ph=document.querySelector('.page-head'); if(ph)ph.style.display='none';
+    var si=document.getElementById('sym'); if(si){var c=si.closest('.card'); if(c)c.style.display='none';}
+    try{document.documentElement.style.background='transparent';document.body.style.background='transparent';}catch(e){}
+    var W=document.querySelector('.wrap'); if(W){W.style.maxWidth='none';W.style.padding='6px 10px 10px';W.style.margin='0';}
+    var postH=function(){try{var h=Math.ceil(document.documentElement.scrollHeight);window.parent.postMessage({type:'scorrTcHeight',height:h},'*');}catch(e){}};
+    window.addEventListener('load',function(){setTimeout(postH,80);});
+    window.addEventListener('resize',postH);
+    try{new MutationObserver(function(){clearTimeout(window.__tcHT);window.__tcHT=setTimeout(postH,90);})
+      .observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true});}catch(e){}
+  }
+  // deep-link / embed autorun — style=investment -> INVEST, anything else -> LONG trade dual.
+  if(symq){
+    var go=function(){ try{
+        if(style==='investment'||style==='invest')setMode('INVEST'); else setMode('LONG');
+        var s=document.getElementById('sym'); if(s)s.value=symq; run();
+      }catch(e){} };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go); else go();
+  }
+})();
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>
