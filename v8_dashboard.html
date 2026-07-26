@@ -170,7 +170,7 @@
     .moodChecks{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;justify-content:stretch}
     .moodChecks>*{min-height:40px;display:flex;align-items:center;justify-content:center}
     /* popouts never overflow the viewport */
-    .modal-box{width:min(94vw,720px)!important;max-width:min(94vw,720px)!important}
+    .modal-box{width:min(94vw,620px)!important;max-width:min(94vw,620px)!important}   /* cc#679: unified 620px footprint */
   }
   @media(max-width:480px){
     .sec-cards{grid-template-columns:1fr 1fr}
@@ -1360,8 +1360,8 @@ function _dcInjectStyle(){
   // cc#571 PART B: pixel-match design_refs/cockpit_v2_R1.html — dark institutional terminal, 5-block
   // information hierarchy (Volume -> OI -> 5D-OI -> Basis -> Levels). All rules scoped under #dcOv so
   // the cockpit's own dark palette never leaks into (or inherits from) the host page theme.
-  const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(3,5,12,.66);display:none}
-  #dcOv.open{display:block}
+  const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px}
+  #dcOv.open{display:flex}
   /* cc#665: cockpit drill re-skinned to the Analysis-modal LIGHT chrome — the dark --c-* tokens now
      map to the page's light palette (same vars the Analysis modal uses) so the whole sheet, header,
      LONG/SHORT pill and LIVE clock read as the A-card. Rounded stat tiles (.oibox/.quad/.basis/.lvc)
@@ -1369,12 +1369,10 @@ function _dcInjectStyle(){
   #dcOv .dc-sheet{--c-bg:var(--panel,#fff);--c-panel:var(--surface2,#f6f8fb);--c-bd:var(--line2,#e8ecf2);--c-tx:var(--txt,#1c2536);--c-mut:var(--mut,#5a6b82);--c-dim:var(--dim,#8a94ad);
     --c-grn:var(--grn,#0a9e63);--c-grnbg:rgba(47,212,139,.14);--c-red:var(--red,#dd3a4a);--c-redbg:rgba(255,92,108,.12);--c-amb:var(--amber,#c98a12);--c-ambbg:rgba(245,166,35,.15);
     --c-blu:var(--blu,#1847DF);--c-blubg:rgba(24,71,223,.10);--c-grid:var(--line2,#e8ecf2);
-    font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:min(94vw,460px);
-    background:var(--c-bg);color:var(--c-tx);border-left:1px solid var(--c-bd);overflow-y:auto;
-    transform:translateX(100%);transition:transform .24s ease}
-  @media(min-width:768px){#dcOv .dc-sheet{width:min(46vw,460px)}}
-  @media(max-width:520px){#dcOv .dc-sheet{width:100%}}
-  #dcOv.open .dc-sheet{transform:none}
+    font-family:'Sora',system-ui,sans-serif;position:relative;width:min(94vw,620px);max-width:620px;max-height:88vh;
+    background:var(--c-bg);color:var(--c-tx);border:1px solid var(--c-bd);border-radius:16px;overflow-y:auto;
+    box-shadow:0 24px 64px rgba(0,0,0,.22)}   /* cc#679: centered modal (was a right-side slide panel), A-modal footprint */
+  @media(max-width:560px){#dcOv .dc-sheet{width:100%;max-width:100%;max-height:92vh}}
   #dcOv .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
   #dcOv .up{color:var(--c-grn)} #dcOv .dn{color:var(--c-red)}
   #dcOv .hdr{padding:14px 16px 12px;border-bottom:1px solid var(--c-bd);position:relative}
@@ -2112,8 +2110,8 @@ function qaChart(sym){
   let ov=document.getElementById('qaChartOv');
   if(!ov){
     ov=document.createElement('div');ov.id='qaChartOv';
-    ov.style.cssText='position:fixed;inset:0;z-index:11600;background:rgba(10,14,20,.55);display:none;align-items:center;justify-content:center;padding:16px';
-    ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.4);width:min(760px,96vw);max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    ov.style.cssText='position:fixed;inset:0;z-index:11600;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.22);width:min(94vw,620px);max-height:88vh;overflow:hidden;display:flex;flex-direction:column"><!-- cc#679: unified modal footprint -->
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)">
         <b id="qaChartTitle" style="font-size:14px"></b>
         <span id="qaChartCard" style="margin-left:8px;display:inline-flex;vertical-align:middle"></span>
