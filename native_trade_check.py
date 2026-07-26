@@ -159,8 +159,12 @@ def _r10_intraday(cur, symbol, side):
 
 
 def _r12_pattern(cur, symbol, side):
-    """30d structure. LONG: breakout OR (higher-lows AND contraction).
-    v3.4: 'none' -> 'no setup' + closest-miss hint."""
+    """30d structure. cc#707: LONG PASS = accumulation (higher-lows) OR consolidation
+    (range contraction) OR breakout — per spec id=143 there is NO markup/too-strong reject
+    for LONG, only DISTRIBUTION (neither higher-lows nor a tightening base) rejects. The old
+    rule required higher-lows AND contraction together, which wrongly failed a clean higher-lows
+    uptrend whose range was expanding (LAURUSLABS 24-Jul: HL 1450->1469->1529->1568). SHORT mirrors
+    (breakdown OR lower-highs OR contraction). 'none' -> 'no setup' + closest-miss hint."""
     cur.execute("""
         WITH d AS (
           SELECT high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
@@ -182,25 +186,30 @@ def _r12_pattern(cur, symbol, side):
     if side == "LONG":
         breakout = lc > phi
         higher_lows = rlo > olo
-        ok = breakout or (higher_lows and contraction)
+        # cc#707: accumulation (higher-lows) OR consolidation (contraction) OR breakout all PASS.
+        # No markup/too-strong reject — only distribution (no HL, no base) fails.
+        ok = breakout or higher_lows or contraction
         if breakout:
             tag = "breakout"
-        elif ok:
-            tag = "HL+contraction"
+        elif higher_lows:
+            tag = "higher-lows (accumulation)"
+        elif contraction:
+            tag = "tight-range (consolidation)"
         else:
-            near = "higher-lows" if higher_lows else ("contraction" if contraction else "lower-lows, no contraction")
-            tag = f"no setup ({near})"
+            tag = "no setup (distribution: lower-lows, no base)"
     else:
         breakdown = lc < plo
         lower_highs = rhi < ohi
-        ok = breakdown or (lower_highs and contraction)
+        # cc#707 mirror: distribution (lower-highs) OR consolidation OR breakdown all PASS on SHORT.
+        ok = breakdown or lower_highs or contraction
         if breakdown:
             tag = "breakdown"
-        elif ok:
-            tag = "LH+contraction"
+        elif lower_highs:
+            tag = "lower-highs (distribution)"
+        elif contraction:
+            tag = "tight-range (consolidation)"
         else:
-            near = "lower-highs" if lower_highs else ("contraction" if contraction else "higher-highs, no contraction")
-            tag = f"no setup ({near})"
+            tag = "no setup (accumulation: higher-highs, no base)"
     return ok, tag
 
 
