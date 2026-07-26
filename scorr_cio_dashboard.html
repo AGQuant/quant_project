@@ -2644,6 +2644,7 @@ function GvmModule() {
   const [docked, setDocked] = useState(false);         // cc#690: nav locked to top + inline search shown
   const [activeSection, setActiveSection] = useState(GVM_NAV[0].id);   // cc#690: scrollspy
   const boxRef = useRef(null);
+  const dockRef = useRef(null);       // cc#704: docked (sticky-nav) search wrapper — must count as "inside" too
   const inputRef = useRef(null);
   const scrollRef = useRef(null);     // cc#690: the scrolling report container
   const debounce = useRef(null);
@@ -2706,7 +2707,14 @@ function GvmModule() {
   }, [query]);
 
   useEffect(() => {
-    const h = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setShowSug(false); };
+    // cc#704: the docked search dropdown lives OUTSIDE boxRef. Before this, a mousedown on a docked
+    // suggestion counted as "outside", fired setShowSug(false) and unmounted the row before its click
+    // landed — so the docked suggestion click never loaded the company. Treat dockRef as inside too.
+    const h = (e) => {
+      const t = e.target;
+      if ((boxRef.current && boxRef.current.contains(t)) || (dockRef.current && dockRef.current.contains(t))) return;
+      setShowSug(false);
+    };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
@@ -2720,6 +2728,7 @@ function GvmModule() {
     typedRef.current = false;   // cc#690: this setQuery is programmatic — keep the dropdown closed
     setSymbol(sym); setShowSug(false); setSuggest([]); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
     inputRef.current?.blur();
+    scrollRef.current?.scrollTo({ top: 0 });   // cc#704: new company starts at the top (also un-docks the nav)
     try {
       const d = await apiGet(`/api/gvm/company/${encodeURIComponent(sym)}`);
       setReport(d);
@@ -2780,7 +2789,7 @@ function GvmModule() {
             boxShadow: docked ? "0 4px 14px rgba(25,40,70,0.10)" : "none",
             display: "flex", alignItems: "center", gap: 10 }}>
             {docked && (
-              <div style={{ position: "relative", flexShrink: 0 }}>
+              <div ref={dockRef} style={{ position: "relative", flexShrink: 0 }}>
                 <input value={query}
                   onChange={e => { typedRef.current = true; setQuery(e.target.value.toUpperCase()); }}
                   onFocus={() => typedRef.current && suggest.length && setShowSug(true)}
