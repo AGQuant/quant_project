@@ -884,53 +884,68 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                 units.setdefault(mname, unit)
             metric_rows = []
             for mname, qmap in by_metric.items():
-                values = [qmap.get(q) for q in quarters]
-                if all(v is None for v in values):
+                # cc#683: keep the full (up to 6-qtr) series for the QoQ/YoY math (YoY needs the year-ago
+                # quarter), but DISPLAY only the last 4 reported quarters (the Standalone-mode columns).
+                full = [qmap.get(q) for q in quarters]
+                if all(v is None for v in full):
                     continue
-                latest = values[-1]
-                qoq = (round(latest - values[-2], 2) if (len(values) >= 2 and latest is not None
-                       and values[-2] is not None) else None)
-                yoy = (round(latest - values[-5], 2) if (len(values) >= 5 and latest is not None
-                       and values[-5] is not None) else None)
+                latest = full[-1]
+                qoq = (round(latest - full[-2], 2) if (len(full) >= 2 and latest is not None
+                       and full[-2] is not None) else None)
+                yoy = (round(latest - full[-5], 2) if (len(full) >= 5 and latest is not None
+                       and full[-5] is not None) else None)
                 metric_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
-                                    "unit": units.get(mname), "values": values,
+                                    "unit": units.get(mname), "values": full[-4:],
                                     "latest": latest, "qoq": qoq, "yoy": yoy})
             metric_rows.sort(key=lambda r: r["label"])
             if metric_rows:
-                out.update({"has_data": True, "periods": quarters, "rows": metric_rows})
-                # cc#641: same-quarter peer benchmark. Pick top-5 peers BY GVM in the company's segment
-                # that ACTUALLY have sector_ops_metrics rows for the company's latest quarter (available
-                # peers, not blind top-5-by-GVM), then align each metric row to that same quarter. A peer
-                # missing a specific metric = null (honest --, never faked). QoQ/YoY stay company-only —
-                # single-quarter extraction can't support peer deltas yet (widens as cc#632 lands).
-                latest_q = quarters[-1] if quarters else None
+                disp_quarters = quarters[-4:]
+                out.update({"has_data": True, "periods": disp_quarters, "rows": metric_rows})
+                # cc#683: RELAXED peer selection for the dual-mode (Peers / Standalone) card. Top-5 peers
+                # BY GVM in the company's segment that have ANY sector_ops_metrics row within the LAST 4
+                # REPORTED QUARTERS (cc#641 was same-quarter-only -> a pharma name with no peer sharing its
+                # latest quarter collapsed to company-only). Per peer, use its MOST RECENT available quarter
+                # in that window (never an older one when a newer extraction exists) and tag it in
+                # peer_quarters. A peer missing a specific KPI at that quarter = null (honest --, never faked).
+                # The peer window is the last 4 reported quarters GLOBALLY (not the company's own, which may
+                # be a single sparse quarter — the ACUTAAS/pharma collapse case): a peer that reported an
+                # adjacent quarter still qualifies and shows under its own tag.
+                cur.execute("SELECT DISTINCT quarter FROM sector_ops_metrics WHERE metric_value IS NOT NULL AND quarter IS NOT NULL")
+                window = sorted([r[0] for r in cur.fetchall()], key=_ops_quarter_key)[-4:]
                 cur.execute("""SELECT segment FROM gvm_scores
                                WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM gvm_scores)
                                LIMIT 1""", (symbol,))
                 seg_row = cur.fetchone()
                 segment = seg_row[0] if seg_row else None
                 peers: List[str] = []
-                if segment and latest_q:
+                if segment and window:
                     cur.execute("""SELECT g.symbol FROM gvm_scores g
                                    WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
                                      AND g.segment=%s AND g.symbol<>%s
                                      AND EXISTS (SELECT 1 FROM sector_ops_metrics s
-                                                 WHERE s.symbol=g.symbol AND s.quarter=%s
+                                                 WHERE s.symbol=g.symbol AND s.quarter=ANY(%s)
                                                    AND s.metric_value IS NOT NULL)
                                    ORDER BY g.gvm_score DESC NULLS LAST
-                                   LIMIT 5""", (segment, symbol, latest_q))
+                                   LIMIT 5""", (segment, symbol, window))
                     peers = [r[0] for r in cur.fetchall()]
                 if peers:
-                    cur.execute("""SELECT symbol, metric_name, metric_value FROM sector_ops_metrics
-                                   WHERE symbol = ANY(%s) AND quarter=%s AND metric_value IS NOT NULL""",
-                                (peers, latest_q))
+                    cur.execute("""SELECT symbol, quarter, metric_name, metric_value FROM sector_ops_metrics
+                                   WHERE symbol = ANY(%s) AND quarter = ANY(%s) AND metric_value IS NOT NULL""",
+                                (peers, window))
+                    prows = cur.fetchall()
+                    peer_q: Dict[str, str] = {}   # per peer -> its most recent quarter in the window
+                    for psym, q, _m, _v in prows:
+                        if psym not in peer_q or _ops_quarter_key(q) > _ops_quarter_key(peer_q[psym]):
+                            peer_q[psym] = q
                     peer_vals: Dict[tuple, Optional[float]] = {}
-                    for psym, mname, val in cur.fetchall():
-                        peer_vals[(psym, mname)] = _f(val)
+                    for psym, q, mname, val in prows:
+                        if q == peer_q.get(psym):
+                            peer_vals[(psym, mname)] = _f(val)
                     for row in metric_rows:
                         row["peers"] = [peer_vals.get((p, row["metric_name"])) for p in peers]
                     out["peers"] = peers
-                    out["peer_quarter"] = latest_q
+                    out["peer_quarters"] = peer_q       # cc#683: per-peer quarter tag
+                    out["peer_quarter"] = window[-1]    # legacy field retained for back-compat
 
         cur.execute("""SELECT quarter, summary, guidance, tone FROM concall_summaries
                        WHERE symbol=%s ORDER BY computed_at DESC LIMIT 1""", (symbol,))
