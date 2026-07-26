@@ -2102,7 +2102,7 @@ function GvmReport({ r, hist }) {
         </button>
       </div>
 
-      <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
+      <div id="gvm-overview" style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16, scrollMarginTop: 60 }}>
         <div style={{ display: "flex", gap: 22, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ textAlign: "center", minWidth: 110 }}>
             <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
@@ -2180,7 +2180,7 @@ function GvmReport({ r, hist }) {
       )}
 
       <ActionStrip x={x} />
-      <SegmentContextCard ctx={segCtx} stockSym={r.symbol} />
+      <div id="gvm-segment" style={{ scrollMarginTop: 60 }}><SegmentContextCard ctx={segCtx} stockSym={r.symbol} /></div>
 
       {(() => {
         const realWeaknesses = (r.negatives || []).filter(p => p.rating != null && p.rating < 5);
@@ -2212,7 +2212,7 @@ function GvmReport({ r, hist }) {
         );
       })()}
 
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+      <div id="gvm-peers" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16, scrollMarginTop: 60 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>Peer Benchmarking</div>
@@ -2306,9 +2306,9 @@ function GvmReport({ r, hist }) {
         })}
       </div>
 
-      <NewsCard symbol={r.symbol} />
+      <div id="gvm-news" style={{ scrollMarginTop: 60 }}><NewsCard symbol={r.symbol} /></div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div id="gvm-levels" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16, scrollMarginTop: 60 }}>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>Pivot Range</div>
           <PivotLadder p={x.pivot} cmp={r.price} />
@@ -2321,19 +2321,21 @@ function GvmReport({ r, hist }) {
 
       <SegmentRankLadder ladder={r.ladder} segment={r.segment} stockSym={r.symbol} />
 
-      {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
-      {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
-      {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
+      <div id="gvm-results" style={{ scrollMarginTop: 60 }}>
+        {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
+        {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
+        {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
-      <ConcallSummary symbol={r.symbol} />
-      <OpsMetrics symbol={r.symbol} segment={r.segment} />
-      <SectorBrief segment={r.segment} />
-      <SectorOpsTrends segment={r.segment} />
+        <ConcallSummary symbol={r.symbol} />
+        <OpsMetrics symbol={r.symbol} segment={r.segment} />
+        <SectorBrief segment={r.segment} />
+        <SectorOpsTrends segment={r.segment} />
+      </div>
 
       {/* cc#518: FINANCIALS -- screener.in-style horizontal tables, placed LAST, above the footer */}
-      <FinancialsSection financials={r.financials} />
+      <div id="gvm-financials" style={{ scrollMarginTop: 60 }}><FinancialsSection financials={r.financials} /></div>
       {/* cc#541: OPERATIONAL METRICS -- per-sector KPIs from concalls/decks (hidden when none) */}
-      <OpsMetricsSection ops={r.operational_metrics} />
+      <div id="gvm-ops" style={{ scrollMarginTop: 60 }}><OpsMetricsSection ops={r.operational_metrics} /></div>
 
       <div style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
@@ -2616,6 +2618,18 @@ function SectorBrief({ segment }) {
   );
 }
 
+// cc#690: 8-section quick-access nav — anchors match the id="gvm-*" wrappers in GvmReport, top→bottom.
+const GVM_NAV = [
+  { id: "gvm-overview", label: "Overview" },
+  { id: "gvm-segment", label: "Segment" },
+  { id: "gvm-peers", label: "Peers" },
+  { id: "gvm-news", label: "News" },
+  { id: "gvm-levels", label: "Levels" },
+  { id: "gvm-results", label: "Results" },
+  { id: "gvm-financials", label: "Financials" },
+  { id: "gvm-ops", label: "Ops Metrics" },
+];
+
 function GvmModule() {
   const [query, setQuery] = useState("");
   const [suggest, setSuggest] = useState([]);
@@ -2625,13 +2639,46 @@ function GvmModule() {
   const [hist, setHist] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const [docked, setDocked] = useState(false);         // cc#690: nav locked to top + inline search shown
+  const [activeSection, setActiveSection] = useState(GVM_NAV[0].id);   // cc#690: scrollspy
   const boxRef = useRef(null);
   const inputRef = useRef(null);
+  const scrollRef = useRef(null);     // cc#690: the scrolling report container
   const debounce = useRef(null);
   const searchAbort = useRef(null);   // cc#268: cancels the in-flight suggestion fetch
+  const typedRef = useRef(false);     // cc#690: true only while the user is actively typing
+  const rafRef = useRef(0);
+
+  // cc#690: scrollspy + dock trigger. Dock once the hero search has scrolled away; active section =
+  // the last anchor whose top has crossed just under the docked nav.
+  const onScroll = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const el = scrollRef.current;
+      if (!el) return;
+      setDocked(el.scrollTop > 64);
+      const contTop = el.getBoundingClientRect().top;
+      let active = GVM_NAV[0].id;
+      for (const s of GVM_NAV) {
+        const node = document.getElementById(s.id);
+        if (!node) continue;
+        if (node.getBoundingClientRect().top - contTop <= 96) active = s.id; else break;
+      }
+      setActiveSection(active);
+    });
+  };
+  const scrollToSection = (id) => {
+    const node = document.getElementById(id), el = scrollRef.current;
+    if (!node || !el) return;
+    const rel = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTo({ top: el.scrollTop + rel - 6, behavior: "smooth" });
+  };
 
   useEffect(() => {
-    if (!query || query.length < 1) {
+    // cc#690: suggestions fetch/open ONLY on real typing. A programmatic setQuery(sym) (loadReport
+    // fills the box with the opened symbol) must NOT re-fetch and re-open the dropdown over the card.
+    if (!query || query.length < 1 || !typedRef.current) {
       // cc#268: also cancel any in-flight fetch when the query empties, else its late
       // response could re-open the dropdown after the field was cleared.
       if (searchAbort.current) searchAbort.current.abort();
@@ -2668,6 +2715,7 @@ function GvmModule() {
     // / clicks a suggestion resolves later and unconditionally re-opens the dropdown over the
     // now-loaded report. Aborting it means its .then/.catch bails out (AbortError) and touches no state.
     if (searchAbort.current) searchAbort.current.abort();
+    typedRef.current = false;   // cc#690: this setQuery is programmatic — keep the dropdown closed
     setSymbol(sym); setShowSug(false); setSuggest([]); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
     inputRef.current?.blur();
     try {
@@ -2681,17 +2729,17 @@ function GvmModule() {
   };
 
   return (
-    <div className="print-scroll" style={{ height: "100%", overflowY: "auto", padding: "24px 24px 80px" }}>
+    <div ref={scrollRef} onScroll={onScroll} className="print-scroll" style={{ height: "100%", overflowY: "auto", padding: "0 24px 80px" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-        <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
+        <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "24px auto 16px" }}>
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ position: "relative", flex: 1 }}>
               <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 15 }}>⌕</span>
               <input
                 ref={inputRef}
                 value={query}
-                onChange={e => setQuery(e.target.value.toUpperCase())}
-                onFocus={() => suggest.length && setShowSug(true)}
+                onChange={e => { typedRef.current = true; setQuery(e.target.value.toUpperCase()); }}
+                onFocus={() => typedRef.current && suggest.length && setShowSug(true)}
                 onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
                 placeholder="Search company — TCS, RELIANCE, HDFCBANK…"
                 style={{ width: "100%", padding: "12px 14px 12px 38px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 14, outline: "none" }}
@@ -2722,6 +2770,47 @@ function GvmModule() {
             </div>
           )}
         </div>
+        {report && !loading && (
+          // cc#690: sticky quick-nav — locks to the top of the report container on scroll; the compact
+          // inline search slides in once docked so a company change is possible from anywhere on the page.
+          <div style={{ position: "sticky", top: 0, zIndex: 45, background: C.bg,
+            borderBottom: `1px solid ${C.border}`, padding: "8px 0 8px", marginBottom: 12,
+            boxShadow: docked ? "0 4px 14px rgba(25,40,70,0.10)" : "none",
+            display: "flex", alignItems: "center", gap: 10 }}>
+            {docked && (
+              <div style={{ position: "relative", flexShrink: 0 }}>
+                <input value={query}
+                  onChange={e => { typedRef.current = true; setQuery(e.target.value.toUpperCase()); }}
+                  onFocus={() => typedRef.current && suggest.length && setShowSug(true)}
+                  onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
+                  placeholder="⌕ Search…"
+                  style={{ width: 132, padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 13, outline: "none" }} />
+                {showSug && suggest.length > 0 && (
+                  <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: 240, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 60, boxShadow: "0 8px 24px rgba(25,40,70,0.16)" }}>
+                    {suggest.slice(0, 6).map(s => (
+                      <div key={s.symbol} onClick={() => loadReport(s.symbol)}
+                        style={{ padding: "8px 12px", cursor: "pointer", borderBottom: `1px solid ${C.gridLine}`, display: "flex", justifyContent: "space-between", gap: 10 }}
+                        onMouseEnter={e => e.currentTarget.style.background = C.border}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{s.gvm_score?.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: 1, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
+              {GVM_NAV.map(sec => (
+                <button key={sec.id} onClick={() => scrollToSection(sec.id)}
+                  style={{ flexShrink: 0, padding: "5px 11px", borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                    border: `1px solid ${activeSection === sec.id ? C.accent : C.border}`,
+                    background: activeSection === sec.id ? `${C.accent}15` : "transparent",
+                    color: activeSection === sec.id ? C.accent : C.muted }}>{sec.label}</button>
+              ))}
+            </div>
+          </div>
+        )}
         {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
         {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
         {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
