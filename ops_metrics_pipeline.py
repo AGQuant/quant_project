@@ -320,11 +320,6 @@ SECTOR_REGISTRY_SEED = {
         ("arpu_or_realization", "ARPU / Realization", "₹", "higher_better", "core"),
         ("ad_revenue_growth_pct", "Ad Revenue Growth", "%", "higher_better", "core"),
     ],
-    "City_Gas": [
-        ("volumes_mmscmd", "Volumes", "mmscmd", "higher_better", "core"),
-        ("margin_per_scm", "Margin/scm", "₹/scm", "higher_better", "core"),
-        ("cng_station_adds", "CNG Station Adds", "count", "higher_better", "extended"),
-    ],
     "Ports_Logistics": [
         ("volume_teu_mt", "Volume", "TEU/MT", "higher_better", "core"),
         ("realisation_per_teu_mt", "Realisation/TEU-MT", "₹", "higher_better", "core"),
@@ -349,8 +344,13 @@ GENERIC_CORE_METRICS = [
 # cc#632: the taxonomy'd sectors above moved OUT of the generic fallback. What remains here still uses
 # GENERIC_CORE_METRICS until it gets its own taxonomy (no founder KPI list yet for these).
 OTHER_SECTORS = [
-    "Real_Estate", "Textiles_Apparel", "Paper_Packaging", "Diversified_Others",
+    "Real_Estate", "Diversified_Others",
 ]
+# cc#684 (founder-directed 26-Jul): five micro sectors with <=4 companies (textiles/apparel, paper &
+# packaging, city gas, power trading, MSME finance) are DROPPED from the ops-metrics framework — their
+# _infer_sector branches now return None (drop: never extracted, no Ops Metrics card), and their stale
+# sector_kpi_registry + sector_ops_metrics rows are purged. The taxonomy is locked to the live set;
+# those labels must never reappear here again.
 ALL_SECTORS = list(SECTOR_REGISTRY_SEED.keys()) + OTHER_SECTORS
 
 
@@ -394,8 +394,8 @@ def _infer_sector(segment):
         return "FMCG"
     if s.startswith("Realty") or s == "REITs" or "Infrastructure" in s:
         return "Real_Estate"   # cc#632: canonical label (was "Realty")
-    if "City Gas" in s or "Gas Distribution" in s:   # cc#632: split out of Power_Energy
-        return "City_Gas"
+    if "City Gas" in s or "Gas Distribution" in s:   # cc#684: dropped micro-sector -> no ops extraction
+        return None
     if any(k in s for k in ("Ports", "Logistics", "Shipping", "Marine", "Container")):
         return "Ports_Logistics"   # cc#632
     if any(k in s for k in ("Power", "Renewable Energy", "Solar",
@@ -406,11 +406,11 @@ def _infer_sector(segment):
         return "Capital_Goods_Engineering"
     if s.startswith("Textiles") or any(k in s for k in ("Garments", "Footwear",
                                                           "Synthetic Fibres", "Home Textiles")):
-        return "Textiles_Apparel"
+        return None   # cc#684: dropped micro-sector -> no ops extraction
     if s.startswith("Consumer Durables") or s == "Consumer Plastics & Others":
         return "Consumer_Durables_Electronics"
     if any(k in s for k in ("Paper", "Packaging", "Building Materials", "Pipes & Tubes")):
-        return "Paper_Packaging"
+        return None   # cc#684: dropped micro-sector -> no ops extraction
     if any(k in s for k in ("Broking", "Capital Markets", "Exchanges")):
         return "Financial_Services_Markets"
     if any(k in s for k in ("Broadcasting", "Entertainment", "Print Media",
@@ -1122,6 +1122,8 @@ def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
         with conn.cursor() as cur:
             ensure_tables(cur)
             sector = _sector_for_symbol(cur, symbol)
+            if not sector:   # cc#684: dropped micro-sector -> never scrape/extract
+                return {"symbol": symbol, "status": "dropped_sector"}
 
             try:
                 docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters)
