@@ -1493,7 +1493,8 @@ function _dcHeader(sym,side,qty,entry,cmp,dcmp){
     </div>
     <div class="sym">
       <div class="l"><h1>${sym}</h1>
-        <span class="tag mono">${side||'FUT'}${qty?(' &middot; '+qty):''}${entry?(' @ '+num(entry)):''}</span></div>
+        <span class="tag mono">${side||'FUT'}${qty?(' &middot; '+qty):''}${entry?(' @ '+num(entry)):''}</span>
+        <div style="margin-top:8px">${window.ScorrCardStripHtml?ScorrCardStripHtml(sym,'D'):''}</div></div>
       <div class="r"><div class="px mono">${c!=null?num(c,1):'--'}</div>
         ${chg!=null?`<div class="chg mono ${cc}">${ar} ${sign(chg,2)}%</div>`:''}</div>
     </div>
@@ -1808,6 +1809,40 @@ function _qaClose(){const s=document.getElementById('qaStrip');if(s)s.classList.
   document.removeEventListener('click',_qaOutside,true);document.removeEventListener('keydown',_qaKey);}
 
 // N / G reuse the shared #infoModal; C uses a dedicated chart overlay.
+// cc#675: shared C·A·R·D quick-nav strip rendered inside every symbol modal (Chart/Analysis/Result/
+// Cockpit). Host-provided (on window) so the site-wide R-card (results_card.js) injects the SAME strip;
+// on pages without these openers window.ScorrCardStripHtml is undefined and the R-card renders none.
+// D is ghosted for cash-only symbols (not in the futures universe = cache.metricsAll). Active letter
+// renders filled + non-tappable. Tap = close current overlay(s), open the target for the SAME symbol.
+function _cardAvail(sym){
+  var fut=false; try{fut=(cache.metricsAll||[]).some(function(m){return m&&m.symbol===sym;});}catch(e){}
+  return {fut:fut, result:true};   // R self-handles its empty state; D gated to the futures universe
+}
+window.ScorrCardStripHtml=function(sym,active){
+  if(!sym)return '';
+  var av=_cardAvail(sym);
+  var items=[['C','Chart',true],['A','Analysis',true],['R','Result',av.result],['D','Cockpit (Futures only)',av.fut]];
+  var base='width:32px;height:32px;border-radius:7px;font:800 13px/1 Sora,sans-serif;'
+    +'display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2,#e8ecf2)';
+  var btns=items.map(function(it){
+    var k=it[0], on=(k===active), en=it[2];
+    if(on)return '<span title="'+it[1]+' (current)" style="'+base+';background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)">'+k+'</span>';
+    if(!en)return '<span title="'+it[1]+'" style="'+base+';background:transparent;color:var(--dim,#9aa4b5);opacity:.42;cursor:not-allowed">'+k+'</span>';
+    return '<button title="'+it[1]+'" onclick="ScorrCardNav(\''+k+'\',\''+sym+'\')" style="'+base+';background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);cursor:pointer">'+k+'</button>';
+  }).join('');
+  return '<span class="scorr-card-strip" style="display:inline-flex;gap:5px;align-items:center;flex-shrink:0">'+btns+'</span>';
+};
+window.ScorrCardNav=function(k,sym){
+  if(!sym)return;
+  try{closeInfo();}catch(e){}
+  try{qaChartClose();}catch(e){}
+  try{_dcClose();}catch(e){}
+  try{if(window.ScorrRCard&&ScorrRCard.close)ScorrRCard.close();}catch(e){}
+  if(k==='C')qaChart(sym);
+  else if(k==='A')qaAnalysis(sym);
+  else if(k==='R'){if(window.ScorrRCard)ScorrRCard.open(sym);}
+  else if(k==='D')openDerivCockpit(sym,null,null,null,null);
+};
 function _qaModal(title,sub,body){
   const T=document.getElementById('mTitle'),S=document.getElementById('mSub'),B=document.getElementById('mBody'),D=document.getElementById('mDcBtn');
   if(T)T.textContent=title;if(S)S.textContent=sub||'';if(B)B.innerHTML=body||'';if(D)D.innerHTML='';
@@ -1936,6 +1971,7 @@ function qaVolExplain(k){
 }
 async function qaAnalysis(sym){
   _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory','<div class="empty">Loading…</div>');
+  try{var _mb=document.getElementById('mDcBtn');if(_mb)_mb.innerHTML=ScorrCardStripHtml(sym,'A');}catch(e){}   // cc#675: C·A·R·D strip
   try{
     const [g,dm]=await Promise.all([
       getJSON('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),
@@ -2080,6 +2116,7 @@ function qaChart(sym){
     ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.4);width:min(760px,96vw);max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)">
         <b id="qaChartTitle" style="font-size:14px"></b>
+        <span id="qaChartCard" style="margin-left:8px;display:inline-flex;vertical-align:middle"></span>
         <span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
           <button id="qaTf_5m" class="qa-tf" onclick="qaChartLoad('5m')">5m</button>
           <button id="qaTf_1M" class="qa-tf" onclick="qaChartLoad('1M')">1M</button>
@@ -2106,6 +2143,7 @@ function qaChart(sym){
   ov.style.display='flex';
   _qaChartSym=sym;_qaChartSeries=null;_qaPriceLines=[];
   document.getElementById('qaChartTitle').textContent=sym+' · Price';
+  try{var _cc=document.getElementById('qaChartCard');if(_cc)_cc.innerHTML=ScorrCardStripHtml(sym,'C');}catch(e){}   // cc#675: C·A·R·D strip
   document.addEventListener('keydown',_qaChartEsc);
   qaChartLoad(_qaTf);
 }

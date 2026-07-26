@@ -1128,6 +1128,7 @@ RESULTS_CARD_JS = """
     var h = '<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
       + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
+      + (opts.close!==false && window.ScorrCardStripHtml ? window.ScorrCardStripHtml(sym,'R') : '')   /* cc#675: host C·A·R·D strip */
       + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>';
     var announced = (status === 'announced' || status === 'announced_no_analysis');
 
@@ -1237,7 +1238,7 @@ RESULTS_CARD_JS = """
     var vp = e.target.closest('.vcard-pill');
     if (vp && vp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); openV(vp.getAttribute('data-sym')); }
   });
-  window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline,
+  window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline, close: close,
     pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; },
     pillV: function(sym){ return sym ? '<span class=\"vcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Volume / Energy\">V</span>' : ''; } };
 })();
