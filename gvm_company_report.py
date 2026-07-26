@@ -901,42 +901,41 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
             if metric_rows:
                 disp_quarters = quarters[-4:]
                 out.update({"has_data": True, "periods": disp_quarters, "rows": metric_rows})
-                # cc#683: RELAXED peer selection for the dual-mode (Peers / Standalone) card. Top-5 peers
-                # BY GVM in the company's segment that have ANY sector_ops_metrics row within the LAST 4
-                # REPORTED QUARTERS (cc#641 was same-quarter-only -> a pharma name with no peer sharing its
-                # latest quarter collapsed to company-only). Per peer, use its MOST RECENT available quarter
-                # in that window (never an older one when a newer extraction exists) and tag it in
-                # peer_quarters. A peer missing a specific KPI at that quarter = null (honest --, never faked).
-                # The peer window is the last 4 reported quarters GLOBALLY (not the company's own, which may
-                # be a single sparse quarter — the ACUTAAS/pharma collapse case): a peer that reported an
-                # adjacent quarter still qualifies and shows under its own tag.
+                # cc#683/687: peer selection for the dual-mode (Peers / Standalone) card. The peer window
+                # is the last 4 reported quarters GLOBALLY. cc#687 fix: pool at the COARSE OPS SECTOR, not
+                # the fine gvm_scores.segment — a narrow segment ("Pharma - Bulk & API" = 2 names) collapsed
+                # the Peers table to 1 column, while the sector ("Pharma" = 33) is the correct broad peer
+                # group. Pool = top-10 same-sector names BY GVM with ANY row in the window; then RANK by
+                # quarter-recency first (freshest data wins), GVM as the tiebreak, and take up to 5 so the
+                # table shows >=4 columns (company + >=3 peers) whenever that many exist — else all available
+                # (honest). Each peer carries its own most-recent quarter tag; a missing KPI = null (--).
                 cur.execute("SELECT DISTINCT quarter FROM sector_ops_metrics WHERE metric_value IS NOT NULL AND quarter IS NOT NULL")
                 window = sorted([r[0] for r in cur.fetchall()], key=_ops_quarter_key)[-4:]
-                cur.execute("""SELECT segment FROM gvm_scores
-                               WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM gvm_scores)
-                               LIMIT 1""", (symbol,))
-                seg_row = cur.fetchone()
-                segment = seg_row[0] if seg_row else None
-                peers: List[str] = []
-                if segment and window:
-                    cur.execute("""SELECT g.symbol FROM gvm_scores g
+                sector = out.get("sector")
+                pool: List[tuple] = []   # (symbol, gvm_score)
+                if sector and window:
+                    cur.execute("""SELECT g.symbol, g.gvm_score FROM gvm_scores g
                                    WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
-                                     AND g.segment=%s AND g.symbol<>%s
+                                     AND g.symbol<>%s
                                      AND EXISTS (SELECT 1 FROM sector_ops_metrics s
-                                                 WHERE s.symbol=g.symbol AND s.quarter=ANY(%s)
+                                                 WHERE s.symbol=g.symbol AND s.sector=%s AND s.quarter=ANY(%s)
                                                    AND s.metric_value IS NOT NULL)
                                    ORDER BY g.gvm_score DESC NULLS LAST
-                                   LIMIT 5""", (segment, symbol, window))
-                    peers = [r[0] for r in cur.fetchall()]
-                if peers:
+                                   LIMIT 10""", (symbol, sector, window))
+                    pool = [(r[0], r[1] if r[1] is not None else -1.0) for r in cur.fetchall()]
+                if pool:
                     cur.execute("""SELECT symbol, quarter, metric_name, metric_value FROM sector_ops_metrics
-                                   WHERE symbol = ANY(%s) AND quarter = ANY(%s) AND metric_value IS NOT NULL""",
-                                (peers, window))
+                                   WHERE symbol = ANY(%s) AND sector=%s AND quarter = ANY(%s) AND metric_value IS NOT NULL""",
+                                ([p for p, _ in pool], sector, window))
                     prows = cur.fetchall()
                     peer_q: Dict[str, str] = {}   # per peer -> its most recent quarter in the window
                     for psym, q, _m, _v in prows:
                         if psym not in peer_q or _ops_quarter_key(q) > _ops_quarter_key(peer_q[psym]):
                             peer_q[psym] = q
+                    # cc#687: rank pool by (quarter-recency, GVM) descending, take top 5
+                    gvm_map = dict(pool)
+                    peers = sorted([p for p, _ in pool if p in peer_q],
+                                   key=lambda p: (_ops_quarter_key(peer_q[p]), gvm_map[p]), reverse=True)[:5]
                     peer_vals: Dict[tuple, Optional[float]] = {}
                     for psym, q, mname, val in prows:
                         if q == peer_q.get(psym):
@@ -944,8 +943,8 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                     for row in metric_rows:
                         row["peers"] = [peer_vals.get((p, row["metric_name"])) for p in peers]
                     out["peers"] = peers
-                    out["peer_quarters"] = peer_q       # cc#683: per-peer quarter tag
-                    out["peer_quarter"] = window[-1]    # legacy field retained for back-compat
+                    out["peer_quarters"] = {p: peer_q[p] for p in peers}   # cc#683: per-peer quarter tag
+                    out["peer_quarter"] = window[-1]                        # legacy field retained
 
         cur.execute("""SELECT quarter, summary, guidance, tone FROM concall_summaries
                        WHERE symbol=%s ORDER BY computed_at DESC LIMIT 1""", (symbol,))

@@ -1984,7 +1984,7 @@ function OpsMetricsSection({ ops }) {
         </div>
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>{showPeers
-        ? `Sector KPIs from management commentary. Company (${latestQ || "latest"}) vs top-${peers.length} same-segment names by GVM — each peer tagged with its most recent reported quarter (— where a peer hasn't reported that KPI).`
+        ? `Sector KPIs from management commentary. Company (${latestQ || "latest"}) vs top-${peers.length} same-sector names by GVM, recency-prioritized — each peer tagged with its most recent reported quarter (— where a peer hasn't reported that KPI).`
         : `Sector KPIs extracted from management commentary (earnings calls &amp; investor decks). Last 4 reported quarters with QoQ / YoY vs the latest reported quarter.`}</div>
       <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: (showPeers ? (1 + peers.length) * 90 : periods.length * 76) + 300, fontSize: 12.5 }}>
