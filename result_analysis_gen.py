@@ -109,7 +109,7 @@ def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
     Result Analysis card from the alternate-day screener_raw export instead of sitting on the prior
     quarter. The export carries GROWTH + MARGIN only (no absolute quarterly Sales/PAT) — Screener
     semantics: qoq_sales_growth / qoq_profit_growth = latest-Q vs year-ago-Q (YoY); opm_latest_q vs
-    opm_prev_year_q = margin latest-Q vs LY-Q. Tagged 'via screener data' with the reported quarter."""
+    opm_prev_year_q = margin latest-Q vs LY-Q. Tagged '(limited review)' with the reported quarter."""
     cur.execute('''SELECT qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q,
                           "Sales growth", pe, segment_pe FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1''', (symbol,))
     r = cur.fetchone()
@@ -130,13 +130,13 @@ def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
     verdict_line = ("Strong quarter; sales and PAT both up YoY." if strong == 2
                     else ("Soft quarter; growth down YoY." if strong == 0 else "Mixed quarter."))
     parts = [
-        f"{qlabel} · {company}   (via screener data)", "",
+        f"{qlabel} · {company}   (limited review)", "",
         f"{e_sales} Sales    {_sign(s_yoy) if s_yoy is not None else 'n/a'} YoY",
         f"{e_pat} PAT      {_sign(p_yoy) if p_yoy is not None else 'n/a'} YoY",
         f"{e_marg} Margins  {_sign(opm, plus=False) if opm is not None else 'n/a'} vs {_sign(opm_ly, plus=False) if opm_ly is not None else 'n/a'} LY",
         f"{e_pe} PE       {(str(pe_raw) + 'x') if pe_raw is not None else 'n/a'} vs {(str(pe_peer) + 'x') if pe_peer is not None else 'n/a'} sector",
         "", verdict_line,
-        "Growth & margins from Screener export; the full quarterly card lands on the next fundamentals scrape.",
+        "Limited review. Detailed review available once concall and investor presentation are updated.",
     ]
     return "\n".join(parts)
 
