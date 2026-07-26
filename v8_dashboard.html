@@ -3885,6 +3885,20 @@ async function loadSignals(){
   ]);
   D.sig = { NIFTY:mapSig(n), BANKNIFTY:mapSig(b) };
 }
+// cc#681: 5-min intraday closes for the index day-change sparklines (last session; index price feed).
+async function loadIdxSpark(){
+  const [n,b] = await Promise.all([
+    getJSON('/api/v10/candles?symbol=NIFTY50&days=2').catch(()=>null),
+    getJSON('/api/v10/candles?symbol=BANKNIFTY&days=2').catch(()=>null),
+  ]);
+  const clo=r=>{const c=(r&&r.candles)||r||[];return (Array.isArray(c)?c:[]).map(x=>Number(x.close)).filter(v=>isFinite(v));};
+  D.idxSpark = { NIFTY:clo(n), BANKNIFTY:clo(b) };
+}
+// cc#681: F&O ban (MWPL) list for the latest ban date (recency-guarded server-side).
+async function loadFoBan(){
+  const d = await getJSON('/api/fo-ban/today').catch(()=>null);
+  D.foBan = { symbols:(d&&d.symbols)||[], date:(d&&d.date)||'' };
+}
 async function loadADR(){
   const a = await getJSON('/api/v8/adr');
   D.adr = { adv:a.advances||0, dec:a.declines||0, unch:a.unchanged||0, ratio:Number(a.adr)||0 };
@@ -4113,14 +4127,37 @@ function sigCol(sym, s, ix){
     <div class="sig-ets">${ets}</div>
   </div>`;
 }
-function rSignal(){
+// cc#681: index day-change sparkline card (replaces the V10 Active Signals cards at the dashboard top).
+function rIdxSpark(){
+  const one=(name,feed,d)=>{
+    const chg=d?d.chg:0, col=chg>=0?UP:DN, spk=(D.idxSpark||{})[feed]||[];
+    return `<div style="flex:1;min-width:0">
+      <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 4px">
+        <span class="big-val" style="font-size:20px">${d&&d.cmp?num(d.cmp,1):'—'}</span>
+        <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
+      ${spk.length>1?sparkline(spk,col,{h:46,liveLast:true}):'<div style="font-size:8px;color:var(--dim)">no intraday</div>'}
+    </div>`;
+  };
   return `<div class="card">
-    <div class="card-hd"><div><div class="t">V10 Active Signals</div>
-      <div class="s">SuperTrend 150/3 (10m) · EMA 3/10 (30m) · NIFTY + BANKNIFTY</div></div></div>
-    <div class="sig-dual">
-      ${sigCol('NIFTY', D.sig.NIFTY, D.idx.NIFTY)}
-      ${sigCol('BANKNIFTY', D.sig.BANKNIFTY, D.idx.BANKNIFTY)}
+    <div class="card-hd"><div><div class="t">Index · Day Change</div>
+      <div class="s">NIFTY + BANKNIFTY · 5-min intraday${D.idxSparkAsof?(' · '+esc(D.idxSparkAsof)):''}</div></div></div>
+    <div style="display:flex;gap:16px">
+      ${one('NIFTY 50','NIFTY',D.idx.NIFTY)}
+      ${one('BANKNIFTY','BANKNIFTY',D.idx.BANKNIFTY)}
     </div></div>`;
+}
+// cc#681: F&O ban (MWPL) today — red chips, tap opens that symbol's C (chart) modal; NO BANS when empty.
+function rFoBan(){
+  const f=D.foBan||{}, syms=f.symbols||[], asof=f.date||'';
+  const head = syms.length ? `F&O Ban · ${syms.length} Today` : 'F&O Ban';
+  const body = syms.length
+    ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid #f2b8bf;background:#fde8ea;color:#c0392b;font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
+    : '<span style="font:700 12px/1 Sora,sans-serif;color:#0a7d47;background:#e7f7ee;border:1px solid #b6e6cd;padding:6px 12px;border-radius:7px">NO BANS</span>';
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">${head}</div>
+      <div class="s">MWPL · barred from fresh F&O positions${asof?(' · '+esc(asof)):''}</div></div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${body}</div></div>`;
 }
 
 function rVix(){
@@ -4550,7 +4587,8 @@ function rStrikeOI(){
 function render(){
   document.getElementById('idx-app').innerHTML =
     rTopBar() + rMood() +
-    `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
+    `<div class="row r-2-16">${rIdxSpark()}${rVix()}</div>` +   // cc#681: V10 Active Signals -> index day-change sparklines
+    `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
     `<div class="row" style="grid-template-columns:1fr 1.4fr">${rADR()}${rPCR()}</div>` +   // cc#549: compact max-pain card removed (strike-wise OI card covers it); ADR+PCR share the row wider
     `<div class="row" style="grid-template-columns:1fr 1fr">${rPivots()}${rStrikeOI()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
@@ -4560,7 +4598,7 @@ function render(){
 /* extend loaders with pivots + strike OI */
 var _origLoadLive=loadLive;
 loadLive=async function(){
-  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI];
+  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[idx]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 };

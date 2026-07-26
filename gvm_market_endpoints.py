@@ -404,6 +404,18 @@ def get_top_gainers(price_date: Optional[str] = None, n: int = 20, min_gvm: Opti
     return api_query(sql, vals)
 
 
+@router.get("/api/fo-ban/today")
+def get_fo_ban_today():
+    """cc#681: symbols currently in the F&O ban (MWPL) list. Latest ban date, recency-guarded (<=4d)
+    so a stale MAX(d) never shows a lifted ban as current — an empty result renders NO BANS."""
+    row = api_query("SELECT MAX(d)::text AS d FROM fo_ban WHERE d >= CURRENT_DATE - 4", single=True)
+    d = row.get("d") if isinstance(row, dict) else None
+    if not d:
+        return {"date": None, "symbols": []}
+    rows = api_query("SELECT symbol FROM fo_ban WHERE d=%s ORDER BY symbol", (d,))
+    return {"date": d, "symbols": [r["symbol"] for r in rows] if isinstance(rows, list) else []}
+
+
 @router.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
     r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol=%s", (symbol.upper(),), single=True)
