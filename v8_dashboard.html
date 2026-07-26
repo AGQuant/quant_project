@@ -2148,12 +2148,13 @@ function _qaAutoscale(orig){
 }
 // cc#668 change_4 (addition 25-Jul): left-edge zone interpretation labels over the id=6133 coarse
 // ladder regions (one label per named region, centred). Mirrors the GVM chart fib-panel naming.
+// cc#670 change_1: each zone label carries its fib ratio range after the name (same muted style).
 var _FIB_ZLABEL_REGIONS=[
-  {lo:0,    hi:23.6, txt:'BREAKDOWN',                  col:'#dd3a4a', op:.55},
-  {lo:23.6, hi:38.2, txt:'WEAK',                       col:'#dd3a4a', op:.5},
-  {lo:38.2, hi:61.8, txt:'DECISION',                   col:'#8a94ad', op:.6},
-  {lo:61.8, hi:100,  txt:'STRENGTH / RESISTANCE TEST', col:'#12864f', op:.6},
-  {lo:100,  hi:123.6,txt:'EXTENSION',                  col:'#0a9e63', op:.65}
+  {lo:0,    hi:23.6, txt:'BREAKDOWN',                  rng:'below 0.236', col:'#dd3a4a', op:.55},
+  {lo:23.6, hi:38.2, txt:'WEAK',                       rng:'0.236-0.382', col:'#dd3a4a', op:.5},
+  {lo:38.2, hi:61.8, txt:'DECISION',                   rng:'0.382-0.618', col:'#8a94ad', op:.6},
+  {lo:61.8, hi:100,  txt:'STRENGTH / RESISTANCE TEST', rng:'0.618-1.0',   col:'#12864f', op:.6},
+  {lo:100,  hi:123.6,txt:'EXTENSION',                  rng:'1.0-1.236',   col:'#0a9e63', op:.65}
 ];
 
 function _qaFibOverlayEl(box){
@@ -2184,8 +2185,8 @@ function qaDrawFibZones(){
     var zk=_fibZoneKey((lv[i].pct+lv[i+1].pct)/2);
     parts.push('<rect x="0" y="'+top.toFixed(1)+'" width="'+w+'" height="'+bh.toFixed(1)+'" fill="'+(_FIB_ZFILL[zk]||'rgba(138,148,173,.05)')+'"></rect>');
   }
-  // cc#668 change_4: one left-edge interpretation label per coarse zone region, vertically centred;
-  // hidden when the region renders too thin (<14px) to avoid overlap.
+  // cc#668 change_4 / cc#670 change_1: one left-edge interpretation label per coarse zone region,
+  // vertically centred, name + fib ratio range; hidden when the region renders too thin (<14px).
   var loP=_qaTfSwing.lo, rng=_qaTfSwing.hi-_qaTfSwing.lo;
   _FIB_ZLABEL_REGIONS.forEach(function(zr){
     var yA=_qaChartSeries.priceToCoordinate(loP+rng*zr.lo/100);
@@ -2195,10 +2196,27 @@ function qaDrawFibZones(){
     if(hgt<14)return;
     var cy=top+hgt/2;
     parts.push('<text x="7" y="'+cy.toFixed(1)+'" dominant-baseline="middle" font-size="9" font-weight="600" '+
-               'letter-spacing=".4" fill="'+zr.col+'" fill-opacity="'+zr.op+'">'+zr.txt+'</text>');
+               'letter-spacing=".4" fill="'+zr.col+'" fill-opacity="'+zr.op+'">'+_svgEsc(zr.txt+'  ·  '+zr.rng)+'</text>');
   });
+  // cc#670 change_2: ratio+price pill at the RIGHT edge of each fib line (canonical level label),
+  // SVG-drawn so there is NO LightweightCharts axis-label duplicate (price lines keep axisLabelVisible
+  // false). Anchored to the plot-area right edge (timeScale width) to clear the price axis.
+  var plotR=w;
+  try{if(_qaChartObj&&_qaChartObj.timeScale())plotR=_qaChartObj.timeScale().width()||w;}catch(e){}
+  for(var j=0;j<lv.length;j++){
+    var yy=_qaChartSeries.priceToCoordinate(+lv[j].price);
+    if(yy==null)continue;
+    var zk2=_fibZoneKey(lv[j].pct), pc=_FIB_ZLINE[zk2]||'#8a94ad';
+    var ptx=(lv[j].pct/100).toFixed(3)+'  ·  '+(Math.round(+lv[j].price*100)/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var pw2=ptx.length*5.1+11, px2=Math.max(2,plotR-pw2-3), pyc=Math.max(9,Math.min(h-9,yy));
+    parts.push('<rect x="'+px2.toFixed(1)+'" y="'+(pyc-8).toFixed(1)+'" width="'+pw2.toFixed(1)+'" height="15" rx="3" '+
+               'fill="rgba(255,255,255,.86)" stroke="'+pc+'" stroke-opacity=".5"></rect>');
+    parts.push('<text x="'+(px2+pw2-6).toFixed(1)+'" y="'+pyc.toFixed(1)+'" text-anchor="end" dominant-baseline="middle" '+
+               'font-size="9" font-weight="700" fill="'+pc+'">'+_svgEsc(ptx)+'</text>');
+  }
   ov.innerHTML=parts.join('');
 }
+function _svgEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // cc#626 item_2: pivot + fib overlays as price lines, from the GVM chart's data source
 // (/api/trade-check/fibcheck: pivots=v8_paper_pivots, fib_levels=same swing derivation). Price-level
@@ -2219,16 +2237,15 @@ async function qaApplyOverlays(){
         if(row[1]!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+row[1],color:row[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:row[0]}));});
     }
   }
-  // cc#668 change_2: fib levels from THIS timeframe's swing (_qaTfFib). change_1: axisLabelVisible:false
-  // suppresses the duplicate right-axis price tag — the on-line pill (ratio + price) is the only label.
+  // cc#668 change_2: fib levels from THIS timeframe's swing (_qaTfFib). axisLabelVisible:false keeps the
+  // right axis free of the bare-price duplicate. cc#670 change_2: the canonical ratio+price pill is now
+  // SVG-drawn at the right edge in qaDrawFibZones (no LightweightCharts title → no axis-label dup).
   if(_qaOv.fib&&_qaTfFib&&_qaChartSeries){_qaTfFib.forEach(f=>{
     if(f.price==null)return;
     var zk=_fibZoneKey(f.pct), col=_FIB_ZLINE[zk]||'#8a94ad';
-    var ratio=(f.pct!=null)?(f.pct/100).toFixed(3):'';
-    var lbl=(ratio?ratio+' ':'')+(Math.round(+f.price*100)/100).toLocaleString('en-IN');
-    _qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:col,lineWidth:1,lineStyle:3,axisLabelVisible:false,title:lbl}));
+    _qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:col,lineWidth:1,lineStyle:3,axisLabelVisible:false}));
   });}
-  qaDrawFibZones();   // cc#664/668: translucent zone shading + interpretation labels
+  qaDrawFibZones();   // cc#664/668/670: zone shading + interpretation labels + ratio+price pills
 }
 function qaToggleOverlay(kind){
   _qaOv[kind]=!_qaOv[kind];
