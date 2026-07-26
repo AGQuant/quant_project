@@ -2075,6 +2075,18 @@ def run_t1_refresh(conn=None):
             summary["result_analysis"] = result_analysis_gen.regenerate(conn)
         except Exception as e:
             log.warning(f"cc#602 result_analysis regen after T+1 failed: {e}")
+        # cc#693: write ONE job_runs row for this execution (control-plane spine). partial/failed also
+        # writes ops_log category=scrape_review via record_run (universal failure rule).
+        try:
+            import ops_control_plane
+            cp_status = ("failed" if (pending and staged == 0) else ("partial" if fail else "ok"))
+            ops_control_plane.record_run("t1_refresh", status=cp_status,
+                sections_landed={"due": len(pending), "docs_staged": staged, "ok": ok, "failed": fail,
+                                 "status_histogram": hist},
+                error=(("staged 0 / all failed: " + ", ".join(failed_syms[:10])) if cp_status != "ok" else None),
+                scope=("%d reported symbols" % len(pending)))
+        except Exception as e:
+            log.warning(f"cc#693 t1 record_run failed: {e}")
         return summary
     finally:
         if own:
@@ -2117,6 +2129,15 @@ def run_saturday_retry(conn=None):
             _oplog(cur, "OPS_METRICS_SATURDAY_RETRY", summary)
             conn.commit()
         summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
+        try:  # cc#693: control-plane spine + universal failure rule
+            import ops_control_plane
+            cp_status = ("ok" if fail == 0 else ("partial" if ok else "failed"))
+            ops_control_plane.record_run("saturday_retry", status=cp_status,
+                sections_landed={"scoped": len(scoped), "ok": ok, "failed": fail},
+                error=(("%d of %d still failing" % (fail, len(scoped))) if fail else None),
+                scope="calendar-dated T+1 failures")
+        except Exception as e:
+            log.warning(f"cc#693 saturday record_run failed: {e}")
         return summary
     finally:
         if own:
