@@ -146,7 +146,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
 <div class="sec-label">01 · Season Summary <span class="cov">same-quarter reporters only</span></div>
 <div id="tape" class="tape"><div style="grid-column:1/-1"><div class="empty">Loading season…</div></div></div>
 
-<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by PAT YoY</span></div>
+<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by PAT YoY</span><button id="secToggle" onclick="sectorMax=!sectorMax;applySectorView();" title="Maximise" style="order:1;margin-left:8px;flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--cyan);border-radius:5px;padding:2px 7px;font-family:var(--mono);font-size:11px;line-height:1;cursor:pointer">⤢</button></div>
 <div class="tbl-card tbl-scroll">
 <table id="sectorTbl">
 <thead><tr><th>Sector</th><th>Reported</th><th>Sales YoY</th><th>PAT YoY</th><th>% Growing</th><th>Sector GVM</th></tr></thead>
@@ -258,8 +258,33 @@ function render(){
         document.getElementById('coTbl').scrollIntoView({behavior:'smooth',block:'nearest'}); }
       applyCo(); };
   });
+  applySectorView();   // cc#695: apply minimise/maximise (default minimised)
 
   renderCo();
+}
+
+// cc#695: Section 02 maximise/minimise. Default MINIMISED (in-memory, resets to minimised on fresh
+// load). Minimised shows the top 5 sectors (already PAT-YoY sorted) + a tappable "+N more" row; tap-to-
+// filter works on the visible rows in both states. Theme-agnostic (uses the page CSS vars).
+let sectorMax = false;
+function applySectorView(){
+  const tbody = document.getElementById('sectorRows');
+  if(!tbody) return;
+  const rows = [...tbody.querySelectorAll('tr[data-sector]')];
+  rows.forEach((r,i)=>{ r.style.display = (sectorMax || i < 5) ? '' : 'none'; });
+  const hidden = Math.max(0, rows.length - 5);
+  let more = document.getElementById('secMore');
+  if(!sectorMax && hidden > 0){
+    if(!more){
+      more = document.createElement('tr'); more.id = 'secMore';
+      more.innerHTML = `<td colspan="6" style="text-align:center;color:var(--dim);cursor:pointer;font-size:11px;padding:8px 0">+<span id="secMoreN"></span> more sectors — tap to expand ⤢</td>`;
+      more.onclick = ()=>{ sectorMax = true; applySectorView(); };
+      tbody.appendChild(more);
+    }
+    more.style.display = ''; document.getElementById('secMoreN').textContent = hidden;
+  } else if(more){ more.style.display = 'none'; }
+  const btn = document.getElementById('secToggle');
+  if(btn){ btn.textContent = sectorMax ? '⤡' : '⤢'; btn.title = sectorMax ? 'Minimise' : 'Maximise'; }
 }
 
 function renderCo(){
