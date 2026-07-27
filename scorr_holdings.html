@@ -66,6 +66,12 @@
   .pos-row2{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
   .pos-chip{font-size:11.5px;color:var(--mut);font-weight:500}
   .pos-chip b{color:var(--txt);font-weight:700}
+  /* cc#711: compact CARD button (replaces R/V chips) + tappable symbol -> shared chart card */
+  .scc-card-btn{font:800 9.5px/1 -apple-system,'Segoe UI',sans-serif;letter-spacing:.03em;padding:4px 7px;border-radius:6px;
+    border:1px solid var(--border);background:var(--surface2);color:var(--mut);cursor:pointer;flex-shrink:0}
+  .scc-card-btn:hover{color:var(--blu);border-color:var(--blu)}
+  .scc-sym{cursor:pointer}
+  .scc-sym:hover{text-decoration:underline}
   .pos-pct{font-size:12px;font-weight:700;font-family:monospace}
   .pos-ltp{font-size:11.5px;color:var(--mut)}
   .pos-sep{color:var(--dim);font-size:10px}
@@ -427,7 +433,7 @@ async function loadHoldings(smooth=false) {
       html+=`<div class="pos-card${lossCls}" id="card-${p.symbol}">
         <div class="pos-row1">
           <div style="display:flex;align-items:center;gap:8px">
-            <span class="pos-sym">${p.symbol}</span>${window.ScorrRCard?ScorrRCard.pill(p.symbol):''}${window.ScorrRCard?ScorrRCard.pillV(p.symbol):''}
+            <span class="pos-sym scc-sym" onclick="window.ScorrChartCard&&ScorrChartCard.open('${p.symbol}')" title="Price chart">${p.symbol}</span><button type="button" class="scc-card-btn" onclick="window.ScorrChartCard&&ScorrChartCard.open('${p.symbol}')" title="Price chart">CARD</button>
             <span class="pos-dir ${dirCls}">${p.direction}</span>
           </div>
           <span class="pos-mtm" id="mtm-${p.symbol}" style="color:${unavail?'#b45309':colorOf(p.mtm)}">${mtmTxt}</span>
@@ -611,7 +617,7 @@ function renderClosed(d){
   const C=d.closed_all||[];
   if(!C.length) return '<div class="empty-msg">No closed trades yet.</div>';
   const rows=C.map(c=>{ const pc=c.pnl>=0?"var(--grn)":"var(--red)";
-    return `<tr><td>${fmtDate(c.close_date)}</td><td class="cl-sym">${c.symbol}</td>
+    return `<tr><td>${fmtDate(c.close_date)}</td><td class="cl-sym"><span class="scc-sym" onclick="window.ScorrChartCard&&ScorrChartCard.open('${c.symbol}')" title="Price chart">${c.symbol}</span> <button type="button" class="scc-card-btn" onclick="window.ScorrChartCard&&ScorrChartCard.open('${c.symbol}')" title="Price chart">CARD</button></td>
       <td><span class="pos-dir ${c.direction==="LONG"?"dir-long":"dir-short"}">${c.direction}</span></td>
       <td class="num">${c.qty}</td><td class="num">${f2(c.entry)}</td><td class="num">${f2(c.exit)}</td>
       <td class="num" style="color:${pc};font-weight:700">${sgn(c.pnl)}</td></tr>`; }).join("");
