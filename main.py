@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware   # cc#712: response compression
 from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import os
@@ -262,6 +263,22 @@ async def auth_gate(request: Request, call_next):
         return Response(content=body, status_code=response.status_code,
                         headers=headers, media_type="text/html")
     return response
+
+# cc#712: GZip added AFTER auth_gate so it is the OUTERMOST middleware — it compresses the FINAL
+# response body (incl. the auth_gate logout/theme/pwa injection) and all >1KB API JSON. HTML pages
+# keep their no-store cache-control (set in auth_gate); gzip only touches content-encoding/length.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# cc#712: serve HTML pages from an in-memory cache — read each file once, then from the dict. A new
+# deploy is a fresh process, so it naturally reloads (no TTL needed). Removes per-request disk reads.
+_HTML_CACHE = {}
+def _page(filename):
+    html = _HTML_CACHE.get(filename)
+    if html is None:
+        with open(filename, "r", encoding="utf-8") as f:
+            html = f.read()
+        _HTML_CACHE[filename] = html
+    return html
 
 app.include_router(auth_router)
 app.include_router(authset_probe_router)
@@ -668,46 +685,46 @@ async def startup():
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    with open("scorr_home.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_home.html")
 
 @app.get("/status")
 def status(): return {"service": "Scorr API", "version": VERSION, "status": "live"}
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    with open("v8_dashboard.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("v8_dashboard.html")
 
 @app.get("/cio", response_class=HTMLResponse)
 def cio():
-    with open("scorr_cockpit.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_cockpit.html")
 
 @app.get("/cio2", response_class=HTMLResponse)
 def cio2():
-    with open("scorr_cio_dashboard.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_cio_dashboard.html")
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask():
-    with open("scorr_ask.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_ask.html")
 
 @app.get("/check", response_class=HTMLResponse)
 def check():
-    with open("scorr_check.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_check.html")
 
 @app.get("/intraday", response_class=HTMLResponse)   # cc#481: restored (cc#476 kill reversed)
 def intraday():
-    with open("scorr_intraday.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_intraday.html")
 
 @app.get("/sector", response_class=HTMLResponse)
 def sector():
-    with open("scorr_sector.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_sector.html")
 
 @app.get("/fpc", response_class=HTMLResponse)
 def fpc():
-    with open("fpc_v11.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("fpc_v11.html")
 
 @app.get("/scanners", response_class=HTMLResponse)
 def scanners():
-    with open("scorr_scanners.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_scanners.html")
 
 @app.get("/filters")
 def filters_page():
@@ -717,64 +734,64 @@ def filters_page():
 
 @app.get("/structure", response_class=HTMLResponse)
 def structure_page():
-    with open("scorr_structure.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_structure.html")
 
 @app.get("/performance", response_class=HTMLResponse)
 def performance():
-    with open("scorr_performance.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_performance.html")
 
 @app.get("/quant-basket", response_class=HTMLResponse)
 def quant_basket():
-    with open("quant_basket.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("quant_basket.html")
 
 @app.get("/news", response_class=HTMLResponse)
 def news_page():
-    with open("scorr_news.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_news.html")
 
 @app.get("/v10", response_class=HTMLResponse)
 def v10_dashboard_page():
-    with open("v10_dashboard.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("v10_dashboard.html")
 
 @app.get("/v9", response_class=HTMLResponse)
 def v9_pairs_page():
     """cc#426: V9 · Pairs — sector-neutral long-short concept, extracted from the V8 dashboard tab
     into its own page (same renderer + /api/v8/v9_pairs_sectors pool)."""
-    with open("scorr_v9.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_v9.html")
 
 @app.get("/v14", response_class=HTMLResponse)
 def v14_intraday_page():
     """cc#442: V14 intraday engine (paper) — live open positions with tag chips, closed-trade log,
     per-tag day summary. Data from /api/v14/*."""
-    with open("scorr_v14.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_v14.html")
 
 @app.get("/v15", response_class=HTMLResponse)
 def v15_mf_page():
     """cc#467: V15 MF Intelligence skeleton — curated screener + fund deep-dive (look-through holdings
     scored on GVM, NAV-derived returns, external ratings). MQS scoring next session. Data from /api/v15/mf/*."""
-    with open("scorr_v15.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_v15.html")
 
 @app.get("/holdings", response_class=HTMLResponse)
 def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
-    with open("scorr_holdings.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_holdings.html")
 
 @app.get("/result-corner", response_class=HTMLResponse)
 def result_corner_page():
     """cc#603: Result Corner — reported companies (newest first) with mcap-tier filter, GVM verdict,
     and a result snapshot. Reads /api/result-corner (result_corner.py)."""
-    with open("scorr_result_corner.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_result_corner.html")
 
 @app.get("/scheduler-master", response_class=HTMLResponse)
 def scheduler_master_page():
     """cc#525: Master Scheduler Registry -- every scheduled job (AST-enumerated from
     scheduler.py, not hand-maintained docs), last run/status, drift-audited daily. Reads
     /api/scheduler/master (scheduler_master.py)."""
-    with open("scorr_scheduler_master.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_scheduler_master.html")
 
 @app.get("/v13", response_class=HTMLResponse)
 def v13_filter_registry_page():
     """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
-    with open("scorr_v13.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_v13.html")
 
 @app.get("/v4scan")
 def tc_v4_scan_page():
@@ -784,17 +801,17 @@ def tc_v4_scan_page():
 @app.get("/v12", response_class=HTMLResponse)
 def v12_builder_page():
     """cc#394: V12 Quant Basket Builder — 5-step wizard (universe/entry/exit/backtest/deploy)."""
-    with open("scorr_v12.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_v12.html")
 
 @app.get("/health", response_class=HTMLResponse)
 def health_report_page():
     """cc#398: Portfolio Health Report — upload holdings -> Scorr-native 13-section report."""
-    with open("scorr_health.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_health.html")
 
 @app.get("/adaptive", response_class=HTMLResponse)
 def adaptive_dashboard_page():
     """cc#651: Adaptive Dashboard — client-facing shelf of saved Portfolio Health Reports."""
-    with open("scorr_adaptive.html", "r", encoding="utf-8") as f: return f.read()
+    return _page("scorr_adaptive.html")
 
 # ── NAV_REGISTRY (cc#397, rule id=2987) — every GET-HTML route -> nav label -> status ──────────────
 # STATUS: nav = in cockpit web nav + cio dashboard nav + mobile launcher; redirect = 301s away;

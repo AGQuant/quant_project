@@ -567,6 +567,7 @@ NAV_TOGGLE_JS = """
 """
 
 _NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+_CACHE_1D = {"Cache-Control": "public, max-age=86400"}   # cc#712: static assets cache 1 day
 
 # ── cc#327 MOBILE_UX_REDEFINE_V1 P1/10 — shared mobile design system ──────────
 # Served at /static/mobile.css and injected site-wide via the auth_gate middleware
@@ -919,7 +920,7 @@ def pwa_js():
 
 @router.get("/nav_toggle.js")
 def pwa_nav_toggle_js():
-    return Response(NAV_TOGGLE_JS, media_type="application/javascript", headers=_NOCACHE)
+    return Response(NAV_TOGGLE_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/service_worker.js")
@@ -950,13 +951,13 @@ def pwa_icon_512():
 def pwa_mobile_css():
     # cc#327: served no-cache during the MOBILE_UX_REDEFINE_V1 program so later
     # tasks' edits propagate immediately; not in the SW SHELL (avoids stale cache).
-    return Response(MOBILE_CSS, media_type="text/css", headers=_NOCACHE)
+    return Response(MOBILE_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
 @router.get("/mobile_tables.js")
 def pwa_mobile_tables_js():
     # cc#330 P4: shared table helper, injected site-wide alongside mobile.css.
-    return Response(MOBILE_TABLES_JS, media_type="application/javascript", headers=_NOCACHE)
+    return Response(MOBILE_TABLES_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 # cc#573 (spec id=6438): ONE shared Results "R" pill + card component, injected site-wide via
@@ -1250,7 +1251,7 @@ RESULTS_CARD_JS = """
 @router.get("/results_card.js")
 def pwa_results_card_js():
     # cc#573: shared Results "R" pill + card modal, injected site-wide alongside mobile.css.
-    return Response(RESULTS_CARD_JS, media_type="application/javascript", headers=_NOCACHE)
+    return Response(RESULTS_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 # cc#706: shared V8-type price chart card, source-of-truth lives in scorr_chart_card.js (repo root),
@@ -1265,4 +1266,4 @@ except Exception:
 
 @router.get("/scorr_chart_card.js")
 def pwa_scorr_chart_card_js():
-    return Response(SCORR_CHART_CARD_JS, media_type="application/javascript", headers=_NOCACHE)
+    return Response(SCORR_CHART_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
