@@ -1245,6 +1245,13 @@ def v15_fund(scheme_code: str):
                 sr = cur.fetchone()
                 if sr:
                     _peer_rows.append(dict(zip([d[0] for d in cur.description], sr)))
+        # cc#721 req_6: category-average AUM for the Cost&Size "IN LINE / LARGER / SMALLER" band
+        # (inline AVG, no schema change).
+        _cat_avg_aum = None
+        if raw_cat:
+            cur.execute("SELECT AVG(aum_cr) FROM mf_master WHERE category=%s AND aum_cr IS NOT NULL", (raw_cat,))
+            _ca = cur.fetchone()
+            _cat_avg_aum = _f2(_ca[0]) if _ca else None
     cat_avg_er = m.pop("avg_expense_ratio", None)
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
@@ -1291,6 +1298,9 @@ def v15_fund(scheme_code: str):
         "ret_1y": _f2(m.pop("avg_ret_1y", None)), "ret_2y": _f2(m.pop("avg_ret_2y", None)),
         "ret_3y": _f2(m.pop("avg_ret_3y", None)),
     }
+    # cc#721 req_6: Cost&Size vs category — category-average ER + AUM for the read-chips.
+    m["category_avg_er"] = _f2(cat_avg_er)
+    m["category_avg_aum_cr"] = _cat_avg_aum
     # cc#721 req_1: hero "Rank #N of M in <category>".
     m["category_rank"] = _rank
     m["category_peers"] = _peers_n

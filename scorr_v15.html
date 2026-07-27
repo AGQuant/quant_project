@@ -128,7 +128,7 @@ td.sym{font-weight:700;font-size:12.5px}
 .segblk .k{font-size:8.5px;font-weight:700;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
 .segblk .v{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:4px}
 .segblk .a{font-size:8.5px;font-weight:700;margin-top:3px}
-.retgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.retgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}
 .ret{background:rgba(13,20,40,.75);border:1px solid var(--line);border-radius:13px;padding:11px 11px 9px;text-align:left;transition:transform .15s,border-color .15s}
 .ret:hover{transform:translateY(-2px);border-color:var(--line2)}
 .ret .k{font-size:9px;font-weight:700;color:var(--dim);letter-spacing:.1em}
@@ -173,6 +173,26 @@ td.sym{font-weight:700;font-size:12.5px}
 :root[data-theme="light"] .cmp{background:rgba(255,255,255,.92);box-shadow:0 -12px 40px rgba(20,35,80,.10)}
 :root[data-theme="light"] #ac{box-shadow:0 18px 44px rgba(20,35,80,.16)}
 :root[data-theme="light"] .verdict .v{box-shadow:none}
+/* cc#721: MQS ring (replaces the removed dial/arc) — conic fill set inline in JS from mqs (0-100). */
+.mqs-ring{width:122px;height:122px;border-radius:50%;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;background:conic-gradient(var(--dim) 0 0%,var(--well) 0 100%);flex-shrink:0}
+.mqs-ring::before{content:"";position:absolute;inset:9px;background:var(--surface);border-radius:50%}
+.mqs-ring .v{position:relative;font-family:var(--mono);font-size:33px;font-weight:700;color:var(--dim);letter-spacing:-.02em}
+.mqs-ring .k{position:relative;font-size:9px;font-weight:700;letter-spacing:.14em;color:var(--dim);margin-top:1px}
+/* cc#721: Cost & Size read-chips */
+.cs-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.cs{background:rgba(13,20,40,.75);border:1px solid var(--line);border-radius:13px;padding:13px 14px}
+.cs .k{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.cs .v{font-family:var(--mono);font-size:20px;font-weight:700;margin-top:6px}
+.chipd{display:inline-block;margin-top:9px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;background:var(--well);color:var(--mut);border:1px solid var(--line)}
+.chipd.good{color:var(--bull);background:var(--bull-soft);border-color:rgba(47,212,139,.3)}
+.chipd.warn{color:var(--amber);background:var(--amber-soft);border-color:rgba(245,185,74,.3)}
+.chipd.bad{color:var(--bear);background:var(--bear-soft);border-color:rgba(255,92,108,.3)}
+/* cc#721: returns cat-delta chip + peers self-row */
+.ret .d{font-family:var(--mono);font-size:9px;font-weight:700;margin-top:3px}
+tr.self td{background:rgba(77,124,254,.10)!important}
+tr.self td.sym{color:var(--blue)}
+:root[data-theme="light"] .mqs-ring::before{background:#FFFFFF}
+:root[data-theme="light"] .cs{background:rgba(20,35,80,.035)}
 :focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
 @media (prefers-reduced-motion:reduce){.rise,.dial .arc,.pc .bar i,.wt .fill,.chip .dot{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:61!important}}
 @media(max-width:720px){.pillars{grid-template-columns:1fr 1fr}.retgrid{grid-template-columns:repeat(3,1fr)}.hero{grid-template-columns:auto 1fr;gap:18px}.verdict{grid-column:1/-1;text-align:left;max-width:none}.segrow{flex-wrap:wrap}.segblk{min-width:29%}.hero h1{font-size:19px}}
@@ -194,66 +214,76 @@ td.sym{font-weight:700;font-size:12.5px}
   <button id="go">Analyse fund</button>
 </div>
 
+<!-- 1 · HERO -->
 <div class="hero rise d3">
-  <div class="dial">
-    <svg width="132" height="132" viewBox="0 0 132 132">
-      <circle class="track" cx="66" cy="66" r="54"/>
-      <g class="ticks">
-        <line class="tick" x1="66" y1="6" x2="66" y2="13"/><line class="tick" x1="126" y1="66" x2="119" y2="66"/>
-        <line class="tick" x1="66" y1="126" x2="66" y2="119"/><line class="tick" x1="6" y1="66" x2="13" y2="66"/>
-      </g>
-      <circle class="arc" id="dial-arc" cx="66" cy="66" r="54" style="animation:none;stroke-dashoffset:339;filter:none;opacity:.25"/>
-    </svg>
-    <div class="core"><span class="v num" id="mqs" style="color:var(--dim);font-size:26px">—</span><span class="k">AWAITING SCORE</span></div>
-  </div>
+  <div class="mqs-ring" id="mqs-ring"><span class="v num" id="mqs">—</span><span class="k">MQS /10</span></div>
   <div>
     <div class="cat" id="f-cat">MF Intelligence</div>
     <h1 id="f-name">Search a fund to begin</h1>
     <div class="meta" id="f-meta">
       <span class="tag" id="f-aum">AUM —</span>
       <span class="tag" id="f-er">ER —</span>
-      <span class="tag" id="f-plan">Plan —</span>
-    </div>
-    <div class="pgvm" id="pgvm-block">
-      <div><div class="k">Portfolio GVM</div><div class="v" id="pgvm-v">—</div></div>
-      <div class="c" id="pgvm-c">Search a fund to check</div>
+      <span class="tag" id="f-crisil" style="display:none"></span>
+      <span class="tag" id="f-mgr" style="display:none"></span>
+      <span class="tag" id="f-incep" style="display:none"></span>
+      <span class="tag" id="f-scode" style="display:none"></span>
     </div>
   </div>
   <div class="verdict">
     <div class="v" id="verdict-chip" style="background:var(--well);color:var(--dim);box-shadow:none">—</div>
     <div class="r" id="verdict-sub">Search a fund to begin</div>
+    <div class="r" id="f-rank" style="margin-top:5px"></div>
   </div>
 </div>
 
-<div class="pillars rise d4">
+<!-- 2 · COST & SIZE vs CATEGORY -->
+<div class="card rise d4">
+  <div class="h"><span class="eyebrow" style="flex:1">Cost &amp; size vs category</span></div>
+  <div class="cs-grid">
+    <div class="cs"><div class="k">Expense ratio</div><div class="v" id="cs-er">—</div><span class="chipd" id="cs-er-chip">—</span></div>
+    <div class="cs"><div class="k">Fund size (AUM)</div><div class="v" id="cs-aum">—</div><span class="chipd" id="cs-aum-chip">—</span></div>
+  </div>
+</div>
+
+<!-- 3 · RETURNS vs CATEGORY -->
+<div class="card rise d4">
+  <div class="h"><span class="eyebrow" style="flex:1">Returns vs category · direct plans</span><span class="badge dim" id="ret-asof">awaiting data</span></div>
+  <div class="retgrid">
+    <div class="ret"><div class="k">1W</div><div class="v" id="r-1w" style="color:var(--dim)">—</div><div class="c" id="rc-1w">cat —</div><div class="d" id="rd-1w"></div></div>
+    <div class="ret"><div class="k">1M</div><div class="v" id="r-1m" style="color:var(--dim)">—</div><div class="c" id="rc-1m">cat —</div><div class="d" id="rd-1m"></div></div>
+    <div class="ret"><div class="k">3M</div><div class="v" id="r-3m" style="color:var(--dim)">—</div><div class="c" id="rc-3m">cat —</div><div class="d" id="rd-3m"></div></div>
+    <div class="ret"><div class="k">6M</div><div class="v" id="r-6m" style="color:var(--dim)">—</div><div class="c" id="rc-6m">cat —</div><div class="d" id="rd-6m"></div></div>
+    <div class="ret"><div class="k">1Y</div><div class="v" id="r-1y" style="color:var(--dim)">—</div><div class="c" id="rc-1y">cat —</div><div class="d" id="rd-1y"></div></div>
+    <div class="ret"><div class="k">2Y</div><div class="v" id="r-2y" style="color:var(--dim)">—</div><div class="c" id="rc-2y">CAGR · cat —</div><div class="d" id="rd-2y"></div></div>
+  </div>
+</div>
+
+<!-- 4 · TOP 5 PEERS -->
+<div class="card rise d5">
+  <div class="h"><span class="eyebrow" style="flex:1">Top peers · same category</span><span class="badge dim">DIRECT · GROWTH · BY 1Y</span></div>
+  <div id="peers-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to see its category peers.</div></div>
+</div>
+
+<!-- 5 · TOP 10 HOLDINGS × GVM -->
+<div class="card rise d5">
+  <div class="h"><span class="eyebrow" style="flex:1">Top 10 holdings × live GVM</span><span class="badge dim" id="xr-scorr" style="cursor:pointer" title="Show only holdings resolved to a live GVM">SCORR-ONLY</span><span class="badge dim" id="xr-pgvm" style="margin-left:6px;cursor:pointer" title="Weighted portfolio-GVM summary">PORTFOLIO GVM</span></div>
+  <div id="xray-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to x-ray its holdings against live GVM.</div></div>
+  <div class="pgvm" id="pgvm-block" style="margin-top:12px"><div><div class="k">Portfolio GVM</div><div class="v" id="pgvm-v">—</div></div><div class="c" id="pgvm-c">Search a fund to check</div></div>
+</div>
+
+<!-- 6 · FQS FACTORS -->
+<div class="eyebrow rise d6" style="margin-top:20px">FQS factors · Q 35 / R 30 / C 15 / S 20</div>
+<div class="pillars rise d6">
   <div class="pc" id="pc-q"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
   <div class="pc" id="pc-r"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
   <div class="pc" id="pc-c"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
   <div class="pc" id="pc-s"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
 </div>
 
-<div class="card rise d5">
-  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge dim" id="xr-scorr" style="cursor:pointer" title="Show only holdings resolved to a live GVM">SCORR-ONLY X-RAY</span><span class="badge dim" id="xr-pgvm" style="margin-left:6px;cursor:pointer" title="Weighted portfolio-GVM summary">PORTFOLIO GVM</span></div>
-  <div id="xray-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to x-ray its holdings against live GVM.</div></div>
-</div>
-
-<div class="card rise d6">
-  <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span><span class="badge dim" id="seg-cov">—</span></div>
+<!-- 7 · SECTOR ALLOCATION -->
+<div class="card rise d7">
+  <div class="h"><span class="eyebrow" style="flex:1">Sector allocation vs sector ratings</span><span class="badge dim" id="seg-cov">—</span></div>
   <div id="segment-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to see its segment exposure vs sector ratings.</div></div>
-</div>
-
-<div class="card rise d6">
-  <div class="h"><span class="eyebrow" style="flex:1">Returns · direct plans</span><span class="badge" id="ret-asof" style="color:var(--dim);background:transparent;border-color:var(--line);box-shadow:none">awaiting data</span></div>
-  <div class="retgrid">
-    <div class="ret"><div class="k">1W</div><div class="v" id="r-1w" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
-    <div class="ret"><div class="k">1M</div><div class="v" id="r-1m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
-    <div class="ret"><div class="k">3M</div><div class="v" id="r-3m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
-    <div class="ret"><div class="k">6M</div><div class="v" id="r-6m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
-    <div class="ret"><div class="k">1Y</div><div class="v" id="r-1y" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
-    <div class="ret"><div class="k">2Y</div><div class="v" id="r-2y" style="color:var(--dim)">—</div><div class="c">CAGR</div></div>
-    <div class="ret"><div class="k">3Y</div><div class="v" id="r-3y" style="color:var(--dim)">—</div><div class="c">CAGR</div></div>
-    <div class="ret"><div class="k">5Y</div><div class="v" id="r-5y" style="color:var(--dim)">—</div><div class="c">CAGR</div></div>
-  </div>
 </div>
 
 <div class="card rise d7">
@@ -324,26 +354,23 @@ td.sym{font-weight:700;font-size:12.5px}
   function band(v){return v>=70?"bull":v>=45?"amber":"bear";}
   function pillarClass(v){return v>=70?"good":v>=45?"warn":"bad";}
   function mqsChip(v){
+    // cc#721: MQS shown on /10 scale (v is stored /100); band cutoffs stay on the /100 value.
     if(v==null)return '<span class="gvm" style="color:var(--dim);background:var(--well)">—</span>';
     var c=v>=70?"g-hi":v>=45?"g-mid":"g-lo";
-    return '<span class="gvm '+c+'">'+v.toFixed(1)+'</span>';
+    return '<span class="gvm '+c+'">'+(v/10).toFixed(1)+'</span>';
   }
 
-  function setDial(mqs,basisPct){
-    var arc=$("dial-arc"),v=$("mqs"),k=arc.parentElement.parentElement.querySelector(".k");
+  // cc#721: MQS ring (dial removed). Value on /10 scale (mqs/10, 1dp); conic fill from mqs (0-100).
+  function setRing(mqs,basisPct){
+    var ring=$("mqs-ring"),v=$("mqs"),k=ring.querySelector(".k");
     if(mqs==null){
-      arc.style.strokeDashoffset=ARC_C; arc.style.opacity=.25; arc.style.stroke="var(--dim)";
-      v.textContent=em; v.style.color="var(--dim)"; v.style.fontSize="26px";
-      k.textContent="AWAITING SCORE"; return;
+      ring.style.background="conic-gradient(var(--dim) 0 0%,var(--well) 0 100%)";
+      v.textContent=em; v.style.color="var(--dim)"; k.textContent="AWAITING SCORE"; return;
     }
     var b=band(mqs), col="var(--"+b+")";
-    arc.style.opacity=1; arc.style.stroke=col;
-    arc.style.strokeDashoffset=ARC_C*(1-mqs/100);
-    v.textContent=mqs.toFixed(1); v.style.color=col; v.style.fontSize="34px";
-    // cc#528 reopened: Q pillar is permanently absent (0/14238 funds have a live rating
-    // source since cc#505) -- a bare "/100" implies the full 4-pillar model backs this
-    // number when it never does. Disclose the real basis instead of a misleading full score.
-    k.textContent=(basisPct!=null&&basisPct<100)?("PARTIAL BASIS · "+Math.round(basisPct)+"%"):(basisPct!=null?"FULL BASIS · Q+R+C+S":"MQS / 100");
+    ring.style.background="conic-gradient("+col+" 0 "+mqs+"%,var(--well) "+mqs+"% 100%)";
+    v.textContent=(mqs/10).toFixed(1); v.style.color=col;
+    k.textContent=(basisPct!=null&&basisPct<100)?("MQS /10 · "+Math.round(basisPct)+"% basis"):"MQS /10";
   }
 
   function setVerdict(mqs,computedAt,basisPct,basisLabel){
@@ -354,7 +381,7 @@ td.sym{font-weight:700;font-size:12.5px}
       sub.textContent="This fund hasn't been scored by the nightly MQS run yet."; return;
     }
     chip.style.background=""; chip.style.color=""; chip.style.boxShadow=""; chip.style.border="";
-    var label=mqs>=80?"ELITE":mqs>=65?"STRONG":mqs>=45?"AVERAGE":"WEAK";
+    var label=mqs>=80?"EXCELLENT":mqs>=65?"STRONG":mqs>=45?"AVERAGE":"WEAK";   // cc#721: relabel (bands unchanged)
     var cls=mqs>=80?"elite":mqs>=65?"strong":mqs>=45?"average":"weak";
     chip.classList.add(cls); chip.textContent=label;
     // cc#546: full 100% basis now attainable (Q+R+C+S) -- state the basis explicitly in both the
@@ -382,7 +409,7 @@ td.sym{font-weight:700;font-size:12.5px}
       return;
     }
     el.classList.add(pillarClass(val));
-    v.textContent=val.toFixed(1); v.style.color="";
+    v.textContent=(val/10).toFixed(1); v.style.color="";   // cc#721: /10 scale display
     bar.style.width=Math.max(0,Math.min(100,val))+"%";
     bar.style.background="var(--"+band(val)+")";
     s.textContent=weightPct+"% of MQS";
@@ -441,20 +468,24 @@ td.sym{font-weight:700;font-size:12.5px}
         +'<div style="color:var(--dim);font-size:12px;margin-top:9px">weighted portfolio GVM · '+(XR.resolvedPct!=null?XR.resolvedPct.toFixed(0):"—")+'% of disclosed weight resolved to a live GVM</div></div>';
       return;
     }
-    var maxW=Math.max.apply(null,hs.map(function(h){return Number(h.pct_weight)||0;}).concat([1]));
-    var rows=hs.filter(function(h){return XR.scorrOnly?h.gvm!=null:true;});
+    // cc#721 req_4: top 10 by weight + verdict-band rating (Strong>=7 / Average 5.5-7 / Weak<5.5).
+    var sorted=hs.slice().sort(function(a,b){return (Number(b.pct_weight)||0)-(Number(a.pct_weight)||0);});
+    var filtered=sorted.filter(function(h){return XR.scorrOnly?h.gvm!=null:true;});
+    var rows=filtered.slice(0,10);
+    var maxW=Math.max.apply(null,rows.map(function(h){return Number(h.pct_weight)||0;}).concat([1]));
+    function rateBand(g){if(g==null)return {t:"—",c:"var(--dim)"};g=Number(g);if(g>=7)return{t:"Strong",c:"var(--bull)"};if(g>=5.5)return{t:"Average",c:"var(--amber)"};return{t:"Weak",c:"var(--bear)"};}
     var trs=rows.map(function(h){
-      var resolved=h.gvm!=null;
+      var resolved=h.gvm!=null, rb=rateBand(h.gvm);
       return '<tr style="'+(resolved?'':'opacity:.42')+'">'
         +'<td class="sym">'+esc(h.company_name)+'</td>'
         +'<td class="num">'+wtCell(h.pct_weight,maxW)+'</td>'
-        +'<td class="num" style="color:var(--dim);font-size:11px">'+(h.resolved_nse_symbol?esc(h.resolved_nse_symbol):"—")+'</td>'
         +'<td>'+(resolved?gvmChip(h.gvm):'<span style="color:var(--dim);font-size:10.5px">unrated</span>')+'</td>'
+        +'<td style="text-align:left;font-weight:700;color:'+rb.c+'">'+rb.t+'</td>'
         +'</tr>';
     }).join("");
-    var hidden=hs.length-rows.length;
-    body.innerHTML='<table><thead><tr><th>Holding</th><th>Weight %</th><th>Symbol</th><th>Live GVM</th></tr></thead><tbody>'+trs+'</tbody></table>'
-      +(XR.scorrOnly&&hidden>0?'<div style="color:var(--dim);font-size:11px;padding:9px 6px 2px">'+hidden+' unresolved holding(s) hidden (foreign / unlisted / cash).</div>':'');
+    var moreN=filtered.length-rows.length;
+    body.innerHTML='<table><thead><tr><th>Holding</th><th>Weight %</th><th>Live GVM</th><th style="text-align:left">Rating</th></tr></thead><tbody>'+trs+'</tbody></table>'
+      +(moreN>0?'<div style="color:var(--dim);font-size:11px;padding:9px 6px 2px">Top 10 of '+filtered.length+' disclosed holdings'+(XR.scorrOnly?' · GVM-resolved only':'')+'.</div>':'');
   }
   function renderSegments(){
     var body=$("segment-body"),cov=$("seg-cov");if(!body)return;
@@ -499,6 +530,71 @@ td.sym{font-weight:700;font-size:12.5px}
     if(pg)pg.addEventListener("click",function(){XR.pgvmView=!XR.pgvmView;setBadge(pg,XR.pgvmView);renderXray();});
   }
 
+  // cc#721 req_6: Cost & Size vs category read-chips. Neutral wording; no red for large AUM.
+  function setCostSize(f){
+    var er=$("cs-er"),erc=$("cs-er-chip"),au=$("cs-aum"),auc=$("cs-aum-chip");
+    if(er){ er.textContent=f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2)+"%":em; er.style.color=f.expense_ratio!=null?"":"var(--dim)"; }
+    var cae=f.category_avg_er;
+    if(erc){ erc.className="chipd";
+      if(f.expense_ratio!=null&&cae!=null){ var d=Number(f.expense_ratio)-Number(cae);
+        if(d<-0.15){erc.classList.add("good");erc.textContent="CHEAP · cat "+Number(cae).toFixed(2)+"%";}
+        else if(d>0.15){erc.classList.add("bad");erc.textContent="EXPENSIVE · cat "+Number(cae).toFixed(2)+"%";}
+        else{erc.textContent="IN LINE · cat "+Number(cae).toFixed(2)+"%";}
+      } else { erc.textContent="cat avg —"; } }
+    if(au){ au.textContent=f.aum_cr!=null?"₹"+Number(f.aum_cr).toLocaleString("en-IN")+" Cr":em; au.style.color=f.aum_cr!=null?"":"var(--dim)"; }
+    var caa=f.category_avg_aum_cr;
+    if(auc){ auc.className="chipd";
+      if(f.aum_cr!=null&&caa!=null&&caa>0){ var r=Number(f.aum_cr)/Number(caa);
+        if(r>1.25)auc.textContent="LARGER than cat avg";
+        else if(r<0.75)auc.textContent="SMALLER than cat avg";
+        else auc.textContent="IN LINE with cat avg";
+      } else { auc.textContent="cat avg —"; } }
+  }
+  // cc#721 req_2: Returns vs category — value + cat ghost + delta (pp) chip per horizon.
+  function setReturns(f){
+    var ca=f.category_avgs||{};
+    [["1w","ret_1w"],["1m","ret_1m"],["3m","ret_3m"],["6m","ret_6m"],["1y","ret_1y"],["2y","ret_2y"]].forEach(function(p){
+      var key=p[0],fv=f[p[1]],cv=ca[p[1]];
+      var ve=$("r-"+key),ce=$("rc-"+key),de=$("rd-"+key);
+      if(ve){var pp=pct(fv);ve.textContent=pp.t;ve.style.color=pp.c;}
+      if(ce){var pre=(key==="2y")?"CAGR · cat ":"cat ";ce.textContent=cv!=null?(pre+(cv>=0?"+":"")+Number(cv).toFixed(1)+"%"):(pre+em);}
+      if(de){ if(fv!=null&&cv!=null){var dd=Number(fv)-Number(cv);de.textContent=(dd>=0?"▲ +":"▼ ")+dd.toFixed(1)+" pp";de.style.color=dd>=0?"var(--bull)":"var(--bear)";} else de.textContent=""; }
+    });
+    $("ret-asof").textContent=f.returns_asof?("as of "+f.returns_asof):"awaiting data";
+  }
+  // cc#721 req_3: top peers table (loaded fund highlighted, always present).
+  function setPeers(f){
+    var body=$("peers-body");if(!body)return;
+    var ps=f.peers||[];
+    if(!ps.length){body.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">No category peers found.</div>';return;}
+    var trs=ps.map(function(p){
+      var y1=pct(p.ret_1y),m6=pct(p.ret_6m),m1=pct(p.ret_1m),y2=pct(p.ret_2y);
+      return '<tr class="'+(p.is_self?"self":"")+'">'
+        +'<td class="sym">'+esc(p.name)+(p.is_self?' <span style="font-size:8.5px;color:var(--blue);font-weight:700">● THIS FUND</span>':'')+'</td>'
+        +'<td>'+mqsChip(p.mqs)+'</td>'
+        +'<td class="num" style="color:'+m1.c+'">'+m1.t+'</td>'
+        +'<td class="num" style="color:'+m6.c+'">'+m6.t+'</td>'
+        +'<td class="num" style="color:'+y1.c+'">'+y1.t+'</td>'
+        +'<td class="num" style="color:'+y2.c+'">'+y2.t+'</td></tr>';
+    }).join("");
+    body.innerHTML='<table><thead><tr><th>Fund</th><th>MQS</th><th>1M</th><th>6M</th><th>1Y</th><th>2Y</th></tr></thead><tbody>'+trs+'</tbody></table>';
+  }
+  function setHeroChips(f){
+    var mgr=$("f-mgr"),inc=$("f-incep"),cr=$("f-crisil"),sc=$("f-scode");
+    function chip(el,txt){ if(!el)return; if(txt){el.textContent=txt;el.style.display="";}else{el.style.display="none";} }
+    chip(cr, f.crisil_rank!=null?("CRISIL #"+f.crisil_rank):"");
+    chip(mgr, f.manager?("Mgr "+f.manager):"");
+    chip(inc, f.inception?("Since "+String(f.inception).slice(0,4)):"");
+    chip(sc, f.scheme_code?("Code "+f.scheme_code):"");
+  }
+  function setRank(f){
+    var el=$("f-rank");if(!el)return;
+    if(f.category_rank!=null&&f.category_peers!=null){
+      el.textContent="Rank "+f.category_rank+" / "+f.category_peers+(f.category?(" in "+f.category):"");
+      el.style.color="var(--mut)";
+    } else el.textContent="";
+  }
+
   function loadFund(code,onNotFound){
     fetch("/api/v15/fund/"+encodeURIComponent(code)).then(function(r){return r.json()}).then(function(d){
       if(!d||!d.fund){if(onNotFound)onNotFound();return;} var f=d.fund;
@@ -507,13 +603,11 @@ td.sym{font-weight:700;font-size:12.5px}
       $("f-cat").textContent=[f.category,f.plan].filter(Boolean).join(" · ")||"—";
       $("f-aum").textContent="AUM "+(f.aum_cr!=null?"₹"+Number(f.aum_cr).toLocaleString("en-IN")+" Cr":em);
       $("f-er").textContent="ER "+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2)+"%":em);
-      $("f-plan").textContent=f.plan||"Plan "+em;
-      setRet("r-1w",f.ret_1w);setRet("r-1m",f.ret_1m);setRet("r-3m",f.ret_3m);
-      setRet("r-6m",f.ret_6m);setRet("r-1y",f.ret_1y);setRet("r-2y",f.ret_2y);
-      setRetState("r-3y","3Y",f.ret_3y,f.ret_3y_state);
-      setRetState("r-5y","5Y",f.ret_5y,f.ret_5y_state);
-      $("ret-asof").textContent=f.returns_asof?("as of "+f.returns_asof):"awaiting data";
-      setDial(f.mqs,f.basis_pct); setVerdict(f.mqs,f.computed_at,f.basis_pct,f.basis_label);
+      setHeroChips(f);
+      setRing(f.mqs,f.basis_pct); setVerdict(f.mqs,f.computed_at,f.basis_pct,f.basis_label); setRank(f);
+      setCostSize(f);
+      setReturns(f);
+      setPeers(f);
       setPillar("pc-q",f.q_score,35);
       setPillar("pc-r",f.r_score,30);
       setPillar("pc-c",f.c_score,15);
