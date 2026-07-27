@@ -2433,14 +2433,14 @@ const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 function fmtTs(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return String(ts);return String(p.day).padStart(2,'0')+' '+MON[p.mon]+' '+String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');}
 // cc_task #76 4b: holding days = CURRENT_DATE - entry_ts::date + 1 (Day 1 = entered today)
 function holdDays(ts){if(!ts)return"--";const ed=String(ts).slice(0,10);const t=new Date(Date.now()+(5*60+30)*60000);const td=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');const d1=Date.parse(ed+'T00:00:00Z'),d2=Date.parse(td+'T00:00:00Z');if(isNaN(d1)||isNaN(d2))return"--";return Math.floor((d2-d1)/86400000)+1;}
-// cc#720: open-position tags shown right after the symbol (order: SYMBOL · star · NEW). NEW = entered
-// the current/latest trading session (holdDays===1, auto-drops next session — no manual state). Star =
-// this side passes Trade Check (v4/v3.3.2): STRONG -> filled ★, VALID -> outline ☆, else none. TC runs
-// ASYNC per unique symbol|side and is cached 15 min in _tcStarCache (module-level so it survives the 60s
-// re-render) — the page renders immediately with empty star slots that fill when TC lands (no call storm,
-// no blocking). data-tckey (not id) so the SAME sym|side across Table + Ladder + mobile all hydrate.
+// cc#720/cc#728: open-position tags shown right after the symbol (order: SYMBOL · star · NEW). NEW =
+// entered the current/latest trading session (holdDays===1, auto-drops next session — no manual state).
+// Star = this side passes Trade Check: STRONG -> filled ★, VALID -> outline ☆, else none. cc#728: the
+// star now reads the LATEST HOURLY SERVER BATCH (tc_position_stars, scored 09:30-15:30 IST) via ONE
+// endpoint /api/trade-check/position-stars — NO per-symbol live TC call from the render path (the cc#720
+// per-render 15-min cache is retired: it silently aged differently per symbol). data-tckey (not id) so
+// the SAME sym|side across Table + Ladder + mobile all hydrate from the single batch fetch.
 const _tcStarCache = new Map();          // "SYM|SIDE" -> {verdict, score, max, ts}
-const _tcStarInflight = new Set();
 function posTags(x){
   const key=(x.symbol||'')+'|'+(x.side||'');
   const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
@@ -2457,29 +2457,29 @@ function _fillTcStar(key){
   const v=_tcStarCache.get(key);
   try{document.querySelectorAll('.tc-star[data-tckey="'+key+'"]').forEach(el=>{el.innerHTML=v?_tcStarHtml(v):'';});}catch(e){}
 }
+// cc#728: ONE call to the hourly-batch endpoint (not one live TC per symbol). Throttled to at most
+// one fetch / 60s so the 60s re-render just re-paints from the cache; the batch only changes hourly.
+let _tcStarsFetchedAt=0;
 function hydrateTcStars(rows){
-  const now=Date.now(),TTL=15*60*1000,uniq=new Set();
-  (rows||[]).forEach(x=>{if(x&&x.symbol&&x.side)uniq.add(x.symbol+'|'+x.side);});
-  uniq.forEach(key=>{
-    const c=_tcStarCache.get(key);
-    if(c&&(now-c.ts)<TTL){_fillTcStar(key);return;}
-    if(_tcStarInflight.has(key))return;
-    _tcStarInflight.add(key);
-    const parts=key.split('|'),sym=parts[0],side=parts[1];
-    fetch('/api/trade-check/v4?symbol='+encodeURIComponent(sym)+'&direction='+encodeURIComponent(side))
-      .then(r=>r.json()).then(d=>{
-        if(d&&d.final_verdict&&d.tier1&&d.tier2){
-          _tcStarCache.set(key,{verdict:d.final_verdict,
-            score:(Number(d.tier1.score)||0)+(Number(d.tier2.score)||0),
-            max:(Number(d.tier1.max)||0)+(Number(d.tier2.max)||0),ts:Date.now()});
-          _fillTcStar(key);
-        }
-      }).catch(function(){}).finally(function(){_tcStarInflight.delete(key);});
-  });
+  const now=Date.now();
+  const paint=()=>{(rows||[]).forEach(x=>{if(x&&x.symbol&&x.side)_fillTcStar(x.symbol+'|'+x.side);});};
+  if(now-_tcStarsFetchedAt<60000&&_tcStarCache.size){paint();return;}
+  _tcStarsFetchedAt=now;
+  fetch('/api/trade-check/position-stars')
+    .then(r=>r.json()).then(d=>{
+      const map=(d&&d.stars)||{};
+      Object.keys(map).forEach(key=>{const v=map[key];
+        _tcStarCache.set(key,{verdict:v.verdict,score:Number(v.score)||0,max:Number(v.max)||0,ts:now});});
+      paint();
+      Object.keys(map).forEach(_fillTcStar);   // also fill any surface rendered before this landed
+    }).catch(function(){});
 }
 // cc_task #76 4c: capitalised basket label + buy=green / sell=red pill
 function basketLabel(b){return({buy_reversal:'Buy Reversal',buy_momentum:'Buy Momentum',buy_s1_bounce:'Buy S1 Bounce',sell_reversal:'Sell Reversal',sell_momentum:'Sell Momentum',sell_overbought:'Sell Overbought'})[b]||(b||'').replace(/_/g,' ');}
-function basketPill(b){const buy=(b||'').startsWith('buy');const bg=buy?'#eaf3de':'#fcebeb',fg=buy?'#3B6D11':'#A32D2D';return`<span style="background:${bg};border:1px solid ${fg};color:${fg};border-radius:5px;padding:1px 6px;font-size:10px;font-family:Sora">${basketLabel(b)}</span>`;}
+// cc#728: Buy Reversal -> aqua (--cyan #37D3E8 family), Sell Reversal -> amber (--amber #F5B94A
+// family); every other basket keeps its prior buy=green / sell=red styling untouched. One function =
+// consistent across Table, Ladder and mobile-card views (all render via basketPill).
+function basketPill(b){const REV={buy_reversal:['#d9f2f6','#0b6b7a'],sell_reversal:['#fbeecb','#8a5b00']};const buy=(b||'').startsWith('buy');const c=REV[b]||(buy?['#eaf3de','#3B6D11']:['#fcebeb','#A32D2D']);const bg=c[0],fg=c[1];return`<span style="background:${bg};border:1px solid ${fg};color:${fg};border-radius:5px;padding:1px 6px;font-size:10px;font-family:Sora">${basketLabel(b)}</span>`;}
 function fmtSince(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return"--";return String(p.day).padStart(2,'0')+'/'+MON[p.mon]+' '+String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');}
 function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
 // cc#326: 2-status taxonomy — OPEN (green) / SIGNAL·reason (amber). NEAR_MISS retired from the

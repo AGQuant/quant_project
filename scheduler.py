@@ -146,6 +146,7 @@ _v10_running = False
 _pcr_intraday_running = False
 _intraday_paper_running = False
 _tc_lite_running = False                          # cc_task #77: TC Lite screener pass guard
+_tc_position_stars_running = False                # cc#728: hourly open-position TC-star batch guard
 _smartgain_mtm_running = False                    # cc#123: SmartGain live MTM refresh guard
 _fu_sync_ran_this_week: Optional[date] = None
 _lot_sync_ran_today: Optional[date] = None   # cc#314: nightly Fyers lot-size audit day-lock
@@ -615,6 +616,56 @@ def _bg_tc_lite():
         log.error(f"tc_lite: {e}")
     finally:
         _tc_lite_running = False
+
+def _bg_tc_position_stars():
+    """cc#728: HOURLY Trade Check batch for every OPEN paper position -> tc_position_stars.
+    Fires on the :30 hour-mark 09:30-15:30 IST (trading days), replacing cc#720's on-demand
+    15-min per-symbol cache. Direction = the position's OWN side (PRIMARY: LONG position ->
+    LONG check, SHORT -> SHORT). Uses the canonical v4 engine (tc_v4_endpoints.trade_check_v4),
+    the SAME scorer the on-demand star used, so the star verdict vocabulary (STRONG/VALID) is
+    unchanged — only the cadence moves to a predictable hourly batch. Each run inserts a fresh
+    computed_at row (history kept); the dashboard reads the latest row per symbol|side, so there
+    is NO live TC call from the render path anymore (call-storm eliminated)."""
+    global _tc_position_stars_running
+    if _tc_position_stars_running: return
+    _tc_position_stars_running = True
+    try:
+        import tc_v4_endpoints
+        batch_ts = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS tc_position_stars (
+                symbol TEXT NOT NULL, side TEXT NOT NULL, verdict TEXT,
+                score NUMERIC, max_score NUMERIC, computed_at TIMESTAMP NOT NULL,
+                PRIMARY KEY (symbol, side, computed_at))""")
+            conn.commit()
+            cur.execute("SELECT DISTINCT symbol, side FROM v8_paper_positions "
+                        "WHERE status='OPEN' AND symbol IS NOT NULL")
+            pairs = cur.fetchall()
+        rows = []
+        for sym, side in pairs:
+            try:
+                d = tc_v4_endpoints.trade_check_v4(sym, side)
+                if d and not d.get("error") and d.get("final_verdict") and d.get("tier1") and d.get("tier2"):
+                    score = (float(d["tier1"].get("score") or 0) + float(d["tier2"].get("score") or 0))
+                    mx = (float(d["tier1"].get("max") or 0) + float(d["tier2"].get("max") or 0))
+                    rows.append((sym, side, d["final_verdict"], score, mx, batch_ts))
+            except Exception as ie:
+                log.error(f"tc_position_stars {sym}/{side}: {ie}")
+        if rows:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.executemany(
+                    """INSERT INTO tc_position_stars (symbol, side, verdict, score, max_score, computed_at)
+                       VALUES (%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (symbol, side, computed_at) DO UPDATE SET
+                           verdict=EXCLUDED.verdict, score=EXCLUDED.score, max_score=EXCLUDED.max_score""",
+                    rows)
+                conn.commit()
+        log.info(f"tc_position_stars: {len(rows)}/{len(pairs)} scored @ {batch_ts:%H:%M IST}")
+    except Exception as e:
+        log.error(f"tc_position_stars: {e}")
+    finally:
+        _tc_position_stars_running = False
+
 
 def _bg_smartgain_mtm():
     """cc#123 (P0): refresh smartgain_holdings.ltp/updated_at from the live feed
@@ -2802,6 +2853,10 @@ async def _scheduler_loop():
         # v8_engine EOD (15:45) and the evening journal review see today's official closes
         # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.
         # Weekday-only. NO GVM/QB cascade here — that stays in the 01:00-02:00 nightly chain.
+        # cc#728: HOURLY open-position TC-star batch on the :30 mark, 09:30-15:30 IST (trading days).
+        # Predictable star cadence (7 marks/day) replacing cc#720's per-render 15-min cache.
+        if now.weekday() < 5 and _is_trading_day(today) and m == 30 and 9 <= h <= 15:
+            _spawn(_bg_tc_position_stars)
         if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 32:

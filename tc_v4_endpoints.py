@@ -694,3 +694,33 @@ def trade_check_v4_health():
                     "VALID": "T1>=8 & T2>=5", "STRONG": "T1>=10 & T2>=5"},
         "status": "ok",
     }
+
+
+@router.get("/api/trade-check/position-stars")
+def trade_check_position_stars():
+    """cc#728: latest HOURLY TC star per open paper position (symbol|side). The V8 dashboard reads
+    THIS one endpoint instead of firing a live /v4 call per rendered symbol — the star reflects the
+    latest scheduled batch (tc_position_stars, written 09:30-15:30 IST by scheduler._bg_tc_position_stars),
+    so there is no per-render TC call-storm. Returns empty (never errors) if the batch table doesn't
+    exist yet (first batch not run) so the frontend degrades to no-star cleanly."""
+    try:
+        with psycopg.connect(_DB) as conn, conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('tc_position_stars')")
+            if cur.fetchone()[0] is None:
+                return {"rows": [], "stars": {}}
+            cur.execute("""
+                SELECT DISTINCT ON (symbol, side) symbol, side, verdict, score, max_score, computed_at
+                FROM tc_position_stars
+                ORDER BY symbol, side, computed_at DESC""")
+            db_rows = cur.fetchall()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "rows": [], "stars": {}}
+    out, stars = [], {}
+    for sym, side, verdict, score, mx, cat in db_rows:
+        item = {"symbol": sym, "side": side, "verdict": verdict,
+                "score": float(score) if score is not None else None,
+                "max": float(mx) if mx is not None else None,
+                "computed_at": cat.strftime("%Y-%m-%d %H:%M:%S") if cat else None}
+        out.append(item)
+        stars[f"{sym}|{side}"] = item
+    return {"rows": out, "stars": stars}
