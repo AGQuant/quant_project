@@ -2711,11 +2711,11 @@ def v8_daylog(era: str = "fresh"):
             cur.execute("""
                 WITH all_dates AS (
                     SELECT DISTINCT entry_ts::date AS d FROM v8_paper_positions
-                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
                     UNION SELECT DISTINCT entry_ts::date FROM v8_paper_trades
-                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
                     UNION SELECT DISTINCT COALESCE(closed_at::date, exit_ts::date) FROM v8_paper_trades
-                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
                 ),
                 opened AS (
                     SELECT entry_ts::date AS d,
@@ -2723,9 +2723,9 @@ def v8_daylog(era: str = "fresh"):
                         COUNT(*) FILTER (WHERE side='SHORT') AS short_opened,
                         COUNT(*) AS total_opened
                     FROM (SELECT entry_ts, side FROM v8_paper_positions
-                          WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
                           UNION ALL SELECT entry_ts, side FROM v8_paper_trades
-                          WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) e
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs') e
                     GROUP BY entry_ts::date
                 ),
                 closed AS (
@@ -2738,7 +2738,7 @@ def v8_daylog(era: str = "fresh"):
                         COUNT(*)*500 AS brokerage,
                         ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
                     FROM v8_paper_trades
-                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
                     GROUP BY COALESCE(closed_at::date, exit_ts::date)
                 ),
                 cumulative AS (

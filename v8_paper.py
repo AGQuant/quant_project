@@ -940,6 +940,10 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live", sim_ts=N
             if hit:
                 exit_ts = datetime.combine(d, time(15, 30))
                 exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,c,exit_ts,hit))
+            elif basket == "s1_reclaim_obs" and ets is not None and (d - ets.date()).days >= 21:
+                # cc#714: observation basket hard timeout — force-close at 21 calendar days, EOD close.
+                exit_ts = datetime.combine(d, time(15, 30))
+                exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,c,exit_ts,"TIMEOUT_21D"))
         return {"mode":"eod","date":str(d),"exits":exits,"closed":len(exits)}
 
     # mode == "live" — mirrors paper_tick EXIT section exactly
@@ -965,4 +969,7 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live", sim_ts=N
             elif cur_close>=sl: hit="SL"
         if hit:
             exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),hit))
+        elif basket == "s1_reclaim_obs" and ets is not None and (d - ets.date()).days >= 21:
+            # cc#714: observation basket hard timeout — force-close at 21 calendar days, prevailing 5-min close.
+            exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),"TIMEOUT_21D"))
     return {"mode":"live","date":str(d),"exits":exits,"closed":len(exits)}

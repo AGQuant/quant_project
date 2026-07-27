@@ -1316,15 +1316,18 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     if not _entry_guards(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
         return
 
-    try:
+    # cc#714: the s1_reclaim_obs observation basket is RING-FENCED — its dedicated 2-concurrent cap
+    # is enforced by the handler, and it is EXCLUDED from the standard slot pools both ways (never
+    # consumes a standard slot; standard baskets never count it toward theirs).
+    if basket != S1REC_BASKET:
+      try:
         buy_slots, sell_slots = _mood_slots(gate_fails)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT side, COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN'
+                WHERE status='OPEN' AND basket IS DISTINCT FROM %s
                 GROUP BY side
-            """)   # cc#502: sell_overbought + buy_s1_bounce (the only ring-fenced pools) are
-                   # removed -- every open position now belongs to the single standard pool.
+            """, (S1REC_BASKET,))   # cc#502: single standard pool; cc#714: observation excluded.
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)
@@ -1334,7 +1337,7 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         if paper_side == "SHORT" and short_open >= sell_slots:
             log.info(f"auto_paper {sym}: slot_full SHORT ({short_open}/{sell_slots})")
             _record_slot_block("SHORT", sym, short_open, sell_slots); return   # cc#256
-    except Exception as e:
+      except Exception as e:
         log.warning(f"auto_paper slot check {sym}: {e}"); return
 
     entry = round(cmp, 2)
@@ -2108,6 +2111,178 @@ def basket_funnel_keys(basket: str) -> set:
     return {f["key"] for f in BASKET_FILTERS.get(basket, [])}
 
 
+# -- cc#714: S1-RECLAIM OBSERVATION BASKET (ring-fenced, paper-only, 10-trading-day sunset) --------
+# A 5-min S1-reclaim LONG with SWING exits (target=R1 frozen, stop=1:1 mirror frozen, 21-cal-day hard
+# timeout — see v8_paper.run_paper_exits). RING-FENCED: own basket tag `s1_reclaim_obs`, dedicated
+# 2-concurrent cap, EXCLUDED from the standard slot pools + the V8 book aggregate (v8_endpoints
+# day-wise perf). Ships DISABLED — set app_config `s1_reclaim_obs_enabled`='1' to start the live
+# observation window (founder-controlled; Claude-web reviews daily, decides extend/kill). Backtest
+# verdict session_log id=9831; relocated out of V14 (whose 15:15 square-off would truncate the swing).
+S1REC_BASKET = "s1_reclaim_obs"
+S1REC_MAX_CONCURRENT = 2
+S1REC_SUNSET_TRADING_DAYS = 10
+S1REC_TIMEOUT_CAL_DAYS = 21   # enforced in v8_paper.run_paper_exits (basket-scoped)
+
+
+def _s1rec_enabled(conn) -> bool:
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='s1_reclaim_obs_enabled'")
+            r = cur.fetchone()
+        return bool(r and str(r[0]).strip().lower() in ("1", "true", "on", "yes"))
+    except Exception:
+        return False
+
+
+def _s1rec_sunset_reached(conn, target_date, sim_ts=None) -> bool:
+    """Stamp the first LIVE tick date once; block NEW entries once >= S1REC_SUNSET_TRADING_DAYS
+    distinct raw_prices trading days have elapsed since. Fail-CLOSED (block) on error so the
+    observation window can never silently over-run."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='s1_reclaim_obs_first_tick'")
+            r = cur.fetchone()
+            if not r or not r[0]:
+                if sim_ts is None:   # live only stamps the anchor; sim/backtest never does
+                    cur.execute("""INSERT INTO app_config (key, value) VALUES ('s1_reclaim_obs_first_tick', %s)
+                                   ON CONFLICT (key) DO NOTHING""", (str(target_date),))
+                    conn.commit()
+                return False
+            cur.execute("""SELECT COUNT(DISTINCT price_date) FROM raw_prices
+                           WHERE price_date > %s AND price_date <= %s""", (r[0], target_date))
+            return int(cur.fetchone()[0]) >= S1REC_SUNSET_TRADING_DAYS
+    except Exception as e:
+        log.warning(f"s1_reclaim_obs sunset check: {e}")
+        try: conn.rollback()
+        except Exception: pass
+        return True
+
+
+def _s1rec_prior5_low_touch(conn, sym, s1, today) -> bool:
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT MIN(low) FROM (SELECT low FROM raw_prices
+                           WHERE symbol=%s AND price_date < %s ORDER BY price_date DESC LIMIT 5) x""",
+                        (sym, today))
+            r = cur.fetchone()
+        return bool(r and r[0] is not None and float(r[0]) <= s1)
+    except Exception:
+        return False
+
+
+def _s1rec_last2_closes(conn, sym, today, cut) -> list:
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT close FROM intraday_prices
+                           WHERE symbol=%s AND ts::date=%s AND source='fyers_eq' AND ts <= %s
+                           ORDER BY ts DESC LIMIT 2""", (sym, today, cut))
+            return [float(r[0]) for r in cur.fetchall() if r[0] is not None]
+    except Exception:
+        return []
+
+
+def _s1rec_recent_entry(conn, sym, today) -> bool:
+    """One entry per symbol per day + 5-trading-session per-symbol cooldown: block if any
+    s1_reclaim_obs paper entry (open OR since-closed) exists within the last 5 trading sessions
+    (inclusive of today). Fail-CLOSED (block) on error — never double-enter."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT MIN(price_date) FROM (SELECT DISTINCT price_date FROM raw_prices
+                           WHERE price_date <= %s ORDER BY price_date DESC LIMIT 5) d""", (today,))
+            r = cur.fetchone()
+            floor_d = r[0] if r and r[0] else today
+            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND basket=%s AND entry_ts::date >= %s LIMIT 1",
+                        (sym, S1REC_BASKET, floor_d))
+            if cur.fetchone(): return True
+            cur.execute("SELECT 1 FROM v8_paper_trades WHERE symbol=%s AND basket=%s AND entry_ts::date >= %s LIMIT 1",
+                        (sym, S1REC_BASKET, floor_d))
+            return cur.fetchone() is not None
+    except Exception:
+        return True
+
+
+def _write_s1_reclaim_obs_qualified(conn, all_metrics: List[dict], target_date: date,
+                                    gate_fails, pivots, signal_ts_ist, sim_ts=None):
+    """cc#714 observation basket — see the block header above. Same handler signature/dispatch as
+    the four live baskets, so it inherits _write_qualified's per-basket try/except isolation."""
+    if not _s1rec_enabled(conn):
+        return
+    if gate_fails > 2:                      # precondition: V8 mood gate OPEN (not the most-defensive posture)
+        return
+    if _s1rec_sunset_reached(conn, target_date, sim_ts=sim_ts):
+        log.info("s1_reclaim_obs: sunset reached (>=10 trading days) — no new entries; open positions ride")
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN' AND basket=%s", (S1REC_BASKET,))
+            open_obs = int(cur.fetchone()[0])
+    except Exception as e:
+        log.warning(f"s1_reclaim_obs cap check: {e}")
+        return
+    if open_obs >= S1REC_MAX_CONCURRENT:
+        return
+
+    today = _today(sim_ts)
+    cut = _bar_cutoff(sim_ts)
+    fired = 0
+    for s in all_metrics:
+        if open_obs >= S1REC_MAX_CONCURRENT:
+            break
+        sym = s["symbol"]
+        cmp = s.get("_cmp")
+        pv = pivots.get(sym)
+        if not cmp or not pv:
+            continue
+        s1, r1 = pv.get("s1"), pv.get("r1")
+        if s1 is None or r1 is None:
+            continue
+        # (0915 EOD-frozen preconditions) rsi_month>70, gvm>=6.5, prev close>=200DMA (dma_200>=0)
+        rm, gv, d200 = s.get("rsi_month"), s.get("gvm_score"), s.get("dma_200")
+        if rm is None or float(rm) <= 70.0: continue
+        if gv is None or float(gv) < 6.5: continue
+        if d200 is None or float(d200) < 0.0: continue
+        # room: (R1 - bar close)/close > 2%
+        if (r1 - cmp) / cmp * 100.0 <= 2.0: continue
+        # S1 touched: prior-5-session low <= S1 OR today's running low <= S1
+        day_lo = s.get("day_low")
+        touched = (day_lo is not None and float(day_lo) <= s1) or _s1rec_prior5_low_touch(conn, sym, s1, today)
+        if not touched: continue
+        # reclaim bar: current 5-min close > S1 AND previous 5-min close <= S1*1.001 (tolerance)
+        closes = _s1rec_last2_closes(conn, sym, today, cut)
+        if len(closes) < 2: continue
+        cur_c, prev_c = closes[0], closes[1]
+        if not (cur_c > s1 and prev_c <= s1 * 1.001): continue
+        # one entry per symbol per day + 5-session cooldown
+        if _s1rec_recent_entry(conn, sym, today): continue
+
+        entry = round(cur_c, 2)
+        tgt = round(r1, 2)
+        stop = round(entry - (r1 - entry), 2)   # 1:1 mirror below entry (LONG), frozen
+        snap = {"s1": s1, "r1": r1, "prev_close": prev_c, "rsi_month": rm, "gvm_score": gv,
+                "dma_200": d200, "room_pct": round((r1 - cur_c) / cur_c * 100.0, 2),
+                "target": tgt, "stop": stop, "observation": True, "spec": "S1RECLAIM_OBS cc#714"}
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO v8_qualified
+                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp, rsi_month, dma_200, metrics, source)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
+                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING""",
+                    (sym, S1REC_BASKET, target_date, signal_ts_ist, gv, cur_c, rm, d200, json.dumps(snap)))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"s1_reclaim_obs qualified {sym}: {e}")
+            try: conn.rollback()
+            except Exception: pass
+        try:
+            _auto_paper_entry(conn, sym, S1REC_BASKET, "BUY", cur_c, pv,
+                              target_date, gate_fails, sim_ts=sim_ts, target=tgt, stop=stop)
+            open_obs += 1; fired += 1
+        except Exception as e:
+            log.warning(f"s1_reclaim_obs entry {sym}: {e}")
+    if fired:
+        log.info(f"s1_reclaim_obs: {fired} observation entr{'y' if fired == 1 else 'ies'} this tick (cap {S1REC_MAX_CONCURRENT})")
+
+
 def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
     """cc#502: the generic FILTER_CONFIG score-gate loop is retired — all four baskets are now
     dedicated strict-AND handlers (zero baskets were left running through it). This is now just
@@ -2131,6 +2306,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
         (_write_sell_reversal_v61_qualified, "sell_reversal_v61"),
         (_write_sell_momentum_v4_qualified,  "sell_momentum_v4"),
         (_write_buy_momentum_v3_qualified,   "buy_momentum_v3"),
+        (_write_s1_reclaim_obs_qualified,    "s1_reclaim_obs"),   # cc#714: ring-fenced observation (enable-gated)
     ):
         try:
             _handler(conn, all_metrics, target_date,
