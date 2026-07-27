@@ -1,24 +1,56 @@
 """
-scorr_auth.py — Simple password gate for all HTML pages.
+scorr_auth.py — password gate for all HTML pages (AUTH_HARDENING_V2, cc#709).
 
-Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
-Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
-Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /screener, /fpc, /news, /holdings, /filters
-Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status, /authdebug
+Password : env SCORR_AUTH_PASSWORD (set in Railway), falling back to _PASSWORD only if the
+           env var is missing (a warning is logged on fallback).
+Sessions : random per-login token (secrets.token_hex(32)) stored in auth_sessions
+           (token PK, created_at, expires_at). _is_authed = token row exists AND not expired.
+           /login inserts a 7-day token + lazily prunes expired rows; /logout DELETEs the row
+           (real server-side revocation). Old static-hash cookies are invalid after deploy — one
+           re-login (acceptable per spec).
+Cookie   : scorr_auth (7-day, httponly, path=/, secure, samesite=none) — flags unchanged.
+Login    : rate-limited to 5 failed attempts per IP per 10 min (in-memory, single process) -> 429.
+Protected: gated by the PROTECTED set (extended in main.py); /authdebug REMOVED (was a live
+           unauthenticated token leak = auth bypass).
 """
 
-import hashlib
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+import logging
+import os
+import secrets
+import time
 
+import psycopg
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+log = logging.getLogger("scorr.auth")
 router = APIRouter()
 
 COOKIE_NAME = "scorr_auth"
 PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/fpc", "/news", "/holdings", "/filters"}
-_SALT = "scorr2026"
 
-# Hardcoded password — change here to update.
+# Fallback password ONLY if SCORR_AUTH_PASSWORD env var is missing (warned). Do not commit a new value.
 _PASSWORD = "556700"
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+SESSION_DAYS = 7
+RATE_MAX = 5                 # max failed logins ...
+RATE_WINDOW = 10 * 60        # ... per IP per 10 minutes
+_FAILED = {}                 # {ip: [unix_ts, ...]} — in-memory, single process (spec-approved)
+_warned_fallback = False
+
+
+def _conn():
+    return psycopg.connect(DATABASE_URL)
+
+
+def _ensure_sessions():
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""CREATE TABLE IF NOT EXISTS auth_sessions (
+            token TEXT PRIMARY KEY,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            expires_at TIMESTAMPTZ NOT NULL)""")
+        conn.commit()
 
 
 def _js_str(s: str) -> str:
@@ -29,30 +61,92 @@ def _js_str(s: str) -> str:
 def _clean(s: str) -> str:
     if s is None:
         return ""
-    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"):
+    for ch in ("​", "‌", "‍", "﻿", "\xa0"):
         s = s.replace(ch, "")
     return s.strip()
 
 
 def _password() -> str:
+    global _warned_fallback
+    env = os.environ.get("SCORR_AUTH_PASSWORD")
+    if env:
+        return _clean(env)
+    if not _warned_fallback:
+        log.warning("SCORR_AUTH_PASSWORD not set — falling back to the in-repo _PASSWORD constant. "
+                    "Set the env var in Railway (alphanumeric 12+).")
+        _warned_fallback = True
     return _PASSWORD
 
 
-def _expected_token() -> str:
-    return hashlib.sha256(f"{_password()}:{_SALT}".encode()).hexdigest()
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limited(ip: str) -> bool:
+    now = time.time()
+    hits = [t for t in _FAILED.get(ip, []) if now - t < RATE_WINDOW]
+    _FAILED[ip] = hits
+    return len(hits) >= RATE_MAX
+
+
+def _record_fail(ip: str):
+    _FAILED.setdefault(ip, []).append(time.time())
+
+
+def _clear_fails(ip: str):
+    _FAILED.pop(ip, None)
 
 
 def _is_authed(request: Request) -> bool:
-    return request.cookies.get(COOKIE_NAME, "") == _expected_token()
+    token = request.cookies.get(COOKIE_NAME, "")
+    if not token:
+        return False
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM auth_sessions WHERE token=%s AND expires_at > now()", (token,))
+            return cur.fetchone() is not None
+    except Exception as e:
+        # fail closed — a DB blip redirects to /login rather than granting access
+        log.warning(f"auth session check failed: {e}")
+        return False
 
 
-def _login_page(error: bool = False) -> str:
-    err = (
-        '<p style="color:#dd3a4a;font-size:13px;margin-bottom:16px;font-weight:600;">'
-        "Incorrect password. Try again.</p>"
-        if error
-        else ""
-    )
+def _new_session_token() -> str:
+    token = secrets.token_hex(32)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM auth_sessions WHERE expires_at < now()")   # lazy cleanup
+        cur.execute("INSERT INTO auth_sessions (token, expires_at) VALUES (%s, now() + %s::interval)",
+                    (token, f"{SESSION_DAYS} days"))
+        conn.commit()
+    return token
+
+
+def _revoke_token(token: str):
+    if not token:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM auth_sessions WHERE token=%s", (token,))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"auth session revoke failed: {e}")
+
+
+def _login_page(error: bool = False, rate_limited: bool = False) -> str:
+    if rate_limited:
+        err = ('<p style="color:#dd3a4a;font-size:13px;margin-bottom:16px;font-weight:600;">'
+               "Too many attempts, wait 10 minutes.</p>")
+    elif error:
+        err = ('<p style="color:#dd3a4a;font-size:13px;margin-bottom:16px;font-weight:600;">'
+               "Incorrect password. Try again.</p>")
+    else:
+        err = ""
+    # cc#709: randomized field name per page load defeats browser autofill; POST reads the first
+    # field whose name starts with 'pw_'. autocomplete='new-password' is the strongest no-autofill hint.
+    field = "pw_" + secrets.token_hex(3)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -86,8 +180,8 @@ button:hover{{background:#9a4507;}}
   <div class="logo">V8 Dashboard</div>
   <div class="sub">Long-Short Futures Signals</div>
   {err}
-  <form method="POST" action="/login">
-    <input type="password" name="password" placeholder="Enter password" autofocus autocomplete="current-password"/>
+  <form method="POST" action="/login" autocomplete="off">
+    <input type="password" name="{field}" placeholder="Enter password" autofocus autocomplete="new-password"/>
     <button type="submit">Enter &rarr;</button>
   </form>
   <div class="foot">Authorised access only</div>
@@ -96,12 +190,20 @@ button:hover{{background:#9a4507;}}
 </html>"""
 
 
-def _set_auth_cookie(response):
+def _set_auth_cookie(response, token: str):
     response.set_cookie(
-        COOKIE_NAME, _expected_token(),
-        max_age=7 * 24 * 3600, path="/",
+        COOKIE_NAME, token,
+        max_age=SESSION_DAYS * 24 * 3600, path="/",
         httponly=True, samesite="none", secure=True,
     )
+
+
+@router.on_event("startup")
+async def _startup():
+    try:
+        _ensure_sessions()
+    except Exception as e:
+        log.error(f"auth_sessions ensure on startup failed: {e}")
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -113,12 +215,24 @@ async def login_get(request: Request):
 
 @router.post("/login", include_in_schema=False)
 async def login_post(request: Request):
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        return HTMLResponse(_login_page(rate_limited=True), status_code=429)
     form = await request.form()
-    password = _clean(str(form.get("password", "")))
-    correct = _password()
+    # cc#709: field name is randomized ('pw_' + hex) — read the first pw_* field.
+    raw = ""
+    for k, v in form.items():
+        if k.startswith("pw_"):
+            raw = str(v)
+            break
+    if not raw:
+        raw = str(form.get("password", ""))   # defensive fallback
+    password = _clean(raw)
     next_url = str(form.get("next", "/")) or "/"
-    if password == correct:
+    if password and password == _password():
+        _clear_fails(ip)
         safe_next = next_url if next_url.startswith("/") else "/"
+        token = _new_session_token()
         html = (
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             f"<meta http-equiv='refresh' content='0;url={safe_next}'>"
@@ -127,13 +241,17 @@ async def login_post(request: Request):
             "</body></html>"
         )
         response = HTMLResponse(html, status_code=200)
-        _set_auth_cookie(response)
+        _set_auth_cookie(response, token)
         return response
+    _record_fail(ip)
+    if _rate_limited(ip):
+        return HTMLResponse(_login_page(rate_limited=True), status_code=429)
     return HTMLResponse(_login_page(error=True), status_code=401)
 
 
 @router.get("/logout", include_in_schema=False)
-async def logout():
+async def logout(request: Request):
+    _revoke_token(request.cookies.get(COOKIE_NAME, ""))
     response = RedirectResponse(url="/login", status_code=302)
     response.set_cookie(
         COOKIE_NAME, "",
@@ -144,20 +262,3 @@ async def logout():
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return response
-
-
-@router.get("/authdebug", include_in_schema=False)
-async def authdebug(request: Request):
-    raw_cookie_header = request.headers.get("cookie", "")
-    cookie_val = request.cookies.get(COOKIE_NAME, "")
-    expected = _expected_token()
-    return JSONResponse({
-        "saw_cookie_header": raw_cookie_header,
-        "scorr_auth_cookie_value": cookie_val,
-        "expected_token": expected,
-        "match": cookie_val == expected,
-        "is_authed": _is_authed(request),
-        "all_cookie_names": list(request.cookies.keys()),
-        "host": request.headers.get("host", ""),
-        "x_forwarded_proto": request.headers.get("x-forwarded-proto", ""),
-    })
