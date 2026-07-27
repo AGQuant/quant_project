@@ -386,6 +386,18 @@ def _ensure_returns_cols(cur):
     cur.execute("ALTER TABLE mf_nav_history ADD COLUMN IF NOT EXISTS nav_kind TEXT")
 
 
+def _ensure_cat_avg_return_cols(cur):
+    """cc#721 req_2: category-average short-horizon returns for the V15 Returns strip cat-ghosts +
+    delta chips. App-side ADD COLUMN (never the run_sql lock-blocked path), same as _ensure_returns_cols.
+    avg_ret_1y/3y/5y already exist in mf_category_averages; add 1w/1m/3m/6m/2y."""
+    cur.execute("""ALTER TABLE mf_category_averages
+        ADD COLUMN IF NOT EXISTS avg_ret_1w NUMERIC,
+        ADD COLUMN IF NOT EXISTS avg_ret_1m NUMERIC,
+        ADD COLUMN IF NOT EXISTS avg_ret_3m NUMERIC,
+        ADD COLUMN IF NOT EXISTS avg_ret_6m NUMERIC,
+        ADD COLUMN IF NOT EXISTS avg_ret_2y NUMERIC""")
+
+
 def _amfi_aaum_quarter(today=None):
     """Latest COMPLETED AMFI scheme-wise AAUM quarter (financial year Apr-Mar). AMFI publishes
     scheme-wise AAUM quarterly (~4-5 wks after quarter end). Returns (fy_str, quarter_str)."""
@@ -1183,7 +1195,7 @@ def v15_fund(scheme_code: str):
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         try:
-            _ensure_returns_cols(cur); conn.commit()
+            _ensure_returns_cols(cur); _ensure_cat_avg_return_cols(cur); conn.commit()
         except Exception:
             conn.rollback()
         cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, m.expense_ratio, m.aum_cr,
@@ -1192,7 +1204,8 @@ def v15_fund(scheme_code: str):
                               m.ret_5y, m.returns_asof,
                               s.mqs, s.q_score, s.r_score, s.c_score, s.s_score, s.computed_at,
                               s.basis_pct, s.basis_label, s.coverage_pct,
-                              ca.avg_expense_ratio
+                              ca.avg_expense_ratio, ca.avg_ret_1w, ca.avg_ret_1m, ca.avg_ret_3m,
+                              ca.avg_ret_6m, ca.avg_ret_1y, ca.avg_ret_2y, ca.avg_ret_3y
                        FROM mf_master m
                        LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
                        LEFT JOIN mf_category_averages ca ON ca.category = m.category
@@ -1202,6 +1215,36 @@ def v15_fund(scheme_code: str):
             return {"error": "not found"}
         cols = [d[0] for d in cur.description]
         m = dict(zip(cols, r))
+        raw_cat = m.get("category")   # stored category (rank/peers partition key) before _derive_cat below
+        # cc#721 req_1: category rank by MQS (RANK() partitioned by category) — only among scored funds.
+        _rank = _peers_n = None
+        if raw_cat:
+            cur.execute("""SELECT rnk, cnt FROM (
+                               SELECT mm.scheme_code,
+                                      RANK() OVER (ORDER BY ss.mqs DESC NULLS LAST) AS rnk,
+                                      COUNT(*) OVER () AS cnt
+                               FROM mf_master mm JOIN mf_scores ss ON ss.scheme_code = mm.scheme_code
+                               WHERE mm.category = %s AND ss.mqs IS NOT NULL
+                           ) t WHERE scheme_code = %s""", (raw_cat, scheme_code))
+            rk = cur.fetchone()
+            if rk:
+                _rank, _peers_n = int(rk[0]), int(rk[1])
+        # cc#721 req_3: top-5 same-category Direct-Growth peers by 1Y, ALWAYS including the loaded fund.
+        _peer_rows = []
+        if raw_cat:
+            _psql = """SELECT m2.scheme_code, m2.name, m2.ret_1m, m2.ret_6m, m2.ret_1y, m2.ret_2y,
+                              s2.mqs, s2.q_score
+                       FROM mf_master m2 LEFT JOIN mf_scores s2 ON s2.scheme_code = m2.scheme_code"""
+            cur.execute(_psql + """ WHERE m2.category=%s AND lower(m2.name) LIKE '%%direct%%'
+                                      AND lower(m2.name) LIKE '%%growth%%'
+                                    ORDER BY m2.ret_1y DESC NULLS LAST LIMIT 5""", (raw_cat,))
+            pcols = [d[0] for d in cur.description]
+            _peer_rows = [dict(zip(pcols, pr)) for pr in cur.fetchall()]
+            if not any(str(p.get("scheme_code")) == str(scheme_code) for p in _peer_rows):
+                cur.execute(_psql + " WHERE m2.scheme_code=%s", (scheme_code,))
+                sr = cur.fetchone()
+                if sr:
+                    _peer_rows.append(dict(zip([d[0] for d in cur.description], sr)))
     cat_avg_er = m.pop("avg_expense_ratio", None)
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
@@ -1241,6 +1284,26 @@ def v15_fund(scheme_code: str):
                        "text": f"AUM ₹{aum:,.0f} Cr is below ₹500 Cr -- smaller "
                                f"funds carry higher volatility/liquidity risk."})
     m["red_flags"] = flags
+    # cc#721 req_2: category-average returns (Returns-vs-category ghosts + delta chips).
+    m["category_avgs"] = {
+        "ret_1w": _f2(m.pop("avg_ret_1w", None)), "ret_1m": _f2(m.pop("avg_ret_1m", None)),
+        "ret_3m": _f2(m.pop("avg_ret_3m", None)), "ret_6m": _f2(m.pop("avg_ret_6m", None)),
+        "ret_1y": _f2(m.pop("avg_ret_1y", None)), "ret_2y": _f2(m.pop("avg_ret_2y", None)),
+        "ret_3y": _f2(m.pop("avg_ret_3y", None)),
+    }
+    # cc#721 req_1: hero "Rank #N of M in <category>".
+    m["category_rank"] = _rank
+    m["category_peers"] = _peers_n
+    # cc#721 req_3: top-5 peers (loaded fund always present, highlighted, even if outside top 5).
+    peers = []
+    for pr in _peer_rows:
+        for kk in ("ret_1m", "ret_6m", "ret_1y", "ret_2y", "mqs", "q_score"):
+            pr[kk] = _f2(pr.get(kk))
+        pr["scheme_code"] = str(pr.get("scheme_code"))
+        pr["is_self"] = (pr["scheme_code"] == str(scheme_code))
+        peers.append(pr)
+    peers.sort(key=lambda p: (p.get("ret_1y") is None, -(p.get("ret_1y") if p.get("ret_1y") is not None else -1e9)))
+    m["peers"] = peers[:6]   # up to 5 + self if self was outside the top 5
     return {"fund": m}
 
 
@@ -1749,22 +1812,28 @@ def compute_mf_category_averages(conn=None):
     conn = conn or _conn()
     try:
         with conn.cursor() as cur:
+            _ensure_cat_avg_return_cols(cur)   # cc#721 req_2: 1w/1m/3m/6m/2y avg columns
             cur.execute("""
-                SELECT category, AVG(expense_ratio), AVG(ret_1y), AVG(ret_3y), AVG(ret_5y), COUNT(*)
+                SELECT category, AVG(expense_ratio), AVG(ret_1y), AVG(ret_3y), AVG(ret_5y), COUNT(*),
+                       AVG(ret_1w), AVG(ret_1m), AVG(ret_3m), AVG(ret_6m), AVG(ret_2y)
                 FROM mf_master
                 WHERE category = ANY(%s)
                 GROUP BY category
             """, (list(EQUITY_CATEGORY_WHITELIST),))
             rows = cur.fetchall()
-            for cat, avg_er, avg_1y, avg_3y, avg_5y, n in rows:
+            for cat, avg_er, avg_1y, avg_3y, avg_5y, n, avg_1w, avg_1m, avg_3m, avg_6m, avg_2y in rows:
                 cur.execute("""INSERT INTO mf_category_averages
-                    (category, avg_expense_ratio, avg_ret_1y, avg_ret_3y, avg_ret_5y, n_funds, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                    (category, avg_expense_ratio, avg_ret_1y, avg_ret_3y, avg_ret_5y, n_funds,
+                     avg_ret_1w, avg_ret_1m, avg_ret_3m, avg_ret_6m, avg_ret_2y, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                     ON CONFLICT (category) DO UPDATE SET
                         avg_expense_ratio=EXCLUDED.avg_expense_ratio, avg_ret_1y=EXCLUDED.avg_ret_1y,
                         avg_ret_3y=EXCLUDED.avg_ret_3y, avg_ret_5y=EXCLUDED.avg_ret_5y,
+                        avg_ret_1w=EXCLUDED.avg_ret_1w, avg_ret_1m=EXCLUDED.avg_ret_1m,
+                        avg_ret_3m=EXCLUDED.avg_ret_3m, avg_ret_6m=EXCLUDED.avg_ret_6m,
+                        avg_ret_2y=EXCLUDED.avg_ret_2y,
                         n_funds=EXCLUDED.n_funds, updated_at=NOW()""",
-                    (cat, avg_er, avg_1y, avg_3y, avg_5y, n))
+                    (cat, avg_er, avg_1y, avg_3y, avg_5y, n, avg_1w, avg_1m, avg_3m, avg_6m, avg_2y))
             # cc#520: purge stray/stale category rows outside the whitelist (Banking & PSU debt +
             # old-naming-convention rows from the pre-_derive_cat 12-fund seed era, e.g. bare
             # "Flexi Cap" alongside the real "Flexi Cap Fund") -- these must not linger and feed a
