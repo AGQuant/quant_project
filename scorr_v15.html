@@ -205,6 +205,12 @@ tr.self td.sym{color:var(--blue)}
   <div class="chip" id="hdr-chip"><span class="dot"></span><span id="hdr-chip-txt">MQS · loading…</span></div>
 </div>
 
+<!-- cc#722: category pill bar relocated ABOVE the search (multi-select; filters BOTH search + screener) -->
+<div class="tabs rise d2" id="tabs" style="margin:0 0 12px">
+  <div class="tab on" data-cat="">All</div>
+  <div class="tab" data-cat="Flexi Cap Fund">Flexi Cap</div><div class="tab" data-cat="Large Cap Fund">Large Cap</div><div class="tab" data-cat="Large & Mid Cap Fund">Large &amp; Mid Cap</div><div class="tab" data-cat="Mid Cap Fund">Mid Cap</div><div class="tab" data-cat="Small Cap Fund">Small Cap</div><div class="tab" data-cat="Multi Cap Fund">Multi Cap</div><div class="tab" data-cat="Sectoral/Thematic Fund">Sectoral/Thematic</div><div class="tab" data-cat="Focused Fund">Focused</div><div class="tab" data-cat="ELSS">ELSS</div><div class="tab" data-cat="Value Fund/Contra Fund">Value/Contra</div><div class="tab" data-cat="Dividend Yield Fund">Dividend Yield</div>
+</div>
+
 <div class="search rise d2">
   <div class="box">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -260,7 +266,7 @@ tr.self td.sym{color:var(--blue)}
 
 <!-- 4 · TOP 5 PEERS -->
 <div class="card rise d5">
-  <div class="h"><span class="eyebrow" style="flex:1">Top peers · same category</span><span class="badge dim">DIRECT · GROWTH · BY 1Y</span></div>
+  <div class="h"><span class="eyebrow" style="flex:1">Top peers · same category</span><span class="badge dim">DIRECT · GROWTH · BY MQS</span></div>
   <div id="peers-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to see its category peers.</div></div>
 </div>
 
@@ -272,7 +278,7 @@ tr.self td.sym{color:var(--blue)}
 </div>
 
 <!-- 6 · FQS FACTORS -->
-<div class="eyebrow rise d6" style="margin-top:20px">FQS factors · Q 35 / R 30 / C 15 / S 20</div>
+<div class="eyebrow rise d6" style="margin-top:20px" id="fqs-hdr">FQS factors · Q 50 / R 25 / C 15 / S 10</div>
 <div class="pillars rise d6">
   <div class="pc" id="pc-q"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
   <div class="pc" id="pc-r"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
@@ -291,10 +297,7 @@ tr.self td.sym{color:var(--blue)}
   <div id="flags-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">Search a fund to check for red flags.</div></div>
 </div>
 
-<div class="eyebrow rise d7" style="margin-top:30px">Screener · equity-oriented mutual fund universe</div>
-<div class="tabs rise d7" id="tabs">
-  <div class="tab on" data-cat="Flexi Cap Fund">Flexi Cap</div><div class="tab" data-cat="Large Cap Fund">Large Cap</div><div class="tab" data-cat="Large & Mid Cap Fund">Large &amp; Mid Cap</div><div class="tab" data-cat="Mid Cap Fund">Mid Cap</div><div class="tab" data-cat="Small Cap Fund">Small Cap</div><div class="tab" data-cat="Multi Cap Fund">Multi Cap</div><div class="tab" data-cat="Sectoral/Thematic Fund">Sectoral/Thematic</div><div class="tab" data-cat="Focused Fund">Focused</div><div class="tab" data-cat="ELSS">ELSS</div><div class="tab" data-cat="Value Fund/Contra Fund">Value/Contra</div><div class="tab" data-cat="Dividend Yield Fund">Dividend Yield</div>
-</div>
+<div class="eyebrow rise d7" style="margin-top:30px" id="scr-label">Screener · equity-oriented mutual fund universe</div>
 <div class="card rise d7" style="margin-top:11px">
   <table>
     <thead><tr><th>Fund</th><th>MQS</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th></tr></thead>
@@ -571,13 +574,14 @@ tr.self td.sym{color:var(--blue)}
       var y1=pct(p.ret_1y),m6=pct(p.ret_6m),m1=pct(p.ret_1m),y2=pct(p.ret_2y);
       return '<tr class="'+(p.is_self?"self":"")+'">'
         +'<td class="sym">'+esc(p.name)+(p.is_self?' <span style="font-size:8.5px;color:var(--blue);font-weight:700">● THIS FUND</span>':'')+'</td>'
+        +'<td style="text-align:left;color:var(--mut);font-size:10.5px">'+esc(p.category||"—")+'</td>'
         +'<td>'+mqsChip(p.mqs)+'</td>'
         +'<td class="num" style="color:'+m1.c+'">'+m1.t+'</td>'
         +'<td class="num" style="color:'+m6.c+'">'+m6.t+'</td>'
         +'<td class="num" style="color:'+y1.c+'">'+y1.t+'</td>'
         +'<td class="num" style="color:'+y2.c+'">'+y2.t+'</td></tr>';
     }).join("");
-    body.innerHTML='<table><thead><tr><th>Fund</th><th>MQS</th><th>1M</th><th>6M</th><th>1Y</th><th>2Y</th></tr></thead><tbody>'+trs+'</tbody></table>';
+    body.innerHTML='<table><thead><tr><th>Fund</th><th style="text-align:left">Category</th><th>MQS</th><th>1M</th><th>6M</th><th>1Y</th><th>2Y</th></tr></thead><tbody>'+trs+'</tbody></table>';
   }
   function setHeroChips(f){
     var mgr=$("f-mgr"),inc=$("f-incep"),cr=$("f-crisil"),sc=$("f-scode");
@@ -608,10 +612,12 @@ tr.self td.sym{color:var(--blue)}
       setCostSize(f);
       setReturns(f);
       setPeers(f);
-      setPillar("pc-q",f.q_score,35);
-      setPillar("pc-r",f.r_score,30);
-      setPillar("pc-c",f.c_score,15);
-      setPillar("pc-s",f.s_score,20);
+      var w=f.mqs_weights||{q:50,r:25,c:15,s:10};   // cc#724: weights are dynamic, never hardcoded
+      var fq=$("fqs-hdr"); if(fq)fq.textContent="FQS factors · Q "+w.q+" / R "+w.r+" / C "+w.c+" / S "+w.s;
+      setPillar("pc-q",f.q_score,w.q);
+      setPillar("pc-r",f.r_score,w.r);
+      setPillar("pc-c",f.c_score,w.c);
+      setPillar("pc-s",f.s_score,w.s);
       setPortfolioGvm(f);
       setFlags(f.red_flags);
     }).catch(function(){if(onNotFound)onNotFound();});
@@ -662,12 +668,29 @@ tr.self td.sym{color:var(--blue)}
     }).catch(function(){});
   }
 
-  // tabs
+  // cc#722: category pill bar — MULTI-SELECT, filters BOTH the screener AND search/autocomplete.
+  // Empty selection = "All" (whole equity universe). Selecting a category deselects All; selecting
+  // All (or clearing the last category) returns to All-only. Multiple categories = OR (union).
   var tabs=$("tabs");
+  var selCats=new Set();   // empty => All
+  function catsParam(){return Array.from(selCats).join(",");}
+  function paintTabs(){
+    Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(x){
+      var c=x.getAttribute("data-cat")||"";
+      x.classList.toggle("on", c===""?(selCats.size===0):selCats.has(c));
+    });
+  }
+  function applyCats(){
+    paintTabs();
+    loadScreener(catsParam());
+    if(q&&q.value.trim().length>=2)runSearch();
+  }
   Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(t){
     t.addEventListener("click",function(){
-      Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(x){x.classList.remove("on")});
-      t.classList.add("on"); loadScreener(t.getAttribute("data-cat")||t.textContent.trim());
+      var c=t.getAttribute("data-cat")||"";
+      if(c===""){selCats.clear();}                                   // All -> clear others
+      else{ if(selCats.has(c))selCats.delete(c); else selCats.add(c); }  // toggle; last removed -> All
+      applyCats();
     });
   });
 
@@ -677,7 +700,7 @@ tr.self td.sym{color:var(--blue)}
   function runSearch(){
     var v=q.value.trim();
     if(v.length<2){hideAc();return;}
-    fetch("/api/v15/search?q="+encodeURIComponent(v)).then(function(r){return r.json()}).then(function(d){
+    fetch("/api/v15/search?q="+encodeURIComponent(v)+"&cats="+encodeURIComponent(catsParam())).then(function(r){return r.json()}).then(function(d){
       var rs=(d&&d.results)||[];
       if(!rs.length){hideAc();return;}
       ac.innerHTML=rs.map(function(f){
@@ -707,7 +730,8 @@ tr.self td.sym{color:var(--blue)}
   // initial load
   bindXrayToggles();
   loadStats();
-  loadScreener("Flexi Cap Fund");
+  paintTabs();               // cc#722: All selected by default
+  loadScreener("");          // All = whole equity universe
   loadDefaultFund();
 })();
 </script>

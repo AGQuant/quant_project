@@ -113,6 +113,12 @@ EQUITY_CATEGORY_WHITELIST = (
 # stored, so the card distinguishes real "insufficient holdings data" from an uncomputed pillar.
 Q_COVERAGE_MIN = 60.0
 
+# cc#724 (spec id=10056, locked 27-Jul): MQS pillar weights — SINGLE SOURCE OF TRUTH. Used by
+# compute_mf_scores AND returned by /api/v15/fund so the V15 FQS-Factors card renders the split
+# dynamically (never hardcoded). Was Q0.35/R0.30/C0.15/S0.20; now Q0.50/R0.25/C0.15/S0.10. Individual
+# pillar formulas (Q/R/C/S math) are UNCHANGED — only the blend weights move.
+MQS_WEIGHTS = {"q": 0.50, "r": 0.25, "c": 0.15, "s": 0.10}
+
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
 # Nippon India Large Cap appeared TWICE (rows 4 & 6) in the founder sheet — seeded once, flagged for
@@ -1144,12 +1150,15 @@ def _derive_plan(name):
 
 
 @router.get("/api/v15/search")
-def v15_search(q: str = "", limit: int = 12):
+def v15_search(q: str = "", limit: int = 12, cats: str = ""):
     """cc#480: fund autocomplete over mf_master (name/amc/category). Prefers Direct-Growth
-    plans. Thin read — no scoring."""
+    plans. Thin read — no scoring. cc#722: optional comma-separated `cats` narrows results to the
+    pill-bar's selected categories (empty/All => the full equity universe)."""
     q = (q or "").strip()
     if not q:
         return {"count": 0, "results": []}
+    _cats = [c.strip() for c in (cats or "").split(",") if c.strip()]
+    _cats = [c for c in _cats if c in EQUITY_CATEGORY_WHITELIST] or list(EQUITY_CATEGORY_WHITELIST)
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         # cc#520: debt strays (Banking & PSU) must not appear in search results.
@@ -1159,7 +1168,7 @@ def v15_search(q: str = "", limit: int = 12):
                        ORDER BY (name ILIKE '%%direct%%' AND name ILIKE '%%growth%%') DESC,
                                 curated DESC, length(name), name
                        LIMIT %s""",
-                    (f"%{q}%", f"%{q}%", f"%{q}%", list(EQUITY_CATEGORY_WHITELIST), max(1, min(limit, 25))))
+                    (f"%{q}%", f"%{q}%", f"%{q}%", _cats, max(1, min(limit, 25))))
         rows = [{"scheme_code": sc, "name": nm, "amc": amc,
                  "category": _derive_cat(nm, cat), "plan": _derive_plan(nm)}
                 for sc, nm, amc, cat in cur.fetchall()]
@@ -1181,7 +1190,7 @@ def _ret_window_state(value, inception, years_needed):
 
 
 @router.get("/api/v15/fund/{scheme_code}")
-def v15_fund(scheme_code: str):
+def v15_fund(scheme_code: str, peer_cats: str = ""):   # cc#723: optional comma-separated peer category scope
     """cc#480: thin hero read — meta + returns bindings.
     cc#519 GO-LIVE: adds MQS/pillar scores (mf_scores, null when unscored -- page shows
     "Not yet scored", never a fabricated value) and deterministic red flags computed from
@@ -1229,15 +1238,18 @@ def v15_fund(scheme_code: str):
             rk = cur.fetchone()
             if rk:
                 _rank, _peers_n = int(rk[0]), int(rk[1])
-        # cc#721 req_3: top-5 same-category Direct-Growth peers by 1Y, ALWAYS including the loaded fund.
+        # cc#723: top-10 Direct-Growth peers BY MQS (was cc#721 top-5 by 1Y), with a Category column and
+        # a category-scope param (default = the fund's own category; comma-separated peer_cats widens it).
+        # ALWAYS includes the loaded fund (appended if outside the top 10).
         _peer_rows = []
-        if raw_cat:
-            _psql = """SELECT m2.scheme_code, m2.name, m2.ret_1m, m2.ret_6m, m2.ret_1y, m2.ret_2y,
+        _pcats = [c.strip() for c in (peer_cats or "").split(",") if c.strip()] or ([raw_cat] if raw_cat else [])
+        if _pcats:
+            _psql = """SELECT m2.scheme_code, m2.name, m2.category, m2.ret_1m, m2.ret_6m, m2.ret_1y, m2.ret_2y,
                               s2.mqs, s2.q_score
                        FROM mf_master m2 LEFT JOIN mf_scores s2 ON s2.scheme_code = m2.scheme_code"""
-            cur.execute(_psql + """ WHERE m2.category=%s AND lower(m2.name) LIKE '%%direct%%'
+            cur.execute(_psql + """ WHERE m2.category = ANY(%s) AND lower(m2.name) LIKE '%%direct%%'
                                       AND lower(m2.name) LIKE '%%growth%%'
-                                    ORDER BY m2.ret_1y DESC NULLS LAST LIMIT 5""", (raw_cat,))
+                                    ORDER BY s2.mqs DESC NULLS LAST LIMIT 10""", (_pcats,))
             pcols = [d[0] for d in cur.description]
             _peer_rows = [dict(zip(pcols, pr)) for pr in cur.fetchall()]
             if not any(str(p.get("scheme_code")) == str(scheme_code) for p in _peer_rows):
@@ -1304,7 +1316,7 @@ def v15_fund(scheme_code: str):
     # cc#721 req_1: hero "Rank #N of M in <category>".
     m["category_rank"] = _rank
     m["category_peers"] = _peers_n
-    # cc#721 req_3: top-5 peers (loaded fund always present, highlighted, even if outside top 5).
+    # cc#723: top-10 peers BY MQS (loaded fund always present + highlighted, even if outside top 10).
     peers = []
     for pr in _peer_rows:
         for kk in ("ret_1m", "ret_6m", "ret_1y", "ret_2y", "mqs", "q_score"):
@@ -1312,8 +1324,10 @@ def v15_fund(scheme_code: str):
         pr["scheme_code"] = str(pr.get("scheme_code"))
         pr["is_self"] = (pr["scheme_code"] == str(scheme_code))
         peers.append(pr)
-    peers.sort(key=lambda p: (p.get("ret_1y") is None, -(p.get("ret_1y") if p.get("ret_1y") is not None else -1e9)))
-    m["peers"] = peers[:6]   # up to 5 + self if self was outside the top 5
+    peers.sort(key=lambda p: (p.get("mqs") is None, -(p.get("mqs") if p.get("mqs") is not None else -1e9)))
+    m["peers"] = peers[:11]   # top-10 by MQS + self if it was outside the top 10
+    # cc#724: MQS weight split (dynamic) so the V15 FQS-Factors card never hardcodes the percentages.
+    m["mqs_weights"] = {k: round(v * 100) for k, v in MQS_WEIGHTS.items()}
     return {"fund": m}
 
 
@@ -1343,6 +1357,10 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
     Large&Mid rows into the plain Mid Cap tab. Free-text category input (legacy callers) keeps
     the ILIKE substring fallback."""
     cat = (category or "").strip()
+    # cc#722: `category` may now be a COMMA-SEPARATED multi-select from the pill bar. Empty => All
+    # (whole equity universe). When every part is a canonical whitelist value, filter category = ANY.
+    _cats = [c.strip() for c in cat.split(",") if c.strip()]
+    _wl_cats = [c for c in _cats if c in EQUITY_CATEGORY_WHITELIST]
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         try:
@@ -1352,11 +1370,11 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
         # cc#520: debt strays (Banking & PSU) must not appear in the screener.
         where = ["m.name ILIKE '%%direct%%'", "m.name ILIKE '%%growth%%'", "m.category = ANY(%s)"]
         params = [list(EQUITY_CATEGORY_WHITELIST)]
-        if cat in EQUITY_CATEGORY_WHITELIST:
-            where.append("m.category = %s")
-            params.append(cat)
+        if _cats and len(_wl_cats) == len(_cats):
+            where.append("m.category = ANY(%s)")   # single or multi canonical categories (OR)
+            params.append(_wl_cats)
         elif cat:
-            where.append("(m.category ILIKE %s OR m.name ILIKE %s)")
+            where.append("(m.category ILIKE %s OR m.name ILIKE %s)")   # free-text fallback
             params += [f"%{cat}%", f"%{cat}%"]
         if sort == "1y":
             order = "ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
@@ -1996,23 +2014,23 @@ def compute_mf_scores(conn=None):
                 q_cov = qi.get("coverage_pct")
                 if qi.get("q_raw") is not None and q_cov is not None and q_cov >= Q_COVERAGE_MIN:
                     pillars["q"] = _clip(float(qi["q_raw"]) * 10.0)
-                    weights["q"] = 0.35
+                    weights["q"] = MQS_WEIGHTS["q"]
 
                 fund_ret = r1y if r1y is not None else (r3y if r3y is not None else r5y)
                 cat_ret = (ca.get("r1y") if r1y is not None
                            else (ca.get("r3y") if r3y is not None else ca.get("r5y")))
                 if fund_ret is not None and cat_ret is not None:
                     pillars["r"] = _clip(50 + (float(fund_ret) - cat_ret) * 3)
-                    weights["r"] = 0.30
+                    weights["r"] = MQS_WEIGHTS["r"]
 
                 if er is not None and ca.get("er") is not None:
                     pillars["c"] = _clip(50 - (float(er) - ca["er"]) * 20)
-                    weights["c"] = 0.15
+                    weights["c"] = MQS_WEIGHTS["c"]
 
                 aum_avg = cat_aum_avg.get(cat)
                 if aum is not None and aum_avg and aum_avg > 0 and float(aum) > 0:
                     pillars["s"] = _clip(50 + _m.log(float(aum) / aum_avg) * 15)
-                    weights["s"] = 0.20
+                    weights["s"] = MQS_WEIGHTS["s"]
 
                 if not pillars:
                     continue
