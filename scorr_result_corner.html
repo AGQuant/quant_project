@@ -407,19 +407,12 @@ function heatHtml(d,stockName,segName){
 }
 async function rcCard(kind,sym){
   if(kind==='R'){ if(window.ScorrRCard&&ScorrRCard.open){ScorrRCard.open(sym);return;} location.href='/check?symbol='+encodeURIComponent(sym); return; }
-  rcOpen(`<h3>${esc(sym)} · ${kind==='C'?'Chart':kind==='A'?'Analysis':'Deriv'}</h3><div class="rc-lbl">Loading…</div>`);
+  // cc#730: C routes to the ONE canonical chart card (fib + pivots), same component every C button uses.
+  // Retires the old inline SVG close-line that used to render here (a plain-chart duplicate).
+  if(kind==='C'){ if(window.ScorrChartCard){ScorrChartCard.open(sym);return;} location.href='/check?symbol='+encodeURIComponent(sym); return; }
+  rcOpen(`<h3>${esc(sym)} · ${kind==='A'?'Analysis':'Deriv'}</h3><div class="rc-lbl">Loading…</div>`);
   try{
-    if(kind==='C'){
-      const rows=await J('/api/candles/'+encodeURIComponent(sym)+'?days=120');
-      const cl=(rows||[]).map(r=>+r.close).filter(isFinite);
-      if(cl.length<2){rcOpen(`<h3>${esc(sym)} · Chart</h3><div class="empty">No daily data.</div>`);return;}
-      const w=400,H=140,lo=Math.min(...cl),hi=Math.max(...cl),rng=(hi-lo)||1;
-      const pts=cl.map((v,i)=>(i/(cl.length-1)*w).toFixed(1)+','+(H-6-((v-lo)/rng)*(H-14)).toFixed(1)).join(' ');
-      const up=cl[cl.length-1]>=cl[0];
-      rcOpen(`<h3>${esc(sym)} · Chart <span style="font-family:var(--mono);font-size:12px;color:var(--mut)">${cl[cl.length-1].toLocaleString('en-IN')}</span></h3>
-        <div class="rc-lbl">Daily close · last ${cl.length} sessions (raw_prices, equity)</div>
-        <svg viewBox="0 0 ${w} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px"><polyline points="${pts}" fill="none" stroke="${up?'var(--grn)':'var(--red)'}" stroke-width="1.6"/></svg>`);
-    } else if(kind==='A'){
+    if(kind==='A'){
       const [gv,dm]=await Promise.all([J('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),J('/api/deriv-metrics/'+encodeURIComponent(sym)).catch(()=>null)]);
       let h=`<h3>${esc(sym)} · Analysis</h3>`;
       if(gv){ const pil=(l,v)=>`<div class="rc-tile" style="text-align:center"><div style="font-size:10px;color:var(--dim);font-weight:700">${l}</div><div style="font-size:16px;font-weight:800">${v==null?'—':Number(v).toFixed(2)}</div></div>`;

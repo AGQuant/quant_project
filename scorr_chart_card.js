@@ -13,7 +13,12 @@
  * 5m gating: probed once per symbol via a 1-session intraday call — rows => futures (5m enabled),
  *            empty => non-futures (5m greyed with "5-min available for F&O stocks" tooltip); daily default.
  * Times are IST (Asia/Kolkata). Crosshair/tooltip is LightweightCharts-native.
- * (Pivots/Fib overlays from the V8 card are intentionally deferred here — core candle parity first.)
+ *
+ * cc#730: Pivots + Fib overlays (default ON) so EVERY C button that opens this card renders the same
+ * fib+pivot chart the V8 dashboard shows. Pivots = latest v8_paper_pivots row via GET
+ * /api/trade-check/fibcheck (cc#478; full universe per cc#342, so non-futures GVM symbols have pivots
+ * too). Fib = retracement levels off the loaded-range swing (same derivation as the V8 chart, cc#668),
+ * both drawn as LightweightCharts price lines. Toggle buttons + persistence mirror the V8 card.
  */
 (function () {
   "use strict";
@@ -25,6 +30,26 @@
 
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
   var _futCache = {};   // {sym: bool} — 5m availability, cached per session (no repeat probe)
+  // cc#730: fib + pivot overlay state (default BOTH on so the card matches the V8 chart out of the box).
+  var _fibCache = {};   // {sym: fibcheck json} — pivots fetched once per symbol
+  var _priceLines = [], _lastData = [];
+  var _ov = _readOv();
+  var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
+  var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
+  function _readOv() {
+    try { var s = localStorage.getItem("scorr_chart_overlay");
+      if (s === "none") return { pivot: false, fib: false };
+      if (s === "pivot") return { pivot: true, fib: false };
+      if (s === "fib") return { pivot: false, fib: true };
+    } catch (e) {}
+    return { pivot: true, fib: true };   // default: both visible
+  }
+  function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
+  function _fibZoneKey(p) {
+    if (p == null) return null;
+    if (p >= 100) return "breakout"; if (p >= 78.6) return "resist"; if (p >= 61.8) return "strength";
+    if (p >= 38.2) return "decision"; if (p >= 23.6) return "weak"; return "breakdown";
+  }
 
   var IST_MONY = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "2-digit" });
   var IST_MY = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" });
@@ -125,6 +150,59 @@
       if (!disabled) b.onclick = function () { _load(k); };
       host.appendChild(b);
     });
+    // cc#730: Pivots / Fib overlay toggles (mirror the V8 card). Pivots suppressed at 5Y — rolling
+    // levels are meaningless at multi-year scale (same rule as the V8 chart's ALL guard).
+    var sep = document.createElement("span");
+    sep.style.cssText = "width:1px;height:16px;background:" + p.line + ";margin:0 2px;align-self:center";
+    host.appendChild(sep);
+    [["pivot", "Pivots", "Pivots — PP / R1 / R2 / S1 / S2 (v8_paper_pivots)"],
+     ["fib", "Fib", "Fibonacci retracement levels (loaded-range swing, same as the V8 chart)"]].forEach(function (o) {
+      var b = document.createElement("button");
+      b.textContent = o[1];
+      var pivBlocked = (o[0] === "pivot" && _tf === "5Y");
+      var on = _ov[o[0]] && !pivBlocked;
+      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
+        ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) + (pivBlocked ? ";opacity:.4;cursor:not-allowed" : "");
+      b.title = pivBlocked ? "Pivots hidden at 5Y (rolling levels meaningless at multi-year scale)" : o[2];
+      if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
+      host.appendChild(b);
+    });
+  }
+  function _toggleOv(kind) {
+    _ov[kind] = !_ov[kind];
+    try { localStorage.setItem("scorr_chart_overlay", _ovStr()); } catch (e) {}
+    _paintChrome(); _applyOverlays();
+  }
+  // cc#730: pivot (backend) + fib (loaded-swing) overlays drawn as price lines. Cheap to re-run on toggle.
+  function _applyOverlays() {
+    if (!_series) return;
+    _priceLines.forEach(function (pl) { try { _series.removePriceLine(pl); } catch (e) {} });
+    _priceLines = [];
+    if (_ov.pivot && _tf !== "5Y") {
+      var drawPiv = function (f) {
+        if (!_series || !f || !f.pivots) return; var P = f.pivots;
+        [["R2", P.r2, "#0a9e63"], ["R1", P.r1, "#0a9e63"], ["PP", P.pp, "#8a94ad"], ["S1", P.s1, "#dd3a4a"], ["S2", P.s2, "#dd3a4a"]].forEach(function (row) {
+          if (row[1] != null) _priceLines.push(_series.createPriceLine({ price: +row[1], color: row[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: row[0] }));
+        });
+      };
+      var cached = _fibCache[_sym];
+      if (cached) { drawPiv(cached); }
+      else {
+        _getJSON("/api/trade-check/fibcheck?symbol=" + encodeURIComponent(_sym) + "&lookback=6m")
+          .then(function (f) { _fibCache[_sym] = f; if (_ov.pivot && _tf !== "5Y") drawPiv(f); }).catch(function () {});
+      }
+    }
+    if (_ov.fib && _lastData && _lastData.length) {
+      var hi = -Infinity, lo = Infinity;
+      _lastData.forEach(function (d) { if (isFinite(d.high) && d.high > hi) hi = d.high; if (isFinite(d.low) && d.low < lo) lo = d.low; });
+      if (isFinite(hi) && isFinite(lo) && hi > lo) {
+        var rng = hi - lo;
+        FIB_RATIOS.forEach(function (r) {
+          var col = FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad";
+          _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: String(r / 100) }));
+        });
+      }
+    }
   }
 
   function _autoscale() { return null; }
@@ -187,8 +265,9 @@
       });
       var s = c.addCandlestickSeries({ upColor: "#0a9e63", downColor: "#dd3a4a", borderVisible: false, wickUpColor: "#0a9e63", wickDownColor: "#dd3a4a" });
       s.setData(data); c.timeScale().fitContent();
-      _chart = c; _series = s;
+      _chart = c; _series = s; _lastData = data;
       _setHL(data);
+      _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
       msg.textContent = isIntraday
         ? "5-min · last 5 sessions · IST (F&O feed)"
         : tf + " · daily · raw_prices (IST)";
@@ -223,6 +302,7 @@
     var ov = document.getElementById("scorrChartOv");
     if (ov) ov.style.display = "none";
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
+    _priceLines = []; _lastData = [];   // cc#730
     document.removeEventListener("keydown", _esc);
     window.removeEventListener("resize", _onResize);
   }
