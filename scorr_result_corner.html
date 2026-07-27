@@ -93,6 +93,10 @@ tr:last-child td{border-bottom:none}
   background:var(--panel);border:1px solid var(--line2);color:var(--mut);transition:.12s}
 .f-chip:hover{color:var(--txt)}
 .f-chip.on{background:var(--blu);border-color:var(--blu);color:#fff}
+/* cc#729: "Hide not-yet-reported" toggle — sits inline with the tier chips */
+.f-toggle{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut);cursor:pointer;user-select:none;padding:6px 4px}
+.f-toggle:hover{color:var(--txt)}
+.f-toggle input{accent-color:var(--blu);width:14px;height:14px;margin:0;cursor:pointer}
 .f-sector{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--cyan);
   border:1px solid rgba(55,211,232,.35);border-radius:20px;padding:4px 12px;display:none;cursor:pointer}
 .f-sector.show{display:block}
@@ -180,6 +184,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
   <span class="f-chip" data-tier="Large">Large</span>
   <span class="f-chip" data-tier="Mid">Mid</span>
   <span class="f-chip" data-tier="Small">Small</span>
+  <label class="f-toggle" title="Hide companies whose latest quarter isn't reported yet (both Sales and PAT blank). Sector counts and aggregates are unaffected — only rows are hidden."><input type="checkbox" id="hideNR" checked onchange="applyCo()"> Hide not-yet-reported</label>
   <span class="f-sector" id="secFilter" title="Clear sector filter">✕ <span id="secName"></span></span>
 </div>
 <div class="tbl-card tbl-scroll">
@@ -311,7 +316,7 @@ function renderCo(){
   const rows=(DATA.companies||[]);
   document.getElementById('coRows').innerHTML = rows.length ? rows.map(c=>{
     const qq=(a,b)=>`<span class="${cls(a)}">${pctS(a)}</span><span class="yy">/</span><span class="${cls(b)}">${pctS(b)}</span>`;
-    return `<tr data-tier="${esc(c.tier)}" data-sector="${esc(c.segment)}">
+    return `<tr data-tier="${esc(c.tier)}" data-sector="${esc(c.segment)}" data-reported="${(c.sales!=null||c.pat!=null)?1:0}">
       <td><div class="co-name" title="${esc(c.company||c.symbol)}">${esc(c.company||c.symbol)}</div><div class="co-tkr">${esc(c.symbol)}</div></td>
       <td class="cov-cell">${c.reported_date?fmtD(c.reported_date):'—'}</td>
       <td><span class="tier-chip">${esc(c.tier)}</span></td>
@@ -329,10 +334,16 @@ function renderCo(){
   applyCo();
 }
 function applyCo(){
+  // cc#729: "Hide not-yet-reported" (default ON) hides rows whose latest quarter has NO data — both
+  // Sales(Qtr) AND PAT(Qtr) blank (data-reported="0"). Row-VISIBILITY only; combines as AND with the
+  // tier + sector filters. Sector tiles/medians/tallies read DATA, not visible rows, so they never change.
+  const hn=document.getElementById('hideNR');
+  const hide=hn?hn.checked:false;
   document.querySelectorAll('#coTbl tbody tr[data-tier]').forEach(r=>{
     const okT=tier==='all'||r.dataset.tier===tier;
     const okS=!selSector||r.dataset.sector===selSector;
-    r.style.display=(okT&&okS)?'':'none';
+    const okR=!hide||r.dataset.reported==='1';
+    r.style.display=(okT&&okS&&okR)?'':'none';
   });
 }
 function fmtD(s){ try{const d=new Date(s+'T00:00:00');const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
