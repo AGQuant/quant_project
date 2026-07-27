@@ -1251,3 +1251,18 @@ RESULTS_CARD_JS = """
 def pwa_results_card_js():
     # cc#573: shared Results "R" pill + card modal, injected site-wide alongside mobile.css.
     return Response(RESULTS_CARD_JS, media_type="application/javascript", headers=_NOCACHE)
+
+
+# cc#706: shared V8-type price chart card, source-of-truth lives in scorr_chart_card.js (repo root),
+# read once at import and served here so it can be injected site-wide (main.py _INJECT).
+import os as _os
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_chart_card.js"), "r", encoding="utf-8") as _scc_f:
+        SCORR_CHART_CARD_JS = _scc_f.read()
+except Exception:
+    SCORR_CHART_CARD_JS = "/* scorr_chart_card.js unavailable */"
+
+
+@router.get("/scorr_chart_card.js")
+def pwa_scorr_chart_card_js():
+    return Response(SCORR_CHART_CARD_JS, media_type="application/javascript", headers=_NOCACHE)

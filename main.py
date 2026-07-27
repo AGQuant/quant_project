@@ -225,6 +225,7 @@ _MOBILE_HEAD = (
     b'<link rel="stylesheet" href="/static/mobile.css">'
     b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
     b'<script src="/results_card.js" defer></script>'    # cc#573: shared Results R-pill + card (site-wide)
+    b'<script src="/scorr_chart_card.js" defer></script>'  # cc#706: shared V8-type price chart card (site-wide)
 )
 
 @app.middleware("http")
