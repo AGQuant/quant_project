@@ -556,47 +556,39 @@ def _inject_open_positions(cur, rows: list, basket: str, open_pos: dict) -> list
     return rows
 
 
+def _adr_ts_label(ts):
+    """cc#719: chip label = the REAL timestamp of the adr_intraday tick actually used (e.g. 'Mon 15:30'),
+    so a frozen post-market/weekend value is never mislabelled to a different day."""
+    if ts is None:
+        return None
+    try:
+        return ts.strftime("%a %H:%M")
+    except Exception:
+        return str(ts)
+
+
 def _read_adr(cur):
-    if _market_open():
-        cur.execute("""
-            SELECT advances, declines, unchanged, adr, universe_count, ts
-            FROM adr_intraday WHERE ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
-        """)
-        row = cur.fetchone()
-        if row and (row[4] or 0) >= 50:
-            adv, dec, unc, adr = row[0] or 0, row[1] or 0, row[2] or 0, float(row[3])
-            return adv, dec, unc, adr, "adr_intraday", str(date.today())
-        cur.execute("""
-            WITH li AS (
-                SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                FROM intraday_prices WHERE ts::date = CURRENT_DATE ORDER BY symbol, ts DESC
-            ),
-            pc AS (
-                SELECT DISTINCT ON (symbol) symbol, close AS pclose
-                FROM raw_prices WHERE price_date < CURRENT_DATE ORDER BY symbol, price_date DESC
-            )
-            SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
-                   COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
-                   COUNT(*) FILTER (WHERE li.cmp = pc.pclose),
-                   COUNT(*)
-            FROM li JOIN pc ON pc.symbol = li.symbol
-        """)
-        r = cur.fetchone()
-        if r and (r[3] or 0) >= 50:
-            adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
-            adr = round(adv / dec, 3) if dec else float(adv)
-            return adv, dec, unc, adr, "live_intraday", str(date.today())
-    # cc#417 fix_2: latest adr_daily row on a TRADING day — defensively exclude any weekend row
-    # (Sat/Sun) even if one slipped in, so the mood gate never reads a phantom 0-ADR weekend row.
-    cur.execute("""SELECT advances, declines, unchanged, adr, price_date FROM adr_daily
-                   WHERE EXTRACT(DOW FROM price_date) BETWEEN 1 AND 5
-                   ORDER BY price_date DESC LIMIT 1""")
-    r = cur.fetchone()
-    if r:
-        adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
-        adr = round(float(r[3]), 3) if r[3] is not None else 1.0
-        return adv, dec, unc, adr, "adr_daily", str(r[4])
-    return 0, 0, 0, 1.0, "no_data", str(date.today())
+    # cc#719 (founder STANDING RULE, re-violated): mood-gate ADR = adr_intraday ONLY, FROZEN at the
+    # LAST tick of the most recent trading session. Market hours -> latest 5-min tick; after 15:30 /
+    # overnight / weekend -> the session's final tick, frozen, with its real timestamp. NEVER adr_daily:
+    # it is EOD-derived (violates freeze-at-last-tick) AND has NO row between 15:30 and the ~15:50 EOD
+    # compute — the 20-min window that rendered FRIDAY breadth (0.87) on a Monday post-close (27-Jul),
+    # flipping the ADR component PASS->FAIL (2->3 fails). The old code only read adr_intraday behind an
+    # `if _market_open()` gate, so every post-15:30 read fell through to adr_daily. Feed dead (no usable
+    # adr_intraday row at all) -> adr=None: caller marks the component INDETERMINATE (not a fail), never
+    # substitutes a stale value.
+    cur.execute("""
+        SELECT advances, declines, unchanged, adr, universe_count, ts
+        FROM adr_intraday
+        WHERE universe_count >= 50
+        ORDER BY ts DESC LIMIT 1
+    """)
+    row = cur.fetchone()
+    if row:
+        adv, dec, unc = row[0] or 0, row[1] or 0, row[2] or 0
+        adr = round(float(row[3]), 3) if row[3] is not None else (round(adv / dec, 3) if dec else float(adv))
+        return adv, dec, unc, adr, "adr_intraday", _adr_ts_label(row[5])
+    return 0, 0, 0, None, "unavailable", None
 
 
 _ADR_CACHE = {"ts": 0.0, "data": None}
@@ -638,7 +630,8 @@ def market_mood():
     try:
         with _conn() as conn, conn.cursor() as cur:
             advances, declines, unchanged, adr, breadth_source, adr_date = _read_adr_cached(cur)
-            adr_pass = adr >= 1.0
+            adr_indeterminate = adr is None                       # cc#719: feed dead -> INDETERMINATE
+            adr_pass = (adr is not None and adr >= 1.0)
             live_nifty = _live_nifty_dwm(cur, "NIFTY50")
             if live_nifty:
                 nifty_day, nifty_week, nifty_month, _ = live_nifty
@@ -660,12 +653,14 @@ def market_mood():
             nifty_week_pass  = nifty_week  is not None and nifty_week  >= 0
             nifty_month_pass = nifty_month is not None and nifty_month >= 0
             checks = [
-                {"filter": "ADR",         "value": adr,         "required": ">= 1", "pass": adr_pass},
+                {"filter": "ADR",         "value": adr,         "required": ">= 1", "pass": adr_pass, "indeterminate": adr_indeterminate},
                 {"filter": "Nifty Day",   "value": nifty_day,   "required": ">= 0", "pass": nifty_day_pass},
                 {"filter": "Nifty Week",  "value": nifty_week,  "required": ">= 0", "pass": nifty_week_pass},
                 {"filter": "Nifty Month", "value": nifty_month, "required": ">= 0", "pass": nifty_month_pass},
             ]
-            fails = sum(1 for c in checks if not c["pass"])
+            # cc#719: an INDETERMINATE ADR (feed dead) is neither pass nor fail — never inflate the
+            # fail count (and thus flip the mood bearish) on missing breadth data.
+            fails = sum(1 for c in checks if not c["pass"] and not c.get("indeterminate"))
             if fails == 0:   buy_slots, sell_slots, mood = 15, 5,  "Strong Bullish"
             elif fails == 1: buy_slots, sell_slots, mood = 14, 6,  "Bullish"
             elif fails == 2: buy_slots, sell_slots, mood = 12, 8,  "Neutral"

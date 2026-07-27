@@ -1092,9 +1092,10 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
             cur.execute("""
                 SELECT advances, declines, universe_count
                 FROM adr_intraday
-                WHERE ts::date = %s AND ts <= %s
+                WHERE ts <= %s
                 ORDER BY ts DESC LIMIT 1
-            """, (_d, _cut))
+            """, (_cut,))   # cc#719: FREEZE at the last adr_intraday tick at/before the cutoff (any
+                            # session) — post-15:30/overnight holds the session close, never adr_daily.
             row = cur.fetchone()
             if row and (row[2] or 0) >= 50:
                 adv, dec = row[0] or 0, row[1] or 0
@@ -1121,17 +1122,12 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
                     adv, dec = adv_row[0] or 0, adv_row[1] or 0
                     adr = (adv / dec) if dec else float(adv)
                 else:
-                    # cc_task #82: never inherit a STALE prior-day ADR at the first
-                    # tick (09:15-09:16). adr_intraday and the live intraday/raw compute
-                    # above are both empty then, so this branch fires and yesterday's
-                    # adr_daily (e.g. Bearish -> 13 sell-slots) forced the wrong mood at
-                    # open (6 SHORTs entered under Bearish limits 25-Jun). Only trust
-                    # adr_daily when it is TODAY's row; otherwise default 1.0 (neutral --
-                    # passes adr>=1.0, adds no gate fail). Mood self-corrects as today's
-                    # ticks accumulate.
-                    cur.execute("SELECT adr FROM adr_daily WHERE price_date = %s ORDER BY price_date DESC LIMIT 1", (_d,))
-                    r = cur.fetchone()
-                    adr = float(r[0]) if r and r[0] is not None else 1.0
+                    # cc#719: NO adr_intraday tick and no live breadth (only at the very first tick,
+                    # 09:15-09:16, before the writer has stamped a row). The adr_daily fallback is
+                    # REMOVED entirely (founder rule: never read adr_daily in the gate — it is
+                    # EOD-derived and stale). INDETERMINATE -> neutral 1.0 (adr>=1.0, adds no fail);
+                    # mood self-corrects as today's ticks accumulate.
+                    adr = 1.0
 
             cur.execute("""
                 SELECT close FROM intraday_prices
