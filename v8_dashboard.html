@@ -235,7 +235,13 @@
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:center;justify-content:center}
   .modal-overlay.open{display:flex}
   .modal-box{background:var(--panel);border-radius:16px;max-width:620px;width:94%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.22)}
-  .modal-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1}
+  .modal-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1;flex-wrap:wrap}
+  /* cc#727: keep the title/subtitle column readable and never let it collapse behind the C·A·R·D
+     strip. On phone width the strip (mDcBtn) drops to its own full-width row under the title so the
+     subtitle ("GVM & sector · volume · delivery · trajectory") wraps cleanly instead of being crammed. */
+  .modal-head>div:first-child{min-width:150px}
+  .modal-head #mDcBtn:empty{display:none}
+  @media(max-width:560px){.modal-head #mDcBtn{order:3;flex-basis:100%;margin-top:2px}}
   .modal-body{padding:16px 20px 28px}
   /* cc#430: sector/segment drill-down modal table — fit Symbol/GVM/1D%/1W%/1M% inside the modal
      with ZERO horizontal scroll on desktop (620px) AND mobile (94vw). table-layout:fixed +
@@ -1804,12 +1810,17 @@ function _qaInjectStyle(){
       border-radius:7px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
     .qa-tf.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}
     .qa-tf.qa-sub{padding:3px 7px;font-size:10px;font-weight:600;opacity:.9}
-    .qa-tcbtn{flex:1;padding:11px 10px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
+    /* cc#727: the TC Trade / Investment Check footer buttons. min-width:0 lets flex:1 shrink them
+       (default min-width:auto let the labels overflow and collide on narrow modal widths). */
+    .qa-tcrow{display:flex;gap:8px}
+    .qa-tcbtn{flex:1;min-width:0;padding:11px 10px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
       background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);font-weight:800;font-size:12.5px;cursor:pointer;
-      transition:background .12s,color .12s,border-color .12s}
+      white-space:nowrap;transition:background .12s,color .12s,border-color .12s}
     .qa-tcbtn:hover{border-color:var(--blu,#4d7cfe)}
     .qa-tcbtn.trade.on{background:var(--grn,#0a9e63);color:#fff;border-color:var(--grn,#0a9e63)}
-    .qa-tcbtn.invest.on{background:#7c3aed;color:#fff;border-color:#7c3aed}`;
+    .qa-tcbtn.invest.on{background:#7c3aed;color:#fff;border-color:#7c3aed}
+    /* cc#727: on phone-width the two labels don't fit side-by-side — stack them so neither overlaps. */
+    @media(max-width:560px){.qa-tcrow{flex-direction:column}}`;
   document.head.appendChild(st);
 }
 function openQuickActions(ev,sym,side,qty,entry,cmp){
@@ -2071,7 +2082,7 @@ async function qaAnalysis(sym){
 function qaTcFooterHtml(sym){
   var s=newsEsc(sym);
   return '<div style="height:1px;background:var(--line);margin:18px 0 12px"></div>'
-    + '<div style="display:flex;gap:8px">'
+    + '<div class="qa-tcrow">'
     +   '<button id="qaTcTrade" class="qa-tcbtn trade" onclick="qaTcEmbed(\''+s+'\',\'trade\')">&#9650; TC Trade Check</button>'
     +   '<button id="qaTcInvest" class="qa-tcbtn invest" onclick="qaTcEmbed(\''+s+'\',\'investment\')">&#9670; Investment Check</button>'
     + '</div>'

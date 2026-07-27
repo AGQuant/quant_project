@@ -322,6 +322,11 @@
   @media(max-width:768px){
     body{font-size:12px}
     table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* cc#727: .rules-table/.inv-rules-table/.scr-table each set overflow:hidden (for the border-radius)
+       which by CLASS specificity beats the generic table{overflow-x:auto} above — so on narrow (A-button
+       embed / mobile) widths the State column was clipped ("PASS" shown as "P") instead of scrolling.
+       Re-assert horizontal scroll so the full table stays reachable rather than truncated. */
+    .rules-table,.inv-rules-table,.scr-table{overflow-x:auto}
     .model-nav{padding:0 8px}
     /* cc#333 P7: 44px controls + keep rule/metric identity while the table scrolls */
     .side-btn{min-height:44px}
