@@ -859,6 +859,47 @@ def _ops_quarter_key(q: str):
     return (fy, quarter)
 
 
+import re as _ops_re
+_OPS_Q_RE = _ops_re.compile(r"^Q([1-4])FY(\d{2,4})$", _ops_re.I)
+_OPS_FY_RE = _ops_re.compile(r"^FY(\d{2,4})$", _ops_re.I)
+
+
+def _ops_is_quarter(q) -> bool:
+    return bool(_OPS_Q_RE.match(str(q or "").upper().replace(" ", "")))
+
+
+def _ops_is_annual(q) -> bool:
+    return bool(_OPS_FY_RE.match(str(q or "").upper().replace(" ", "")))
+
+
+def _ops_annual_key(q):
+    """'FY26' -> 2026 for chronological sort; unrecognised -> 0."""
+    m = _OPS_FY_RE.match(str(q or "").upper().replace(" ", ""))
+    if not m:
+        return 0
+    fy = int(m.group(1))
+    return fy + 2000 if fy < 100 else fy
+
+
+def _ops_yoy_label(q):
+    """cc#715: 'Q1FY27' -> 'Q1FY26' (same quarter, one FY back). None if not a quarter label.
+    Preserves the FY digit-width (canonical spine is 2-digit FYyy) so the lookup matches exactly —
+    NEVER substitute a different quarter (YoY is blank when the year-ago quarter is absent)."""
+    s = str(q or "").upper().replace(" ", "")
+    m = _OPS_Q_RE.match(s)
+    if not m:
+        return None
+    fy = m.group(2)
+    return "Q%sFY%s" % (m.group(1), str(int(fy) - 1).zfill(len(fy)))
+
+
+def _ops_growth_pct(cur_v, prev_v):
+    """cc#715: percent growth cur vs prev (None if either missing or prev==0). Rounded 1 dp."""
+    if cur_v is None or prev_v is None or prev_v == 0:
+        return None
+    return round((cur_v - prev_v) / abs(prev_v) * 100.0, 1)
+
+
 def _ops_pretty(metric_name: str) -> str:
     """Human label from the stored metric_name (LLM writes varied casings like 'GNPA_pct',
     'provision_coverage', 'NIM'): strip a trailing _pct/_ratio, split on '_', upper-case known
@@ -891,33 +932,50 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
         rows = cur.fetchall()
         if rows:
             out["sector"] = rows[0][0]
-            quarters = sorted({r[3] for r in rows if r[3]}, key=_ops_quarter_key)[-6:]
+            # cc#715: split the QxFYyy quarterly spine from FYyy annual-only labels. Quarterly rows get
+            # trailing-5 columns + QoQ%/YoY% (label-aware, % growth); FY annual rows render in a separate
+            # section with NO growth math. `direction` (sector_kpi_registry) is passed through so the
+            # frontend can colour growth direction-aware (lower-is-better KPIs inverted; unknown -> none).
+            all_qs = {r[3] for r in rows if r[3]}
+            q_labels = sorted([q for q in all_qs if _ops_is_quarter(q)], key=_ops_quarter_key)
+            fy_labels = sorted([q for q in all_qs if _ops_is_annual(q)], key=_ops_annual_key)
+            disp_quarters = q_labels[-5:]
+            disp_fy = fy_labels[-3:]
             by_metric: Dict[str, Dict[str, Any]] = {}
             units: Dict[str, Any] = {}
             for _sector, mname, unit, q, val, _conf in rows:
-                if q not in quarters:
-                    continue
                 by_metric.setdefault(mname, {})[q] = _f(val)
                 units.setdefault(mname, unit)
+            dir_map: Dict[str, Any] = {}
+            try:
+                cur.execute("SELECT metric_name, direction FROM sector_kpi_registry WHERE sector=%s", (out["sector"],))
+                dir_map = {m: d for m, d in cur.fetchall()}
+            except Exception:
+                dir_map = {}
+            prev_q_label = q_labels[-2] if len(q_labels) >= 2 else None
+            latest_q_label = q_labels[-1] if q_labels else None
+            yoy_q_label = _ops_yoy_label(latest_q_label)
             metric_rows = []
+            annual_rows = []
             for mname, qmap in by_metric.items():
-                # cc#683: keep the full (up to 6-qtr) series for the QoQ/YoY math (YoY needs the year-ago
-                # quarter), but DISPLAY only the last 4 reported quarters (the Standalone-mode columns).
-                full = [qmap.get(q) for q in quarters]
-                if all(v is None for v in full):
-                    continue
-                latest = full[-1]
-                qoq = (round(latest - full[-2], 2) if (len(full) >= 2 and latest is not None
-                       and full[-2] is not None) else None)
-                yoy = (round(latest - full[-5], 2) if (len(full) >= 5 and latest is not None
-                       and full[-5] is not None) else None)
-                metric_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
-                                    "unit": units.get(mname), "values": full[-4:],
-                                    "latest": latest, "qoq": qoq, "yoy": yoy})
+                direction = dir_map.get(mname)
+                q_vals = [qmap.get(q) for q in disp_quarters]
+                if any(v is not None for v in q_vals):
+                    latest = qmap.get(latest_q_label)
+                    qoq = _ops_growth_pct(latest, qmap.get(prev_q_label)) if prev_q_label else None
+                    yoy = _ops_growth_pct(latest, qmap.get(yoy_q_label)) if (yoy_q_label in qmap) else None
+                    metric_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
+                                        "unit": units.get(mname), "values": q_vals,
+                                        "latest": latest, "qoq": qoq, "yoy": yoy, "direction": direction})
+                elif disp_fy and any(qmap.get(fy) is not None for fy in disp_fy):
+                    annual_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
+                                        "unit": units.get(mname), "direction": direction,
+                                        "values": [qmap.get(fy) for fy in disp_fy]})
             metric_rows.sort(key=lambda r: r["label"])
-            if metric_rows:
-                disp_quarters = quarters[-4:]
-                out.update({"has_data": True, "periods": disp_quarters, "rows": metric_rows})
+            annual_rows.sort(key=lambda r: r["label"])
+            if metric_rows or annual_rows:
+                out.update({"has_data": True, "periods": disp_quarters, "rows": metric_rows,
+                            "annual_periods": disp_fy, "annual_rows": annual_rows})
                 # cc#683/687: peer selection for the dual-mode (Peers / Standalone) card. The peer window
                 # is the last 4 reported quarters GLOBALLY. cc#687 fix: pool at the COARSE OPS SECTOR, not
                 # the fine gvm_scores.segment — a narrow segment ("Pharma - Bulk & API" = 2 names) collapsed
@@ -926,8 +984,10 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                 # quarter-recency first (freshest data wins), GVM as the tiebreak, and take up to 5 so the
                 # table shows >=4 columns (company + >=3 peers) whenever that many exist — else all available
                 # (honest). Each peer carries its own most-recent quarter tag; a missing KPI = null (--).
+                # cc#715: window widened 4 -> 5 quarters so each peer's QoQ (adjacent) and YoY
+                # (same quarter one FY back) can be computed per its OWN series, not just its latest.
                 cur.execute("SELECT DISTINCT quarter FROM sector_ops_metrics WHERE metric_value IS NOT NULL AND quarter IS NOT NULL")
-                window = sorted([r[0] for r in cur.fetchall()], key=_ops_quarter_key)[-4:]
+                window = sorted([q for q in (r[0] for r in cur.fetchall()) if _ops_is_quarter(q)], key=_ops_quarter_key)[-5:]
                 sector = out.get("sector")
                 pool: List[tuple] = []   # (symbol, gvm_score)
                 if sector and window:
@@ -945,20 +1005,30 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                                    WHERE symbol = ANY(%s) AND sector=%s AND quarter = ANY(%s) AND metric_value IS NOT NULL""",
                                 ([p for p, _ in pool], sector, window))
                     prows = cur.fetchall()
-                    peer_q: Dict[str, str] = {}   # per peer -> its most recent quarter in the window
-                    for psym, q, _m, _v in prows:
+                    peer_series: Dict[tuple, Dict[str, Optional[float]]] = {}   # (peer,metric) -> {quarter: value}
+                    peer_q: Dict[str, str] = {}   # per peer -> its most recent reported quarter in the window
+                    for psym, q, mname, val in prows:
+                        peer_series.setdefault((psym, mname), {})[q] = _f(val)
                         if psym not in peer_q or _ops_quarter_key(q) > _ops_quarter_key(peer_q[psym]):
                             peer_q[psym] = q
-                    # cc#687: rank pool by (quarter-recency, GVM) descending, take top 5
                     gvm_map = dict(pool)
                     peers = sorted([p for p, _ in pool if p in peer_q],
                                    key=lambda p: (_ops_quarter_key(peer_q[p]), gvm_map[p]), reverse=True)[:5]
-                    peer_vals: Dict[tuple, Optional[float]] = {}
-                    for psym, q, mname, val in prows:
-                        if q == peer_q.get(psym):
-                            peer_vals[(psym, mname)] = _f(val)
                     for row in metric_rows:
-                        row["peers"] = [peer_vals.get((p, row["metric_name"])) for p in peers]
+                        pv, pq, py = [], [], []
+                        for p in peers:
+                            ser = peer_series.get((p, row["metric_name"]), {})
+                            lq = peer_q.get(p)
+                            lv = ser.get(lq)
+                            pv.append(lv)
+                            qs = sorted(ser.keys(), key=_ops_quarter_key)
+                            prevq = qs[-2] if len(qs) >= 2 else None
+                            pq.append(_ops_growth_pct(lv, ser.get(prevq)) if prevq else None)
+                            yl = _ops_yoy_label(lq)
+                            py.append(_ops_growth_pct(lv, ser.get(yl)) if (yl in ser) else None)
+                        row["peers"] = pv
+                        row["peer_qoq"] = pq
+                        row["peer_yoy"] = py
                     out["peers"] = peers
                     out["peer_quarters"] = {p: peer_q[p] for p in peers}   # cc#683: per-peer quarter tag
                     out["peer_quarter"] = window[-1]                        # legacy field retained
