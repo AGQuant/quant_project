@@ -916,6 +916,63 @@ function MatrixRow({ b, pillar, onChart }) {
   );
 }
 
+// cc#731: GVM pillar popout — an ADDITIVE quick-access modal (inline G/V/M detail sections stay).
+// Reuses the EXISTING per-pillar benchmark items (benchByPillar) already on the page — no new API call.
+// Card grid, header badge + composite score, and score-band border/chip colours mirror the inline
+// grouped view (ratingColor bands) and the locked reference (design_refs/scorr_gvm_popout_R1.html).
+function PillarPopModal({ pillar, items, score, onClose }) {
+  const pi = PILLAR_INFO[pillar];
+  React.useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", h);
+    const prev = document.body.style.overflow; document.body.style.overflow = "hidden";  // body scroll lock
+    return () => { document.removeEventListener("keydown", h); document.body.style.overflow = prev; };
+  }, [onClose]);
+  const bandColor = (b) => b.is_context ? _verdictColor(b.verdict) : ratingColor(b.rating);
+  const isMobile = (typeof window !== "undefined" && window.innerWidth <= 640);
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(4,7,15,.72)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+        display: "flex", alignItems: isMobile ? "flex-end" : "flex-start", justifyContent: "center", padding: isMobile ? 0 : "6vh 20px", overflowY: "auto" }}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: isMobile ? "16px 16px 0 0" : 16,
+        maxWidth: 1080, width: "100%", minHeight: isMobile ? "100vh" : undefined, overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,.4)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, background: C.card, zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15, background: pi.bg, color: pi.color, border: `1px solid ${pi.color}66` }}>{pillar}</div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{pi.label}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{pi.desc} · {items.length} metric{items.length === 1 ? "" : "s"}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <div style={{ fontFamily: "monospace", fontSize: 24, fontWeight: 600, color: gvmColor(score) }}>{score != null ? score.toFixed(2) : "—"}</div>
+            <button onClick={onClose} title="Close" style={{ background: "none", border: `1px solid ${C.border}`, color: C.muted, borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, marginLeft: 18 }}>✕</button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill,minmax(${isMobile ? 150 : 180}px,1fr))`, gap: 12, padding: "20px 24px 24px" }}>
+          {items.length ? items.map((b, i) => {
+            const bc = bandColor(b);
+            const chip = b.is_context ? (b.verdict ? b.verdict.label : "") : (b.rating != null ? b.rating.toFixed(1) : "");
+            const val = b.company != null ? `${b.company.toFixed(2)}${b.unit || ""}` : (b.is_context && b.verdict ? b.verdict.label : "—");
+            const peer = b.peer_avg != null ? `peer ${b.peer_avg.toFixed(2)}${b.unit || ""}` : "";
+            const rank = (b.rank != null) ? `#${b.rank}/${b.peer_n}` : "";
+            return (
+              <div key={b.key || i} style={{ background: C.bg, border: `1px solid ${bc}80`, borderRadius: 10, padding: 12, position: "relative" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 6, paddingRight: 36, color: bc }}>{b.label}</div>
+                {chip !== "" && <div style={{ position: "absolute", top: 10, right: 10, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: bc }}>{chip}</div>}
+                <div style={{ fontFamily: "monospace", fontSize: 13, marginBottom: 4, color: C.text }}>{val}</div>
+                <div style={{ fontFamily: "monospace", fontSize: 10, color: C.muted, display: "flex", justifyContent: "space-between" }}>
+                  <span>{peer}</span><span>{rank}</span>
+                </div>
+              </div>
+            );
+          }) : <div style={{ color: C.muted, fontSize: 12, padding: "8px 0" }}>No metrics available for this pillar.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SegmentRankLadder({ ladder, segment, stockSym }) {
   const cols = [
     { key: "rank",   lbl: "#",    w: 28,  align: "left"  },
@@ -2168,6 +2225,8 @@ function GvmReport({ r, hist }) {
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
   const [chartExpand, setChartExpand] = useState(null);   // cc#634: 'gvm' | 'price' | null
   const [chartRow, setChartRow] = useState(null);  // cc#507: per-metric peer-ladder chart modal
+  const [pillarPop, setPillarPop] = useState(null);  // cc#731: G/V/M pillar quick-access popout
+  const [hovP, setHovP] = useState(null);            // cc#731: pillar-box hover lift/glow
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
   const x = r.extras || {};
@@ -2211,6 +2270,7 @@ function GvmReport({ r, hist }) {
       {fibOpen && <FibPopout symbol={r.symbol} onClose={() => setFibOpen(false)} />}
       {chartExpand && <ChartExpandModal mode={chartExpand} symbol={r.symbol} onClose={() => setChartExpand(null)} />}
       {chartRow && <PeerLadderModal b={chartRow} sym={r.symbol} onClose={() => setChartRow(null)} />}
+      {pillarPop && <PillarPopModal pillar={pillarPop} items={benchByPillar[pillarPop] || []} score={pillarScore(pillarPop)} onClose={() => setPillarPop(null)} />}
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button onClick={() => window.print()}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
@@ -2271,9 +2331,16 @@ function GvmReport({ r, hist }) {
               {["G","V","M"].map(pillar => {
                 const pi = PILLAR_INFO[pillar];
                 const score = pillarScore(pillar);
+                const hov = hovP === pillar;   // cc#731: click to open the pillar popout; hover lifts + glows
                 return (
-                  <div key={pillar} style={{ background: pi.bg, border: `1px solid ${pi.color}40`,
-                    borderRadius: 10, padding: "9px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
+                  <div key={pillar} onClick={() => setPillarPop(pillar)}
+                    onMouseEnter={() => setHovP(pillar)} onMouseLeave={() => setHovP(null)}
+                    title={`${pi.label} — tap for the full metric grid`}
+                    style={{ background: pi.bg, border: `1px solid ${hov ? pi.color : pi.color + "40"}`,
+                    borderRadius: 10, padding: "9px 14px", flex: 1, minWidth: 80, textAlign: "center", position: "relative",
+                    cursor: "pointer", transition: "transform .15s ease, border-color .15s ease, box-shadow .15s ease",
+                    transform: hov ? "translateY(-3px)" : "none", boxShadow: hov ? `0 0 18px ${pi.color}26` : "none" }}>
+                    <span style={{ position: "absolute", top: 6, right: 8, fontSize: 11, color: pi.color, opacity: hov ? 1 : 0, transition: "opacity .15s" }}>⤢</span>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: pi.color, textTransform: "uppercase", letterSpacing: ".05em" }}>{pillar}</div>
                     <div style={{ fontSize: 24, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace", lineHeight: 1.1 }}>
                       {score?.toFixed(2) ?? "—"}
