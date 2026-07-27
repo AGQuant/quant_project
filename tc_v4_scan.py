@@ -25,7 +25,8 @@ from nifty_dwm import live_nifty_dwm
 from r6_volume import volume_ratio
 from tc_v4_dual import (_f, _r, _derive, score_card, _verdict,
                         STYLES, _ist, SPEC_REF, VERSION,
-                        _sector_aggs, _nifty_ret63)   # cc#586: R18/R19 sector + nifty-RS shared helpers
+                        _sector_aggs, _nifty_ret63,   # cc#586: R18/R19 sector + nifty-RS shared helpers
+                        _segment_peer_rows, _peer_counts)   # cc#717 part_3: shared R3 peer helpers (parity)
 
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
@@ -107,33 +108,19 @@ def _load_bulk(cur):
     for s in syms:
         D[s]["gvm180"] = gh180.get(s)
 
-    # peers: segment totals minus self (same numbers as the single-symbol direct query)
-    cur.execute("""
-        SELECT g.segment,
-               COUNT(*) FILTER (WHERE v.day_1d > 1),  COUNT(*) FILTER (WHERE v.day_1d > 0),
-               COUNT(*) FILTER (WHERE v.day_1d < -1), COUNT(*) FILTER (WHERE v.day_1d < -0.5),
-               COUNT(*) FILTER (WHERE v.day_1d < 0),  COUNT(*)
-        FROM gvm_scores g JOIN v8_metrics v ON v.symbol = g.symbol
-        WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-          AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-          AND g.segment IS NOT NULL
-        GROUP BY g.segment""")
-    seg = {r[0]: {"up1": int(r[1] or 0), "up": int(r[2] or 0), "dn1": int(r[3] or 0),
-                  "dn05": int(r[4] or 0), "dn": int(r[5] or 0), "n": int(r[6] or 0)} for r in cur.fetchall()}
+    # peers: cc#717 part_3 — same shared helpers as the single-symbol loader (gvm_scores top-10-mcap
+    # peers + live bulk day%, NOT the old gvm_scores⋈v8_metrics INNER JOIN that zeroed cash peers).
+    # Segment rows fetched once per distinct segment (cached), then top-10-excl-self counted per symbol
+    # -> byte-identical R3 to the single card (SHARED-MODULE CONTRACT preserved).
+    _peer_seg_cache = {}
     for s in syms:
-        d = D[s]; sg = seg.get(d.get("segment"))
-        day = (d.get("v8") or {}).get("day_1d")
-        if not sg or day is None:
-            d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0,
-                      "peer_count": (sg["n"] - 1) if sg else 0})
-        else:
-            d.update({
-                "peers_up1": sg["up1"] - (1 if day > 1 else 0),
-                "peers_up":  sg["up"] - (1 if day > 0 else 0),
-                "peers_dn1": sg["dn1"] - (1 if day < -1 else 0),
-                "peers_dn05": sg["dn05"] - (1 if day < -0.5 else 0),
-                "peers_dn":  sg["dn"] - (1 if day < 0 else 0),
-                "peer_count": sg["n"] - 1})
+        d = D[s]; segn = d.get("segment")
+        if not segn:
+            d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
+            continue
+        if segn not in _peer_seg_cache:
+            _peer_seg_cache[segn] = _segment_peer_rows(cur, segn)
+        d.update(_peer_counts(_peer_seg_cache[segn], s))
 
     # pivots
     cur.execute("""SELECT DISTINCT ON (symbol) symbol, pp, r1, s1, r2, s2 FROM v8_paper_pivots

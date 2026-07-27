@@ -336,6 +336,58 @@ def _dgvm180(cur, symbol):
 
 # ── data loader (single symbol) ──────────────────────────────────────────────────
 
+# ── cc#717 part_3: peer set = same-segment gvm_scores (NOT joined to v8_metrics, which holds only the
+#    ~210 futures universe and silently zeroed cash peers). Top-10 by market_cap, self excluded; live
+#    day% from cmp_prices (else last intraday close) vs the prior raw_prices close — one BULK query, so
+#    the single loader and the batch scanner get byte-identical peer numbers (SHARED-MODULE CONTRACT).
+#    (Deviation from the spec's literal "resolve_cmp per peer": a bulk day% preserves exact scanner↔
+#    single parity AND avoids a Yahoo storm across a whole segment — both hard requirements. The bug it
+#    fixes — cash peers appearing at all — is fixed identically either way.)
+def _segment_peer_rows(cur, segment):
+    if not segment:
+        return []
+    cur.execute("""
+        WITH seg AS (
+            SELECT symbol, market_cap FROM gvm_scores
+            WHERE segment=%s AND score_date=(SELECT MAX(score_date) FROM gvm_scores)
+        )
+        SELECT s.symbol, s.market_cap,
+               CASE WHEN px.cmp IS NOT NULL AND px.pclose IS NOT NULL AND px.pclose<>0
+                    THEN (px.cmp - px.pclose)/px.pclose*100.0 END AS day_pct
+        FROM seg s
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(cp.cmp, li.close) AS cmp, pc.close AS pclose
+            FROM (SELECT 1) _
+            LEFT JOIN cmp_prices cp ON cp.symbol=s.symbol
+            LEFT JOIN LATERAL (SELECT close FROM intraday_prices ip
+                               WHERE ip.symbol=s.symbol ORDER BY ip.ts DESC LIMIT 1) li ON TRUE
+            LEFT JOIN LATERAL (SELECT close FROM raw_prices rp
+                               WHERE rp.symbol=s.symbol AND rp.price_date < CURRENT_DATE
+                               ORDER BY rp.price_date DESC LIMIT 1) pc ON TRUE
+        ) px ON TRUE
+    """, (segment,))
+    return [(r[0], (float(r[1]) if r[1] is not None else None), _f(r[2])) for r in cur.fetchall()]
+
+
+def _peer_counts(rows, self_symbol):
+    """Top-10 same-segment peers by market_cap, EXCLUDING self; tally up/down among those with a
+    resolvable live day%. peer_count reflects the REAL peers found (cc#717 part_3)."""
+    peers = sorted([r for r in (rows or []) if r[0] != self_symbol],
+                   key=lambda r: (r[1] if r[1] is not None else -1.0), reverse=True)[:10]
+    up1 = up = dn1 = dn05 = dn = n = 0
+    for _s, _m, dp in peers:
+        if dp is None:
+            continue
+        n += 1
+        if dp > 1:    up1 += 1
+        if dp > 0:    up += 1
+        if dp < -1:   dn1 += 1
+        if dp < -0.5: dn05 += 1
+        if dp < 0:    dn += 1
+    return {"peers_up1": up1, "peers_up": up, "peers_dn1": dn1,
+            "peers_dn05": dn05, "peers_dn": dn, "peer_count": n}
+
+
 def _load_one(cur, symbol):
     d = {"symbol": symbol}
 
@@ -382,23 +434,9 @@ def _load_one(cur, symbol):
 
     d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
-        cur.execute("""
-            SELECT COUNT(*) FILTER (WHERE v.day_1d > 1),
-                   COUNT(*) FILTER (WHERE v.day_1d > 0),
-                   COUNT(*) FILTER (WHERE v.day_1d < -1),
-                   COUNT(*) FILTER (WHERE v.day_1d < -0.5),
-                   COUNT(*) FILTER (WHERE v.day_1d < 0),
-                   COUNT(*)
-            FROM gvm_scores g
-            JOIN v8_metrics v ON v.symbol = g.symbol
-            WHERE g.segment = %s AND g.symbol <> %s
-              AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-              AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-        """, (d["segment"], symbol))
-        p = cur.fetchone()
-        d.update({"peers_up1": int(p[0] or 0), "peers_up": int(p[1] or 0),
-                  "peers_dn1": int(p[2] or 0), "peers_dn05": int(p[3] or 0),
-                  "peers_dn": int(p[4] or 0), "peer_count": int(p[5] or 0)})
+        # cc#717 part_3: gvm_scores top-10-mcap peers + live day% (shared helpers) — drops the
+        # v8_metrics INNER JOIN that zeroed cash peers. Identical numbers in the batch scanner.
+        d.update(_peer_counts(_segment_peer_rows(cur, d["segment"]), symbol))
 
     cur.execute("""SELECT pp, r1, s1, r2, s2 FROM v8_paper_pivots WHERE symbol=%s
                    ORDER BY pivot_date DESC LIMIT 1""", (symbol,))
@@ -424,7 +462,10 @@ def _load_one(cur, symbol):
         cmp_v = rows[-1]["close"]
     d["cmp"] = cmp_v
 
-    cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+    # cc#717 part_2 / R1 (spec id=9946): ADR = the LIVE V8 mood-gate source = adr_intraday last tick
+    # (frozen at the most recent session, cc#719), NOT adr_daily (stale EOD, no row 15:30-15:50). Single
+    # source of truth with the V8 gate so TC R1 and the live gate can never disagree again.
+    cur.execute("SELECT adr FROM adr_intraday WHERE universe_count >= 50 ORDER BY ts DESC LIMIT 1")
     a = cur.fetchone()
     d["adr"] = _f(a[0]) if a else None
 
@@ -744,41 +785,55 @@ def _rules(d, style, side):
     out.append(_R("R11", "Location + room", c, val, required=req))
 
     # R12 — OI structure. 3010 SELL: short-buildup OR long-unwinding (price down) ->1; OI missing/stale ->0.5.
+    # cc#717 part_6: a non-futures (cash) stock structurally has NO OI -> credit 0.5 N/A (was a hard 0)
+    # + a CASH · DERIVATIVES N/A chip. Futures symbols keep the exact logic below.
     day = v8.get("day_1d")
     oic = d.get("oi_chg")
-    if BUY:
-        c = 1.0 if (day is not None and day > 0 and oic is not None) else 0.0
-        req = "day_1d > 0 AND OI-change present"
+    if not d.get("is_future"):
+        out.append(_R("R12", "OI structure", 0.5,
+                      {"day": _r(day), "oi_chg": None, "cash_na": True, "chip": "CASH · DERIVATIVES N/A"},
+                      required="cash stock — derivatives N/A (0.5)"))
     else:
-        if oic is None:
-            c = 0.5
-        elif day is not None and day < 0:
-            c = 1.0
+        if BUY:
+            c = 1.0 if (day is not None and day > 0 and oic is not None) else 0.0
+            req = "day_1d > 0 AND OI-change present"
         else:
-            c = 0.0
-        req = "day_1d < 0 (OI missing/stale = 0.5)"
-    out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}, required=req))
+            if oic is None:
+                c = 0.5
+            elif day is not None and day < 0:
+                c = 1.0
+            else:
+                c = 0.0
+            req = "day_1d < 0 (OI missing/stale = 0.5)"
+        out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}, required=req))
 
     # R13 — basis. cc#513 cross-cutting: missing-basis credit now symmetric -> 0.5 BOTH sides
     # (was BUY 0 / SELL 0.5).
     now, prev = d.get("basis_now"), d.get("basis_prev")
-    if BUY:
-        if now is None or prev is None:
-            c = 0.5
-        elif MOM:
-            c = 1.0 if (now > prev and now > 0) else 0.0
-        else:
-            c = 1.0 if (now > prev and now < 0) else 0.0
-        req = f"basis {'widening premium' if MOM else 'fading discount'} (missing = 0.5)"
+    if not d.get("is_future"):
+        # cc#717 part_6: cash stock has no futures basis -> 0.5 N/A + CASH chip (SELL already gave 0.5
+        # on missing basis; this makes the non-futures case explicit + symmetric with R12).
+        out.append(_R("R13", "Basis", 0.5,
+                      {"now": _r(now), "prev": _r(prev), "cash_na": True, "chip": "CASH · DERIVATIVES N/A"},
+                      required="cash stock — derivatives N/A (0.5)"))
     else:
-        if now is None or prev is None:
-            c = 0.5
-        elif MOM:
-            c = 1.0 if (now < prev and now < 0) else (0.5 if now < 0 else 0.0)
+        if BUY:
+            if now is None or prev is None:
+                c = 0.5
+            elif MOM:
+                c = 1.0 if (now > prev and now > 0) else 0.0
+            else:
+                c = 1.0 if (now > prev and now < 0) else 0.0
+            req = f"basis {'widening premium' if MOM else 'fading discount'} (missing = 0.5)"
         else:
-            c = 1.0 if (now < prev and now > 0) else (0.5 if now > 0 else 0.0)
-        req = f"basis {'widening discount' if MOM else 'fading premium'} (missing = 0.5)"
-    out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}, required=req))
+            if now is None or prev is None:
+                c = 0.5
+            elif MOM:
+                c = 1.0 if (now < prev and now < 0) else (0.5 if now < 0 else 0.0)
+            else:
+                c = 1.0 if (now < prev and now > 0) else (0.5 if now > 0 else 0.0)
+            req = f"basis {'widening discount' if MOM else 'fading premium'} (missing = 0.5)"
+        out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}, required=req))
 
     # R14 — ATR ignition. BUY only; DROPPED on SELL (3010).
     if BUY:
