@@ -281,7 +281,8 @@ def smartgain_m2m():
                             CASE WHEN c.spot_ltp IS NOT NULL THEN c.spot_ts END,
                             c.eod_ts
                         ) AS last_tick,
-                        c.fut_ever_existed
+                        c.fut_ever_existed,
+                        COALESCE(c.fut_prev_close, c.spot_prev_close)         AS prev_close   -- cc#718: prior-session base for the day-change line (fut close, fallback spot)
                     FROM (
                         SELECT
                             -- cc#193: only TRADING-SESSION fut bars (weekday +
@@ -312,6 +313,21 @@ def smartgain_m2m():
                             (SELECT ip.ts FROM intraday_prices ip
                               WHERE ip.symbol = h.symbol
                               ORDER BY ip.ts DESC LIMIT 1)                    AS eod_ts,
+                            -- cc#718: prior-session closes for the day-change line. fut_prev_close =
+                            -- last fut session close on a date STRICTLY before the newest fut bar's
+                            -- date; spot_prev_close = last raw_prices close before today (fallback,
+                            -- same spot fallback the mtm math uses).
+                            (SELECT ip.close FROM intraday_prices ip
+                              WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                                AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                                AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                                AND ip.ts::date < (SELECT MAX(ip2.ts::date) FROM intraday_prices ip2
+                                                    WHERE ip2.symbol = h.symbol AND ip2.source = 'fyers_fut'
+                                                      AND EXTRACT(DOW FROM ip2.ts) BETWEEN 1 AND 5)
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS fut_prev_close,
+                            (SELECT rp.close FROM raw_prices rp
+                              WHERE rp.symbol = h.symbol AND rp.price_date < CURRENT_DATE
+                              ORDER BY rp.price_date DESC LIMIT 1)            AS spot_prev_close,
                             -- cc#161: existence check, NOT scoped to today/recency --
                             -- distinguishes a structurally fut-less instrument (index
                             -- futures never subscribed, e.g. NIFTY -- see cc#162) from
@@ -332,6 +348,7 @@ def smartgain_m2m():
                 row["entry_price"]        = float(row["entry_price"]) if row["entry_price"] is not None else None
                 row["ltp"]                = float(row["ltp"])         if row["ltp"]         is not None else None
                 row["mtm"]                = float(row["mtm"])         if row["mtm"]         is not None else None
+                row["prev_close"]         = float(row["prev_close"])  if row["prev_close"]  is not None else None   # cc#718
                 row["is_live"]            = bool(row["is_live"])
                 row["ltp_age_min"]        = float(row["ltp_age_min"]) if row["ltp_age_min"] is not None else None
                 row["spot_ltp"]           = float(row["spot_ltp"]) if row["spot_ltp"] is not None else None

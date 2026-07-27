@@ -204,11 +204,13 @@
       <div class="hero-bucket">
         <div class="hero-bk-label">Long Value</div>
         <div class="hero-bk-val" id="hero-long-val">&#8212;</div>
+        <div class="hero-bk-sub" id="hero-long-day"></div>
         <div class="hero-bk-sub" id="hero-long-pct"></div>
       </div>
       <div class="hero-bucket">
         <div class="hero-bk-label">Short Value</div>
         <div class="hero-bk-val" id="hero-short-val">&#8212;</div>
+        <div class="hero-bk-sub" id="hero-short-day"></div>
         <div class="hero-bk-sub" id="hero-short-pct"></div>
       </div>
     </div>
@@ -331,6 +333,36 @@ async function loadHoldings(smooth=false) {
       if(svEl){ svEl.textContent=sp.length?"₹"+f0(sVal):"—"; svEl.style.color=sp.length?"var(--txt)":"var(--mut)"; }
       if(lpEl){ lpEl.textContent=lPct!=null?(lPct>=0?"+":"")+lPct.toFixed(2)+"% P&L":""; lpEl.style.color=colorOf(lPct); }
       if(spEl){ spEl.textContent=sPct!=null?(sPct>=0?"+":"")+sPct.toFixed(2)+"% P&L":""; spEl.style.color=colorOf(sPct); }
+
+      // cc#718: per-side DAY change line. P&L-IMPACT sign convention (green = that side MADE money
+      // today) — SHORT with prices DOWN shows POSITIVE green. Day P&L per leg = qty*(ltp-base) LONG /
+      // qty*(base-ltp) SHORT; base = prev_close (prior-session close), falling back to entry_price when
+      // no prior close exists (also the opened-today case, since holdings carry no per-leg entry date).
+      // % = side day P&L / TOTAL side value (self-referenced, founder-confirmed denominator). Legs with
+      // no live ltp are excluded and flagged with a trailing * (partial); a side with 0 legs shows a dash.
+      const sideDay = (list)=>{
+        let pnl=0, val=0, partial=false, any=false;
+        for(const p of list){
+          const base = (p.prev_close!=null) ? p.prev_close : p.entry_price;
+          if(p.ltp==null || base==null || p.qty==null){ partial=true; continue; }
+          pnl += (p.direction==="SHORT" ? (base-p.ltp) : (p.ltp-base)) * p.qty;
+          val += p.ltp*p.qty; any=true;
+        }
+        if(!any) return null;
+        return { pnl, pct: val>0 ? pnl/val*100 : null, partial };
+      };
+      const paintDay = (el, list)=>{
+        if(!el) return;
+        if(!list.length){ el.textContent="Day —"; el.style.color="var(--mut)"; return; }
+        const x = sideDay(list);
+        if(!x || x.pct==null){ el.textContent="Day —"; el.style.color="var(--mut)"; return; }
+        const pctT=(x.pct>=0?"+":"")+x.pct.toFixed(2)+"%";
+        const rupT=(x.pnl>=0?"+":"−")+"₹"+f2(Math.abs(x.pnl));
+        el.textContent="Day "+pctT+" ("+rupT+")"+(x.partial?" *":"");
+        el.style.color=colorOf(x.pct);
+      };
+      paintDay(document.getElementById("hero-long-day"),  lp);
+      paintDay(document.getElementById("hero-short-day"), sp);
     }
     const lc = document.getElementById("live-chip");
     lc.style.display = isLive?"inline-flex":"none";
