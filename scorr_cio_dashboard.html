@@ -2133,6 +2133,25 @@ function GvmReport({ r, hist }) {
               {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
               {x.earnings && x.earnings.blackout && <Tag color={C.red}>⚠ Blackout {x.earnings.days_to}d</Tag>}
             </div>
+            {/* cc#710: compact C·A·R·D action strip below the symbol/name header (founder 27-Jul).
+                C opens the shared V8-type chart card (cc#706); R opens the shared Result/Scorr-view card.
+                A is ghosted (this page already IS the full analysis); D is ghosted (Deriv Cockpit is F&O-only,
+                lives on the V8 dashboard — no site-wide opener). R/V pills on the header line stay as-is. */}
+            <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
+              {[
+                { k: "C", t: "Price chart", on: true, fn: () => { if (window.ScorrChartCard) window.ScorrChartCard.open(r.symbol); } },
+                { k: "A", t: "Full analysis is shown on this page", on: false },
+                { k: "R", t: "Results / Scorr view", on: true, fn: () => { if (window.ScorrRCard) window.ScorrRCard.open(r.symbol); } },
+                { k: "D", t: "Cockpit — F&O stocks, on the V8 dashboard", on: false },
+              ].map(b => (
+                <button key={b.k} title={b.t} disabled={!b.on} onClick={b.on ? b.fn : undefined}
+                  style={{ width: 28, height: 28, borderRadius: 7, fontSize: 12.5, fontWeight: 800, fontFamily: "monospace",
+                    border: `1px solid ${C.gridLine}`, cursor: b.on ? "pointer" : "not-allowed",
+                    background: b.on ? C.bg : "transparent", color: b.on ? C.accent : C.muted, opacity: b.on ? 1 : 0.42 }}>
+                  {b.k}
+                </button>
+              ))}
+            </div>
             <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "nowrap", overflowX: "auto" }}>
               {["G","V","M"].map(pillar => {
                 const pi = PILLAR_INFO[pillar];
