@@ -1813,7 +1813,40 @@ function FinChartModal({ title, periods, rows, onClose }) {
   );
 }
 
-function FinTable({ title, table, trendLabel }) {
+// cc#713: YoY colour-coding for the Financials Quarterly + Annual (P&L) tables. Cell BACKGROUND tint
+// only (text colour untouched) via low-alpha rgba so it reads on BOTH light & dark. Only Sales /
+// Operating Profit / Net Profit / EPS get the growth rule; OPM% gets a binary pp expand/contract tint.
+// Expenses / Interest / Depreciation / Tax% are NEVER tinted (growth there is a negative signal).
+const _FIN_NUM = v => { if (v == null) return null; if (typeof v === "number") return isFinite(v) ? v : null; const n = parseFloat(String(v).replace(/[, %]/g, "")); return isFinite(n) ? n : null; };
+const _FIN_TINT = { green: "rgba(34,197,94,0.16)", yellow: "rgba(234,179,8,0.15)", red: "rgba(239,68,68,0.14)" };
+function _finRowKind(label) {
+  const l = String(label || "").trim().toLowerCase();
+  if (/^opm|operating profit margin/.test(l)) return "opm";
+  if (/^sales|^revenue|^net sales|^total revenue|^total income/.test(l)) return "sales";
+  if (/^operating profit/.test(l)) return "op";
+  if (/^net profit|^profit after tax|^pat\b/.test(l)) return "np";
+  if (/^eps/.test(l)) return "eps";
+  return null;
+}
+// mode: "quarterly" (col N vs N-4) | "annual" (col N vs N-1). Returns {bg, pct, opm} or null.
+function _finYoY(mode, kind, arr, i) {
+  if (!mode || !kind) return null;
+  const j = i - (mode === "quarterly" ? 4 : 1);
+  if (j < 0) return null;
+  const cur = _FIN_NUM(arr[i]), prev = _FIN_NUM(arr[j]);
+  if (cur == null || prev == null) return null;
+  if (kind === "opm") {                       // percentage-point delta, binary expand/contract
+    const dpp = cur - prev;
+    if (dpp === 0) return null;
+    return { bg: dpp > 0 ? _FIN_TINT.green : _FIN_TINT.red, pct: dpp, opm: true };
+  }
+  if (prev === 0) return null;
+  const g = (cur - prev) / Math.abs(prev) * 100;
+  return { bg: g > 10 ? _FIN_TINT.green : (g >= 0 ? _FIN_TINT.yellow : _FIN_TINT.red), pct: g };
+}
+const _finYoYTip = yy => (yy.pct >= 0 ? "+" : "") + yy.pct.toFixed(1) + (yy.opm ? "pp YoY" : "% YoY");
+
+function FinTable({ title, table, trendLabel, yoy }) {
   const [chartOpen, setChartOpen] = useState(false);   // cc#638: one chart modal per table (header button)
   if (!table || !table.rows || !table.rows.length) return null;
   const displayRows = table.rows.filter(rw => rw.display !== false);
@@ -1830,6 +1863,7 @@ function FinTable({ title, table, trendLabel }) {
   const rowVals = row => keep.map(i => row.values[i]);
   const periods = keep.map(i => srcP[i]);
   const ttmIdx = (table.ttm || isTTM(periods[periods.length - 1])) ? periods.length - 1 : -1;
+  const latestIdx = periods.length - 1;   // cc#713: most-recent column (always emphasised)
   const modalRows = displayRows.map(r => ({ ...r, values: rowVals(r) }));
   return (
     <div style={{ marginBottom: 22 }}>
@@ -1845,39 +1879,58 @@ function FinTable({ title, table, trendLabel }) {
         </span>
       </div>
       {chartOpen && <FinChartModal title={title} periods={periods} rows={modalRows} onClose={() => setChartOpen(false)} />}
+      {/* cc#713: bolder grid + stronger header, zebra rows, sticky row-label column, latest-column
+          emphasis (bold + left accent), and — on the Quarterly/Annual tables — YoY background tints. */}
       <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + 170, fontSize: 12.5 }}>
           <thead>
             <tr>
-              <th style={{ position: "sticky", left: 0, background: C.card, zIndex: 2, textAlign: "left",
-                padding: "8px 12px", borderBottom: `1px solid ${C.border}`, minWidth: 170, color: C.muted, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>
+              <th style={{ position: "sticky", left: 0, background: C.bg, zIndex: 2, textAlign: "left",
+                padding: "9px 12px", borderBottom: `2px solid ${C.border}`, minWidth: 170, color: C.muted, fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>
                 {title}
               </th>
               {periods.map((p, i) => (
-                <th key={i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`,
-                  color: i === ttmIdx ? C.gold : C.muted, fontWeight: i === ttmIdx ? 800 : 700, fontSize: 11,
-                  background: i === ttmIdx ? C.gold + "12" : "transparent", whiteSpace: "nowrap" }}>{p}</th>
+                <th key={i} style={{ padding: "9px 10px", textAlign: "right", borderBottom: `2px solid ${C.border}`,
+                  color: i === ttmIdx ? C.gold : C.muted, fontWeight: (i === latestIdx || i === ttmIdx) ? 800 : 700, fontSize: 11,
+                  background: i === ttmIdx ? C.gold + "14" : C.bg, whiteSpace: "nowrap",
+                  borderLeft: i === latestIdx ? `2px solid ${C.accent}` : undefined }}>{p}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {displayRows.map(row => (
-              <React.Fragment key={row.label}>
-                <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
-                  <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontWeight: 600 }}>
+            {displayRows.map((row, ri) => {
+              const kind = _finRowKind(row.label);
+              const labelBold = kind && kind !== "opm";   // Sales/Operating Profit/Net Profit/EPS semibold
+              const vals = rowVals(row);
+              const rowBg = ri % 2 ? C.bg : C.card;        // zebra (opaque so it holds under the sticky col)
+              return (
+                <tr key={row.label}>
+                  <td style={{ position: "sticky", left: 0, background: rowBg, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap", borderBottom: `1px solid ${C.border}` }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontWeight: labelBold ? 700 : 600 }}>
                       {row.label}
                       {trendLabel && row.label === trendLabel && _qoqArrow(row.values)}
                     </span>
                   </td>
-                  {rowVals(row).map((v, i) => (
-                    <td key={i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
-                      color: i === ttmIdx ? C.gold : C.text, fontWeight: i === ttmIdx ? 800 : 500,
-                      background: i === ttmIdx ? C.gold + "08" : "transparent" }}>{_finFmt(v, row.unit)}</td>
-                  ))}
+                  {vals.map((v, i) => {
+                    const yy = _finYoY(yoy, kind, vals, i);
+                    const isLatest = i === latestIdx;
+                    const isTtm = i === ttmIdx;
+                    const bg = yy ? yy.bg : (isTtm ? C.gold + "10" : rowBg);
+                    const showSub = yy && isLatest && (kind === "sales" || kind === "np");
+                    return (
+                      <td key={i} title={yy ? _finYoYTip(yy) : undefined}
+                        style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
+                          color: isTtm ? C.gold : C.text, fontWeight: (isLatest || isTtm) ? 800 : 500,
+                          background: bg, borderBottom: `1px solid ${C.border}`,
+                          borderLeft: isLatest ? `2px solid ${C.accent}` : undefined }}>
+                        <div>{_finFmt(v, row.unit)}</div>
+                        {showSub && <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "monospace", lineHeight: 1.2, marginTop: 1, whiteSpace: "nowrap", color: yy.pct >= 0 ? C.green : C.red }}>{(yy.pct >= 0 ? "+" : "") + yy.pct.toFixed(1) + "%"}</div>}
+                      </td>
+                    );
+                  })}
                 </tr>
-              </React.Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1918,8 +1971,8 @@ function FinancialsSection({ financials }) {
         )}
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Tap the chart icon on any row for its trend across all periods.</div>
-      <FinTable title="Quarterly Results" table={cur.quarterly} />
-      <FinTable title="Profit & Loss" table={cur.profit_loss} />
+      <FinTable title="Quarterly Results" table={cur.quarterly} yoy="quarterly" />
+      <FinTable title="Profit & Loss" table={cur.profit_loss} yoy="annual" />
       <FinTable title="Balance Sheet" table={cur.balance_sheet} />
       <FinTable title="Cash Flow" table={cur.cash_flow} />
       {/* cc#638/639/640: Ratios section — the ratios_v2 buckets (Growth 1Y/3Y/5Y; Profitability,
