@@ -323,6 +323,7 @@ const CATS = [
   { id:"domestic",     label:"Domestic" },
   { id:"global",       label:"Global" },
   { id:"ipo",          label:"IPO" },
+  { id:"stock_views",  label:"Stock Views" },   // cc#725: 5th category (before Learn)
   { id:"learn",        label:"Learn" },
 ];
 // cc#294: "Position News" tab relocated to v8_dashboard.html (Master Dashboard is where open
@@ -458,7 +459,7 @@ function pick(cat){
 function _newsCatLabel(cat){
   // mirrors backend _CANON_CAT (news_endpoints.py) — used to read the right
   // count out of category_counts for the cap/hasMore calc below.
-  return {ai_editorial:"AI Editorial", domestic:"Domestic", global:"Global", ipo:"IPO"}[cat];
+  return {ai_editorial:"AI Editorial", domestic:"Domestic", global:"Global", ipo:"IPO", stock_views:"Stock Views"}[cat];
 }
 
 async function load(){
@@ -489,11 +490,11 @@ async function load(){
     articles = d.articles || [];
     newsOffset = articles.length;
     const c = d.category_counts || {};
-    const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0);
+    const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0)+(c["Stock Views"]||0);
     newsCatTotal = activeCat === "all" ? total : (c[_newsCatLabel(activeCat)] || 0);
     newsHasMore = articles.length < Math.min(newsCatTotal, NEWS_CAP) && articles.length >= NEWS_INITIAL;
     document.getElementById("meta").textContent =
-      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
+      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0} · Stock Views ${c["Stock Views"]||0}`;
     render();
   } catch(e){
     if(e.name === "AbortError") return; // tab switched — silently ignore
@@ -579,6 +580,11 @@ function artFull(a, isLead){
   const rt = rmins ? `<span class="art-rt">${rmins} min read</span>` : "";
   const stand = (hasFull && a.summary && String(a.summary).trim())
     ? `<div class="art-stand">${esc(a.summary)}</div>` : "";
+  // cc#725: Stock Views cards carry the symbol tag + an async TC verdict badge + score chip.
+  const svSym = (a.category === "Stock Views") ? (symStr(a).split(",")[0]||"").trim() : "";
+  const svTag = svSym
+    ? `<span class="art-sym">${esc(svSym)}</span><span class="tc-badge" data-tcsym="${esc(svSym)}"></span><span>·</span>`
+    : "";
   const bodyHTML = hasFull
     ? renderMd(a.full_summary)
     : (a.summary && String(a.summary).trim()
@@ -587,7 +593,7 @@ function artFull(a, isLead){
   return `<article class="art ${impClass}${isLead?' lead':''}">
     ${copyBtn(a, hasFull)}
     <div class="art-head">${esc(a.headline_clean)}</div>
-    <div class="art-metarow">${rt}${impact}</div>
+    <div class="art-metarow">${svTag}${rt}${impact}</div>
     ${stand}
     <div class="art-body">${bodyHTML}</div>
     <div class="art-foot">
@@ -817,8 +823,8 @@ function render(){
   }
   let html;
   if(curCat === "all"){
-    html = rows.map((a,i) => a.category === "AI Editorial" ? artFull(a, i===0) : artCompact(a, true)).join("");
-  } else if(curCat === "ai_editorial"){
+    html = rows.map((a,i) => (a.category === "AI Editorial" || a.category === "Stock Views") ? artFull(a, i===0) : artCompact(a, true)).join("");
+  } else if(curCat === "ai_editorial" || curCat === "stock_views"){   // cc#725: Stock Views uses the AI-Editorial card treatment
     html = rows.map((a,i) => artFull(a, i===0)).join("");
   } else {
     html = rows.map(a => artCompact(a, false)).join("");
@@ -829,6 +835,41 @@ function render(){
     html += `<div class="feed-end">You're all caught up${articles.length>=NEWS_CAP?` — showing the latest ${NEWS_CAP}`:''}.</div>`;
   }
   feed.innerHTML = html;
+  hydrateTcBadges();   // cc#725: fill Stock Views TC verdict badges (async, cached)
+}
+
+// cc#725: async TC verdict badge on Stock Views cards — STRONG = filled ★, VALID = outline ☆,
+// plus a score chip (TC <score>/22). Best of LONG/SHORT via /api/trade-check/v4; cached per symbol.
+var _tcBadgeCache = {};
+function _tcBadgeHtml(v){
+  if(!v)return '';
+  var filled = v.verdict === "STRONG";
+  var chip = v.score.toFixed(1) + "/" + v.max;
+  return '<span title="Trade Check '+chip+' '+v.verdict+'" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:7px;margin-right:2px;'
+    + (filled ? 'background:#0fa968;color:#fff;' : 'background:transparent;color:#0fa968;border:1px solid #0fa968;') + '">'
+    + (filled ? '★' : '☆') + ' ' + v.verdict + ' · TC ' + chip + '</span>';
+}
+function hydrateTcBadges(){
+  document.querySelectorAll('.tc-badge[data-tcsym]').forEach(function(el){
+    var sym = el.getAttribute('data-tcsym');
+    if(!sym || el.getAttribute('data-done')) return;
+    el.setAttribute('data-done','1');
+    if(_tcBadgeCache[sym] !== undefined){ el.innerHTML = _tcBadgeHtml(_tcBadgeCache[sym]); return; }
+    Promise.all(['LONG','SHORT'].map(function(dir){
+      return fetch('/api/trade-check/v4?symbol='+encodeURIComponent(sym)+'&direction='+dir)
+        .then(function(r){return r.json()}).catch(function(){return null;});
+    })).then(function(rs){
+      var best = null;
+      rs.forEach(function(d){
+        if(!d || d.error || !d.tier1 || !d.tier2) return;
+        var sc = (d.tier1.score||0)+(d.tier2.score||0), mx = (d.tier1.max||0)+(d.tier2.max||0);
+        if((d.final_verdict==="VALID"||d.final_verdict==="STRONG") && (!best || sc>best.score))
+          best = { verdict:d.final_verdict, score:sc, max:mx };
+      });
+      _tcBadgeCache[sym] = best;
+      document.querySelectorAll('.tc-badge[data-tcsym="'+sym+'"]').forEach(function(x){ x.innerHTML = _tcBadgeHtml(best); });
+    });
+  });
 }
 
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){

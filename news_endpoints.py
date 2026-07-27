@@ -285,6 +285,7 @@ _CANON_CAT = {
     "domestic":        "Domestic",
     "global":          "Global",
     "ipo":             "IPO",
+    "stock_views":     "Stock Views",   # cc#725: 5th canonical category (STOCK_VIEWS_FRAMEWORK_V1 id=10062)
 }
 
 
@@ -329,6 +330,51 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
         counts = {row[0]: row[1] for row in cur.fetchall()}
     return {"category": cat, "limit": limit, "offset": offset,
             "count": len(articles), "category_counts": counts, "articles": articles}
+
+
+@router.get("/api/news/stock_views/shortlist")
+def stock_views_shortlist(request: Request, hours: int = 48):
+    """cc#725 / STOCK_VIEWS_FRAMEWORK_V1 (id=10062) part_1 — READ-ONLY shortlist helper. Pulls the
+    DISTINCT symbols mentioned in polished_news over the last `hours` (ANY category = the news-catalyst
+    source), runs Trade Check on each (best of LONG/SHORT), and returns only VALID/STRONG candidates
+    sorted by TC score DESC. Writes NOTHING — Claude-web calls it on the founder's "stock views"
+    trigger to choose which stocks to write up (news catalyst AND a valid technical setup, both true)."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
+    hours = max(1, min(hours, 168))
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT DISTINCT UPPER(TRIM(s)) AS sym
+                       FROM polished_news p,
+                            LATERAL unnest(COALESCE(p.mentioned_symbols, ARRAY[]::text[])) AS s
+                       WHERE p.polished_at > (NOW() AT TIME ZONE 'Asia/Kolkata') - make_interval(hours => %s)
+                         AND TRIM(s) <> ''""", (hours,))
+        syms = [r[0] for r in cur.fetchall()]
+    try:
+        from tc_v4_endpoints import trade_check_v4   # PRIMARY TC scorer (22-pt tier1+tier2 + verdict)
+    except Exception as e:
+        return {"error": f"TC engine unavailable: {e}", "hours": hours,
+                "universe_scanned": len(syms), "count": 0, "candidates": []}
+    cands = []
+    for sym in syms:
+        best = None
+        for direction in ("LONG", "SHORT"):
+            try:
+                d = trade_check_v4(sym, direction)
+            except Exception:
+                continue
+            if not d or d.get("error"):
+                continue
+            t1, t2 = d.get("tier1") or {}, d.get("tier2") or {}
+            score = (t1.get("score") or 0) + (t2.get("score") or 0)
+            mx = (t1.get("max") or 0) + (t2.get("max") or 0)
+            verdict = d.get("final_verdict")
+            if verdict in ("VALID", "STRONG") and (best is None or score > best["score"]):
+                best = {"symbol": sym, "direction": direction, "verdict": verdict,
+                        "score": round(score, 1), "max": mx, "cmp": d.get("cmp")}
+        if best:
+            cands.append(best)
+    cands.sort(key=lambda c: -c["score"])
+    return {"hours": hours, "universe_scanned": len(syms), "count": len(cands), "candidates": cands}
 
 
 # cc#217: /api/admin/refresh_news retired — its company-news fetch is superseded by
