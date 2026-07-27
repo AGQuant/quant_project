@@ -2608,12 +2608,11 @@ function renderMood(m){
   const gval=c=>{const v=Number(c.value);if(c.value==null||isNaN(v))return'';return short(c.filter)==='ADR'?v.toFixed(2):sign(v,2)+'%';};
   // cc#417 fix_2: when the ADR breadth row is from a prior trading day (weekend/holiday), stamp its
   // date so the gate reads e.g. "ADR 5.03 (Fri)" instead of implying it is today's breadth.
+  // cc#726 fix: adr_detail.adr_date is now a PRE-FORMATTED frozen-tick label from cc#719's _read_adr
+  // (e.g. "Mon 15:30"), NOT a YYYY-MM-DD date. The old `new Date(_adrDate)` parse produced literal
+  // "(Invalid Date)". Render the backend label verbatim — it already carries the day + IST time.
   const _adrDate=(m.adr_detail&&m.adr_detail.adr_date)||'';
-  let adrStamp='';
-  if(_adrDate&&_adrDate!==(m.checked_at||'')){
-    let wd='';try{wd=new Date(_adrDate+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short'});}catch(e){wd=_adrDate;}
-    adrStamp=` <span style="color:var(--dim);font-weight:400">(${wd})</span>`;
-  }
+  const adrStamp=_adrDate?` <span style="color:var(--dim);font-weight:400">(${_adrDate})</span>`:'';
   // cc#271: value (ADR ratio / signed %) rendered big in its own <b class="chk-val">, matching
   // the Buy/Sell slot number size; the ADR/Day/Week/Month label and the Y/N suffix stay small.
   const pills=(m.checks||[]).map(c=>{const v=gval(c);const st=(short(c.filter)==='ADR')?adrStamp:'';return`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)}${v?` <b class="chk-val">${v}</b>`:''}${st} ${c.pass?'Y':'N'}</div>`;}).join('');
@@ -2625,7 +2624,7 @@ function renderMood(m){
     <div class="mood-left"><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
       ${metricRow('openVix()','India VIX','vixInline')}
-      ${metricRow('openAdr()','ADR','adrInline')}
+      ${metricRow('openAdr()','ADR · daily EOD','adrInline')}
       ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
