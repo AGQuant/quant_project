@@ -2422,6 +2422,50 @@ const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 function fmtTs(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return String(ts);return String(p.day).padStart(2,'0')+' '+MON[p.mon]+' '+String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');}
 // cc_task #76 4b: holding days = CURRENT_DATE - entry_ts::date + 1 (Day 1 = entered today)
 function holdDays(ts){if(!ts)return"--";const ed=String(ts).slice(0,10);const t=new Date(Date.now()+(5*60+30)*60000);const td=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');const d1=Date.parse(ed+'T00:00:00Z'),d2=Date.parse(td+'T00:00:00Z');if(isNaN(d1)||isNaN(d2))return"--";return Math.floor((d2-d1)/86400000)+1;}
+// cc#720: open-position tags shown right after the symbol (order: SYMBOL · star · NEW). NEW = entered
+// the current/latest trading session (holdDays===1, auto-drops next session — no manual state). Star =
+// this side passes Trade Check (v4/v3.3.2): STRONG -> filled ★, VALID -> outline ☆, else none. TC runs
+// ASYNC per unique symbol|side and is cached 15 min in _tcStarCache (module-level so it survives the 60s
+// re-render) — the page renders immediately with empty star slots that fill when TC lands (no call storm,
+// no blocking). data-tckey (not id) so the SAME sym|side across Table + Ladder + mobile all hydrate.
+const _tcStarCache = new Map();          // "SYM|SIDE" -> {verdict, score, max, ts}
+const _tcStarInflight = new Set();
+function posTags(x){
+  const key=(x.symbol||'')+'|'+(x.side||'');
+  const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
+  return '<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
+}
+function _tcStarHtml(v){
+  if(!v)return'';
+  const filled=v.verdict==='STRONG',outline=v.verdict==='VALID';
+  if(!filled&&!outline)return'';   // WATCH / FAIL / REJECT -> no star
+  const title='TC '+Number(v.score).toFixed(1)+'/'+v.max+' '+v.verdict;
+  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">'+(filled?'★':'☆')+'</span>';
+}
+function _fillTcStar(key){
+  const v=_tcStarCache.get(key);
+  try{document.querySelectorAll('.tc-star[data-tckey="'+key+'"]').forEach(el=>{el.innerHTML=v?_tcStarHtml(v):'';});}catch(e){}
+}
+function hydrateTcStars(rows){
+  const now=Date.now(),TTL=15*60*1000,uniq=new Set();
+  (rows||[]).forEach(x=>{if(x&&x.symbol&&x.side)uniq.add(x.symbol+'|'+x.side);});
+  uniq.forEach(key=>{
+    const c=_tcStarCache.get(key);
+    if(c&&(now-c.ts)<TTL){_fillTcStar(key);return;}
+    if(_tcStarInflight.has(key))return;
+    _tcStarInflight.add(key);
+    const parts=key.split('|'),sym=parts[0],side=parts[1];
+    fetch('/api/trade-check/v4?symbol='+encodeURIComponent(sym)+'&direction='+encodeURIComponent(side))
+      .then(r=>r.json()).then(d=>{
+        if(d&&d.final_verdict&&d.tier1&&d.tier2){
+          _tcStarCache.set(key,{verdict:d.final_verdict,
+            score:(Number(d.tier1.score)||0)+(Number(d.tier2.score)||0),
+            max:(Number(d.tier1.max)||0)+(Number(d.tier2.max)||0),ts:Date.now()});
+          _fillTcStar(key);
+        }
+      }).catch(function(){}).finally(function(){_tcStarInflight.delete(key);});
+  });
+}
 // cc_task #76 4c: capitalised basket label + buy=green / sell=red pill
 function basketLabel(b){return({buy_reversal:'Buy Reversal',buy_momentum:'Buy Momentum',buy_s1_bounce:'Buy S1 Bounce',sell_reversal:'Sell Reversal',sell_momentum:'Sell Momentum',sell_overbought:'Sell Overbought'})[b]||(b||'').replace(/_/g,' ');}
 function basketPill(b){const buy=(b||'').startsWith('buy');const bg=buy?'#eaf3de':'#fcebeb',fg=buy?'#3B6D11':'#A32D2D';return`<span style="background:${bg};border:1px solid ${fg};color:${fg};border-radius:5px;padding:1px 6px;font-size:10px;font-family:Sora">${basketLabel(b)}</span>`;}
@@ -2755,13 +2799,14 @@ function renderMaster(){
     const day_pnl_pct=(day_pct==null)?null:(isShort?-day_pct:day_pct);
     return{...x,isShort,net_pnl,net_pnl_pct,potential_left,pot_pct,day_pct,day_pnl_pct,sector_seg,sector_day,sector_sd,days:holdDays(x.entry_ts)};
   });
+  setTimeout(function(){hydrateTcStars(openRows);},60);   // cc#720: async TC stars fill after the DOM paints (cached 15m)
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
   const openPosTable=sortTbl('openpos',
     [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
     openRows,x=>`<tr>
-      <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
+      <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
       <td style="text-align:center">${x.days}</td>
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
@@ -2802,7 +2847,7 @@ function renderMaster(){
   // its own row so the eye lands on money first, not the timestamp. Bar tooltip drops the P&L dup.
   const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
     <div class="mob-card"><div class="mob-card-header"><span style="display:flex;align-items:baseline;gap:8px;min-width:0">
-        <span class="mob-sym dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
+        <span class="mob-sym dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}
         <span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
       <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
@@ -2831,7 +2876,7 @@ function renderMaster(){
     return`<div style="display:flex;align-items:center;gap:20px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${accent};border-radius:5px;padding:14px 18px">
       <div style="width:210px;flex-shrink:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-          <span class="dc-link" style="font-size:15px;font-weight:700;letter-spacing:.04em" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
+          <span class="dc-link" style="font-size:15px;font-weight:700;letter-spacing:.04em" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}
           <span style="font-size:9px;font-weight:700;letter-spacing:.09em;padding:2px 6px;border-radius:3px;background:${badgeBg};color:${badgeFg}">${x.side}</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
           ${basketPill(x.basket)}<span style="font-size:10px;color:var(--mut)">${fmtTs(x.entry_ts)}</span><span style="font-size:10px;color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">D${x.days}</span></div></div>
