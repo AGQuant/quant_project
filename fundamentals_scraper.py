@@ -51,6 +51,10 @@ SPOT_CHECK = ["RELIANCE", "KPITTECH", "HDFCBANK"]
 SCRAPE_FLAG = "fundamentals_scrape"
 SCRAPE_1B_FLAG = "fundamentals_scrape_1b"   # cc#391 shareholding phase
 
+# cc#741: scrape-universe enforcement — every fundamentals/shareholding fetch is hard-gated at the
+# single network choke point (_fetch_soup) so no enqueue/retry path can scrape beyond the universe.
+from scrape_universe import in_scrape_universe, log_universe_skip, universe_symbols
+
 # screener section id -> period_type stored in fundamentals_history
 SECTIONS = {"quarters": "quarter", "profit-loss": "annual", "balance-sheet": "annual",
             "cash-flow": "annual", "ratios": "annual"}
@@ -168,8 +172,28 @@ def _fetch(url):
 
 def _fetch_soup(symbol):
     """Fetch a company page (consolidated preferred, else standalone) and return (soup, cons) or
-    (None, None). A valid page carries a profit-loss data-table."""
+    (None, None). A valid page carries a profit-loss data-table.
+
+    cc#741: HARD scrape-universe gate at the SINGLE network choke point. fetch_company,
+    fetch_shareholding and the cc#694 single-visit path all fetch through here, so an out-of-universe
+    symbol can NEVER hit the network regardless of which enqueue/retry path reached it (this is what
+    plugs the daily 8-19-symbol T+1 leak — the earlier per-path gates logged skips but some path still
+    fetched). Out-of-universe -> (None, None), audit-logged once via log_universe_skip. Fail-OPEN on a
+    DB error (proceed to fetch) so a transient hiccup never blocks a legitimate universe fetch."""
     sym = symbol.strip().upper()
+    try:
+        import fyers_feed
+        _c = fyers_feed.get_db()
+        try:
+            with _c.cursor() as _cur:
+                if not in_scrape_universe(_cur, sym):
+                    log_universe_skip(_cur, sym, None, "fundamentals_scraper._fetch_soup")
+                    _c.commit()
+                    return None, None
+        finally:
+            _c.close()
+    except Exception as _ge:
+        log.warning(f"cc#741 universe gate check failed for {sym} (fail-open): {_ge}")
     for cons, path in ((True, f"{BASE}{sym}/consolidated/"), (False, f"{BASE}{sym}/")):
         r = _fetch(path)
         if r is None or r.status_code != 200 or "data-table" not in r.text:
@@ -279,6 +303,8 @@ def run_scrape(mode="run") -> dict:
                 cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
                             "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
                 symbols = [r[0] for r in cur.fetchall()]
+                _univ = universe_symbols(cur)   # cc#741: enqueue-side pre-filter to the scrape universe
+                symbols = [s for s in symbols if s in _univ]
                 cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE status='ok'")
                 already = {r[0] for r in cur.fetchall()}
         todo = [s for s in symbols if s not in already]
@@ -359,6 +385,8 @@ def run_shareholding_scrape() -> dict:
             cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
                         "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
             symbols = [r[0] for r in cur.fetchall()]
+            _univ = universe_symbols(cur)   # cc#741: enqueue-side pre-filter to the scrape universe
+            symbols = [s for s in symbols if s in _univ]
             # cc#597: skip 'ok' AND 'empty' (a page that loaded but genuinely has no shareholding
             # section — delisted/new/illiquid). Only NULL + 'failed' are retried.
             cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE phase1b_status IN ('ok','empty')")
@@ -458,6 +486,8 @@ def run_shareholding_quarterly(target_end: date = None, today: date = None) -> d
             cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
                         "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
             symbols = [r[0] for r in cur.fetchall()]
+            _univ = universe_symbols(cur)   # cc#741: enqueue-side pre-filter to the scrape universe
+            symbols = [s for s in symbols if s in _univ]
             cur.execute("""SELECT DISTINCT symbol FROM fundamentals_history
                            WHERE section='shareholding' AND period_end >= %s""", (target_end,))
             already = {r[0] for r in cur.fetchall()}
@@ -572,9 +602,14 @@ async def _scrape_startup_trigger():
     if mode:
         log.info(f"cc#361: fundamentals_scrape flag claimed (mode={mode}) — starting in background")
         threading.Thread(target=run_scrape, args=(mode,), name="cc361-scrape", daemon=True).start()
-    if _claim_1b_flag():   # cc#391
-        log.info("cc#391: fundamentals_scrape_1b flag claimed — starting shareholding scrape in background")
-        threading.Thread(target=run_shareholding_scrape, name="cc391-scrape1b", daemon=True).start()
+    # cc#741 (founder 28-Jul, id=10093): the Phase 1B full-universe shareholding backfill ambition is
+    # RETIRED — everything beyond the ~613-symbol scrape universe is cancelled (nothing outside it feeds
+    # the rating engine). The startup auto-trigger is disabled so an armed flag can NEVER relaunch the
+    # full-universe queue. The manual /run_shareholding_scrape endpoint remains (now hard-gated at
+    # _fetch_soup to the universe) for a deliberate, universe-scoped refresh if ever needed.
+    # if _claim_1b_flag():   # cc#391 — RETIRED cc#741
+    #     log.info("cc#391: fundamentals_scrape_1b flag claimed — starting shareholding scrape in background")
+    #     threading.Thread(target=run_shareholding_scrape, name="cc391-scrape1b", daemon=True).start()
 
 
 @router.get("/fundamentals_scrape_status")

@@ -43,6 +43,27 @@ def in_scrape_universe(cur, symbol: str) -> bool:
     return cur.fetchone() is not None
 
 
+def universe_symbols(cur) -> set:
+    """cc#741: the FULL scrape-eligible set (cc#701 inclusive union) in ONE query — for enqueue-side
+    pre-filtering. Callers filter their todo list against this instead of re-implementing the ranking
+    inline (the per-symbol in_scrape_universe() stays the authoritative single-symbol gate). Same
+    definition as in_scrape_universe: NSE non-numeric top-500 by market_cap UNION any sector_ops_metrics
+    symbol; numeric BSE-only codes excluded by the non-numeric filter."""
+    cur.execute("""
+        WITH ranked AS (
+            SELECT UPPER(nse_code) AS code
+            FROM screener_raw
+            WHERE nse_code IS NOT NULL AND nse_code <> '' AND nse_code !~ '^[0-9]+$'
+              AND market_cap IS NOT NULL
+            ORDER BY market_cap DESC NULLS LAST
+            LIMIT %s)
+        SELECT code FROM ranked
+        UNION
+        SELECT UPPER(symbol) FROM sector_ops_metrics WHERE symbol IS NOT NULL
+    """, (TOP_N,))
+    return {r[0] for r in cur.fetchall()}
+
+
 def log_universe_skip(cur, symbol: str, ex_date=None, source: str = "") -> bool:
     """Record an out-of-universe scrape-skip ONCE per symbol (not per night). Returns True the
     first time a symbol is skipped (freshly logged), False on repeat skips. Backed by the
