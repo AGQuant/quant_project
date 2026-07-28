@@ -118,7 +118,7 @@ MCP_TOOLS = [
     {"name":"v9_backtest","description":"V9 Pair Strategy: run full backtest — 10 parameter combos on all valid pairs, 2025 EOD data.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v9_results","description":"V9 Pair Strategy: get backtest results summary — all combos ranked by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v9_best_combo","description":"V9 Pair Strategy: get best parameter combo by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"v10_signal","description":"V10 ST+EMA: current NIFTY directional signal (ST 150/3 10m + EMA 3/10 30m gate, SL100/T200).","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v10_signal","description":"V10 ST+EMA: current directional signal for BOTH NIFTY50 and BANKNIFTY (ST 150/3 10m + EMA 3/10 30m gate). Returns both indices when symbol omitted; pass symbol=NIFTY50|BANKNIFTY for one (cc#746).","inputSchema":{"type":"object","properties":{"symbol":{"type":"string","description":"NIFTY50 | BANKNIFTY (omit for both)"}},"required":[]}},
     {"name":"v10_tick","description":"V10 ST+EMA: run one 5-min cycle — append 5m bar, compute signal, Telegram alert on BUY/SELL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM±5 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
@@ -282,7 +282,14 @@ async def _call_tool(name, args):
         elif name == "v9_best_combo":
             r = await client.get(f"{BASE_URL}/api/v9/best_combo"); return r.json()
         elif name == "v10_signal":
-            r = await client.get(f"{BASE_URL}/api/v10/signal"); return r.json()
+            _sym = (args or {}).get("symbol")
+            if _sym:
+                r = await client.get(f"{BASE_URL}/api/v10/signal", params={"symbol": _sym}); return r.json()
+            # cc#746: expose BOTH indices by default (BANKNIFTY was hidden — the surface that let the
+            # inverted-label + expiry-day defects go unnoticed).
+            rn = await client.get(f"{BASE_URL}/api/v10/signal", params={"symbol": "NIFTY50"})
+            rb = await client.get(f"{BASE_URL}/api/v10/signal", params={"symbol": "BANKNIFTY"})
+            return {"NIFTY50": rn.json(), "BANKNIFTY": rb.json()}
         elif name == "v10_tick":
             r = await client.post(f"{BASE_URL}/api/v10/tick", headers=h); return r.json()
         elif name == "pcr_intraday":

@@ -268,8 +268,16 @@ def current_signal(feed_symbol="NIFTY50"):
 
 # ---------- option chain lookup ----------
 def _atm_option(cur, oc_underlying, opt_type, underlying_px):
-    """Nearest-strike (ATM) monthly option's latest ltp for the given side.
-    Returns (strike, expiry, ltp) or (None,None,None) if no data."""
+    """Nearest-strike (ATM) nearest-expiry option's latest ltp for the given side.
+    Returns (strike, expiry, ltp) or (None,None,None) if no data.
+
+    cc#746 step 3: expiry is resolved PER underlying — MIN(expiry) WHERE underlying=%s AND
+    expiry >= CURRENT_DATE — so NIFTY (weekly) and BANKNIFTY (monthly-only) each pick their OWN
+    nearest live contract; there is NO shared-cycle assumption (confirmed correct). Known gap
+    (FOUNDER DECISION PENDING, no roll implemented yet): on EXPIRY DAY, MIN(expiry) equals today,
+    so a fresh entry writes the same-day expiring contract instead of rolling to the next series.
+    The roll THRESHOLD (e.g. stop selecting the expiring series after HH:MM on expiry day) is the
+    open decision — wire it here once the founder sets it."""
     cur.execute(
         "SELECT strike, expiry, ltp FROM option_chain "
         "WHERE underlying=%s AND option_type=%s "
@@ -357,14 +365,17 @@ def _paper_step(cur, feed_symbol, table, lot, oc, sl_pts, tgt_pts):
                     (feed_symbol, sig, px, round(fstop, 1), round(ftarget, 1), lot))
         events.append({"action": "OPEN", "leg": "FUT", "side": sig, "entry": round(px, 1),
                        "stop": round(fstop, 1), "target": round(ftarget, 1)})
-        # OPT leg: BUY->write PE, SELL->write CE
+        # OPT leg: BUY->write PE, SELL->write CE. The option leg is always WRITTEN (sold), so its
+        # side label is SELL regardless of the signal direction — cc#746 fix: previously stored `sig`,
+        # which mislabelled BUY-signal PE legs as side=BUY. P&L is unaffected (_close_leg's OPT branch
+        # is pure premium-collected math and never reads side).
         otype = "PE" if sig == "BUY" else "CE"
         strike, expiry, prem = _atm_option(cur, oc, otype, px)
         if strike is not None and prem is not None:
             cur.execute("INSERT INTO v10_positions (symbol,side,entry_price,entry_ts,stop,target,lot_size,status,leg,opt_strike,opt_type,opt_expiry) "
-                        "VALUES (%s,%s,%s,NOW(),NULL,NULL,%s,'OPEN','OPT',%s,%s,%s) ON CONFLICT (symbol,leg,status) DO NOTHING",
-                        (feed_symbol, sig, prem, lot, strike, otype, expiry))
-            events.append({"action": "OPEN", "leg": "OPT", "write": otype, "strike": strike,
+                        "VALUES (%s,'SELL',%s,NOW(),NULL,NULL,%s,'OPEN','OPT',%s,%s,%s) ON CONFLICT (symbol,leg,status) DO NOTHING",
+                        (feed_symbol, prem, lot, strike, otype, expiry))
+            events.append({"action": "OPEN", "leg": "OPT", "side": "SELL", "write": otype, "strike": strike,
                            "expiry": str(expiry), "premium": prem})
         else:
             events.append({"action": "OPT_SKIP", "reason": "no option_chain data for ATM"})
