@@ -845,6 +845,7 @@ NAV_REGISTRY = {
     "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
+    "/dashboard#digest": ("Digest · V8 tab (Daily Digest v2.3)", "nav"),   # cc#744
     "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
     "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
     "/dashboard#bt":    ("V6 BT — V8 tab-only deep-link (removed from top nav)", "tab"),  # cc#551: dropped from NAV, reachable via the V8 tab bar only
@@ -1114,6 +1115,63 @@ def _build_digest_daily() -> dict:
                 }
             except Exception as e:
                 log.warning(f"digest market_positioning section: {e}")
+            # cc#744: sections 6-10 — extend the digest to the full 10-section v2.3 (news/events/global/
+            # MARKET READ). HARD SEPARATION (id=244): composed ONLY from digest-domain data (news,
+            # earnings_calendar, ADR/PCR/pivots, FII/DII) — NEVER v8_metrics / qualified / baskets / paper.
+            def _hl(src, n=5):
+                cur.execute("SELECT headline FROM raw_news WHERE source_type=%s AND headline IS NOT NULL "
+                            "ORDER BY published_at DESC NULLS LAST, fetched_at DESC LIMIT %s", (src, n))
+                return [x[0] for x in cur.fetchall()]
+            result["sections"]["6_top_domestic_news"] = {"label": "Top Domestic News", "headlines": _hl("domestic", 5)}
+            cur.execute("SELECT ticker FROM earnings_calendar WHERE ex_date=CURRENT_DATE AND ticker IS NOT NULL ORDER BY ticker")
+            today_tk = [x[0] for x in cur.fetchall()]
+            cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date=CURRENT_DATE-1")
+            yday_n = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date=CURRENT_DATE+1")
+            tmrw_n = cur.fetchone()[0]
+            result["sections"]["7_events_results_today"] = {"label": "Events & Results Today",
+                "count": len(today_tk), "tickers": today_tk[:10], "more": max(0, len(today_tk) - 10)}
+            result["sections"]["8_results_yesterday"] = {"label": "Results Yesterday", "count": int(yday_n or 0)}
+            result["sections"]["9_global_events"] = {"label": "Global Events", "headlines": _hl("global", 5)}
+            if tmrw_n and tmrw_n >= 50:
+                result["heaviest_day_flag"] = f"Heavy results day tomorrow — {tmrw_n} companies report."
+            # 10 MARKET READ — advisory, composed from ADR / pivots / FII-DII / index tape (id=965).
+            pos = result["sections"].get("6_market_positioning", {}) or {}
+            fii = (pos.get("fii_dii") or {}).get("FII") or {}
+            dii = (pos.get("fii_dii") or {}).get("DII") or {}
+            nifty = domestic.get("NIFTY50") or {}
+            npp = (pivots.get("NIFTY50") or {}).get("pp"); bpp = (pivots.get("BANKNIFTY") or {}).get("pp")
+            adr_v = adr.get("adr") if adr else None
+            def _above(sym, pp):
+                c = (domestic.get(sym) or {}).get("close")
+                return bool(c is not None and pp is not None and c >= pp)
+            up_votes = sum([1 if (adr_v is not None and adr_v > 1.0) else 0,
+                            1 if (nifty.get("chg_pct") or 0) > 0 else 0,
+                            1 if fii.get("sign") == "buy" else 0,
+                            1 if _above("NIFTY50", npp) else 0])
+            bias = "BULLISH" if up_votes >= 3 else ("BEARISH" if up_votes <= 1 else "MIXED")
+            cautions = []
+            if adr_v is not None and adr_v < 1.0 and (nifty.get("chg_pct") or 0) > 0:
+                cautions.append(f"Breadth lags tape: ADR {adr_v} < 1.0 while NIFTY {('+' if (nifty.get('chg_pct') or 0) >= 0 else '')}{nifty.get('chg_pct')}% — narrow move.")
+            if fii.get("sign") == "sell" and (fii.get("streak") or 0) >= 2:
+                cautions.append(f"FII net sellers {fii.get('streak')} sessions (latest Rs.{fii.get('latest_net')} Cr).")
+            if not cautions:
+                cautions.append(f"No major divergence — ADR {adr_v}, FII {fii.get('sign')} Rs.{fii.get('latest_net')} Cr.")
+            def _zone(sym, pp):
+                pv = pivots.get(sym) or {}; side = "above" if _above(sym, pp) else "below"
+                return {"index": sym, "close": (domestic.get(sym) or {}).get("close"), "pp": pp,
+                        "position": side, "next_level": pv.get("r1") if side == "above" else pv.get("s1")}
+            result["sections"]["10_market_read"] = {"label": "MARKET READ",
+                "bias": bias,
+                "bias_support": {"adr": adr_v, "nifty_chg_pct": nifty.get("chg_pct"),
+                                 "fii_net": fii.get("latest_net"), "fii_sign": fii.get("sign"),
+                                 "dii_net": dii.get("latest_net"), "dii_sign": dii.get("sign")},
+                "cautions": cautions[:2],
+                "key_zones": [_zone("NIFTY50", npp), _zone("BANKNIFTY", bpp)],
+                "mood_gate_call": {"adr": adr_v, "adr_gate": 1.0,
+                                   "adr_state": ("PASS" if (adr_v is not None and adr_v >= 1.0) else ("FAIL" if adr_v is not None else "n/a")),
+                                   "nifty_above_pp": _above("NIFTY50", npp),
+                                   "fii_streak": fii.get("streak"), "fii_sign": fii.get("sign")}}
     except Exception as e:
         log.error(f"_build_digest_daily failed: {e}"); result["error"] = str(e)
     return result

@@ -551,6 +551,7 @@
     <button class="v8toptab" data-pane="index" onclick="showV8Pane('index')">Index Intel</button>
     <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')">V14 Intraday</button>
     <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
+    <button class="v8toptab" data-pane="digest" onclick="showV8Pane('digest')">Digest</button>
   </div>
   <div id="pane-v8">
 
@@ -753,6 +754,13 @@
       </div>
     </div>
   </div><!--/pane-bt-->
+
+  <!-- cc#744: Daily Digest (v2.3, 10 sections) as a V8 tab. HARD SEPARATION (id=244): this pane fetches
+       ONLY /api/digest/daily — no V8 metrics/qualified/baskets/paper data touches it. -->
+  <div id="pane-digest" style="display:none">
+    <div class="ptitle">Daily <b>Digest</b> <span class="ct" id="digestStamp">—</span></div>
+    <div id="digestBody"><div class="empty" style="padding:24px;color:var(--mut)">Loading digest…</div></div>
+  </div>
 
   <footer>
     <span id="apiNote">API: <span id="apiBase">&#8212;</span></span>
@@ -4939,7 +4947,7 @@ window.v14Boot=function(){
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
 function showV8Pane(name){
-  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',bt:'pane-bt'};
+  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',bt:'pane-bt',digest:'pane-digest'};
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
@@ -4947,9 +4955,85 @@ function showV8Pane(name){
   if(name==='index'&&window.idxBoot)window.idxBoot();
   if(name==='v14'&&window.v14Boot)window.v14Boot();
   if(name==='bt'&&window.btBoot)window.btBoot();
+  if(name==='digest'&&window.digestBoot)window.digestBoot();
 }
-(function(){var h=(location.hash||'').replace('#','');if(h==='index'||h==='v14'||h==='bt'){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var h=(location.hash||'').replace('#','');showV8Pane((h==='index'||h==='v14'||h==='bt')?h:'v8');});
+(function(){var h=(location.hash||'').replace('#','');if(h==='index'||h==='v14'||h==='bt'||h==='digest'){showV8Pane(h);}})();
+window.addEventListener('hashchange',function(){var h=(location.hash||'').replace('#','');showV8Pane((h==='index'||h==='v14'||h==='bt'||h==='digest')?h:'v8');});
+</script>
+<style>
+  /* cc#744: Daily Digest tab */
+  #pane-digest .dg-sec{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  #pane-digest .dg-h{font-size:12.5px;font-weight:800;color:var(--txt);margin-bottom:8px;letter-spacing:.3px}
+  #pane-digest .dg-n{display:inline-flex;min-width:20px;justify-content:center;font-size:10.5px;color:#fff;background:var(--blu);border-radius:5px;padding:1px 5px;margin-right:6px;font-weight:800}
+  #pane-digest .dg-read{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.5}
+  #pane-digest .dg-sub{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;font-weight:700;margin-bottom:4px}
+  #pane-digest .dg-news{margin:0;padding-left:18px;font-size:12.5px;color:var(--txt);line-height:1.6}
+  #pane-digest .dg-news li{margin-bottom:3px}
+  #pane-digest .dg-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  #pane-digest .dg-empty{font-size:12px;color:var(--mut)}
+  #pane-digest table.dg-tbl th{text-align:right;font-size:10px;color:var(--dim);padding:6px 10px;border-bottom:1px solid var(--line);text-transform:uppercase}
+  #pane-digest table.dg-tbl th:first-child{text-align:left}
+  @media(max-width:640px){#pane-digest .dg-two{grid-template-columns:1fr}}
+</style>
+<script>
+/* cc#744: Daily Digest tab renderer — fetches ONLY /api/digest/daily (hard-separated from V8; no
+   v8_metrics/qualified/baskets/paper touch this pane). Renders the 10-section v2.3 digest natively. */
+(function(){
+  var _loaded=false;
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function pctv(v){if(v==null||isNaN(v))return '--';var n=Number(v);return (n>=0?'+':'')+n.toFixed(2)+'%';}
+  function pcls(v){return (v!=null&&Number(v)<0)?'neg':(v!=null&&Number(v)>0?'pos':'');}
+  function bold(v){return (v!=null&&Math.abs(Number(v))>0.5)?'font-weight:800':'';}
+  function num(v,d){return (v==null||isNaN(v))?'--':Number(v).toFixed(d==null?2:d);}
+  function sec(n,label,body){return '<div class="dg-sec"><div class="dg-h"><span class="dg-n">'+n+'</span>'+esc(label)+'</div>'+body+'</div>';}
+  function tbl(head,rows){return '<div class="scroll"><table class="dg-tbl"><thead><tr>'+head.map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';}
+  function render(d){
+    var S=(d&&d.sections)||{},H='';
+    var stamp=document.getElementById('digestStamp'); if(stamp)stamp.textContent=(d&&d.generated_at)||'—';
+    if(d&&d.error){document.getElementById('digestBody').innerHTML='<div class="empty" style="color:var(--red);padding:20px">Digest error: '+esc(d.error)+'</div>';return;}
+    if(d&&d.heaviest_day_flag)H+='<div style="margin:0 0 12px;padding:8px 12px;border:1px solid var(--amber);background:rgba(245,185,74,.09);border-radius:8px;font-weight:700;color:var(--amber)">⚠ '+esc(d.heaviest_day_flag)+'</div>';
+    var g=S['1_global_indices']||{};
+    var grows=(g.data||[]).map(function(r){return '<tr><td style="text-align:left">'+esc(r.name)+'</td><td>'+num(r.price)+'</td><td class="'+pcls(r.chg_pct)+'" style="'+bold(r.chg_pct)+'">'+pctv(r.chg_pct)+'</td><td style="text-align:left;color:var(--dim)">'+esc(r.quote_date||'')+'</td></tr>';}).join('');
+    H+=sec('1',g.label||'Global Indices', grows?tbl(['Name','Price','Chg%','As of'],grows):'<div class="dg-empty">No global data.</div>');
+    var dm=S['2_domestic_indices']||{};
+    function drow(nm,o){o=o||{};return '<tr><td style="text-align:left">'+nm+'</td><td>'+num(o.close)+'</td><td class="'+pcls(o.chg_pct)+'" style="'+bold(o.chg_pct)+'">'+pctv(o.chg_pct)+'</td><td>'+num(o.high)+'</td><td>'+num(o.low)+'</td></tr>';}
+    var a=dm.adr||{};
+    H+=sec('2',dm.label||'Domestic Indices + ADR', tbl(['Index','Close','Chg%','High','Low'],drow('NIFTY50',dm.NIFTY50)+drow('BANKNIFTY',dm.BANKNIFTY))+'<div class="dg-read">ADR '+num(a.adr)+' — adv '+(a.advances==null?'--':a.advances)+' / dec '+(a.declines==null?'--':a.declines)+' / unch '+(a.unchanged==null?'--':a.unchanged)+'</div>');
+    var s3=S['3_support_levels']||{};
+    H+=sec('3',s3.label||'Support Levels', tbl(['Index','S1','S2'],'<tr><td style="text-align:left">NIFTY50</td><td>'+num((s3.NIFTY50||{}).s1)+'</td><td>'+num((s3.NIFTY50||{}).s2)+'</td></tr><tr><td style="text-align:left">BANKNIFTY</td><td>'+num((s3.BANKNIFTY||{}).s1)+'</td><td>'+num((s3.BANKNIFTY||{}).s2)+'</td></tr>'));
+    var s4=S['4_pivot_points']||{};
+    function prow(nm,p){p=p||{};return '<tr><td style="text-align:left">'+nm+'</td><td>'+num(p.s2)+'</td><td>'+num(p.s1)+'</td><td style="font-weight:800">'+num(p.pp)+'</td><td>'+num(p.r1)+'</td><td>'+num(p.r2)+'</td></tr>';}
+    H+=sec('4',s4.label||'Pivot Points', tbl(['Index','S2','S1','PP','R1','R2'],prow('NIFTY50',s4.NIFTY50)+prow('BANKNIFTY',s4.BANKNIFTY)));
+    var s5=S['5_pcr_trend']||{};
+    function pcrrows(arr){return (arr||[]).map(function(r){var sus=r.quality==='suspect';return '<tr'+(sus?' style="opacity:.55"':'')+'><td style="text-align:left">'+esc(r.price_date)+'</td><td>'+num(r.pcr,3)+(sus?' <span style="color:var(--amber);font-weight:800" title="'+esc(r.quality_note||'suspect capture')+'">⚠</span>':'')+'</td></tr>';}).join('');}
+    H+=sec('5',s5.label||'PCR Trend','<div class="dg-two"><div><div class="dg-sub">NIFTY</div>'+tbl(['Date','PCR'],pcrrows(s5.NIFTY))+'</div><div><div class="dg-sub">BANKNIFTY</div>'+tbl(['Date','PCR'],pcrrows(s5.BANKNIFTY))+'</div></div>');
+    var s6=S['6_top_domestic_news']||{};
+    H+=sec('6',s6.label||'Top Domestic News','<ul class="dg-news">'+((s6.headlines||[]).map(function(h){return '<li>'+esc(h)+'</li>';}).join('')||'<li>—</li>')+'</ul>');
+    var s7=S['7_events_results_today']||{};
+    H+=sec('7',s7.label||'Events & Results Today','<div class="dg-read"><b>'+(s7.count||0)+'</b> today'+((s7.tickers||[]).length?' · '+(s7.tickers||[]).map(esc).join(', '):'')+(s7.more?' +'+s7.more+' others':'')+'</div>');
+    var s8=S['8_results_yesterday']||{};
+    H+=sec('8',s8.label||'Results Yesterday','<div class="dg-read"><b>'+(s8.count||0)+'</b> reported yesterday</div>');
+    var s9=S['9_global_events']||{};
+    H+=sec('9',s9.label||'Global Events','<ul class="dg-news">'+((s9.headlines||[]).map(function(h){return '<li>'+esc(h)+'</li>';}).join('')||'<li>—</li>')+'</ul>');
+    var s10=S['10_market_read']||{},bs=s10.bias_support||{},mg=s10.mood_gate_call||{};
+    var biasCol=s10.bias==='BULLISH'?'var(--grn)':s10.bias==='BEARISH'?'var(--red)':'var(--amber)';
+    var zones=(s10.key_zones||[]).map(function(z){return '<li>'+esc(z.index)+': close '+num(z.close)+' '+esc(z.position)+' PP '+num(z.pp)+' → next '+num(z.next_level)+'</li>';}).join('');
+    var cautions=(s10.cautions||[]).map(function(c,i){return '<li>'+(i+1)+'. '+esc(c)+'</li>';}).join('');
+    H+=sec('10',s10.label||'MARKET READ',
+      '<div class="dg-read">BIAS <b style="color:'+biasCol+'">'+esc(s10.bias||'--')+'</b> · ADR '+num(bs.adr)+' · NIFTY '+pctv(bs.nifty_chg_pct)+' · FII '+esc(bs.fii_sign||'--')+' Rs.'+(bs.fii_net==null?'--':bs.fii_net)+' Cr · DII '+esc(bs.dii_sign||'--')+' Rs.'+(bs.dii_net==null?'--':bs.dii_net)+' Cr</div>'+
+      '<div class="dg-sub" style="margin-top:10px">Cautions</div><ul class="dg-news">'+(cautions||'<li>—</li>')+'</ul>'+
+      '<div class="dg-sub" style="margin-top:10px">Key Zones</div><ul class="dg-news">'+(zones||'<li>—</li>')+'</ul>'+
+      '<div class="dg-sub" style="margin-top:10px">Mood Gate Call (advisory)</div><div class="dg-read">ADR '+num(mg.adr)+' vs gate '+num(mg.adr_gate,1)+' → <b>'+esc(mg.adr_state||'--')+'</b> · NIFTY '+(mg.nifty_above_pp?'above':'below')+' PP · FII '+esc(mg.fii_sign||'--')+' ×'+(mg.fii_streak==null?'--':mg.fii_streak)+'</div>');
+    document.getElementById('digestBody').innerHTML=H;
+  }
+  window.digestBoot=function(){
+    if(_loaded)return;
+    _loaded=true;
+    fetch('/api/digest/daily',{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(render).catch(function(){
+      _loaded=false;document.getElementById('digestBody').innerHTML='<div class="empty" style="color:var(--red);padding:20px">Digest failed to load — tap the tab to retry.</div>';
+    });
+  };
+})();
 </script>
 <script>
 /* cc#544: V6 BT playground — namespaced IIFE, lazy-boots on first activation.
