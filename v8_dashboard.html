@@ -550,6 +550,7 @@
     <button class="v8toptab active" data-pane="v8" onclick="showV8Pane('v8')">V8</button>
     <button class="v8toptab" data-pane="index" onclick="showV8Pane('index')">Index Intel</button>
     <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')">V14 Intraday</button>
+    <button class="v8toptab" data-pane="tcscan" onclick="showV8Pane('tcscan')">TC Scanner</button>
     <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
     <button class="v8toptab" data-pane="digest" onclick="showV8Pane('digest')">Digest</button>
   </div>
@@ -696,6 +697,12 @@
     </div>
     <div class="rp-toast" id="rpToast"></div>
     <div class="ti-ov" id="tiOv" onclick="if(event.target===this)closeTradeInfo()"><div class="ti-box" id="tiBox"></div></div>
+  </div>
+  <!-- cc#740: TC Scanner as a V8 tab (cc#543 pattern). Display-layer move only — embeds the existing
+       /intraday page (endpoints unchanged) via an iframe; ?embed=1 + Sec-Fetch-Dest:iframe make the
+       auth_gate skip the injected site nav so there is no double nav. -->
+  <div id="pane-tcscan" style="display:none">
+    <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#544: V6 BT playground pane (read-mostly wrapper over the existing bt6 engine) -->
   <div id="pane-bt" style="display:none">
@@ -4947,7 +4954,7 @@ window.v14Boot=function(){
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
 function showV8Pane(name){
-  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',bt:'pane-bt',digest:'pane-digest'};
+  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',digest:'pane-digest'};
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
@@ -4956,9 +4963,10 @@ function showV8Pane(name){
   if(name==='v14'&&window.v14Boot)window.v14Boot();
   if(name==='bt'&&window.btBoot)window.btBoot();
   if(name==='digest'&&window.digestBoot)window.digestBoot();
+  if(name==='tcscan'){var f=document.getElementById('tcscanFrame');if(f&&!f.src)f.src='/intraday?embed=1';}  // cc#740: lazy-load the embedded scanner once
 }
-(function(){var h=(location.hash||'').replace('#','');if(h==='index'||h==='v14'||h==='bt'||h==='digest'){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var h=(location.hash||'').replace('#','');showV8Pane((h==='index'||h==='v14'||h==='bt'||h==='digest')?h:'v8');});
+(function(){var TABS=['index','v14','tcscan','bt','digest'];var h=(location.hash||'').replace('#','');if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
+window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest'];var h=(location.hash||'').replace('#','');showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 </script>
 <style>
   /* cc#744: Daily Digest tab */

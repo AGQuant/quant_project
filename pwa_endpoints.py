@@ -274,7 +274,7 @@ PWA_JS = """
     ['/check', '\\u2713', 'Check'],
     ['/result-corner', '\\u2263', 'Results'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
-    ['/intraday', '\\u23f1', 'TC Scanner'],
+    ['/dashboard#tcscan', '\\u23f1', 'TC Scanner'],
     ['/dashboard#digest', '\\ud83d\\udcca', 'Digest'],
     ['/v13', '\\u25a4', 'V13'],
     ['/health', '\\u2695', 'Health'],

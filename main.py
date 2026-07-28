@@ -834,7 +834,8 @@ NAV_REGISTRY = {
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
-    "/intraday":     ("TC Scanner",           "nav"),   # cc#464: same-slot rename (id=2987)
+    "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
+    "/dashboard#tcscan": ("TC Scanner · V8 tab", "nav"),   # cc#740
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
     "/scanners":     ("(removed from nav — superseded by V12/V13/Check)", "typed-url"),   # cc#441
