@@ -232,8 +232,10 @@ function ChartExpandModal({ mode, symbol, onClose }) {
   const [err, setErr] = useState(false);   // cc: surface fetch failure instead of an eternal "loading…"
   const [tries, setTries] = useState(0);
   const [showComp, setShowComp] = useState(true);
+  const [hoverI, setHoverI] = useState(null);   // cc#705: crosshair/scrub index
+  const svgRef = useRef(null);
   useEffect(() => {
-    let alive = true; setData(null); setErr(false);
+    let alive = true; setData(null); setErr(false); setHoverI(null);
     apiGet(`/api/gvm/trend/${encodeURIComponent(symbol)}?range=${range}`)
       .then(x => { if (!alive) return; if (x && !x.error) setData(x); else setErr(true); })
       .catch(() => { if (alive) setErr(true); });
@@ -264,8 +266,22 @@ function ChartExpandModal({ mode, symbol, onClose }) {
     const ticks = [0, 1, 2, 3, 4].map(t => ymin + (ymax - ymin) * t / 4);
     const xlab = [0, Math.floor(pts.length / 2), pts.length - 1];
     const cc = { g: C.gPillar, v: C.vPillar, m: C.mPillar };
+    // cc#705: pointer -> nearest data-point index (snap; scores are daily). Full pts kept for the
+    // tooltip even on 3Y/5Y so the readout is the TRUE daily value, never an interpolated one.
+    const moveTo = (clientX) => {
+      if (!svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      const localX = (clientX - rect.left) * (W / rect.width);
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < pts.length; i++) { const d = Math.abs(X(i) - localX); if (d < bestD) { bestD = d; best = i; } }
+      setHoverI(best);
+    };
+    const hIdx = (hoverI != null && hoverI >= 0 && hoverI < pts.length) ? hoverI : null;
     content = (
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block", touchAction: "pan-y" }}
+        onMouseMove={e => moveTo(e.clientX)} onMouseLeave={() => setHoverI(null)}
+        onTouchStart={e => moveTo(e.touches[0].clientX)}
+        onTouchMove={e => { e.preventDefault(); moveTo(e.touches[0].clientX); }}>
         {ticks.map((tv, i) => (
           <g key={i}>
             <line x1={L} y1={Y(tv)} x2={W - R} y2={Y(tv)} stroke={C.gridLine} strokeWidth="0.5" strokeOpacity="0.5" />
@@ -279,6 +295,28 @@ function ChartExpandModal({ mode, symbol, onClose }) {
         <path d={path(isGvm ? "gvm" : "close")} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" />
         <circle cx={X(iHi)} cy={Y(mainV[iHi])} r="3" fill={C.green} />
         <circle cx={X(iLo)} cy={Y(mainV[iLo])} r="3" fill={C.red} />
+        {hIdx != null && (() => {
+          const p = pts[hIdx], cx = X(hIdx);
+          const rows = (isGvm
+            ? (showComp ? [["GVM", p.gvm, C.accent], ["G", p.g, cc.g], ["V", p.v, cc.v], ["M", p.m, cc.m]] : [["GVM", p.gvm, C.accent]])
+            : [["", p.close, C.accent]]).filter(rr => rr[1] != null);
+          const tw = 96, th = 15 + rows.length * 13 + 5;
+          const tx = cx > W - tw - 10 ? cx - tw - 8 : cx + 8;
+          const ty = T + 2;
+          return (
+            <g style={{ pointerEvents: "none" }}>
+              <line x1={cx} y1={T} x2={cx} y2={H - B} stroke={C.muted} strokeWidth="0.8" strokeDasharray="3 3" strokeOpacity="0.75" />
+              {rows.map((rr, k) => <circle key={k} cx={cx} cy={Y(rr[1])} r="3.2" fill={rr[2]} stroke={C.card || C.bg} strokeWidth="1" />)}
+              <rect x={tx} y={ty} width={tw} height={th} rx="4" fill={C.card || C.bg} stroke={C.gridLine} strokeWidth="0.8" opacity="0.98" />
+              <text x={tx + 7} y={ty + 11} fontSize="8.5" fill={C.muted} fontFamily="monospace">{(p.d || "").slice(0, 10)}</text>
+              {rows.map((rr, k) => (
+                <text key={k} x={tx + 7} y={ty + 25 + k * 13} fontSize="9.5" fill={rr[2]} fontFamily="monospace" fontWeight="700">
+                  {(rr[0] ? rr[0] + " " : "") + (isGvm ? Number(rr[1]).toFixed(2) : fmt(rr[1], 0))}
+                </text>
+              ))}
+            </g>
+          );
+        })()}
       </svg>
     );
   }
@@ -287,9 +325,19 @@ function ChartExpandModal({ mode, symbol, onClose }) {
     const mainV = pts.map(valOf), first = mainV[0], last = mainV[mainV.length - 1];
     const ret = first ? (last - first) / first * 100 : null;
     const hi = Math.max(...mainV), lo = Math.min(...mainV);
-    headStat = isGvm
-      ? <span style={{ fontFamily: "monospace", fontSize: 13, color: C.muted }}>H {hi.toFixed(2)} · L {lo.toFixed(2)}</span>
-      : <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: ret >= 0 ? C.green : C.red }}>{range.toUpperCase()} {signFmt(ret, 0)}% <span style={{ color: C.muted, fontWeight: 400 }}>· H {fmt(hi, 0)} · L {fmt(lo, 0)}</span></span>;
+    // cc#705: when scrubbing, the hovered value+date is prominent (price-chart convention); the
+    // period H/L is the resting state.
+    const hIdx = (hoverI != null && hoverI >= 0 && hoverI < pts.length) ? hoverI : null;
+    if (hIdx != null) {
+      const p = pts[hIdx], hv = valOf(p);
+      headStat = <span style={{ fontFamily: "monospace", fontSize: 13 }}>
+        <b style={{ color: C.accent }}>{isGvm ? Number(hv).toFixed(2) : fmt(hv, 0)}</b>
+        <span style={{ color: C.muted, fontWeight: 400 }}> · {(p.d || "").slice(0, 10)}</span></span>;
+    } else {
+      headStat = isGvm
+        ? <span style={{ fontFamily: "monospace", fontSize: 13, color: C.muted }}>H {hi.toFixed(2)} · L {lo.toFixed(2)}</span>
+        : <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: ret >= 0 ? C.green : C.red }}>{range.toUpperCase()} {signFmt(ret, 0)}% <span style={{ color: C.muted, fontWeight: 400 }}>· H {fmt(hi, 0)} · L {fmt(lo, 0)}</span></span>;
+    }
   }
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(6,10,20,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
