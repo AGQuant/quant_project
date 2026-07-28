@@ -1175,6 +1175,118 @@ def _bg_weekly_ops_metrics_queue():
         log.error(f"weekly_ops_metrics_queue: {e}")
 
 
+_ops_polish_detect_running = False
+_ops_polish_detect_ran_today = None
+_POLISH_CARD_TITLE = "POLISH_QUEUE — ops-metrics forward-fill (auto-maintained, cc#736)"
+
+def _bg_ops_polish_detector(scheduled=False):
+    """cc#736 POLISH_WORKER_V1 — app-side DETECTOR (zero AI, pure SQL). Maintains ONE standing cc_task
+    'POLISH_QUEUE' card listing symbols whose stored doc_texts are newer than / uncovered by
+    sector_ops_metrics (the forward-fill backlog cc#733 deferred). CC drains the card IN-SESSION
+    (loop-until-empty) using Opus under Max — reads each symbol's doc windows, applies the RAW_DATA
+    hard_rules, writes sector_ops_metrics via run_sql — so there is ZERO API spend here; the scheduler
+    only detects and refreshes the card. Triggers: the daily sweep (scheduled=True, day-locked) AND
+    app_config ops_polish_run='run_now' (on-demand, single-flight like cc#734). Detection signal mirrors
+    cc#667: a stored investor doc fresher than the symbol's latest extraction OR uncovered, minus the
+    honest-absent registry, restricted to specific-KPI sectors. cc#732/733 already-covered
+    symbol-quarters are skipped by CC at extraction time (spec instructs check-existing-rows-first)."""
+    global _ops_polish_detect_running, _ops_polish_detect_ran_today
+    if _ops_polish_detect_running:
+        return _SKIPPED
+    today = _ist_now().date()
+    on_demand = False
+    if not scheduled:
+        # every-tick path: act ONLY on an explicit on-demand flag (no-op otherwise, cheap flag read)
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key='ops_polish_run'")
+                row = cur.fetchone()
+            on_demand = bool(row and row[0] == 'run_now')
+        except Exception:
+            on_demand = False
+        if not on_demand:
+            return _SKIPPED
+    else:
+        if _ops_polish_detect_ran_today == today:
+            return _SKIPPED
+    _ops_polish_detect_running = True
+    try:
+        import ops_metrics_pipeline as _omp
+        try:
+            _specific = set(_omp.SECTOR_REGISTRY_SEED.keys())
+        except Exception:
+            _omp, _specific = None, set()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+              WITH latest_doc AS (
+                SELECT symbol, MAX(fetched_at) AS fa FROM doc_texts
+                WHERE extract_status='stored' AND char_count>0 GROUP BY symbol),
+              latest_kpi AS (
+                SELECT symbol, MAX(created_at) AS ca FROM sector_ops_metrics GROUP BY symbol)
+              SELECT d.symbol FROM latest_doc d
+              LEFT JOIN latest_kpi k ON k.symbol=d.symbol
+              WHERE (k.ca IS NULL OR d.fa > k.ca)
+                AND d.symbol NOT IN (SELECT symbol FROM ops_metrics_honest_absent)
+              ORDER BY d.symbol""")
+            cand = [r[0] for r in cur.fetchall()]
+            if _omp and _specific and cand:
+                cur.execute("SELECT DISTINCT symbol, segment FROM gvm_scores WHERE segment IS NOT NULL")
+                seg = {r[0]: r[1] for r in cur.fetchall()}
+                work = [s for s in cand if _omp._infer_sector(seg.get(s)) in _specific]
+            else:
+                work = cand
+            spec = Json({
+                "worker": "POLISH_WORKER_V1", "cc": 736,
+                "loop_directive": "LOOP_UNTIL_EMPTY — process a batch, write rows, ops_log, immediately "
+                    "pull the next batch in the SAME session until this list is exhausted; checkpoint the "
+                    "cursor to ops_log after every batch so an interrupted session resumes cleanly.",
+                "description": "Ops-metrics forward-fill backlog. For each symbol: read its stored "
+                    "doc_texts, extract sector-KPI registry figures per RAW_DATA_RULE (id=10079: literal "
+                    "figures only, never synthesize; content vintage id=9897 decides the quarter, NOT the "
+                    "doc date label; canonical metric_names cc#685; source_1 = deck name + month; HIGH "
+                    "confidence only for verbatim figures). Missing KPI -> ops_metrics_honest_absent "
+                    "(metric-absent only). Skip symbol-quarters already covered (check existing rows). "
+                    "Write via run_sql, ops_log per batch.",
+                "symbols": work, "count": len(work), "detected_at": _ist_now().isoformat(), "cursor": 0,
+            })
+            if work:
+                cur.execute("UPDATE cc_tasks SET spec=%s, "
+                            "status=CASE WHEN status='in_progress' THEN 'in_progress' ELSE 'pending' END, "
+                            "priority='high', category='polish_queue' WHERE category='polish_queue'", (spec,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO cc_tasks (title, spec, status, priority, category, created_by) "
+                                "VALUES (%s, %s, 'pending', 'high', 'polish_queue', 'scheduler')",
+                                (_POLISH_CARD_TITLE, spec))
+            else:
+                # nothing to polish -> settle the standing card to done (unless CC is mid-drain)
+                cur.execute("UPDATE cc_tasks SET spec=%s, "
+                            "status=CASE WHEN status='in_progress' THEN 'in_progress' ELSE 'done' END, "
+                            "category='polish_queue' WHERE category='polish_queue'", (spec,))
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'ops_metrics', 'OPS_POLISH_DETECT', %s)""",
+                        (Json({"trigger": "run_now" if on_demand else "scheduled",
+                               "candidates": len(work), "symbols": work[:80], "ist": _ist_now().isoformat()}),))
+            if on_demand:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_polish_run','done',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+        if scheduled:
+            _ops_polish_detect_ran_today = today
+        log.info(f"ops_polish_detector ({'run_now' if on_demand else 'scheduled'}): {len(work)} candidates queued")
+    except Exception as e:
+        log.error(f"ops_polish_detector: {e}")
+        if on_demand:
+            try:
+                with _conn() as conn, conn.cursor() as cur:
+                    cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_polish_run','failed',NOW()) "
+                                "ON CONFLICT (key) DO UPDATE SET value='failed', updated_at=NOW()")
+                    conn.commit()
+            except Exception:
+                pass
+    finally:
+        _ops_polish_detect_running = False
+
+
 def _bg_gvm():
     global _gvm_ran_today
     today = _ist_now().date()
@@ -2276,10 +2388,12 @@ def _bg_ops_metrics_backfill():
     A stale-running resume (see below) also waits for this window rather than firing immediately."""
     global _ops_metrics_running
     if _ops_metrics_running:
-        return _SKIPPED
+        return _SKIPPED   # cc#734 guardrail: single-flight — a concurrent trigger no-ops (already_running)
     now_ist = datetime.now(IST)
-    if not (1 <= now_ist.hour < 6):
-        return _SKIPPED
+    # cc#734: read the flag BEFORE the window gate so an on-demand 'run_now' can bypass it. The
+    # cc#526 overnight window (01:00-06:00 IST) still governs the DEFAULT scheduled 'pending' path
+    # unchanged; 'run_now' executes immediately at any clock time. Source = screener.in result pages
+    # (NOT the fyers live feed), so a market-hours run_now is source-safe (no live-feed contention).
     try:
         with _conn() as conn, conn.cursor() as cur:
             # cc#526 BUG FIX: a Railway redeploy mid-run kills this process with a SIGTERM, not
@@ -2291,32 +2405,54 @@ def _bg_ops_metrics_backfill():
             cur.execute("""SELECT value, EXTRACT(EPOCH FROM (NOW()-updated_at))/60.0
                            FROM app_config WHERE key='ops_metrics_backfill_run'""")
             r = cur.fetchone()
-        STALE_RUNNING_MIN = 20
-        is_pending = r and r[0] == 'pending'
-        is_stale_running = r and r[0] == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN
-        if not (is_pending or is_stale_running):
-            return _SKIPPED
-        if is_stale_running:
-            log.warning(f"_bg_ops_metrics_backfill: flag stuck at 'running' for {r[1]:.0f} min -- "
-                        f"treating as an orphaned run (likely killed by a mid-run redeploy) and resuming")
-        _ops_metrics_running = True
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_backfill flag read: {e}")
+        return
+    STALE_RUNNING_MIN = 20
+    val = r[0] if r else None
+    is_run_now = (val == 'run_now')            # cc#734: on-demand, any clock time
+    is_pending = (val == 'pending')
+    is_stale_running = (val == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN)
+    if not (is_run_now or is_pending or is_stale_running):
+        return _SKIPPED
+    # window gate applies to the SCHEDULED path only (pending / stale-resume); run_now is clock-free.
+    if not is_run_now and not (1 <= now_ist.hour < 6):
+        return _SKIPPED
+    if is_stale_running:
+        log.warning(f"_bg_ops_metrics_backfill: flag stuck at 'running' for {r[1]:.0f} min -- "
+                    f"treating as an orphaned run (likely killed by a mid-run redeploy) and resuming")
+    _ops_metrics_running = True
+    try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','running',NOW()) "
                         "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
             conn.commit()
         import ops_metrics_pipeline
         res = ops_metrics_pipeline.run_ops_metrics_backfill()
-        log.info(f"_bg_ops_metrics_backfill: {res}")
+        log.info(f"_bg_ops_metrics_backfill ({'run_now' if is_run_now else 'scheduled'}): {res}")
         with _conn() as conn, conn.cursor() as cur:
+            # cc#734: audit row so Claude web can verify the on-demand run + its counts.
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'ops_metrics', 'OPS_METRICS_BACKFILL_RUN', %s)""",
+                        (Json({"trigger": "run_now" if is_run_now else "scheduled",
+                               "result": res if isinstance(res, dict) else {"raw": str(res)[:400]},
+                               "ist": _ist_now().isoformat()}),))
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','done',NOW()) "
                         "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
             conn.commit()
     except Exception as e:
         log.error(f"_bg_ops_metrics_backfill: {e}")
         try:
+            # cc#734: a failed run_now settles to 'failed' (never left stuck on run_now); a failed
+            # scheduled run settles to 'pending' so the next overnight window retries it (unchanged).
+            end_val = 'failed' if is_run_now else 'pending'
             with _conn() as conn, conn.cursor() as cur:
-                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','pending',NOW()) "
-                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run',%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (end_val,))
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'ops_metrics', 'OPS_METRICS_BACKFILL_RUN', %s)""",
+                            (Json({"trigger": "run_now" if is_run_now else "scheduled",
+                                   "status": "failed", "error": str(e)[:300], "ist": _ist_now().isoformat()}),))
                 conn.commit()
         except Exception:
             pass
@@ -2820,6 +2956,8 @@ async def _scheduler_loop():
             _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
         if now.weekday() == 5 and h == 6 and m == 10:
             _spawn(_bg_weekly_ops_metrics_queue)   # cc#667: Sat 06:10 detect new docs -> ops-metrics queue
+        if h == 6 and m == 25:
+            _spawn(_bg_ops_polish_detector, True)  # cc#736: DAILY 06:25 sweep -> refresh POLISH_QUEUE card (day-locked)
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         # cc#660: 09:25 feed-silent-at-open now handled inside feed_guardian.guardian_tick()
@@ -2913,6 +3051,7 @@ async def _scheduler_loop():
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
         _spawn(_bg_yahoo_new_listings)  # cc#539: flag-gated one-shot Yahoo EOD backfill for new listings
         _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
+        _spawn(_bg_ops_polish_detector)    # cc#736: flag-gated (ops_polish_run=run_now), checked every tick — refreshes the POLISH_QUEUE card
         _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
