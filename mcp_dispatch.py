@@ -141,6 +141,7 @@ MCP_TOOLS = [
     {"name":"hr_report_generate","description":"cc#651 Portfolio Health: generate/refresh a client Portfolio Health Report using the EXACT /health template. Pass {portfolio_id} to (re)generate a saved portfolio (e.g. 4 = Vishal Bhosale), OR {name, holdings:[{symbol,qty,avg_price}]} to create one from scratch (symbols resolved to Scorr nse_code server-side). Runs the full pipeline and returns {portfolio_id, report_url}. white_label defaults true (client-shareable, zero Scorr branding).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"},"name":{"type":"string"},"holdings":{"type":"array","items":{"type":"object","properties":{"symbol":{"type":"string"},"qty":{"type":"number"},"avg_price":{"type":"number"}},"required":["symbol"]}},"white_label":{"type":"boolean"},"alpha_start_date":{"type":"string","description":"YYYY-MM-DD; alpha vs Nifty 500 is measured from this date to live. Omit -> earliest holding entry date (never a 1yr default)."}},"required":[]}},
     {"name":"restate_symbol_history","description":"cc#657 raw_prices corporate-action fix: full 5y ADJUSTED re-pull from Yahoo for split/bonus/demerger-polluted symbols (one/sec), restating the whole series so fake -34%..-90% single-day cliffs disappear. Pass {symbols:[...]} for an explicit list, or {detect:true} to auto-select the current cliff backlog. Returns per-symbol {bars, first_date, last_date, residual_cliffs} (a residual cliff after re-pull is a TRUE market move).","inputSchema":{"type":"object","properties":{"symbols":{"type":"array","items":{"type":"string"}},"detect":{"type":"boolean"},"lookback":{"type":"string"}},"required":[]}},
     {"name":"hr_report_pdf","description":"cc#652 Portfolio Health: get a fetchable white-label PDF of a saved portfolio's Health Report. Returns {url} — an absolute, short-lived (~10 min) signed URL you can web_fetch directly (no login) and share in chat. Zero Scorr branding. Pass {portfolio_id} (e.g. 4 = Vishal Bhosale).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"}},"required":["portfolio_id"]}},
+    {"name":"stock_views_shortlist","description":"cc#737 / STOCK_VIEWS_FRAMEWORK_V1: TC-gated stock-views shortlist. DISTINCT symbols mentioned in polished_news over the last `hours` -> canonical Trade Check (best of LONG/SHORT) -> keep VALID/STRONG -> sorted by score DESC. Returns {hours, universe_scanned, count, candidates:[{symbol,direction,verdict,score,max,cmp}]}. Read-only, writes nothing. Reuses the same helper as the /api/news/stock_views/shortlist HTTP route (which Claude web can't call — it's login-gated).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -343,6 +344,14 @@ async def _call_tool(name, args):
             return await asyncio.to_thread(
                 smartgain_reconcile.backfill_all_batches,
                 args.get("account", "MHK40"),
+            )
+        elif name == "stock_views_shortlist":
+            # cc#737: internal-trusted (no auth gate) — call the SHARED helper directly, bypassing the
+            # login-gated HTTP route. Same computation, canonical TC scorer via tc_resolver (cc#738).
+            import news_endpoints
+            return await asyncio.to_thread(
+                news_endpoints.stock_views_shortlist_data,
+                int(args.get("hours", 48)),
             )
         return {"error": f"Unknown tool: {name}"}
 

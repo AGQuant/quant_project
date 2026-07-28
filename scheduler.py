@@ -621,7 +621,7 @@ def _bg_tc_position_stars():
     """cc#728: HOURLY Trade Check batch for every OPEN paper position -> tc_position_stars.
     Fires on the :30 hour-mark 09:30-15:30 IST (trading days), replacing cc#720's on-demand
     15-min per-symbol cache. Direction = the position's OWN side (PRIMARY: LONG position ->
-    LONG check, SHORT -> SHORT). Uses the canonical v4 engine (tc_v4_endpoints.trade_check_v4),
+    LONG check, SHORT -> SHORT). Uses the canonical scorer via tc_resolver.get_primary_tc (cc#738),
     the SAME scorer the on-demand star used, so the star verdict vocabulary (STRONG/VALID) is
     unchanged — only the cadence moves to a predictable hourly batch. Each run inserts a fresh
     computed_at row (history kept); the dashboard reads the latest row per symbol|side, so there
@@ -630,7 +630,8 @@ def _bg_tc_position_stars():
     if _tc_position_stars_running: return
     _tc_position_stars_running = True
     try:
-        import tc_v4_endpoints
+        from tc_resolver import get_primary_tc   # cc#738: canonical scorer (never a versioned import)
+        _tc = get_primary_tc()
         batch_ts = _ist_now()
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""CREATE TABLE IF NOT EXISTS tc_position_stars (
@@ -644,7 +645,7 @@ def _bg_tc_position_stars():
         rows = []
         for sym, side in pairs:
             try:
-                d = tc_v4_endpoints.trade_check_v4(sym, side)
+                d = _tc(sym, side)
                 if d and not d.get("error") and d.get("final_verdict") and d.get("tier1") and d.get("tier2"):
                     score = (float(d["tier1"].get("score") or 0) + float(d["tier2"].get("score") or 0))
                     mx = (float(d["tier1"].get("max") or 0) + float(d["tier2"].get("max") or 0))

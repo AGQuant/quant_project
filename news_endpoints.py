@@ -332,15 +332,13 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
             "count": len(articles), "category_counts": counts, "articles": articles}
 
 
-@router.get("/api/news/stock_views/shortlist")
-def stock_views_shortlist(request: Request, hours: int = 48):
-    """cc#725 / STOCK_VIEWS_FRAMEWORK_V1 (id=10062) part_1 — READ-ONLY shortlist helper. Pulls the
-    DISTINCT symbols mentioned in polished_news over the last `hours` (ANY category = the news-catalyst
-    source), runs Trade Check on each (best of LONG/SHORT), and returns only VALID/STRONG candidates
-    sorted by TC score DESC. Writes NOTHING — Claude-web calls it on the founder's "stock views"
-    trigger to choose which stocks to write up (news catalyst AND a valid technical setup, both true)."""
-    if not _is_authed(request):
-        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
+def stock_views_shortlist_data(hours: int = 48):
+    """cc#725/737 SHARED CORE (no auth, writes nothing). DISTINCT symbols mentioned in polished_news
+    over the last `hours` (ANY category = the news-catalyst source) -> canonical Trade Check (best of
+    LONG/SHORT) -> keep only VALID/STRONG -> sort by TC score DESC. Both the HTTP route (auth-gated,
+    below) and the Scorr MCP tool `stock_views_shortlist` (internal-trusted, cc#737) call THIS one
+    helper — no duplicated TC-scoring loop. cc#738: the scorer comes from the canonical tc_resolver,
+    never a versioned import."""
     hours = max(1, min(hours, 168))
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""SELECT DISTINCT UPPER(TRIM(s)) AS sym
@@ -350,7 +348,8 @@ def stock_views_shortlist(request: Request, hours: int = 48):
                          AND TRIM(s) <> ''""", (hours,))
         syms = [r[0] for r in cur.fetchall()]
     try:
-        from tc_v4_endpoints import trade_check_v4   # PRIMARY TC scorer (22-pt tier1+tier2 + verdict)
+        from tc_resolver import get_primary_tc   # cc#738: ONE canonical scorer, never a versioned import
+        tc = get_primary_tc()
     except Exception as e:
         return {"error": f"TC engine unavailable: {e}", "hours": hours,
                 "universe_scanned": len(syms), "count": 0, "candidates": []}
@@ -359,7 +358,7 @@ def stock_views_shortlist(request: Request, hours: int = 48):
         best = None
         for direction in ("LONG", "SHORT"):
             try:
-                d = trade_check_v4(sym, direction)
+                d = tc(sym, direction)
             except Exception:
                 continue
             if not d or d.get("error"):
@@ -375,6 +374,15 @@ def stock_views_shortlist(request: Request, hours: int = 48):
             cands.append(best)
     cands.sort(key=lambda c: -c["score"])
     return {"hours": hours, "universe_scanned": len(syms), "count": len(cands), "candidates": cands}
+
+
+@router.get("/api/news/stock_views/shortlist")
+def stock_views_shortlist(request: Request, hours: int = 48):
+    """cc#725 / STOCK_VIEWS_FRAMEWORK_V1 (id=10062) part_1 — READ-ONLY shortlist. Auth-gated HTTP
+    wrapper around the shared helper (cc#737 extracted the core so the MCP tool can reuse it)."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
+    return stock_views_shortlist_data(hours)
 
 
 # cc#217: /api/admin/refresh_news retired — its company-news fetch is superseded by
