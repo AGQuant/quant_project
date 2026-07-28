@@ -248,6 +248,11 @@ def _compute_and_store_pcr(conn=None):
                     pcr=EXCLUDED.pcr, computed_at=NOW()
             """)
             conn.commit()
+        try:
+            import pcr_backfill
+            pcr_backfill.mark_pcr_quality(conn)   # cc#745: sanity-gate the just-computed PCR rows
+        except Exception as _qe:
+            log.warning(f"pcr quality mark failed: {_qe}")
         log.info("PCR computed and stored")
         return {"ok": True}
     except Exception as e:
@@ -928,6 +933,11 @@ def _backfill_pcr_for_date(conn, target) -> bool:
         """, {"t": target})
         n = cur.rowcount
     conn.commit()
+    try:
+        import pcr_backfill
+        pcr_backfill.mark_pcr_quality(conn)   # cc#745: sanity-gate the healed PCR rows
+    except Exception as _qe:
+        log.warning(f"pcr quality mark failed: {_qe}")
     return n > 0
 
 

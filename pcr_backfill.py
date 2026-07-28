@@ -152,6 +152,62 @@ def _upsert_oi(conn, sym, underlying, strike, otype, exp, candles):
     return rows
 
 
+# cc#745: PCR data-integrity sanity gate. The 27-Jul BANKNIFTY row captured put_oi=38,400 against a
+# ~12M trailing median (partial-strike / expiry-roll capture), giving a false PCR 0.002 that reached the
+# digest. A reading is SUSPECT when a leg's OI deviates >10x from its trailing-5-session median (the
+# precise detector — it catches the collapse without false-flagging genuinely low-PCR sessions like the
+# early-June 0.28 band, which have consistent OI), OR PCR is grossly implausible (<0.05 / >6.0 backstop
+# for the <3-history case). Flagged rows are MARKED, never deleted — the digest + mood-gate exclude them.
+_PCR_QUALITY_NOTE = ("cc#745 sanity gate: put/call OI deviates >10x from the trailing-5-session median "
+                     "(or PCR outside [0.05,6.0]) — capture suspect, excluded from trend/mood reads")
+
+_PCR_SUSPECT_COND = """
+  p.pcr IS NOT NULL AND (
+    p.pcr < 0.05 OR p.pcr > 6.0
+    OR (
+      (SELECT COUNT(*) FROM pcr_daily h WHERE h.underlying=p.underlying AND h.price_date < p.price_date) >= 3
+      AND (
+        p.put_oi  < 0.1 * COALESCE((SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY q.put_oi)
+          FROM (SELECT put_oi FROM pcr_daily y WHERE y.underlying=p.underlying AND y.price_date < p.price_date ORDER BY y.price_date DESC LIMIT 5) q), p.put_oi)
+        OR p.put_oi  > 10 * COALESCE((SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY q.put_oi)
+          FROM (SELECT put_oi FROM pcr_daily y WHERE y.underlying=p.underlying AND y.price_date < p.price_date ORDER BY y.price_date DESC LIMIT 5) q), p.put_oi)
+        OR p.call_oi < 0.1 * COALESCE((SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY q.call_oi)
+          FROM (SELECT call_oi FROM pcr_daily y WHERE y.underlying=p.underlying AND y.price_date < p.price_date ORDER BY y.price_date DESC LIMIT 5) q), p.call_oi)
+        OR p.call_oi > 10 * COALESCE((SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY q.call_oi)
+          FROM (SELECT call_oi FROM pcr_daily y WHERE y.underlying=p.underlying AND y.price_date < p.price_date ORDER BY y.price_date DESC LIMIT 5) q), p.call_oi)
+      )
+    )
+  )
+"""
+
+
+def ensure_pcr_quality_cols(conn):
+    """cc#745: app-side idempotent add of the quality marker columns (never via the run_sql MCP path,
+    which hard-blocks ALTER)."""
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE pcr_daily ADD COLUMN IF NOT EXISTS quality TEXT DEFAULT 'ok'")
+        cur.execute("ALTER TABLE pcr_daily ADD COLUMN IF NOT EXISTS quality_note TEXT")
+    conn.commit()
+
+
+def mark_pcr_quality(conn):
+    """cc#745: (re)mark EVERY pcr_daily row 'ok'/'suspect' from the sanity gate. Idempotent + cheap
+    (small table) so writers call it after each insert and it also serves as the one-time history
+    backfill. Only sets the marker + note — never touches put_oi/call_oi/pcr (historical integrity)."""
+    ensure_pcr_quality_cols(conn)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE pcr_daily p SET
+              quality      = CASE WHEN {_PCR_SUSPECT_COND} THEN 'suspect' ELSE 'ok' END,
+              quality_note = CASE WHEN {_PCR_SUSPECT_COND} THEN %s ELSE NULL END
+        """, (_PCR_QUALITY_NOTE,))
+        n = cur.rowcount
+        cur.execute("SELECT COUNT(*) FROM pcr_daily WHERE quality='suspect'")
+        suspect = cur.fetchone()[0]
+    conn.commit()
+    return {"rows_marked": n, "suspect_total": suspect}
+
+
 def _recompute_pcr_daily_for_range(conn, start: date, end: date):
     """Fill pcr_daily for each date in [start,end] from the now-OI-populated option_chain."""
     filled = []
@@ -180,6 +236,7 @@ def _recompute_pcr_daily_for_range(conn, start: date, end: date):
         if n:
             filled.append(str(d))
         d += timedelta(days=1)
+    mark_pcr_quality(conn)   # cc#745: flag any implausible captures in the just-written range
     return filled
 
 

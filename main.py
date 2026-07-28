@@ -681,6 +681,16 @@ async def startup():
     t2 = asyncio.create_task(_v8_paper_rebuild_cutover())
     _BG_TASKS.add(t2); t2.add_done_callback(_BG_TASKS.discard)
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
+    # cc#745: ensure the pcr_daily quality columns exist + backfill the marker across history on boot
+    # (so the digest §5 read never errors on a missing column and the 27-Jul false 0.002 is flagged
+    # immediately, without waiting for the next PCR compute).
+    try:
+        import pcr_backfill, psycopg
+        with psycopg.connect(os.getenv("DATABASE_URL", "")) as _pc:
+            res = pcr_backfill.mark_pcr_quality(_pc)
+        log.info(f"cc#745 pcr quality backfill: {res}")
+    except Exception as _pe:
+        log.warning(f"cc#745 pcr quality backfill on startup failed: {_pe}")
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/", response_class=HTMLResponse)
@@ -1076,11 +1086,20 @@ def _build_digest_daily() -> dict:
                 "NIFTY50": {"s1": pivots.get("NIFTY50",{}).get("s1"), "s2": pivots.get("NIFTY50",{}).get("s2")},
                 "BANKNIFTY": {"s1": pivots.get("BANKNIFTY",{}).get("s1"), "s2": pivots.get("BANKNIFTY",{}).get("s2")}}
             result["sections"]["4_pivot_points"] = {"label": "Pivot Points (rolling-5d)", "NIFTY50": pivots.get("NIFTY50"), "BANKNIFTY": pivots.get("BANKNIFTY")}
+            # cc#745: carry the quality marker so a suspect capture (e.g. 27-Jul BANKNIFTY PCR 0.002 from
+            # a collapsed put leg) renders with an inline anomaly flag and is EXCLUDED from the trend read
+            # instead of surviving to the rendered output as a real reading. quality defaults 'ok' pre-backfill.
             pcr_out = {}
             for und in ("NIFTY", "BANKNIFTY"):
-                cur.execute("SELECT price_date::text, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT 5", (und,))
+                cur.execute("SELECT price_date::text, put_oi, call_oi, pcr, "
+                            "COALESCE(quality,'ok') AS quality, quality_note "
+                            "FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT 5", (und,))
                 cols2 = [d[0] for d in cur.description]; pcr_out[und] = [dict(zip(cols2, row)) for row in cur.fetchall()]
-            result["sections"]["5_pcr_trend"] = {"label": "PCR Trend (5-day rolling)", "NIFTY": pcr_out.get("NIFTY",[]), "BANKNIFTY": pcr_out.get("BANKNIFTY",[])}
+            # trend read excludes suspect rows (a false extreme must not drive who-controls interpretation).
+            _clean = {u: [r for r in rows if r.get("quality") != "suspect"] for u, rows in pcr_out.items()}
+            result["sections"]["5_pcr_trend"] = {"label": "PCR Trend (5-day rolling)",
+                "NIFTY": pcr_out.get("NIFTY", []), "BANKNIFTY": pcr_out.get("BANKNIFTY", []),
+                "trend_rows_clean": _clean, "note": "rows marked quality='suspect' are flagged and excluded from the trend read (cc#745)"}
             # cc#517: FII/DII cash + FII index-futures positioning (participant-wise OI). Computed
             # in nse_eod_ingest.py (single source, no recompute here); a blank section before the
             # first nightly run is expected, not an error.
