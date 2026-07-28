@@ -2275,6 +2275,11 @@ function GvmReport({ r, hist }) {
   const [chartRow, setChartRow] = useState(null);  // cc#507: per-metric peer-ladder chart modal
   const [pillarPop, setPillarPop] = useState(null);  // cc#731: G/V/M pillar quick-access popout
   const [hovP, setHovP] = useState(null);            // cc#731: pillar-box hover lift/glow
+  // cc#739: scrape-universe gate (id=10093). Out-of-universe symbols hide the Result Analysis card,
+  // the per-symbol Ops Metrics table and the Ops Metrics section (their scrape data isn't maintained
+  // -> permanently empty). GVM-native Overview/Key Takeaways/Financials/News/etc. stay. Default-true
+  // (!== false) so a report without the flag (older cache) behaves exactly as before.
+  const inUniv = r.in_scrape_universe !== false;
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
   const x = r.extras || {};
@@ -2575,10 +2580,10 @@ function GvmReport({ r, hist }) {
       <div id="gvm-results" style={{ scrollMarginTop: 60 }}>
         {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
         {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
-        {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
+        {inUniv && r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
         <ConcallSummary symbol={r.symbol} />
-        <OpsMetrics symbol={r.symbol} segment={r.segment} />
+        {inUniv && <OpsMetrics symbol={r.symbol} segment={r.segment} />}
         <SectorBrief segment={r.segment} />
         <SectorOpsTrends segment={r.segment} />
       </div>
@@ -2586,7 +2591,7 @@ function GvmReport({ r, hist }) {
       {/* cc#518: FINANCIALS -- screener.in-style horizontal tables, placed LAST, above the footer */}
       <div id="gvm-financials" style={{ scrollMarginTop: 60 }}><FinancialsSection financials={r.financials} /></div>
       {/* cc#541: OPERATIONAL METRICS -- per-sector KPIs from concalls/decks (hidden when none) */}
-      <div id="gvm-ops" style={{ scrollMarginTop: 60 }}><OpsMetricsSection ops={r.operational_metrics} /></div>
+      {inUniv && <div id="gvm-ops" style={{ scrollMarginTop: 60 }}><OpsMetricsSection ops={r.operational_metrics} /></div>}
 
       <div style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
@@ -3061,7 +3066,9 @@ function GvmModule() {
               </div>
             )}
             <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: 1, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
-              {GVM_NAV.map(sec => (
+              {/* cc#739: drop the Ops Metrics nav tab for out-of-scrape-universe symbols (its section is
+                  hidden). "Results" stays — it keeps GVM-native Overview/Key Takeaways. */}
+              {GVM_NAV.filter(sec => (report?.in_scrape_universe !== false) || sec.id !== "gvm-ops").map(sec => (
                 <button key={sec.id} onClick={() => scrollToSection(sec.id)}
                   style={{ flexShrink: 0, padding: "5px 11px", borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
                     border: `1px solid ${activeSection === sec.id ? C.accent : C.border}`,

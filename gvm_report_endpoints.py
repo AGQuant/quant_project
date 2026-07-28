@@ -574,9 +574,18 @@ def gvm_company_report(symbol: str):
                       "balance_sheet": None, "cash_flow": None, "ratios": None, "shareholding": None}
 
     # --- 7c. cc#541: OPERATIONAL METRICS section (per-sector KPIs from concalls/decks) ---
+    # cc#739: also resolve scrape-universe membership (id=10093 universe_rule) here on the SAME conn —
+    # EXISTS in sector_ops_metrics. The frontend hides the Result Analysis + Ops Metrics surfaces for
+    # out-of-universe symbols (their scrape data is only maintained inside this ~587-symbol universe,
+    # so those tabs would otherwise render permanently empty/stale). Fail-open (True) on error so a
+    # transient hiccup never wrongly hides content.
+    in_scrape_universe = True
     try:
         with _conn() as conn:
             operational_metrics = build_ops_block(conn, sym)
+            with conn.cursor() as _uc:
+                _uc.execute("SELECT EXISTS(SELECT 1 FROM sector_ops_metrics WHERE symbol=%s)", (sym,))
+                in_scrape_universe = bool(_uc.fetchone()[0])
     except Exception as e:
         log.warning(f"ops metrics block failed for {sym}: {e}")
         operational_metrics = {"has_data": False, "sector": None, "periods": [], "rows": [], "concall": None}
@@ -626,6 +635,7 @@ def gvm_company_report(symbol: str):
         "content":      content,
         "financials":   financials,   # cc#518: screener.in-style FINANCIALS section
         "operational_metrics": operational_metrics,   # cc#541: per-sector ops KPIs (concall-extracted)
+        "in_scrape_universe": in_scrape_universe,      # cc#739: gate Result Analysis + Ops Metrics tabs
         "generated_at": _ist_now(),
         "persisted":    persist_error is None,
         "persist_error": persist_error,
