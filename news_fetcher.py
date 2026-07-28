@@ -236,6 +236,14 @@ def ensure_schema(conn):
         cur.execute("CREATE INDEX IF NOT EXISTS idx_raw_news_symbol_pub  ON raw_news(symbol, published_at DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_raw_news_srctype_pub ON raw_news(source_type, published_at DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_raw_news_fetched     ON raw_news(fetched_at DESC)")
+        # cc#742: cross-source dedup — canonical_id points to the canonical raw_news.id for this story
+        # (NULL = this row IS the canonical). norm_sig = the normalized+stemmed story signature the
+        # collapse keys on. cc#743: relevance_score orders the polish queue. All app-side idempotent.
+        cur.execute("ALTER TABLE raw_news ADD COLUMN IF NOT EXISTS canonical_id BIGINT")
+        cur.execute("ALTER TABLE raw_news ADD COLUMN IF NOT EXISTS norm_sig TEXT")
+        cur.execute("ALTER TABLE raw_news ADD COLUMN IF NOT EXISTS relevance_score INTEGER")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_raw_news_normsig   ON raw_news(norm_sig)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_raw_news_canonical ON raw_news(canonical_id)")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS polished_news (
                 id BIGSERIAL PRIMARY KEY,
@@ -252,6 +260,92 @@ def ensure_schema(conn):
         cur.execute("CREATE INDEX IF NOT EXISTS idx_polished_category  ON polished_news(category)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_polished_rawid     ON polished_news(raw_news_id)")
     conn.commit()
+
+
+# cc#742: story-signature stopwords — generic glue + finance filler + qualifier adverbs + reporting
+# verbs-as-filler are dropped so the SAME story from different feeds (paraphrased, different numbers,
+# source suffix) reduces to the SAME significant-token set. Entity names + core event nouns + direction
+# words are KEPT so genuinely different stories never collapse.
+_NEWS_SIG_STOP = {
+    "the","a","an","of","in","to","for","on","at","and","as","is","are","was","were","with","by","from",
+    "its","it","vs","after","over","amid","up","into","out","new","this","that","will","has","have","be",
+    "says","say","said","report","reports","reported","sees","see","posts","post","posted","logs","logged",
+    "q1","q2","q3","q4","h1","h2","fy","yoy","qoq","mom","results","result","net","gross","total","standalone",
+    "consolidated","profit","loss","revenue","income","sales","earnings","update","updates","live","latest",
+    "stock","stocks","share","shares","price","prices","ltd","limited","inc","co","corp","company","group",
+    "nse","bse","crore","cr","rs","inr","usd","percent","pct","yr","year","quarter","quarterly","cent",
+    "nearly","almost","about","around","roughly","approximately","over","under","near","some","more","than",
+    "sharply","marginally","slightly","strong","weak","big","huge","record","key","top","best","worst",
+}
+
+
+def _news_norm_sig(headline):
+    """cc#742: order/number/source-independent story signature. Two headlines collapse to ONE canonical
+    polish-queue row ONLY when their significant stemmed token SETS are identical — a deterministic,
+    high bar (no fuzzy threshold), so distinct stories are never falsely merged. E.g. 'Ambuja Cements
+    Q1 results: Profit drops nearly 37%' and 'Ambuja Cement Q1 Results: Net profit drops 34% YoY' both
+    reduce to {ambuja, cement, drop}."""
+    h = (headline or "").lower()
+    h = re.split(r"\s[\-|–—]\s", h)[0]     # drop a trailing " - Source" / " | Source" attribution
+    h = re.sub(r"[^a-z\s]", " ", h)                   # strip digits + punctuation
+    toks = set()
+    for w in h.split():
+        if len(w) < 3 or w in _NEWS_SIG_STOP:
+            continue
+        if w.endswith("ies") and len(w) > 4:   w = w[:-3] + "y"   # companies -> company
+        elif w.endswith("es") and len(w) > 4:  w = w[:-2]         # gains? -> keep core (guides->guid)
+        elif w.endswith("s") and len(w) > 3:   w = w[:-1]         # drops -> drop, cements -> cement
+        if w not in _NEWS_SIG_STOP:
+            toks.add(w)
+    return " ".join(sorted(toks))
+
+
+_NEWS_TIP_RE = re.compile(
+    r"stocks?\s+to\s+(buy|watch|sell|avoid)|buy\s+or\s+sell|top\s+\d+\s+stocks?|share[s]?\s+to\s+buy|"
+    r"stock\s+(recommendation|tips?|picks?|radar)|brokerage\s+(call|view)|target\s+price|"
+    r"analyst[s]?\s+(say|recommend|see)|multibagger|stocks?\s+in\s+focus\s+today", re.I)
+_NEWS_RESULT_RE = re.compile(r"\b(q[1-4]|quarter|results?|net profit|\bpat\b|revenue|ebitda|earnings|margin)\b", re.I)
+_NEWS_EVENT_RE  = re.compile(
+    r"\b(guidance|outlook|order (win|book|inflow)|contract|acqui|merger|stake|\bqip\b|fund ?rais|"
+    r"rights issue|buyback|dividend|bonus|split|sebi|\brbi\b|regulat|policy|\bban\b|approv|licen[cs]e|"
+    r"tariff|budget|ipo|listing|delisting|resign|appoint)\b", re.I)
+_NEWS_WRAP_RE   = re.compile(
+    r"\b(preview|what to expect|ahead of|to watch|market wrap|closing bell|opening bell|"
+    r"sensex (ends|closes|today)|nifty (ends|closes|today)|live updates?|top gainers)\b", re.I)
+_NEWS_MACRO_RE  = re.compile(
+    r"\b(nifty|banknifty|bank nifty|sensex|\brbi\b|\bsebi\b|\bfed\b|fomc|crude|brent|rupee|inflation|"
+    r"\bgdp\b|repo rate|bond yield|dollar index)\b", re.I)
+_NEWS_SRC_TIER = {"bloomberg": 10, "reuters": 10, "et markets": 8, "economic times": 8, "livemint": 7,
+                  "mint": 7, "moneycontrol": 7, "business standard": 7, "et industry": 6}
+
+
+def _news_relevance_score(headline, description, symbol, source_name, in_universe):
+    """cc#743: relevance score for polish-queue ordering (NOT auto-publish). Highest weight = symbol in
+    the scrape universe; event type (results/regulatory/corp-action) beats commentary/preview/wrap;
+    index/macro relevance + source tier add; tip-sheet / recommendation content is hard-penalised (a
+    separate editorial-risk category that must never auto-surface). Non-canonical duplicate rows are
+    scored 0 by the caller."""
+    h = ((headline or "") + " " + (description or "")).lower()
+    if _NEWS_TIP_RE.search(h):
+        return -50
+    score = 0
+    if in_universe:
+        score += 40
+    elif symbol:
+        score += 12
+    if _NEWS_RESULT_RE.search(h):
+        score += 25
+    elif _NEWS_EVENT_RE.search(h):
+        score += 22
+    elif _NEWS_WRAP_RE.search(h):
+        score += 2
+    else:
+        score += 8
+    if _NEWS_MACRO_RE.search(h):
+        score += 15
+    sn = (source_name or "").lower()
+    score += max((v for k, v in _NEWS_SRC_TIER.items() if k in sn), default=4)
+    return score
 
 
 def _insert_rows(conn, rows):
@@ -276,6 +370,12 @@ def _insert_rows(conn, rows):
     stale_cutoff_company = _now_utc - timedelta(hours=COMPANY_STALE_HOURS)
     stale_cutoff_default = _now_utc - timedelta(hours=UNPOLISHED_MAX_HOURS)
     with conn.cursor() as cur:
+        # cc#743: preload the scrape universe once per batch for the relevance-score universe-match.
+        try:
+            cur.execute("SELECT UPPER(symbol) FROM sector_ops_metrics WHERE symbol IS NOT NULL")
+            _univ = {x[0] for x in cur.fetchall()}
+        except Exception:
+            _univ = set()
         for r in rows:
             # age gate BEFORE the quality gate. r[7]=published_at (aware UTC, or None), r[0]=source_type.
             # NULL published_at passes through unchanged — news_retention() COALESCEs to fetched_at,
@@ -297,29 +397,36 @@ def _insert_rows(conn, rows):
                 stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
-            # cc#296: content-level dedup BEFORE the url_hash insert. url_hash (MD5 of URL) can't
-            # catch same-story-different-URL duplicates — ET syndicates identical stories to both
-            # its Markets and Industry RSS feeds (same headline + published_at, different URL), and
-            # a single feed occasionally re-lists a story under a new URL at a later fetch. Skip if
-            # an identical headline already exists with published_at within ±2 min in the last 7
-            # days. r[2]=headline, r[7]=published_at (NULL published_at can't be content-matched).
-            if r[2] and r[7] is not None:
+            # cc#742: cross-source dedup via a normalized STORY SIGNATURE (replaces cc#296's exact-
+            # headline ±2min skip, which missed paraphrased cross-feed copies with different numbers —
+            # the Ambuja/Suzlon/HUL cases). Every source row is KEPT (multi-source signal preserved) and
+            # a duplicate is LINKED to the canonical row via canonical_id rather than dropped. The
+            # url_hash UNIQUE constraint still drops a genuine same-URL re-fetch. r[2]=headline,
+            # r[6]=source_name, r[1]=symbol, r[3]=description.
+            sig = _news_norm_sig(r[2])
+            canon_id = None
+            if sig:
                 cur.execute("""
-                    SELECT 1 FROM raw_news
-                    WHERE headline = %s
-                      AND published_at BETWEEN %s - INTERVAL '2 minutes' AND %s + INTERVAL '2 minutes'
-                      AND fetched_at > NOW() - INTERVAL '7 days'
-                    LIMIT 1
-                """, (r[2], r[7], r[7]))
-                if cur.fetchone():
-                    stats["content_dup_skipped"] += 1
-                    continue
+                    SELECT id FROM raw_news
+                    WHERE norm_sig = %s AND canonical_id IS NULL
+                      AND fetched_at > NOW() - INTERVAL '3 days'
+                    ORDER BY id ASC LIMIT 1
+                """, (sig,))
+                _cn = cur.fetchone()
+                if _cn:
+                    canon_id = _cn[0]
+                    stats["content_dup_skipped"] += 1   # counter now = "collapsed onto a canonical row"
+            # cc#743: relevance score at ingest — a non-canonical duplicate scores 0 so it never surfaces
+            # for polish; in_univ = the (tagged) symbol is in the scrape universe.
+            in_univ = bool(r[1]) and (r[1].upper() in _univ)
+            rel = 0 if canon_id is not None else _news_relevance_score(r[2], r[3], r[1], r[6], in_univ)
             cur.execute("""
                 INSERT INTO raw_news
-                    (source_type, symbol, headline, description, url, url_hash, source_name, published_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    (source_type, symbol, headline, description, url, url_hash, source_name,
+                     published_at, norm_sig, canonical_id, relevance_score)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (url_hash) DO NOTHING
-            """, r)
+            """, r + (sig, canon_id, rel))
             if cur.rowcount:
                 stats["inserted"] += 1
             else:
@@ -331,7 +438,7 @@ def _insert_rows(conn, rows):
     if stats["quality_rejected"]:
         log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
     if stats["content_dup_skipped"]:
-        log.info(f"_insert_rows: skipped {stats['content_dup_skipped']} content-duplicate(s)")
+        log.info(f"_insert_rows: collapsed {stats['content_dup_skipped']} cross-source duplicate(s) onto a canonical row (cc#742)")
     return stats
 
 

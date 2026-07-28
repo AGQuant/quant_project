@@ -167,19 +167,25 @@ def news_unpolished(sample: int = 20):
     """Count + sample of raw_news rows with no matching polished_news that are eligible for
     polish. Used by the manual Claude.ai polish session to know what is pending. Quality-filtered
     (task #54) + cc#242 position gate: market news always, stock-tagged only for open positions."""
+    # cc#742: canonical rows only (a cross-source duplicate carries canonical_id -> its story is already
+    # represented by the canonical row, so the queue reflects unique STORIES not feed items). A row with
+    # no canonical_id column value (pre-cc#742 backfill) counts as canonical. cc#743: order by relevance
+    # score DESC then fetched_at DESC, so the 48h purge drops the genuine low-value tail, not an
+    # arbitrary recency slice. relevance_score is exposed so the expiring tail can be reviewed.
+    _CANON = " AND r.canonical_id IS NULL "
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE)
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE)
         pending = cur.fetchone()[0]
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
-                   r.source_name, r.url, r.published_at
+                   r.source_name, r.url, r.published_at, r.relevance_score
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + """
-            ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + """
+            ORDER BY r.relevance_score DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))
         rows = _rows(cur)
