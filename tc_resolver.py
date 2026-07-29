@@ -67,3 +67,24 @@ def get_primary_tc():
 def primary_tc(symbol, direction="LONG"):
     """One-shot convenience: score `symbol`/`direction` on the canonical scorer."""
     return get_primary_tc()(symbol, direction)
+
+
+# ── STYLE-level primary (cc#748, founder-approved 29-Jul) ────────────────────────────────────────
+# get_primary_tc() (v4.0 endpoints) yields ONE verdict per LONG/SHORT direction — it has NO
+# reversal-vs-momentum split. The 4 style cards (BUY/SELL x MOMENTUM/REVERSAL, each with its own
+# STRONG/VALID/REJECT verdict) live in the v4 DUAL engine. Consumers that need per-style verdicts
+# (the TC outcome sim, cc#748 — "per-style win rates are the whole point") import THIS accessor from
+# the resolver, never `tc_v4_dual` directly, so cc#738's single-import-point rule still holds: the
+# resolver remains the ONE place the platform's TC engines are named.
+def get_primary_styles():
+    """Return the canonical STYLE-level scorer callable: fn(symbol, side='ALL') -> dict whose `cards`
+    list holds the 4 style cards, each {style, side, label, score, max, verdict}. Same v4 family and
+    same PRIMARY_TC_VERSION flip point as get_primary_tc(); the dual is the style-resolving variant."""
+    _resolve_version()   # keep the flip point consistent (dual is the v4 style-resolving variant)
+    from tc_v4_dual import trade_check_v4_dual
+    return trade_check_v4_dual
+
+
+def primary_styles(symbol, side="ALL"):
+    """One-shot convenience: score `symbol` on the canonical style-level scorer (all 4 style cards)."""
+    return get_primary_styles()(symbol, side)

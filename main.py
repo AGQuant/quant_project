@@ -65,6 +65,7 @@ from tc_v4_endpoints import router as tc_v4_router
 from tc_v4_dual import router as tc_v4_dual_router   # cc#386: dual-style v4 engine (spec id=2926)
 from tc_v4_scan import router as tc_v4_scan_router   # cc#387: dual-style v4 batch scanner
 from check_endpoint import router as check_router
+from tc_sim_endpoints import router as tc_sim_router   # cc#748: TC outcome sim
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from ops_metrics_pipeline import router as ops_metrics_router   # cc#523: sector KPI registry + concall pipeline
@@ -310,6 +311,7 @@ app.include_router(tc_v4_router)
 app.include_router(tc_v4_dual_router)   # cc#386
 app.include_router(tc_v4_scan_router)   # cc#387
 app.include_router(check_router)
+app.include_router(tc_sim_router)   # cc#748: /api/tc-sim/*
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(ops_metrics_router)   # cc#523

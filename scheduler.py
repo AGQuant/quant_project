@@ -1007,6 +1007,34 @@ def _bg_adr_pcr_retry():
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()
 
+_tc_sim_running = False
+def _bg_tc_sim_tick():
+    """cc#748: hourly TC OUTCOME SIM tick. Scores the futures universe via tc_resolver.get_primary_styles()
+    ONLY, opens sim entries for verdict=STRONG cards (+/-3% exits, 5-trading-day TIME cap) and processes
+    open-position exits. Trading-day + entry logic live inside run_tc_sim_tick(); single-flight guarded so
+    an hourly tick can never overlap a still-running one (universe scoring can be slow). No V8 objects (id=244)."""
+    global _tc_sim_running
+    if _tc_sim_running:
+        return _SKIPPED
+    _tc_sim_running = True
+    try:
+        import tc_sim
+        res = tc_sim.run_tc_sim_tick()
+        try:
+            with _conn() as _c:
+                _log_health(_c, "tc_sim_tick",
+                            {"opened": len(res.get("opened", [])), "closed": len(res.get("closed", [])),
+                             "open": res.get("still_open"), "errors": len(res.get("errors", []))})
+        except Exception:
+            pass
+        log.info(f"tc_sim_tick: opened={len(res.get('opened',[]))} "
+                 f"closed={len(res.get('closed',[]))} open={res.get('still_open')}")
+        return res
+    except Exception as e:
+        log.error(f"tc_sim_tick: {e}")
+    finally:
+        _tc_sim_running = False
+
 def _bg_tc_screener_precompute():
     # task #43: nightly TC screener cache @16:00 IST (after market close + ADR/PCR)
     try:
@@ -3006,6 +3034,15 @@ async def _scheduler_loop():
         # Predictable star cadence (7 marks/day) replacing cc#720's per-render 15-min cache.
         if now.weekday() < 5 and _is_trading_day(today) and m == 30 and 9 <= h <= 15:
             _spawn(_bg_tc_position_stars)
+        # cc#748: TC outcome sim — hourly STRONG-entry tracker on the session's entry marks (09:30-15:30
+        # today, sourced from nse_session so it follows the 03-Aug NSE change). Trading-day gate + all
+        # entry/exit logic live inside run_tc_sim_tick(); dispatch stays crash-proof if the module is absent.
+        try:
+            import nse_session as _nss
+            if now.weekday() < 5 and _nss.is_entry_tick(h, m):
+                _spawn(_bg_tc_sim_tick)
+        except Exception as _e:
+            log.error(f"tc_sim dispatch: {_e}")
         if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 32:
