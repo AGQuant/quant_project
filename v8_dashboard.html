@@ -3514,21 +3514,34 @@ function _pnDayLabel(ts){
   if(diff===1)return'Yesterday';
   return String(ist.getUTCDate()).padStart(2,'0')+' '+MON[ist.getUTCMonth()];
 }
+// cc#753: remember which positions the user expanded, for the session (survives tab re-renders).
+let PN_EXPANDED=new Set();
+function pnExpandAll(open){
+  const el=document.getElementById('panel14');if(!el)return;
+  el.querySelectorAll('.pncard').forEach(c=>{
+    const bd=c.querySelector('.rcol-body'),ca=c.querySelector('.rcol-caret'),sym=c.getAttribute('data-sym');
+    if(bd)bd.style.display=open?'block':'none';
+    if(ca)ca.innerHTML=open?'▾':'▸';
+    if(sym){if(open)PN_EXPANDED.add(sym);else PN_EXPANDED.delete(sym);}
+    c.setAttribute('data-open',open?'1':'0');
+  });
+}
 function renderPositionNews(d){
-  // cc#620 RESULT_CARD_CONSISTENCY_V1: the Position News tab renders ONE shared result-card per open
-  // position (the SAME card the R button opens) via ScorrRCard.renderInline — strict priority chain:
-  // structured result (fresh quarter only) -> polished news -> raw one-liner. Supersedes the cc#611
-  // per-item feed. side/basket context still available via the shared card header + peer block.
+  // cc#753 COLLAPSED-BY-DEFAULT: one compact row per open position (symbol + GVM tag + result-status
+  // chip + date), each expandable IN PLACE to the SAME shared result card (cc#620 chain: structured
+  // result -> polished news -> raw one-liner). Dense grid so ~21 positions fit in ~2 screens; Expand /
+  // Collapse All at top; expansion remembered for the session in PN_EXPANDED.
   const syms=(d&&d.open_symbols)||[];
   const _openN=(d&&d.open_positions!=null)?d.open_positions:syms.length;
-  const meta=`<div class="ptitle">Position News <span class="ct">${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain) · latest result or news per position</span></div>`;
+  const meta=`<div class="ptitle" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Position News <span class="ct">${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain) · tap a row to expand</span>`
+    +`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn" onclick="pnExpandAll(true)">Expand all</button><button class="btn" onclick="pnExpandAll(false)">Collapse all</button></span></div>`;
   if(!syms.length)return meta+`<div class="empty">No open positions.</div>`;
   const cid=s=>'pncard-'+String(s).replace(/[^A-Za-z0-9]/g,'_');
-  let html=meta+`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:8px">`;
-  syms.forEach(s=>{html+=`<div id="${cid(s)}" style="border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel);box-shadow:var(--shadow)"><div class="rcard-body" style="color:var(--mut)">Loading ${newsEsc(s)}…</div></div>`;});
+  let html=meta+`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;align-items:start;margin-top:8px">`;
+  syms.forEach(s=>{html+=`<div class="pncard" id="${cid(s)}" data-sym="${newsEsc(s)}" data-open="0" style="border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden;align-self:start"></div>`;});
   html+=`</div>`;
-  // populate each card async once the grid is in the DOM (shared renderer -> /api/results/card chain).
-  setTimeout(()=>{if(window.ScorrRCard&&ScorrRCard.renderInline)syms.forEach(s=>{const el=document.getElementById(cid(s));if(el)ScorrRCard.renderInline(el,s);});},0);
+  // populate each row async once the grid is in the DOM (shared collapsible renderer -> /api/results/card).
+  setTimeout(()=>{if(window.ScorrRCard&&ScorrRCard.renderCollapsible)syms.forEach(s=>{const el=document.getElementById(cid(s));if(el)ScorrRCard.renderCollapsible(el,s,{expanded:PN_EXPANDED.has(s),onToggle:o=>{if(o)PN_EXPANDED.add(s);else PN_EXPANDED.delete(s);}});});},0);
   return html;
 }
 

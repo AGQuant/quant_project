@@ -1129,11 +1129,13 @@ RESULTS_CARD_JS = """
     if (status === 'announced' || status === 'announced_no_analysis'){ pill='Announced'; cls='rcard-st-a'; }
     else if (status === 'upcoming'){ pill='Result due ' + fmtDate(d && d.ex_date); cls='rcard-st-u'; }
     else { pill='Date TBD'; cls='rcard-st-t'; }
-    var h = '<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
+    /* cc#753: opts.header===false skips this leading header block (the collapsed Position-News row
+       already shows symbol + GVM + status + date, so the expanded body must not repeat them). */
+    var h = (opts.header===false) ? '' : ('<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
       + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
       + (opts.close!==false && window.ScorrCardStripHtml ? window.ScorrCardStripHtml(sym,'R') : '')   /* cc#675: host C·A·R·D strip */
-      + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>';
+      + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>');
     var announced = (status === 'announced' || status === 'announced_no_analysis');
 
     if (announced){
@@ -1182,6 +1184,41 @@ RESULTS_CARD_JS = """
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){ container.innerHTML = cardHtml(d, sym, {close:false}); })
       .catch(function(){ container.innerHTML='<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result card unavailable.</div>'; });
+  }
+  // cc#753: COLLAPSED-by-default Position-News row. Renders a compact clickable header (symbol +
+  // GVM tag + result-status chip + date) and the full shared card body hidden underneath; clicking the
+  // header expands it IN PLACE (same builder, header:false so nothing repeats). opts.expanded seeds the
+  // open state; opts.onToggle(open) lets the host remember expansion for the session.
+  function _statusChip(d){
+    var status=(d&&d.status)||'date_tbd';
+    if(status==='announced'||status==='announced_no_analysis') return {txt:'ANNOUNCED', cls:'rcard-st-a'};
+    if(status==='upcoming') return {txt:'RESULT DUE', cls:'rcard-st-u'};
+    return {txt:'DATE TBD', cls:'rcard-st-t'};
+  }
+  function renderCollapsible(container, sym, opts){
+    if(!container) return; opts=opts||{};
+    container.innerHTML='<div style=\"padding:10px 12px;color:var(--mut,#667085);font-size:12px\">Loading '+esc(sym)+'&hellip;</div>';
+    fetch('/api/results/card?symbol='+encodeURIComponent(sym))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        var sc=_statusChip(d);
+        var dateStr=(d&&d.ex_date)?fmtDate(d.ex_date):'';
+        var gvm=(d&&d.gvm_verdict)?esc(d.gvm_verdict):'';
+        var head='<div class=\"rcol-head\" role=\"button\" tabindex=\"0\" style=\"display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;user-select:none\">'
+          + '<span style=\"font-weight:800;font-size:13px\">'+esc(sym)+'</span>'
+          + (gvm?'<span class=\"rcard-gvm\">GVM: '+gvm+'</span>':'')
+          + '<span class=\"rcard-status '+sc.cls+'\">'+sc.txt+'</span>'
+          + (dateStr?'<span style=\"color:var(--mut,#667085);font-size:11.5px;white-space:nowrap\">'+esc(dateStr)+'</span>':'')
+          + '<span class=\"rcol-caret\" style=\"margin-left:auto;color:var(--mut,#667085);font-size:11px\">&#9656;</span></div>';
+        var body='<div class=\"rcol-body\" style=\"display:none;padding:0 12px 12px\">'+cardHtml(d, sym, {close:false, header:false})+'</div>';
+        container.innerHTML=head+body;
+        var hd=container.querySelector('.rcol-head'), bd=container.querySelector('.rcol-body'), ca=container.querySelector('.rcol-caret');
+        function setOpen(o){ bd.style.display=o?'block':'none'; ca.innerHTML=o?'&#9662;':'&#9656;'; container.setAttribute('data-open',o?'1':'0'); if(opts.onToggle) try{opts.onToggle(o);}catch(e){} }
+        hd.addEventListener('click', function(){ setOpen(bd.style.display==='none'); });
+        hd.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setOpen(bd.style.display==='none'); } });
+        bd.style.display=opts.expanded?'block':'none'; ca.innerHTML=opts.expanded?'&#9662;':'&#9656;'; container.setAttribute('data-open',opts.expanded?'1':'0');
+      })
+      .catch(function(){ container.innerHTML='<div class=\"rcol-head\" style=\"padding:10px 12px;display:flex;gap:8px;align-items:center\"><span style=\"font-weight:800;font-size:13px\">'+esc(sym)+'</span><span class=\"rcard-status rcard-st-t\">unavailable</span></div>'; });
   }
   function renderMsg(msg){
     box.innerHTML = '<div class=\"rcard-hd\"><div class=\"rcard-sym\">'+esc(_cur)+'</div>'
@@ -1242,7 +1279,7 @@ RESULTS_CARD_JS = """
     var vp = e.target.closest('.vcard-pill');
     if (vp && vp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); openV(vp.getAttribute('data-sym')); }
   });
-  window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline, close: close,
+  window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline, renderCollapsible: renderCollapsible, close: close,
     pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; },
     pillV: function(sym){ return sym ? '<span class=\"vcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Volume / Energy\">V</span>' : ''; } };
 })();
