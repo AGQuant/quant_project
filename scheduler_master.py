@@ -249,8 +249,23 @@ def run_drift_audit(conn=None):
                 _oplog(cur, "scheduler_master_drift",
                        {"direction": "missing_from_master", "jobs": missing_from_master})
             if vanished:
+                # cc#759 fix5: a job registered-but-gone-from-code was previously logged as a low-signal
+                # drift note AND left active=TRUE forever — so it re-noted silently every audit and paged
+                # nobody (the 6 vanished feed-health jobs are exactly why the 5h outage alerted no one).
+                # Formally RETIRE each (active=FALSE, so it self-resolves and never re-alerts) and raise a
+                # real 'alert' row. If a retirement is wrong, restore the _spawn in scheduler.py.
+                for _name in vanished:
+                    cur.execute("""UPDATE scheduler_master
+                                   SET active=FALSE,
+                                       notes = COALESCE(NULLIF(notes,''), '')
+                                               || ' | RETIRED_VANISHED_FROM_CODE cc#759 ' || CURRENT_DATE::text
+                                   WHERE job_name=%s""", (_name,))
                 _oplog(cur, "scheduler_master_drift",
-                       {"direction": "vanished_from_code", "jobs": vanished})
+                       {"direction": "vanished_from_code", "jobs": vanished,
+                        "action": "auto-retired active=FALSE (cc#759) — restore the _spawn in scheduler.py if unintended"})
+                _oplog(cur, "alert", "scheduler_registry_vanished",
+                       {"jobs": vanished,
+                        "note": "registered jobs with no code — auto-retired; restore if the retirement is wrong"})
             summary = {"code_jobs": len(code_jobs), "master_jobs": len(master_jobs),
                        "missing_from_master": missing_from_master, "vanished_from_code": vanished}
             _oplog(cur, "scheduler_master_audit_run", summary)
