@@ -1992,13 +1992,95 @@ def _quarters_fresh(cur, symbol, ex_date) -> bool:
     return bool(r and r[0] and r[0] >= qend)
 
 
-def run_t1_refresh(conn=None):
-    """cc#524 item 1: companies whose earnings_calendar row transitioned to status='reported'
-    yesterday (IST) get queued and refreshed T+1. Reads the SAME status='reported' signal
-    admin_data.py's _earnings_lifecycle() already flips daily at 06:15 IST -- this just acts on
-    it, doesn't duplicate the lifecycle logic."""
+def _ist_today():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).date()
+
+
+def _n_trading_days_ago(today, n):
+    """The latest ex_date on/before which >= n trading days have elapsed relative to `today`."""
+    try:
+        from nse_holidays import is_trading_day
+    except Exception:
+        def is_trading_day(d):
+            return d.weekday() < 5
+    d, cnt = today, 0
+    while cnt < n:
+        d -= timedelta(days=1)
+        if is_trading_day(d):
+            cnt += 1
+    return d
+
+
+# cc#749: the one artefact predicate — a result has demonstrably landed for (ec.ticker, ec.ex_date) if
+# EITHER a doc_registry doc was discovered on/after ex_date (independent of the scrape, so it breaks the
+# status<->scrape deadlock) OR a fundamentals_history 'quarters' row was scraped after ex_date.
+_RESULT_ARTEFACT_SQL = """(
+        EXISTS (SELECT 1 FROM doc_registry dr
+                WHERE UPPER(dr.symbol)=UPPER(ec.ticker) AND dr.discovered_at::date >= ec.ex_date)
+     OR EXISTS (SELECT 1 FROM fundamentals_history fh
+                WHERE UPPER(fh.symbol)=UPPER(ec.ticker) AND fh.section='quarters'
+                  AND fh.scraped_at::date > ec.ex_date)
+    )"""
+
+
+def flip_earnings_status(conn=None, since=None):
+    """cc#749: EVIDENCE-BASED earnings_calendar status maintenance. ADDITIVE to (does NOT modify) the
+    loader's date-only aging in admin_data._earnings_lifecycle — this is the deterministic, IST-correct,
+    artefact-gated flip the T+1 chain needs, since run_t1_refresh() enqueues on status='reported' and
+    that field was previously maintained only by a UTC-`CURRENT_DATE` date-flip that lags a day (the
+    root cause of the 28-Jul reporters staying 'upcoming').
+
+      status IN (upcoming|missing) + ex_date passed (IST today) + a RESULT ARTEFACT exists  -> reported
+      status='upcoming'            + ex_date passed >= 2 TRADING days + NO artefact           -> missing
+      status='upcoming'            + ex_date passed < 2 trading days  + no artefact            -> left upcoming (grace)
+
+    The 'reported' pass also RECOVERS a row previously marked 'missing' if a late artefact appears, so
+    the flip is self-correcting and never silently reports a no-show. Called at the START of
+    run_t1_refresh so evidence-backed reporters flip AND enqueue in the SAME run. `since` bounds the
+    scan (default 45 days back); pass an earlier date for a season backfill."""
     own = conn is None
     conn = conn or _conn()
+    today = _ist_today()
+    since = since or (today - timedelta(days=45))
+    missing_cutoff = _n_trading_days_ago(today, 2)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""UPDATE earnings_calendar ec SET status='reported', last_updated=NOW()
+                            WHERE ec.status IN ('upcoming','missing') AND ec.ticker IS NOT NULL
+                              AND ec.ex_date < %s AND ec.ex_date >= %s AND {_RESULT_ARTEFACT_SQL}""",
+                        (today, since))
+            reported = cur.rowcount
+            cur.execute(f"""UPDATE earnings_calendar ec SET status='missing', last_updated=NOW()
+                            WHERE ec.status='upcoming' AND ec.ticker IS NOT NULL
+                              AND ec.ex_date <= %s AND ec.ex_date >= %s AND NOT {_RESULT_ARTEFACT_SQL}""",
+                        (missing_cutoff, since))
+            missing = cur.rowcount
+        conn.commit()
+        res = {"reported": reported, "missing": missing, "today": str(today),
+               "missing_cutoff": str(missing_cutoff), "since": str(since)}
+        log.info(f"flip_earnings_status: {res}")
+        return res
+    except Exception as e:
+        conn.rollback()
+        log.error(f"flip_earnings_status: {e}")
+        return {"error": str(e)[:200]}
+    finally:
+        if own:
+            conn.close()
+
+
+def run_t1_refresh(conn=None):
+    """cc#524 item 1: companies whose earnings_calendar row transitioned to status='reported'
+    get queued and refreshed T+1. cc#749: run_t1_refresh now maintains that signal ITSELF via
+    flip_earnings_status() (evidence-based, IST-correct) at the start of each run, so the chain no
+    longer depends solely on admin_data._earnings_lifecycle()'s tz-lagged date-only aging."""
+    own = conn is None
+    conn = conn or _conn()
+    # cc#749: evidence-based status flip FIRST (same conn/run) so freshly-reported names enqueue below.
+    try:
+        flip_earnings_status(conn)
+    except Exception as e:
+        log.error(f"run_t1_refresh flip_earnings_status: {e}")
     try:
         with conn.cursor() as cur:
             ensure_tables(cur)
