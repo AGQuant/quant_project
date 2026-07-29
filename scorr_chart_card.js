@@ -35,6 +35,7 @@
   // cc#730: fib + pivot overlay state (default BOTH on so the card matches the V8 chart out of the box).
   var _fibCache = {};   // {sym: fibcheck json} — pivots fetched once per symbol
   var _priceLines = [], _lastData = [];
+  var _vwapSeries = null, _vwapLast = null;   // cc#755: session-VWAP line series (intraday only) + latest value for the chip
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
@@ -49,12 +50,14 @@
   ];
   var _fibBand = null;   // cc#750: {lo, rng} of the loaded-range swing, for priceToCoordinate band placement
   function _readOv() {
+    var vwap = false;   // cc#755: VWAP is an opt-in overlay (default off), persisted separately so the
+    try { vwap = localStorage.getItem("scorr_chart_vwap") === "1"; } catch (e) {}   // pivot/fib scheme is untouched
     try { var s = localStorage.getItem("scorr_chart_overlay");
-      if (s === "none") return { pivot: false, fib: false };
-      if (s === "pivot") return { pivot: true, fib: false };
-      if (s === "fib") return { pivot: false, fib: true };
+      if (s === "none") return { pivot: false, fib: false, vwap: vwap };
+      if (s === "pivot") return { pivot: true, fib: false, vwap: vwap };
+      if (s === "fib") return { pivot: false, fib: true, vwap: vwap };
     } catch (e) {}
-    return { pivot: true, fib: true };   // default: both visible
+    return { pivot: true, fib: true, vwap: vwap };   // default: pivots + fib on, VWAP off
   }
   function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
   function _fibZoneKey(p) {
@@ -179,11 +182,49 @@
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
+    // cc#755: VWAP toggle — third chip, independent of Pivots/Fib. Session VWAP is intraday-only, so it
+    // is greyed on every EOD timeframe (1M/3M/6M/1Y/ALL). Value shows in the chip strip, never the axis.
+    (function () {
+      var b = document.createElement("button");
+      b.textContent = "VWAP";
+      var vwapBlocked = (_tf !== "5m");
+      var on = _ov.vwap && !vwapBlocked;
+      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
+        ";background:" + (on ? "#f5a623" : p.btn) + ";color:" + (on ? "#1c2536" : p.mut) + (vwapBlocked ? ";opacity:.4;cursor:not-allowed" : "");
+      b.title = vwapBlocked ? "Session VWAP is intraday-only — switch to the 5m timeframe" : "Session VWAP (cumulative price·volume / volume, from 09:15; resets each session)";
+      if (!vwapBlocked) b.onclick = function () { _toggleOv("vwap"); };
+      host.appendChild(b);
+    })();
   }
   function _toggleOv(kind) {
     _ov[kind] = !_ov[kind];
-    try { localStorage.setItem("scorr_chart_overlay", _ovStr()); } catch (e) {}
-    _paintChrome(); _applyOverlays();
+    try {
+      if (kind === "vwap") localStorage.setItem("scorr_chart_vwap", _ov.vwap ? "1" : "0");
+      else localStorage.setItem("scorr_chart_overlay", _ovStr());
+    } catch (e) {}
+    _paintChrome();
+    if (kind === "vwap") { _applyVwap(); _renderFx(); } else { _applyOverlays(); }
+  }
+  // cc#755: session-VWAP line (intraday only). Cumulative SUM(close·volume)/SUM(volume) from each
+  // session's first bar (~09:15), reset when the bar's date changes. A native LightweightCharts line
+  // series so it tracks the price scale; the latest value is surfaced as a chip (never on the axis).
+  function _applyVwap() {
+    if (!_chart) return;
+    if (_vwapSeries) { try { _chart.removeSeries(_vwapSeries); } catch (e) {} _vwapSeries = null; }
+    _vwapLast = null;
+    if (!(_ov.vwap && _tf === "5m" && _lastData && _lastData.length)) return;
+    var pts = [], cumPV = 0, cumV = 0, day = null;
+    for (var i = 0; i < _lastData.length; i++) {
+      var bar = _lastData[i];
+      if (bar._day !== day) { day = bar._day; cumPV = 0; cumV = 0; }   // reset at each session boundary
+      var v = isFinite(bar.volume) ? bar.volume : 0;
+      cumPV += bar.close * v; cumV += v;
+      pts.push({ time: bar.time, value: cumV > 0 ? cumPV / cumV : bar.close });
+    }
+    if (!pts.length) return;
+    _vwapSeries = _chart.addLineSeries({ color: "#f5a623", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    _vwapSeries.setData(pts);
+    _vwapLast = pts[pts.length - 1].value;
   }
   // cc#730/#750: pivot + fib overlays. Pivot LEVELS + fib LINES are native price lines (they track the
   // scale); cc#750 removes the pivot AXIS badges (they collided with the price ticks + CMP tag) in favour
@@ -242,6 +283,8 @@
     var fx = _ensureFx(); if (!fx) return;
     var pal = _pal();
     var html = "";
+    var chipBg = (_theme === "dark" ? "rgba(18,24,36,.72)" : "rgba(255,255,255,.78)");
+    var pivShown = false;
     // pivot chip strip — one row, top-left; R green / PP gray / S red; semi-transparent bg.
     if (_ov.pivot && _tf !== "ALL") {
       var f = _fibCache[_sym];
@@ -251,8 +294,12 @@
           .filter(function (r) { return r[1] != null; })
           .map(function (r) { return '<span style="color:' + r[2] + ';font-weight:700">' + r[0] + '</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span>'; })
           .join('<span style="color:' + pal.sub + ';margin:0 5px">|</span>');
-        if (chips) html += '<div class="sc-pivchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + (_theme === "dark" ? "rgba(18,24,36,.72)" : "rgba(255,255,255,.78)") + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + chips + '</div>';
+        if (chips) { html += '<div class="sc-pivchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + chips + '</div>'; pivShown = true; }
       }
+    }
+    // cc#755: VWAP value chip (amber) — top-left, below the pivot strip if present. Intraday only.
+    if (_ov.vwap && _tf === "5m" && _vwapLast != null && isFinite(_vwapLast)) {
+      html += '<div class="sc-vwapchip" style="position:absolute;left:0;top:' + (pivShown ? "26px" : "0") + ';font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)"><span style="color:#f5a623;font-weight:800">VWAP</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(_vwapLast).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span></div>';
     }
     // fib zone bands (positioned in _positionFx); one label per band, right-inside vertical stack.
     if (_ov.fib && _fibBand) {
@@ -332,7 +379,7 @@
       var data;
       if (isIntraday) {
         data = (rows || []).map(function (r) {
-          return { time: Math.floor(new Date(String(r.ts).replace(" ", "T") + "+05:30").getTime() / 1000), open: +r.open, high: +r.high, low: +r.low, close: +r.close };
+          return { time: Math.floor(new Date(String(r.ts).replace(" ", "T") + "+05:30").getTime() / 1000), open: +r.open, high: +r.high, low: +r.low, close: +r.close, volume: +r.volume, _day: String(r.ts).slice(0, 10) };   // cc#755: volume + session date for VWAP
         }).filter(function (d) { return isFinite(d.close) && isFinite(d.time); });
       } else {
         data = (rows || []).map(function (r) { return { time: r.date, open: +r.open, high: +r.high, low: +r.low, close: +r.close }; })
@@ -354,6 +401,7 @@
       _chart = c; _series = s; _lastData = data;
       _setHL(data);
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
+      _applyVwap();       // cc#755: draw the session-VWAP line (intraday only; no-op on EOD TFs)
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
       msg.textContent = isIntraday
         ? "5-min · last 5 sessions · IST (F&O feed)"
@@ -391,6 +439,7 @@
     if (ov) ov.style.display = "none";
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
+    _vwapSeries = null; _vwapLast = null;   // cc#755 (series is owned by _chart, already removed above)
     var fx = document.getElementById("scorrChartFx"); if (fx && fx.parentNode) fx.parentNode.removeChild(fx);   // cc#750: rebuilt fresh on next open
     document.removeEventListener("keydown", _esc);
     window.removeEventListener("resize", _onResize);
