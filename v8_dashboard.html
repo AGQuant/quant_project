@@ -540,6 +540,11 @@
     <div class="clock" id="clock">&#8212;</div>
     <div class="toggle">
       <span class="feed-badge fb-green" id="feedBadge" title="Feed status"><span class="fb-dot"></span><span class="fb-txt" id="feedBadgeTxt"></span></span>
+      <!-- cc#760: data-integrity alert icon (replaces the full-width banner). Hidden at zero flags. -->
+      <span id="diAlert" title="Data integrity" onclick="toggleDiPop(event)" style="display:none;position:relative;cursor:pointer;align-items:center;justify-content:center;padding:0 3px">
+        <span id="diAlertIcon" style="font-size:16px;line-height:1">&#9888;</span>
+        <span id="diAlertBadge" style="position:absolute;top:-5px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:#d92d3c;color:#fff;font-size:9px;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box"></span>
+      </span>
       <a class="btn" href="/v13" title="Filter registry — every platform metric" style="text-decoration:none">&#9636; V13</a>
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
       <button class="btn" id="refreshBtn" onclick="loadAll()">&#8635; Refresh</button>
@@ -564,8 +569,9 @@
     &#128274; Market Closed &mdash; Final as of 15:30 IST &middot; figures frozen until 09:15 next trading day
   </div>
 
-  <!-- cc#658 part_6: one-line Data Integrity strip — CA watchdog headline; red if any unresolved anomaly. -->
-  <div id="dataIntegrityStrip" style="display:none;margin:0 0 12px;padding:7px 12px;border-radius:8px;font-size:11px;font-weight:600;letter-spacing:.02em"></div>
+  <!-- cc#760: the full-width Data Integrity strip is REMOVED — its content now lives in the header
+       alert icon (#diAlert) + click-to-expand popover (#diPop). -->
+  <div id="diPop" role="dialog" aria-label="Data integrity detail" style="display:none;position:fixed;top:54px;right:14px;z-index:11800;width:min(92vw,340px);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,.28);padding:12px 14px;font-size:12px"></div>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
   <!-- cc#266: India VIX 5-day hourly line chart. cc#275: was an always-visible card; now a
@@ -3838,20 +3844,49 @@ pollFeedHealth();
 setInterval(pollFeedHealth,60*1000);
 
 // cc#658 part_6: Data Integrity strip — CA watchdog headline; red if any unresolved anomaly.
+// cc#760: data-integrity now = a header alert icon + click-to-expand popover (no full-width banner).
+// Icon shows only when there is >=1 flag; RED on any genuine-crash / restated-overnight (or master red
+// flag), AMBER when only upcoming ex-dates. Popover lists each category; a line expands to its symbols.
+let DI_DATA=null;
 async function loadDataIntegrity(){
-  var el=document.getElementById('dataIntegrityStrip'); if(!el) return;
+  const icon=document.getElementById('diAlert'); if(!icon) return;
   try{
-    const d=await getJSON('/api/data-integrity/status');
-    const head=d.ca_headline||d.master_headline;
-    if(!head){ el.style.display='none'; return; }
-    const red=!!d.red;
-    el.style.display='block';
-    el.style.background=red?'rgba(217,45,60,.12)':'rgba(11,110,66,.10)';
-    el.style.border='1px solid '+(red?'rgba(217,45,60,.45)':'rgba(11,110,66,.35)');
-    el.style.color=red?'#d92d3c':'#0b6e42';
-    el.textContent=(red?'⚠ ':'✓ ')+'Data integrity: '+head;
-  }catch(e){ el.style.display='none'; }
+    const d=await getJSON('/api/data-integrity/status'); DI_DATA=d;
+    const c=(d.counts&&d.counts.total)||0, sev=d.severity||'none';
+    if(!c||sev==='none'){ icon.style.display='none'; const pop=document.getElementById('diPop'); if(pop)pop.style.display='none'; return; }
+    const col=sev==='red'?'#d92d3c':'#d9820e';
+    icon.style.display='inline-flex';
+    document.getElementById('diAlertIcon').style.color=col;
+    const badge=document.getElementById('diAlertBadge'); badge.textContent=c; badge.style.background=col;
+    icon.title='Data integrity — '+c+' flag'+(c===1?'':'s')+' (click for detail)';
+    renderDiPop();
+  }catch(e){ icon.style.display='none'; }
 }
+function diToggleLine(i){ const s=document.getElementById('di-syms-'+i); if(s) s.style.display=s.style.display==='none'?'block':'none'; }
+function renderDiPop(){
+  const pop=document.getElementById('diPop'); if(!pop||!DI_DATA) return;
+  const b=DI_DATA.breakdown||{};
+  let i=0;
+  const line=(label,arr,col,fmt)=>{
+    const n=(arr||[]).length, idx=i++;
+    return `<div style="padding:7px 0;border-top:1px solid var(--line)">
+      <div onclick="${n?`diToggleLine(${idx})`:''}" style="display:flex;justify-content:space-between;font-weight:700;cursor:${n?'pointer':'default'}">
+        <span style="color:${n?col:'var(--dim)'}">${label}</span><span style="color:${n?col:'var(--dim)'}">${n}${n?' ▸':''}</span></div>
+      ${n?`<div id="di-syms-${idx}" style="display:none;margin-top:4px;color:var(--mut);font-size:11px;line-height:1.55">${(arr||[]).map(fmt).join(', ')}</div>`:''}
+    </div>`;
+  };
+  pop.innerHTML=`<div style="font-weight:800;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center">Data integrity<span onclick="document.getElementById('diPop').style.display='none'" style="cursor:pointer;color:var(--dim);font-size:16px;line-height:1">&times;</span></div>`
+    + line('Genuine-crash flags', b.genuine_crash_flags, '#d92d3c', x=>`${esc(x.symbol)}${x.drop_pct!=null?' ('+Number(x.drop_pct).toFixed(1)+'%)':''}`)
+    + line('Restated overnight', b.restated_overnight, '#d92d3c', x=>esc(x.symbol))
+    + line('Upcoming ex-dates', b.upcoming_ex_dates, '#d9820e', x=>`${esc(x.symbol)}${x.ex_date?' · '+esc(x.ex_date):''}`)
+    + ((DI_DATA.master_headline&&DI_DATA.red)?`<div style="padding:7px 0;border-top:1px solid var(--line);color:#d92d3c;font-size:11px">${esc(DI_DATA.master_headline)}</div>`:'');
+}
+function toggleDiPop(ev){ if(ev)ev.stopPropagation(); const pop=document.getElementById('diPop'); if(!pop)return; pop.style.display=pop.style.display==='none'?'block':'none'; }
+document.addEventListener('click',function(e){
+  const pop=document.getElementById('diPop'), icon=document.getElementById('diAlert');
+  if(pop&&pop.style.display==='block'&&!pop.contains(e.target)&&icon&&!icon.contains(e.target)) pop.style.display='none';
+});
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ const pop=document.getElementById('diPop'); if(pop)pop.style.display='none'; } });
 loadDataIntegrity();
 setInterval(loadDataIntegrity,10*60*1000);
 </script>

@@ -394,6 +394,10 @@ def data_integrity_status():
     """cc#658 part_6: compact status for the /health card + V8 dashboard strip. Reads today's CA note +
     master note headlines; red when any unresolved anomaly (genuine-crash flag or master red flag)."""
     out = {"ca_headline": None, "master_headline": None, "genuine_flags": 0, "red": False}
+    # cc#760: also pass through the CA note's already-computed per-category breakdown (symbols) so the
+    # dashboard's header alert popover can list affected names. READ-ONLY — no integrity check/threshold
+    # is touched here; this only re-exposes what _bg_ca_daily_note already stored.
+    breakdown = {"upcoming_ex_dates": [], "restated_overnight": [], "genuine_crash_flags": []}
     try:
         with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
             cur.execute("""SELECT details FROM ops_log WHERE category='data_integrity' AND title='CA_DAILY_NOTE'
@@ -402,7 +406,17 @@ def data_integrity_status():
             if r and r[0]:
                 d = r[0] if isinstance(r[0], dict) else json.loads(r[0])
                 out["ca_headline"] = d.get("headline")
-                out["genuine_flags"] = len(d.get("genuine_crash_flags") or [])
+                genuine = d.get("genuine_crash_flags") or []
+                out["genuine_flags"] = len(genuine)
+                breakdown["genuine_crash_flags"] = [{"symbol": x.get("symbol"), "drop_pct": x.get("drop_pct"),
+                                                     "cliff_date": x.get("cliff_date")}
+                                                    for x in genuine if isinstance(x, dict)]
+                breakdown["upcoming_ex_dates"] = [{"symbol": x.get("symbol"), "ex_date": x.get("ex_date"),
+                                                   "action": x.get("action"), "ratio": x.get("ratio")}
+                                                  for x in (d.get("upcoming_ex_dates") or []) if isinstance(x, dict)]
+                breakdown["restated_overnight"] = [{"symbol": x.get("symbol"), "status": x.get("status")}
+                                                   for x in (d.get("restated_overnight") or [])
+                                                   if isinstance(x, dict) and x.get("status") == "restated"]
             cur.execute("""SELECT details FROM ops_log WHERE category='watchdog_daily' AND title='MASTER_WATCHDOG_NOTE'
                            ORDER BY session_ts DESC LIMIT 1""")
             r = cur.fetchone()
@@ -412,5 +426,11 @@ def data_integrity_status():
                 out["red"] = bool(d.get("red_flags"))
     except Exception as e:
         out["error"] = str(e)[:120]
-    out["red"] = out["red"] or out["genuine_flags"] > 0
+    out["breakdown"] = breakdown
+    n_up = len(breakdown["upcoming_ex_dates"]); n_re = len(breakdown["restated_overnight"]); n_ge = len(breakdown["genuine_crash_flags"])
+    out["counts"] = {"upcoming": n_up, "restated": n_re, "genuine": n_ge, "total": n_up + n_re + n_ge}
+    # cc#760 colour rule: red on any genuine-crash or restated-overnight (or a master red flag); amber
+    # when ONLY upcoming ex-dates. Never red for ex-dates alone.
+    out["severity"] = "red" if (n_ge > 0 or n_re > 0 or out["red"]) else ("amber" if n_up > 0 else "none")
+    out["red"] = out["red"] or n_ge > 0 or n_re > 0
     return out
