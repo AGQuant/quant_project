@@ -1976,7 +1976,12 @@ def run(auth_code=None):
     # shared (by mutation, no nonlocal needed) between on_connect/housekeeping/the sequence
     # runner below.
     boot_time  = datetime.now(IST)
-    _sub_state = {'day': None, 'done': False}
+    _sub_state = {'day': None, 'done': False, 'holder': None, 'last_ok': 0.0}
+    # cc#759 fix1: ONE process-level mutex around every subscribe sequence. The 29-Jul death was two
+    # sequences (guardian-all + scheduled-0920) subscribing the SAME WS concurrently at 09:20 -> every
+    # symbol subscribed twice -> broker dropped the futures leg 210->18. A second caller now NO-OPs.
+    _subscribe_lock = threading.Lock()
+    SUBSCRIBE_IDEMPOTENCY_SEC = 180   # a non-recovery re-trigger within this window of a success is a no-op
 
     conn    = get_db()
     token   = get_valid_token(conn, auth_code)
@@ -2102,13 +2107,25 @@ def run(auth_code=None):
         now_t     = datetime.now(IST)
         in_market = now_t.weekday() < 5 and MARKET_OPEN <= now_t.time() <= MARKET_CLOSE
         if in_market or (_sub_state.get('day') == now_t.date() and _sub_state.get('done')):
-            sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
-            log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — re-subscribing "
-                     f"{len(sub_list)} symbols ({len(option_syms)} options; post-sequence "
-                     "reconnect, safe side of the pre-open trap)")
-            _log_feed_incident("feed_ws_connect", f"reconnect re-subscribe: {len(sub_list)} symbols")
-            _batched_subscribe(fyers_ws, sub_list, action='sub', label='reconnect')
-            threading.Thread(target=_verify_subscribe_survivors, args=('reconnect',), daemon=True).start()
+            # cc#759 fix1/fix4: a reconnect MUST re-subscribe (never leave a connected WS with zero subs),
+            # but must not race a running sequence on the same socket — take the SAME mutex. If a sequence
+            # holds it, that sequence owns the (re)subscribe, so defer to it rather than double-subscribe.
+            if _subscribe_lock.acquire(blocking=False):
+                try:
+                    sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+                    log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — re-subscribing "
+                             f"{len(sub_list)} symbols ({len(option_syms)} options; post-sequence "
+                             "reconnect, safe side of the pre-open trap)")
+                    _log_feed_incident("feed_ws_connect", f"reconnect re-subscribe: {len(sub_list)} symbols")
+                    _batched_subscribe(fyers_ws, sub_list, action='sub', label='reconnect')
+                    _sub_state['last_ok'] = time.monotonic()
+                    threading.Thread(target=_verify_subscribe_survivors, args=('reconnect',), daemon=True).start()
+                finally:
+                    _subscribe_lock.release()
+            else:
+                log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — a subscribe sequence is "
+                         "running; deferring the reconnect re-subscribe to it (cc#759 fix1 mutex)")
+                _log_feed_incident("feed_ws_connect", "reconnect deferred to the running subscribe sequence")
         else:
             log.info(f"WS connected at {now_t.strftime('%H:%M:%S')} IST — NOT subscribing yet "
                      "(cc#497: the scheduled canary/full sequence owns today's initial subscribe)")
@@ -2243,14 +2260,32 @@ def run(auth_code=None):
         except Exception as e:
             log.error(f"heartbeat heal_gap failed: {e}")
 
+    def _forced_close(reason, timeout=20):
+        """cc#759 fix3: fyers_ws.close_connection() HUNG the worker on 29-Jul (watchdog rung-1 fired the
+        forced close, then the process sat alive-but-silent inside it — the remedy killed the patient).
+        Run the close on a daemon thread with a HARD timeout; if it doesn't return, os._exit(1) so Railway
+        restarts cleanly. Guarantee: the worker is either ticking or dead-and-restarting, never silent."""
+        log.error(f"FEED: forced close_connection ({reason})")
+        done = threading.Event()
+        def _c():
+            try:
+                fyers_ws.close_connection()
+            except Exception as e:
+                log.warning(f"forced close ({reason}): {e}")
+            finally:
+                done.set()
+        threading.Thread(target=_c, daemon=True).start()
+        if not done.wait(timeout):
+            log.critical(f"FEED: close_connection hung >{timeout}s ({reason}) — os._exit(1) for a clean "
+                         "Railway restart (cc#759 fix3)")
+            try: _log_feed_incident("feed_close_hang_exit", f"{reason}: close hung >{timeout}s — exiting")
+            except Exception: pass
+            os._exit(1)
+
     def _force_reconnect():
-        """change_1: drop the socket so the SDK (reconnect=True) re-establishes and
-        on_connect re-subscribes the full universe."""
-        try:
-            log.error("HEARTBEAT: forcing WebSocket reconnect (close_connection)")
-            fyers_ws.close_connection()
-        except Exception as e:
-            log.warning(f"force reconnect: {e}")
+        """change_1: drop the socket so the SDK (reconnect=True) re-establishes and on_connect
+        re-subscribes the full universe. cc#759 fix3: the close is now timeout-guarded (os._exit on hang)."""
+        _forced_close("watchdog/force reconnect")
 
     def _log_feed_incident(kind, detail):
         """cc_task #112: record each watchdog action to ops_log (category=alert)
@@ -2309,19 +2344,62 @@ def run(auth_code=None):
         founder killed. Observation/logging only, same as before cc#495."""
         time.sleep(120)
         try:
-            recent = _recent_symbol_count(15)
+            counts = _recent_symbol_counts_by_source(15)
+            eq, fut = counts.get('fyers_eq', -1), counts.get('fyers_fut', -1)
+            recent = -1 if (eq < 0 or fut < 0) else eq + fut
+            uni_eq, uni_fut = len(equity_fyers_syms), len(futures_fyers_syms)
             now = datetime.now(IST)
             in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= MARKET_CLOSE
-            msg = f"{label}: {recent}/{TOTAL_FUTURES} symbols writing bars"
-            if in_market:
+            msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut} writing bars"
+            # cc#759 fix2: a ticking count that EXCEEDS its universe leg is a double-subscription / counting
+            # bug, NEVER health — it must ALERT and be treated as a failure (the 224/212 tell, LEARNING 2).
+            if (uni_fut > 0 and fut > uni_fut) or (uni_eq > 0 and eq > uni_eq):
+                _log_feed_incident("feed_ticking_exceeds_universe",
+                                   f"{label}: ticking EXCEEDS universe ({msg}) — double-subscription, FAILURE")
+            elif in_market:
                 _log_feed_incident("subscribe_verify", msg)
+            elif recent == 0:
+                # cc#759 fix6: off-hours verification FAILURE (0 bars after a subscribe) still alerts at low
+                # urgency — the 28-Jul 0/212 post-roll result predicted the 29-Jul outage 15h ahead but was
+                # silently suppressed (LEARNING 5). Never silent.
+                _log_feed_incident("subscribe_verify_offhours_fail", f"OFF-HOURS 0 bars after subscribe: {msg}")
             else:
-                log.info(f"Post-{label} verification (off-hours — no alert): {msg}")
-            log.info(f"Post-{label} verification: {recent}/{TOTAL_FUTURES} symbols ticking")
+                log.info(f"Post-{label} verification (off-hours): {msg}")
+            log.info(f"Post-{label} verification: {msg}")
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")
 
     def _run_subscribe_sequence(trigger):
+        """cc#759 fix1: process-level MUTEX + idempotency guard around the whole subscribe sequence — the
+        one gate that prevents two triggers (guardian + scheduled-0920) from subscribing the same WS
+        concurrently (the 29-Jul double-subscription that collapsed the futures leg). A second caller
+        NO-OPs (logged, naming the holder). A non-recovery re-trigger within SUBSCRIBE_IDEMPOTENCY_SEC of
+        a success is also a no-op. guardian-* / *-retry / midmarket-boot are recovery triggers (always run)."""
+        is_recovery = (trigger.startswith('guardian') or trigger.endswith('-retry')
+                       or trigger == 'midmarket-boot')
+        if not _subscribe_lock.acquire(blocking=False):
+            holder = _sub_state.get('holder')
+            log.error(f"subscribe sequence ({trigger}): another sequence (holder={holder}) holds the "
+                      f"subscribe lock — NO-OP (cc#759 fix1 mutex)")
+            try: _log_feed_incident("feed_subscribe_mutex_blocked", f"{trigger}: blocked, holder={holder}")
+            except Exception: pass
+            return
+        _sub_state['holder'] = trigger
+        try:
+            now_mono = time.monotonic()
+            last_ok = _sub_state.get('last_ok', 0.0)
+            if (not is_recovery) and last_ok and (now_mono - last_ok) < SUBSCRIBE_IDEMPOTENCY_SEC:
+                log.info(f"subscribe sequence ({trigger}): a sequence succeeded {int(now_mono - last_ok)}s "
+                         f"ago (<{SUBSCRIBE_IDEMPOTENCY_SEC}s) — NO-OP (cc#759 fix1 idempotency)")
+                try: _log_feed_incident("feed_subscribe_idempotent_skip", f"{trigger}: recent success")
+                except Exception: pass
+                return
+            _run_subscribe_sequence_inner(trigger)
+        finally:
+            _sub_state['holder'] = None
+            _subscribe_lock.release()
+
+    def _run_subscribe_sequence_inner(trigger):
         """cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: the two-stage subscribe that replaces the old
         on_connect-driven immediate subscribe. Runs on its own daemon thread (fired by
         housekeeping's wall-clock/boot-time triggers below, NEVER by on_connect):
@@ -2372,6 +2450,7 @@ def run(auth_code=None):
             _sub_state['day'] = datetime.now(IST).date()
             if _attempt(trigger):
                 _sub_state['done'] = True
+                _sub_state['last_ok'] = time.monotonic()   # cc#759 fix1: idempotency anchor
                 return
             log.error(f"subscribe sequence ({trigger}): canary showed ZERO ticks — forcing "
                       "reconnect and retrying once")
@@ -2381,6 +2460,7 @@ def run(auth_code=None):
             time.sleep(15)   # let the SDK's reconnect=True actually re-establish first
             if _attempt(f"{trigger}-retry"):
                 _sub_state['done'] = True
+                _sub_state['last_ok'] = time.monotonic()   # cc#759 fix1: idempotency anchor
             else:
                 log.error(f"subscribe sequence ({trigger}): retry ALSO showed zero ticks — "
                           "handing off to the periodic watchdog ladder")
@@ -2403,10 +2483,7 @@ def run(auth_code=None):
             agg.flush_all(); opt_store.flush_all()   # persist whatever bars we hold
         except Exception:
             pass
-        try:
-            fyers_ws.close_connection()
-        except Exception:
-            pass
+        _forced_close("hard restart pre-execv", timeout=15)   # cc#759 fix3: timeout-guarded (os._exit on hang)
         try:
             os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
