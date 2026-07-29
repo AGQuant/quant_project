@@ -28,3 +28,4 @@ fyers-apiv3==3.1.13
 anthropic>=0.28.0
 
 weasyprint>=60,<63
+cryptography>=42,<44

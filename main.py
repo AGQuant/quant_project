@@ -66,6 +66,7 @@ from tc_v4_dual import router as tc_v4_dual_router   # cc#386: dual-style v4 eng
 from tc_v4_scan import router as tc_v4_scan_router   # cc#387: dual-style v4 batch scanner
 from check_endpoint import router as check_router
 from tc_sim_endpoints import router as tc_sim_router   # cc#748: TC outcome sim
+from client_index_endpoints import router as client_index_router   # cc#758: client_index credential security
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from ops_metrics_pipeline import router as ops_metrics_router   # cc#523: sector KPI registry + concall pipeline
@@ -312,6 +313,7 @@ app.include_router(tc_v4_dual_router)   # cc#386
 app.include_router(tc_v4_scan_router)   # cc#387
 app.include_router(check_router)
 app.include_router(tc_sim_router)   # cc#748: /api/tc-sim/*
+app.include_router(client_index_router)   # cc#758: /api/admin/client-index/*
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(ops_metrics_router)   # cc#523
@@ -693,6 +695,17 @@ async def startup():
         log.info(f"cc#745 pcr quality backfill: {res}")
     except Exception as _pe:
         log.warning(f"cc#745 pcr quality backfill on startup failed: {_pe}")
+    # cc#758: idempotently encrypt client_index credentials in place, IF CLIENT_INDEX_ENC_KEY is set.
+    # No-op (single SELECT per column) once everything is already enc:-prefixed; silently skips when the
+    # key isn't configured yet (nothing is exposed meanwhile — the scrub_row denylist + no readers).
+    try:
+        import client_index_security, psycopg
+        if client_index_security.key_present():
+            with psycopg.connect(os.getenv("DATABASE_URL", "")) as _cc:
+                res = client_index_security.migrate_encrypt(_cc)
+            log.info(f"cc#758 client_index encrypt-migrate: {res}")
+    except Exception as _ce:
+        log.warning(f"cc#758 client_index encrypt-migrate on startup failed: {_ce}")
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/", response_class=HTMLResponse)
