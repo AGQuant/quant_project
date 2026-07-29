@@ -29,9 +29,10 @@ strict-intersection survivors.
     week_index_52>=75, gvm_score>=7, day_1d>0, hourly_pct>0 AND NOT NULL, FINAL heavy
     true_weekly_rsi 70-85) AND SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent
     n/n-1). Exits fixed +/-3.0%, standard slot pool.
-  BUY_REVERSAL V6 (_write_buy_reversal_v6_qualified, cc#606/session_log 7828, supersedes V5): 7
-    CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d>=-0.5,
-    week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5, day_1d>0 strict.
+  BUY_REVERSAL V6.1 (_write_buy_reversal_v6_qualified, cc#606 -> cc#754, supersedes V5): 9
+    CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d [-0.5, 2.5]
+    (cc#754 upper cap), week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5,
+    day_1d>0 strict, gvm_score>=6.5 strict (cc#754 quality gate).
     V5's heavy true_weekly_rsi>=70 stage REMOVED from this basket only. Entry all-day live CMP,
     no CMP>PP/room/hourly gate. Exits fixed +3%/-3% frozen, max hold 15 trading days, standard pool.
   SELL_REVERSAL V6.1 (_write_sell_reversal_v61_qualified, replaces V5-D): 10 conditions --
@@ -1432,9 +1433,13 @@ def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) 
 
 def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date: date,
                                      gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#606 BUY_REVERSAL_V6 (session_log 7828, locked 23-Jul, supersedes V5/cc#502). Dedicated
-    strict-AND of 7 conditions — ALL CHEAP now (the heavy per-symbol true_weekly_rsi stage is
-    removed FROM THIS BASKET ONLY; buy_momentum/sell_momentum/sell_reversal twr stages untouched):
+    """cc#606 BUY_REVERSAL_V6 -> cc#754 V6.1 (session_log 7828 + 29-Jul directive). Dedicated
+    strict-AND of 9 conditions — ALL CHEAP now (the heavy per-symbol true_weekly_rsi stage is
+    removed FROM THIS BASKET ONLY; buy_momentum/sell_momentum/sell_reversal twr stages untouched).
+    cc#754 V6.1 adds two tightening gates to the V6 foundation (7 gates unchanged):
+      (8) gvm_score >= 6.5 (NULL fails) — restores the quality gate (V6 sprayed junk, e.g. GVM 5.02).
+      (9) mom_2d <= 2.5 upper cap (with the existing >= -0.5 -> band [-0.5, 2.5]) — a dip-buy must
+          not chase a 2-day rally (all 3 V6 losses in the 29-Jul sim were hot-bounce chases +3.4..+3.8).
       (1) S1-touch: MIN(prior-4-trading-day raw_prices low) <= today's S1, OR today's live
           session day_low <= today's S1. [Entry can only happen AFTER the pierce — never lookahead.]
       (2) mom_2d >= -0.5
@@ -1492,30 +1497,35 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
         v = s.get("day_1d")
         return v is not None and float(v) > 0.0
 
-    # cc#606 BUY_REVERSAL_V6: all 7 conditions are now CHEAP (no heavy true_weekly_rsi stage).
+    def _gvm_ok(s):     # cc#754 (8): gvm_score >= 6.5 (STRICT, NULL fails)
+        v = s.get("gvm_score")
+        return v is not None and float(v) >= 6.5
+
+    # cc#606/#754 BUY_REVERSAL_V6.1: all 9 conditions are CHEAP (no heavy true_weekly_rsi stage).
     # cc#364-style INDEPENDENT per-filter pass counts across `base` — each gate counted ALONE over
-    # the whole base, NOT cumulative survivors. _score_qualified = strict 7-way intersection.
+    # the whole base, NOT cumulative survivors. _score_qualified = strict 9-way intersection.
     funnel = {"_universe": len(base)}
     funnel["s1_touch"]     = sum(1 for s in base if s["_s1_touch"])                             # (1)
-    funnel["mom_2d"]       = sum(1 for s in base if _passes(s.get("mom_2d"), -0.5, None))       # (2)
+    funnel["mom_2d"]       = sum(1 for s in base if _passes(s.get("mom_2d"), -0.5, 2.5))        # (2)+(9) cc#754 band [-0.5,2.5]
     funnel["week_return"]  = sum(1 for s in base if _passes(s.get("week_return"), -2.0, None))  # (3)
     funnel["rsi_month"]    = sum(1 for s in base if _passes(s.get("rsi_month"), 60.0, 90.0))    # (4)
     funnel["sector_week"]  = sum(1 for s in base if _sw_gt0(s))                                 # (5)
     funnel["month_return"] = sum(1 for s in base if _passes(s.get("month_return"), None, 5.0))  # (6)
     funnel["day_1d"]       = sum(1 for s in base if _d1_gt0(s))                                 # (7) cc#606
-    # _stage6_survivors kept: the 6 pre-day_1d cheap gates intersected (semantics preserved from V5).
+    funnel["gvm_score"]    = sum(1 for s in base if _gvm_ok(s))                                 # (8) cc#754
+    # _stage6_survivors kept: the 6 pre-day_1d cheap gates intersected (mom_2d now capped at 2.5, cc#754).
     surv = [s for s in base
             if s["_s1_touch"]
-            and _passes(s.get("mom_2d"), -0.5, None)
+            and _passes(s.get("mom_2d"), -0.5, 2.5)
             and _passes(s.get("week_return"), -2.0, None)
             and _passes(s.get("rsi_month"), 60.0, 90.0)
             and _sw_gt0(s)
             and _passes(s.get("month_return"), None, 5.0)]
     funnel["_stage6_survivors"] = len(surv)
 
-    qualified = [s for s in surv if _d1_gt0(s)]            # (7) day_1d > 0 strict — cheap, no per-symbol query
+    qualified = [s for s in surv if _d1_gt0(s) and _gvm_ok(s)]   # (7) day_1d>0 + (8) gvm>=6.5 — cheap, no per-symbol query
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"buy_reversal_v6: {len(surv)} after 6 cheap gates -> {len(qualified)} qualified (day_1d>0) [cc#606]")
+    log.info(f"buy_reversal_v61: {len(surv)} after 6 cheap gates -> {len(qualified)} qualified (day_1d>0 + gvm>=6.5) [cc#754]")
 
     try:
         with conn.cursor() as cur:
@@ -1538,9 +1548,10 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
             "rsi_month":       s.get("rsi_month"),
             "sector_week":     s.get("sector_week"),
             "month_return":    s.get("month_return"),
+            "gvm_score":       s.get("gvm_score"),   # cc#754 (8)
             "s1_touch":        s.get("_s1_touch"),
-            "filter_score": 7, "filter_total": 7,
-            "spec": "BUY_REVERSAL_V6 cc#606",
+            "filter_score": 9, "filter_total": 9,
+            "spec": "BUY_REVERSAL_V6.1 cc#754",
         }
         try:
             with conn.cursor() as cur:
@@ -2031,15 +2042,17 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
 # consume min/max FROM this registry so bounds are literal-single-source too. Keys/order/bounds here
 # MUST mirror the handler exactly — funnel counts are byte-identical pre/post (metadata-only change).
 BASKET_FILTERS = {
-    # BUY_REVERSAL_V6 (cc#606) — 7 CHEAP gates, no heavy true_weekly_rsi stage (day_1d>0 replaced it).
+    # BUY_REVERSAL_V6.1 (cc#606 -> cc#754) — 9 CHEAP gates (V6.1 adds gvm_score>=6.5 + mom_2d upper cap
+    # 2.5), no heavy true_weekly_rsi stage (day_1d>0 replaced it).
     "buy_reversal": [
         {"key": "s1_touch",     "label": "S1 touch (prior-4d low or today's low)", "cond_min": "<= S1",   "cond_max": "",     "min": None,  "max": None,  "type": "custom"},
-        {"key": "mom_2d",       "label": "mom 2d",       "cond_min": ">= -0.5", "cond_max": "",     "min": -0.5,  "max": None,  "type": "band"},
+        {"key": "mom_2d",       "label": "mom 2d",       "cond_min": ">= -0.5", "cond_max": "<= 2.5","min": -0.5,  "max": 2.5,   "type": "band"},
         {"key": "week_return",  "label": "week return",  "cond_min": ">= -2",   "cond_max": "",     "min": -2.0,  "max": None,  "type": "band"},
         {"key": "rsi_month",    "label": "monthly RSI",  "cond_min": ">= 60",   "cond_max": "<= 90","min": 60.0,  "max": 90.0,  "type": "band"},
         {"key": "sector_week",  "label": "sector week",  "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
         {"key": "month_return", "label": "month return", "cond_min": "",        "cond_max": "< 5",  "min": None,  "max": 5.0,   "type": "band"},
         {"key": "day_1d",       "label": "day 1d",       "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
+        {"key": "gvm_score",    "label": "gvm score",    "cond_min": ">= 6.5",  "cond_max": "",     "min": 6.5,   "max": None,  "type": "band", "strict": True},
     ],
     # SELL_REVERSAL_V6.1 (cc#502) — 10 cheap conditions + heavy true_weekly_rsi<=45 FINAL stage.
     "sell_reversal": [
@@ -2082,7 +2095,7 @@ BASKET_FILTERS = {
 
 # Header-pill spec label per basket (dashboard reads this via /api/v8/filters).
 BASKET_SPEC = {
-    "buy_reversal":  {"version": "V6",   "cc": "cc#606", "label": "Buy Reversal V6"},
+    "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
     "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
     "buy_momentum":  {"version": "V3",   "cc": "cc#502", "label": "Buy Momentum V3"},

@@ -10,9 +10,10 @@ is now exactly FOUR dedicated strict-AND handlers in v8_signal_writer.py -- the 
 FILTER_CONFIG score-gate loop is retired (kept dormant/unreachable in a couple of fallback code
 paths only). Each handler's FINAL heavy stage is the shared true_weekly_rsi() (wRSI) -- NEVER the
 synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
-  buy_reversal   BUY_REVERSAL_V6   (_write_buy_reversal_v6_qualified):   7 filters -- S1-touch
-    (prior-4d raw_prices low OR today's live day_low <= S1), mom_2d>=-0.5, week_return>=-2,
-    rsi_month[60,90], sector_week>0, month_return<5, day_1d>0 strict. All cheap (cc#606 dropped the
+  buy_reversal   BUY_REVERSAL_V6.1 (_write_buy_reversal_v6_qualified):   9 filters -- S1-touch
+    (prior-4d raw_prices low OR today's live day_low <= S1), mom_2d[-0.5,2.5] (cc#754 cap),
+    week_return>=-2, rsi_month[60,90], sector_week>0, month_return<5, day_1d>0 strict,
+    gvm_score>=6.5 strict (cc#754). All cheap (cc#606 dropped the
     heavy wRSI>=70 FINAL stage). Fixed +/-3.0% exits.
   buy_momentum   BUY_MOMENTUM_V3   (_write_buy_momentum_v3_qualified): TWO independent layers --
     6 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
