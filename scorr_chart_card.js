@@ -36,6 +36,16 @@
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
+  // cc#750: fib ZONE bands (tint fills between consecutive fib levels). Edges are the exact fib ratios so
+  // a band snaps flush to its bounding lines by construction. Consistent green->neutral->red ramp, top→bottom.
+  var FIB_ZONES = [
+    { key: "EXTENSION",          lo: 100,  hi: 123.6, col: "#0a9e63" },
+    { key: "STRENGTH·RESIST",    lo: 61.8, hi: 100,   col: "#12864f" },
+    { key: "DECISION",           lo: 38.2, hi: 61.8,  col: "#8a94ad" },
+    { key: "WEAK",               lo: 23.6, hi: 38.2,  col: "#e0913a" },
+    { key: "BREAKDOWN",          lo: 0,    hi: 23.6,  col: "#dd3a4a" }
+  ];
+  var _fibBand = null;   // cc#750: {lo, rng} of the loaded-range swing, for priceToCoordinate band placement
   function _readOv() {
     try { var s = localStorage.getItem("scorr_chart_overlay");
       if (s === "none") return { pivot: false, fib: false };
@@ -173,7 +183,10 @@
     try { localStorage.setItem("scorr_chart_overlay", _ovStr()); } catch (e) {}
     _paintChrome(); _applyOverlays();
   }
-  // cc#730: pivot (backend) + fib (loaded-swing) overlays drawn as price lines. Cheap to re-run on toggle.
+  // cc#730/#750: pivot + fib overlays. Pivot LEVELS + fib LINES are native price lines (they track the
+  // scale); cc#750 removes the pivot AXIS badges (they collided with the price ticks + CMP tag) in favour
+  // of a compact top-left chip strip, and adds fib ZONE tint bands with right-inside labels (an HTML layer
+  // positioned via priceToCoordinate, repositioned on pan/zoom/resize). Only the CMP tag stays on the axis.
   function _applyOverlays() {
     if (!_series) return;
     _priceLines.forEach(function (pl) { try { _series.removePriceLine(pl); } catch (e) {} });
@@ -181,9 +194,11 @@
     if (_ov.pivot && _tf !== "5Y") {
       var drawPiv = function (f) {
         if (!_series || !f || !f.pivots) return; var P = f.pivots;
+        // cc#750: axisLabelVisible:false — values now live in the top-left chip strip, not on the axis.
         [["R2", P.r2, "#0a9e63"], ["R1", P.r1, "#0a9e63"], ["PP", P.pp, "#8a94ad"], ["S1", P.s1, "#dd3a4a"], ["S2", P.s2, "#dd3a4a"]].forEach(function (row) {
-          if (row[1] != null) _priceLines.push(_series.createPriceLine({ price: +row[1], color: row[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: row[0] }));
+          if (row[1] != null) _priceLines.push(_series.createPriceLine({ price: +row[1], color: row[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" }));
         });
+        _renderFx();
       };
       var cached = _fibCache[_sym];
       if (cached) { drawPiv(cached); }
@@ -192,17 +207,86 @@
           .then(function (f) { _fibCache[_sym] = f; if (_ov.pivot && _tf !== "5Y") drawPiv(f); }).catch(function () {});
       }
     }
+    _fibBand = null;
     if (_ov.fib && _lastData && _lastData.length) {
       var hi = -Infinity, lo = Infinity;
       _lastData.forEach(function (d) { if (isFinite(d.high) && d.high > hi) hi = d.high; if (isFinite(d.low) && d.low < lo) lo = d.low; });
       if (isFinite(hi) && isFinite(lo) && hi > lo) {
         var rng = hi - lo;
+        _fibBand = { lo: lo, rng: rng };   // cc#750: drive the tint bands off the SAME swing as the lines
         FIB_RATIOS.forEach(function (r) {
           var col = FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad";
-          _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: String(r / 100) }));
+          _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" }));
         });
       }
     }
+    _renderFx();
+  }
+
+  // cc#750: the HTML FX layer over the plot area — pivot chip strip (top-left) + fib zone tint bands
+  // with right-inside labels. pointer-events:none so the native crosshair/tooltip still work.
+  function _ensureFx() {
+    var box = document.getElementById("scorrChartBox"); if (!box) return null;
+    box.style.position = "relative";
+    var fx = document.getElementById("scorrChartFx");
+    if (!fx) {
+      fx = document.createElement("div"); fx.id = "scorrChartFx";
+      fx.style.cssText = "position:absolute;left:8px;top:8px;pointer-events:none;overflow:hidden;z-index:3";
+      box.appendChild(fx);
+    }
+    return fx;
+  }
+  function _renderFx() {
+    var fx = _ensureFx(); if (!fx) return;
+    var pal = _pal();
+    var html = "";
+    // pivot chip strip — one row, top-left; R green / PP gray / S red; semi-transparent bg.
+    if (_ov.pivot && _tf !== "5Y") {
+      var f = _fibCache[_sym];
+      if (f && f.pivots) {
+        var P = f.pivots;
+        var chips = [["R2", P.r2, "#0a9e63"], ["R1", P.r1, "#0a9e63"], ["PP", P.pp, "#8a94ad"], ["S1", P.s1, "#dd3a4a"], ["S2", P.s2, "#dd3a4a"]]
+          .filter(function (r) { return r[1] != null; })
+          .map(function (r) { return '<span style="color:' + r[2] + ';font-weight:700">' + r[0] + '</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span>'; })
+          .join('<span style="color:' + pal.sub + ';margin:0 5px">|</span>');
+        if (chips) html += '<div class="sc-pivchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + (_theme === "dark" ? "rgba(18,24,36,.72)" : "rgba(255,255,255,.78)") + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + chips + '</div>';
+      }
+    }
+    // fib zone bands (positioned in _positionFx); one label per band, right-inside vertical stack.
+    if (_ov.fib && _fibBand) {
+      FIB_ZONES.forEach(function (z, i) {
+        html += '<div class="sc-fibz" data-zi="' + i + '" style="position:absolute;left:0;right:0;display:none;background:' + _rgba(z.col, 0.09) + '">' +
+          '<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font:700 9px/1 -apple-system,Segoe UI,sans-serif;letter-spacing:.4px;text-transform:uppercase;font-variant:small-caps;color:' + z.col + ';white-space:nowrap;opacity:.92">' + z.key + '</span></div>';
+      });
+    }
+    fx.innerHTML = html;
+    _positionFx();
+  }
+  function _rgba(hex, a) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+    return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + a + ")" : hex;
+  }
+  function _positionFx() {
+    if (!_chart || !_series) return;
+    var box = document.getElementById("scorrChartBox"); var fx = document.getElementById("scorrChartFx");
+    if (!box || !fx) return;
+    var rightW = 0, botH = 0;
+    try { rightW = _chart.priceScale("right").width() || 0; } catch (e) {}
+    try { botH = _chart.timeScale().height() || 0; } catch (e) {}
+    var plotW = Math.max(0, box.clientWidth - 16 - rightW);   // 16 = fx left+right inset (8+8)
+    var plotH = Math.max(0, box.clientHeight - 8 - botH);     // 8 = fx top inset
+    fx.style.width = plotW + "px"; fx.style.height = plotH + "px";
+    if (!(_ov.fib && _fibBand)) return;
+    var lo = _fibBand.lo, rng = _fibBand.rng;
+    fx.querySelectorAll(".sc-fibz").forEach(function (el) {
+      var z = FIB_ZONES[+el.getAttribute("data-zi")];
+      var yTop = _series.priceToCoordinate(lo + rng * z.hi / 100);
+      var yBot = _series.priceToCoordinate(lo + rng * z.lo / 100);
+      if (yTop == null || yBot == null) { el.style.display = "none"; return; }
+      var top = Math.max(0, Math.min(yTop, yBot)), bot = Math.min(plotH, Math.max(yTop, yBot));
+      if (bot - top < 2) { el.style.display = "none"; return; }
+      el.style.display = "block"; el.style.top = top + "px"; el.style.height = (bot - top) + "px";
+    });
   }
 
   function _autoscale() { return null; }
@@ -268,6 +352,7 @@
       _chart = c; _series = s; _lastData = data;
       _setHL(data);
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
+      try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
       msg.textContent = isIntraday
         ? "5-min · last 5 sessions · IST (F&O feed)"
         : tf + " · daily · raw_prices (IST)";
@@ -278,6 +363,7 @@
   function _onResize() {
     if (!_chart) return;
     var box = document.getElementById("scorrChartBox"); if (box) try { _chart.applyOptions({ width: box.clientWidth }); } catch (e) {}
+    _positionFx();   // cc#750: re-fit the fib bands + chip strip to the new width (mobile PWA)
   }
 
   function open(symbol, opts) {
@@ -302,7 +388,8 @@
     var ov = document.getElementById("scorrChartOv");
     if (ov) ov.style.display = "none";
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
-    _priceLines = []; _lastData = [];   // cc#730
+    _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
+    var fx = document.getElementById("scorrChartFx"); if (fx && fx.parentNode) fx.parentNode.removeChild(fx);   // cc#750: rebuilt fresh on next open
     document.removeEventListener("keydown", _esc);
     window.removeEventListener("resize", _onResize);
   }
