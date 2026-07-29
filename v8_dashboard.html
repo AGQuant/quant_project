@@ -959,7 +959,7 @@ function _mxCell(basketId,spec){
   return byM(spec);
 }
 function _mxLiveWR(basketId){
-  const t=((cache.paper&&cache.paper.recent_trades)||[]).filter(x=>(x.basket||"")===basketId);
+  const t=((cache.paper&&(cache.paper.all_trades||cache.paper.recent_trades))||[]).filter(x=>(x.basket||"")===basketId);  // cc#751: full ledger
   const w=t.filter(x=>Number(x.pnl)>0).length,l=t.filter(x=>Number(x.pnl)<0).length;
   if(w+l===0)return null;return{acc:w/(w+l)*100,n:w+l};
 }
@@ -2438,7 +2438,7 @@ function sign(x,d=2){if(x===null||x===undefined||isNaN(x))return"--";const v=Num
 function cls(x){if(x===null||x===undefined||isNaN(x))return"";return Number(x)>=0?"pos":"neg";}
 function inr(x){if(x===null||x===undefined||isNaN(x))return"--";return"Rs."+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0});}
 function pnlCls(x){return Number(x)>=0?"pos":"neg";}
-function netPnl(pnl,trades){return(Number(pnl)||0)-(Number(trades)||1)*BROKERAGE_PER_TRADE;}
+function netPnl(pnl,trades){const n=Number(trades);return(Number(pnl)||0)-(isFinite(n)&&n>0?n:0)*BROKERAGE_PER_TRADE;}  // cc#751: 0 trades -> 0 brokerage (was ||1, invented a phantom -Rs.500 on an empty filter)
 function _parseISTNaive(ts){
   if(!ts)return null;
   try{const s=String(ts).replace(' ','T').replace(/Z$/,'').replace(/[+-]\d{2}:\d{2}$/,'');
@@ -3025,7 +3025,12 @@ function _istDateMinus(days){   // YYYY-MM-DD of (IST today - days), for calenda
 }
 function renderTradeLog(){
   const p=cache.paper;if(!p)return'<div class="loading">...</div>';
-  let t=p.recent_trades||[];const s=p.summary||{};
+  // cc#751: the Trade Log is the COMPLETE ledger — full history (all_trades/all_summary), NOT the
+  // era-filtered fresh-book view. Same source feeds BOTH the list and the P&L card, so a pre-cutover
+  // basket (e.g. sell_momentum) shows its trades with a matching P&L. Falls back to the era fields
+  // if an older API build hasn't shipped the full-history ones yet.
+  const _allT=p.all_trades||p.recent_trades||[];
+  let t=_allT.slice();const s=p.all_summary||p.summary||{};
   // cc#370: apply the Duration + Basket filters (combine); default All/All = no filtering.
   if(TLOG_DUR!=='all'){const cut=_istDateMinus(TLOG_DUR==='1w'?7:30);t=t.filter(x=>String(x.exit_ts||'').slice(0,10)>=cut);}
   if(TLOG_BASKET!=='all')t=t.filter(x=>(x.basket||'')===TLOG_BASKET);
@@ -3053,7 +3058,15 @@ function renderTradeLog(){
   const bAvgWin =_winRows.length ?_winRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_winRows.length :null;
   const bAvgLoss=_lossRows.length?_lossRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_lossRows.length:null;
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
-  const bkBtns=[['all','All'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['buy_s1_bounce','Buy S1 Bounce'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum'],['sell_overbought','Sell Overbought']].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
+  // cc#751: DYNAMIC basket row — derived from the baskets actually present in the trade ledger (union
+  // any currently-qualifying basket), so it always reflects what has run/is running instead of a stale
+  // hardcoded 6. Canonical display order; unknown baskets sort last. Reconciliation of the running-basket
+  // source of truth (v8_filter_state vs live v8_qualified writes) is documented for the founder.
+  const _bkOrder=['buy_reversal','buy_momentum','buy_s1_bounce','sell_reversal','sell_momentum','sell_overbought'];
+  const _liveBk=(window.BASKETS||[]).map(b=>b.id);
+  const _presentBk=[...new Set([..._allT.map(x=>x.basket),..._liveBk].filter(Boolean))];
+  _presentBk.sort((a,b)=>{const ia=_bkOrder.indexOf(a),ib=_bkOrder.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||String(a).localeCompare(String(b));});
+  const bkBtns=[['all','All'],..._presentBk.map(v=>[v,basketLabel(v)])].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}</div>
@@ -3763,14 +3776,24 @@ async function loadAll(){
   document.getElementById('lastUpd').textContent='Last refresh: '+String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0')+':'+String(ist.getUTCSeconds()).padStart(2,'0')+' IST';
 }
 
+// cc#751: the Auto-5m refresh must update numbers IN PLACE — no page jump, active tab + filters + scroll
+// preserved. loadAll() replaces panel innerHTML (needed to refresh numbers) but that reflow resets the
+// window scroll; the tab (separate display state) and the Trade Log filters (TLOG_DUR/TLOG_BASKET module
+// globals, re-read by renderTradeLog) already persist. So we snapshot+restore scrollY around the refresh.
+// The manual Refresh button keeps calling loadAll() directly (full behaviour, top-of-page is fine there).
+async function autoRefresh(){
+  const y=window.scrollY||window.pageYOffset||0;
+  try{await loadAll();}finally{window.scrollTo(0,y);}
+}
+
 function toggleAuto(){
   AUTO=!AUTO;const b=document.getElementById('autoBtn');
   b.textContent='Auto 5m: '+(AUTO?'ON':'OFF');b.classList.toggle('on',AUTO);
-  if(AUTO){autoTimer=setInterval(loadAll,5*60*1000);}else{clearInterval(autoTimer);}
+  if(AUTO){autoTimer=setInterval(autoRefresh,5*60*1000);}else{clearInterval(autoTimer);}
 }
 
 loadAll();
-autoTimer=setInterval(loadAll,5*60*1000);
+autoTimer=setInterval(autoRefresh,5*60*1000);
 loadNews();
 setInterval(loadNews,15*60*1000);
 

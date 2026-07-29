@@ -1633,11 +1633,19 @@ def paper_status():
         ) pc ON true
         WHERE p.status = 'OPEN' AND {era_clause} ORDER BY p.entry_ts DESC
     """, era_params)
+    # cc#751: the Trade Log tab is the COMPLETE trade ledger (all baskets, all time) — the era filter
+    # (cc#504 fresh-book) applies only to the headline paper P&L / open positions above, NOT to the
+    # Trade Log. all_trades/all_summary are the un-era'd full history the Trade Log renders from, so a
+    # basket that stopped running pre-cutover (e.g. sell_momentum, 11 closed trades) still shows with a
+    # P&L that matches its own list (both computed from the SAME full-history set). recent_trades/summary
+    # (era) are kept unchanged for the fresh-book headline consumers.
     return {
         "open_positions": open_positions,
         "recent_trades": api_query(f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades WHERE {era_clause} ORDER BY closed_at DESC LIMIT 100", era_params),
+        "all_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 500"),
         "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
         "summary": api_query(f"SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades WHERE {era_clause}", era_params, single=True),
+        "all_summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True),
         "rebuild_cutover_ts": cutover_ts,
     }
 
