@@ -114,17 +114,23 @@ def _resolve(cur, sym: str) -> Optional[str]:
 
 
 def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
-    """Add news-discovered reported companies missing from earnings_calendar. Idempotent: upsert on
-    (ticker, ex_date); skip symbols already status='reported' this quarter. Each add is also enqueued
-    into ops_metrics_t1_queue so the T+1/Saturday chain stages its docs + re-scrapes fundamentals."""
+    """Add news-discovered result LEADS missing from earnings_calendar as status='upcoming' (cc#765
+    GUARD 1 — news never asserts 'reported'). Idempotent: upsert on (ticker, ex_date); skip symbols
+    that already have any calendar row this quarter. Each add is enqueued into ops_metrics_t1_queue so
+    the T+1/Saturday chain stages its docs + re-scrapes fundamentals; the authoritative flip to
+    'reported' comes only from the exchange scrape / cc#749 evidence path, never from this news lead."""
     discovered = discover_reported(conn, days)
     q_start = _quarter_start()
     added = updated = skipped_present = unresolved = enqueued = 0
     skipped_universe = 0   # cc#700: out-of-universe (not top-500 NSE) — calendar-added but NEVER scrape-queued
     samples = []
     with conn.cursor() as cur:
+        # cc#765 GUARD 1: dedup against ANY calendar row this quarter (any status), not just
+        # 'reported'. A news-discovered entry is written once as 'upcoming' and must not be
+        # re-touched on later runs (that churned reschedule_log). The authoritative flip to
+        # 'reported' comes only from the exchange scrape / cc#749 evidence path — never from here.
         cur.execute("""SELECT UPPER(ticker) FROM earnings_calendar
-                       WHERE status='reported' AND ex_date >= %s""", (q_start,))
+                       WHERE ex_date >= %s""", (q_start,))
         already = {r[0] for r in cur.fetchall()}
         for sym, info in discovered.items():
             if sym in already:
@@ -138,19 +144,24 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
                 added += 1
                 continue
             ex_date = info["ex_date"]
+            # cc#765 GUARD 1: news is a LEAD, not verified evidence — it must never assert a
+            # reported Quarterly Result. Insert as 'upcoming' (event_type kept so the calendar
+            # surfaces an expected result). On conflict NEVER overwrite an existing status:
+            # keep whatever the exchange/evidence path already set (esp. a real 'reported') and
+            # only append an audit note. The T+1 scrape + cc#749 evidence flip own 'reported'.
             cur.execute("""
                 INSERT INTO earnings_calendar
                     (company_name, ticker, ex_date, event_type, status, verified, first_seen,
                      last_updated, reschedule_log)
-                VALUES (%s,%s,%s,'Quarterly Result','reported',FALSE,NOW(),NOW(),
+                VALUES (%s,%s,%s,'Quarterly Result','upcoming',FALSE,NOW(),NOW(),
                         jsonb_build_array(jsonb_build_object('src','cc#602','ts',NOW()::text,'note',%s)))
                 ON CONFLICT (ticker, ex_date) DO UPDATE SET
-                    status='reported', last_updated=NOW(),
+                    last_updated=NOW(),
                     reschedule_log=COALESCE(earnings_calendar.reschedule_log,'[]'::jsonb)
                         || jsonb_build_array(jsonb_build_object('src','cc#602','ts',NOW()::text,
-                                                                'note','news-confirmed reported'))
+                                                                'note','news lead (unverified)'))
                 RETURNING (xmax=0) AS inserted
-            """, (company, sym, ex_date, f"news-discovered ({info['headline']})"))
+            """, (company, sym, ex_date, f"news-discovered lead ({info['headline']})"))
             inserted = cur.fetchone()[0]
             if inserted:
                 added += 1
@@ -172,8 +183,8 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
                 samples.append(f"{sym}:{ex_date}")
         if apply:
             _oplog(cur, "RESULT_CORNER_RECONCILE",
-                   {"discovered": len(discovered), "added": added, "updated": updated,
-                    "skipped_already_reported": skipped_present, "unresolved": unresolved,
+                   {"discovered": len(discovered), "added_upcoming": added, "updated": updated,
+                    "skipped_already_in_calendar": skipped_present, "unresolved": unresolved,
                     "enqueued_t1": enqueued, "skipped_universe_top500": skipped_universe,
                     "window_days": days, "sample": samples})
         conn.commit()

@@ -92,9 +92,10 @@ def _emoji_vs(v, sector, higher_good=True):
 
 
 def _reported_qend(cur, symbol: str):
-    """cc#692: the result quarter-end of the company's latest REPORTED earnings_calendar date (the
-    standard quarter-end on/before ex_date). Used to detect a fundamentals-quarters scrape that is
-    stale vs what the company has actually reported."""
+    """cc#692 / cc#765 GUARD 2: the result quarter-end of the company's latest VALIDATED reported
+    earnings_calendar date (the standard quarter-end on/before ex_date). status='reported' is
+    authoritative post-cc#765-GUARD-1 (news leads land as 'upcoming', never 'reported'), so this is
+    both the stale-scrape detector AND the ceiling quarter for any result card (never label ahead)."""
     cur.execute("SELECT MAX(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND status='reported'", (symbol,))
     r = cur.fetchone()
     ex = r[0] if r and r[0] else None
@@ -154,15 +155,27 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
         rq0 = _reported_qend(cur, symbol)
         return _screener_fallback_card(cur, symbol, rq0) if rq0 else None
     latest_end = rows[0][0]
-    # cc#692: if the company has REPORTED a newer quarter than fundamentals_history holds (quarters
-    # scrape stale vs earnings_calendar), fall back to the screener_raw export (growth+margin) so the
-    # card never sits on the prior quarter. Scrape fix (cc#692/694) remains primary; this closes the gap.
+    # cc#765 GUARD 2: rq = the company's latest VALIDATED reported quarter-end. Post-cc#765-GUARD-1 the
+    # earnings_calendar 'reported' status is authoritative (news leads land as 'upcoming'; only the
+    # exchange scrape / cc#749 evidence path flips to 'reported'), so rq is the CEILING for any result
+    # card's quarter — a card must never be labelled ahead of it.
     rq = _reported_qend(cur, symbol)
+    # cc#692 + cc#765 GUARD 2/3: company has (validly) reported a newer quarter than fundamentals_history
+    # holds (quarters scrape stale vs earnings_calendar) -> serve the screener_raw export (growth+margin)
+    # so the card never sits on the prior quarter. Label comes from rq (the actual reporting period,
+    # exchange/evidence-validated), never run-date fiscal math.
     if rq and rq > latest_end:
         fb = _screener_fallback_card(cur, symbol, rq)
         if fb:
             return fb
     if min_quarter_end and latest_end < min_quarter_end:
+        return None
+    # cc#765 GUARD 2/3 pre-print clamp: a result card must NEVER label a quarter ahead of the company's
+    # latest VALIDATED reported quarter (the 30-Jul DIXON incident: card printed 'Q1 FY27' while the
+    # result was still DUE 31 Jul). If fundamentals_history carries a quarter the earnings_calendar has
+    # not yet flipped to 'reported', hold the card until the evidence-based flip (cc#749) lands rather
+    # than pre-printing an unreported quarter. rq is None only outside the reported-regen path.
+    if rq and latest_end > rq:
         return None
     # BFSI metric mapping: banks/NBFCs report Revenue (not Sales) + Financing Margin % (not OPM %).
     # Data-driven detection so it needs no external Industry lookup: a bank row has Revenue and no Sales.
