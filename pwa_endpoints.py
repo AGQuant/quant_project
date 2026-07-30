@@ -1007,6 +1007,16 @@ RESULTS_CARD_JS = """
     + '.rcard-peer-p{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums;min-width:64px;text-align:right}'
     + '.rcard-beat{font:700 9px/1 Sora;color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4);border-radius:4px;padding:2px 5px}'
     + '.rcard-miss{font:700 9px/1 Sora;color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3);border-radius:4px;padding:2px 5px}'
+    // cc#766: pre-results peer table — button below the Expected result date, inline expandable table.
+    + '.rcard-peerres{margin-top:8px}'
+    + '.rcard-peerres-btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:6px 11px;font:700 12px/1 Sora,sans-serif;color:var(--accent,#2f6df4);background:rgba(47,109,244,.08);border:1px solid rgba(47,109,244,.28);border-radius:7px;cursor:pointer;-webkit-tap-highlight-color:transparent}'
+    + '.rcard-peerres-btn:hover{background:rgba(47,109,244,.16)}'
+    + '.rcard-peerres-tbl{margin-top:8px;overflow-x:auto}'
+    + '.rcard-pr-table{width:100%;border-collapse:collapse;font-size:11.5px;font-variant-numeric:tabular-nums}'
+    + '.rcard-pr-table th{font:700 9.5px/1.2 Sora,sans-serif;text-transform:uppercase;letter-spacing:.03em;color:var(--mut,#667085);text-align:left;padding:4px 8px 5px;border-bottom:1px solid var(--line,rgba(148,166,210,.2));white-space:nowrap}'
+    + '.rcard-pr-table td{padding:6px 8px;border-bottom:1px solid var(--line,rgba(148,166,210,.12));white-space:nowrap;color:var(--txt,#1c2536)}'
+    + '.rcard-pr-nm{font-weight:700;max-width:150px;overflow:hidden;text-overflow:ellipsis}'
+    + '.rcard-pr-un td{color:var(--dim,#8892a6);font-style:italic}'
     // cc#579: V (volume/energy) pill + card — sibling of R, same .rcard-* scaffold, green accent
     + '.vcard-pill{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:3px;font:800 9px/1 Sora,sans-serif;color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4);border-radius:4px;cursor:pointer;vertical-align:middle;user-select:none}'
     + '.vcard-pill:hover{background:rgba(47,212,139,.24)}'
@@ -1045,6 +1055,21 @@ RESULTS_CARD_JS = """
     if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-viewmore')){ e.preventDefault(); e.target.click(); }
   });
 
+  // cc#766: delegated toggle for the "Peer Results (N reported)" button — one listener covers both the
+  // R modal and every inline/collapsible card; toggles the sibling table + flips the caret. Per-card
+  // state lives in the DOM (each card owns its own .rcard-peerres wrapper).
+  document.addEventListener('click', function(e){
+    var b = e.target && e.target.closest && e.target.closest('.rcard-peerres-btn');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var wrap = b.closest('.rcard-peerres'); if (!wrap) return;
+    var tbl = wrap.querySelector('.rcard-peerres-tbl'); if (!tbl) return;
+    var open = tbl.style.display === 'none';
+    tbl.style.display = open ? 'block' : 'none';
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var cx = b.querySelector('.rcard-pr-cx'); if (cx) cx.innerHTML = open ? '&#9662;' : '&#9656;';
+  });
+
   function esc(s){ return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];}); }
   function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
@@ -1069,6 +1094,42 @@ RESULTS_CARD_JS = """
     return '<div class=\"rcard-peer\">'+body+'</div>'
       +'<div class=\"rcard-note\">vs top-'+(pc.peer_count||0)+' same-quarter peers by GVM in '+esc(pc.segment||'segment')
       +' &middot; '+cnt+' reported '+esc(pc.quarter||'')+', self-excluded.</div>';
+  }
+
+  // cc#766: pre-results peer table. Button "Peer Results (N reported)" below the Expected result date;
+  // tap -> inline table of the top-3 same-segment GVM peers (Peer | Result date | Sales YoY | PAT YoY |
+  // Margin vs LY | move % on result day). Only reported peers carry figures (cc#765 validated gate);
+  // unreported peers render greyed with their expected date. Collapsed by default, per-card state via a
+  // delegated toggle (below). pr.peers is already GVM-desc from the backend.
+  function _pct(v){ return v==null?'--':((v>=0?'+':'')+v+'%'); }
+  function peerResultsHtml(pr){
+    if(!pr || !pr.n_reported) return '';
+    var rows='';
+    for(var i=0;i<pr.peers.length;i++){ var p=pr.peers[i];
+      if(p.reported){
+        var mv=p.move_pct, mvs=mv==null?'--':((mv>=0?'+':'')+mv+'%');
+        var mvc=mv==null?'var(--mut,#667085)':(mv>=0?'#0f9d58':'#d0433b');
+        var marg=(p.margin!=null&&p.margin_ly!=null)?(esc(p.margin+'% vs '+p.margin_ly+'%')):'--';
+        rows+='<tr><td class=\"rcard-pr-nm\" title=\"'+esc(p.name)+'\">'+esc(p.name)+'</td>'
+          +'<td>'+fmtDate(p.result_date)+'</td>'
+          +'<td style=\"text-align:right\">'+_pct(p.sales_yoy)+'</td>'
+          +'<td style=\"text-align:right\">'+_pct(p.pat_yoy)+'</td>'
+          +'<td style=\"text-align:right\">'+marg+'</td>'
+          +'<td style=\"text-align:right;color:'+mvc+'\">'+mvs+'</td></tr>';
+      } else {
+        rows+='<tr class=\"rcard-pr-un\"><td class=\"rcard-pr-nm\" title=\"'+esc(p.name)+'\">'+esc(p.name)+'</td>'
+          +'<td colspan=\"5\">Not reported'+(p.expected_date?' &middot; expected '+fmtDate(p.expected_date):'')+'</td></tr>';
+      }
+    }
+    var btn='<button type=\"button\" class=\"rcard-peerres-btn\" data-n=\"'+esc(pr.n_reported)+'\" aria-expanded=\"false\">'
+      +'Peer Results ('+esc(pr.n_reported)+' reported) <span class=\"rcard-pr-cx\">&#9656;</span></button>';
+    var tbl='<div class=\"rcard-peerres-tbl\" style=\"display:none\"><table class=\"rcard-pr-table\"><thead><tr>'
+      +'<th>Peer</th><th>Result date</th><th style=\"text-align:right\">Sales YoY</th>'
+      +'<th style=\"text-align:right\">PAT YoY</th><th style=\"text-align:right\">Margin vs LY</th>'
+      +'<th style=\"text-align:right\">Move %</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      +'<div class=\"rcard-note\">Top-3 by GVM in '+esc(pr.segment||'segment')+' &middot; '+esc(pr.quarter||'')
+      +' &middot; YoY (screener export); move = close vs prior close on result day.</div></div>';
+    return '<div class=\"rcard-peerres\">'+btn+tbl+'</div>';
   }
 
   var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
@@ -1154,6 +1215,7 @@ RESULTS_CARD_JS = """
       // BRANCH B order: expected date + FY27 -> LAST RESULT (prior quarter, explicit label) -> RAW -> POLISH.
       h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>'
         + '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
+      h += peerResultsHtml(d && d.peer_results);   // cc#766: reported-peer table under the expected date
       h += fy27Html(d && d.fy27_growth);
       if (d && d.last_result_analysis){
         h += '<div class=\"rcard-lbl\">Last result'+(d.last_card_quarter?' &middot; '+esc(d.last_card_quarter):'')+'</div>'

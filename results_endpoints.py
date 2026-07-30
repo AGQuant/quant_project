@@ -195,6 +195,87 @@ def _flt(v):
         return None
 
 
+def _completed_quarter_end(today=None):
+    """cc#766: the most recent COMPLETED fiscal quarter-end (Mar/Jun/Sep/Dec) on or before today — the
+    quarter peers are currently reporting. Used as the validated-reported window start for the peer table."""
+    d = today or date.today()
+    ends = [date(d.year, 3, 31), date(d.year, 6, 30), date(d.year, 9, 30),
+            date(d.year, 12, 31), date(d.year - 1, 12, 31)]
+    return max(e for e in ends if e <= d)
+
+
+def _result_day_move(cur, psym, rep_date):
+    """cc#766: peer stock move % on its result day = raw_prices close on rep_date vs the prior trading
+    close. None when either bar is missing (result day was a no-trade holiday, or pre-listing history)."""
+    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND price_date=%s", (psym, rep_date))
+    c = cur.fetchone()
+    if not c or c[0] is None:
+        return None
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date < %s AND close IS NOT NULL
+                   ORDER BY price_date DESC LIMIT 1""", (psym, rep_date))
+    p = cur.fetchone()
+    if not p or p[0] is None:
+        return None
+    try:
+        return round((float(c[0]) - float(p[0])) / float(p[0]) * 100.0, 2)
+    except Exception:
+        return None
+
+
+def _peer_results(cur, sym, segment, today=None):
+    """cc#766: pre-results peer context for the R-card. Uses the SAME top-3-by-GVM same-segment peer set
+    as the MISS/BEAT block (self-excluded). For each peer with a VALIDATED reported result THIS quarter
+    (earnings_calendar status='reported' AND verified<>'false', ex_date >= the last completed quarter-end
+    — the cc#765 gate: a news lead sits at 'upcoming' and is never surfaced as reported) it returns the
+    result date, Sales/PAT YoY + margin vs LY (screener_raw export) and the stock's move on result day
+    (raw_prices close vs prior close). Unreported peers come back greyed with their expected date. Returns
+    None (button hidden) when no peer has reported. Ordered GVM desc. Zero new scrape."""
+    if not segment:
+        return None
+    d = today or date.today()
+    q_start = _completed_quarter_end(d)
+    quarter = _fq_label(q_start)
+    cur.execute("""SELECT g.symbol, g.gvm_score FROM gvm_scores g
+                   WHERE g.segment=%s AND g.symbol<>%s AND g.gvm_score IS NOT NULL
+                     AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                   ORDER BY g.gvm_score DESC LIMIT 3""", (segment, sym))
+    peers = cur.fetchall()
+    if not peers:
+        return None
+    out, n_reported = [], 0
+    for psym, gvm in peers:
+        cur.execute("""SELECT ex_date FROM earnings_calendar
+                       WHERE UPPER(ticker)=%s AND status='reported' AND verified<>'false' AND ex_date >= %s
+                       ORDER BY ex_date DESC LIMIT 1""", (psym, q_start))
+        rr = cur.fetchone()
+        rep_date = rr[0] if rr else None
+        cur.execute("""SELECT company_name, qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q
+                       FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1""", (psym,))
+        sr = cur.fetchone()
+        name = (sr[0] if sr and sr[0] else None) or psym
+        rec = {"symbol": psym, "name": name, "gvm": _f(gvm), "reported": rep_date is not None}
+        if rep_date is not None:
+            n_reported += 1
+            rec.update({
+                "result_date": str(rep_date),
+                "sales_yoy": _f(_flt(sr[1])) if sr else None,
+                "pat_yoy": _f(_flt(sr[2])) if sr else None,
+                "margin": _f(_flt(sr[3])) if sr else None,
+                "margin_ly": _f(_flt(sr[4])) if sr else None,
+                "move_pct": _result_day_move(cur, psym, rep_date),
+            })
+        else:
+            # unreported -> greyed with the peer's own next expected earnings_calendar date
+            cur.execute("""SELECT ex_date FROM earnings_calendar
+                           WHERE UPPER(ticker)=%s AND ex_date >= %s ORDER BY ex_date ASC LIMIT 1""", (psym, d))
+            er = cur.fetchone()
+            rec["expected_date"] = str(er[0]) if (er and er[0]) else None
+        out.append(rec)
+    if n_reported == 0:
+        return None
+    return {"quarter": quarter, "segment": segment, "n_reported": n_reported, "peers": out}
+
+
 def _fundamentals(cur, sym):
     cur.execute('''SELECT "Operating profit growth", roce, opm, "Debt to equity", "Return on equity"
                    FROM screener_raw WHERE nse_code=%s LIMIT 1''', (sym,))
@@ -224,9 +305,11 @@ async def results_card(symbol: str, generate: bool = False):
         gvm_verdict = vr[0] if vr else None
         segment = vr[1] if vr else None
         peer_comparison = _peer_comparison(cur, sym, segment)  # cc#590: top-3-by-GVM QoQ peer block
+        peer_results = _peer_results(cur, sym, segment, date.today())  # cc#766: reported-peer table
 
         def _with_peer(d):
             d["peer_comparison"] = peer_comparison
+            d["peer_results"] = peer_results
             return d
 
         cur.execute("SELECT ex_date, status FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY ex_date DESC LIMIT 1", (sym,))
