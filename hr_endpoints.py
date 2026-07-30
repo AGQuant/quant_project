@@ -357,32 +357,61 @@ def health_portfolios():
     latest raw_prices.close fallback (a holding with no price falls back to its avg so it never breaks
     the sum)."""
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, name, source, created_at FROM hr_portfolios ORDER BY id DESC")
+        cur.execute("SELECT id, name, created_by, source, created_at FROM hr_portfolios ORDER BY id DESC")
         ports = cur.fetchall()
         cur.execute("SELECT portfolio_id, symbol, qty, avg_price FROM hr_holdings")
         rows = cur.fetchall()
-        px = _cmp_map(cur, list({r[1] for r in rows if r[1]}))
+        # cc#756: active = source has no _INACTIVE suffix. CMP is fetched ONLY for ACTIVE portfolios'
+        # EQUITY symbols — never for CASH (a pseudo-holding valued at its qty) and never for inactive
+        # clients (their card is a collapsed name+cash line, no valuation).
+        active_ids = {p[0] for p in ports if not str(p[3] or "").endswith("_INACTIVE")}
+        eq_syms = list({r[1] for r in rows if r[1] and str(r[1]).upper() != "CASH" and r[0] in active_ids})
+        px = _cmp_map(cur, eq_syms)
         # cc#654: realised gainloss per portfolio -> invested_adjusted so the shelf reconciles with the report
         cur.execute("SELECT portfolio_id, COALESCE(SUM(gainloss),0) FROM hr_realised GROUP BY portfolio_id")
         realised_map = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+        # cc#756: client_index metadata via created_by=account_id. SELECT ONLY non-secret columns —
+        # password/totp_key are NEVER read here (cc#758 denylist honoured by hand-picking columns).
+        ci = {}
+        try:
+            cur.execute("""SELECT account_id, name, platform, investment_amount, tracking_date,
+                                  return_pct, active FROM client_index""")
+            for r in cur.fetchall():
+                ci[r[0]] = {"name": r[1], "platform": r[2],
+                            "investment_amount": float(r[3]) if r[3] is not None else None,
+                            "tracking_date": str(r[4]) if r[4] is not None else None,
+                            "return_pct": float(r[5]) if r[5] is not None else None,
+                            "active": bool(r[6]) if r[6] is not None else None}
+        except Exception:
+            ci = {}   # client_index absent (pre-migration) -> cards still render without the enrichment
     agg = {}
     for pid_, sym, qty, avg in rows:
-        a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0})
+        a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0})
         q = float(qty or 0); ap = float(avg or 0)
+        if sym and str(sym).upper() == "CASH":
+            a["cash"] += q            # cc#756: value = qty (avg_price=1), NO price lookup, out of equity P&L
+            continue
+        if pid_ not in active_ids:
+            continue                  # inactive client: name+cash only, no equity valuation / CMP
         a["n"] += 1
         a["inv"] += q * ap
         a["cur"] += q * px.get(sym, ap)
     out = []
-    for id_, name, source, created in ports:
-        a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0})
+    for id_, name, created_by, source, created in ports:
+        a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0})
         realised = realised_map.get(id_, 0.0)
         inv_adj = a["inv"] - realised    # cc#654: holdings cost - realised gainloss
-        curv = a["cur"]
-        pnl = curv - inv_adj             # == realised + unrealised
-        out.append({"id": id_, "name": name, "source": source, "created_at": str(created),
+        curv = a["cur"]; cash = a["cash"]
+        pnl = curv - inv_adj             # == realised + unrealised (equity only; CASH excluded)
+        src = str(source or "")
+        category = "PMS" if src.startswith("PMS") else ("NSEPAY" if src.startswith("NSEPAY") else src)
+        out.append({"id": id_, "name": name, "source": source, "created_by": created_by,
+                    "category": category, "active": id_ in active_ids, "created_at": str(created),
                     "n_holdings": a["n"], "invested": round(inv_adj, 2), "current": round(curv, 2),
+                    "cash": round(cash, 2), "total_portfolio": round(curv + cash, 2),
                     "pnl": round(pnl, 2), "pnl_pct": (round(pnl / inv_adj * 100.0, 2) if inv_adj else None),
-                    "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - a["inv"], 2)})
+                    "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - a["inv"], 2),
+                    "client": ci.get(created_by)})
     return {"portfolios": out}
 
 

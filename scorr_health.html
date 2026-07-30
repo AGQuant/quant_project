@@ -676,24 +676,49 @@ html,body{margin:0;padding:0;background:var(--bg);}
   // cc#651 part_5: list saved portfolios below the upload form (name + created date + holdings count +
   // invested/current/P&L), each row a quick link into its report. /adaptive is the client-facing shelf;
   // this is the in-tab entry so saved reports aren't reachable only by a hand-typed URL.
+  // cc#756: three sections — NSEPAY (active) + PMS (active) as cards, then an Inactive-clients accordion
+  // at the bottom (name + cash only, no cards, no CMP). client_index metadata (name/platform/tracking
+  // date) enriches the card; CASH is shown as a separate line and folded into the total. No secret
+  // fields are ever returned by the endpoint (cc#758).
   function loadSaved(){
     var box=$('hr-saved'); if(!box) return;
     fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
       var ps=(d&&d.portfolios)||[];
       if(!ps.length){ box.innerHTML=''; return; }
-      var rows=ps.map(function(p){
+      var nsepay=ps.filter(function(p){return p.active&&p.category==='NSEPAY';});
+      var pms=ps.filter(function(p){return p.active&&p.category==='PMS';});
+      var other=ps.filter(function(p){return p.active&&p.category!=='NSEPAY'&&p.category!=='PMS';});
+      var inactive=ps.filter(function(p){return !p.active;});
+      function inr(n){return '₹'+Math.round(n||0).toLocaleString('en-IN');}
+      function card(p){
         var pnl=p.pnl, pc=p.pnl_pct, col=(pnl==null?'var(--muted)':(pnl>=0?'var(--grn)':'var(--red)'));
         var pl=(pnl==null?'—':(pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(pnl)).toLocaleString('en-IN')
           +(pc==null?'':' ('+(pc>=0?'+':'−')+Math.abs(pc).toFixed(1)+'%)'));
+        var c=p.client||{}, sub=[];
+        if(c.platform) sub.push(esc(c.platform));
+        sub.push((p.n_holdings||0)+' holdings');
+        if(p.cash>0) sub.push('cash '+inr(p.cash));
+        if(c.tracking_date) sub.push('since '+esc(c.tracking_date));
+        var total=(p.total_portfolio!=null)?p.total_portfolio:(p.current||0);
         return '<a href="/health?pid='+p.id+'" style="display:flex;justify-content:space-between;align-items:center;gap:12px;'
           + 'text-decoration:none;color:var(--ink);padding:12px 14px;border:1px solid var(--rule);border-radius:4px;min-height:44px;background:var(--bg);">'
-          + '<div style="min-width:0;"><div style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(p.name||('Portfolio '+p.id))+'</div>'
-          + '<div style="font-size:12.5px;color:var(--muted);margin-top:2px;">'+dmy(p.created_at)+' · '+(p.n_holdings||0)+' holdings</div></div>'
-          + '<div style="text-align:right;flex:none;"><div style="font-size:15px;font-weight:600;">₹'+Math.round(p.current||0).toLocaleString('en-IN')+'</div>'
+          + '<div style="min-width:0;"><div style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(c.name||p.name||('Portfolio '+p.id))+'</div>'
+          + '<div style="font-size:12.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+sub.join(' · ')+'</div></div>'
+          + '<div style="text-align:right;flex:none;"><div style="font-size:15px;font-weight:600;">'+inr(total)+'</div>'
           + '<div style="font-size:13px;font-weight:600;color:'+col+';margin-top:2px;">'+pl+'</div></div></a>';
-      }).join('');
-      box.innerHTML='<div class="lbl" style="margin:4px 0 12px;">Saved portfolios</div>'
-        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">'+rows+'</div>';
+      }
+      function grid(list){ return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">'+list.map(card).join('')+'</div>'; }
+      function sect(title,list){ return list.length?('<div class="lbl" style="margin:14px 0 10px;">'+title+' <span style="color:var(--faint);font-weight:400;">'+list.length+'</span></div>'+grid(list)):''; }
+      var inactHtml='';
+      if(inactive.length){
+        var irows=inactive.map(function(p){var c=p.client||{};return '<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 4px;border-bottom:1px solid var(--rule);font-size:13px;">'
+          + '<a href="/health?pid='+p.id+'" style="color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(c.name||p.name||('Portfolio '+p.id))+'</a>'
+          + '<span style="color:var(--muted);flex:none;">'+(p.cash>0?inr(p.cash):'—')+'</span></div>';}).join('');
+        inactHtml='<details style="margin-top:16px;"><summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);padding:6px 0;">Inactive clients <span>'+inactive.length+'</span></summary>'
+          + '<div style="margin-top:6px;">'+irows+'</div></details>';
+      }
+      box.innerHTML='<div class="lbl" style="margin:4px 0 0;">Saved portfolios</div>'
+        + sect('NSEPAY', nsepay) + sect('PMS', pms) + sect('Other', other) + inactHtml;
     }).catch(function(){ box.innerHTML=''; });
   }
 
