@@ -335,6 +335,16 @@ html,body{margin:0;padding:0;background:var(--bg);}
   </div>
 </div>
 
+<!-- ══════════ cc#757 REPAIR PANEL (editable holdings + dedupe merge + activate toggle) ══════════ -->
+<div class="page" id="hr-repair-page" style="background:var(--paper);border-top:1px solid var(--rule);display:none;">
+  <div style="padding:18px 24px;">
+    <details>
+      <summary class="lbl" style="cursor:pointer;">Repair holdings <span id="hr-repair-flags" style="color:var(--faint);text-transform:none;letter-spacing:0;"></span></summary>
+      <div id="hr-repair-body" style="margin-top:14px;"></div>
+    </details>
+  </div>
+</div>
+
 <!-- ══════════ FOOTER TRIPTYCH ══════════ -->
 <div class="g3-bottom page" style="background:var(--paper);border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
 
@@ -722,6 +732,72 @@ html,body{margin:0;padding:0;background:var(--bg);}
     }).catch(function(){ box.innerHTML=''; });
   }
 
+  // ── cc#757: portfolio repair (editable holdings grid + duplicate merge + activate toggle) ────────
+  function loadRepair(){
+    if(!pid) return;
+    var page=$('hr-repair-page'); if(!page) return;
+    fetch('/api/health/portfolio/'+pid).then(function(r){return r.json();}).then(function(d){
+      if(d.error) return;
+      window._hrHoldings=(d.holdings||[]).map(function(h){return {symbol:h.symbol||'',qty:h.qty,avg_price:h.avg_price};});
+      window._hrSource=d.source||'';
+      page.style.display='block';
+      renderRepair();
+    }).catch(function(){});
+  }
+  function rpZero(h){ return (h.avg_price==null||Number(h.avg_price)===0); }
+  function renderRepair(){
+    var body=$('hr-repair-body'); if(!body) return;
+    var hs=window._hrHoldings||[];
+    var inactive=(window._hrSource||'').endsWith('_INACTIVE');
+    var zeros=hs.filter(rpZero).length;
+    var fl=$('hr-repair-flags'); if(fl) fl.textContent=zeros?('· '+zeros+' row'+(zeros===1?'':'s')+' missing avg price'):'';
+    var rows=hs.map(function(h,ix){ var z=rpZero(h);
+      return '<tr data-ix="'+ix+'">'
+        +'<td style="padding:4px;"><input class="rp-sym" value="'+esc(h.symbol||'')+'" style="width:110px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);"></td>'
+        +'<td style="padding:4px;"><input class="rp-qty" value="'+(h.qty!=null?h.qty:'')+'" style="width:70px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;"></td>'
+        +'<td style="padding:4px;white-space:nowrap;"><input class="rp-avg" value="'+(h.avg_price!=null?h.avg_price:'')+'" style="width:80px;font-size:13px;padding:4px;border:1px solid '+(z?'var(--red)':'var(--rule)')+';background:var(--bg);color:var(--ink);text-align:right;">'+(z?' <span style="color:var(--red);font-size:10px;">avg?</span>':'')+'</td>'
+        +'<td style="padding:4px;"><button type="button" onclick="rpDel('+ix+')" style="font-size:12px;padding:3px 8px;border:1px solid var(--rule);background:var(--bg);color:var(--muted);cursor:pointer;">&#10005;</button></td></tr>';
+    }).join('');
+    body.innerHTML='<div style="overflow-x:auto;"><table style="width:100%;"><thead><tr>'
+      +'<th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Symbol</th><th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Qty</th><th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Avg</th><th></th></tr></thead>'
+      +'<tbody id="hr-repair-tb">'+rows+'</tbody></table></div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;">'
+      +'<button type="button" onclick="rpAdd()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">+ Add row</button>'
+      +'<button type="button" onclick="rpMergePreview()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">Merge duplicates…</button>'
+      +'<button type="button" onclick="rpToggle()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">'+(inactive?'Activate':'Deactivate')+'</button>'
+      +'<button type="button" onclick="rpSave()" style="font-size:13px;font-weight:600;padding:8px 16px;border:none;background:var(--grn);color:#fff;cursor:pointer;margin-left:auto;">Save changes</button>'
+      +'</div><div id="hr-repair-msg" style="font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-line;"></div>';
+  }
+  function rpSync(){
+    var trs=document.querySelectorAll('#hr-repair-tb tr'), out=[];
+    trs.forEach(function(tr){ var s=(tr.querySelector('.rp-sym').value||'').trim().toUpperCase(); if(!s) return;
+      var av=tr.querySelector('.rp-avg').value;
+      out.push({symbol:s, qty:(tr.querySelector('.rp-qty').value!==''?parseFloat(tr.querySelector('.rp-qty').value):null), avg_price:(av!==''?parseFloat(av):null)}); });
+    window._hrHoldings=out; return out;
+  }
+  function rpDel(ix){ rpSync(); window._hrHoldings.splice(ix,1); renderRepair(); }
+  function rpAdd(){ rpSync(); window._hrHoldings.push({symbol:'',qty:null,avg_price:null}); renderRepair(); }
+  function rpMsg(t,c){ var m=$('hr-repair-msg'); if(m){ m.textContent=t; m.style.color=c||'var(--muted)'; } }
+  function rpSave(){ var hs=rpSync(); rpMsg('Saving…');
+    fetch('/api/health/portfolio/'+pid+'/holdings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({holdings:hs})})
+      .then(function(r){return r.json();}).then(function(d){ if(d.error){ rpMsg(d.error,'var(--red)'); return; }
+        rpMsg('Saved '+d.saved+' holdings'+(d.unresolved?(' · '+d.unresolved+' unresolved'):'')+'. Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); })
+      .catch(function(e){ rpMsg('Save failed: '+e,'var(--red)'); }); }
+  function rpMergePreview(){ rpMsg('Checking duplicates…');
+    fetch('/api/health/portfolio/'+pid+'/merge_preview').then(function(r){return r.json();}).then(function(d){
+      if(!d.has_duplicates){ rpMsg('No duplicate symbols found.'); return; }
+      var lines=d.duplicates.map(function(x){return x.symbol+': '+x.rows+' rows → qty '+x.merged_qty+' @ avg '+x.merged_avg;}).join('\n');
+      if(confirm('Merge these duplicates (summed qty, weighted-avg price)?\n\n'+lines)){ rpMsg('Merging…');
+        fetch('/api/health/portfolio/'+pid+'/merge',{method:'POST'}).then(function(r){return r.json();}).then(function(m){ if(m.error){ rpMsg(m.error,'var(--red)'); return; }
+          rpMsg('Merged → '+m.symbols+' symbols. Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); }).catch(function(e){ rpMsg('Merge failed: '+e,'var(--red)'); });
+      } else { rpMsg(''); }
+    }).catch(function(e){ rpMsg('Preview failed: '+e,'var(--red)'); }); }
+  function rpToggle(){ if(!confirm('Toggle this portfolio active/inactive?')) return; rpMsg('Updating…');
+    fetch('/api/health/portfolio/'+pid+'/toggle_active',{method:'POST'}).then(function(r){return r.json();}).then(function(d){ if(d.error){ rpMsg(d.error,'var(--red)'); return; }
+      rpMsg('Now '+(d.active?'ACTIVE':'INACTIVE')+' ('+d.source+'). Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); }).catch(function(e){ rpMsg('Toggle failed: '+e,'var(--red)'); }); }
+  // the repair grid uses inline onclick handlers — this script is an IIFE, so expose them on window.
+  window.rpDel=rpDel; window.rpAdd=rpAdd; window.rpSave=rpSave; window.rpMergePreview=rpMergePreview; window.rpToggle=rpToggle;
+
   function doParse(){
     var msg=$('hr-parse-msg'); msg.textContent='Parsing…'; msg.style.color='var(--muted)';
     var file=$('hr-file').files[0], text=$('hr-paste').value;
@@ -827,7 +903,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
   var sp=$('hr-savepdf'); if(sp) sp.addEventListener('click', function(){ savePdf(sp); });
 
   if(wl) applyWhiteLabel();   // static branding stripped immediately (before the async report data lands)
-  if(pid) load('GET'); else renderUpload();
+  if(pid){ load('GET'); loadRepair(); } else renderUpload();   // cc#757: repair panel on the report view
 })();
 </script>
 </body>

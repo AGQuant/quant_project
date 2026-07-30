@@ -331,6 +331,148 @@ def health_portfolio(pid: int):
     return {"id": p[0], "name": p[1], "source": p[2], "created_at": str(p[3]), "holdings": holdings}
 
 
+# ── cc#757: portfolio repair tool (editable holdings, duplicate merge, activate toggle) ────────────
+def _symbol_exists(cur, sym):
+    """cc#757: a symbol resolves if it exists in gvm_scores or raw_prices. CASH is always resolved."""
+    if not sym or sym.upper() == "CASH":
+        return True
+    cur.execute("SELECT 1 FROM gvm_scores WHERE UPPER(symbol)=%s LIMIT 1", (sym,))
+    if cur.fetchone():
+        return True
+    cur.execute("SELECT 1 FROM raw_prices WHERE UPPER(symbol)=%s LIMIT 1", (sym,))
+    return cur.fetchone() is not None
+
+
+def _recompute_client_index(cur, pid):
+    """cc#757: after ANY holdings edit, refresh client_index.holdings_value / total_portfolio / cash for
+    the portfolio's client (hr_portfolios.created_by = account_id). CASH (avg=1) is valued at its qty, never
+    priced; equity is valued via _cmp_map. Best-effort — a missing client_index row must never block an edit."""
+    cur.execute("SELECT created_by FROM hr_portfolios WHERE id=%s", (pid,))
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return
+    account_id = row[0]
+    cur.execute("SELECT symbol, qty, avg_price FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+    hrows = cur.fetchall()
+    eq_syms = [r[0] for r in hrows if r[0] and str(r[0]).upper() != "CASH"]
+    px = _cmp_map(cur, eq_syms)
+    hv = cash = 0.0
+    for sym, qty, avg in hrows:
+        q = float(qty or 0)
+        if str(sym).upper() == "CASH":
+            cash += q
+        else:
+            hv += q * px.get(sym, float(avg or 0))
+    try:
+        cur.execute("""UPDATE client_index SET holdings_value=%s, total_portfolio=%s, cash=%s
+                       WHERE account_id=%s""", (round(hv, 2), round(hv + cash, 2), round(cash, 2), account_id))
+    except Exception:
+        pass
+
+
+class HRHoldingsEditReq(BaseModel):
+    holdings: List[HRHolding]
+
+
+@router.post("/api/health/portfolio/{pid}/holdings")
+def health_edit_holdings(pid: int, body: HRHoldingsEditReq):
+    """cc#757: REPLACE a saved portfolio's holdings (add / edit / delete via a full set). Each symbol is
+    resolved against gvm_scores/raw_prices -> hr_holdings.resolved=false when unmatched. Recomputes the
+    client_index values after. Fixing Seema Alice's avg prices flows through here."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM hr_portfolios WHERE id=%s", (pid,))
+        if not cur.fetchone():
+            return {"error": "portfolio not found"}
+        cur.execute("DELETE FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+        n = unresolved = 0
+        for h in body.holdings:
+            sym = (h.symbol or "").strip().upper()
+            if not sym:
+                continue
+            res = _symbol_exists(cur, sym)
+            if not res:
+                unresolved += 1
+            cur.execute("""INSERT INTO hr_holdings (portfolio_id, symbol, company_name, qty, avg_price, resolved, raw_input)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                        (pid, sym, h.company_name, h.qty, h.avg_price, res, json.dumps(h.dict(), default=str)))
+            n += 1
+        _recompute_client_index(cur, pid)
+        conn.commit()
+    return {"portfolio_id": pid, "saved": n, "unresolved": unresolved}
+
+
+@router.get("/api/health/portfolio/{pid}/merge_preview")
+def health_merge_preview(pid: int):
+    """cc#757: PREVIEW a duplicate-symbol merge (summed qty + weighted-average avg_price) — never mutates.
+    Many NSEPAY accounts carry the same symbol twice (e.g. PRICOLLTD). Returns only the symbols that
+    actually have >1 row so the UI can show a preview before the founder confirms."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT symbol, qty, avg_price FROM hr_holdings WHERE portfolio_id=%s ORDER BY id", (pid,))
+        rows = cur.fetchall()
+    groups = {}
+    for sym, qty, avg in rows:
+        g = groups.setdefault((sym or "").upper(), {"rows": 0, "qty": 0.0, "cost": 0.0})
+        q = float(qty or 0)
+        g["rows"] += 1; g["qty"] += q; g["cost"] += q * float(avg or 0)
+    dups = [{"symbol": s, "rows": g["rows"], "merged_qty": round(g["qty"], 4),
+             "merged_avg": round(g["cost"] / g["qty"], 4) if g["qty"] else 0}
+            for s, g in groups.items() if g["rows"] > 1]
+    return {"portfolio_id": pid, "duplicates": dups, "has_duplicates": bool(dups)}
+
+
+@router.post("/api/health/portfolio/{pid}/merge")
+def health_merge(pid: int):
+    """cc#757: APPLY the duplicate merge — one row per symbol, qty summed + avg_price weighted-averaged.
+    Recomputes client_index. (Only reached after the preview above; the UI never auto-merges silently.)"""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT symbol, company_name, qty, avg_price, resolved FROM hr_holdings WHERE portfolio_id=%s ORDER BY id", (pid,))
+        rows = cur.fetchall()
+        if not rows:
+            return {"error": "no holdings"}
+        groups = {}
+        for sym, cname, qty, avg, res in rows:
+            k = (sym or "").upper()
+            g = groups.setdefault(k, {"cname": cname, "qty": 0.0, "cost": 0.0, "res": bool(res)})
+            q = float(qty or 0)
+            g["qty"] += q; g["cost"] += q * float(avg or 0)
+            if cname and not g["cname"]:
+                g["cname"] = cname
+            g["res"] = g["res"] and bool(res)
+        cur.execute("DELETE FROM hr_holdings WHERE portfolio_id=%s", (pid,))
+        for k, g in groups.items():
+            avg = (g["cost"] / g["qty"]) if g["qty"] else 0
+            cur.execute("""INSERT INTO hr_holdings (portfolio_id, symbol, company_name, qty, avg_price, resolved)
+                           VALUES (%s,%s,%s,%s,%s,%s)""",
+                        (pid, k, g["cname"], round(g["qty"], 4), round(avg, 4), g["res"]))
+        _recompute_client_index(cur, pid)
+        conn.commit()
+    return {"portfolio_id": pid, "symbols": len(groups)}
+
+
+@router.post("/api/health/portfolio/{pid}/toggle_active")
+def health_toggle_active(pid: int):
+    """cc#757: flip a portfolio between active and inactive — hr_portfolios.source X <-> X_INACTIVE — and
+    sync client_index.active (ALTER TABLE is lock-blocked, so active lives in the source suffix, id=3041)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT created_by, source FROM hr_portfolios WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row:
+            return {"error": "not found"}
+        account_id, source = row[0], (row[1] or "")
+        if source.endswith("_INACTIVE"):
+            new_source, new_active = source[:-len("_INACTIVE")], True
+        else:
+            new_source, new_active = source + "_INACTIVE", False
+        cur.execute("UPDATE hr_portfolios SET source=%s WHERE id=%s", (new_source, pid))
+        if account_id:
+            try:
+                cur.execute("UPDATE client_index SET active=%s WHERE account_id=%s", (new_active, account_id))
+            except Exception:
+                pass
+        conn.commit()
+    return {"portfolio_id": pid, "source": new_source, "active": new_active}
+
+
 def _cmp_map(cur, syms):
     """cc#651: symbol -> price, cmp_prices first then latest raw_prices close (mirrors hr_report._load_cmp)."""
     out = {}
