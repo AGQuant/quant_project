@@ -12,10 +12,14 @@ every derived-metric computation; the single-symbol loader (`_load_one`) and the
 `score_card`. That is the "scanner score == single-symbol score, exactly" guarantee — one rulebook,
 never duplicated.
 
-Verdict bands (cc#586 CEILING FINAL, after R16 fib + R17 valuation + R18 momentum + R19 relative-
-strength + R20 GVM-trend): BUY max 22 — STRONG >= 18.5 | VALID 14.4 to <18.5 | REJECT < 14.4.
-SELL max 20 — STRONG >= 17.0 | VALID 12.9 to <17.0 | REJECT < 12.9.
-SELL side = v4.1 mirror (locked same session): all rules mirrored per the spec's v4_1_sell_mirror table.
+Verdict bands (cc#767 V8-ALIGNMENT, spec id=12289, locked 30-Jul-2026): the score denominator is
+DYNAMIC (propagation map id=265) — flow rules consolidated (R5+R6 -> Volume confirm, R12+R13 ->
+Derivatives confirm, R14 ATR dropped) and the freed points reallocated to per-bucket live-V8 basket
+gate imports, so each style bucket carries its own max: BUY-MOM 22, BUY-REV 20, SELL-MOM 20, SELL-REV
+19. Bands re-baseline PROPORTIONALLY off each card's own max at the founder-locked ratios STRONG 0.84x
+/ VALID 0.65x (from the prior BUY 18.5-22 / 14.4-22). Per-bucket imports: BUY-MOM +dma_50[5,12]
++w52>=75 +GVM>=7 (R7 twr bound [70,85]); BUY-REV R7->mRSI[60,90] +GVM>=6.5, R4 graded d200&d20;
+SELL-MOM R11->CMP<PP +S2-clearance>=3%; SELL-REV R4 graded 3-DMA<0, R10 mom_2d[-4,-1]+w52<50.
 Gates (cc#677, founder-final spec id=9035): ZERO VETO. The verdict is SCORE BANDS ALONE. The old
 G1 GVM / G2 earnings / G3 futures-DTE gates AND the fo_ban check no longer reject anything — every
 risk condition is now an informational ALERT CHIP (F&O ban · result-date · GVM floor · DTE countdown).
@@ -621,27 +625,39 @@ def _rules(d, style, side):
             n = sum(below)
             c = 1.0 if n >= 2 else (0.5 if n == 1 else 0.0)
             req = "2-of-3 DMAs down (1-of-3 = 0.5)"
+    elif BUY:
+        # cc#767 BUY-REV: graded — dma_200>0 AND dma_20>0 = 1, one = 0.5 (V6.1 gate; was binary dma_200).
+        d200p = (v8.get("dma_200") or 0) > 0
+        d20p = (v8.get("dma_20") or 0) > 0
+        c = 1.0 if (d200p and d20p) else (0.5 if (d200p or d20p) else 0.0)
+        req = "dma_200>0 AND dma_20>0 (one = 0.5)"
     else:
-        d200 = v8.get("dma_200")
-        c = 1.0 if (d200 is not None and (d200 > 0 if BUY else d200 < 0)) else 0.0
-        req = f"dma_200 {'> 0' if BUY else '< 0'}"
-    out.append(_R("R4", f"MAs {'2of3' if MOM else 'DMA200'}", c,
+        # cc#767 SELL-REV: graded — all three DMAs < 0 = 1, two = 0.5 (V6.1 mirror; was binary dma_200<0).
+        nb = sum(below)
+        c = 1.0 if nb == 3 else (0.5 if nb == 2 else 0.0)
+        req = "3 DMAs < 0 (2/3 = 0.5)"
+    out.append(_R("R4", f"MAs {'2of3' if MOM else 'graded'}", c,
                   {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
                   required=req))
 
-    # R5 — 1-month up/down close volume ratio. BUY band (1.1,0.9); SELL relaxed to (1.05,0.95) per 3010.
+    # R5 — cc#767 VOLUME CONFIRM: merges old R5 (1M up/dn ratio) + R6 (today time-adjusted) into ONE
+    # rule tested once. today >= 1.5x OR 1M >= 1.1 -> 1pt; a partial leg (today >= 1.1x OR 1M >= 0.9) ->
+    # 0.5. SELL mirror uses the down/up 1M ratio (>=1.05 full / >=0.95 partial) with the same today surge
+    # leg — a volume surge confirms conviction on either side. (Old R14 ATR ignition dropped entirely;
+    # R9 5m+VWAP already answers "is it moving now".)
+    vt = d.get("vol_ratio_today")
     if BUY:
-        hi5, lo5 = 1.1, 0.9
-        ratio, c = d.get("vol21_up_dn"), _band(d.get("vol21_up_dn"), hi5, lo5)
+        v1m = d.get("vol21_up_dn")
+        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
+        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
+        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
     else:
-        hi5, lo5 = 1.05, 0.95
-        ratio, c = d.get("vol21_dn_up"), _band(d.get("vol21_dn_up"), hi5, lo5)
-    out.append(_R("R5", "Vol 1M (up/dn)", c, _r(ratio), required=f">= {hi5} ({lo5}-{hi5} = 0.5)"))
-
-    # R6 — today's time-adjusted volume ratio. BUY only; DROPPED on SELL (3010).
-    if BUY:
-        out.append(_R("R6", "Vol today", _band(d.get("vol_ratio_today"), 1.5, 1.1), _r(d.get("vol_ratio_today")),
-                      required=">= 1.5x (1.1-1.5x = 0.5)"))
+        v1m = d.get("vol21_dn_up")
+        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.05))
+        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.95))
+        req = "today>=1.5x OR 1M dn/up>=1.05 (partial = 0.5)"
+    c = 1.0 if full else (0.5 if part else 0.0)
+    out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
     # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.
@@ -659,15 +675,22 @@ def _rules(d, style, side):
             c = _both(mr is not None and mr < 40, twr is not None and twr <= 40)
             req = "mRSI<40 AND twr<=40 (one leg = 0.5)"
         val = {"mRSI": _r(mr), "trueWk": _r(twr)}
+        label = "RSI frame"
+    elif BUY:
+        # cc#767 BUY-REV: monthly RSI in [60,90] = 1 (V6.1 gate). Replaces the dead V5 remnant twr>=70
+        # (V6.1 removed it — a true dip candidate is quality-uptrend, weekly-cool, not weekly-hot).
+        c = (1.0 if (mr is not None and 60 <= mr <= 90)
+             else (0.5 if (mr is not None and ((50 <= mr < 60) or (90 < mr <= 95))) else 0.0))
+        req = "mRSI in [60,90] (50-60 or 90-95 = 0.5)"
+        val = {"mRSI": _r(mr)}
+        label = "RSI monthly"
     else:
-        if BUY:
-            c = 1.0 if (twr is not None and twr >= 70) else (0.5 if (twr is not None and 60 <= twr < 70) else 0.0)
-            req = "twr >= 70 (60-70 = 0.5)"
-        else:
-            c = 1.0 if (twr is not None and twr <= 45) else (0.5 if (twr is not None and 45 < twr <= 50) else 0.0)
-            req = "twr <= 45 (45-50 = 0.5)"
+        # SELL-REV: weekly-cool band on true weekly RSI (unchanged).
+        c = 1.0 if (twr is not None and twr <= 45) else (0.5 if (twr is not None and 45 < twr <= 50) else 0.0)
+        req = "twr <= 45 (45-50 = 0.5)"
         val = {"trueWk": _r(twr)}
-    out.append(_R("R7", f"RSI {'frame' if MOM else 'weekly heat'}", c, val, required=req))
+        label = "RSI weekly heat"
+    out.append(_R("R7", label, c, val, required=req))
 
     # R8 — returns. cc#513 BUY-REV: V5's own month_return cap + sanity floor replaces mo>0.
     wk, mo = v8.get("week_return"), v8.get("month_return")
@@ -707,10 +730,10 @@ def _rules(d, style, side):
     w52 = v8.get("week_index_52")
     if MOM:
         if BUY:
-            mom_ok = (m2 is not None and 0 <= m2 <= 6)
-            w52_band = (1.0 if (w52 is not None and w52 >= 75) else (0.5 if (w52 is not None and 40 <= w52 < 75) else 0.0))
-            c = w52_band if mom_ok else min(w52_band, 0.5)
-            req = "mom_2d in [0,6] AND w52>=75 (w52 [40,75) or mom_2d fail = 0.5 cap)"
+            # cc#767 BUY-MOM: mom_2d in [0,6] ONLY — w52>=75 is now its own imported V3 hard-gate rule
+            # (appended below), tested once, not folded here.
+            c = 1.0 if (m2 is not None and 0 <= m2 <= 6) else (0.5 if (m2 is not None and -1 <= m2 < 0) else 0.0)
+            req = "mom_2d in [0,6] ([-1,0) = 0.5)"
         else:
             c = _both(m2 is not None and -4 <= m2 <= -2, w52 is not None and 20 <= w52 <= 60)
             req = "mom_2d in [-4,-2] AND w52 in [20,60] (one leg = 0.5)"
@@ -730,18 +753,13 @@ def _rules(d, style, side):
             val = {"low_5d": _r(low5d), "s1": _r(s1)}
             req = "5d low <= S1 (within 1% of S1 = 0.5)"
         else:
-            # 3010 base band + cc#513 day_1d co-condition for the 1.0 tier
-            fall = d.get("fall_from_high_2d")
-            day1d = v8.get("day_1d")
-            day_ok = (day1d is not None and -2 <= day1d <= 0)
-            if fall is not None and 2 <= fall <= 8 and day_ok:
-                c = 1.0
-            elif fall is not None and ((1 <= fall < 2) or (8 < fall <= 12) or (2 <= fall <= 8)):
-                c = 0.5
-            else:
-                c = 0.0
-            val = {"fall_2d": _r(fall), "day_1d": _r(day1d)}
-            req = "fall 2-8% AND day_1d in [-2,0] (fall 1-2%/8-12%, or 2-8% w/o day_1d = 0.5)"
+            # cc#767 SELL-REV: turn = mom_2d in [-4,-1] AND week_index_52 < 50 (V6.1 gate). Replaces the
+            # old fall-from-high band, which overlapped R9's falling-from-high leg (tested twice).
+            m2ok = (m2 is not None and -4 <= m2 <= -1)
+            w52ok = (w52 is not None and w52 < 50)
+            c = 1.0 if (m2ok and w52ok) else (0.5 if (m2ok or w52ok) else 0.0)
+            val = {"mom_2d": _r(m2), "w52": _r(w52)}
+            req = "mom_2d in [-4,-1] AND w52 < 50 (one leg = 0.5)"
     out.append(_R("R10", "Style extra", c, val, required=req))
 
     # R11 — location + room. cc#513 BUY-REV: room-to-R1 removed (V5 = fixed +/-3 exits) -> V5 turn
@@ -757,13 +775,11 @@ def _rules(d, style, side):
         val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
         req = "above PP AND room-to-R1 >= 2% (above PP only = 0.5)"
     elif MOM and (not BUY):
-        rs2 = d.get("room_s2")
-        if d.get("above_pp"):
-            c = 0.0
-        else:
-            c = 1.0 if (rs2 is not None and rs2 >= 3) else 0.0
-        val = {"abovePP": d.get("above_pp"), "room_s2": _r(rs2)}
-        req = "below PP AND S2-clearance >= 3%"
+        # cc#767 SELL-MOM: R11 is now CMP < PP alone (a distinct 1pt gate); S2-clearance is split into
+        # its own imported V8-survival rule (appended below), tested once each rather than bundled.
+        c = 0.0 if d.get("above_pp") else 1.0
+        val = {"abovePP": d.get("above_pp")}
+        req = "CMP < PP"
     elif (not MOM) and BUY:
         m2r, wkr = v8.get("mom_2d"), v8.get("week_return")
         n = sum(1 for x in [(m2r is not None and m2r >= -0.5), (wkr is not None and wkr >= -2)] if x)
@@ -784,62 +800,37 @@ def _rules(d, style, side):
         req = "S1-room >= 2% (1-2% = 0.5)"
     out.append(_R("R11", "Location + room", c, val, required=req))
 
-    # R12 — OI structure. 3010 SELL: short-buildup OR long-unwinding (price down) ->1; OI missing/stale ->0.5.
-    # cc#717 part_6: a non-futures (cash) stock structurally has NO OI -> credit 0.5 N/A (was a hard 0)
-    # + a CASH · DERIVATIVES N/A chip. Futures symbols keep the exact logic below.
+    # R12 — cc#767 DERIVATIVES CONFIRM: merges old R12 (OI structure) + R13 (basis) into ONE rule tested
+    # once, replacing the two-way split. Two legs — (1) OI change present with the aligned price
+    # direction, (2) basis moving the aligned direction. Both legs win = 1pt, one leg = 0.5, neither
+    # (data present) = 0, both legs missing/stale = 0.5 neutral. Cash (non-futures) stocks have no
+    # derivatives -> 0.5 N/A + CASH chip. (Old R14 ATR ignition dropped entirely — see the R5 note; R9
+    # 5m+VWAP already answers "is it moving now".)
     day = v8.get("day_1d")
     oic = d.get("oi_chg")
-    if not d.get("is_future"):
-        out.append(_R("R12", "OI structure", 0.5,
-                      {"day": _r(day), "oi_chg": None, "cash_na": True, "chip": "CASH · DERIVATIVES N/A"},
-                      required="cash stock — derivatives N/A (0.5)"))
-    else:
-        if BUY:
-            c = 1.0 if (day is not None and day > 0 and oic is not None) else 0.0
-            req = "day_1d > 0 AND OI-change present"
-        else:
-            if oic is None:
-                c = 0.5
-            elif day is not None and day < 0:
-                c = 1.0
-            else:
-                c = 0.0
-            req = "day_1d < 0 (OI missing/stale = 0.5)"
-        out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}, required=req))
-
-    # R13 — basis. cc#513 cross-cutting: missing-basis credit now symmetric -> 0.5 BOTH sides
-    # (was BUY 0 / SELL 0.5).
     now, prev = d.get("basis_now"), d.get("basis_prev")
     if not d.get("is_future"):
-        # cc#717 part_6: cash stock has no futures basis -> 0.5 N/A + CASH chip (SELL already gave 0.5
-        # on missing basis; this makes the non-futures case explicit + symmetric with R12).
-        out.append(_R("R13", "Basis", 0.5,
-                      {"now": _r(now), "prev": _r(prev), "cash_na": True, "chip": "CASH · DERIVATIVES N/A"},
+        out.append(_R("R12", "Derivatives confirm", 0.5,
+                      {"cash_na": True, "chip": "CASH · DERIVATIVES N/A"},
                       required="cash stock — derivatives N/A (0.5)"))
     else:
-        if BUY:
-            if now is None or prev is None:
-                c = 0.5
-            elif MOM:
-                c = 1.0 if (now > prev and now > 0) else 0.0
-            else:
-                c = 1.0 if (now > prev and now < 0) else 0.0
-            req = f"basis {'widening premium' if MOM else 'fading discount'} (missing = 0.5)"
+        oi_avail = oic is not None
+        basis_avail = (now is not None and prev is not None)
+        oi_win = oi_avail and (day is not None and (day > 0 if BUY else day < 0))
+        if not basis_avail:
+            basis_win = False
+        elif BUY:
+            basis_win = (now > prev and now > 0) if MOM else (now > prev and now < 0)
         else:
-            if now is None or prev is None:
-                c = 0.5
-            elif MOM:
-                c = 1.0 if (now < prev and now < 0) else (0.5 if now < 0 else 0.0)
-            else:
-                c = 1.0 if (now < prev and now > 0) else (0.5 if now > 0 else 0.0)
-            req = f"basis {'widening discount' if MOM else 'fading premium'} (missing = 0.5)"
-        out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}, required=req))
-
-    # R14 — ATR ignition. BUY only; DROPPED on SELL (3010).
-    if BUY:
-        out.append(_R("R14", "ATR ignition", 1.0 if d.get("ignition") else 0.0,
-                      {"tr": _r(d.get("tr_today")), "atr14": _r(d.get("atr14"))},
-                      required="TR today >= 1.3x ATR14"))
+            basis_win = (now < prev and now < 0) if MOM else (now < prev and now > 0)
+        if not oi_avail and not basis_avail:
+            c = 0.5   # both legs stale/missing -> neutral (was the symmetric R12/R13 missing = 0.5)
+        else:
+            wins = (1 if oi_win else 0) + (1 if basis_win else 0)
+            c = 1.0 if wins >= 2 else (0.5 if wins == 1 else 0.0)
+        out.append(_R("R12", "Derivatives confirm", c,
+                      {"day": _r(day), "oi_chg": _r(oic), "basis_now": _r(now), "basis_prev": _r(prev)},
+                      required="OI-change present (aligned) + basis direction (one leg = 0.5)"))
 
     # R15 — relative strength vs Nifty. cc#513 BUY-REV: rs_mo band relaxed one notch (dip candidates
     # lag by construction).
@@ -941,40 +932,69 @@ def _rules(d, style, side):
         r20req = "ΔGVM180 <-0.5=1 / -0.5-0=0.5 / >0=0 (mirror)"
     out.append(_R("R20", "GVM trend (Δ180d)", r20, {"dgvm180": _r(dg)}, required=r20req))
 
+    # ── cc#767 imported LIVE-V8 basket hard gates (funded by the flow consolidation: R5+R6 merged,
+    # R12+R13 merged, R14 dropped). Each is scored ONCE as its own point — never a veto (cc#677
+    # ZERO-VETO holds; these add base score, distinct from R17 V-pillar / R20 GVM-trend). ──────────
+    gvm = d.get("gvm_score")
+    d50 = v8.get("dma_50")
+    w52g = v8.get("week_index_52")
+    if BUY and MOM:
+        # R21 — dma_50 in [5,12] band (BuyMom V3 hard gate: healthy but not overextended above 50DMA).
+        c21 = (1.0 if (d50 is not None and 5 <= d50 <= 12)
+               else (0.5 if (d50 is not None and ((2 <= d50 < 5) or (12 < d50 <= 20))) else 0.0))
+        out.append(_R("R21", "dma_50 band", c21, {"dma_50": _r(d50)}, required="dma_50 in [5,12] ([2,5)/(12,20] = 0.5)"))
+        # R22 — 52-week index >= 75 (BuyMom V3 hard gate: near 52w highs). Extracted from the old R10.
+        c22 = (1.0 if (w52g is not None and w52g >= 75) else (0.5 if (w52g is not None and 60 <= w52g < 75) else 0.0))
+        out.append(_R("R22", "52w index", c22, {"w52": _r(w52g)}, required="week_index_52 >= 75 (60-75 = 0.5)"))
+        # R23 — GVM quality floor >= 7 (BuyMom V3 level, stricter than BuyRev 6.5).
+        c23 = (1.0 if (gvm is not None and gvm >= 7.0) else (0.5 if (gvm is not None and 6.5 <= gvm < 7.0) else 0.0))
+        out.append(_R("R23", "GVM floor", c23, {"gvm": _r(gvm)}, required="GVM >= 7.0 (6.5-7.0 = 0.5)"))
+    elif BUY and (not MOM):
+        # R23 — GVM quality floor >= 6.5 (BuyRev V6.1 gate).
+        c23 = (1.0 if (gvm is not None and gvm >= 6.5) else (0.5 if (gvm is not None and 6.0 <= gvm < 6.5) else 0.0))
+        out.append(_R("R23", "GVM floor", c23, {"gvm": _r(gvm)}, required="GVM >= 6.5 (6.0-6.5 = 0.5)"))
+    elif (not BUY) and MOM:
+        # R21 — S2-clearance (CMP-S2)/CMP >= 3% (SellMom-N5 V8 survival gate: real room below target).
+        rs2 = d.get("room_s2")
+        c21 = (1.0 if (rs2 is not None and rs2 >= 3) else (0.5 if (rs2 is not None and 2 <= rs2 < 3) else 0.0))
+        out.append(_R("R21", "S2-clearance", c21, {"room_s2": _r(rs2)}, required="S2-clearance >= 3% (2-3% = 0.5)"))
+
     return out
 
 
-def _verdict(score, side="BUY"):
-    # cc#410: R16 fib -> BUY 16 / SELL 14. cc#583: R17 (+1) -> 17 / 15.
-    # cc#586 CEILING FINAL (id=6625): R18 (+2) + R19 (+2) + R20 (+1) -> FINAL_MAX BUY 22 / SELL 20.
-    # STRONG BUY>=18.5 / SELL>=17.0 (proportional strictness + R20 +0.5 bump). VALID floor = original
-    # v3.3.2 floor ratio-scaled (BUY 10.5*1.375=14.44 -> 14.4 ; SELL 9*1.429=12.86 -> 12.9).
-    if side == "SELL":   # max 20
-        if score >= 17.0:
-            return "STRONG"
-        if score >= 12.9:
-            return "VALID"
-        return "REJECT"
-    if score >= 18.5:    # BUY max 22
+_STRONG_RATIO = 0.84   # cc#767: preserves the prior BUY strictness (18.5/22 = 0.841)
+_VALID_RATIO = 0.65    # cc#767: preserves the prior BUY floor  (14.4/22 = 0.655)
+
+
+def _verdict(score, max_score):
+    """cc#767: DYNAMIC denominator (score_denominator rule, propagation map id=265). After the V8-gate
+    imports + flow consolidation each style bucket carries its own max (BUY-MOM 22, BUY-REV 20, SELL-MOM
+    20, SELL-REV 19), so bands are re-baselined PROPORTIONALLY off the card's own max — preserving the
+    founder-locked strictness ratios (STRONG 0.84x / VALID 0.65x, from the prior BUY 18.5-22 / 14.4-22)."""
+    if score >= round(_STRONG_RATIO * max_score, 1):
         return "STRONG"
-    if score >= 14.4:
+    if score >= round(_VALID_RATIO * max_score, 1):
         return "VALID"
     return "REJECT"
 
 
 def score_card(d, style, side):
     """The one shared scorer. Returns the full card for one (style, side).
-    cc#400: SELL drops R6+R14. cc#410: R16 fib added to both -> max BUY 16 / SELL 14, bands rescaled."""
+    cc#767 V8-ALIGNMENT: flow rules consolidated (R5+R6 -> Volume confirm, R12+R13 -> Derivatives
+    confirm, R14 ATR dropped); freed points reallocated to per-bucket live-V8 basket gate imports
+    (BUY-MOM dma_50/w52/GVM, BUY-REV mRSI/GVM/graded-MAs, SELL-MOM CMP<PP + S2-clearance, SELL-REV
+    graded 3-DMA + mom_2d/w52). Max is DYNAMIC = 1pt per rule + 1 extra each for R18/R19 (the only
+    2-point rules, always present) -> len(rules)+2."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    max_score = 20 if side == "SELL" else 22  # cc#586 CEILING FINAL: R17+R18+R19+R20 (was 15 / 17)
+    max_score = len(rules) + 2   # cc#767: R18 + R19 are the only 2-point rules, always present
+    strong = round(_STRONG_RATIO * max_score, 1)
+    valid = round(_VALID_RATIO * max_score, 1)
     card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
-            "score": score, "max": max_score, "verdict": _verdict(score, side), "rules": rules}
+            "score": score, "max": max_score, "verdict": _verdict(score, max_score), "rules": rules}
+    card["bands"] = f"STRONG≥{strong} / VALID {valid}–{strong} / REJECT<{valid}"
     if side == "SELL":
-        card["recal"] = "RECALIBRATED 12-JUL"
-        card["bands"] = "STRONG≥17.0 / VALID 12.9–17.0 / REJECT<12.9"
-    else:
-        card["bands"] = "STRONG≥18.5 / VALID 14.4–18.5 / REJECT<14.4"
+        card["recal"] = "V8-ALIGNED cc#767"
     return card
 
 
@@ -1178,10 +1198,10 @@ def v4_dual_health():
         "version": VERSION, "spec_ref": SPEC_REF,
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
         "gates": "cc#677 ZERO-VETO — verdict = score bands alone; alert chips only (F&O ban · result-date · GVM floor · DTE)",
-        "rules": "BUY R1-R20 (max 22) · SELL drops R6+R14 (max 20); +R17 val +R18 mom +R19 RS +R20 ΔGVM",
-        "max_score": {"BUY": 22, "SELL": 20},
-        "verdict": {"BUY": {"STRONG": ">=18.5", "VALID": "14.4 to <18.5", "REJECT": "<14.4"},
-                    "SELL": {"STRONG": ">=17.0", "VALID": "12.9 to <17.0", "REJECT": "<12.9"}},
+        "rules": "cc#767 V8-ALIGNED: R5 Volume-confirm (R5+R6 merged) · R12 Derivatives-confirm (R12+R13 merged) · R14 dropped; per-bucket V8 imports — BUY-MOM +dma_50/w52/GVM, BUY-REV mRSI+GVM+graded MAs, SELL-MOM CMP<PP+S2-clearance, SELL-REV graded 3-DMA+mom_2d/w52",
+        "max_score": {"BUY-MOM": 22, "BUY-REV": 20, "SELL-MOM": 20, "SELL-REV": 19, "note": "DYNAMIC = len(rules)+2"},
+        "verdict": {"ratios": {"STRONG": "0.84 x max", "VALID": "0.65 x max"},
+                    "example_BUY-MOM(max22)": {"STRONG": ">=18.5", "VALID": "14.3 to <18.5", "REJECT": "<14.3"}},
         "sides": {"BUY": "long", "SELL": "v4.1 mirror (GVM gate skipped)"},
         "status": "ok",
     }
