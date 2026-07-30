@@ -2495,6 +2495,34 @@ def adr_history(days: int = 5):
         raise HTTPException(500, f"adr_history failed: {e}")
 
 
+@router.get("/adr_intraday")
+def adr_intraday_trend():
+    """cc#761: 5-min LIVE ADR over the last 5 TRADING days (~375 points) for the ADR modal chart —
+    mirrors the pcr_intraday pattern. adr_intraday.ts is naive IST. Restricts to real breadth ticks
+    (universe_count>=50, same gate the mood-gate uses). Falls back to the adr_daily 5-point trend when
+    adr_intraday is empty (holiday / pre-open edge). Oldest -> newest; {points:[{ts,adr}], source}."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ts, adr FROM adr_intraday
+                WHERE adr IS NOT NULL AND universe_count >= 50
+                  AND ts::date >= (SELECT MIN(d) FROM (
+                        SELECT DISTINCT ts::date AS d FROM adr_intraday
+                        WHERE universe_count >= 50 ORDER BY d DESC LIMIT 5) x)
+                ORDER BY ts ASC""")
+            rows = [{"ts": str(r[0]), "adr": round(float(r[1]), 2)} for r in cur.fetchall()]
+            if rows:
+                return {"points": rows, "source": "adr_intraday"}
+            # fallback: adr_daily 5-point trend (ts carries the date so the chart still renders)
+            cur.execute("""SELECT price_date, adr FROM adr_daily
+                           WHERE adr IS NOT NULL AND EXTRACT(DOW FROM price_date) BETWEEN 1 AND 5
+                           ORDER BY price_date DESC LIMIT 5""")
+            daily = [{"ts": str(r[0]), "adr": round(float(r[1]), 2)} for r in cur.fetchall()][::-1]
+        return {"points": daily, "source": "adr_daily"}
+    except Exception as e:
+        raise HTTPException(500, f"adr_intraday failed: {e}")
+
+
 @router.get("/v9_pairs_sectors")
 def v9_pairs_sectors():
     """cc#385: dynamic sector list for the V9 Sector-Pairs concept tab. Every futures-universe

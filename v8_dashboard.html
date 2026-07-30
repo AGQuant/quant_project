@@ -3704,43 +3704,57 @@ const _adrZonePlugin={id:'adrZones',beforeDatasetsDraw(chart){
   band(y.min,0.5,'rgba(229,72,77,.08)');               // weak
   ctx.restore();
 }};
-function _adrWkLabel(d){try{return new Date(d+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'});}catch(e){return d;}}
-function loadAdrChart(){
-  const pts=(cache.adrHistory&&cache.adrHistory.points)||[];
+function _adrWkLabel(d){try{return new Date(String(d).slice(0,10)+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'});}catch(e){return d;}}
+// cc#761: ADR modal is now 5-min LIVE on a 5-trading-day rolling basis (like the PCR popouts) — day
+// boundaries compress overnight gaps (_dayBoundaryPlugin) and the >2/0.5-2/<0.5 band shading stays
+// (_adrZonePlugin). Falls back to the adr_daily 5-point trend (endpoint returns source='adr_daily').
+async function loadAdrChart(){
+  let pts=[], source='adr_intraday';
+  try{ const d=await getJSON('/api/v8/adr_intraday'); pts=(d&&d.points)||[]; source=(d&&d.source)||'adr_intraday'; }catch(e){}
+  if(!pts.length){ const dp=(cache.adrHistory&&cache.adrHistory.points)||[]; pts=dp.map(p=>({ts:p.date,adr:p.adr})); source='adr_daily'; }
+  const intraday=(source==='adr_intraday');
   const vals=pts.map(p=>Number(p.adr));
   const last=vals.length?vals[vals.length-1]:null;
-  // inline metric-row value: ADR ratio + weekday stamp, coloured by the latest zone (mirrors VIX/PCR
-  // value tokens, but ADR is a ratio not a %). Cached so renderMood re-injects it on every repaint.
+  // inline metric-row value (latest tick), coloured by zone. Cached so renderMood re-injects it.
   if(pts.length){
-    let dow='';try{dow=new Date(pts[pts.length-1].date+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',timeZone:'UTC'});}catch(e){}
     const zc=_adrZoneColor(last);
-    const html=`<span style="color:${zc}">${last==null?'--':last.toFixed(2)}</span> <span style="color:var(--dim);font-weight:600">${dow}</span>`;
+    let stamp='';
+    if(intraday){ stamp=String(pts[pts.length-1].ts).slice(11,16); }   // HH:MM of the latest 5-min tick
+    else{ try{ stamp=new Date(String(pts[pts.length-1].ts).slice(0,10)+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',timeZone:'UTC'}); }catch(e){} }
+    const html=`<span style="color:${zc}">${last==null?'--':last.toFixed(2)}</span> <span style="color:var(--dim);font-weight:600">${stamp}</span>`;
     _metricInlineCache['adrInline']=html;
     const el=document.getElementById('adrInline');if(el)el.innerHTML=html;
   }
   const le=document.getElementById('adrLast');if(le)le.textContent=last==null?'--':last.toFixed(2);
   if(!window.Chart)return;   // CDN blocked — inline value still shows, dashboard stays functional
   const cv=document.getElementById('adrChart');if(!cv)return;
-  const labels=pts.map(p=>_adrWkLabel(p.date));
+  const labels=intraday?pts.map(p=>fmtTs(p.ts)):pts.map(p=>_adrWkLabel(p.ts));
+  const dayTicks=intraday?_dayTickLabels(labels):null;
+  const xcb=intraday?function(v,i){return dayTicks[i]||'';}:function(v,i){return labels[i]||'';};
   const dotCols=vals.map(v=>_adrZoneColor(v));
   const lineCol=_adrZoneColor(last);
+  const radii=intraday?vals.map((_,i)=>i===vals.length-1?5:0):vals.map(()=>5);   // intraday: marker only on the live tick
+  if(window.Chart&&!window.__dayBoundaryReg){Chart.register(_dayBoundaryPlugin);window.__dayBoundaryReg=true;}
   if(ADR_CHART){
     ADR_CHART.data.labels=labels;ADR_CHART.data.datasets[0].data=vals;
-    ADR_CHART.data.datasets[0].pointBackgroundColor=dotCols;
+    ADR_CHART.data.datasets[0].pointBackgroundColor=dotCols;ADR_CHART.data.datasets[0].pointRadius=radii;
     ADR_CHART.data.datasets[0].borderColor=lineCol;ADR_CHART.data.datasets[0].backgroundColor=lineCol+'1a';
+    ADR_CHART.$dayBounds=intraday?_dayBounds(labels):[];
+    ADR_CHART.options.scales.x.ticks.callback=xcb;
     ADR_CHART.update('none');return;
   }
   ADR_CHART=new Chart(cv.getContext('2d'),{
     type:'line',plugins:[_adrZonePlugin],
     data:{labels,datasets:[{data:vals,borderColor:lineCol,borderWidth:2,backgroundColor:lineCol+'1a',
-      fill:true,tension:.25,pointRadius:5,pointBackgroundColor:dotCols,pointBorderColor:'#fff',
+      fill:true,tension:.25,pointRadius:radii,pointBackgroundColor:dotCols,pointBorderColor:'#fff',
       pointBorderWidth:1.5,spanGaps:true}]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index',
         callbacks:{label:c=>'ADR '+Number(c.parsed.y).toFixed(2)}}},
-      scales:{x:{grid:{display:false},ticks:{color:'#8a94a6',font:{size:9},maxRotation:0}},
+      scales:{x:{grid:{display:false,drawTicks:false},ticks:{autoSkip:false,maxRotation:0,color:'#8a94a6',font:{size:9},callback:xcb}},
         y:{grace:'12%',grid:{color:'rgba(138,148,166,.15)'},
            ticks:{maxTicksLimit:5,color:'#8a94a6',font:{size:9},callback:v=>Number(v).toFixed(1)}}}}});
+  ADR_CHART.$dayBounds=intraday?_dayBounds(labels):[];
 }
 
 function paint(){
