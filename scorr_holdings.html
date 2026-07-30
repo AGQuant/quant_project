@@ -287,11 +287,14 @@ const reasonLabel = r => {
 /* ── Holdings ── */
 async function loadHoldings(smooth=false) {
   try {
-    const r = await fetch(API+"/api/smartgain/m2m");
+    const r = await fetch(API+"/api/smartgain/m2m", {cache:'no-store'});
     const d = await r.json();
-    if (d.error) return;
+    // cc#763: never leave the "Loading positions…" spinner hanging — clear it on an error response too
+    // (first load only; a transient refresh failure keeps the already-rendered positions).
+    if (d.error) { if(firstLoad){ const pw=document.getElementById("pos-wrap"); if(pw) pw.innerHTML='<div class="empty-msg">Positions unavailable — <a href="#" onclick="refresh();return false;">retry</a></div>'; } return; }
 
     const pos = d.positions||[];
+    window._sgPositions = pos;   // cc#763: current live holdings, for the mismatch cross-check
     /* cc#301: headline is NET of brokerage. Gross = Realised + Unrealised; Net = Gross − Brokerage. */
     const realised   = d.realised   != null ? d.realised   : 0;
     const unrealised = d.unrealised != null ? d.unrealised : (d.total_mtm||0);
@@ -484,7 +487,11 @@ async function loadHoldings(smooth=false) {
     document.getElementById("pos-wrap").innerHTML=html;
     firstLoad=false;
 
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error(e);
+    // cc#763: fetch/parse failure must also clear the spinner on first load (was silently swallowed).
+    if(firstLoad){ const pw=document.getElementById("pos-wrap"); if(pw) pw.innerHTML='<div class="empty-msg">Failed to load positions — <a href="#" onclick="refresh();return false;">retry</a></div>'; }
+  }
 }
 
 function calcPct(p) {
@@ -638,7 +645,15 @@ function renderLWChart(d){
 
 function renderMismatchBanner(d){
   const el=document.getElementById("m2m-mismatch");
-  const mm=d.holdings_mismatch||[];
+  // cc#763: never trust a cached/stale replay mismatch. Validate each reported entry against the CURRENT
+  // live holdings (from /api/smartgain/m2m) — if the live broker qty no longer differs from the replay
+  // qty, the data layer has been reconciled and the entry is stale replay state, so drop it.
+  const live={}; (window._sgPositions||[]).forEach(p=>{ live[(p.symbol||"")+"|"+(p.direction||"")]=p.qty; });
+  const mm=(d.holdings_mismatch||[]).filter(m=>{
+    const lq=live[(m.symbol||"")+"|"+(m.direction||"")];
+    if(lq==null) return true;                          // no live position to compare -> keep (genuine)
+    return Number(lq)!==Number(m.replay_qty);          // live holding == replay -> reconciled -> drop
+  });
   if(!mm.length){ el.style.display="none"; el.innerHTML=""; return; }
   const list=mm.map(m=>`${m.symbol} ${m.direction}: broker ${m.holdings_qty} vs replay ${m.replay_qty}`).join(" · ");
   el.innerHTML=`<span class="mm-ic">&#9888;</span><div><b>Replay vs broker holdings mismatch</b> — latest orderbook batch missing, values may be stale.<div class="mm-list">${list}</div></div>`;
@@ -664,7 +679,7 @@ function renderClosed(d){
 
 async function loadM2M(range){
   try{
-    const r=await fetch(API+"/api/smartgain/daily_m2m?range="+range);
+    const r=await fetch(API+"/api/smartgain/daily_m2m?range="+range, {cache:'no-store'});   // cc#763: always a fresh recompute, never a cached replay
     const d=await r.json();
     document.getElementById("m2m-card").style.display="block";
     // cc#181: checksum banner rides on every range response — wrong data can never
