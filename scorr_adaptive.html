@@ -63,38 +63,102 @@ html,body{margin:0;padding:0;background:var(--bg);}
     <h1>Adaptive Dashboard</h1>
     <div class="sub"><span id="adx-count">—</span> saved portfolios · tap a client to open their Portfolio Health Report</div>
   </div>
-  <div class="wrap"><div id="adx-list"><div class="empty">Loading client reports…</div></div></div>
+  <div class="wrap">
+    <div id="adx-toolbar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+      <input id="adx-search" type="text" placeholder="Search clients…" autocomplete="off"
+        style="flex:1;min-width:180px;max-width:320px;padding:9px 12px;font-size:14px;border:1px solid var(--rule,#dfe3ea);border-radius:8px;background:var(--bg,#fff);color:inherit;">
+      <div style="display:inline-flex;border:1px solid var(--rule,#dfe3ea);border-radius:8px;overflow:hidden;flex:none;">
+        <button id="adx-tab-cards" type="button" style="padding:8px 15px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:transparent;color:inherit;">Cards</button>
+        <button id="adx-tab-table" type="button" style="padding:8px 15px;font-size:13px;font-weight:600;border:none;cursor:pointer;background:transparent;color:inherit;">Table</button>
+      </div>
+    </div>
+    <div id="adx-list"><div class="empty">Loading client reports…</div></div>
+  </div>
 </div>
 <script>
 (function(){
   "use strict";
-  var listEl=document.getElementById('adx-list'), countEl=document.getElementById('adx-count');
+  // cc#764: card/table toggle (SmartGain Table/Ladder pattern) + live client search + sortable table.
+  // Default = cards when <=6 clients, table when more; choice remembered in-session. Data from the cc#756
+  // enriched /api/health/portfolios (client name / tracking_date / holdings / invested / current / P&L).
+  var listEl=document.getElementById('adx-list'), countEl=document.getElementById('adx-count'),
+      toolbar=document.getElementById('adx-toolbar'), searchEl=document.getElementById('adx-search'),
+      tabCards=document.getElementById('adx-tab-cards'), tabTable=document.getElementById('adx-tab-table');
   function inr(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '₹'+Math.round(n).toLocaleString('en-IN'); }
-  function dmy(iso){ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d)) return iso;
+  function dmy(iso){ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10)||'—';
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
   function esc(s){ var d=document.createElement('div'); d.textContent=(s==null)?'':String(s); return d.innerHTML; }
   function pnlStr(pnl,pc){ if(pnl==null) return '—';
     return (pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(pnl)).toLocaleString('en-IN')
       +(pc==null?'':' ('+(pc>=0?'+':'−')+Math.abs(pc).toFixed(1)+'%)'); }
-  fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
-    var ps=(d&&d.portfolios)||[];
-    countEl.textContent=ps.length;
-    if(!ps.length){ listEl.innerHTML='<div class="empty">No saved portfolios yet. Build one on the <a href="/health">Health</a> tab.</div>'; return; }
-    // client reports are white-labelled by default (wl=1) — client-shareable, zero Scorr branding.
-    var cards=ps.map(function(p){
-      var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)'));
+  var ALL=[], VIEW='cards', SORT={key:'pnl_pct',dir:-1};
+  function clientName(p){ return (p.client&&p.client.name)||p.name||('Portfolio '+p.id); }
+  function asOf(p){ return (p.client&&p.client.tracking_date)||p.created_at; }
+  function filtered(){ var q=(searchEl.value||'').trim().toLowerCase();
+    return q?ALL.filter(function(p){ return clientName(p).toLowerCase().indexOf(q)>-1; }):ALL.slice(); }
+  function setView(v){ VIEW=v; try{ sessionStorage.setItem('adx_view',v); }catch(e){}
+    tabCards.style.background=(v==='cards')?'var(--grn,#0b6e42)':'transparent'; tabCards.style.color=(v==='cards')?'#fff':'inherit';
+    tabTable.style.background=(v==='table')?'var(--grn,#0b6e42)':'transparent'; tabTable.style.color=(v==='table')?'#fff':'inherit';
+    render(); }
+  function render(){ var ps=filtered(); if(VIEW==='table') renderTable(ps); else renderCards(ps); }
+  function renderCards(ps){
+    if(!ps.length){ listEl.innerHTML='<div class="empty">No matching clients.</div>'; return; }
+    var cards=ps.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)'));
       return '<a class="card" href="/health?pid='+p.id+'&wl=1">'
-        + '<div class="nm">'+esc(p.name||('Portfolio '+p.id))+'</div>'
-        + '<div class="meta">as of '+dmy(p.created_at)+' · '+(p.n_holdings||0)+' holdings</div>'
+        + '<div class="nm">'+esc(clientName(p))+'</div>'
+        + '<div class="meta">as of '+dmy(asOf(p))+' · '+(p.n_holdings||0)+' holdings</div>'
         + '<div class="strip">'
         +   '<div class="b"><div class="l">Invested</div><div class="v">'+inr(p.invested)+'</div></div>'
         +   '<div class="b"><div class="l">Current</div><div class="v">'+inr(p.current)+'</div></div>'
         +   '<div class="b"><div class="l">P&amp;L</div><div class="v" style="color:'+col+'">'+pnlStr(p.pnl,p.pnl_pct)+'</div></div>'
-        + '</div>'
-        + '<div class="go">View report →</div></a>';
+        + '</div><div class="go">View report →</div></a>';
     }).join('');
     listEl.innerHTML='<div class="grid">'+cards+'</div>';
+  }
+  function sortRows(ps){ var k=SORT.key, dir=SORT.dir;
+    function val(p){ if(k==='client') return clientName(p).toLowerCase();
+      if(k==='asof') return String(asOf(p)||'');
+      if(k==='holdings') return p.n_holdings||0;
+      if(k==='invested') return p.invested||0; if(k==='current') return p.current||0;
+      if(k==='pnl') return (p.pnl==null?-Infinity:p.pnl); if(k==='pnl_pct') return (p.pnl_pct==null?-Infinity:p.pnl_pct);
+      return 0; }
+    return ps.slice().sort(function(a,b){ var va=val(a), vb=val(b); if(va<vb) return -dir; if(va>vb) return dir; return 0; });
+  }
+  function renderTable(ps){
+    if(!ps.length){ listEl.innerHTML='<div class="empty">No matching clients.</div>'; return; }
+    var rows=sortRows(ps);
+    var cols=[['client','Client','left'],['asof','As of','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right']];
+    function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
+    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'" style="text-align:'+c[2]+';padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
+    var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
+          pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)'));
+      return '<tr onclick="location.href=\'/health?pid='+p.id+'&wl=1\'" style="cursor:pointer;border-bottom:1px solid var(--rule,#eef1f5);">'
+        + '<td style="padding:10px 12px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
+        + '<td style="padding:10px 12px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(asOf(p))+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;">'+(p.n_holdings||0)+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;">'+inr(p.invested)+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;">'+inr(p.current)+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">View →</td></tr>';
+    }).join('');
+    listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:13.5px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
+    listEl.querySelectorAll('th[data-k]').forEach(function(th){ th.addEventListener('click',function(){
+      var k=th.getAttribute('data-k');
+      if(SORT.key===k) SORT.dir*=-1; else { SORT.key=k; SORT.dir=(k==='client'||k==='asof')?1:-1; }
+      render(); }); });
+  }
+  fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
+    ALL=(d&&d.portfolios)||[]; countEl.textContent=ALL.length;
+    if(!ALL.length){ listEl.innerHTML='<div class="empty">No saved portfolios yet. Build one on the <a href="/health">Health</a> tab.</div>'; return; }
+    toolbar.style.display='flex';
+    var saved=null; try{ saved=sessionStorage.getItem('adx_view'); }catch(e){}
+    VIEW=(saved==='cards'||saved==='table')?saved:(ALL.length>6?'table':'cards');
+    tabCards.addEventListener('click',function(){ setView('cards'); });
+    tabTable.addEventListener('click',function(){ setView('table'); });
+    searchEl.addEventListener('input',render);
+    setView(VIEW);
   }).catch(function(e){ listEl.innerHTML='<div class="empty">Could not load reports. '+esc(''+e)+'</div>'; });
 })();
 </script>
