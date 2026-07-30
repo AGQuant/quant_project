@@ -733,8 +733,40 @@ def _bg_smartgain_mtm():
                   AND (fut.fut_close IS NOT NULL OR fb.basis IS NOT NULL OR fev.ever)
             """)
             n = cur.rowcount
+            # cc#762: INDEX-futures positions (NIFTY/BANKNIFTY/…) never resolved above — the stock path
+            # DRIVES off cmp_prices and gates on a fresh spot row, but an index symbol has no reliably-
+            # fresh spot tick (NIFTY spot never ticks as fyers_eq; only NIFTY50 does), so it was skipped
+            # and ltp stayed NULL (MHK40 NIFTY). Resolve index holdings DIRECTLY off the latest index-
+            # futures 5-min bar (intraday_prices fyers_fut) first, with a spot+basis synthetic fallback
+            # (universal pricing rule). Driven off the holdings themselves, not cmp_prices freshness.
+            cur.execute("""
+                UPDATE smartgain_holdings h
+                SET ltp = COALESCE(fut.fut_close, cp.cmp + fb.basis, cp.cmp),
+                    updated_at = NOW()
+                FROM (SELECT DISTINCT symbol FROM smartgain_holdings
+                      WHERE UPPER(symbol) IN ('NIFTY','NIFTY50','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX')) idx
+                LEFT JOIN LATERAL (
+                    SELECT ip.close AS fut_close FROM intraday_prices ip
+                    WHERE ip.symbol = idx.symbol AND ip.source = 'fyers_fut'
+                      AND ip.ts >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '15 minutes'
+                    ORDER BY ip.ts DESC LIMIT 1
+                ) fut ON true
+                LEFT JOIN LATERAL (
+                    SELECT cp2.cmp FROM cmp_prices cp2
+                    WHERE cp2.symbol = idx.symbol
+                      AND cp2.updated_at >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '15 minutes'
+                    LIMIT 1
+                ) cp ON true
+                LEFT JOIN LATERAL (
+                    SELECT fb2.basis FROM futures_basis fb2 WHERE fb2.symbol = idx.symbol
+                    ORDER BY fb2.ts DESC LIMIT 1
+                ) fb ON true
+                WHERE h.symbol = idx.symbol
+                  AND (fut.fut_close IS NOT NULL OR cp.cmp IS NOT NULL)
+            """)
+            n_idx = cur.rowcount
             conn.commit()
-        log.info(f"smartgain_mtm: refreshed {n} holdings (fut-ltp-first)")
+        log.info(f"smartgain_mtm: refreshed {n} holdings (fut-ltp-first) + {n_idx} index holdings (cc#762)")
     except Exception as e:
         log.error(f"smartgain_mtm: {e}")
     finally:
