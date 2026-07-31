@@ -710,7 +710,7 @@ def _bg_smartgain_mtm():
                 LEFT JOIN LATERAL (
                     SELECT ip.close AS fut_close
                     FROM intraday_prices ip
-                    WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                    WHERE ip.symbol = cp.symbol AND ip.source IN ('fyers_fut','fyers_fut_rest')  -- cc#770: REST fallback
                       AND ip.ts >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 minutes'
                     ORDER BY ip.ts DESC LIMIT 1
                 ) fut ON true
@@ -752,7 +752,7 @@ def _bg_smartgain_mtm():
                       WHERE UPPER(symbol) IN ('NIFTY','NIFTY50','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX')) idx
                 LEFT JOIN LATERAL (
                     SELECT ip.close AS fut_close FROM intraday_prices ip
-                    WHERE ip.symbol = idx.symbol AND ip.source = 'fyers_fut'
+                    WHERE ip.symbol = idx.symbol AND ip.source IN ('fyers_fut','fyers_fut_rest')  -- cc#770: REST fallback
                       AND ip.ts >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '15 minutes'
                     ORDER BY ip.ts DESC LIMIT 1
                 ) fut ON true
@@ -776,6 +776,26 @@ def _bg_smartgain_mtm():
         log.error(f"smartgain_mtm: {e}")
     finally:
         _smartgain_mtm_running = False
+
+_fut_rest_fallback_running = False
+def _bg_fut_rest_fallback():
+    """cc#770 (P0): app-side REST futures fallback. When the native WS futures leg is dark (worker acks
+    but Fyers streams no futures ticks), synthesize 5-min fyers_fut_rest bars from the Fyers /data/quotes
+    REST snapshot for open-position futures + indices (then the wider universe if the token isn't
+    throttled). NO worker bounce — never risks the working equity leg. Self-retires when native fut
+    recovers (gated on native-fut-dark inside run())."""
+    global _fut_rest_fallback_running
+    if _fut_rest_fallback_running:
+        return
+    _fut_rest_fallback_running = True
+    try:
+        import fut_rest_fallback
+        fut_rest_fallback.run()
+    except Exception as e:
+        log.error(f"fut_rest_fallback bg: {e}")
+    finally:
+        _fut_rest_fallback_running = False
+
 
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
@@ -3057,6 +3077,7 @@ async def _scheduler_loop():
             _spawn(_bg_pcr_intraday)
             _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
             _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
+            _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
