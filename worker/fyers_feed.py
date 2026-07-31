@@ -1572,8 +1572,17 @@ def poll_futures_oi(token, fut_syms, agg):
     try:
         log.info(f"OI poll starting: {len(fut_syms)} futures via depth API")
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
-        got, first = 0, True
+        got, first, empties = 0, True, 0
+        # cc#770 THROTTLE FIX: the old loop `continue`d past its per-call sleep on any non-ok/empty body,
+        # so it HAMMERED the depth API precisely while being rate-limited (~50% empty bodies, 862 JSON
+        # errors since 30-Jul). Every iteration now sleeps: base spacing on success, EXPONENTIAL backoff +
+        # jitter on an empty/throttled body (consecutive empties raise the pace, capped), decaying to base
+        # on the next success. Stops the hammering that may itself be degrading the account's entitlement.
+        base_spacing = OI_CALL_SPACING_SEC
+        max_backoff  = max(base_spacing * 16, 2.0)
+        consec_empty = 0
         for fsym in fut_syms:
+            throttled = False
             try:
                 r = requests.get(DEPTH_URL,
                                  params={'symbol': fsym, 'ohlcv_flag': 1},
@@ -1581,31 +1590,45 @@ def poll_futures_oi(token, fut_syms, agg):
                 if first:
                     log.info(f"OI poll debug {fsym}: HTTP {r.status_code} body={r.text[:300]}")
                     first = False
-                # cc#473: feed the dead-token detector — a char-0/401 response here is the
-                # exact expired-token signature that ran silent all 13-Jul morning.
+                # cc#473: feed the dead-token detector — a char-0/401 response here is the exact
+                # expired-token signature that ran silent all 13-Jul morning.
                 if _dead_signal(r):
-                    _note_api(True)
-                    continue
-                _note_api(False)
-                d = r.json()
-                if d.get('s') != 'ok':
-                    continue
-                data_d = d.get('d')
-                node = {}
-                if isinstance(data_d, dict):
-                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
-                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
-                    node = data_d[0].get('v', data_d[0])
-                oi = node.get('oi') if isinstance(node, dict) else None
-                if oi is None:
-                    continue
-                nse = from_fyers_symbol(fsym)
-                agg.last_oi[nse] = int(oi)   # GIL-atomic dict write; no lock needed
-                got += 1
+                    _note_api(True); throttled = True
+                elif r.status_code == 429 or not (r.text or '').strip():
+                    throttled = True   # cc#770: empty body / rate-limit — the throttle signature
+                else:
+                    _note_api(False)
+                    d = r.json()
+                    if d.get('s') != 'ok':
+                        throttled = True
+                    else:
+                        data_d = d.get('d')
+                        node = {}
+                        if isinstance(data_d, dict):
+                            node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
+                        elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
+                            node = data_d[0].get('v', data_d[0])
+                        oi = node.get('oi') if isinstance(node, dict) else None
+                        if oi is not None:
+                            nse = from_fyers_symbol(fsym)
+                            agg.last_oi[nse] = int(oi)   # GIL-atomic dict write; no lock needed
+                            got += 1
             except Exception as e:
                 log.warning(f"poll_futures_oi {fsym}: {e}")
-            time.sleep(OI_CALL_SPACING_SEC)
-        log.info(f"OI poll (depth API): {got}/{len(fut_syms)} futures OI updated")
+                throttled = True
+            if throttled:
+                empties += 1
+                consec_empty += 1
+                spacing = min(max_backoff, base_spacing * (2 ** min(consec_empty, 4)))
+            else:
+                consec_empty = 0
+                spacing = base_spacing
+            time.sleep(spacing + (got % 5) * 0.03)   # jitter
+        rate = round(got / len(fut_syms) * 100, 1) if fut_syms else 0
+        log.info(f"OI poll (depth API): {got}/{len(fut_syms)} futures OI updated ({rate}% ok, {empties} throttled/empty)")
+        if empties and fut_syms and (empties / len(fut_syms)) > 0.3:
+            log.warning(f"OI depth poll THROTTLED: {empties}/{len(fut_syms)} empty ({rate}% ok) — "
+                        "exponential backoff engaged (cc#770)")
     finally:
         _OI_POLL_LOCK.release()
 
@@ -2070,12 +2093,28 @@ def run(auth_code=None):
     opt_store = OptionBarStore(conn, opt_mgr)
     access    = f"{FYERS_CLIENT_ID}:{token}"
 
+    # cc#770 CAPTURE: non-tick WS frames (subscribe acks, status, embedded rejects) were silently dropped
+    # in on_message — we were blind to WHY the futures leg delivers nothing. Log the first 40 verbatim,
+    # then one every 30s (rate-limited so a reject storm can't flood the log, but nothing is invisible).
+    _frame_diag = {'n': 0, 'last_log': 0.0}
+    def _capture_frame(msg):
+        try:
+            _frame_diag['n'] += 1
+            now = time.monotonic()
+            if _frame_diag['n'] <= 40 or (now - _frame_diag['last_log']) >= 30:
+                _frame_diag['last_log'] = now
+                log.info(f"WS non-tick frame #{_frame_diag['n']} (cc#770 capture): {str(msg)[:400]}")
+        except Exception:
+            pass
+
     def on_message(msg):
         try:
             fsym = msg.get('symbol', '')
             ltp  = msg.get('ltp')
             vol  = msg.get('vol_traded_today') or msg.get('volume') or 0
-            if not fsym or not ltp: return
+            if not fsym or not ltp:
+                _capture_frame(msg)   # cc#770: surface ack/status/reject frames instead of discarding them
+                return
 
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
@@ -2156,6 +2195,10 @@ def run(auth_code=None):
 
     def on_error(msg):
         log.error(f"WS error: {msg}")
+        # cc#770 CAPTURE: persist EVERY error frame (not just -300) to ops_log so an entitlement/throttle
+        # reject on the futures channel is visible in the record, not only on stdout.
+        try: _log_feed_incident("feed_ws_error", str(msg)[:400])
+        except Exception: pass
         # cc#489 step_6 + cc#495 change_1/1_amended: on a -300 invalid-symbol
         # rejection, Fyers appears to reject the WHOLE subscribe batch the bad
         # symbol was in, not just that one symbol (16-Jul: SAMMAANCAP26JULFUT alone
@@ -2356,6 +2399,19 @@ def run(auth_code=None):
             if (uni_fut > 0 and fut > uni_fut) or (uni_eq > 0 and eq > uni_eq):
                 _log_feed_incident("feed_ticking_exceeds_universe",
                                    f"{label}: ticking EXCEEDS universe ({msg}) — double-subscription, FAILURE")
+            elif in_market and uni_fut > 0 and fut == 0 and eq > 0:
+                # cc#770: the FUTURES leg is silent while EQUITY flows on the SAME socket. Dump the exact
+                # futures subscribe payload (so a malformed/expired AUG contract is visible) + raise a
+                # HIGH-URGENCY escalation. Cross-reference the captured non-tick/error frames: a reject
+                # frame names the cause; if a single-symbol subscribe is ALSO silent it is a Fyers
+                # entitlement issue (founder -> Fyers support), else a batch-composition/invalid-symbol one.
+                _log_feed_incident("feed_futures_silent_eq_alive",
+                                   {"msg": msg, "fut_universe": uni_fut,
+                                    "fut_payload_sample": futures_fyers_syms[:20],
+                                    "hint": "eq flows on same WS; inspect captured feed_ws_error / non-tick "
+                                            "frames; single-symbol subscribe also silent => Fyers entitlement"})
+                log.error(f"cc#770 FUTURES SILENT ({label}): {msg} — full fut payload ({uni_fut}): "
+                          f"{futures_fyers_syms}")
             elif in_market:
                 _log_feed_incident("subscribe_verify", msg)
             elif recent == 0:
