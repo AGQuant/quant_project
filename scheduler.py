@@ -733,17 +733,22 @@ def _bg_smartgain_mtm():
                   AND (fut.fut_close IS NOT NULL OR fb.basis IS NOT NULL OR fev.ever)
             """)
             n = cur.rowcount
-            # cc#762: INDEX-futures positions (NIFTY/BANKNIFTY/…) never resolved above — the stock path
-            # DRIVES off cmp_prices and gates on a fresh spot row, but an index symbol has no reliably-
-            # fresh spot tick (NIFTY spot never ticks as fyers_eq; only NIFTY50 does), so it was skipped
-            # and ltp stayed NULL (MHK40 NIFTY). Resolve index holdings DIRECTLY off the latest index-
-            # futures 5-min bar (intraday_prices fyers_fut) first, with a spot+basis synthetic fallback
-            # (universal pricing rule). Driven off the holdings themselves, not cmp_prices freshness.
+            # cc#762 / cc#769 fix_2: INDEX-futures positions (NIFTY/BANKNIFTY/…) — the stock path above
+            # drives off cmp_prices under the HOLDING symbol, but an index future has no reliably-fresh
+            # tick under its own key: NIFTY's live spot ticks as 'NIFTY50' (not 'NIFTY'), and index
+            # futures are never subscribed live (cc#162) so the fyers_fut bar goes stale after close.
+            # cc#762 looked spot up under idx.symbol='NIFTY' (stale since 10-Jul) -> NULL -> the WHERE
+            # gate failed every scheduled 5-min tick and NIFTY.ltp froze at the one recovery stamp.
+            # FIX: resolve the spot leg through the SPOT_ALIAS (NIFTY->NIFTY50, others self) so the live
+            # NIFTY50 tick + last-known NIFTY basis produce a fresh synthetic future price on EVERY tick.
+            # Fallback chain unchanged: fresh index-fut 5m bar -> aliased-spot + basis synthetic -> spot.
             cur.execute("""
                 UPDATE smartgain_holdings h
-                SET ltp = COALESCE(fut.fut_close, cp.cmp + fb.basis, cp.cmp),
+                SET ltp = COALESCE(fut.fut_close, sp.cmp + fb.basis, sp.cmp),
                     updated_at = NOW()
-                FROM (SELECT DISTINCT symbol FROM smartgain_holdings
+                FROM (SELECT DISTINCT symbol,
+                             CASE UPPER(symbol) WHEN 'NIFTY' THEN 'NIFTY50' ELSE UPPER(symbol) END AS spot_sym
+                      FROM smartgain_holdings
                       WHERE UPPER(symbol) IN ('NIFTY','NIFTY50','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX')) idx
                 LEFT JOIN LATERAL (
                     SELECT ip.close AS fut_close FROM intraday_prices ip
@@ -753,16 +758,16 @@ def _bg_smartgain_mtm():
                 ) fut ON true
                 LEFT JOIN LATERAL (
                     SELECT cp2.cmp FROM cmp_prices cp2
-                    WHERE cp2.symbol = idx.symbol
+                    WHERE cp2.symbol = idx.spot_sym
                       AND cp2.updated_at >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '15 minutes'
-                    LIMIT 1
-                ) cp ON true
+                    ORDER BY cp2.updated_at DESC LIMIT 1
+                ) sp ON true
                 LEFT JOIN LATERAL (
                     SELECT fb2.basis FROM futures_basis fb2 WHERE fb2.symbol = idx.symbol
                     ORDER BY fb2.ts DESC LIMIT 1
                 ) fb ON true
                 WHERE h.symbol = idx.symbol
-                  AND (fut.fut_close IS NOT NULL OR cp.cmp IS NOT NULL)
+                  AND (fut.fut_close IS NOT NULL OR sp.cmp IS NOT NULL)
             """)
             n_idx = cur.rowcount
             conn.commit()

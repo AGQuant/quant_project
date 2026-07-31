@@ -530,9 +530,12 @@ const ago = ts => {
 
 async function loadSG() {
   try {
-    const r = await fetch("/api/smartgain/m2m");
+    const r = await fetch("/api/smartgain/m2m", {cache:'no-store'});   // cc#769: always fresh, never a stale cached body
     const d = await r.json();
-    if (d.error || !d.positions) return;
+    // cc#769 fix_1: NEVER leave "Week M2M" stranded at "Loading…" — the old silent `return` on an
+    // error/positions-less response froze the header (31-Jul incident). Always clear to an explicit state.
+    if (d.error) { document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>'; return; }
+    if (!d.positions) { document.getElementById("sg-total").innerHTML = '<span class="sg-loading">No live data</span>'; return; }
 
     // cc#301: headline is NET of brokerage. Gross = Realised + Unrealised; Net = Gross − Brokerage.
     const realised   = d.realised   != null ? d.realised   : 0;
@@ -749,7 +752,7 @@ function renderBookPnl(d, book) {
 }
 async function loadBook(book) {
   try {
-    const r = await fetch(book.posEP);
+    const r = await fetch(book.posEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
     if (d.error) { document.getElementById(book.pfx + "-pos").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
     renderBookPositions(d, book);
@@ -803,7 +806,7 @@ function renderBookRealised(d, book) {
 }
 async function loadBookRealised(book) {
   try {
-    const r = await fetch(book.realEP);
+    const r = await fetch(book.realEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
     if (d.error) { document.getElementById(book.pfx + "-real").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
     renderBookRealised(d, book);
@@ -876,9 +879,9 @@ let sgThisWeek = null;   // the real current week (nav upper bound)
 async function loadDailyM2M(weekStart) {
   try {
     const url = "/api/smartgain/daily_m2m" + (weekStart ? "?week_start=" + weekStart : "");
-    const r = await fetch(url);
+    const r = await fetch(url, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
-    if (d.error) return;
+    if (d.error) return;   // additive chart panel (collapsed by default) — no loading state to strand
     sgCurWeek = d.week_start;
     if (!sgThisWeek && !weekStart) sgThisWeek = d.week_start;
 
