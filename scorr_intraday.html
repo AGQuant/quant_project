@@ -140,15 +140,22 @@
     <div class="card"><div class="k">Net Pts</div><div class="v" id="sNet">—</div></div>
   </div>
 
-  <div class="tabs">
+  <div class="tabs" style="align-items:center">
     <div class="tab active" id="tabBUY" onclick="selectTab('BUY')">▲ Buy</div>
     <div class="tab" id="tabSELL" onclick="selectTab('SELL')">▼ Sell</div>
     <div class="tab" id="tabORB" onclick="selectTab('ORB')">◆ ORB AG</div>
+    <div class="tab" id="tabRADAR" onclick="selectTab('RADAR')">◎ Result Radar</div>
+    <!-- cc#772: page-level quick-switch across every registered scanner strategy (reads /api/scanners/registry) -->
+    <button id="otherStratBtn" onclick="openStrategies()" title="Jump to another scanner strategy"
+            style="margin-left:auto;margin-bottom:6px;font-family:var(--mono);font-size:11.5px;font-weight:600;
+                   color:var(--mut);background:var(--panel2);border:1px solid var(--line2);border-radius:7px;
+                   padding:5px 11px;cursor:pointer">⋯ Other Strategies</button>
   </div>
 
   <div class="panel active" id="panelBUY"></div>
   <div class="panel" id="panelSELL"></div>
   <div class="panel" id="panelORB"></div>
+  <div class="panel" id="panelRADAR"></div>
 
   <footer>
     <span id="footerLegend">TC Scanner &middot; full futures universe &middot; 13-check binary bucket (id=399/400), pass &ge;12/13 &middot; target +3% / SL -3% &middot; latch-once-per-symbol-per-day &middot; screener only, not a live signal</span>
@@ -159,8 +166,17 @@
 <div class="info-ov" id="infoOv" onclick="if(event.target===this)closeInfo()">
   <div class="info-box" id="infoBox">
     <button class="info-close" onclick="closeInfo()">&times;</button>
-    <div style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;margin-bottom:10px">TC Scanner &middot; how it works</div>
+    <div id="infoTitle" style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;margin-bottom:10px">TC Scanner &middot; how it works</div>
     <div id="infoBody" style="font-size:12.5px;line-height:1.7;color:var(--txt)">Loading…</div>
+  </div>
+</div>
+
+<!-- cc#772: OTHER STRATEGIES quick-switch menu (reads /api/scanners/registry) -->
+<div class="info-ov" id="stratOv" onclick="if(event.target===this)closeStrat()">
+  <div class="info-box">
+    <button class="info-close" onclick="closeStrat()">&times;</button>
+    <div style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;margin-bottom:6px">Scanner strategies</div>
+    <div id="stratBody" style="font-size:12.5px;color:var(--txt)">Loading…</div>
   </div>
 </div>
 
@@ -205,6 +221,7 @@ function renderInfoBody(s){
 }
 async function openInfo(){
   document.getElementById('infoOv').classList.add('open');
+  document.getElementById('infoTitle').textContent = 'TC Scanner · how it works';
   const body=document.getElementById('infoBody');
   if(tcSpecCache){ body.innerHTML=renderInfoBody(tcSpecCache); return; }
   body.innerHTML='Loading…';
@@ -228,18 +245,21 @@ function exitBadge(reason){
 
 function selectTab(side){
   currentSide = side;
-  document.getElementById('tabBUY').className = 'tab' + (side==='BUY'?' active':'');
-  document.getElementById('tabSELL').className = 'tab' + (side==='SELL'?' active':'');
-  document.getElementById('tabORB').className = 'tab' + (side==='ORB'?' active':'');
-  document.getElementById('panelBUY').className = 'panel' + (side==='BUY'?' active':'');
-  document.getElementById('panelSELL').className = 'panel' + (side==='SELL'?' active':'');
-  document.getElementById('panelORB').className = 'panel' + (side==='ORB'?' active':'');
-  document.getElementById('footerLegend').textContent = side==='ORB'
-    ? 'ORB AG · full futures universe · 6-condition strategy (20-DMA, 9-DMA, PP-R1 band, sector month, 09:15-10:00 opening-range breakout, 1.2x time-proportional volume) · target +3% / SL -3% · screener only, not a live signal'
-    : 'TC Scanner · full futures universe · 13-check binary bucket (id=399/400), pass ≥12/13 · target +3% / SL -3% · latch-once-per-symbol-per-day · screener only, not a live signal';
+  ['BUY','SELL','ORB','RADAR'].forEach(s=>{
+    document.getElementById('tab'+s).className = 'tab' + (side===s?' active':'');
+    document.getElementById('panel'+s).className = 'panel' + (side===s?' active':'');
+  });
+  document.getElementById('footerLegend').textContent =
+      side==='RADAR' ? 'Result Radar · pre-results OI-positioning quadrant for next-day F&O reporters · observation study (8 samples), NOT a trade signal'
+    : side==='ORB'   ? 'ORB AG · full futures universe · 6-condition strategy (20-DMA, 9-DMA, PP-R1 band, sector month, 09:15-10:00 opening-range breakout, 1.2x time-proportional volume) · target +3% / SL -3% · screener only, not a live signal'
+    :                  'TC Scanner · full futures universe · 13-check binary bucket (id=399/400), pass ≥12/13 · target +3% / SL -3% · latch-once-per-symbol-per-day · screener only, not a live signal';
   if(side==='ORB'){
     if(orbData) document.getElementById('panelORB').innerHTML = renderOrbPanel();
     else loadOrb(false);
+  }
+  if(side==='RADAR'){
+    if(radarData) document.getElementById('panelRADAR').innerHTML = renderRadarPanel();
+    else loadRadar(false);
   }
 }
 
@@ -427,10 +447,86 @@ async function loadOrb(silent){
   }catch(e){ if(!silent) console.error('ORB AG error', e); }
 }
 
+// ── cc#772: RESULT RADAR — pre-results OI-positioning observation study ─────────
+let radarData = null;
+function _rrChip(r){
+  const c = r.tag==='WASHED OUT' ? 'var(--grn)' : r.tag==='CROWDED' ? 'var(--red)' : 'var(--mut)';
+  const bg = r.tag==='WASHED OUT' ? 'rgba(47,212,139,.14)' : r.tag==='CROWDED' ? 'rgba(240,80,80,.14)' : 'rgba(148,166,210,.14)';
+  return `<span style="font-weight:700;font-size:11px;color:${c};background:${bg};border:1px solid ${c};border-radius:5px;padding:2px 7px;white-space:nowrap">${r.tag}</span>`;
+}
+function _rrGrade(r){
+  if(r.direction==null) return '<span style="color:var(--dim)">—</span>';
+  if(r.full_signal) return '<span style="font-weight:700;font-size:10px;color:var(--grn);background:rgba(47,212,139,.14);border:1px solid var(--grn);border-radius:5px;padding:2px 6px">FULL SIGNAL</span>';
+  return (r.badges||[]).map(b=>`<span style="font-size:10px;color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.5);border-radius:5px;padding:2px 6px;margin-right:3px;white-space:nowrap">${b}</span>`).join('');
+}
+function _rrOI(v){ return v!=null ? (Number(v)>=0?'+':'')+Number(v).toLocaleString('en-IN') : '—'; }
+function renderRadarPanel(){
+  if(!radarData) return '<div class="empty" style="padding:40px">Loading…</div>';
+  if(radarData.status==='error') return `<div class="empty" style="padding:40px">Result Radar unavailable: ${radarData.error||''}</div>`;
+  const rows = radarData.rows || [];
+  const head = `<div class="ptitle" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Result Radar
+      <span class="ct">${rows.length} F&amp;O reporter${rows.length===1?'':'s'} on ${radarData.result_date||'—'} · as of ${radarData.as_of||''}</span>
+      <button onclick="openRadarRules()" style="margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--cyan);background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:4px 10px;cursor:pointer">RULES</button></div>
+    <div style="font-size:11px;color:var(--dim);margin:2px 0 8px">${radarData.disclaimer||''}</div>`;
+  const trs = rows.map(r=>`<tr>
+    <td class="sym">${r.symbol}</td><td>${_rrChip(r)}</td>
+    <td class="${r.oi_chg_day!=null?cls(r.oi_chg_day):''}">${_rrOI(r.oi_chg_day)}</td>
+    <td class="${r.price_move_t1!=null?cls(r.price_move_t1):''}">${pct(r.price_move_t1)}</td>
+    <td>${r.vol_vs_20d!=null?Number(r.vol_vs_20d).toFixed(2)+'×':'—'}</td>
+    <td>${num(r.mrsi,1)}</td>
+    <td class="${r.ret_1m!=null?cls(r.ret_1m):''}">${pct(r.ret_1m,1)}</td>
+    <td class="${r.ret_3m!=null?cls(r.ret_3m):''}">${pct(r.ret_3m,1)}</td>
+    <td>${_rrGrade(r)}</td></tr>`).join('');
+  const table = `<div class="scroll desktop-tbl"><table><thead><tr>
+      <th>Symbol</th><th>Tag</th><th>OI Δ (T-1)</th><th>Move% (T-1)</th><th>Vol×20d</th><th>mRSI</th><th>1M</th><th>3M</th><th>Grade</th>
+    </tr></thead><tbody>${trs||`<tr><td colspan="9" class="empty">No F&amp;O stocks reporting the next trading day yet · card populates after 15:00 IST</td></tr>`}</tbody></table></div>
+    <div class="mob-cards">${rows.map(r=>`<div class="mob-card"><div class="mob-card-head"><span class="mob-sym">${r.symbol}</span>${_rrChip(r)}</div>
+      <div class="mob-chips"><span class="mob-chip ${r.oi_chg_day!=null?cls(r.oi_chg_day):''}">OI ${_rrOI(r.oi_chg_day)}</span>
+      <span class="mob-chip ${r.price_move_t1!=null?cls(r.price_move_t1):''}">Move ${pct(r.price_move_t1)}</span>
+      <span class="mob-chip">Vol ${r.vol_vs_20d!=null?Number(r.vol_vs_20d).toFixed(2)+'×':'—'}</span>
+      <span class="mob-chip">mRSI ${num(r.mrsi,1)}</span></div>
+      <div style="margin-top:6px">${_rrGrade(r)}</div></div>`).join('')||'<div class="empty">No reporters next trading day</div>'}</div>`;
+  return head + table;
+}
+async function loadRadar(silent){
+  if(!silent && currentSide==='RADAR') document.getElementById('panelRADAR').innerHTML='<div class="empty" style="padding:40px">Loading…</div>';
+  try{
+    const r = await fetch('/api/scanners/result_radar', {cache:'no-store'});
+    radarData = await r.json();
+    if(currentSide==='RADAR') document.getElementById('panelRADAR').innerHTML = renderRadarPanel();
+  }catch(e){ if(!silent) console.error('Result Radar error', e); }
+}
+async function openRadarRules(){
+  document.getElementById('infoOv').classList.add('open');
+  document.getElementById('infoTitle').textContent = 'Result Radar · how it works';
+  const body=document.getElementById('infoBody'); body.innerHTML='Loading…';
+  try{
+    const s = await (await fetch('/api/scanners/result_radar/rules')).json();
+    body.innerHTML = (s.sections||[]).map(x=>`<div style="margin-top:10px"><div style="font-weight:700;color:var(--cyan)">${x.h}</div><div style="margin-top:2px">${x.p}</div></div>`).join('')
+      + `<div style="margin-top:12px;color:var(--dim);font-size:11px">${s.disclaimer||''}</div>`;
+  }catch(e){ body.innerHTML='<span style="color:var(--red)">Rules unavailable: '+e+'</span>'; }
+}
+async function openStrategies(){
+  document.getElementById('stratOv').classList.add('open');
+  const body=document.getElementById('stratBody'); body.innerHTML='Loading…';
+  try{
+    const s = await (await fetch('/api/scanners/registry')).json();
+    body.innerHTML = (s.strategies||[]).map(x=>{
+      const here = (x.url==='/scanners' && x.tab);
+      const act = here ? `onclick="closeStrat();selectTab('${x.tab}')"` : `onclick="location.href='${x.url}'"`;
+      return `<div ${act} style="padding:10px 12px;border-top:1px solid var(--line);cursor:pointer">
+        <div style="font-weight:700">${x.label}${here?' <span style="font-size:10px;color:var(--dim)">(this page)</span>':''}</div>
+        <div style="font-size:11.5px;color:var(--dim);margin-top:2px">${x.desc}</div></div>`;
+    }).join('');
+  }catch(e){ body.innerHTML='<span style="color:var(--red)">Registry unavailable</span>'; }
+}
+function closeStrat(){ document.getElementById('stratOv').classList.remove('open'); }
+
 load(false);
 loadOrb(false);
-setInterval(()=>{ load(true); loadOrb(true); }, AUTO_MS);
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ load(true); loadOrb(true); } });
+loadRadar(false);
+setInterval(()=>{ load(true); loadOrb(true); loadRadar(true); }, AUTO_MS);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ load(true); loadOrb(true); loadRadar(true); } });
 </script>
 
 <script>

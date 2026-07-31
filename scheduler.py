@@ -516,6 +516,33 @@ def _premarket_writer_check():
         log.error(f"_premarket_writer_check: {e}")
 
 
+_result_radar_running = False
+def _bg_result_radar_snapshot():
+    """cc#772: post-close (15:40 IST) FREEZE of the Result Radar card (next-day reporters) into
+    result_radar_log with the T-1 tag/metrics captured at result-eve (returns filled later)."""
+    global _result_radar_running
+    if _result_radar_running:
+        return
+    _result_radar_running = True
+    try:
+        import intraday_scanner_endpoints
+        log.info(f"result_radar snapshot: {intraday_scanner_endpoints.result_radar_snapshot()}")
+    except Exception as e:
+        log.error(f"_bg_result_radar_snapshot: {e}")
+    finally:
+        _result_radar_running = False
+
+
+def _bg_result_radar_log():
+    """cc#772: nightly T+1 EOD backfill — fills T/T+1 day-returns on frozen result_radar_log rows once
+    those closes are in raw_prices (the tag is already frozen; this only fills outcomes). Idempotent."""
+    try:
+        import intraday_scanner_endpoints
+        log.info(f"result_radar backfill: {intraday_scanner_endpoints.result_radar_backfill_returns()}")
+    except Exception as e:
+        log.error(f"_bg_result_radar_log: {e}")
+
+
 _smartgain_resync_running = False
 def _bg_smartgain_resync():
     """cc#771 fix_1: 09:10 IST pre-market SmartGain replay-resync (all accounts in smartgain_orders).
@@ -3093,6 +3120,10 @@ async def _scheduler_loop():
         # cc#445 fix_4: ATM-OI daily snapshot — post-open (09:20) + EOD (15:35), trading days.
         if now.weekday() < 5 and _is_trading_day(now.date()) and ((h == 9 and m == 20) or (h == 15 and m == 35)):
             _spawn(_bg_oi_snapshot)
+        if _is_trading_day(now.date()) and h == 15 and m == 40:
+            _spawn(_bg_result_radar_snapshot)   # cc#772: post-close freeze of the Result Radar card (T-1 tag)
+        if _is_trading_day(now.date()) and h == 16 and m == 15:
+            _spawn(_bg_result_radar_log)        # cc#772: nightly T+1 outcome backfill for the study
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)

@@ -856,3 +856,309 @@ def scanner_orb_ag(limit: int = 40):
         "universe": len(rows), "count": len(signals), "recorded_to_watchlist": recorded,
         "signals": top_signals,
     }
+
+
+# ══ cc#772: RESULT RADAR — pre-results OI positioning observation study ═══════════════════════════
+# Frozen study (card_spec cc#772; the referenced RESULT_FADE_V0/LONG_UNWIND_V0 session_log entries were
+# not present at build time, so the rule set below is transcribed from the task card_spec):
+#   OI QUADRANT (primary tag): WASHED OUT = OI down + price down (longs unwound -> historically UP on T,
+#   5/5) = BULLISH fade; CROWDED = OI up + price up (longs crowded -> historically DOWN, 0/3) = BEARISH;
+#   NEUTRAL otherwise. GRADE FILTERS (badges, never gates): RSI — bullish needs mRSI>50, bearish mRSI<50;
+#   MOMENTUM — bullish needs 1M OR 3M return>0, bearish 1M OR 3M<0. full-signal when both agree, a caution
+#   badge per disagreeing filter; the quadrant tag is ALWAYS shown. Thresholds FROZEN: n>=20 by 31-Aug,
+#   >=70% + positive expectancy -> paper basket, <60% -> retire.
+RR_DISCLAIMER = "Observation study · 8 historical samples · not a trade signal"
+RR_THRESHOLDS = {"min_n": 20, "target_date": "31-Aug-2026", "promote_pct": 70, "retire_pct": 60}
+
+
+def _ensure_rr_table(cur):
+    # idempotent (CREATE TABLE is allowed under MAINTENANCE_LOCK_RULE; app-side self-create).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS result_radar_log (
+            id            SERIAL PRIMARY KEY,
+            symbol        TEXT NOT NULL,
+            result_date   DATE NOT NULL,
+            tag           TEXT NOT NULL,
+            direction     TEXT,
+            rsi_pass      BOOLEAN,
+            mom_pass      BOOLEAN,
+            oi_chg_day    NUMERIC,
+            price_move_t1 NUMERIC,
+            mrsi          NUMERIC,
+            ret_1m        NUMERIC,
+            ret_3m        NUMERIC,
+            t_return      NUMERIC,
+            t1_return     NUMERIC,
+            logged_at     TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE (symbol, result_date)
+        )
+    """)
+
+
+def _next_trading_day(d):
+    from nse_holidays import is_trading_day
+    from datetime import timedelta
+    n = d + timedelta(days=1)
+    for _ in range(12):
+        if is_trading_day(n):
+            return n
+        n += timedelta(days=1)
+    return n
+
+
+def _rr_classify(oi_chg_day, price_move, mrsi, r1m, r3m):
+    """OI-quadrant tag + grade-filter badges. Returns the full row-decoration dict. Never returns None
+    for the tag (NEUTRAL is a real tag)."""
+    oi = oi_chg_day if oi_chg_day is not None else 0.0
+    pm = price_move if price_move is not None else 0.0
+    if oi < 0 and pm < 0:
+        tag, direction = "WASHED OUT", "bullish"
+    elif oi > 0 and pm > 0:
+        tag, direction = "CROWDED", "bearish"
+    else:
+        tag, direction = "NEUTRAL", None
+
+    rsi_pass = mom_pass = None
+    badges = []
+    if direction == "bullish":
+        rsi_pass = (mrsi is not None and mrsi > 50)
+        mom_pass = ((r1m is not None and r1m > 0) or (r3m is not None and r3m > 0))
+    elif direction == "bearish":
+        rsi_pass = (mrsi is not None and mrsi < 50)
+        mom_pass = ((r1m is not None and r1m < 0) or (r3m is not None and r3m < 0))
+    if direction is not None:
+        if not rsi_pass:
+            badges.append("mRSI caution")
+        if not mom_pass:
+            badges.append("momentum caution")
+    full_signal = bool(direction and rsi_pass and mom_pass)
+    return {"tag": tag, "direction": direction, "rsi_pass": rsi_pass, "mom_pass": mom_pass,
+            "badges": badges, "full_signal": full_signal}
+
+
+def _result_radar_rows(cur, result_date):
+    """One row per F&O stock reporting on result_date (validated upcoming per cc#765). Metrics are the
+    T-1 (latest) session values: OI-change (futures_basis day sum), price move (day_1d), volume vs 20d,
+    monthly RSI, 1M return, 3M return (raw_prices 90d)."""
+    cur.execute("""
+        WITH cal AS (
+            SELECT DISTINCT UPPER(e.ticker) AS symbol
+            FROM earnings_calendar e
+            JOIN futures_universe fu ON UPPER(fu.symbol) = UPPER(e.ticker) AND fu.is_active
+            WHERE e.ex_date = %(rd)s AND e.status = 'upcoming' AND e.verified <> 'false'
+              AND e.event_type IN ('Quarterly Result', 'Financial Results')
+        )
+        SELECT c.symbol, m.rsi_month, m.month_return, m.day_1d,
+               (SELECT COALESCE(SUM(fb.oi_chg), 0) FROM futures_basis fb
+                  WHERE fb.symbol = c.symbol
+                    AND fb.ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date)            AS oi_chg_day,
+               (SELECT rp.volume FROM raw_prices rp WHERE rp.symbol = c.symbol
+                  ORDER BY rp.price_date DESC LIMIT 1)                                       AS vol_today,
+               (SELECT AVG(v) FROM (SELECT volume v FROM raw_prices WHERE symbol = c.symbol
+                  ORDER BY price_date DESC LIMIT 20) x)                                      AS vol_20d,
+               (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = c.symbol
+                  ORDER BY rp.price_date DESC LIMIT 1)                                       AS c_now,
+               (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = c.symbol
+                  AND rp.price_date <= CURRENT_DATE - 90 ORDER BY rp.price_date DESC LIMIT 1) AS c_3m
+        FROM cal c
+        LEFT JOIN LATERAL (SELECT rsi_month, month_return, day_1d FROM v8_metrics
+                           WHERE symbol = c.symbol ORDER BY score_date DESC LIMIT 1) m ON true
+        ORDER BY c.symbol
+    """, {"rd": result_date})
+    out = []
+    for (sym, mrsi, r1m, day1d, oi_chg, vol_t, vol_20, c_now, c_3m) in cur.fetchall():
+        f = lambda x: float(x) if x is not None else None
+        mrsi, r1m, day1d, oi_chg = f(mrsi), f(r1m), f(day1d), f(oi_chg)
+        r3m = (round((float(c_now) - float(c_3m)) / float(c_3m) * 100, 1)
+               if (c_now and c_3m and float(c_3m) != 0) else None)
+        vol_ratio = (round(float(vol_t) / float(vol_20), 2)
+                     if (vol_t and vol_20 and float(vol_20) > 0) else None)
+        cls = _rr_classify(oi_chg, day1d, mrsi, r1m, r3m)
+        out.append({"symbol": sym, "result_date": str(result_date),
+                    "oi_chg_day": round(oi_chg, 0) if oi_chg is not None else None,
+                    "price_move_t1": round(day1d, 2) if day1d is not None else None,
+                    "vol_vs_20d": vol_ratio, "mrsi": round(mrsi, 1) if mrsi is not None else None,
+                    "ret_1m": round(r1m, 1) if r1m is not None else None, "ret_3m": r3m, **cls})
+    # WASHED OUT + CROWDED first (directional), NEUTRAL last; full-signals on top within each.
+    order = {"WASHED OUT": 0, "CROWDED": 1, "NEUTRAL": 2}
+    out.sort(key=lambda r: (order.get(r["tag"], 3), not r["full_signal"], r["symbol"]))
+    return out
+
+
+@router.get("/api/scanners/result_radar")
+def scanner_result_radar():
+    """RESULT RADAR card — F&O stocks reporting the NEXT trading day, tagged by pre-results OI quadrant
+    with grade-filter badges. Observation study (cc#772), never a live signal."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_rr_table(cur); conn.commit()
+            today = _ist_now().date()
+            rd = _next_trading_day(today)
+            rows = _result_radar_rows(cur, rd)
+        return {"scanner": "result_radar", "status": "ok", "result_date": str(rd),
+                "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
+                "count": len(rows), "rows": rows,
+                "disclaimer": RR_DISCLAIMER, "thresholds": RR_THRESHOLDS}
+    except Exception as e:
+        return {"scanner": "result_radar", "status": "error", "error": str(e),
+                "rows": [], "disclaimer": RR_DISCLAIMER}
+
+
+@router.get("/api/scanners/result_radar/rules")
+def scanner_result_radar_rules():
+    """Plain-language RULES modal content — generated from the live constants so it can't drift."""
+    return {
+        "title": "Result Radar · how it works",
+        "disclaimer": RR_DISCLAIMER,
+        "sections": [
+            {"h": "What it is", "p": "Stocks reporting results the next trading day, tagged by how "
+             "futures traders positioned INTO the result (open-interest quadrant). An observation study "
+             "of a 7-day pattern — not a trade signal."},
+            {"h": "OI quadrant (primary tag)", "p": "WASHED OUT = bets CLOSED + price down (longs "
+             "unwound the position going in) → historically drifted UP on result day. CROWDED = bets "
+             "ADDED + price up (longs piled in) → historically drifted DOWN. NEUTRAL = anything else."},
+            {"h": "Grade filter · mRSI (badge, not a gate)", "p": "A bullish (WASHED OUT) tag is "
+             "'full-signal' only if monthly RSI > 50; a bearish (CROWDED) tag only if monthly RSI < 50. "
+             "If it disagrees you still see the tag, with an 'mRSI caution' badge."},
+            {"h": "Grade filter · momentum (badge, not a gate)", "p": "Bullish wants 1-month OR 3-month "
+             "return > 0; bearish wants 1M OR 3M < 0. Disagreement shows a 'momentum caution' badge — "
+             "the quadrant tag is never hidden."},
+            {"h": "The study (frozen thresholds)", "p": f"Self-tracks every tagged row's T and T+1 "
+             f"outcome across four variants (raw / RSI-filtered / momentum-filtered / both). Kill/promote "
+             f"is frozen: need n≥{RR_THRESHOLDS['min_n']} by {RR_THRESHOLDS['target_date']}; "
+             f"≥{RR_THRESHOLDS['promote_pct']}% with positive expectancy → paper-basket proposal; "
+             f"<{RR_THRESHOLDS['retire_pct']}% → retire the card."},
+        ],
+    }
+
+
+# ── cc#772: scanner strategy registry — the OTHER STRATEGIES quick-switch reads THIS (never hardcoded).
+# A new scanner adds one entry here and it appears in the menu automatically.
+SCANNER_REGISTRY = [
+    {"id": "buy",           "label": "Intraday · Buy",       "url": "/scanners", "tab": "BUY",
+     "desc": "2-tier long screener (buy-reversal / momentum / S1-bounce / TC 14-check + MA & room gates)."},
+    {"id": "sell",          "label": "Intraday · Sell",      "url": "/scanners", "tab": "SELL",
+     "desc": "Mirror short screener over the same 2-tier core filters."},
+    {"id": "orb_ag",        "label": "ORB AG",               "url": "/scanners", "tab": "ORB",
+     "desc": "09:15–10:00 opening-range breakout, full futures universe, 6-condition, +3%/-3% (screen only)."},
+    {"id": "result_radar",  "label": "Result Radar",         "url": "/scanners", "tab": "RADAR",
+     "desc": "Pre-results OI-positioning quadrant for next-day reporters (observation study)."},
+    {"id": "tc_scanner",    "label": "TC Scanner (V8 dash)", "url": "/dashboard", "tab": "TC",
+     "desc": "Dual-style Trade-Check buckets (BUY/SELL × Momentum/Reversal) on the V8 dashboard."},
+    {"id": "v14_orb",       "label": "V14 Intraday",         "url": "/v14",      "tab": None,
+     "desc": "V14 paper intraday engine — ORB / VWAP-reclaim / R1-rejection setups with live exits."},
+]
+
+
+@router.get("/api/scanners/registry")
+def scanners_registry():
+    """List of live scanner strategies/cards for the page-level OTHER STRATEGIES quick-switch."""
+    return {"status": "ok", "strategies": SCANNER_REGISTRY}
+
+
+def result_radar_snapshot(conn=None):
+    """cc#772 (post-close ~15:40 IST): FREEZE today's Result Radar card (next-trading-day reporters) into
+    result_radar_log with returns NULL. The tag + T-1 metrics are captured AT result-eve — the study never
+    re-derives them from later data (which would use the wrong day's OI/RSI). Idempotent (UNIQUE
+    symbol+result_date; DO NOTHING preserves the first freeze)."""
+    own = conn is None
+    conn = conn or _conn()
+    n = 0
+    try:
+        with conn.cursor() as cur:
+            _ensure_rr_table(cur); conn.commit()
+            rd = _next_trading_day(_ist_now().date())
+            for r in _result_radar_rows(cur, rd):
+                cur.execute("""INSERT INTO result_radar_log
+                    (symbol, result_date, tag, direction, rsi_pass, mom_pass, oi_chg_day,
+                     price_move_t1, mrsi, ret_1m, ret_3m)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, result_date) DO NOTHING""",
+                    (r["symbol"], rd, r["tag"], r["direction"], r["rsi_pass"], r["mom_pass"],
+                     r["oi_chg_day"], r["price_move_t1"], r["mrsi"], r["ret_1m"], r["ret_3m"]))
+                n += cur.rowcount
+            conn.commit()
+        return {"status": "ok", "frozen": n, "result_date": str(rd)}
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        return {"status": "error", "error": str(e)}
+    finally:
+        if own:
+            try: conn.close()
+            except Exception: pass
+
+
+def result_radar_backfill_returns(conn=None):
+    """cc#772 nightly (T+1 EOD): fill T (result-day) and T+1 day-returns on the frozen result_radar_log
+    rows once those closes are in raw_prices. Idempotent — only fills a NULL return, never re-derives the
+    (already-frozen) tag. Safe to run daily; it catches up any lagging row."""
+    own = conn is None
+    conn = conn or _conn()
+    n = 0
+    try:
+        today = _ist_now().date()
+        with conn.cursor() as cur:
+            _ensure_rr_table(cur); conn.commit()
+            cur.execute("SELECT id, symbol, result_date FROM result_radar_log "
+                        "WHERE t_return IS NULL OR t1_return IS NULL")
+            pending = cur.fetchall()
+
+            def _day_ret(s, d):
+                cur.execute("""SELECT close, (SELECT close FROM raw_prices WHERE symbol=%s
+                                 AND price_date < %s ORDER BY price_date DESC LIMIT 1)
+                               FROM raw_prices WHERE symbol=%s AND price_date=%s""", (s, d, s, d))
+                rr = cur.fetchone()
+                if rr and rr[0] is not None and rr[1] not in (None, 0):
+                    return round((float(rr[0]) - float(rr[1])) / float(rr[1]) * 100, 2)
+                return None
+
+            for rid, sym, rd in pending:
+                t1 = _next_trading_day(rd)
+                t_ret = _day_ret(sym, rd) if rd < today else None
+                t1_ret = _day_ret(sym, t1) if t1 < today else None
+                if t_ret is None and t1_ret is None:
+                    continue
+                cur.execute("""UPDATE result_radar_log
+                               SET t_return=COALESCE(%s, t_return), t1_return=COALESCE(%s, t1_return)
+                               WHERE id=%s""", (t_ret, t1_ret, rid))
+                n += cur.rowcount
+            conn.commit()
+        return {"status": "ok", "updated": n}
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        return {"status": "error", "error": str(e)}
+    finally:
+        if own:
+            try: conn.close()
+            except Exception: pass
+
+
+@router.get("/api/scanners/result_radar/accuracy")
+def scanner_result_radar_accuracy():
+    """Study scoreboard — accuracy per variant (RAW / RSI / MOM / BOTH) from result_radar_log. A tag is
+    'correct' when its directional bias matched T-day drift (bullish→T return>0, bearish→<0)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_rr_table(cur); conn.commit()
+            cur.execute("""SELECT tag, direction, rsi_pass, mom_pass, t_return
+                           FROM result_radar_log WHERE direction IS NOT NULL AND t_return IS NOT NULL""")
+            recs = cur.fetchall()
+        def acc(sel):
+            hits = tot = 0
+            for tag, direction, rp, mp, tr in recs:
+                if not sel(rp, mp):
+                    continue
+                tot += 1
+                correct = (tr > 0) if direction == "bullish" else (tr < 0)
+                hits += 1 if correct else 0
+            return {"n": tot, "pct": round(hits / tot * 100, 1) if tot else None}
+        return {"status": "ok",
+                "raw":  acc(lambda rp, mp: True),
+                "rsi":  acc(lambda rp, mp: bool(rp)),
+                "mom":  acc(lambda rp, mp: bool(mp)),
+                "both": acc(lambda rp, mp: bool(rp) and bool(mp)),
+                "thresholds": RR_THRESHOLDS}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
