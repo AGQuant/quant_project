@@ -287,13 +287,15 @@ def smartgain_m2m():
                         SELECT
                             -- cc#193: only TRADING-SESSION fut bars (weekday +
                             -- 09:15-15:30 IST) — never a phantom off-hours tick.
+                            -- cc#771 fix_2 / cc#770: include the REST fallback source so a position stays
+                            -- priced (fut_live) while the native WS futures leg is dark, not downgraded.
                             (SELECT ip.close FROM intraday_prices ip
-                              WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                              WHERE ip.symbol = h.symbol AND ip.source IN ('fyers_fut','fyers_fut_rest')
                                 AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
                                 AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
                               ORDER BY ip.ts DESC LIMIT 1)                    AS fut_close,
                             (SELECT ip.ts FROM intraday_prices ip
-                              WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                              WHERE ip.symbol = h.symbol AND ip.source IN ('fyers_fut','fyers_fut_rest')
                                 AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
                                 AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
                               ORDER BY ip.ts DESC LIMIT 1)                    AS fut_ts,
@@ -367,20 +369,31 @@ def smartgain_m2m():
                 # fresh the spot number itself is -- e.g. NIFTY/BANKNIFTY pre-cc#162).
                 fut_ever = bool(row.pop("fut_ever_existed", False))
                 reason = None
+                row["stale"] = False
+                row["ltp_as_of"] = row["last_tick"]   # cc#771 fix_2: as-of stamp for the served price
                 if row["pricing_method"] in ("spot_only", "eod"):
                     if not fut_ever:
+                        # structurally fut-less (index futures never NATIVELY subscribed, cc#162): spot is
+                        # NOT a valid futures stand-in, so keep withholding a wrong number (cc#161).
                         reason = "no_live_futures_feed"
-                    elif row["ltp_age_min"] is not None and row["ltp_age_min"] > 24 * 60:
-                        reason = f"stale_data_{round(row['ltp_age_min'] / 1440)}d"
-                    if reason:
                         row["pricing_method"] = "unavailable"
                         row["ltp"] = None
                         row["mtm"] = None
+                        row["is_live"] = False
+                    elif row["ltp_age_min"] is not None and row["ltp_age_min"] > 24 * 60:
+                        # cc#771 fix_2: a real-but-old futures price beats a blank — SERVE it with a stale
+                        # badge + as-of instead of nulling. Never leave an open position value empty.
+                        reason = f"stale_data_{round(row['ltp_age_min'] / 1440)}d"
+                        row["stale"] = True
                         row["is_live"] = False
                 elif row["pricing_method"] is None:
                     reason = "no_data"
                     row["pricing_method"] = "unavailable"
                     row["is_live"] = False
+                # cc#771 fix_2: any priced-but-not-live row (fut_eod off-hours, stale synthetic, stale-served)
+                # carries the stale badge so the UI shows data-age rather than implying it is live.
+                if row["ltp"] is not None and not row["is_live"] and reason != "no_live_futures_feed":
+                    row["stale"] = True
                 row["reason"] = reason
                 rows.append(row)
             # ── UNREALISED: live MTM on open positions (existing computation) ──
@@ -395,16 +408,27 @@ def smartgain_m2m():
             # so this tile read +0.00 all session. All three realised endpoints (/m2m,
             # /daily_m2m week card, /daily_m2m?range=1w) now read this same replay -> identical.
             from smartgain_daily_m2m import current_week_realised, current_week_brokerage
-            realised = current_week_realised("MHK40")
+            replay_degraded = False
+            try:
+                realised  = current_week_realised("MHK40")
+                brokerage = current_week_brokerage("MHK40")
+            except Exception as e:
+                # cc#771 fix_4: the FIFO replay can throw on a morning desync (missing opening checksum, or
+                # a fill that oversells the book). NEVER fail the endpoint — fall back to the last stored
+                # weekly row (smartgain_weekly_pnl) and flag degraded so the WEEK M2M header shows a stale
+                # badge instead of "Could not load". The 09:10 resync (fix_1) prevents the desync upstream.
+                import logging as _lg
+                _lg.getLogger("scorr").warning(f"smartgain_m2m replay degraded — weekly_pnl fallback: {e}")
+                cur.execute("""SELECT realised, brokerage FROM smartgain_weekly_pnl
+                               WHERE account='MHK40' ORDER BY week_start DESC LIMIT 1""")
+                _w = cur.fetchone()
+                realised  = float(_w[0]) if (_w and _w[0] is not None) else 0.0
+                brokerage = float(_w[1]) if (_w and _w[1] is not None) else 0.0
+                replay_degraded = True
 
-            # ── GROSS: realised + unrealised ──
+            # ── GROSS: realised + unrealised ── (unrealised = live MTM on holdings, replay-independent)
             gross = round(realised + unrealised, 2)
-
-            # ── cc#301: brokerage (this week, live estimate) + NET = gross - brokerage.
-            # Standing rule: Gross / Brokerage / Net must always be shown as three separate
-            # line items, never netted silently. `total` stays = gross for byte-compat with
-            # older consumers; the web surfaces now headline `net`.
-            brokerage = current_week_brokerage("MHK40")
+            # cc#301: Gross / Brokerage / Net always three separate line items, never netted silently.
             net = round(gross - brokerage, 2)
 
             return {
@@ -414,8 +438,33 @@ def smartgain_m2m():
                 "total_mtm": unrealised,  # back-compat: old field == unrealised bucket
                 "position_count": len(rows), "last_updated": last_updated,
                 "data_source": "live_fyers" if any_live else "holdings",
+                "stale": replay_degraded,                                    # cc#771 fix_4
+                "degraded": ("replay_desync" if replay_degraded else None),  # cc#771 fix_4
             }
     except Exception as e:
+        # cc#771 fix_4: even a hard failure of the positions query must NOT surface as an error banner —
+        # serve the last stored weekly headline (smartgain_weekly_pnl) with a degraded/stale flag so the
+        # WEEK M2M header renders a number, never "Could not load". Positions come back empty.
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute("""SELECT realised, unrealised, total, brokerage, net_pl, last_updated
+                               FROM smartgain_weekly_pnl WHERE account='MHK40'
+                               ORDER BY week_start DESC LIMIT 1""")
+                w = cur.fetchone()
+            if w:
+                realised = float(w[0] or 0); unrealised = float(w[1] or 0)
+                gross = float(w[2]) if w[2] is not None else round(realised + unrealised, 2)
+                brokerage = float(w[3] or 0)
+                net = float(w[4]) if w[4] is not None else round(gross - brokerage, 2)
+                return {"account": "MHK40", "positions": [],
+                        "realised": realised, "unrealised": unrealised, "total": gross,
+                        "gross": gross, "brokerage": brokerage, "net": net,
+                        "total_mtm": unrealised, "position_count": 0,
+                        "last_updated": w[5].isoformat() if w[5] else None,
+                        "data_source": "weekly_pnl_snapshot", "stale": True,
+                        "degraded": "endpoint_error", "error_detail": str(e)[:200]}
+        except Exception:
+            pass
         return {"error": str(e)}
 
 

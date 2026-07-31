@@ -508,8 +508,40 @@ def _premarket_writer_check():
                        f"{f'{age:.0f}min' if age is not None else 'absent'} — forcing live-writer restart before open")
             _request_restart("premarket 09:10 readiness: v8_metrics stale/absent")
             _spawn(_bg_signal_writer)
+        # cc#771 fix_1: the SmartGain opening-state rebuild was never scheduled — replay/journal drifted
+        # stale EVERY morning until smartgain_backfill was run by hand (30/31-Jul mismatch banners). Run
+        # it here at 09:10 so the book always opens in sync (idempotent + self-healing; safe to repeat).
+        _spawn(_bg_smartgain_resync)
     except Exception as e:
         log.error(f"_premarket_writer_check: {e}")
+
+
+_smartgain_resync_running = False
+def _bg_smartgain_resync():
+    """cc#771 fix_1: 09:10 IST pre-market SmartGain replay-resync (all accounts in smartgain_orders).
+    backfill_all_batches re-runs the full-inception cascade — idempotent + self-healing (cc#309), so a
+    daily pre-open run guarantees the FIFO replay / journal / weekly-opening never start desynced (the
+    morning mismatch-banner recurrence). Run once, day-locked by the 09:10 hook that calls it."""
+    global _smartgain_resync_running
+    if _smartgain_resync_running:
+        return
+    _smartgain_resync_running = True
+    try:
+        import smartgain_reconcile
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT account FROM smartgain_orders WHERE status=%s",
+                        (smartgain_reconcile.ORDER_STATUS,))
+            accounts = [r[0] for r in cur.fetchall()] or [smartgain_reconcile.DEFAULT_ACCOUNT]
+        for acct in accounts:
+            try:
+                res = smartgain_reconcile.backfill_all_batches(acct)
+                log.info(f"smartgain 09:10 resync {acct}: {res.get('batches_processed')} batches")
+            except Exception as e:
+                log.error(f"smartgain 09:10 resync {acct}: {e}")
+    except Exception as e:
+        log.error(f"_bg_smartgain_resync: {e}")
+    finally:
+        _smartgain_resync_running = False
 
 
 def _bg_v8_paper_exit():

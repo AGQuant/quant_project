@@ -528,13 +528,17 @@ const ago = ts => {
   const m = Math.floor(s/60); return m < 60 ? m + "m ago" : Math.floor(m/60) + "h ago";
 };
 
-async function loadSG() {
+async function loadSG(_retry) {
   try {
     const r = await fetch("/api/smartgain/m2m", {cache:'no-store'});   // cc#769: always fresh, never a stale cached body
     const d = await r.json();
-    // cc#769 fix_1: NEVER leave "Week M2M" stranded at "Loading…" — the old silent `return` on an
-    // error/positions-less response froze the header (31-Jul incident). Always clear to an explicit state.
-    if (d.error) { document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>'; return; }
+    // cc#769 fix_1: NEVER leave "Week M2M" stranded at "Loading…". cc#771 fix_4: auto-retry ONCE on a
+    // failure before showing "Could not load" (the endpoint now degrades to a stored weekly figure, so a
+    // bare error is almost always a transient network/deploy blip that a single retry clears).
+    if (d.error) {
+      if (!_retry) { setTimeout(() => loadSG(true), 1200); return; }
+      document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>'; return;
+    }
     if (!d.positions) { document.getElementById("sg-total").innerHTML = '<span class="sg-loading">No live data</span>'; return; }
 
     // cc#301: headline is NET of brokerage. Gross = Realised + Unrealised; Net = Gross − Brokerage.
@@ -545,7 +549,13 @@ async function loadSG() {
     const net        = d.net        != null ? d.net        : (gross - brokerage);
 
     const tv = document.getElementById("sg-total");
-    tv.textContent = (net >= 0 ? "+" : "") + "₹" + f2(net);
+    // cc#771 fix_4: when the endpoint served a degraded/stored figure (replay desync), badge it STALE
+    // rather than passing it off as live — the number still renders, never "Could not load".
+    const staleBadge = (d.stale || d.degraded)
+      ? ' <span style="font-size:10px;font-weight:700;color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45);border-radius:5px;padding:1px 5px;vertical-align:middle" title="'
+        + (d.degraded || 'stale') + ' — showing last-known figure">STALE</span>'
+      : '';
+    tv.innerHTML = (net >= 0 ? "+" : "") + "₹" + f2(net) + staleBadge;
     tv.style.color = net >= 0 ? "var(--grn)" : "var(--red)";
 
     const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
@@ -655,6 +665,7 @@ async function loadSG() {
       rows.length + " positions · " + nowIST + " IST · tap for chart & details";
 
   } catch(e) {
+    if (!_retry) { setTimeout(() => loadSG(true), 1200); return; }   // cc#771 fix_4: one retry before erroring
     document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>';
   }
 }
