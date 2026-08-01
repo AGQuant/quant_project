@@ -448,6 +448,7 @@ tr.self td.sym{color:var(--blue)}
   // cc#550: look-through x-ray + segment exposure (both formerly parked under the stale
   // DATA-QUALITY HOLD). Holdings are now real per-fund (cc#533) and Q-scored (cc#546).
   var XR={holdings:[],pwGvm:null,resolvedPct:null,segments:[],segCov:null,scorrOnly:false,pgvmView:false};
+  var SEG_EXPANDED=false;   // cc#776: sector-allocation card shows top 10 by exposure; collapsed by default
   function gvmChip(g){g=Number(g);var c=g>=7?"g-hi":g>=5?"g-mid":"g-lo";return '<span class="gvm '+c+'">'+g.toFixed(1)+'</span>';}
   function wtCell(w,maxW){
     if(w==null)return em;
@@ -499,8 +500,12 @@ tr.self td.sym{color:var(--blue)}
       return;
     }
     var segs=XR.segments.filter(function(s){return s.sector_gvm!=null;});
+    // cc#776: the full mapped-segment list runs long. Show the TOP 10 by exposure (sorted desc —
+    // the backend already orders this way, sorted here too so the card never depends on payload
+    // order), with a "+N more" summary line acting as a SHOW ALL toggle. Default collapsed.
+    segs=segs.slice().sort(function(a,b){return (b.exposure_pct||0)-(a.exposure_pct||0);});
     var maxE=Math.max.apply(null,segs.map(function(s){return s.exposure_pct;}).concat([1]));
-    var trs=segs.map(function(s){
+    function rowHtml(s){
       var aln=segAlign(s.exposure_pct,Number(s.sector_gvm));
       return '<tr>'
         +'<td class="sym">'+esc(s.segment)+'</td>'
@@ -508,8 +513,25 @@ tr.self td.sym{color:var(--blue)}
         +'<td>'+gvmChip(s.sector_gvm)+'</td>'
         +'<td class="'+aln.cls+'" style="text-align:left;font-size:11px">'+aln.t+'</td>'
         +'</tr>';
-    }).join("");
-    body.innerHTML='<table><thead><tr><th>Segment</th><th>Exposure %</th><th>Sector GVM</th><th style="text-align:left">Alignment</th></tr></thead><tbody>'+trs+'</tbody></table>';
+    }
+    var TOP=10, shown=SEG_EXPANDED?segs:segs.slice(0,TOP), hidden=segs.slice(TOP);
+    var trs=shown.map(rowHtml).join("");
+    var foot="";
+    if(hidden.length){
+      var combined=hidden.reduce(function(a,s){return a+(s.exposure_pct||0);},0);
+      foot='<tr class="seg-more"><td colspan="4" id="seg-more-cell" role="button" tabindex="0" '
+        +'style="text-align:center;cursor:pointer;color:var(--acc,#2f6df4);font-size:11.5px;font-weight:600;padding:9px 6px">'
+        +(SEG_EXPANDED?'Show top 10 only':'+ '+hidden.length+' more segment'+(hidden.length===1?'':'s')
+           +' · '+combined.toFixed(1)+'% combined exposure')
+        +'</td></tr>';
+    }
+    body.innerHTML='<table><thead><tr><th>Segment</th><th>Exposure %</th><th>Sector GVM</th><th style="text-align:left">Alignment</th></tr></thead><tbody>'+trs+foot+'</tbody></table>';
+    var mc=$("seg-more-cell");
+    if(mc){
+      var tog=function(){SEG_EXPANDED=!SEG_EXPANDED;renderSegments();};
+      mc.addEventListener("click",tog);
+      mc.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();tog();}});
+    }
   }
   function loadXray(code){
     var xb=$("xray-body");
@@ -520,6 +542,7 @@ tr.self td.sym{color:var(--blue)}
       XR.resolvedPct=(d&&d.resolved_pct!=null)?d.resolved_pct:null;
       XR.segments=(d&&d.segments)||[];
       XR.segCov=(d&&d.segment_coverage_pct!=null)?d.segment_coverage_pct:null;
+      SEG_EXPANDED=false;   // cc#776: a newly loaded fund always starts collapsed at top 10
       XR.scorrOnly=false;XR.pgvmView=false;setBadge($("xr-scorr"),false);setBadge($("xr-pgvm"),false);
       renderXray();renderSegments();
     }).catch(function(){
