@@ -2610,8 +2610,12 @@ function GvmReport({ r, hist }) {
 
       {/* cc#518: FINANCIALS -- screener.in-style horizontal tables, placed LAST, above the footer */}
       <div id="gvm-financials" style={{ scrollMarginTop: 60 }}><FinancialsSection financials={r.financials} /></div>
-      {/* cc#541: OPERATIONAL METRICS -- per-sector KPIs from concalls/decks (hidden when none) */}
-      {inUniv && <div id="gvm-ops" style={{ scrollMarginTop: 60 }}><OpsMetricsSection ops={r.operational_metrics} /></div>}
+      {/* cc#783 FOUNDER DECISION 01-Aug: the Operational Metrics block (Peers + Standalone toggle)
+          is REMOVED from the GVM company page — ops metrics is not investor-grade for display.
+          Display only: ops_metrics_pipeline keeps running, data keeps accumulating, and every
+          /api/ops_metrics/* endpoint stays live for the internal consumers (Ask the CIO, Result
+          Analysis). The OpsMetricsSection component is left defined but unrendered so this is a
+          one-line revert if the display decision is ever reversed. */}
 
       <div style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
@@ -2903,7 +2907,8 @@ const GVM_NAV = [
   { id: "gvm-levels", label: "Levels" },
   { id: "gvm-results", label: "Results" },
   { id: "gvm-financials", label: "Financials" },
-  { id: "gvm-ops", label: "Ops Metrics" },
+  /* cc#783: "Ops Metrics" rail entry removed with the block it targeted — the #gvm-ops anchor no
+     longer exists, so leaving it would be a dead scroll link on this same page. */
 ];
 
 function GvmModule() {
