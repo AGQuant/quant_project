@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, time as dt_time
 import os
+import json
 import time
 import psycopg
 import httpx
@@ -187,7 +188,11 @@ def smartgain_m2m():
                     -- personal_journal.entry_price can differ from the actual fill
                     -- (e.g. SONACOMS 614.40 journal vs 614.63 broker) causing MTM drift.
                     -- cc#312: source_tag = Arpit's editable source override.
-                    SELECT id, symbol, direction, qty, entry_price, source_tag
+                    -- cc#775: carry the stored broker-reconciled ltp/mtm through as a LAST-KNOWN
+                    -- fallback, so a row whose live pricing is unavailable renders its last real
+                    -- value (stale-badged) instead of contributing 0 to LONG/SHORT VALUE.
+                    SELECT id, symbol, direction, qty, entry_price, source_tag, ltp AS stored_ltp,
+                           mtm AS stored_mtm, updated_at AS stored_ts
                     FROM smartgain_holdings
                     WHERE account = 'MHK40'
                 )
@@ -214,6 +219,7 @@ def smartgain_m2m():
                     -- positions (symbol + side match, status=OPEN). NULL when V8 is not
                     -- currently in this symbol+side -> card shows no tag (blank on no-match,
                     -- Arpit's choice). Dynamic: disappears if V8 later closes its paper leg.
+                    h.stored_ltp, h.stored_mtm, h.stored_ts,                 -- cc#775 last-known fallback
                     (SELECT vp.basket FROM v8_paper_positions vp
                       WHERE vp.symbol = h.symbol AND vp.side = h.direction
                         AND vp.status = 'OPEN' LIMIT 1)                      AS v8_basket,
@@ -390,6 +396,20 @@ def smartgain_m2m():
                     reason = "no_data"
                     row["pricing_method"] = "unavailable"
                     row["is_live"] = False
+                # cc#775: LAST-KNOWN FALLBACK — if live pricing produced no ltp, fall back to the stored
+                # broker-reconciled smartgain_holdings ltp/mtm rather than leaving the row valueless (a
+                # null ltp is excluded from the LONG/SHORT VALUE totals, which is what rendered a real
+                # book as Rs 0). The row is stale-badged; the badge conveys age, zeroing conveys a lie.
+                _sl, _sm, _st = row.pop("stored_ltp", None), row.pop("stored_mtm", None), row.pop("stored_ts", None)
+                if row["ltp"] is None and _sl is not None:
+                    row["ltp"] = float(_sl)
+                    row["mtm"] = float(_sm) if _sm is not None else None
+                    row["pricing_method"] = "holdings_last_known"
+                    row["is_live"] = False
+                    row["stale"] = True
+                    row["ltp_as_of"] = _st.isoformat() if _st else row.get("ltp_as_of")
+                    if reason is None:
+                        reason = "degraded — last-known broker-reconciled price"
                 # cc#771 fix_2: any priced-but-not-live row (fut_eod off-hours, stale synthetic, stale-served)
                 # carries the stale badge so the UI shows data-age rather than implying it is live.
                 if row["ltp"] is not None and not row["is_live"] and reason != "no_live_futures_feed":
@@ -442,27 +462,66 @@ def smartgain_m2m():
                 "degraded": ("replay_desync" if replay_degraded else None),  # cc#771 fix_4
             }
     except Exception as e:
-        # cc#771 fix_4: even a hard failure of the positions query must NOT surface as an error banner —
-        # serve the last stored weekly headline (smartgain_weekly_pnl) with a degraded/stale flag so the
-        # WEEK M2M header renders a number, never "Could not load". Positions come back empty.
+        # cc#775: a degraded state MUST CARRY LAST-KNOWN DATA, NEVER ZEROS. The cc#771 version of this
+        # handler returned positions:[] alongside the stored weekly headline, which rendered as
+        # LONG VALUE Rs 0 / SHORT VALUE Rs 0 + a STALE badge on a book that genuinely held APLAPOLLO +
+        # HINDZINC (~Rs 90.5k long) — a confident, plausible-looking EMPTY BOOK. That is strictly worse
+        # than the "Could not load" it replaced: the badge conveys staleness, zeroing conveys a false
+        # empty book. Serve the broker-reconciled smartgain_holdings rows (qty, entry, stored ltp, mtm)
+        # so values and cards render from last-known state; zeros are permitted ONLY when the account
+        # genuinely has no holdings.
+        _detail = str(e)[:300]
         try:
             with get_conn() as conn, conn.cursor() as cur:
+                # cc#775: the underlying exception was being swallowed into a response field nobody reads.
+                # Record it so the CAUSE stays visible even though the surface degrades gracefully.
+                try:
+                    cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                   VALUES (CURRENT_DATE, NOW(), 'alert', 'SMARTGAIN_M2M_DEGRADED', %s::jsonb)""",
+                                (json.dumps({"error": _detail,
+                                             "note": "smartgain_m2m fell back to holdings/weekly snapshot"}),))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                cur.execute("""SELECT symbol, direction, qty, entry_price, ltp, mtm, updated_at
+                               FROM smartgain_holdings WHERE account='MHK40' ORDER BY id""")
+                hrows = cur.fetchall()
                 cur.execute("""SELECT realised, unrealised, total, brokerage, net_pl, last_updated
                                FROM smartgain_weekly_pnl WHERE account='MHK40'
                                ORDER BY week_start DESC LIMIT 1""")
                 w = cur.fetchone()
+            # last-known positions from the holdings table (same shape the UI already renders)
+            rows = []
+            for (sym, direction, qty, entry, ltp, mtm, upd) in hrows:
+                rows.append({
+                    "symbol": sym, "direction": direction,
+                    "qty": int(qty) if qty is not None else None,
+                    "entry_price": float(entry) if entry is not None else None,
+                    "ltp": float(ltp) if ltp is not None else None,
+                    "mtm": float(mtm) if mtm is not None else None,
+                    "pricing_method": "holdings_last_known", "is_live": False, "stale": True,
+                    "reason": "degraded — last-known broker-reconciled price",
+                    "last_tick": upd.isoformat() if upd else None,
+                    "updated_at": upd.isoformat() if upd else None,
+                    "ltp_as_of": upd.isoformat() if upd else None,
+                })
+            # unrealised from the SAME holdings rows (never 0 while a book exists)
+            unrealised = round(sum(r["mtm"] or 0 for r in rows), 2)
             if w:
-                realised = float(w[0] or 0); unrealised = float(w[1] or 0)
-                gross = float(w[2]) if w[2] is not None else round(realised + unrealised, 2)
+                realised  = float(w[0] or 0)
                 brokerage = float(w[3] or 0)
-                net = float(w[4]) if w[4] is not None else round(gross - brokerage, 2)
-                return {"account": "MHK40", "positions": [],
+            else:
+                realised = brokerage = 0.0
+            gross = round(realised + unrealised, 2)
+            net = round(gross - brokerage, 2)
+            if rows or w:
+                return {"account": "MHK40", "positions": rows,
                         "realised": realised, "unrealised": unrealised, "total": gross,
                         "gross": gross, "brokerage": brokerage, "net": net,
-                        "total_mtm": unrealised, "position_count": 0,
-                        "last_updated": w[5].isoformat() if w[5] else None,
-                        "data_source": "weekly_pnl_snapshot", "stale": True,
-                        "degraded": "endpoint_error", "error_detail": str(e)[:200]}
+                        "total_mtm": unrealised, "position_count": len(rows),
+                        "last_updated": max((r["last_tick"] for r in rows if r["last_tick"]), default=None),
+                        "data_source": "holdings_last_known", "stale": True,
+                        "degraded": "endpoint_error", "error_detail": _detail}
         except Exception:
             pass
         return {"error": str(e)}
