@@ -31,6 +31,10 @@
   var TF_ORDER = ["5m", "1M", "3M", "6M", "1Y", "ALL"];
 
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
+  var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
+  var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
+  var _full = false;                // cc#779: fullscreen state
+  var GVM_COL = "#7b6bd6";          // muted violet — distinct from price/pivot/fib/VWAP palettes
   var _futCache = {};   // {sym: bool} — 5m availability, cached per session (no repeat probe)
   // cc#730: fib + pivot overlay state (default BOTH on so the card matches the V8 chart out of the box).
   var _fibCache = {};   // {sym: fibcheck json} — pivots fetched once per symbol
@@ -52,12 +56,14 @@
   function _readOv() {
     var vwap = false;   // cc#755: VWAP is an opt-in overlay (default off), persisted separately so the
     try { vwap = localStorage.getItem("scorr_chart_vwap") === "1"; } catch (e) {}   // pivot/fib scheme is untouched
+    var gvm = false;    // cc#779: GVM quality-trend line, opt-in, persisted separately (same reason)
+    try { gvm = localStorage.getItem("scorr_chart_gvm") === "1"; } catch (e) {}
     try { var s = localStorage.getItem("scorr_chart_overlay");
-      if (s === "none") return { pivot: false, fib: false, vwap: vwap };
-      if (s === "pivot") return { pivot: true, fib: false, vwap: vwap };
-      if (s === "fib") return { pivot: false, fib: true, vwap: vwap };
+      if (s === "none") return { pivot: false, fib: false, vwap: vwap, gvm: gvm };
+      if (s === "pivot") return { pivot: true, fib: false, vwap: vwap, gvm: gvm };
+      if (s === "fib") return { pivot: false, fib: true, vwap: vwap, gvm: gvm };
     } catch (e) {}
-    return { pivot: true, fib: true, vwap: vwap };   // default: pivots + fib on, VWAP off
+    return { pivot: true, fib: true, vwap: vwap, gvm: gvm };   // default: pivots + fib on, VWAP/GVM off
   }
   function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
   function _fibZoneKey(p) {
@@ -114,7 +120,9 @@
     document.head.appendChild(s);
   }
 
-  function _esc(k) { if (k.key === "Escape") close(); }
+  // cc#779: Esc exits fullscreen FIRST (one step back, as the spec's "Esc or collapse icon returns
+  // to the modal" requires); a second Esc closes the card.
+  function _esc(k) { if (k.key === "Escape") { if (_full) _toggleFull(false); else close(); } }
 
   function _buildModal() {
     var ov = document.getElementById("scorrChartOv");
@@ -128,7 +136,9 @@
         '<div id="scorrChartHead" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid">' +
           '<b id="scorrChartTitle" style="font-size:14px"></b>' +
           '<span id="scorrChartHL" style="margin-left:6px;font-size:11.5px"></span>' +
+          '<span id="scorrChartVerdict" style="margin-left:6px"></span>' +   /* cc#779 trend badge */
           '<span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end" id="scorrChartTfs"></span>' +
+          '<button id="scorrChartFull" title="Maximize (Esc to exit)" style="border:none;background:none;font-size:15px;line-height:1;cursor:pointer;margin-left:4px">&#9974;</button>' +
           '<button id="scorrChartClose" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;margin-left:4px">&times;</button>' +
         '</div>' +
         '<div id="scorrChartBox" style="width:100%;height:412px;padding:8px 8px 0"></div>' +
@@ -137,7 +147,100 @@
     document.body.appendChild(ov);
     ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
     ov.querySelector("#scorrChartClose").addEventListener("click", close);
+    ov.querySelector("#scorrChartFull").addEventListener("click", function (e) { e.stopPropagation(); _toggleFull(); });
     return ov;
+  }
+
+  // cc#779: MAXIMIZE — expand the same modal to the full viewport (desktop: browser window; mobile:
+  // full screen, landscape-friendly). Every control persists because we only restyle the existing
+  // wrapper — the timeframe pills, Pivots/Fib/VWAP/GVM toggles, verdict badge and crosshair are the
+  // same DOM. Esc or the collapse icon returns to the modal (close() also resets the flag).
+  function _toggleFull(force) {
+    _full = (force === undefined) ? !_full : !!force;
+    var wrap = document.getElementById("scorrChartBoxWrap");
+    var box = document.getElementById("scorrChartBox");
+    var ovEl = document.getElementById("scorrChartOv");
+    var btn = document.getElementById("scorrChartFull");
+    if (!wrap || !box) return;
+    if (_full) {
+      if (ovEl) ovEl.style.padding = "0";
+      wrap.style.width = "100vw"; wrap.style.maxHeight = "100vh"; wrap.style.height = "100vh";
+      wrap.style.borderRadius = "0";
+      box.style.height = "calc(100vh - 108px)";
+      if (btn) { btn.innerHTML = "&#10066;"; btn.title = "Exit fullscreen (Esc)"; }
+    } else {
+      if (ovEl) ovEl.style.padding = "16px";
+      wrap.style.width = "min(94vw,640px)"; wrap.style.maxHeight = "88vh"; wrap.style.height = "";
+      wrap.style.borderRadius = "16px";
+      box.style.height = "412px";
+      if (btn) { btn.innerHTML = "&#9974;"; btn.title = "Maximize (Esc to exit)"; }
+    }
+    try { if (_chart) _chart.applyOptions({ width: box.clientWidth, height: box.clientHeight }); } catch (e) {}
+    _renderFx();
+  }
+
+  // cc#779: trend-strength badge next to the return %. Server-computed (one endpoint, cached per
+  // symbol+timeframe per day) so the rule table lives in ONE place and cannot drift per surface.
+  function _loadVerdict() {
+    var host = document.getElementById("scorrChartVerdict");
+    if (!host) return;
+    host.innerHTML = "";
+    _verdict = null;
+    if (_tf === "5m" || !_sym) return;   // daily-series verdict; meaningless intraday
+    var sym = _sym, tf = _tf;
+    _getJSON("/api/gvm/trend_verdict/" + encodeURIComponent(sym) + "?tf=" + encodeURIComponent(tf))
+      .then(function (d) {
+        if (_sym !== sym || _tf !== tf) return;          // user switched mid-flight
+        var v = d && d.verdict;
+        if (!v) return;                                   // no verdict -> no badge, never a guess
+        _verdict = v;
+        var h = document.getElementById("scorrChartVerdict");
+        if (!h) return;
+        h.innerHTML = '<span id="scorrChartVerdictChip" role="button" tabindex="0" title="Tap for the inputs behind this verdict" ' +
+          'style="cursor:pointer;font:800 9.5px/1 -apple-system,Segoe UI,sans-serif;letter-spacing:.03em;color:#fff;' +
+          'background:' + v.color + ';border-radius:5px;padding:3px 6px;white-space:nowrap">' + v.label + '</span>';
+        var chip = document.getElementById("scorrChartVerdictChip");
+        var show = function (e) { e.stopPropagation(); _verdictPopup(v); };
+        chip.addEventListener("click", show);
+        chip.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(e); } });
+      })
+      .catch(function () { /* badge is additive — never break the chart */ });
+  }
+
+  // Plain-language popup: the three inputs with their current values + one line of meaning.
+  function _verdictPopup(v) {
+    var p = _pal();
+    var old = document.getElementById("scorrVerdictPop");
+    if (old) { old.remove(); return; }                    // tap again to dismiss
+    var MEAN = {
+      "1_VERY_STRONG": "Price is climbing and business quality is improving from an already-high base — the strongest combination.",
+      "2_STRONG": "Price is climbing with quality either improving or holding firm at a good level.",
+      "3_STEADY": "Nothing is breaking down, but there is no strong quality signal either way — a hold-and-watch picture.",
+      "4_CAUTION": "Price is rising while quality is FALLING from a high base. Quality slipping against a price tailwind is a real warning, not noise.",
+      "5_WEAK": "Quality is deteriorating, and price is either falling with it or rising on a low-quality base.",
+      "6_QUALITY_DIP": "Price is down but quality is high and not falling — the classic accumulation-candidate pattern."
+    };
+    var arrow = function (s) { return s === "up" ? "rising" : s === "down" ? "falling" : "flat"; };
+    var lvlTxt = v.level === "high" ? "high (≥7)" : v.level === "mid" ? "mid (6–7)" : "low (<6)";
+    var d = document.createElement("div");
+    d.id = "scorrVerdictPop";
+    d.style.cssText = "position:fixed;z-index:12100;max-width:300px;background:" + p.panel + ";color:" + p.txt +
+      ";border:1px solid " + p.line + ";border-radius:11px;box-shadow:0 14px 40px rgba(0,0,0,.28);padding:12px 14px;font:12px/1.55 -apple-system,Segoe UI,sans-serif";
+    d.innerHTML =
+      '<div style="font:800 11px/1 -apple-system,Segoe UI,sans-serif;color:' + v.color + ';margin-bottom:7px">' + v.label + '</div>' +
+      '<div><b>Price</b> ' + arrow(v.price_state) + ' &middot; ' + (v.price_chg_pct >= 0 ? "+" : "") + v.price_chg_pct + '% over ' + _tf + '</div>' +
+      '<div><b>GVM trend</b> ' + arrow(v.gvm_state) + ' &middot; ' + v.gvm_then + ' → ' + v.gvm_now + ' (' + (v.gvm_delta >= 0 ? "+" : "") + v.gvm_delta + ')</div>' +
+      '<div><b>Quality level</b> ' + lvlTxt + '</div>' +
+      '<div style="margin-top:8px;color:' + p.sub + '">' + (MEAN[v.key] || "") + '</div>' +
+      '<div style="margin-top:7px;font-size:10.5px;color:' + p.sub + '">Bands: price flat ±2% &middot; GVM flat ±0.15 pts &middot; window = selected timeframe.</div>';
+    document.body.appendChild(d);
+    var chip = document.getElementById("scorrChartVerdictChip");
+    var r = chip ? chip.getBoundingClientRect() : { left: 40, bottom: 60 };
+    d.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 316)) + "px";
+    d.style.top = (r.bottom + 8) + "px";
+    setTimeout(function () {
+      document.addEventListener("click", function h() { var x = document.getElementById("scorrVerdictPop"); if (x) x.remove(); document.removeEventListener("click", h); });
+    }, 0);
   }
 
   function _paintChrome() {
@@ -147,6 +250,7 @@
     document.getElementById("scorrChartHead").style.borderBottom = "1px solid " + p.line;
     document.getElementById("scorrChartTitle").style.color = p.txt;
     document.getElementById("scorrChartClose").style.color = p.mut;
+    var _fb = document.getElementById("scorrChartFull"); if (_fb) _fb.style.color = p.mut;   // cc#779
     document.getElementById("scorrChartMsg").style.color = p.sub;
     // timeframe buttons
     var host = document.getElementById("scorrChartTfs");
@@ -195,15 +299,68 @@
       if (!vwapBlocked) b.onclick = function () { _toggleOv("vwap"); };
       host.appendChild(b);
     })();
+    // cc#779: GVM quality-trend toggle — fourth chip. The GVM series is a DAILY score, so it is
+    // greyed on the 5m intraday timeframe (nothing to plot at intraday resolution).
+    (function () {
+      var b = document.createElement("button");
+      b.textContent = "GVM";
+      var gBlocked = (_tf === "5m");
+      var on = _ov.gvm && !gBlocked;
+      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
+        ";background:" + (on ? GVM_COL : p.btn) + ";color:" + (on ? "#fff" : p.mut) + (gBlocked ? ";opacity:.4;cursor:not-allowed" : "");
+      b.title = gBlocked ? "GVM is a daily quality score — switch to 1M or longer" :
+        "GVM quality trend (gvm_history, full score) on a fixed 0-10 right axis";
+      if (!gBlocked) b.onclick = function () { _toggleOv("gvm"); };
+      host.appendChild(b);
+    })();
   }
   function _toggleOv(kind) {
     _ov[kind] = !_ov[kind];
     try {
       if (kind === "vwap") localStorage.setItem("scorr_chart_vwap", _ov.vwap ? "1" : "0");
+      else if (kind === "gvm") localStorage.setItem("scorr_chart_gvm", _ov.gvm ? "1" : "0");
       else localStorage.setItem("scorr_chart_overlay", _ovStr());
     } catch (e) {}
     _paintChrome();
-    if (kind === "vwap") { _applyVwap(); _renderFx(); } else { _applyOverlays(); }
+    if (kind === "vwap") { _applyVwap(); _renderFx(); }
+    else if (kind === "gvm") { _applyGvm(); }
+    else { _applyOverlays(); }
+  }
+
+  // cc#779: GVM quality-trend line on a SECONDARY right axis with a FIXED 0-10 scale, so the line's
+  // vertical position always means the same thing (a 7 sits at the same height on every chart) and
+  // never rescales with price. Muted colour + thin stroke — context, never a price signal.
+  function _applyGvm() {
+    if (!_chart) return;
+    if (_gvmSeries) { try { _chart.removeSeries(_gvmSeries); } catch (e) {} _gvmSeries = null; }
+    if (!_ov.gvm || _tf === "5m") return;
+    var days = TF[_tf] || 365;
+    var sym = _sym;
+    _getJSON("/api/gvm/history/" + encodeURIComponent(sym) + "?days=" + Math.min(days + 5, 2500))
+      .then(function (d) {
+        if (!_chart || _sym !== sym || !_ov.gvm) return;           // modal closed / symbol changed mid-flight
+        var pts = ((d && d.points) || []).filter(function (r) { return r.gvm_score != null; })
+          .map(function (r) { return { time: String(r.score_date).slice(0, 10), value: +r.gvm_score }; })
+          .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+        if (!pts.length) return;
+        _gvmSeries = _chart.addLineSeries({
+          color: GVM_COL, lineWidth: 2, priceScaleId: "gvm",
+          priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+          priceFormat: { type: "price", precision: 2, minMove: 0.01 }
+        });
+        _gvmSeries.setData(pts);
+        try {
+          _chart.priceScale("gvm").applyOptions({
+            scaleMargins: { top: 0.05, bottom: 0.05 }, visible: true, borderVisible: false,
+            autoScale: false
+          });
+          // FIXED 0-10: pin the range so the axis cannot autoscale to the data's own min/max.
+          _gvmSeries.applyOptions({ autoscaleInfoProvider: function () {
+            return { priceRange: { minValue: 0, maxValue: 10 } };
+          } });
+        } catch (e) {}
+      })
+      .catch(function () { /* quality line is additive — never break the price chart */ });
   }
   // cc#755: session-VWAP line (intraday only). Cumulative SUM(close·volume)/SUM(volume) from each
   // session's first bar (~09:15), reset when the bar's date changes. A native LightweightCharts line
@@ -402,6 +559,8 @@
       _setHL(data);
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
       _applyVwap();       // cc#755: draw the session-VWAP line (intraday only; no-op on EOD TFs)
+      _applyGvm();        // cc#779: GVM quality-trend line (secondary fixed 0-10 axis; no-op on 5m)
+      _loadVerdict();     // cc#779: trend-strength badge, recomputed for THIS timeframe
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
       msg.textContent = isIntraday
         ? "5-min · last 5 sessions · IST (F&O feed)"
@@ -440,6 +599,9 @@
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
     _vwapSeries = null; _vwapLast = null;   // cc#755 (series is owned by _chart, already removed above)
+    _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
+    if (_full) _toggleFull(false);          // cc#779: never leave the wrapper stuck full-viewport
+    var vp = document.getElementById("scorrVerdictPop"); if (vp) vp.remove();   // cc#779
     var fx = document.getElementById("scorrChartFx"); if (fx && fx.parentNode) fx.parentNode.removeChild(fx);   // cc#750: rebuilt fresh on next open
     document.removeEventListener("keydown", _esc);
     window.removeEventListener("resize", _onResize);

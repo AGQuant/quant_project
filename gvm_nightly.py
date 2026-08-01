@@ -29,7 +29,7 @@ Verdict framework (Arpit):
 
 import os
 import logging
-from datetime import date
+from datetime import date, timedelta   # cc#779: timedelta for the trend-verdict window
 from typing import Optional, Dict, List
 
 import psycopg
@@ -540,6 +540,92 @@ async def load_screener_json(req: Request, x_admin_token: Optional[str] = Header
 def gvm_recompute(refresh_momentum: bool = True, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     return recompute_gvm(refresh_momentum=refresh_momentum)
+
+
+# ── cc#779: chart trend-strength verdict (founder-locked 02-Aug, cell-by-cell) ────────────────
+# Three inputs over the SELECTED chart timeframe, so the badge recomputes on every timeframe switch:
+#   price trend  — close now vs close at window start, FLAT band +/-2%
+#   GVM trend    — gvm_score now vs at window start, FLAT band ABSOLUTE +/-0.15 points
+#   level        — current gvm_score: >=7 high / 6-7 mid / <6 low
+# Full GVM is used (not G+V) for consistency with the rating shown everywhere else.
+_TF_DAYS = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "ALL": 365 * 20}
+_VERDICT_CACHE = {}   # (symbol, tf, date) -> payload; per spec "cached per symbol+timeframe per day"
+
+
+def _trend_verdict(p_chg, g_now, g_then):
+    """The 6 founder-locked labels. Order matters — the first matching rule wins."""
+    if p_chg is None or g_now is None or g_then is None:
+        return None
+    dg = g_now - g_then
+    p = "up" if p_chg > 2 else ("down" if p_chg < -2 else "flat")
+    g = "up" if dg > 0.15 else ("down" if dg < -0.15 else "flat")
+    lvl = "high" if g_now >= 7 else ("mid" if g_now >= 6 else "low")
+    if p == "up" and g == "up" and lvl == "high":
+        k, t, c = "1_VERY_STRONG", "VERY STRONG", "#0a7f4f"
+    elif p == "up" and ((g == "up" and lvl == "mid") or (g == "flat" and lvl == "high")):
+        k, t, c = "2_STRONG", "STRONG", "#12a05f"
+    elif p == "up" and g == "down" and lvl in ("high", "mid"):
+        # GVM falling AGAINST a momentum tailwind is a strong statement, hence its own label.
+        k, t, c = "4_CAUTION", "CAUTION", "#e0913a"
+    elif (p == "up" and g == "down" and lvl == "low") or (p == "down" and g == "down"):
+        k, t, c = "5_WEAK", "WEAK", "#dd3a4a"
+    elif p == "down" and g in ("up", "flat") and lvl == "high":
+        k, t, c = "6_QUALITY_DIP", "QUALITY DIP", "#1f8fa8"
+    else:
+        # residual: price up with flat/rising-but-low quality, and price-down cells whose
+        # mid/low quality is NOT falling. Flat-price windows land here too.
+        k, t, c = "3_STEADY", "STEADY", "#8a94ad"
+    return {"key": k, "label": t, "color": c,
+            "price_state": p, "gvm_state": g, "level": lvl,
+            "price_chg_pct": round(p_chg, 2), "gvm_now": round(g_now, 2),
+            "gvm_then": round(g_then, 2), "gvm_delta": round(dg, 2)}
+
+
+@router.get("/api/gvm/trend_verdict/{symbol}")
+def gvm_trend_verdict(symbol: str, tf: str = "1Y"):
+    """cc#779: trend-strength verdict for the chart badge, over the selected timeframe. Cached per
+    symbol+timeframe per day. Returns null verdict (never a guess) when either series lacks a point
+    at the window start — the badge simply doesn't render."""
+    sym = (symbol or "").upper()
+    tf = tf if tf in _TF_DAYS else "1Y"
+    key = (sym, tf, date.today().isoformat())
+    if key in _VERDICT_CACHE:
+        return _VERDICT_CACHE[key]
+    days = _TF_DAYS[tf]
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT close, price_date FROM raw_prices
+                       WHERE symbol=%s AND close IS NOT NULL ORDER BY price_date DESC LIMIT 1""", (sym,))
+        r = cur.fetchone()
+        p_now, p_date = (float(r[0]), r[1]) if r else (None, None)
+        p_then = None
+        if p_date:
+            cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
+                           AND price_date <= %s ORDER BY price_date DESC LIMIT 1""",
+                        (sym, p_date - timedelta(days=days)))
+            rr = cur.fetchone()
+            p_then = float(rr[0]) if rr else None
+        cur.execute("""SELECT gvm_score, score_date FROM gvm_history
+                       WHERE symbol=%s AND gvm_score IS NOT NULL ORDER BY score_date DESC LIMIT 1""", (sym,))
+        g = cur.fetchone()
+        g_now, g_date = (float(g[0]), g[1]) if g else (None, None)
+        g_then = None
+        if g_date:
+            cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
+                           AND score_date <= %s ORDER BY score_date DESC LIMIT 1""",
+                        (sym, g_date - timedelta(days=days)))
+            gg = cur.fetchone()
+            g_then = float(gg[0]) if gg else None
+            if g_then is None:   # window predates our GVM history -> use the oldest point we hold
+                cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
+                               ORDER BY score_date ASC LIMIT 1""", (sym,))
+                gg = cur.fetchone()
+                g_then = float(gg[0]) if gg else None
+    p_chg = ((p_now - p_then) / p_then * 100.0) if (p_now and p_then) else None
+    out = {"symbol": sym, "timeframe": tf, "verdict": _trend_verdict(p_chg, g_now, g_then)}
+    _VERDICT_CACHE[key] = out
+    if len(_VERDICT_CACHE) > 4000:
+        _VERDICT_CACHE.clear()
+    return out
 
 
 @router.get("/api/gvm/history/{symbol}")
