@@ -2410,6 +2410,48 @@ def _bg_mf_nav():
         log.error(f"_bg_mf_nav: {e}")
 
 
+_mf_derived_nightly_armed_day = None
+def _bg_mf_derived_nightly():
+    """cc#777 Part 2 + cc#778: NIGHTLY holdings-derived NAV rebuild + metric recompute.
+
+    cc#778 amendment: derivation is NIGHTLY, not weekly — it sits inside the 01:00-02:05 IST chain
+    AFTER the 01:00 Yahoo EOD load so the same-day closes are consumed, which keeps the screener and
+    fund pages T-1 fresh instead of up to 6 days stale. Compute is trivial (~512 funds x ~60 holdings)."""
+    global _mf_derived_nightly_armed_day
+    now = _ist_now()
+    if not (now.hour == 1 and 35 <= now.minute < 50):   # after the 01:00 yahoo EOD load
+        return _SKIPPED
+    day_key = now.date().isoformat()
+    if _mf_derived_nightly_armed_day == day_key:
+        return _SKIPPED
+    _mf_derived_nightly_armed_day = day_key
+    try:
+        import mf_derived
+        log.info(f"_bg_mf_derived_nightly: {mf_derived.run_nightly()}")
+    except Exception as e:
+        log.error(f"_bg_mf_derived_nightly: {e}")
+
+
+_mf_derived_audit_armed_day = None
+def _bg_mf_derived_audit():
+    """cc#778: Saturday SELF-AUDIT ONLY — re-grade tracking error / confidence from the accumulated
+    daily points (~22 obs/fund/month vs 4 under the old weekly design). Does NOT rebuild the series;
+    the nightly job owns that."""
+    global _mf_derived_audit_armed_day
+    now = _ist_now()
+    if not (now.weekday() == 5 and now.hour == 7 and now.minute < 15):
+        return _SKIPPED
+    day_key = now.date().isoformat()
+    if _mf_derived_audit_armed_day == day_key:
+        return _SKIPPED
+    _mf_derived_audit_armed_day = day_key
+    try:
+        import mf_derived
+        log.info(f"_bg_mf_derived_audit: {mf_derived.run_weekly_audit()}")
+    except Exception as e:
+        log.error(f"_bg_mf_derived_audit: {e}")
+
+
 _mf_monthly_mc_armed_day = None
 def _bg_mf_monthly_mc():
     """cc#777 Part 1: MONTHLY Moneycontrol refresh on the 11th (AMC portfolio disclosures are
@@ -3442,6 +3484,10 @@ async def _scheduler_loop():
         # THIS design (vendor stays the eventual production source; this is the interim). Day+hour
         # gate lives inside the job, which is day-locked and writes the job_runs spine.
         if now.day == 11:       _spawn(_bg_mf_monthly_mc)
+        # cc#777 Part 2 + cc#778: NIGHTLY derived-NAV rebuild (post-01:00 Yahoo EOD) + Saturday
+        # self-audit only. Hour/minute gates + day-locks live inside each job.
+        if h == 1:              _spawn(_bg_mf_derived_nightly)
+        if now.weekday() == 5 and h == 7:  _spawn(_bg_mf_derived_audit)
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
