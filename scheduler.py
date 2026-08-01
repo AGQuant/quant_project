@@ -2410,6 +2410,97 @@ def _bg_mf_nav():
         log.error(f"_bg_mf_nav: {e}")
 
 
+_mf_monthly_mc_armed_day = None
+def _bg_mf_monthly_mc():
+    """cc#777 Part 1: MONTHLY Moneycontrol refresh on the 11th (AMC portfolio disclosures are
+    SEBI-mandated within 10 days of month-end, so the 11th is the first safe day).
+
+    (a) resolve_mc_map — maps any NEW schemes to their MC imid/slug (idempotent, ~3.5 min);
+    (b) run_mc_oneshot — holdings+weights (getInvestmentByStock pageSize=300) + AUM/TER/manager/
+        inception (__NEXT_DATA__ overview) over the ~519 equity universe. Reuses the cc#500
+        orchestrator as-is: checkpointed via app_config mf_mc_oneshot_cursor, 1.7s pacing, step_5
+        stop rules (3 consecutive 403/no-__NEXT_DATA__, or >20% unparseable in first 50) and the
+        AMC-aggregate-AUM sanity reject (>Rs 5,00,000 Cr). ~90 min. The cursor self-deletes on a
+        clean finish, so each monthly run starts fresh; a stop_event leaves it so the next run
+        RESUMES rather than restarting — both correct.
+    (c) NAV ANCHOR — stamps the month-end actual NAV per fund into mf_nav_history as nav_kind='m',
+        the truth point tracking-error is measured against.
+
+    Registered in schedule_registry (id=9116) and writes a job_runs row via the ops_control_plane
+    spine; any failure ALSO writes ops_log category=scrape_review (universal failure rule)."""
+    global _mf_monthly_mc_armed_day
+    now = _ist_now()
+    if now.day != 11 or now.hour != 3:      # 03:30 IST — clear of the 01:00-02:00 nightly cascade
+        return _SKIPPED
+    if now.minute >= 40:
+        return _SKIPPED
+    day_key = now.date().isoformat()
+    if _mf_monthly_mc_armed_day == day_key:
+        return _SKIPPED
+    _mf_monthly_mc_armed_day = day_key
+
+    started = _ist_now()
+    landed, err, status = {}, None, "ok"
+    try:
+        import mf_pipeline
+        try:
+            m = mf_pipeline.resolve_mc_map()
+            landed["mc_map"] = True
+        except Exception as e:
+            landed["mc_map"] = False; err = f"resolve_mc_map: {e}"; m = None
+        res = mf_pipeline.run_mc_oneshot()
+        landed["holdings"] = bool(res and res.get("holdings_filled"))
+        landed["overview"] = bool(res and res.get("overview_filled"))
+        if res and res.get("stop_event"):
+            status = "partial"
+            err = f"stop_event: {res.get('stop_event')}"
+        elif not landed["holdings"]:
+            status = "partial"
+            err = err or "no holdings rows written"
+        # (c) NAV anchor — month-end actual NAV per fund, the tracking-error truth point.
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO mf_nav_history (scheme_code, nav_date, nav, nav_kind)
+                    SELECT DISTINCT ON (h.scheme_code) h.scheme_code, h.nav_date, h.nav, 'm'
+                    FROM mf_nav_history h
+                    WHERE h.nav_date >= (date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
+                                         - INTERVAL '1 month')::date
+                      AND h.nav_date <  date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')::date)::date
+                      AND h.nav IS NOT NULL
+                    ORDER BY h.scheme_code, h.nav_date DESC
+                    ON CONFLICT DO NOTHING""")
+                landed["nav_anchor"] = cur.rowcount
+                conn.commit()
+        except Exception as e:
+            landed["nav_anchor"] = 0
+            err = (err + " | " if err else "") + f"nav_anchor: {e}"
+            status = "partial" if status == "ok" else status
+        log.info(f"_bg_mf_monthly_mc: status={status} landed={landed} res={res}")
+    except Exception as e:
+        status, err = "failed", str(e)[:400]
+        log.error(f"_bg_mf_monthly_mc: {e}")
+    # job_runs spine + universal failure rule (ops_log category=scrape_review on non-ok)
+    try:
+        import ops_control_plane
+        ops_control_plane.record_run("mf_monthly_mc", status=status, sections_landed=landed,
+                                     error=err, scope="v15_mf")
+    except Exception as e:
+        log.warning(f"_bg_mf_monthly_mc record_run failed: {e}")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO job_runs (job_key, started_at, finished_at, status, sections_landed, error)
+                           VALUES ('mf_monthly_mc', %s, NOW(), %s, %s, %s)""",
+                        (started, status, Json(landed), err))
+            if status != "ok":
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'scrape_review', 'MF_MONTHLY_MC_FAILED', %s)""",
+                            (Json({"status": status, "error": err, "landed": landed}),))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"_bg_mf_monthly_mc job_runs write failed: {e}")
+
+
 def _bg_mf_returns_backfill():
     """cc#477: flag-gated one-shot V15 MF returns backfill (AUM>5000cr, monthly+weekly NAV history,
     1W/1M/3M/6M/1Y/2Y). Runs on the APP server (has AMFI/mfapi outbound), independent of the feed
@@ -3346,6 +3437,11 @@ async def _scheduler_loop():
         if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # flag-gated -- manual /run_weekly arm only
         # if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)        # unconditional Sat cron -- DISABLED cc#499
         # if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)   # unconditional monthly cron -- DISABLED cc#499
+        # cc#777: V15 MF REVIVAL — monthly MC refresh on the 11th. Founder 02-Aug explicitly
+        # SUPERSEDES the cc#499/id=5415 cadence-void and the id=5428 no-further-scrape framing for
+        # THIS design (vendor stays the eventual production source; this is the interim). Day+hour
+        # gate lives inside the job, which is day-locked and writes the job_runs spine.
+        if now.day == 11:       _spawn(_bg_mf_monthly_mc)
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
