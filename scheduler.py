@@ -1340,9 +1340,17 @@ def _bg_weekly_ops_metrics_queue():
                 work = [s for s in cand if _omp._infer_sector(seg.get(s)) in _specific]
             else:
                 work = cand
+            # cc#773 BUGFIX: ops_metrics_t1_queue.ex_date is NOT NULL, but this insert only ever supplied
+            # (symbol, queued_at, status) — so EVERY queue attempt raised and the whole cc#667 detector
+            # silently queued nothing (queue depth sat at 0 while 214 reporters went uncovered). Supply
+            # the symbol's latest validated reported ex_date (fallback today), and make it conflict-safe.
             for sym in work:
-                cur.execute("INSERT INTO ops_metrics_t1_queue (symbol, queued_at, status) "
-                            "VALUES (%s, NOW(), 'pending')", (sym,))
+                cur.execute("""INSERT INTO ops_metrics_t1_queue (symbol, ex_date, queued_at, status)
+                    VALUES (%s, COALESCE((SELECT MAX(e.ex_date) FROM earnings_calendar e
+                                          WHERE UPPER(e.ticker)=%s AND e.status='reported'
+                                            AND e.verified <> 'false'),
+                                         (NOW() AT TIME ZONE 'Asia/Kolkata')::date), NOW(), 'pending')
+                    ON CONFLICT (symbol, ex_date) DO NOTHING""", (sym, sym))
             cur.execute("SELECT COUNT(*) FROM ops_metrics_t1_queue WHERE status='pending'")
             depth = cur.fetchone()[0]
             cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
