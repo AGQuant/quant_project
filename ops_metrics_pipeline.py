@@ -443,11 +443,25 @@ _METRIC_CANON = {
     "ebitda_per_mt": "ebitda_per_t", "ebitda_per_t": "ebitda_per_t",
     "realisation_per_mt": "realization_per_t", "realization_per_t": "realization_per_t",
     "realisation_per_t": "realization_per_t", "realization_per_mt": "realization_per_t",
-    "volume_mt": "volume_mn_t", "volumes_mn_t": "volume_mn_t",
-    "credit_growth": "credit_growth_yoy", "deposit_growth": "deposit_growth_yoy",
-    "pcr": "provision_coverage_pct", "provision_coverage": "provision_coverage_pct",
-    "deal_wins_tcv_cr": "deal_wins_tcv", "deal_wins_tcv_mn": "deal_wins_tcv",
-    "tcv_deal_wins": "deal_wins_tcv",
+    # cc#781 (found by the spec's own verify step, not listed on the card): the SAME inversion existed
+    # here — registry canonical for Cement/Metals_Steel is `volumes_mn_t` (plural), but the map pointed
+    # that registry name AT the non-registry `volume_mn_t`. Direction corrected.
+    "volume_mt": "volumes_mn_t", "volume_mn_t": "volumes_mn_t", "volumes_mt": "volumes_mn_t",
+    # cc#781: these four were INVERTED — they mapped the REGISTRY-canonical name onto a long variant
+    # (credit_growth -> credit_growth_yoy, pcr -> provision_coverage_pct), i.e. exactly backwards.
+    # sector_kpi_registry holds credit_growth / deposit_growth / pcr / roa / nim and NOT the long
+    # forms, so every scrape wrote names the registry-driven Peers card cannot match — which is what
+    # re-created the blank cells cc#780 fixed, after 300+ rows had been renamed by hand on 01-Aug.
+    # RULE (id=7117 prereq 1): the registry is the naming authority; _canon_metric output must be a
+    # registry metric_name wherever the registry has an entry. Direction is now variants -> canonical.
+    "credit_growth_yoy": "credit_growth", "advances_growth_yoy_pct": "credit_growth",
+    "advances_growth_yoy": "credit_growth", "deposit_growth_yoy": "deposit_growth",
+    "provision_coverage_pct": "pcr", "provision_coverage": "pcr", "pcr_pct": "pcr",
+    "roa_pct": "roa", "nim_pct": "nim",
+    # cc#781 (same inversion, also found by the verify): registry canonical for IT is `tcv_deal_wins`;
+    # the map pointed that registry name AT the non-registry `deal_wins_tcv`. Direction corrected.
+    "deal_wins_tcv_cr": "tcv_deal_wins", "deal_wins_tcv_mn": "tcv_deal_wins",
+    "deal_wins_tcv": "tcv_deal_wins",
     "volume_growth_uvg_pct": "volume_growth_pct",
 }
 
