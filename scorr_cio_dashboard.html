@@ -2166,7 +2166,9 @@ function OpsMetricsSection({ ops }) {
     <div id="operational" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Operational Metrics</div>
-        {ops.sector && <Tag color={C.muted}>{String(ops.sector).replace(/_/g, " ")}</Tag>}
+        {/* cc#780 fix_3: show the SEGMENT (BANKS / NBFC per screener_raw.Industry), not the combined
+            Banking_NBFC registry sector — id=7132 makes them separate segments everywhere. */}
+        {(ops.segment || ops.sector) && <Tag color={C.muted}>{String(ops.segment || ops.sector).replace(/_/g, " ")}</Tag>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {peers.length ? modeBtn("peers", "Peers", showPeers) : null}
           {modeBtn("standalone", "Standalone", !showPeers)}
@@ -2199,19 +2201,37 @@ function OpsMetricsSection({ ops }) {
           <tbody>
             {ops.rows.map(row => (
               <tr key={row.metric_name} style={{ borderBottom: `1px solid ${C.gridLine}` }}>
-                <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap", color: C.text, fontWeight: 600 }}>{row.label}</td>
+                <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap", color: C.text, fontWeight: 600 }}>
+                  {row.label}
+                  {/* cc#780 fix_5 (id=7132 min_peers=2): fewer than 2 in-window peers holding this
+                      metric => value only, flagged, never a percentile off a single comparator. */}
+                  {showPeers && row.thin_peers
+                    ? <span title="Fewer than 2 peers reported this metric in the window — value shown without a peer benchmark"
+                        style={{ marginLeft: 6, fontSize: 8.5, fontWeight: 800, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 4px", verticalAlign: "middle" }}>THIN PEERS</span>
+                    : null}
+                </td>
                 {showPeers ? (
                   <React.Fragment>
+                    {/* cc#780 fix_2: QoQ/YoY sub-lines REMOVED from every peers-mode cell (id=7117 is
+                        SINGLE LEVEL: value + as-of + peer badge). cc#780 fix_1: each cell carries its
+                        OWN as-of quarter, shown only when it differs from the column header quarter —
+                        so a value that fell back to an older quarter is never passed off as current. */}
                     <td key="co" style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace", color: C.text, fontWeight: 700 }}>
                       <div>{fmt(row.latest, row.unit)}</div>
-                      {growthSub(row.qoq, row.yoy, row.direction)}
+                      {row.as_of && row.as_of !== latestQ
+                        ? <div style={{ fontSize: 9, fontWeight: 600, color: C.muted, lineHeight: 1.2 }}>{row.as_of}</div> : null}
                     </td>
-                    {peers.map((ps, i) => (
+                    {peers.map((ps, i) => {
+                      const pv = row.peers ? row.peers[i] : null;
+                      const pa = row.peer_as_of ? row.peer_as_of[i] : null;
+                      return (
                       <td key={"p" + i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace", borderLeft: i === 0 ? `1px solid ${C.border}` : "none", color: C.muted, fontWeight: 500 }}>
-                        <div>{fmt(row.peers ? row.peers[i] : null, row.unit)}</div>
-                        {growthSub(row.peer_qoq ? row.peer_qoq[i] : null, row.peer_yoy ? row.peer_yoy[i] : null, row.direction)}
+                        <div>{fmt(pv, row.unit)}</div>
+                        {pv != null && pa && pa !== (peerQ[ps] || null)
+                          ? <div style={{ fontSize: 9, fontWeight: 600, color: C.muted, lineHeight: 1.2 }}>{pa}</div> : null}
                       </td>
-                    ))}
+                      );
+                    })}
                   </React.Fragment>
                 ) : (
                   row.values.map((v, i) => (

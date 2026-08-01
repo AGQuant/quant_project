@@ -918,6 +918,48 @@ def _ops_pretty(metric_name: str) -> str:
     return " ".join(out) or metric_name
 
 
+# cc#780 / id=7132 BFSI split. Banking_NBFC is a REGISTRY sector, never a peer pool: banks and
+# MFI-NBFCs have structurally different NIM/ROA, so a combined pool makes every benchmark false.
+_BANK_INDUSTRIES = {"Private Sector Bank", "Public Sector Bank", "Other Bank", "Other Sector Bank"}
+_NBFC_INDUSTRIES = {"Non Banking Financial Company (NBFC)", "Housing Finance Company",
+                    "Financial Institution", "Microfinance Institutions"}
+_BANK_ONLY_OPS = {"casa_pct", "casa", "deposit_growth", "deposit_growth_yoy", "cost_to_income"}
+
+
+def _bfsi_segment(cur, symbol: str) -> Optional[str]:
+    """BANKS | NBFC | None (non-BFSI or unclassified). id=7132 fallback: an unmatched Industry is
+    NBFC when the symbol has no CASA row, else BANKS."""
+    try:
+        cur.execute('SELECT "Industry" FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1', (symbol,))
+        r = cur.fetchone()
+        ind = (r[0] or "").strip() if r else ""
+    except Exception:
+        return None
+    if ind in _BANK_INDUSTRIES:
+        return "BANKS"
+    if ind in _NBFC_INDUSTRIES:
+        return "NBFC"
+    try:
+        cur.execute("""SELECT 1 FROM sector_ops_metrics WHERE symbol=%s
+                        AND metric_name IN ('casa_pct','casa') AND metric_value IS NOT NULL LIMIT 1""", (symbol,))
+        return "BANKS" if cur.fetchone() else None
+    except Exception:
+        return None
+
+
+def _bfsi_segment_symbols(cur, seg: str) -> Optional[List[str]]:
+    """All symbols in the BANKS / NBFC segment, so the peer pool never crosses the boundary."""
+    inds = _BANK_INDUSTRIES if seg == "BANKS" else _NBFC_INDUSTRIES if seg == "NBFC" else None
+    if not inds:
+        return None
+    try:
+        cur.execute('SELECT UPPER(nse_code) FROM screener_raw WHERE "Industry" = ANY(%s) AND nse_code IS NOT NULL',
+                    (list(inds),))
+        return [r[0] for r in cur.fetchall()] or None
+    except Exception:
+        return None
+
+
 def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
     """cc#541: operational KPI block for the GVM company report. Pivots sector_ops_metrics into
     quarters-as-columns rows (last 6 quarters, oldest -> newest, mirroring the FINANCIALS shape),
@@ -961,12 +1003,18 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                 direction = dir_map.get(mname)
                 q_vals = [qmap.get(q) for q in disp_quarters]
                 if any(v is not None for v in q_vals):
-                    latest = qmap.get(latest_q_label)
+                    # cc#780 fix_1: the COMPANY column gets the same per-metric fallback as the peers —
+                    # its own newest quarter FOR THIS METRIC, tagged with that quarter, rather than a
+                    # single card-wide quarter that blanks every metric not reported in it.
+                    _own_qs = [q for q, v in qmap.items() if v is not None and _ops_is_quarter(q)]
+                    own_q = max(_own_qs, key=_ops_quarter_key) if _own_qs else None
+                    latest = qmap.get(own_q) if own_q else qmap.get(latest_q_label)
                     qoq = _ops_growth_pct(latest, qmap.get(prev_q_label)) if prev_q_label else None
                     yoy = _ops_growth_pct(latest, qmap.get(yoy_q_label)) if (yoy_q_label in qmap) else None
                     metric_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
                                         "unit": units.get(mname), "values": q_vals,
-                                        "latest": latest, "qoq": qoq, "yoy": yoy, "direction": direction})
+                                        "latest": latest, "as_of": own_q,   # cc#780 per-cell as-of
+                                        "qoq": qoq, "yoy": yoy, "direction": direction})
                 elif disp_fy and any(qmap.get(fy) is not None for fy in disp_fy):
                     annual_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
                                         "unit": units.get(mname), "direction": direction,
@@ -986,52 +1034,78 @@ def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
                 # (honest). Each peer carries its own most-recent quarter tag; a missing KPI = null (--).
                 # cc#715: window widened 4 -> 5 quarters so each peer's QoQ (adjacent) and YoY
                 # (same quarter one FY back) can be computed per its OWN series, not just its latest.
+                # cc#780: window = last 2 REPORTED quarters (id=7132 quarter_window.peer_pool), not 5.
                 cur.execute("SELECT DISTINCT quarter FROM sector_ops_metrics WHERE metric_value IS NOT NULL AND quarter IS NOT NULL")
-                window = sorted([q for q in (r[0] for r in cur.fetchall()) if _ops_is_quarter(q)], key=_ops_quarter_key)[-5:]
+                window = sorted([q for q in (r[0] for r in cur.fetchall()) if _ops_is_quarter(q)], key=_ops_quarter_key)[-2:]
                 sector = out.get("sector")
+                # cc#780 / id=7132 DISPLAY_SEPARATE: Banking_NBFC is NOT a peer pool. Split it into
+                # BANKS vs NBFC by screener_raw.Industry and benchmark within the OWN segment only —
+                # the 01-Aug card mixed KARURVYSYA/FEDERALBNK (banks) with CREDITACC/SATIN (MFI-NBFCs),
+                # whose NIM/ROA are structurally different, making every comparison meaningless.
+                seg = _bfsi_segment(cur, symbol)
+                out["segment"] = seg or (sector.replace("_", " ") if sector else None)
+                seg_syms = _bfsi_segment_symbols(cur, seg) if seg else None
+                # cc#780 fix_3: bank-only metrics never render on an NBFC company card.
+                if seg == "NBFC":
+                    metric_rows = [r for r in metric_rows if r["metric_name"] not in _BANK_ONLY_OPS]
+                    out["rows"] = metric_rows
+                core_metrics = [r["metric_name"] for r in metric_rows]
                 pool: List[tuple] = []   # (symbol, gvm_score)
-                if sector and window:
-                    cur.execute("""SELECT g.symbol, g.gvm_score FROM gvm_scores g
-                                   WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
-                                     AND g.symbol<>%s
-                                     AND EXISTS (SELECT 1 FROM sector_ops_metrics s
-                                                 WHERE s.symbol=g.symbol AND s.sector=%s AND s.quarter=ANY(%s)
-                                                   AND s.metric_value IS NOT NULL)
-                                   ORDER BY g.gvm_score DESC NULLS LAST
-                                   LIMIT 10""", (symbol, sector, window))
+                if sector and window and core_metrics:
+                    # cc#780 fix_4: a symbol only earns a peer column if it holds >=1 IN-WINDOW value on
+                    # the segment's core metrics; otherwise take the next GVM name. Ranked by GVM (the
+                    # locked rule) — NOT by recency, which previously let a stale-but-fresh-looking name
+                    # outrank a better peer.
+                    q = """SELECT g.symbol, g.gvm_score FROM gvm_scores g
+                           WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                             AND g.symbol<>%s
+                             AND EXISTS (SELECT 1 FROM sector_ops_metrics s
+                                         WHERE s.symbol=g.symbol AND s.sector=%s AND s.quarter=ANY(%s)
+                                           AND s.metric_name=ANY(%s) AND s.metric_value IS NOT NULL)"""
+                    params: List[Any] = [symbol, sector, window, core_metrics]
+                    if seg_syms:
+                        q += " AND g.symbol = ANY(%s)"
+                        params.append(seg_syms)
+                    q += " ORDER BY g.gvm_score DESC NULLS LAST LIMIT 5"
+                    cur.execute(q, params)
                     pool = [(r[0], r[1] if r[1] is not None else -1.0) for r in cur.fetchall()]
                 if pool:
+                    peers = [p for p, _ in pool]
                     cur.execute("""SELECT symbol, quarter, metric_name, metric_value FROM sector_ops_metrics
                                    WHERE symbol = ANY(%s) AND sector=%s AND quarter = ANY(%s) AND metric_value IS NOT NULL""",
-                                ([p for p, _ in pool], sector, window))
-                    prows = cur.fetchall()
+                                (peers, sector, window))
                     peer_series: Dict[tuple, Dict[str, Optional[float]]] = {}   # (peer,metric) -> {quarter: value}
-                    peer_q: Dict[str, str] = {}   # per peer -> its most recent reported quarter in the window
-                    for psym, q, mname, val in prows:
-                        peer_series.setdefault((psym, mname), {})[q] = _f(val)
-                        if psym not in peer_q or _ops_quarter_key(q) > _ops_quarter_key(peer_q[psym]):
-                            peer_q[psym] = q
-                    gvm_map = dict(pool)
-                    peers = sorted([p for p, _ in pool if p in peer_q],
-                                   key=lambda p: (_ops_quarter_key(peer_q[p]), gvm_map[p]), reverse=True)[:5]
+                    peer_q: Dict[str, str] = {}   # per peer -> newest quarter seen (header tag only)
+                    for psym, q_, mname, val in cur.fetchall():
+                        peer_series.setdefault((psym, mname), {})[q_] = _f(val)
+                        if psym not in peer_q or _ops_quarter_key(q_) > _ops_quarter_key(peer_q[psym]):
+                            peer_q[psym] = q_
+                    # cc#780 fix_1 PER-METRIC QUARTER FALLBACK. The old code read ser.get(lq) where lq was
+                    # the peer's newest quarter across ALL metrics — so ONE stray newer row blanked every
+                    # other metric for that peer (the 01-Aug all-"--" SATIN column, while the DB held its
+                    # Q4FY26 credit_cost/credit_growth/gnpa). Each CELL now independently takes the latest
+                    # quarter available FOR THAT (peer, metric) and carries its OWN as-of tag.
                     for row in metric_rows:
-                        pv, pq, py = [], [], []
+                        pv, pa = [], []
                         for p in peers:
                             ser = peer_series.get((p, row["metric_name"]), {})
-                            lq = peer_q.get(p)
-                            lv = ser.get(lq)
-                            pv.append(lv)
-                            qs = sorted(ser.keys(), key=_ops_quarter_key)
-                            prevq = qs[-2] if len(qs) >= 2 else None
-                            pq.append(_ops_growth_pct(lv, ser.get(prevq)) if prevq else None)
-                            yl = _ops_yoy_label(lq)
-                            py.append(_ops_growth_pct(lv, ser.get(yl)) if (yl in ser) else None)
+                            if ser:
+                                cq = max(ser.keys(), key=_ops_quarter_key)
+                                pv.append(ser[cq]); pa.append(cq)
+                            else:
+                                pv.append(None); pa.append(None)
                         row["peers"] = pv
-                        row["peer_qoq"] = pq
-                        row["peer_yoy"] = py
+                        row["peer_as_of"] = pa      # cc#780: per-CELL as-of quarter
+                        row.pop("peer_qoq", None)   # cc#780 fix_2: QoQ/YoY killed (id=7117 single level)
+                        row.pop("peer_yoy", None)
                     out["peers"] = peers
-                    out["peer_quarters"] = {p: peer_q[p] for p in peers}   # cc#683: per-peer quarter tag
+                    out["peer_quarters"] = {p: peer_q[p] for p in peers}
                     out["peer_quarter"] = window[-1]                        # legacy field retained
+                    # cc#780 fix_5: percentile/benchmark badge needs >=2 in-window peers holding the
+                    # metric (id=7132 min_peers=2); below that the UI shows value only + thin-peers.
+                    for row in metric_rows:
+                        row["peer_n"] = sum(1 for v in row.get("peers") or [] if v is not None)
+                        row["thin_peers"] = row["peer_n"] < 2
 
         cur.execute("""SELECT quarter, summary, guidance, tone FROM concall_summaries
                        WHERE symbol=%s ORDER BY computed_at DESC LIMIT 1""", (symbol,))

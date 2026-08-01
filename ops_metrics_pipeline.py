@@ -884,7 +884,28 @@ def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
     # internal confidence comparisons (_merge_pass/_should_escalate) stay lowercase, only the
     # value written to the DB is upper-cased here.
     sector = _canon_sector(sector)   # cc#632: canonical label at write time
+    # cc#780 fix_6 SCRAPER GUARD. Two classes of junk reached this table and had to be purged by hand
+    # on 01-Aug: rows with a NULL metric_value (nothing to display, but they still won the
+    # latest-quarter race and blanked real values), and month-shaped / "unspecified" quarter labels
+    # (11,313 of 14,758 rows — 77% of the table). Both are now rejected AT THE WRITE, so the same
+    # cleanup can never be needed twice. A rejected row is logged, never silently dropped.
+    _QLABEL = re.compile(r"^(Q[1-4]FY[0-9]{2}|FY[0-9]{2})$")
+    if not quarter or not _QLABEL.match(str(quarter).strip()):
+        log.warning(f"write_extraction REJECTED {symbol}: bad quarter label {quarter!r} "
+                    "(must match ^Q[1-4]FY[0-9]{2}$ or ^FY[0-9]{2}$) — cc#780 guard")
+        try:
+            _oplog(cur, "OPS_METRICS_BAD_QUARTER_REJECTED",
+                   {"symbol": symbol, "quarter": str(quarter)[:40], "sector": sector,
+                    "metrics": list(metrics.keys())[:20]}, category="scrape_review")
+        except Exception:
+            pass
+        return
+    quarter = str(quarter).strip()
     for name, m in metrics.items():
+        if m.get("value") is None:
+            # a NULL-valued row displays as "--" yet still competes for the latest quarter — never store it
+            log.info(f"write_extraction skipped {symbol}/{name} {quarter}: NULL metric_value (cc#780 guard)")
+            continue
         confidence = m["confidence"].upper() if m["confidence"] else None
         name = _canon_metric(name)   # cc#632: canonical lowercase snake_case metric_name
         cur.execute("""INSERT INTO sector_ops_metrics
