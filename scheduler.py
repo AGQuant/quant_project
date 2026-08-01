@@ -1308,6 +1308,31 @@ def _bg_weekly_ops_metrics_queue():
                 AND d.symbol NOT IN (SELECT symbol FROM ops_metrics_t1_queue WHERE status='pending')
               ORDER BY d.symbol""")
             cand = [r[0] for r in cur.fetchall()]
+            # cc#773 CATCH-UP: the doc-driven worklist above only sees symbols that ALREADY have a stored
+            # doc — which is exactly why 214 validated reporters (50%) were missing and invisible. Add
+            # every validated recent reporter (cc#765 gate) that has a stored doc but no ops row, ordered
+            # LARGEST MCAP FIRST, so the biggest coverage holes (VAML/PHOENIXLTD/IRB…) are queued first.
+            cur.execute("""
+              WITH reporters AS (
+                SELECT DISTINCT UPPER(e.ticker) AS symbol FROM earnings_calendar e
+                WHERE e.status='reported' AND e.verified <> 'false'
+                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 14
+                  AND e.event_type IN ('Quarterly Result','Financial Results')),
+              covered AS (SELECT DISTINCT symbol FROM sector_ops_metrics
+                          WHERE created_at >= NOW() - INTERVAL '14 days')
+              SELECT r.symbol FROM reporters r
+              LEFT JOIN covered c ON c.symbol = r.symbol
+              LEFT JOIN screener_raw s ON UPPER(s.nse_code) = r.symbol
+              WHERE c.symbol IS NULL
+                AND EXISTS (SELECT 1 FROM doc_texts d WHERE d.symbol=r.symbol
+                              AND d.extract_status='stored' AND d.char_count>0)
+                AND r.symbol NOT IN (SELECT symbol FROM ops_metrics_honest_absent)
+                AND r.symbol NOT IN (SELECT symbol FROM ops_metrics_t1_queue WHERE status='pending')
+              ORDER BY s.market_cap::numeric DESC NULLS LAST""")
+            catchup = [r[0] for r in cur.fetchall()]
+            for s in catchup:
+                if s not in cand:
+                    cand.append(s)
             # taxonomy filter: keep only symbols whose segment maps to a specific-KPI sector
             if _omp and cand:
                 cur.execute("SELECT DISTINCT symbol, segment FROM gvm_scores WHERE segment IS NOT NULL")
@@ -1328,6 +1353,75 @@ def _bg_weekly_ops_metrics_queue():
         log.info(f"weekly_ops_metrics_queue: +{len(work)} queued, pending depth={depth}")
     except Exception as e:
         log.error(f"weekly_ops_metrics_queue: {e}")
+
+
+# cc#773 OPS-METRICS SEASON MODE: through 15-Aug-2026 the queue-filler runs at DOUBLE pace (daily
+# instead of Saturday-only) because peak results season outruns the weekly burst. Auto-reverts after.
+OPS_SEASON_MODE_UNTIL = date(2026, 8, 15)
+
+
+def _ops_season_mode(today=None):
+    return (today or _ist_now().date()) <= OPS_SEASON_MODE_UNTIL
+
+
+def _bg_ops_metrics_coverage():
+    """cc#773: nightly DUAL coverage counter — of the validated reporters (cc#765 gate) of the last 14
+    days that are in the screener universe, what % have sector_ops_metrics rows (SCRAPED) and what %
+    are polished. Alerts when scraped coverage < 80% so the 48%-gap degradation can never go silent
+    again. Also reports the doc-staging gap (missing symbols with NO stored doc), which is the real
+    upstream bottleneck — extraction cannot cover a symbol whose investor doc was never staged."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+              WITH reporters AS (
+                SELECT DISTINCT UPPER(e.ticker) AS symbol FROM earnings_calendar e
+                WHERE e.status='reported' AND e.verified <> 'false'
+                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 14
+                  AND e.event_type IN ('Quarterly Result','Financial Results')
+                  AND EXISTS (SELECT 1 FROM screener_raw s WHERE UPPER(s.nse_code)=UPPER(e.ticker))),
+              covered AS (SELECT DISTINCT symbol FROM sector_ops_metrics
+                          WHERE created_at >= NOW() - INTERVAL '14 days'),
+              missing AS (SELECT r.symbol FROM reporters r LEFT JOIN covered c ON c.symbol=r.symbol
+                          WHERE c.symbol IS NULL)
+              SELECT (SELECT count(*) FROM reporters),
+                     (SELECT count(*) FROM reporters r JOIN covered c ON c.symbol=r.symbol),
+                     (SELECT count(*) FROM missing),
+                     (SELECT count(*) FROM missing m WHERE EXISTS
+                        (SELECT 1 FROM doc_texts d WHERE d.symbol=m.symbol AND d.extract_status='stored')),
+                     (SELECT count(*) FROM missing m WHERE EXISTS
+                        (SELECT 1 FROM ops_metrics_honest_absent h WHERE h.symbol=m.symbol)),
+                     (SELECT count(*) FROM ops_metrics_t1_queue WHERE status='pending')
+            """)
+            tot, cov, miss, miss_with_doc, miss_absent, qdepth = cur.fetchone()
+            scraped_pct = round(cov / tot * 100, 1) if tot else None
+            # polished-pct: rows carrying a polished/narrative field (the Claude-web job's output)
+            try:
+                cur.execute("""SELECT count(DISTINCT symbol) FROM sector_ops_metrics
+                               WHERE created_at >= NOW() - INTERVAL '14 days'
+                                 AND notes IS NOT NULL AND length(notes) > 0""")
+                pol = cur.fetchone()[0]
+            except Exception:
+                conn.rollback(); pol = None
+            polished_pct = round(pol / tot * 100, 1) if (tot and pol is not None) else None
+            payload = {"reporters_14d": tot, "with_ops_rows": cov, "scraped_pct": scraped_pct,
+                       "polished": pol, "polished_pct": polished_pct,
+                       "missing": miss, "missing_with_stored_doc": miss_with_doc,
+                       "missing_no_doc": (miss - miss_with_doc - miss_absent) if miss is not None else None,
+                       "honest_absent": miss_absent, "queue_pending": qdepth,
+                       "season_mode": _ops_season_mode()}
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'ops_metrics', 'OPS_METRICS_COVERAGE', %s)""",
+                        (Json(payload),))
+            if scraped_pct is not None and scraped_pct < 80:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'alert', 'OPS_METRICS_COVERAGE_LOW', %s)""",
+                            (Json({**payload, "message":
+                                   f"ops-metrics coverage {scraped_pct}% < 80% — {miss} reporters missing "
+                                   f"({miss_with_doc} have a stored doc and are queueable; the rest need doc staging)"}),))
+            conn.commit()
+        log.info(f"ops_metrics_coverage: {payload}")
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_coverage: {e}")
 
 
 _ops_polish_detect_running = False
@@ -3109,8 +3203,13 @@ async def _scheduler_loop():
             _spawn(_bg_ca_sweep_daily)        # cc#659: DAILY (incl weekends) sharded full-universe CA scrape
         if now.weekday() == 6 and h == 5 and m == 30:
             _spawn(_bg_ca_weekly_scan)        # cc#658 part_2: Sunday 05:30 full 5y distortion scan
-        if now.weekday() == 5 and h == 6 and m == 10:
-            _spawn(_bg_weekly_ops_metrics_queue)   # cc#667: Sat 06:10 detect new docs -> ops-metrics queue
+        # cc#667: Sat 06:10 detect new docs -> ops-metrics queue.
+        # cc#773 SEASON MODE: through 15-Aug run it DAILY (2x pace) — peak results season outruns the
+        # weekly burst (48% coverage gap on 01-Aug). Auto-reverts to Saturday-only after that date.
+        if h == 6 and m == 10 and (now.weekday() == 5 or _ops_season_mode(now.date())):
+            _spawn(_bg_weekly_ops_metrics_queue)
+        if h == 22 and m == 40:
+            _spawn(_bg_ops_metrics_coverage)       # cc#773: nightly dual coverage counter + <80% alert
         if h == 6 and m == 25:
             _spawn(_bg_ops_polish_detector, True)  # cc#736: DAILY 06:25 sweep -> refresh POLISH_QUEUE card (day-locked)
         if h == 9 and m == 10:
