@@ -505,8 +505,9 @@ tr.self td.sym{color:var(--blue)}
     // order), with a "+N more" summary line acting as a SHOW ALL toggle. Default collapsed.
     segs=segs.slice().sort(function(a,b){return (b.exposure_pct||0)-(a.exposure_pct||0);});
     var maxE=Math.max.apply(null,segs.map(function(s){return s.exposure_pct;}).concat([1]));
-    function rowHtml(s){
-      var aln=segAlign(s.exposure_pct,Number(s.sector_gvm));
+    function segRowHtml(s){   // cc#777: renamed from rowHtml — it shadowed nothing (function-scoped)
+      var aln=segAlign(s.exposure_pct,Number(s.sector_gvm));   // but the collision with the screener's
+                                                               // rowHtml was a trap for the next reader
       return '<tr>'
         +'<td class="sym">'+esc(s.segment)+'</td>'
         +'<td class="num">'+wtCell(s.exposure_pct,maxE)+'</td>'
@@ -515,7 +516,7 @@ tr.self td.sym{color:var(--blue)}
         +'</tr>';
     }
     var TOP=10, shown=SEG_EXPANDED?segs:segs.slice(0,TOP), hidden=segs.slice(TOP);
-    var trs=shown.map(rowHtml).join("");
+    var trs=shown.map(segRowHtml).join("");
     var foot="";
     if(hidden.length){
       var combined=hidden.reduce(function(a,s){return a+(s.exposure_pct||0);},0);
@@ -661,12 +662,32 @@ tr.self td.sym{color:var(--blue)}
     });
   }
 
+  // cc#777: DERIVED FALLBACK. Actual returns (mf_master, from mfapi/MC) always win — they are the
+  // official number. Derived (holdings-based) fills ONLY the gaps, and when it does the cell is
+  // marked with a superscript D + tooltip, so a derived figure can never be mistaken for an
+  // official NAV return. `dot` carries the confidence grade from the tracking-error audit.
+  function derivedCell(actual, derived, conf, te, label){
+    if(actual!=null) return null;                       // official value present -> never override
+    if(derived==null) return null;                      // nothing to fall back to
+    var p=pct(derived);
+    var grade = conf==='LOW' ? 'low confidence' : conf==='HIGH' ? 'high confidence' : 'ungraded';
+    var tip = 'Derived (holdings-based) '+label+' — no official '+label+' available for this fund. '
+      + grade + (te!=null ? ' · tracking error '+te+' bps' : '')
+      + '. Reconstructed from disclosed holdings x daily stock returns, anchored to actual NAV.';
+    var mark = '<sup style="font-size:8px;font-weight:800;color:var(--dim);margin-left:2px"'
+      + (conf==='LOW' ? ' data-low="1"' : '') + '>D</sup>';
+    return { t: p.t + mark, c: p.c, title: tip };
+  }
   function rowHtml(f){
     var r1=pct(f.ret_1y),r3=retCell(f.ret_3y,f.ret_3y_state,"3Y");
+    var d1=derivedCell(f.ret_1y,f.derived_ret_1y,f.derived_confidence,f.derived_te_bps,"1Y");
+    var d3=derivedCell(f.ret_3y,f.derived_ret_3y,f.derived_confidence,f.derived_te_bps,"3Y");
+    if(d1) r1={t:d1.t,c:d1.c,title:d1.title};
+    if(d3) r3={t:d3.t,c:d3.c,title:d3.title};
     return '<tr data-code="'+esc(f.scheme_code)+'" style="cursor:pointer">'
       +'<td class="sym">'+esc(f.name)+'</td>'
       +'<td>'+mqsChip(f.mqs)+'</td>'
-      +'<td class="num" style="color:'+r1.c+'">'+r1.t+'</td>'
+      +'<td class="num" style="color:'+r1.c+'" title="'+esc(r1.title||"")+'">'+r1.t+'</td>'
       +'<td class="num" style="color:'+r3.c+'" title="'+esc(r3.title||"")+'">'+r3.t+'</td>'
       +'<td class="num">'+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2):em)+'</td>'
       +'<td class="num">'+(f.aum_cr!=null?Number(f.aum_cr).toLocaleString("en-IN"):em)+'</td>'

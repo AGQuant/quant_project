@@ -1382,16 +1382,29 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
             order = "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
         else:
             order = "mqs DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
+        # cc#777: LEFT JOIN the holdings-derived metrics so a fund with no OFFICIAL return can still
+        # show a labelled derived figure. Order of preference is deliberate: ACTUAL returns
+        # (mf_master, sourced from mfapi/MC) are strictly better and always win; derived only FILLS
+        # GAPS and is always flagged, never silently blended into an official number.
         sql = ("SELECT m.scheme_code, m.name, m.amc, m.category, m.crisil_rank, "
-               "m.expense_ratio, m.aum_cr, m.ret_1y, m.ret_3y, m.inception, s.mqs "
-               "FROM mf_master m LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code WHERE "
+               "m.expense_ratio, m.aum_cr, m.ret_1y, m.ret_3y, m.inception, s.mqs, "
+               "d.ret_1y, d.ret_3y, d.confidence, d.tracking_err_bps "
+               "FROM mf_master m LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code "
+               "LEFT JOIN mf_derived_metrics d ON d.scheme_code = m.scheme_code WHERE "
                + " AND ".join(where) + " ORDER BY " + order + " LIMIT %s")
         params.append(max(1, min(limit, 80)))
         cur.execute(sql, params)
         rows = []
-        for sc, nm, amc, c, cr, er, aum, r1y, r3y, inception, mqs in cur.fetchall():
+        for (sc, nm, amc, c, cr, er, aum, r1y, r3y, inception, mqs,
+             d1y, d3y, dconf, dte) in cur.fetchall():
             rows.append({"scheme_code": sc, "name": nm, "amc": amc,
                          "category": _derive_cat(nm, c),
+                         # derived fallbacks, always explicitly labelled by the caller
+                         "derived_ret_1y": float(d1y) if d1y is not None else None,
+                         "derived_ret_3y": float(d3y) if d3y is not None else None,
+                         "derived_confidence": dconf,
+                         "derived_te_bps": float(dte) if dte is not None else None,
+                         "derived_basis": "Derived (holdings-based)",
                          "crisil_rank": cr, "expense_ratio": float(er) if er is not None else None,
                          "aum_cr": float(aum) if aum is not None else None,
                          "ret_1y": float(r1y) if r1y is not None else None,
@@ -1399,6 +1412,41 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
                          "ret_3y_state": _ret_window_state(float(r3y) if r3y is not None else None, inception, 3),
                          "mqs": float(mqs) if mqs is not None else None})
     return {"category": cat, "count": len(rows), "results": rows}
+
+
+def _screener_selftest():
+    """cc#777: the V15 page has been showing 'Screener unavailable.' — which is the frontend's
+    .catch, i.e. the request rejected / returned non-JSON / the row mapper threw. It is NOT a data
+    gap: the whitelist has ~510 direct-growth rows with actual 1Y on 852 funds, 3Y on 364, AUM 509,
+    ER 507, MQS 509. Because the failure could not be reproduced from the CC environment
+    (scorr.in is network-blocked), this endpoint makes the NEXT occurrence name itself instead of
+    dying anonymously behind a generic banner: it runs the real screener call server-side and
+    records the exact exception + traceback to ops_log. Hit GET /api/v15/screener/selftest."""
+    import traceback
+    out = {"ok": True, "checks": []}
+    for cat in ("", "Flexi Cap Fund"):
+        try:
+            r = v15_screener(category=cat, sort="mqs", limit=40)
+            out["checks"].append({"category": cat or "(all)", "ok": True, "count": r.get("count")})
+        except Exception as e:
+            out["ok"] = False
+            out["checks"].append({"category": cat or "(all)", "ok": False,
+                                  "error": str(e)[:400], "trace": traceback.format_exc()[-1200:]})
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, 'V15_SCREENER_SELFTEST', %s::jsonb)""",
+                        ("alert" if not out["ok"] else "info", json.dumps(out)))
+            conn.commit()
+    except Exception:
+        pass
+    return out
+
+
+@router.get("/api/v15/screener/selftest")
+def v15_screener_selftest():
+    """Diagnostic: runs the screener server-side and logs the exact failure to ops_log."""
+    return _screener_selftest()
 
 
 @router.get("/api/v15/mf/search")
