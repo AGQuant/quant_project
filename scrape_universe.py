@@ -64,6 +64,28 @@ def universe_symbols(cur) -> set:
     return {r[0] for r in cur.fetchall()}
 
 
+# cc#774 / UNIVERSE_DENOMINATOR_RULE (session_log id=207, locked 01-Aug): the SQL-joinable form of the
+# SAME definition as universe_symbols() above, for queries that must JOIN the universe rather than
+# pre-filter a Python list. Use this in EVERY coverage/backlog/missing query — the 01-Aug false alarm
+# (reported "48% coverage / 214 missing"; truth 97.8% / 6) came from a query hand-rolling
+# `EXISTS (SELECT 1 FROM screener_raw ...)`, which is the ~1801-row screener, NOT this ~616 universe.
+#
+#   Usage:  cur.execute("WITH " + UNIVERSE_CTE + ", reporters AS (... JOIN scrape_universe u ON ...) ...")
+#
+# NEVER quote a coverage number without stating denominator + window.
+UNIVERSE_CTE = f"""
+    scrape_universe AS (
+        SELECT UPPER(nse_code) AS symbol FROM (
+            SELECT nse_code FROM screener_raw
+            WHERE nse_code IS NOT NULL AND nse_code <> '' AND nse_code !~ '^[0-9]+$'
+              AND market_cap IS NOT NULL
+            ORDER BY market_cap DESC NULLS LAST
+            LIMIT {TOP_N}) r
+        UNION
+        SELECT UPPER(symbol) FROM sector_ops_metrics WHERE symbol IS NOT NULL
+    )"""
+
+
 def log_universe_skip(cur, symbol: str, ex_date=None, source: str = "") -> bool:
     """Record an out-of-universe scrape-skip ONCE per symbol (not per night). Returns True the
     first time a symbol is skipped (freshly logged), False on repeat skips. Backed by the

@@ -2144,6 +2144,32 @@ def run_t1_refresh(conn=None):
                 cur.execute("""UPDATE ops_metrics_t1_queue SET status=%s, processed_at=NOW()
                                WHERE symbol=%s AND ex_date=%s""",
                             ("done" if landed else "failed", sym, ex_date))
+                # cc#774 spec_2 — NEVER go terminal with no artifact. 'done' above is gated on the
+                # FUNDAMENTALS quarters landing, not on a doc; a company whose investor doc was never
+                # found therefore closed as 'done' with zero doc_texts, zero ops rows and zero
+                # honest-absent row — invisible to every coverage query (NTPCGREEN, THANGAMAYL, JBMA,
+                # MAHSCOOTER on the 02-Aug audit). If we are closing this symbol and no doc text exists,
+                # record an explicit honest-absent with a DISTINCT reason (no doc found — as opposed to
+                # the doc-read-but-no-printed-KPI default), so the outcome is stated, not silent.
+                if landed:
+                    try:
+                        cur.execute("""SELECT 1 FROM doc_texts WHERE UPPER(symbol)=UPPER(%s)
+                                        AND extract_status='stored' AND char_count>0 LIMIT 1""", (sym,))
+                        if not cur.fetchone():
+                            cur.execute("""INSERT INTO ops_metrics_honest_absent (symbol, sector, reason)
+                                VALUES (UPPER(%s),
+                                        (SELECT segment FROM gvm_scores WHERE symbol=UPPER(%s)
+                                          ORDER BY score_date DESC LIMIT 1),
+                                        'no investor doc discoverable at T+1 (cc#774) — nothing to extract')
+                                ON CONFLICT (symbol) DO NOTHING""", (sym, sym))
+                            if cur.rowcount:
+                                _oplog(cur, "T1_NO_DOC_HONEST_ABSENT",
+                                       {"symbol": sym, "ex_date": str(ex_date),
+                                        "reason": "closed with no stored doc — recorded honest-absent "
+                                                  "instead of a silent 'done' (cc#774)"},
+                                       category="scrape_review")
+                    except Exception as e:
+                        log.warning(f"cc#774 no-doc honest-absent for {sym}: {e}")
                 conn.commit()
             # cc#694: per-company job_runs row (control-plane spine) with the single-visit sections_landed.
             # done gate = quarters landed (cc#692); partial = quarters ok but a section/docs missing ->

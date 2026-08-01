@@ -1290,6 +1290,7 @@ def _bg_weekly_ops_metrics_queue():
             _specific = set(_omp.SECTOR_REGISTRY_SEED.keys())
         except Exception:
             _omp, _specific = None, set()
+        from scrape_universe import UNIVERSE_CTE as _UNIVERSE_CTE   # cc#774: one canonical definition
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""CREATE TABLE IF NOT EXISTS ops_metrics_honest_absent (
                 symbol TEXT PRIMARY KEY, sector TEXT,
@@ -1308,26 +1309,33 @@ def _bg_weekly_ops_metrics_queue():
                 AND d.symbol NOT IN (SELECT symbol FROM ops_metrics_t1_queue WHERE status='pending')
               ORDER BY d.symbol""")
             cand = [r[0] for r in cur.fetchall()]
-            # cc#773 CATCH-UP: the doc-driven worklist above only sees symbols that ALREADY have a stored
-            # doc — which is exactly why 214 validated reporters (50%) were missing and invisible. Add
-            # every validated recent reporter (cc#765 gate) that has a stored doc but no ops row, ordered
-            # LARGEST MCAP FIRST, so the biggest coverage holes (VAML/PHOENIXLTD/IRB…) are queued first.
+            # cc#773 CATCH-UP, cc#774 UNIVERSE-BOUNDED + DOC-GAP CLOSING. Queues validated recent
+            # reporters (cc#765 gate) with no ops row, LARGEST MCAP FIRST.
+            # cc#774 fix a: the cc#773 version had NO universe join, so it could queue out-of-universe
+            # symbols — a HARD_BOUNDARY (id=10260) violation. Now INNER JOINed to the canonical scrape
+            # universe, the single definition shared with the coverage counter (scrape_universe.py).
+            # cc#774 fix b: it also required a STORED DOC, which made the real gap unreachable —
+            # run_t1_refresh only stages docs on a 3-DAY lookback, so any in-universe reporter that
+            # missed that window had no doc, was therefore never queued, and stayed invisible forever
+            # (NTPCGREEN 22-Jul, THANGAMAYL/MAHSCOOTER/VGUARD 29-Jul, JBMA 30-Jul). The doc requirement
+            # is dropped: a queued no-doc symbol is exactly what run_t1_refresh needs to go stage it,
+            # while symbols that already have a doc flow on to extraction as before.
             cur.execute("""
-              WITH reporters AS (
+              WITH """ + _UNIVERSE_CTE + """,
+              reporters AS (
                 SELECT DISTINCT UPPER(e.ticker) AS symbol FROM earnings_calendar e
+                JOIN scrape_universe u ON u.symbol = UPPER(e.ticker)
                 WHERE e.status='reported' AND e.verified <> 'false'
-                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 14
+                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 21
                   AND e.event_type IN ('Quarterly Result','Financial Results')),
-              covered AS (SELECT DISTINCT symbol FROM sector_ops_metrics
-                          WHERE created_at >= NOW() - INTERVAL '14 days')
+              covered AS (SELECT DISTINCT UPPER(symbol) AS symbol FROM sector_ops_metrics
+                          WHERE created_at >= NOW() - INTERVAL '21 days')
               SELECT r.symbol FROM reporters r
               LEFT JOIN covered c ON c.symbol = r.symbol
               LEFT JOIN screener_raw s ON UPPER(s.nse_code) = r.symbol
               WHERE c.symbol IS NULL
-                AND EXISTS (SELECT 1 FROM doc_texts d WHERE d.symbol=r.symbol
-                              AND d.extract_status='stored' AND d.char_count>0)
-                AND r.symbol NOT IN (SELECT symbol FROM ops_metrics_honest_absent)
-                AND r.symbol NOT IN (SELECT symbol FROM ops_metrics_t1_queue WHERE status='pending')
+                AND r.symbol NOT IN (SELECT UPPER(symbol) FROM ops_metrics_honest_absent)
+                AND r.symbol NOT IN (SELECT UPPER(symbol) FROM ops_metrics_t1_queue WHERE status='pending')
               ORDER BY s.market_cap::numeric DESC NULLS LAST""")
             catchup = [r[0] for r in cur.fetchall()]
             for s in catchup:
@@ -1373,45 +1381,60 @@ def _ops_season_mode(today=None):
 
 
 def _bg_ops_metrics_coverage():
-    """cc#773: nightly DUAL coverage counter — of the validated reporters (cc#765 gate) of the last 14
-    days that are in the screener universe, what % have sector_ops_metrics rows (SCRAPED) and what %
-    are polished. Alerts when scraped coverage < 80% so the 48%-gap degradation can never go silent
-    again. Also reports the doc-staging gap (missing symbols with NO stored doc), which is the real
-    upstream bottleneck — extraction cannot cover a symbol whose investor doc was never staged."""
+    """cc#773 + cc#774 DENOMINATOR FIX: nightly DUAL coverage counter, measured against the SCRAPE
+    UNIVERSE ONLY (~616 = top-500 NSE non-numeric by mcap UNION sector_ops_metrics symbols;
+    SCRAPE_UNIVERSE_TOP500_NSE_V1 id=9178 + HARD_BOUNDARY id=10260), 21-day window.
+
+    cc#774: the cc#773 version measured against ALL of screener_raw (~1801), so it read ~50% coverage
+    and would have fired a false <80% alert every night. Out-of-universe reporters are NOT a gap — the
+    cc#700 boss rule deliberately skips them. Against the correct denominator, real coverage is ~97%.
+    Per UNIVERSE_DENOMINATOR_RULE (session_log id=207): the denominator + window are now emitted IN the
+    payload, so no number from this counter is ever quotable without them."""
     try:
+        from scrape_universe import UNIVERSE_CTE
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-              WITH reporters AS (
+              WITH """ + UNIVERSE_CTE + """,
+              reporters AS (
                 SELECT DISTINCT UPPER(e.ticker) AS symbol FROM earnings_calendar e
+                JOIN scrape_universe u ON u.symbol = UPPER(e.ticker)
                 WHERE e.status='reported' AND e.verified <> 'false'
-                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 14
-                  AND e.event_type IN ('Quarterly Result','Financial Results')
-                  AND EXISTS (SELECT 1 FROM screener_raw s WHERE UPPER(s.nse_code)=UPPER(e.ticker))),
-              covered AS (SELECT DISTINCT symbol FROM sector_ops_metrics
-                          WHERE created_at >= NOW() - INTERVAL '14 days'),
+                  AND e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 21
+                  AND e.event_type IN ('Quarterly Result','Financial Results')),
+              -- cc#774: a symbol with an ops row OR an honest-absent row is RESOLVED, not a gap. The
+              -- cc#773 version counted honest-absent as missing, so a doc-read-but-no-printed-KPI
+              -- company (OBEROIRLTY, IRB) dragged coverage down permanently and could re-trip the alert.
+              covered AS (SELECT DISTINCT UPPER(symbol) AS symbol FROM sector_ops_metrics
+                          WHERE created_at >= NOW() - INTERVAL '21 days'
+                          UNION SELECT UPPER(symbol) FROM ops_metrics_honest_absent),
               missing AS (SELECT r.symbol FROM reporters r LEFT JOIN covered c ON c.symbol=r.symbol
                           WHERE c.symbol IS NULL)
               SELECT (SELECT count(*) FROM reporters),
                      (SELECT count(*) FROM reporters r JOIN covered c ON c.symbol=r.symbol),
                      (SELECT count(*) FROM missing),
                      (SELECT count(*) FROM missing m WHERE EXISTS
-                        (SELECT 1 FROM doc_texts d WHERE d.symbol=m.symbol AND d.extract_status='stored')),
+                        (SELECT 1 FROM doc_texts d WHERE UPPER(d.symbol)=m.symbol AND d.extract_status='stored')),
                      (SELECT count(*) FROM missing m WHERE EXISTS
-                        (SELECT 1 FROM ops_metrics_honest_absent h WHERE h.symbol=m.symbol)),
-                     (SELECT count(*) FROM ops_metrics_t1_queue WHERE status='pending')
+                        (SELECT 1 FROM ops_metrics_honest_absent h WHERE UPPER(h.symbol)=m.symbol)),
+                     (SELECT count(*) FROM ops_metrics_t1_queue WHERE status='pending'),
+                     (SELECT count(*) FROM scrape_universe)
             """)
-            tot, cov, miss, miss_with_doc, miss_absent, qdepth = cur.fetchone()
+            tot, cov, miss, miss_with_doc, miss_absent, qdepth, uni_n = cur.fetchone()
             scraped_pct = round(cov / tot * 100, 1) if tot else None
             # polished-pct: rows carrying a polished/narrative field (the Claude-web job's output)
             try:
-                cur.execute("""SELECT count(DISTINCT symbol) FROM sector_ops_metrics
-                               WHERE created_at >= NOW() - INTERVAL '14 days'
+                cur.execute("""SELECT count(DISTINCT UPPER(symbol)) FROM sector_ops_metrics
+                               WHERE created_at >= NOW() - INTERVAL '21 days'
                                  AND notes IS NOT NULL AND length(notes) > 0""")
                 pol = cur.fetchone()[0]
             except Exception:
                 conn.rollback(); pol = None
             polished_pct = round(pol / tot * 100, 1) if (tot and pol is not None) else None
-            payload = {"reporters_14d": tot, "with_ops_rows": cov, "scraped_pct": scraped_pct,
+            # cc#774 / UNIVERSE_DENOMINATOR_RULE: denominator + window travel WITH the numbers, always.
+            payload = {"denominator": "scrape_universe (top-500 NSE non-numeric by mcap UNION "
+                                      "sector_ops_metrics symbols; id=9178 + id=10260)",
+                       "universe_size": uni_n, "window_days": 21,
+                       "reporters_21d": tot, "with_ops_rows": cov, "scraped_pct": scraped_pct,
                        "polished": pol, "polished_pct": polished_pct,
                        "missing": miss, "missing_with_stored_doc": miss_with_doc,
                        "missing_no_doc": (miss - miss_with_doc - miss_absent) if miss is not None else None,
@@ -1424,7 +1447,8 @@ def _bg_ops_metrics_coverage():
                 cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                                VALUES (CURRENT_DATE, NOW(), 'alert', 'OPS_METRICS_COVERAGE_LOW', %s)""",
                             (Json({**payload, "message":
-                                   f"ops-metrics coverage {scraped_pct}% < 80% — {miss} reporters missing "
+                                   f"ops-metrics coverage {scraped_pct}% < 80% of {tot} in-universe reporters "
+                                   f"(21d, universe {uni_n}) — {miss} missing "
                                    f"({miss_with_doc} have a stored doc and are queueable; the rest need doc staging)"}),))
             conn.commit()
         log.info(f"ops_metrics_coverage: {payload}")
