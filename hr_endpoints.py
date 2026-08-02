@@ -474,10 +474,28 @@ def health_toggle_active(pid: int):
 
 
 def _cmp_map(cur, syms):
-    """cc#651: symbol -> price, cmp_prices first then latest raw_prices close (mirrors hr_report._load_cmp)."""
+    """symbol -> price for portfolio valuation (/health shelf + /adaptive client cards).
+
+    cc#811: now the shared resolver. The old body read cmp_prices with NO freshness check at all —
+    any row, at any age, counted as "CMP" — and only fell back to raw_prices when a symbol had no
+    cmp_prices row whatsoever. So a symbol whose feed died last week valued a live portfolio at last
+    week's price and looked no different from a fresh one. The resolver ladder (live 5-min spot tick
+    -> <15-min cache -> EOD close) makes the freshest available number the one that gets used, and
+    the 15-minute bound means a stale cache entry falls through to EOD instead of masquerading as
+    live. Falls back to the original two-step on any resolver error — a portfolio card must render.
+    """
     out = {}
     if not syms:
         return out
+    try:
+        import cmp_resolver
+        for s, r in cmp_resolver.resolve_cmp_many(cur, syms).items():
+            if r.get("cmp") is not None:
+                out[s] = float(r["cmp"])
+        if out:
+            return out
+    except Exception:
+        pass
     cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE symbol = ANY(%s)", (syms,))
     for s, c in cur.fetchall():
         if c is not None:

@@ -88,7 +88,59 @@ def get_gvm(symbol: str):
     """, (symbol.upper(),), single=True)
     if not r:
         raise HTTPException(404, f"{symbol} not found")
+    # cc#811: gvm_scores.price is the NIGHTLY snapshot — during the session it is hours stale, and
+    # between 15:30 and the nightly run it is yesterday. Overlay the resolver's price so the card
+    # header shows the live/last tick, keeping the frozen value as `price_eod` for anything that
+    # genuinely wants the score-date price. `live` drives the UI's live dot.
+    _attach_live(r, r.get("symbol"))
     return r
+
+
+def _attach_live(row, symbol):
+    """Overlay cc#811 live price + day% onto a row dict, in place. Never raises: a display price is
+    additive, and a resolver hiccup must degrade to the stored value rather than 500 the card."""
+    if not isinstance(row, dict) or not symbol:
+        return row
+    try:
+        import cmp_resolver
+        with _conn() as c, c.cursor() as cur:
+            r = cmp_resolver.resolve_cmp(cur, str(symbol).upper())
+        if r.get("cmp") is not None:
+            row["price_eod"] = row.get("price")
+            row["price"] = round(float(r["cmp"]), 2)
+            row["day_pct"] = r.get("day_pct")
+            row["price_source"] = r.get("source")
+            row["live"] = r.get("live")
+    except Exception:
+        pass
+    return row
+
+
+def _attach_live_many(rows, key="symbol"):
+    """Batch form of _attach_live for list surfaces — ONE resolver pass for the whole page rather
+    than four queries per row. At segment-list and screener sizes the per-row form does not load."""
+    if not rows:
+        return rows
+    try:
+        import cmp_resolver
+        syms = [str(x.get(key)).upper() for x in rows if isinstance(x, dict) and x.get(key)]
+        if not syms:
+            return rows
+        with _conn() as c, c.cursor() as cur:
+            res = cmp_resolver.resolve_cmp_many(cur, syms)
+        for x in rows:
+            if not isinstance(x, dict):
+                continue
+            r = res.get(str(x.get(key)).upper())
+            if r and r.get("cmp") is not None:
+                x["price_eod"] = x.get("price")
+                x["price"] = round(float(r["cmp"]), 2)
+                x["day_pct"] = r.get("day_pct")
+                x["price_source"] = r.get("source")
+                x["live"] = r.get("live")
+    except Exception:
+        pass
+    return rows
 
 
 def _flt(v):
@@ -232,6 +284,7 @@ def get_gvm_snapshot(symbol: str):
                         FROM gvm_scores WHERE symbol=%s""", (sym,), single=True)
     if not base:
         raise HTTPException(404, f"{symbol} not found")
+    _attach_live(base, sym)   # cc#811: the "G" popout header shows the live/last tick, not the EOD snapshot
     cur_gvm = base.get("gvm_score")
     # 180d delta-GVM: the score ~6 months ago (nearest row in a ±20d window around T-180) vs today.
     d = api_query("""SELECT gvm_score FROM gvm_history WHERE symbol=%s
@@ -350,7 +403,9 @@ def get_sectors(segment: Optional[str] = None):
     # RSIm sourced from momentum_scores (full-universe coverage). v8_metrics holds
     # only the F&O set, so non-futures segments (microfinance/MSME/etc.) returned
     # blank RSIm before this fix (15-Jun-2026). Validated live same day.
-    return api_query("""
+    # cc#811: the segment list's price column is live via _attach_live_many (ONE batch resolver
+    # pass for the whole list, not four queries per row).
+    return _attach_live_many(api_query("""
         SELECT g.symbol, g.company_name, g.segment,
                ROUND(g.gvm_score::numeric,2) AS gvm_score,
                ROUND(g.g_score::numeric,2)   AS g_score,
@@ -374,7 +429,7 @@ def get_sectors(segment: Optional[str] = None):
         ) rsi ON true
         WHERE g.segment ILIKE %s
         ORDER BY g.gvm_score DESC NULLS LAST
-    """, (f"%{segment}%",))
+    """, (f"%{segment}%",)))
 
 
 # ── Market ───────────────────────────────────────────────────────────────────
