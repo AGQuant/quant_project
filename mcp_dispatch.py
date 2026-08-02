@@ -143,6 +143,7 @@ MCP_TOOLS = [
     {"name":"restate_symbol_history","description":"cc#657 raw_prices corporate-action fix: full 5y ADJUSTED re-pull from Yahoo for split/bonus/demerger-polluted symbols (one/sec), restating the whole series so fake -34%..-90% single-day cliffs disappear. Pass {symbols:[...]} for an explicit list, or {detect:true} to auto-select the current cliff backlog. Returns per-symbol {bars, first_date, last_date, residual_cliffs} (a residual cliff after re-pull is a TRUE market move).","inputSchema":{"type":"object","properties":{"symbols":{"type":"array","items":{"type":"string"}},"detect":{"type":"boolean"},"lookback":{"type":"string"}},"required":[]}},
     {"name":"hr_report_pdf","description":"cc#652 Portfolio Health: get a fetchable white-label PDF of a saved portfolio's Health Report. Returns {url} — an absolute, short-lived (~10 min) signed URL you can web_fetch directly (no login) and share in chat. Zero Scorr branding. Pass {portfolio_id} (e.g. 4 = Vishal Bhosale).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"}},"required":["portfolio_id"]}},
     {"name":"stock_views_shortlist","description":"cc#737 / STOCK_VIEWS_FRAMEWORK_V1: TC-gated stock-views shortlist. DISTINCT symbols mentioned in polished_news over the last `hours` -> canonical Trade Check (best of LONG/SHORT) -> keep VALID/STRONG -> sorted by score DESC. Returns {hours, universe_scanned, count, candidates:[{symbol,direction,verdict,score,max,cmp}]}. Read-only, writes nothing. Reuses the same helper as the /api/news/stock_views/shortlist HTTP route (which Claude web can't call — it's login-gated).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
+    {"name":"run_fundamentals_scrape","description":"cc#790: kick the Screener quarterly-fundamentals scrape. Pass {symbols:['ABB','TITAN']} for a TARGETED re-scrape that BYPASSES the 'already ok' resume filter — required for refreshing a symbol scraped in a prior season, because that filter never expires and would otherwise skip it forever (the cause of the 02-Aug gap: 102 announced companies frozen at their 11-Jul scrape with no Q1FY27 row). Omit symbols for the normal resumable full-universe run, or pass {mode:'test'} for a 3-symbol spot check. Runs in a background daemon and returns immediately; poll fundamentals_scrape_status via run_sql on fundamentals_scrape_status. Writes fundamentals_history + fundamentals_scrape_status.","inputSchema":{"type":"object","properties":{"symbols":{"type":"array","items":{"type":"string"},"description":"explicit symbols for a targeted re-scrape"},"mode":{"type":"string","description":"'run' (default) or 'test'"}},"required":[]}},
     {"name":"stock_views_feed","description":"cc#787 FUNNEL 2 (Stock Views raw feed): raw_news from the last `hours` that is EITHER broker/analyst recommendation content (is_reco) OR a catalyst on a stock in the ACTIVE futures universe. Scope is deliberately narrow so volume cannot explode — source_type domestic|company ONLY (no Reuters/Bloomberg global), IPO/listing/GMP content excluded, canonical rows only. Returns {hours, total_count, returned, capped_at, truncated, reco_count, reco_column_present, articles:[{raw_id,symbol,headline,description,source_name,source_type,url,published_at,is_reco}]} — capped at 200 rows newest-first, with total_count so you see real volume without pulling everything. This is what you scan on 'stock views' for P1/P2 candidates. Read-only. Distinct from stock_views_shortlist, which TC-scores already-POLISHED news; this is the raw upstream feed and is the only place reco content appears (funnel 1 / news-polish never shows it).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
 ]
 
@@ -356,6 +357,23 @@ async def _call_tool(name, args):
                 smartgain_reconcile.backfill_all_batches,
                 args.get("account", "MHK40"),
             )
+        elif name == "run_fundamentals_scrape":
+            # cc#790: internal-trusted — call the scraper directly rather than the admin HTTP route,
+            # so a missing/rotated ADMIN_TOKEN can't silently block the season refresh. Backgrounded
+            # the same way the route does it: the scrape walks hundreds of symbols with a throttle
+            # and must never hold the MCP request open.
+            import threading, fundamentals_scraper
+            _syms = [str(s).strip().upper() for s in (args.get("symbols") or []) if str(s).strip()]
+            if _syms:
+                threading.Thread(target=fundamentals_scraper.run_scrape,
+                                 kwargs={"symbols": _syms}, name="cc790-mcp-targeted", daemon=True).start()
+                return {"status": "started", "mode": "targeted", "symbols": len(_syms),
+                        "note": "Targeted re-scrape running in background; poll fundamentals_scrape_status."}
+            _m = "test" if str(args.get("mode", "run")).lower() == "test" else "run"
+            threading.Thread(target=fundamentals_scraper.run_scrape, args=(_m,),
+                             name="cc790-mcp-full", daemon=True).start()
+            return {"status": "started", "mode": _m,
+                    "note": "Scrape running in background; poll fundamentals_scrape_status."}
         elif name == "stock_views_feed":
             # cc#787: internal-trusted (no auth gate) — call the SHARED funnel-2 core directly,
             # bypassing the login-gated HTTP route. Same query, one definition.

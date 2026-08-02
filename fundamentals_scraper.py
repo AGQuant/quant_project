@@ -285,18 +285,38 @@ def _slog(conn, category, title, details):
 
 # ── runner ───────────────────────────────────────────────────────────────────────
 
-def run_scrape(mode="run") -> dict:
+def run_scrape(mode="run", symbols=None) -> dict:
     """Phase-1 scrape. mode='test' -> 3 spot-check symbols only; else full universe (resumable).
     Per symbol: fetch + parse + upsert + status; throttle THROTTLE s; failures logged and skipped
     (never abort). Stage summary (scraped/failed/skipped) every STAGE_SIZE symbols. On completion
-    writes session_log GVM_HISTORY_SCRAPE_COMPLETE and STOPS — no compute (Phases 2-4 gated)."""
+    writes session_log GVM_HISTORY_SCRAPE_COMPLETE and STOPS — no compute (Phases 2-4 gated).
+
+    cc#790 TARGETED RE-SCRAPE. Pass `symbols` (a list) to scrape exactly those, BYPASSING the
+    "already ok" resume filter.
+
+    Why this had to exist: the resume filter is `status='ok'`, which is set ONCE per symbol and
+    never expires. A symbol scraped successfully in a prior season is therefore skipped forever and
+    can never pick up a new quarter. Measured 02-Aug: of 149 announced companies with no Q1FY27 row
+    in fundamentals_history, 102 were marked ok on a single date (11-Jul-2026) — before most Q1FY27
+    results were even announced (the season ran 07-Jul to 01-Aug). Re-running the full scrape could
+    not have fixed them; it would have skipped all 102. Only the 47 with no status row would have
+    moved. The resume filter is correct for crash-resume WITHIN a season and wrong ACROSS seasons.
+
+    Targeted mode also skips the universe pre-filter, so an explicitly-named symbol is always
+    honoured — the caller has already decided it is in scope.
+    """
     import fyers_feed
     conn = fyers_feed.get_db()
     started = time.time()
+    targeted = bool(symbols)
     try:
         ensure_tables(conn)
         with conn.cursor() as cur:
-            if mode == "test":
+            if targeted:
+                seen, symbols = set(), [str(s).strip().upper() for s in symbols if s and str(s).strip()]
+                symbols = [s for s in symbols if not (s in seen or seen.add(s))]
+                already = set()          # explicit targets are never skipped
+            elif mode == "test":
                 symbols = list(SPOT_CHECK)
                 already = set()
             else:
@@ -309,7 +329,8 @@ def run_scrape(mode="run") -> dict:
                 already = {r[0] for r in cur.fetchall()}
         todo = [s for s in symbols if s not in already]
         _slog(conn, "backfill", "GVM_HISTORY_SCRAPE_START",
-              {"mode": mode, "universe": len(symbols), "already_ok": len(already), "to_do": len(todo)})
+              {"mode": ("targeted" if targeted else mode), "targeted": targeted,
+               "universe": len(symbols), "already_ok": len(already), "to_do": len(todo)})
         ok = failed = skipped = rows_total = 0
         failures = []
         for i, sym in enumerate(todo, 1):
@@ -641,11 +662,23 @@ async def fundamentals_scrape_status():
 
 
 @router.post("/run_fundamentals_scrape")
-async def run_fundamentals_scrape(mode: str = "run", x_admin_token: Optional[str] = Header(None)):
+async def run_fundamentals_scrape(mode: str = "run", symbols: Optional[str] = None,
+                                  x_admin_token: Optional[str] = Header(None)):
     """cc#361 Phase 1: kick the Screener scrape in a background daemon. mode='test' (3 spot-check
-    symbols) or 'run' (full universe, resumable). Phases 2-4 (compute) remain gated."""
+    symbols) or 'run' (full universe, resumable). Phases 2-4 (compute) remain gated.
+
+    cc#790: `symbols` (comma-separated) runs a TARGETED re-scrape of exactly those, bypassing the
+    'already ok' resume filter. Needed because that filter never expires, so a symbol scraped in a
+    prior season is skipped forever and can never pick up a new quarter — the cause of the 02-Aug
+    gap where 102 announced companies stayed frozen at their 11-Jul scrape."""
     _check_admin(x_admin_token)
     import threading
+    syms = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()]
+    if syms:
+        threading.Thread(target=run_scrape, kwargs={"symbols": syms},
+                         name="cc790-scrape-targeted", daemon=True).start()
+        return {"status": "started", "mode": "targeted", "symbols": len(syms),
+                "note": "Targeted re-scrape running; poll /api/admin/fundamentals_scrape_status."}
     m = "test" if (mode or "").lower() == "test" else "run"
     threading.Thread(target=run_scrape, args=(m,), name="cc361-scrape-manual", daemon=True).start()
     return {"status": "started", "mode": m,
