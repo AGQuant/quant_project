@@ -19,6 +19,11 @@
  * /api/trade-check/fibcheck (cc#478; full universe per cc#342, so non-futures GVM symbols have pivots
  * too). Fib = retracement levels off the loaded-range swing (same derivation as the V8 chart, cc#668),
  * both drawn as LightweightCharts price lines. Toggle buttons + persistence mirror the V8 card.
+ *
+ * cc#806: TFs are 5m/1M/3M/6M/1Y/3Y/ALL; pivots render on 5m/1M/3M/6M only (greyed beyond — rolling
+ * levels lose meaning at longer scales).
+ * cc#807: session VWAP + VPOC are AUTOMATIC on 5m and absent on every other timeframe — no toggle,
+ * no greyed pill. Both are flat dashed LEVEL lines (grey VWAP / muted-blue VPOC) with value chips.
  */
 (function () {
   "use strict";
@@ -67,7 +72,13 @@
   // cc#730: fib + pivot overlay state (default BOTH on so the card matches the V8 chart out of the box).
   var _fibCache = {};   // {sym: fibcheck json} — pivots fetched once per symbol
   var _priceLines = [], _lastData = [];
-  var _vwapSeries = null, _vwapLast = null;   // cc#755: session-VWAP line series (intraday only) + latest value for the chip
+  // cc#807: intraday session LEVELS — VWAP + VPOC. Both are flat price lines (not curves) held in
+  // their OWN array, separate from _priceLines, because _applyOverlays() wipes that one on every
+  // pivot/fib change and these must survive it.
+  var _ilLines = [];                          // price-line handles for the VWAP + VPOC levels
+  var _vwapLast = null, _vpocLast = null;     // latest values, surfaced as chips
+  var VWAP_COL = "#8a94ad";                   // grey — same family as the PP pivot line
+  var VPOC_COL = "#5b7fb3";                   // muted blue — distinct from grey VWAP and the fib palette
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
@@ -82,16 +93,19 @@
   ];
   var _fibBand = null;   // cc#750: {lo, rng} of the loaded-range swing, for priceToCoordinate band placement
   function _readOv() {
-    var vwap = false;   // cc#755: VWAP is an opt-in overlay (default off), persisted separately so the
-    try { vwap = localStorage.getItem("scorr_chart_vwap") === "1"; } catch (e) {}   // pivot/fib scheme is untouched
+    // cc#807: `vwap` is GONE from the overlay state. VWAP is no longer a user decision — it renders
+    // automatically on 5m and does not exist anywhere else, so there is nothing to persist. The old
+    // "scorr_chart_vwap" localStorage key is intentionally not read; it is now dead and simply ages
+    // out of browsers. Do not re-add it — a preference that has only one sensible value is not a
+    // preference, and a permanently-disabled pill on 6 of 7 timeframes was pure UI noise.
     var gvm = false;    // cc#779: GVM quality-trend line, opt-in, persisted separately (same reason)
     try { gvm = localStorage.getItem("scorr_chart_gvm") === "1"; } catch (e) {}
     try { var s = localStorage.getItem("scorr_chart_overlay");
-      if (s === "none") return { pivot: false, fib: false, vwap: vwap, gvm: gvm };
-      if (s === "pivot") return { pivot: true, fib: false, vwap: vwap, gvm: gvm };
-      if (s === "fib") return { pivot: false, fib: true, vwap: vwap, gvm: gvm };
+      if (s === "none") return { pivot: false, fib: false, gvm: gvm };
+      if (s === "pivot") return { pivot: true, fib: false, gvm: gvm };
+      if (s === "fib") return { pivot: false, fib: true, gvm: gvm };
     } catch (e) {}
-    return { pivot: true, fib: true, vwap: vwap, gvm: gvm };   // default: pivots + fib on, VWAP/GVM off
+    return { pivot: true, fib: true, gvm: gvm };   // default: pivots + fib on, GVM off
   }
   function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
   function _fibZoneKey(p) {
@@ -181,7 +195,7 @@
 
   // cc#779: MAXIMIZE — expand the same modal to the full viewport (desktop: browser window; mobile:
   // full screen, landscape-friendly). Every control persists because we only restyle the existing
-  // wrapper — the timeframe pills, Pivots/Fib/VWAP/GVM toggles, verdict badge and crosshair are the
+  // wrapper — the timeframe pills, Pivots/Fib/GVM toggles, verdict badge and crosshair are the
   // same DOM. Esc or the collapse icon returns to the modal (close() also resets the flag).
   function _toggleFull(force) {
     _full = (force === undefined) ? !_full : !!force;
@@ -315,20 +329,12 @@
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
-    // cc#755: VWAP toggle — third chip, independent of Pivots/Fib. Session VWAP is intraday-only, so it
-    // is greyed on every EOD timeframe (1M/3M/6M/1Y/ALL). Value shows in the chip strip, never the axis.
-    (function () {
-      var b = document.createElement("button");
-      b.textContent = "VWAP";
-      var vwapBlocked = (_tf !== "5m");
-      var on = _ov.vwap && !vwapBlocked;
-      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
-        ";background:" + (on ? "#f5a623" : p.btn) + ";color:" + (on ? "#1c2536" : p.mut) + (vwapBlocked ? ";opacity:.4;cursor:not-allowed" : "");
-      b.title = vwapBlocked ? "Session VWAP is intraday-only — switch to the 5m timeframe" : "Session VWAP (cumulative price·volume / volume, from 09:15; resets each session)";
-      if (!vwapBlocked) b.onclick = function () { _toggleOv("vwap"); };
-      host.appendChild(b);
-    })();
-    // cc#779: GVM quality-trend toggle — fourth chip. The GVM series is a DAILY score, so it is
+    // cc#807: the VWAP toggle that used to sit here is DELETED. Session VWAP (and now VPOC) exist only
+    // intraday, so the pill was permanently disabled on 6 of the 7 timeframes — noise offering a
+    // decision with one right answer. Both levels now render automatically on 5m and are absent
+    // everywhere else: no pill, no greyed state, the concept simply not present. See
+    // _applyIntradayLevels(). Do not reintroduce a toggle for them.
+    // cc#779: GVM quality-trend toggle — third chip. The GVM series is a DAILY score, so it is
     // greyed on the 5m intraday timeframe (nothing to plot at intraday resolution).
     (function () {
       var b = document.createElement("button");
@@ -346,13 +352,11 @@
   function _toggleOv(kind) {
     _ov[kind] = !_ov[kind];
     try {
-      if (kind === "vwap") localStorage.setItem("scorr_chart_vwap", _ov.vwap ? "1" : "0");
-      else if (kind === "gvm") localStorage.setItem("scorr_chart_gvm", _ov.gvm ? "1" : "0");
+      if (kind === "gvm") localStorage.setItem("scorr_chart_gvm", _ov.gvm ? "1" : "0");
       else localStorage.setItem("scorr_chart_overlay", _ovStr());
     } catch (e) {}
     _paintChrome();
-    if (kind === "vwap") { _applyVwap(); _renderFx(); }
-    else if (kind === "gvm") { _applyGvm(); }
+    if (kind === "gvm") { _applyGvm(); }
     else { _applyOverlays(); }
   }
 
@@ -406,26 +410,108 @@
       })
       .catch(function () { /* quality line is additive — never break the price chart */ });
   }
-  // cc#755: session-VWAP line (intraday only). Cumulative SUM(close·volume)/SUM(volume) from each
-  // session's first bar (~09:15), reset when the bar's date changes. A native LightweightCharts line
-  // series so it tracks the price scale; the latest value is surfaced as a chip (never on the axis).
-  function _applyVwap() {
-    if (!_chart) return;
-    if (_vwapSeries) { try { _chart.removeSeries(_vwapSeries); } catch (e) {} _vwapSeries = null; }
-    _vwapLast = null;
-    if (!(_ov.vwap && _tf === "5m" && _lastData && _lastData.length)) return;
-    var pts = [], cumPV = 0, cumV = 0, day = null;
-    for (var i = 0; i < _lastData.length; i++) {
-      var bar = _lastData[i];
-      if (bar._day !== day) { day = bar._day; cumPV = 0; cumV = 0; }   // reset at each session boundary
-      var v = isFinite(bar.volume) ? bar.volume : 0;
-      cumPV += bar.close * v; cumV += v;
-      pts.push({ time: bar.time, value: cumV > 0 ? cumPV / cumV : bar.close });
+  // cc#807: intraday session LEVELS — VWAP and VPOC. Both are automatic on 5m and absent on every
+  // other timeframe; there is no toggle (cc#755's pill is gone).
+  //
+  // VWAP is drawn as a FLAT horizontal level, not the cumulative curve cc#755 used to plot. Founder
+  // call, and the right one: the curve traces where VWAP HAS BEEN, which is history you can already
+  // read off the candles. A level answers the only live question — is price above or below the
+  // session's average traded price right now. It re-anchors as new 5m bars arrive but is always flat.
+  //
+  // VPOC = the price bin holding the most traded volume in the CURRENT session. Bars are binned by
+  // CLOSE, so this is a bar-close approximation of a volume profile, NOT a tick-level one: within a
+  // 5-min bar all volume is attributed to the closing price. That is honest enough to mark the
+  // session's heaviest-traded shelf and wrong enough that it should never be read as a precise
+  // auction level. A true profile needs tick data we do not store.
+  //
+  // Both use the LAST session in the loaded window (the 5m feed returns ~5 sessions), so "session"
+  // means today, not the whole visible range.
+  // cc#807 VOLUME NORMALISER — required, and it exposes a real feed defect.
+  // intraday_prices.volume is NOT consistently per-bar. Measured over 24-Jul..31-Jul on
+  // RELIANCE/TCS/HDFCBANK/INFY/SBIN: 27/28/30-Jul are 100% non-decreasing (the column holds a
+  // CUMULATIVE day counter), 24/29-Jul are 45-58% non-decreasing (genuine per-bar), and 31-Jul is
+  // 82-86% (the feed switched mode mid-session, per-bar to 11:20 then cumulative from 11:25).
+  // Summing a cumulative counter is nonsense — on 31-Jul RELIANCE it totals 206.7M against a true
+  // day volume of 8.6M — and it drags VWAP toward the late session while pinning VPOC to whatever
+  // bin the last bars closed in. So both levels are computed from a normalised series:
+  //   * >=97% non-decreasing -> cumulative -> first-difference it. Verified on 30-Jul RELIANCE: the
+  //     differenced series sums EXACTLY to the day total and has the textbook intraday U (501k open,
+  //     ~55-70k midday, 1.09M on the closing bar).
+  //   * <75% non-decreasing  -> already per-bar -> use as-is.
+  //   * in between -> the feed changed representation mid-session and the two halves are not even
+  //     mutually consistent (31-Jul's morning per-bar volumes sum to 3.39M, MORE than the 2.44M the
+  //     cumulative counter reads at 11:25). That cannot be repaired client-side from what is stored,
+  //     so return null and DRAW NOTHING. A missing level is honest; a confidently wrong one is not.
+  // The real fix belongs in the feed worker, not here. Reported with cc#807.
+  function _perBarVolumes(bars) {
+    var v = bars.map(function (b) { return isFinite(b.volume) ? b.volume : 0; });
+    if (v.length < 2) return v;
+    // Ties are NEUTRAL, excluded from both sides of the ratio. An illiquid symbol can print the same
+    // volume on many consecutive bars; counting those as "non-decreasing" would misread a per-bar
+    // series as a cumulative counter and silently difference real volumes away. A session with no
+    // informative steps at all falls through to the per-bar default, which is the safe direction.
+    var up = 0, steps = 0, i;
+    for (i = 1; i < v.length; i++) {
+      if (v[i] === v[i - 1]) continue;
+      steps++; if (v[i] > v[i - 1]) up++;
     }
-    if (!pts.length) return;
-    _vwapSeries = _chart.addLineSeries({ color: "#f5a623", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-    _vwapSeries.setData(pts);
-    _vwapLast = pts[pts.length - 1].value;
+    if (!steps) return v;
+    var frac = up / steps;
+    if (frac < 0.75) return v;            // per-bar already
+    if (frac < 0.97) return null;         // mixed / mid-session mode switch — unrecoverable here
+    var out = [v[0]];                     // cumulative: first bar's counter IS its own volume
+    for (i = 1; i < v.length; i++) out.push(Math.max(0, v[i] - v[i - 1]));
+    return out;
+  }
+
+  function _applyIntradayLevels() {
+    if (!_series) return;
+    _ilLines.forEach(function (pl) { try { _series.removePriceLine(pl); } catch (e) {} });
+    _ilLines = [];
+    _vwapLast = null; _vpocLast = null;
+    if (!(_tf === "5m" && _lastData && _lastData.length)) return;
+
+    var lastDay = _lastData[_lastData.length - 1]._day;
+    var bars = _lastData.filter(function (b) { return b._day === lastDay; });
+    if (!bars.length) return;
+
+    var vols = _perBarVolumes(bars);
+    if (!vols) return;   // volume series unusable for this session — no VWAP line, no VPOC, no chips
+
+    // ── VWAP: SUM(close·volume)/SUM(volume) across the session, rendered as a flat level.
+    var cumPV = 0, cumV = 0;
+    bars.forEach(function (b, ix) { cumPV += b.close * vols[ix]; cumV += vols[ix]; });
+    if (cumV > 0 && isFinite(cumPV / cumV)) _vwapLast = cumPV / cumV;
+    else _vwapLast = bars[bars.length - 1].close;   // zero-volume session (pre-open / halted): fall back to last price
+
+    // ── VPOC: 24 equal bins across the session's high-low range; heaviest bin's MIDPOINT.
+    var hi = -Infinity, lo = Infinity;
+    bars.forEach(function (b) { if (isFinite(b.high) && b.high > hi) hi = b.high; if (isFinite(b.low) && b.low < lo) lo = b.low; });
+    if (isFinite(hi) && isFinite(lo)) {
+      if (hi <= lo) {
+        _vpocLast = lo;   // flat session (one price all day) — the whole range IS the POC
+      } else {
+        var NB = 24, w = (hi - lo) / NB, vol = new Array(NB), i;
+        for (i = 0; i < NB; i++) vol[i] = 0;
+        bars.forEach(function (b, ix) {
+          var idx = Math.floor((b.close - lo) / w);
+          if (idx < 0) idx = 0; if (idx >= NB) idx = NB - 1;   // the high-closing bar lands in the top bin, not past it
+          vol[idx] += vols[ix];
+        });
+        var best = -1, bi = -1;
+        for (i = 0; i < NB; i++) { if (vol[i] > best) { best = vol[i]; bi = i; } }
+        if (bi >= 0 && best > 0) _vpocLast = lo + w * (bi + 0.5);
+      }
+    }
+
+    // Dashed level lines, pivot styling. axisLabelVisible:false — values live in the chips, and the
+    // axis is already crowded by the CMP tag (the cc#750 reason pivots lost their badges).
+    if (_vwapLast != null && isFinite(_vwapLast)) {
+      _ilLines.push(_series.createPriceLine({ price: +_vwapLast, color: VWAP_COL, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" }));
+    }
+    if (_vpocLast != null && isFinite(_vpocLast)) {
+      _ilLines.push(_series.createPriceLine({ price: +_vpocLast, color: VPOC_COL, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" }));
+    }
   }
   // cc#730/#750: pivot + fib overlays. Pivot LEVELS + fib LINES are native price lines (they track the
   // scale); cc#750 removes the pivot AXIS badges (they collided with the price ticks + CMP tag) in favour
@@ -498,9 +584,16 @@
         if (chips) { html += '<div class="sc-pivchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + chips + '</div>'; pivShown = true; }
       }
     }
-    // cc#755: VWAP value chip (amber) — top-left, below the pivot strip if present. Intraday only.
-    if (_ov.vwap && _tf === "5m" && _vwapLast != null && isFinite(_vwapLast)) {
-      html += '<div class="sc-vwapchip" style="position:absolute;left:0;top:' + (pivShown ? "26px" : "0") + ';font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)"><span style="color:#f5a623;font-weight:800">VWAP</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(_vwapLast).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span></div>';
+    // cc#807: VWAP + VPOC value chips — one row, top-left, below the pivot strip if present. 5m only,
+    // always shown there (no toggle). Each label is coloured to MATCH ITS LINE so the chip row reads
+    // as the chart's legend; a legend whose colour does not match the line it names is not a legend.
+    // (cc#755's chip was amber while cc#807 makes the line grey — matching them is the deviation.)
+    if (_tf === "5m" && ((_vwapLast != null && isFinite(_vwapLast)) || (_vpocLast != null && isFinite(_vpocLast)))) {
+      var ilChips = [["VWAP", _vwapLast, VWAP_COL], ["VPOC", _vpocLast, VPOC_COL]]
+        .filter(function (r) { return r[1] != null && isFinite(r[1]); })
+        .map(function (r) { return '<span style="color:' + r[2] + ';font-weight:800">' + r[0] + '</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span>'; })
+        .join('<span style="color:' + pal.sub + ';margin:0 5px">|</span>');
+      html += '<div class="sc-vwapchip" style="position:absolute;left:0;top:' + (pivShown ? "26px" : "0") + ';font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + ilChips + '</div>';
     }
     // fib zone bands (positioned in _positionFx); one label per band, right-inside vertical stack.
     if (_ov.fib && _fibBand) {
@@ -602,7 +695,7 @@
       _chart = c; _series = s; _lastData = data;
       _setHL(data);
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
-      _applyVwap();       // cc#755: draw the session-VWAP line (intraday only; no-op on EOD TFs)
+      _applyIntradayLevels();   // cc#807: flat VWAP + VPOC session levels (5m only; no-op on EOD TFs)
       _applyGvm();        // cc#779: GVM quality-trend line (secondary fixed 0-10 axis; no-op on 5m)
       _loadVerdict();     // cc#779: trend-strength badge, recomputed for THIS timeframe
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
@@ -642,7 +735,7 @@
     if (ov) ov.style.display = "none";
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
-    _vwapSeries = null; _vwapLast = null;   // cc#755 (series is owned by _chart, already removed above)
+    _ilLines = []; _vwapLast = null; _vpocLast = null;   // cc#807 (price lines are owned by _series, removed with it)
     _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
     if (_full) _toggleFull(false);          // cc#779: never leave the wrapper stuck full-viewport
     var vp = document.getElementById("scorrVerdictPop"); if (vp) vp.remove();   // cc#779
