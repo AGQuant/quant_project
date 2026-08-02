@@ -14,14 +14,18 @@
  * WIRING
  *   window.ScorrCardStripHtml(sym, active)  -> strip HTML string
  *   window.ScorrCardNav(letter, sym)        -> dispatch a letter
- *   window.ScorrCardStrip.register({C,A,R,D})   page-local openers (richer than the fallbacks)
+ *   window.ScorrCardStrip.register({C,A,R,D})   RETAINED FOR COMPATIBILITY ONLY — see below
  *   window.ScorrCardStrip.registerClose(fn)     called before any nav, to close page overlays
  *   window.ScorrCardStrip.setFutures(symbols)   page hands over a futures universe it already has
  *
- * DISPATCH PRECEDENCE — one rule, everywhere: a page-registered opener wins; otherwise the
- * site-wide fallback runs (ScorrChartCard / ScorrRCard / cockpit deep-link). So every page goes
- * through the SAME dispatcher and the SAME availability logic; a page can only make a letter
- * richer, never make the strip look or behave differently.
+ * DISPATCH — one rule, everywhere: every letter opens its shared component.
+ *   C -> scorr_chart_card.js      (cc#706, locked cc#803)
+ *   A -> scorr_analysis_card.js   (cc#805, locked cc#805)
+ *   R -> results_card.js          (cc#573, locked cc#803)
+ *   D -> scorr_cockpit_card.js    (cc#805, locked cc#805)
+ * As of cc#805 ALL FOUR letters are locked, so register() is a no-op that warns: there is no way for
+ * a page to change what a letter does. Every surface therefore gets not just the same strip markup
+ * (cc#789) but the same card behind every button.
  */
 (function () {
   if (window.ScorrCardStrip) return;
@@ -155,16 +159,27 @@
 
   /* ── dispatch ───────────────────────────────────────────────────────────────────────── */
 
-  /* cc#803 LOCKED LETTERS. cc#789 made the strip's MARKUP single-source but left its BEHAVIOUR
-   * overridable by any page, which is the same drift one level down: /dashboard registered its own
-   * C and opened a page-local chart overlay while /gvm opened the shared ScorrChartCard — one
-   * button, two different charts. A letter is overridable ONLY while no shared component exists
-   * for it. C (scorr_chart_card.js) and R (results_card.js) both have one, so they are locked to
-   * it site-wide and a register() attempt is ignored with a warning. A and D stay overridable
-   * because their fallback is a deep-link to /dashboard, not a shared in-page component — a page
-   * that owns that implementation genuinely is richer. When A or D gets a shared component, lock
-   * it here too rather than trusting every future page author to not register it. */
-  var _LOCKED = { C: 'scorr_chart_card.js', R: 'results_card.js' };
+  /* cc#803/#805 LOCKED LETTERS — ALL FOUR. cc#789 made the strip's MARKUP single-source but left its
+   * BEHAVIOUR overridable by any page, which is the same drift one level down: /dashboard registered
+   * its own C and opened a page-local chart overlay while /gvm opened the shared ScorrChartCard — one
+   * button, two different charts.
+   *
+   * cc#803 locked C and R and wrote down the exception that let A and D stay overridable: "a letter
+   * is overridable ONLY while no shared component exists for it". THAT EXCEPTION IS NOW CLOSED.
+   * cc#805 extracted the Analysis modal into scorr_analysis_card.js and the Derivative Cockpit into
+   * scorr_cockpit_card.js (both built on scorr_card_common.js), so every letter has a shared
+   * component and every letter is locked to it site-wide. There is no longer any condition under
+   * which a page may register an opener — register() ignores all four with a console warning.
+   *
+   * FORWARD RULE: a new surface that wants different behaviour behind a letter EXTENDS that shared
+   * file. It does not register, and it does not fork. Adding a fifth letter means adding its shared
+   * component here at the same time, not "temporarily" leaving it page-overridable. */
+  var _LOCKED = {
+    C: 'scorr_chart_card.js',
+    A: 'scorr_analysis_card.js',
+    R: 'results_card.js',
+    D: 'scorr_cockpit_card.js'
+  };
 
   function register(h) {
     if (!h) return;
@@ -173,8 +188,8 @@
       if (_LOCKED[k]) {
         try {
           console.warn('[ScorrCardStrip] "' + k + '" is locked to the shared ' + _LOCKED[k] +
-                       ' and cannot be overridden per page (cc#803). Registration ignored — ' +
-                       'extend that shared file instead.');
+                       ' and cannot be overridden per page (cc#803/#805 — all four letters are now ' +
+                       'locked). Registration ignored — extend that shared file instead.');
         } catch (e) {}
         return;
       }
@@ -187,6 +202,10 @@
     _closers.forEach(function (fn) { try { fn(); } catch (e) {} });
     try { if (window.ScorrRCard && window.ScorrRCard.close) window.ScorrRCard.close(); } catch (e) {}
     try { if (window.ScorrChartCard && window.ScorrChartCard.close) window.ScorrChartCard.close(); } catch (e) {}
+    /* cc#805: A and D are shared components now, so the dispatcher closes them itself instead of
+       relying on each host page to have registered a closer for them. */
+    try { if (window.ScorrAnalysisCard && window.ScorrAnalysisCard.close) window.ScorrAnalysisCard.close(); } catch (e) {}
+    try { if (window.ScorrCockpitCard && window.ScorrCockpitCard.close) window.ScorrCockpitCard.close(); } catch (e) {}
   }
 
   /* Site-wide fallbacks, used when a page registers no opener for a letter. These are the
@@ -194,18 +213,25 @@
   function _fallback(k, sym) {
     if (k === 'C') { if (window.ScorrChartCard) window.ScorrChartCard.open(sym); return; }
     if (k === 'A') {
-      /* cc#789 item 3 — A PARITY. The canonical A is the V8 Analysis modal (GVM + sector rank,
-       * volume, delivery, trajectory, TC footer). Its renderer has a long transitive tail
-       * (trajHtml/_volTilesHtml/heatHtml/_trajValTile/_heatTile/qaVolExplain/TC embed + their CSS)
-       * that lives in v8_dashboard.html, so cloning it here would recreate the very duplication
-       * this task exists to kill. Instead we deep-link to the ONE implementation via ?qa=.
-       * Consequence, stated plainly: on non-V8 surfaces A opens the dashboard tab rather than an
-       * in-page overlay. Content and behaviour are identical because it IS the same modal. */
+      /* cc#805 — A PARITY, FINALLY IN-PAGE. cc#789 had to deep-link A to /dashboard?qa= because the
+       * canonical Analysis renderer had a long transitive tail (trajHtml/_volTilesHtml/heatHtml/
+       * _trajValTile/_heatTile/qaVolExplain/TC embed + their CSS) locked inside v8_dashboard.html;
+       * cloning it here would have recreated the duplication cc#789 existed to kill. cc#805 moved
+       * that tail into scorr_card_common.js + scorr_analysis_card.js, so A now opens the SAME modal
+       * IN PAGE on every surface. The deep link stays only as a degradation path for a context where
+       * the shared file did not load (embeds), so the strip never becomes a dead button. */
+      if (window.ScorrAnalysisCard) { window.ScorrAnalysisCard.open(sym); return; }
       window.open('/dashboard?qa=' + encodeURIComponent(sym), '_blank');
       return;
     }
     if (k === 'R') { if (window.ScorrRCard) window.ScorrRCard.open(sym); return; }
-    if (k === 'D') { window.open('/dashboard?dc=' + encodeURIComponent(sym), '_blank'); return; }
+    if (k === 'D') {
+      /* cc#805 — same story as A: the Derivative Cockpit is now scorr_cockpit_card.js, opened in
+       * page. ?dc= remains the degradation path only. */
+      if (window.ScorrCockpitCard) { window.ScorrCockpitCard.open(sym); return; }
+      window.open('/dashboard?dc=' + encodeURIComponent(sym), '_blank');
+      return;
+    }
   }
 
   function cardNav(k, sym) {

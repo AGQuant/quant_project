@@ -1684,3 +1684,42 @@ except Exception:
 @router.get("/scorr_card_strip.js")
 def pwa_scorr_card_strip_js():
     return Response(SCORR_CARD_STRIP_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+# cc#805: the A (Analysis) and D (Derivative Cockpit) cards, extracted out of v8_dashboard.html so the
+# C·A·R·D strip can LOCK all four letters to shared components instead of deep-linking A and D back to
+# /dashboard. Three files, and the ORDER MATTERS (main.py _MOBILE_HEAD injects them in this order):
+#   scorr_card_common.js   the primitives both cards shared with the dashboard page itself
+#                          (num/sign/getJSON/newsEsc + the volume tiles, heat cells and sparkline).
+#                          It had to be extracted FIRST — num alone had 139 call sites on the
+#                          dashboard, so anything else would have meant duplicating it.
+#   scorr_analysis_card.js window.ScorrAnalysisCard.open(sym)
+#   scorr_cockpit_card.js  window.ScorrCockpitCard.open(sym, side, qty, entry, cmp)
+# Same serve pattern as scorr_chart_card.js: source of truth is the repo-root .js file, read once at
+# import, served with the shared 1-day cache headers (main.py stamps the URL with the build id).
+def _read_root_js(name):
+    try:
+        with open(_os.path.join(_os.path.dirname(__file__), name), "r", encoding="utf-8") as _f:
+            return _f.read()
+    except Exception:
+        return "/* %s unavailable */" % name
+
+
+SCORR_CARD_COMMON_JS = _read_root_js("scorr_card_common.js")
+SCORR_ANALYSIS_CARD_JS = _read_root_js("scorr_analysis_card.js")
+SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
+
+
+@router.get("/scorr_card_common.js")
+def pwa_scorr_card_common_js():
+    return Response(SCORR_CARD_COMMON_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_analysis_card.js")
+def pwa_scorr_analysis_card_js():
+    return Response(SCORR_ANALYSIS_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_cockpit_card.js")
+def pwa_scorr_cockpit_card_js():
+    return Response(SCORR_COCKPIT_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)

@@ -238,9 +238,16 @@ _MOBILE_HEAD = (
     # returning client could serve yesterday's bundle for a full day — which is exactly how the
     # founder saw the pre-cc#779 chart card hours after it deployed. Stamping the URL is the fix that
     # does not depend on anyone remembering anything at deploy time.
+    # cc#805 DEPENDENCY ORDER — scorr_card_common.js FIRST. It owns the primitives every other card
+    # file binds to (num/sign/getJSON/newsEsc, the volume tiles, the heat cells, the sparkline), and
+    # both scorr_analysis_card.js and scorr_cockpit_card.js bail out with a console warning if
+    # window.ScorrCardCommon is not already there. Do not reorder these five tags.
+    + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/results_card.js?v=' + _BUILD_B + b'" defer></script>'       # cc#573: shared Results R-pill + card
-    + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card
+    + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card (letter C)
+    + b'<script src="/scorr_analysis_card.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared Analysis modal (letter A)
+    + b'<script src="/scorr_cockpit_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#805: shared Derivative Cockpit (letter D)
 )
 
 @app.middleware("http")
@@ -264,6 +271,14 @@ async def auth_gate(request: Request, call_next):
                 body = body.replace(b"</body>", _THEME_BTN + b"</body>", 1)
             if do_pwa and b'src="/pwa.js"' not in body:
                 body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
+            # cc#805: a page may carry its OWN early <script src="/scorr_card_common.js"> tag when it
+            # needs the shared primitives at PARSE time — v8_dashboard.html does, because the injected
+            # tags below are `defer` and (that document having no </head>) land at the END of <body>,
+            # after its inline scripts have already called loadAll()/loadNews()/loadDataIntegrity().
+            # Stamp that hardcoded tag with the build id here, so it can never serve a day-stale
+            # cached bundle the way an unstamped max-age=86400 URL would.
+            body = body.replace(b'src="/scorr_card_common.js"',
+                                b'src="/scorr_card_common.js?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: before </body>)
             if b'href="/static/mobile.css"' not in body:
                 if b"</head>" in body:
