@@ -124,6 +124,136 @@ def _expectations(cur, sym, actual_sales=None, actual_profit=None):
     return out or None
 
 
+# ── cc#797 BASIC POLISH L1 (design BASIC_POLISH_L1_CARD_DESIGN_V1, session_log 13551) ────────────
+# Block 1 is ABSOLUTES FIRST: Sales / PAT with QoQ and YoY, margin latest vs last year, PE vs industry.
+#
+# SOURCE DEVIATION, STATED: the design says these come from the CSV's latest/preceding/preceding-year
+# columns. Those columns do not exist in screener_raw (63 columns, checked) and would need the same
+# blocked migration as cc#796. fundamentals_history carries the identical quarterly series for 331
+# symbols after the cc#790 scrape, so L1 is built from there instead — same numbers, available today,
+# and no dependency on a migration. The CSV can replace this source later without changing the card.
+#
+# BFSI handling is derived from the DATA rather than a hardcoded name list, which cannot go stale:
+#   has 'OPM %'              -> non-BFSI, show the OPM pair
+#   has 'Financing Margin %' -> Bank/NBFC, relabel the row "Financing Margin"
+#   neither                  -> Insurer, hide the margin row entirely
+def _l1_quarter(cur, sym):
+    try:
+        cur.execute("""SELECT period_end, period_label, metrics FROM fundamentals_history
+                       WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
+                       ORDER BY period_end DESC LIMIT 5""", (sym,))
+        rows = cur.fetchall()
+    except Exception as e:
+        log.warning(f"_l1_quarter {sym}: {e}")
+        return None
+    if not rows:
+        return None
+
+    def num(m, *keys):
+        for k in keys:
+            v = m.get(k)
+            if v not in (None, "", "-"):
+                n = _f(str(v).replace(",", "").replace("%", ""))
+                if n is not None:
+                    return n
+        return None
+
+    cur_pe, cur_lbl, cur_m = rows[0][0], rows[0][1], (rows[0][2] or {})
+    prev_m = (rows[1][2] or {}) if len(rows) > 1 else {}
+    # year-ago = same quarter-end one year back; None when the series does not reach it
+    yr_m = {}
+    for pe, _lbl, m in rows:
+        if pe and cur_pe and pe.year == cur_pe.year - 1 and pe.month == cur_pe.month:
+            yr_m = m or {}
+            break
+
+    def pct(now, was):
+        if now is None or was is None or was == 0:
+            return None
+        return round((now - was) / abs(was) * 100.0, 1)
+
+    sales_k = ("Sales", "Revenue")
+    s_now, s_prev, s_yr = num(cur_m, *sales_k), num(prev_m, *sales_k), num(yr_m, *sales_k)
+    p_now, p_prev, p_yr = num(cur_m, "Net Profit"), num(prev_m, "Net Profit"), num(yr_m, "Net Profit")
+
+    pe_self = pe_ind = None
+    is_insurer = False
+    try:
+        cur.execute("""SELECT pe, segment_pe, industry_group FROM screener_raw
+                       WHERE UPPER(nse_code)=UPPER(%s)""", (sym,))
+        r = cur.fetchone()
+        if r:
+            pe_self, pe_ind = _f(r[0]), _f(r[1])
+            is_insurer = (str(r[2] or "").strip().lower() == "insurance")
+    except Exception:
+        pass
+
+    # Insurers must be checked EXPLICITLY, not inferred from the metric keys. Screener publishes an
+    # "OPM %" for them (verified: SBILIFE, CANHLIFE, ICICIPRULI, GODIGIT, STARHEALTH, NIACL all carry
+    # it), so a keys-only rule would have shown them a Margins row the design says to hide — and an
+    # operating margin on a life insurer is not a meaningful number to put in front of a reader.
+    # industry_group='Insurance' separates all six cleanly from banks and non-BFSI.
+    if is_insurer:
+        m_label, m_now, m_yr = None, None, None      # row hidden entirely, never shown empty
+    elif "OPM %" in cur_m:
+        m_label, m_now, m_yr = "Margins", num(cur_m, "OPM %"), num(yr_m, "OPM %")
+    elif "Financing Margin %" in cur_m:
+        m_label, m_now, m_yr = "Financing Margin", num(cur_m, "Financing Margin %"), num(yr_m, "Financing Margin %")
+    else:
+        m_label, m_now, m_yr = None, None, None
+
+    return {
+        "quarter_label": cur_lbl, "quarter_end": str(cur_pe) if cur_pe else None,
+        "sales": {"value": s_now, "qoq": pct(s_now, s_prev), "yoy": pct(s_now, s_yr)},
+        "pat": {"value": p_now, "qoq": pct(p_now, p_prev), "yoy": pct(p_now, p_yr)},
+        "margin": ({"label": m_label, "now": m_now, "ly": m_yr,
+                    "pp": (round(m_now - m_yr, 1) if (m_now is not None and m_yr is not None) else None)}
+                   if m_label else None),
+        "valuation": {"pe": pe_self, "industry_pe": pe_ind},
+    }
+
+
+# cc#797 AUTO-VERDICT: one deterministic line, no LLM. 12 combinations = PAT YoY sign (2) x vs-est
+# band (3) x margin direction (2). The point is that the same inputs always produce the same sentence,
+# so the card cannot drift between renders or cost anything to generate. When a dimension is unknown
+# the sentence simply omits that clause rather than guessing a direction.
+def _auto_verdict(l1, expectations):
+    if not l1:
+        return None
+    pat = (l1.get("pat") or {})
+    yoy = pat.get("yoy")
+    if yoy is None:
+        return None
+    mg = l1.get("margin") or {}
+    pp = mg.get("pp")
+    band = None
+    exp = expectations or {}
+    if exp.get("profit"):
+        band = exp["profit"].get("tag")
+    elif exp.get("sales"):
+        band = exp["sales"].get("tag")
+
+    grew = yoy >= 0
+    head = ("Profit grew %.0f%%" % abs(yoy)) if grew else ("Profit fell %.0f%%" % abs(yoy))
+    if band == "BEAT":
+        mid = " and beat the projected run-rate"
+    elif band == "MISS":
+        mid = " but missed the projected run-rate" if grew else " and missed the projected run-rate"
+    elif band == "IN-LINE":
+        mid = " and landed on the projected run-rate"
+    else:
+        mid = ""
+    if pp is None:
+        tail = "."
+    elif pp > 0.05:
+        tail = "; margins did the work." if grew else "; margins held up even so."
+    elif pp < -0.05:
+        tail = "; margins gave ground." if grew else "; margins went with it."
+    else:
+        tail = "; margins were flat."
+    return head + mid + tail
+
+
 def _fy27_growth(cur, sym):
     """cc#623: FY27 estimated growth % from input_raw.fy27_growth (Sonnet on Trendlyne consensus,
     ~1536/2008 populated). Numeric or None. NEVER touches the retired empty fy27_outlook column."""
@@ -416,12 +546,15 @@ async def results_card(symbol: str, generate: bool = False):
         except Exception as e:
             log.warning(f"cc#796 actuals {sym}: {e}")
         expectations = _expectations(cur, sym, _act_sales, _act_pat)
+        l1 = _l1_quarter(cur, sym)                      # cc#797 block 1
+        auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
         raw_news = _raw_news(cur, sym, hours=168)   # cc#650: RAW headlines widened 48h -> 7 days
         pol_news = _polished_by_symbol(cur, sym, days=30)
 
         def _sections(base):
             base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
-                         "expectations": expectations})   # cc#796: None -> card omits the line
+                         "expectations": expectations,    # cc#796: None -> card omits the line
+                         "l1": l1, "auto_verdict": auto_verdict})   # cc#797
             return _with_peer(base)
 
         cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))

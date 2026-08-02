@@ -1032,6 +1032,13 @@ RESULTS_CARD_JS = """
     + '.rcard-exp-v{font-variant-numeric:tabular-nums;font-weight:700}'
     + '.rcard-exp-e{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums}'
     + '.rcard-exp-d{font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}'
+    /* cc#797 L1 block — absolutes first, deltas trailing, traffic light on the delta only */
+    + '.rcard-av{font:600 13px/1.5 Sora,sans-serif;margin:0 0 10px;color:var(--txt,#101828)}'
+    + '.rcard-l1row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:7px;font-size:12.5px}'
+    + '.rcard-l1k{font-weight:700;min-width:74px;color:var(--mut,#667085);text-transform:uppercase;'
+    + 'font-size:9.5px;letter-spacing:.07em}'
+    + '.rcard-l1v{font:800 14px/1.2 Sora,sans-serif;font-variant-numeric:tabular-nums}'
+    + '.rcard-l1d{font-variant-numeric:tabular-nums;color:var(--dim,#8892a6)}'
     /* cc#794 — coverage level tag beside the status chip. DETAILED is filled violet so it reads as
        an earned state; BASIC is a grey outline so it reads as a default, not a failure. */
     + '.rcard-lvl{display:inline-flex;align-items:center;font:700 9.5px/1 Sora,sans-serif;'
@@ -1288,6 +1295,48 @@ RESULTS_CARD_JS = """
       + '<div class=\"rcard-note\">Reported quarter PAT YoY vs the FY27 full-year consensus &mdash; directional, not like-for-like.</div>';
   }
 
+  // cc#797 BASIC POLISH L1 — block 1, ABSOLUTES FIRST. The number comes before its deltas because the
+  // absolute is the fact and the percentages are commentary on it; a card that leads with "+18% YoY"
+  // makes the reader hunt for what actually happened.
+  // Traffic light is on the DELTA, not the absolute: green above zero, red below, grey at zero.
+  // BFSI is handled by the payload (backend derives it from which metric keys the filing carries),
+  // so a bank shows "Financing Margin" and an insurer shows no margin row at all rather than an
+  // empty one.
+  function _sign(v){ return v==null ? 'var(--mut,#667085)' : (v>0 ? '#0f9d58' : (v<0 ? '#d0433b' : 'var(--mut,#667085)')); }
+  function _pc(v){ return v==null ? '--' : ((v>=0?'+':'')+esc(v)+'%'); }
+  function l1Html(l1, verdict){
+    if (!l1) return '';
+    var h = '<div class=\"rcard-lbl\">Quarter'+(l1.quarter_label?' &middot; '+esc(l1.quarter_label):'')+'</div>';
+    if (verdict) h += '<div class=\"rcard-av\">'+esc(verdict)+'</div>';
+    function moneyRow(lbl, o){
+      if (!o || o.value==null) return '';
+      return '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+lbl+'</span>'
+        + '<span class=\"rcard-l1v\">&#8377;'+esc(o.value)+' Cr</span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.qoq)+'\">QoQ '+_pc(o.qoq)+'</span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.yoy)+'\">YoY '+_pc(o.yoy)+'</span></div>';
+    }
+    h += moneyRow('Sales', l1.sales) + moneyRow('PAT', l1.pat);
+    var m = l1.margin;
+    if (m && m.now!=null){
+      h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+esc(m.label)+'</span>'
+        + '<span class=\"rcard-l1v\">'+esc(m.now)+'%</span>'
+        + '<span class=\"rcard-l1d\">vs LY '+(m.ly==null?'--':esc(m.ly)+'%')+'</span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(m.pp)+'\">'
+        + (m.pp==null?'--':((m.pp>=0?'+':'')+esc(m.pp)+'pp'))+'</span></div>';
+    }
+    var v = l1.valuation || {};
+    if (v.pe!=null || v.industry_pe!=null){
+      var prem = (v.pe!=null && v.industry_pe) ? Math.round((v.pe/v.industry_pe-1)*100) : null;
+      h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">Valuation</span>'
+        + '<span class=\"rcard-l1v\">PE '+(v.pe==null?'--':esc(v.pe))+'</span>'
+        + '<span class=\"rcard-l1d\">industry '+(v.industry_pe==null?'--':esc(v.industry_pe))+'</span>'
+        + (prem==null ? '' : '<span class=\"rcard-l1d\" style=\"color:'+_sign(-prem)+'\">'
+             + (prem>=0?'+':'')+esc(prem)+'% vs industry</span>')
+        + '</div>';
+    }
+    return h;
+  }
+
   // cc#796 EXPECTATIONS. Screener's CSV carries an expected quarterly sales/profit. It is a MECHANICAL
   // TREND PROJECTION, not analyst consensus — the season measured a median deviation of -16%
   // (155 beats vs 320 misses), which is what a run-rate extrapolation looks like, not a broker forecast.
@@ -1440,6 +1489,7 @@ RESULTS_CARD_JS = """
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
       }
       // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
+      h += l1Html(d && d.l1, d && d.auto_verdict);   // cc#797 block 1: absolutes-first + deterministic verdict
       h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
       h += viewDetailedHtml(d && d.v2, d && d.card_quarter);
       h += fy27Html(d && d.fy27_growth, _actualPat(d));
