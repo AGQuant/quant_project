@@ -586,8 +586,18 @@ def run_shareholding_quarterly(target_end: date = None, today: date = None) -> d
 
 
 def _claim_scrape_flag():
-    """Consume app_config['fundamentals_scrape'] in ('test','run','pending'); return the mode or None.
-    Marks 'claimed:<mode>' so it never re-fires on the next boot."""
+    """Consume app_config['fundamentals_scrape']; return the mode or None.
+    Marks 'claimed:<value>' so it never re-fires on the next boot.
+
+    Accepted values:
+      'test'                  -> 3 spot-check symbols
+      'run' | 'pending'       -> full universe (resumable)
+      'run:SYM1,SYM2,...'     -> cc#790 TARGETED re-scrape of exactly those symbols
+
+    The targeted form exists because this flag is the ONLY trigger that survives a restart, and a
+    season refresh often needs a bounded, explicitly-scoped run rather than the whole universe.
+    Returns either a mode string or a ('targeted', [symbols]) tuple.
+    """
     import fyers_feed
     try:
         conn = fyers_feed.get_db()
@@ -595,14 +605,22 @@ def _claim_scrape_flag():
             with conn.cursor() as cur:
                 cur.execute("SELECT value FROM app_config WHERE key=%s FOR UPDATE", (SCRAPE_FLAG,))
                 r = cur.fetchone()
-                val = (r[0] or "").strip().lower() if r else ""
-                if val not in ("test", "run", "pending"):
+                raw = (r[0] or "").strip() if r else ""
+                val = raw.lower()
+                syms = []
+                if val.startswith("run:"):
+                    syms = [s.strip().upper() for s in raw.split(":", 1)[1].split(",") if s.strip()]
+                    if not syms:
+                        conn.commit(); return None
+                elif val not in ("test", "run", "pending"):
                     conn.commit(); return None
                 cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s",
-                            (f"claimed:{val}", SCRAPE_FLAG))
+                            (f"claimed:{raw}"[:2000], SCRAPE_FLAG))
             conn.commit()
         finally:
             conn.close()
+        if syms:
+            return ("targeted", syms)
         return "test" if val == "test" else "run"
     except Exception as e:
         log.error(f"scrape flag claim failed: {e}")
@@ -635,7 +653,12 @@ def _claim_1b_flag():
 async def _scrape_startup_trigger():
     import threading
     mode = _claim_scrape_flag()
-    if mode:
+    if isinstance(mode, tuple) and mode[0] == "targeted":
+        _syms = mode[1]
+        log.info(f"cc#790: fundamentals_scrape flag claimed (targeted, {len(_syms)} symbols) — starting in background")
+        threading.Thread(target=run_scrape, kwargs={"symbols": _syms},
+                         name="cc790-scrape-flag-targeted", daemon=True).start()
+    elif mode:
         log.info(f"cc#361: fundamentals_scrape flag claimed (mode={mode}) — starting in background")
         threading.Thread(target=run_scrape, args=(mode,), name="cc361-scrape", daemon=True).start()
     # cc#741 (founder 28-Jul, id=10093): the Phase 1B full-universe shareholding backfill ambition is
