@@ -255,9 +255,12 @@
     <button class="h-btn" id="clearBtn" onclick="clearChat()" title="Clear conversation">
       <span style="font-size:13px">↻</span><span>Clear</span>
     </button>
-    <div class="mode-sel" id="modeSel" title="Native = DB only, $0  |  Haiku = Haiku 4.5  |  Gemini = Gemini Flash">
+    <!-- cc#836: Haiku and Sonnet are DROPPED from Max (founder correction, session_log 13816 +
+         13822). The model surface is Native / Gemini only. Gemini itself is stage 3 and stays
+         UNWIRED for now - the pill is present so the surface is final, but Native is the default
+         and every tappable leaf answers at $0 without it. -->
+    <div class="mode-sel" id="modeSel" title="Native = DB only, $0  |  Gemini = free-text fallback">
       <button class="mode-pill" data-mode="native" onclick="setMode('native')">Native</button>
-      <button class="mode-pill" data-mode="haiku" onclick="setMode('haiku')">Haiku</button>
       <button class="mode-pill" data-mode="gemini" onclick="setMode('gemini')">Gemini</button>
     </div>
   </div>
@@ -306,7 +309,7 @@
 const API='/api/scorr/chat', USER_KEY='scorr_arpit', STORE='scorr_max_v9';
 const SONNET='claude-sonnet-4-6', MAX_TOKENS=3000, BUDGET=0.05;
 
-let mode='haiku', totalCost=0, busy=false, currentController=null;
+let mode='native', totalCost=0, busy=false, currentController=null;   // cc#836: guided native is the default
 let history=[];
 
 const CARDS=[
@@ -449,14 +452,298 @@ function chipSection(title,items){
   return s;
 }
 
-function renderWelcome(){
-  const root=document.getElementById('catSections');root.innerHTML='';
-  const quick=MOST_USED.map(id=>CARDS.find(c=>c.id===id)).filter(Boolean);
-  if(quick.length)root.appendChild(chipSection('★ Quick Access',quick));
-  for(const cat of CAT_ORDER){
-    const items=CARDS.filter(c=>c.cat===cat);
-    if(items.length)root.appendChild(chipSection(cat,items));
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// cc#836 — MAX IVR GUIDED CIO
+// Design chain: session_log 13823 (index) -> 13822 (MAX_IVR_TREE_V2) -> 13816 (architecture).
+//
+// The tree is NOT in this file. It is rendered from max_ivr_tree via /api/max/ivr/tree, so a
+// relabel or reorder is one SQL UPDATE with zero deploy (13816 forbids a hardcoded tree outright).
+// Three levels maximum, breadcrumb + back + home on every level, and the free-text card is ALWAYS
+// the last card on EVERY level — never removed, never prominent.
+//
+// ECONOMICS INVARIANT: a tapped leaf sends its stored natural-language string down the SAME native
+// path the old card grid used, so it resolves through native_intent.classify() at $0. No leaf has
+// its own dispatch, which is what keeps a leaf from ever drifting onto a paid model.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+let IVR={nodes:[],byId:{},byParent:{},loaded:false,error:null};
+let IVR_PATH=[];                       // node_ids from L0 down
+let IVR_CTX={sym:null,sym2:null,seg:null};
+let IVR_PENDING_LEAF=null;             // leaf to auto-run once its picker is satisfied
+const IVR_SESSION=(function(){ try{ let s=localStorage.getItem('max_ivr_sid');
+  if(!s){ s='s'+Math.random().toString(36).slice(2,10); localStorage.setItem('max_ivr_sid',s); }
+  return s; }catch(e){ return 'anon'; } })();
+
+function ivrIndex(nodes){
+  IVR.nodes=nodes; IVR.byId={}; IVR.byParent={};
+  nodes.forEach(n=>{ IVR.byId[n.node_id]=n;
+    const p=n.parent_id||'__root__'; (IVR.byParent[p]=IVR.byParent[p]||[]).push(n); });
+  Object.values(IVR.byParent).forEach(a=>a.sort((x,y)=>(x.sort||0)-(y.sort||0)));
+}
+
+async function ivrLoad(){
+  try{
+    const r=await fetch('/api/max/ivr/tree');
+    const t=await r.text();
+    let d=null; try{ d=JSON.parse(t); }catch(e){}
+    if(!d) throw new Error('unreadable tree response — '+(t||'empty').slice(0,120));
+    if(d.error&&!(d.nodes&&d.nodes.length)) throw new Error(d.error);
+    ivrIndex(d.nodes||[]);
+    IVR.loaded=true; IVR.error=null;
+  }catch(e){ IVR.loaded=true; IVR.error=String(e&&e.message||e); }
+  renderWelcome();
+}
+
+function ivrTap(nodeId){
+  // Fire-and-forget. Navigation must never wait on, or be broken by, telemetry.
+  try{ fetch('/api/max/ivr/tap',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({node_id:nodeId,session_id:IVR_SESSION})}).catch(()=>{}); }catch(e){}
+}
+
+function ivrRecent(){ try{ return JSON.parse(localStorage.getItem('max_ivr_recent')||'[]'); }catch(e){ return []; } }
+function ivrPushRecent(sym){
+  try{ const r=ivrRecent().filter(x=>x!==sym); r.unshift(sym);
+    localStorage.setItem('max_ivr_recent',JSON.stringify(r.slice(0,5))); }catch(e){}
+}
+
+function ivrNodeEl(n){
+  const b=document.createElement('button');
+  const p=n.action_params||{};
+  const pending=p.stage===2;
+  b.className='qchip'+(n.parent_id?'':' quick');
+  b.innerHTML=`<span class="qc-ic">${n.icon||(n.parent_id?'›':'◆')}</span>`
+             +`<span class="qc-lb">${n.label}${pending?' <span style="opacity:.55;font-weight:600">· building</span>':''}</span>`;
+  b.title=n.sublabel||n.label;
+  if(pending) b.style.opacity='.62';
+  b.onclick=()=>ivrGo(n);
+  return b;
+}
+
+function ivrPathTo(nodeId){
+  const path=[]; let cur=IVR.byId[nodeId];
+  while(cur&&cur.parent_id){ path.unshift(cur.parent_id); cur=IVR.byId[cur.parent_id]; }
+  return path;
+}
+
+function ivrGo(n){
+  ivrTap(n.node_id);
+  const p=n.action_params||{};
+  if(n.node_id==='freetext'){ const q=document.getElementById('q'); if(q) q.focus(); return; }
+  // A leaf reached by SEARCH skips the picker its branch would have shown, so the requirement is
+  // re-checked here rather than assumed from the path. Without this, tapping a search result for
+  // "GVM Report" would fire a query with an empty symbol.
+  const wantsSym=(p.card||/\{sym\}/.test(p.q||''));
+  const wantsSeg=/\{seg\}/.test(p.q||'');
+  if((wantsSym&&!IVR_CTX.sym)||(wantsSeg&&!IVR_CTX.seg)){
+    IVR_PATH=ivrPathTo(n.node_id);
+    IVR_PENDING_LEAF=n.node_id;
+    renderWelcome();
+    return;
   }
+  const kids=IVR.byParent[n.node_id]||[];
+  // A branch with children opens the next level. A picker node collects its input first, then
+  // shows its children — that is how Analyze reaches its 14 per-symbol leaves without a 4th level.
+  if(p.needs && !ivrHave(p.needs)){ IVR_PATH.push(n.node_id); renderWelcome(); return; }
+  if(kids.length){ IVR_PATH.push(n.node_id); renderWelcome(); return; }
+  ivrRun(n);
+}
+
+function ivrHave(need){
+  if(need==='symbol') return !!IVR_CTX.sym;
+  if(need==='symbol2') return !!IVR_CTX.sym2;
+  if(need==='segment') return !!IVR_CTX.seg;
+  return true;
+}
+
+function ivrRun(n){
+  const p=n.action_params||{};
+  if(p.href){ location.href=p.href; return; }
+  if(n.action_intent==='learn_glossary'){ ivrAnswerStatic(n.label,p.body||''); return; }
+  if(p.stage===2){
+    ivrAnswerStatic(n.label,
+      '**Building this week.**\n\nThis leaf is in stage 2 of the Max IVR build — its native card '
+      +'template is not written yet, and firing a half-matched query would be worse than saying so.\n\n'
+      +'Everything already tappable answers from the database at **$0**. Use the free-text box below '
+      +'if you need this answer now.');
+    return;
+  }
+  // C/A/R/D leaves open the SHARED flagship card in-page (cc#789 forward rule: never re-implement).
+  if(p.card && IVR_CTX.sym){
+    const opened=ivrOpenCard(p.card,IVR_CTX.sym);
+    if(opened) return;
+  }
+  let q=p.q||n.label;
+  q=q.replace(/\{sym\}/g,IVR_CTX.sym||'').replace(/\{sym2\}/g,IVR_CTX.sym2||'')
+     .replace(/\{seg\}/g,IVR_CTX.seg||'');
+  const box=document.getElementById('q');
+  if(box){ box.value=q.trim(); send(); }
+}
+
+function ivrOpenCard(letter,sym){
+  const m={C:'ScorrChartCard',A:'ScorrAnalysisCard',R:'ScorrResultsCard',D:'ScorrCockpitCard'};
+  const c=window[m[letter]];
+  if(c&&typeof c.open==='function'){ try{ c.open(sym); return true; }catch(e){} }
+  return false;
+}
+
+function ivrAnswerStatic(title,body){
+  // Static glossary + stage-2 notices render through the normal message stream so they read like
+  // any other Max answer, and cost exactly nothing.
+  const msgs=document.getElementById('msgs');
+  const w=document.getElementById('welcome');
+  if(w) w.style.display='none';
+  if(!msgs) return;
+  const d=document.createElement('div');
+  d.className='msg bot';
+  d.innerHTML='<div class="av">MAX</div><div class="bubble"><div style="font-weight:800;margin-bottom:6px">'
+    +esc(title)+'</div>'+mdLite(body)+'<div style="margin-top:10px;font-size:10.5px;opacity:.6">Native · $0</div></div>';
+  msgs.appendChild(d);
+  msgs.scrollTop=msgs.scrollHeight;
+}
+
+// esc() already exists further down this file — deliberately NOT redefined here (a second
+// declaration would hoist over the first and quietly change escaping for every other caller).
+function mdLite(t){
+  return esc(t).split(/\n{2,}/).map(par=>{
+    if(/^\s*-\s/m.test(par)){
+      const lis=par.split(/\n/).filter(l=>l.trim()).map(l=>'<li>'+l.replace(/^\s*-\s*/,'')+'</li>').join('');
+      return '<ul style="margin:6px 0 6px 16px;line-height:1.6">'+lis+'</ul>';
+    }
+    return '<p style="margin:6px 0;line-height:1.6">'+par.replace(/\n/g,'<br>')+'</p>';
+  }).join('').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+}
+
+function ivrCrumb(root){
+  const bar=document.createElement('div');
+  bar.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:11.5px';
+  const mk=(txt,fn,strong)=>{ const a=document.createElement('button');
+    a.textContent=txt; a.onclick=fn;
+    a.style.cssText='background:transparent;border:none;color:'+(strong?'var(--txt)':'var(--mut)')
+      +';font-family:inherit;font-size:11.5px;font-weight:'+(strong?'800':'600')+';cursor:pointer;padding:2px 0';
+    return a; };
+  bar.appendChild(mk('Home',()=>{ IVR_PATH=[]; IVR_CTX={sym:null,sym2:null,seg:null}; renderWelcome(); },IVR_PATH.length===0));
+  IVR_PATH.forEach((id,i)=>{
+    const n=IVR.byId[id]; if(!n) return;
+    const sep=document.createElement('span'); sep.textContent='›'; sep.style.cssText='color:var(--dim)';
+    bar.appendChild(sep);
+    let lbl=n.label;
+    if(id==='analyze'&&IVR_CTX.sym) lbl=IVR_CTX.sym;
+    if(id==='sc_pick'&&IVR_CTX.seg) lbl=IVR_CTX.seg;
+    bar.appendChild(mk(lbl,()=>{ IVR_PATH=IVR_PATH.slice(0,i+1); renderWelcome(); },i===IVR_PATH.length-1));
+  });
+  if(IVR_PATH.length){
+    const back=document.createElement('button');
+    back.textContent='← Back';
+    back.style.cssText='margin-left:auto;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);'
+      +'font-family:inherit;font-size:11px;font-weight:700;border-radius:7px;padding:4px 10px;cursor:pointer';
+    back.onclick=()=>{ const gone=IVR_PATH.pop();
+      if(gone==='analyze') IVR_CTX.sym=null;
+      if(gone==='sc_pick') IVR_CTX.seg=null;
+      renderWelcome(); };
+    bar.appendChild(back);
+  }
+  root.appendChild(bar);
+}
+
+function ivrPicker(root,node,need){
+  const s=document.createElement('div'); s.className='cat-section';
+  const t=document.createElement('div'); t.className='cat-title';
+  t.textContent=need==='segment'?'Pick a segment':(need==='symbol2'?'Compare with':'Pick a stock');
+  s.appendChild(t);
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;gap:7px;margin-bottom:8px';
+  const inp=document.createElement('input');
+  inp.placeholder=need==='segment'?'e.g. Private Banks, IT - Large':'e.g. RELIANCE, BAJFINANCE';
+  inp.autocomplete='off'; inp.spellcheck=false;
+  inp.style.cssText='flex:1;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;'
+    +'padding:9px 12px;color:var(--txt);font-family:inherit;font-size:12.5px';
+  const go=document.createElement('button');
+  go.textContent='Go';
+  go.style.cssText='background:#2FD48B;border:none;border-radius:9px;padding:9px 16px;color:#08131f;'
+    +'font-family:inherit;font-weight:800;font-size:12px;cursor:pointer';
+  const commit=()=>{ const v=(inp.value||'').trim(); if(!v) return;
+    if(need==='segment'){ IVR_CTX.seg=v; }
+    else { const sym=v.toUpperCase(); if(need==='symbol2') IVR_CTX.sym2=sym; else { IVR_CTX.sym=sym; ivrPushRecent(sym); } }
+    if(need==='symbol2'){ const back=IVR.byId['an_compare']; IVR_PATH.pop(); if(back) ivrRun(back); return; }
+    renderWelcome(); };
+  go.onclick=commit;
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter') commit(); });
+  row.appendChild(inp); row.appendChild(go);
+  s.appendChild(row);
+  if(need!=='segment'){
+    const rec=ivrRecent();
+    if(rec.length){
+      const rw=document.createElement('div'); rw.className='chip-wrap';
+      rec.forEach(sym=>{ const b=document.createElement('button'); b.className='qchip';
+        b.innerHTML='<span class="qc-ic">↺</span><span class="qc-lb">'+esc(sym)+'</span>';
+        b.onclick=()=>{ inp.value=sym; commit(); }; rw.appendChild(b); });
+      const rt=document.createElement('div'); rt.className='cat-title'; rt.textContent='Recent';
+      s.appendChild(rt); s.appendChild(rw);
+    }
+  }
+  root.appendChild(s);
+  setTimeout(()=>{ try{ inp.focus(); }catch(e){} },40);
+}
+
+function ivrSymbolHeader(root,sym){
+  // cc#789 forward rule: the flagship C·A·R·D strip is the SHARED component, never re-implemented.
+  // /cio is in _PWA_INJECT_PATHS so scorr_card_strip.js is already on the page.
+  if(!window.ScorrCardStripHtml) return;
+  const h=document.createElement('div');
+  h.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap';
+  h.innerHTML='<span style="font-size:15px;font-weight:800;color:var(--txt)">'+esc(sym)+'</span>'
+    +window.ScorrCardStripHtml(sym);
+  root.appendChild(h);
+}
+
+function renderWelcome(){
+  const root=document.getElementById('catSections'); if(!root) return;
+  root.innerHTML='';
+  if(!IVR.loaded){
+    const l=document.createElement('div'); l.className='cat-title';
+    l.style.padding='10px 2px'; l.textContent='Loading…'; root.appendChild(l); return;
+  }
+  if(IVR.error){
+    const e=document.createElement('div');
+    e.style.cssText='padding:12px 14px;border:1px solid var(--line2);border-radius:10px;font-size:12.5px;line-height:1.6';
+    e.innerHTML='<b>Guided menu unavailable.</b><br><span style="opacity:.75">'+esc(IVR.error)+'</span>'
+      +'<br><span style="opacity:.75">The free-text box below still answers — type your question.</span>';
+    root.appendChild(e); return;
+  }
+  ivrCrumb(root);
+
+  const here=IVR_PATH.length?IVR_PATH[IVR_PATH.length-1]:null;
+  const node=here?IVR.byId[here]:null;
+  const need=node&&(node.action_params||{}).needs;
+
+  if(node&&need&&!ivrHave(need)){ ivrPicker(root,node,need); return; }
+  // A search-launched leaf that needed a picker resumes the moment the picker is satisfied.
+  if(IVR_PENDING_LEAF){
+    const leaf=IVR.byId[IVR_PENDING_LEAF];
+    const lp=leaf?(leaf.action_params||{}):{};
+    const ok=leaf&&(!(lp.card||/\{sym\}/.test(lp.q||''))||IVR_CTX.sym)
+                &&(!/\{seg\}/.test(lp.q||'')||IVR_CTX.seg);
+    if(ok){ IVR_PENDING_LEAF=null; ivrRun(leaf); return; }
+  }
+  if(IVR_CTX.sym&&IVR_PATH[0]==='analyze') ivrSymbolHeader(root,IVR_CTX.sym);
+
+  const kids=(IVR.byParent[here||'__root__']||[]).filter(n=>n.node_id!=='freetext');
+  const title=node?(node.label==='Analyze a Stock'&&IVR_CTX.sym?IVR_CTX.sym:node.label)
+                  :'What do you want to do?';
+  root.appendChild(chipSectionNodes(title,kids));
+
+  // 13816: free-text is the LAST card on EVERY level. Rendered here, not stored per level, so it
+  // cannot be reordered away or forgotten on a new branch.
+  const ft=IVR.byId['freetext'];
+  if(ft) root.appendChild(chipSectionNodes('Or just ask',[ft]));
+}
+
+function chipSectionNodes(title,nodes){
+  const s=document.createElement('div'); s.className='cat-section';
+  const t=document.createElement('div'); t.className='cat-title'; t.textContent=title;
+  const wrap=document.createElement('div'); wrap.className='chip-wrap';
+  nodes.forEach(n=>wrap.appendChild(ivrNodeEl(n)));
+  s.appendChild(t); s.appendChild(wrap);
+  return s;
 }
 
 // Left quick-access panel (active chat only) — same cards as the home grid,
@@ -482,18 +769,39 @@ function renderQuickPanel(){
   }
 }
 
+// cc#836: the search-actions box stays exactly where it was (spec part 3) but now searches the IVR
+// LEAVES rather than the retired 50-card array — otherwise the box and the menu would answer to two
+// different catalogues. Matching a leaf jumps straight to it, path and all, so search is a shortcut
+// INTO the tree rather than a parallel surface.
+function ivrSearchLeaves(q){
+  const ql=q.toLowerCase().trim();
+  if(!ql) return [];
+  const words=ql.split(/\s+/).filter(w=>w.length>=1);
+  const leaves=IVR.nodes.filter(n=>n.parent_id&&n.node_id!=='freetext');
+  return leaves.map(n=>{
+    const parent=IVR.byId[n.parent_id];
+    const bag=(n.label+' '+(n.sublabel||'')+' '+(n.action_intent||'')+' '
+              +(parent?parent.label:'')+' '+JSON.stringify(n.action_params||{})).toLowerCase();
+    let s=0;
+    if(bag.includes(ql)) s+=10;
+    for(const w of words){ if(bag.includes(w)) s+=3;
+      else if(w.length>=4&&bag.includes(w.slice(0,4))) s+=1; }
+    return {n,s};
+  }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.n);
+}
+
 function filterChips(q){
   const root=document.getElementById('catSections');
   q=(q||'').trim();
   if(q.length<1){renderWelcome();return;}
-  const matches=searchCardsAll(q);
+  const matches=ivrSearchLeaves(q);
   root.innerHTML='';
   if(!matches.length){
     const e=document.createElement('div');e.className='cat-title';
-    e.style.padding='10px 2px';e.textContent='No matching actions';
+    e.style.padding='10px 2px';e.textContent='No matching actions — press Enter to ask Max instead';
     root.appendChild(e);return;
   }
-  root.appendChild(chipSection(`Matches (${matches.length})`,matches));
+  root.appendChild(chipSectionNodes(`Matches (${matches.length})`,matches.slice(0,24)));
 }
 
 function runCard(c){
@@ -527,7 +835,7 @@ function searchCardsAll(q){
   return scored.map(x=>x.c);
 }
 
-const MODE_LABELS={native:'Native $0 · Native',haiku:'Native $0 · Haiku 4.5',gemini:'Native $0 · Gemini Flash'};
+const MODE_LABELS={native:'Native $0 · Guided',gemini:'Native $0 · Gemini Flash'};
 function setMode(m){mode=m;applyMode();saveLocal();}
 function applyMode(){
   document.querySelectorAll('.mode-pill').forEach(function(p){p.classList.toggle('on',p.dataset.mode===mode);});
@@ -582,7 +890,34 @@ function addMsg(role,content,meta){
   const tag=meta?.tag||'';
   d.innerHTML=`<div class="av">${role==='user'?'YOU':'MAX'}</div>
     <div class="body"><div class="bubble">${bc}</div>${toolsHtml}${tag?`<div class="meta">${tag}</div>`:''}</div>`;
-  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  msgs.appendChild(d);
+  if(role==='bot') ivrAttachStrips(d);
+  msgs.scrollTop=msgs.scrollHeight;
+}
+
+// cc#836 CARD-STRIP INTEGRATION (b): every symbol in every native answer carries the compact
+// C·A·R·D row, so any answer is one tap from the flagship deep-dive. cc#789 forward rule — the
+// markup and dispatch come from window.ScorrCardRow, never re-implemented here.
+//
+// Scoped DELIBERATELY NARROW: first column of a table body row only, and only when the cell text
+// is exactly an NSE-symbol-shaped token. A native answer's first column is the symbol by
+// convention; a looser match would decorate the word "SECTOR" in a header and look broken.
+const _SYM_RE=/^[A-Z][A-Z0-9&]{1,14}(-[A-Z]{1,4})?$/;
+function ivrAttachStrips(scope){
+  if(!window.ScorrCardRow||!scope) return;
+  try{
+    scope.querySelectorAll('table tr').forEach(tr=>{
+      if(tr.querySelector('th')) return;                 // header row
+      const td=tr.querySelector('td');
+      if(!td||td.querySelector('.scorr-card-strip')) return;
+      const txt=(td.textContent||'').trim();
+      if(!_SYM_RE.test(txt)) return;
+      const holder=document.createElement('span');
+      holder.style.cssText='margin-left:7px;display:inline-flex;vertical-align:middle';
+      holder.innerHTML=window.ScorrCardRow(txt);
+      td.appendChild(holder);
+    });
+  }catch(e){}
 }
 
 function saveLocal(){try{localStorage.setItem(STORE,JSON.stringify({
@@ -656,7 +991,10 @@ async function checkHealth(){
 }
 
 (async function(){
-  loadLocal();applyMode();renderWelcome();renderQuickPanel();
+  loadLocal();
+  if(mode==='haiku') mode='native';   // cc#836: migrate any saved Haiku preference off the dropped model
+  applyMode();renderWelcome();renderQuickPanel();
+  ivrLoad();                          // cc#836: fetch the config-driven tree, then re-render
   const csEl=document.getElementById('chipSearch');
   if(csEl){
     csEl.addEventListener('input',function(){filterChips(this.value);});
