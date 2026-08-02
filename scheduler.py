@@ -3151,28 +3151,67 @@ def _bg_futures_gap_backfill():
     return None
 
 
-_v9_paper_ran_month = None   # cc#629: (year,month) of the last V9 Brahmastra monthly rebalance
+def _first_trading_day_of_month(d):
+    """cc#840: the first day of d's month that is a trading day. A monthly boundary that can land on
+    a Saturday and be skipped is a defect (ENGINE_LIVENESS_RULE corollary, session_log id=13829) —
+    so the boundary is DERIVED from the calendar rather than assumed to be the 1st."""
+    probe = d.replace(day=1)
+    for _ in range(14):          # 14 is beyond any plausible Indian market holiday run
+        if _is_trading_day(probe):
+            return probe
+        probe = probe + timedelta(days=1)
+    return None
+
 
 def _bg_v9_paper_monthly():
-    """cc#629: V9 SECTOR PAIRS "Brahmastra" monthly rebalance — FIRST trading day of the month,
-    ~01:50 IST (after the nightly GVM at 01:30). Month-locked here + idempotent per calendar month in
-    the engine. PAPER-ONLY, strictly separate book (v9_paper_*); never touches any V8 table."""
-    global _v9_paper_ran_month
+    """cc#629 / cc#840: V9 SECTOR PAIRS "Brahmastra" monthly rebalance — first TRADING day of the
+    month, at or after 01:50 IST (the nightly GVM lands 01:30). PAPER-ONLY, strictly separate book
+    (v9_paper_*); never touches any V8 table.
+
+    cc#840 made this RESTART-PROOF. The old form was `h == 1 and m == 50` guarded by an in-process
+    `_v9_paper_ran_month` global — two problems that only show up in production:
+      * an exact-minute condition in a 60s tick loop is a coin flip against deploys. A restart that
+        crosses 01:50 skips the ENTIRE MONTH, and 02-Aug alone had a dozen deploys.
+      * the in-process flag resets on every restart, so it neither guaranteed a run nor reliably
+        prevented a double one — the engine's own idempotence was the only real backstop.
+    Now: fire on any tick at-or-after the scheduled time on the correct day, and ask the DATABASE
+    whether this calendar month has already been handled. A cash month counts as handled, so a
+    legitimately empty month is not retried every ten minutes for a day."""
     now = datetime.now(IST)
-    if not (now.hour == 1 and now.minute == 50):
+    today = now.date()
+    first_td = _first_trading_day_of_month(today)
+    if first_td != today:
         return _SKIPPED
-    if now.day > 7 or not _is_trading_day(now.date()):   # first trading day window
-        return _SKIPPED
-    mkey = (now.year, now.month)
-    if _v9_paper_ran_month == mkey:
-        return _SKIPPED
-    _v9_paper_ran_month = mkey
+    if now.hour < 1 or (now.hour == 1 and now.minute < 50):
+        return _SKIPPED                      # at-or-AFTER 01:50, never exactly-at
     try:
         import v9_paper_engine
+        if v9_paper_engine.ran_this_month(asof=today):
+            return _SKIPPED
         res = v9_paper_engine.run_monthly()
         log.info(f"_bg_v9_paper_monthly: {res}")
     except Exception as e:
         log.error(f"_bg_v9_paper_monthly: {e}")
+    return None
+
+
+_v9_mtm_ran_today = None
+
+def _bg_v9_paper_mtm():
+    """cc#840: nightly mark-to-market on OPEN V9 pairs (~19:10 IST, after the EOD price ingest), so
+    the page's cumulative and open-pair cards move between monthly rebalances instead of sitting
+    frozen at entry for a month. Day-locked; trading days only."""
+    global _v9_mtm_ran_today
+    today = datetime.now(IST).date()
+    if _v9_mtm_ran_today == today or not _is_trading_day(today):
+        return _SKIPPED
+    try:
+        import v9_paper_engine
+        res = v9_paper_engine.mark_to_market()
+        _v9_mtm_ran_today = today
+        log.info(f"_bg_v9_paper_mtm: {res}")
+    except Exception as e:
+        log.error(f"_bg_v9_paper_mtm: {e}")
     return None
 
 
@@ -3534,7 +3573,11 @@ async def _scheduler_loop():
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
-        if h == 1 and m == 50:  _spawn(_bg_v9_paper_monthly)   # cc#629: V9 Brahmastra monthly rebalance (first trading day, month-locked)
+        # cc#840: polled every 10 min instead of at an exact minute — the job self-gates on the
+        # first trading day + at-or-after 01:50 + a DB month check, so a deploy crossing the
+        # window can no longer eat a whole month.
+        if m % 10 == 0:  _spawn(_bg_v9_paper_monthly)   # cc#629/840: V9 Brahmastra monthly rebalance
+        if h == 19 and m == 10: _spawn(_bg_v9_paper_mtm)   # cc#840: nightly MTM on open V9 pairs
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 2 and m == 10:  _spawn(_bg_rvol_profiles)  # cc#674: nightly RVOL cum-vol profiles (after universe_technicals)
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --

@@ -218,6 +218,89 @@ def _close_open_positions(cur, asof):
     return closed
 
 
+def ran_this_month(conn=None, asof: date = None) -> bool:
+    """cc#840: DB-BACKED "has this calendar month already been handled?".
+
+    The scheduler's in-process month flag is reset by every deploy, and 02-Aug alone had a dozen.
+    An in-memory guard therefore neither guarantees a run nor prevents a double one — only the DB
+    can answer this across restarts. A CASH MONTH counts as handled: zero qualifying pairs is a
+    valid outcome under the spec, so it must not look like an unrun month and get retried all day.
+    """
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        asof = asof or date.today()
+        with conn.cursor() as cur:
+            cur.execute("""SELECT COUNT(*) FROM v9_paper_positions
+                           WHERE date_trunc('month', rebalance_date) = date_trunc('month', %s::date)""",
+                        (asof,))
+            if cur.fetchone()[0] > 0:
+                return True
+            cur.execute("""SELECT COUNT(*) FROM ops_log
+                           WHERE title='V9_PAPER_REBALANCE'
+                             AND date_trunc('month', session_date) = date_trunc('month', %s::date)""",
+                        (asof,))
+            return cur.fetchone()[0] > 0
+    except Exception as e:
+        log.warning("v9 ran_this_month check failed (treating as NOT run): %s", e)
+        return False
+    finally:
+        if own:
+            conn.close()
+
+
+def mark_to_market(conn=None, asof: date = None) -> dict:
+    """cc#840: nightly MTM on OPEN pairs, so the page's cumulative and open-pair cards move between
+    monthly rebalances instead of sitting frozen at entry for a month.
+
+    Spread P&L is the LONG leg's move minus the SHORT leg's move, in rupees, lot-weighted — the
+    same arithmetic _close_open_positions uses at exit, so the running number and the realised one
+    can never tell different stories. Writes into the position row's spread_pnl / ret_pct while the
+    row stays OPEN; a leg with no fresh close keeps its last mark rather than dropping the pair out
+    of the total for a day."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        ensure_schema(conn)
+        asof = asof or date.today()
+        with conn.cursor() as cur:
+            cur.execute("""SELECT id, long_symbol, short_symbol, long_lot, short_lot,
+                                  long_entry, short_entry
+                           FROM v9_paper_positions WHERE status='OPEN'""")
+            rows = cur.fetchall()
+            if not rows:
+                return {"asof": str(asof), "marked": 0, "open_pairs": 0}
+            syms = {r[1] for r in rows} | {r[2] for r in rows}
+            px = _closes(cur, syms, asof)
+            marked, unpriced = 0, []
+            for pid, ls, ss, llot, slot, lent, sent in rows:
+                lp, sp = px.get(ls), px.get(ss)
+                if lp is None or sp is None:
+                    unpriced.append(ls if lp is None else ss)
+                    continue
+                lent_f, sent_f = _f(lent), _f(sent)
+                if not lent_f or not sent_f:
+                    continue
+                llot = int(llot or 1); slot = int(slot or 1)
+                pnl = (lp - lent_f) * llot - (sp - sent_f) * slot
+                base = lent_f * llot + sent_f * slot
+                cur.execute("""UPDATE v9_paper_positions
+                                  SET spread_pnl=%s, ret_pct=%s
+                                WHERE id=%s""",
+                            (round(pnl, 2), (round(pnl / base * 100.0, 3) if base else None), pid))
+                marked += 1
+            conn.commit()
+        return {"asof": str(asof), "marked": marked, "open_pairs": len(rows),
+                "unpriced": sorted(set(unpriced))}
+    except Exception as e:
+        conn.rollback()
+        log.error(f"v9 mark_to_market: {e}", exc_info=True)
+        raise
+    finally:
+        if own:
+            conn.close()
+
+
 def run_monthly(conn=None, asof: date = None) -> dict:
     """Monthly rebalance: idempotent per rebalance_date. Close prior open pairs at EOD, select the new
     Brahmastra pairs, open them at EOD close. Zero pairs = a valid cash month (still logged)."""
