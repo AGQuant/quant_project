@@ -406,6 +406,70 @@ def result_corner_v2():
             if not fund:
                 return {"season": None, "summary": {}, "sectors": [], "companies": []}
             season_end = max(f["latest_q"] for f in fund.values())
+            for _s in fund:
+                fund[_s]["basis"] = "detailed"   # sourced from a scraped filing
+
+            # ── cc#826 FULL-CSV EXPANSION ────────────────────────────────────────────────────
+            # Until now this payload was built ONLY from fundamentals_history, i.e. from the ~600
+            # names the scrape universe covers. Everyone else was "reported but unscraped" — a dash.
+            # Post-cc#804 the daily CSV carries the quarter itself (last_result_quarter) plus the
+            # absolutes needed to compute it: sales and PAT for the latest, preceding and year-ago
+            # quarters, opm vs opm_prev_year_q, pe vs segment_pe. That is a complete BASIC card for
+            # every announced company, with no doc-scrape dependency at all.
+            #
+            # Layering, not replacing: a symbol already in fundamentals_history keeps its scraped
+            # figures (basis="detailed"); the CSV only fills symbols that have none (basis="basic").
+            # The R card's existing BASIC/DETAILED gate then layers L2 analysis on top wherever it
+            # exists, which is why nothing here needs to know about doc_texts.
+            #
+            # NULL-SAFE: a missing base yields None and renders as "--". It is never coerced to 0 —
+            # a fabricated zero would flow straight into the season medians and the sector table and
+            # silently drag them toward nothing.
+            season_label = None
+            try:
+                cur.execute("""SELECT last_result_quarter FROM screener_raw
+                               WHERE last_result_quarter IS NOT NULL
+                               GROUP BY last_result_quarter ORDER BY COUNT(*) DESC LIMIT 1""")
+                _r = cur.fetchone()
+                # The CSV's modal quarter is the season the bulk have declared. Guard: only accept it
+                # as the CSV season when it agrees with the scraped season, so a stale CSV can never
+                # pull in a different quarter's numbers alongside this one's.
+                season_label = _r[0] if _r else None
+            except Exception as e:
+                log.warning(f"cc#826 season label: {e}")
+            csv_added = 0
+            if season_label:
+                try:
+                    cur.execute("""
+                        SELECT UPPER(nse_code),
+                               sales_latest_quarter, sales_preceding_quarter, sales_preceding_year_quarter,
+                               profit_after_tax_latest_quarter, profit_after_tax_preceding_quarter,
+                               profit_after_tax_preceding_year_quarter,
+                               opm_latest_q, opm_prev_year_q, pe, segment_pe, last_result_date
+                        FROM screener_raw
+                        WHERE last_result_quarter = %s AND nse_code IS NOT NULL AND nse_code <> ''
+                    """, (season_label,))
+                    for (sym, s_now, s_prev, s_yoy, p_now, p_prev, p_yoy,
+                         opm_now, opm_ly, pe_v, seg_pe, lrd) in cur.fetchall():
+                        if sym in fund or sym not in uni:
+                            continue          # scraped data wins; unscored symbols have no card
+                        fund[sym] = {
+                            "latest_q": season_end,          # same season, so it joins `same` below
+                            "sales": _num(s_now), "pat": _num(p_now),
+                            "sales_qoq": _pct(_num(s_now), _num(s_prev)),
+                            "sales_yoy": _pct(_num(s_now), _num(s_yoy)),
+                            "pat_qoq": _pct(_num(p_now), _num(p_prev)),
+                            "pat_yoy": _pct(_num(p_now), _num(p_yoy)),
+                            "opm": _num(opm_now), "opm_ly": _num(opm_ly),
+                            "pe": _num(pe_v), "segment_pe": _num(seg_pe),
+                            "result_date": lrd,
+                            "basis": "basic",                # CSV-sourced; L2 layers on top via R
+                        }
+                        csv_added += 1
+                except Exception as e:
+                    # Additive: the scraped payload must still render if the CSV layer fails.
+                    log.warning(f"cc#826 CSV layer skipped: {e}")
+
             same = [s for s in fund if fund[s]["latest_q"] == season_end and s in uni]
             # 4) sector GVM ratings + reported dates
             cur.execute("SELECT segment, ROUND(mcap_weighted_gvm::numeric,2), verdict FROM sector_ratings")
@@ -428,12 +492,23 @@ def result_corner_v2():
             seg_pat_median[seg] = pat_med
             pos = sum(1 for s in syms if (fund[s]["pat_yoy"] or 0) > 0)
             pat_vals = [s for s in syms if fund[s]["pat_yoy"] is not None]
+            # cc#826 TINY-BASE DISTORTION FLAG. A sector median computed from one or two reporters is
+            # not a sector read, it is one company's quarter wearing a sector's name — and with the
+            # full CSV universe now included, more sectors reach the table early in a season with a
+            # handful of names. The flag travels WITH the number so a surface cannot render the
+            # median without also having the reason to caveat it. Threshold is on the count that
+            # actually produced the median (pat_vals), not on reported, because a sector can have
+            # eight reporters of whom two carry a usable YoY base.
+            _n_used = len(pat_vals)
             sectors.append({
                 "sector": seg, "reported": len(syms), "total": seg_total.get(seg, len(syms)),
                 "sales_yoy": _median(sy), "pat_yoy": pat_med,
                 "pct_positive": round(pos / len(pat_vals) * 100) if pat_vals else None,
                 "gvm": (secrt.get(seg) or {}).get("rating"),
                 "gvm_verdict": (secrt.get(seg) or {}).get("verdict"),
+                "n_used": _n_used,
+                "tiny_base": _n_used > 0 and _n_used < 3,
+                "basic_count": sum(1 for s in syms if fund[s].get("basis") == "basic"),
             })
         sectors.sort(key=lambda x: (x["pat_yoy"] is None, -(x["pat_yoy"] or 0)))
 
@@ -460,6 +535,14 @@ def result_corner_v2():
             "median_sales_qoq": _median([fund[s]["sales_qoq"] for s in same]),
             "median_pat_qoq": _median([fund[s]["pat_qoq"] for s in same]),
             "tiers": tier_split,
+            # cc#826: say how the season set was assembled. "637 reported" means something different
+            # if 246 of them are CSV-basic rather than scraped filings, and a summary that hides the
+            # split invites the reader to assume depth that is not there for every name.
+            "basis_split": {
+                "detailed": sum(1 for s in same if fund[s].get("basis") == "detailed"),
+                "basic": sum(1 for s in same if fund[s].get("basis") == "basic"),
+            },
+            "csv_added": csv_added,
         }
 
         # ── section 03 companies: same-quarter reporters (numbers) + reported-but-unscraped (dashes) ──
@@ -476,6 +559,17 @@ def result_corner_v2():
                 "sales": f["sales"] if is_same else None, "pat": f["pat"] if is_same else None,
                 "sales_qoq": f["sales_qoq"] if is_same else None, "sales_yoy": f["sales_yoy"] if is_same else None,
                 "pat_qoq": f["pat_qoq"] if is_same else None, "pat_yoy": f["pat_yoy"] if is_same else None,
+                # cc#826: which layer this row's numbers came from. "basic" = built from the daily CSV
+                # absolutes, "detailed" = from a scraped filing. The R card's existing BASIC/DETAILED
+                # gate reads this to decide whether an L2 analysis is available to layer on top, and a
+                # reader can tell a CSV-derived row from a filing-derived one instead of guessing.
+                "basis": (f.get("basis") if (is_same and f) else None),
+                # cc#826: the extra CSV-only fields, present only on basic rows (None on detailed ones,
+                # never fabricated — a scraped row simply does not carry these from this source).
+                "opm": (f.get("opm") if is_same else None),
+                "opm_ly": (f.get("opm_ly") if is_same else None),
+                "pe": (f.get("pe") if is_same else None),
+                "segment_pe": (f.get("segment_pe") if is_same else None),
             })
         companies.sort(key=lambda c: (c["reported_date"] is None, c["reported_date"] or "", ), reverse=True)
         return {"season": {"quarter": _fq_label(season_end), "quarter_end": str(season_end)},
