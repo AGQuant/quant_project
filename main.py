@@ -231,8 +231,19 @@ _MOBILE_HEAD = (
     b"document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"
     b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
-    b'<link rel="stylesheet" href="/static/mobile.css">'
-    b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
+    # cc#816: BOTH of these are served with Cache-Control max-age=86400 (_CACHE_1D in
+    # pwa_endpoints), so without a changing URL a returning client keeps yesterday's copy for a
+    # full day. That is exactly the failure cc#792 stamped the shared JS tags for — it just missed
+    # these two, because they sit above the block it edited. The visible symptom the founder hit:
+    # the theme button correctly reports Light while the page renders dark, because the cached
+    # mobile.css predates the :root[data-theme=light] override it depends on.
+    # mobile_tables.js has the identical cache header and the identical exposure, so it is stamped
+    # in the same change rather than waiting to be found the same way.
+    # The two Google Fonts links above are deliberately NOT stamped: they are third-party URLs on
+    # a different origin with their own cache policy, and appending ?v= to them would fingerprint
+    # our build into an external request without busting anything we control.
+    + b'<link rel="stylesheet" href="/static/mobile.css?v=' + _BUILD_B + b'">'
+    + b'<script src="/mobile_tables.js?v=' + _BUILD_B + b'" defer></script>'   # cc#330 P4: shared table helper
     # cc#792: every shared JS tag carries the deploy build stamp, so a push busts the browser cache
     # automatically. These are served with Cache-Control max-age=86400, so without a changing URL a
     # returning client could serve yesterday's bundle for a full day — which is exactly how the
