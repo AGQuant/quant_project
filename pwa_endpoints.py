@@ -994,6 +994,21 @@ RESULTS_CARD_JS = """
     + '.rcard-lbl{font:700 10.5px/1.3 Sora,sans-serif;text-transform:uppercase;letter-spacing:.1em;color:var(--mut,#667085);margin:18px 0 11px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))}'
     + '.rcard-lbl:first-child{margin-top:2px;padding-top:0;border-top:none}'
     + '.rcard-note{font-size:11px;color:var(--dim,#8892a6);margin-top:8px}'
+    /* cc#788 LEVEL 1 — FY27 estimate benchmarked against the actual, one tabular line + HIT/MISSED */
+    + '.rcard-fy27{display:flex;align-items:center;gap:18px;flex-wrap:wrap}'
+    + '.rcard-fy27-c{display:flex;flex-direction:column;gap:2px}'
+    + '.rcard-fy27-k{font:600 9.5px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.07em;color:var(--mut,#667085)}'
+    + '.rcard-fy27-v{font:800 15px/1.2 Sora,sans-serif;font-variant-numeric:tabular-nums}'
+    + '.rcard-hit,.rcard-missed{font:700 10px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.06em;'
+    + 'padding:4px 9px;border-radius:6px;margin-left:auto}'
+    + '.rcard-hit{color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
+    + '.rcard-missed{color:#d0433b;background:rgba(208,67,59,.12);border:1px solid rgba(208,67,59,.35)}'
+    /* cc#788 LEVEL 2 — View Detailed gate above the FY27 section */
+    + '.rcard-detwrap{margin-top:14px}'
+    + '.rcard-detbtn{display:inline-flex;align-items:center;gap:6px;min-height:38px;border:1px solid var(--line,rgba(148,166,210,.28));'
+    + 'background:transparent;color:var(--txt,#101828);font:700 12px Sora,sans-serif;border-radius:8px;padding:8px 14px;cursor:pointer}'
+    + '.rcard-detbtn:hover{background:rgba(148,166,210,.1)}'
+    + '.rcard-detcx{color:var(--mut,#667085);font-size:10px}'
     + '.rcard-btn{margin-top:12px;border:1px solid var(--blu,#4D7CFE);background:rgba(77,124,254,.1);'
     + 'color:var(--blu,#4D7CFE);font:700 12px Sora,sans-serif;border-radius:8px;padding:8px 14px;cursor:pointer}'
     + '.rcard-btn:disabled{opacity:.6;cursor:progress}'
@@ -1069,6 +1084,22 @@ RESULTS_CARD_JS = """
   });
   document.addEventListener('keydown', function(e){
     if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-v2-more')){ e.preventDefault(); e.target.click(); }
+  });
+
+  // cc#788: delegated toggle for the Level-2 "View Detailed" button. One listener covers the R modal
+  // and every inline/collapsible card; per-card state lives in the DOM, same pattern as cc#766.
+  document.addEventListener('click', function(e){
+    var b = e.target && e.target.closest && e.target.closest('.rcard-detbtn');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var box = document.getElementById(b.getAttribute('data-t')); if (!box) return;
+    var open = box.style.display === 'none';
+    box.style.display = open ? 'block' : 'none';
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var cx = b.querySelector('.rcard-detcx'); if (cx) cx.innerHTML = open ? '&#9662;' : '&#9656;';
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-detbtn')){ e.preventDefault(); e.target.click(); }
   });
 
   // cc#784: fetch the card payload and the V2 analysis together, so the renderer sees both at once
@@ -1191,14 +1222,67 @@ RESULTS_CARD_JS = """
   }
 
   var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
-  // cc#623: FY27 Est. Growth row — from input_raw.fy27_growth (Sonnet on Trendlyne consensus).
-  // Hidden when null. Shown on BOTH branches (post-result it gives actual-vs-estimate context).
-  function fy27Html(g){
+  // cc#623: FY27 Est. Growth — from input_raw.fy27_growth (Sonnet on Trendlyne consensus).
+  // cc#788 LEVEL 1: BENCHMARKED. The bare "+13%" said nothing on its own; it is now shown against
+  // the actual so the reader can see whether the company is tracking to consensus. `actual` is the
+  // reported PAT YoY for the quarter, which the card already has from peer_comparison.profit.stock.
+  //
+  // HONEST LABELLING: the estimate is a FULL-YEAR consensus and the actual is ONE QUARTER, so this
+  // is a directional read, not a like-for-like comparison. The note says so on the card rather than
+  // letting a green HIT imply the full year is already banked.
+  // Hidden when the estimate is null. Degrades to the plain estimate when no actual exists yet.
+  function fy27Html(g, actual){
     if (g == null) return '';
     var s = (g>=0?'+':'')+esc(g)+'%';
     var col = g>=0 ? '#0f9d58' : '#d0433b';
-    return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
-      + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>';
+    var h = '<div class=\"rcard-lbl\">FY27 Est. Benchmarked</div>';
+    if (actual == null){
+      return h + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>'
+        + '<div class=\"rcard-note\">Consensus FY27 PAT growth. No reported quarter to benchmark against yet.</div>';
+    }
+    var a = (actual>=0?'+':'')+esc(actual)+'%';
+    var hit = Number(actual) >= Number(g);
+    return h
+      + '<div class=\"rcard-fy27\">'
+      +   '<div class=\"rcard-fy27-c\"><span class=\"rcard-fy27-k\">FY27 Est.</span>'
+      +     '<span class=\"rcard-fy27-v\" style=\"color:'+col+'\">'+s+'</span></div>'
+      +   '<div class=\"rcard-fy27-c\"><span class=\"rcard-fy27-k\">Actual PAT YoY</span>'
+      +     '<span class=\"rcard-fy27-v\" style=\"color:'+(actual>=0?'#0f9d58':'#d0433b')+'\">'+a+'</span></div>'
+      +   '<span class=\"'+(hit?'rcard-hit':'rcard-missed')+'\">'+(hit?'HIT':'MISSED')+'</span>'
+      + '</div>'
+      + '<div class=\"rcard-note\">Reported quarter PAT YoY vs the FY27 full-year consensus &mdash; directional, not like-for-like.</div>';
+  }
+
+  // cc#788 LEVEL 2: the long-form editorial moves out of the inline Result Analysis block and behind
+  // this button, which sits ABOVE the FY27 section. Renders ONLY when result_analysis_v2 actually has
+  // a row for THIS symbol and THIS quarter — no row means no button and the card is pure Level 1,
+  // never an empty section.
+  //
+  // Quarter labels differ by source: the card carries "Q1 FY27" (results_endpoints._card_quarter)
+  // while result_analysis_v2.quarter is "Q1FY27". Compare on a whitespace-stripped uppercase form or
+  // the gate would never open. When the card has no quarter at all, fall back to has_analysis rather
+  // than hiding content we do have.
+  // cc#788: the reported PAT YoY the card already holds — peer_comparison.profit.stock is the
+  // stock's own YoY (the peer figure is .peer). Null when this quarter has no peer_comparison
+  // block, which is exactly when there is nothing to benchmark.
+  function _actualPat(d){
+    var p = d && d.peer_comparison && d.peer_comparison.profit;
+    return (p && p.stock != null) ? p.stock : null;
+  }
+  function _qkey(q){ return String(q==null?'':q).replace(/\\s+/g,'').toUpperCase(); }
+  function v2Matches(v2, cardQuarter){
+    if (!v2 || !v2.has_analysis || !v2.analysis) return false;
+    var a = _qkey(v2.quarter), b = _qkey(cardQuarter);
+    return (!a || !b) ? true : (a === b);
+  }
+  function viewDetailedHtml(v2, cardQuarter){
+    if (!v2Matches(v2, cardQuarter)) return '';
+    var id = 'rcdet_' + Math.abs(String(v2.symbol||'x').split('').reduce(function(a,c){return a*31+c.charCodeAt(0)|0;},7));
+    return '<div class=\"rcard-detwrap\">'
+      + '<button type=\"button\" class=\"rcard-detbtn\" data-t=\"'+id+'\" aria-expanded=\"false\">'
+      +   'View Detailed <span class=\"rcard-detcx\">&#9656;</span></button>'
+      + '<div id=\"'+id+'\" class=\"rcard-det\" style=\"display:none\">'+v2Html(v2)+'</div>'
+      + '</div>';
   }
   // cc#623/cc#650: RAW headlines (last 7 days) — headline + source + date only, date desc; no
   // summaries; hidden when empty. Capped server-side at the latest 10 so the card stays scannable.
@@ -1266,20 +1350,26 @@ RESULTS_CARD_JS = """
         // 4-line metric header (Sales/PAT/Margins/PE) from the template card and render the editorial
         // body BELOW it, collapsed by default. When no V2 row exists the card is byte-identical to
         // before — the surface degrades to the template rather than showing an empty section.
+        // cc#788 LEVEL 1: metric header + peer BEAT/MISS rows, exactly as they rendered before.
+        // The long-form editorial no longer sits inline — it moved behind the Level-2 button below.
         h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
           + '<div class=\"rcard-body\">'+esc(_metricHeader(d.result_analysis, d.v2))+'</div>'
-          + v2Html(d && d.v2)
           + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
       }
-      h += fy27Html(d && d.fy27_growth);
+      // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
+      h += viewDetailedHtml(d && d.v2, d && d.card_quarter);
+      h += fy27Html(d && d.fy27_growth, _actualPat(d));
     } else {
       // BRANCH B order: expected date + FY27 -> LAST RESULT (prior quarter, explicit label) -> RAW -> POLISH.
       h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>'
         + '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
       h += peerResultsHtml(d && d.peer_results);   // cc#766: reported-peer table under the expected date
-      h += fy27Html(d && d.fy27_growth);
+      // cc#788: pre-result there is no reported quarter to benchmark, so fy27Html degrades to the
+      // plain estimate. The Level-2 gate is not offered here — Branch B's analysis is the PRIOR
+      // quarter, and result_analysis_v2 is keyed to the current one.
+      h += fy27Html(d && d.fy27_growth, null);
       if (d && d.last_result_analysis){
         h += '<div class=\"rcard-lbl\">Last result'+(d.last_card_quarter?' &middot; '+esc(d.last_card_quarter):'')+'</div>'
           + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>'
