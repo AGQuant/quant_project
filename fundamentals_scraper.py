@@ -209,7 +209,12 @@ def _fetch_soup(symbol):
     pref = _get_view_pref(sym)
     if pref == "standalone":
         order.reverse()
-    best = (None, None, None)      # (soup, cons, quality)
+    # "Has SOME quarterly rows" is not good enough as a stop condition. BAYERCROP's consolidated view
+    # carries exactly 2 quarter rows, both from 2006, and TATAELXSI's stops at 2015 — an abandoned
+    # view can be stale without being empty. So a view is only taken WITHOUT comparison when it is
+    # actually FRESH; otherwise both views are fetched and the one with the newer latest quarter wins.
+    _fresh_cut = str(_last_quarter_end(date.today()) - timedelta(days=200))
+    cands = []
     for cons, path in order:
         r = _fetch(path)
         if r is None or r.status_code != 200 or "data-table" not in r.text:
@@ -218,22 +223,23 @@ def _fetch_soup(symbol):
         if not soup.find("section", id="profit-loss"):
             continue
         q = _page_quality(soup)
-        if q["quarter_rows"]:
-            # a view with real quarterly data is decisive — take it and stop fetching
-            if cons is False and pref != "standalone":
-                _set_view_pref(sym, "standalone",
-                               "consolidated view carried no quarterly rows; standalone does (cc#793)")
-            elif cons is True and pref == "standalone":
-                _set_view_pref(sym, "consolidated", "consolidated view carries quarterly rows again (cc#793)")
-            return soup, cons
-        if best[0] is None or q["newest_annual"] > (best[2] or {}).get("newest_annual", ""):
-            best = (soup, cons, q)
-    if best[0] is not None:
-        log.warning(f"cc#793 {sym}: neither view carried quarterly rows — using "
-                    f"{'consolidated' if best[1] else 'standalone'} (newest annual "
-                    f"{best[2].get('newest_annual') or 'n/a'})")
-        return best[0], best[1]
-    return None, None
+        cands.append((soup, cons, q))
+        if q["newest_quarter"] and q["newest_quarter"] >= _fresh_cut:
+            break        # fresh view — no need to spend a second fetch
+    if not cands:
+        return None, None
+    # newest quarter is the decisive signal; fall back to newest annual, then to row count
+    best = max(cands, key=lambda c: (c[2]["newest_quarter"], c[2]["newest_annual"], c[2]["quarter_rows"]))
+    soup, cons, q = best
+    if len(cands) > 1 or pref:
+        want = "consolidated" if cons else "standalone"
+        if want != (pref or "consolidated"):
+            _set_view_pref(sym, want, f"chosen on freshness: latest quarter "
+                                      f"{q['newest_quarter'] or 'none'}, annual {q['newest_annual'] or 'none'} (cc#793)")
+    if not q["newest_quarter"]:
+        log.warning(f"cc#793 {sym}: no view carried quarterly rows (using "
+                    f"{'consolidated' if cons else 'standalone'})")
+    return soup, cons
 
 
 def _page_quality(soup):
@@ -241,12 +247,15 @@ def _page_quality(soup):
     table is empty cannot produce a running quarter no matter how well it parses."""
     q = _parse_section(soup, "quarters", "quarter")
     ann = _parse_section(soup, "profit-loss", "annual")
-    newest = ""
-    for r in ann:
-        pe = r.get("period_end")
-        if pe and str(pe) > newest:
-            newest = str(pe)
-    return {"quarter_rows": len(q), "annual_rows": len(ann), "newest_annual": newest}
+    def _newest(rows):
+        out = ""
+        for r in rows:
+            pe = r.get("period_end")
+            if pe and str(pe) > out:
+                out = str(pe)
+        return out
+    return {"quarter_rows": len(q), "annual_rows": len(ann),
+            "newest_quarter": _newest(q), "newest_annual": _newest(ann)}
 
 
 def _ensure_view_pref_table(cur):
