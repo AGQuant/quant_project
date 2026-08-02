@@ -785,6 +785,10 @@ def _claim_scrape_flag():
       'run' | 'pending'       -> full universe (resumable)
       'run:SYM1,SYM2,...'     -> cc#790 TARGETED re-scrape of exactly those symbols
 
+    OPERATIONAL NOTE: the flag is claimed at app STARTUP, so arming it only takes effect on the
+    next restart/deploy. Arm it BEFORE pushing, or it will sit until something else restarts the
+    app. On completion run_scrape sets the value to 'done', so an armed flag is never re-fired.
+
     The targeted form exists because this flag is the ONLY trigger that survives a restart, and a
     season refresh often needs a bounded, explicitly-scoped run rather than the whole universe.
     Returns either a mode string or a ('targeted', [symbols]) tuple.
