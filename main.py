@@ -228,6 +228,7 @@ _MOBILE_HEAD = (
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     b'<link rel="stylesheet" href="/static/mobile.css">'
     b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
+    b'<script src="/scorr_card_strip.js" defer></script>'  # cc#789: shared C·A·R·D strip — SINGLE SOURCE, load before its consumers
     b'<script src="/results_card.js" defer></script>'    # cc#573: shared Results R-pill + card (site-wide)
     b'<script src="/scorr_chart_card.js" defer></script>'  # cc#706: shared V8-type price chart card (site-wide)
 )

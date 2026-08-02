@@ -1881,35 +1881,25 @@ function _qaClose(){const s=document.getElementById('qaStrip');if(s)s.classList.
 // on pages without these openers window.ScorrCardStripHtml is undefined and the R-card renders none.
 // D is ghosted for cash-only symbols (not in the futures universe = cache.metricsAll). Active letter
 // renders filled + non-tappable. Tap = close current overlay(s), open the target for the SAME symbol.
-function _cardAvail(sym){
-  var fut=false; try{fut=(cache.metricsAll||[]).some(function(m){return m&&m.symbol===sym;});}catch(e){}
-  return {fut:fut, result:true};   // R self-handles its empty state; D gated to the futures universe
-}
-window.ScorrCardStripHtml=function(sym,active){
-  if(!sym)return '';
-  var av=_cardAvail(sym);
-  var items=[['C','Chart',true],['A','Analysis',true],['R','Result',av.result],['D','Cockpit (Futures only)',av.fut]];
-  var base='width:32px;height:32px;border-radius:7px;font:800 13px/1 Sora,sans-serif;'
-    +'display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2,#e8ecf2)';
-  var btns=items.map(function(it){
-    var k=it[0], on=(k===active), en=it[2];
-    if(on)return '<span title="'+it[1]+' (current)" style="'+base+';background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)">'+k+'</span>';
-    if(!en)return '<span title="'+it[1]+'" style="'+base+';background:transparent;color:var(--dim,#9aa4b5);opacity:.42;cursor:not-allowed">'+k+'</span>';
-    return '<button title="'+it[1]+'" onclick="ScorrCardNav(\''+k+'\',\''+sym+'\')" style="'+base+';background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);cursor:pointer">'+k+'</button>';
-  }).join('');
-  return '<span class="scorr-card-strip" style="display:inline-flex;gap:5px;align-items:center;flex-shrink:0">'+btns+'</span>';
-};
-window.ScorrCardNav=function(k,sym){
-  if(!sym)return;
-  try{closeInfo();}catch(e){}
-  try{qaChartClose();}catch(e){}
-  try{_dcClose();}catch(e){}
-  try{if(window.ScorrRCard&&ScorrRCard.close)ScorrRCard.close();}catch(e){}
-  if(k==='C')qaChart(sym);
-  else if(k==='A')qaAnalysis(sym);
-  else if(k==='R'){if(window.ScorrRCard)ScorrRCard.open(sym);}
-  else if(k==='D')openDerivCockpit(sym,null,null,null,null);
-};
+// cc#789: the strip itself (ScorrCardStripHtml / ScorrCardNav / _cardAvail + its CSS) NO LONGER LIVES
+// HERE — it moved to the shared, site-wide scorr_card_strip.js so the GVM page and every future
+// surface render the identical strip. This page only REGISTERS its richer local openers; the shared
+// dispatcher calls them, and falls back to the site-wide globals on pages that have none.
+// Do not re-add a strip builder here: exactly one definition may exist (cc#789 forward rule).
+(function(){
+  if(!window.ScorrCardStrip) return;   // shared file not loaded (e.g. embed) -> page still works, no strip
+  window.ScorrCardStrip.register({
+    C:function(sym){ qaChart(sym); },
+    A:function(sym){ qaAnalysis(sym); },      // canonical A: GVM + sector rank, volume, delivery, trajectory
+    D:function(sym){ openDerivCockpit(sym,null,null,null,null); }
+    // R intentionally unregistered — ScorrRCard.open is already the site-wide canonical opener.
+  });
+  window.ScorrCardStrip.registerClose(function(){
+    try{closeInfo();}catch(e){}
+    try{qaChartClose();}catch(e){}
+    try{_dcClose();}catch(e){}
+  });
+})();
 function _qaModal(title,sub,body){
   const T=document.getElementById('mTitle'),S=document.getElementById('mSub'),B=document.getElementById('mBody'),D=document.getElementById('mDcBtn');
   if(T)T.textContent=title;if(S)S.textContent=sub||'';if(B)B.innerHTML=body||'';if(D)D.innerHTML='';
@@ -3787,7 +3777,14 @@ async function loadAll(){
                               .catch(e=>{errs.push(e.message);cache[k]=cache[k]||null;});
   const jobs=[
     run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();loadNiftyPcrChart();loadBankniftyPcrChart();}),   // cc#266/#290: VIX + PCR charts on the gate cadence
-    run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
+    // cc#789: hand the futures universe to the shared C·A·R·D strip so D keeps ghosting for cash-only
+    // symbols exactly as before. The strip used to read cache.metricsAll directly — a page-local
+    // variable that does not exist anywhere else, which is why the availability rule could not be
+    // shared until now. The shared file falls back to fetching /api/v8/futures/list on other pages.
+    run('metricsAll',()=>getJSON(EP.metricsAll),()=>{
+      try{if(window.ScorrCardStrip)window.ScorrCardStrip.setFutures(cache.metricsAll||[]);}catch(e){}
+      renderMasterPanels();
+    }),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
     run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);loadAdrChart();}),   // cc#443/#448: ADR trend row + popout chart
@@ -5299,6 +5296,22 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(_openDc, 60); });
   else setTimeout(_openDc, 60);
+})();
+// cc#789 A-BUTTON PARITY: ?qa=SYMBOL opens the CANONICAL Analysis modal (qaAnalysis — GVM + sector
+// rank, volume, delivery, trajectory, TC footer). This is what lets every other surface show the same
+// A as V8 without cloning the renderer: the shared strip deep-links here instead of re-implementing.
+// The GVM page previously opened a thinner Volume/Energy card under A — that was the reported drift.
+// Same defer/retry hardening as the ?dc= link above (cc#571 PART A), for the same reason.
+(function(){
+  var _qaSym=new URLSearchParams(location.search).get('qa');
+  if(!_qaSym) return;
+  var _sym=_qaSym.toUpperCase(), _tries=0;
+  function _openQa(){
+    if(typeof qaAnalysis==='function'){ qaAnalysis(_sym); return; }
+    if(_tries++ < 40) setTimeout(_openQa, 150);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(_openQa, 60); });
+  else setTimeout(_openQa, 60);
 })();
 </script>
 <script src="/nav_toggle.js" defer></script>

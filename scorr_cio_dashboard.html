@@ -2382,24 +2382,16 @@ function GvmReport({ r, hist }) {
               {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
               {x.earnings && x.earnings.blackout && <Tag color={C.red}>⚠ Blackout {x.earnings.days_to}d</Tag>}
             </div>
-            {/* cc#710/#716: compact C·A·R·D action strip below the symbol/name header. All four are
-                fully active + uniform (founder 28-Jul: no dead/ghosted buttons). C -> shared V8-type
-                chart card (cc#706); A -> Volume/Energy card; R -> Results/Scorr-view card (A+R absorb
-                the removed legacy header chips); D -> Derivatives cockpit deep-link (cc#514, new tab). */}
-            <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-              {[
-                { k: "C", t: "Price chart", fn: () => { if (window.ScorrChartCard) window.ScorrChartCard.open(r.symbol); } },
-                { k: "A", t: "Volume / Energy analysis", fn: () => { if (window.ScorrRCard && window.ScorrRCard.openV) window.ScorrRCard.openV(r.symbol); } },
-                { k: "R", t: "Results / Scorr view", fn: () => { if (window.ScorrRCard) window.ScorrRCard.open(r.symbol); } },
-                { k: "D", t: "Derivatives cockpit", fn: () => { window.open("/dashboard?dc=" + encodeURIComponent(r.symbol), "_blank"); } },
-              ].map(b => (
-                <button key={b.k} title={b.t} onClick={b.fn}
-                  style={{ width: 28, height: 28, borderRadius: 7, fontSize: 12.5, fontWeight: 800, fontFamily: "monospace",
-                    border: `1px solid ${C.gridLine}`, cursor: "pointer", background: C.bg, color: C.accent }}>
-                  {b.k}
-                </button>
-              ))}
-            </div>
+            {/* cc#710/#716: compact C·A·R·D action strip below the symbol/name header.
+                cc#789: this page used to carry its OWN inline copy of the strip — different markup,
+                different sizing, and an A that opened the Volume/Energy card while V8's A opened the
+                full Analysis modal. That divergence is exactly what the founder reported. The strip is
+                now rendered from the single shared source (scorr_card_strip.js, injected site-wide),
+                so this page cannot drift from V8 again.
+                FORWARD RULE: never re-implement these buttons here — render via window.ScorrCardStripHtml
+                and, if this page ever needs a richer opener, register it via ScorrCardStrip.register. */}
+            <div style={{ marginTop: 8 }}
+                 dangerouslySetInnerHTML={{ __html: (window.ScorrCardStripHtml ? window.ScorrCardStripHtml(r.symbol, "") : "") }} />
             <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "nowrap", overflowX: "auto" }}>
               {["G","V","M"].map(pillar => {
                 const pi = PILLAR_INFO[pillar];

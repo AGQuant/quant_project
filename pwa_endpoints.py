@@ -1517,3 +1517,19 @@ except Exception:
 @router.get("/scorr_chart_card.js")
 def pwa_scorr_chart_card_js():
     return Response(SCORR_CHART_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+# cc#789: shared C·A·R·D quick-nav strip — SINGLE SOURCE. Was defined inside v8_dashboard.html with a
+# divergent inline copy on the GVM page (the A-button drift the founder reported). Source of truth is
+# scorr_card_strip.js (repo root), read once at import and injected site-wide (main.py _MOBILE_HEAD),
+# same pattern as scorr_chart_card.js.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_card_strip.js"), "r", encoding="utf-8") as _scs_f:
+        SCORR_CARD_STRIP_JS = _scs_f.read()
+except Exception:
+    SCORR_CARD_STRIP_JS = "/* scorr_card_strip.js unavailable */"
+
+
+@router.get("/scorr_card_strip.js")
+def pwa_scorr_card_strip_js():
+    return Response(SCORR_CARD_STRIP_JS, media_type="application/javascript", headers=_CACHE_1D)
