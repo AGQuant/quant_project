@@ -401,7 +401,14 @@
 @media(max-width:760px){#pane-index .set-grid{grid-template-columns:repeat(2,1fr)}}
 #pane-index .set-box{background:var(--card2);border-radius:6px;padding:6px 8px;border:1px solid var(--line)}
 #pane-index .set-box .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
-#pane-index .set-box .v{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--txt)}
+/* cc#818 fix_2: the V10 Performance and Entry/Exit Settings cards were ALREADY identical — both
+   render .set-box > .k/.v through this single rule, so there was no parity bug to fix between them.
+   What is real: these tiles sat at 12px while every table in the same pane (#pane-index table) is
+   13px, so inside the Performance card the stat tiles read smaller than the By Symbol / By Leg rows
+   directly beneath them, while the Settings card has no table to be judged against. Raising the tile
+   value to 13px matches the pane's table token and removes that mismatch. Because both cards share
+   this ONE rule, they cannot drift apart — parity is structural, not something to re-check. */
+#pane-index .set-box .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--txt)}
 #pane-index .legend{display:flex;gap:20px;margin-top:10px;padding:6px 10px;
     background:var(--card2);border-radius:6px;flex-wrap:wrap}
 #pane-index .lg{display:flex;align-items:center;gap:5px}
@@ -3771,8 +3778,24 @@ async function loadClosed(){
              leg:(x.leg||'').toUpperCase(), str:x.opt_strike||null, opt:x.opt_type||null,
              rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
              dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
+             // cc#818: carry the RAW exit timestamp. `dt` is already run through fmtDate, and
+             // sorting on a display string ("09 Jun") orders alphabetically, not chronologically.
+             exitTs:(x.exit_ts||x.exit_time||x.trade_date||x.exit_date||null),
              eng:'V10' };
-  }).sort((a,b)=>b.id-a.id);   // cc#463 fix3: most-recent leg first
+  }).sort((a,b)=>{
+    // cc#818: sort by WHEN THE TRADE CLOSED, newest first. cc#463 sorted by id DESC on the
+    // assumption that a higher id is a later trade — that holds only while rows are inserted in
+    // chronological order, and it stopped holding (backfilled//re-inserted legs), which is why the
+    // founder saw 09 Jun sitting at the top. Worse, rClosed() slices the first 15 off this array and
+    // labels them "last 15", so a wrong order silently showed the OLDEST 15 under that label.
+    // id DESC remains the tie-break for legs closed at the same timestamp, and the fallback when a
+    // row carries no usable date at all.
+    const ta=Date.parse(a.exitTs||''), tb=Date.parse(b.exitTs||'');
+    if(isFinite(ta)&&isFinite(tb)&&ta!==tb) return tb-ta;
+    if(isFinite(tb)&&!isFinite(ta)) return 1;    // undated rows sink, never displace a real date
+    if(isFinite(ta)&&!isFinite(tb)) return -1;
+    return b.id-a.id;
+  });
 }
 async function loadPerf(){
   /* V10 own performance stats (replaces the old V8 qualified pull) */
