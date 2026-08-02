@@ -31,7 +31,7 @@ history (12y) is ample for the annual-stepped G/V components; quarterly QoQ inpu
 import logging
 import os
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -260,6 +260,43 @@ def _write_symbol(conn, symbol, rows, cons):
     conn.commit()
 
 
+def _grade_scrape(rows, cons):
+    """cc#791: grade a SUCCESSFUL parse instead of stamping a flat 'ok'.
+
+    'ok' used to mean only "some rows were written". It did not mean the quarterly table was
+    parsed, and it did not mean the data was recent — so a scrape could write junk and record a
+    success, which nothing alerts on and the resume logic treats as done. Two silent-success
+    classes were found on 02-Aug during the cc#790 run:
+
+      no quarters   AUBANK wrote 16 rows and COLPAL 20, both with ZERO section='quarters' rows.
+                    A symbol with no quarters row can NEVER enter Basic Polish, and nothing said so.
+      stale annual  COLPAL's annual sections parsed as Mar 2006..Mar 2010 and stopped — five
+                    ancient periods — while its shareholding section came back current to Jun 2026.
+                    Compare APLAPOLLO, which parses Mar 2015..Mar 2026 + TTM correctly.
+
+    Returns the (status, rows_written, cons, error) tuple for _set_status. Both new statuses still
+    mean "rows were written" — they are graded successes, not failures — but they are queryable and
+    alertable, and the cc#790 outcome-based resume filter will retry them rather than treating a
+    hollow success as done.
+    """
+    n = len(rows)
+    qrows = [r for r in rows if r.get("section") == "quarters"]
+    if not qrows:
+        return ("ok_no_quarters", n, cons,
+                "parsed and wrote rows but ZERO section=quarters rows — this symbol can never "
+                "enter Basic Polish; check whether the quarters data-table is present on the page "
+                "and simply unmatched, or genuinely absent upstream (cc#791)")
+    ann = [r.get("period_end") for r in rows
+           if r.get("period_type") == "annual" and r.get("period_end")]
+    if ann:
+        newest = max(ann)
+        if (date.today() - newest).days > 730:
+            return ("ok_thin", n, cons,
+                    f"annual sections stop at {newest} (>2y stale) while the parse reported success "
+                    "— the annual table was almost certainly truncated to its oldest columns (cc#791)")
+    return ("ok", n, cons, None)
+
+
 def _set_status(conn, symbol, status, rows_written=0, cons=None, error=None):
     with conn.cursor() as cur:
         cur.execute("""
@@ -375,7 +412,7 @@ def run_scrape(mode="run", symbols=None) -> dict:
                 rows, cons = fetch_company(sym)
                 if rows:
                     _write_symbol(conn, sym, rows, cons)
-                    _set_status(conn, sym, "ok", len(rows), cons)
+                    _set_status(conn, sym, *_grade_scrape(rows, cons))
                     ok += 1; rows_total += len(rows)
                 else:
                     _set_status(conn, sym, "failed", 0, None, "no financial tables parsed")
@@ -401,11 +438,45 @@ def run_scrape(mode="run", symbols=None) -> dict:
                 SELECT symbol FROM fundamentals_history WHERE section='quarters'
                 GROUP BY symbol HAVING COUNT(*) < 8) z""")
             thin = cur.fetchone()
-        summary = {"mode": mode, "ok": ok, "failed": failed, "skipped_already": len(already),
+        # cc#791 POST-SCRAPE ASSERTION. A run used to report ok/failed counts only, so a scrape that
+        # "succeeded" while landing zero running-quarter rows looked healthy. Check the thing the
+        # pipeline actually exists to produce: for every symbol this run touched that the earnings
+        # calendar says REPORTED this season, did the running quarter actually land? Anything that
+        # did not is named here and raised as an alert, so a hollow success can never pass silently
+        # again. On 02-Aug a 122-symbol run produced 13 ok and exactly ONE running-quarter row.
+        missed = []
+        try:
+            _qend = _last_quarter_end(date.today())
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT s.symbol FROM fundamentals_scrape_status s
+                    WHERE s.symbol = ANY(%s)
+                      AND EXISTS (SELECT 1 FROM earnings_calendar e
+                                  WHERE UPPER(e.ticker)=UPPER(s.symbol) AND e.status='reported'
+                                    AND e.ex_date >= %s)
+                      AND NOT EXISTS (SELECT 1 FROM fundamentals_history f
+                                      WHERE UPPER(f.symbol)=UPPER(s.symbol) AND f.section='quarters'
+                                        AND f.period_type='quarter' AND f.period_end=%s)
+                    ORDER BY 1""", (todo, _qend - timedelta(days=60), _qend))
+                missed = [r[0] for r in cur.fetchall()]
+        except Exception as e:
+            log.warning(f"post-scrape running-quarter assertion failed: {e}")
+        summary = {"mode": ("targeted" if targeted else mode), "ok": ok, "failed": failed,
+                   "skipped_already": len(already),
                    "rows_written_this_run": rows_total, "elapsed_min": round((time.time()-started)/60, 1),
                    "symbols_ok_total": int(tot[0] or 0), "rows_total": int(tot[1] or 0),
-                   "symbols_under_8_quarters": int(thin[0] or 0), "failures_sample": failures[:50]}
+                   "symbols_under_8_quarters": int(thin[0] or 0), "failures_sample": failures[:50],
+                   "announced_missing_running_quarter": len(missed),
+                   "announced_missing_sample": missed[:50], "running_quarter_end": str(_last_quarter_end(date.today()))}
         _slog(conn, "data_audit", "GVM_HISTORY_SCRAPE_COMPLETE", summary)
+        if missed:
+            log.warning(f"cc#791: {len(missed)} announced symbol(s) still have no running-quarter row "
+                        f"after this run: {', '.join(missed[:20])}")
+            _slog(conn, "alert", "SCRAPE_ANNOUNCED_MISSING_RUNNING_QUARTER",
+                  {"count": len(missed), "sample": missed[:50],
+                   "running_quarter_end": str(_last_quarter_end(date.today())),
+                   "note": "these companies have REPORTED per earnings_calendar but the scrape did not "
+                           "land their running-quarter row — they cannot enter Basic Polish (cc#791)"})
         try:
             with conn.cursor() as cur:
                 cur.execute("UPDATE app_config SET value='done', updated_at=NOW() WHERE key=%s", (SCRAPE_FLAG,))
