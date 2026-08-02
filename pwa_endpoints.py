@@ -1055,6 +1055,34 @@ RESULTS_CARD_JS = """
     if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-viewmore')){ e.preventDefault(); e.target.click(); }
   });
 
+  // cc#784: delegated expand/collapse for the V2 long-form (one listener covers the R modal and every
+  // inline/collapsible card, same pattern as the polished-news view-more).
+  document.addEventListener('click', function(e){
+    var t = e.target && e.target.closest && e.target.closest('.rcard-v2-more');
+    if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    var box = document.getElementById(t.getAttribute('data-t'));
+    if (!box) return;
+    var open = box.style.maxHeight !== 'none';
+    box.style.maxHeight = open ? 'none' : '132px';
+    t.textContent = open ? 'Show less' : 'Read full analysis';
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.classList && e.target.classList.contains('rcard-v2-more')){ e.preventDefault(); e.target.click(); }
+  });
+
+  // cc#784: fetch the card payload and the V2 analysis together, so the renderer sees both at once
+  // and never has to re-paint. A missing/failed V2 read degrades to has_analysis:false (template card).
+  function _fetchCard(sym, extra){
+    return Promise.all([
+      fetch('/api/results/card?symbol='+encodeURIComponent(sym)+(extra||''), {cache:'no-store'})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }),
+      fetch('/api/results/v2/'+encodeURIComponent(sym), {cache:'no-store'})
+        .then(function(r){ return r.ok ? r.json() : {has_analysis:false}; })
+        .catch(function(){ return {has_analysis:false}; })
+    ]).then(function(res){ var d = res[0] || {}; d.v2 = res[1]; return d; });
+  }
+
   // cc#766: delegated toggle for the "Peer Results (N reported)" button — one listener covers both the
   // R modal and every inline/collapsible card; toggles the sibling table + flips the caret. Per-card
   // state lives in the DOM (each card owns its own .rcard-peerres wrapper).
@@ -1132,6 +1160,36 @@ RESULTS_CARD_JS = """
     return '<div class=\"rcard-peerres\">'+btn+tbl+'</div>';
   }
 
+  // cc#784: RESULT ANALYSIS V2 — the editorial long-form written by the "polish results" batches.
+  // Keep the template card's 4-line metric header (Sales / PAT / Margins / PE) and drop only its
+  // 3 narrative template lines, which the long-form replaces. When no V2 row exists, the template
+  // card renders unchanged — this never blanks an existing surface.
+  function _metricHeader(txt, v2){
+    if (!txt) return '';
+    if (!v2 || !v2.has_analysis) return txt;          // no V2 -> unchanged template card
+    var lines = String(txt).split('\\n');
+    var out = [], metrics = 0;
+    for (var i = 0; i < lines.length; i++){
+      var L = lines[i];
+      out.push(L);
+      if (/^[\\u{1F7E2}\\u{1F534}\\u{1F7E1}]/u.test(L.trim())) metrics++;
+      if (metrics >= 4) break;                        // header ends after the 4 metric lines
+    }
+    return out.join('\\n');
+  }
+  function v2Html(v2){
+    if (!v2 || !v2.has_analysis || !v2.analysis) return '';
+    var id = 'rcv2_' + Math.abs(String(v2.symbol||'x').split('').reduce(function(a,c){return a*31+c.charCodeAt(0)|0;},7));
+    var paras = String(v2.analysis).split(/\\n\\s*\\n/).filter(function(p){ return p.trim(); });
+    var body = paras.map(function(p){
+      return '<p style=\"margin:0 0 9px\">'+esc(p.trim())+'</p>';
+    }).join('');
+    return '<div class=\"rcard-lbl\">Scorr analysis'+(v2.quarter?' &middot; '+esc(v2.quarter):'')+'</div>'
+      + '<div id=\"'+id+'\" class=\"rcard-body rcard-v2\" style=\"max-height:132px;overflow:hidden;position:relative\">'+body+'</div>'
+      + '<span class=\"rcard-v2-more\" data-t=\"'+id+'\" role=\"button\" tabindex=\"0\" style=\"display:inline-flex;align-items:center;min-height:38px;font-size:12px;font-weight:700;color:var(--accent,#2f6df4);cursor:pointer\">Read full analysis</span>'
+      + (v2.polished_at ? '<div class=\"rcard-note\">'+esc(v2.basis||'Scorr editorial')+' &middot; '+fmtDate(v2.polished_at)+'</div>' : '');
+  }
+
   var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
   // cc#623: FY27 Est. Growth row — from input_raw.fy27_growth (Sonnet on Trendlyne consensus).
   // Hidden when null. Shown on BOTH branches (post-result it gives actual-vs-estimate context).
@@ -1204,8 +1262,13 @@ RESULTS_CARD_JS = """
       h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)
         + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+'</div>';
       if (d && d.result_analysis){
+        // cc#784: when a polish batch has written a long-form V2 analysis for this symbol, keep the
+        // 4-line metric header (Sales/PAT/Margins/PE) from the template card and render the editorial
+        // body BELOW it, collapsed by default. When no V2 row exists the card is byte-identical to
+        // before — the surface degrades to the template rather than showing an empty section.
         h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
-          + '<div class=\"rcard-body\">'+esc(d.result_analysis)+'</div>'
+          + '<div class=\"rcard-body\">'+esc(_metricHeader(d.result_analysis, d.v2))+'</div>'
+          + v2Html(d && d.v2)
           + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
@@ -1242,8 +1305,7 @@ RESULTS_CARD_JS = """
   function renderInline(container, sym){
     if (!container) return;
     container.innerHTML = '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Loading '+esc(sym)+'&hellip;</div>';
-    fetch('/api/results/card?symbol='+encodeURIComponent(sym))
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    _fetchCard(sym)
       .then(function(d){ container.innerHTML = cardHtml(d, sym, {close:false}); })
       .catch(function(){ container.innerHTML='<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result card unavailable.</div>'; });
   }
@@ -1260,8 +1322,7 @@ RESULTS_CARD_JS = """
   function renderCollapsible(container, sym, opts){
     if(!container) return; opts=opts||{};
     container.innerHTML='<div style=\"padding:10px 12px;color:var(--mut,#667085);font-size:12px\">Loading '+esc(sym)+'&hellip;</div>';
-    fetch('/api/results/card?symbol='+encodeURIComponent(sym))
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    _fetchCard(sym)
       .then(function(d){
         var sc=_statusChip(d);
         var dateStr=(d&&d.ex_date)?fmtDate(d.ex_date):'';
@@ -1291,8 +1352,7 @@ RESULTS_CARD_JS = """
   function load(sym, gen){
     _cur = sym;
     if (gen) render({status:'upcoming', ex_date:null}, true);
-    fetch('/api/results/card?symbol='+encodeURIComponent(sym)+(gen?'&generate=true':''))
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    _fetchCard(sym, gen?'&generate=true':'')
       .then(function(d){ render(d, false); })
       .catch(function(e){ renderMsg('Results card unavailable ('+e.message+'). The backend (cc#572) may still be deploying.'); });
   }
