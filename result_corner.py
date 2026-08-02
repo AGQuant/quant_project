@@ -367,14 +367,23 @@ def result_corner_v2():
     try:
         with conn.cursor() as cur:
             # 1) scored universe -> tier (AMFI mcap rank) + segment + GVM
-            cur.execute("""SELECT symbol, company_name, segment, market_cap, gvm_score, verdict,
-                                  ROW_NUMBER() OVER (ORDER BY market_cap DESC NULLS LAST) mrank
-                           FROM gvm_scores WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)""")
+            # cc#834: market_cap is now KEPT on the universe row, not just consumed for the tier
+            # rank — the sector table orders on average sector mcap. Value prefers screener_raw
+            # (the fresher number, cc#450) and falls back to the gvm_scores snapshot, so a symbol
+            # missing from the CSV still carries a size.
+            cur.execute("""SELECT g.symbol, g.company_name, g.segment,
+                                  COALESCE(s.market_cap, g.market_cap) AS market_cap,
+                                  g.gvm_score, g.verdict,
+                                  ROW_NUMBER() OVER (ORDER BY g.market_cap DESC NULLS LAST) mrank
+                           FROM gvm_scores g
+                           LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+                           WHERE g.score_date=(SELECT MAX(score_date) FROM gvm_scores)""")
             uni = {}
             for sym, co, seg, mc, g, v, mr in cur.fetchall():
                 tier = "Large" if mr <= 100 else "Mid" if mr <= 250 else "Small"
                 uni[sym] = {"company": co, "segment": seg or "Unclassified",
-                            "gvm": float(g) if g is not None else None, "verdict": v, "tier": tier}
+                            "gvm": float(g) if g is not None else None, "verdict": v, "tier": tier,
+                            "market_cap": _num(mc)}
             # 2) bulk recent quarters, grouped per symbol (consolidated-preferred, newest first)
             cur.execute("""SELECT symbol, period_end, metrics, consolidated, period_label
                            FROM fundamentals_history
@@ -485,6 +494,16 @@ def result_corner_v2():
         seg_pat_median = {}
         sectors = []
         seg_total = Counter(uni[s]["segment"] for s in uni)
+        # cc#834: AVG MCAP over the sector's FULL universe membership — NOT its reporters. A
+        # sector's importance does not change with reporting progress, so an average that moved as
+        # results trickled in would rank the table differently every morning for no real reason.
+        # Per UNIVERSE_DENOMINATOR_RULE both numbers travel with it: mcap_n (members carrying a
+        # market cap) over mcap_total (full membership).
+        seg_mcaps = defaultdict(list)
+        for s in uni:
+            _mc = uni[s].get("market_cap")
+            if _mc is not None:
+                seg_mcaps[uni[s]["segment"]].append(_mc)
         for seg, syms in seg_syms.items():
             sy = [fund[s]["sales_yoy"] for s in syms]
             py = [fund[s]["pat_yoy"] for s in syms]
@@ -500,8 +519,12 @@ def result_corner_v2():
             # actually produced the median (pat_vals), not on reported, because a sector can have
             # eight reporters of whom two carry a usable YoY base.
             _n_used = len(pat_vals)
+            _mcs = seg_mcaps.get(seg, [])
             sectors.append({
                 "sector": seg, "reported": len(syms), "total": seg_total.get(seg, len(syms)),
+                # cc#834: Rs Cr, integer — the display rounds, the payload does not invent precision.
+                "avg_mcap": round(sum(_mcs) / len(_mcs)) if _mcs else None,
+                "mcap_n": len(_mcs), "mcap_total": seg_total.get(seg, len(syms)),
                 "sales_yoy": _median(sy), "pat_yoy": pat_med,
                 "pct_positive": round(pos / len(pat_vals) * 100) if pat_vals else None,
                 "gvm": (secrt.get(seg) or {}).get("rating"),
@@ -510,7 +533,12 @@ def result_corner_v2():
                 "tiny_base": _n_used > 0 and _n_used < 3,
                 "basic_count": sum(1 for s in syms if fund[s].get("basis") == "basic"),
             })
-        sectors.sort(key=lambda x: (x["pat_yoy"] is None, -(x["pat_yoy"] or 0)))
+        # cc#834: DEFAULT ORDER = average sector mcap, heaviest first. Sorting by PAT YoY put a
+        # 3-member micro sector with two reporters and a +325% swing above Banks and IT — a ranking
+        # that reads as "what mattered this season" while actually surfacing the smallest base.
+        # Pairs with the cc#826 tiny-base flag: one guard marks the distortion, this one stops it
+        # leading. PAT YoY ordering stays one tap away (tap-to-sort on the other columns).
+        sectors.sort(key=lambda x: (x["avg_mcap"] is None, -(x["avg_mcap"] or 0)))
 
         # ── section 01 summary (same-quarter only) ──
         def _band(x):

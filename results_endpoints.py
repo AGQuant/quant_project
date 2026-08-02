@@ -291,16 +291,19 @@ def _polished_by_symbol(cur, sym, days=30):
     # under Domestic, so shorts are DOMESTIC ONLY — Global and IPO are deliberately NOT pulled into a
     # company card. AI Editorial long-form and Stock Views ride the same stream, tagged, so the reader
     # gets one merged feed newest-first rather than three sections to reconcile.
-    # Live category counts when this shipped: Domestic 1600, Global 732, AI Editorial 441, IPO 176,
-    # Stock Views 5 — so this filter removes ~900 items that are market-wide, not company news.
-    cur.execute("""
+    # cc#830: the category list (and now the wire-stub + reco-shape guards) moved to news_endpoints
+    # so the R card and the GVM page Latest News block read from ONE definition. The inline
+    # `category IN (...)` that used to sit here was the copy that would have drifted.
+    from news_endpoints import polished_company_filter
+    _scope_sql, _scope_params = polished_company_filter(headline_col="headline_clean")
+    cur.execute(f"""
         SELECT headline_clean, COALESCE(full_summary, summary) AS summary, source, published_time,
                category, summary AS short_summary
         FROM polished_news
         WHERE %s = ANY(mentioned_symbols) AND published_time >= NOW() - make_interval(days => %s)
-          AND category IN ('Domestic', 'AI Editorial', 'Stock Views')
+        {_scope_sql}
         ORDER BY published_time DESC, id DESC
-        LIMIT 15""", (sym, days))
+        LIMIT 15""", [sym, days] + _scope_params)
     return [{"headline": r[0], "summary": r[1], "source": r[2],
              "published_time": r[3].isoformat() if r[3] else None,
              "category": r[4], "short_summary": r[5]} for r in cur.fetchall()]

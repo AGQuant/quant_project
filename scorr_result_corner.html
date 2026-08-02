@@ -170,10 +170,19 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
 <div class="sec-label">01 · Season Summary <span class="cov">same-quarter reporters only</span></div>
 <div id="tape" class="tape"><div style="grid-column:1/-1"><div class="empty">Loading season…</div></div></div>
 
-<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by PAT YoY</span><button id="secToggle" onclick="sectorMax=!sectorMax;applySectorView();" title="Maximise" style="order:1;margin-left:8px;flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--cyan);border-radius:5px;padding:2px 7px;font-family:var(--mono);font-size:11px;line-height:1;cursor:pointer">⤢</button></div>
+<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by avg mcap · tap a column to re-sort</span><button id="secToggle" onclick="sectorMax=!sectorMax;applySectorView();" title="Maximise" style="order:1;margin-left:8px;flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--cyan);border-radius:5px;padding:2px 7px;font-family:var(--mono);font-size:11px;line-height:1;cursor:pointer">⤢</button></div>
 <div class="tbl-card tbl-scroll">
 <table id="sectorTbl">
-<thead><tr><th>Sector</th><th>Reported</th><th>Sales YoY</th><th>PAT YoY</th><th>% Growing</th><th>Sector GVM</th></tr></thead>
+<!-- cc#834: AVG MCAP column + tap-to-sort on every column. Default order is avg mcap desc. -->
+<thead><tr>
+  <th data-k="sector" data-dir="1">Sector</th>
+  <th data-k="reported">Reported</th>
+  <th data-k="avg_mcap" title="Average market cap across the sector's FULL universe membership, not just its reporters — a sector's size does not change with reporting progress.">Avg MCap</th>
+  <th data-k="sales_yoy">Sales YoY</th>
+  <th data-k="pat_yoy">PAT YoY</th>
+  <th data-k="pct_positive">% Growing</th>
+  <th data-k="gvm">Sector GVM</th>
+</tr></thead>
 <tbody id="sectorRows"><tr><td colspan="6" class="empty">Loading sectors…</td></tr></tbody>
 </table>
 </div>
@@ -263,17 +272,53 @@ function render(){
     </div>`;
 
   // ── 02 SECTOR TABLE ──
-  const secs=d.sectors||[];
-  document.getElementById('sectorRows').innerHTML = secs.length ? secs.map(x=>{
+  SECS = d.sectors||[];
+  renderSectors();
+
+  renderCo();
+}
+
+// ── cc#834: sector table rendering + tap-to-sort ─────────────────────────────────────────────────
+// Default key is avg_mcap desc — the backend already ships the rows in that order, so an untouched
+// page and a re-sorted page agree. Sorting is client-side over the SAME payload the tiles read, so
+// re-ordering can never change a number, only its position.
+let SECS = [];
+let SEC_SORT = { key: 'avg_mcap', dir: -1 };   // dir: -1 desc, 1 asc
+
+// Rs Cr with Indian grouping (cc#823: integer, no invented precision). Sectors run from a few
+// hundred Cr to several lakh Cr, so the biggest values get the lakh-cr shorthand to keep the column
+// narrow enough to scan.
+function mcapS(v){
+  if(v==null) return '—';
+  const n=Number(v);
+  if(!isFinite(n)) return '—';
+  if(n>=100000) return (n/100000).toLocaleString('en-IN',{maximumFractionDigits:2})+' L Cr';
+  return inr(n)+' Cr';
+}
+
+function renderSectors(){
+  const tb=document.getElementById('sectorRows');
+  if(!tb) return;
+  const k=SEC_SORT.key, dir=SEC_SORT.dir;
+  const rowsData=[...SECS].sort((a,b)=>{
+    const av=a[k], bv=b[k];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;            // missing always sinks, whichever direction
+    if(bv==null) return -1;
+    if(typeof av==='string') return dir*av.localeCompare(bv);
+    return dir*(av-bv);          // dir -1 => descending
+  });
+  tb.innerHTML = rowsData.length ? rowsData.map(x=>{
     const pos=x.pct_positive; const gv=x.gvm;
     return `<tr data-sector="${esc(x.sector)}">
       <td class="sect-name">${esc(x.sector)}</td>
       <td class="cov-cell"><b>${x.reported}</b> / ${x.total}</td>
+      <td class="cov-cell" title="avg over ${x.mcap_n==null?'?':x.mcap_n}/${x.mcap_total==null?'?':x.mcap_total} members carrying a market cap">${mcapS(x.avg_mcap)}</td>
       <td class="${grade(x.sales_yoy)}">${pctS(x.sales_yoy)}</td>
       <td class="${grade(x.pat_yoy)}">${pctS(x.pat_yoy)}</td>
       <td>${pos==null?'—':pos+'%'}${pos==null?'':`<span class="pct-pos-bar"><i style="width:${pos}%"></i></span>`}</td>
       <td>${gv==null?'—':`<span class="gvm-chip ${gvmChipCls(gv)}">${gv.toFixed(1)}</span>`}</td>
-    </tr>`;}).join('') : `<tr><td colspan="6" class="empty">No sector has a same-quarter reporter yet.</td></tr>`;
+    </tr>`;}).join('') : `<tr><td colspan="7" class="empty">No sector has a same-quarter reporter yet.</td></tr>`;
   document.querySelectorAll('#sectorTbl tbody tr[data-sector]').forEach(row=>{
     row.onclick=()=>{ const sc=row.dataset.sector;
       if(selSector===sc){ selSector=null; row.classList.remove('sel'); document.getElementById('secFilter').classList.remove('show'); }
@@ -283,14 +328,22 @@ function render(){
         document.getElementById('coTbl').scrollIntoView({behavior:'smooth',block:'nearest'}); }
       applyCo(); };
   });
+  document.querySelectorAll('#sectorTbl thead th[data-k]').forEach(th=>{
+    const key=th.getAttribute('data-k');
+    th.style.cursor='pointer';
+    th.onclick=()=>{
+      if(SEC_SORT.key===key) SEC_SORT.dir*=-1;
+      else SEC_SORT={ key, dir: th.hasAttribute('data-dir') ? Number(th.getAttribute('data-dir')) : -1 };
+      renderSectors();
+    };
+    th.textContent=th.textContent.replace(/ [▲▼]$/,'')+(SEC_SORT.key===key?(SEC_SORT.dir===1?' ▲':' ▼'):'');
+  });
   applySectorView();   // cc#695: apply minimise/maximise (default minimised)
-
-  renderCo();
 }
 
 // cc#695: Section 02 maximise/minimise. Default MINIMISED (in-memory, resets to minimised on fresh
-// load). Minimised shows the top 5 sectors (already PAT-YoY sorted) + a tappable "+N more" row; tap-to-
-// filter works on the visible rows in both states. Theme-agnostic (uses the page CSS vars).
+// load). Minimised shows the top 5 sectors (in the current sort order) + a tappable "+N more" row;
+// tap-to-filter works on the visible rows in both states. Theme-agnostic (uses the page CSS vars).
 let sectorMax = false;
 function applySectorView(){
   const tbody = document.getElementById('sectorRows');

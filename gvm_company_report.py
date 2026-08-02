@@ -465,10 +465,38 @@ _QUARTER_ROW_DEFS = [
     ("Net Profit",        "cr",  "bar"),
     ("EPS in Rs",         "eps", "line"),
 ]
+# cc#833 BFSI ALIAS REGISTRY. Screener publishes NO Sales / Operating Profit / OPM % for financing
+# companies — it publishes Revenue / Financing Profit / Financing Margin %. The fixed industrial row
+# template above therefore rendered BAJFINANCE's P&L against real stored data and printed nothing.
+# The registry is a small explicit map, not a string transform (same doctrine as the row defs).
+#
+# Insertion, not substitution: each alias row is slotted immediately after the industrial row it
+# stands in for. _build_table already DROPS any row that is None across every period, so a BFSI
+# symbol loses the industrial row and keeps the alias, an industrial symbol does exactly the reverse,
+# and neither needs a segment test. That is what makes the non-BFSI path byte-identical.
+_BFSI_ALIAS_ROWS = {
+    "Sales":            [("Revenue",           "cr",  "bar")],
+    "Operating Profit": [("Financing Profit",  "cr",  "bar")],
+    "OPM %":            [("Financing Margin %", "pct", "line")],
+}
+
+
+def _with_bfsi_aliases(row_defs):
+    out = []
+    for d in row_defs:
+        out.append(d)
+        out.extend(_BFSI_ALIAS_ROWS.get(d[0], []))
+    return out
+
+
+_QUARTER_ROW_DEFS = _with_bfsi_aliases(_QUARTER_ROW_DEFS)
 _PL_ROW_DEFS = _QUARTER_ROW_DEFS   # same key set, annual + TTM
 # cc#518 REVISION (founder, same session): P&L display trims to 6 key rows -- the rest stay in the
 # payload (display=False) for the row charts / future use, never dropped from computation.
-_PL_DISPLAY_KEYS = ("Sales", "Operating Profit", "OPM %", "Interest", "Net Profit", "EPS in Rs")
+_PL_DISPLAY_KEYS = ("Sales", "Operating Profit", "OPM %", "Interest", "Net Profit", "EPS in Rs",
+                    # cc#833: the BFSI aliases are display rows too — otherwise a financing company's
+                    # P&L collapses to Interest / Net Profit / EPS with its top line hidden.
+                    "Revenue", "Financing Profit", "Financing Margin %")
 
 _BS_ROW_DEFS = [
     ("Equity Capital",    "cr", "bar"),
@@ -607,6 +635,53 @@ def _annual_vals(cur, symbol, section, key):
     return [_parse_metric((r[1] or {}).get(key)) for r in rows if bool(r[0]) == has_c]
 
 
+def _quarter_vals(cur, symbol, keys):
+    """cc#832: oldest->newest series of one metric across QUARTERLY periods.
+
+    Same dominant-variant rule as _annual_vals. `keys` is tried in priority order and the ONE key
+    with the most non-null readings wins for the WHOLE series — resolving per row would silently
+    splice a Sales quarter next to a Revenue quarter and call the join a growth rate. (BFSI files
+    print "Revenue", industrials print "Sales"; BAJFINANCE has no Sales key at all.)"""
+    cur.execute("""SELECT consolidated, metrics FROM fundamentals_history
+                   WHERE symbol=%s AND section='quarters' AND period_type='quarter'
+                   ORDER BY period_end ASC""", (symbol,))
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    has_c = any(bool(r[0]) for r in rows)
+    ms = [(r[1] or {}) for r in rows if bool(r[0]) == has_c]
+    best, best_n = None, 0
+    for key in keys:
+        n = sum(1 for m in ms if _parse_metric(m.get(key)) is not None)
+        if n > best_n:
+            best, best_n = key, n
+    if not best:
+        return []
+    return [_parse_metric(m.get(best)) for m in ms]
+
+
+def _ttm_growth(series):
+    """cc#832: TTM growth = sum(latest 4 quarters) vs sum(the 4 quarters before those).
+
+    Returns None — rendered as "--" — rather than a number whenever the answer would be invented:
+      * fewer than 8 quarters in the series (includes symbols with no quarters series at all)
+      * any gap inside either 4-quarter window
+      * a prior window that is negative or zero (cc#804 QoQ doctrine: a swing through zero has no
+        meaningful percent)
+    Deliberately NO fallback to the annual 1Y figure it replaces — a silent substitution would put
+    an annual number under a column headed TTM."""
+    vals = series or []
+    if len(vals) < 8:
+        return None
+    cur4, prev4 = vals[-4:], vals[-8:-4]
+    if any(v is None for v in cur4) or any(v is None for v in prev4):
+        return None
+    base = sum(prev4)
+    if base <= 0:
+        return None
+    return round((sum(cur4) - base) / base * 100.0, 1)
+
+
 def _rat_row(label, unit, values):
     if all(v is None for v in values):
         return None
@@ -663,8 +738,10 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
                               "roce", "roe", "opm", "sg1", "sg3", "sg5"], r):
             k[name] = _parse_metric(val)
     np_s = _annual_vals(cur, sym, "profit-loss", "Net Profit")
-    eps_s = _annual_vals(cur, sym, "profit-loss", "EPS in Rs")
     sales_s = _annual_vals(cur, sym, "profit-loss", "Sales")
+    # cc#832: the Growth table's first column is TTM, built from the quarterly series.
+    q_sales_s = _quarter_vals(cur, sym, ["Sales", "Revenue"])
+    q_np_s = _quarter_vals(cur, sym, ["Net Profit"])
 
     def _last(s, n=1):
         return s[-n] if len(s) >= n else None
@@ -732,40 +809,68 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         if rows:
             buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
 
-    # 1) GROWTH — 1Y / 3Y CAGR / 5Y CAGR (unchanged)
-    _add("Growth", ["1Y", "3Y CAGR", "5Y CAGR"], [
-        _rat_row("Sales Growth", "pct", [k.get("sg1") if k.get("sg1") is not None else _g1y(_last(sales_s), _last(sales_s, 2)),
+    def _yr_row(label, unit, hist, current):
+        """cc#833: a year-wise row whose HISTORY is empty across every FY does not render, even when
+        a Current value exists. That combination — no history, one Current cell — is precisely the
+        all-dash ROCE/OPM row BAJFINANCE showed: screener_raw carries an opm/roce number for every
+        listed company, so the Current cell alone kept a row alive whose metric the filing never
+        publishes. An all-dash row against real stored data reads as missing data; it is actually
+        the wrong metric."""
+        if all(v is None for v in hist):
+            return None
+        return _rat_row(label, unit, list(hist) + [current])
+
+    # cc#833: BFSI margin history, sourced from the SAME annual P&L frame the other year-wise rows
+    # use, so it lines up column-for-column with them.
+    fin_margin_y = [_mv(m, "Financing Margin %") for m in pl_m]
+    fin_profit_y = [_mv(m, "Financing Profit") for m in pl_m]
+
+    # 1) GROWTH — cc#832: TTM / 3Y CAGR / 5Y CAGR, two rows.
+    # The 1Y column is now TTM (latest 4 quarters vs the 4 before), which is what "the last year of
+    # trading" actually means once a symbol has reported past its FY end — the annual 1Y went stale
+    # the moment Q1 landed. The 3Y/5Y CAGR columns are untouched (annual series, screener CAGR
+    # preferred where present). EPS Growth is DELETED: Net Profit and EPS are the same story told
+    # twice, and its 3Y/5Y cells were hardcoded None anyway — a row that was 2/3 empty by design.
+    _add("Growth", ["TTM", "3Y CAGR", "5Y CAGR"], [
+        _rat_row("Sales Growth", "pct", [_ttm_growth(q_sales_s),
                                           k.get("sg3") if k.get("sg3") is not None else _cagr(_last(sales_s), _last(sales_s, 4), 3),
                                           k.get("sg5") if k.get("sg5") is not None else _cagr(_last(sales_s), _last(sales_s, 6), 5)]),
-        _rat_row("Net Profit Growth", "pct", [_g1y(_last(np_s), _last(np_s, 2)),
+        _rat_row("Net Profit Growth", "pct", [_ttm_growth(q_np_s),
                                               _cagr(_last(np_s), _last(np_s, 4), 3), _cagr(_last(np_s), _last(np_s, 6), 5)]),
-        _rat_row("EPS Growth", "pct", [_g1y(_last(eps_s), _last(eps_s, 2)), None, None]),
     ])
-    # 2) PROFITABILITY — YEAR-WISE + Current
+    # 2) PROFITABILITY — YEAR-WISE + Current.
+    # cc#833: rows now survive on the strength of their HISTORY, not on a Current cell screener_raw
+    # hands out to everyone, and the BFSI margin row sits where OPM % would be. Its Current cell is
+    # deliberately BLANK: screener_raw's opm for BAJFINANCE is 68.1 (a quarterly figure on a
+    # different base) against an annual Financing Margin history of ~33 — printing it at the end of
+    # this row would be a basis break dressed as a trend. Rule chosen: DROP the Current cell rather
+    # than mix bases. NPM % and Asset Turnover already did exactly this.
     _add("Profitability", yr_periods, [
-        _rat_row("ROCE %", "pct", roce_y + [k.get("roce")]),
-        _rat_row("ROE %",  "pct", roe_y  + [k.get("roe")]),
-        _rat_row("OPM %",  "pct", opm_y  + [k.get("opm")]),
-        _rat_row("NPM %",  "pct", npm_y  + [None]),
-        _rat_row("Asset Turnover", "x", at_y + [None]),
+        _yr_row("ROCE %", "pct", roce_y, k.get("roce")),
+        _yr_row("ROE %",  "pct", roe_y,  k.get("roe")),
+        _yr_row("OPM %",  "pct", opm_y,  k.get("opm")),
+        _yr_row("Financing Margin %", "pct", fin_margin_y, None),
+        _yr_row("Financing Profit",   "cr",  fin_profit_y, None),
+        _yr_row("NPM %",  "pct", npm_y,  None),
+        _yr_row("Asset Turnover", "x", at_y, None),
     ])
     # 3) VALUATION — cc#691: PE/PB/EV-EBITDA/MCap-Sales/Div-Yield ALL year-wise now (FY-end close +
     # Current). EV/EBITDA is SUPPRESSED for BFSI (meaningless for financials — same _is_bfsi gate as the
     # Solvency D/E + Interest-Coverage exclusion); MCap/Sales + Div Yield stay for BFSI.
     _val_rows = [
-        _rat_row("PE", "x", pe_y + [k.get("pe")]),
-        _rat_row("PB", "x", pb_y + [k.get("pb")]),
+        _yr_row("PE", "x", pe_y, k.get("pe")),
+        _yr_row("PB", "x", pb_y, k.get("pb")),
     ]
     if not _is_bfsi(segment):
-        _val_rows.append(_rat_row("EV/EBITDA", "x", evebitda_y + [k.get("evebitda")]))
-    _val_rows.append(_rat_row("MCap/Sales", "x", mcaps_y + [mcap_sales]))
-    _val_rows.append(_rat_row("Dividend Yield", "pct", dy_y + [k.get("divyield")]))
+        _val_rows.append(_yr_row("EV/EBITDA", "x", evebitda_y, k.get("evebitda")))
+    _val_rows.append(_yr_row("MCap/Sales", "x", mcaps_y, mcap_sales))
+    _val_rows.append(_yr_row("Dividend Yield", "pct", dy_y, k.get("divyield")))
     _add("Valuation", yr_periods, _val_rows)
     # 4) SOLVENCY — YEAR-WISE + Current, HIDDEN for BFSI
     if not _is_bfsi(segment):
         _add("Solvency", yr_periods, [
-            _rat_row("Debt / Equity", "x", de_y + [k.get("de")]),
-            _rat_row("Interest Coverage", "x", ic_y + [k.get("intcov")]),
+            _yr_row("Debt / Equity", "x", de_y, k.get("de")),
+            _yr_row("Interest Coverage", "x", ic_y, k.get("intcov")),
         ])
     # 5) EFFICIENCY — annual ratios section (days metrics), ROCE excluded (now under Profitability)
     _ra_all = _all_section(cur, sym, "ratios", "annual")

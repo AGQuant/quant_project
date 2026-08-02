@@ -439,11 +439,13 @@ function ActionStrip({ x }) {
     chips.push({ label: "No upcoming event", color: C.muted });
   }
   if (x.percentile) {
-    const z = x.percentile.z_score;
+    // cc#829: Z dropped from the GVM page. Rank #x/N already conveys position; the Z restatement
+    // is the same one-stat-too-many the cc#827 ruling removed from the sector page. The API still
+    // returns percentile.z_score (gvm_page_extras) — kept for other consumers, just not rendered.
     chips.push({
-      label: `#${x.percentile.universe_rank}/${x.percentile.universe_total}${z != null ? ` · Z=${signFmt(z, 2)}` : ""}`,
+      label: `#${x.percentile.universe_rank}/${x.percentile.universe_total}`,
       color: C.purple,
-      title: z != null ? `GVM mean ${x.percentile.mean} · stdev ${x.percentile.stdev} · Z = (gvm − μ) / σ` : "GVM rank in scored universe",
+      title: "GVM rank in scored universe",
     });
   }
   if (!chips.length) return null;
@@ -2321,8 +2323,8 @@ function GvmReport({ r, hist }) {
             <Tag color={vc}>{r.verdict}</Tag>
             {x.percentile && (
               <div style={{ fontSize: 12, color: C.purple, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>
+                {/* cc#829: Z line removed — rank is sufficient */}
                 #{fmt(x.percentile.universe_rank)} / {fmt(x.percentile.universe_total)}
-                {x.percentile.z_score != null && <div>Z = {signFmt(x.percentile.z_score, 2)}</div>}
               </div>
             )}
           </div>
@@ -2557,8 +2559,14 @@ function GvmReport({ r, hist }) {
       <div id="gvm-results" style={{ scrollMarginTop: 60 }}>
         {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
         {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
-        {inUniv && r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
-
+        {/* cc#831: the inline Result Analysis ContentCard is GONE. The C·A·R·D strip's R button is
+            the single result surface (one-letter-one-card, cc#803/805) and carries strictly more —
+            metric header, peers, vs-estimate, L2 View Detailed. The deleted block was also still
+            printing the three narrative template lines cc#801 killed on the R card (Mixed quarter /
+            Revenue lagged / Margin expanded): confirmation that it was a FORK, not a shared render,
+            and that divergence dies with it. content.result_analysis stays in the API payload (same
+            ruling as cc#829's z_score — other consumers may read it) and ContentCard stays, still
+            used by Company Overview and Key Takeaways. */}
         <ConcallSummary symbol={r.symbol} />
         {inUniv && <OpsMetrics symbol={r.symbol} segment={r.segment} />}
         <SectorBrief segment={r.segment} />
@@ -2664,7 +2672,9 @@ function NewsCard({ symbol }) {
           {articles == null ? (
             <div style={{ fontSize: 13.5, color: C.muted }}>Loading…</div>
           ) : !articles.length ? (
-            <div style={{ fontSize: 13.5, color: C.muted }}>No recent news available</div>
+            /* cc#830: the quiet empty state. NEVER a raw fallback — a link-out/wire-stub item is
+               worse than a shorter card (cc#802 rule). */
+            <div style={{ fontSize: 13.5, color: C.muted, fontStyle: "italic" }}>No polished coverage yet</div>
           ) : articles.map((a, i) => {
             const isOpen = rowOpen === i;
             const isMentioned = a.tier === "mentioned";
@@ -2692,9 +2702,19 @@ function NewsCard({ symbol }) {
                     <div style={{ fontSize: 12.5, color: C.muted, marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       {isMentioned && <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase",
                         color: C.muted, background: C.muted + "1f", border: `1px solid ${C.muted}44`, borderRadius: 4, padding: "1px 5px" }}>Mentioned</span>}
-                      <span>{a.source_name || "—"}</span>
+                      {/* cc#830: AI Editorial / Stock Views are Scorr's OWN long-form and carry a
+                          badge, same treatment as the R card's merged stream. Domestic stays a
+                          plain source line — badging everything badges nothing. */}
+                      {(a.category === "AI Editorial" || a.category === "Stock Views") ? (
+                        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase",
+                          color: C.purple, background: C.purple + "1f", border: `1px solid ${C.purple}44`,
+                          borderRadius: 4, padding: "1px 5px" }}>
+                          {a.category === "AI Editorial" ? "AI Editorial" : "Stock View"}
+                        </span>
+                      ) : <span>{a.source_name || "—"}</span>}
                       {a.published_at && <><span>·</span><span>{_timeAgo(a.published_at)}</span></>}
-                      {a.category && <><span>·</span><span style={{ textTransform: "capitalize" }}>{a.category}</span></>}
+                      {a.category && a.category !== "AI Editorial" && a.category !== "Stock Views"
+                        && <><span>·</span><span style={{ textTransform: "capitalize" }}>{a.category}</span></>}
                     </div>
                   </div>
                   {impactTag(a.impact)}

@@ -66,6 +66,40 @@ def _ensure_polished_view():
 _ensure_polished_view()
 
 
+# ── cc#830: THE company-news scope. ONE definition, used by BOTH company surfaces — the R card
+# (results_endpoints._polished_by_symbol) and the GVM page Latest News block (/api/news/company).
+# A second copy of these rules is exactly the drift cc#802 killed, so this lives here and is
+# imported, never restated.
+#
+# Three filters, each earning its place against what BAJFINANCE actually served on 02-Aug:
+#
+#  1. CATEGORY (cc#802) — company news lives under Domestic; AI Editorial and Stock Views ride the
+#     same stream, tagged. Global and IPO are market-wide, not company news, and are excluded.
+#
+#  2. BODY LENGTH — the founder's "wire shorts". Every item he called low-value was a 129-143 char
+#     RSS stub ("F&O Talk: Nifty lacks direction..." = 143 chars); the first genuine article in the
+#     same list is 406 chars and the AI Editorial is 2,152. A stub is a headline with a restatement
+#     underneath — there is no article to expand, so the row costs a tap and returns nothing.
+#
+#  3. RECO SHAPE (cc#787) — reco/tip-shaped items never surface on a company card even if they
+#     reach polish. is_reco is the structural guard, but that column does not exist in raw_news
+#     yet, so the named families are matched on the headline. Deliberately NARROW: it catches the
+#     listicle and tip formats the founder named, not every headline carrying an analyst opinion.
+POLISHED_COMPANY_CATEGORIES = ["Domestic", "AI Editorial", "Stock Views"]
+POLISHED_MIN_BODY_CHARS = 250
+_RECO_HEADLINE_RE = (r"(f&o talk|stocks? to buy|buy or sell|target price|price target"
+                     r"|top (stock |share )?picks?|hot picks?|trading (call|idea)s?|multibagger)")
+
+
+def polished_company_filter(cat_col="category", body_col="COALESCE(full_summary, summary)",
+                            headline_col="headline"):
+    """Returns (sql_fragment, params) — AND-able onto any company-news query. See the block above."""
+    sql = (f" AND {cat_col} = ANY(%s)"
+           f" AND COALESCE(LENGTH({body_col}), 0) >= %s"
+           f" AND COALESCE({headline_col}, '') !~* %s")
+    return sql, [POLISHED_COMPANY_CATEGORIES, POLISHED_MIN_BODY_CHARS, _RECO_HEADLINE_RE]
+
+
 def _rows(cur):
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -124,17 +158,23 @@ def news_company(symbol: str):
     Each row carries full_summary (the complete polished article, markdown for AI
     Editorials) for the inline expand. Empty → clean empty state, zero web calls."""
     sym = symbol.upper()
+    # cc#830: the founder's ruling — this block shows POLISHED coverage only. It always read
+    # polished_news (never raw), but it applied NONE of the cc#802 scope the R card had, so the
+    # market-wide categories, the reco-shaped headlines and the 130-char wire stubs all landed on
+    # the company card. Same scope as the R card now, from the same definition.
+    _scope_sql, _scope_params = polished_company_filter()
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             SELECT polished_id, raw_id, headline,
                    full_summary, summary, category, sentiment, impact,
                    mentioned_symbols, symbol, source_name,
                    display_time AS published_at
             FROM v_polished_articles
-            WHERE symbol = %s OR mentioned_symbols @> ARRAY[%s]::text[]
+            WHERE (symbol = %s OR mentioned_symbols @> ARRAY[%s]::text[])
+            {_scope_sql}
             ORDER BY display_time DESC NULLS LAST, polished_id DESC
             LIMIT 30
-        """, (sym, sym))
+        """, [sym, sym] + _scope_params)
         rows = _rows(cur)
         try:
             import news_tagger
