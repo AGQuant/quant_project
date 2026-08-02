@@ -2,7 +2,7 @@
 fy_end_backfill.py — cc#703 FY-END PRICE BACKFILL 2015-2021 (founder OK 26-Jul, option-2)
 ==========================================================================================
 One-time Yahoo backfill of FISCAL-YEAR-END prices ONLY, to unlock the 12-yr historical
-valuation series (cc#691). For every symbol in scrape universe V2 (~613 — top-500 NSE by
+valuation series (cc#691). For every symbol in scrape universe V2 (top-750 NSE by
 market_cap UNION any sector_ops_metrics member, spec id=9178 / cc#701), fetch the close on
 the LAST TRADING DAY on-or-before 31-Mar for fiscal years 2015..2021 (7 anchors/symbol) and
 upsert into raw_prices. The cc#691 valuation compute reads raw_prices.close on/before each
@@ -97,7 +97,7 @@ def _json(d):
 
 
 def _universe(cur) -> List[str]:
-    """Scrape universe V2 (cc#701): top-500 NSE by market_cap UNION any sector_ops_metrics member."""
+    """Scrape universe V2 (cc#701): top-750 NSE by market_cap UNION any sector_ops_metrics member (cc#814)."""
     cur.execute("""
         WITH ranked AS (
             SELECT UPPER(nse_code) AS code

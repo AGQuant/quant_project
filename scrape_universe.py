@@ -1,12 +1,14 @@
 """cc#700: T+1 result-scrape universe gate.
 
 BOSS RULE (founder 26-Jul, session_log id=9178):
-V1 (SCRAPE_UNIVERSE_TOP500_NSE_V1): scrape universe = NSE-LISTED companies in the
-TOP 500 BY MARKET CAP (from screener_raw.market_cap; NSE code must be non-numeric).
+V1 (SCRAPE_UNIVERSE_TOP500_NSE_V1 — rule id kept verbatim as the locked session_log
+identifier; the CUTOFF it names is superseded below): scrape universe = NSE-LISTED
+companies in the TOP 750 BY MARKET CAP (from screener_raw.market_cap; NSE code must be
+non-numeric). cc#814 (founder-frozen 02-Aug-2026) raised the cutoff 500 -> 750.
 V2 (universe_v2_inclusive, cc#701): INCLUSIVE UNION — a symbol qualifies if it is
-(a) NSE non-numeric AND top-500 by market_cap, OR (b) already present in
+(a) NSE non-numeric AND top-750 by market_cap, OR (b) already present in
 sector_ops_metrics (any row) — so ops-tracked smalls (e.g. AMC_Wealth names below
-rank 500) stay scrape-eligible. ~613 symbols total. Everything else is NEVER queued
+rank 750) stay scrape-eligible. Everything else is NEVER queued
 for a scrape; its Result Analysis serves from the screener_raw fallback ("limited
 review"). BSE-only numeric codes are always excluded.
 
@@ -17,14 +19,14 @@ reconcile + ops_metrics_pipeline.run_t1_refresh). Ops-metrics EXTRACTION entry (
 Saturday detector over already-stored doc_texts) stays open-flow and does NOT call this.
 """
 
-TOP_N = 500
+TOP_N = 750
 
 
 def in_scrape_universe(cur, symbol: str) -> bool:
     """True iff `symbol` qualifies for the T+1 scrape (cc#701 inclusive union): NSE-listed
-    (non-numeric nse_code) AND in the top-500 by market_cap in screener_raw, OR already present
+    (non-numeric nse_code) AND in the top-750 by market_cap in screener_raw, OR already present
     in sector_ops_metrics (any row). Purely-numeric codes (BSE-only) are always excluded. Ranking
-    is evaluated live so the top-500 tranche tracks the latest screener upload."""
+    is evaluated live so the top-750 tranche tracks the latest screener upload."""
     sym = (symbol or "").strip().upper()
     if not sym or sym.isdigit():
         return False
@@ -47,7 +49,7 @@ def universe_symbols(cur) -> set:
     """cc#741: the FULL scrape-eligible set (cc#701 inclusive union) in ONE query — for enqueue-side
     pre-filtering. Callers filter their todo list against this instead of re-implementing the ranking
     inline (the per-symbol in_scrape_universe() stays the authoritative single-symbol gate). Same
-    definition as in_scrape_universe: NSE non-numeric top-500 by market_cap UNION any sector_ops_metrics
+    definition as in_scrape_universe: NSE non-numeric top-750 by market_cap UNION any sector_ops_metrics
     symbol; numeric BSE-only codes excluded by the non-numeric filter."""
     cur.execute("""
         WITH ranked AS (
@@ -90,14 +92,19 @@ def log_universe_skip(cur, symbol: str, ex_date=None, source: str = "") -> bool:
     """Record an out-of-universe scrape-skip ONCE per symbol (not per night). Returns True the
     first time a symbol is skipped (freshly logged), False on repeat skips. Backed by the
     scrape_universe_skips table so the log-once contract survives across runs."""
+    # cc#814: the reason string is DERIVED from TOP_N rather than hardcoded, so it can never again
+    # drift out of step with the gate it describes. Rows already written keep 'universe_top500' —
+    # that is historically accurate for the cutoff in force when they were skipped, and rewriting
+    # them would falsify the log.
+    reason = f"universe_top{TOP_N}"
     cur.execute("""CREATE TABLE IF NOT EXISTS scrape_universe_skips (
         symbol TEXT PRIMARY KEY,
-        reason TEXT DEFAULT 'universe_top500',
+        reason TEXT,
         ex_date DATE,
         source TEXT,
         first_skipped_at TIMESTAMPTZ DEFAULT NOW())""")
     cur.execute("""INSERT INTO scrape_universe_skips (symbol, reason, ex_date, source)
-                   VALUES (%s,'universe_top500',%s,%s)
+                   VALUES (%s,%s,%s,%s)
                    ON CONFLICT (symbol) DO NOTHING
-                   RETURNING 1""", ((symbol or "").strip().upper(), ex_date, source))
+                   RETURNING 1""", ((symbol or "").strip().upper(), reason, ex_date, source))
     return cur.fetchone() is not None

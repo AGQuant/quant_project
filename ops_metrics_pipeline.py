@@ -67,7 +67,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 import psycopg
 
-from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700: top-500 NSE scrape gate
+from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700/814: top-750 NSE scrape gate
 
 
 def _conn():
@@ -862,7 +862,7 @@ def _should_escalate(metrics_out, pres_text, trans_text):
 # WHAT STOPS: LLM extraction of ops metrics from docs, all writes into sector_ops_metrics, and
 # sector_kpi_registry maintenance.
 # WHAT DELIBERATELY DOES NOT STOP: the doc scrape. Concall transcripts, investor presentations and
-# fundamentals history for the top-500 universe feed Level-2 Result Analysis and CIO queries, and
+# fundamentals history for the top-750 universe feed Level-2 Result Analysis and CIO queries, and
 # they stay fully alive. run_t1_refresh / run_saturday_retry / run_season_sweep keep staging
 # doc_texts and re-scraping fundamentals exactly as before — only the metric layer on top is gone.
 # sector_ops_metrics and sector_kpi_registry remain as a FROZEN ARCHIVE. Nothing is dropped.
@@ -1549,7 +1549,7 @@ RUN_FLAG_KEY = "ops_metrics_backfill_run"   # 'pending' | 'running' | 'done'
 
 
 def _build_universe(cur):
-    """Futures (F&O) symbols first, then top-500 by market_cap, de-duped -- same shape as
+    """Futures (F&O) symbols first, then top-750 by market_cap, de-duped -- same shape as
     gvm_backfill.py's _build_universe, kept local (not imported) to avoid coupling this
     feature to gvm_backfill's internals. Cached to app_config for stable resume ordering."""
     cached = _cfg_get(cur, UNIVERSE_KEY)
@@ -2357,9 +2357,9 @@ def run_t1_refresh(conn=None):
                            WHERE status='reported' AND ex_date >= (CURRENT_DATE - INTERVAL '3 days')::date
                              AND ex_date < CURRENT_DATE AND ticker IS NOT NULL""")
             due = cur.fetchall()
-            skipped_universe = 0   # cc#700: reported-but-out-of-universe (not top-500 NSE)
+            skipped_universe = 0   # cc#700: reported-but-out-of-universe (not top-750 NSE)
             for sym, ex_date in due:
-                # cc#700: only top-500 NSE names enter the scrape path; out-of-universe reports are
+                # cc#700/814: only top-750 NSE names enter the scrape path; out-of-universe reports are
                 # NEVER scrape-queued (Result Analysis serves them from the screener_raw fallback).
                 if not in_scrape_universe(cur, sym):
                     if log_universe_skip(cur, sym, ex_date, "ops_metrics_pipeline.run_t1_refresh"):

@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Header, HTTPException
 from typing import Dict, Optional, Tuple
 
-from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700: top-500 NSE scrape gate
+from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700/814: top-750 NSE scrape gate
 
 log = logging.getLogger("scorr.result_corner")
 router = APIRouter(prefix="/api/admin/result_corner", tags=["result_corner"])
@@ -122,7 +122,7 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
     discovered = discover_reported(conn, days)
     q_start = _quarter_start()
     added = updated = skipped_present = unresolved = enqueued = 0
-    skipped_universe = 0   # cc#700: out-of-universe (not top-500 NSE) — calendar-added but NEVER scrape-queued
+    skipped_universe = 0   # cc#700: out-of-universe (not top-750 NSE) — calendar-added but NEVER scrape-queued
     samples = []
     with conn.cursor() as cur:
         # cc#765 GUARD 1: dedup against ANY calendar row this quarter (any status), not just
@@ -167,7 +167,7 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
                 added += 1
             else:
                 updated += 1
-            # cc#700: only top-500 NSE names enter the scrape path. Out-of-universe reports stay in the
+            # cc#700/814: only top-750 NSE names enter the scrape path. Out-of-universe reports stay in the
             # calendar (they DID report) but are NEVER scrape-queued — Result Analysis serves them from
             # the screener_raw fallback (limited review). Skip logged once per symbol.
             if not in_scrape_universe(cur, sym):

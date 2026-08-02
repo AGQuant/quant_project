@@ -1382,7 +1382,7 @@ def _ops_season_mode(today=None):
 
 def _bg_ops_metrics_coverage():
     """cc#773 + cc#774 DENOMINATOR FIX: nightly DUAL coverage counter, measured against the SCRAPE
-    UNIVERSE ONLY (~616 = top-500 NSE non-numeric by mcap UNION sector_ops_metrics symbols;
+    UNIVERSE ONLY (top-750 NSE non-numeric by mcap UNION sector_ops_metrics symbols;
     SCRAPE_UNIVERSE_TOP500_NSE_V1 id=9178 + HARD_BOUNDARY id=10260), 21-day window.
 
     cc#774: the cc#773 version measured against ALL of screener_raw (~1801), so it read ~50% coverage
@@ -1431,7 +1431,7 @@ def _bg_ops_metrics_coverage():
                 conn.rollback(); pol = None
             polished_pct = round(pol / tot * 100, 1) if (tot and pol is not None) else None
             # cc#774 / UNIVERSE_DENOMINATOR_RULE: denominator + window travel WITH the numbers, always.
-            payload = {"denominator": "scrape_universe (top-500 NSE non-numeric by mcap UNION "
+            payload = {"denominator": "scrape_universe (top-750 NSE non-numeric by mcap UNION "
                                       "sector_ops_metrics symbols; id=9178 + id=10260)",
                        "universe_size": uni_n, "window_days": 21,
                        "reporters_21d": tot, "with_ops_rows": cov, "scraped_pct": scraped_pct,
