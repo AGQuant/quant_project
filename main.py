@@ -219,6 +219,11 @@ _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 # cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
 # injected into <head> on every protected/app page via the same gate as the PWA
 # bootstrap, so no page is missed and the design system is defined in ONE place.
+# cc#792: one build stamp for every cache-busted asset URL. Same source the service worker uses for
+# its cache name (pwa_endpoints.BUILD_ID), so the two can never drift apart within a deploy.
+_BUILD_ID = (os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:8] or os.getenv("APP_VERSION", "") or VERSION)
+_BUILD_B = _BUILD_ID.encode()
+
 _MOBILE_HEAD = (
     # cc#345/348: set the saved theme SYNCHRONOUSLY before first paint (no flash).
     # cc#348: DEFAULT is now LIGHT (founder 09-Jul) — no saved pick => light.
@@ -228,9 +233,14 @@ _MOBILE_HEAD = (
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     b'<link rel="stylesheet" href="/static/mobile.css">'
     b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
-    b'<script src="/scorr_card_strip.js" defer></script>'  # cc#789: shared C·A·R·D strip — SINGLE SOURCE, load before its consumers
-    b'<script src="/results_card.js" defer></script>'    # cc#573: shared Results R-pill + card (site-wide)
-    b'<script src="/scorr_chart_card.js" defer></script>'  # cc#706: shared V8-type price chart card (site-wide)
+    # cc#792: every shared JS tag carries the deploy build stamp, so a push busts the browser cache
+    # automatically. These are served with Cache-Control max-age=86400, so without a changing URL a
+    # returning client could serve yesterday's bundle for a full day — which is exactly how the
+    # founder saw the pre-cc#779 chart card hours after it deployed. Stamping the URL is the fix that
+    # does not depend on anyone remembering anything at deploy time.
+    + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
+    + b'<script src="/results_card.js?v=' + _BUILD_B + b'" defer></script>'       # cc#573: shared Results R-pill + card
+    + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card
 )
 
 @app.middleware("http")

@@ -924,10 +924,28 @@ def pwa_nav_toggle_js():
     return Response(NAV_TOGGLE_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
+# cc#792: the deploy build stamp. Railway exposes the commit SHA; fall back to APP_VERSION, then to a
+# process-start token so a bare local run still gets a unique value rather than a constant.
+import os as _os_build, time as _time_build
+BUILD_ID = (_os_build.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:8]
+            or _os_build.getenv("APP_VERSION", "")
+            or str(int(_time_build.time())))
+
+
 @router.get("/service_worker.js")
 def pwa_service_worker():
+    """cc#792: the SW cache name now carries the build stamp, so it bumps on EVERY deploy.
+
+    This retires the cc#178 rule that a human must remember to bump scorr-pwa-vN in the same commit
+    as any PWA_JS/SW_JS change. That rule had already failed twice — cc#177 shipped a nav rename
+    without a bump and installed clients served the old nav forever, and the founder saw yesterday's
+    scorr_chart_card.js hours after cc#779 deployed. A convention that must be remembered on every
+    commit is not a safeguard; deriving it from the deploy is. The activate handler already deletes
+    every cache != CACHE, so a changing name is exactly what forces installed clients to drop stale
+    shell assets on their next visit."""
     h = dict(_NOCACHE); h["Service-Worker-Allowed"] = "/"
-    return Response(SW_JS, media_type="application/javascript", headers=h)
+    js = SW_JS.replace("scorr-pwa-v13", "scorr-pwa-" + BUILD_ID)
+    return Response(js, media_type="application/javascript", headers=h)
 
 
 @router.get("/static/manifest.json")
@@ -1014,6 +1032,12 @@ RESULTS_CARD_JS = """
     + '.rcard-exp-v{font-variant-numeric:tabular-nums;font-weight:700}'
     + '.rcard-exp-e{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums}'
     + '.rcard-exp-d{font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}'
+    /* cc#794 — coverage level tag beside the status chip. DETAILED is filled violet so it reads as
+       an earned state; BASIC is a grey outline so it reads as a default, not a failure. */
+    + '.rcard-lvl{display:inline-flex;align-items:center;font:700 9.5px/1 Sora,sans-serif;'
+    + 'text-transform:uppercase;letter-spacing:.07em;padding:4px 8px;border-radius:6px;margin:6px 0 0 6px}'
+    + '.rcard-lvl-d{color:#fff;background:#7a5af8;border:1px solid #7a5af8}'
+    + '.rcard-lvl-b{color:var(--mut,#667085);background:transparent;border:1px solid var(--line,rgba(148,166,210,.35))}'
     /* cc#788 LEVEL 2 — View Detailed gate above the FY27 section */
     + '.rcard-detwrap{margin-top:14px}'
     + '.rcard-detbtn{display:inline-flex;align-items:center;gap:6px;min-height:38px;border:1px solid var(--line,rgba(148,166,210,.28));'
@@ -1317,6 +1341,19 @@ RESULTS_CARD_JS = """
     var a = _qkey(v2.quarter), b = _qkey(cardQuarter);
     return (!a || !b) ? true : (a === b);
   }
+  // cc#794: coverage level at a glance. DETAILED (violet, filled) when a result_analysis_v2 row exists
+  // for this symbol AND quarter; BASIC (grey, outline) otherwise.
+  // It shares v2Matches with the View Detailed button DELIBERATELY — one predicate, two uses, so the
+  // tag and the button can never disagree. A card claiming DETAILED with no button to open, or a
+  // button under a BASIC tag, is exactly the drift this task exists to prevent.
+  function levelTag(d){
+    var on = v2Matches(d && d.v2, d && d.card_quarter);
+    return '<span class=\"' + (on ? 'rcard-lvl rcard-lvl-d' : 'rcard-lvl rcard-lvl-b') + '\" title=\"'
+      + (on ? 'Level 2 — full Scorr analysis written for this quarter'
+            : 'Level 1 — reported numbers, peers and estimate comparison') + '\">'
+      + (on ? 'DETAILED' : 'BASIC') + '</span>';
+  }
+
   function viewDetailedHtml(v2, cardQuarter){
     if (!v2Matches(v2, cardQuarter)) return '';
     var id = 'rcdet_' + Math.abs(String(v2.symbol||'x').split('').reduce(function(a,c){return a*31+c.charCodeAt(0)|0;},7));
@@ -1378,7 +1415,9 @@ RESULTS_CARD_JS = """
        already shows symbol + GVM + status + date, so the expanded body must not repeat them). */
     var h = (opts.header===false) ? '' : ('<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
-      + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
+      + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span>'
+      + levelTag(d)   /* cc#794: BASIC / DETAILED coverage tag, next to the status chip */
+      + '</div>'
       + (opts.close!==false && window.ScorrCardStripHtml ? window.ScorrCardStripHtml(sym,'R') : '')   /* cc#675: host C·A·R·D strip */
       + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>');
     var announced = (status === 'announced' || status === 'announced_no_analysis');
