@@ -299,10 +299,21 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
                                (latest - prev) / prev * 100.0, np.nan)
         return True
 
+    # cc#804 fix (found on the first real load): the profit pair slugs to
+    # profit_after_tax_latest_quarter / profit_after_tax_preceding_quarter, NOT profit_latest_quarter.
+    # The narrower name set never matched, so qoq_profit_growth silently kept the CSV's OWN
+    # precomputed column — which is a different basis. Measured on the 02-Aug load: 1,569 of 1,801
+    # rows carried a qoq_profit_growth contradicting the absolutes in their own row by >1pp, while
+    # qoq_sales_growth (whose names did match) was exact. Both column-name families are listed now,
+    # and the loader reports qoq_*_computed so a silent miss is visible in the response instead of
+    # being discovered a season later.
     qoq_sales_ok = _qoq({"Sales latest quarter", "sales_latest_quarter"},
                         {"Sales preceding quarter", "sales_preceding_quarter"}, "qoq_sales_growth")
-    qoq_profit_ok = _qoq({"Profit latest quarter", "profit_latest_quarter"},
-                         {"Profit preceding quarter", "profit_preceding_quarter"}, "qoq_profit_growth")
+    qoq_profit_ok = _qoq({"Profit latest quarter", "profit_latest_quarter",
+                          "Profit after tax latest quarter", "profit_after_tax_latest_quarter"},
+                         {"Profit preceding quarter", "profit_preceding_quarter",
+                          "Profit after tax preceding quarter", "profit_after_tax_preceding_quarter"},
+                         "qoq_profit_growth")
 
     # ── cc#804: slug every header to a stable identifier, then MAKE THE TABLE MATCH THE FILE.
     # This is the actual fix. The old code intersected a fixed allowlist with the CSV columns AND
