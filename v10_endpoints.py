@@ -260,35 +260,60 @@ def v10_buildup(limit: int = 15):
     NOTE: oi/oi_chg/basis are NULL until the OI feed lands (feed pending)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # cc#819 bug_1 — DAY% was measured from the WRONG ANCHOR. The old `f` CTE took the
+            # session's FIRST futures bar (09:15) as the denominator, so the column reported an
+            # intraday move from the open, not the day change. DIXON on 31-Jul: last bar 13,581
+            # against the 09:15 bar 14,348 = -5.35%, which is exactly the figure the founder saw and
+            # which matches no valid day-change basis. Against the previous session's futures close
+            # (14,138) it is -3.94%, the audited number.
+            #
+            # Worth stating precisely, because the fix follows from it: this was NOT a cross-source
+            # mix. Numerator and denominator both came from futures_basis. Spot's previous close is
+            # 14,338, close to the 14,348 the code used but not equal to it — so the resemblance is
+            # a coincidence, and "wrong table" would have been the wrong diagnosis. It is one source
+            # with the wrong time anchor.
+            #
+            # `pf` is the previous SESSION's last futures close, per the universal pricing rule
+            # (id=2169): one basis, futures vs futures. A symbol with no prior futures close is
+            # dropped rather than silently rebased onto spot — mixing is what caused this.
             cur.execute("""
                 WITH sess AS (
                     SELECT MAX(ts::date) AS d FROM futures_basis
                     WHERE ts::time BETWEEN '09:15' AND '15:30'
                 ),
-                f AS (
-                    SELECT DISTINCT ON (symbol) symbol, futures_close AS o
+                pf AS (
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS pc
                     FROM futures_basis, sess
-                    WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
-                    ORDER BY symbol, ts ASC
+                    WHERE ts::date < sess.d AND ts::time BETWEEN '09:15' AND '15:30'
+                    ORDER BY symbol, ts DESC
                 ),
                 l AS (
                     SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, basis
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
+                ),
+                -- cc#819 bug_2: vol_ratio was hardcoded None in _row(), so the Vol column could
+                -- never populate — on-market or off. v8_metrics.vol_ratio is the same futures
+                -- universe and is already frozen at the last completed session, which is the
+                -- cc#719 freeze behaviour the rest of this row follows.
+                v AS (
+                    SELECT symbol, vol_ratio FROM v8_metrics
+                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
                 )
-                SELECT f.symbol, l.c AS price,
-                       ROUND(((l.c-f.o)/NULLIF(f.o,0)*100)::numeric,2) AS day_1d,
-                       l.oi, l.oi_chg, l.basis
-                FROM f JOIN l USING(symbol)
-                WHERE f.o IS NOT NULL AND l.c IS NOT NULL
+                SELECT l.symbol, l.c AS price,
+                       ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
+                       l.oi, l.oi_chg, l.basis, v.vol_ratio
+                FROM l JOIN pf USING(symbol)
+                LEFT JOIN v ON v.symbol = l.symbol
+                WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
             rows = cur.fetchall()
     except Exception as e:
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
-        sym, price, day_1d, oi, oi_chg, basis = r
+        sym, price, day_1d, oi, oi_chg, basis, vol_ratio = r
         day_1d = float(day_1d) if day_1d is not None else None
         oi_chg = int(oi_chg) if oi_chg is not None else None
         # true buildup needs price + OI; classify only when oi_chg is present
@@ -302,7 +327,8 @@ def v10_buildup(limit: int = 15):
         return {"symbol": sym, "price": float(price) if price is not None else None,
                 "day_1d": day_1d, "oi": int(oi) if oi is not None else None,
                 "oi_chg": oi_chg, "basis": float(basis) if basis is not None else None,
-                "vol_ratio": None, "signal": sig}
+                "vol_ratio": float(vol_ratio) if vol_ratio is not None else None,   # cc#819 bug_2
+                "signal": sig}
 
     data = [_row(r) for r in rows if r[2] is not None]
     longs = sorted(data, key=lambda x: x["day_1d"], reverse=True)[:limit]
