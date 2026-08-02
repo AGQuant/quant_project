@@ -508,12 +508,10 @@ function ivrPushRecent(sym){
 function ivrNodeEl(n){
   const b=document.createElement('button');
   const p=n.action_params||{};
-  const pending=p.stage===2;
   b.className='qchip'+(n.parent_id?'':' quick');
   b.innerHTML=`<span class="qc-ic">${n.icon||(n.parent_id?'›':'◆')}</span>`
-             +`<span class="qc-lb">${n.label}${pending?' <span style="opacity:.55;font-weight:600">· building</span>':''}</span>`;
+             +`<span class="qc-lb">${n.label}</span>`;
   b.title=n.sublabel||n.label;
-  if(pending) b.style.opacity='.62';
   b.onclick=()=>ivrGo(n);
   return b;
 }
@@ -531,8 +529,8 @@ function ivrGo(n){
   // A leaf reached by SEARCH skips the picker its branch would have shown, so the requirement is
   // re-checked here rather than assumed from the path. Without this, tapping a search result for
   // "GVM Report" would fire a query with an empty symbol.
-  const wantsSym=(p.card||/\{sym\}/.test(p.q||''));
-  const wantsSeg=/\{seg\}/.test(p.q||'');
+  const wantsSym=(p.card||p.needs_sym||/\{sym\}/.test(p.q||''));
+  const wantsSeg=(p.needs_seg||/\{seg\}/.test(p.q||''));
   if((wantsSym&&!IVR_CTX.sym)||(wantsSeg&&!IVR_CTX.seg)){
     IVR_PATH=ivrPathTo(n.node_id);
     IVR_PENDING_LEAF=n.node_id;
@@ -558,14 +556,10 @@ function ivrRun(n){
   const p=n.action_params||{};
   if(p.href){ location.href=p.href; return; }
   if(n.action_intent==='learn_glossary'){ ivrAnswerStatic(n.label,p.body||''); return; }
-  if(p.stage===2){
-    ivrAnswerStatic(n.label,
-      '**Building this week.**\n\nThis leaf is in stage 2 of the Max IVR build — its native card '
-      +'template is not written yet, and firing a half-matched query would be worse than saying so.\n\n'
-      +'Everything already tappable answers from the database at **$0**. Use the free-text box below '
-      +'if you need this answer now.');
-    return;
-  }
+  // cc#836 phase B: a leaf with a native card template goes straight to the card dispatch. Still
+  // $0 — /api/max/card is a DB read with no model in the path — and it is ONE endpoint, so a leaf
+  // can never grow its own route to somewhere more expensive.
+  if(n.has_card){ ivrRunCard(n); return; }
   // C/A/R/D leaves open the SHARED flagship card in-page (cc#789 forward rule: never re-implement).
   if(p.card && IVR_CTX.sym){
     const opened=ivrOpenCard(p.card,IVR_CTX.sym);
@@ -576,6 +570,51 @@ function ivrRun(n){
      .replace(/\{seg\}/g,IVR_CTX.seg||'');
   const box=document.getElementById('q');
   if(box){ box.value=q.trim(); send(); }
+}
+
+async function ivrRunCard(n){
+  const p=n.action_params||{};
+  const qs=new URLSearchParams();
+  if(IVR_CTX.sym) qs.set('sym',IVR_CTX.sym);
+  if(IVR_CTX.seg) qs.set('seg',IVR_CTX.seg);
+  if(p.screen_id) qs.set('screen_id',p.screen_id);
+  if(p.cat) qs.set('cat',p.cat);
+  qs.set('node',n.node_id);
+  ivrAnswerStatic(n.label,'_Reading…_');
+  let d=null;
+  try{
+    const r=await fetch('/api/max/card/'+encodeURIComponent(n.action_intent)+'?'+qs.toString());
+    const t=await r.text();
+    try{ d=JSON.parse(t); }catch(e){}
+    if(!d) throw new Error('unreadable card response');
+  }catch(e){
+    ivrAnswerStatic(n.label,'**This card could not be built right now.**\n\n'+String(e&&e.message||e));
+    return;
+  }
+  // Replace the placeholder bubble rather than stacking a second one.
+  const msgs=document.getElementById('msgs');
+  if(msgs&&msgs.lastElementChild) msgs.removeChild(msgs.lastElementChild);
+  if(d.error&&!d.body){ ivrAnswerStatic(n.label,'**'+d.error+'**'); return; }
+  ivrAnswerCard(d.title||n.label, d.body||'');
+}
+
+// A card body is markdown WITH pipe tables, so it renders through the page's full formatter (fmt)
+// rather than the lightweight one — that is what gives it the same table styling as any other Max
+// answer, and what lets the C·A·R·D row strip attach to its symbol column.
+function ivrAnswerCard(title, body){
+  const msgs=document.getElementById('msgs');
+  const w=document.getElementById('welcome');
+  if(w) w.style.display='none';
+  if(!msgs) return;
+  msgs.classList.add('show');
+  const app=document.getElementById('app'); if(app) app.classList.add('chatting');
+  const d=document.createElement('div');
+  d.className='msg bot';
+  d.innerHTML='<div class="av">MAX</div><div class="body"><div class="bubble"><div class="md">'
+    +'<div style="font-weight:800;margin-bottom:6px">'+esc(title)+'</div>'+fmt(body)+'</div></div></div>';
+  msgs.appendChild(d);
+  ivrAttachStrips(d);
+  msgs.scrollTop=msgs.scrollHeight;
 }
 
 function ivrOpenCard(letter,sym){
@@ -720,8 +759,8 @@ function renderWelcome(){
   if(IVR_PENDING_LEAF){
     const leaf=IVR.byId[IVR_PENDING_LEAF];
     const lp=leaf?(leaf.action_params||{}):{};
-    const ok=leaf&&(!(lp.card||/\{sym\}/.test(lp.q||''))||IVR_CTX.sym)
-                &&(!/\{seg\}/.test(lp.q||'')||IVR_CTX.seg);
+    const ok=leaf&&(!(lp.card||lp.needs_sym||/\{sym\}/.test(lp.q||''))||IVR_CTX.sym)
+                &&(!(lp.needs_seg||/\{seg\}/.test(lp.q||''))||IVR_CTX.seg);
     if(ok){ IVR_PENDING_LEAF=null; ivrRun(leaf); return; }
   }
   if(IVR_CTX.sym&&IVR_PATH[0]==='analyze') ivrSymbolHeader(root,IVR_CTX.sym);

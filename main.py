@@ -103,6 +103,7 @@ from fyers_hist_backfill import router as fyers_hist_backfill_router   # cc#377 
 from fundamentals_scraper import router as fundamentals_scraper_router   # cc#361 Phase 1 scrape
 from screeners_endpoints import router as screeners_router   # cc#824 predefined screeners (read-only)
 from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided CIO tree + telemetry
+from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from v13_presets_endpoints import router as v13_presets_router
 from mf_pipeline import router as mf_pipeline_router   # cc#466: V15 MF Intelligence data layer
 from galaxy_endpoints import router as galaxy_router
@@ -445,6 +446,7 @@ app.include_router(hr_router)   # cc#398 Portfolio Health Report (ingest)
 app.include_router(hr_report_router)   # cc#398 Portfolio Health Report (report engine)
 app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report white-label PDF
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
+app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
