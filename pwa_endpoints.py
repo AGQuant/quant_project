@@ -1040,6 +1040,12 @@ RESULTS_CARD_JS = """
     + '.rcard-exp-v{font-variant-numeric:tabular-nums;font-weight:700}'
     + '.rcard-exp-e{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums}'
     + '.rcard-exp-d{font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}'
+    /* cc#802 — category tags on the merged news stream. AI Editorial is the long-form worth expanding;
+       Stock Views is a distinct editorial product. Domestic shorts carry no tag (they are the default). */
+    + '.rcard-cat{display:inline-block;font:700 8.5px/1 Sora,sans-serif;text-transform:uppercase;'
+    + 'letter-spacing:.07em;padding:3px 6px;border-radius:4px;margin-left:7px;vertical-align:middle}'
+    + '.rcard-cat-ai{color:#7a5af8;background:rgba(122,90,248,.12);border:1px solid rgba(122,90,248,.32)}'
+    + '.rcard-cat-sv{color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.38)}'
     /* cc#797 L1 block — absolutes first, deltas trailing, traffic light on the delta only */
     + '.rcard-av{font:600 13px/1.5 Sora,sans-serif;margin:0 0 10px;color:var(--txt,#101828)}'
     + '.rcard-l1row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:7px;font-size:12.5px}'
@@ -1281,7 +1287,6 @@ RESULTS_CARD_JS = """
       + (v2.polished_at ? '<div class=\"rcard-note\">'+esc(v2.basis||'Scorr editorial')+' &middot; '+fmtDate(v2.polished_at)+'</div>' : '');
   }
 
-  var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
   // cc#623: FY27 Est. Growth — from input_raw.fy27_growth (Sonnet on Trendlyne consensus).
   // cc#788 LEVEL 1: BENCHMARKED. The bare "+13%" said nothing on its own; it is now shown against
   // the actual so the reader can see whether the company is tracking to consensus. `actual` is the
@@ -1421,16 +1426,9 @@ RESULTS_CARD_JS = """
   }
   // cc#623/cc#650: RAW headlines (last 7 days) — headline + source + date only, date desc; no
   // summaries; hidden when empty. Capped server-side at the latest 10 so the card stays scannable.
-  function rawNewsHtml(items){
-    if (!items || !items.length) return '';
-    var h = '<div class=\"rcard-lbl\">Raw headlines &middot; last 7 days'+RAW_CHIP+'</div>';
-    for (var i=0;i<items.length;i++){ var it=items[i];
-      var line = it.url ? '<a href=\"'+esc(it.url)+'\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--txt,#1c2536);text-decoration:none\">'+esc(it.headline)+'</a>' : esc(it.headline);
-      h += '<div style=\"font-size:12.5px;line-height:1.5;margin-bottom:6px\">'+line
-        + '<div class=\"rcard-note\" style=\"margin-top:1px\">'+esc(it.source||'')+(it.published_at?' &middot; '+fmtDate(it.published_at):'')+'</div></div>';
-    }
-    return h;
-  }
+  // cc#802: rawNewsHtml DELETED — the card must not render external links, and leaving a
+  // working renderer behind is an invitation to re-add the section. Raw news remains
+  // available to the editorial desk and funnel 2; it just never reaches this surface.
   // cc#623: POLISHED news (last 1 month, via polished_news.mentioned_symbols) — headline + summary +
   // source; date desc; hidden when empty. Intel-tab quality.
   function polNewsHtml(items){
@@ -1439,13 +1437,21 @@ RESULTS_CARD_JS = """
     // first ~160 chars of summary + a >=44px "View more" affordance that expands THAT item inline to
     // the full summary (delegated click handler below). AI Editorial items are collapsed too: their
     // full body NEVER renders expanded by default. cc#625 fix_1: rule + gap above the header.
-    var h = '<div class=\"rcard-lbl\">Polished news &middot; last 30 days</div>';   // cc#676: now the shared SectionSeparator
+    // cc#802: ONE merged stream, newest first — Domestic shorts, AI Editorial long-form and Stock
+    // Views together, each tagged, rather than three sections the reader has to reconcile. Backend
+    // already excludes Global and IPO (market-wide, not company news). No item carries a link.
+    var h = '<div class=\"rcard-lbl\">News &middot; last 30 days</div>';   // cc#676: shared SectionSeparator
     for (var i=0;i<items.length;i++){ var it=items[i];
       var sum = it.summary || '';
       var over = sum.length > 160;
       var brief = over ? (esc(sum.slice(0,160).replace(/\\s+\\S*$/,'')) + '&hellip;') : esc(sum);
+      var cat = it.category || '';
+      // AI Editorial is the 2000+ char long-form: tag it so the reader knows the body is worth the
+      // expand, and so it is distinguishable from a wire short at a glance.
+      var tag = cat === 'AI Editorial' ? '<span class=\"rcard-cat rcard-cat-ai\">AI EDITORIAL</span>'
+              : cat === 'Stock Views'  ? '<span class=\"rcard-cat rcard-cat-sv\">STOCK VIEW</span>' : '';
       h += '<div class=\"rcard-pol-item\" style=\"margin-bottom:11px\">'
-        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+'</div>';
+        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+tag+'</div>';
       if (sum){
         h += '<div class=\"rcard-pol-brief rcard-body\" style=\"margin-top:3px\">'+brief+'</div>';
         if (over){
@@ -1517,7 +1523,11 @@ RESULTS_CARD_JS = """
     }
     // cc#650 order: Result/FY27 (peer line now merged INTO the result block above per cc#697) -> RAW
     // headlines (7 days, headlines only) -> POLISHED news LAST (collapsed per item).
-    h += rawNewsHtml(d && d.raw_news);       // cc#650: RAW headlines, last 7 days
+    // cc#802: the RAW headlines section is REMOVED from the card. Its items linked out to
+    // GuruFocus/scanx and carried duplicates, so it leaked users off-site from a Scorr surface
+    // and showed the same story twice. Raw stays internal fuel only (funnel 2, editorial desk).
+    // There is deliberately NO fallback to raw when polished is empty — an empty section is
+    // hidden entirely, because a link-out is worse than a shorter card.
     h += polNewsHtml(d && d.polished_news);  // cc#650: POLISHED news LAST, collapsed + view-more
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));

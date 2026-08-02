@@ -287,14 +287,23 @@ def _polished_by_symbol(cur, sym, days=30):
     symbol-section query — polished_news where the symbol is in mentioned_symbols. cc#625 fix_2: the
     1-month window is driven by the ARTICLE's published_time (not polished_at, which is when WE polished
     it and drifts — an old article polished today would masquerade as fresh). Date-sorted desc."""
+    # cc#802 CATEGORY SCOPE (founder correction supersedes the earlier amendment): company news lives
+    # under Domestic, so shorts are DOMESTIC ONLY — Global and IPO are deliberately NOT pulled into a
+    # company card. AI Editorial long-form and Stock Views ride the same stream, tagged, so the reader
+    # gets one merged feed newest-first rather than three sections to reconcile.
+    # Live category counts when this shipped: Domestic 1600, Global 732, AI Editorial 441, IPO 176,
+    # Stock Views 5 — so this filter removes ~900 items that are market-wide, not company news.
     cur.execute("""
-        SELECT headline_clean, COALESCE(full_summary, summary) AS summary, source, published_time
+        SELECT headline_clean, COALESCE(full_summary, summary) AS summary, source, published_time,
+               category, summary AS short_summary
         FROM polished_news
         WHERE %s = ANY(mentioned_symbols) AND published_time >= NOW() - make_interval(days => %s)
+          AND category IN ('Domestic', 'AI Editorial', 'Stock Views')
         ORDER BY published_time DESC, id DESC
         LIMIT 15""", (sym, days))
     return [{"headline": r[0], "summary": r[1], "source": r[2],
-             "published_time": r[3].isoformat() if r[3] else None} for r in cur.fetchall()]
+             "published_time": r[3].isoformat() if r[3] else None,
+             "category": r[4], "short_summary": r[5]} for r in cur.fetchall()]
 
 
 def _conn():
