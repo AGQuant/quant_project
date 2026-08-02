@@ -221,7 +221,15 @@ _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 # bootstrap, so no page is missed and the design system is defined in ONE place.
 # cc#792: one build stamp for every cache-busted asset URL. Same source the service worker uses for
 # its cache name (pwa_endpoints.BUILD_ID), so the two can never drift apart within a deploy.
-_BUILD_ID = (os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:8] or os.getenv("APP_VERSION", "") or VERSION)
+#
+# cc#821: this is now IMPORTED from pwa_endpoints rather than recomputed. The comment above already
+# claimed the two shared a source; they did not. Both read RAILWAY_GIT_COMMIT_SHA then APP_VERSION,
+# but the final fallback differed — pwa used a process-start token, main.py used the VERSION
+# constant. On any deploy where Railway does not expose the SHA to the runtime, main.py's asset
+# stamps would freeze at a constant across every deploy (so max-age=86400 assets never bust) while
+# the service-worker cache name still rotated. Same intent, opposite behaviour, and only visible in
+# production. Importing removes the possibility rather than re-stating the rule in two places.
+from pwa_endpoints import BUILD_ID as _BUILD_ID   # noqa: E402  (single source, see above)
 _BUILD_B = _BUILD_ID.encode()
 
 _MOBILE_HEAD = (
@@ -261,6 +269,28 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_cockpit_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#805: shared Derivative Cockpit (letter D)
 )
 
+def _find_outside_comments(hay: bytes, needle: bytes) -> int:
+    """cc#821: index of `needle` in `hay`, ignoring occurrences inside an HTML comment.
+
+    Injecting shared assets by substring-matching a tag name is only safe if prose can never look
+    like markup — and it can. A cc#805 comment in v8_dashboard.html that mentioned a closing-head
+    tag caused the entire shared-asset block to be injected inside that comment, disabling the theme
+    and every C·A·R·D card in production. Returns -1 when every occurrence is commented out."""
+    pos = 0
+    while True:
+        i = hay.find(needle, pos)
+        if i < 0:
+            return -1
+        c_open = hay.rfind(b"<!--", 0, i)
+        if c_open < 0:
+            return i                      # no comment opens before it -> real markup
+        c_close = hay.find(b"-->", c_open)
+        if c_close < 0 or c_close > i:
+            pos = i + 1                   # sits inside that comment -> keep looking
+            continue
+        return i                          # the comment closed before it -> real markup
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     if request.url.path in PROTECTED and not _is_authed(request):
@@ -290,12 +320,23 @@ async def auth_gate(request: Request, call_next):
             # cached bundle the way an unstamped max-age=86400 URL would.
             body = body.replace(b'src="/scorr_card_common.js"',
                                 b'src="/scorr_card_common.js?v=' + _BUILD_B + b'"')
-            # cc#327: shared mobile design system into <head> (fallback: before </body>)
+            # cc#327: shared mobile design system into <head> (fallback: end of document)
+            # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
+            # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal
+            # string. The test matched it, and all six shared tags plus the mobile.css link were
+            # injected INSIDE that comment, where they are inert. One cause, all three reported
+            # symptoms: no mobile.css so the light theme never applied; no scorr_card_strip/chart/
+            # analysis/cockpit so C fell back to the page-local overlay while A/R/D opened nothing
+            # (their local definitions having moved out in cc#805); and it is why cc#816's stamp
+            # changed nothing — a commented-out tag cannot be cache-busted.
+            # Matches inside HTML comments are now skipped, so no future comment can disable the
+            # entire shared-asset layer by mentioning a tag name.
             if b'href="/static/mobile.css"' not in body:
-                if b"</head>" in body:
-                    body = body.replace(b"</head>", _MOBILE_HEAD + b"</head>", 1)
-                else:
-                    body = body.replace(b"</body>", _MOBILE_HEAD + b"</body>", 1)
+                _at = _find_outside_comments(body, b"</head>")
+                if _at < 0:
+                    _at = _find_outside_comments(body, b"</body>")
+                if _at >= 0:
+                    body = body[:_at] + _MOBILE_HEAD + body[_at:]
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"

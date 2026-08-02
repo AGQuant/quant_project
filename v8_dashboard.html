@@ -792,10 +792,16 @@
      Guarded at render time (if(!window.Chart)) so a CDN hiccup never breaks the dashboard. -->
 <!-- cc#805 LOAD ORDER — DO NOT REMOVE OR ADD defer. scorr_card_common.js owns num/sign/
      getJSON/newsEsc and the shared card primitives that used to be defined in the block below. The
-     site-wide injection of this file (main.py _MOBILE_HEAD) is `defer` and, because this document has
-     no </head>, lands at the END of <body> — after the inline scripts here have already run
-     loadAll()/loadNews()/loadDataIntegrity() at parse time. This blocking tag is what makes those
-     parse-time calls resolve. The file is an idempotent IIFE, so loading it twice is free. -->
+     site-wide injection of this file (main.py _MOBILE_HEAD) is `defer` and, because this document
+     carries no closing-head tag, lands at the end of the document — after the inline scripts here
+     have already run loadAll()/loadNews()/loadDataIntegrity() at parse time. This blocking tag is
+     what makes those parse-time calls resolve. The file is an idempotent IIFE, so loading it twice
+     is free.
+     cc#821 — NEVER write a literal closing-head or closing-body tag inside a comment in this file.
+     auth_gate searched the raw bytes for one to decide where to inject _MOBILE_HEAD; the previous
+     wording of this very comment contained one, so all six shared tags were injected INSIDE this
+     comment and silently did nothing in production. auth_gate now ignores matches inside comments,
+     but do not rely on that alone. -->
 <script src="/scorr_card_common.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
