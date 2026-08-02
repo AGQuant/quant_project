@@ -194,14 +194,103 @@ def _fetch_soup(symbol):
             _c.close()
     except Exception as _ge:
         log.warning(f"cc#741 universe gate check failed for {sym} (fail-open): {_ge}")
-    for cons, path in ((True, f"{BASE}{sym}/consolidated/"), (False, f"{BASE}{sym}/")):
+    # cc#793 STANDALONE FALLBACK. The old test was "does this page have a profit-loss section",
+    # which the consolidated view passes even when it is a FROZEN RELIC. Colgate stopped consolidated
+    # reporting in 2010, so screener.in/company/COLPAL/consolidated/ still serves a real page — with
+    # annuals ending Mar 2010 and an EMPTY quarterly table — and the old check accepted it and never
+    # looked at standalone, where the current data actually lives. Confirmed live by Claude web; the
+    # parser was correct all along, it was being handed the wrong view. Same class: BAYERCROP (2006),
+    # TATAELXSI (2015), 3MINDIA (2024).
+    #
+    # The view is now chosen on QUALITY, not mere existence: a view carrying quarterly rows beats one
+    # that does not, and among equals the fresher annual history wins. The remembered preference is
+    # tried first so a symbol already known to need standalone costs ONE fetch, not two.
+    order = [(True, f"{BASE}{sym}/consolidated/"), (False, f"{BASE}{sym}/")]
+    pref = _get_view_pref(sym)
+    if pref == "standalone":
+        order.reverse()
+    best = (None, None, None)      # (soup, cons, quality)
+    for cons, path in order:
         r = _fetch(path)
         if r is None or r.status_code != 200 or "data-table" not in r.text:
             continue
         soup = BeautifulSoup(r.text, "lxml")
-        if soup.find("section", id="profit-loss"):
+        if not soup.find("section", id="profit-loss"):
+            continue
+        q = _page_quality(soup)
+        if q["quarter_rows"]:
+            # a view with real quarterly data is decisive — take it and stop fetching
+            if cons is False and pref != "standalone":
+                _set_view_pref(sym, "standalone",
+                               "consolidated view carried no quarterly rows; standalone does (cc#793)")
+            elif cons is True and pref == "standalone":
+                _set_view_pref(sym, "consolidated", "consolidated view carries quarterly rows again (cc#793)")
             return soup, cons
+        if best[0] is None or q["newest_annual"] > (best[2] or {}).get("newest_annual", ""):
+            best = (soup, cons, q)
+    if best[0] is not None:
+        log.warning(f"cc#793 {sym}: neither view carried quarterly rows — using "
+                    f"{'consolidated' if best[1] else 'standalone'} (newest annual "
+                    f"{best[2].get('newest_annual') or 'n/a'})")
+        return best[0], best[1]
     return None, None
+
+
+def _page_quality(soup):
+    """cc#793: how usable is this view? quarter_rows is the decisive signal — a view whose quarterly
+    table is empty cannot produce a running quarter no matter how well it parses."""
+    q = _parse_section(soup, "quarters", "quarter")
+    ann = _parse_section(soup, "profit-loss", "annual")
+    newest = ""
+    for r in ann:
+        pe = r.get("period_end")
+        if pe and str(pe) > newest:
+            newest = str(pe)
+    return {"quarter_rows": len(q), "annual_rows": len(ann), "newest_annual": newest}
+
+
+def _ensure_view_pref_table(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS fundamentals_view_pref (
+        symbol text PRIMARY KEY, view text NOT NULL, reason text,
+        decided_at timestamptz DEFAULT now())""")
+
+
+def _get_view_pref(symbol):
+    """Remembered per-symbol view ('consolidated' | 'standalone'), or None."""
+    try:
+        import fyers_feed
+        c = fyers_feed.get_db()
+        try:
+            with c.cursor() as cur:
+                _ensure_view_pref_table(cur)
+                cur.execute("SELECT view FROM fundamentals_view_pref WHERE symbol=%s", (symbol,))
+                r = cur.fetchone()
+            c.commit()
+            return r[0] if r else None
+        finally:
+            c.close()
+    except Exception as e:
+        log.warning(f"_get_view_pref {symbol}: {e}")
+        return None
+
+
+def _set_view_pref(symbol, view, reason=""):
+    try:
+        import fyers_feed
+        c = fyers_feed.get_db()
+        try:
+            with c.cursor() as cur:
+                _ensure_view_pref_table(cur)
+                cur.execute("""INSERT INTO fundamentals_view_pref (symbol, view, reason, decided_at)
+                               VALUES (%s,%s,%s,NOW())
+                               ON CONFLICT (symbol) DO UPDATE SET view=EXCLUDED.view,
+                                 reason=EXCLUDED.reason, decided_at=NOW()""", (symbol, view, reason[:400]))
+            c.commit()
+            log.info(f"cc#793 {symbol}: fetch view -> {view} ({reason})")
+        finally:
+            c.close()
+    except Exception as e:
+        log.warning(f"_set_view_pref {symbol}: {e}")
 
 
 def fetch_company(symbol):
