@@ -955,10 +955,26 @@ def _pnl_facts(cur, symbol, quarter):
     if not pe:
         return None
     prior = date(pe.year - 1, pe.month, pe.day)   # quarter ends are 30/31 — no Feb-29 hazard
+    # cc#793 fallout: a symbol can now hold BOTH bases — a stale consolidated series left over from
+    # when the company stopped consolidated reporting, and the current standalone one. TATAELXSI's
+    # consolidated series ends 2015-03-31 while its standalone reaches Q1FY27. Reading both and
+    # letting whichever row arrives last win would compare ops against an ABANDONED basis and
+    # manufacture conflicts that do not exist.
+    # So: pick the basis that actually carries the target quarter, and use that SAME basis for the
+    # year-ago comparator too — a YoY computed across two different bases is not a real growth rate.
     try:
+        cur.execute("""SELECT consolidated FROM fundamentals_history
+                       WHERE symbol=%s AND section='quarters' AND period_type='quarter'
+                         AND period_end=%s
+                       ORDER BY consolidated NULLS LAST LIMIT 1""", (symbol, pe))
+        b = cur.fetchone()
+        if not b:
+            return None
+        basis = b[0]
         cur.execute("""SELECT period_end, metrics FROM fundamentals_history
                        WHERE symbol=%s AND section='quarters' AND period_type='quarter'
-                         AND period_end IN (%s,%s)""", (symbol, pe, prior))
+                         AND period_end IN (%s,%s)
+                         AND consolidated IS NOT DISTINCT FROM %s""", (symbol, pe, prior, basis))
         rows = {r[0]: (r[1] or {}) for r in cur.fetchall()}
     except Exception as e:
         log.warning(f"_pnl_facts {symbol}/{quarter}: {e}")
