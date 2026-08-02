@@ -6,8 +6,8 @@ results_endpoints.py) is a data-driven quarter card:
 
     Q1 FY27 · <Company>
 
-    <emoji> Sales   +x% QoQ  +y% YoY  (Sector s%)
-    <emoji> PAT     +x% QoQ  +y% YoY  (Sector s%)
+    <emoji> Sales   +y% YoY  +x% QoQ  (Sector s%)     # cc#823: YoY leads, QoQ trails
+    <emoji> PAT     +y% YoY  +x% QoQ  (Sector s%)
     <emoji> Margins  m% vs l% LY
     <emoji> PE       p x vs q x sector
 
@@ -73,9 +73,23 @@ def _qkey(card_text):
 
 
 def _sign(v, plus=True):
+    """cc#823: GROWTH/CHANGE -> exactly ONE decimal, matching the R card's RESULTS_CARD_JS _grow().
+    Both layers render the same numbers; if only one obeyed the contract the stored header text and
+    the rendered blocks would disagree on the same figure."""
     if v is None:
         return "n/a"
-    return f"{'+' if v >= 0 and plus else ''}{v}%"
+    return f"{'+' if v >= 0 and plus else ''}{float(v):.1f}%"
+
+
+def _lvl(v, unit=""):
+    """cc#823: ABSOLUTE LEVELS (margin %, PE x) -> integer, no decimals. Mirrors _absN()/_lvl() in
+    RESULTS_CARD_JS. Rounds, never truncates."""
+    if v is None:
+        return "n/a"
+    try:
+        return f"{round(float(v)):,}{unit}".replace(",", ",")
+    except (TypeError, ValueError):
+        return "n/a"
 
 
 def _emoji_vs(v, sector, higher_good=True):
@@ -134,8 +148,8 @@ def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
         f"{qlabel} · {company}   (limited review)", "",
         f"{e_sales} Sales    {_sign(s_yoy) if s_yoy is not None else 'n/a'} YoY",
         f"{e_pat} PAT      {_sign(p_yoy) if p_yoy is not None else 'n/a'} YoY",
-        f"{e_marg} Margins  {_sign(opm, plus=False) if opm is not None else 'n/a'} vs {_sign(opm_ly, plus=False) if opm_ly is not None else 'n/a'} LY",
-        f"{e_pe} PE       {(str(pe_raw) + 'x') if pe_raw is not None else 'n/a'} vs {(str(pe_peer) + 'x') if pe_peer is not None else 'n/a'} sector",
+        f"{e_marg} Margins  {_lvl(opm, '%')} vs {_lvl(opm_ly, '%')} LY",              # cc#823: levels -> integer
+        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_peer, 'x')} sector",           # cc#823: levels -> integer
         "", verdict_line,
         "Limited review. Detailed review available once concall and investor presentation are updated.",
     ]
@@ -286,14 +300,18 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     def line(emoji, label, a, b, blabel, sector):
         # cc#625 fix_3(c): sector figure carries same-quarter coverage, e.g. "(Sector +46.7% · 8/23 reported)".
         secpart = f"  (Sector {_sign(sector)}{sec_cov_str})" if sector is not None else ""
-        return f"{emoji} {label:<7} {_sign(a):>7} QoQ  {_sign(b):>7} {blabel}{secpart}"
+        # cc#823 rule_1: YoY LEADS, QoQ demoted to the trailing secondary. `a` is QoQ and `b` is
+        # YoY at every call site, so the swap is here rather than at the callers. The traffic-light
+        # emoji already keys off YoY (see _emoji_vs calls above), so colour and headline figure now
+        # describe the same thing.
+        return f"{emoji} {label:<7} {_sign(b):>7} {blabel}  {_sign(a):>7} QoQ{secpart}"
 
     parts = [
         f"{qlabel} · {company}", "",
         line(e_sales, "Sales", s_qoq, s_yoy, "YoY", sec_sales),
         line(e_pat, "PAT", p_qoq, p_yoy, "YoY", sec_pat),
-        f"{e_marg} Margins  {_sign(opm, plus=False) if opm is not None else 'n/a'} vs {_sign(opm_ly, plus=False) if opm_ly is not None else 'n/a'} LY",
-        f"{e_pe} PE       {(str(pe_raw)+'x') if pe_raw is not None else 'n/a'} vs {(str(pe_peer)+'x') if pe_peer is not None else 'n/a'} sector",
+        f"{e_marg} Margins  {_lvl(opm, '%')} vs {_lvl(opm_ly, '%')} LY",              # cc#823: levels -> integer
+        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_peer, 'x')} sector",           # cc#823: levels -> integer
         "", verdict_line, rev_line, marg_line,
     ]
     return "\n".join(parts)

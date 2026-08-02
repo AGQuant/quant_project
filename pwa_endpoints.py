@@ -1199,11 +1199,11 @@ RESULTS_CARD_JS = """
     if(!pc) return '';
     function row(lbl, o){
       if(!o || o.peer==null) return '';
-      var st=(o.stock!=null?o.stock+'%':'--');
+      var st=(_grow(o.stock)||'--');   // cc#823: peer YoY growth -> one decimal
       var beat=o.beat, cls=beat?'rcard-beat':'rcard-miss', tag=beat?'BEAT':'MISS';
       return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+' YoY</span>'
         +'<span class=\"rcard-peer-v\">'+esc(st)+'</span>'
-        +'<span class=\"rcard-peer-p\">Top-'+(pc.peer_count||0)+' peers '+esc(o.peer+'%')+'</span>'
+        +'<span class=\"rcard-peer-p\">Top-'+(pc.peer_count||0)+' peers '+esc(_grow(o.peer)||'--')+'</span>'
         +'<span class=\"'+cls+'\">'+tag+'</span></div>';
     }
     var body=row('Sales',pc.sales)+row('PAT',pc.profit);
@@ -1225,15 +1225,18 @@ RESULTS_CARD_JS = """
   // Margin vs LY | move % on result day). Only reported peers carry figures (cc#765 validated gate);
   // unreported peers render greyed with their expected date. Collapsed by default, per-card state via a
   // delegated toggle (below). pr.peers is already GVM-desc from the backend.
-  function _pct(v){ return v==null?'--':((v>=0?'+':'')+v+'%'); }
+  // cc#823: routed through the ONE contract rather than its own formatter — this is exactly the
+  // kind of near-duplicate that drifts. Growth -> one decimal.
+  function _pct(v){ return _grow(v) || '--'; }
   function peerResultsHtml(pr){
     if(!pr || !pr.n_reported) return '';
     var rows='';
     for(var i=0;i<pr.peers.length;i++){ var p=pr.peers[i];
       if(p.reported){
-        var mv=p.move_pct, mvs=mv==null?'--':((mv>=0?'+':'')+mv+'%');
+        var mv=p.move_pct, mvs=(_grow(mv)||'--');   // cc#823: result-day move is a change -> one decimal
         var mvc=mv==null?'var(--mut,#667085)':(mv>=0?'#0f9d58':'#d0433b');
-        var marg=(p.margin!=null&&p.margin_ly!=null)?(esc(p.margin+'% vs '+p.margin_ly+'%')):'--';
+        // cc#823: margin LEVELS are absolutes -> integer.
+        var marg=(p.margin!=null&&p.margin_ly!=null)?(esc(_lvl(p.margin,'%')+' vs '+_lvl(p.margin_ly,'%'))):'--';
         rows+='<tr><td class=\"rcard-pr-nm\" title=\"'+esc(p.name)+'\">'+esc(p.name)+'</td>'
           +'<td>'+fmtDate(p.result_date)+'</td>'
           +'<td style=\"text-align:right\">'+_pct(p.sales_yoy)+'</td>'
@@ -1307,7 +1310,7 @@ RESULTS_CARD_JS = """
   // Quarterly hit/miss now lives ONLY in the vs-est block (cc#796), which compares like with like.
   function fy27Html(g){
     if (g == null) return '';
-    var s = (g>=0?'+':'')+esc(g)+'%';
+    var s = esc(_grow(g) || '--');   // cc#823: growth -> exactly one decimal
     var col = g>=0 ? '#0f9d58' : '#d0433b';
     return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
       + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>'
@@ -1322,35 +1325,67 @@ RESULTS_CARD_JS = """
   // so a bank shows "Financing Margin" and an insurer shows no margin row at all rather than an
   // empty one.
   function _sign(v){ return v==null ? 'var(--mut,#667085)' : (v>0 ? '#0f9d58' : (v<0 ? '#d0433b' : 'var(--mut,#667085)')); }
-  function _pc(v){ return v==null ? '--' : ((v>=0?'+':'')+esc(v)+'%'); }
+
+  // cc#823 NUMBER FORMAT CONTRACT — ONE place, used by every numeral on this card, so the metric
+  // header text and the rendered blocks cannot drift into different precisions.
+  //   _absN  absolutes  -> integer, Indian digit grouping, no decimals  (4,921 / 87 / 34)
+  //   _grow  growth/change -> exactly ONE decimal, signed               (+54.8% / -3.0%)
+  // Rounding, never truncation: Math.round and toFixed(1) both round, so 87.33 -> 87 and
+  // 54.85 -> 54.9 rather than 54.8. The founder's rule is that an absolute reads as a quantity and
+  // a growth figure reads as a rate; two decimals on either is noise on a card this dense.
+  function _absN(v){
+    if (v==null || v==='' || isNaN(Number(v))) return null;
+    // en-IN gives the 4,921 / 12,34,567 lakh-crore grouping the founder asked for.
+    try { return Math.round(Number(v)).toLocaleString('en-IN'); }
+    catch(e){ return String(Math.round(Number(v))); }
+  }
+  function _grow(v){
+    if (v==null || v==='' || isNaN(Number(v))) return null;
+    var n = Number(v);
+    return (n>=0?'+':'') + n.toFixed(1) + '%';
+  }
+  function _pc(v){ var s=_grow(v); return s==null ? '--' : s; }   // growth cells (kept name, new contract)
+  function _lvl(v, unit){ var s=_absN(v); return s==null ? '--' : (s + (unit||'')); }   // levels: %, x, plain
   function l1Html(l1, verdict){
     if (!l1) return '';
     var h = '<div class=\"rcard-lbl\">Quarter'+(l1.quarter_label?' &middot; '+esc(l1.quarter_label):'')+'</div>';
     if (verdict) h += '<div class=\"rcard-av\">'+esc(verdict)+'</div>';
+    // cc#823 rule_1: YoY LEADS, QoQ is the trailing secondary. A single quarter against the prior
+    // quarter is seasonal noise for most of this universe; against the same quarter last year it is
+    // a business read. The order on the row is the editorial claim, so YoY goes first.
+    // cc#823 rule_2/3: the Rs value is an absolute -> integer with Indian grouping (Rs4,921 Cr).
     function moneyRow(lbl, o){
       if (!o || o.value==null) return '';
+      var val = _absN(o.value);
       return '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+lbl+'</span>'
-        + '<span class=\"rcard-l1v\">&#8377;'+esc(o.value)+' Cr</span>'
-        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.qoq)+'\">QoQ '+_pc(o.qoq)+'</span>'
-        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.yoy)+'\">YoY '+_pc(o.yoy)+'</span></div>';
+        + '<span class=\"rcard-l1v\">&#8377;'+esc(val==null?o.value:val)+' Cr</span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.yoy)+'\">YoY '+_pc(o.yoy)+'</span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.qoq)+'\">QoQ '+_pc(o.qoq)+'</span></div>';
     }
     h += moneyRow('Sales', l1.sales) + moneyRow('PAT', l1.pat);
     var m = l1.margin;
     if (m && m.now!=null){
+      // cc#823: margin LEVELS are absolutes -> integer (34% vs 32% LY). The pp DELTA is a change
+      // -> one decimal, same rule as growth.
       h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+esc(m.label)+'</span>'
-        + '<span class=\"rcard-l1v\">'+esc(m.now)+'%</span>'
-        + '<span class=\"rcard-l1d\">vs LY '+(m.ly==null?'--':esc(m.ly)+'%')+'</span>'
+        + '<span class=\"rcard-l1v\">'+esc(_lvl(m.now,'%'))+'</span>'
+        + '<span class=\"rcard-l1d\">vs LY '+esc(_lvl(m.ly,'%'))+'</span>'
         + '<span class=\"rcard-l1d\" style=\"color:'+_sign(m.pp)+'\">'
-        + (m.pp==null?'--':((m.pp>=0?'+':'')+esc(m.pp)+'pp'))+'</span></div>';
+        + (m.pp==null?'--':((m.pp>=0?'+':'')+esc(Number(m.pp).toFixed(1))+'pp'))+'</span></div>';
     }
     var v = l1.valuation || {};
     if (v.pe!=null || v.industry_pe!=null){
-      var prem = (v.pe!=null && v.industry_pe) ? Math.round((v.pe/v.industry_pe-1)*100) : null;
+      // cc#823: NOT pre-rounded — _grow owns the precision. Rounding to an integer here and then
+      // formatting to one decimal would print a fabricated ".0" on a number that was never measured
+      // to that precision.
+      var prem = (v.pe!=null && v.industry_pe) ? ((v.pe/v.industry_pe-1)*100) : null;
+      // cc#823: PE and industry PE are LEVELS -> integer (87x vs 34x, not 87.33x vs 33.54x).
+      // The premium is a change vs the sector -> one decimal.
       h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">Valuation</span>'
-        + '<span class=\"rcard-l1v\">PE '+(v.pe==null?'--':esc(v.pe))+'</span>'
-        + '<span class=\"rcard-l1d\">industry '+(v.industry_pe==null?'--':esc(v.industry_pe))+'</span>'
+        + '<span class=\"rcard-l1v\">PE '+esc(_lvl(v.pe,'x'))+'</span>'
+        + '<span class=\"rcard-l1d\">industry '+esc(_lvl(v.industry_pe,'x'))+'</span>'
         + (prem==null ? '' : '<span class=\"rcard-l1d\" style=\"color:'+_sign(-prem)+'\">'
-             + (prem>=0?'+':'')+esc(prem)+'% vs industry</span>')
+             + esc(_grow(prem))+' vs industry</span>')
         + '</div>';
     }
     return h;
@@ -1371,11 +1406,15 @@ RESULTS_CARD_JS = """
     function row(lbl, o){
       if (!o) return '';
       var cls = o.tag==='BEAT' ? 'rcard-hit' : (o.tag==='MISS' ? 'rcard-missed' : 'rcard-inline');
-      var dev = (o.dev_pct>=0?'+':'')+esc(o.dev_pct)+'%';
+      // cc#823: actual and expected are ABSOLUTES -> integer + Indian grouping; the deviation is a
+      // change -> one decimal. The BEAT/IN-LINE/MISS bands still key off the raw value, so trimming
+      // display precision cannot move a row across a band boundary.
+      var dev = _grow(o.dev_pct) || '--';
       var col = o.dev_pct>2 ? '#0f9d58' : (o.dev_pct<-2 ? '#d0433b' : 'var(--mut,#667085)');
+      var _a = _absN(o.actual), _e = _absN(o.expected);
       return '<div class=\"rcard-exp-row\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
-        + '<span class=\"rcard-exp-v\">'+esc(o.actual)+'</span>'
-        + '<span class=\"rcard-exp-e\">vs est. '+esc(o.expected)+'</span>'
+        + '<span class=\"rcard-exp-v\">'+esc(_a==null?o.actual:_a)+'</span>'
+        + '<span class=\"rcard-exp-e\">vs est. '+esc(_e==null?o.expected:_e)+'</span>'
         + '<span class=\"rcard-exp-d\" style=\"color:'+col+'\">'+dev+'</span>'
         + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span></div>';
     }
