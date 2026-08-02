@@ -890,6 +890,153 @@ def run_extraction(symbol, sector, registry, pres_text, trans_text, quarter_hint
             "model_used": model_used, "usage": usages}
 
 
+# ── 5b. P&L RECONCILIATION (cc#786) ─────────────────────────────────────────────
+# WHY THIS EXISTS. _merge_pass() sets confidence purely on whether the presentation and the
+# transcript agree with EACH OTHER, and write_extraction never wrote discrepancy_flag at all.
+# So two consistent-but-wrong extractions validate each other and land as confidence=HIGH with
+# discrepancy_flag=false — the QA was structurally incapable of catching a wrong number.
+#
+# Measured 02-Aug-2026 (denominators stated per UNIVERSE_DENOMINATOR_RULE, debug_learnings 207),
+# extracted growth vs YoY computed from the reported P&L in fundamentals_history:
+#   Q1FY27  83 comparable revenue rows -> 33 differ >5pp, 17 >20pp, 12 OPPOSITE SIGN
+#   Q1FY27  76 comparable PAT rows     -> 33 differ >5pp, 25 >20pp, 11 OPPOSITE SIGN
+#   every one of the 25 worst PAT cases: discrepancy_flag=false, 23 of 25 confidence=HIGH
+# The error rate is also a REGRESSION, not a constant: revenue rows differing >5pp ran 10.4%
+# in Q3FY26, then 40.5% in Q4FY26 and 39.8% in Q1FY27 — a 4x jump in one extraction cycle.
+#
+# This reconciles against the REPORTED P&L, which the doc passes cannot see. It runs at WRITE
+# time on new extractions only. It deliberately does NOT bulk-correct existing rows: the spec
+# forbids that until the basis question (standalone vs consolidated vs segment) is settled, and
+# ~10% of these rows were already correct before the regression — a wrong correction is worse
+# than a flagged conflict.
+_RECON_WARN_PP        = 5.0    # spec: >5pp  -> warn (confidence downgraded, no flag)
+_RECON_FLAG_PP        = 20.0   # spec: >20pp or sign-flip -> discrepancy_flag + confidence LOW
+# Margin gets a deliberately wider bar. screener "Operating Profit" = Sales - Expenses (before
+# depreciation and interest), so "OPM %" is a close PROXY for EBITDA margin but not guaranteed
+# identical — treatment of other income and some other-expense lines can differ. A few points of
+# drift is definitional, not a defect; a >10pp gap is not explainable that way.
+_RECON_MARGIN_FLAG_PP = 10.0
+
+_QFY_RE = re.compile(r"^Q([1-4])FY([0-9]{2})$")
+
+
+def _quarter_period_end(quarter):
+    """'Q1FY27' -> date(2026,6,30). The FY label year is the year the FY ENDS (31-Mar), so
+    Q1-Q3 of FYyy sit in calendar year 2000+yy-1 and Q4 lands in 2000+yy. Returns None for
+    annual 'FYyy' labels (no single quarter end) and for anything unparseable."""
+    m = _QFY_RE.match((quarter or "").strip())
+    if not m:
+        return None
+    q, yy = int(m.group(1)), int(m.group(2))
+    fy = 2000 + yy
+    return {1: date(fy - 1, 6, 30), 2: date(fy - 1, 9, 30),
+            3: date(fy - 1, 12, 31), 4: date(fy, 3, 31)}[q]
+
+
+def _fnum(v):
+    """fundamentals_history.metrics is jsonb holding STRINGS with thousand separators
+    ("1,057") and percent signs ("22%"). Scrub before casting; None on anything non-numeric."""
+    if v is None:
+        return None
+    s = str(v).replace(",", "").replace("%", "").strip()
+    if not s or s in ("-", "--"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _pnl_facts(cur, symbol, quarter):
+    """Reported P&L for `quarter` plus its year-ago comparator -> dict of computed truths
+    {rev_yoy, pat_yoy, opm} (any key absent when not derivable). Returns None when the quarter
+    label is unparseable or the current-quarter row is missing."""
+    pe = _quarter_period_end(quarter)
+    if not pe:
+        return None
+    prior = date(pe.year - 1, pe.month, pe.day)   # quarter ends are 30/31 — no Feb-29 hazard
+    try:
+        cur.execute("""SELECT period_end, metrics FROM fundamentals_history
+                       WHERE symbol=%s AND section='quarters' AND period_type='quarter'
+                         AND period_end IN (%s,%s)""", (symbol, pe, prior))
+        rows = {r[0]: (r[1] or {}) for r in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"_pnl_facts {symbol}/{quarter}: {e}")
+        return None
+    cur_m = rows.get(pe)
+    if cur_m is None:
+        return None
+    out = {}
+    opm = _fnum(cur_m.get("OPM %"))
+    if opm is not None:
+        out["opm"] = opm
+    pri_m = rows.get(prior)
+    if pri_m is not None:
+        for key, srcs in (("rev_yoy", ("Sales", "Revenue")), ("pat_yoy", ("Net Profit",))):
+            c = next((x for x in (_fnum(cur_m.get(s)) for s in srcs) if x is not None), None)
+            p = next((x for x in (_fnum(pri_m.get(s)) for s in srcs) if x is not None), None)
+            # a non-positive prior base makes a growth PERCENTAGE meaningless, not merely noisy
+            if c is not None and p is not None and p > 0:
+                out[key] = (c - p) / p * 100.0
+    return out or None
+
+
+def reconcile_vs_pnl(cur, symbol, quarter, metrics):
+    """cc#786: cross-check extracted metrics against the REPORTED P&L and mark, never silently
+    fix. Mutates `metrics` in place — sets pnl_gap_pp / pnl_expected / discrepancy_flag and
+    downgrades confidence. Returns a list of human-readable findings (empty = nothing to say).
+
+    Silent no-op when no comparator exists: an absent P&L baseline is not evidence of a bad
+    extraction, and flagging on absence would train everyone to ignore the flag."""
+    findings = []
+    facts = _pnl_facts(cur, symbol, quarter)
+
+    def _mark(name, flag, conf, note, expected=None, gap=None):
+        m = metrics.get(name)
+        if not m:
+            return
+        m["discrepancy_flag"] = flag or bool(m.get("discrepancy_flag"))
+        if conf:
+            m["confidence"] = conf
+        if expected is not None:
+            m["pnl_expected"] = round(expected, 2)
+        if gap is not None:
+            m["pnl_gap_pp"] = round(gap, 2)
+        findings.append(f"{symbol}/{quarter}/{name}: {note}")
+
+    if facts:
+        checks = (("revenue_growth_yoy", "rev_yoy", _RECON_FLAG_PP, True),
+                  ("pat_growth_yoy",     "pat_yoy", _RECON_FLAG_PP, True),
+                  ("ebitda_margin_pct",  "opm",     _RECON_MARGIN_FLAG_PP, False))
+        for name, fact_key, flag_pp, sign_matters in checks:
+            m = metrics.get(name)
+            got = _num((m or {}).get("value"))
+            exp = facts.get(fact_key)
+            if m is None or got is None or exp is None:
+                continue
+            gap = abs(got - exp)
+            sign_flip = sign_matters and (got * exp < 0)
+            if gap > flag_pp or sign_flip:
+                why = "opposite sign vs reported P&L" if sign_flip else f"{gap:.1f}pp vs reported P&L"
+                _mark(name, True, "LOW", f"{why} (extracted {got:.2f}, reported {exp:.2f})", exp, gap)
+            elif gap > _RECON_WARN_PP and sign_matters:
+                _mark(name, False, "MEDIUM", f"{gap:.1f}pp vs reported P&L "
+                                             f"(extracted {got:.2f}, reported {exp:.2f})", exp, gap)
+
+    # Arithmetic impossibility — independent of the P&L, so it runs even with no comparator.
+    # EBIT margin is EBITDA margin minus depreciation; they cannot be equal when depreciation
+    # is non-zero, and cannot be inverted at all. Found live on STYL (both 25.1% against Rs 11 Cr
+    # depreciation) and ROUTE (both 9.5% against Rs 24 Cr), each carrying confidence=HIGH.
+    ebit = _num((metrics.get("ebit_margin") or {}).get("value"))
+    ebitda = _num((metrics.get("ebitda_margin_pct") or {}).get("value"))
+    if ebit is not None and ebitda is not None and ebit >= ebitda:
+        for n in ("ebit_margin", "ebitda_margin_pct"):
+            _mark(n, True, "LOW",
+                  f"ebit_margin ({ebit:.2f}) >= ebitda_margin_pct ({ebitda:.2f}) — impossible "
+                  "unless depreciation is zero")
+    return findings
+
+
 def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
     # cc#527 fix: the live sector_ops_metrics table (pre-existing, see ensure_tables note above)
     # has no computed_at column -- it has created_at/updated_at instead -- and its confidence
@@ -915,6 +1062,23 @@ def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
             pass
         return
     quarter = str(quarter).strip()
+    # cc#786: reconcile against the REPORTED P&L before writing. This is the check the doc-vs-doc
+    # confidence could never make. Marks only — it downgrades confidence and raises
+    # discrepancy_flag on THIS write; it never rewrites history.
+    try:
+        for f in reconcile_vs_pnl(cur, symbol, quarter, metrics):
+            log.warning(f"[cc#786 pnl_reconcile] {f}")
+        _flagged = [n for n, m in metrics.items() if m.get("discrepancy_flag")]
+        if _flagged:
+            _oplog(cur, "OPS_METRICS_PNL_CONFLICT",
+                   {"symbol": symbol, "quarter": quarter, "metrics": _flagged[:20],
+                    "detail": {n: {"extracted": metrics[n].get("value"),
+                                   "reported": metrics[n].get("pnl_expected"),
+                                   "gap_pp": metrics[n].get("pnl_gap_pp")} for n in _flagged[:20]}},
+                   category="scrape_review")
+    except Exception as e:
+        # reconciliation is a guard, never a gate — a failure here must not lose the extraction
+        log.error(f"reconcile_vs_pnl {symbol}/{quarter}: {e}")
     for name, m in metrics.items():
         if m.get("value") is None:
             # a NULL-valued row displays as "--" yet still competes for the latest quarter — never store it
@@ -924,16 +1088,18 @@ def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
         name = _canon_metric(name)   # cc#632: canonical lowercase snake_case metric_name
         cur.execute("""INSERT INTO sector_ops_metrics
             (symbol, sector, metric_name, metric_value, unit, quarter, confidence,
-             source_1, source_1_value, source_2, source_2_value, discrepancy_pct, updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+             source_1, source_1_value, source_2, source_2_value, discrepancy_pct,
+             discrepancy_flag, updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             ON CONFLICT (symbol, quarter, metric_name) DO UPDATE SET
               metric_value=EXCLUDED.metric_value, unit=EXCLUDED.unit, confidence=EXCLUDED.confidence,
               source_1=EXCLUDED.source_1, source_1_value=EXCLUDED.source_1_value,
               source_2=EXCLUDED.source_2, source_2_value=EXCLUDED.source_2_value,
-              discrepancy_pct=EXCLUDED.discrepancy_pct, updated_at=NOW()""",
+              discrepancy_pct=EXCLUDED.discrepancy_pct,
+              discrepancy_flag=EXCLUDED.discrepancy_flag, updated_at=NOW()""",
                     (symbol, sector, name, m["value"], m["unit"], quarter, confidence,
                      m["source_1"], m["source_1_value"], m["source_2"], m["source_2_value"],
-                     m["discrepancy_pct"]))
+                     m["discrepancy_pct"], bool(m.get("discrepancy_flag"))))
     if concall is not None and (concall.get("summary") or concall.get("guidance")):
         cur.execute("""INSERT INTO concall_summaries
             (symbol, quarter, summary, key_metrics, guidance, tone, source_docs, computed_at)
