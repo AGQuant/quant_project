@@ -64,13 +64,31 @@ picks AS (
            json_agg(json_build_object(
                'symbol',  t.symbol,
                'gvm',     ROUND(t.gvm_score::numeric, 2),
+               -- cc#811: the top-pick day move is the LIVE/last 5-min spot tick against the close
+               -- before that tick's own session, falling back to EOD only for a symbol with no
+               -- intraday feed at all. Was: latest raw_prices close vs the one before it, which
+               -- reads YESTERDAY between 15:30 and the nightly Yahoo refresh, and all day for any
+               -- symbol whose EOD row had not landed yet.
                'day_ret', ROUND(((
-                     (SELECT close FROM raw_prices WHERE symbol = t.symbol ORDER BY price_date DESC LIMIT 1)
-                   - (SELECT close FROM raw_prices WHERE symbol = t.symbol
-                        AND price_date < (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol)
+                     COALESCE(
+                       (SELECT i.close FROM intraday_prices i WHERE i.symbol = t.symbol
+                          AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+                          AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1),
+                       (SELECT close FROM raw_prices WHERE symbol = t.symbol AND close IS NOT NULL
+                          ORDER BY price_date DESC LIMIT 1))
+                   - (SELECT close FROM raw_prices WHERE symbol = t.symbol AND close IS NOT NULL
+                        AND price_date < COALESCE(
+                              (SELECT i.ts::date FROM intraday_prices i WHERE i.symbol = t.symbol
+                                 AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+                                 AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1),
+                              (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol))
                       ORDER BY price_date DESC LIMIT 1)
-                 ) / NULLIF((SELECT close FROM raw_prices WHERE symbol = t.symbol
-                        AND price_date < (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol)
+                 ) / NULLIF((SELECT close FROM raw_prices WHERE symbol = t.symbol AND close IS NOT NULL
+                        AND price_date < COALESCE(
+                              (SELECT i.ts::date FROM intraday_prices i WHERE i.symbol = t.symbol
+                                 AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+                                 AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1),
+                              (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol))
                       ORDER BY price_date DESC LIMIT 1), 0) * 100)::numeric, 2)
            ) ORDER BY t.rn) AS top_stocks
     FROM (

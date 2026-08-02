@@ -55,13 +55,32 @@ def latest_completed_close(cur, symbol: str):
 
 
 def resolve_price(cur, symbol: str) -> dict:
-    """{price, label, date, is_live}. FEED -> live CMP; NON-FEED -> latest completed close.
-    A feed symbol with no cmp_prices row falls back to the completed close (never crashes)."""
+    """{price, label, date, is_live}. cc#811: this now DELEGATES to cmp_resolver.resolve_cmp.
+
+    Two resolvers with different rules had grown side by side — cc#343's here (feed symbol ->
+    cmp_prices, everyone else -> last completed close) and cc#717's cmp_resolver (intraday bar ->
+    cache -> yahoo -> EOD). Same question, two answers, so the GVM card and a Trade Check card could
+    legitimately print different prices for the same stock at the same moment. cc#811 names the
+    cc#717 resolver as THE display price source, so this becomes a thin adapter over it rather than
+    a second opinion. The cc#343 contract (the dict shape and the "Prev Close <date>" label for
+    anything not live) is preserved for existing callers.
+
+    The behavioural change callers will see is the one cc#811 asked for: a non-F&O symbol with an
+    intraday feed now shows its live/last tick instead of an EOD close, and after 15:30 nothing
+    falls back to raw_prices while that table still reads yesterday.
+    """
     symbol = (symbol or "").upper().strip()
-    if is_feed_symbol(cur, symbol):
-        cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s LIMIT 1", (symbol,))
-        r = cur.fetchone()
-        if r and r[0] is not None:
-            return {"price": float(r[0]), "label": "CMP", "date": None, "is_live": True}
+    try:
+        import cmp_resolver
+        r = cmp_resolver.resolve_cmp(cur, symbol)
+        if r.get("cmp") is not None:
+            if r.get("live"):
+                return {"price": float(r["cmp"]), "label": "CMP", "date": None, "is_live": True}
+            ts = r.get("ts")
+            return {"price": float(r["cmp"]),
+                    "label": "Last Tick" if r.get("source") == "last_tick" else "Prev Close",
+                    "date": str(ts)[:10] if ts else None, "is_live": False}
+    except Exception:
+        pass   # resolver unavailable/failed -> the original cc#343 path below, never a broken card
     px, d = latest_completed_close(cur, symbol)
     return {"price": px, "label": "Prev Close", "date": d, "is_live": False}

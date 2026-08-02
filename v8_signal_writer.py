@@ -50,12 +50,13 @@ total (was 24; the 4 freed slots are NOT redistributed):
     Strong Bullish: 15B / 5S  | Bullish:  14B / 6S
     Neutral:        12B / 8S  | Bearish:   8B / 13S
 
-Sector aggregates (18-Jun-2026):
-  All 3 sector metrics are now fully LIVE for the 209-symbol futures universe:
-    sector_day   = avg mom_2d     (1-day peer avg, every 5-min)
-    sector_week  = avg week_return (1-week peer avg, every 5-min)
-    sector_month = avg month_return (1-month peer avg, every 5-min)
-  Computed via _update_sector_aggregates_sql (single SQL pass) after every tick.
+Sector aggregates (18-Jun-2026; REDEFINED by cc#810 02-Aug-2026):
+  sector_day / sector_week / sector_month are the segment's MCAP-WEIGHTED change across ALL
+  members of its gvm_scores.segment — SUM(mcap_i * chg_i) / SUM(mcap_i), weights from
+  screener_raw.market_cap, members priced live (5-min spot tick) where a feed exists and EOD
+  otherwise. Computed ONCE in segment_change.py and written here after every tick.
+  Was, until cc#810: an unweighted AVG of v8_metrics peers — i.e. of the ~209 FUTURES symbols
+  only, which made a 16-member segment report the move of the 2 F&O names in it.
   EOD engine can no longer overwrite (COALESCE protection in v8_engine.store_metrics).
 """
 
@@ -1038,42 +1039,49 @@ def _upsert_metrics_batch(conn, computed: dict, target_date: date, sim_ts=None) 
 
 def _update_sector_aggregates_sql(conn, target_date) -> int:
     """
-    Compute sector_day, sector_week, sector_month for all 209 futures symbols
-    via a single SQL UPDATE after every signal_writer tick. All three are
-    live peer-averages grouped by gvm_scores segment.
-      sector_day   = avg mom_2d     (live 1-day peer avg, every 5-min)
-      sector_week  = avg week_return (live 1-week peer avg, every 5-min)
-      sector_month = avg month_return (live 1-month peer avg, every 5-min)
-    Single SQL pass for all three. Added: 18-Jun-2026.
+    Write sector_day, sector_week, sector_month onto every v8_metrics row after each
+    signal_writer tick, from the ONE shared computation in segment_change.py.
+
+    cc#810 (02-Aug-2026) replaced the maths here. Taxonomy is gvm_scores.segment; the value is the
+    MCAP-WEIGHTED change across ALL segment members (SUM(mcap_i*chg_i)/SUM(mcap_i), weights from
+    screener_raw.market_cap), priced live where a feed exists and EOD otherwise. Was: an unweighted
+    AVG over v8_metrics rows, i.e. over the ~209 futures symbols only.
+    Added 18-Jun-2026; rewritten cc#810.
     """
+    # cc#810 SEGMENT UNIFICATION (founder 02-Aug-2026). The old body of this function averaged
+    # v8_metrics rows within a segment — and v8_metrics holds ONLY the ~209 futures symbols, so
+    # "the sector" meant "the handful of F&O names in it". Measured on the 31-Jul session for Pipes
+    # & Tubes (16 members): the old F&O-only simple average said -2.74%, an equal-weight average of
+    # the full membership said +0.08%, and the mcap-weighted full membership says -1.64%. Three
+    # stories, one segment, one day. It was also an unweighted mean, which is wrong in its own right
+    # here: APLAPOLLO alone is 31.6% of the segment's market cap.
+    #
+    # The computation now lives in segment_change.py so the writer, TC cards and the GVM chips
+    # cannot drift apart (the cc#803 lesson). This function keeps its name, signature and return
+    # contract — it is still the thing the tick loop calls — but it now WRITES a number it no longer
+    # OWNS. If the shared module fails, we leave the previous values in place rather than writing a
+    # half-computed sector; a stale-but-consistent aggregate beats a wrong fresh one.
     try:
+        import segment_change
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE v8_metrics
-                SET sector_day   = seg_avgs.avg_mom_2d,
-                    sector_week  = seg_avgs.avg_week_return,
-                    sector_month = seg_avgs.avg_month_return
-                FROM (
-                    SELECT m.symbol,
-                           AVG(m2.mom_2d)       AS avg_mom_2d,
-                           AVG(m2.week_return)  AS avg_week_return,
-                           AVG(m2.month_return) AS avg_month_return
-                    FROM v8_metrics m
-                    JOIN gvm_scores g  ON g.symbol  = m.symbol
-                        AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-                    JOIN v8_metrics m2 ON m2.score_date = m.score_date
-                    JOIN gvm_scores g2 ON g2.symbol  = m2.symbol
-                        AND g2.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-                        AND g2.segment   = g.segment
-                    WHERE m.score_date = %s
-                    GROUP BY m.symbol
-                ) seg_avgs
-                WHERE v8_metrics.symbol     = seg_avgs.symbol
-                  AND v8_metrics.score_date = %s
-            """, (target_date, target_date))
+            segs = segment_change.segment_changes(cur)
+            if not segs:
+                log.warning("_update_sector_aggregates_sql: segment_change returned nothing — "
+                            "leaving previous sector_day/week/month untouched")
+                return 0
+            rows = [(v.get("day"), v.get("week"), v.get("month"), seg) for seg, v in segs.items()]
+            # One statement for the whole taxonomy: join v8_metrics to its segment via gvm_scores.
+            cur.executemany("""
+                UPDATE v8_metrics SET sector_day = %s, sector_week = %s, sector_month = %s
+                FROM gvm_scores g
+                WHERE g.symbol = v8_metrics.symbol
+                  AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                  AND g.segment = %s
+                  AND v8_metrics.score_date = """ + "%s", [r + (target_date,) for r in rows])
             updated = cur.rowcount
         conn.commit()
-        log.info(f"_update_sector_aggregates_sql: {updated} rows sector_day/week/month for {target_date}")
+        log.info(f"_update_sector_aggregates_sql: {len(segs)} segments -> sector_day/week/month "
+                 f"for {target_date} (cc#810 mcap-weighted, full membership)")
         return updated
     except Exception as e:
         log.warning(f"_update_sector_aggregates_sql: {e}")
