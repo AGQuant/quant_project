@@ -68,7 +68,10 @@ const VC = {"Excellent":"#2FD48B","Good":"#4D7CFE","Average":"#F5B94A","Weak":"#
 const fmt  = (v,d=2) => v==null ? "—" : Number(v).toFixed(d);
 const pct  = (v,d=1) => v==null ? "—" : (v>0?"+":"")+Number(v).toFixed(d)+"%";
 const clr  = v => v==null ? C.muted : v>0 ? C.green : v<0 ? C.red : C.muted;
-const sclr = s => s>=7 ? C.green : s>=4 ? C.orange : C.red;
+// cc#827: the composite Score is gone — GVM IS the rating. Colour bands follow the platform's
+// own GVM verdict bands (>=8 Excellent / 7-8 Good / 6-7 Average / <6 Weak), so a colour on this
+// page means the same thing as a verdict anywhere else.
+const sclr = s => s>=7 ? C.green : s>=6 ? C.orange : C.red;
 const peClr = v => v==null ? C.muted : v<30 ? C.green : v<50 ? C.gold : C.red;
 const mcapFmt = v => { if(v==null) return "—"; v=Number(v); return v>=100000?(v/100000).toFixed(1)+"LCr":v>=1000?(v/1000).toFixed(1)+"KCr":Math.round(v)+"Cr"; };
 const clip = (s,n=28) => s&&s.length>n ? s.slice(0,n)+"…" : (s||"");
@@ -97,7 +100,7 @@ function RankCard({row, rank, isBottom}) {
         <span style={{fontSize:rank<3&&!isBottom?18:12,lineHeight:1}}>
           {!isBottom&&rank<3?MEDALS[rank]:<span style={{fontWeight:800,color:C.muted,fontFamily:"monospace"}}>#{rank+1}</span>}
         </span>
-        <span style={{fontSize:19,fontWeight:900,color:sclr(row.composite_score),fontFamily:"monospace",letterSpacing:"-1px"}}>{fmt(row.composite_score,1)}</span>
+        <span style={{fontSize:19,fontWeight:900,color:sclr(row.gvm),fontFamily:"monospace",letterSpacing:"-1px"}}>{fmt(row.gvm,2)}</span>
       </div>
       <div style={{fontSize:12,fontWeight:700,color:C.text,marginTop:5,lineHeight:1.3}}>{clip(row.segment,22)}</div>
       <div style={{fontSize:10,color:C.muted,marginTop:3}}>GVM <b style={{color:row.gvm>=7?C.green:row.gvm>=6?C.orange:C.red}}>{fmt(row.gvm)}</b></div>
@@ -122,13 +125,13 @@ function Strip({top5, cold, onSel}) {
     <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
       <div style={{display:"flex",gap:0,alignItems:"flex-start"}}>
         <div style={{flex:"0 0 auto",marginRight:16}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8,letterSpacing:".06em"}}>🔥 TOP 5 · HIGHEST SCORE</div>
+          <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8,letterSpacing:".06em"}}>🔥 TOP 5 · HIGHEST GVM</div>
           <div style={{display:"flex",gap:8}}>{top5.map((r,i)=><div key={r.segment} onClick={()=>onSel(r)}><RankCard row={r} rank={i} isBottom={false}/></div>)}</div>
         </div>
         <div style={{width:1,background:C.border,margin:"0 0 0 0",alignSelf:"stretch",flexShrink:0}}/>
         <div style={{flex:1,minWidth:0,marginLeft:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,letterSpacing:".06em"}}>
-            ❄️ COLD SECTORS · Score &lt; 4.0 &nbsp;
+            ❄️ COLD SECTORS · GVM &lt; 6.0 &nbsp;
             <span style={{background:"rgba(255,92,108,.08)",color:C.red,border:"1px solid #fecaca",borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:800}}>{cold.length}</span>
           </div>
           <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
@@ -136,7 +139,7 @@ function Strip({top5, cold, onSel}) {
           </div>
         </div>
       </div>
-      <div style={{fontSize:9,color:C.muted,marginTop:8}}>Score 0–10 · Percentile rank avg of 5 signals: GVM · GVM Δ14d · Institutional flow (median) · QoQ profit (median) · Annual upside · Dots = signal pass/fail</div>
+      <div style={{fontSize:9,color:C.muted,marginTop:8}}>Ranked by GVM · segments with fewer than {d.min_members||5} companies are merged into their base family, or into Others – Diversified · hover a merged row to see what it absorbed</div>
     </div>
   );
 }
@@ -260,7 +263,7 @@ function Detail({row, onClose}) {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <div style={{textAlign:"right"}}>
-            <div style={{fontSize:26,fontWeight:900,color:sclr(row.composite_score),fontFamily:"monospace"}}>{fmt(row.composite_score,2)}</div>
+            <div style={{fontSize:26,fontWeight:900,color:sclr(row.gvm),fontFamily:"monospace"}}>{fmt(row.gvm,2)}</div>
             <div style={{fontSize:9,color:C.muted}}>/ 10 composite</div>
           </div>
           <span style={{fontSize:12,fontWeight:700,color:VC[row.verdict]||C.muted}}>{row.verdict}</span>
@@ -303,7 +306,7 @@ function useSort(def, defDir="desc") {
 }
 
 function RankTab({data, onSel}) {
-  const {sortK, sortD, Th} = useSort("composite_score");
+  const {sortK, sortD, Th} = useSort("gvm");   // cc#827: GVM is the ranking
   const rows = useMemo(()=>[...data].sort((a,b)=>{const av=a[sortK]??-Infinity,bv=b[sortK]??-Infinity;return sortD==="desc"?bv-av:av-bv;}),[data,sortK,sortD]);
   return (
     <div style={{overflowX:"auto",background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}>
@@ -311,7 +314,6 @@ function RankTab({data, onSel}) {
         <thead><tr>
           <th style={{width:32,textAlign:"center"}}>#</th>
           <Th k="segment" lbl="Segment"/>
-          <Th k="composite_score" lbl="Score" r/>
           <Th k="gvm" lbl="GVM" r/>
           <Th k="g_score" lbl="G" r/>
           <Th k="v_score" lbl="V" r/>
@@ -326,10 +328,9 @@ function RankTab({data, onSel}) {
         </tr></thead>
         <tbody>
           {rows.map((r,i)=>(
-            <tr key={r.segment} onClick={()=>onSel(r)} style={{background:r.composite_score<4?"#fff5f5":undefined}}>
+            <tr key={r.segment} onClick={()=>onSel(r)} title={r.absorbed&&r.absorbed.length>1?("Merged: "+r.absorbed.join(" · ")):undefined} style={{background:(r.gvm!=null&&r.gvm<6)?"#fff5f5":undefined}}>
               <td className="mono" style={{textAlign:"center",color:C.muted,fontSize:11}}>{i+1}</td>
               <td style={{fontWeight:600,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}}>{clip(r.segment,30)}</td>
-              <td className="mono" style={{textAlign:"right",fontWeight:900,color:sclr(r.composite_score)}}>{fmt(r.composite_score,2)}</td>
               <td className="mono" style={{textAlign:"right",color:r.gvm>=7?C.green:r.gvm>=6?C.orange:C.red}}>{fmt(r.gvm)}</td>
               <td className="mono" style={{textAlign:"right",color:C.green}}>{fmt(r.g_score)}</td>
               <td className="mono" style={{textAlign:"right",color:C.gold}}>{fmt(r.v_score)}</td>
@@ -356,9 +357,9 @@ function RankTab({data, onSel}) {
 }
 
 function GVMTab({data, onSel}) {
-  const [mode, setMode] = useState("composite_score");
+  const [mode, setMode] = useState("gvm");   // cc#827
   const rows = useMemo(()=>[...data].sort((a,b)=>b[mode]-a[mode]).slice(0,25),[data,mode]);
-  const MODES = [["composite_score","Score"],["gvm","GVM"],["g_score","G · Growth"],["v_score","V · Value"],["m_score","M · Momentum"]];
+  const MODES = [["gvm","GVM"],["g_score","G · Growth"],["v_score","V · Value"],["m_score","M · Momentum"]];
   return (
     <div>
       <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -385,7 +386,7 @@ function GVMTab({data, onSel}) {
               ))}
             </div>
             <div className="mono" style={{fontSize:13,fontWeight:800,color:r.gvm>=7?C.green:r.gvm>=6?C.orange:C.red,width:36,textAlign:"right"}}>{fmt(r.gvm)}</div>
-            <div className="mono" style={{fontSize:13,fontWeight:900,color:sclr(r.composite_score),width:32,textAlign:"right"}}>{fmt(r.composite_score,1)}</div>
+            <div className="mono" style={{fontSize:13,fontWeight:900,color:sclr(r.gvm),width:32,textAlign:"right"}}>{fmt(r.gvm,2)}</div>
             <div style={{fontSize:11,color:VC[r.verdict]||C.muted,fontWeight:600,width:60}}>{r.verdict}</div>
           </div>
         ))}
@@ -593,7 +594,7 @@ function App() {
   },[]);
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;
-  const stats = {buy:d.all.filter(r=>["Excellent","Good"].includes(r.verdict)).length,hi:d.all.filter(r=>r.composite_score>=7).length,cold:d.all.filter(r=>r.composite_score<4).length};
+  const stats = {buy:d.all.filter(r=>["Excellent","Good"].includes(r.verdict)).length,hi:d.all.filter(r=>r.gvm>=7).length,cold:d.all.filter(r=>r.gvm!=null&&r.gvm<6).length};
   const TABS = [["themes","Themes"],["search","Sector Search"],["rank","Rank Table"],["gvm","G · V · M"]];
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>

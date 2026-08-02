@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 import psycopg
 import os
+import re   # cc#827: cap-qualifier stripping for the segment merge layer
 
 router = APIRouter()
 
@@ -50,14 +51,12 @@ combined AS (
     LEFT JOIN gvm_delta gd ON gd.segment = b.segment
     LEFT JOIN screener_agg sa ON sa.segment = b.segment
 ),
+-- cc#827: the five PERCENT_RANK columns that fed composite_score are REMOVED. A repo grep
+-- confirmed the sector page was their only consumer (computed here, rendered in
+-- scorr_sector.html, referenced nowhere else), so nothing downstream loses a field.
+-- Founder ruling: "too many analyses make things paralysis" — GVM answers segment quality.
 ranked AS (
-    SELECT *,
-           PERCENT_RANK() OVER (ORDER BY gvm)          AS r_gvm,
-           PERCENT_RANK() OVER (ORDER BY gvm_change)   AS r_gvm_change,
-           PERCENT_RANK() OVER (ORDER BY inst_change)  AS r_inst,
-           PERCENT_RANK() OVER (ORDER BY qoq_profit)   AS r_profit,
-           PERCENT_RANK() OVER (ORDER BY annual_upside) AS r_upside
-    FROM combined
+    SELECT * FROM combined
 ),
 picks AS (
     SELECT t.segment,
@@ -113,12 +112,130 @@ SELECT
     ranked.inst_change,
     ranked.qoq_profit,
     ROUND(ranked.annual_upside::numeric, 1) AS annual_upside,
-    ROUND(((ranked.r_gvm + ranked.r_gvm_change + ranked.r_inst + ranked.r_profit + ranked.r_upside) / 5 * 10)::numeric, 2) AS composite_score,
     COALESCE(pk.top_stocks, '[]'::json)     AS top_stocks
 FROM ranked
 LEFT JOIN picks pk ON pk.segment = ranked.segment
-ORDER BY composite_score DESC
+ORDER BY ranked.gvm DESC NULLS LAST
 """
+
+# cc#827 MERGE LAYER. A one-stock segment is noise, not a sector: "Iron and Steel - Smallcap (1)"
+# tells you about one company while occupying a row that reads like an industry.
+#
+# DISPLAY-TIME ONLY. gvm_scores.segment is untouched — it feeds peers, the R card and the screeners,
+# and rewriting the canonical segment would ripple through all of them. This maps segment ->
+# display_segment from LIVE membership counts, so it self-adjusts as the universe moves instead of
+# freezing today's answer into a constant.
+#
+# Rule: a segment with fewer than MIN_MEMBERS merges UP.
+#   (a) strip the cap qualifier and fold into its base FAMILY, if the family reaches MIN_MEMBERS;
+#   (b) otherwise into a single catch-all, "Others - Diversified".
+# The whole family collapses to the base name, not just the small member — otherwise "Textiles" and
+# "Textiles - Large" would sit as separate rows describing the same industry.
+MIN_MEMBERS = 5
+OTHERS = "Others - Diversified"
+_CAP_SUFFIX = re.compile(r"\s*[-–—]?\s*(smallcap|midcap|largecap|small\s*cap|mid\s*cap|large\s*cap|"
+                         r"large|small|mid|heavy)\s*$", re.I)
+
+
+def _family(seg: str) -> str:
+    """Base family name: the segment minus any trailing cap qualifier."""
+    return _CAP_SUFFIX.sub("", (seg or "").strip()).strip(" -–—") or (seg or "").strip()
+
+
+def build_display_map(counts: dict) -> dict:
+    """{segment: member_count} -> {segment: display_segment}. Pure, so it is testable without a DB."""
+    fam_total = {}
+    for seg, n in counts.items():
+        fam_total[_family(seg)] = fam_total.get(_family(seg), 0) + n
+    out = {}
+    for seg, n in counts.items():
+        if n >= MIN_MEMBERS:
+            fam = _family(seg)
+            # A healthy segment still collapses into its family when a sibling had to merge in —
+            # keeping "Textiles - Large" separate from a merged "Textiles" would defeat the merge.
+            out[seg] = fam if (fam != seg and fam_total.get(fam, 0) >= MIN_MEMBERS
+                               and any(c < MIN_MEMBERS for s, c in counts.items()
+                                       if _family(s) == fam)) else seg
+        else:
+            fam = _family(seg)
+            out[seg] = fam if fam_total.get(fam, 0) >= MIN_MEMBERS else OTHERS
+    return out
+
+
+def _wavg(pairs):
+    """Market-cap weighted average, cc#810 doctrine. None when no weight is available — never 0."""
+    num = den = 0.0
+    for val, w in pairs:
+        if val is None or w is None or w <= 0:
+            continue
+        num += float(val) * float(w); den += float(w)
+    return round(num / den, 2) if den > 0 else None
+
+
+def _verdict_from_gvm(g):
+    """cc#827: verdict re-keyed off GVM, since the Score it used to follow is gone.
+    Bands are the platform's existing GVM bands (CLAUDE.md / gvm_nightly._verdict):
+      >= 8.0 Excellent · 7.0-8.0 Good · 6.0-7.0 Average · < 6.0 Weak."""
+    if g is None:
+        return None
+    g = float(g)
+    return "Excellent" if g >= 8 else "Good" if g >= 7 else "Average" if g >= 6 else "Weak"
+
+
+def _merge_rows(rows):
+    """Collapse raw segment rows into display segments, recomputing every aggregate over the merged
+    membership (cc#810: mcap-weighted, not a mean of means)."""
+    counts = {r["segment"]: int(r.get("stocks_count") or 0) for r in rows}
+    dmap = build_display_map(counts)
+    groups = {}
+    for r in rows:
+        groups.setdefault(dmap[r["segment"]], []).append(r)
+
+    merged = []
+    for disp, grp in groups.items():
+        if len(grp) == 1 and grp[0]["segment"] == disp:
+            r = dict(grp[0])
+            r["display_segment"] = disp
+            r["absorbed"] = []
+            r["verdict"] = _verdict_from_gvm(r.get("gvm"))
+            merged.append(r)
+            continue
+        mc = [(g.get("total_mcap") or 0) for g in grp]
+        gvm = _wavg([(g.get("gvm"), w) for g, w in zip(grp, mc)])
+        row = {
+            "segment": disp, "display_segment": disp,
+            "score_date": grp[0].get("score_date"),
+            "gvm": gvm,
+            "g_score": _wavg([(g.get("g_score"), w) for g, w in zip(grp, mc)]),
+            "v_score": _wavg([(g.get("v_score"), w) for g, w in zip(grp, mc)]),
+            "m_score": _wavg([(g.get("m_score"), w) for g, w in zip(grp, mc)]),
+            "gvm_change": _wavg([(g.get("gvm_change"), w) for g, w in zip(grp, mc)]),
+            "annual_upside": _wavg([(g.get("annual_upside"), w) for g, w in zip(grp, mc)]),
+            "inst_change": _wavg([(g.get("inst_change"), w) for g, w in zip(grp, mc)]),
+            "qoq_profit": _wavg([(g.get("qoq_profit"), w) for g, w in zip(grp, mc)]),
+            "stocks_count": sum(int(g.get("stocks_count") or 0) for g in grp),
+            "total_mcap": round(sum(float(g.get("total_mcap") or 0) for g in grp), 1),
+            # UNIVERSE_DENOMINATOR_RULE: a merged row must say what it absorbed, or its member count
+            # is an unexplained number.
+            "absorbed": sorted(g["segment"] for g in grp),
+        }
+        row["verdict"] = _verdict_from_gvm(gvm)
+        best = max(grp, key=lambda g: (g.get("top_stock_gvm") is not None, g.get("top_stock_gvm") or -1))
+        row["top_stock"] = best.get("top_stock")
+        row["top_stock_gvm"] = best.get("top_stock_gvm")
+        picks = []
+        for g in grp:
+            tp = g.get("top_stocks") or []
+            if isinstance(tp, list):
+                picks.extend(tp)
+        picks.sort(key=lambda p: (p.get("gvm") is None, -(p.get("gvm") or 0)))
+        row["top_stocks"] = picks[:2]
+        merged.append(row)
+    # cc#827 part_2: ranked by GVM. The composite Score is gone, so GVM is the ordering AND the
+    # rating — "too many analyses make things paralysis" (founder).
+    merged.sort(key=lambda r: (r.get("gvm") is None, -(r.get("gvm") or 0)))
+    return merged
+
 
 @router.get("/api/sector/rotation")
 def sector_rotation():
@@ -126,14 +243,19 @@ def sector_rotation():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(COMPOSITE_SQL)
             cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            top5   = rows[:5]
-            # Cold = all sectors with composite score < 4.0, worst first
-            cold   = [r for r in reversed(rows) if float(r["composite_score"]) < 4.0]
+            raw = [dict(zip(cols, r)) for r in cur.fetchall()]
+            rows = _merge_rows(raw)
+            # cc#827: composite_score is no longer computed at all — see the SQL above.
+            # Hot/cold now key off GVM, matching the platform's own bands rather than a percentile
+            # rank of five signals that no other surface used.
+            cold = [r for r in reversed(rows) if r.get("gvm") is not None and float(r["gvm"]) < 6.0]
             return {
                 "score_date": rows[0]["score_date"] if rows else None,
                 "total_segments": len(rows),
-                "top5": top5,
+                "raw_segments": len(raw),
+                "merged_away": len(raw) - len(rows),
+                "min_members": MIN_MEMBERS,
+                "top5": rows[:5],
                 "bottom5": cold,   # key kept for HTML compatibility
                 "all": rows,
             }
