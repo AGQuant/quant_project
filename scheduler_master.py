@@ -158,8 +158,17 @@ _WORKER_JOBS = [
 ]
 
 
+# cc#824: jobs that run CHAINED inside another job rather than on their own tick condition. The
+# scheduler-loop scanner above derives job names from tick guards, so a chained job is invisible to
+# it — and a job the registry cannot see is a job nobody notices has stopped. Listed explicitly.
+_CHAINED_JOBS = [
+    {"job_name": "screeners_eod", "cadence_human": "nightly, chained immediately after gvm_recompute",
+     "module": "screeners_eod.py", "function": "run_all", "service": "app", "category": "chained"},
+]
+
+
 def all_known_jobs():
-    return enumerate_scheduler_jobs() + _STARTUP_JOBS + _WORKER_JOBS
+    return enumerate_scheduler_jobs() + _STARTUP_JOBS + _WORKER_JOBS + _CHAINED_JOBS
 
 
 # ── 2 & 3. SEED + RUN RECORDER ──────────────────────────────────────────────────

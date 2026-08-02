@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screeners · Scorr</title>
+<style>
+  :root{--bg:#f6f8fb;--panel:#fff;--card2:#f6f8fb;--line:#e8ecf2;--line2:#e8ecf2;
+        --txt:#1c2536;--mut:#667085;--dim:#9aa4b5;--blu:#2f6df4;--grn:#0f9d58;--red:#d0433b;}
+  :root[data-theme="dark"]{--bg:#0e1420;--panel:#141c2b;--card2:#182131;--line:#243044;--line2:#243044;
+        --txt:#e8eef7;--mut:#93a0b5;--dim:#6c7c93;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px}
+  .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
+  /* tab strip — horizontally scrollable on mobile, no wrap, per MOBILE_UX_STANDARD_V1 */
+  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:12px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
+       background:var(--panel);color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;
+       min-height:38px;display:inline-flex;align-items:center;gap:6px}
+  .tab:hover{border-color:var(--blu)}
+  .tab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  .tab .n{font-size:10.5px;font-weight:800;opacity:.72}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .meta{font-size:11px;color:var(--dim);margin:0 0 10px;line-height:1.5}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 8px;
+           font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);
+           border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:8px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  tbody tr:hover{background:var(--card2)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .sym{font-weight:800}
+  .pos{color:var(--grn)} .neg{color:var(--red)} .zero{color:var(--mut)}
+  .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
+            margin-left:5px;vertical-align:middle}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
+  @media(max-width:760px){
+    .wrap{padding:12px 10px 64px}
+    thead th,tbody td{padding:7px 6px;font-size:12px}
+  }
+</style>
+
+<div class="wrap">
+  <div id="scorr-nav"></div>
+  <h1>Screeners</h1>
+  <div class="sub">
+    Predefined screens, recomputed after each end-of-day run. These are standing views — there is
+    nothing to run. <b>Added On</b> is the date a stock first entered the screen and stays fixed for
+    as long as it remains a member.
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="card">
+    <div class="meta" id="meta"></div>
+    <div class="scroll"><table id="tbl">
+      <thead><tr id="head"></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<script>
+// cc#824 — read-only screener page. Every number here was computed by the nightly job; the only
+// live value is CMP/Day%, overlaid server-side through the shared cc#811 resolver so this page can
+// never disagree with the GVM or Trade Check card about a price.
+var SCREENS = [], CUR = null;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+// cc#823 number contract, same rule as the R card: absolutes render as integers with Indian
+// grouping, growth/change renders with exactly one decimal. Defined once here and used by every
+// cell, so a column cannot quietly adopt its own precision.
+function fmtLevel(v){
+  if(v==null||v===''||isNaN(Number(v))) return '--';
+  try{ return Math.round(Number(v)).toLocaleString('en-IN'); }
+  catch(e){ return String(Math.round(Number(v))); }
+}
+function fmtGrowth(v){
+  if(v==null||v===''||isNaN(Number(v))) return '--';
+  var n=Number(v); return (n>=0?'+':'')+n.toFixed(1)+'%';
+}
+function cls(v){ return v==null?'zero':(v>0?'pos':(v<0?'neg':'zero')); }
+function fmtDate(d){
+  if(!d) return '--';
+  var t=new Date(d+'T00:00:00');
+  if(isNaN(t)) return esc(d);
+  var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return t.getDate()+' '+M[t.getMonth()]+' '+t.getFullYear();
+}
+
+function renderTabs(){
+  document.getElementById('tabs').innerHTML = SCREENS.map(function(s){
+    return '<button class="tab'+(CUR===s.id?' on':'')+'" onclick="pick('+s.id+')">'
+      + esc(s.name) + '<span class="n">'+(s.members||0)+'</span></button>';
+  }).join('');
+}
+
+function pick(id){
+  CUR = id; renderTabs();
+  document.getElementById('body').innerHTML =
+    '<tr><td colspan="20" class="empty">Loading…</td></tr>';
+  fetch('/api/screeners/'+id,{headers:{Accept:'application/json'}})
+    .then(function(r){return r.json();}).then(renderScreen)
+    .catch(function(){
+      document.getElementById('body').innerHTML =
+        '<tr><td colspan="20" class="empty">Could not load this screen.</td></tr>';
+    });
+}
+
+function renderScreen(d){
+  if(!d || d.status!=='ok'){ return; }
+  var cols = d.columns || [];
+  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · <screen's own fields> · Added On
+  var head = ['<th>Sr</th>','<th>Symbol</th>','<th class="num">CMP</th>','<th class="num">Day%</th>',
+              '<th class="num">GVM</th>'];
+  var shown = cols.filter(function(c){ return c.key!=='gvm_score'; });   // GVM already has its column
+  shown.forEach(function(c){ head.push('<th class="num">'+esc(c.label)+'</th>'); });
+  head.push('<th>Added On</th>');
+  document.getElementById('head').innerHTML = head.join('');
+
+  var rows = d.rows || [];
+  if(!rows.length){
+    document.getElementById('body').innerHTML =
+      '<tr><td colspan="'+head.length+'" class="empty">No stocks in this screen yet.<br>'
+      + 'Screens fill after the next end-of-day run.</td></tr>';
+    document.getElementById('meta').textContent = d.name + ' · 0 members';
+    return;
+  }
+  document.getElementById('body').innerHTML = rows.map(function(r,i){
+    var m = r.metrics||{};
+    var tds = ['<td class="num">'+(i+1)+'</td>'];
+    // cc#798: the shared C·A·R·D row strip — never re-implemented per page.
+    var strip = (window.ScorrCardRow ? window.ScorrCardRow(r.symbol) : '');
+    tds.push('<td class="sym">'+esc(r.symbol)+strip+'</td>');
+    tds.push('<td class="num">'+(r.cmp==null?'--':fmtLevel(r.cmp))
+             + (r.live?'<span class="live-dot" title="live tick"></span>':'')+'</td>');
+    tds.push('<td class="num '+cls(r.day_pct)+'">'+fmtGrowth(r.day_pct)+'</td>');
+    tds.push('<td class="num">'+(m.gvm_score==null?'--':Number(m.gvm_score).toFixed(2))+'</td>');
+    shown.forEach(function(c){
+      var v = m[c.key];
+      tds.push('<td class="num'+(c.fmt==='growth'?' '+cls(v):'')+'">'
+               + (c.fmt==='growth'?fmtGrowth(v):fmtLevel(v))+'</td>');
+    });
+    tds.push('<td>'+fmtDate(r.first_seen)+'</td>');
+    return '<tr>'+tds.join('')+'</tr>';
+  }).join('');
+  document.getElementById('meta').textContent =
+    d.name + ' · ' + rows.length + ' stocks · sorted by ' + (d.sort_key||'GVM');
+}
+
+fetch('/api/screeners',{headers:{Accept:'application/json'}})
+  .then(function(r){return r.json();})
+  .then(function(d){
+    SCREENS = (d && d.screens) || [];
+    if(!SCREENS.length){
+      document.getElementById('body').innerHTML =
+        '<tr><td colspan="20" class="empty">No screens configured.</td></tr>';
+      return;
+    }
+    renderTabs();
+    pick(SCREENS[0].id);
+    if(d.never_run){
+      document.getElementById('meta').textContent =
+        'Screens have not been computed yet — they fill after the next end-of-day run.';
+    }
+  })
+  .catch(function(){
+    document.getElementById('body').innerHTML =
+      '<tr><td colspan="20" class="empty">Could not load screens.</td></tr>';
+  });
+</script>
+</body>
+</html>

@@ -1579,6 +1579,17 @@ def _bg_gvm():
             _log_health(conn, "gvm_recompute", {"date": str(today)})  # cc#255
         _gvm_ran_today = today
         log.info("gvm_recompute done")
+        # cc#824: predefined screens recompute HERE, immediately after the GVM scores they screen on
+        # land — chained rather than given its own wall-clock slot, because a fixed time would race
+        # the very job it depends on and quietly screen yesterday's scores on a night GVM ran late.
+        # Guarded: a screener failure must never mark the GVM run bad.
+        try:
+            import screeners_eod
+            with _conn() as sconn:
+                res = screeners_eod.run_all(sconn)
+            log.info("cc#824 screeners: %s", res.get("screens"))
+        except Exception as e:
+            log.error(f"cc#824 screeners_eod: {e}")
     except Exception as e: log.error(f"gvm: {e}")
 
 def _bg_gvm_backfill():

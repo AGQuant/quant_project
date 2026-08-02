@@ -273,6 +273,11 @@ PWA_JS = """
     ['/sector', '\\u2297', 'Sector'],
     ['/check', '\\u2713', 'Check'],
     ['/result-corner', '\\u2263', 'Results'],
+    // cc#824 (founder 02-Aug): Screeners — the 8 predefined screens as a standing destination.
+    // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile
+    // "More" sheet), so a single entry appears in both automatically — a second entry would double
+    // it, not extend it. Rebased on cc#822's trim: Digest / TC Scanner / Holdings stay removed.
+    ['/screeners', '\\u2637', 'Screeners'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,

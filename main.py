@@ -101,6 +101,7 @@ from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
 from fyers_hist_backfill import router as fyers_hist_backfill_router   # cc#377 Phase B
 from fundamentals_scraper import router as fundamentals_scraper_router   # cc#361 Phase 1 scrape
+from screeners_endpoints import router as screeners_router   # cc#824 predefined screeners (read-only)
 from v13_presets_endpoints import router as v13_presets_router
 from mf_pipeline import router as mf_pipeline_router   # cc#466: V15 MF Intelligence data layer
 from galaxy_endpoints import router as galaxy_router
@@ -207,12 +208,14 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
+                     "/screeners",   # cc#824
                      "/adaptive"}   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
 PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) — gate + no-store
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
+PROTECTED.add("/screeners")   # cc#824: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -433,6 +436,7 @@ app.include_router(stock_options_backfill_router)
 app.include_router(fy_end_backfill_router)   # cc#703 FY-end price backfill 2015-2021
 app.include_router(fyers_hist_backfill_router)   # cc#377 Phase B
 app.include_router(fundamentals_scraper_router)   # cc#361 Phase 1 scrape
+app.include_router(screeners_router)   # cc#824 predefined screeners
 app.include_router(v13_presets_router)
 app.include_router(mf_pipeline_router)   # cc#466: /api/v15/mf/*
 app.include_router(galaxy_router)
@@ -893,6 +897,13 @@ def scheduler_master_page():
     /api/scheduler/master (scheduler_master.py)."""
     return _page("scorr_scheduler_master.html")
 
+@app.get("/screeners", response_class=HTMLResponse)
+def screeners_page():
+    """cc#824: predefined screens as a standing destination — EOD-computed member tables, no Run
+    buttons. The screens themselves live ONLY here; /v13 stays the filter registry + ad-hoc
+    screener (founder 02-Aug)."""
+    return _page("scorr_screeners.html")
+
 @app.get("/v13", response_class=HTMLResponse)
 def v13_filter_registry_page():
     """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
@@ -929,6 +940,7 @@ NAV_REGISTRY = {
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
+    "/screeners":    ("Screeners",            "nav"),   # cc#824
     "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
     "/dashboard#tcscan": ("TC Scanner · V8 tab — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#740; cc#822 removed from nav
     "/sector":       ("Sector",               "nav"),

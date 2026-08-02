@@ -190,12 +190,21 @@ def _col_expr(src, col):
     return f'{src}."{col}"'
 
 
-def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
-    """Execute {fieldkey:{min?,max?}} against v8_metrics(+gvm_scores+screener_raw). Returns a result dict."""
+def _screen_sql(filters, sort_key=None, sort_dir=-1):
+    """cc#824: build the WHERE/JOIN/ORDER for a preset ONCE, so the ad-hoc runner and the nightly
+    batch runner share identical field semantics.
+
+    This was inline in _run_screen. The cc#824 EOD job needs the same predicate over the full
+    membership, and a second copy of these rules — the s-column numeric coercion, the LEFT-vs-INNER
+    join choice, the universe_technicals latest-score_date anchor — would be a copy that drifts,
+    which is exactly what rule id=3069 is guarding against when it says presets must go through the
+    real engine. Returns (where_sql, params, join_sql, order_sql, uses_screener, uses_fut) or raises
+    ValueError on an unknown key.
+    """
     filters = filters or {}
     unknown = [k for k in filters if k not in _FIELD_MAP]
     if unknown:
-        return {"error": "unknown filter key(s): " + ", ".join(unknown), "valid_keys": sorted(_FIELD_MAP.keys())}
+        raise ValueError("unknown filter key(s): " + ", ".join(unknown))
     # cc#558: base = universe_technicals u (latest score_date) — the full ~1,811 GVM-scored universe.
     where = ["u.score_date=(SELECT MAX(score_date) FROM universe_technicals)"]
     params = []
@@ -213,11 +222,20 @@ def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
     join = ("JOIN gvm_scores g ON g.symbol=u.symbol AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores) "
             "LEFT JOIN screener_raw s ON UPPER(s.nse_code)=UPPER(u.symbol) "
             "LEFT JOIN v8_metrics m ON m.symbol=u.symbol AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)")
-    wsql = " AND ".join(where)
     if sort_key and sort_key in _FIELD_MAP:
         order = f"ORDER BY {_col_expr(*_FIELD_MAP[sort_key])} {'ASC' if sort_dir == 1 else 'DESC'} NULLS LAST"
     else:
         order = "ORDER BY g.gvm_score DESC NULLS LAST"
+    return " AND ".join(where), params, join, order, uses_screener, uses_fut
+
+
+def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
+    """Execute {fieldkey:{min?,max?}} against v8_metrics(+gvm_scores+screener_raw). Returns a result dict."""
+    filters = filters or {}
+    try:
+        wsql, params, join, order, uses_screener, uses_fut = _screen_sql(filters, sort_key, sort_dir)
+    except ValueError as e:
+        return {"error": str(e), "valid_keys": sorted(_FIELD_MAP.keys())}
     lim = max(1, min(int(limit or 10), 100))
     cur.execute(f"SELECT COUNT(*) FROM universe_technicals u {join} WHERE {wsql}", params)
     count = int(cur.fetchone()[0])
