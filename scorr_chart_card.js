@@ -35,6 +35,25 @@
   var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
   var _full = false;                // cc#779: fullscreen state
   var GVM_COL = "#7b6bd6";          // muted violet — distinct from price/pivot/fib/VWAP palettes
+  // cc#800: the GVM axis bounds live here so the pin has ONE source. The scale is conceptually
+  // 0-10 and must never be derived from the data — that is the bug this fixes.
+  var GVM_MIN = 0, GVM_MAX = 10;
+  // cc#800 polish: optional 5-day EMA of gvm_score. OFF by default per founder preference — daily
+  // M-pillar noise is real, but the trend is the signal and the raw line is what he asked to see.
+  // Flip to true (or expose a toggle) if the noise ever outweighs the fidelity.
+  var GVM_SMOOTH = false;
+
+  // Simple EMA over {time,value} points. Seeded with the first value rather than a zero so the
+  // series does not open with a false climb from 0 up to the real level.
+  function _ema(pts, n) {
+    if (!pts || pts.length < 2) return pts;
+    var k = 2 / (n + 1), prev = pts[0].value, out = [{ time: pts[0].time, value: prev }];
+    for (var i = 1; i < pts.length; i++) {
+      prev = pts[i].value * k + prev * (1 - k);
+      out.push({ time: pts[i].time, value: Math.round(prev * 100) / 100 });
+    }
+    return out;
+  }
   var _futCache = {};   // {sym: bool} — 5m availability, cached per session (no repeat probe)
   // cc#730: fib + pivot overlay state (default BOTH on so the card matches the V8 chart out of the box).
   var _fibCache = {};   // {sym: fibcheck json} — pivots fetched once per symbol
@@ -343,21 +362,36 @@
           .map(function (r) { return { time: String(r.score_date).slice(0, 10), value: +r.gvm_score }; })
           .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
         if (!pts.length) return;
+        if (GVM_SMOOTH) pts = _ema(pts, 5);
+        // cc#800 FIX — the 0-10 axis was not actually pinned, for TWO reasons, and BOTH had to go:
+        //
+        // 1. autoscaleInfoProvider was applied via applyOptions AFTER addLineSeries. In
+        //    LightweightCharts 4.1.3 the provider is read when the series is created for a custom
+        //    priceScaleId; setting it afterwards leaves the scale on its default autoscale.
+        // 2. the scale was ALSO set autoScale:false. That alone would have defeated the fix even
+        //    with the provider in the right place — when autoScale is off the scale keeps a manual
+        //    range and never consults the provider at all. The pin comes FROM the provider, so
+        //    autoscaling must stay ON and simply always be handed the same 0-10 range.
+        //
+        // Together these made the axis fit the data's own min/max, so a symbol living in 6.0-7.5
+        // stretched across the full height and read as violently price-correlated (the PETRONET
+        // screenshot). With this, that symbol occupies a narrow band in the upper-middle instead.
         _gvmSeries = _chart.addLineSeries({
           color: GVM_COL, lineWidth: 2, priceScaleId: "gvm",
           priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
-          priceFormat: { type: "price", precision: 2, minMove: 0.01 }
+          priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: function () {
+            return { priceRange: { minValue: GVM_MIN, maxValue: GVM_MAX } };
+          }
         });
         _gvmSeries.setData(pts);
         try {
           _chart.priceScale("gvm").applyOptions({
+            // Margins kept tight so the pinned range uses nearly the whole height; autoScale STAYS
+            // TRUE so the provider above is what decides the range.
             scaleMargins: { top: 0.05, bottom: 0.05 }, visible: true, borderVisible: false,
-            autoScale: false
+            autoScale: true
           });
-          // FIXED 0-10: pin the range so the axis cannot autoscale to the data's own min/max.
-          _gvmSeries.applyOptions({ autoscaleInfoProvider: function () {
-            return { priceRange: { minValue: 0, maxValue: 10 } };
-          } });
         } catch (e) {}
       })
       .catch(function () { /* quality line is additive — never break the price chart */ });
