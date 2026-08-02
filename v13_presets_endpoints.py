@@ -179,14 +179,21 @@ _FIELD_MAP = {
     "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
     "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
     "m_score": ("g", "m_score"), "market_cap": ("g", "market_cap"),
-    "return_1y": ("s", "return_1y"), "return_3y": ("s", "return_3y"),
-    "return_52w_vs_index": ("s", "return_52w_vs_index"), "pe": ("s", "pe"), "roce": ("s", "roce"),
+    "return_1y": ("s", "return_1y", "year_return"), "return_3y": ("s", "return_3y", "return_3y"),
+    "return_52w_vs_index": ("s", "return_52w_vs_index", "return_52w_vs_index"),
+    "pe": ("s", "pe"), "roce": ("s", "roce"),
 }
 
 
-def _col_expr(src, col):
+def _col_expr(src, col, native=None):
+    """cc#828 part_2: an optional THIRD element on an "s" mapping names the universe_technicals
+    column that computes the same thing natively. The filter then reads
+    `screener value COALESCE native value`, so a narrower CSV export degrades the field to
+    computed truth instead of NULL — which is how the 02-Aug narrow load silently emptied
+    return_3y and made the Quality Compounders screen return nothing."""
     if src == "s":   # screener_raw is a wide TEXT dump -> strip non-numeric, cast, NULL if not numeric
-        return f"NULLIF(REGEXP_REPLACE(s.\"{col}\"::text, '[^0-9.\\-]', '', 'g'), '')::numeric"
+        expr = f"NULLIF(REGEXP_REPLACE(s.\"{col}\"::text, '[^0-9.\\-]', '', 'g'), '')::numeric"
+        return f'COALESCE({expr}, u."{native}")' if native else expr
     return f'{src}."{col}"'
 
 

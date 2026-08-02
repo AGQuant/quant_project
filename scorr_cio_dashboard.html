@@ -976,7 +976,16 @@ function PillarPopModal({ pillar, items, score, onClose }) {
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";  // body scroll lock
     return () => { document.removeEventListener("keydown", h); document.body.style.overflow = prev; };
   }, [onClose]);
-  const bandColor = (b) => b.is_context ? _verdictColor(b.verdict) : ratingColor(b.rating);
+  // cc#828 part_3: a metric with no value is EXCLUDED from the pillar average, not silently
+  // scored 5.0. Grey the tile, drop its score chip, and print the real denominator in the header
+  // ("over 3/5 metrics") so a blanked data column can never again hide inside a healthy-looking
+  // pillar score the way the 02-Aug narrow CSV load did.
+  const isExcluded = (b) => !b.is_context && (b.excluded === true || b.rating == null);
+  const scoreable = items.filter(b => !b.is_context);
+  const nScored = scoreable.filter(b => !isExcluded(b)).length;
+  const nExcluded = scoreable.length - nScored;
+  const bandColor = (b) => b.is_context ? _verdictColor(b.verdict)
+                         : (isExcluded(b) ? C.muted : ratingColor(b.rating));
   const isMobile = (typeof window !== "undefined" && window.innerWidth <= 640);
   return (
     <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -989,7 +998,10 @@ function PillarPopModal({ pillar, items, score, onClose }) {
             <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15, background: pi.bg, color: pi.color, border: `1px solid ${pi.color}66` }}>{pillar}</div>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{pi.label}</div>
-              <div style={{ fontSize: 11, color: C.muted }}>{pi.desc} · {items.length} metric{items.length === 1 ? "" : "s"}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>
+                {pi.desc} · scored over {nScored}/{scoreable.length} metric{scoreable.length === 1 ? "" : "s"}
+                {nExcluded > 0 && <span style={{ color: "#F5B94A" }}> · {nExcluded} excluded (no data)</span>}
+              </div>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center" }}>
@@ -1000,14 +1012,18 @@ function PillarPopModal({ pillar, items, score, onClose }) {
         <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill,minmax(${isMobile ? 150 : 180}px,1fr))`, gap: 12, padding: "20px 24px 24px" }}>
           {items.length ? items.map((b, i) => {
             const bc = bandColor(b);
-            const chip = b.is_context ? (b.verdict ? b.verdict.label : "") : (b.rating != null ? b.rating.toFixed(1) : "");
+            const exc = isExcluded(b);
+            const chip = b.is_context ? (b.verdict ? b.verdict.label : "")
+                       : (exc ? "excluded" : (b.rating != null ? b.rating.toFixed(1) : ""));
             const val = b.company != null ? `${b.company.toFixed(2)}${b.unit || ""}` : (b.is_context && b.verdict ? b.verdict.label : "—");
             const peer = b.peer_avg != null ? `peer ${b.peer_avg.toFixed(2)}${b.unit || ""}` : "";
             const rank = (b.rank != null) ? `#${b.rank}/${b.peer_n}` : "";
             return (
-              <div key={b.key || i} style={{ background: C.bg, border: `1px solid ${bc}80`, borderRadius: 10, padding: 12, position: "relative" }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 6, paddingRight: 36, color: bc }}>{b.label}</div>
-                {chip !== "" && <div style={{ position: "absolute", top: 10, right: 10, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: bc }}>{chip}</div>}
+              <div key={b.key || i} title={exc ? "No data for this metric — excluded from the pillar score" : undefined}
+                style={{ background: C.bg, border: `1px solid ${bc}80`, borderRadius: 10, padding: 12, position: "relative",
+                  opacity: exc ? 0.45 : 1 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 6, paddingRight: 46, color: bc }}>{b.label}</div>
+                {chip !== "" && <div style={{ position: "absolute", top: 10, right: 10, fontFamily: "monospace", fontSize: exc ? 9 : 11, fontWeight: 600, color: bc, letterSpacing: exc ? .4 : 0 }}>{chip}</div>}
                 <div style={{ fontFamily: "monospace", fontSize: 13, marginBottom: 4, color: C.text }}>{val}</div>
                 <div style={{ fontFamily: "monospace", fontSize: 10, color: C.muted, display: "flex", justifyContent: "space-between" }}>
                   <span>{peer}</span><span>{rank}</span>

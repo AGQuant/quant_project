@@ -29,6 +29,7 @@ Verdict framework (Arpit):
 
 import os
 import re                              # cc#804: header slugging for the dynamic wide loader
+import json                            # cc#828: column-drop guard writes a jsonb ops_log alert
 import logging
 from datetime import date, timedelta   # cc#779: timedelta for the trend-verdict window
 from datetime import date as _date     # cc#804: explicit alias — `date` is shadowed by params below
@@ -324,6 +325,58 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         _cur0.execute("SELECT column_name FROM information_schema.columns WHERE table_name='screener_raw'")
         _live = {r[0] for r in _cur0.fetchall()}
 
+    # ── cc#828 part_1 COLUMN-DROP GUARD ─────────────────────────────────────────────────────────
+    # A clean-replace with a NARROWER export silently blanks every column the new file omits. On
+    # 02-Aug that emptied return_1y / return_3y / return_52w_vs_index / dma_50 / dma_200 / RSI for
+    # all 1,801 rows, and nothing said so: the GVM M-popout tiles just went blank and the pillar
+    # quietly scored them neutral. The load reported {"status":"ok"} throughout.
+    #
+    # So: before replacing, diff the incoming header set against the columns that are CURRENTLY
+    # well-populated. Anything previously populated and now absent is a casualty, named in the
+    # response and raised to ops_log. Deliberately NOT a block — the founder may intend a narrower
+    # file — but it can never again happen quietly.
+    dropped_populated = []
+    try:
+        _num_live = [c for c in _live if c not in SCREENER_TEXT_COLS]
+        if _num_live:
+            _sel = ", ".join(f'COUNT("{c}") AS "{c}"' for c in _num_live)
+            with _conn() as _c1, _c1.cursor() as _cur1:
+                _cur1.execute(f"SELECT COUNT(*) AS _n, {_sel} FROM screener_raw")
+                _row = _cur1.fetchone()
+                _names = [d[0] for d in _cur1.description]
+            _counts = dict(zip(_names, _row))
+            _total = _counts.pop("_n", 0) or 0
+            if _total:
+                # Compare against BOTH the raw headers and their slugs. The rename to slugs happens
+                # further down, so a stored column like return_1y would otherwise look "absent" from
+                # a file whose header reads "Return 1y" — a false alarm on every single load.
+                incoming = set(df.columns) | {_screener_slug(c) for c in df.columns}
+                incoming.discard(None)
+                incoming.discard("")
+                for c, filled in _counts.items():
+                    # ">90% populated" = a column the platform genuinely relies on today. A sparse
+                    # column vanishing is not news; a full one vanishing is the incident.
+                    if c not in incoming and (filled or 0) / _total > 0.90:
+                        dropped_populated.append(c)
+        dropped_populated.sort()
+        if dropped_populated:
+            log.error("SCREENER_LOAD_COLUMN_DROP: %d previously-populated column(s) absent from this "
+                      "CSV and about to be blanked: %s", len(dropped_populated), ", ".join(dropped_populated))
+            try:
+                with _conn() as _c2, _c2.cursor() as _cur2:
+                    _cur2.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                     VALUES (CURRENT_DATE, NOW(), 'alert',
+                                             'SCREENER_LOAD_COLUMN_DROP', %s::jsonb)""",
+                                  (json.dumps({"cc": 828, "dropped": dropped_populated,
+                                               "n_dropped": len(dropped_populated),
+                                               "headers_in_file": len(df.columns),
+                                               "note": "clean-replace will NULL these for every row"}),))
+                    _c2.commit()
+            except Exception as _e:
+                log.warning("cc#828 ops_log alert failed (load continues): %s", _e)
+    except Exception as _e:
+        log.warning("cc#828 column-drop guard skipped (load continues): %s", _e)
+
     # An EXISTING column name wins over its slug. screener_raw already holds Title Case columns such
     # as "Price to book value", "BSE Code" and "Sales growth", and consumers reference them by that
     # exact quoted name (e.g. gvm_market_endpoints selects s."Price to book value"). Slugging those
@@ -406,6 +459,9 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         "columns_loaded": len(cols),             # cc#804 item 5: acceptance in one glance
         "columns_added": added,
         "columns_skipped": skipped,
+        # cc#828 part_1: columns that WERE >90% populated and are not in this file. After the
+        # clean-replace they are NULL for every row. Empty list = nothing was silently lost.
+        "columns_dropped_populated": dropped_populated,
         "qoq_sales_computed": bool(qoq_sales_ok),
         "qoq_profit_computed": bool(qoq_profit_ok),
         "result_quarter": result_quarter,

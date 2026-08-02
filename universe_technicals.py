@@ -65,7 +65,88 @@ def ensure_schema(conn):
         # cc#558: idempotent add for an already-created table (DDL is app-side; run_sql ALTER is
         # blocked by MAINTENANCE_LOCK). vol_ratio_21 feeds the V13 full-universe breakout preset.
         cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS vol_ratio_21 NUMERIC")
+        # cc#828 part_2: the last two M-pillar technicals that existed ONLY as screener_raw CSV
+        # columns. On 02-Aug a narrower export blanked them for all 1,801 rows and the M pillar
+        # quietly scored the gap 5.0. Computing them here removes the CSV as a single point of
+        # failure — year_return / dma_50 / dma_200 were already native, these two were not.
+        cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS return_3y NUMERIC")
+        cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS return_52w_vs_index NUMERIC")
     conn.commit()
+
+
+# cc#828 part_2: benchmark for the vs-index leg. raw_prices carries NIFTY50 daily back to
+# 2021-05-24, so the 1Y anchor is always available on a normal session.
+BENCHMARK_SYMBOL = "NIFTY50"
+ANCHOR_TOLERANCE_DAYS = 30   # how far BEFORE the anniversary we accept the lookback bar
+
+
+def _compute_long_returns(conn, target_date: date) -> dict:
+    """Fill return_3y + return_52w_vs_index for every row of today's universe_technicals.
+
+    Deliberately ONE set-based pass rather than a per-symbol query inside the main loop — the
+    loop already runs ~1,800 symbols and this would triple its query count for arithmetic that
+    Postgres can do in a single statement.
+
+    Semantics match what the Screener CSV columns held, so the COALESCE in the consumers compares
+    like with like:
+      return_3y            = absolute % change over 3 years (NOT annualised — screener's
+                             "Return over 3 years" is a simple total return)
+      return_52w_vs_index  = stock 1Y return MINUS NIFTY50 1Y return, in percentage points
+
+    A symbol with no bar in the lookback window gets NULL, never a fabricated 0 — a 2024 listing
+    genuinely has no 3-year return and must render as "--", not as a flat line.
+    """
+    sql = """
+    WITH latest AS (
+        SELECT DISTINCT ON (symbol) symbol, close
+        FROM raw_prices
+        WHERE price_date <= %(d)s AND close > 0
+        ORDER BY symbol, price_date DESC
+    ),
+    a1 AS (
+        SELECT DISTINCT ON (symbol) symbol, close
+        FROM raw_prices
+        WHERE close > 0
+          AND price_date <= %(d)s - INTERVAL '1 year'
+          AND price_date >= %(d)s - INTERVAL '1 year' - %(tol)s * INTERVAL '1 day'
+        ORDER BY symbol, price_date DESC
+    ),
+    a3 AS (
+        SELECT DISTINCT ON (symbol) symbol, close
+        FROM raw_prices
+        WHERE close > 0
+          AND price_date <= %(d)s - INTERVAL '3 years'
+          AND price_date >= %(d)s - INTERVAL '3 years' - %(tol)s * INTERVAL '1 day'
+        ORDER BY symbol, price_date DESC
+    ),
+    bench AS (
+        SELECT (l.close / a.close - 1) * 100 AS idx_1y
+        FROM latest l JOIN a1 a ON a.symbol = l.symbol
+        WHERE l.symbol = %(bench)s
+    ),
+    calc AS (
+        SELECT l.symbol,
+               ROUND(((l.close / a3.close - 1) * 100)::numeric, 2) AS r3,
+               ROUND((((l.close / a1.close - 1) * 100) - b.idx_1y)::numeric, 2) AS r52
+        FROM latest l
+        LEFT JOIN a3 ON a3.symbol = l.symbol
+        LEFT JOIN a1 ON a1.symbol = l.symbol
+        LEFT JOIN bench b ON true
+    )
+    UPDATE universe_technicals u
+       SET return_3y = c.r3, return_52w_vs_index = c.r52
+      FROM calc c
+     WHERE u.symbol = c.symbol AND u.score_date = %(d)s
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, {"d": target_date, "tol": ANCHOR_TOLERANCE_DAYS, "bench": BENCHMARK_SYMBOL})
+        touched = cur.rowcount
+        cur.execute("""SELECT COUNT(return_3y), COUNT(return_52w_vs_index), COUNT(*)
+                       FROM universe_technicals WHERE score_date = %s""", (target_date,))
+        n3, n52, ntot = cur.fetchone()
+    conn.commit()
+    return {"rows_touched": touched, "return_3y_filled": n3,
+            "return_52w_vs_index_filled": n52, "rows_total": ntot}
 
 
 def _compute_vol_ratio_21(conn, symbol: str, for_date: date):
@@ -199,6 +280,13 @@ def run_universe_technicals(conn, target_date: date = None) -> dict:
         except Exception as e:
             errors.append(f"{sym}: {str(e)[:80]}")
 
+    # cc#828 part_2: long-horizon returns, one set-based pass after the per-symbol loop.
+    try:
+        long_ret = _compute_long_returns(conn, target_date)
+    except Exception as e:
+        long_ret = {"error": str(e)[:200]}
+        log.warning("universe_technicals: long-return pass failed: %s", e)
+
     runtime_secs = round(time.time() - t0, 1)
     match_pct = _overlap_match_check(conn, target_date)
     alert = (runtime_secs > RUNTIME_ALERT_SECS) or (match_pct is not None and match_pct < MATCH_PCT_ALERT)
@@ -211,6 +299,7 @@ def run_universe_technicals(conn, target_date: date = None) -> dict:
         "errors": len(errors),
         "runtime_secs": runtime_secs,
         "overlap_match_pct": match_pct,
+        "long_returns": long_ret,          # cc#828 part_2
         "sample_errors": errors[:10],
     }
     with conn.cursor() as cur:

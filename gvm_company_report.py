@@ -79,6 +79,16 @@ PARAMS = [
 # dii_holding and fii_change/dii_change SEPARATELY; the net values (inst_holding_abs /
 # inst_holding_change) live only in screener_loader's in-memory df, never persisted. Compute
 # them inline for the peer query, mirroring the loader's both-null -> NULL semantics.
+# cc#828 part_2: screener_raw column -> the universe_technicals column that computes the SAME
+# quantity natively from raw_prices. Read as `screener value COALESCE native value`, so a narrower
+# CSV export (02-Aug: return_1y/3y/52w blanked for all 1,801 rows) degrades the metric to computed
+# truth instead of NULL -> a silently-neutral 5.0 in the M pillar.
+_NATIVE_FALLBACK = {
+    "return_1y":           "year_return",
+    "return_3y":           "return_3y",
+    "return_52w_vs_index": "return_52w_vs_index",
+}
+
 _COMPUTED_COLS = {
     "inst_holding_abs":    ('CASE WHEN s."fii_holding" IS NULL AND s."dii_holding" IS NULL THEN NULL '
                             'ELSE COALESCE(s."fii_holding",0)+COALESCE(s."dii_holding",0) END'),
@@ -168,14 +178,33 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
             (f'{_COMPUTED_COLS[c]} AS "{c}"' if c in _COMPUTED_COLS else f's."{c}" AS "{c}"')
             for c in screener_cols
         )
+        # cc#828 part_2: pull the native equivalents alongside, under a _nat_ alias, and resolve the
+        # COALESCE in Python (screener_raw is a wide TEXT dump — a SQL COALESCE of text against
+        # numeric would not even type-check; _f() already normalises both sides here).
+        nat_sql = "".join(f', u."{n}" AS "_nat_{s}"' for s, n in _NATIVE_FALLBACK.items())
         cur.execute(f"""
-            SELECT g.symbol, g.company_name, g.gvm_score, g.market_cap, {col_sql}
+            SELECT g.symbol, g.company_name, g.gvm_score, g.market_cap, {col_sql}{nat_sql}
             FROM gvm_scores g
             JOIN screener_raw s ON s.nse_code = g.symbol
+            LEFT JOIN universe_technicals u
+                   ON u.symbol = g.symbol
+                  AND u.score_date = (SELECT MAX(score_date) FROM universe_technicals)
             WHERE g.segment = %s AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
         """, (segment,))
         pcols = [d[0] for d in cur.description]
         peers = [dict(zip(pcols, r)) for r in cur.fetchall()]
+
+        # Apply the fallback ONCE, here, so every downstream consumer (own value, peer median,
+        # rank, peer ladder, best/worst) sees one consistent resolved number.
+        native_used = {}
+        for scol, ncol in _NATIVE_FALLBACK.items():
+            used = 0
+            for p in peers:
+                if _f(p.get(scol)) is None and _f(p.get(f"_nat_{scol}")) is not None:
+                    p[scol] = p[f"_nat_{scol}"]
+                    used += 1
+            if used:
+                native_used[scol] = used
 
         if not any(p["symbol"] == symbol for p in peers):
             # company has gvm row but no screener_raw join — still return header
@@ -196,6 +225,7 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         # Build per-parameter benchmark
         params_out = []
         pillar_acc: Dict[str, List[float]] = {}
+        pillar_total: Dict[str, int] = {}   # cc#828 part_3: denominator incl. excluded metrics
         persist_vals: Dict[str, Any] = {}
 
         for key, label, group, scol, hib, prefix, unit in PARAMS:
@@ -208,12 +238,21 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
 
             raw = rating = rank = None
             best_sym = worst_sym = None
+            pillar_total[group] = pillar_total.get(group, 0) + 1
             if me_idx is not None:
                 raw = col_vals[me_idx]
                 rank = _rank_within(col_vals, me_idx, hib)
+                # cc#828 part_3: NO VALUE => NO SCORE. Every gvm_engine scorer returns
+                # BLANK_SCORE (5.0) for a blank input, which is indistinguishable from a
+                # genuinely average stock — that is exactly how the 02-Aug blanked return
+                # columns rode along inside M=8.91 without anyone noticing. A metric with no
+                # value is now EXCLUDED: rating None, tile greyed, pillar averaged over the
+                # metrics that do have data with the denominator carried to the UI.
+                if raw is None:
+                    rating = None
                 # cc#506: rating source = gvm_engine, same functions the nightly G/V/M engine
                 # uses, fed the segment MEDIAN -- retires the old percentile-rank _rate_within.
-                if key == "pe":
+                elif key == "pe":
                     hist_pe = _f(peers[me_idx].get("historical_pe"))
                     rating = score_pe(raw, hist_pe, live_segment_median_pe)
                 elif key == "opm_exp":
@@ -240,6 +279,7 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 "peer_avg": peer_median, "peer_median": peer_median,
                 "rank": rank, "peer_count": len(non_null),
                 "rating": rating, "higher_is_better": hib,
+                "excluded": rating is None,   # cc#828 part_3: no value -> out of the pillar average
                 "best": best_sym, "worst": worst_sym, "peers": peers_list,
                 "beats_peer": (raw is not None and peer_median is not None and
                                ((raw >= peer_median) if hib else (raw <= peer_median))),
@@ -278,7 +318,8 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 _raw = _cv[me_idx] if me_idx is not None else None
                 _rnk = _rank_within(_cv, me_idx, _hib) if me_idx is not None else None
                 _rat = None
-                if me_idx is not None:
+                pillar_total["Technicals"] = pillar_total.get("Technicals", 0) + 1
+                if me_idx is not None and _raw is not None:
                     # cc#506: DMA 50/200 -> gvm_engine.score_dma (absolute deviation bands, no
                     # peer input). momentum_scores.dma_50/200 already STORE a deviation % (not a
                     # raw MA price level), so synthesize a price/dma pair that reduces score_dma's
@@ -287,8 +328,10 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                     # Monthly / Vol Trend / 1M Return have no dedicated engine fn -> param_score
                     # vs the segment median, same as the fundamentals above (data source for all
                     # 5 stays momentum_scores/raw_prices, unchanged per the momentum exception).
+                    # cc#828 part_3: the `else 5.0` that used to sit on this line is gone — a
+                    # missing DMA is now an excluded tile, not a neutral score.
                     if _key in ("dma_50", "dma_200"):
-                        _rat = score_dma(100 + _raw, 100) if _raw is not None else 5.0
+                        _rat = score_dma(100 + _raw, 100)
                     else:
                         _rat = param_score(_raw, _median_v)
                 _best = _worst = None
@@ -305,6 +348,7 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                     "peer_avg": _median_v, "peer_median": _median_v,
                     "rank": _rnk, "peer_count": len(_nn),
                     "rating": _rat, "higher_is_better": _hib,
+                    "excluded": _rat is None,   # cc#828 part_3
                     "best": _best, "worst": _worst, "peers": _peers_list,
                     "beats_peer": (_raw is not None and _median_v is not None and
                                    ((_raw >= _median_v) if _hib else (_raw <= _median_v))),
@@ -314,11 +358,18 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         except Exception as _me:
             log.warning(f"momentum_scores M extras failed for {symbol}: {_me}")
 
-        # Pillar (headline) scores = avg of param ratings in that group
+        # Pillar (headline) scores = avg of param ratings in that group.
+        # cc#828 part_3: the average is over the metrics that HAVE data, and the denominator that
+        # produced it travels with the score so the UI can print "M over 5/8 metrics" instead of
+        # implying all eight were measured.
         pillars = {}
+        pillar_coverage = {}
         for group, score_key in PILLAR_MAP.items():
             vals = pillar_acc.get(group, [])
+            total = pillar_total.get(group, len(vals))
             pillars[score_key] = round(sum(vals) / len(vals), 2) if vals else None
+            pillar_coverage[score_key] = {"scored": len(vals), "total": total,
+                                          "excluded": max(total - len(vals), 0)}
 
         # Segment rank ladder (all peers by gvm_score)
         ladder = sorted(
@@ -366,6 +417,8 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         "segment_rank": seg_rank,
         "segment_size": len(ladder),
         "pillars": pillars,
+        "pillar_coverage": pillar_coverage,      # cc#828 part_3: {score_key:{scored,total,excluded}}
+        "native_fallback_used": native_used,     # cc#828 part_2: {screener_col: n_peers_backfilled}
         "parameters": params_out,
         "segment_ladder": ladder,
         "positives": positives,

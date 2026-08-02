@@ -83,6 +83,7 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
         "peer_avg":   p.get("peer_avg"),
         "peer_median": p.get("peer_median", p.get("peer_avg")),
         "rating":     p.get("rating"),
+        "excluded":   bool(p.get("excluded")),     # cc#828 part_3: no value -> out of the pillar avg
         "rank":       p.get("rank"),
         "peer_n":     p.get("peer_count"),
         "best":       p.get("best"),
@@ -628,6 +629,10 @@ def gvm_company_report(symbol: str):
             "m":   base.get("m_score"),
         },
         "benchmark":    benchmark,
+        # cc#828 part_3: {track_score|val_score|outlook_score|reliability_score|tech_score:
+        #   {scored, total, excluded}} — the denominator behind each pillar average, so the popout
+        # can print "M over 3/5 metrics" instead of implying every metric was measured.
+        "pillar_coverage": base.get("pillar_coverage") or {},
         "positives":    positives,
         "negatives":    negatives,
         "ladder":       ladder,
