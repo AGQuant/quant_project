@@ -16,14 +16,17 @@ APScheduler registry that doesn't exist -- the same "code is the source of truth
 adapted to the codebase that's actually here.
 """
 import os
+import re                    # cc#841: cadence classifier
 import ast
 import json
 import logging
 import inspect
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg
 from fastapi import APIRouter
+
+IST = timezone(timedelta(hours=5, minutes=30))   # cc#841: all cadence reasoning is IST
 
 log = logging.getLogger("scorr.scheduler_master")
 router = APIRouter(tags=["scheduler_master"])
@@ -167,6 +170,172 @@ _CHAINED_JOBS = [
 ]
 
 
+# ── cc#841 part_1: CADENCE-AWARE FRESHNESS ────────────────────────────────────────────────────────
+# The flat "stale if last_run > 48h" rule is wrong for most of this registry, and on a weekend it is
+# wrong for nearly all of it. Measured on Sunday 02-Aug: 25 jobs flagged stale, of which 23 were
+# Friday-session jobs sitting at 2.1-2.4 days (market-hours 5-min loops and weekday-only dailies) and
+# one was bg_fu_sync at 6.6 days on a Monday-weekly cadence. Every one of them was healthy. A monitor
+# that cries wolf on 24 of 25 rows trains you to ignore it, which is worse than no monitor.
+#
+# So: a job is STALE only when an EXPECTED RUN WAS MISSED. The cadence expression the registry
+# already stores is classified into a class, and each class knows its own allowed silence.
+# Deliberately a CLASSIFIER, not a cron parser: these expressions are arbitrary Python read out of
+# the dispatch loop, and a half-working parser that silently mis-reads one would be worse than a
+# classifier that says "unknown" out loud.
+
+_TRADING_CLOSE_H, _TRADING_CLOSE_M = 15, 30
+_MARKET_TICK_GRACE_MIN = 15   # a 5-min loop's last tick lands before the close bell
+
+
+def _prev_weekday_at(now, hh, mm, weekday=None):
+    """Most recent instant at hh:mm that has already passed, restricted to weekdays (or one
+    specific weekday). Returns None if none within a 40-day lookback."""
+    probe = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if probe > now:
+        probe -= timedelta(days=1)
+    for _ in range(40):
+        ok = (probe.weekday() < 5) if weekday is None else (probe.weekday() == weekday)
+        if ok:
+            return probe
+        probe -= timedelta(days=1)
+    return None
+
+
+def classify_cadence(cadence: str) -> dict:
+    """cadence expression -> {'class': ..., 'hh','mm','weekday','dom'} where discoverable."""
+    c = (cadence or "").strip()
+    cl = c.lower()
+    out = {"class": "unknown", "hh": None, "mm": None, "weekday": None, "dom": None,
+           "dom_min": None, "months": None}
+    if not c:
+        return out
+    if "armed-flag-only" in cl or "app_config" in cl and "armed" in cl:
+        out["class"] = "armed"          # runs only when explicitly armed — silence is normal
+        return out
+    if "startup" in cl or "on app startup" in cl:
+        out["class"] = "startup"
+        return out
+    if "event-triggered" in cl:
+        out["class"] = "event"
+        return out
+    m = re.search(r"h\s*==\s*(\d+)", c)
+    if m:
+        out["hh"] = int(m.group(1))
+    m = re.search(r"\bm\s*==\s*(\d+)", c)
+    if m:
+        out["mm"] = int(m.group(1))
+    m = re.search(r"weekday\(\)\s*==\s*(\d+)", c)
+    if m:
+        out["weekday"] = int(m.group(1))
+    m = re.search(r"now\.day\s*==\s*(\d+)", c)
+    if m:
+        out["dom"] = int(m.group(1))
+    m = re.search(r"now\.day\s*>=\s*(\d+)", c)
+    if m:
+        out["dom_min"] = int(m.group(1))
+    m = re.search(r"now\.month\s+in\s*\(([\d,\s]+)\)", c)
+    if m:
+        out["months"] = [int(x) for x in m.group(1).replace(" ", "").split(",") if x]
+    if "_is_market_hours" in c:
+        out["class"] = "market_hours"
+    elif "now.month in" in cl:
+        out["class"] = "quarterly"
+    elif out["dom"] is not None:
+        out["class"] = "monthly"
+    elif out["weekday"] is not None:
+        out["class"] = "weekly"
+    elif out["hh"] is not None:
+        out["class"] = "daily"
+    elif re.search(r"m\s*%\s*\d+", c) or "every tick" in cl:
+        out["class"] = "frequent"
+    return out
+
+
+def expected_last_run(cadence: str, now=None, is_trading_day=None):
+    """The most recent instant this job SHOULD have run by. None => cannot be judged on a clock
+    (armed / startup / event / unknown), which the caller must report as such rather than as stale."""
+    now = now or datetime.now(IST)
+    k = classify_cadence(cadence)
+    cls = k["class"]
+    if cls in ("armed", "startup", "event", "unknown"):
+        return None
+    if cls == "frequent":
+        return now - timedelta(minutes=20)      # generous: a tick loop that missed 20 min is late
+    if cls == "market_hours":
+        # Healthy all weekend and all evening: the yardstick is the END of the last trading session,
+        # minus a grace window. A 5-minute loop's FINAL tick of the day legitimately lands before
+        # 15:30 (15:25, or 15:20 if that tick was busy), so demanding a run at-or-after 15:30 would
+        # flag every market-hours job as stale every single evening — the very noise this replaces.
+        probe = now.replace(hour=_TRADING_CLOSE_H, minute=_TRADING_CLOSE_M, second=0, microsecond=0)
+        if probe > now:
+            probe -= timedelta(days=1)
+        for _ in range(12):
+            if probe.weekday() < 5 and (is_trading_day is None or is_trading_day(probe.date())):
+                return probe - timedelta(minutes=_MARKET_TICK_GRACE_MIN)
+            probe -= timedelta(days=1)
+        return None
+    hh = k["hh"] if k["hh"] is not None else 23
+    mm = k["mm"] if k["mm"] is not None else 59
+    if cls == "daily":
+        return _prev_weekday_at(now, hh, mm)
+    if cls == "weekly":
+        return _prev_weekday_at(now, hh, mm, weekday=k["weekday"])
+    if cls == "quarterly":
+        # The month gate is the whole point of a quarterly job: outside its months there is NOTHING
+        # to expect. Reading only the day/hour and ignoring `now.month in (...)` flagged
+        # bg_shareholding_quarterly as stale in August, when its next window is October.
+        if k["months"] and now.month not in k["months"]:
+            return None
+        dom = k["dom"] or k["dom_min"] or 1
+        probe = now.replace(day=min(dom, 28), hour=hh, minute=mm, second=0, microsecond=0)
+        return probe if probe <= now else None
+    if cls == "monthly":
+        dom = k["dom"] or 1
+        probe = now.replace(day=min(dom, 28), hour=hh, minute=mm, second=0, microsecond=0)
+        return probe if probe <= now else None
+    return None
+
+
+def job_health(job: dict, now=None, is_trading_day=None) -> dict:
+    """{'status','reason','expected_by'} for one scheduler_master row.
+
+    status: ok | stale | never_run | error | unjudgeable
+    A MISSED EXPECTED RUN is the only thing that earns 'stale'."""
+    now = now or datetime.now(IST)
+    # cc#841 part_4/part_6: an INACTIVE row is retired history, not a death. bg_feed_incident_relay
+    # (8.2d) and bg_oi_feed_health (9.1d) read as "dead jobs" on the page, but both were retired by
+    # cc#660 FEED_GUARDIAN_V1 and already deactivated by cc#759 on 29-Jul — their functions no longer
+    # exist in scheduler.py, and feed_guardian's guardian_tick / guardian_offhours own that work now.
+    # Their last_run_at is frozen at the retirement. Reviving them would resurrect superseded code;
+    # the correct fix is that the registry stops presenting them as live.
+    if job.get("active") is False:
+        return {"status": "retired", "reason": "inactive — retired, kept for history",
+                "expected_by": None, "cadence_class": "retired"}
+    cadence = job.get("cadence_human") or ""
+    last = job.get("last_run_at")
+    exp = expected_last_run(cadence, now, is_trading_day)
+    cls = classify_cadence(cadence)["class"]
+    if (job.get("last_status") or "") == "error":
+        return {"status": "error", "reason": job.get("last_error") or "last run errored",
+                "expected_by": (exp.isoformat() if exp else None), "cadence_class": cls}
+    if not last:
+        if exp is None:
+            return {"status": "unjudgeable", "reason": f"{cls} cadence — no clock expectation",
+                    "expected_by": None, "cadence_class": cls}
+        return {"status": "never_run", "reason": f"expected by {exp.isoformat()}",
+                "expected_by": exp.isoformat(), "cadence_class": cls}
+    if exp is None:
+        return {"status": "ok", "reason": f"{cls} cadence — judged per trigger, not per clock",
+                "expected_by": None, "cadence_class": cls}
+    if getattr(last, "tzinfo", None) is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if last < exp:
+        return {"status": "stale", "reason": f"missed the run expected by {exp.isoformat()}",
+                "expected_by": exp.isoformat(), "cadence_class": cls}
+    return {"status": "ok", "reason": "ran at or after its last expected run",
+            "expected_by": exp.isoformat(), "cadence_class": cls}
+
+
 def all_known_jobs():
     return enumerate_scheduler_jobs() + _STARTUP_JOBS + _WORKER_JOBS + _CHAINED_JOBS
 
@@ -297,12 +466,31 @@ def get_scheduler_master():
                        FROM scheduler_master ORDER BY service, category, job_name""")
         cols = [d[0] for d in cur.description]
         rows = []
+        try:
+            import scheduler as _s
+            _itd = _s._is_trading_day
+        except Exception:
+            _itd = None
+        _now = datetime.now(IST)
         for r in cur.fetchall():
             row = dict(zip(cols, r))
+            # cc#841 part_1: the verdict is computed SERVER-SIDE from the cadence the registry
+            # already stores, so the page and bg_engine_watchdog can never disagree about what
+            # "stale" means — two copies of that judgement is how a monitor starts lying.
+            h = job_health(row, _now, _itd)
+            row["health"] = h["status"]
+            row["health_reason"] = h["reason"]
+            row["expected_by"] = h["expected_by"]
+            row["cadence_class"] = h["cadence_class"]
             row["added_date"] = str(row["added_date"]) if row["added_date"] else None
             row["last_run_at"] = str(row["last_run_at"]) if row["last_run_at"] else None
             rows.append(row)
-    return {"count": len(rows), "jobs": rows}
+    buckets = {}
+    for r in rows:
+        buckets[r["health"]] = buckets.get(r["health"], 0) + 1
+    return {"count": len(rows), "jobs": rows, "health_counts": buckets,
+            "health_basis": "cc#841: STALE means an EXPECTED run was missed, computed per cadence "
+                            "class — not a flat >48h age."}
 
 
 @router.post("/api/admin/scheduler_master/seed")

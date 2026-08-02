@@ -88,12 +88,26 @@ tr.hidden{display:none}
     var t=d.getTime();
     return isNaN(t)?null:t;
   }
+  // cc#841 part_1: the verdict comes from the SERVER (scheduler_master.job_health), which computes
+  // it from each job's own cadence class. The old flat ">48h" rule flagged 25 jobs on Sunday 02-Aug
+  // of which 23 were healthy Friday-session jobs — a monitor that is wrong 24 times out of 25 trains
+  // you to ignore it. The local fallback below only runs against an older API payload.
   function statusOf(j){
+    if(j.health){
+      var map={ok:{cls:"ok",bucket:"ok"},stale:{cls:"warn",bucket:"stale"},
+                never_run:{cls:"none",bucket:"never-run"},error:{cls:"err",bucket:"error"},
+                unjudgeable:{cls:"skip",bucket:"ok"},
+                retired:{cls:"skip",bucket:"retired"}};
+      var m=map[j.health]||{cls:"skip",bucket:"ok"};
+      var txt=j.health==="ok"?(j.last_status||"ok")
+             :j.health==="unjudgeable"?(j.cadence_class||"on trigger")
+             :j.health==="retired"?"retired"
+             :j.health.replace("_"," ");
+      return {cls:m.cls,txt:txt,bucket:m.bucket,title:j.health_reason||""};
+    }
     if(!j.last_run_at)return {cls:"none",txt:"never run",bucket:"never-run"};
     if(j.last_status==="error")return {cls:"err",txt:"error",bucket:"error"};
     if(j.last_status==="skipped")return {cls:"skip",txt:"skipped",bucket:"skipped"};
-    var mins=(Date.now()-lastRunMs(j))/60000;
-    if(!isNaN(mins)&&mins>2880)return {cls:"warn",txt:"stale (>48h)",bucket:"ok"};
     return {cls:"ok",txt:j.last_status||"ok",bucket:"ok"};
   }
 
