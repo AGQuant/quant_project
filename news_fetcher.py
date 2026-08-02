@@ -22,6 +22,7 @@ NOT built here.
 
 import os
 import re
+import html
 import time
 import random
 import hashlib
@@ -87,10 +88,18 @@ def _md5(s: str) -> str:
 
 
 def _clean(text: str) -> str:
-    """Strip HTML tags + collapse whitespace (RSS summaries carry markup)."""
+    """Strip HTML tags, decode HTML entities, collapse whitespace (RSS summaries carry markup).
+
+    cc#787 BUG FIX: entities are now decoded here, so every ingest filter downstream sees the
+    real text. Previously "F&amp;O Talk" reached _is_quality_article still escaped and slipped
+    straight past the `f&o talk` pattern that was meant to catch it.
+
+    Order matters and is deliberate: strip tags FIRST, then unescape. Unescaping first would
+    turn an escaped "&lt;b&gt;" into a live "<b>" that the tag-stripper would then eat,
+    silently deleting real text."""
     if not text:
         return ""
-    return _WS_RE.sub(" ", _TAG_RE.sub(" ", text)).strip()
+    return _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", text))).strip()
 
 
 def _truncate(text: str, n: int = DESC_MAX) -> str:
@@ -183,8 +192,11 @@ def _is_quality_article(headline: str, description: str, source_name: str = None
         return False
     if h_low.startswith("quote of the day"):    # F3 quote of the day
         return False
-    if _DOM_LISTICLE_RE.search(h_low):          # F4 broker listicles / F&O tips
-        return False
+    # cc#787: F4 (broker listicles / F&O tips) NO LONGER rejects here. Founder decision 02-Aug:
+    # recommendation content is not junk, it is the PRIZE for the Stock Views funnel (funnel 2).
+    # It is flagged via _is_reco() in _insert_rows instead of being destroyed at ingest, and
+    # funnel 1 (news-polish) excludes it explicitly. _DOM_LISTICLE_RE is still the classifier —
+    # it just routes now instead of dropping.
     if _DOM_OBIT_RE.search(h_low) and not _DOM_OBIT_MARKET_RE.search(d.lower()):  # F5 non-market obituary
         return False
     # task #101 -- Bloomberg-only relevance gate
@@ -319,6 +331,52 @@ _NEWS_SRC_TIER = {"bloomberg": 10, "reuters": 10, "et markets": 8, "economic tim
                   "mint": 7, "moneycontrol": 7, "business standard": 7, "et industry": 6}
 
 
+def _is_reco(headline, description="") -> bool:
+    """cc#787 FUNNEL 2 CLASSIFIER: True when the article is broker/analyst recommendation content.
+
+    Founder decision (02-Aug): do NOT block reco content. Two funnels —
+      FUNNEL 1 (news-polish)  : editorial flow, must never see this content.
+      FUNNEL 2 (Stock Views)  : this content is the P1 prize.
+
+    Matches the two patterns that previously meant 'kill' or 'bury':
+      _DOM_LISTICLE_RE — was a hard drop in _is_quality_article (now routes instead of dropping)
+      _NEWS_TIP_RE     — scores -50 in _news_relevance_score; that penalty is DELIBERATELY LEFT
+                         ALONE so funnel 1's ordering stays byte-identical.
+    _DOM_LISTICLE_RE carries no re.I flag (it was always matched against a lowered string), so
+    lowercase for it; _NEWS_TIP_RE is already case-insensitive."""
+    blob = (headline or "") + " " + (description or "")
+    return bool(_DOM_LISTICLE_RE.search(blob.lower()) or _NEWS_TIP_RE.search(blob))
+
+
+# cc#787: tri-state process cache — None = not yet probed. raw_news.is_reco is created by a
+# Railway-console migration because MAINTENANCE_LOCK_RULE hard-blocks ALTER TABLE on the run_sql
+# path. Probing means this code is safe to deploy BEFORE the column exists and starts populating
+# it the moment it does, so there is no deploy/migration ordering dependency in either direction.
+_IS_RECO_COL = None
+
+
+def _has_is_reco(cur) -> bool:
+    global _IS_RECO_COL
+    if _IS_RECO_COL is None:
+        try:
+            cur.execute("""SELECT 1 FROM information_schema.columns
+                           WHERE table_name='raw_news' AND column_name='is_reco'""")
+            _IS_RECO_COL = cur.fetchone() is not None
+        except Exception:
+            _IS_RECO_COL = False
+    return _IS_RECO_COL
+
+
+def has_is_reco_column(conn) -> bool:
+    """Public wrapper of the cc#787 column probe, for callers outside this module
+    (news_endpoints funnel-1 guard, stock_views_funnel feed)."""
+    try:
+        with conn.cursor() as cur:
+            return _has_is_reco(cur)
+    except Exception:
+        return False
+
+
 def _news_relevance_score(headline, description, symbol, source_name, in_universe):
     """cc#743: relevance score for polish-queue ordering (NOT auto-publish). Highest weight = symbol in
     the scrape universe; event type (results/regulatory/corp-action) beats commentary/preview/wrap;
@@ -358,7 +416,8 @@ def _insert_rows(conn, rows):
     counts BOTH intra-source repeats and cross-source-type collisions (a company URL
     already present as a domestic row) — the counter tells us which stage kills rows."""
     stats = {"parsed": len(rows), "stale_rejected": 0, "quality_rejected": 0,
-             "content_dup_skipped": 0, "dup_skipped": 0, "inserted": 0}
+             "content_dup_skipped": 0, "dup_skipped": 0, "inserted": 0,
+             "reco_flagged": 0, "reco_dropped_no_column": 0}   # cc#787
     if not rows:
         return stats
     # cc#289: ingest age gate — anything already older than the window at insert time is evergreen
@@ -397,6 +456,16 @@ def _insert_rows(conn, rows):
                 stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
+            # cc#787: classify reco content. SAFETY GATE — until the is_reco column exists there is
+            # nowhere to record the flag, so funnel 1 could not exclude these rows and they would leak
+            # into the polish queue. Pre-migration we therefore keep the OLD behaviour (drop), which
+            # makes this commit deployable ahead of the migration with funnel 1 byte-identical.
+            reco = _is_reco(r[2], r[3])
+            has_reco_col = _has_is_reco(cur)
+            if reco and not has_reco_col:
+                stats["reco_dropped_no_column"] += 1
+                stats["quality_rejected"] += 1
+                continue
             # cc#742: cross-source dedup via a normalized STORY SIGNATURE (replaces cc#296's exact-
             # headline ±2min skip, which missed paraphrased cross-feed copies with different numbers —
             # the Ambuja/Suzlon/HUL cases). Every source row is KEPT (multi-source signal preserved) and
@@ -420,15 +489,26 @@ def _insert_rows(conn, rows):
             # for polish; in_univ = the (tagged) symbol is in the scrape universe.
             in_univ = bool(r[1]) and (r[1].upper() in _univ)
             rel = 0 if canon_id is not None else _news_relevance_score(r[2], r[3], r[1], r[6], in_univ)
-            cur.execute("""
-                INSERT INTO raw_news
-                    (source_type, symbol, headline, description, url, url_hash, source_name,
-                     published_at, norm_sig, canonical_id, relevance_score)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (url_hash) DO NOTHING
-            """, r + (sig, canon_id, rel))
+            if has_reco_col:
+                cur.execute("""
+                    INSERT INTO raw_news
+                        (source_type, symbol, headline, description, url, url_hash, source_name,
+                         published_at, norm_sig, canonical_id, relevance_score, is_reco)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (url_hash) DO NOTHING
+                """, r + (sig, canon_id, rel, reco))
+            else:
+                cur.execute("""
+                    INSERT INTO raw_news
+                        (source_type, symbol, headline, description, url, url_hash, source_name,
+                         published_at, norm_sig, canonical_id, relevance_score)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (url_hash) DO NOTHING
+                """, r + (sig, canon_id, rel))
             if cur.rowcount:
                 stats["inserted"] += 1
+                if reco:
+                    stats["reco_flagged"] += 1
             else:
                 stats["dup_skipped"] += 1
     conn.commit()
@@ -439,6 +519,11 @@ def _insert_rows(conn, rows):
         log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
     if stats["content_dup_skipped"]:
         log.info(f"_insert_rows: collapsed {stats['content_dup_skipped']} cross-source duplicate(s) onto a canonical row (cc#742)")
+    if stats["reco_flagged"]:
+        log.info(f"_insert_rows: flagged {stats['reco_flagged']} reco article(s) for funnel 2 (cc#787)")
+    if stats["reco_dropped_no_column"]:
+        log.warning(f"_insert_rows: dropped {stats['reco_dropped_no_column']} reco article(s) — "
+                    f"raw_news.is_reco column not present yet, run the cc#787 migration to start capturing them")
     return stats
 
 

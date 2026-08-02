@@ -88,6 +88,7 @@ from performance_endpoints import router as performance_router
 from scheduler_health_endpoints import router as scheduler_health_router
 from news_endpoints import router as news_router
 from position_news_endpoints import router as position_news_router  # cc#207
+from stock_views_funnel import router as stock_views_funnel_router  # cc#787: FUNNEL 2 (Stock Views)
 from admin_index_backfill import router as idx_backfill_router
 from feed_health_endpoints import router as feed_health_router
 from v12_endpoints import router as v12_router
@@ -340,6 +341,7 @@ app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
 app.include_router(position_news_router)  # cc#207: Position News quarantine tab
+app.include_router(stock_views_funnel_router)  # cc#787: FUNNEL 2 — /api/news/stock_views/feed
 app.include_router(pwa_router)
 app.include_router(idx_backfill_router)
 app.include_router(feed_health_router)

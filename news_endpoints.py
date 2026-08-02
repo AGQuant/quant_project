@@ -13,12 +13,14 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
 """
 
 import os
+import logging
 import psycopg
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from scorr_auth import _is_authed
 
+log = logging.getLogger("scorr.news")
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -162,6 +164,22 @@ _POSITION_POLISH_CLAUSE = (
 )
 
 
+def _reco_exclude_clause(conn) -> str:
+    """cc#787 FUNNEL 1 GUARD: broker/analyst reco rows can NEVER surface in the news-polish flow.
+
+    Same protection as before, stated explicitly instead of relying on the ingest hard-drop
+    (which cc#787 removed so funnel 2 can have the content). Returns '' while the is_reco
+    column does not exist yet — safe, because pre-migration news_fetcher still drops reco rows
+    at ingest, so there are none to leak. Funnel 1 stays byte-identical either way."""
+    try:
+        import news_fetcher
+        if news_fetcher.has_is_reco_column(conn):
+            return " AND NOT COALESCE(r.is_reco, false) "
+    except Exception as e:
+        log.warning(f"_reco_exclude_clause: {e}")
+    return ""
+
+
 @router.get("/api/news/unpolished")
 def news_unpolished(sample: int = 20):
     """Count + sample of raw_news rows with no matching polished_news that are eligible for
@@ -174,17 +192,19 @@ def news_unpolished(sample: int = 20):
     # arbitrary recency slice. relevance_score is exposed so the expiring tail can be reviewed.
     _CANON = " AND r.canonical_id IS NULL "
     with _conn() as conn, conn.cursor() as cur:
+        # cc#787 FUNNEL 1 GUARD — reco content is routed to the Stock Views funnel, never here.
+        _RECO = _reco_exclude_clause(conn)
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE)
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO)
         pending = cur.fetchone()[0]
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
                    r.source_name, r.url, r.published_at, r.relevance_score
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + """
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + """
             ORDER BY r.relevance_score DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))

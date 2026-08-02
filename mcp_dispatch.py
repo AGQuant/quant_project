@@ -143,6 +143,7 @@ MCP_TOOLS = [
     {"name":"restate_symbol_history","description":"cc#657 raw_prices corporate-action fix: full 5y ADJUSTED re-pull from Yahoo for split/bonus/demerger-polluted symbols (one/sec), restating the whole series so fake -34%..-90% single-day cliffs disappear. Pass {symbols:[...]} for an explicit list, or {detect:true} to auto-select the current cliff backlog. Returns per-symbol {bars, first_date, last_date, residual_cliffs} (a residual cliff after re-pull is a TRUE market move).","inputSchema":{"type":"object","properties":{"symbols":{"type":"array","items":{"type":"string"}},"detect":{"type":"boolean"},"lookback":{"type":"string"}},"required":[]}},
     {"name":"hr_report_pdf","description":"cc#652 Portfolio Health: get a fetchable white-label PDF of a saved portfolio's Health Report. Returns {url} — an absolute, short-lived (~10 min) signed URL you can web_fetch directly (no login) and share in chat. Zero Scorr branding. Pass {portfolio_id} (e.g. 4 = Vishal Bhosale).","inputSchema":{"type":"object","properties":{"portfolio_id":{"type":"integer"}},"required":["portfolio_id"]}},
     {"name":"stock_views_shortlist","description":"cc#737 / STOCK_VIEWS_FRAMEWORK_V1: TC-gated stock-views shortlist. DISTINCT symbols mentioned in polished_news over the last `hours` -> canonical Trade Check (best of LONG/SHORT) -> keep VALID/STRONG -> sorted by score DESC. Returns {hours, universe_scanned, count, candidates:[{symbol,direction,verdict,score,max,cmp}]}. Read-only, writes nothing. Reuses the same helper as the /api/news/stock_views/shortlist HTTP route (which Claude web can't call — it's login-gated).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
+    {"name":"stock_views_feed","description":"cc#787 FUNNEL 2 (Stock Views raw feed): raw_news from the last `hours` that is EITHER broker/analyst recommendation content (is_reco) OR a catalyst on a stock in the ACTIVE futures universe. Scope is deliberately narrow so volume cannot explode — source_type domestic|company ONLY (no Reuters/Bloomberg global), IPO/listing/GMP content excluded, canonical rows only. Returns {hours, total_count, returned, capped_at, truncated, reco_count, reco_column_present, articles:[{raw_id,symbol,headline,description,source_name,source_type,url,published_at,is_reco}]} — capped at 200 rows newest-first, with total_count so you see real volume without pulling everything. This is what you scan on 'stock views' for P1/P2 candidates. Read-only. Distinct from stock_views_shortlist, which TC-scores already-POLISHED news; this is the raw upstream feed and is the only place reco content appears (funnel 1 / news-polish never shows it).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -354,6 +355,14 @@ async def _call_tool(name, args):
             return await asyncio.to_thread(
                 smartgain_reconcile.backfill_all_batches,
                 args.get("account", "MHK40"),
+            )
+        elif name == "stock_views_feed":
+            # cc#787: internal-trusted (no auth gate) — call the SHARED funnel-2 core directly,
+            # bypassing the login-gated HTTP route. Same query, one definition.
+            import stock_views_funnel
+            return await asyncio.to_thread(
+                stock_views_funnel.stock_views_feed_data,
+                int(args.get("hours", 48)),
             )
         elif name == "stock_views_shortlist":
             # cc#737: internal-trusted (no auth gate) — call the SHARED helper directly, bypassing the

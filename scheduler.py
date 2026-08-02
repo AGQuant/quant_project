@@ -2313,10 +2313,13 @@ def _bg_data_retention():
         log.error(f"data_retention: {e}")
 
 def _bg_fetch_stock_news():
-    """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
-    universe -> raw_news (source_type='company' + symbol), alias-filtered at ingest. Single
-    funnel with market news; supersedes the position_news quarantine fetch (cc#207/id=402).
-    3x/day on trading days: 08:30/12:30/16:30."""
+    """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News -> raw_news (source_type='company'
+    + symbol), alias-filtered at ingest. Single funnel with market news; supersedes the
+    position_news quarantine fetch (cc#207/id=402). Runs once daily ~00:30 IST (cc#321).
+
+    cc#787 DOCSTRING FIX: this said "full active futures universe", which has been wrong since
+    cc#243/cc#244 deliberately narrowed news_fetcher._stock_universe to OPEN POSITIONS ONLY.
+    Universe-wide coverage is now a separate funnel-2 job (_bg_fetch_universe_reco_news)."""
     try:
         import news_fetcher
         with _conn() as conn:
@@ -2342,6 +2345,28 @@ def _bg_fetch_position_news():
         log.info(f"fetch_position_news: {res}")
     except Exception as e:
         log.error(f"fetch_position_news: {e}")
+
+def _bg_fetch_universe_reco_news(slot: int = 0):
+    """cc#787 FUNNEL 2 coverage: per-stock Google News across the ACTIVE FUTURES UNIVERSE
+    (~209 symbols), query biased to recommendation content, landing in raw_news as
+    source_type='company' with is_reco set by the shared classifier.
+
+    Distinct from _bg_fetch_stock_news, which is OPEN POSITIONS ONLY (cc#243/cc#244) — this is
+    the universe-wide leg the Stock Views funnel needs.
+
+    2 slots/day, OFF market hours (03:10 / 21:10 IST), each taking half the universe (slot 0 /
+    slot 1 alternate) so one run never walks all ~209 symbols and the Google 429 budget stays
+    intact. Politeness stack is position_news's, reused verbatim: sequential, browser UA, 2-4s
+    jitter, Retry-After honoured, abort on 10 consecutive 429s. On abort the remainder is left
+    for the next slot; the halves alternate so nothing is starved permanently."""
+    try:
+        import stock_views_funnel
+        with _conn() as conn:
+            res = stock_views_funnel.fetch_universe_reco_news(slot=slot, conn=conn)
+        log.info(f"fetch_universe_reco_news(slot={slot}): {res}")
+    except Exception as e:
+        log.error(f"fetch_universe_reco_news(slot={slot}): {e}")
+
 
 def _bg_stock_news_watchdog():
     """cc#245: staleness / all-blocked watchdog for the per-stock Google News fetch. Piggybacks
@@ -3339,6 +3364,16 @@ async def _scheduler_loop():
         # gate (news_fetcher.COMPANY_STALE_HOURS) widens per-run coverage to compensate.
         if h == 0 and m == 30:
             _spawn(_bg_fetch_stock_news)               # cc#321: once daily ~00:30 IST
+        # cc#787 FUNNEL 2: universe-wide reco-biased fetch, 2 slots/day OFF market hours, each
+        # taking half the ~209-symbol active futures universe. EVERY day (broker notes land on
+        # weekends too). Deliberately not near 00:30 (_bg_fetch_stock_news) or the 01:00-02:40
+        # nightly chain, so the Google-News 429 budget is never spent by two fetchers at once.
+        # _spawn(fn, *args) forwards args and records fn.__name__ in scheduler_master — passing
+        # the slot as an arg (not via a lambda) keeps the telemetry name real, not '<lambda>'.
+        if h == 3 and m == 10:
+            _spawn(_bg_fetch_universe_reco_news, 0)
+        if h == 21 and m == 10:
+            _spawn(_bg_fetch_universe_reco_news, 1)
         # cc#611: revived dedicated per-open-position Google News, 3 slots/day (07:35/13:35/19:35 IST),
         # EVERY day (positions held over weekends still get fresh news). Off the fyers feed -> any hour
         # is safe; alerting + the cc#599 watchdog freshness check catch a silent stall like the 06-Jul one.
