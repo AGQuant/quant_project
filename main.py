@@ -930,7 +930,7 @@ NAV_REGISTRY = {
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
     "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
-    "/dashboard#tcscan": ("TC Scanner · V8 tab", "nav"),   # cc#740
+    "/dashboard#tcscan": ("TC Scanner · V8 tab — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#740; cc#822 removed from nav
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
     "/scanners":     ("(removed from nav — superseded by V12/V13/Check)", "typed-url"),   # cc#441
@@ -941,14 +941,14 @@ NAV_REGISTRY = {
     "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
-    "/dashboard#digest": ("Digest · V8 tab (Daily Digest v2.3)", "nav"),   # cc#744
+    "/dashboard#digest": ("Digest · V8 tab (Daily Digest v2.3) — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#744; cc#822 removed from nav
     "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
     "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
     "/dashboard#bt":    ("V6 BT — V8 tab-only deep-link (removed from top nav)", "tab"),  # cc#551: dropped from NAV, reachable via the V8 tab bar only
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/result-corner":    ("Result Corner",     "nav"),        # cc#603: reported-companies tier board
-    "/holdings":     ("Holdings",             "nav"),
+    "/holdings":     ("Holdings — route unchanged, typed URL only", "typed-url"),   # cc#822 removed from nav
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
     "/v12":          ("V12 · Quant Basket Builder — QB-page button (removed from top nav)", "tab"),  # cc#557: folded into /quant-basket

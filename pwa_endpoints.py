@@ -274,15 +274,18 @@ PWA_JS = """
     ['/check', '\\u2713', 'Check'],
     ['/result-corner', '\\u2263', 'Results'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
-    ['/dashboard#tcscan', '\\u23f1', 'TC Scanner'],
-    ['/dashboard#digest', '\\ud83d\\udcca', 'Digest'],
+    // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
+    // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
+    // /dashboard#digest). Nav removal only; no route changed, nothing retired.
     ['/v13', '\\u25a4', 'V13'],
     ['/health', '\\u2695', 'Health'],
     ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
-    ['/holdings', '\\u25c6', 'Holdings'],
+    // cc#822: Holdings REMOVED from the nav. The /holdings route is UNCHANGED and still loads by
+    // typed URL — this is the one entry here that is a real page rather than a tab, so it is the
+    // one that becomes typed-URL-only. Recorded as such in main.py NAV_REGISTRY (rule id=2987).
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler']
