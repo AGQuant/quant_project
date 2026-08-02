@@ -11,6 +11,7 @@ import io
 import os
 import json
 import re
+import logging
 
 import psycopg
 from fastapi import APIRouter, UploadFile, File, Form
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 router = APIRouter()
+log = logging.getLogger("scorr.hr")
 _DB = os.getenv("DATABASE_URL", "")
 
 
@@ -487,13 +489,31 @@ def _cmp_map(cur, syms):
     out = {}
     if not syms:
         return out
+    # cc#835: the resolver runs inside a SAVEPOINT. The cc#811 version wrapped it in a bare
+    # `except Exception: pass` — but a FAILED cur.execute leaves the transaction ABORTED, so the
+    # "fallback" line below immediately raised InFailedSqlTransaction, uncaught, and FastAPI
+    # returned a plain-text 500. That is what the /adaptive shelf was parsing as JSON
+    # ("Unexpected token I, Internal S..."). A savepoint makes the fallback actually reachable.
+    try:
+        cur.execute("SAVEPOINT cmp_resolver_try")
+    except Exception:
+        pass
     try:
         import cmp_resolver
         for s, r in cmp_resolver.resolve_cmp_many(cur, syms).items():
             if r.get("cmp") is not None:
                 out[s] = float(r["cmp"])
         if out:
+            try:
+                cur.execute("RELEASE SAVEPOINT cmp_resolver_try")
+            except Exception:
+                pass
             return out
+    except Exception as e:
+        log.warning("cc#835 _cmp_map: resolver failed, falling back to cmp_prices/raw_prices: %s", e)
+        out = {}
+    try:
+        cur.execute("ROLLBACK TO SAVEPOINT cmp_resolver_try")
     except Exception:
         pass
     cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE symbol = ANY(%s)", (syms,))
@@ -510,12 +530,33 @@ def _cmp_map(cur, syms):
     return out
 
 
+def _norm_sym(s):
+    """cc#835: resolve_cmp_many normalises its keys to UPPER/stripped; the legacy cmp_prices path
+    returns them in whatever case the row holds. Callers look holdings up by the raw
+    hr_holdings.symbol, so the two key spaces have to be reconciled somewhere — here. Without this a
+    lower-cased or space-padded holding silently valued at its AVG PRICE (P&L 0), which looks like a
+    flat stock rather than a lookup miss."""
+    return (s or "").strip().upper()
+
+
 @router.get("/api/health/portfolios")
 def health_portfolios():
     """cc#651 part_5/2: list every saved portfolio with a lightweight invested/current/P&L summary.
     Powers the /health saved-portfolios list AND the /adaptive client shelf. CMP = cmp_prices with a
     latest raw_prices.close fallback (a holding with no price falls back to its avg so it never breaks
-    the sum)."""
+    the sum).
+
+    cc#835: a display shelf must degrade to an error CARD, never to a parse exception. Whatever goes
+    wrong below, this returns JSON — {"portfolios": [], "error": "..."} — so the client always has
+    something it can render and read."""
+    try:
+        return _health_portfolios_inner()
+    except Exception as e:
+        log.exception("cc#835 /api/health/portfolios failed")
+        return {"portfolios": [], "error": f"{type(e).__name__}: {str(e)[:300]}"}
+
+
+def _health_portfolios_inner():
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, name, created_by, source, created_at FROM hr_portfolios ORDER BY id DESC")
         ports = cur.fetchall()
@@ -555,7 +596,7 @@ def health_portfolios():
             continue                  # inactive client: name+cash only, no equity valuation / CMP
         a["n"] += 1
         a["inv"] += q * ap
-        a["cur"] += q * px.get(sym, ap)
+        a["cur"] += q * px.get(_norm_sym(sym), px.get(sym, ap))
     out = []
     for id_, name, created_by, source, created in ports:
         a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0})

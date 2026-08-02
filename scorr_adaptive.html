@@ -149,7 +149,19 @@ html,body{margin:0;padding:0;background:var(--bg);}
       if(SORT.key===k) SORT.dir*=-1; else { SORT.key=k; SORT.dir=(k==='client'||k==='asof')?1:-1; }
       render(); }); });
   }
-  fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
+  // cc#835: guard r.ok and the content type BEFORE .json(). A 500 returns a PLAIN-TEXT body, and
+  // calling .json() on it threw "SyntaxError: Unexpected token I, Internal S..." straight into the
+  // shelf — a parse exception where a readable error card belongs. Same shape as getJSON() in
+  // scorr_card_common.js: read the body as text, surface the server's own message.
+  fetch('/api/health/portfolios').then(function(r){
+    return r.text().then(function(t){
+      var d=null; try{ d=JSON.parse(t); }catch(e){}
+      if(!r.ok && !d) throw new Error('server returned '+r.status+' — '+(t||'no body').slice(0,140));
+      if(!d) throw new Error('unreadable response — '+(t||'empty').slice(0,140));
+      return d;
+    });
+  }).then(function(d){
+    if(d&&d.error&&!(d.portfolios&&d.portfolios.length)) throw new Error(d.error);
     ALL=(d&&d.portfolios)||[]; countEl.textContent=ALL.length;
     if(!ALL.length){ listEl.innerHTML='<div class="empty">No saved portfolios yet. Build one on the <a href="/health">Health</a> tab.</div>'; return; }
     toolbar.style.display='flex';
@@ -159,7 +171,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
     tabTable.addEventListener('click',function(){ setView('table'); });
     searchEl.addEventListener('input',render);
     setView(VIEW);
-  }).catch(function(e){ listEl.innerHTML='<div class="empty">Could not load reports. '+esc(''+e)+'</div>'; });
+  }).catch(function(e){
+    listEl.innerHTML='<div class="empty" style="text-align:left;line-height:1.6;">'
+      +'<div style="font-weight:600;margin-bottom:4px;">Could not load reports.</div>'
+      +'<div style="font-size:12.5px;opacity:.8;">'+esc(String(e&&e.message||e))+'</div>'
+      +'<div style="font-size:12.5px;margin-top:8px;"><a href="/adaptive">Retry</a> · '
+      +'<a href="/health">Health tab</a></div></div>';
+  });
 })();
 </script>
 </body>

@@ -61,7 +61,12 @@ def _prev_close(cur, symbol, before=None):
 # coin-flip between spot and the futures premium for every one of them — mean absolute divergence
 # 0.388%, max 1.84%. That is the same class of bug cc#367 fixed inside the feed worker for
 # cmp_prices; it was still live here, in the resolver cc#811 makes THE display price source.
-SPOT_SOURCES = ('fyers_eq', 'fyers_ext', 'fyers_hist')
+# cc#835: a LIST, and every query below binds it with the ANY() form, never the SQL IN operator.
+# The tuple + IN form is psycopg2-only. This module is handed cursors from BOTH drivers
+# (hr_endpoints and gvm_market_endpoints both `import psycopg`, i.e. psycopg3), and psycopg3
+# adapts a tuple to a COMPOSITE, so `IN %s` raised there — aborting the caller's transaction and
+# turning the /adaptive shelf into a plain-text 500. `= ANY(%s)` with a list is correct in both.
+SPOT_SOURCES = ['fyers_eq', 'fyers_ext', 'fyers_hist']
 
 
 def _pack(cmp_v, prev, source, ts, live=None):
@@ -118,7 +123,7 @@ def resolve_cmp(cur, symbol):
     # near midnight, so from 15:30 until then raw_prices still reads YESTERDAY. The last tick is the
     # honest number in that window, and it is what the V8 dashboard already shows.
     cur.execute("""SELECT close, ts FROM intraday_prices
-                   WHERE symbol=%s AND source IN %s AND timeframe='5m' AND close IS NOT NULL
+                   WHERE symbol=%s AND source = ANY(%s) AND timeframe='5m' AND close IS NOT NULL
                    ORDER BY ts DESC LIMIT 1""", (symbol, SPOT_SOURCES))
     r = cur.fetchone()
     if r and r[0] is not None:
@@ -177,7 +182,7 @@ def resolve_cmp_many(cur, symbols):
 
     # (1) last spot 5-min bar per symbol
     cur.execute("""SELECT DISTINCT ON (symbol) symbol, close, ts FROM intraday_prices
-                   WHERE symbol = ANY(%s) AND source IN %s AND timeframe='5m' AND close IS NOT NULL
+                   WHERE symbol = ANY(%s) AND source = ANY(%s) AND timeframe='5m' AND close IS NOT NULL
                    ORDER BY symbol, ts DESC""", (syms, SPOT_SOURCES))
     bars = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
