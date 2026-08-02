@@ -196,7 +196,26 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
         if c not in SCREENER_TEXT_COLS:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    cols = [c for c in SCREENER_LIVE_COLS if c in df.columns]
+    # cc#801 fix_3 — REGRESSION I INTRODUCED IN cc#796, fixed here.
+    # This intersected the allowlist with the CSV's columns only, never with the TABLE's. cc#796 added
+    # expected_qtr_sales / expected_qtr_profit to SCREENER_LIVE_COLS ahead of the migration that
+    # creates them, on the assumption the entries would be inert. They are inert only while the CSV
+    # lacks those headers — the moment a CSV carrying "Expected quarterly sales" is loaded, the
+    # rename produces the column, it passes the `in df.columns` test, and the INSERT names a column
+    # screener_raw does not have, so the whole load fails. cc#796 deployed 06:50 UTC and the founder
+    # reported the loader erroring at 06:56 UTC; the timing and the mechanism both fit.
+    #
+    # Intersecting with the live table is the right guard regardless of cause: a CSV column the table
+    # cannot store should be skipped, never fatal to the entire load.
+    with _conn() as _c0, _c0.cursor() as _cur0:
+        _cur0.execute("""SELECT column_name FROM information_schema.columns
+                         WHERE table_name='screener_raw'""")
+        _live = {r[0] for r in _cur0.fetchall()}
+    _dropped = [c for c in SCREENER_LIVE_COLS if c in df.columns and c not in _live]
+    if _dropped:
+        log.warning("load_screener: skipping %d CSV column(s) absent from screener_raw: %s "
+                    "(run the migration to start storing them)", len(_dropped), ", ".join(_dropped))
+    cols = [c for c in SCREENER_LIVE_COLS if c in df.columns and c in _live]
     placeholders = ", ".join(["%s"] * len(cols))
     colnames = ", ".join('"' + c + '"' for c in cols)
 

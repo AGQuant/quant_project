@@ -203,7 +203,10 @@ def _l1_quarter(cur, sym):
         m_label, m_now, m_yr = None, None, None
 
     return {
-        "quarter_label": cur_lbl, "quarter_end": str(cur_pe) if cur_pe else None,
+        # cc#801 fix_6: ONE quarter naming card-wide. period_label is "Jun 2026", which rendered as
+        # "QUARTER · JUN 2026" while every other block said "Q1 FY27". _fq_label is the canonical
+        # converter already used by the peer block, so both now read the same.
+        "quarter_label": (_fq_label(cur_pe) or cur_lbl), "quarter_end": str(cur_pe) if cur_pe else None,
         "sales": {"value": s_now, "qoq": pct(s_now, s_prev), "yoy": pct(s_now, s_yr)},
         "pat": {"value": p_now, "qoq": pct(p_now, p_prev), "yoy": pct(p_now, p_yr)},
         "margin": ({"label": m_label, "now": m_now, "ly": m_yr,
@@ -338,13 +341,33 @@ def _peer_comparison(cur, sym, segment):
     qq = cur.fetchone()
     subj_q = qq[0] if qq and qq[0] else None
     quarter = _fq_label(subj_q) if subj_q else None
-    # peers = gvm + screener QoQ + each peer's OWN latest reported quarter (fundamentals_history)
-    cur.execute("""SELECT g.gvm_score, s.qoq_sales_growth, s.qoq_profit_growth, fh.latest_q
-                   FROM gvm_scores g JOIN screener_raw s ON g.symbol = s.nse_code
-                   LEFT JOIN (SELECT symbol, MAX(period_end) latest_q FROM fundamentals_history
-                              WHERE section='quarters' AND period_type='quarter' GROUP BY symbol) fh
-                          ON fh.symbol = g.symbol
-                   WHERE g.segment=%s AND g.symbol<>%s""", (segment, sym))
+    # cc#801 fix_1 — ONE PROFIT DEFINITION CARD-WIDE. This used to read the subject's own growth from
+    # screener_raw.qoq_profit_growth while the header read fundamentals_history "Net Profit", so the
+    # same card showed PAT YoY +3.3% up top and 5.79% in the peer row (TORNTPHARM). Screener's profit
+    # line is not the post-minority Net Profit the EPS is struck on, so the two could never agree.
+    #
+    # Both the subject AND every peer are now computed from fundamentals_history "Net Profit" and
+    # Sales|Revenue — same table, same line, same YoY arithmetic as the L1 block. The screener
+    # qoq_* columns are no longer read here at all; that second source is dead.
+    cur.execute("""
+        WITH q AS (
+            SELECT UPPER(symbol) AS sym, period_end,
+                   NULLIF(replace(COALESCE(metrics->>'Sales', metrics->>'Revenue'),',',''),'')::numeric AS rev,
+                   NULLIF(replace(metrics->>'Net Profit',',',''),'')::numeric AS pat
+            FROM fundamentals_history
+            WHERE section='quarters' AND period_type='quarter'),
+        yoy AS (
+            SELECT c.sym, c.period_end AS latest_q,
+                   CASE WHEN p.rev > 0 THEN (c.rev - p.rev) / p.rev * 100 END AS s_yoy,
+                   CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END AS p_yoy
+            FROM q c
+            LEFT JOIN q p ON p.sym = c.sym
+                         AND p.period_end = (c.period_end - INTERVAL '1 year')::date
+            WHERE c.period_end = (SELECT MAX(period_end) FROM q z WHERE z.sym = c.sym))
+        SELECT g.gvm_score, y.s_yoy, y.p_yoy, y.latest_q
+        FROM gvm_scores g
+        LEFT JOIN yoy y ON y.sym = UPPER(g.symbol)
+        WHERE g.segment=%s AND g.symbol<>%s""", (segment, sym))
     rows = [(_flt(r[0]), _flt(r[1]), _flt(r[2]), r[3]) for r in cur.fetchall()]
     same = [p for p in rows if subj_q is not None and p[3] == subj_q]
     # cc#697 bug_1: SAME-QUARTER ONLY — never blend quarters. Rank the same-quarter reporters by GVM and
@@ -362,7 +385,19 @@ def _peer_comparison(cur, sym, segment):
 
     peer_s, n_s = _top3(1)
     peer_p, n_p = _top3(2)
-    cur.execute('SELECT qoq_sales_growth, qoq_profit_growth FROM screener_raw WHERE nse_code=%s', (sym,))
+    # cc#801 fix_1: the subject's own figures come from the SAME source as the peers and as the L1
+    # header — fundamentals_history, Net Profit and Sales|Revenue — not from screener_raw.
+    cur.execute("""
+        WITH q AS (
+            SELECT period_end,
+                   NULLIF(replace(COALESCE(metrics->>'Sales', metrics->>'Revenue'),',',''),'')::numeric AS rev,
+                   NULLIF(replace(metrics->>'Net Profit',',',''),'')::numeric AS pat
+            FROM fundamentals_history
+            WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter')
+        SELECT CASE WHEN p.rev > 0 THEN (c.rev - p.rev) / p.rev * 100 END,
+               CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END
+        FROM q c LEFT JOIN q p ON p.period_end = (c.period_end - INTERVAL '1 year')::date
+        WHERE c.period_end = (SELECT MAX(period_end) FROM q)""", (sym,))
     sr = cur.fetchone()
     st_s = _flt(sr[0]) if sr else None
     st_p = _flt(sr[1]) if sr else None

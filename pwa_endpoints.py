@@ -1199,10 +1199,16 @@ RESULTS_CARD_JS = """
     }
     var body=row('Sales',pc.sales)+row('PAT',pc.profit);
     if(!body) return '';
-    var cnt=(pc.same_quarter_peers!=null?pc.same_quarter_peers:0)+'/'+(pc.total_peers!=null?pc.total_peers:'?');
+    // cc#801 fix_5: two counts appear on this card — the header's full-segment count (which INCLUDES
+    // the subject) and this peer-pool count (which excludes it), so they legitimately differ by one.
+    // Both derive from the same reported-detection rule (latest fundamentals_history quarter ==
+    // subject's quarter); only the population differs. Say which population this one is, so a reader
+    // seeing "7/12" above and "6/11" here knows it is scope, not a contradiction.
+    var cnt=(pc.same_quarter_peers!=null?pc.same_quarter_peers:0)+' of '+(pc.total_peers!=null?pc.total_peers:'?');
     return '<div class=\"rcard-peer\">'+body+'</div>'
       +'<div class=\"rcard-note\">vs top-'+(pc.peer_count||0)+' same-quarter peers by GVM in '+esc(pc.segment||'segment')
-      +' &middot; '+cnt+' reported '+esc(pc.quarter||'')+', self-excluded.</div>';
+      +' &middot; '+cnt+' segment peers (excluding this company) have reported '+esc(pc.quarter||'')
+      +'. The sector figure in the header counts the full segment including this company.</div>';
   }
 
   // cc#766: pre-results peer table. Button "Peer Results (N reported)" below the Expected result date;
@@ -1245,9 +1251,13 @@ RESULTS_CARD_JS = """
   // Keep the template card's 4-line metric header (Sales / PAT / Margins / PE) and drop only its
   // 3 narrative template lines, which the long-form replaces. When no V2 row exists, the template
   // card renders unchanged — this never blanks an existing surface.
+  // cc#801 fix_4: the 3 narrative template lines ("Strong quarter with growth ahead of the sector",
+  // "Revenue outpaced...", "Margin expanded...") are now ALWAYS dropped, not only when a V2 row
+  // exists. The cc#797 auto-verdict replaces them by design, and until now BOTH rendered — the old
+  // lines above the peer rows and the new verdict inside the QUARTER block, saying the same thing
+  // twice in different words. Only the 4 traffic-light metric lines survive here.
   function _metricHeader(txt, v2){
     if (!txt) return '';
-    if (!v2 || !v2.has_analysis) return txt;          // no V2 -> unchanged template card
     var lines = String(txt).split('\\n');
     var out = [], metrics = 0;
     for (var i = 0; i < lines.length; i++){
@@ -1281,26 +1291,19 @@ RESULTS_CARD_JS = """
   // is a directional read, not a like-for-like comparison. The note says so on the card rather than
   // letting a green HIT imply the full year is already banked.
   // Hidden when the estimate is null. Degrades to the plain estimate when no actual exists yet.
-  function fy27Html(g, actual){
+  // cc#801 fix_2: FY27 renders STANDALONE — number and label only, NO HIT/MISSED tag.
+  // Benchmarking a FULL-YEAR estimate against a SINGLE quarter's actual is not a valid comparison,
+  // and a green HIT on that basis reads as "the year is banked" when one quarter says no such thing.
+  // I flagged this when the tag shipped in cc#788 and put the caveat in a note; the founder's ruling
+  // is that a caveat under a wrong comparison is still a wrong comparison. Tag removed, not softened.
+  // Quarterly hit/miss now lives ONLY in the vs-est block (cc#796), which compares like with like.
+  function fy27Html(g){
     if (g == null) return '';
     var s = (g>=0?'+':'')+esc(g)+'%';
     var col = g>=0 ? '#0f9d58' : '#d0433b';
-    var h = '<div class=\"rcard-lbl\">FY27 Est. Benchmarked</div>';
-    if (actual == null){
-      return h + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>'
-        + '<div class=\"rcard-note\">Consensus FY27 PAT growth. No reported quarter to benchmark against yet.</div>';
-    }
-    var a = (actual>=0?'+':'')+esc(actual)+'%';
-    var hit = Number(actual) >= Number(g);
-    return h
-      + '<div class=\"rcard-fy27\">'
-      +   '<div class=\"rcard-fy27-c\"><span class=\"rcard-fy27-k\">FY27 Est.</span>'
-      +     '<span class=\"rcard-fy27-v\" style=\"color:'+col+'\">'+s+'</span></div>'
-      +   '<div class=\"rcard-fy27-c\"><span class=\"rcard-fy27-k\">Actual PAT YoY</span>'
-      +     '<span class=\"rcard-fy27-v\" style=\"color:'+(actual>=0?'#0f9d58':'#d0433b')+'\">'+a+'</span></div>'
-      +   '<span class=\"'+(hit?'rcard-hit':'rcard-missed')+'\">'+(hit?'HIT':'MISSED')+'</span>'
-      + '</div>'
-      + '<div class=\"rcard-note\">Reported quarter PAT YoY vs the FY27 full-year consensus &mdash; directional, not like-for-like.</div>';
+    return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
+      + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>'
+      + '<div class=\"rcard-note\">Full-year FY27 PAT growth estimate. Quarterly hit/miss is in the vs est. block above.</div>';
   }
 
   // cc#797 BASIC POLISH L1 — block 1, ABSOLUTES FIRST. The number comes before its deltas because the
@@ -1385,13 +1388,9 @@ RESULTS_CARD_JS = """
   // while result_analysis_v2.quarter is "Q1FY27". Compare on a whitespace-stripped uppercase form or
   // the gate would never open. When the card has no quarter at all, fall back to has_analysis rather
   // than hiding content we do have.
-  // cc#788: the reported PAT YoY the card already holds — peer_comparison.profit.stock is the
-  // stock's own YoY (the peer figure is .peer). Null when this quarter has no peer_comparison
-  // block, which is exactly when there is nothing to benchmark.
-  function _actualPat(d){
-    var p = d && d.peer_comparison && d.peer_comparison.profit;
-    return (p && p.stock != null) ? p.stock : null;
-  }
+  // cc#801 fix_2: _actualPat is GONE. Its only caller was the FY27 HIT/MISSED tag, and that tag is
+  // removed because a full-year estimate cannot be scored against one quarter. Leaving a dead helper
+  // behind would invite someone to wire the invalid comparison back up.
   function _qkey(q){ return String(q==null?'':q).replace(/\\s+/g,'').toUpperCase(); }
   function v2Matches(v2, cardQuarter){
     if (!v2 || !v2.has_analysis || !v2.analysis) return false;
@@ -1500,7 +1499,7 @@ RESULTS_CARD_JS = """
       h += l1Html(d && d.l1, d && d.auto_verdict);   // cc#797 block 1: absolutes-first + deterministic verdict
       h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
       h += viewDetailedHtml(d && d.v2, d && d.card_quarter);
-      h += fy27Html(d && d.fy27_growth, _actualPat(d));
+      h += fy27Html(d && d.fy27_growth);   // cc#801 fix_2: standalone, no HIT/MISS
     } else {
       // BRANCH B order: expected date + FY27 -> LAST RESULT (prior quarter, explicit label) -> RAW -> POLISH.
       h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>'
@@ -1509,7 +1508,7 @@ RESULTS_CARD_JS = """
       // cc#788: pre-result there is no reported quarter to benchmark, so fy27Html degrades to the
       // plain estimate. The Level-2 gate is not offered here — Branch B's analysis is the PRIOR
       // quarter, and result_analysis_v2 is keyed to the current one.
-      h += fy27Html(d && d.fy27_growth, null);
+      h += fy27Html(d && d.fy27_growth);   // cc#801 fix_2: standalone, no HIT/MISS
       if (d && d.last_result_analysis){
         h += '<div class=\"rcard-lbl\">Last result'+(d.last_card_quarter?' &middot; '+esc(d.last_card_quarter):'')+'</div>'
           + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>'
