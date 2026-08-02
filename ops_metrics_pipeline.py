@@ -1575,6 +1575,14 @@ def _build_universe(cur):
     return ordered
 
 
+# cc#815 Phase 1 season catch-up (see run_t1_refresh). The cap exists to keep a backlog drain from
+# becoming a burst against screener.in: 100 companies at OPS_THROTTLE is already ~8 minutes of
+# steady requests before document downloads. It drains over nights, largest market cap first, so the
+# names that matter most get documents first if the backlog never fully clears.
+SEASON_CATCHUP_LIMIT = 100
+SEASON_CATCHUP_FROM = '2026-07-01'   # start of the current results season
+CATCHUP_MIN_DOC_CHARS = 3000         # a cover letter is not a document; below this it does not count
+
 OPS_THROTTLE = 5.0   # cc#526: dedicated, more polite than fundamentals_scraper's THROTTLE (2.5s)
                       # -- this pipeline hits the same screener.in pages fundamentals_scraper
                       # does, PLUS a PDF fetch on top, so it should be gentler, not equally fast.
@@ -2357,6 +2365,55 @@ def run_t1_refresh(conn=None):
                            WHERE status='reported' AND ex_date >= (CURRENT_DATE - INTERVAL '3 days')::date
                              AND ex_date < CURRENT_DATE AND ticker IS NOT NULL""")
             due = cur.fetchall()
+
+            # cc#819-prep / cc#815 Phase 1: SEASON CATCH-UP.
+            #
+            # The 3-day lookback above is the T+1 signal, and it is the only path into this queue.
+            # A company whose result date fell outside that window — a run missed, a status flip
+            # that lagged, or simply a report from last week — has NO route to having its documents
+            # fetched: run_saturday_retry only retries rows ALREADY queued, and run_season_sweep
+            # only covers companies with no tracked earnings date at all. So a reported company with
+            # a tracked date that missed its 3 days falls through all three jobs permanently.
+            #
+            # Measured 02-Aug-2026: 790 companies reported since 01-Jul, 634 of them beyond the
+            # 3-day window. That is the structural reason only 166 of the 833-symbol universe hold a
+            # genuine Q1FY27 document, and why cc#815 Phase 2 had almost nothing to author.
+            #
+            # This adds the missing route: any reported company THIS SEASON that has no
+            # current-quarter doc_texts row and is not already queued becomes eligible. Capped per
+            # run and ordered by market cap so it drains over several nights at the existing
+            # OPS_THROTTLE pacing instead of firing hundreds of requests at screener.in in one burst
+            # — the cap is a politeness guarantee, not a performance tuning knob. Raising it trades
+            # a real rate-limit risk for speed; do that deliberately, not by accident.
+            try:
+                cur.execute("""
+                    SELECT UPPER(e.ticker), MAX(e.ex_date) AS ex_date
+                    FROM earnings_calendar e
+                    LEFT JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(e.ticker)
+                    WHERE e.status = 'reported'
+                      AND e.ticker IS NOT NULL
+                      AND e.ex_date >= %s
+                      AND e.ex_date < CURRENT_DATE
+                      AND NOT EXISTS (SELECT 1 FROM ops_metrics_t1_queue q
+                                       WHERE UPPER(q.symbol) = UPPER(e.ticker))
+                      AND NOT EXISTS (SELECT 1 FROM doc_texts d
+                                       WHERE UPPER(d.symbol) = UPPER(e.ticker)
+                                         AND d.char_count > %s
+                                         AND d.fetched_at >= %s)
+                    GROUP BY UPPER(e.ticker), s.market_cap
+                    ORDER BY s.market_cap DESC NULLS LAST
+                    LIMIT %s
+                """, (SEASON_CATCHUP_FROM, CATCHUP_MIN_DOC_CHARS, SEASON_CATCHUP_FROM,
+                      SEASON_CATCHUP_LIMIT))
+                catchup = cur.fetchall()
+                if catchup:
+                    log.info("run_t1_refresh season catch-up: %d company(ies) reported before the "
+                             "3-day window with no current-season doc (cap %d/run)",
+                             len(catchup), SEASON_CATCHUP_LIMIT)
+                    due = list(due) + [r for r in catchup]
+            except Exception as e:
+                # Additive only: the T+1 path must still run if the catch-up query fails.
+                log.warning(f"run_t1_refresh season catch-up skipped: {e}")
             skipped_universe = 0   # cc#700: reported-but-out-of-universe (not top-750 NSE)
             for sym, ex_date in due:
                 # cc#700/814: only top-750 NSE names enter the scrape path; out-of-universe reports are
