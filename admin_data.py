@@ -30,7 +30,7 @@ import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from gvm_nightly import _sql_clean_replace_screener
+from gvm_nightly import _sql_clean_replace_screener, _sql_clean_replace_screener_v2   # cc#804
 
 log = logging.getLogger("scorr.admin_data")
 
@@ -86,8 +86,14 @@ async def load_screener(req: Request):
     body = await req.json(); file_id = body.get("file_id")
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id); df = pd.read_csv(io.StringIO(csv_text))
-    n = _sql_clean_replace_screener(df.to_dict(orient="records"))
-    return {"status": "ok", "action": "clean_replace_wide", "rows_loaded": n}
+    # cc#804 item 5: return the loader's full diagnostics — columns_loaded, columns_added, and the
+    # per-reason dropped-row counts — so acceptance is one glance instead of a follow-up
+    # information_schema query. The old response was {"status":"ok","rows_loaded":n} and nothing
+    # else, which is exactly how a load that silently stored ZERO of the new columns still read as a
+    # clean success (the cc#790 acceptance failure this task exists to fix).
+    res = _sql_clean_replace_screener_v2(df.to_dict(orient="records"))
+    return {"status": "ok", "action": "clean_replace_wide",
+            "headers_in_file": len(df.columns), **res}
 
 
 # ── Screener.in earnings scraper ─────────────────────────────────────────────────

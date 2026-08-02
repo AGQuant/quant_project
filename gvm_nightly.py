@@ -28,8 +28,10 @@ Verdict framework (Arpit):
 """
 
 import os
+import re                              # cc#804: header slugging for the dynamic wide loader
 import logging
 from datetime import date, timedelta   # cc#779: timedelta for the trend-verdict window
+from datetime import date as _date     # cc#804: explicit alias — `date` is shadowed by params below
 from typing import Optional, Dict, List
 
 import psycopg
@@ -182,47 +184,192 @@ def _punchline(verd, g_lbl, v_lbl, m_lbl, gvm_lbl):
 # ============================================================
 # LOAD: clean-replace screener_raw from uploaded rows (raw headers)
 # ============================================================
+def _screener_slug(col: str) -> str:
+    """cc#804: a stable, quotable Postgres identifier for an ARBITRARY CSV header.
+
+    Canonical names (nse_code, market_cap, ...) pass through untouched so every downstream reader
+    keeps working; anything else becomes lower_snake_case, trimmed to 63 chars (Postgres' identifier
+    limit — a longer name would be silently truncated by the server and then never match on the next
+    load)."""
+    c = str(col).strip()
+    if not c:
+        return ""
+    if c in SCREENER_TEXT_COLS or c in set(SCREENER_COLUMNS.values()):
+        return c
+    s = re.sub(r"[^0-9a-zA-Z]+", "_", c).strip("_").lower()
+    s = re.sub(r"_+", "_", s)
+    if s and s[0].isdigit():
+        s = "c_" + s
+    return s[:63]
+
+
+def _parse_yyyymm(v):
+    """cc#804 item 4: "Last result date" arrives as a YYYYMM NUMBER (202606.00 = Jun 2026 = Q1FY27).
+    Returns (date_of_month_start, 'Q1FY27') or (None, None). Read as a float first because pandas
+    types the column as numeric and 202606.00 must not become the string '202606.0'."""
+    try:
+        n = int(float(v))
+    except Exception:
+        return None, None
+    y, m = n // 100, n % 100
+    if not (1990 <= y <= 2100 and 1 <= m <= 12):
+        return None, None
+    # Indian FY runs Apr-Mar: Apr-Jun = Q1 of FY(y+1), Jan-Mar = Q4 of FY(y).
+    q = (m - 1) // 3 + 1          # calendar quarter
+    fq = {1: 4, 2: 1, 3: 2, 4: 3}[q]
+    fy = y + 1 if m >= 4 else y
+    return _date(y, m, 1), f"Q{fq}FY{str(fy)[-2:]}"
+
+
 def _sql_clean_replace_screener(rows: List[dict]) -> int:
+    res = _sql_clean_replace_screener_v2(rows)
+    return res["rows_loaded"]
+
+
+def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
+    """cc#804: DYNAMIC WIDE loader. Returns a diagnostics dict; the thin wrapper above preserves the
+    old int-returning contract for existing callers.
+
+    ROOT CAUSE this fixes. SCREENER_LIVE_COLS was a fixed ALLOWLIST and the insert was
+    `[c for c in SCREENER_LIVE_COLS if c in df.columns and c in _live]`. Both filters are subtractive,
+    so the loader could only ever write columns that were ALREADY in the list AND already in the
+    table — it had no path by which a new CSV header could become a stored column. That is why the
+    founder's 44-header file loaded 1,801 rows and produced ZERO new columns while reporting
+    {"status":"ok"}: nothing failed, the extra headers were simply dropped on the floor in silence.
+    The cc#790 claim that "the loader schema was updated" was wrong about THIS path.
+
+    The schema is now derived from the CSV header on every load: unknown headers get a slugged
+    column added to screener_raw (numeric unless the values are non-numeric), and every header in
+    the file is stored. Adding a nullable column with no default is a catalogue-only change in
+    Postgres — no table rewrite — and it runs under a short lock_timeout so it can never wedge
+    behind an idle transaction the way the 10-Jul REINDEX did (MAINTENANCE_LOCK_RULE, cc#351).
+    """
     df = pd.DataFrame(rows)
-    df = df.rename(columns={"NSE Code": "nse_code", "Name": "company_name"})
+    rows_in_file = len(df)
+    df = df.rename(columns={"NSE Code": "nse_code", "Name": "company_name",
+                            "Current Price": "price"})   # cc#804: the new export's identity casing
     df = df.rename(columns=SCREENER_COLUMNS)
     df = _norm_screener_cols(df)   # cc#796: case/spacing-tolerant expected-column mapping
+
+    # ── row accounting (cc#804 item 2): every dropped row is counted and reported, never silent.
+    if "nse_code" not in df.columns:
+        raise ValueError("load_screener: CSV has no NSE Code / nse_code column")
+    _n0 = len(df)
     df = df[df["nse_code"].notna()].copy()
     df["nse_code"] = df["nse_code"].astype(str).str.strip()
-    df = df[~df["nse_code"].isin(["", "nan"])].copy()
+    df = df[~df["nse_code"].isin(["", "nan", "NaN", "None", "-"])].copy()
+    dropped_no_nse = _n0 - len(df)          # BSE-only rows: legitimate, kept as a filter, now logged
+    _n1 = len(df)
     df = df.drop_duplicates(subset="nse_code", keep="first").reset_index(drop=True)
+    dropped_dupe = _n1 - len(df)
 
+    # ── cc#804 item 4: "Last result date" YYYYMM -> real date + quarter label
+    result_quarter = None
+    _lrd = next((c for c in df.columns
+                 if " ".join(str(c).lower().split()) in ("last result date", "last_result_date")), None)
+    if _lrd is not None:
+        parsed = df[_lrd].map(lambda v: _parse_yyyymm(v))
+        df["last_result_date"] = [p[0] for p in parsed]
+        df["last_result_quarter"] = [p[1] for p in parsed]
+        if _lrd not in ("last_result_date",):
+            df = df.drop(columns=[_lrd])
+        try:
+            result_quarter = df["last_result_quarter"].dropna().mode().iloc[0]
+        except Exception:
+            result_quarter = None
+
+    # ── typing: text columns stay text, everything else numeric-coerced
+    _text_cols = set(SCREENER_TEXT_COLS) | {"last_result_quarter"}
+    _date_cols = {"last_result_date"}
     for c in df.columns:
-        if c not in SCREENER_TEXT_COLS:
+        if c not in _text_cols and c not in _date_cols:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # cc#801 fix_3 — REGRESSION I INTRODUCED IN cc#796, fixed here.
-    # This intersected the allowlist with the CSV's columns only, never with the TABLE's. cc#796 added
-    # expected_qtr_sales / expected_qtr_profit to SCREENER_LIVE_COLS ahead of the migration that
-    # creates them, on the assumption the entries would be inert. They are inert only while the CSV
-    # lacks those headers — the moment a CSV carrying "Expected quarterly sales" is loaded, the
-    # rename produces the column, it passes the `in df.columns` test, and the INSERT names a column
-    # screener_raw does not have, so the whole load fails. cc#796 deployed 06:50 UTC and the founder
-    # reported the loader erroring at 06:56 UTC; the timing and the mechanism both fit.
-    #
-    # Intersecting with the live table is the right guard regardless of cause: a CSV column the table
-    # cannot store should be skipped, never fatal to the entire load.
+    # ── cc#804 item 3: QoQ growth from the preceding-quarter ABSOLUTES in the file, not from a
+    # pre-computed chip. Verified on 20MICRONS: sales 244.72 latest vs 261.06 preceding -> -6.26%.
+    def _qoq(latest_names, prev_names, out_col):
+        lc = next((c for c in df.columns if c in latest_names), None)
+        pc = next((c for c in df.columns if c in prev_names), None)
+        if lc is None or pc is None:
+            return False
+        latest, prev = pd.to_numeric(df[lc], errors="coerce"), pd.to_numeric(df[pc], errors="coerce")
+        # Guard the sign flip: a swing THROUGH zero (loss -> profit) has no meaningful percentage,
+        # and dividing by a negative base silently inverts the direction of the move.
+        df[out_col] = np.where((prev.notna()) & (latest.notna()) & (prev > 0),
+                               (latest - prev) / prev * 100.0, np.nan)
+        return True
+
+    qoq_sales_ok = _qoq({"Sales latest quarter", "sales_latest_quarter"},
+                        {"Sales preceding quarter", "sales_preceding_quarter"}, "qoq_sales_growth")
+    qoq_profit_ok = _qoq({"Profit latest quarter", "profit_latest_quarter"},
+                         {"Profit preceding quarter", "profit_preceding_quarter"}, "qoq_profit_growth")
+
+    # ── cc#804: slug every header to a stable identifier, then MAKE THE TABLE MATCH THE FILE.
+    # This is the actual fix. The old code intersected a fixed allowlist with the CSV columns AND
+    # with the live table, so both filters could only ever REMOVE columns — a new header had no path
+    # to becoming a stored column, which is precisely why a 44-header file added zero columns while
+    # returning {"status":"ok"}.
     with _conn() as _c0, _c0.cursor() as _cur0:
-        _cur0.execute("""SELECT column_name FROM information_schema.columns
-                         WHERE table_name='screener_raw'""")
+        _cur0.execute("SELECT column_name FROM information_schema.columns WHERE table_name='screener_raw'")
         _live = {r[0] for r in _cur0.fetchall()}
-    _dropped = [c for c in SCREENER_LIVE_COLS if c in df.columns and c not in _live]
-    if _dropped:
-        log.warning("load_screener: skipping %d CSV column(s) absent from screener_raw: %s "
-                    "(run the migration to start storing them)", len(_dropped), ", ".join(_dropped))
-    cols = [c for c in SCREENER_LIVE_COLS if c in df.columns and c in _live]
+
+    # An EXISTING column name wins over its slug. screener_raw already holds Title Case columns such
+    # as "Price to book value", "BSE Code" and "Sales growth", and consumers reference them by that
+    # exact quoted name (e.g. gvm_market_endpoints selects s."Price to book value"). Slugging those
+    # would create a parallel price_to_book_value column, leave the original permanently NULL after
+    # the clean-replace, and silently blank the field on every surface that reads it. Only genuinely
+    # NEW headers get slugged.
+    ren = {}
+    for c in list(df.columns):
+        if c in _live:
+            continue
+        s = _screener_slug(c)
+        if not s:
+            df = df.drop(columns=[c])
+        elif s != c:
+            ren[c] = s
+    if ren:
+        df = df.rename(columns=ren)
+    df = df.loc[:, ~df.columns.duplicated()].copy()   # two headers can slug to one name; first wins
+
+    missing = [c for c in df.columns if c not in _live]
+    added = []
+    if missing:
+        # ADD COLUMN with no default is catalogue-only in Postgres (no rewrite). lock_timeout keeps
+        # it from queueing behind an idle transaction and blocking readers — the failure mode
+        # MAINTENANCE_LOCK_RULE (cc#351) exists to prevent. If the lock cannot be taken we skip the
+        # column and still load everything else, rather than failing the whole ingest.
+        with _conn() as _c1, _c1.cursor() as _cur1:
+            _cur1.execute("SET lock_timeout = '5s'")
+            for c in missing:
+                if c in _date_cols:
+                    typ = "DATE"
+                elif c in _text_cols:
+                    typ = "TEXT"
+                else:
+                    typ = "TEXT" if df[c].dtype == object else "NUMERIC"
+                try:
+                    _cur1.execute(f'ALTER TABLE screener_raw ADD COLUMN IF NOT EXISTS "{c}" {typ}')
+                    _c1.commit()
+                    added.append(c)
+                except Exception as e:
+                    _c1.rollback()
+                    log.warning("load_screener: could not add column %s (%s): %s", c, typ, e)
+        _live |= set(added)
+
+    cols = [c for c in df.columns if c in _live]
+    skipped = [c for c in df.columns if c not in _live]
+    if skipped:
+        log.warning("load_screener: %d column(s) not storable, skipped: %s", len(skipped), ", ".join(skipped))
     placeholders = ", ".join(["%s"] * len(cols))
     colnames = ", ".join('"' + c + '"' for c in cols)
 
     def cell(c, v):
-        if pd.isna(v):
+        if v is None or (not isinstance(v, (list, dict)) and pd.isna(v)):
             return None
-        if c in SCREENER_TEXT_COLS:
+        if c in _date_cols:
+            return v
+        if c in _text_cols or df[c].dtype == object:
             return str(v)
         try:
             f = float(v)
@@ -236,7 +383,22 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
         cur.execute("DELETE FROM screener_raw")
         cur.executemany(f"INSERT INTO screener_raw ({colnames}) VALUES ({placeholders})", batch)
         conn.commit()
-    return len(batch)
+
+    log.info("load_screener: %d/%d rows (dropped %d no-nse_code, %d duplicate), %d columns "
+             "(%d added: %s)", len(batch), rows_in_file, dropped_no_nse, dropped_dupe,
+             len(cols), len(added), ", ".join(added) or "none")
+    return {
+        "rows_loaded": len(batch),
+        "rows_in_file": rows_in_file,
+        "dropped_no_nse_code": dropped_no_nse,   # BSE-only listings: an intentional filter, now visible
+        "dropped_duplicate_nse_code": dropped_dupe,
+        "columns_loaded": len(cols),             # cc#804 item 5: acceptance in one glance
+        "columns_added": added,
+        "columns_skipped": skipped,
+        "qoq_sales_computed": bool(qoq_sales_ok),
+        "qoq_profit_computed": bool(qoq_profit_ok),
+        "result_quarter": result_quarter,
+    }
 
 
 # ============================================================
