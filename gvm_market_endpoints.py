@@ -279,7 +279,8 @@ def get_candles(symbol: str, days: int = 90):
     ``days`` <= 0 => ALL tab: the symbol's COMPLETE stored history (MIN(price_date) per symbol, never
     hardcoded). To keep the payload light (cc#649 pattern), history longer than ~1,500 daily bars is
     downsampled server-side to WEEKLY candles (first-open / max-high / min-low / last-close / sum-vol);
-    shorter history returns daily. 1M/3M/6M/1Y pass their full calendar window (no truncation)."""
+    shorter history returns daily. cc#806: bounded windows are capped at 1825 days (was 365), so the
+    card's 1M/3M/6M/1Y/3Y/ALL pills all pass their full calendar window untruncated."""
     sym = symbol.upper()
     # cc#673: anchor the window to MAX(price_date) for THIS symbol (not CURRENT_DATE) so the tail is
     # ALWAYS the latest stored bar regardless of server clock / feed lag / holidays — fixes the
@@ -306,7 +307,14 @@ def get_candles(symbol: str, days: int = 90):
                                    volume
                             FROM raw_prices WHERE symbol=%s ORDER BY price_date ASC""", (sym,))
     else:
-        days = min(max(days, 5), 365)
+        # cc#806: cap raised 365 -> 1825. It HAD to be: the shared chart card asked for ALL with
+        # days=365*20 and this line silently clamped it to 365, so "ALL" rendered exactly one year —
+        # identical to the 1Y pill. (The V8 local chart sent days=0 and took the branch above, so it
+        # showed real full history; that is the same GVM-vs-V8 divergence cc#803 closed, one layer
+        # down in the transport.) With the cap at 365 the new 3Y/ALL pills would all have collapsed
+        # onto 1Y too. 1825 daily bars ≈ 1,250 rows — under the 1,500-row weekly-downsample threshold,
+        # so these stay daily. days<=0 still means true full stored history.
+        days = min(max(days, 5), 1825)
         rows = api_query("""SELECT price_date::text AS date,
                                    ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
                                    ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,

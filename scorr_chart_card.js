@@ -8,7 +8,7 @@
  * API:  window.ScorrChartCard.open(symbol, {theme:'light'|'dark'})
  *       theme auto-detected from the host page when omitted (light on GVM/SmartGain, dark on V8-like).
  *
- * Data:  daily 1M/3M/6M/1Y/ALL  -> GET /api/candles/{sym}?days=N   (raw_prices; all stocks)
+ * Data:  daily 1M/3M/6M/1Y/3Y/ALL -> GET /api/candles/{sym}?days=N  (raw_prices; all stocks)
  *        5-min intraday      -> GET /api/intraday/{sym}?sessions=N  (fyers feed; FUTURES universe only)
  * 5m gating: probed once per symbol via a 1-session intraday call — rows => futures (5m enabled),
  *            empty => non-futures (5m greyed with "5-min available for F&O stocks" tooltip); daily default.
@@ -26,9 +26,18 @@
 
   var LWC_SRC = "https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
   // cc#752: TF row unified with the V8 dashboard chart (qaChart _QA_TF) so every surface — V8,
-  // SmartGain, TC cards, GVM "C" — shows the SAME timeframes. 5m=intraday; ALL=full stored history.
-  var TF = { "5m": null, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "ALL": 365 * 20 };
-  var TF_ORDER = ["5m", "1M", "3M", "6M", "1Y", "ALL"];
+  // SmartGain, TC cards, GVM "C" — shows the SAME timeframes. 5m=intraday.
+  // cc#806: 3Y added; ALL is now 5 years, not a 20-year sentinel. raw_prices retention IS ~5 years, so
+  // the old 365*20 asked the API for history that does not exist and simply returned whatever was
+  // stored — "ALL" now states the real bound instead of implying two decades.
+  var TF = { "5m": null, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 1095, "ALL": 1825 };
+  var TF_ORDER = ["5m", "1M", "3M", "6M", "1Y", "3Y", "ALL"];
+  // cc#806 FOUNDER RULE: pivots render ONLY on 5m and 1M/3M/6M. Rolling levels lose meaning at 1Y+,
+  // so those pills grey out exactly like VWAP does on EOD frames. This replaces the old ALL-only
+  // suppression. One predicate, used by the toggle chip, the price lines and the chip strip — so the
+  // button state and what is actually drawn can never disagree.
+  var PIV_TFS = { "5m": 1, "1M": 1, "3M": 1, "6M": 1 };
+  function _pivOk() { return !!PIV_TFS[_tf]; }
 
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
   var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
@@ -288,8 +297,9 @@
       if (!disabled) b.onclick = function () { _load(k); };
       host.appendChild(b);
     });
-    // cc#730: Pivots / Fib overlay toggles (mirror the V8 card). Pivots suppressed at ALL — rolling
-    // levels are meaningless at multi-year scale (same rule as the V8 chart's ALL guard).
+    // cc#730: Pivots / Fib overlay toggles (mirror the V8 card). cc#806: pivots are suppressed on every
+    // timeframe longer than 6M (see PIV_TFS), not just ALL — rolling levels lose meaning well before
+    // full history. Fib is unaffected: its swing is derived from the loaded range, so it stays valid.
     var sep = document.createElement("span");
     sep.style.cssText = "width:1px;height:16px;background:" + p.line + ";margin:0 2px;align-self:center";
     host.appendChild(sep);
@@ -297,11 +307,11 @@
      ["fib", "Fib", "Fibonacci retracement levels (loaded-range swing, same as the V8 chart)"]].forEach(function (o) {
       var b = document.createElement("button");
       b.textContent = o[1];
-      var pivBlocked = (o[0] === "pivot" && _tf === "ALL");
+      var pivBlocked = (o[0] === "pivot" && !_pivOk());
       var on = _ov[o[0]] && !pivBlocked;
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) + (pivBlocked ? ";opacity:.4;cursor:not-allowed" : "");
-      b.title = pivBlocked ? "Pivots hidden at ALL (rolling levels meaningless at full-history scale)" : o[2];
+      b.title = pivBlocked ? "Pivots shown on 1M–6M — rolling levels lose meaning at longer scales" : o[2];
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
@@ -425,7 +435,7 @@
     if (!_series) return;
     _priceLines.forEach(function (pl) { try { _series.removePriceLine(pl); } catch (e) {} });
     _priceLines = [];
-    if (_ov.pivot && _tf !== "ALL") {
+    if (_ov.pivot && _pivOk()) {
       var drawPiv = function (f) {
         if (!_series || !f || !f.pivots) return; var P = f.pivots;
         // cc#750: axisLabelVisible:false — values now live in the top-left chip strip, not on the axis.
@@ -438,7 +448,7 @@
       if (cached) { drawPiv(cached); }
       else {
         _getJSON("/api/trade-check/fibcheck?symbol=" + encodeURIComponent(_sym) + "&lookback=6m")
-          .then(function (f) { _fibCache[_sym] = f; if (_ov.pivot && _tf !== "ALL") drawPiv(f); }).catch(function () {});
+          .then(function (f) { _fibCache[_sym] = f; if (_ov.pivot && _pivOk()) drawPiv(f); }).catch(function () {});
       }
     }
     _fibBand = null;
@@ -477,7 +487,7 @@
     var chipBg = (_theme === "dark" ? "rgba(18,24,36,.72)" : "rgba(255,255,255,.78)");
     var pivShown = false;
     // pivot chip strip — one row, top-left; R green / PP gray / S red; semi-transparent bg.
-    if (_ov.pivot && _tf !== "ALL") {
+    if (_ov.pivot && _pivOk()) {
       var f = _fibCache[_sym];
       if (f && f.pivots) {
         var P = f.pivots;
