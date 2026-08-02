@@ -154,9 +154,32 @@
   function rowStrip(sym) { return stripHtml(sym, '', { compact: true }); }
 
   /* ── dispatch ───────────────────────────────────────────────────────────────────────── */
+
+  /* cc#803 LOCKED LETTERS. cc#789 made the strip's MARKUP single-source but left its BEHAVIOUR
+   * overridable by any page, which is the same drift one level down: /dashboard registered its own
+   * C and opened a page-local chart overlay while /gvm opened the shared ScorrChartCard — one
+   * button, two different charts. A letter is overridable ONLY while no shared component exists
+   * for it. C (scorr_chart_card.js) and R (results_card.js) both have one, so they are locked to
+   * it site-wide and a register() attempt is ignored with a warning. A and D stay overridable
+   * because their fallback is a deep-link to /dashboard, not a shared in-page component — a page
+   * that owns that implementation genuinely is richer. When A or D gets a shared component, lock
+   * it here too rather than trusting every future page author to not register it. */
+  var _LOCKED = { C: 'scorr_chart_card.js', R: 'results_card.js' };
+
   function register(h) {
     if (!h) return;
-    ['C', 'A', 'R', 'D'].forEach(function (k) { if (typeof h[k] === 'function') _handlers[k] = h[k]; });
+    ['C', 'A', 'R', 'D'].forEach(function (k) {
+      if (typeof h[k] !== 'function') return;
+      if (_LOCKED[k]) {
+        try {
+          console.warn('[ScorrCardStrip] "' + k + '" is locked to the shared ' + _LOCKED[k] +
+                       ' and cannot be overridden per page (cc#803). Registration ignored — ' +
+                       'extend that shared file instead.');
+        } catch (e) {}
+        return;
+      }
+      _handlers[k] = h[k];
+    });
   }
   function registerClose(fn) { if (typeof fn === 'function') _closers.push(fn); }
 

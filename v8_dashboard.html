@@ -1889,7 +1889,12 @@ function _qaClose(){const s=document.getElementById('qaStrip');if(s)s.classList.
 (function(){
   if(!window.ScorrCardStrip) return;   // shared file not loaded (e.g. embed) -> page still works, no strip
   window.ScorrCardStrip.register({
-    C:function(sym){ qaChart(sym); },
+    // cc#803: C is NO LONGER registered here. It used to call this page's local qaChart(), so the
+    // same C button opened a page-local overlay on V8 and the shared ScorrChartCard on the GVM page
+    // — two different chart implementations behind one button. cc#789 made the strip's MARKUP
+    // single-source but left its BEHAVIOUR overridable per page, which is the same drift one level
+    // down. C now falls through to the shared ScorrChartCard everywhere, which is also the richer
+    // component (pivot/fib/VWAP/GVM overlays, fullscreen, verdict badge — all absent from qaChart).
     A:function(sym){ qaAnalysis(sym); },      // canonical A: GVM + sector rank, volume, delivery, trajectory
     D:function(sym){ openDerivCockpit(sym,null,null,null,null); }
     // R intentionally unregistered — ScorrRCard.open is already the site-wide canonical opener.
@@ -2166,6 +2171,17 @@ function _istCross(time){   // crosshair/tooltip: always full date incl. year
 function _qaOvStr(){return _qaOv.pivot&&_qaOv.fib?'both':_qaOv.pivot?'pivot':_qaOv.fib?'fib':'none';}
 function _qaChartEsc(e){if(e.key==='Escape')qaChartClose();}
 function qaChart(sym){
+  // cc#803: SINGLE CHART, SITE-WIDE. Every "open the chart for SYM" entry point on this page — the
+  // C button of the C·A·R·D strip, the quick-actions Chart pill, the red symbol buttons in the alert
+  // list — now resolves to the SAME shared component the GVM page opens (scorr_chart_card.js).
+  // Before this, C on /gvm opened ScorrChartCard and C on /dashboard opened the local overlay below:
+  // one button, two chart implementations, different overlays and controls. The shared card is also
+  // the strict superset (pivot/fib/VWAP/GVM overlays, fullscreen, verdict badge). The local overlay
+  // is kept ONLY as a fallback for contexts where the shared file did not load (embeds), so the page
+  // degrades instead of breaking. Do not add a new local chart path here — extend scorr_chart_card.js.
+  if(window.ScorrChartCard && typeof window.ScorrChartCard.open==='function'){
+    try{ window.ScorrChartCard.open(sym); return; }catch(e){}
+  }
   let ov=document.getElementById('qaChartOv');
   if(!ov){
     ov=document.createElement('div');ov.id='qaChartOv';
