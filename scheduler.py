@@ -2040,6 +2040,19 @@ def _bg_qb_eod():
                 cur.execute("SELECT basket_name, next_rebalance FROM quant_basket_registry "
                             "WHERE is_active=TRUE ORDER BY basket_name")
                 baskets = [(r[0], r[1]) for r in cur.fetchall()]
+            # cc#838 step_3: SEED BEFORE REBALANCE. An active registry basket that has never held a
+            # position is not in a rebalance situation — it has never started. run_scheduled_rebalance
+            # deliberately never buys (its docstring is explicit), so a never-seeded basket would keep
+            # logging zero-entry rows and advancing its cadence forever. qb_seed enumerates from the
+            # registry and discovers each basket's selector by convention, so a new registry row
+            # participates with no code change here.
+            try:
+                import qb_seed
+                seeded = qb_seed.seed_pending(conn)
+                if seeded.get("seeded"):
+                    log.info("qb_eod: seeded %s", seeded)
+            except Exception as e:
+                log.error(f"qb_eod seed pass: {e}")
             checked = 0; rebalanced = []
             for name, next_reb in baskets:
                 try:

@@ -115,6 +115,27 @@ def qb_rebalance_due(x_admin_token: Optional[str] = Header(None)):
     return {"due": len(out), "results": out}
 
 
+@router.get("/seed/preview")
+def qb_seed_preview():
+    """cc#838: dry-run of the initial seed for every never-started active basket. READ-ONLY —
+    shows exactly what the seed pass would write, priced off the latest EOD close."""
+    import qb_seed
+    with _conn() as conn:
+        return qb_seed.seed_pending(conn, dry_run=True)
+
+
+@router.post("/seed/run")
+def qb_seed_run(basket_name: Optional[str] = None, x_admin_token: Optional[str] = Header(None)):
+    """cc#838: run the initial seed. Idempotent — a basket with ANY position history (open or
+    exited) is refused, so this can never double-seed. Omit basket_name to seed all pending."""
+    _check_admin(x_admin_token)
+    import qb_seed
+    with _conn() as conn:
+        if basket_name:
+            return qb_seed.seed_basket(conn, basket_name)
+        return qb_seed.seed_pending(conn)
+
+
 @router.post("/fix_allocations")
 def qb_fix_allocations(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
     """Fix allocation column + add NIFTYBEES residual for one basket."""
