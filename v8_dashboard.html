@@ -2535,9 +2535,19 @@ function renderFunnel(b){
 
 // cc#370: Trade log filters — Duration (calendar window) + Basket. Client-side (all closed trades
 // already load in recent_trades). State persists across paper refreshes; setters re-render panel7.
-let TLOG_DUR='all', TLOG_BASKET='all';
+// cc#817: TLOG_RETIRED — show baskets that no longer run. Default OFF: the Trade Log's headline
+// numbers should describe the book that is actually trading, not one that includes a retired
+// basket's closed era. Session-scoped by design (spec: no persistence required).
+let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=false;
 function setTlogDur(v){TLOG_DUR=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogBasket(v){TLOG_BASKET=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
+function setTlogRetired(v){
+  TLOG_RETIRED=!!v;
+  // Turning retired OFF while a retired basket is the active filter would leave the view pinned to
+  // a basket whose pill just disappeared — reset to All so the tab can never end up showing nothing.
+  if(!TLOG_RETIRED){const live=(window.BASKETS||[]).map(b=>b.id);if(TLOG_BASKET!=='all'&&live.indexOf(TLOG_BASKET)<0)TLOG_BASKET='all';}
+  const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();
+}
 function _istDateMinus(days){   // YYYY-MM-DD of (IST today - days), for calendar-window filtering
   const t=new Date(Date.now()+(5*60+30)*60000-days*86400000);
   return t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');
@@ -2550,11 +2560,23 @@ function renderTradeLog(){
   // if an older API build hasn't shipped the full-history ones yet.
   const _allT=p.all_trades||p.recent_trades||[];
   let t=_allT.slice();const s=p.all_summary||p.summary||{};
+  // cc#817: RETIRED baskets. A basket present in the ledger but absent from window.BASKETS is
+  // retired (buy_s1_bounce, sell_overbought, and anything future that stops running). Default view
+  // hides them entirely — no pill, no rows — and, critically, EXCLUDES THEM FROM THE SUMMARY.
+  // Derived from BASKETS rather than a hardcoded retired list, so retiring a basket needs no edit here.
+  const _liveBk=(window.BASKETS||[]).map(b=>b.id);
+  const _retiredBk=[...new Set(_allT.map(x=>x.basket).filter(b=>b&&_liveBk.indexOf(b)<0))];
+  if(!TLOG_RETIRED&&_retiredBk.length)t=t.filter(x=>_liveBk.indexOf(x.basket||'')>=0);
   // cc#370: apply the Duration + Basket filters (combine); default All/All = no filtering.
   if(TLOG_DUR!=='all'){const cut=_istDateMinus(TLOG_DUR==='1w'?7:30);t=t.filter(x=>String(x.exit_ts||'').slice(0,10)>=cut);}
   if(TLOG_BASKET!=='all')t=t.filter(x=>(x.basket||'')===TLOG_BASKET);
   // cc#370: All/All shows the authoritative summary totals; ANY filter recomputes from the subset.
-  const isAll=(TLOG_DUR==='all'&&TLOG_BASKET==='all');
+  // cc#817: the API summary (s) covers the WHOLE ledger, retired baskets included — so it is only
+  // the right answer when the visible set really is every trade. Hiding retired rows while still
+  // printing s.total_pnl would show live-basket rows under a P&L that silently contains the retired
+  // Rs.62k era: the exact number the founder wants out of the headline. When retired baskets exist
+  // and are hidden, we recompute from the visible subset instead.
+  const isAll=(TLOG_DUR==='all'&&TLOG_BASKET==='all'&&(TLOG_RETIRED||_retiredBk.length===0));
   const bTrades=isAll?(s.trades??t.length):t.length;
   // cc#371: classify WINS/LOSSES by gross-P&L SIGN, not the result string. result==TARGET/SL missed
   // GAP_TARGET_EXIT / GAP_SL_EXIT / MAX_HOLD / CONFLICT_EXIT rows (21+13!=42). ONE classifier for
@@ -2582,13 +2604,22 @@ function renderTradeLog(){
   // hardcoded 6. Canonical display order; unknown baskets sort last. Reconciliation of the running-basket
   // source of truth (v8_filter_state vs live v8_qualified writes) is documented for the founder.
   const _bkOrder=['buy_reversal','buy_momentum','buy_s1_bounce','sell_reversal','sell_momentum','sell_overbought'];
-  const _liveBk=(window.BASKETS||[]).map(b=>b.id);
-  const _presentBk=[...new Set([..._allT.map(x=>x.basket),..._liveBk].filter(Boolean))];
+  // cc#817: the pill row follows the same rule as the rows — retired baskets only appear when the
+  // toggle is on, and then carry a RETIRED tag so a pill can never be mistaken for a live basket.
+  const _presentBk=[...new Set([..._allT.map(x=>x.basket),..._liveBk].filter(Boolean))]
+    .filter(v=>TLOG_RETIRED||_liveBk.indexOf(v)>=0);
   _presentBk.sort((a,b)=>{const ia=_bkOrder.indexOf(a),ib=_bkOrder.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||String(a).localeCompare(String(b));});
-  const bkBtns=[['all','All'],..._presentBk.map(v=>[v,basketLabel(v)])].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
+  const bkBtns=[['all','All'],..._presentBk.map(v=>[v,basketLabel(v)])].map(([v,l])=>{
+    const ret=(v!=='all'&&_liveBk.indexOf(v)<0);
+    const tag=ret?' <span style="font-size:8px;font-weight:800;letter-spacing:.4px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">RETIRED</span>':'';
+    return `<button class="btn${TLOG_BASKET===v?' on':''}"${ret?' style="opacity:.72"':''} onclick="setTlogBasket('${v}')">${l}${tag}</button>`;
+  }).join('');
+  // cc#817: the toggle only exists when there IS something retired to reveal — an inert control on a
+  // clean ledger is noise. Session-scoped (no persistence), per spec.
+  const retBtn=_retiredBk.length?`<button class="btn${TLOG_RETIRED?' on':''}" onclick="setTlogRetired(${TLOG_RETIRED?'false':'true'})" title="${_retiredBk.map(basketLabel).join(', ')} — no longer running; hidden from rows and from the summary by default">${TLOG_RETIRED?'Hide':'Show'} retired (${_retiredBk.length})</button>`:'';
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}${retBtn?'<span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>'+retBtn:''}</div>
   </div>`;
   const summaryCards=`<div class="cards">
     <div class="card"><div class="k">Trades</div><div class="v">${bTrades??'--'}</div></div>
