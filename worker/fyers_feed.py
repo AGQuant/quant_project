@@ -1223,6 +1223,11 @@ class BarAggregator:
         self.last_ltp_ts        = {}   # symbol -> datetime of most recent real tick
         self._last_cmp_flush_ts = None # datetime of the last successful cmp flush
         self.last_oi  = {}   # symbol -> latest OI from depth REST poll (futures)
+        # cc#807 follow-up: (sym, source) -> {'bkt', 'base', 'last'} for turning the cumulative day-volume
+        # counter into per-bar volume. In-memory only: a restart re-bases the current bar from the
+        # first tick it sees, which under-reports that ONE bar rather than emitting a spike the
+        # size of the whole session — the failure this replaces.
+        self._vol_state = {}
         # RLock (re-entrant): flush_all holds it while _flush → _compute_basis
         # runs; a plain Lock here deadlocked the whole feed (v6.1 fix).
         self.lock     = threading.RLock()
@@ -1231,6 +1236,48 @@ class BarAggregator:
     def _bucket(self, ts):
         # 5-min bucket: round down to nearest 5-min boundary
         return ts.replace(minute=ts.minute - ts.minute % BAR_MINUTES, second=0, microsecond=0)
+
+    def _per_bar_volume(self, key, cum, bkt):
+        """cc#807 follow-up: convert Fyers' CUMULATIVE day volume into this bar's OWN volume.
+
+        on_message reads msg['vol_traded_today'] — a running total for the session, not a per-bar
+        figure — and this class stored it verbatim, so intraday_prices.volume held a cumulative
+        counter for every WS-fed bar. The fyers_hist backfill writes genuine per-bar volume into the
+        SAME column, so the table mixed two incompatible representations, and a worker restart
+        mid-session switched a symbol from one to the other partway through the day (observed
+        31-Jul-2026: RELIANCE per-bar to 11:20, cumulative from 11:25; raw sum 206.7M against a true
+        day volume of 8.6M).
+
+        Anything that sums or volume-weights this column was wrong: VWAP, VPOC, any rvol or
+        volume-ratio consumer. cc#807 added a client-side detector for the chart card; this fixes the
+        data itself, which is the only fix that reaches every other consumer.
+
+        Method: remember the cumulative reading at the moment each bucket opened; this bar's volume
+        is (current cumulative - that base). A DECREASE means the counter reset — a new session, or
+        the feed re-anchoring after a reconnect — so we re-base to the current reading rather than
+        emit a negative or an absurd spike. Returns None when no sane value can be derived, and the
+        caller then leaves the bar's volume untouched rather than writing a guess."""
+        if cum is None:
+            return None
+        try:
+            cum = float(cum)
+        except (TypeError, ValueError):
+            return None
+        if cum < 0:
+            return None
+        st = self._vol_state.get(key)
+        if st is None or st['bkt'] != bkt:
+            # New bucket: its base is the last cumulative we saw. On the very first tick for a
+            # symbol we have no base, so the bar starts at 0 and fills in as the session proceeds —
+            # the honest reading, since we genuinely do not know what traded before we connected.
+            base = st['last'] if (st is not None and cum >= st['last']) else 0.0
+            st = {'bkt': bkt, 'base': base, 'last': cum}
+            self._vol_state[key] = st
+        if cum < st['last']:
+            # Counter went backwards -> reset/re-anchor. Re-base here; do not emit a negative.
+            st['base'] = 0.0
+        st['last'] = cum
+        return max(0.0, cum - st['base'])
 
     def on_tick(self, sym, ltp, vol, ts=None, source='fyers_eq', oi=None):
         ts  = ts or datetime.now(IST).replace(tzinfo=None)
@@ -1245,17 +1292,25 @@ class BarAggregator:
             if source != 'fyers_fut':
                 self.last_ltp[sym]    = ltp
                 self.last_ltp_ts[sym] = ts   # cc_task #112: mark when this genuine tick arrived
+            # cc#807 follow-up: `vol` arrives as the session's CUMULATIVE total (vol_traded_today). Convert it
+            # to this bar's own volume BEFORE it is stored. Must run while holding the lock and
+            # before the bucket-rollover branch below, because _per_bar_volume re-bases on the
+            # bucket it is given.
+            bar_vol = self._per_bar_volume(key, vol, bkt)
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
                     self._flush(key, bar)
                 self.bars[key] = {'ts': bkt, 'o': ltp, 'h': ltp, 'l': ltp,
-                                  'c': ltp, 'v': vol or 0, 'oi': oi, 'source': source}
+                                  'c': ltp, 'v': bar_vol or 0, 'oi': oi, 'source': source}
             else:
                 bar['h'] = max(bar['h'], ltp)
                 bar['l'] = min(bar['l'], ltp)
                 bar['c'] = ltp
-                if vol: bar['v'] = vol
+                # bar_vol is monotonic within a bucket, so the latest reading is the bar's total.
+                # `is not None` rather than truthiness: a genuine 0 (no trades yet this bar) must
+                # overwrite a stale carry-over, and the old `if vol:` silently skipped exactly that.
+                if bar_vol is not None: bar['v'] = bar_vol
                 if oi is not None: bar['oi'] = oi
 
     def _flush(self, key, bar):
