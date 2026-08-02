@@ -57,6 +57,73 @@ def _card_quarter(text):
     return m.group(1).strip() if m else None
 
 
+# cc#796 EXPECTATIONS. Screener's CSV carries an EXPECTED quarterly sales/profit per company. It is a
+# mechanical trend projection, NOT analyst consensus — Claude web measured the season at a median
+# deviation of -16% (155 beats vs 320 misses), which is what a run-rate extrapolation looks like, not
+# what a broker forecast looks like. So the surface must never call it "analyst estimates" or "street
+# expectations": it is "Screener projected run-rate", labelled "vs est." on the card.
+#
+# The columns are NOT in screener_raw yet (63 columns, none expected-*). Adding them needs an
+# ALTER TABLE, which MAINTENANCE_LOCK_RULE blocks on the run_sql path — see the cc#796 task result for
+# the exact migration. This probes for them so the code is safe to deploy before OR after that lands:
+# absent columns simply return None, and the spec's own rule ("no expected value -> omit the line
+# entirely, no empty state") makes that the correct rendering rather than a degraded one.
+_EXPECTED_COLS = None      # tri-state cache: None = not probed
+
+
+def _expected_cols(cur):
+    global _EXPECTED_COLS
+    if _EXPECTED_COLS is None:
+        try:
+            cur.execute("""SELECT column_name FROM information_schema.columns
+                           WHERE table_name='screener_raw'
+                             AND column_name IN ('expected_qtr_sales','expected_qtr_profit')""")
+            _EXPECTED_COLS = {r[0] for r in cur.fetchall()}
+        except Exception:
+            _EXPECTED_COLS = set()
+    return _EXPECTED_COLS
+
+
+def _expectations(cur, sym, actual_sales=None, actual_profit=None):
+    """cc#796: {sales:{expected,actual,dev_pct,tag}, profit:{...}} for whichever side is derivable.
+    Returns None when nothing is — the caller omits the line rather than rendering an empty state.
+
+    Bands are founder-set: BEAT > +2%, IN-LINE within +/-2%, MISS < -2%. Deviation is reported
+    alongside the tag, never the tag alone, because a 2.1% beat and a 60% beat are not the same
+    statement and the binary hides that."""
+    cols = _expected_cols(cur)
+    if not cols:
+        return None
+    try:
+        sel = ", ".join(f'"{c}"' for c in sorted(cols))
+        cur.execute(f"SELECT {sel} FROM screener_raw WHERE UPPER(nse_code)=UPPER(%s)", (sym,))
+        r = cur.fetchone()
+    except Exception as e:
+        log.warning(f"_expectations {sym}: {e}")
+        return None
+    if not r:
+        return None
+    got = dict(zip(sorted(cols), r))
+
+    def side(exp, act):
+        exp, act = _f(exp), _f(act)
+        if exp is None or act is None or exp == 0:
+            return None
+        dev = (act - exp) / abs(exp) * 100.0
+        tag = "BEAT" if dev > 2 else ("MISS" if dev < -2 else "IN-LINE")
+        return {"expected": round(exp, 2), "actual": round(act, 2),
+                "dev_pct": round(dev, 1), "tag": tag}
+
+    out = {}
+    s = side(got.get("expected_qtr_sales"), actual_sales)
+    p = side(got.get("expected_qtr_profit"), actual_profit)
+    if s:
+        out["sales"] = s
+    if p:
+        out["profit"] = p
+    return out or None
+
+
 def _fy27_growth(cur, sym):
     """cc#623: FY27 estimated growth % from input_raw.fy27_growth (Sonnet on Trendlyne consensus,
     ~1536/2008 populated). Numeric or None. NEVER touches the retired empty fy27_outlook column."""
@@ -333,11 +400,28 @@ async def results_card(symbol: str, generate: bool = False):
         # quarter the data does not contain; the cc#622-A downgrade guard protects stored cards).
         expected_q = _expected_quarter(today)
         fy27 = _fy27_growth(cur, sym)
+        # cc#796: reported quarter actuals, from the SAME basis that carries the latest quarter —
+        # a symbol can hold both a stale consolidated series and a current standalone one (cc#793),
+        # and comparing an expectation against an abandoned basis would be worse than showing nothing.
+        _act_sales = _act_pat = None
+        try:
+            cur.execute("""SELECT metrics FROM fundamentals_history
+                           WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
+                           ORDER BY period_end DESC LIMIT 1""", (sym,))
+            _m = cur.fetchone()
+            if _m and _m[0]:
+                _mm = _m[0]
+                _act_sales = _f(str(_mm.get("Sales") or _mm.get("Revenue") or "").replace(",", ""))
+                _act_pat = _f(str(_mm.get("Net Profit") or "").replace(",", ""))
+        except Exception as e:
+            log.warning(f"cc#796 actuals {sym}: {e}")
+        expectations = _expectations(cur, sym, _act_sales, _act_pat)
         raw_news = _raw_news(cur, sym, hours=168)   # cc#650: RAW headlines widened 48h -> 7 days
         pol_news = _polished_by_symbol(cur, sym, days=30)
 
         def _sections(base):
-            base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news})
+            base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
+                         "expectations": expectations})   # cc#796: None -> card omits the line
             return _with_peer(base)
 
         cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))

@@ -79,7 +79,30 @@ SCREENER_COLUMNS = {
     "Return over 3years": "return_3y", "DMA 50": "dma_50", "DMA 200": "dma_200",
     "52w Index": "return_52w_vs_index", "Market Capitalization": "market_cap",
     "Industry Group": "industry_group",
+    # cc#796: Screener's EXPECTED quarterly sales/profit. This is a mechanical trend projection, NOT
+    # analyst consensus — the season measured a median deviation of -16% (155 beats / 320 misses).
+    # Every surface must call it a projected run-rate, never "analyst estimates".
+    # Several header spellings are mapped because the export has used more than one; _norm_screener_cols
+    # below also catches case/spacing variants so a renamed header cannot silently drop the column.
+    "Expected quarterly sales": "expected_qtr_sales",
+    "Expected quarterly profit": "expected_qtr_profit",
+    "Expected Quarterly Sales": "expected_qtr_sales",
+    "Expected Quarterly Profit": "expected_qtr_profit",
 }
+
+
+def _norm_screener_cols(df):
+    """cc#796: map any header that IS the expected-quarterly sales/profit column regardless of case or
+    spacing. A fixed-string mapping alone would silently drop the column on a rename, and a silently
+    missing expectation is indistinguishable on the card from a company that genuinely has none."""
+    ren = {}
+    for c in df.columns:
+        k = " ".join(str(c).lower().split())
+        if k in ("expected quarterly sales", "expected quarterly sale"):
+            ren[c] = "expected_qtr_sales"
+        elif k in ("expected quarterly profit", "expected quarterly pat"):
+            ren[c] = "expected_qtr_profit"
+    return df.rename(columns=ren) if ren else df
 
 SCREENER_LIVE_COLS = [
     "company_name", "BSE Code", "nse_code", "ISIN Code", "industry_group", "Industry",
@@ -95,6 +118,10 @@ SCREENER_LIVE_COLS = [
     "EPS growth 3Years", "EPS growth 7Years", "EPS growth 10Years", "profit_growth_5y",
     "return_1y", "return_3y", "dma_50", "dma_200", "RSI", "Number of equity shares",
     "fixed_asset_growth", "Return over 1month",
+    # cc#796 — ingested only once the columns exist in screener_raw (they do not yet; the migration is
+    # in the cc#796 task result). The loader intersects this list with the DataFrame's columns, so
+    # naming them here ahead of the migration is inert rather than breaking.
+    "expected_qtr_sales", "expected_qtr_profit",
 ]
 SCREENER_TEXT_COLS = {"company_name", "BSE Code", "nse_code", "ISIN Code", "industry_group", "Industry"}
 
@@ -159,6 +186,7 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
     df = pd.DataFrame(rows)
     df = df.rename(columns={"NSE Code": "nse_code", "Name": "company_name"})
     df = df.rename(columns=SCREENER_COLUMNS)
+    df = _norm_screener_cols(df)   # cc#796: case/spacing-tolerant expected-column mapping
     df = df[df["nse_code"].notna()].copy()
     df["nse_code"] = df["nse_code"].astype(str).str.strip()
     df = df[~df["nse_code"].isin(["", "nan"])].copy()

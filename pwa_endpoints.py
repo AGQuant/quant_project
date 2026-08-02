@@ -1003,6 +1003,17 @@ RESULTS_CARD_JS = """
     + 'padding:4px 9px;border-radius:6px;margin-left:auto}'
     + '.rcard-hit{color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
     + '.rcard-missed{color:#d0433b;background:rgba(208,67,59,.12);border:1px solid rgba(208,67,59,.35)}'
+    /* cc#796 — vs est. rows: actual, expected, deviation %, banded tag. IN-LINE is deliberately grey,
+       not green: matching a mechanical run-rate projection is not an achievement. */
+    + '.rcard-inline{font:700 10px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.06em;'
+    + 'padding:4px 9px;border-radius:6px;color:var(--mut,#667085);background:rgba(148,166,210,.14);'
+    + 'border:1px solid rgba(148,166,210,.3)}'
+    + '.rcard-exp{display:flex;flex-direction:column;gap:7px}'
+    + '.rcard-exp-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12.5px}'
+    + '.rcard-exp-l{font-weight:700;min-width:42px}'
+    + '.rcard-exp-v{font-variant-numeric:tabular-nums;font-weight:700}'
+    + '.rcard-exp-e{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums}'
+    + '.rcard-exp-d{font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}'
     /* cc#788 LEVEL 2 — View Detailed gate above the FY27 section */
     + '.rcard-detwrap{margin-top:14px}'
     + '.rcard-detbtn{display:inline-flex;align-items:center;gap:6px;min-height:38px;border:1px solid var(--line,rgba(148,166,210,.28));'
@@ -1253,6 +1264,37 @@ RESULTS_CARD_JS = """
       + '<div class=\"rcard-note\">Reported quarter PAT YoY vs the FY27 full-year consensus &mdash; directional, not like-for-like.</div>';
   }
 
+  // cc#796 EXPECTATIONS. Screener's CSV carries an expected quarterly sales/profit. It is a MECHANICAL
+  // TREND PROJECTION, not analyst consensus — the season measured a median deviation of -16%
+  // (155 beats vs 320 misses), which is what a run-rate extrapolation looks like, not a broker forecast.
+  // So this NEVER says "analyst estimates" or "street expectations": the label is "vs est." and the
+  // tooltip says exactly what it is.
+  //
+  // The deviation % is shown NEXT TO the tag, never the tag alone — a 2.1% beat and a 60% beat are not
+  // the same statement, and the binary hides that. Bands are founder-set: BEAT > +2, IN-LINE +/-2,
+  // MISS < -2. No expected value (about 5% of the top 500, ~14% of the full CSV) => the whole line is
+  // omitted, never an empty state.
+  function expHtml(e){
+    if (!e || (!e.sales && !e.profit)) return '';
+    function row(lbl, o){
+      if (!o) return '';
+      var cls = o.tag==='BEAT' ? 'rcard-hit' : (o.tag==='MISS' ? 'rcard-missed' : 'rcard-inline');
+      var dev = (o.dev_pct>=0?'+':'')+esc(o.dev_pct)+'%';
+      var col = o.dev_pct>2 ? '#0f9d58' : (o.dev_pct<-2 ? '#d0433b' : 'var(--mut,#667085)');
+      return '<div class=\"rcard-exp-row\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
+        + '<span class=\"rcard-exp-v\">'+esc(o.actual)+'</span>'
+        + '<span class=\"rcard-exp-e\">vs est. '+esc(o.expected)+'</span>'
+        + '<span class=\"rcard-exp-d\" style=\"color:'+col+'\">'+dev+'</span>'
+        + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span></div>';
+    }
+    var body = row('Sales', e.sales) + row('PAT', e.profit);
+    if (!body) return '';
+    return '<div class=\"rcard-lbl\" title=\"Screener projected run-rate\">vs est.</div>'
+      + '<div class=\"rcard-exp\">'+body+'</div>'
+      + '<div class=\"rcard-note\">vs Screener projected run-rate &mdash; a mechanical projection from '
+      + 'reported trend, not a broker forecast. Bands: beat above +2%, in-line within 2%, miss below -2%.</div>';
+  }
+
   // cc#788 LEVEL 2: the long-form editorial moves out of the inline Result Analysis block and behind
   // this button, which sits ABOVE the FY27 section. Renders ONLY when result_analysis_v2 actually has
   // a row for THIS symbol and THIS quarter — no row means no button and the card is pure Level 1,
@@ -1359,6 +1401,7 @@ RESULTS_CARD_JS = """
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
       }
       // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
+      h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
       h += viewDetailedHtml(d && d.v2, d && d.card_quarter);
       h += fy27Html(d && d.fy27_growth, _actualPat(d));
     } else {
