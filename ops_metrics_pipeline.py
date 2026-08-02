@@ -67,7 +67,7 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 import psycopg
 
-from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700/814: top-750 NSE scrape gate
+from scrape_universe import in_scrape_universe, log_universe_skip, UNIVERSE_CTE   # cc#700/814: top-750 NSE scrape gate
 
 
 def _conn():
@@ -2386,9 +2386,18 @@ def run_t1_refresh(conn=None):
             # — the cap is a politeness guarantee, not a performance tuning knob. Raising it trades
             # a real rate-limit risk for speed; do that deliberately, not by accident.
             try:
-                cur.execute("""
+                # The LIMIT must be applied to symbols that are ALREADY inside the scrape universe.
+                # Filtering afterwards (in the in_scrape_universe loop below) looks equivalent and is
+                # not: measured 02-Aug, 53 of the top 100 candidates by market cap sit OUTSIDE the
+                # 750 universe, so more than half the cap would be spent on symbols that are then
+                # skipped — and because a skipped symbol is never queued and never gets a doc, the
+                # SAME 53 would reappear on every subsequent run. The catch-up would drain the real
+                # backlog at half speed, permanently. Hence the universe CTE joins here, sharing the
+                # one definition in scrape_universe.py rather than restating the rule.
+                cur.execute("WITH " + UNIVERSE_CTE + """
                     SELECT UPPER(e.ticker), MAX(e.ex_date) AS ex_date
                     FROM earnings_calendar e
+                    JOIN scrape_universe u ON u.symbol = UPPER(e.ticker)
                     LEFT JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(e.ticker)
                     WHERE e.status = 'reported'
                       AND e.ticker IS NOT NULL
