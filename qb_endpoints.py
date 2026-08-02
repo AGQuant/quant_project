@@ -115,6 +115,27 @@ def qb_rebalance_due(x_admin_token: Optional[str] = Header(None)):
     return {"due": len(out), "results": out}
 
 
+@router.get("/nav")
+def qb_nav_series(basket_name: str = "large_cap", window: str = "MAX"):
+    """cc#839: stored NAV vs benchmark for the basket card's performance chart.
+    window = 1M | 3M | 6M | MAX; both legs re-based to 100 at the start of the window."""
+    import qb_nav
+    with _conn() as conn:
+        return qb_nav.get_series(conn, basket_name, window)
+
+
+@router.post("/nav/rebuild")
+def qb_nav_rebuild(basket_name: Optional[str] = None, x_admin_token: Optional[str] = Header(None)):
+    """cc#839: (re)build the NAV series from position history + raw_prices closes. Full recompute,
+    idempotent — a backdated exit corrects the history it belongs to instead of leaving a wrong tail."""
+    _check_admin(x_admin_token)
+    import qb_nav
+    with _conn() as conn:
+        if basket_name:
+            return qb_nav.persist_series(conn, basket_name)
+        return qb_nav.persist_all(conn)
+
+
 @router.get("/seed/preview")
 def qb_seed_preview():
     """cc#838: dry-run of the initial seed for every never-started active basket. READ-ONLY —

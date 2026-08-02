@@ -2063,7 +2063,16 @@ def _bg_qb_eod():
                         qb_eod_checker.run_eod_checker(conn, basket_name=name); checked += 1
                 except Exception as e:
                     log.error(f"qb_eod {name}: {e}")
-            _log_health(conn, "qb_eod", {"checked": checked, "rebalanced": rebalanced})  # cc#255
+            # cc#839: append today's NAV point for every basket in the SAME pass (spec: one loop,
+            # no second job). Runs after the marks so it reads the freshest position values.
+            nav_out = None
+            try:
+                import qb_nav
+                nav_out = qb_nav.persist_all(conn)
+            except Exception as e:
+                log.error(f"qb_eod nav pass: {e}")
+            _log_health(conn, "qb_eod", {"checked": checked, "rebalanced": rebalanced,
+                                         "nav": (nav_out or {}).get("baskets")})  # cc#255
         log.info(f"qb_eod: {checked} baskets checked, rebalanced={rebalanced}")
         _qb_eod_ran_today = today
     except Exception as e: log.error(f"qb_eod: {e}")
