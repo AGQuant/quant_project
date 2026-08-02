@@ -325,7 +325,22 @@ def run_scrape(mode="run", symbols=None) -> dict:
                 symbols = [r[0] for r in cur.fetchall()]
                 _univ = universe_symbols(cur)   # cc#741: enqueue-side pre-filter to the scrape universe
                 symbols = [s for s in symbols if s in _univ]
-                cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE status='ok'")
+                # cc#790 SELF-HEAL: the resume set used to be "status='ok'", a flag written once and
+                # never expired — so a symbol scraped in a prior season was skipped FOREVER and could
+                # never pick up a new quarter. On 02-Aug that had frozen 102 announced companies at
+                # their 11-Jul scrape with no Q1FY27 row, and no full run could ever have fixed them.
+                #
+                # Resume now tests the OUTCOME we actually care about — does this symbol already hold
+                # the most recently completed quarter — instead of a proxy flag. A symbol that is
+                # genuinely up to date is still skipped (crash-resume within a season keeps working),
+                # but every symbol missing the running quarter is picked up automatically on the next
+                # scheduled run. No manual trigger, no stale flag.
+                _qend = _last_quarter_end(date.today())
+                cur.execute("""SELECT s.symbol FROM fundamentals_scrape_status s
+                               WHERE s.status='ok' AND EXISTS (
+                                 SELECT 1 FROM fundamentals_history f
+                                 WHERE UPPER(f.symbol)=UPPER(s.symbol) AND f.section='quarters'
+                                   AND f.period_type='quarter' AND f.period_end=%s)""", (_qend,))
                 already = {r[0] for r in cur.fetchall()}
         todo = [s for s in symbols if s not in already]
         _slog(conn, "backfill", "GVM_HISTORY_SCRAPE_START",
