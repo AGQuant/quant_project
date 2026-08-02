@@ -484,7 +484,13 @@ def _canon_metric(name):
 
 def seed_registry(conn=None):
     """Idempotent upsert of the 22-sector registry. Also logs the live segment->sector
-    distribution so the founder can audit _infer_sector's calls (HONESTY NOTE 1)."""
+    distribution so the founder can audit _infer_sector's calls (HONESTY NOTE 1).
+
+    cc#795: RETIRED — sector_kpi_registry maintenance stops. The table stays as a frozen archive
+    (gvm_company_report still READS it for direction/display metadata; reads are unaffected)."""
+    if OPS_METRICS_RETIRED:
+        _ops_retired("seed_registry", "sector_kpi_registry frozen as archive")
+        return {"status": "retired", "seeded": 0}
     own = conn is None
     conn = conn or _conn()
     try:
@@ -850,6 +856,34 @@ def _should_escalate(metrics_out, pres_text, trans_text):
     return any_low or any_big_gap or (all_empty and doc_existed)
 
 
+# ── cc#795 OPS METRICS RETIREMENT (founder 02-Aug-2026) ─────────────────────────
+# Ops metrics are retired COMPLETELY. cc#783 removed the UI; this stops the extraction layer.
+#
+# WHAT STOPS: LLM extraction of ops metrics from docs, all writes into sector_ops_metrics, and
+# sector_kpi_registry maintenance.
+# WHAT DELIBERATELY DOES NOT STOP: the doc scrape. Concall transcripts, investor presentations and
+# fundamentals history for the top-500 universe feed Level-2 Result Analysis and CIO queries, and
+# they stay fully alive. run_t1_refresh / run_saturday_retry / run_season_sweep keep staging
+# doc_texts and re-scraping fundamentals exactly as before — only the metric layer on top is gone.
+# sector_ops_metrics and sector_kpi_registry remain as a FROZEN ARCHIVE. Nothing is dropped.
+#
+# The switch sits at the WRITE and at the LLM CALL rather than only in the scheduler, because
+# several paths reach them — the flag-gated backfill runner, the monthly re-run, and the admin
+# endpoints. Gating only the cadence would leave a manual trigger able to resurrect the pipeline
+# and quietly re-open the data-quality problems catalogued in cc#786 (which cc#795 supersedes).
+OPS_METRICS_RETIRED = True
+_ops_retired_logged = set()
+
+
+def _ops_retired(where, detail=""):
+    """Log the no-op once per call site, then stay quiet — a retired pipeline that shouts on every
+    tick is noise that trains people to ignore the log."""
+    if where not in _ops_retired_logged:
+        _ops_retired_logged.add(where)
+        log.info(f"cc#795: ops-metrics {where} is RETIRED — no-op. {detail}")
+    return True
+
+
 def run_extraction(symbol, sector, registry, pres_text, trans_text, quarter_hint=None):
     """Two-pass extraction (presentation + transcript) merged into per-metric rows, plus a
     concall summary from the transcript pass (cc#523 REVISION point 3: "one call does both
@@ -857,7 +891,13 @@ def run_extraction(symbol, sector, registry, pres_text, trans_text, quarter_hint
     passes when _should_escalate flags trouble. Returns {"quarter":.., "metrics": {name:{...}},
     "concall": {...}|None, "model_used": "haiku"|"sonnet", "usage": [usage_dict, ...]}.
     Never fabricates: a metric with no signal from either pass is still emitted (metric_value
-    None) so the row exists as an honest "checked, not found" record."""
+    None) so the row exists as an honest "checked, not found" record.
+
+    cc#795: RETIRED. Returns None without calling Anthropic — this is the cost centre of the
+    pipeline, so gating here (not just at the write) is what actually stops the spend."""
+    if OPS_METRICS_RETIRED:
+        _ops_retired("run_extraction", "no Anthropic call, no metrics returned")
+        return None
     usages = []
 
     def _call(text, prompt_fn, model):
@@ -1054,6 +1094,14 @@ def reconcile_vs_pnl(cur, symbol, quarter, metrics):
 
 
 def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
+    # cc#795 RETIREMENT — the hard stop. No caller can write sector_ops_metrics, whatever reached
+    # here: the flag-gated backfill runner, the monthly re-run, the admin endpoints or a future
+    # path nobody has written yet. Gating only the scheduler would have left a manual trigger able
+    # to resurrect the pipeline. This is the guarantee behind the spec's verify line, "no scheduler
+    # job writes sector_ops_metrics after this ships".
+    if OPS_METRICS_RETIRED:
+        _ops_retired("write_extraction", "sector_ops_metrics frozen as archive; doc scrape unaffected")
+        return
     # cc#527 fix: the live sector_ops_metrics table (pre-existing, see ensure_tables note above)
     # has no computed_at column -- it has created_at/updated_at instead -- and its confidence
     # CHECK constraint requires UPPERCASE 'HIGH'/'MEDIUM'/'LOW'. Every write_extraction() call

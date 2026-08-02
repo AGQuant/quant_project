@@ -3406,10 +3406,15 @@ async def _scheduler_loop():
         # cc#667: Sat 06:10 detect new docs -> ops-metrics queue.
         # cc#773 SEASON MODE: through 15-Aug run it DAILY (2x pace) — peak results season outruns the
         # weekly burst (48% coverage gap on 01-Aug). Auto-reverts to Saturday-only after that date.
-        if h == 6 and m == 10 and (now.weekday() == 5 or _ops_season_mode(now.date())):
-            _spawn(_bg_weekly_ops_metrics_queue)
-        if h == 22 and m == 40:
-            _spawn(_bg_ops_metrics_coverage)       # cc#773: nightly dual coverage counter + <80% alert
+        # cc#795 RETIRED (founder 02-Aug): ops metrics are retired completely, so neither the
+        # detect-and-queue sweep nor the coverage counter has anything to act on — the queue would
+        # fill with work nobody drains, and the counter would alert on coverage of a dead metric.
+        # The DOC scrape is untouched: _bg_ops_text_fetch below still runs, and the T+1 / Saturday /
+        # season jobs keep staging doc_texts and re-scraping fundamentals for Level-2 Result Analysis.
+        # if h == 6 and m == 10 and (now.weekday() == 5 or _ops_season_mode(now.date())):
+        #     _spawn(_bg_weekly_ops_metrics_queue)
+        # if h == 22 and m == 40:
+        #     _spawn(_bg_ops_metrics_coverage)     # cc#773: nightly dual coverage counter + <80% alert
         if h == 6 and m == 25:
             _spawn(_bg_ops_polish_detector, True)  # cc#736: DAILY 06:25 sweep -> refresh POLISH_QUEUE card (day-locked)
         if h == 9 and m == 10:
@@ -3527,7 +3532,10 @@ async def _scheduler_loop():
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
         _spawn(_bg_yahoo_new_listings)  # cc#539: flag-gated one-shot Yahoo EOD backfill for new listings
-        _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
+        # cc#795 RETIRED: this runner calls run_company -> run_extraction/write_extraction, i.e. the
+        # LLM spend and the sector_ops_metrics write. Disarmed here AND hard-stopped inside
+        # ops_metrics_pipeline, so an armed app_config flag cannot resurrect it either.
+        # _spawn(_bg_ops_metrics_backfill)  # cc#523/524: flag-gated, checked every tick
         _spawn(_bg_ops_polish_detector)    # cc#736: flag-gated (ops_polish_run=run_now), checked every tick — refreshes the POLISH_QUEUE card
         _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
@@ -3544,7 +3552,10 @@ async def _scheduler_loop():
         if h == 5 and m == 5:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit. cc#622 C: 08:45 -> 05:05 (clear 06:00-09:10)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
-        if h == 2 and m == 10:  _spawn(_bg_ops_peer_benchmark)   # cc#593: nightly ops peer-benchmark rebuild
+        # cc#795 RETIRED: ops_peer_benchmark is derived FROM sector_ops_metrics, which is now a frozen
+        # archive — rebuilding it nightly from frozen input would only rewrite the same rows forever.
+        # The table is left in place (read paths unaffected), just no longer regenerated.
+        # if h == 2 and m == 10:  _spawn(_bg_ops_peer_benchmark)   # cc#593: nightly rebuild
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
         # resume (both no-op once flag='done' or a run is in-flight; off-market gate inside).
         if h == 2 and m == 20:  _spawn(_bg_gvm_backfill)
