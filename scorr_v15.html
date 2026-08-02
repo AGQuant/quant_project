@@ -142,7 +142,8 @@ td.sym{font-weight:700;font-size:12.5px}
 .flag.ok .ic{background:var(--bull-soft);color:var(--bull)}
 .tabs{display:flex;gap:8px;overflow-x:auto;margin:12px 0 0;padding-bottom:8px;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex-shrink:0;height:38px;padding:0 17px;border-radius:19px;border:1px solid var(--line);background:rgba(18,26,51,.7);color:var(--mut);font-size:12px;font-weight:700;display:flex;align-items:center;cursor:pointer;transition:all .15s;backdrop-filter:blur(6px)}
+/* cc#837: 44px tap floor per MOBILE_UX_STANDARD_V1 (was 38px). */
+.tab{flex-shrink:0;height:44px;padding:0 17px;border-radius:22px;border:1px solid var(--line);background:rgba(18,26,51,.7);color:var(--mut);font-size:12px;font-weight:700;display:flex;align-items:center;cursor:pointer;transition:all .15s;backdrop-filter:blur(6px)}
 .tab:hover{color:var(--text);border-color:var(--line2)}
 .tab.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(77,124,254,.35)}
 .addcmp{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--cyan);background:transparent;border:1px solid rgba(55,211,232,.35);padding:4px 9px;border-radius:8px;cursor:pointer;transition:all .15s}
@@ -168,8 +169,16 @@ td.sym{font-weight:700;font-size:12.5px}
 :root[data-theme="light"] .pc:hover{box-shadow:0 14px 34px rgba(20,35,80,.10)}
 :root[data-theme="light"] .card{background:linear-gradient(180deg,#FFFFFF,#FAFBFF)}
 :root[data-theme="light"] .segblk,:root[data-theme="light"] .ret,:root[data-theme="light"] .pgvm{background:rgba(20,35,80,.035)}
+/* cc#837 BUG 1 — the active chip's label vanished in LIGHT theme.
+   `:root[data-theme="light"] .tab` has specificity (0,2,1); `.tab.on` only (0,2,0). So the light
+   override won the BACKGROUND and repainted the selected chip #FFFFFF, while `.tab.on`'s
+   `color:#fff` still applied — white text on a white pill, exactly the blank capsule in the
+   screenshot. The dark path was never affected, which is why this hid in the light override.
+   Fix: state the active chip at (0,3,1) so it beats the plain-chip light override outright, and
+   paint BOTH background and text there so the pair can never separate again. Rule chosen (applied
+   to every chip, both themes): active = accent fill + white text. */
 :root[data-theme="light"] .tab{background:#FFFFFF}
-:root[data-theme="light"] .tab.on{color:#fff}
+:root[data-theme="light"] .tab.on{background:var(--blue);border-color:var(--blue);color:#fff}
 :root[data-theme="light"] .cmp{background:rgba(255,255,255,.92);box-shadow:0 -12px 40px rgba(20,35,80,.10)}
 :root[data-theme="light"] #ac{box-shadow:0 18px 44px rgba(20,35,80,.16)}
 :root[data-theme="light"] .verdict .v{box-shadow:none}
@@ -727,7 +736,7 @@ tr.self td.sym{color:var(--blue)}
   function applyCats(){
     paintTabs();
     loadScreener(catsParam());
-    if(q&&q.value.trim().length>=2)runSearch();
+    if(q&&ac&&ac.style.display!=="none")runSearch();   // cc#837: re-scope an OPEN dropdown, typed or not
   }
   Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(t){
     t.addEventListener("click",function(){
@@ -741,28 +750,77 @@ tr.self td.sym{color:var(--blue)}
   // search autocomplete
   var q=$("q"),ac=$("ac"),tmr=null;
   function hideAc(){ac.style.display="none";}
+  // cc#837: the dropdown now carries an MQS chip per row, opens useful on FOCUS (top-8 of the
+  // active category by MQS, before a keystroke), stays category-scoped with a one-line escape
+  // hatch, and is keyboard-navigable. Same interaction shape as the /cio stock autocomplete —
+  // arrow keys move, Enter opens, Escape closes — rather than a second invention.
+  var acIdx=-1, acRows=[], acBreakout=false;
+
+  // The suggestion row reuses the page's EXISTING mqsChip (defined above, cc#721) rather than
+  // declaring a second one. Two same-named function declarations in this scope would hoist over
+  // each other and silently repaint the peers table and screener chips too — and mqs is stored on
+  // the /100 scale while the page renders /10, so a second copy would also get the scale wrong.
+
+  function paintAcSel(){
+    acRows.forEach(function(el,i){ el.style.background = (i===acIdx) ? "var(--well)" : "transparent"; });
+    if(acIdx>=0 && acRows[acIdx] && acRows[acIdx].scrollIntoView) acRows[acIdx].scrollIntoView({block:"nearest"});
+  }
+
+  function openAcRow(el){
+    if(!el) return;
+    if(el.getAttribute("data-breakout")==="1"){       // "Search all categories" escape hatch
+      acBreakout=true; runSearch(); return;
+    }
+    var c=el.getAttribute("data-code");
+    q.value=el.querySelector("div").textContent;
+    hideAc(); loadFund(c); window.scrollTo({top:0,behavior:"smooth"});
+  }
+
   function runSearch(){
     var v=q.value.trim();
-    if(v.length<2){hideAc();return;}
-    fetch("/api/v15/search?q="+encodeURIComponent(v)+"&cats="+encodeURIComponent(catsParam())).then(function(r){return r.json()}).then(function(d){
+    var scoped=(!acBreakout)?catsParam():"";
+    // <2 chars is no longer "hide" — it is the top-of-category view, which is what makes the
+    // dropdown worth opening before typing.
+    var url = v.length>=2
+      ? "/api/v15/search?q="+encodeURIComponent(v)+"&cats="+encodeURIComponent(scoped)
+      : "/api/v15/search?top=1&limit=8&cats="+encodeURIComponent(scoped);
+    fetch(url).then(function(r){return r.json()}).then(function(d){
       var rs=(d&&d.results)||[];
       if(!rs.length){hideAc();return;}
-      ac.innerHTML=rs.map(function(f){
-        return '<div data-code="'+esc(f.scheme_code)+'" style="padding:11px 15px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px">'
+      var head = (v.length>=2?"":"Top by MQS")+(scoped?(v.length>=2?"In ":" · in ")+"selected categories":"");
+      var html = head
+        ? '<div style="padding:7px 15px;font-size:9.5px;font-weight:800;letter-spacing:.06em;'
+          +'text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line)">'+esc(head)+'</div>'
+        : "";
+      html += rs.map(function(f){
+        return '<div data-code="'+esc(f.scheme_code)+'" style="padding:11px 15px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px;display:flex;gap:10px;align-items:flex-start">'
+          +'<div style="flex:1;min-width:0">'
           +'<div style="font-weight:700;color:var(--text)">'+esc(f.name)+'</div>'
-          +'<div style="font-size:10px;color:var(--dim);margin-top:2px">'+[esc(f.amc),esc(f.category),esc(f.plan)].filter(Boolean).join(" · ")+'</div></div>';
+          +'<div style="font-size:10px;color:var(--dim);margin-top:2px">'+[esc(f.amc),esc(f.category),esc(f.plan)].filter(Boolean).join(" · ")+'</div>'
+          +'</div><div style="flex:0 0 auto;padding-top:2px;font-size:11px">'+mqsChip(f.mqs)+'</div></div>';
       }).join("");
-      Array.prototype.forEach.call(ac.querySelectorAll("[data-code]"),function(it){
-        it.addEventListener("mousedown",function(e){e.preventDefault();var c=it.getAttribute("data-code");q.value=it.querySelector("div").textContent;hideAc();loadFund(c);window.scrollTo({top:0,behavior:"smooth"});});
+      if(scoped){
+        html += '<div data-breakout="1" style="padding:9px 15px;cursor:pointer;font-size:11px;font-weight:700;color:var(--blue)">Search all categories →</div>';
+      }
+      ac.innerHTML=html;
+      acRows=Array.prototype.slice.call(ac.querySelectorAll("[data-code],[data-breakout]"));
+      acIdx=-1;
+      acRows.forEach(function(it){
+        it.addEventListener("mousedown",function(e){e.preventDefault();openAcRow(it);});
+        it.addEventListener("mouseenter",function(){acIdx=acRows.indexOf(it);paintAcSel();});
       });
       ac.style.display="block";
     }).catch(hideAc);
   }
-  q.addEventListener("input",function(){clearTimeout(tmr);tmr=setTimeout(runSearch,180);});
+  q.addEventListener("input",function(){acBreakout=false;clearTimeout(tmr);tmr=setTimeout(runSearch,180);});
+  q.addEventListener("focus",function(){ if(ac.style.display==="none") runSearch(); });
   q.addEventListener("blur",function(){setTimeout(hideAc,150);});
   $("go").addEventListener("click",runSearch);
   q.addEventListener("keydown",function(e){
-    if(e.key==="Enter")runSearch();
+    var open=(ac.style.display!=="none")&&acRows.length;
+    if(e.key==="ArrowDown"&&open){e.preventDefault();acIdx=Math.min(acIdx+1,acRows.length-1);paintAcSel();return;}
+    if(e.key==="ArrowUp"&&open){e.preventDefault();acIdx=Math.max(acIdx-1,0);paintAcSel();return;}
+    if(e.key==="Enter"){ if(open&&acIdx>=0){e.preventDefault();openAcRow(acRows[acIdx]);} else runSearch(); return; }
     if(e.key==="Escape"){hideAc();q.blur();}
   });
   document.addEventListener("click",function(e){

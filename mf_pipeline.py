@@ -1150,29 +1150,58 @@ def _derive_plan(name):
 
 
 @router.get("/api/v15/search")
-def v15_search(q: str = "", limit: int = 12, cats: str = ""):
+def v15_search(q: str = "", limit: int = 12, cats: str = "", top: int = 0):
     """cc#480: fund autocomplete over mf_master (name/amc/category). Prefers Direct-Growth
-    plans. Thin read — no scoring. cc#722: optional comma-separated `cats` narrows results to the
-    pill-bar's selected categories (empty/All => the full equity universe)."""
+    plans. cc#722: optional comma-separated `cats` narrows results to the pill-bar's selected
+    categories (empty/All => the full equity universe).
+
+    cc#837 extends this endpoint rather than adding the /api/v15/mf/search the spec allowed for —
+    a second fund-search query would be the same drift cc#802 killed on the news side. Two additions:
+
+      * MQS now travels with every suggestion (LEFT JOIN mf_scores), so the dropdown can carry the
+        score chip and a user can rank the choices before opening one. NULL for an unscored fund —
+        never a zero, which would read as "scored badly" rather than "not scored".
+      * top=1 with an EMPTY q returns the best funds of the active category BY MQS, which makes the
+        dropdown useful on focus, before a single keystroke.
+
+    NOTE FOR cc#836: this is the mf_fund picker the Max IVR tree needs (13822, mf.pick node).
+    Consume it — do not build a second one."""
     q = (q or "").strip()
-    if not q:
-        return {"count": 0, "results": []}
     _cats = [c.strip() for c in (cats or "").split(",") if c.strip()]
     _cats = [c for c in _cats if c in EQUITY_CATEGORY_WHITELIST] or list(EQUITY_CATEGORY_WHITELIST)
+    n = max(1, min(limit, 25))
+    if not q and not top:
+        return {"count": 0, "results": []}
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         # cc#520: debt strays (Banking & PSU) must not appear in search results.
-        cur.execute("""SELECT scheme_code, name, amc, category FROM mf_master
-                       WHERE (name ILIKE %s OR amc ILIKE %s OR category ILIKE %s)
-                         AND category = ANY(%s)
-                       ORDER BY (name ILIKE '%%direct%%' AND name ILIKE '%%growth%%') DESC,
-                                curated DESC, length(name), name
-                       LIMIT %s""",
-                    (f"%{q}%", f"%{q}%", f"%{q}%", _cats, max(1, min(limit, 25))))
+        if not q:
+            # Empty-input focus: top of the category by MQS. Unscored funds sink rather than
+            # disappear — a category with few scored funds still shows something.
+            cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, s.mqs
+                           FROM mf_master m
+                           LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
+                           WHERE m.category = ANY(%s)
+                             AND m.name ILIKE '%%direct%%' AND m.name ILIKE '%%growth%%'
+                           ORDER BY s.mqs DESC NULLS LAST, m.curated DESC, length(m.name), m.name
+                           LIMIT %s""", (_cats, n))
+        else:
+            cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, s.mqs
+                           FROM mf_master m
+                           LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
+                           WHERE (m.name ILIKE %s OR m.amc ILIKE %s OR m.category ILIKE %s)
+                             AND m.category = ANY(%s)
+                           ORDER BY (m.name ILIKE '%%direct%%' AND m.name ILIKE '%%growth%%') DESC,
+                                    m.curated DESC, s.mqs DESC NULLS LAST, length(m.name), m.name
+                           LIMIT %s""",
+                        (f"%{q}%", f"%{q}%", f"%{q}%", _cats, n))
         rows = [{"scheme_code": sc, "name": nm, "amc": amc,
-                 "category": _derive_cat(nm, cat), "plan": _derive_plan(nm)}
-                for sc, nm, amc, cat in cur.fetchall()]
-    return {"count": len(rows), "results": rows}
+                 "category": _derive_cat(nm, cat), "plan": _derive_plan(nm),
+                 "mqs": (round(float(mqs), 1) if mqs is not None else None)}
+                for sc, nm, amc, cat, mqs in cur.fetchall()]
+    return {"count": len(rows), "results": rows,
+            "scoped_to": (None if len(_cats) == len(EQUITY_CATEGORY_WHITELIST) else _cats),
+            "mode": ("top_by_mqs" if not q else "search")}
 
 
 def _ret_window_state(value, inception, years_needed):
