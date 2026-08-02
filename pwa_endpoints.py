@@ -980,9 +980,17 @@ def pwa_mobile_tables_js():
 
 
 # cc#573 (spec id=6438): ONE shared Results "R" pill + card component, injected site-wide via
-# _MOBILE_HEAD. Any page adds ScorrRCard.pill(sym) (or a <span class="rcard-pill" data-sym="SYM">R</span>)
-# next to a symbol; a delegated click opens the modal and fetches /api/results/card?symbol=X
+# _MOBILE_HEAD. A delegated click opens the modal and fetches /api/results/card?symbol=X
 # (built to cc#572's response contract). Degrades gracefully if that backend isn't deployed yet.
+#
+# cc#798: DO NOT add R/V pills to new surfaces. Next to a symbol in a table, use the shared
+# C·A·R·D strip instead — window.ScorrCardRow(sym) — which gives Chart / Analysis / Result /
+# Cockpit with one call and the same availability rules everywhere. pillV is GONE: the V button
+# opened the Volume/Energy card, which is a strict SUBSET of what the strip's A opens (the
+# Analysis modal covers GVM, sector rank, volume, delivery and trajectory), so V folded into A
+# rather than being dropped — no function was lost. `pill` survives only for the documented raw
+# <span class="rcard-pill" data-sym="SYM">R</span> pattern; it is deprecated, and every page call
+# site was migrated to ScorrCardRow in cc#798.
 RESULTS_CARD_JS = """
 (function(){
   if (window.__scorrRCard) return; window.__scorrRCard = true;
@@ -1620,12 +1628,14 @@ RESULTS_CARD_JS = """
     if (!e.target.closest) return;
     var rp = e.target.closest('.rcard-pill');
     if (rp && rp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); open(rp.getAttribute('data-sym')); return; }
-    var vp = e.target.closest('.vcard-pill');
-    if (vp && vp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); openV(vp.getAttribute('data-sym')); }
+    // cc#798: the .vcard-pill handler is RETIRED along with pillV — no surface emits a V pill any
+    // more. openV itself stays on the API because the Volume/Energy view is still reachable
+    // programmatically; it is the legacy PILL that is gone, not the capability.
   });
   window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline, renderCollapsible: renderCollapsible, close: close,
-    pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; },
-    pillV: function(sym){ return sym ? '<span class=\"vcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Volume / Energy\">V</span>' : ''; } };
+    // cc#798 DEPRECATED — use window.ScorrCardRow(sym) for the shared C·A·R·D strip. Kept only for
+    // the documented raw-span pattern; every page call site was migrated.
+    pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; } };
 })();
 """
 

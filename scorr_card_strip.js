@@ -39,7 +39,13 @@
     + 'background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);cursor:pointer;padding:0}'
     + '.scorr-cs-b:hover{border-color:var(--blu,#4d7cfe)}'
     + '.scorr-cs-on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe);cursor:default}'
-    + '.scorr-cs-off{background:transparent;color:var(--dim,#9aa4b5);opacity:.42;cursor:not-allowed}';
+    + '.scorr-cs-off{background:transparent;color:var(--dim,#9aa4b5);opacity:.42;cursor:not-allowed}'
+    /* cc#798 COMPACT variant — for table rows, where the 32px modal-header strip is too heavy.
+       Same component, same dispatcher, same availability rules; only the metrics change. This is a
+       SIZE PROP, deliberately not a second implementation: a table-row copy is precisely how the
+       R/V pair drifted from the modal in the first place. */
+    + '.scorr-cs-sm{gap:3px;vertical-align:middle;margin-left:6px}'
+    + '.scorr-cs-sm .scorr-cs-b{width:22px;height:22px;border-radius:5px;font-size:10px}';
   try {
     var st = document.createElement('style');
     st.setAttribute('data-scorr', 'card-strip');
@@ -101,7 +107,10 @@
       var nodes = document.querySelectorAll('.scorr-card-strip[data-sym]');
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
-        var html = stripHtml(n.getAttribute('data-sym'), n.getAttribute('data-active') || '');
+        // cc#798: carry the compact flag through the repaint, or a table-row strip would silently
+        // rebuild at modal size the moment the futures universe resolves.
+        var html = stripHtml(n.getAttribute('data-sym'), n.getAttribute('data-active') || '',
+                             { compact: n.getAttribute('data-compact') === '1' });
         if (html) {
           var tmp = document.createElement('div');
           tmp.innerHTML = html;
@@ -119,11 +128,14 @@
     ['D', 'Cockpit (Futures only)']
   ];
 
-  function stripHtml(sym, active) {
+  /* opts.compact renders the table-row size. Everything else — availability, dispatch, the active
+     state — is identical, because it IS the same function. */
+  function stripHtml(sym, active, opts) {
     if (!sym) return '';
     if (_futures === null) _loadFutures();
     var av = cardAvail(sym);
     var s = esc(sym);
+    var compact = !!(opts && opts.compact);
     var btns = ITEMS.map(function (it) {
       var k = it[0], title = it[1];
       var en = (k === 'D') ? av.fut : (k === 'R' ? av.result : true);
@@ -132,9 +144,14 @@
       return '<button type="button" class="scorr-cs-b" title="' + title + '" '
         + 'onclick="ScorrCardNav(\'' + k + '\',\'' + s + '\')">' + k + '</button>';
     }).join('');
-    return '<span class="scorr-card-strip" data-sym="' + s + '" data-active="' + esc(active || '') + '">'
+    return '<span class="scorr-card-strip' + (compact ? ' scorr-cs-sm' : '') + '" data-sym="' + s
+      + '" data-active="' + esc(active || '') + '"' + (compact ? ' data-compact="1"' : '') + '>'
       + btns + '</span>';
   }
+
+  /* cc#798 convenience for table cells — one short call per row, so a row author never hand-writes
+     markup. Replaces the legacy ScorrRCard.pill + pillV pair. */
+  function rowStrip(sym) { return stripHtml(sym, '', { compact: true }); }
 
   /* ── dispatch ───────────────────────────────────────────────────────────────────────── */
   function register(h) {
@@ -178,8 +195,10 @@
 
   window.ScorrCardStripHtml = stripHtml;
   window.ScorrCardNav = cardNav;
+  window.ScorrCardRow = rowStrip;      // cc#798: table-row shorthand, replaces ScorrRCard.pill+pillV
   window.ScorrCardStrip = {
     html: stripHtml,
+    row: rowStrip,
     nav: cardNav,
     avail: cardAvail,
     register: register,
