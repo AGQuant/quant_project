@@ -316,6 +316,28 @@ def run_scrape(mode="run", symbols=None) -> dict:
                 seen, symbols = set(), [str(s).strip().upper() for s in symbols if s and str(s).strip()]
                 symbols = [s for s in symbols if not (s in seen or seen.add(s))]
                 already = set()          # explicit targets are never skipped
+                # cc#790: _fetch_soup carries its OWN hard scrape-universe gate (cc#741, HARD_BOUNDARY
+                # id=10260) at the network choke point. An out-of-universe symbol returns (None, None)
+                # there, which surfaced here as "no financial tables parsed" — a deliberate POLICY SKIP
+                # wearing a data-failure label. Measured 02-Aug: 81 of a 122-symbol targeted run were
+                # recorded as parse failures when nothing was ever fetched.
+                # Bypassing the enqueue filter therefore does NOT bypass the boundary, and it must not:
+                # that boundary is a locked founder decision. So classify honestly up front instead —
+                # these are marked 'skipped_out_of_universe' and never attempted, so the run's failure
+                # count means what it says.
+                try:
+                    _univ = universe_symbols(cur)
+                    _out = [s for s in symbols if s not in _univ]
+                    symbols = [s for s in symbols if s in _univ]
+                    for _s in _out:
+                        _set_status(conn, _s, "skipped_out_of_universe", 0, None,
+                                    "outside the scrape universe (cc#741 HARD_BOUNDARY id=10260) — "
+                                    "never fetched; widen the universe to include it")
+                    if _out:
+                        log.info(f"run_scrape targeted: {len(_out)} symbol(s) outside the scrape "
+                                 f"universe — classified, not attempted")
+                except Exception as e:
+                    log.warning(f"run_scrape targeted universe pre-classify failed: {e}")
             elif mode == "test":
                 symbols = list(SPOT_CHECK)
                 already = set()
