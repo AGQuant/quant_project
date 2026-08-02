@@ -97,6 +97,25 @@ IST               = pytz.timezone('Asia/Kolkata')
 EQUITY_RETENTION_DAYS = 730   # intraday_prices source='fyers_eq' ONLY (30→365 08-Jul; →730 cc#381 11-Jul: 2yr rolling for replay/sim depth)
 HIST_RETENTION_DAYS   = 730   # cc#381: source='fyers_hist' backtest warehouse — 2yr rolling (matches equity; was purge-exempt in cc#377)
 INTRADAY_FUT_RETENTION_DAYS = 7   # cc#227: fyers_fut + residual legacy fyers/yahoo intraday bars — AND futures_basis (cc#297)
+# ── cc#809 LIVE FEED EXPANSION ────────────────────────────────────────────────────────────────────
+# The full CSV/screener equity universe streams on the SAME single Fyers WS as the F&O set. Its bars
+# are tagged with their OWN source so retention, health counts and the watchdog can all tell the two
+# apart. This is deliberate: reusing 'fyers_eq' would silently give ~1,600 extra symbols the 730-day
+# F&O retention (the cc#381 2-yr re-optimisation window) and would inflate the watchdog's eq count so
+# a total collapse of the F&O leg could hide behind healthy extended-leg numbers.
+EXT_SOURCE            = 'fyers_ext'   # intraday_prices.source for the extended (non-F&O) equity leg
+EXT_RETENTION_DAYS    = 30            # founder-approved: 30d rolling (~+370 MB steady state)
+EXT_STAGE_FLAG        = 'feed_ext_stage'   # app_config: 'off' | '<int>' | 'all' — staged rollout dial
+EXT_STAGE_DEFAULT     = 'off'         # cc#809 ships DARK. Nothing subscribes until the flag is set.
+EXT_VERIFY_WAIT_SEC   = 180           # post-subscribe settle before the extended leg is graded
+EXT_MIN_TICK_FRACTION = 0.25          # <25% of the extended leg writing bars => treat the stage as failed
+# Tier 3 of the cc#809 retention scheme. Index 5-min bars are written by update_index_ltp() through
+# agg.on_tick(..., source='fyers_eq') — they are NOT a separate source, and re-tagging them would
+# break every consumer that reads index candles (the /api/intraday and v10 paths both filter on
+# source IN ('fyers_eq','fyers_hist')). So the 5-year tier is carved out BY SYMBOL instead, which is
+# a purely additive change: these symbols currently roll at 730d, so widening to 1825d can only
+# retain more, never delete anything the old rule kept.
+INDEX_RETENTION_DAYS  = 1825          # NIFTY50/BANKNIFTY/INDIAVIX/NIFTY500/GOLDBEES/SILVERBEES
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
 
@@ -208,6 +227,20 @@ CREATE TABLE IF NOT EXISTS futures_basis (
     UNIQUE(symbol, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, ts DESC);
+"""
+
+# cc#809: the extended leg is built from ~1,600 UNVALIDATED screener nse_codes, so some of them are
+# certain not to be live NSE:XXX-EQ instruments (delisted, renamed, SME/other series). Fyers answers
+# those with a WS -300 invalid_symbols frame. The F&O legs persist such a drop via
+# futures_universe.is_active, but an extended symbol has no row there — without its own store it
+# would be re-subscribed on every single boot and re-trigger the same -300 forever. This table is
+# that store, and get_extended_universe() subtracts it.
+EXT_BLACKLIST_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS feed_ext_blacklist (
+    symbol     TEXT PRIMARY KEY,
+    reason     TEXT,
+    added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -695,6 +728,66 @@ def get_index_futures_universe(conn):
             "SELECT symbol FROM futures_universe WHERE is_active = TRUE "
             "AND symbol = ANY(%s)", (list(INDEX_FUTURES_UNIVERSE),))
         return sorted(r[0] for r in cur.fetchall())
+
+
+def _ext_stage_limit(conn):
+    """cc#809: read the staged-rollout dial from app_config. Returns the max number of EXTENDED
+    symbols to subscribe: 0 = disabled, a positive int = that many (mcap-rank order), or a very
+    large number for 'all'. Unset/garbage => EXT_STAGE_DEFAULT ('off'), i.e. this whole feature
+    ships DARK and stays dark until it is switched on deliberately. Staging is a DB flag rather
+    than a code constant on purpose: advancing stage 1 -> stage 2 must not require another worker
+    deploy, because worker deploys are restricted to outside market hours (cc#416) and a mid-market
+    reboot is a coin-flip on re-auth."""
+    raw = None
+    try:
+        raw = _flag_get(conn, EXT_STAGE_FLAG)
+    except Exception as e:
+        log.warning(f"_ext_stage_limit: flag read failed ({e}) — defaulting to '{EXT_STAGE_DEFAULT}'")
+    val = str(raw if raw is not None else EXT_STAGE_DEFAULT).strip().lower()
+    if val in ('off', '0', 'none', 'false', ''):
+        return 0
+    if val in ('all', 'full', '-1'):
+        return 10 ** 9
+    try:
+        return max(0, int(val))
+    except Exception:
+        log.warning(f"_ext_stage_limit: unrecognised {EXT_STAGE_FLAG}={raw!r} — treating as 'off'")
+        return 0
+
+
+def get_extended_universe(conn, fno_symbols, limit):
+    """cc#809: the EXTENDED equity leg — every symbol in the daily screener CSV universe
+    (screener_raw.nse_code) that is NOT already on the F&O equity leg and is not an index.
+
+    Ordered by input_raw.mcap_rank ASC so `limit` always slices the LARGEST names first — that is
+    what makes the staged rollout meaningful (stage 1 = +500 largest). Symbols with no mcap_rank
+    sort last, alphabetically, so the ordering is total and stable rather than whatever the planner
+    happens to return; without that a re-run of "stage 1" could subscribe a different 500.
+
+    Returns [] on any error — the extended leg is strictly additive and must never be able to stop
+    the F&O feed from booting."""
+    if limit <= 0:
+        return []
+    try:
+        excl = sorted(set(fno_symbols) | SKIP_SYMBOLS | set(INDEX_LTP_SYMBOLS.keys()))
+        with conn.cursor() as cur:
+            cur.execute(EXT_BLACKLIST_SCHEMA_SQL)   # first boot may run this before ensure_schemas
+            cur.execute("""
+                SELECT sr.nse_code
+                FROM screener_raw sr
+                LEFT JOIN input_raw ir ON ir.nse_code = sr.nse_code
+                WHERE sr.nse_code IS NOT NULL AND sr.nse_code <> ''
+                  AND sr.nse_code <> ALL(%s)
+                  AND NOT EXISTS (SELECT 1 FROM feed_ext_blacklist b WHERE b.symbol = sr.nse_code)
+                ORDER BY ir.mcap_rank ASC NULLS LAST, sr.nse_code ASC
+                LIMIT %s
+            """, (excl, limit))
+            out = [r[0] for r in cur.fetchall()]
+        conn.commit()
+        return out
+    except Exception as e:
+        log.warning(f"get_extended_universe: {e} — extended leg disabled for this boot")
+        return []
 
 
 def _canary_symbols(conn, nse_codes, n):
@@ -1284,9 +1377,60 @@ class BarAggregator:
             log.warning(f"_compute_basis {sym}: {e}")
 
     def flush_all(self):
+        """cc#809: ONE batched upsert per pass instead of one INSERT+COMMIT per symbol.
+
+        This ran every housekeeping pass (~30s) doing a round-trip per open bar. At 209 F&O symbols
+        that was ~7 writes/sec — tolerable. At the full ~1,800-symbol universe it becomes ~60
+        commits/sec sustained, all day, which is the single thing most likely to make this expansion
+        fall over. One executemany + one commit per pass instead.
+
+        Behaviour preserved exactly: same off-hours rejection per bar (cc#193), same upsert, same
+        basis computation for futures bars (still per-symbol, still AFTER the write lands, and still
+        only for source='fyers_fut' — that leg is ~209 symbols, not the one that needed batching).
+        On a DB connection error it falls back to the original per-bar path, which owns the
+        reconnect-once-then-os._exit(1) ladder (cc#489 step_4) — that ladder is the reason a dead
+        conn cannot silently persist, so the batch path must never swallow it."""
         with self.lock:
-            for key, bar in list(self.bars.items()):
-                self._flush(key, bar)
+            items = list(self.bars.items())
+        rows, fut_bars = [], []
+        for key, bar in items:
+            sym, source = key
+            try:
+                bt = bar['ts']
+                if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
+                    continue   # cc#193: never persist an off-hours/phantom bar
+            except Exception:
+                pass
+            rows.append((sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'],
+                         int(bar['v']), source))
+            if source == 'fyers_fut':
+                fut_bars.append((sym, bar['ts'], bar['c'], bar.get('oi')))
+        if not rows:
+            return
+        try:
+            with self.conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'5m',%s)
+                    ON CONFLICT (symbol,ts,timeframe,source) DO UPDATE SET
+                        open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
+                        close=EXCLUDED.close,volume=EXCLUDED.volume
+                """, rows)
+            self.conn.commit()
+            self._db_reconnect_attempted = False
+        except Exception as e:
+            # Fall back to the per-bar path: it carries the cc#489 reconnect/exit ladder, and a
+            # single poison row cannot take the whole batch down with it.
+            log.warning(f"flush_all batch failed ({e}) — falling back to per-bar writes")
+            with self.lock:
+                for key, bar in items:
+                    self._flush(key, bar)
+            return
+        for sym, ts, close, oi in fut_bars:
+            try:
+                self._compute_basis(sym, ts, close, oi)
+            except Exception as e:
+                log.warning(f"flush_all basis {sym}: {e}")
 
     def flush_cmp(self):
         """cc_task #112 — STOP STALE-WRITE MASKING (most critical fix).
@@ -1321,7 +1465,7 @@ class BarAggregator:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT DISTINCT ON (symbol) symbol, close FROM intraday_prices
-                    WHERE source='fyers_eq' AND timeframe='5m'
+                    WHERE source IN ('fyers_eq', 'fyers_ext') AND timeframe='5m'   -- cc#809
                       AND ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
                       AND symbol = ANY(%s)
                     ORDER BY symbol, ts DESC
@@ -1510,6 +1654,8 @@ def purge_old_bars(conn):
     # NOT the equity constant — decoupled so a future equity bump can't silently drag it along).
     eq_cutoff    = now - timedelta(days=EQUITY_RETENTION_DAYS)             # intraday fyers_eq (730d, 2yr sim history)
     hist_cutoff  = now - timedelta(days=HIST_RETENTION_DAYS)              # cc#381: fyers_hist warehouse (730d, 2yr rolling)
+    ext_cutoff   = now - timedelta(days=EXT_RETENTION_DAYS)               # cc#809: fyers_ext extended equity leg (30d)
+    idx_cutoff   = now - timedelta(days=INDEX_RETENTION_DAYS)             # cc#809: index feeds (5yr, carved out by symbol)
     basis_cutoff = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # futures_basis (7d, matches fyers_fut)
     fut_cutoff   = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # intraday fyers_fut + legacy (7d)
     opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)            # option_chain (7d, leaner)
@@ -1521,14 +1667,27 @@ def purge_old_bars(conn):
             # cc#377/381: source='fyers_hist' (backtest warehouse) rolls on its OWN 2yr window (730d,
             # HIST_RETENTION_DAYS) — was purge-exempt in cc#377; cc#381 gives it a cutoff so it rolls
             # instead of growing forever. Still excluded from the 7d "other" rule below.
+            # cc#809 tier 1 (F&O equity, 730d) now EXCLUDES the index symbols, which move to tier 3.
+            _idx_syms = sorted(INDEX_LTP_SYMBOLS.keys())
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
-                        "AND source='fyers_eq'", (eq_cutoff,))
+                        "AND source='fyers_eq' AND symbol <> ALL(%s)", (eq_cutoff, _idx_syms))
             eq_del = cur.rowcount
+            # cc#809 tier 3: index feeds keep 5 years. Same source, carved out by symbol.
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                        "AND source='fyers_eq' AND symbol = ANY(%s)", (idx_cutoff, _idx_syms))
+            idx_del = cur.rowcount
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source='fyers_hist'", (hist_cutoff,))
             hist_del = cur.rowcount
+            # cc#809: THIRD tier. The extended (non-F&O) equity leg rolls on 30 days — that is the
+            # whole basis of the founder-approved ~+370 MB budget. It MUST also be excluded from the
+            # catch-all below, or the 7-day futures rule would silently shred it down to a week.
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
-                        "AND source IS DISTINCT FROM 'fyers_eq' AND source IS DISTINCT FROM 'fyers_hist'", (fut_cutoff,))
+                        "AND source=%s", (ext_cutoff, EXT_SOURCE))
+            ext_del = cur.rowcount
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                        "AND source IS DISTINCT FROM 'fyers_eq' AND source IS DISTINCT FROM 'fyers_hist' "
+                        "AND source IS DISTINCT FROM %s", (fut_cutoff, EXT_SOURCE))
             other_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
@@ -1536,7 +1695,9 @@ def purge_old_bars(conn):
             basis_del = cur.rowcount
         conn.commit()
         log.info(f"Purged intraday: fyers_eq={eq_del} (>{EQUITY_RETENTION_DAYS}d), "
+                 f"index={idx_del} (>{INDEX_RETENTION_DAYS}d), "
                  f"fyers_hist={hist_del} (>{HIST_RETENTION_DAYS}d), "
+                 f"{EXT_SOURCE}={ext_del} (>{EXT_RETENTION_DAYS}d), "
                  f"fut/legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
                  f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), "
                  f"futures_basis={basis_del} (>{INTRADAY_FUT_RETENTION_DAYS}d)")
@@ -1548,11 +1709,12 @@ def ensure_schemas(conn):
     with conn.cursor() as cur:
         cur.execute(OPTION_SCHEMA_SQL)
         cur.execute(FUTURES_BASIS_SCHEMA_SQL)
+        cur.execute(EXT_BLACKLIST_SCHEMA_SQL)   # cc#809
         cur.execute("ALTER TABLE futures_basis ADD COLUMN IF NOT EXISTS oi BIGINT, "
                     "ADD COLUMN IF NOT EXISTS oi_prev BIGINT, ADD COLUMN IF NOT EXISTS oi_chg BIGINT")
         cur.execute("ALTER TABLE cmp_prices ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'fyers'")
     conn.commit()
-    log.info("Schemas ready (option_chain, futures_basis)")
+    log.info("Schemas ready (option_chain, futures_basis, feed_ext_blacklist)")
 
 
 # ── futures OI poll (DEPTH REST — quotes API has NO OI) ───────────────────────────────────────────────────────────────────────────────
@@ -2017,11 +2179,18 @@ def run(auth_code=None):
     index_fut_codes = get_index_futures_universe(conn)
     fut_codes       = symbols + index_fut_codes
 
+    # cc#809: the EXTENDED equity leg (full screener CSV universe minus the F&O set). Sliced by the
+    # app_config staging dial — 'off' by default, so merely deploying this changes nothing.
+    ext_limit   = _ext_stage_limit(conn)
+    ext_symbols = get_extended_universe(conn, symbols, ext_limit)
+
     ensure_schemas(conn)
     _boot_gap_report(conn)   # cc#339 fix_3: self-document any outage window at boot
     threading.Thread(target=_phase_a_worker_daemon, name="cc390-phasea", daemon=True).start()   # cc#390
     log.info(f"Universe: {len(symbols)} equity + {len(fut_codes)} futures "
              f"({len(index_fut_codes)} index: {index_fut_codes}) + options")
+    log.info(f"cc#809 extended leg: stage={ext_limit if ext_limit < 10**9 else 'all'} -> "
+             f"{len(ext_symbols)} symbols (source={EXT_SOURCE}, retention={EXT_RETENTION_DAYS}d)")
 
     # cc#352 (id166 family): seed cmp_prices SPOT from Fyers REST on a cold/stale boot BEFORE the
     # WS subscribes, so the worker is never price-less (the options live-price gate needs a
@@ -2071,6 +2240,7 @@ def run(auth_code=None):
 
     equity_fyers_syms  = [fyers_eq_symbol(s) for s in symbols]
     futures_fyers_syms = [futures_fyers_symbol(s, expiry) for s in fut_codes]   # cc#162: + index futures
+    ext_fyers_syms     = [fyers_eq_symbol(s) for s in ext_symbols]              # cc#809: extended equity leg
 
     master = OptionMaster()
     master.load()
@@ -2082,12 +2252,18 @@ def run(auth_code=None):
     # cmp_prices silently produced zero option subscriptions on a pre-market restart.
     option_syms = []
 
-    all_syms    = equity_fyers_syms + futures_fyers_syms
+    all_syms    = equity_fyers_syms + futures_fyers_syms + ext_fyers_syms
     log.info(f"WS: {len(equity_fyers_syms)} eq + {len(futures_fyers_syms)} fut + "
-             f"0 opt (options deferred to live-price gate) = {len(all_syms)} total")
+             f"{len(ext_fyers_syms)} ext + 0 opt (options deferred to live-price gate) "
+             f"= {len(all_syms)} total")
 
     equity_set  = set(equity_fyers_syms)
     futures_set = set(futures_fyers_syms)
+    # cc#809: a symbol can only ever be in ONE of these. get_extended_universe already excludes the
+    # F&O equity codes, but the sets are the thing on_message actually dispatches on, so the
+    # invariant is enforced here too — an overlap would tag the same bar under two sources and
+    # double-count it in every per-source health read.
+    ext_set     = set(ext_fyers_syms) - equity_set - futures_set
 
     agg       = BarAggregator(conn)
     opt_store = OptionBarStore(conn, opt_mgr)
@@ -2118,6 +2294,10 @@ def run(auth_code=None):
 
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
+            elif fsym in ext_set:
+                # cc#809: extended (non-F&O) equity — identical spot handling, own source tag so it
+                # gets the 30d tier and never inflates the watchdog's fyers_eq count.
+                agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source=EXT_SOURCE)
             elif fsym in futures_set:
                 # OI not in WS — sourced from depth REST poll (agg.last_oi)
                 nse = from_fyers_symbol(fsym)
@@ -2151,7 +2331,7 @@ def run(auth_code=None):
             # holds it, that sequence owns the (re)subscribe, so defer to it rather than double-subscribe.
             if _subscribe_lock.acquire(blocking=False):
                 try:
-                    sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+                    sub_list = equity_fyers_syms + futures_fyers_syms + ext_fyers_syms + list(option_syms)   # cc#809
                     log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — re-subscribing "
                              f"{len(sub_list)} symbols ({len(option_syms)} options; post-sequence "
                              "reconnect, safe side of the pre-open trap)")
@@ -2170,6 +2350,26 @@ def run(auth_code=None):
                      "(cc#497: the scheduled canary/full sequence owns today's initial subscribe)")
             _log_feed_incident("feed_ws_connect", f"connected pre-sequence at {now_t.strftime('%H:%M:%S')}")
         fyers_ws.keep_running()
+
+    def _blacklist_extended(fsym, reason):
+        """cc#809: persist an extended-leg symbol drop to feed_ext_blacklist so it is excluded from
+        every future boot (get_extended_universe subtracts this table). Own short-lived connection —
+        on_error runs on the WS callback thread and must never touch the shared worker conn (the
+        cc#489 lesson). Returns the nse_code either way; an in-memory drop already happened, so a
+        failed persist only costs us one repeat -300 on the next boot."""
+        nse_code = from_fyers_symbol(fsym)
+        try:
+            bconn = get_db()
+            with bconn.cursor() as cur:
+                cur.execute(EXT_BLACKLIST_SCHEMA_SQL)
+                cur.execute("INSERT INTO feed_ext_blacklist (symbol,reason) VALUES (%s,%s) "
+                            "ON CONFLICT (symbol) DO UPDATE SET reason=EXCLUDED.reason",
+                            (nse_code, reason))
+            bconn.commit()
+            bconn.close()
+        except Exception as e:
+            log.warning(f"_blacklist_extended({fsym}): persist failed (in-memory drop still applied): {e}")
+        return nse_code
 
     def _blacklist_symbol(fsym, reason):
         """cc#495 change_2/1_amended: persist the drop to futures_universe.is_active so
@@ -2220,6 +2420,16 @@ def run(auth_code=None):
                 elif fsym in futures_set:
                     futures_set.discard(fsym)
                     if fsym in futures_fyers_syms: futures_fyers_syms.remove(fsym)
+                elif fsym in ext_set:
+                    # cc#809: extended leg. Its drop persists to feed_ext_blacklist, NOT to
+                    # futures_universe — an extended symbol has no row there, so _blacklist_symbol
+                    # would update zero rows and the same dead symbol would come back every boot.
+                    ext_set.discard(fsym)
+                    if fsym in ext_fyers_syms: ext_fyers_syms.remove(fsym)
+                    nse_code = _blacklist_extended(fsym, f"WS -300 invalid_symbols: {msg}"[:200])
+                    dropped.append(nse_code)
+                    log.warning(f"WS -300: dropped+blacklisted EXTENDED {fsym} (nse_code={nse_code})")
+                    continue
                 elif fsym in option_syms:
                     option_syms.remove(fsym)   # options: in-memory drop only, no persistent table
                 else:
@@ -2231,7 +2441,9 @@ def run(auth_code=None):
             if dropped:
                 _log_feed_incident("feed_invalid_symbol_dropped",
                                    {"dropped": dropped, "raw": str(msg)[:300]})
-                sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+                # cc#809: the corrected universe MUST carry the extended leg too — omitting it here
+                # would silently unsubscribe ~1,600 symbols on the first invalid-symbol recovery.
+                sub_list = equity_fyers_syms + futures_fyers_syms + ext_fyers_syms + list(option_syms)
                 log.info(f"WS -300 recovery: re-subscribing corrected universe ({len(sub_list)} symbols)")
                 _batched_subscribe(fyers_ws, sub_list, action='sub', label='invalid_symbol_recovery')
         except Exception as e:
@@ -2267,16 +2479,20 @@ def run(auth_code=None):
             with hc.cursor() as cur:
                 cur.execute("""
                     SELECT source, COUNT(DISTINCT symbol) FROM intraday_prices
-                    WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
+                    WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut',%s)
                       AND ts >= %s
                     GROUP BY source
-                """, (cutoff,))
-                counts = {'fyers_eq': 0, 'fyers_fut': 0}
+                """, (EXT_SOURCE, cutoff))
+                # cc#809: fyers_ext is REPORTED here but deliberately NOT part of the watchdog's
+                # health test below — that test stays eq/fut only. The extended leg is additive
+                # context; a healthy 1,500-symbol extended count must never be able to mask a dead
+                # F&O leg, and an extended leg that never subscribes must never trip a restart.
+                counts = {'fyers_eq': 0, 'fyers_fut': 0, EXT_SOURCE: 0}
                 counts.update({row[0]: row[1] for row in cur.fetchall()})
                 return counts
         except Exception as e:
             log.warning(f"_recent_symbol_counts_by_source: {e}")
-            return {'fyers_eq': -1, 'fyers_fut': -1}
+            return {'fyers_eq': -1, 'fyers_fut': -1, EXT_SOURCE: -1}
         finally:
             if hc is not None:
                 try:
@@ -2455,6 +2671,62 @@ def run(auth_code=None):
             _sub_state['holder'] = None
             _subscribe_lock.release()
 
+    def _subscribe_extended(trigger):
+        """cc#809 stage 3 + AUTO-HALT. Subscribes the extended equity leg after the core universe is
+        up, waits for it to settle, then grades it on two independent questions:
+
+          1. Did the CORE degrade? The F&O equity leg is what live signals, paper trading and the
+             option gate run on. If its symbol count fell below the watchdog floor after we piled on
+             the extended leg, the expansion is the prime suspect — so we unsubscribe the extended
+             leg immediately and flip the app_config dial to 'off' so the NEXT boot comes up clean
+             without anyone having to intervene at 09:20.
+          2. Did the extended leg itself actually work? Below EXT_MIN_TICK_FRACTION of it writing
+             bars means the subscribe was silently dropped (the failure mode cc#151 documents), so
+             the same halt applies rather than leaving a half-subscribed universe that quietly
+             under-reports sector aggregates.
+
+        Grading is REPORT-ONLY in every other case. This thread can disable the extended leg; it can
+        never reconnect, restart or otherwise touch the core feed."""
+        try:
+            log.info(f"cc#809 stage 3 ({trigger}): subscribing {len(ext_fyers_syms)} extended symbols")
+            _log_feed_incident("feed_ext_subscribe", f"{trigger}: {len(ext_fyers_syms)} extended symbols")
+            _batched_subscribe(fyers_ws, ext_fyers_syms, action='sub', label=f'ext-{trigger}')
+            time.sleep(EXT_VERIFY_WAIT_SEC)
+            counts  = _recent_symbol_counts_by_source(15)
+            eq, fut = counts.get('fyers_eq', -1), counts.get('fyers_fut', -1)
+            ext     = counts.get(EXT_SOURCE, -1)
+            if eq < 0 or fut < 0 or ext < 0:
+                log.warning("cc#809 stage 3: DB read failed — no grading, no action (extended leg left up)")
+                return
+            frac = ext / float(len(ext_fyers_syms)) if ext_fyers_syms else 0.0
+            core_ok = eq >= WATCHDOG_MIN_SYMBOLS and fut >= WATCHDOG_MIN_SYMBOLS
+            ext_ok  = frac >= EXT_MIN_TICK_FRACTION
+            report = {"trigger": trigger, "ext_subscribed": len(ext_fyers_syms), "ext_ticking": ext,
+                      "ext_fraction": round(frac, 3), "eq": eq, "fut": fut,
+                      "floor": WATCHDOG_MIN_SYMBOLS, "core_ok": core_ok, "ext_ok": ext_ok,
+                      "retention_days": EXT_RETENTION_DAYS, "ist": _ist_now_str()}
+            log.info(f"cc#809 stage 3 report: ext={ext}/{len(ext_fyers_syms)} ({frac*100:.0f}%) "
+                     f"eq={eq} fut={fut} core_ok={core_ok} ext_ok={ext_ok}")
+            if core_ok and ext_ok:
+                _ops_log(conn, 'feed', 'feed_ext_stage_ok', report)
+                return
+            report["halted"] = True
+            report["reason"] = ("core F&O leg below floor after extended subscribe"
+                                if not core_ok else
+                                f"extended leg only {frac*100:.0f}% ticking (<{EXT_MIN_TICK_FRACTION*100:.0f}%)")
+            log.error(f"cc#809 AUTO-HALT: {report['reason']} — unsubscribing extended leg and "
+                      f"setting {EXT_STAGE_FLAG}=off")
+            try:
+                _batched_subscribe(fyers_ws, ext_fyers_syms, action='unsub', label=f'ext-halt-{trigger}')
+            except Exception as e:
+                log.warning(f"cc#809 auto-halt unsubscribe failed (flag still being set off): {e}")
+            ext_set.clear()   # stop tagging any straggler ticks as extended
+            _flag_set(conn, EXT_STAGE_FLAG, 'off')
+            _ops_log(conn, 'alert', 'feed_ext_stage_halted', report)
+            _log_feed_incident("feed_ext_halted", report["reason"])
+        except Exception as e:
+            log.warning(f"cc#809 _subscribe_extended({trigger}): {e}")
+
     def _run_subscribe_sequence_inner(trigger):
         """cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: the two-stage subscribe that replaces the old
         on_connect-driven immediate subscribe. Runs on its own daemon thread (fired by
@@ -2500,6 +2772,12 @@ def run(auth_code=None):
             _log_feed_incident("feed_subscribe_full", f"{label}: {len(remaining)} remaining symbols")
             _batched_subscribe(fyers_ws, remaining, action='sub', label=f'full-{label}')
             threading.Thread(target=_verify_subscribe_survivors, args=(label,), daemon=True).start()
+            # cc#809 STAGE 3 — the extended leg goes on LAST, on its own thread, only after the core
+            # F&O universe is subscribed and verified. Ordering is the safety property: if the WS
+            # cannot carry ~1,800 symbols, the thing that degrades is the leg we added, never the
+            # F&O feed that everything else depends on.
+            if ext_fyers_syms:
+                threading.Thread(target=_subscribe_extended, args=(label,), daemon=True).start()
             return True
 
         try:

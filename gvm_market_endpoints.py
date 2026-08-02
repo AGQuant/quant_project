@@ -435,7 +435,12 @@ def get_cmp(symbol: str):
 @router.get("/api/intraday/{symbol}")
 def get_intraday(symbol: str, days: int = 1, sessions: int = 0):
     """cc#626/cc#669: EQUITY 5m bars from the 12-month warehouse — UNION of source IN
-    ('fyers_eq','fyers_hist') deduped on ts (prefer the live fyers_eq feed on any collision).
+    ('fyers_eq','fyers_hist','fyers_ext') deduped on ts (prefer the live fyers_eq feed on collision).
+
+    cc#809: 'fyers_ext' is the extended (non-F&O) equity leg. Without it here the worker would write
+    ~2.5M rows a month that no surface can read — the 5m tab would stay blank for every one of the
+    ~1,600 newly-live symbols. The mandatory-source-filter invariant below is untouched: ext and eq
+    are disjoint symbol sets, so no symbol can return two rows at the same ts.
     Returns the last N TRADING sessions (``sessions`` param — 1D/5D/20D range control; falls back
     to legacy ``days`` when ``sessions`` is 0), anchored to the latest session that actually has
     equity bars so the tab is never empty (off-market/holiday fallback). LightweightCharts spaces
@@ -446,7 +451,7 @@ def get_intraday(symbol: str, days: int = 1, sessions: int = 0):
     n_sess = min(max(n_sess, 1), 40)
     sym = symbol.upper()
     dts = api_query("""SELECT DISTINCT ts::date AS d FROM intraday_prices
-                       WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist')
+                       WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist','fyers_ext')
                        ORDER BY d DESC LIMIT %s""", (sym, n_sess))
     if not dts:
         return []
@@ -454,7 +459,7 @@ def get_intraday(symbol: str, days: int = 1, sessions: int = 0):
     return api_query("""SELECT symbol, ts, open, high, low, close, volume FROM (
                           SELECT DISTINCT ON (ts) symbol, ts, open, high, low, close, volume
                           FROM intraday_prices
-                          WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist')
+                          WHERE symbol=%s AND source IN ('fyers_eq','fyers_hist','fyers_ext')
                             AND ts::date >= %s
                           ORDER BY ts, CASE source WHEN 'fyers_eq' THEN 0 ELSE 1 END
                         ) q ORDER BY ts ASC""", (sym, oldest))
