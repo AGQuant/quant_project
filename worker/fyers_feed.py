@@ -117,6 +117,22 @@ EXT_MIN_TICK_FRACTION = 0.25          # <25% of the extended leg writing bars =>
 # retain more, never delete anything the old rule kept.
 INDEX_RETENTION_DAYS  = 1825          # NIFTY50/BANKNIFTY/INDIAVIX/NIFTY500/GOLDBEES/SILVERBEES
 MARKET_OPEN    = dt_time(9, 15)
+# cc#843 FOUNDER-LOCKED 03-Aug: DO NOT CONNECT PRE-OPEN AT ALL.
+# Root cause (Claude-web diagnosis 03-Aug, ops_log 14428-14477): a Fyers WS established PRE-OPEN
+# comes up SUBSCRIBE-DEAD. Equity registered at connect time streams, but derivatives never activate
+# and every later subscribe on that connection is ACKED (sub/200/Subscribed) yet silently NOT
+# PROCESSED. The smoking gun is the ABSENCE of an error: the sick 09:21 connection took a batch
+# containing 12 provably-invalid symbols and returned ZERO -300 frames, while the fresh 09:24
+# connection given the identical payload rejected all 12 immediately and reached fut 208/208 +
+# ext 480/488 by 09:27. Acks are meaningless on a sick connection.
+# So we no longer establish a connection we know comes up poisoned. 09:05 boot does token remint +
+# REST self-test only; the FIRST AND ONLY WS connect happens at 09:16.
+# WHY 09:16 AND NOT 09:20: the 09:15 bar feeds V14 ORB (09:15-09:30 observe) and the mood-gate open
+# read. Connecting at 09:16 captures 09:16-09:20 ticks, i.e. a partial-but-real 09:15 bar with the
+# correct close; 09:20 would lose that bar entirely for 1,800+ symbols. ACCEPTED COST, founder-
+# informed: equity gives up the 09:15:00-09:16:00 ticks it used to get from the pre-open connection.
+# Correctness of the futures + extended legs from the open is worth more than 60s of equity ticks.
+WS_FIRST_CONNECT = dt_time(9, 16)
 MARKET_CLOSE   = dt_time(15, 30)
 
 INDEX_LTP_SYMBOLS = {
@@ -1928,35 +1944,59 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
         got = 0
         empty_fails = []
+        # cc#843 fix_3b: the cc#770 exponential backoff was applied to the FUTURES depth poll only.
+        # This loop kept its flat per-call sleep and so carried on hammering the depth API while it
+        # was being rate-limited — 778 empty-body warnings in 52 minutes on 03-Aug, ~50% of the 244
+        # index-option contracts. Same treatment as poll_futures_oi: every iteration sleeps, an
+        # empty/throttled body raises the pace exponentially (capped) and a success decays it back.
+        # Hammering a throttled endpoint is not neutral; it is plausibly part of what degrades the
+        # account's entitlement in the first place.
+        base_spacing = OI_CALL_SPACING_SEC
+        max_backoff  = max(base_spacing * 16, 2.0)
+        consec_empty = 0
         for fsym in opt_syms:
+            throttled = False
             try:
                 r = requests.get(DEPTH_URL,
                                  params={'symbol': fsym, 'ohlcv_flag': 1},
                                  headers=headers, timeout=8)
                 body = (r.text or '').strip()
-                if not body or r.status_code == 401:
+                if not body or r.status_code in (401, 429):
                     empty_fails.append(fsym)
-                    continue
-                d = r.json()
-                if d.get('s') != 'ok':
-                    empty_fails.append(fsym)
-                    continue
-                data_d = d.get('d')
-                node = {}
-                if isinstance(data_d, dict):
-                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
-                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
-                    node = data_d[0].get('v', data_d[0])
-                oi = node.get('oi') if isinstance(node, dict) else None
-                if oi is None:
-                    continue
-                opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
-                got += 1
+                    throttled = True
+                else:
+                    d = r.json()
+                    if d.get('s') != 'ok':
+                        empty_fails.append(fsym)
+                        throttled = True
+                    else:
+                        data_d = d.get('d')
+                        node = {}
+                        if isinstance(data_d, dict):
+                            node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
+                        elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
+                            node = data_d[0].get('v', data_d[0])
+                        oi = node.get('oi') if isinstance(node, dict) else None
+                        if oi is not None:
+                            opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
+                            got += 1
             except Exception as e:
                 empty_fails.append(fsym)
+                throttled = True
                 log.warning(f"poll_options_oi ({label}) {fsym}: {e}")
-            time.sleep(OI_CALL_SPACING_SEC)
-        log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated")
+            if throttled:
+                consec_empty += 1
+                spacing = min(max_backoff, base_spacing * (2 ** min(consec_empty, 4)))
+            else:
+                consec_empty = 0
+                spacing = base_spacing
+            time.sleep(spacing + (got % 5) * 0.03)   # jitter
+        _rate = round(got / len(opt_syms) * 100, 1) if opt_syms else 0
+        log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated "
+                 f"({_rate}% ok, {len(empty_fails)} throttled/empty)")
+        if empty_fails and opt_syms and (len(empty_fails) / len(opt_syms)) > 0.3:
+            log.warning(f"Option OI poll ({label}) THROTTLED: {len(empty_fails)}/{len(opt_syms)} "
+                        f"empty ({_rate}% ok) — exponential backoff engaged (cc#843 fix_3b)")
         try:
             # cc#495 change_4: was failure-only — the daily feed log needs a real
             # success RATE (got/total), not just a count of empty responses.
@@ -2217,6 +2257,10 @@ def run(auth_code=None):
     # runner below.
     boot_time  = datetime.now(IST)
     _sub_state = {'day': None, 'done': False, 'holder': None, 'last_ok': 0.0}
+    # cc#843: the subscribe sequence is now anchored on WHEN THE CONNECTION WAS ESTABLISHED, not on
+    # when the process booted. Under the old design those were the same moment; under the 09:16 gate
+    # they are not, and boot_time would have mis-routed a 09:05 boot down the pre-open path.
+    _conn_state = {'established_at': None, 'connect_called_at': None}
     # cc#759 fix1: ONE process-level mutex around every subscribe sequence. The 29-Jul death was two
     # sequences (guardian-all + scheduled-0920) subscribing the SAME WS concurrently at 09:20 -> every
     # symbol subscribed twice -> broker dropped the futures leg 210->18. A second caller now NO-OPs.
@@ -2379,6 +2423,7 @@ def run(auth_code=None):
         # or today's initial sequence already completed (a later off-hours reconnect, e.g. an
         # 18:00 heal-adjacent blip, is also safe to just resubscribe).
         now_t     = datetime.now(IST)
+        _conn_state['established_at'] = now_t   # cc#843: anchors the sequence + the pre-open check
         in_market = now_t.weekday() < 5 and MARKET_OPEN <= now_t.time() <= MARKET_CLOSE
         if in_market or (_sub_state.get('day') == now_t.date() and _sub_state.get('done')):
             # cc#759 fix1/fix4: a reconnect MUST re-subscribe (never leave a connected WS with zero subs),
@@ -2405,6 +2450,122 @@ def run(auth_code=None):
                      "(cc#497: the scheduled canary/full sequence owns today's initial subscribe)")
             _log_feed_incident("feed_ws_connect", f"connected pre-sequence at {now_t.strftime('%H:%M:%S')}")
         fyers_ws.keep_running()
+
+    # ── cc#843 fix_2: THE -300 PROBE ─────────────────────────────────────────────────────────
+    # The 03-Aug diagnosis turned on an ABSENCE: a sick connection acks everything and rejects
+    # nothing, so "Subscribed" tells you precisely nothing. The only reliable signal is whether the
+    # broker still REJECTS garbage. After a subscribe sequence completes we hand the socket one
+    # known-invalid symbol and wait: a healthy connection answers with a -300 naming it within
+    # seconds; a subscribe-dead connection stays silent. Silence therefore means dead, and we
+    # reconnect immediately rather than waiting for the 09:24 bar-count backstop to notice.
+    #
+    # The probe symbol comes from feed_ext_blacklist — symbols the broker has ALREADY told us are
+    # invalid — so the probe can never accidentally subscribe something real, and it costs one
+    # request. The bar-count check stays as the backstop it always was.
+    _probe_state = {'awaiting': None, 'seen': False}
+    PROBE_WAIT_SEC = 12
+
+    def _probe_symbol(c):
+        try:
+            with c.cursor() as cur:
+                cur.execute("SELECT symbol FROM feed_ext_blacklist ORDER BY created_at DESC LIMIT 1")
+                r = cur.fetchone()
+            if r and r[0]:
+                return fyers_eq_symbol(r[0])
+        except Exception as e:
+            log.warning(f"cc#843 probe symbol lookup failed: {e}")
+        return None
+
+    def _probe_subscribe_alive(label):
+        """Returns True if the connection provably still rejects garbage; False if it is
+        subscribe-dead; None if the probe could not run (no blacklist member yet)."""
+        pc = None
+        try:
+            pc = get_db()
+            psym = _probe_symbol(pc)
+        except Exception:
+            psym = None
+        finally:
+            if pc is not None:
+                try:
+                    pc.close()
+                except Exception:
+                    pass
+        if not psym:
+            log.info(f"cc#843 probe ({label}): no blacklist member available — probe skipped, "
+                     "bar-count backstop still applies")
+            return None
+        _probe_state['awaiting'] = psym
+        _probe_state['seen'] = False
+        log.info(f"cc#843 probe ({label}): subscribing known-invalid {psym}, expecting a -300 "
+                 f"within {PROBE_WAIT_SEC}s")
+        try:
+            _batched_subscribe(fyers_ws, [psym], action='sub', label=f'probe-{label}')
+        except Exception as e:
+            log.warning(f"cc#843 probe ({label}) subscribe failed: {e}")
+            _probe_state['awaiting'] = None
+            return None
+        deadline = time.monotonic() + PROBE_WAIT_SEC
+        while time.monotonic() < deadline:
+            if _probe_state['seen']:
+                break
+            time.sleep(0.5)
+        alive = _probe_state['seen']
+        _probe_state['awaiting'] = None
+        if alive:
+            log.info(f"cc#843 probe ({label}): -300 received — subscribe pipeline is ALIVE")
+            _log_feed_incident("feed_probe_ok", f"{label}: -300 received for {psym}")
+        else:
+            log.error(f"cc#843 probe ({label}): NO -300 within {PROBE_WAIT_SEC}s for a known-invalid "
+                      f"symbol — connection is SUBSCRIBE-DEAD, forcing a clean reconnect")
+            _log_feed_incident("feed_probe_dead",
+                               f"{label}: no -300 for {psym} in {PROBE_WAIT_SEC}s — subscribe-dead")
+            try:
+                _force_reconnect()
+            except Exception as e:
+                log.error(f"cc#843 probe ({label}): reconnect failed: {e}")
+        return alive
+
+    # ── cc#843 fix_3a: ONE pending corrected-universe resubscribe ────────────────────────────
+    # On 03-Aug three full-universe resubscribes interleaved on the same socket (1150/1149/1146
+    # symbols, ~3,400 requests in 45 seconds) because each -300 frame triggered its own recovery.
+    # That is a self-inflicted burst at exactly the moment the connection is already unhappy — and
+    # cc#759 proved concurrent subscribe sequences are how the futures leg gets dropped. Collapse:
+    # at most ONE resubscribe in flight; invalids that arrive while it runs are coalesced into a
+    # single follow-up, which then uses the universe as it stands after every drop is applied.
+    _resub_state = {'in_flight': False, 'pending': False}
+    _resub_lock = threading.Lock()
+
+    def _resubscribe_corrected(reason):
+        with _resub_lock:
+            if _resub_state['in_flight']:
+                _resub_state['pending'] = True
+                log.info(f"cc#843: corrected-universe resubscribe already in flight — coalescing "
+                         f"({reason})")
+                return
+            _resub_state['in_flight'] = True
+
+        def _worker():
+            try:
+                while True:
+                    sub_list = (equity_fyers_syms + futures_fyers_syms + ext_fyers_syms
+                                + list(option_syms))
+                    log.info(f"WS -300 recovery: re-subscribing corrected universe "
+                             f"({len(sub_list)} symbols) [{reason}]")
+                    _batched_subscribe(fyers_ws, sub_list, action='sub',
+                                       label='invalid_symbol_recovery')
+                    with _resub_lock:
+                        if not _resub_state['pending']:
+                            _resub_state['in_flight'] = False
+                            return
+                        _resub_state['pending'] = False   # one more pass, with the latest universe
+            except Exception as e:
+                log.warning(f"cc#843 coalesced resubscribe failed: {e}")
+                with _resub_lock:
+                    _resub_state['in_flight'] = False
+                    _resub_state['pending'] = False
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _blacklist_extended(fsym, reason):
         """cc#809: persist an extended-leg symbol drop to feed_ext_blacklist so it is excluded from
@@ -2462,6 +2623,12 @@ def run(auth_code=None):
         # resubscribed again on any future boot), then immediately re-subscribe the
         # corrected universe so nothing else in that batch stays silently dropped.
         try:
+            # cc#843 fix_2: the probe watches for its own symbol in any -300 frame. Recorded
+            # BEFORE the early return so a probe-only frame still counts as proof of life.
+            if isinstance(msg, dict) and msg.get('code') == -300:
+                _pa = _probe_state.get('awaiting')
+                if _pa and _pa in (msg.get('invalid_symbols') or []):
+                    _probe_state['seen'] = True
             if not (isinstance(msg, dict) and msg.get('code') == -300):
                 return
             invalid = msg.get('invalid_symbols') or []
@@ -2498,9 +2665,8 @@ def run(auth_code=None):
                                    {"dropped": dropped, "raw": str(msg)[:300]})
                 # cc#809: the corrected universe MUST carry the extended leg too — omitting it here
                 # would silently unsubscribe ~1,600 symbols on the first invalid-symbol recovery.
-                sub_list = equity_fyers_syms + futures_fyers_syms + ext_fyers_syms + list(option_syms)
-                log.info(f"WS -300 recovery: re-subscribing corrected universe ({len(sub_list)} symbols)")
-                _batched_subscribe(fyers_ws, sub_list, action='sub', label='invalid_symbol_recovery')
+                # cc#843 fix_3a: ONE coalesced resubscribe, never three interleaved.
+                _resubscribe_corrected(f"invalid_symbols x{len(dropped)}")
         except Exception as e:
             log.warning(f"on_error invalid-symbol handling failed: {e}")
     def on_close(msg):
@@ -2833,6 +2999,11 @@ def run(auth_code=None):
             # F&O feed that everything else depends on.
             if ext_fyers_syms:
                 threading.Thread(target=_subscribe_extended, args=(label,), daemon=True).start()
+            # cc#843 fix_2: probe AFTER the sequence completes. It is the primary health check now —
+            # the canary bar-count above proves EQUITY is streaming, which the sick 03-Aug connection
+            # also did while every derivative subscribe was silently discarded. Only the probe
+            # distinguishes "acking and working" from "acking and dead".
+            threading.Thread(target=_probe_subscribe_alive, args=(label,), daemon=True).start()
             return True
 
         try:
@@ -3018,19 +3189,30 @@ def run(auth_code=None):
                 # overnight) once, so the canary stage rides a fresh at-open session instead of
                 # a stale one Fyers may have silently dropped subscriptions on. A boot that
                 # happens AFTER 09:00 never needs this — its own session is already fresh.
-                if (sub_bounce_day != today and boot_time.time() < dt_time(9, 0)
-                        and now.time() >= dt_time(9, 14)):
+                # cc#843 fix_1 REPLACES the cc#497 09:14-bounce + 09:20-scheduled pair.
+                # The invariant is now simply: TODAY'S SUBSCRIBE SEQUENCE ONLY EVER RUNS ON A
+                # CONNECTION ESTABLISHED AT OR AFTER 09:16. Two ways a socket can be older than
+                # that: a weekend/holiday boot whose connection survived into Monday pre-open, or a
+                # reconnect the SDK made on its own before the gate released. Both get bounced once
+                # at 09:16, then the sequence runs on the fresh session.
+                if (sub_bounce_day != today and now.time() >= WS_FIRST_CONNECT):
+                    est = _conn_state.get('established_at')
+                    stale_conn = (est is not None and (est.date() < today
+                                  or est.time() < WS_FIRST_CONNECT))
                     sub_bounce_day = today
-                    log.info("cc#497: 09:14 pre-open socket bounce — forcing a fresh session "
-                             "before the canary subscribe")
-                    _log_feed_incident("feed_preopen_bounce", "09:14 fresh-session bounce")
-                    _force_reconnect()
+                    if stale_conn:
+                        log.info("cc#843: connection predates 09:16 (established "
+                                 f"{est.strftime('%Y-%m-%d %H:%M:%S')}) — bouncing to a fresh "
+                                 "post-open session before any subscribe")
+                        _log_feed_incident("feed_preopen_bounce",
+                                           f"cc#843 09:16 bounce; conn established {est.isoformat()}")
+                        _force_reconnect()
 
-                # 09:20 IST scheduled canary+full sequence — pre-open/overnight boots only.
-                if (sub_seq_day != today and boot_time.time() < MARKET_OPEN
-                        and now.time() >= dt_time(9, 20)):
+                # 09:16 IST first-and-only sequence for a boot that came up before the open.
+                if (sub_seq_day != today and boot_time.time() < WS_FIRST_CONNECT
+                        and now.time() >= WS_FIRST_CONNECT):
                     sub_seq_day = today
-                    threading.Thread(target=_run_subscribe_sequence, args=('scheduled-0920',),
+                    threading.Thread(target=_run_subscribe_sequence, args=('scheduled-0916',),
                                      daemon=True).start()
 
                 # midmarket_boot_rule: the worker booted AT OR AFTER market open (already on the
@@ -3039,7 +3221,7 @@ def run(auth_code=None):
                 # no "wait for 09:20" scheduled path left to catch it). Run canary->full NOW
                 # instead of waiting for tomorrow — this also makes a same-day cc#497 deploy
                 # itself the recovery restart for an already-dead feed.
-                elif (sub_seq_day != today and boot_time.time() >= MARKET_OPEN and in_market):
+                elif (sub_seq_day != today and boot_time.time() >= WS_FIRST_CONNECT and in_market):
                     sub_seq_day = today
                     threading.Thread(target=_run_subscribe_sequence, args=('midmarket-boot',),
                                      daemon=True).start()
@@ -3429,7 +3611,34 @@ def run(auth_code=None):
                     pass
             time.sleep(5)
     threading.Thread(target=_housekeeping_supervised, daemon=True).start()
+    # ── cc#843 fix_1: the pre-open connect gate ──────────────────────────────────────────────
+    # A trading-day boot BEFORE 09:16 waits. A boot at or after 09:16 (and before close) is already
+    # on the safe side and connects immediately — today's 09:24 boot proved that path healthy. A
+    # non-trading-day / off-hours boot connects normally: the rule is about trading-day session
+    # starts, not about keeping the socket down.
+    _now_gate = datetime.now(IST)
+    if is_trading_day(_now_gate.date()) and _now_gate.time() < WS_FIRST_CONNECT:
+        _target = _now_gate.replace(hour=WS_FIRST_CONNECT.hour, minute=WS_FIRST_CONNECT.minute,
+                                    second=0, microsecond=0)
+        _wait = (_target - _now_gate).total_seconds()
+        log.info(f"cc#843: trading day and it is {_now_gate.strftime('%H:%M:%S')} IST — holding the WS "
+                 f"connect until {WS_FIRST_CONNECT.strftime('%H:%M')} ({int(_wait)}s). A pre-open "
+                 "connection comes up subscribe-dead; auth was already proven by the REST self-test.")
+        try:
+            _log_feed_incident("feed_preopen_hold",
+                               f"holding connect until {WS_FIRST_CONNECT.strftime('%H:%M')} IST "
+                               f"({int(_wait)}s from boot at {_now_gate.strftime('%H:%M:%S')})")
+        except Exception:
+            pass
+        while True:
+            _n = datetime.now(IST)
+            if _n.time() >= WS_FIRST_CONNECT or not is_trading_day(_n.date()):
+                break
+            time.sleep(min(20, max(1, (_target - _n).total_seconds())))
+        log.info(f"cc#843: {datetime.now(IST).strftime('%H:%M:%S')} IST — releasing the connect gate")
+
     log.info("Connecting WebSocket (live)...")
+    _conn_state['connect_called_at'] = datetime.now(IST)
     fyers_ws.connect()
 
 
