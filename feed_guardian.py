@@ -146,6 +146,29 @@ def _mark_alert(state, key, now):
     state.setdefault("alerts", {})[key] = now.isoformat()
 
 
+# ── cc#844: THE HEARTBEAT AGE CONTRACT ────────────────────────────────────────────────────────────
+# worker_heartbeat.last_beat is a NAIVE `TIMESTAMP` written by the worker with Postgres NOW(), so it
+# stores UTC. This module works in IST (_ist_now). Subtracting one from the other — which is exactly
+# what both call sites did — adds a permanent, invented 5h30m to every reading.
+#
+# The damage was not theoretical. On 03-Aug the guardian reported the worker heartbeat as "336 min
+# old" while it was genuinely 6 minutes old, fired WORKER SILENT to Telegram, and pushed the master
+# watchdog permanently RED. A DB audit then read that alert alongside other UTC-stored timestamps
+# (v8_metrics.computed_at, ops_log.session_ts — both naive UTC too) as if they were IST, and
+# concluded the whole app had been hung for 5.5 hours during live trading. It had not: ops_log had
+# 102/154/96/65/75 rows in the 09:30-14:30 IST hours and v8_metrics was 1 minute fresh. A P0 was
+# raised and a founder's buy-shortlist was withheld on the strength of a subtraction error.
+#
+# So the age is now computed BY POSTGRES, against the DB clock, with the stored basis stated
+# explicitly. No Python-side timezone assumption can re-enter, and it needs no data migration.
+def _heartbeat_age_min(cur):
+    """Minutes since the worker's last heartbeat, or None if it has never written one."""
+    cur.execute("""SELECT ROUND((EXTRACT(EPOCH FROM (NOW() - last_beat AT TIME ZONE 'UTC')) / 60.0)::numeric, 1)
+                   FROM worker_heartbeat WHERE id = 1""")
+    r = cur.fetchone()
+    return float(r[0]) if r and r[0] is not None else None
+
+
 def _ensure_heartbeat_table(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS worker_heartbeat (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -438,13 +461,17 @@ def offhours_liveness_tick():
             if last_beat is None:
                 out["note"] = "no heartbeat yet — worker cc#660 hook not live; skipping (safe bootstrap)"
             else:
-                age = (now - last_beat).total_seconds() / 60.0
+                # cc#844: age from the DB clock, never (IST now - UTC stored). See the contract above.
+                age = _heartbeat_age_min(cur)
+                if age is None:
+                    out["note"] = "heartbeat row present but unreadable — skipping"
+                    return out
                 out["heartbeat_age_min"] = round(age, 1)
                 if age > HEARTBEAT_STALE_MIN:
                     if not _throttled(state, "worker_silent", now):
                         _telegram(f"WORKER SILENT — feed worker heartbeat {age:.0f} min old "
                                   f"(>{HEARTBEAT_STALE_MIN}). truthful-friendship appears DOWN. "
-                                  f"Last beat {last_beat.strftime('%d-%b %H:%M')} IST.")
+                                  f"Last beat {(last_beat + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')} IST.")
                         _mark_alert(state, "worker_silent", now)
                         out["alerted"] = True
                     _oplog(cur, "worker_silent", {"age_min": round(age, 1),
@@ -503,10 +530,10 @@ def guardian_summary():
                         and now.time() <= dt_time(15, 35) and now.weekday() < 5:
                     out["red_flags"].append(f"{src} stale {a:.0f}min")
             _ensure_heartbeat_table(cur)
-            cur.execute("SELECT last_beat FROM worker_heartbeat WHERE id=1")
-            r = cur.fetchone()
-            if r and r[0]:
-                age = (now - r[0]).total_seconds() / 60.0
+            # cc#844: same contract — DB-clock age, not (IST now - UTC stored). This red_flag is what
+            # drove the master watchdog permanently RED with a phantom "heartbeat 330min old".
+            age = _heartbeat_age_min(cur)
+            if age is not None:
                 out["worker_heartbeat_age_min"] = round(age, 1)
                 if age > HEARTBEAT_STALE_MIN:
                     out["red_flags"].append(f"worker heartbeat {age:.0f}min old")
