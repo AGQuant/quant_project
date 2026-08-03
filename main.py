@@ -729,6 +729,29 @@ _BG_TASKS: set = set()
 
 @app.on_event("startup")
 async def startup():
+    # cc#841 part_2: startup one-shots DO fire on every deploy, but nothing recorded them, so they
+    # showed "never run" in scheduler_master forever — an instrumentation gap masquerading as four
+    # dead jobs. _recorded() wraps each one so the registry sees the truth. Never raises: a recorder
+    # failure must not become a startup failure.
+    def _recorded(job_name, coro_fn):
+        async def _wrapped():
+            import time as _t
+            t0 = _t.time()
+            status, err = "ok", None
+            try:
+                await coro_fn()
+            except Exception as e:
+                status, err = "error", str(e)[:400]
+                raise
+            finally:
+                try:
+                    import scheduler_master
+                    scheduler_master.record_run(job_name, status, error=err,
+                                                duration_ms=int((_t.time() - t0) * 1000))
+                except Exception as _re:
+                    log.warning(f"record_run({job_name}) failed: {_re}")
+        return _wrapped
+
     async def _init_tables():
         try: await asyncio.to_thread(create_tables)
         except Exception as e: log.error(f"create_tables (bg) failed: {e}")
@@ -766,11 +789,11 @@ async def startup():
         except Exception as e:
             log.error(f"[startup] v8_paper_rebuild_cutover failed: {e}")
 
-    t0 = asyncio.create_task(_init_tables())
+    t0 = asyncio.create_task(_recorded("init_tables", _init_tables)())
     _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
-    t1 = asyncio.create_task(_auto_fill_briefs())
+    t1 = asyncio.create_task(_recorded("auto_fill_briefs", _auto_fill_briefs)())
     _BG_TASKS.add(t1); t1.add_done_callback(_BG_TASKS.discard)
-    t2 = asyncio.create_task(_v8_paper_rebuild_cutover())
+    t2 = asyncio.create_task(_recorded("v8_paper_rebuild_cutover", _v8_paper_rebuild_cutover)())
     _BG_TASKS.add(t2); t2.add_done_callback(_BG_TASKS.discard)
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
     # cc#745: ensure the pcr_daily quality columns exist + backfill the marker across history on boot

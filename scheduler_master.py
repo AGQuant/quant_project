@@ -322,6 +322,27 @@ def job_health(job: dict, now=None, is_trading_day=None) -> dict:
         if exp is None:
             return {"status": "unjudgeable", "reason": f"{cls} cadence — no clock expectation",
                     "expected_by": None, "cadence_class": cls}
+        # cc#841 part_2: a job cannot have missed a run that happened before it EXISTED. Without
+        # this, every newly-shipped job reads as never-run against a slot that predates its own
+        # deploy — which is precisely what made bg_fetch_universe_reco_news and bg_mf_derived_audit
+        # look like real misses when both were simply added after that day's slot had passed.
+        added = job.get("added_date")
+        if added is not None:
+            try:
+                a = datetime(added.year, added.month, added.day, tzinfo=IST)
+                # added_date is a DATE, so for a slot falling ON the add day we cannot know whether
+                # the deploy landed before or after it. That is genuinely unknowable, and saying so
+                # beats guessing in either direction — bg_mf_derived_audit (added Sat 01-Aug, slot
+                # Sat 07:00) is exactly this case.
+                if exp < a + timedelta(days=1):
+                    same_day = exp >= a
+                    return {"status": "unjudgeable",
+                            "reason": (f"added {added} — cannot tell whether the deploy preceded "
+                                       f"that day's {cls} slot" if same_day else
+                                       f"added {added} — its last {cls} slot predates the job"),
+                            "expected_by": exp.isoformat(), "cadence_class": cls}
+            except Exception:
+                pass
         return {"status": "never_run", "reason": f"expected by {exp.isoformat()}",
                 "expected_by": exp.isoformat(), "cadence_class": cls}
     if exp is None:
@@ -464,6 +485,8 @@ def get_scheduler_master():
                               active, added_date, notes, last_run_at, last_status, last_error,
                               last_duration_ms
                        FROM scheduler_master ORDER BY service, category, job_name""")
+        # NOTE: added_date is read BEFORE the row dict is stringified below, because job_health
+        # needs it as a date — see the added_date guard in job_health().
         cols = [d[0] for d in cur.description]
         rows = []
         try:

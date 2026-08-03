@@ -2,7 +2,7 @@
 Scheduler — Scorr background tasks (restored 18-Jun-2026).
 Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intraday/tick.
 """
-import asyncio, logging, os, time
+import asyncio, json, logging, os, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone, time as dt_time
 from typing import Optional
@@ -88,6 +88,91 @@ def _spawn(fn, *args):
     t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, _run_recorded, fn, args))
     _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
     return t
+
+# ── cc#841 part_3: CATCH-UP FOR EXACT-MINUTE JOBS ────────────────────────────────────────────────
+# The dispatch loop gates daily/weekly/monthly jobs on an EXACT minute (h == X and m == Y) inside a
+# 60-second tick. That is restart-fragile by construction: a deploy that crosses the minute makes the
+# job silently skip its whole period, and 02-Aug had a dozen deploys. cc#840 fixed this for one job
+# by hand; this generalises it.
+#
+# On each sweep: for every exact-minute job in scheduler_master whose scheduled time for the CURRENT
+# period has passed and which has NO recorded run inside that period, dispatch it now.
+#
+# BOUNDED ON PURPOSE — the failure mode of a catch-up rule is re-firing work that was correctly
+# skipped, which is worse than the miss it fixes:
+#   * daily -> same calendar day only; weekly -> same week; monthly -> same month.
+#   * market-hours and m%N loops are EXCLUDED outright. A 5-minute loop that missed a tick has
+#     nothing to catch up to — the next tick is 5 minutes away and the stale one is worthless.
+#   * armed / startup / event jobs are excluded: their trigger is not a clock.
+#   * a job whose function is not resolvable in this module is skipped, never guessed at.
+#   * INACTIVE registry rows are skipped — retired code must never be resurrected (cc#660/759).
+# Every catch-up dispatch is logged so a silent re-fire is impossible to miss in review.
+_CATCHUP_CLASSES = ("daily", "weekly", "monthly", "quarterly")
+_catchup_last_sweep = None
+
+
+def _period_start(now, cls):
+    """Start of the period a catch-up may look back over — the bound that stops a missed Monday
+    job from firing on Thursday."""
+    d = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if cls == "daily":
+        return d
+    if cls == "weekly":
+        return d - timedelta(days=now.weekday())
+    return d.replace(day=1)          # monthly + quarterly
+
+
+def _bg_catchup_sweep():
+    global _catchup_last_sweep
+    now = datetime.now(IST)
+    if _catchup_last_sweep and (now - _catchup_last_sweep).total_seconds() < 300:
+        return _SKIPPED
+    _catchup_last_sweep = now
+    fired = []
+    try:
+        import scheduler_master as sm
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT job_name, cadence_human, last_run_at, added_date
+                           FROM scheduler_master
+                           WHERE active AND category='scheduler_loop'""")
+            rows = cur.fetchall()
+        for job_name, cadence, last_run, added in rows:
+            k = sm.classify_cadence(cadence or "")
+            if k["class"] not in _CATCHUP_CLASSES:
+                continue
+            exp = sm.expected_last_run(cadence, now, _is_trading_day)
+            if exp is None:
+                continue
+            floor = _period_start(now, k["class"])
+            if exp < floor:
+                continue                       # this period's slot has not arrived
+            if added and datetime(added.year, added.month, added.day, tzinfo=IST) > exp:
+                continue                       # slot predates the job (cc#841 part_2 guard)
+            if last_run is not None:
+                lr = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+                if lr >= floor:
+                    continue                   # already ran inside this period
+            fn = globals().get("_" + job_name) or globals().get(job_name)
+            if not callable(fn):
+                log.warning("catchup: no resolvable function for %s — skipped, not guessed", job_name)
+                continue
+            log.warning("cc#841 CATCH-UP: %s missed its %s slot (expected %s) — dispatching now",
+                        job_name, k["class"], exp.isoformat())
+            _spawn(fn)
+            fired.append(job_name)
+        if fired:
+            try:
+                with _conn() as conn, conn.cursor() as cur:
+                    cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                   VALUES (CURRENT_DATE, NOW(), 'alert', 'SCHEDULER_CATCHUP', %s::jsonb)""",
+                                (json.dumps({"cc": 841, "fired": fired, "at": now.isoformat()}),))
+                    conn.commit()
+            except Exception as e:
+                log.warning("catchup oplog: %s", e)
+    except Exception as e:
+        log.error(f"_bg_catchup_sweep: {e}")
+    return None
+
 
 def _is_market_hours(now):
     if now.weekday() >= 5: return False
@@ -1583,13 +1668,25 @@ def _bg_gvm():
         # land — chained rather than given its own wall-clock slot, because a fixed time would race
         # the very job it depends on and quietly screen yesterday's scores on a night GVM ran late.
         # Guarded: a screener failure must never mark the GVM run bad.
+        # cc#841 part_2: a CHAINED job never passes through _spawn, so record_run never fired for it
+        # and screeners_eod would have shown "never run" in scheduler_master forever — the registry
+        # would have been lying about a job that runs every night. Recorded explicitly here.
+        _sc_t0 = time.time()
+        _sc_status, _sc_err = "ok", None
         try:
             import screeners_eod
             with _conn() as sconn:
                 res = screeners_eod.run_all(sconn)
             log.info("cc#824 screeners: %s", res.get("screens"))
         except Exception as e:
+            _sc_status, _sc_err = "error", str(e)[:400]
             log.error(f"cc#824 screeners_eod: {e}")
+        try:
+            import scheduler_master
+            scheduler_master.record_run("screeners_eod", _sc_status, error=_sc_err,
+                                        duration_ms=int((time.time() - _sc_t0) * 1000))
+        except Exception as _re:
+            log.warning(f"record_run(screeners_eod) failed: {_re}")
     except Exception as e: log.error(f"gvm: {e}")
 
 def _bg_gvm_backfill():
@@ -3576,6 +3673,7 @@ async def _scheduler_loop():
         # cc#840: polled every 10 min instead of at an exact minute — the job self-gates on the
         # first trading day + at-or-after 01:50 + a DB month check, so a deploy crossing the
         # window can no longer eat a whole month.
+        if m % 5 == 0:   _spawn(_bg_catchup_sweep)     # cc#841 part_3: restart-proof catch-up sweep
         if m % 10 == 0:  _spawn(_bg_v9_paper_monthly)   # cc#629/840: V9 Brahmastra monthly rebalance
         if h == 19 and m == 10: _spawn(_bg_v9_paper_mtm)   # cc#840: nightly MTM on open V9 pairs
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
