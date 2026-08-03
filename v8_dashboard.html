@@ -537,6 +537,46 @@
 #pane-bt .bt-empty{padding:16px 8px;text-align:center;color:var(--dim);font-size:11px}
 #pane-bt .bt-loading{padding:30px 8px;text-align:center;color:var(--mut);font-size:12px}
 
+
+/* ── cc#842 GLOBAL HEAT STRIP V2 (spec_locked 14406) ────────────────────────────────────────
+   Mobile requirement is founder-locked: the strip WRAPS to rows, it never scrolls horizontally.
+   flex-wrap does that at every width, so there is no breakpoint to get wrong and no hidden tile. */
+.hs-wrap{margin:0 0 14px;padding:12px 14px;background:var(--panel2,#0D1428);
+  border:1px solid var(--line,rgba(148,166,210,.14));border-radius:12px}
+.hs-head{display:flex;align-items:baseline;gap:10px;margin:2px 0 7px;flex-wrap:wrap}
+.hs-head-eod{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line,rgba(148,166,210,.2))}
+.hs-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--txt,#E9EEFB)}
+.hs-sub{font-size:10.5px;color:var(--dim,#5E6B8F)}
+.hs-lvl{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.hs-eod{opacity:.97}
+.hs-grp{display:flex;flex-direction:column;gap:5px;padding-right:10px;
+  border-right:1px solid var(--line,rgba(148,166,210,.12))}
+.hs-grp:last-child{border-right:none;padding-right:0}
+.hs-glab{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim,#5E6B8F)}
+.hs-tiles{display:flex;flex-wrap:wrap;gap:5px}
+/* 44px tap floor per MOBILE_UX_STANDARD_V1 */
+.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:78px;min-height:44px;
+  padding:5px 9px;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
+.hs-tile:hover{transform:translateY(-1px)}
+.hs-nm{font-size:10.5px;font-weight:700;opacity:.92;white-space:nowrap}
+.hs-ch{font-size:12.5px;font-weight:800;font-family:var(--mono,ui-monospace,monospace)}
+.hs-foot{margin-top:9px;font-size:10px;color:var(--dim,#5E6B8F);line-height:1.5}
+.hs-err{font-size:11.5px;color:var(--dim,#5E6B8F)}
+.hs-draw{margin:0 0 14px;padding:12px 14px;background:var(--panel,#121A33);
+  border:1px solid var(--line2,rgba(148,166,210,.24));border-radius:12px}
+.hs-dhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.hs-dhead b{font-size:14px}
+.hs-close{margin-left:auto;background:transparent;border:1px solid var(--line,rgba(148,166,210,.2));
+  color:var(--dim,#5E6B8F);border-radius:7px;min-width:34px;min-height:34px;cursor:pointer;font-family:inherit}
+.hs-rts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.hs-rt{min-width:64px;padding:6px 9px;border-radius:8px;background:var(--well,rgba(148,166,210,.07))}
+.hs-rt .k{font-size:9.5px;font-weight:700;letter-spacing:.05em;color:var(--dim,#5E6B8F)}
+.hs-rt .v{font-size:13px;font-weight:800;font-family:var(--mono,ui-monospace,monospace)}
+.hs-52{margin-top:9px;font-size:11px;color:var(--mut,#8C99BD)}
+@media(max-width:640px){
+  .hs-grp{border-right:none;padding-right:0;width:100%}
+  .hs-tile{flex:1 1 calc(33.333% - 4px);min-width:0}
+}
 </style>
 
 <nav class="model-nav" id="scorr-nav"></nav>
@@ -2992,11 +3032,140 @@ let GI_LOADED=false, GI_TIMER=null;   // cc#281: GI_TIMER = 5-min poll while the
 async function loadGlobalIndices(){
   const el=document.getElementById('panel13');if(!el)return;
   if(!GI_LOADED)el.innerHTML='<div class="loading">Loading Global Indices...</div>';   // flash only on first load
-  try{const d=await getJSON(EP.globalIndices);GI_LOADED=true;el.innerHTML=renderGlobalIndices(d);}
+  try{
+    // cc#842: strip + table load together, but the strip NEVER blocks the table — a heat strip is
+    // additive, and a strip failure must not cost you the indices you came for.
+    const [d,hs]=await Promise.all([
+      getJSON(EP.globalIndices),
+      getJSON('/api/global/heatstrip').catch(e=>({tiles:[],eod_tiles:[],error:String(e&&e.message||e)}))
+    ]);
+    GI_LOADED=true;
+    el.innerHTML=renderHeatStrip(hs)+renderGlobalIndices(d);
+    bindHeatStrip();
+  }
   // cc#281: on a poll failure keep the last-good render (and its now-stale Last-updated time) —
   // do not blank the tab; the honest timestamp shows the data has stopped advancing.
   catch(e){if(!GI_LOADED)el.innerHTML=`<div class="err">Global Indices failed: ${e.message}</div>`;}
 }
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// cc#842 GLOBAL HEAT STRIP V2 — spec_locked session_log id=14406.
+// Two levels: DAY (latest tick vs prev close) and WEEK (rolling 5 sessions on each symbol's OWN
+// calendar). The five no-intraday symbols get their own EOD block rather than being dimmed into
+// the day row. VIX tiles are inverted on BOTH levels. Every tile carries its own as-of, because
+// these markets genuinely close on different dates and one shared stamp would be a lie.
+// READ-ONLY: no new tables, jobs or pollers — it rides the existing tab refresh.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+const HS_BAND={
+  'up-strong':  {bg:'rgba(47,212,139,.30)', fg:'#0B7A4B'},
+  'up':         {bg:'rgba(47,212,139,.13)', fg:'#2FD48B'},
+  'down':       {bg:'rgba(255,92,108,.13)', fg:'#FF5C6C'},
+  'down-strong':{bg:'rgba(255,92,108,.32)', fg:'#B3202F'},
+  'flat':       {bg:'rgba(148,166,210,.14)',fg:'#8C99BD'},
+  'none':       {bg:'rgba(148,166,210,.07)',fg:'#5E6B8F'}
+};
+let HS_DATA=null;
+
+function hsPct(v){ return v==null?'--':(v>=0?'+':'')+Number(v).toFixed(2)+'%'; }
+
+function hsTile(t,level){
+  const chg = level==='week'? t.week_chg_pct : t.day_chg_pct;
+  const band= level==='week'? t.week_band    : t.day_band;
+  const c=HS_BAND[band]||HS_BAND.none;
+  const asof = level==='week'
+    ? (t.week_base_date? ('vs '+t.week_base_date+' · '+t.week_sessions+' sessions') : 'insufficient history')
+    : (t.as_of_is_live? ('live · '+t.as_of) : ('EOD · '+t.as_of));
+  const px = t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
+  return `<button class="hs-tile" data-sym="${escAttr(t.symbol)}"
+      title="${escAttr(t.name)} · ${px} · ${asof}${t.inverted?' · inverted (up = risk-off)':''}"
+      style="background:${c.bg};border:1px solid ${c.fg}44;color:${c.fg}">
+      <span class="hs-nm">${escHtml(t.name||t.symbol)}</span>
+      <span class="hs-ch">${hsPct(chg)}</span>
+    </button>`;
+}
+
+function hsGroups(tiles,level,data){
+  const order=(data&&data.category_order)||['index','volatility','commodity','currency','crypto'];
+  const label=(data&&data.category_label)||{};
+  let out='';
+  order.forEach(cat=>{
+    const g=tiles.filter(t=>t.category===cat);
+    if(!g.length)return;
+    out+=`<div class="hs-grp"><div class="hs-glab">${escHtml(label[cat]||cat)}</div>`
+       +`<div class="hs-tiles">${g.map(t=>hsTile(t,level)).join('')}</div></div>`;
+  });
+  return out;
+}
+
+function renderHeatStrip(d){
+  HS_DATA=d;
+  if(!d||d.error&&!(d.tiles||[]).length){
+    return `<div class="hs-wrap"><div class="hs-err">Heat strip unavailable${d&&d.error?': '+escHtml(d.error):''}. The indices table below is unaffected.</div></div>`;
+  }
+  const live=(d.tiles||[]), eod=(d.eod_tiles||[]);
+  if(!live.length&&!eod.length)return'';
+  let h='<div class="hs-wrap">';
+  h+='<div class="hs-head"><span class="hs-title">Global heat</span>'
+    +'<span class="hs-sub">DAY · latest vs prev close</span></div>';
+  h+='<div class="hs-lvl">'+hsGroups(live,'day',d)+'</div>';
+  if(eod.length){
+    // Founder-locked: a SEPARATE, visually distinct block. Not dimmed into the day row, not dropped.
+    h+='<div class="hs-head hs-head-eod"><span class="hs-title">EOD only</span>'
+      +'<span class="hs-sub">no intraday feed · each tile carries its own close date</span></div>';
+    h+='<div class="hs-lvl hs-eod">'+hsGroups(eod,'day',d)+'</div>';
+  }
+  h+='<div class="hs-head"><span class="hs-title">Week</span>'
+    +`<span class="hs-sub">rolling 5 sessions · each symbol's own calendar</span></div>`;
+  h+='<div class="hs-lvl">'+hsGroups(live.concat(eod),'week',d)+'</div>';
+  h+='<div class="hs-foot">VIX tiles inverted — up = risk-off, on both levels. Tap a tile for returns and 52-week range.</div>';
+  h+='</div><div id="hs-drawer"></div>';
+  return h;
+}
+
+function bindHeatStrip(){
+  document.querySelectorAll('.hs-tile').forEach(b=>{
+    b.onclick=()=>hsOpenDrawer(b.getAttribute('data-sym'));
+  });
+}
+
+async function hsOpenDrawer(sym){
+  const el=document.getElementById('hs-drawer'); if(!el)return;
+  el.innerHTML='<div class="hs-draw"><div class="hs-err">Loading…</div></div>';
+  let d=null;
+  try{ d=await getJSON('/api/global/heatstrip/'+encodeURIComponent(sym)); }
+  catch(e){ el.innerHTML='<div class="hs-draw"><div class="hs-err">'+escHtml(String(e&&e.message||e))+'</div></div>'; return; }
+  if(!d||d.error){ el.innerHTML='<div class="hs-draw"><div class="hs-err">'+escHtml((d&&d.error)||'no data')+'</div></div>'; return; }
+  const R=d.returns||{};
+  const cell=(k)=>{const v=R[k];const col=v==null?'#8C99BD':(d.inverted?(v>0?'#FF5C6C':'#2FD48B'):(v>=0?'#2FD48B':'#FF5C6C'));
+    return `<div class="hs-rt"><div class="k">${k}</div><div class="v" style="color:${col}">${hsPct(v)}</div></div>`;};
+  const pts=(d.series||[]);
+  let svg='';
+  if(pts.length>1){
+    const ys=pts.map(p=>p.p), lo=Math.min.apply(null,ys), hi=Math.max.apply(null,ys), sp=(hi-lo)||1;
+    const W=560,H=90;
+    const path=pts.map((p,i)=>`${(i/(pts.length-1)*W).toFixed(1)},${(H-(p.p-lo)/sp*H).toFixed(1)}`).join(' ');
+    svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block">
+      <polyline points="${path}" fill="none" stroke="#4D7CFE" stroke-width="1.8"/></svg>`;
+  }
+  el.innerHTML=`<div class="hs-draw">
+    <div class="hs-dhead">
+      <b>${escHtml(d.name||d.symbol)}</b>
+      <span>${d.price==null?'--':Number(d.price).toLocaleString('en-IN',{maximumFractionDigits:2})}</span>
+      <span class="hs-sub">as of ${escHtml(d.as_of||'')} · ${escHtml(d.series_kind||'')} chart</span>
+      <button class="hs-close" onclick="document.getElementById('hs-drawer').innerHTML=''">✕</button>
+    </div>
+    ${svg}
+    <div class="hs-rts">${['1D','1W','1M','3M','6M','YTD','1Y'].map(cell).join('')}</div>
+    <div class="hs-52">52W range ${d.low_52w==null?'--':Number(d.low_52w).toLocaleString('en-IN',{maximumFractionDigits:2})}
+      – ${d.high_52w==null?'--':Number(d.high_52w).toLocaleString('en-IN',{maximumFractionDigits:2})}
+      · ${hsPct(d.from_52w_high_pct)} from high · ${d.sessions_in_52w||0} sessions</div>
+    <div class="hs-foot">${escHtml(d.basis||'')}</div>
+  </div>`;
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function escHtml(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function escAttr(s){return escHtml(s).replace(/"/g,'&quot;');}
+
 function renderGlobalIndices(data){
   const rows=(data&&data.instruments)||[];
   if(!rows.length)return'<div class="empty">No global indices data.</div>';
