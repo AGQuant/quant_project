@@ -183,7 +183,11 @@
           '<button id="scorrChartFull" title="Maximize (Esc to exit)" style="border:none;background:none;font-size:15px;line-height:1;cursor:pointer;margin-left:4px">&#9974;</button>' +
           '<button id="scorrChartClose" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;margin-left:4px">&times;</button>' +
         '</div>' +
+        /* cc#845: CHART | PEERS tab pair at CARD level. Toggle in place — same card, no popup,
+           no navigation, because a peer scan is a comparison workflow and navigating away breaks it. */
+        '<div id="scorrChartTabs" style="display:flex;gap:4px;padding:8px 16px 0"></div>' +
         '<div id="scorrChartBox" style="width:100%;height:412px;padding:8px 8px 0"></div>' +
+        '<div id="scorrPeerPane" style="display:none;padding:6px 12px 12px;overflow:auto;max-height:436px"></div>' +
         '<div id="scorrChartMsg" style="padding:6px 16px 12px;font-size:11px"></div>' +
       '</div>';
     document.body.appendChild(ov);
@@ -712,6 +716,195 @@
     _positionFx();   // cc#750: re-fit the fib bands + chip strip to the new width (mobile PWA)
   }
 
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // cc#845 PEERS TAB — segment peer table inside the same card.
+  // Read-only. Every number comes from /api/chart/peers, which LEFT-joins v8_metrics and falls
+  // back to raw_prices per symbol: v8_metrics covers only the ~209 futures names, so on the
+  // founder's own PETRONET example just 1 of 5 City Gas peers has a row. An inner join would have
+  // rendered a peer table containing only the stock you were already looking at.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  var _tab = "chart", _peers = null, _peerOpen = null;
+
+  function _paintTabs() {
+    var host = document.getElementById("scorrChartTabs");
+    if (!host) return;
+    var p = _pal();
+    host.innerHTML = ["chart", "peers"].map(function (k) {
+      var on = (_tab === k);
+      return '<button data-tab="' + k + '" style="border:1px solid ' + (on ? p.btnOn : p.line) +
+        ';background:' + (on ? p.btnOn : p.btn) + ';color:' + (on ? "#fff" : p.mut) +
+        ';border-radius:8px;padding:5px 14px;min-height:32px;font-size:11.5px;font-weight:700;' +
+        'cursor:pointer;font-family:inherit">' + (k === "chart" ? "Chart" : "Peers") + '</button>';
+    }).join("");
+    Array.prototype.forEach.call(host.querySelectorAll("[data-tab]"), function (b) {
+      b.onclick = function () { _setTab(b.getAttribute("data-tab")); };
+    });
+  }
+
+  function _setTab(k) {
+    _tab = k;
+    var box = document.getElementById("scorrChartBox");
+    var pane = document.getElementById("scorrPeerPane");
+    var tfs = document.getElementById("scorrChartTfs");
+    var msg = document.getElementById("scorrChartMsg");
+    if (box) box.style.display = (k === "chart") ? "" : "none";
+    if (pane) pane.style.display = (k === "peers") ? "" : "none";
+    // Timeframe pills belong to the chart; hiding them on Peers stops them implying they filter
+    // the table (they do not — the peer columns are fixed Day/Week/Month).
+    if (tfs) tfs.style.display = (k === "chart") ? "" : "none";
+    if (msg) msg.style.display = (k === "chart") ? "" : "none";
+    _paintTabs();
+    if (k === "peers") _loadPeers();
+    else if (_chart) { try { _chart.applyOptions({ width: box.clientWidth }); } catch (e) {} }
+  }
+
+  function _pc(v) {
+    if (v == null) return '<span style="opacity:.45">—</span>';
+    var col = v > 0 ? "#2FD48B" : (v < 0 ? "#FF5C6C" : "#8C99BD");
+    return '<span style="color:' + col + ';font-weight:700">' + (v >= 0 ? "+" : "") + v.toFixed(2) + '%</span>';
+  }
+
+  function _bandChip(b) {
+    if (!b) return "";
+    var c = b === "Strong Buy" ? "#2FD48B" : b === "Buy" ? "#7FD4A8"
+          : b === "Watch" ? "#F5B94A" : "#FF5C6C";
+    return '<span style="font-size:9.5px;font-weight:800;letter-spacing:.03em;padding:2px 6px;' +
+      'border-radius:6px;color:' + c + ';border:1px solid ' + c + '55;white-space:nowrap">' + b + '</span>';
+  }
+
+  function _loadPeers() {
+    var pane = document.getElementById("scorrPeerPane");
+    if (!pane) return;
+    var p = _pal(), sym = _sym;
+    pane.innerHTML = '<div style="padding:14px 4px;font-size:11.5px;color:' + p.mut + '">Loading peers…</div>';
+    _getJSON("/api/chart/peers/" + encodeURIComponent(sym))
+      .then(function (d) {
+        if (_sym !== sym) return;                       // user switched symbol mid-flight
+        _peers = d; _peerOpen = null;
+        _renderPeers();
+      })
+      .catch(function (e) {
+        pane.innerHTML = '<div style="padding:14px 4px;font-size:11.5px;color:' + p.mut +
+          '">Peers unavailable — ' + String(e && e.message || e) + '</div>';
+      });
+  }
+
+  function _renderPeers() {
+    var pane = document.getElementById("scorrPeerPane");
+    var d = _peers; if (!pane || !d) return;
+    var p = _pal();
+    if (d.error || !(d.peers || []).length) {
+      pane.innerHTML = '<div style="padding:14px 4px;font-size:11.5px;color:' + p.mut + '">' +
+        (d.error ? ("Peers unavailable — " + d.error) : (d.reason || "No peers in this segment.")) +
+        '</div>';
+      return;
+    }
+    var head = '<div style="font-size:11px;color:' + p.mut + ';padding:2px 4px 8px">' +
+      '<b style="color:' + p.txt + '">' + d.segment + '</b> · ' + d.count + ' peers · ' + d.band_rule + '</div>';
+    var th = 'padding:6px 8px;font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:' +
+      p.sub + ';border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
+    var rows = d.peers.map(function (r, i) {
+      var td = 'padding:7px 8px;font-size:12px;border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
+      // Own row pinned visually rather than reordered — the table stays in GVM order so the
+      // reader can see WHERE the stock sits among its peers, which is the point of the view.
+      var selfBg = r.is_self ? ('background:' + (p.btnOn + "1f") + ';') : '';
+      return '<tr data-sym="' + r.symbol + '" style="' + selfBg + '">' +
+        '<td style="' + td + ';text-align:left">' +
+          '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + p.txt + '">' + r.symbol +
+            (r.is_self ? ' <span style="font-size:9px;opacity:.7">THIS</span>' : '') + '</div>' +
+          '<div style="font-size:10px;color:' + p.sub + '">' + (r.company_name || "") + '</div>' +
+        '</td>' +
+        '<td style="' + td + '">' + _pc(r.day_pct) + '</td>' +
+        '<td style="' + td + '">' + _pc(r.week_pct) + '</td>' +
+        '<td style="' + td + '">' + _pc(r.month_pct) + '</td>' +
+        '<td style="' + td + ';color:' + p.txt + ';font-weight:700">' + (r.gvm == null ? "—" : r.gvm.toFixed(2)) + '</td>' +
+        '<td style="' + td + '">' + _bandChip(r.band) + '</td>' +
+        '<td style="' + td + '"><button data-card="' + r.symbol + '" style="border:1px solid ' + p.line +
+          ';background:' + p.btn + ';color:' + p.mut + ';border-radius:7px;padding:4px 10px;min-height:30px;' +
+          'font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit">CARD</button></td>' +
+        '</tr>' +
+        '<tr data-drawer="' + r.symbol + '" style="display:none"><td colspan="7" style="padding:0"></td></tr>';
+    }).join("");
+    pane.innerHTML = head +
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px">' +
+      '<thead><tr>' +
+        '<th style="' + th + ';text-align:left">Symbol</th><th style="' + th + '">Day</th>' +
+        '<th style="' + th + '">Week</th><th style="' + th + '">Month</th>' +
+        '<th style="' + th + '">GVM</th><th style="' + th + '">Band</th><th style="' + th + '"></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div style="font-size:9.5px;color:' + p.sub + ';padding:8px 4px 0;line-height:1.5">' + d.basis + '</div>';
+    Array.prototype.forEach.call(pane.querySelectorAll("[data-card]"), function (b) {
+      b.onclick = function (e) { e.stopPropagation(); _toggleDrawer(b.getAttribute("data-card")); };
+    });
+  }
+
+  // cc#845 founder-delegated decision: INLINE DRAWER, not navigation. A peer scan is an A/B
+  // comparison workflow; navigating away breaks it. The full-screen path is preserved as a link
+  // inside the drawer so the deep route is never lost.
+  function _toggleDrawer(sym) {
+    var pane = document.getElementById("scorrPeerPane"); if (!pane) return;
+    var row = pane.querySelector('[data-drawer="' + sym + '"]'); if (!row) return;
+    var cell = row.firstChild;
+    if (_peerOpen === sym) { row.style.display = "none"; _peerOpen = null; return; }
+    if (_peerOpen) {
+      var prev = pane.querySelector('[data-drawer="' + _peerOpen + '"]');
+      if (prev) prev.style.display = "none";
+    }
+    _peerOpen = sym;
+    row.style.display = "";
+    var p = _pal();
+    cell.innerHTML = '<div style="padding:10px 12px;font-size:11.5px;color:' + p.mut + '">Loading ' + sym + '…</div>';
+    _getJSON("/api/chart/tradecard/" + encodeURIComponent(sym))
+      .then(function (t) { if (_peerOpen === sym) cell.innerHTML = _drawerHtml(sym, t); })
+      .catch(function () {
+        if (_peerOpen !== sym) return;
+        cell.innerHTML = '<div style="padding:10px 12px;font-size:11.5px;color:' + p.mut + '">' +
+          'Trade card unavailable for ' + sym + '. ' + _fullLink(sym) + '</div>';
+      });
+  }
+
+  function _fullLink(sym) {
+    return '<a href="/check?symbol=' + encodeURIComponent(sym) + '" target="_blank" rel="noopener" ' +
+      'style="color:#4d7cfe;font-weight:700;text-decoration:none">Open full Trade Check →</a>';
+  }
+
+  function _drawerHtml(sym, t) {
+    var p = _pal();
+    t = t || {};
+    // Every value is server-derived (/api/chart/tradecard) so the arithmetic lives in ONE place.
+    // A cash peer legitimately has no lot size, so LOT/REWARD/RISK render as em dashes rather than
+    // a fabricated single-share position; R:R and the levels stay valid because they are
+    // lot-independent.
+    var g = function (k) { var v = t[k]; return (v == null || v === "") ? "—" : v; };
+    var pair = function (k, label) {
+      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">' +
+        '<span style="color:' + p.sub + '">' + label + '</span>' +
+        '<span style="color:' + p.txt + ';font-weight:700;font-family:ui-monospace,monospace">' + g(k) + '</span></div>';
+    };
+    if (t.reason || (t.error && t.entry == null)) {
+      return '<div style="margin:2px 8px 10px;padding:10px 12px;border:1px solid ' + p.line +
+        ';border-radius:10px;background:' + p.btn + ';font-size:11.5px;color:' + p.mut + '">' +
+        '<b style="color:' + p.txt + '">' + sym + '</b> — ' + (t.reason || t.error) +
+        '<div style="margin-top:8px;font-size:10px">' + _fullLink(sym) + '</div></div>';
+    }
+    var vch = t.verdict ? '<span style="margin-left:8px;font-size:9.5px;font-weight:800;padding:2px 6px;' +
+      'border-radius:6px;border:1px solid ' + p.line + ';color:' + p.mut + '">' + t.verdict + '</span>' : '';
+    return '<div style="margin:2px 8px 10px;padding:10px 12px;border:1px solid ' + p.line +
+      ';border-radius:10px;background:' + p.btn + '">' +
+      '<div style="font-weight:800;color:' + p.txt + ';margin-bottom:6px;font-size:12px">' + sym +
+        ' · Trade card' + vch + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;font-size:11.5px">' +
+        pair("entry", "ENTRY") + pair("lot_size", "LOT SIZE") +
+        pair("target", "TARGET") + pair("reward", "REWARD") +
+        pair("sl", "SL") + pair("risk", "RISK") +
+        pair("rr", "R:R") + pair("cmp", "PRICE") +
+      '</div>' +
+      '<div style="margin-top:7px;font-size:9.5px;color:' + p.sub + ';line-height:1.5">' +
+        (t.basis || "") + (t.as_of ? (' · pivots ' + t.as_of) : '') + '</div>' +
+      '<div style="margin-top:6px;font-size:10px">' + _fullLink(sym) + '</div>' +
+    '</div>';
+  }
+
   function open(symbol, opts) {
     if (!symbol) return;
     opts = opts || {};
@@ -723,6 +916,8 @@
     document.getElementById("scorrChartHL").textContent = "";
     document.addEventListener("keydown", _esc);
     _tf = "3M";
+    _tab = "chart"; _peers = null; _peerOpen = null;   // cc#845: every open starts on Chart
+    _setTab("chart");
     _ensureLib(function (ok) {
       if (!ok) { document.getElementById("scorrChartMsg").textContent = "Chart library failed to load."; _paintChrome(); return; }
       _probeFutures(_sym).then(function () { _load(_tf); });
@@ -737,6 +932,7 @@
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
     _ilLines = []; _vwapLast = null; _vpocLast = null;   // cc#807 (price lines are owned by _series, removed with it)
     _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
+    _tab = "chart"; _peers = null; _peerOpen = null;   // cc#845
     if (_full) _toggleFull(false);          // cc#779: never leave the wrapper stuck full-viewport
     var vp = document.getElementById("scorrVerdictPop"); if (vp) vp.remove();   // cc#779
     var fx = document.getElementById("scorrChartFx"); if (fx && fx.parentNode) fx.parentNode.removeChild(fx);   // cc#750: rebuilt fresh on next open

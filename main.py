@@ -105,6 +105,7 @@ from screeners_endpoints import router as screeners_router   # cc#824 predefined
 from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided CIO tree + telemetry
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
+from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
 from v13_presets_endpoints import router as v13_presets_router
 from mf_pipeline import router as mf_pipeline_router   # cc#466: V15 MF Intelligence data layer
 from galaxy_endpoints import router as galaxy_router
@@ -449,6 +450,7 @@ app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report whit
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip*
+app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
