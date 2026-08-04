@@ -46,7 +46,7 @@ MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections, traffic-light per section.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"digest_daily","description":"Daily Digest V3 — the full digest, same payload as the /digest page (cc#851).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
@@ -160,7 +160,7 @@ async def _call_tool(name, args):
             if args.get("symbols"): _p["symbols"] = ",".join(args["symbols"]) if isinstance(args["symbols"], list) else args["symbols"]
             r = await client.post(f"{BASE_URL}/api/admin/restate_symbols", params=_p, headers=h); return r.json()
         elif name == "run_diagnosis": r = await client.get(f"{BASE_URL}/api/diagnosis"); return r.json()
-        elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/daily"); return r.json()
+        elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/v3"); return r.json()   # cc#851: repointed off the retired v2.3 builder
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
         elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum",True)}, headers=h); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days",180)}); return r.json()
