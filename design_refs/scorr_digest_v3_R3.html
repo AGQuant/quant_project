@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorr · Daily Digest V3 R3 — DESIGN REFERENCE (static data)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!--
+  DESIGN REFERENCE R3 — NOT APP CODE. Founder-approved 04-Aug-2026.
+  R3 vs R2: heat strip rebuilt as a COMPACT HORIZONTAL COLOUR-BOX RUN — flush tiles, no pill chrome,
+  small muted name + small day %, thin dividers between category groups, colour intensity carries
+  magnitude. Everything else unchanged from R2.
+  CC (cc#853): port this markup + CSS VERBATIM into scorr_digest_v3.html. KEEP your existing data
+  bindings — do not replace the live file wholesale, merge the shell and bind the values.
+  All numbers below are a hardcoded DB snapshot from 04-Aug-2026 06:45 IST.
+-->
+<style>
+:root{
+  --bg:#0A0F1E; --panel:#0E1526; --panel2:#131C31; --raise:#18233C;
+  --line:#1E2A44; --line2:#2A3A5C;
+  --tx:#E6EDF7; --tx2:#9DAEC8; --tx3:#64748B;
+  --cy:#22D3EE; --gr:#34D399; --rd:#F87171; --am:#FBBF24; --vi:#A78BFA;
+  --grDim:rgba(52,211,153,.14); --rdDim:rgba(248,113,113,.14); --amDim:rgba(251,191,36,.13);
+  --f-d:'Sora',system-ui,sans-serif; --f-m:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;padding:0 0 60px}
+.wrap{max-width:1220px;margin:0 auto;padding:0 20px}
+
+/* ── LEDGER HEAD ───────────────────────────────── */
+.head{border-bottom:1px solid var(--line);background:
+  radial-gradient(1200px 300px at 15% -60%,rgba(34,211,238,.10),transparent 70%),var(--panel);
+  padding:18px 0 0}
+.headtop{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.brand{font-size:11px;letter-spacing:.32em;color:var(--tx3);font-weight:600}
+.brand b{color:var(--cy)}
+h1{font-size:30px;font-weight:800;letter-spacing:-.03em;line-height:1.05}
+h1 span{color:var(--cy)}
+.dateline{font-family:var(--f-m);font-size:11.5px;color:var(--tx2);letter-spacing:.04em}
+.clockbox{margin-left:auto;text-align:right;display:flex;align-items:center;gap:14px}
+.clock{font-family:var(--f-m);font-size:22px;font-weight:600;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums}
+.clock small{font-size:10px;color:var(--tx3);letter-spacing:.16em;display:block;margin-top:-2px}
+.mkt{border:1px solid var(--am);color:var(--am);background:var(--amDim);
+  padding:5px 11px;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:.14em}
+.mkt.open{border-color:var(--gr);color:var(--gr);background:var(--grDim)}
+
+/* SESSION RAIL — signature element */
+.rail{position:relative;margin:22px 0 0;padding:0 0 16px}
+.railline{position:relative;height:3px;background:var(--line);border-radius:2px}
+.railfill{position:absolute;inset:0 auto 0 0;width:14.2%;
+  background:linear-gradient(90deg,rgba(34,211,238,.25),var(--cy));border-radius:2px}
+.railnow{position:absolute;top:50%;left:14.2%;transform:translate(-50%,-50%);
+  width:11px;height:11px;border-radius:50%;background:var(--cy);
+  box-shadow:0 0 0 4px rgba(34,211,238,.18),0 0 16px rgba(34,211,238,.55)}
+.tick{position:absolute;top:-6px;width:1px;height:15px;background:var(--line2)}
+.tlab{position:absolute;top:20px;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.tlab .t{font-family:var(--f-m);font-size:10.5px;color:var(--tx2);font-weight:500;display:block}
+.tlab .l{font-size:9px;letter-spacing:.12em;color:var(--tx3);text-transform:uppercase}
+.tlab.hot .t{color:var(--am)} .tlab.hot .l{color:var(--am);opacity:.75}
+.tlab.now .t{color:var(--cy)} .tlab.now .l{color:var(--cy)}
+.railpins{display:flex;gap:8px;margin-top:44px;flex-wrap:wrap}
+.pin{font-family:var(--f-m);font-size:10.5px;padding:4px 9px;border-radius:3px;
+  border:1px solid var(--line2);color:var(--tx2);background:var(--panel2)}
+.pin b{color:var(--tx);font-weight:600}
+.pin.warn{border-color:rgba(251,191,36,.4);color:var(--am);background:var(--amDim)}
+
+/* ── SECTION SHELL ─────────────────────────────── */
+section{margin-top:26px}
+.sh{display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.snum{font-family:var(--f-m);font-size:10px;color:var(--tx3);border:1px solid var(--line2);
+  width:22px;height:22px;display:grid;place-items:center;border-radius:3px;flex:none}
+.st{font-size:15px;font-weight:700;letter-spacing:-.01em}
+.badge{font-family:var(--f-m);font-size:9.5px;letter-spacing:.13em;padding:3px 8px;border-radius:3px;
+  border:1px solid;font-weight:600}
+.b-live{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
+.b-eod{color:var(--cy);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.09)}
+.b-static{color:var(--tx3);border-color:var(--line2)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--gr);display:inline-block;
+  margin-right:5px;animation:pulse 2.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.asof{margin-left:auto;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)}
+.asof b{color:var(--tx2);font-weight:500}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.read{font-size:12.5px;color:var(--tx2);padding:10px 14px;border-top:1px solid var(--line);
+  background:var(--panel2);line-height:1.55}
+.read b{color:var(--tx);font-weight:600}
+.read .tag{font-family:var(--f-m);font-size:9.5px;letter-spacing:.14em;color:var(--cy);
+  margin-right:9px;font-weight:600}
+
+/* ── THE READ (hero) ───────────────────────────── */
+.hero{background:linear-gradient(135deg,var(--panel2),var(--panel));
+  border:1px solid var(--line2);border-radius:7px;padding:20px 22px;margin-top:24px;
+  position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--gr),var(--cy))}
+.hlab{font-family:var(--f-m);font-size:10px;letter-spacing:.28em;color:var(--cy);font-weight:600}
+.hbody{font-size:16px;line-height:1.62;margin-top:9px;max-width:78ch;color:#DCE6F5;font-weight:300}
+.hbody b{font-weight:600;color:#fff}
+.hstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+  margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.hs{background:var(--panel);padding:11px 14px}
+.hs .k{font-size:9.5px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.hs .v{font-family:var(--f-m);font-size:19px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+.hs .n{font-size:10.5px;color:var(--tx3);margin-top:1px}
+
+/* ── HEAT STRIP · compact horizontal colour-box run (R3) ── */
+.striprow{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.striprow:last-child{border-bottom:none}
+.slab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
+  border-right:1px solid var(--line);background:var(--panel2)}
+.tiles{display:flex;flex:1;flex-wrap:wrap}
+.tile{flex:1 1 0;min-width:64px;padding:6px 7px 7px;text-align:center;
+  border-right:1px solid rgba(10,15,30,.55);transition:filter .12s}
+.tile:last-child{border-right:none}
+.tile:hover{filter:brightness(1.4)}
+.tile .n{font-size:8.5px;letter-spacing:.04em;color:var(--tx2);opacity:.72;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.tile .c{font-family:var(--f-m);font-size:11px;font-weight:600;margin-top:1px;
+  font-variant-numeric:tabular-nums;line-height:1.2}
+.gap{flex:none;width:1px;background:var(--line2);margin:4px 0}
+.g3{background:rgba(52,211,153,.30)} .g2{background:rgba(52,211,153,.18)} .g1{background:rgba(52,211,153,.08)}
+.r3{background:rgba(248,113,113,.30)} .r2c{background:rgba(248,113,113,.18)} .r1c{background:rgba(248,113,113,.08)}
+.fl{background:rgba(148,163,184,.07)}
+.pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
+.eodnote{padding:6px 11px;background:rgba(251,191,36,.05);border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:9.5px;color:var(--am);letter-spacing:.02em}
+
+/* ── PIVOT LADDER ──────────────────────────────── */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.idx{padding:16px 18px}
+.idxhead{display:flex;align-items:baseline;gap:10px}
+.idxname{font-size:13px;font-weight:700;letter-spacing:.06em}
+.idxpx{font-family:var(--f-m);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em}
+.idxchg{font-family:var(--f-m);font-size:12.5px;font-weight:600}
+.idxsub{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);margin-top:2px}
+.ladder{margin-top:15px;position:relative}
+.rung{display:grid;grid-template-columns:34px 1fr 74px 56px;align-items:center;gap:9px;
+  padding:5px 0;border-bottom:1px dashed rgba(30,42,68,.75);font-family:var(--f-m);font-size:11px}
+.rung:last-child{border-bottom:none}
+.rung .k{font-size:9.5px;letter-spacing:.1em;color:var(--tx3);font-weight:600}
+.rung .bar{height:4px;border-radius:2px;background:var(--line);position:relative}
+.rung .bar i{position:absolute;inset:0 auto 0 0;border-radius:2px;display:block}
+.rung .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx)}
+.rung .d{text-align:right;font-size:10px;color:var(--tx3)}
+.rung.res .k{color:var(--rd)} .rung.res .bar i{background:rgba(248,113,113,.55)}
+.rung.sup .k{color:var(--gr)} .rung.sup .bar i{background:rgba(52,211,153,.55)}
+.rung.pp .k{color:var(--cy)} .rung.pp .bar i{background:rgba(34,211,238,.6)}
+.rung.cmp{background:rgba(34,211,238,.07);margin:2px -8px;padding:6px 8px;border-radius:4px;
+  border:1px solid rgba(34,211,238,.28)}
+.rung.cmp .k{color:var(--cy)}
+.rung.cmp .v{color:#fff;font-weight:600;font-size:12px}
+
+/* ── BREADTH / PCR ─────────────────────────────── */
+.three{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
+.mini{padding:14px 16px}
+.mk{font-size:10px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.mv{font-family:var(--f-m);font-size:28px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.mn{font-size:11px;color:var(--tx3);margin-top:2px}
+.adbar{display:flex;height:7px;border-radius:4px;overflow:hidden;margin-top:11px;background:var(--line)}
+.adbar i{display:block}
+.spark{display:flex;align-items:flex-end;gap:4px;height:44px;margin-top:11px}
+.spark i{flex:1;background:var(--line2);border-radius:2px 2px 0 0}
+.spark i.hi{background:rgba(34,211,238,.55)}
+.spark i.last{background:var(--cy)}
+.sparklab{display:flex;justify-content:space-between;font-family:var(--f-m);font-size:9px;
+  color:var(--tx3);margin-top:5px}
+
+/* ── RESULTS CHIPS ─────────────────────────────── */
+.chips{display:flex;flex-wrap:wrap;gap:7px;padding:14px 16px}
+.chip{font-family:var(--f-m);font-size:11px;padding:5px 10px;border-radius:3px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--tx);white-space:nowrap}
+.chip b{color:var(--cy);font-weight:600}
+.chip.more{color:var(--tx3);border-style:dashed}
+
+/* ── NEWS ──────────────────────────────────────── */
+.nrow{display:flex;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+.nrow:last-child{border-bottom:none}
+.sdot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
+.s-bull{background:var(--gr)} .s-bear{background:var(--rd)}
+.s-neu{background:var(--tx3)} .s-cau{background:var(--am)}
+.nh{font-size:13px;font-weight:600;line-height:1.4}
+.ns{font-size:11.5px;color:var(--tx3);margin-top:2px}
+.nsent{margin-left:auto;font-family:var(--f-m);font-size:9.5px;letter-spacing:.1em;color:var(--tx3);
+  flex:none;padding-top:2px}
+
+/* ── RESULTS TABLE ─────────────────────────────── */
+.rtab{width:100%;border-collapse:collapse}
+.rtab th{font-size:9.5px;letter-spacing:.15em;color:var(--tx3);text-transform:uppercase;
+  text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:600}
+.rtab th.r{text-align:right} .rtab th.c{text-align:center}
+.rtab td{padding:11px 14px;border-bottom:1px solid rgba(30,42,68,.6);vertical-align:top}
+.rtab tr:last-child td{border-bottom:none}
+.rtab tbody tr:hover{background:rgba(34,211,238,.035)}
+.rtab td.r{text-align:right} .rtab td.c{text-align:center;white-space:nowrap}
+.tk{font-family:var(--f-m);font-size:11.5px;font-weight:600;color:var(--cy);display:block;letter-spacing:.02em}
+.cn{font-size:11px;color:var(--tx3);display:block;margin-top:1px}
+.num{font-family:var(--f-m);font-size:11.5px;color:var(--tx2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rtab td b{font-size:12.5px;font-weight:600;display:block;line-height:1.35}
+.sub{font-size:11px;color:var(--tx3);display:block;margin-top:3px;line-height:1.45}
+.pend{font-size:11.5px;color:var(--tx3);font-style:italic}
+.pill{font-family:var(--f-m);font-size:9px;letter-spacing:.11em;padding:3px 8px;border-radius:3px;
+  border:1px solid;font-weight:600}
+.p-bull{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
+.p-cau{color:var(--am);border-color:rgba(251,191,36,.4);background:var(--amDim)}
+.p-neu{color:var(--tx2);border-color:var(--line2)}
+.p-pend{color:var(--tx3);border-color:var(--line2);border-style:dashed}
+.rfoot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);background:var(--panel2)}
+.rlink{margin-left:auto;color:var(--cy)}
+@media(max-width:700px){.rtab th:nth-child(2),.rtab td:nth-child(2){display:none}}
+
+/* ── FOOT ──────────────────────────────────────── */
+.foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
+@media(max-width:860px){
+  .two,.three{grid-template-columns:1fr}
+  h1{font-size:23px} .clockbox{width:100%;justify-content:flex-start;margin:8px 0 0}
+  .slab{width:42px} .hbody{font-size:14.5px} .tile{min-width:56px}
+}
+</style>
+</head>
+<body>
+
+<div class="head">
+ <div class="wrap">
+  <div class="headtop">
+   <div>
+     <div class="brand">SCORR <b>·</b> LEARN MORE. SCORE MORE.</div>
+     <h1>Daily <span>Digest</span></h1>
+     <div class="dateline">TUESDAY 04 AUG 2026 · SESSION 1 OF 5 · EXPIRY IN 3 SESSIONS</div>
+   </div>
+   <div class="clockbox">
+     <div class="mkt">◷ PRE-OPEN · 2H 29M TO BELL</div>
+     <div class="clock">06:46:12<small>IST · LIVE</small></div>
+   </div>
+  </div>
+
+  <div class="rail">
+    <div class="railline">
+      <div class="railfill"></div>
+      <div class="railnow"></div>
+      <div class="tick" style="left:0%"></div>
+      <div class="tick" style="left:14.2%"></div>
+      <div class="tick" style="left:32%"></div>
+      <div class="tick" style="left:60%"></div>
+      <div class="tick" style="left:88%"></div>
+      <div class="tick" style="left:100%"></div>
+      <div class="tlab" style="left:0%"><span class="t">06:00</span><span class="l">Feeds up</span></div>
+      <div class="tlab now" style="left:14.2%"><span class="t">06:46</span><span class="l">You are here</span></div>
+      <div class="tlab hot" style="left:32%"><span class="t">09:15</span><span class="l">Open</span></div>
+      <div class="tlab" style="left:60%"><span class="t">12:30</span><span class="l">Mid</span></div>
+      <div class="tlab hot" style="left:88%"><span class="t">15:15</span><span class="l">CAS starts</span></div>
+      <div class="tlab" style="left:100%"><span class="t">15:30</span><span class="l">Close</span></div>
+    </div>
+    <div class="railpins">
+      <span class="pin warn"><b>100</b> results today — heaviest of the season</span>
+      <span class="pin"><b>LIC OFS</b> non-retail opens</span>
+      <span class="pin"><b>Day 2</b> of closing auction</span>
+      <span class="pin">US closed <b>+1.48%</b> overnight</span>
+    </div>
+  </div>
+ </div>
+</div>
+
+<div class="wrap">
+
+<div class="hero">
+  <div class="hlab">THE READ · 04 AUG</div>
+  <div class="hbody">
+    Crude did the heavy lifting. Brent fell <b>7.3%</b> to $83.54 on Iran talks, and India took the gift —
+    Nifty closed <b>+1.60%</b> at 24,774 on breadth of <b>3.24</b>, the strongest advance-decline in six sessions.
+    Wall Street confirmed overnight with the Dow at a record and Nasdaq <b>+2.13%</b>.
+    Two cautions sit under the rally: Monday's close came from the new auction, not continuous trade —
+    Nifty printed +1.60% while Sensex managed +0.70%, so <b>the 24,774 level is mechanically soft</b>.
+    And <b>100 companies report today</b>, led by Bharti Airtel and ONGC. Gap-up into a heavy results day
+    with a questionable reference close argues for confirmation over anticipation.
+  </div>
+  <div class="hstats">
+    <div class="hs"><div class="k">Nifty pivot</div><div class="v">24,501</div><div class="n">Close sits 273 above PP</div></div>
+    <div class="hs"><div class="k">First resistance</div><div class="v pos">25,048</div><div class="n">+1.10% room to R1</div></div>
+    <div class="hs"><div class="k">Breadth ADR</div><div class="v pos">3.24</div><div class="n">535 adv / 165 dec</div></div>
+    <div class="hs"><div class="k">India VIX</div><div class="v">11.93</div><div class="n">No fear priced in</div></div>
+    <div class="hs"><div class="k">Results today</div><div class="v" style="color:var(--am)">100</div><div class="n">67 reported yesterday</div></div>
+  </div>
+</div>
+
+<section>
+  <div class="sh">
+    <span class="snum">01</span><span class="st">Global Tape</span>
+    <span class="badge b-live"><span class="dot"></span>LIVE · 12 OF 17</span>
+    <span class="asof">day / week · as of <b>04 Aug 06:45:56 IST</b></span>
+  </div>
+  <div class="card">
+    <div class="striprow"><div class="slab">DAY</div><div class="tiles">
+      <div class="tile g2"><div class="n">Dow</div><div class="c pos">+1.32</div></div>
+      <div class="tile g3"><div class="n">Nasdaq</div><div class="c pos">+2.13</div></div>
+      <div class="tile g2"><div class="n">S&amp;P 500</div><div class="c pos">+1.48</div></div>
+      <div class="tile g2"><div class="n">DAX</div><div class="c pos">+1.45</div></div>
+      <div class="tile r1c"><div class="n">FTSE</div><div class="c neg">−0.10</div></div>
+      <div class="tile r2c"><div class="n">Nikkei</div><div class="c neg">−0.94</div></div>
+      <div class="gap"></div>
+      <div class="tile r2c"><div class="n">India VIX</div><div class="c neg">+1.45</div></div>
+      <div class="tile g1"><div class="n">US VIX</div><div class="c pos">−0.81</div></div>
+      <div class="gap"></div>
+      <div class="tile r3"><div class="n">Brent</div><div class="c neg">−7.30</div></div>
+      <div class="tile r2c"><div class="n">WTI</div><div class="c neg">−1.04</div></div>
+      <div class="tile r1c"><div class="n">Gold</div><div class="c neg">−0.46</div></div>
+      <div class="tile r1c"><div class="n">Silver</div><div class="c neg">−0.25</div></div>
+      <div class="tile g1"><div class="n">Nat Gas</div><div class="c pos">+0.62</div></div>
+      <div class="gap"></div>
+      <div class="tile g1"><div class="n">DXY</div><div class="c pos">+0.24</div></div>
+      <div class="tile fl"><div class="n">USDINR</div><div class="c flat">−0.05</div></div>
+      <div class="tile fl"><div class="n">Bitcoin</div><div class="c flat">+0.05</div></div>
+    </div></div>
+    <div class="striprow"><div class="slab">WEEK</div><div class="tiles">
+      <div class="tile g2"><div class="n">Dow</div><div class="c pos">+1.85</div></div>
+      <div class="tile g3"><div class="n">Nasdaq</div><div class="c pos">+3.94</div></div>
+      <div class="tile g3"><div class="n">S&amp;P 500</div><div class="c pos">+2.53</div></div>
+      <div class="tile g3"><div class="n">DAX</div><div class="c pos">+2.52</div></div>
+      <div class="tile g1"><div class="n">FTSE</div><div class="c pos">+0.70</div></div>
+      <div class="tile r3"><div class="n">Nikkei</div><div class="c neg">−1.81</div></div>
+      <div class="gap"></div>
+      <div class="tile g3"><div class="n">India VIX</div><div class="c pos">−5.81</div></div>
+      <div class="tile g3"><div class="n">US VIX</div><div class="c pos">−15.05</div></div>
+      <div class="gap"></div>
+      <div class="tile r3"><div class="n">Brent</div><div class="c neg">−9.24</div></div>
+      <div class="tile r3"><div class="n">WTI</div><div class="c neg">−3.37</div></div>
+      <div class="tile g3"><div class="n">Gold</div><div class="c pos">+2.22</div></div>
+      <div class="tile g2"><div class="n">Silver</div><div class="c pos">+1.91</div></div>
+      <div class="tile g3"><div class="n">Nat Gas</div><div class="c pos">+2.71</div></div>
+      <div class="gap"></div>
+      <div class="tile r2c"><div class="n">DXY</div><div class="c neg">−1.40</div></div>
+      <div class="tile g1"><div class="n">USDINR</div><div class="c pos">−0.54</div></div>
+      <div class="tile r1c"><div class="n">Bitcoin</div><div class="c neg">−0.75</div></div>
+    </div></div>
+    <div class="eodnote">◷ EOD ONLY — DAX, FTSE, Shanghai, Nikkei, India VIX carry 03 Aug close. No intraday feed exists for these five; they will not move until their own market opens.</div>
+    <div class="read"><span class="tag">READ</span>
+      <b>Risk-on, led by the oil crash.</b> US VIX down 15% on the week is the cleanest signal on the tape —
+      fear is being unwound, not just prices marked up. Brent −9.2% weekly hands India a current-account gift
+      worth roughly $12bn annualised per $10 of crude. Watch the divergence: Asia and Europe still price
+      Monday's caution while the US has already repriced.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">02</span><span class="st">Index Ladders</span>
+    <span class="badge b-eod">EOD CLOSE · PIVOTS FOR TODAY</span>
+    <span class="asof">close <b>03 Aug 15:30</b> · pivots <b>04 Aug 01:45</b></span>
+  </div>
+  <div class="two">
+    <div class="card idx">
+      <div class="idxhead">
+        <span class="idxname">NIFTY 50</span>
+        <span class="idxpx">24,774.30</span>
+        <span class="idxchg pos">+1.60%</span>
+      </div>
+      <div class="idxsub">H 24,774.30 · L 24,515.15 · closed AT the high (auction print)</div>
+      <div class="ladder">
+        <div class="rung res"><span class="k">R2</span><span class="bar"><i style="width:100%"></i></span><span class="v">25,320.77</span><span class="d">+2.21%</span></div>
+        <div class="rung res"><span class="k">R1</span><span class="bar"><i style="width:62%"></i></span><span class="v">25,047.53</span><span class="d">+1.10%</span></div>
+        <div class="rung cmp"><span class="k">CMP</span><span class="bar"><i style="width:0"></i></span><span class="v">24,774.30</span><span class="d">—</span></div>
+        <div class="rung pp"><span class="k">PP</span><span class="bar"><i style="width:38%"></i></span><span class="v">24,501.07</span><span class="d">−1.10%</span></div>
+        <div class="rung sup"><span class="k">S1</span><span class="bar"><i style="width:62%"></i></span><span class="v">24,227.83</span><span class="d">−2.21%</span></div>
+        <div class="rung sup"><span class="k">S2</span><span class="bar"><i style="width:100%"></i></span><span class="v">23,681.37</span><span class="d">−4.41%</span></div>
+      </div>
+    </div>
+    <div class="card idx">
+      <div class="idxhead">
+        <span class="idxname">BANK NIFTY</span>
+        <span class="idxpx">58,247.95</span>
+        <span class="idxchg pos">+1.36%</span>
+      </div>
+      <div class="idxsub">H 58,247.95 · L 57,465.95 · also closed at the high</div>
+      <div class="ladder">
+        <div class="rung res"><span class="k">R2</span><span class="bar"><i style="width:100%"></i></span><span class="v">59,298.32</span><span class="d">+1.80%</span></div>
+        <div class="rung res"><span class="k">R1</span><span class="bar"><i style="width:50%"></i></span><span class="v">58,773.13</span><span class="d">+0.90%</span></div>
+        <div class="rung cmp"><span class="k">CMP</span><span class="bar"><i style="width:0"></i></span><span class="v">58,247.95</span><span class="d">—</span></div>
+        <div class="rung pp"><span class="k">PP</span><span class="bar"><i style="width:50%"></i></span><span class="v">57,722.77</span><span class="d">−0.90%</span></div>
+        <div class="rung sup"><span class="k">S1</span><span class="bar"><i style="width:100%"></i></span><span class="v">57,197.58</span><span class="d">−1.80%</span></div>
+        <div class="rung sup"><span class="k">S2</span><span class="bar"><i style="width:100%"></i></span><span class="v">56,147.22</span><span class="d">−3.61%</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="read" style="border-top:none"><span class="tag">READ</span>
+      Both indices closed <b>exactly at their session high</b> — an artefact of the new closing auction, not
+      buying pressure carried into the bell. Treat 24,774 as a soft reference: the honest range is
+      <b>PP 24,501 to R1 25,048</b>, and a gap-up open that fails to hold above 24,774 in the first hour
+      is the tell that Monday's print was mechanical.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">03</span><span class="st">Internals</span>
+    <span class="badge b-live"><span class="dot"></span>LIVE FROM 09:15</span>
+    <span class="asof">breadth &amp; PCR as of <b>03 Aug 15:50 IST</b></span>
+  </div>
+  <div class="three">
+    <div class="card mini">
+      <div class="mk">Advance / Decline</div>
+      <div class="mv pos">3.24</div>
+      <div class="mn">535 advancing · 165 declining · 6-session high</div>
+      <div class="adbar">
+        <i style="width:76.4%;background:var(--gr)"></i>
+        <i style="width:23.6%;background:var(--rd)"></i>
+      </div>
+      <div class="sparklab"><span>29 Jul 2.89</span><span>30 Jul 0.82</span><span>31 Jul 1.85</span><span>03 Aug 3.24</span></div>
+    </div>
+    <div class="card mini">
+      <div class="mk">Nifty PCR</div>
+      <div class="mv">0.93</div>
+      <div class="mn">Down from 1.04 — calls being written into strength</div>
+      <div class="spark">
+        <i class="hi" style="height:78%"></i><i style="height:62%"></i><i class="hi" style="height:72%"></i>
+        <i class="hi" style="height:73%"></i><i class="hi" style="height:74%"></i><i class="last" style="height:65%"></i>
+      </div>
+      <div class="sparklab"><span>27 Jul</span><span>03 Aug</span></div>
+    </div>
+    <div class="card mini">
+      <div class="mk">Bank Nifty PCR</div>
+      <div class="mv">0.76</div>
+      <div class="mn">Flat vs Friday · below 1.0 for six sessions</div>
+      <div class="spark">
+        <i style="height:22%"></i><i style="height:47%"></i><i style="height:40%"></i>
+        <i style="height:45%"></i><i style="height:53%"></i><i class="last" style="height:53%"></i>
+      </div>
+      <div class="sparklab"><span>27 Jul</span><span>03 Aug</span></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="read" style="border-top:none"><span class="tag">READ</span>
+      Breadth and options are telling different stories. <b>ADR 3.24 is genuine participation</b> — three
+      stocks up for every one down, not an index carried by four heavyweights. But PCR falling to 0.93
+      while price rallies means call writers are selling into the move. Broad buying, capped expectations:
+      supportive for stock selection, less so for an index breakout.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">04</span><span class="st">Reporting Today</span>
+    <span class="badge b-static">CALENDAR</span>
+    <span class="asof"><b>100</b> companies · 67 reported yesterday</span>
+  </div>
+  <div class="card">
+    <div class="chips">
+      <span class="chip"><b>BHARTIARTL</b> Bharti Airtel</span>
+      <span class="chip"><b>ONGC</b> Oil &amp; Natural Gas</span>
+      <span class="chip"><b>PIDILITIND</b> Pidilite</span>
+      <span class="chip"><b>BSE</b> BSE Ltd</span>
+      <span class="chip"><b>MARICO</b> Marico</span>
+      <span class="chip"><b>NYKAA</b> FSN E-Commerce</span>
+      <span class="chip"><b>BHARTIHEXA</b> Bharti Hexacom</span>
+      <span class="chip"><b>NHPC</b> NHPC</span>
+      <span class="chip more">+92 more</span>
+    </div>
+    <div class="read"><span class="tag">READ</span>
+      The heaviest single day of the season. <b>ONGC reports into a 7% crude crash</b> — the realisation
+      question matters more than the profit line. Bharti Airtel carries index weight and ARPU direction.
+      Yesterday's 67 included DLF, SBI Funds and Torrent Power, all now polished in the results desk.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">05</span><span class="st">What Moved</span>
+    <span class="badge b-live"><span class="dot"></span>LIVE FEED</span>
+    <span class="asof">domestic · newest <b>04 Aug 05:52 IST</b></span>
+  </div>
+  <div class="card">
+    <div class="nrow"><span class="sdot s-bull"></span><div><div class="nh">Sensex jumps 544 points, Nifty ends above 24,750 as investors gain Rs 4 lakh crore</div><div class="ns">Fourth straight winning session as crude slid and IT stocks led the buying.</div></div><span class="nsent">BULLISH</span></div>
+    <div class="nrow"><span class="sdot s-neu"></span><div><div class="nh">LIC offer for sale opens August 4 as government sells up to 6.5%</div><div class="ns">Non-retail bidding begins Tuesday, retail Wednesday.</div></div><span class="nsent">NEUTRAL</span></div>
+    <div class="nrow"><span class="sdot s-bull"></span><div><div class="nh">IREDA profit rises 37% to Rs 339 crore with stable asset quality</div><div class="ns">Sequential decline of 31% tempers a strong annual comparison.</div></div><span class="nsent">BULLISH</span></div>
+    <div class="nrow"><span class="sdot s-neu"></span><div><div class="nh">DLF profit rises 4% to Rs 794 crore as revenue halves</div><div class="ns">Booking timing distorts the topline; profitability holds.</div></div><span class="nsent">NEUTRAL</span></div>
+    <div class="nrow"><span class="sdot s-neu"></span><div><div class="nh">SBI Funds profit rises 3% to Rs 873 crore in first post-listing quarter</div><div class="ns">Weak market sentiment caps growth for India's largest fund house.</div></div><span class="nsent">NEUTRAL</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">06</span><span class="st">Global Events</span>
+    <span class="badge b-live"><span class="dot"></span>LIVE FEED</span>
+    <span class="asof">overnight wrap</span>
+  </div>
+  <div class="card">
+    <div class="nrow"><span class="sdot s-bear"></span><div><div class="nh">Emerging-market stocks fall as Korean chipmakers reverse</div><div class="ns">The first EM decline in three days traces to Seoul's unwind.</div></div><span class="nsent">BEARISH</span></div>
+    <div class="nrow"><span class="sdot s-bear"></span><div><div class="nh">Burned Korean retail investors vow to quit the Kospi</div><div class="ns">July's reversal crushed leveraged traders in Seoul.</div></div><span class="nsent">BEARISH</span></div>
+    <div class="nrow"><span class="sdot s-cau"></span><div><div class="nh">China stocks slide as AI selloff hits chipmakers; Alibaba rallies</div><div class="ns">A new Alibaba model claims parity with global leaders even as the sector corrects.</div></div><span class="nsent">CAUTIOUS</span></div>
+    <div class="nrow"><span class="sdot s-neu"></span><div><div class="nh">Hong Kong launches offshore Chinese government bond futures</div><div class="ns">A third attempt to open China's rate market to global hedgers.</div></div><span class="nsent">NEUTRAL</span></div>
+    <div class="read"><span class="tag">READ</span>
+      North Asia is the weak link — Korea unwinding leverage and China's AI names correcting, while the US
+      makes records. That divergence is precisely the flow condition that sent
+      <b>Rs 6,732 crore of FPI money into India in July</b>, the first net-positive month since the war.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sh">
+    <span class="snum">07</span><span class="st">Yesterday's Results · Scored</span>
+    <span class="badge b-static">67 REPORTED · TOP 10 BY MCAP</span>
+    <span class="asof">summaries from <b>polished desk</b> · 03 Aug</span>
+  </div>
+  <div class="card">
+    <table class="rtab">
+      <thead><tr><th>Company</th><th class="r">M-Cap</th><th>The quarter</th><th class="c">Read</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tk">DLF</span><span class="cn">DLF Ltd</span></td><td class="r num">1.63L cr</td>
+          <td><b>Profit +4% to Rs 794 cr, revenue −46%</b><span class="sub">Booking timing distorts the topline; profitability holds.</span></td>
+          <td class="c"><span class="pill p-neu">NEUTRAL</span></td></tr>
+        <tr><td><span class="tk">SBIFUNDS</span><span class="cn">SBI Funds Mgmt</span></td><td class="r num">1.20L cr</td>
+          <td><b>Profit +3.3% to Rs 873 cr</b><span class="sub">First print since listing — flat market caps growth for India's largest fund house.</span></td>
+          <td class="c"><span class="pill p-neu">NEUTRAL</span></td></tr>
+        <tr><td><span class="tk">TORNTPOWER</span><span class="cn">Torrent Power</span></td><td class="r num">71.2k cr</td>
+          <td><span class="pend">Reported — summary not yet on the desk</span></td>
+          <td class="c"><span class="pill p-pend">PENDING</span></td></tr>
+        <tr><td><span class="tk">JSL</span><span class="cn">Jindal Stainless</span></td><td class="r num">60.6k cr</td>
+          <td><span class="pend">Reported — summary not yet on the desk</span></td>
+          <td class="c"><span class="pill p-pend">PENDING</span></td></tr>
+        <tr><td><span class="tk">UPL</span><span class="cn">UPL Ltd</span></td><td class="r num">51.0k cr</td>
+          <td><span class="pend">Reported — summary not yet on the desk</span></td>
+          <td class="c"><span class="pill p-pend">PENDING</span></td></tr>
+        <tr><td><span class="tk">ATHERENERG</span><span class="cn">Ather Energy</span></td><td class="r num">49.7k cr</td>
+          <td><b>Loss narrows to Rs 51 cr on stronger sales</b><span class="sub">Lands in the month EV registrations hit a record — but still funds growth externally.</span></td>
+          <td class="c"><span class="pill p-bull">BULLISH</span></td></tr>
+        <tr><td><span class="tk">ESCORTS</span><span class="cn">Escorts Kubota</span></td><td class="r num">34.5k cr</td>
+          <td><b>Profit +4.4% to Rs 386 cr on 28% revenue</b><span class="sub">Profit growing at a sixth of the revenue pace — margin, not demand, is the constraint.</span></td>
+          <td class="c"><span class="pill p-cau">CAUTIOUS</span></td></tr>
+        <tr><td><span class="tk">IREDA</span><span class="cn">Indian Renewable Energy</span></td><td class="r num">33.6k cr</td>
+          <td><b>Profit +37% to Rs 339 cr, asset quality stable</b><span class="sub">Down 31% sequentially — stable asset quality matters more in a young green book.</span></td>
+          <td class="c"><span class="pill p-bull">BULLISH</span></td></tr>
+        <tr><td><span class="tk">NXST</span><span class="cn">Nexus Select Trust</span></td><td class="r num">25.3k cr</td>
+          <td><b>NOI +11% to Rs 510 cr, consumption +17%</b><span class="sub">Retail leasing at a four-year high — a landlord's market for the mall REITs.</span></td>
+          <td class="c"><span class="pill p-bull">BULLISH</span></td></tr>
+        <tr><td><span class="tk">KANSAINER</span><span class="cn">Kansai Nerolac</span></td><td class="r num">15.9k cr</td>
+          <td><b>Profit +5%, approves Rs 601 cr expansion</b><span class="sub">Committing capex in a cost-pressured quarter signals confidence in demand durability.</span></td>
+          <td class="c"><span class="pill p-bull">BULLISH</span></td></tr>
+      </tbody>
+    </table>
+    <div class="rfoot">
+      <span>4 bullish · 1 cautious · 2 neutral · 3 awaiting desk</span>
+      <span class="rlink">L2 detailed analysis available for 255 companies this season →</span>
+    </div>
+    <div class="read"><span class="tag">READ</span>
+      <b>Financiers beat, manufacturers squeezed.</b> IREDA and SBI Funds delivered on the lending and
+      fee side while Escorts grew revenue 28% and converted almost none of it — the margin story of this
+      quarter is input costs and freight, not demand. DLF's headline revenue collapse is a recognition
+      artefact, not a business one. Nothing here contradicts the risk-on tape.
+    </div>
+  </div>
+</section>
+
+<div class="foot">
+  <span>SCORR DAILY DIGEST V3 · R3 DESIGN REFERENCE</span>
+  <span>17 global · 2 domestic · 100 results · 9 stories</span>
+  <span>SOURCES: global_indices · raw_prices · v8_paper_pivots · adr_daily · pcr_daily · earnings_calendar · polished_news · result_analysis_v2</span>
+  <span>ALL TIMES IST</span>
+</div>
+
+</div>
+</body>
+</html>
