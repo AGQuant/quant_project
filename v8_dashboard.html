@@ -880,7 +880,13 @@ const BASKETS=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results","Global Indices","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];   // cc#294: Position News = 14 · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17 (open=high/open=low scanner)
+  "Results","Global Indices","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];
+// cc#294: Position News = 14 (retired cc#847) · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17
+// cc#850: index 12 relabelled "Forthcoming Results" -> "Results". LABEL ONLY — panel id (panel12),
+// the i===12 lazy-load branch, loadForthcoming()/FR_LOADED and the /api route behind it are all
+// unchanged, so no deep link or bookmark breaks. Nothing else keys off this string: selectTab
+// matches button text against this same array, and the in-panel "Loading Forthcoming Results..."
+// copy is body text, not nav.
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
 // ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
