@@ -142,7 +142,10 @@ def fetch_universe_reco_news(slot: int = 0, conn=None, max_symbols=None):
         conn = _conn()
     try:
         import news_tagger
-        import position_news as pn
+        # cc#847: Position News is retired, so the three identity helpers this job actually used
+        # (_name_map / _split_title / _target_is_primary) now live in news_identity.py. Same
+        # functions, moved verbatim — this job's behaviour is unchanged.
+        import news_identity as pn
 
         universe = _active_universe(conn)
         if not universe:

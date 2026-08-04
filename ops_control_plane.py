@@ -122,7 +122,7 @@ SCHEDULE_SEED: List[Dict[str, Any]] = [
     ("fetch_global", "daily 05:15", "scheduler._bg_fetch_global", "global indices freshness"),
     ("fetch_market_news", "daily 05:20 + market-hours", "scheduler._bg_fetch_market_news", "market_news freshness"),
     ("fetch_stock_news", "daily ~00:30", "scheduler._bg_fetch_stock_news", "stock news freshness"),
-    ("fetch_position_news", "daily", "scheduler._bg_fetch_position_news", "position news freshness"),
+    # cc#847: fetch_position_news retired with the Position News feature.
     ("tag_news", "daily 05:30", "scheduler._bg_tag_news", "news tagged"),
     ("fetch_global_intraday", "market-hours", "scheduler._bg_fetch_global_intraday", "global intraday freshness"),
     ("fu_sync", "Mon 05:40", "scheduler._bg_fu_sync", "futures universe sync"),

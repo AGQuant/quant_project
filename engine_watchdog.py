@@ -136,11 +136,9 @@ SEED_CHECKS = [
      "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-5 LIMIT 1",
      "cadence": "daily_trading", "sla_hours": 24, "severity": "high",
      "suggested_action": "ops-extraction produced no new sector_ops_metrics in >24h while companies reported — check the doc-fetch/extraction cycle (cc#595/596) + the CC extraction batch off doc_texts."},
-    {"check_id": "position_news_data", "job_name": "bg_fetch_position_news", "check_type": "data",
-     "output_table": "position_news", "ts_column": "fetched_at", "scope_filter": None,
-     "precondition_sql": "SELECT 1 FROM (SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL) p LIMIT 1",
-     "cadence": "daily", "sla_hours": 30, "severity": "high",
-     "suggested_action": "position_news stale while positions are open — the revived 3-slot fetch (07:35/13:35/19:35) stalled; check bg_fetch_position_news + position_news.fetch_and_alert (cc#611; 06-Jul unwiring class)."},
+    # cc#847: position_news_data check REMOVED with the feature. Leaving a freshness check
+    # on a deliberately-retired job would alert "stale" high-severity every day, forever —
+    # the watchdog must not cry about a job that was killed on purpose.
     {"check_id": "fundamentals_t1_data", "job_name": "bg_ops_metrics_t1", "check_type": "data",
      "output_table": "fundamentals_history", "ts_column": "scraped_at", "scope_filter": "section<>'shareholding'",
      "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-3 LIMIT 1",

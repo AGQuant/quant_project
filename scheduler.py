@@ -2351,7 +2351,8 @@ def _bg_feed_daily_log():
 
 # cc#217: _bg_fetch_company_news / _bg_company_news_wave2 / _bg_company_news_retry
 # removed — the 500-company Google waves were retired (cc#207) and fully deleted here.
-# Position News (open V8 + SmartGain symbols) is the successor: _bg_fetch_position_news.
+# Position News (open V8 + SmartGain symbols) was the successor; it too is retired (cc#847).
+# Per-symbol company news now rides the single raw_news/polished_news funnel.
 
 def _bg_cleanup_news():
     """cc#192: daily news retention — unpolished raw_news dies at 48h, polished (and its raw
@@ -2458,23 +2459,9 @@ def _bg_fetch_stock_news():
     except Exception as e:
         log.error(f"fetch_stock_news: {e}")
 
-def _bg_fetch_position_news():
-    """cc#611 (revive): dedicated per-open-position Google News (V8 OPEN ∪ SmartGain net) -> the
-    position_news table, 3 slots/day. The wiring was dropped ~06-Jul (cc#244 retired the old slot as
-    "superseded") and the tab silently starved to ~1 item. Restored here. Calls fetch_and_alert so a
-    silent stall (open positions but nothing fetched in >24h) raises an ops_log alert; also runs the
-    7-day purge. OFF the fyers feed -> safe any hour, every day (news breaks on weekends too)."""
-    try:
-        import position_news
-        with _conn() as conn:
-            res = position_news.fetch_and_alert(conn)
-            try:
-                position_news.purge_position_news(conn)
-            except Exception:
-                pass
-        log.info(f"fetch_position_news: {res}")
-    except Exception as e:
-        log.error(f"fetch_position_news: {e}")
+# cc#847: _bg_fetch_position_news REMOVED — Position News is retired (tab, fetcher,
+# endpoints, table read path). The 3 slots/day (05:35/13:35/19:35) ran ~1,800 external
+# fetches to land ~20 rows for a surface that no longer exists.
 
 def _bg_fetch_universe_reco_news(slot: int = 0):
     """cc#787 FUNNEL 2 coverage: per-stock Google News across the ACTIVE FUTURES UNIVERSE
@@ -3543,11 +3530,7 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_universe_reco_news, 0)
         if h == 21 and m == 10:
             _spawn(_bg_fetch_universe_reco_news, 1)
-        # cc#611: revived dedicated per-open-position Google News, 3 slots/day (07:35/13:35/19:35 IST),
-        # EVERY day (positions held over weekends still get fresh news). Off the fyers feed -> any hour
-        # is safe; alerting + the cc#599 watchdog freshness check catch a silent stall like the 06-Jul one.
-        if m == 35 and h in (5, 13, 19):               # cc#622 C: slot 1 07:35 -> 05:35 (slots 2/3 unchanged)
-            _spawn(_bg_fetch_position_news)
+        # cc#847: the 3 position-news slots (05:35/13:35/19:35) are GONE with the feature.
         if _is_trading_day(today) and ((h == 5 and m == 30) or (m == 20 and h in (16, 22))):
             _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger. cc#622 C: morning slot 07:20 -> 05:30
         # cc#291: global intraday now runs 24x7 (was 06:00-23:30) — its symbols are commodities/

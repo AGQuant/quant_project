@@ -873,7 +873,7 @@ const EP={
   vixIntraday:"/api/v8/indiavix_intraday",     // cc#266
   niftyPcr:"/api/pcr/intraday_hourly?underlying=NIFTY",         // cc#290
   bankniftyPcr:"/api/pcr/intraday_hourly?underlying=BANKNIFTY", // cc#290
-  positionNews:"/api/news/position",                           // cc#294
+  // cc#847: positionNews endpoint retired.
   v10Positions:"/api/v10/positions",                           // cc#536: read-only V10 open-positions bridge
 };
 // cc#502: buy_s1_bounce (panel3) + sell_overbought (panel6) retired -- panel ids kept dormant,
@@ -885,7 +885,7 @@ const BASKETS=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results","Global Indices","Position News","Matrix","V9 Pairs","OH-OL"];   // cc#294: Position News = 14 · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17 (open=high/open=low scanner)
+  "Forthcoming Results","Global Indices","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];   // cc#294: Position News = 14 · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17 (open=high/open=low scanner)
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
 // ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
@@ -900,7 +900,7 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // Rules" tab; cc#510 (founder decision, 18-Jul-2026) removed it again -- the per-basket i-button
 // popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt specs, so the dedicated
 // tab was redundant. renderBasketRules() deleted; index 3 reverts to its cc#502 dormant state.
-const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
+const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,15];   // cc#847: Position News (14) removed — panel14 dormant, label slot kept so Matrix(15)/V9(16)/OH-OL(17) panel ids do not shift   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
 
 // -- Basket info --------------------------------------------------------------
 // cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce RETIRED (ring-fenced
@@ -1641,24 +1641,8 @@ function _qaClose(){const s=document.getElementById('qaStrip');if(s)s.classList.
 })();
 function _qaTs(s){const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;}
 
-async function qaNews(sym){
-  _qaModal('Position News · '+sym,'Google News scoped to open positions (120h gate)','<div class="empty">Loading…</div>');
-  try{
-    const d=await getJSON(EP.positionNews);
-    const groups=(d&&d.groups)||[];
-    const g=groups.find(x=>String(x.symbol||'').toUpperCase()===sym.toUpperCase());
-    const items=g?(g.items||[]).slice():[];
-    if(!items.length){_qaSetBody('<div class="empty">No polished news for '+sym+' yet.</div>');return;}
-    items.sort((a,b)=>_qaTs(b.published_at||b.polished_at)-_qaTs(a.published_at||a.polished_at));
-    let html='';
-    items.forEach(it=>{const ts=it.published_at||it.polished_at;const age=ts?newsAgo(ts):'';
-      html+=`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
-        `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
-        (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
-        `<div style="font-size:11px;color:var(--dim)">${newsEsc(it.source||'')}${age?' · '+newsEsc(age):''}</div></div>`;});
-    _qaSetBody(html);
-  }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">News failed to load.</div>');}
-}
+// cc#847: qaNews() deleted — it read /api/news/position and had no callers (cc#620 dropped
+// N from the quick-action strip). Removing it with the endpoint avoids a dead fetch path.
 
 async function qaGvm(sym){
   _qaModal('GVM Rating · '+sym,'Snapshot — G/V/M pillars · verdict · 180d Δ · segment rank','<div class="empty">Loading…</div>');
@@ -2127,7 +2111,7 @@ function selectTab(i){
   // any other tab is selected so it never polls in the background.
   if(i===13){loadGlobalIndices();if(!GI_TIMER)GI_TIMER=setInterval(loadGlobalIndices,5*60*1000);}
   else if(GI_TIMER){clearInterval(GI_TIMER);GI_TIMER=null;}
-  if(i===14&&!PN_LOADED)loadPositionNews();   // cc#294: Position News lazy-load on first click
+  // cc#847: Position News lazy-load removed with the tab.
   // cc#275: VIX is now a popout overlay (openVix/closeVix), no longer tab-toggled here.
 }
 
@@ -3219,62 +3203,6 @@ function renderGlobalIndices(data){
     <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Each tile shows its own last tick · <span style="color:var(--grn)">●</span> live (≤15m) · <span style="color:var(--amber)">PREV CLOSE</span> = market closed / stale · US indices live ≈19:00-01:40 IST · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 
-// ---- Position News tab (cc#294) — relocated from scorr_news.html. Lazy-load on first tab click
-// (same pattern as loadForthcoming/loadGlobalIndices). Reuses /api/news/position UNCHANGED and the
-// locked Domestic-News card format (bold headline + full_summary body + source·time·symbol meta),
-// grouped by symbol, no detail-page link. newsAgo()/newsEsc() are the existing dashboard helpers.
-let PN_LOADED=false;
-async function loadPositionNews(){
-  const el=document.getElementById('panel14');if(!el)return;
-  el.innerHTML='<div class="loading">Loading Position News...</div>';
-  try{const d=await getJSON(EP.positionNews);PN_LOADED=true;el.innerHTML=renderPositionNews(d);}
-  catch(e){el.innerHTML=`<div class="err">Position News failed: ${e.message}</div>`;}
-}
-// cc#422: ONE flat chronological feed across ALL open-position symbols (supersedes cc#415 per-symbol
-// grouping). Every item flattened, sorted by published_at DESC (newest first regardless of symbol),
-// with Today / Yesterday / date separators when the list crosses a day boundary. Each item carries a
-// SYMBOL chip. Source = /api/news/position (V8 paper OPEN ∪ SmartGain holdings) — unchanged.
-function _pnDayLabel(ts){
-  const d=new Date(ts);if(isNaN(d.getTime()))return'';
-  const ist=new Date(d.getTime()+(5*60+30)*60000);                 // published_at is UTC ISO -> IST date
-  const now=new Date(Date.now()+(5*60+30)*60000);
-  const itemD=Date.UTC(ist.getUTCFullYear(),ist.getUTCMonth(),ist.getUTCDate());
-  const todayD=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
-  const diff=Math.round((todayD-itemD)/86400000);
-  if(diff<=0)return'Today';
-  if(diff===1)return'Yesterday';
-  return String(ist.getUTCDate()).padStart(2,'0')+' '+MON[ist.getUTCMonth()];
-}
-// cc#753: remember which positions the user expanded, for the session (survives tab re-renders).
-let PN_EXPANDED=new Set();
-function pnExpandAll(open){
-  const el=document.getElementById('panel14');if(!el)return;
-  el.querySelectorAll('.pncard').forEach(c=>{
-    const bd=c.querySelector('.rcol-body'),ca=c.querySelector('.rcol-caret'),sym=c.getAttribute('data-sym');
-    if(bd)bd.style.display=open?'block':'none';
-    if(ca)ca.innerHTML=open?'▾':'▸';
-    if(sym){if(open)PN_EXPANDED.add(sym);else PN_EXPANDED.delete(sym);}
-    c.setAttribute('data-open',open?'1':'0');
-  });
-}
-function renderPositionNews(d){
-  // cc#753 COLLAPSED-BY-DEFAULT: one compact row per open position (symbol + GVM tag + result-status
-  // chip + date), each expandable IN PLACE to the SAME shared result card (cc#620 chain: structured
-  // result -> polished news -> raw one-liner). Dense grid so ~21 positions fit in ~2 screens; Expand /
-  // Collapse All at top; expansion remembered for the session in PN_EXPANDED.
-  const syms=(d&&d.open_symbols)||[];
-  const _openN=(d&&d.open_positions!=null)?d.open_positions:syms.length;
-  const meta=`<div class="ptitle" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Position News <span class="ct">${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain) · tap a row to expand</span>`
-    +`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn" onclick="pnExpandAll(true)">Expand all</button><button class="btn" onclick="pnExpandAll(false)">Collapse all</button></span></div>`;
-  if(!syms.length)return meta+`<div class="empty">No open positions.</div>`;
-  const cid=s=>'pncard-'+String(s).replace(/[^A-Za-z0-9]/g,'_');
-  let html=meta+`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;align-items:start;margin-top:8px">`;
-  syms.forEach(s=>{html+=`<div class="pncard" id="${cid(s)}" data-sym="${newsEsc(s)}" data-open="0" style="border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden;align-self:start"></div>`;});
-  html+=`</div>`;
-  // populate each row async once the grid is in the DOM (shared collapsible renderer -> /api/results/card).
-  setTimeout(()=>{if(window.ScorrRCard&&ScorrRCard.renderCollapsible)syms.forEach(s=>{const el=document.getElementById(cid(s));if(el)ScorrRCard.renderCollapsible(el,s,{expanded:PN_EXPANDED.has(s),onToggle:o=>{if(o)PN_EXPANDED.add(s);else PN_EXPANDED.delete(s);}});});},0);
-  return html;
-}
 
 // cc#293: day change vs the PREVIOUS trading day's last value = the last series point whose date
 // is earlier than today (IST). Shared by the India VIX / NIFTY PCR / BankNifty PCR rows.
