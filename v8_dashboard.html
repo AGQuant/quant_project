@@ -996,7 +996,9 @@ const MATRIX_ROWS=[
   {label:"50-DMA distance", map:{buy_momentum:"dma_50_score"}},
   {label:"200-DMA distance",map:{buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
   {sec:"RSI & momentum"},
-  {label:"Weekly RSI (FINAL heavy)",map:{buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
+  // cc#854: sell_momentum dropped from this row — its true weekly RSI filter is REMOVED (spec
+  // 15366). buy_momentum (twr 70-85) and sell_reversal (twr<=45) still carry theirs.
+  {label:"Weekly RSI (FINAL heavy)",map:{buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi"}},
   {label:"Monthly RSI",     map:{buy_reversal:"rsi_month",buy_momentum:"rsi_month",sell_momentum:"rsi_month"}},
   {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",sell_reversal:"mom_2d",sell_momentum:"mom_2d"}},
   {label:"Hourly momentum", map:{buy_momentum:"hourly_pct"}},

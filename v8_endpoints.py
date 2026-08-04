@@ -24,9 +24,10 @@ synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
     (last 3 days), day_1d[-2,0], dma_20/50/200<0, week_index_52<50, sector_week<0, mom_2d[-4,-1],
     month_return>=-10, room-to-S1/S2 dynamic target, FINAL wRSI<=45. Dynamic S1/S2 target, 1:1
     mirror stop.
-  sell_momentum  SELL_MOMENTUM_V4  (_write_sell_momentum_v4_qualified): 9 filters -- rsi_month<40,
-    mom_2d[-4,-2], dma_200<=2, week_return[-10,-0.5], sector_week<0, week_index_52[20,60],
-    CMP<PP, S2-clearance>=3%, FINAL wRSI<=40. Dynamic S2 target, 1:1 mirror stop.
+  sell_momentum  SELL_MOMENTUM_V4_N5I (_write_sell_momentum_v4_qualified): 8 filters, no heavy
+    FINAL stage (cc#854, spec 15366) -- rsi_month<40, mom_2d[-4,-1], dma_200<=2,
+    week_return[-10,-0.5], sector_week<0, week_index_52[20,60], CMP<PP, S2-clearance>=3%.
+    The true weekly RSI stage was REMOVED 04-Aug. Fixed -/+3.0% exits, true 1:1.
 Generic funnel_detail stages emit survivors/killed (dashboard aliases for passes/fails).
 Slot architecture (cc#502, 18-Jul-2026) SLOT_ARCHITECTURE_V3.0.0: ring-fenced SO/S1B pools removed,
 standard pool only, 20 total slots:

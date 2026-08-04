@@ -40,10 +40,11 @@ strict-intersection survivors.
     week_index_52<50, sector_week<0 strict, mom_2d [-4,-1], month_return>=-10, FINAL heavy
     true_weekly_rsi<=45. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror, RAW (no market
     gate, no kill-switch), standard SELL slot pool.
-  SELL_MOMENTUM V4 (_write_sell_momentum_v4_qualified, renamed from V3): same 9 conditions as
-    V3 with twr<=40 (was <=45) and mom_2d [-4,-2] (was [-4,-1]) -- mRSI<40 strict, dma_200<=+2,
-    week_return [-10,-0.5], sector_week<0 strict, CMP<PP, week_index_52 [20,60], S2-clearance
-    >=3%. Exits fixed +/-3.0%, standard SELL slot pool.
+  SELL_MOMENTUM V4_N5I (_write_sell_momentum_v4_qualified): 8 conditions, ALL CHEAP (cc#854,
+    spec 15366) -- mRSI<40 strict, mom_2d [-4,-1], dma_200<=+2, week_return [-10,-0.5],
+    sector_week<0 strict, CMP<PP, week_index_52 [20,60], S2-clearance >=3%. The true weekly RSI
+    FINAL stage was REMOVED 04-Aug (it passed 0 of 208 and took the funnel to zero); mom_2d
+    restored from the drifted [-4,-2] to the spec [-4,-1]. Exits fixed +/-3.0%, standard SELL pool.
 
 Slot architecture (cc#502): SO/S1B ring-fenced pools removed -- ONE standard pool, 20 slots
 total (was 24; the 4 freed slots are NOT redistributed):
@@ -1765,18 +1766,33 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
 
 def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date: date,
                                       gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#502 SELL_MOMENTUM_V4 (renamed from V3). Dedicated strict-AND handler — sell_momentum
-    is REMOVED from the standard score-gate loop. Strict AND of 9:
-      (1) true_weekly_rsi <= 40     (TRUE calendar weekly — basket-local, never shared rsi_weekly;
-                                     tightened from <=45)
-      (2) rsi_month       < 40      (deeply weak monthly)
-      (3) mom_2d in [-4, -2]        (recent down-momentum, not a crash; tightened from [-4,-1])
-      (4) dma_200         <= +2     (below / near the 200-DMA)
-      (5) week_return in [-10, -0.5](weak week, not capitulation)
-      (6) sector_week     < 0       (weak sector)
-      (7) CMP < PP                  (below the rolling-5d pivot)
-      (8) week_index_52 in [20, 60] (mid 52-week band)
-      (9) S2-clearance (CMP-S2)/CMP >= 3%  (support sits below the 3% target so it can't block the fall)
+    """cc#854 SELL_MOMENTUM_V4_N5I (was cc#502 V4). Dedicated strict-AND handler — sell_momentum
+    is REMOVED from the standard score-gate loop. Strict AND of 8:
+      (1) rsi_month       < 40      (deeply weak monthly — now the ONLY slow-timeframe filter)
+      (2) mom_2d in [-4, -1]        (recent down-momentum, not a crash)
+      (3) dma_200         <= +2     (below / near the 200-DMA)
+      (4) week_return in [-10, -0.5](weak week, not capitulation)
+      (5) sector_week     < 0       (weak sector)
+      (6) CMP < PP                  (below the rolling-5d pivot)
+      (7) week_index_52 in [20, 60] (mid 52-week band)
+      (8) S2-clearance (CMP-S2)/CMP >= 3%  (support sits below the 3% target so it can't block the fall)
+
+    cc#854 (founder-locked 04-Aug, spec session_log id=15366 — supersedes id=2901 for the FILTER
+    SET ONLY). Two changes, both to undo drift that had made this basket unfireable:
+
+      TRUE WEEKLY RSI IS REMOVED ENTIRELY. It was the terminal stage and on 04-Aug it passed 0 of
+      208, taking the funnel 1 -> 0. Over the prior 14 sessions at <=45 it was near-inert (identical
+      counts on 10 of 14 days); at <=40 it is a hard stop. Founder chose REMOVAL, explicitly not a
+      relaxation back to <=45. The shared _true_weekly_rsi() helper stays — buy_momentum,
+      buy_reversal and sell_reversal still use it; only this basket's call is gone, which also
+      removes a per-symbol heavy query from every 5-min tick.
+
+      mom_2d RESTORED to the spec band [-4, -1]. It had drifted to [-4, -2].
+
+    RISK ACCEPTED BY FOUNDER (15366): without the weekly gate this is a 2-day momentum short with
+    monthly RSI as the only slow-timeframe filter. Watch WR against the 64% 1-yr backtest baseline;
+    below ~55% over 30+ live trades, the weekly gate is the first thing to reconsider — at 45, not 40.
+
     Exits FIXED +/-3.0% (true 1:1) via _auto_paper_entry's sell_momentum branch; max hold 15 trading
     days; standard SELL slot pool + all guards. Independent per-filter funnel counts (cc#364 style)."""
     basket, side = "sell_momentum", "SELL"
@@ -1802,38 +1818,34 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
     def _s2c_ok(s):        # (CMP-S2)/CMP >= 3%  (fails if no s2)
         return s["_s2c_pct"] is not None and s["_s2c_pct"] >= 3.0
 
-    # cc#380: INDEPENDENT per-filter pass counts across `base` (cc#364 convention). true_weekly_rsi
-    # (heavy) is counted only over the strict-intersection of the 8 cheap gates.
+    # cc#380: INDEPENDENT per-filter pass counts across `base` (cc#364 convention). cc#854: every
+    # filter is cheap now, so all 8 rows are counted over the full universe — there is no heavy
+    # stage left to count over a survivor subset.
     funnel = {"_universe": len(base)}
-    funnel["rsi_month"]     = sum(1 for s in base if _rm_lt40(s))                              # (2)
-    funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -2.0))     # (3)
-    funnel["dma_200"]       = sum(1 for s in base if _passes(s.get("dma_200"), None, 2.0))     # (4)
-    funnel["week_return"]   = sum(1 for s in base if _passes(s.get("week_return"), -10.0, -0.5))  # (5)
-    funnel["sector_week"]   = sum(1 for s in base if _sw_lt0(s))                               # (6)
-    funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), 20.0, 60.0))  # (8)
-    funnel["cmp_lt_pp"]     = sum(1 for s in base if s["_cmp"] < s["_pp"])                     # (7)
-    funnel["s2_clearance"]  = sum(1 for s in base if _s2c_ok(s))                               # (9)
+    funnel["rsi_month"]     = sum(1 for s in base if _rm_lt40(s))                              # (1)
+    funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -1.0))     # (2) cc#854: -2 -> -1 (spec 2901)
+    funnel["dma_200"]       = sum(1 for s in base if _passes(s.get("dma_200"), None, 2.0))     # (3)
+    funnel["week_return"]   = sum(1 for s in base if _passes(s.get("week_return"), -10.0, -0.5))  # (4)
+    funnel["sector_week"]   = sum(1 for s in base if _sw_lt0(s))                               # (5)
+    funnel["cmp_lt_pp"]     = sum(1 for s in base if s["_cmp"] < s["_pp"])                     # (6)
+    funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), 20.0, 60.0))  # (7)
+    funnel["s2_clearance"]  = sum(1 for s in base if _s2c_ok(s))                               # (8)
     surv = [s for s in base
             if _rm_lt40(s)
-            and _passes(s.get("mom_2d"), -4.0, -2.0)
+            and _passes(s.get("mom_2d"), -4.0, -1.0)
             and _passes(s.get("dma_200"), None, 2.0)
             and _passes(s.get("week_return"), -10.0, -0.5)
             and _sw_lt0(s)
             and _passes(s.get("week_index_52"), 20.0, 60.0)
             and s["_cmp"] < s["_pp"]
             and _s2c_ok(s)]
-    funnel["_stage8_survivors"] = len(surv)   # denominator for the stage-9 true_weekly_rsi row
-    log.info(f"sell_momentum_v4: {len(surv)} after 8-condition cheap pre-filter")
-
-    qualified = []
-    for s in surv:
-        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
-        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr <= 40.0:               # (1)
-            qualified.append(s)
-    funnel["true_weekly_rsi"] = len(qualified)
+    # cc#854: the true_weekly_rsi FINAL stage is GONE. The 8 cheap gates ARE the whole basket now,
+    # so the strict-AND survivors are the qualifiers — there is no second pass and no
+    # `_stage8_survivors` denominator, because there is no stage 9 left to divide into.
+    # `true_weekly_rsi` is deliberately absent from `funnel`, which is what drops its funnel row.
+    qualified = surv
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"sell_momentum_v4: {len(qualified)} qualified (true_weekly_rsi<=40) [cc#502]")
+    log.info(f"sell_momentum_v4: {len(qualified)} qualified (8 filters, cc#854 N5I) ")
 
     try:
         with conn.cursor() as cur:
@@ -1851,7 +1863,9 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
         sym = s["symbol"]
         cmp = s.get("_cmp")
         snap = {
-            "true_weekly_rsi": s.get("_true_weekly_rsi"),
+            # cc#854: true_weekly_rsi dropped — the filter is removed, so the value is no longer
+            # computed. Emitting a null here would read as "measured and empty" rather than
+            # "no longer part of this basket".
             "rsi_month":       s.get("rsi_month"),
             "mom_2d":          s.get("mom_2d"),
             "dma_200":         s.get("dma_200"),
@@ -1860,8 +1874,8 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
             "week_index_52":   s.get("week_index_52"),
             "s2_clearance_pct": s.get("_s2c_pct"),
             "target": round(round(cmp, 2) * 0.97, 2), "stop": round(round(cmp, 2) * 1.03, 2),
-            "filter_score": 9, "filter_total": 9,
-            "spec": "SELL_MOMENTUM_V4 cc#502",
+            "filter_score": 8, "filter_total": 8,
+            "spec": "SELL_MOMENTUM_V4_N5I cc#854 (session_log 15366)",
         }
         try:
             with conn.cursor() as cur:
@@ -2076,17 +2090,18 @@ BASKET_FILTERS = {
         {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",      "min": None,  "max": None, "type": "custom"},
         {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 45", "min": None,  "max": 45.0, "type": "band", "heavy": True, "denom_key": "_stage9_survivors"},
     ],
-    # SELL_MOMENTUM_V4 (cc#502) — 8 cheap gates + heavy true_weekly_rsi<=40 FINAL stage.
+    # SELL_MOMENTUM_V4_N5I (cc#854, spec 15366) — 8 cheap gates, NO heavy FINAL stage.
     "sell_momentum": [
         {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "< 40",   "min": None,  "max": 40.0, "type": "band", "strict": True},
-        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -2",  "min": -4.0,  "max": -2.0, "type": "band"},
+        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1",  "min": -4.0,  "max": -1.0, "type": "band"},
         {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "<= 2",   "min": None,  "max": 2.0,  "type": "band"},
         {"key": "week_return",    "label": "week return",  "cond_min": ">= -10", "cond_max": "<= -0.5","min": -10.0, "max": -0.5, "type": "band"},
         {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
         {"key": "week_index_52",  "label": "52w index",    "cond_min": ">= 20",  "cond_max": "<= 60",  "min": 20.0,  "max": 60.0, "type": "band"},
         {"key": "cmp_lt_pp",      "label": "CMP < PP",     "cond_min": "",       "cond_max": "",       "min": None,  "max": None, "type": "custom"},
         {"key": "s2_clearance",   "label": "S2 clearance", "cond_min": ">= 3%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
-        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 40",  "min": None,  "max": 40.0, "type": "band", "heavy": True, "denom_key": "_stage8_survivors"},
+        # cc#854: the true weekly RSI row is REMOVED — 9 filters become 8. Nothing else in this
+        # list changes, and the sell_reversal block above keeps ITS twr<=45 row untouched.
     ],
     # BUY_MOMENTUM_V3 (cc#502) — 6 cheap HARD gates + heavy true_weekly_rsi[70,85] FINAL stage.
     # (A separate SCORE>=7-of-10 V2-band layer also applies; it is a second layer, not a funnel gate.)
