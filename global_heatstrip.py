@@ -181,10 +181,30 @@ def build_strip(cur) -> Dict[str, Any]:
             "eod_only": sym in EOD_ONLY,
             "inverted": inv,
             "sessions_available": len(rows),
+            # ── cc#849 merge fields ───────────────────────────────────────────────────────────
+            # tick_ts: the RAW naive-IST tick, handed over untouched so the client can recompute
+            # the age on every paint. A server-computed age would freeze at render time and start
+            # lying within a minute — and the per-tile age is the load-bearing capability of the
+            # tab being retired.
+            "tick_ts": str(lts) if lts else None,
+            "prev_close": prev_close,          # PREV CLOSE badge for markets that are shut
+            "quote_date": str(qdate) if qdate else None,
+            # 5m availability is decided by the founder-locked EOD_ONLY set, NOT by whether the
+            # feed happened to write a row in the last few minutes — a transient gap must not
+            # silently turn the 5m button off for a market that has a feed.
+            "has_intraday": sym not in EOD_ONLY,
         })
 
     order = {c: i for i, c in enumerate(CATEGORY_ORDER)}
     tiles.sort(key=lambda t: (order.get(t["category"], 99), t["name"] or t["symbol"]))
+
+    # ── cc#849: the five capabilities the retiring Global Indices tab carries ─────────────────
+    cat_counts: Dict[str, int] = {}
+    for t in tiles:
+        cat_counts[t["category"]] = cat_counts.get(t["category"], 0) + 1
+    stamps = [t["tick_ts"] for t in tiles if t.get("tick_ts")]
+    freshest = max(stamps) if stamps else None
+
     return {
         "tiles": [t for t in tiles if not t["eod_only"]],
         "eod_tiles": [t for t in tiles if t["eod_only"]],
@@ -194,6 +214,16 @@ def build_strip(cur) -> Dict[str, Any]:
         "count": len(tiles),
         "live_ticks": len(live),
         "live_error": live_error,
+        "freshest_tick": freshest,
+        "category_counts": cat_counts,
+        # Honest disclosure, inherited verbatim in substance from the tab (cc#849 item (e)).
+        "disclosure": ("US indices tick live roughly 19:00–01:40 IST; outside that window they carry "
+                       "their last tick. US VIX is CBOE ^VIX — not the India VIX gate, which is the "
+                       "separate INDIAVIX tile."),
+        # Every tick timestamp in this payload is naive IST wall-clock (global_intraday.ts and
+        # intraday_prices.ts are both stored that way). Note that global_intraday.updated_at is
+        # naive UTC — the two must never be compared. Ages are computed against IST now.
+        "tick_tz": "Asia/Kolkata",
     }
 
 
@@ -291,6 +321,114 @@ def build_detail(cur, symbol: str) -> Dict[str, Any]:
         "eod_only": symbol in EOD_ONLY,
         "basis": "global_indices daily history" + (" + global_intraday" if series_kind == "intraday" else ""),
     }
+
+
+# ── cc#849 CHART SERIES — 5m / 1D / 1W / 1M ───────────────────────────────────────────────────
+# Feeds TradingView LIGHTWEIGHT CHARTS (v4.1.3, MIT), the library already vendored in this repo by
+# scorr_chart_card.js / v8_dashboard / v10_dashboard / scorr_holdings — reused, not a second lib.
+# Deliberately NOT the TradingView embeddable widget: that renders TradingView's own market data,
+# which would print a different Nikkei inside the drawer than the tile shows beside it — a second
+# source of truth, directly against the digest's per-tile-honesty thesis.
+#
+# THE ONE RULE HERE: DO NOT FABRICATE OHLC. global_indices carries price / prev_close / chg_pct and
+# NO open-high-low. So 1D/1W/1M are honest CLOSE LINES, never candles built by pretending
+# open=high=low=close. Only 5m is candles, because global_intraday genuinely stores OHLC.
+#
+# TIME BASIS. global_intraday.ts is naive IST wall-clock (verified: max ts sits ~2 min behind
+# NOW() AT TIME ZONE 'Asia/Kolkata', and ~-328 min against plain NOW()). Lightweight Charts plots
+# UNIX seconds on a UTC axis, so intraday bars are emitted as the IST wall-clock reinterpreted as
+# epoch seconds — which makes the rendered axis read IST, matching every other time on the page.
+# Daily/weekly/monthly use LWC business-day strings ('YYYY-MM-DD') and need no such handling.
+
+_TF = ("5m", "1D", "1W", "1M")
+_EPOCH_BASIS = "1970-01-01"
+
+
+def build_chart(cur, symbol: str, tf: str) -> Dict[str, Any]:
+    sym = (symbol or "").strip()
+    tf = (tf or "1D").strip()
+    if tf not in _TF:
+        return {"error": f"unsupported timeframe: {tf}", "timeframes": list(_TF)}
+
+    cur.execute("""SELECT name, category FROM global_indices WHERE symbol=%s
+                   ORDER BY quote_date DESC LIMIT 1""", (sym,))
+    head = cur.fetchone()
+    if not head:
+        return {"error": f"unknown symbol: {sym}"}
+    name, cat = head
+    common = {"symbol": sym, "name": name, "category": cat, "timeframe": tf,
+              "inverted": sym in INVERTED, "has_intraday": sym not in EOD_ONLY}
+
+    if tf == "5m":
+        # Never silently fall back to daily here. A disabled button plus a plain reason is the
+        # honest answer; a daily series relabelled "5m" is not.
+        if sym in EOD_ONLY:
+            return dict(common, kind="unavailable", bars=[], basis=None,
+                        reason="No intraday feed for this market — 5-minute candles are not available.")
+        cur.execute("""SELECT ts, open, high, low, close FROM global_intraday
+                       WHERE symbol=%s AND close IS NOT NULL ORDER BY ts""", (sym,))
+        bars = []
+        for ts, o, h, l, c in cur.fetchall():
+            cf = _f(c)
+            if cf is None:
+                continue
+            # Any missing leg degrades that ONE bar to a flat close, rather than dropping the bar
+            # or inventing a range.
+            bars.append({"time": int(ts.timestamp()) + _ist_shift(ts),
+                         "open": _f(o) if o is not None else cf,
+                         "high": _f(h) if h is not None else cf,
+                         "low": _f(l) if l is not None else cf,
+                         "close": cf})
+        return dict(common, kind="candles", bars=bars, count=len(bars),
+                    basis="5-minute candles from global_intraday OHLC (~8-day rolling window) · IST",
+                    depth_note="global_intraday keeps roughly 8 days of 5-minute bars.")
+
+    if tf == "1D":
+        cur.execute("""SELECT quote_date, price FROM global_indices
+                       WHERE symbol=%s AND price IS NOT NULL ORDER BY quote_date""", (sym,))
+        rows = cur.fetchall()
+        basis = "daily close from global_indices — close-line (no OHLC is stored for daily)"
+    elif tf == "1W":
+        cur.execute("""SELECT DISTINCT ON (date_trunc('week', quote_date))
+                              quote_date, price
+                       FROM global_indices WHERE symbol=%s AND price IS NOT NULL
+                       ORDER BY date_trunc('week', quote_date), quote_date DESC""", (sym,))
+        rows = sorted(cur.fetchall(), key=lambda r: r[0])
+        basis = "weekly close-line — last close of each ISO week, resampled from the daily series"
+    else:  # 1M
+        cur.execute("""SELECT DISTINCT ON (date_trunc('month', quote_date))
+                              quote_date, price
+                       FROM global_indices WHERE symbol=%s AND price IS NOT NULL
+                       ORDER BY date_trunc('month', quote_date), quote_date DESC""", (sym,))
+        rows = sorted(cur.fetchall(), key=lambda r: r[0])
+        basis = "monthly close-line — last close of each calendar month, resampled from the daily series"
+
+    bars = [{"time": str(d), "value": _f(p)} for d, p in rows if _f(p) is not None]
+    if not bars:
+        return dict(common, kind="unavailable", bars=[], basis=basis,
+                    reason=f"No daily history stored for {sym}.")
+    return dict(common, kind="line", bars=bars, count=len(bars), basis=basis)
+
+
+def _ist_shift(ts) -> int:
+    """Bars are stored as naive IST wall-clock. `datetime.timestamp()` on a naive value interprets
+    it in the SERVER's local zone, so the offset is corrected back out here — the number emitted is
+    the IST wall-clock read as epoch seconds, which is what makes the Lightweight Charts UTC axis
+    print IST. Deriving the correction rather than hardcoding 19800 keeps it right whether the
+    container runs on UTC or on IST."""
+    off = ts.astimezone().utcoffset()
+    return int(off.total_seconds()) if off else 0
+
+
+@router.get("/api/global/chart/{symbol:path}")
+def global_chart(symbol: str, tf: str = "1D"):
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            return build_chart(cur, symbol, tf)
+    except Exception as e:
+        log.exception("global chart failed")
+        return {"symbol": symbol, "timeframe": tf, "kind": "unavailable", "bars": [],
+                "error": f"{type(e).__name__}: {str(e)[:200]}"}
 
 
 @router.get("/api/global/heatstrip")

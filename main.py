@@ -452,7 +452,7 @@ app.include_router(hr_report_router)   # cc#398 Portfolio Health Report (report 
 app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report white-label PDF
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
-app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip*
+app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
 app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
 

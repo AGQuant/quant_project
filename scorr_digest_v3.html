@@ -221,10 +221,62 @@ section{margin-top:26px}
 .rfoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:10px;
   font-family:var(--f-m);font-size:10.5px;color:var(--tx2)}
 .rlink{color:var(--cy)}
+/* ── cc#849 GLOBAL TILES + CHART DRAWER ────────────── */
+.gcount{font-family:var(--f-m);font-size:9px;color:var(--tx2);border:1px solid var(--line2);
+  border-radius:8px;padding:1px 6px;margin-left:5px;letter-spacing:0}
+.gtile{cursor:pointer;transition:border-color .12s,background .12s}
+.gtile:hover,.gtile:focus{border-color:var(--cy);background:var(--raise);outline:none}
+.ldot{width:5px;height:5px;border-radius:50%;background:var(--gr);display:none;
+  margin-right:5px;vertical-align:middle;animation:pulse 2.2s infinite}
+.gtile.fresh .ldot{display:inline-block}
+.pcb{font-family:var(--f-m);font-size:8.5px;letter-spacing:.1em;color:var(--am);
+  border:1px solid rgba(251,191,36,.4);background:var(--amDim);border-radius:2px;
+  padding:1px 4px;margin-right:5px}
+
+.gdwrap{position:fixed;inset:0;z-index:90;display:none}
+.gdwrap.on{display:block}
+.gdscrim{position:absolute;inset:0;background:rgba(5,9,18,.72);backdrop-filter:blur(2px)}
+.gdpanel{position:absolute;right:0;top:0;bottom:0;width:min(640px,100%);background:var(--panel);
+  border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow-y:auto}
+.gdhead{display:flex;align-items:flex-start;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line);
+  background:var(--panel2);position:relative}
+.gdname{font-size:16px;font-weight:700;display:block;letter-spacing:-.01em}
+.gdsym{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);letter-spacing:.06em}
+.gdpx{margin-left:auto;text-align:right;padding-right:26px}
+.gdpx .big{font-size:19px;color:var(--tx);font-weight:600;display:block}
+.gdlegs{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:block;margin-top:3px}
+.gdage{font-family:var(--f-m);font-size:10px;color:var(--tx3);display:block;margin-top:3px}
+.gdx{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--tx3);
+  font-size:22px;line-height:1;cursor:pointer;padding:2px 6px}
+.gdx:hover{color:var(--tx)}
+.gdtabs{display:flex;gap:6px;padding:12px 18px 0}
+.gtf{font-family:var(--f-m);font-size:11px;padding:6px 14px;min-height:32px;border-radius:3px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--tx2);cursor:pointer}
+.gtf.on{background:var(--cy);border-color:var(--cy);color:#05131a;font-weight:600}
+.gtf.off{opacity:.38;cursor:not-allowed}
+#gdChart{height:300px;margin:12px 18px 0;position:relative}
+.gdbasis{font-family:var(--f-m);font-size:9.5px;color:var(--tx3);padding:7px 18px 0;line-height:1.5}
+.gdmsg{font-size:12px;color:var(--tx3);padding:22px 0;text-align:center}
+.gdrets{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:4px;overflow:hidden;margin:14px 18px 0}
+.gdr{background:var(--panel2);padding:9px 4px;text-align:center}
+.gdr .gk{display:block;font-family:var(--f-m);font-size:9px;letter-spacing:.1em;color:var(--tx3)}
+.gdr .gv{display:block;font-family:var(--f-m);font-size:11.5px;margin-top:3px}
+.gd52{display:flex;flex-wrap:wrap;gap:14px;padding:12px 18px 20px;font-size:11.5px;color:var(--tx3)}
+.gd52 b{color:var(--tx2);font-weight:600}
+
 @media(max-width:760px){
   .g2,.g3{grid-template-columns:1fr!important}
   .rtab{display:block;overflow-x:auto}
   .chips{flex-wrap:wrap}
+  .gdpanel{width:100%;border-left:none}          /* drawer full-width on mobile */
+  #gdChart{height:240px;margin:12px 12px 0}
+  .gdtabs{padding:12px 12px 0}
+  .gtf{flex:1;min-height:40px;padding:9px 0;text-align:center}   /* thumb-reachable */
+  .gdrets{grid-template-columns:repeat(4,1fr);margin:14px 12px 0}
+  .gdhead{padding:14px 12px}
+  .gdpx{margin-left:0;text-align:left;width:100%;padding-right:0}
+  .gdhead{flex-wrap:wrap}
 }
 
 </style>
@@ -252,6 +304,19 @@ section{margin-top:26px}
 </div>
 
 <div id="digest"><div class="card" style="margin-top:20px">Loading the ledger…</div></div>
+
+<!-- cc#849: tile-click chart drawer. Values in the head are read from the SAME tile object the
+     strip rendered, so the drawer can never disagree with the tile it was opened from. -->
+<div class="gdwrap" id="gdWrap" role="dialog" aria-modal="true" aria-label="Global chart">
+  <div class="gdscrim" onclick="gdClose()"></div>
+  <div class="gdpanel">
+    <div class="gdhead" id="gdHead"></div>
+    <div class="gdtabs" id="gdTabs"></div>
+    <div id="gdChart"></div>
+    <div class="gdbasis" id="gdBasis"></div>
+    <div id="gdRets"></div>
+  </div>
+</div>
 
 <div class="foot">
   <span>SCORR DAILY DIGEST V3</span>
@@ -312,33 +377,113 @@ function sh(n,title,tier,asof){
 }
 function read(t){ return t? '<div class="read"><span class="tag">READ</span>'+esc(t)+'</div>' : ''; }
 
+/* ── cc#849 GLOBAL SECTION = FULL MERGE OF THE GLOBAL INDICES TAB ──────────────────
+   The standalone tab is being retired into this section, so all five of its capabilities are
+   inherited here: freshest-tick header stamp, PER-TILE age in words + live dot, PREV CLOSE badge
+   for shut markets, per-category counts, and the honest disclosure line.
+
+   AGE IS COMPUTED CLIENT-SIDE, EVERY PAINT. The tiles come from markets on different clocks, so a
+   single section timestamp asserts something false. tick_ts is naive IST wall-clock (that is how
+   global_intraday.ts is stored — note its updated_at is UTC; the two are never mixed), and istNow()
+   below derives IST from the browser's UTC offset so the age is right on any machine's timezone. */
+function istNow(){ var n=new Date();
+  return new Date(n.getTime()+(n.getTimezoneOffset()*60000)+(5.5*3600000)); }
+function parseIST(s){ if(!s) return null;
+  var d=new Date(String(s).replace(' ','T')); return isNaN(d)?null:d; }
+/* Minutes between a naive-IST stamp and IST now. Both sides are read as wall-clock in the same
+   frame, so the browser's own zone cancels out. */
+function ageMin(tick){ var d=parseIST(tick); if(!d) return null;
+  var n=istNow();
+  var w=new Date(n.getFullYear(),n.getMonth(),n.getDate(),n.getHours(),n.getMinutes(),n.getSeconds());
+  return Math.floor((w-d)/60000); }
+function ageWords(m){
+  if(m==null) return '—';
+  if(m<1) return 'just now';
+  if(m<60) return m+'m ago';
+  if(m<1440){ var h=Math.floor(m/60); return h+'h ago'; }
+  var dd=Math.floor(m/1440); return dd===1?'1d ago':dd+'d ago';
+}
+var LIVE_DOT_MAX_MIN = 15;   /* the tab's own threshold for the live dot */
+
 function tapeTiles(tiles,level){
   return tiles.map(function(t){
     var v = level==='week'? t.week_chg_pct : t.day_chg_pct;
-    /* Per-tile as-of with TIME — bug 1 (965 mandates date AND time) and bug 2 (stale flagged). */
-    var stamp = level==='week' ? ('vs '+(t.week_base_date||'—')) : tIST(t.as_of);
-    return '<div class="chip"><span class="k">'+esc(t.name||t.symbol)+'</span>'+
+    var am = t.as_of_is_live ? ageMin(t.tick_ts) : null;
+    var fresh = (am!=null && am<=LIVE_DOT_MAX_MIN);
+    var stamp, badgeHtml='';
+    if(level==='week'){
+      stamp = 'vs '+(t.week_base_date||'—');
+    } else if(t.as_of_is_live){
+      stamp = ageWords(am);
+    } else {
+      /* PREV CLOSE badge with the tick time, for markets that are shut. */
+      stamp = tIST(t.as_of);
+      badgeHtml = '<span class="pcb">PREV CLOSE</span>';
+    }
+    return '<div class="chip gtile'+(fresh?' fresh':'')+'" data-sym="'+esc(t.symbol)+'" tabindex="0" '+
+      'role="button" aria-label="'+esc((t.name||t.symbol)+' — open chart')+'">'+
+      '<span class="k">'+(t.as_of_is_live?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</span>'+
       '<span class="mv">'+pcInv(v,t.inverted)+'</span>'+
-      '<span class="d">'+esc(stamp)+(t.as_of_is_live?'':' · EOD')+'</span></div>';
+      '<span class="d">'+badgeHtml+esc(stamp)+'</span></div>';
   }).join('');
+}
+
+/* Grouped by category with a per-group count — capability (d) of the retiring tab. */
+function tapeGroups(tiles,order,labels,counts){
+  var byCat={}; tiles.forEach(function(t){ (byCat[t.category]=byCat[t.category]||[]).push(t); });
+  var out='';
+  (order||[]).forEach(function(c){
+    var g=byCat[c]; if(!g||!g.length) return;
+    out += '<div class="grouplab">'+esc((labels||{})[c]||c)+
+           ' <span class="gcount">'+g.length+'</span></div>'+
+           '<div class="chips">'+tapeTiles(g,'day')+'</div>';
+  });
+  Object.keys(byCat).forEach(function(c){
+    if((order||[]).indexOf(c)>=0) return;
+    out += '<div class="grouplab">'+esc(c)+' <span class="gcount">'+byCat[c].length+'</span></div>'+
+           '<div class="chips">'+tapeTiles(byCat[c],'day')+'</div>';
+  });
+  return out;
 }
 
 function secTape(s){
   if(!s) return '';
   var live=s.tiles||[], eod=s.eod_tiles||[];
-  var h = sh('01','Global Tape',s.tier||'LIVE','two-level · day + rolling 5 sessions');
+  var fresh = s.freshest_tick ? ('freshest tick '+tIST(s.freshest_tick)+' IST') : 'no live tick';
+  var h = sh('01','Global Tape',s.tier||'LIVE',fresh);
   h += '<div class="card">';
-  h += '<div class="grouplab">DAY</div><div class="chips">'+tapeTiles(live,'day')+'</div>';
+  if(s.error||s.live_error){
+    h += '<div class="eodnote">Live ticks unavailable ('+esc(s.live_error||s.error)+
+         ') — tiles are showing their last stored close.</div>';
+  }
+  h += tapeGroups(live,s.category_order,s.category_label,s.category_counts);
   if(eod.length){
-    h += '<div class="grouplab" style="margin-top:12px">EOD ONLY · NO INTRADAY FEED</div>'+
+    h += '<div class="grouplab" style="margin-top:12px">EOD ONLY · NO INTRADAY FEED '+
+         '<span class="gcount">'+eod.length+'</span></div>'+
          '<div class="chips">'+tapeTiles(eod,'day')+'</div>'+
          '<div class="eodnote">'+esc(s.eod_note||'')+'</div>';
   }
   h += '<div class="grouplab" style="margin-top:14px">WEEK · ROLLING 5 SESSIONS</div>'+
        '<div class="chips">'+tapeTiles(live.concat(eod),'week')+'</div>';
+  if(s.disclosure) h += '<div class="eodnote">'+esc(s.disclosure)+'</div>';
   h += read(s.read)+'</div>';
   return '<section>'+h+'</section>';
 }
+
+/* Tiles re-render their own age every 30s so the words stay truthful between digest refreshes,
+   without re-fetching anything. */
+function refreshAges(){
+  var s=((D||{}).sections||{}).global_tape; if(!s) return;
+  var map={}; (s.tiles||[]).concat(s.eod_tiles||[]).forEach(function(t){ map[t.symbol]=t; });
+  document.querySelectorAll('#digest .gtile').forEach(function(el){
+    var t=map[el.getAttribute('data-sym')]; if(!t||!t.as_of_is_live) return;
+    var d=el.querySelector('.d'); if(!d||d.querySelector('.pcb')) return;
+    var am=ageMin(t.tick_ts);
+    d.textContent=ageWords(am);
+    el.classList.toggle('fresh',(am!=null&&am<=LIVE_DOT_MAX_MIN));
+  });
+}
+setInterval(refreshAges,30000);
 
 function secLadders(s){
   if(!s) return '';
@@ -444,6 +589,149 @@ function secRead(d){
        '<div class="eodnote">'+esc(m.note||'')+'</div></div>';
   return '<section>'+h+'</section>';
 }
+
+/* ── cc#849 TILE DRAWER: chart + the cc#842 return block ───────────────────────────
+   Library: TradingView LIGHTWEIGHT CHARTS 4.1.3 (MIT) — the SAME unpkg build already loaded by
+   scorr_chart_card.js and the V8/V10 dashboards, lazy-loaded and reused rather than adding a
+   second charting dependency. Deliberately NOT the TradingView widget/datafeed: that renders
+   TradingView's own market data and would print a different Nikkei in the drawer than the tile
+   shows beside it. Every number here comes from our DB, so drawer and tile always agree. */
+var LWC_SRC="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
+var GD={sym:null,tf:'1D',chart:null,series:null,detail:null};
+
+function lwcLib(cb){
+  if(window.LightweightCharts) return cb(true);
+  var ex=document.getElementById('scorr-lwc-lib');
+  if(ex){ ex.addEventListener('load',function(){cb(!!window.LightweightCharts);});
+          ex.addEventListener('error',function(){cb(false);}); return; }
+  var s=document.createElement('script');
+  s.id='scorr-lwc-lib'; s.src=LWC_SRC; s.async=true;
+  s.onload=function(){cb(!!window.LightweightCharts);};
+  s.onerror=function(){cb(false);};
+  document.head.appendChild(s);
+}
+
+function gdClose(){
+  var w=document.getElementById('gdWrap'); if(w) w.classList.remove('on');
+  if(GD.chart){ try{GD.chart.remove();}catch(e){} GD.chart=null; GD.series=null; }
+  GD.sym=null;
+}
+
+function gdOpen(sym){
+  var s=((D||{}).sections||{}).global_tape||{};
+  var t=(s.tiles||[]).concat(s.eod_tiles||[]).filter(function(x){return x.symbol===sym;})[0];
+  if(!t) return;
+  GD.sym=sym; GD.tf = t.has_intraday ? '5m' : '1D';
+  var w=document.getElementById('gdWrap');
+  w.classList.add('on');
+  /* Header values are taken from the TILE OBJECT itself — same DB, same numbers, so the drawer
+     can never disagree with the tile it was opened from. Inversion applies here too. */
+  document.getElementById('gdHead').innerHTML =
+    '<div class="gdt"><span class="gdname">'+esc(t.name||t.symbol)+'</span>'+
+    '<span class="gdsym">'+esc(t.symbol)+' · '+esc(t.category||'')+'</span></div>'+
+    '<div class="gdpx"><span class="num big">'+num(t.price,2)+'</span>'+
+    '<span class="gdlegs">DAY '+pcInv(t.day_chg_pct,t.inverted)+
+    ' &nbsp;·&nbsp; WK '+pcInv(t.week_chg_pct,t.inverted)+'</span>'+
+    '<span class="gdage">'+(t.as_of_is_live? esc(ageWords(ageMin(t.tick_ts)))
+       : '<span class="pcb">PREV CLOSE</span>'+esc(tIST(t.as_of)))+'</span></div>'+
+    '<button class="gdx" onclick="gdClose()" aria-label="Close">×</button>';
+  /* 5m is enabled on the 12 covered symbols only; disabled with a tooltip on the 5 EOD ones —
+     never enabled-and-silently-daily. */
+  document.getElementById('gdTabs').innerHTML =
+    ['5m','1D','1W','1M'].map(function(tf){
+      var off = (tf==='5m' && !t.has_intraday);
+      return '<button class="gtf'+(tf===GD.tf?' on':'')+(off?' off':'')+'"'+
+        (off?' disabled title="No intraday feed for this market"':' onclick="gdTf(\''+tf+'\')"')+
+        '>'+tf+'</button>';
+    }).join('');
+  gdDetail(sym);
+  gdChart();
+}
+
+function gdTf(tf){
+  GD.tf=tf;
+  Array.prototype.forEach.call(document.querySelectorAll('#gdTabs .gtf'),function(b){
+    b.classList.toggle('on',b.textContent===tf); });
+  gdChart();
+}
+
+/* The cc#842 build_detail block — reused, not rewritten. */
+function gdDetail(sym){
+  var box=document.getElementById('gdRets');
+  box.innerHTML='<div class="gdmsg">Loading…</div>';
+  fetch('/api/global/heatstrip/'+encodeURIComponent(sym))
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d || d.error){ box.innerHTML='<div class="gdmsg">'+esc((d&&d.error)||'unavailable')+'</div>'; return; }
+      GD.detail=d;
+      var order=['1D','1W','1M','3M','6M','YTD','1Y'], rets=d.returns||{};
+      var h='<div class="gdrets">'+order.map(function(k){
+        return '<div class="gdr"><span class="gk">'+k+'</span><span class="gv">'+
+               pcInv(rets[k],d.inverted)+'</span></div>'; }).join('')+'</div>';
+      h+='<div class="gd52"><span>52w range <b class="num">'+num(d.low_52w,2)+' – '+num(d.high_52w,2)+
+         '</b></span><span>from 52w high <b>'+pc(d.from_52w_high_pct)+'</b></span>'+
+         '<span>'+num(d.sessions_in_52w,0)+' sessions</span></div>';
+      box.innerHTML=h;
+    }).catch(function(e){ box.innerHTML='<div class="gdmsg">'+esc(String(e&&e.message||e))+'</div>'; });
+}
+
+function gdChart(){
+  var box=document.getElementById('gdChart'), lab=document.getElementById('gdBasis');
+  var sym=GD.sym, tf=GD.tf;
+  lab.textContent='Loading…';
+  fetch('/api/global/chart/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(tf))
+    .then(function(r){return r.json();}).then(function(d){
+      if(GD.sym!==sym || GD.tf!==tf) return;                 /* a newer click won */
+      if(!d || d.kind==='unavailable' || d.error || !(d.bars||[]).length){
+        box.innerHTML='<div class="gdmsg">'+esc((d&&(d.reason||d.error))||'No series available.')+'</div>';
+        lab.textContent=''; return;
+      }
+      lwcLib(function(ok){
+        if(GD.sym!==sym || GD.tf!==tf) return;
+        if(!ok){ box.innerHTML='<div class="gdmsg">Chart library unavailable.</div>'; lab.textContent=''; return; }
+        box.innerHTML='';
+        if(GD.chart){ try{GD.chart.remove();}catch(e){} GD.chart=null; }
+        var c=LightweightCharts.createChart(box,{
+          width:box.clientWidth, height:box.clientHeight,
+          layout:{background:{color:'transparent'},textColor:'#9DAEC8',fontSize:10},
+          grid:{vertLines:{color:'rgba(30,42,68,.55)'},horzLines:{color:'rgba(30,42,68,.55)'}},
+          rightPriceScale:{borderColor:'#1E2A44'},
+          timeScale:{borderColor:'#1E2A44',timeVisible:tf==='5m',secondsVisible:false},
+          crosshair:{mode:LightweightCharts.CrosshairMode.Normal}
+        });
+        if(d.kind==='candles'){
+          /* CANDLES ONLY where real OHLC exists (5m). Daily/weekly/monthly store close only and
+             are drawn as an honest area line — never candles faked from close. */
+          var s=c.addCandlestickSeries({upColor:'#34D399',downColor:'#F87171',
+            borderUpColor:'#34D399',borderDownColor:'#F87171',
+            wickUpColor:'#34D399',wickDownColor:'#F87171'});
+          s.setData(d.bars); GD.series=s;
+        } else {
+          var a=c.addAreaSeries({lineColor:'#22D3EE',lineWidth:2,
+            topColor:'rgba(34,211,238,.20)',bottomColor:'rgba(34,211,238,0)'});
+          a.setData(d.bars); GD.series=a;
+        }
+        c.timeScale().fitContent(); GD.chart=c;
+        lab.textContent=d.basis||'';
+      });
+    }).catch(function(e){
+      box.innerHTML='<div class="gdmsg">'+esc(String(e&&e.message||e))+'</div>'; lab.textContent='';
+    });
+}
+
+window.addEventListener('resize',function(){
+  if(GD.chart){ var b=document.getElementById('gdChart');
+    try{ GD.chart.applyOptions({width:b.clientWidth,height:b.clientHeight}); }catch(e){} }
+});
+document.addEventListener('keydown',function(k){ if(k.key==='Escape') gdClose(); });
+document.addEventListener('click',function(e){
+  var el=e.target.closest? e.target.closest('.gtile'):null;
+  if(el) gdOpen(el.getAttribute('data-sym'));
+});
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'&&e.key!==' ') return;
+  var el=e.target&&e.target.closest? e.target.closest('.gtile'):null;
+  if(el){ e.preventDefault(); gdOpen(el.getAttribute('data-sym')); }
+});
 
 function render(d){
   D=d;
