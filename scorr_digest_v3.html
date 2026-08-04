@@ -1,0 +1,476 @@
+<style>
+
+:root{
+  --bg:#0A0F1E; --panel:#0E1526; --panel2:#131C31; --raise:#18233C;
+  --line:#1E2A44; --line2:#2A3A5C;
+  --tx:#E6EDF7; --tx2:#9DAEC8; --tx3:#64748B;
+  --cy:#22D3EE; --gr:#34D399; --rd:#F87171; --am:#FBBF24; --vi:#A78BFA;
+  --grDim:rgba(52,211,153,.14); --rdDim:rgba(248,113,113,.14); --amDim:rgba(251,191,36,.13);
+  --f-d:'Sora',system-ui,sans-serif; --f-m:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;padding:0 0 60px}
+.wrap{max-width:1220px;margin:0 auto;padding:0 20px}
+
+/* ── LEDGER HEAD ───────────────────────────────── */
+.head{border-bottom:1px solid var(--line);background:
+  radial-gradient(1200px 300px at 15% -60%,rgba(34,211,238,.10),transparent 70%),var(--panel);
+  padding:18px 0 0}
+.headtop{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.brand{font-size:11px;letter-spacing:.32em;color:var(--tx3);font-weight:600}
+.brand b{color:var(--cy)}
+h1{font-size:30px;font-weight:800;letter-spacing:-.03em;line-height:1.05}
+h1 span{color:var(--cy)}
+.dateline{font-family:var(--f-m);font-size:11.5px;color:var(--tx2);letter-spacing:.04em}
+.clockbox{margin-left:auto;text-align:right;display:flex;align-items:center;gap:14px}
+.clock{font-family:var(--f-m);font-size:22px;font-weight:600;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums}
+.clock small{font-size:10px;color:var(--tx3);letter-spacing:.16em;display:block;margin-top:-2px}
+.mkt{border:1px solid var(--am);color:var(--am);background:var(--amDim);
+  padding:5px 11px;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:.14em}
+.mkt.open{border-color:var(--gr);color:var(--gr);background:var(--grDim)}
+
+/* SESSION RAIL — the signature element */
+.rail{position:relative;margin:22px 0 0;padding:0 0 16px}
+.railline{position:relative;height:3px;background:linear-gradient(90deg,var(--line) 0%,var(--line) 100%);
+  border-radius:2px}
+.railfill{position:absolute;inset:0 auto 0 0;width:14.2%;
+  background:linear-gradient(90deg,rgba(34,211,238,.25),var(--cy));border-radius:2px}
+.railnow{position:absolute;top:50%;left:14.2%;transform:translate(-50%,-50%);
+  width:11px;height:11px;border-radius:50%;background:var(--cy);
+  box-shadow:0 0 0 4px rgba(34,211,238,.18),0 0 16px rgba(34,211,238,.55)}
+.tick{position:absolute;top:-6px;width:1px;height:15px;background:var(--line2)}
+.tlab{position:absolute;top:20px;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.tlab .t{font-family:var(--f-m);font-size:10.5px;color:var(--tx2);font-weight:500;display:block}
+.tlab .l{font-size:9px;letter-spacing:.12em;color:var(--tx3);text-transform:uppercase}
+.tlab.hot .t{color:var(--am)} .tlab.hot .l{color:var(--am);opacity:.75}
+.tlab.now .t{color:var(--cy)} .tlab.now .l{color:var(--cy)}
+.railpins{display:flex;gap:8px;margin-top:44px;flex-wrap:wrap}
+.pin{font-family:var(--f-m);font-size:10.5px;padding:4px 9px;border-radius:3px;
+  border:1px solid var(--line2);color:var(--tx2);background:var(--panel2)}
+.pin b{color:var(--tx);font-weight:600}
+.pin.warn{border-color:rgba(251,191,36,.4);color:var(--am);background:var(--amDim)}
+
+/* ── SECTION SHELL ─────────────────────────────── */
+section{margin-top:26px}
+.sh{display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.snum{font-family:var(--f-m);font-size:10px;color:var(--tx3);border:1px solid var(--line2);
+  width:22px;height:22px;display:grid;place-items:center;border-radius:3px;flex:none}
+.st{font-size:15px;font-weight:700;letter-spacing:-.01em}
+.badge{font-family:var(--f-m);font-size:9.5px;letter-spacing:.13em;padding:3px 8px;border-radius:3px;
+  border:1px solid;font-weight:600}
+.b-live{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
+.b-eod{color:var(--cy);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.09)}
+.b-static{color:var(--tx3);border-color:var(--line2)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--gr);display:inline-block;
+  margin-right:5px;animation:pulse 2.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.asof{margin-left:auto;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)}
+.asof b{color:var(--tx2);font-weight:500}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.read{font-size:12.5px;color:var(--tx2);padding:10px 14px;border-top:1px solid var(--line);
+  background:var(--panel2);line-height:1.55}
+.read b{color:var(--tx);font-weight:600}
+.read .tag{font-family:var(--f-m);font-size:9.5px;letter-spacing:.14em;color:var(--cy);
+  margin-right:9px;font-weight:600}
+
+/* ── THE READ (hero) ───────────────────────────── */
+.hero{background:linear-gradient(135deg,var(--panel2),var(--panel));
+  border:1px solid var(--line2);border-radius:7px;padding:20px 22px;margin-top:24px;
+  position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--gr),var(--cy))}
+.hlab{font-family:var(--f-m);font-size:10px;letter-spacing:.28em;color:var(--cy);font-weight:600}
+.hbody{font-size:16px;line-height:1.62;margin-top:9px;max-width:78ch;color:#DCE6F5;font-weight:300}
+.hbody b{font-weight:600;color:#fff}
+.hstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+  margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.hs{background:var(--panel);padding:11px 14px}
+.hs .k{font-size:9.5px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.hs .v{font-family:var(--f-m);font-size:19px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+.hs .n{font-size:10.5px;color:var(--tx3);margin-top:1px}
+
+/* ── HEAT STRIP ────────────────────────────────── */
+.striprow{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.striprow:last-child{border-bottom:none}
+.slab{width:58px;flex:none;display:grid;place-items:center;font-family:var(--f-m);font-size:9.5px;
+  letter-spacing:.14em;color:var(--tx3);border-right:1px solid var(--line);background:var(--panel2)}
+.tiles{display:flex;flex-wrap:wrap;gap:0;flex:1}
+.tile{flex:1 1 92px;min-width:82px;padding:8px 10px;border-right:1px solid var(--line);
+  border-bottom:1px solid rgba(30,42,68,.5);cursor:default;transition:filter .15s}
+.tile:hover{filter:brightness(1.35)}
+.tile .n{font-size:10px;color:var(--tx2);letter-spacing:.02em;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.tile .c{font-family:var(--f-m);font-size:14px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.g3{background:rgba(52,211,153,.26)} .g2{background:rgba(52,211,153,.16)} .g1{background:rgba(52,211,153,.07)}
+.r3{background:rgba(248,113,113,.26)} .r2c{background:rgba(248,113,113,.16)} .r1c{background:rgba(248,113,113,.07)}
+.fl{background:rgba(148,163,184,.07)}
+.pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
+.sep{width:100%;height:0;flex-basis:100%}
+.grouplab{font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
+  padding:6px 10px 3px;background:var(--panel2);border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line);flex:1 1 100%}
+.eodnote{padding:7px 12px;background:rgba(251,191,36,.06);border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:10.5px;color:var(--am)}
+
+/* ── PIVOT LADDER ──────────────────────────────── */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.idx{padding:16px 18px}
+.idxhead{display:flex;align-items:baseline;gap:10px}
+.idxname{font-size:13px;font-weight:700;letter-spacing:.06em}
+.idxpx{font-family:var(--f-m);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em}
+.idxchg{font-family:var(--f-m);font-size:12.5px;font-weight:600}
+.idxsub{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);margin-top:2px}
+.ladder{margin-top:15px;position:relative}
+.rung{display:grid;grid-template-columns:34px 1fr 74px 56px;align-items:center;gap:9px;
+  padding:5px 0;border-bottom:1px dashed rgba(30,42,68,.75);font-family:var(--f-m);font-size:11px}
+.rung:last-child{border-bottom:none}
+.rung .k{font-size:9.5px;letter-spacing:.1em;color:var(--tx3);font-weight:600}
+.rung .bar{height:4px;border-radius:2px;background:var(--line);position:relative}
+.rung .bar i{position:absolute;inset:0 auto 0 0;border-radius:2px;display:block}
+.rung .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx)}
+.rung .d{text-align:right;font-size:10px;color:var(--tx3)}
+.rung.res .k{color:var(--rd)} .rung.res .bar i{background:rgba(248,113,113,.55)}
+.rung.sup .k{color:var(--gr)} .rung.sup .bar i{background:rgba(52,211,153,.55)}
+.rung.pp .k{color:var(--cy)} .rung.pp .bar i{background:rgba(34,211,238,.6)}
+.rung.cmp{background:rgba(34,211,238,.07);margin:2px -8px;padding:6px 8px;border-radius:4px;
+  border:1px solid rgba(34,211,238,.28)}
+.rung.cmp .k{color:var(--cy)}
+.rung.cmp .v{color:#fff;font-weight:600;font-size:12px}
+
+/* ── BREADTH / PCR ─────────────────────────────── */
+.three{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
+.mini{padding:14px 16px}
+.mk{font-size:10px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.mv{font-family:var(--f-m);font-size:28px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.mn{font-size:11px;color:var(--tx3);margin-top:2px}
+.adbar{display:flex;height:7px;border-radius:4px;overflow:hidden;margin-top:11px;background:var(--line)}
+.adbar i{display:block}
+.spark{display:flex;align-items:flex-end;gap:4px;height:44px;margin-top:11px}
+.spark i{flex:1;background:var(--line2);border-radius:2px 2px 0 0}
+.spark i.hi{background:rgba(34,211,238,.55)}
+.spark i.last{background:var(--cy)}
+.sparklab{display:flex;justify-content:space-between;font-family:var(--f-m);font-size:9px;
+  color:var(--tx3);margin-top:5px}
+
+/* ── RESULTS CHIPS ─────────────────────────────── */
+.chips{display:flex;flex-wrap:wrap;gap:7px;padding:14px 16px}
+.chip{font-family:var(--f-m);font-size:11px;padding:5px 10px;border-radius:3px;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--tx);white-space:nowrap}
+.chip b{color:var(--cy);font-weight:600}
+.chip.more{color:var(--tx3);border-style:dashed}
+
+/* ── NEWS ──────────────────────────────────────── */
+.nrow{display:flex;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+.nrow:last-child{border-bottom:none}
+.sdot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
+.s-bull{background:var(--gr)} .s-bear{background:var(--rd)}
+.s-neu{background:var(--tx3)} .s-cau{background:var(--am)}
+.nh{font-size:13px;font-weight:600;line-height:1.4}
+.ns{font-size:11.5px;color:var(--tx3);margin-top:2px}
+.nsent{margin-left:auto;font-family:var(--f-m);font-size:9.5px;letter-spacing:.1em;color:var(--tx3);
+  flex:none;padding-top:2px}
+
+/* ── RESULTS TABLE ─────────────────────────────── */
+.rtab{width:100%;border-collapse:collapse}
+.rtab th{font-size:9.5px;letter-spacing:.15em;color:var(--tx3);text-transform:uppercase;
+  text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:600}
+.rtab th.r{text-align:right} .rtab th.c{text-align:center}
+.rtab td{padding:11px 14px;border-bottom:1px solid rgba(30,42,68,.6);vertical-align:top}
+.rtab tr:last-child td{border-bottom:none}
+.rtab tbody tr:hover{background:rgba(34,211,238,.035)}
+.rtab td.r{text-align:right} .rtab td.c{text-align:center;white-space:nowrap}
+.tk{font-family:var(--f-m);font-size:11.5px;font-weight:600;color:var(--cy);display:block;letter-spacing:.02em}
+.cn{font-size:11px;color:var(--tx3);display:block;margin-top:1px}
+.num{font-family:var(--f-m);font-size:11.5px;color:var(--tx2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rtab td b{font-size:12.5px;font-weight:600;display:block;line-height:1.35}
+.sub{font-size:11px;color:var(--tx3);display:block;margin-top:3px;line-height:1.45}
+.pend{font-size:11.5px;color:var(--tx3);font-style:italic}
+.pill{font-family:var(--f-m);font-size:9px;letter-spacing:.11em;padding:3px 8px;border-radius:3px;
+  border:1px solid;font-weight:600}
+.p-bull{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
+.p-cau{color:var(--am);border-color:rgba(251,191,36,.4);background:var(--amDim)}
+.p-neu{color:var(--tx2);border-color:var(--line2)}
+.p-pend{color:var(--tx3);border-color:var(--line2);border-style:dashed}
+.rfoot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);background:var(--panel2)}
+.rlink{margin-left:auto;color:var(--cy)}
+@media(max-width:700px){.rtab th:nth-child(2),.rtab td:nth-child(2){display:none}}
+
+/* ── FOOT ──────────────────────────────────────── */
+.foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
+@media(max-width:860px){
+  .two,.three{grid-template-columns:1fr}
+  h1{font-size:23px} .clockbox{width:100%;justify-content:flex-start;margin:8px 0 0}
+  .slab{width:44px} .hbody{font-size:14.5px}
+}
+
+/* cc#846 additions on top of the reference tokens — same system, classes the live render needs. */
+.rtab{width:100%;border-collapse:collapse}
+.rtab th{font-family:var(--f-m);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--tx3);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.rtab th.r{text-align:right} .rtab th.c{text-align:center}
+.rtab td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:12.5px}
+.rtab td.r{text-align:right} .rtab td.c{text-align:center}
+.tk{display:block;font-family:var(--f-m);font-weight:600;color:var(--tx)}
+.cn{display:block;font-size:10.5px;color:var(--tx3)}
+.sub{display:block;font-size:11px;color:var(--tx2);margin-top:2px}
+.rfoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:10px;
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx2)}
+.rlink{color:var(--cy)}
+@media(max-width:760px){
+  .g2,.g3{grid-template-columns:1fr!important}
+  .rtab{display:block;overflow-x:auto}
+  .chips{flex-wrap:wrap}
+}
+
+</style>
+<div class="wrap">
+
+<div class="head">
+  <div class="headtop">
+    <span class="brand">SCORR <b>·</b> DAILY DIGEST</span>
+    <h1>Market <span>Ledger</span></h1>
+    <div class="clockbox">
+      <div class="clock"><span id="clk">--:--:--</span><small>IST</small></div>
+      <span class="mkt" id="mktPill">—</span>
+    </div>
+  </div>
+  <div class="dateline" id="dateline">—</div>
+
+  <!-- SESSION RAIL — NOW marker position computed from the live IST clock, not assumed. -->
+  <div class="rail">
+    <div class="railline"><div class="railfill" id="railFill"></div><div class="railnow" id="railNow"></div>
+      <div id="railTicks"></div>
+    </div>
+    <div id="railLabs"></div>
+    <div class="railpins" id="railPins"></div>
+  </div>
+</div>
+
+<div id="digest"><div class="card" style="margin-top:20px">Loading the ledger…</div></div>
+
+<div class="foot">
+  <span>SCORR DAILY DIGEST V3</span>
+  <span id="footStats"></span>
+  <span>SOURCES: global_indices · raw_prices · v8_paper_pivots · adr_daily · pcr_daily · earnings_calendar · polished_news · result_analysis_v2</span>
+  <span>ALL TIMES IST</span>
+</div>
+</div>
+
+<script>
+/* cc#846 DAILY DIGEST V3 — live bindings behind design_refs/scorr_digest_v3_R2.html.
+   Read-only render. Content contract is session_log 965 v2.3; V3 is presentation only. */
+var D = null;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+function num(v,d){return v==null?'—':Number(v).toLocaleString('en-IN',{minimumFractionDigits:d||0,maximumFractionDigits:d||0});}
+function pc(v){ if(v==null) return '<span class="flat">—</span>';
+  var c = v>0?'pos':(v<0?'neg':'flat');
+  return '<span class="'+c+'">'+(v>=0?'+':'')+Number(v).toFixed(2)+'%</span>'; }
+/* VIX inversion: up = risk-off = RED, on BOTH levels. Bug 3 in the card. */
+function pcInv(v,inv){ if(v==null) return '<span class="flat">—</span>';
+  var eff = inv ? -v : v, c = eff>0?'pos':(eff<0?'neg':'flat');
+  return '<span class="'+c+'">'+(v>=0?'+':'')+Number(v).toFixed(2)+'%</span>'; }
+function badge(t){ var m={LIVE:'b-live',EOD:'b-eod',STATIC:'b-static'};
+  return '<span class="badge '+(m[t]||'b-static')+'">'+(t==='LIVE'?'<span class="dot"></span>':'')+t+'</span>'; }
+function tIST(iso){ if(!iso) return '—';
+  var s=String(iso).replace(' ','T'); var d=new Date(s.length<=10?s+'T00:00:00':s);
+  if(isNaN(d)) return String(iso).slice(0,16);
+  return d.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
+
+/* ── SESSION RAIL + CLOCK (must TICK, not be static text) ───────────────────────── */
+var RAIL=[{m:360,t:'06:00',l:'FEEDS UP'},{m:555,t:'09:15',l:'OPEN'},{m:750,t:'12:30',l:'MID'},
+          {m:915,t:'15:15',l:'CAS'},{m:930,t:'15:30',l:'CLOSE'}];
+var R0=330, R1=990;   /* 05:30 → 16:30 window */
+function railPct(m){ return Math.max(0,Math.min(100,(m-R0)/(R1-R0)*100)); }
+function paintRail(){
+  var now=new Date();
+  var ist=new Date(now.getTime()+(now.getTimezoneOffset()*60000)+(5.5*3600000));
+  var mins=ist.getHours()*60+ist.getMinutes();
+  document.getElementById('clk').textContent=
+    String(ist.getHours()).padStart(2,'0')+':'+String(ist.getMinutes()).padStart(2,'0')+':'+String(ist.getSeconds()).padStart(2,'0');
+  var p=railPct(mins);
+  document.getElementById('railFill').style.width=p+'%';
+  document.getElementById('railNow').style.left=p+'%';
+  if(!document.getElementById('railTicks').innerHTML){
+    document.getElementById('railTicks').innerHTML=RAIL.map(function(r){
+      return '<div class="tick" style="left:'+railPct(r.m)+'%"></div>'; }).join('');
+    document.getElementById('railLabs').innerHTML=RAIL.map(function(r){
+      return '<div class="tlab" style="left:'+railPct(r.m)+'%"><span class="t">'+r.t+'</span><span class="l">'+r.l+'</span></div>'; }).join('');
+  }
+}
+setInterval(paintRail,1000); paintRail();
+
+/* ── SECTIONS ───────────────────────────────────────────────────────────────────── */
+function sh(n,title,tier,asof){
+  return '<div class="sh"><span class="snum">'+n+'</span><span class="st">'+esc(title)+'</span>'+
+         badge(tier)+'<span class="asof">'+esc(asof||'')+'</span></div>';
+}
+function read(t){ return t? '<div class="read"><span class="tag">READ</span>'+esc(t)+'</div>' : ''; }
+
+function tapeTiles(tiles,level){
+  return tiles.map(function(t){
+    var v = level==='week'? t.week_chg_pct : t.day_chg_pct;
+    /* Per-tile as-of with TIME — bug 1 (965 mandates date AND time) and bug 2 (stale flagged). */
+    var stamp = level==='week' ? ('vs '+(t.week_base_date||'—')) : tIST(t.as_of);
+    return '<div class="chip"><span class="k">'+esc(t.name||t.symbol)+'</span>'+
+      '<span class="mv">'+pcInv(v,t.inverted)+'</span>'+
+      '<span class="d">'+esc(stamp)+(t.as_of_is_live?'':' · EOD')+'</span></div>';
+  }).join('');
+}
+
+function secTape(s){
+  if(!s) return '';
+  var live=s.tiles||[], eod=s.eod_tiles||[];
+  var h = sh('01','Global Tape',s.tier||'LIVE','two-level · day + rolling 5 sessions');
+  h += '<div class="card">';
+  h += '<div class="grouplab">DAY</div><div class="chips">'+tapeTiles(live,'day')+'</div>';
+  if(eod.length){
+    h += '<div class="grouplab" style="margin-top:12px">EOD ONLY · NO INTRADAY FEED</div>'+
+         '<div class="chips">'+tapeTiles(eod,'day')+'</div>'+
+         '<div class="eodnote">'+esc(s.eod_note||'')+'</div>';
+  }
+  h += '<div class="grouplab" style="margin-top:14px">WEEK · ROLLING 5 SESSIONS</div>'+
+       '<div class="chips">'+tapeTiles(live.concat(eod),'week')+'</div>';
+  h += read(s.read)+'</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secLadders(s){
+  if(!s) return '';
+  var h = sh('02','Index Ladders',s.tier||'LIVE','pivots + live CMP');
+  h += '<div class="card"><div class="g2">';
+  (s.indexes||[]).forEach(function(ix){
+    h += '<div class="idx"><div class="idxhead"><span class="idxname">'+esc(ix.symbol)+'</span>'+
+         '<span class="idxpx num">'+num(ix.cmp,2)+'</span></div>'+
+         '<div class="idxsub">'+badge(ix.tier)+' as of '+esc(tIST(ix.as_of))+'</div>';
+    if(!(ix.rungs||[]).length){ h += '<div class="pend">'+esc(ix.reason||'no ladder')+'</div></div>'; return; }
+    h += '<div class="ladder">';
+    ix.rungs.forEach(function(r,i){
+      if(i===ix.cmp_slot){
+        h += '<div class="nrow cmp"><span class="hlab">CMP</span><span class="num">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
+      }
+      var w = Math.min(100, Math.abs(r.dist_pct||0)*22);
+      h += '<div class="nrow"><span class="hlab">'+r.label+'</span><span class="num">'+num(r.value,2)+'</span>'+
+           '<span class="bar"><i style="width:'+w+'%"></i></span><span class="d">'+pc(r.dist_pct)+'</span></div>';
+    });
+    if(ix.cmp_slot===(ix.rungs||[]).length){
+      h += '<div class="nrow cmp"><span class="hlab">CMP</span><span class="num">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
+    }
+    h += '</div></div>';
+  });
+  h += '</div>'+read(s.read)+'</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secInternals(s){
+  if(!s) return '';
+  var h = sh('03','Internals',s.tier||'LIVE','breadth + options positioning');
+  h += '<div class="card"><div class="g2">';
+  var a=s.adr;
+  h += '<div><div class="grouplab">BREADTH · ADR'+(s.adr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>';
+  h += a ? ('<div class="hstats"><div class="hs"><span class="n num">'+num(a.adr,2)+'</span><span class="l">ADR</span></div>'+
+            '<div class="hs"><span class="n num pos">'+num(a.advances)+'</span><span class="l">ADV</span></div>'+
+            '<div class="hs"><span class="n num neg">'+num(a.declines)+'</span><span class="l">DEC</span></div></div>'+
+            '<div class="asof">'+esc(a.date)+'</div>')
+          : '<div class="pend">No breadth row.</div>';
+  h += '</div><div><div class="grouplab">OPTIONS · PCR'+(s.pcr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>';
+  h += (s.pcr||[]).length ? ('<div class="hstats">'+(s.pcr||[]).map(function(p){
+        return '<div class="hs"><span class="n num">'+num(p.pcr,2)+'</span><span class="l">'+esc(p.underlying)+'</span></div>'; }).join('')+
+        '</div><div class="asof">'+esc((s.pcr[0]||{}).date||'')+'</div>')
+       : '<div class="pend">No PCR row.</div>';
+  h += '</div></div>'+read(s.read)+'</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secReporting(s){
+  if(!s) return '';
+  var h = sh('04','Reporting Today',s.tier||'STATIC','earnings_calendar');
+  h += '<div class="card">';
+  h += (s.companies||[]).length
+    ? '<div class="chips">'+(s.companies||[]).map(function(c){
+        return '<div class="chip"><span class="k">'+esc(c.ticker)+'</span><span class="d">'+esc(c.company||'')+'</span></div>'; }).join('')+'</div>'
+    : '<div class="pend">No scheduled reporters today.</div>';
+  h += read(s.read)+'</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secNews(n,title,s,tier){
+  if(!s) return '';
+  var h = sh(n,title,tier||'LIVE','polished desk');
+  h += '<div class="card">';
+  h += (s.items||[]).length ? (s.items||[]).map(function(i){
+        return '<div class="nrow ns"><div><div class="nh">'+esc(i.headline)+'</div>'+
+               '<div class="nsent">'+esc((i.summary||'').slice(0,180))+'</div></div>'+
+               '<span class="d">'+esc(tIST(i.published))+'</span></div>'; }).join('')
+      : '<div class="pend">Nothing on the desk.</div>';
+  h += '</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secResults(s){
+  if(!s) return '';
+  var h = sh('07',"Yesterday's Results · Scored",s.tier||'STATIC',
+             (s.reported_total||0)+' REPORTED · TOP 10 BY MCAP');
+  h += '<div class="card"><table class="rtab"><thead><tr><th>Company</th><th class="r">M-Cap</th>'+
+       '<th>The quarter</th><th class="c">Read</th></tr></thead><tbody>';
+  h += (s.companies||[]).map(function(c){
+    var mc = c.market_cap==null?'—':(c.market_cap>=100000? (c.market_cap/100000).toFixed(2)+'L cr'
+             : (c.market_cap/1000).toFixed(1)+'k cr');
+    var body = c.headline
+      ? '<b>'+esc(c.headline)+'</b>'+(c.summary?'<span class="sub">'+esc(String(c.summary).slice(0,150))+'</span>':'')
+      : '<span class="pend">'+esc(c.pending_reason||'Reported — summary not yet on the desk')+'</span>';
+    var pm={BULLISH:'p-bull',CAUTIOUS:'p-cau',NEUTRAL:'p-neu',PENDING:'p-pend'};
+    return '<tr><td><span class="tk">'+esc(c.ticker)+'</span><span class="cn">'+esc(c.company||'')+'</span></td>'+
+           '<td class="r num">'+mc+'</td><td>'+body+'</td>'+
+           '<td class="c"><span class="pill '+(pm[c.read]||'p-neu')+'">'+esc(c.read)+'</span></td></tr>';
+  }).join('');
+  h += '</tbody></table><div class="rfoot"><span>'+esc(s.read||'')+'</span>'+
+       '<span class="rlink">L2 detailed analysis available for '+(s.l2_count||0)+' companies →</span></div>';
+  h += '<div class="eodnote">Match rule: '+esc(s.match_rule||'')+'</div>';
+  h += '</div>';
+  return '<section>'+h+'</section>';
+}
+
+function secRead(d){
+  var m=d.market_read||{};
+  var h = sh('08','Market Read','STATIC','composed from the numbers above');
+  h += '<div class="card"><div class="hero"><span class="pill p-bull">'+esc(m.bias||'—')+'</span></div>'+
+       '<div class="nsent">'+esc((m.support||[]).join(' · '))+'</div>'+
+       '<div class="eodnote">'+esc(m.note||'')+'</div></div>';
+  return '<section>'+h+'</section>';
+}
+
+function render(d){
+  D=d;
+  document.getElementById('dateline').textContent =
+    d.date_ist + ' · generated ' + tIST(d.generated_at) + ' IST';
+  var pill=document.getElementById('mktPill');
+  pill.textContent=(d.market||{}).label||'—';
+  pill.className='mkt'+(((d.market||{}).state==='OPEN')?' open':'');
+  var s=d.sections||{};
+  document.getElementById('digest').innerHTML =
+    secTape(s.global_tape) + secLadders(s.ladders) + secInternals(s.internals) +
+    secReporting(s.reporting_today) + secNews('05','What Moved',s.what_moved) +
+    secNews('06','Global Events',s.global_events) + secResults(s.yesterday_results) + secRead(d);
+  var t=(s.global_tape||{});
+  document.getElementById('footStats').textContent =
+    ((t.tiles||[]).length+(t.eod_tiles||[]).length)+' global · '+
+    ((s.ladders||{}).indexes||[]).length+' domestic · '+
+    ((s.yesterday_results||{}).reported_total||0)+' results';
+}
+
+fetch('/api/digest/v3').then(function(r){return r.text();}).then(function(t){
+  var d=null; try{ d=JSON.parse(t); }catch(e){}
+  if(!d) throw new Error('unreadable response');
+  if(d.error && !d.sections) throw new Error(d.error);
+  render(d);
+}).catch(function(e){
+  document.getElementById('digest').innerHTML =
+    '<div class="card">Digest unavailable — '+esc(String(e&&e.message||e))+'</div>';
+});
+</script>

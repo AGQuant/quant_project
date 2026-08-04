@@ -278,6 +278,12 @@ PWA_JS = """
     // "More" sheet), so a single entry appears in both automatically — a second entry would double
     // it, not extend it. Rebased on cc#822's trim: Digest / TC Scanner / Holdings stay removed.
     ['/screeners', '\\u2637', 'Screeners'],
+    // cc#846 (founder 04-Aug): Daily Digest V3 is now a REAL PAGE (/digest), not the V8 tab it was.
+    // cc#822 removed 'Digest' from this array on the explicit grounds that it was "a V8 tab, not a
+    // page" — that rationale no longer holds, and rule 8 (NAV-COMPLETE, id=2987) requires a page to
+    // carry a nav entry. Re-added on that basis, as ONE entry. If the founder still wants it out of
+    // the bar, deleting this line is the whole change; the /digest route stays reachable either way.
+    ['/digest', '\\u25f1', 'Digest'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,

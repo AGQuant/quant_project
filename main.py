@@ -106,6 +106,7 @@ from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
+from digest_v3 import router as digest_v3_router   # cc#846 Daily Digest V3 (read-only render)
 from v13_presets_endpoints import router as v13_presets_router
 from mf_pipeline import router as mf_pipeline_router   # cc#466: V15 MF Intelligence data layer
 from galaxy_endpoints import router as galaxy_router
@@ -213,6 +214,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/intraday", "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
                      "/screeners",   # cc#824
+                     "/digest",      # cc#846
                      "/adaptive"}   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
@@ -220,6 +222,7 @@ PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
 PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) — gate + no-store
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 PROTECTED.add("/screeners")   # cc#824: gate + no-store
+PROTECTED.add("/digest")   # cc#846: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -451,6 +454,7 @@ app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, 
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip*
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
+app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -969,6 +973,7 @@ NAV_REGISTRY = {
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
+    "/digest":       ("Daily Digest",        "nav"),        # cc#846 rule id=2987
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
     "/screeners":    ("Screeners",            "nav"),   # cc#824
