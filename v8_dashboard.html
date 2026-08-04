@@ -604,7 +604,13 @@
     <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')">V14 Intraday</button>
     <button class="v8toptab" data-pane="tcscan" onclick="showV8Pane('tcscan')">TC Scanner</button>
     <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
-    <!-- cc#851: Digest top-tab removed — V3 at /digest is the single digest. -->
+    <!-- cc#853 (founder 04-Aug): Digest belongs in THIS row, immediately after V6 BT, and NOT in
+         the main site nav. It NAVIGATES to /digest rather than swapping in a pane: cc#851
+         established one digest renderer, and V3 is a full page with its own :root token block and
+         nav injection — hosting it in a pane would either duplicate the renderer or nest a second
+         navbar inside this one. So this is the single Digest ENTRY app-wide, styled identically to
+         its siblings. -->
+    <button class="v8toptab" data-pane="digest" onclick="location.href='/digest'">Digest</button>
   </div>
   <div id="pane-v8">
 

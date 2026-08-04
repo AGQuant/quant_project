@@ -1,5 +1,12 @@
 <style>
-
+/* cc#853: CSS PORTED VERBATIM from design_refs/scorr_digest_v3_R3.html (commit 39d4693),
+   founder-approved 04-Aug. The token block and every section rule below are R3's, copied not
+   re-derived. R3 supersedes R2 wherever they disagree; the only substantive change is the heat
+   strip, now a compact horizontal colour-box run.
+   TWO deliberate deltas from the reference, both additive:
+     1. the cc#849 chart-drawer + clickable-tile rules are appended below — R3 is a static
+        reference and does not model the drawer, but the drawer is a shipped feature.
+     2. R3's mobile block is kept as-is; the drawer's own mobile rules follow it. */
 :root{
   --bg:#0A0F1E; --panel:#0E1526; --panel2:#131C31; --raise:#18233C;
   --line:#1E2A44; --line2:#2A3A5C;
@@ -31,10 +38,9 @@ h1 span{color:var(--cy)}
   padding:5px 11px;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:.14em}
 .mkt.open{border-color:var(--gr);color:var(--gr);background:var(--grDim)}
 
-/* SESSION RAIL — the signature element */
+/* SESSION RAIL — signature element */
 .rail{position:relative;margin:22px 0 0;padding:0 0 16px}
-.railline{position:relative;height:3px;background:linear-gradient(90deg,var(--line) 0%,var(--line) 100%);
-  border-radius:2px}
+.railline{position:relative;height:3px;background:var(--line);border-radius:2px}
 .railfill{position:absolute;inset:0 auto 0 0;width:14.2%;
   background:linear-gradient(90deg,rgba(34,211,238,.25),var(--cy));border-radius:2px}
 .railnow{position:absolute;top:50%;left:14.2%;transform:translate(-50%,-50%);
@@ -91,28 +97,28 @@ section{margin-top:26px}
 .hs .v{font-family:var(--f-m);font-size:19px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
 .hs .n{font-size:10.5px;color:var(--tx3);margin-top:1px}
 
-/* ── HEAT STRIP ────────────────────────────────── */
+/* ── HEAT STRIP · compact horizontal colour-box run (R3) ── */
 .striprow{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
 .striprow:last-child{border-bottom:none}
-.slab{width:58px;flex:none;display:grid;place-items:center;font-family:var(--f-m);font-size:9.5px;
-  letter-spacing:.14em;color:var(--tx3);border-right:1px solid var(--line);background:var(--panel2)}
-.tiles{display:flex;flex-wrap:wrap;gap:0;flex:1}
-.tile{flex:1 1 92px;min-width:82px;padding:8px 10px;border-right:1px solid var(--line);
-  border-bottom:1px solid rgba(30,42,68,.5);cursor:default;transition:filter .15s}
-.tile:hover{filter:brightness(1.35)}
-.tile .n{font-size:10px;color:var(--tx2);letter-spacing:.02em;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-.tile .c{font-family:var(--f-m);font-size:14px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
-.g3{background:rgba(52,211,153,.26)} .g2{background:rgba(52,211,153,.16)} .g1{background:rgba(52,211,153,.07)}
-.r3{background:rgba(248,113,113,.26)} .r2c{background:rgba(248,113,113,.16)} .r1c{background:rgba(248,113,113,.07)}
+.slab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
+  border-right:1px solid var(--line);background:var(--panel2)}
+.tiles{display:flex;flex:1;flex-wrap:wrap}
+.tile{flex:1 1 0;min-width:64px;padding:6px 7px 7px;text-align:center;
+  border-right:1px solid rgba(10,15,30,.55);transition:filter .12s}
+.tile:last-child{border-right:none}
+.tile:hover{filter:brightness(1.4)}
+.tile .n{font-size:8.5px;letter-spacing:.04em;color:var(--tx2);opacity:.72;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.tile .c{font-family:var(--f-m);font-size:11px;font-weight:600;margin-top:1px;
+  font-variant-numeric:tabular-nums;line-height:1.2}
+.gap{flex:none;width:1px;background:var(--line2);margin:4px 0}
+.g3{background:rgba(52,211,153,.30)} .g2{background:rgba(52,211,153,.18)} .g1{background:rgba(52,211,153,.08)}
+.r3{background:rgba(248,113,113,.30)} .r2c{background:rgba(248,113,113,.18)} .r1c{background:rgba(248,113,113,.08)}
 .fl{background:rgba(148,163,184,.07)}
 .pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
-.sep{width:100%;height:0;flex-basis:100%}
-.grouplab{font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
-  padding:6px 10px 3px;background:var(--panel2);border-right:1px solid var(--line);
-  border-bottom:1px solid var(--line);flex:1 1 100%}
-.eodnote{padding:7px 12px;background:rgba(251,191,36,.06);border-top:1px solid var(--line);
-  font-family:var(--f-m);font-size:10.5px;color:var(--am)}
+.eodnote{padding:6px 11px;background:rgba(251,191,36,.05);border-top:1px solid var(--line);
+  font-family:var(--f-m);font-size:9.5px;color:var(--am);letter-spacing:.02em}
 
 /* ── PIVOT LADDER ──────────────────────────────── */
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -205,22 +211,10 @@ section{margin-top:26px}
 @media(max-width:860px){
   .two,.three{grid-template-columns:1fr}
   h1{font-size:23px} .clockbox{width:100%;justify-content:flex-start;margin:8px 0 0}
-  .slab{width:44px} .hbody{font-size:14.5px}
+  .slab{width:42px} .hbody{font-size:14.5px} .tile{min-width:56px}
 }
 
-/* cc#846 additions on top of the reference tokens — same system, classes the live render needs. */
-.rtab{width:100%;border-collapse:collapse}
-.rtab th{font-family:var(--f-m);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--tx3);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-.rtab th.r{text-align:right} .rtab th.c{text-align:center}
-.rtab td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:12.5px}
-.rtab td.r{text-align:right} .rtab td.c{text-align:center}
-.tk{display:block;font-family:var(--f-m);font-weight:600;color:var(--tx)}
-.cn{display:block;font-size:10.5px;color:var(--tx3)}
-.sub{display:block;font-size:11px;color:var(--tx2);margin-top:2px}
-.rfoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:10px;
-  font-family:var(--f-m);font-size:10.5px;color:var(--tx2)}
-.rlink{color:var(--cy)}
+/* ── cc#849 ADDITIONS (not in the static R3 reference) ──────────────── */
 /* ── cc#849 GLOBAL TILES + CHART DRAWER ────────────── */
 .gcount{font-family:var(--f-m);font-size:9px;color:var(--tx2);border:1px solid var(--line2);
   border-radius:8px;padding:1px 6px;margin-left:5px;letter-spacing:0}
@@ -266,7 +260,11 @@ section{margin-top:26px}
 .gd52 b{color:var(--tx2);font-weight:600}
 
 @media(max-width:760px){
-  .g2,.g3{grid-template-columns:1fr!important}
+  /* cc#853: the old `.g2,.g3{grid-template-columns:1fr}` rule is GONE. Those are R3's green
+     colour-band classes, not grids — the live page was emitting <div class="g2"> as a grid
+     container for sections 02/03, which is why they rendered as a green-tinted block instead of
+     the reference's side-by-side cards. The grids are .two/.three and R3 already handles them
+     at 860px. */
   .rtab{display:block;overflow-x:auto}
   .chips{flex-wrap:wrap}
   .gdpanel{width:100%;border-left:none}          /* drawer full-width on mobile */
@@ -405,81 +403,109 @@ function ageWords(m){
 }
 var LIVE_DOT_MAX_MIN = 15;   /* the tab's own threshold for the live dot */
 
+/* ── cc#853 HEAT STRIP · R3 COMPACT HORIZONTAL COLOUR-BOX RUN ─────────────────────
+   Ported from design_refs/scorr_digest_v3_R3.html. The R2-era wrapped pill groups are gone:
+   one continuous horizontal run per LEVEL (a DAY row and a WEEK row), each prefixed by a .slab
+   label, tiles flush against each other with no pill chrome, and a thin .gap divider between
+   category groups instead of separate stacked blocks. Colour intensity carries magnitude via
+   R3's band classes; the sign colour on the number is separate from the box tint.
+
+   TIMESTAMP HONESTY IS NOT TRADED FOR SPACE (founder-locked). The per-tile as-of no longer has
+   room to print inline, so it moves to the tile's title= — visible on hover and on tap — and the
+   text is rebuilt on every age refresh, so it never goes stale. A tile with no live tick says so
+   in words rather than silently showing a close as though it were a tick.
+
+   cc#849 survives: every tile keeps .gtile + data-sym, so the click/Enter handlers and the
+   Lightweight Charts drawer are untouched. */
+
+/* R3 band classes. Inversion flips the SIGN before banding, so a +2% VIX box is as red as a
+   -2% equity box — the same rule pcInv() applies to the number. */
+function bandCls(v,inv){
+  if(v==null) return 'fl';
+  var e = inv ? -v : v;
+  if(e>=1.5) return 'g3';
+  if(e>=0.5) return 'g2';
+  if(e>0)    return 'g1';
+  if(e===0)  return 'fl';
+  if(e<=-1.5) return 'r3';
+  if(e<=-0.5) return 'r2c';
+  return 'r1c';
+}
+/* R3 prints a true minus (U+2212) and no % inside the box — the row label carries the unit. */
+function tileNum(v,inv){
+  if(v==null) return '<span class="c flat">—</span>';
+  var e = inv ? -v : v, c = e>0?'pos':(e<0?'neg':'flat');
+  var t = (v>0?'+':(v<0?'−':'')) + Math.abs(Number(v)).toFixed(2);
+  return '<span class="c '+c+'">'+t+'</span>';
+}
+
+function tileTitle(t,level){
+  var nm = (t.name||t.symbol);
+  if(level==='week') return nm+' · week vs '+(t.week_base_date||'—')+' ('+(t.week_sessions||5)+' sessions)';
+  if(t.as_of_is_live){
+    var am=ageMin(t.tick_ts);
+    return nm+' · last tick '+tIST(t.tick_ts)+' IST ('+ageWords(am)+')';
+  }
+  return nm+' · PREV CLOSE '+tIST(t.as_of)+' — no intraday feed for this market';
+}
+
 function tapeTiles(tiles,level){
   return tiles.map(function(t){
     var v = level==='week'? t.week_chg_pct : t.day_chg_pct;
     var am = t.as_of_is_live ? ageMin(t.tick_ts) : null;
     var fresh = (am!=null && am<=LIVE_DOT_MAX_MIN);
-    var stamp, badgeHtml='';
-    if(level==='week'){
-      stamp = 'vs '+(t.week_base_date||'—');
-    } else if(t.as_of_is_live){
-      stamp = ageWords(am);
-    } else {
-      /* PREV CLOSE badge with the tick time, for markets that are shut. */
-      stamp = tIST(t.as_of);
-      badgeHtml = '<span class="pcb">PREV CLOSE</span>';
-    }
-    return '<div class="chip gtile'+(fresh?' fresh':'')+'" data-sym="'+esc(t.symbol)+'" tabindex="0" '+
-      'role="button" aria-label="'+esc((t.name||t.symbol)+' — open chart')+'">'+
-      '<span class="k">'+(t.as_of_is_live?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</span>'+
-      '<span class="mv">'+pcInv(v,t.inverted)+'</span>'+
-      '<span class="d">'+badgeHtml+esc(stamp)+'</span></div>';
+    return '<div class="tile gtile '+bandCls(v,t.inverted)+(fresh?' fresh':'')+'" '+
+      'data-sym="'+esc(t.symbol)+'" data-level="'+level+'" tabindex="0" role="button" '+
+      'title="'+esc(tileTitle(t,level))+'">'+
+      '<div class="n">'+(t.as_of_is_live?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</div>'+
+      tileNum(v,t.inverted)+'</div>';
   }).join('');
 }
 
-/* Grouped by category with a per-group count — capability (d) of the retiring tab. */
-function tapeGroups(tiles,order,labels,counts){
+/* One continuous run, ordered by category, with a thin divider between groups (R3 .gap). */
+function tapeRun(tiles,order,level){
   var byCat={}; tiles.forEach(function(t){ (byCat[t.category]=byCat[t.category]||[]).push(t); });
-  var out='';
-  (order||[]).forEach(function(c){
-    var g=byCat[c]; if(!g||!g.length) return;
-    out += '<div class="grouplab">'+esc((labels||{})[c]||c)+
-           ' <span class="gcount">'+g.length+'</span></div>'+
-           '<div class="chips">'+tapeTiles(g,'day')+'</div>';
-  });
-  Object.keys(byCat).forEach(function(c){
-    if((order||[]).indexOf(c)>=0) return;
-    out += '<div class="grouplab">'+esc(c)+' <span class="gcount">'+byCat[c].length+'</span></div>'+
-           '<div class="chips">'+tapeTiles(byCat[c],'day')+'</div>';
-  });
-  return out;
+  var cats=(order||[]).filter(function(c){return byCat[c]&&byCat[c].length;});
+  Object.keys(byCat).forEach(function(c){ if(cats.indexOf(c)<0) cats.push(c); });
+  return cats.map(function(c){ return tapeTiles(byCat[c],level); }).join('<div class="gap"></div>');
 }
 
 function secTape(s){
   if(!s) return '';
-  var live=s.tiles||[], eod=s.eod_tiles||[];
-  var fresh = s.freshest_tick ? ('freshest tick '+tIST(s.freshest_tick)+' IST') : 'no live tick';
-  var h = sh('01','Global Tape',s.tier||'LIVE',fresh);
+  var live=s.tiles||[], eod=s.eod_tiles||[], all=live.concat(eod);
+  var n=all.length;
+  /* R3 header: number chip + title + tier badge + right-aligned as-of. The badge counts how many
+     of the tiles are genuinely live rather than asserting the whole section is. */
+  var h = '<div class="sh"><span class="snum">01</span><span class="st">Global Tape</span>'+
+          '<span class="badge b-live"><span class="dot"></span>LIVE · '+live.length+' OF '+n+'</span>'+
+          '<span class="asof">day / week · as of <b>'+
+          esc(s.freshest_tick? tIST(s.freshest_tick)+' IST' : '—')+'</b></span></div>';
   h += '<div class="card">';
   if(s.error||s.live_error){
     h += '<div class="eodnote">Live ticks unavailable ('+esc(s.live_error||s.error)+
-         ') — tiles are showing their last stored close.</div>';
+         ') — every tile is showing its last stored close.</div>';
   }
-  h += tapeGroups(live,s.category_order,s.category_label,s.category_counts);
-  if(eod.length){
-    h += '<div class="grouplab" style="margin-top:12px">EOD ONLY · NO INTRADAY FEED '+
-         '<span class="gcount">'+eod.length+'</span></div>'+
-         '<div class="chips">'+tapeTiles(eod,'day')+'</div>'+
-         '<div class="eodnote">'+esc(s.eod_note||'')+'</div>';
-  }
-  h += '<div class="grouplab" style="margin-top:14px">WEEK · ROLLING 5 SESSIONS</div>'+
-       '<div class="chips">'+tapeTiles(live.concat(eod),'week')+'</div>';
+  /* EOD symbols ride the SAME run as the live ones (R3 shows all 17 in one strip); their own
+     as-of and PREV CLOSE state are carried in the tile title and the amber note below. */
+  h += '<div class="striprow"><div class="slab">DAY</div><div class="tiles">'+
+       tapeRun(all,s.category_order,'day')+'</div></div>';
+  h += '<div class="striprow"><div class="slab">WEEK</div><div class="tiles">'+
+       tapeRun(all,s.category_order,'week')+'</div></div>';
+  if(s.eod_note) h += '<div class="eodnote">◷ '+esc(s.eod_note)+'</div>';
   if(s.disclosure) h += '<div class="eodnote">'+esc(s.disclosure)+'</div>';
   h += read(s.read)+'</div>';
   return '<section>'+h+'</section>';
 }
 
-/* Tiles re-render their own age every 30s so the words stay truthful between digest refreshes,
-   without re-fetching anything. */
+/* Ages live in title= now, so the 30s refresh rewrites the tooltip rather than visible text. */
 function refreshAges(){
   var s=((D||{}).sections||{}).global_tape; if(!s) return;
   var map={}; (s.tiles||[]).concat(s.eod_tiles||[]).forEach(function(t){ map[t.symbol]=t; });
   document.querySelectorAll('#digest .gtile').forEach(function(el){
-    var t=map[el.getAttribute('data-sym')]; if(!t||!t.as_of_is_live) return;
-    var d=el.querySelector('.d'); if(!d||d.querySelector('.pcb')) return;
+    var t=map[el.getAttribute('data-sym')]; if(!t) return;
+    el.setAttribute('title',tileTitle(t,el.getAttribute('data-level')||'day'));
+    if(!t.as_of_is_live) return;
     var am=ageMin(t.tick_ts);
-    d.textContent=ageWords(am);
     el.classList.toggle('fresh',(am!=null&&am<=LIVE_DOT_MAX_MIN));
   });
 }
@@ -487,73 +513,153 @@ setInterval(refreshAges,30000);
 
 function secLadders(s){
   if(!s) return '';
-  var h = sh('02','Index Ladders',s.tier||'LIVE','pivots + live CMP');
-  h += '<div class="card"><div class="g2">';
+  var h = sh('02','Index Ladders',s.tier||'EOD','pivots + live CMP');
+  /* cc#853 — ported to R3 exactly. Three divergences from the shipped version were fixed here:
+       1. the grid: R3 puts .two OUTSIDE and gives each index its OWN .card idx. The old code
+          emitted <div class="card"><div class="g2">, and .g2 is R3's green colour-band class,
+          not a grid — which is why this section rendered as one green-tinted block.
+       2. the rungs: R3 uses .rung with .k/.bar/.v/.d and the res/sup/pp/cmp modifiers that colour
+          the key and the bar fill. The old code emitted .nrow (a NEWS row: flex, 11px padding,
+          bottom border) with .hlab (the hero label class), so the ladder had no grid columns and
+          no support/resistance colouring at all.
+       3. the READ: R3 hangs it in its own .card below the grid, not inside a wrapper card. */
+  h += '<div class="two">';
   (s.indexes||[]).forEach(function(ix){
-    h += '<div class="idx"><div class="idxhead"><span class="idxname">'+esc(ix.symbol)+'</span>'+
-         '<span class="idxpx num">'+num(ix.cmp,2)+'</span></div>'+
+    h += '<div class="card idx"><div class="idxhead">'+
+         '<span class="idxname">'+esc(ix.symbol)+'</span>'+
+         '<span class="idxpx">'+num(ix.cmp,2)+'</span>'+
+         (ix.chg_pct!=null?'<span class="idxchg">'+pc(ix.chg_pct)+'</span>':'')+
+         '</div>'+
          '<div class="idxsub">'+badge(ix.tier)+' as of '+esc(tIST(ix.as_of))+'</div>';
     if(!(ix.rungs||[]).length){ h += '<div class="pend">'+esc(ix.reason||'no ladder')+'</div></div>'; return; }
     h += '<div class="ladder">';
-    ix.rungs.forEach(function(r,i){
-      if(i===ix.cmp_slot){
-        h += '<div class="nrow cmp"><span class="hlab">CMP</span><span class="num">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
-      }
-      var w = Math.min(100, Math.abs(r.dist_pct||0)*22);
-      h += '<div class="nrow"><span class="hlab">'+r.label+'</span><span class="num">'+num(r.value,2)+'</span>'+
-           '<span class="bar"><i style="width:'+w+'%"></i></span><span class="d">'+pc(r.dist_pct)+'</span></div>';
-    });
-    if(ix.cmp_slot===(ix.rungs||[]).length){
-      h += '<div class="nrow cmp"><span class="hlab">CMP</span><span class="num">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
+    function cmpRung(){
+      return '<div class="rung cmp"><span class="k">CMP</span>'+
+             '<span class="bar"><i style="width:0"></i></span>'+
+             '<span class="v">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
     }
+    ix.rungs.forEach(function(r,i){
+      if(i===ix.cmp_slot) h += cmpRung();
+      /* R3 colours the rung by what the level IS: resistance red, support green, pivot cyan. */
+      var lab=String(r.label||'').toUpperCase();
+      var mod = lab.charAt(0)==='R' ? 'res' : (lab.charAt(0)==='S' ? 'sup' : 'pp');
+      var w = Math.min(100, Math.abs(r.dist_pct||0)*22);
+      h += '<div class="rung '+mod+'"><span class="k">'+esc(r.label)+'</span>'+
+           '<span class="bar"><i style="width:'+w+'%"></i></span>'+
+           '<span class="v">'+num(r.value,2)+'</span>'+
+           '<span class="d">'+pc(r.dist_pct)+'</span></div>';
+    });
+    if(ix.cmp_slot===(ix.rungs||[]).length) h += cmpRung();
     h += '</div></div>';
   });
-  h += '</div>'+read(s.read)+'</div>';
+  h += '</div>';
+  if(s.read) h += '<div class="card" style="margin-top:12px">'+
+                  '<div class="read" style="border-top:none"><span class="tag">READ</span>'+
+                  esc(s.read)+'</div></div>';
   return '<section>'+h+'</section>';
 }
+
 
 function secInternals(s){
   if(!s) return '';
   var h = sh('03','Internals',s.tier||'LIVE','breadth + options positioning');
-  h += '<div class="card"><div class="g2">';
+  /* cc#853 — R3 structure: a .three grid of standalone .card mini tiles, each with .mk label,
+     one big .mv number, an .mn sentence and a bar/spark beneath. The shipped version emitted
+     <div class="card"><div class="g2"> with .grouplab + .hstats, which is the HERO stat-strip
+     component, not this one — same green-band collision as section 02. */
+  h += '<div class="three">';
   var a=s.adr;
-  h += '<div><div class="grouplab">BREADTH · ADR'+(s.adr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>';
-  h += a ? ('<div class="hstats"><div class="hs"><span class="n num">'+num(a.adr,2)+'</span><span class="l">ADR</span></div>'+
-            '<div class="hs"><span class="n num pos">'+num(a.advances)+'</span><span class="l">ADV</span></div>'+
-            '<div class="hs"><span class="n num neg">'+num(a.declines)+'</span><span class="l">DEC</span></div></div>'+
-            '<div class="asof">'+esc(a.date)+'</div>')
-          : '<div class="pend">No breadth row.</div>';
-  h += '</div><div><div class="grouplab">OPTIONS · PCR'+(s.pcr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>';
-  h += (s.pcr||[]).length ? ('<div class="hstats">'+(s.pcr||[]).map(function(p){
-        return '<div class="hs"><span class="n num">'+num(p.pcr,2)+'</span><span class="l">'+esc(p.underlying)+'</span></div>'; }).join('')+
-        '</div><div class="asof">'+esc((s.pcr[0]||{}).date||'')+'</div>')
-       : '<div class="pend">No PCR row.</div>';
-  h += '</div></div>'+read(s.read)+'</div>';
+  h += '<div class="card mini"><div class="mk">Advance / Decline'+
+       (s.adr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>';
+  if(a){
+    var adv=Number(a.advances)||0, dec=Number(a.declines)||0, tot=adv+dec;
+    var ap = tot? (adv/tot*100) : 0;
+    h += '<div class="mv '+((a.adr!=null&&a.adr>=1)?'pos':'neg')+'">'+num(a.adr,2)+'</div>'+
+         '<div class="mn">'+num(adv)+' advancing · '+num(dec)+' declining</div>'+
+         '<div class="adbar"><i style="width:'+ap.toFixed(1)+'%;background:var(--gr)"></i>'+
+         '<i style="width:'+(100-ap).toFixed(1)+'%;background:var(--rd)"></i></div>'+
+         '<div class="sparklab"><span>'+esc(a.date||'')+'</span><span>ADR '+num(a.adr,2)+'</span></div>';
+  } else { h += '<div class="pend">No breadth row.</div>'; }
+  h += '</div>';
+  /* One .card mini per PCR underlying, matching R3's Nifty / Bank Nifty pair. */
+  var pcrs=(s.pcr||[]);
+  if(pcrs.length){
+    pcrs.forEach(function(p){
+      h += '<div class="card mini"><div class="mk">'+esc(p.underlying)+' PCR'+
+           (s.pcr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>'+
+           '<div class="mv">'+num(p.pcr,2)+'</div>'+
+           '<div class="mn">'+esc(p.note||('as of '+(p.date||'—')))+'</div>';
+      var hist=(p.history||[]);
+      if(hist.length){
+        var mx=Math.max.apply(null,hist.map(function(x){return Number(x.pcr)||0;}))||1;
+        h += '<div class="spark">'+hist.map(function(x,i){
+              var ht=Math.max(6,(Number(x.pcr)||0)/mx*100);
+              return '<i class="'+(i===hist.length-1?'last':((Number(x.pcr)||0)>=1?'hi':''))+
+                     '" style="height:'+ht.toFixed(0)+'%"></i>'; }).join('')+'</div>'+
+             '<div class="sparklab"><span>'+esc(hist[0].date||'')+'</span>'+
+             '<span>'+esc(hist[hist.length-1].date||'')+'</span></div>';
+      } else {
+        h += '<div class="sparklab"><span>'+esc(p.date||'')+'</span></div>';
+      }
+      h += '</div>';
+    });
+  } else {
+    h += '<div class="card mini"><div class="mk">Options · PCR</div><div class="pend">No PCR row.</div></div>';
+  }
+  h += '</div>';
+  if(s.read) h += '<div class="card" style="margin-top:12px">'+
+                  '<div class="read" style="border-top:none"><span class="tag">READ</span>'+
+                  esc(s.read)+'</div></div>';
   return '<section>'+h+'</section>';
 }
+
 
 function secReporting(s){
   if(!s) return '';
   var h = sh('04','Reporting Today',s.tier||'STATIC','earnings_calendar');
   h += '<div class="card">';
-  h += (s.companies||[]).length
-    ? '<div class="chips">'+(s.companies||[]).map(function(c){
-        return '<div class="chip"><span class="k">'+esc(c.ticker)+'</span><span class="d">'+esc(c.company||'')+'</span></div>'; }).join('')+'</div>'
+  // cc#853: R3 chip markup is <span class="chip"><b>TICKER</b> Company</span> — the <b> is what
+  // carries the cyan (.chip b{color:var(--cy)}). The old <span class="k">/<span class="d"> pair
+  // had no CSS behind it at all, so the ticker rendered unstyled.
+  var _co=(s.companies||[]), _cap=_co.slice(0,24);
+  h += _co.length
+    ? '<div class="chips">'+_cap.map(function(c){
+        return '<span class="chip"><b>'+esc(c.ticker)+'</b> '+esc(c.company||'')+'</span>'; }).join('')+
+      (_co.length>_cap.length?'<span class="chip more">+'+(_co.length-_cap.length)+' more</span>':'')+'</div>'
     : '<div class="pend">No scheduled reporters today.</div>';
   h += read(s.read)+'</div>';
   return '<section>'+h+'</section>';
+}
+
+/* cc#853: polished_news.sentiment is stored with an inconsistent vocabulary
+   (Bullish/Positive/positive, Bearish/Negative/negative, Cautious, Neutral/neutral). Normalised
+   ONCE here into R3's four buckets. Anything unrecognised or missing falls to NEUTRAL — the
+   digest never guesses a direction it was not told. */
+function sentBucket(v){
+  var t=String(v||'').trim().toLowerCase();
+  if(t==='bullish'||t==='positive') return {c:'s-bull',l:'BULLISH'};
+  if(t==='bearish'||t==='negative') return {c:'s-bear',l:'BEARISH'};
+  if(t==='cautious') return {c:'s-cau',l:'CAUTIOUS'};
+  return {c:'s-neu',l:'NEUTRAL'};
 }
 
 function secNews(n,title,s,tier){
   if(!s) return '';
   var h = sh(n,title,tier||'LIVE','polished desk');
   h += '<div class="card">';
+  /* R3 row: .sdot sentiment dot · a block with .nh headline + .ns summary · right-aligned .nsent.
+     The shipped version put `ns` on the ROW (it is the summary class) and pushed the summary into
+     .nsent (the right-aligned sentiment slot), so headline and body collapsed into one column. */
   h += (s.items||[]).length ? (s.items||[]).map(function(i){
-        return '<div class="nrow ns"><div><div class="nh">'+esc(i.headline)+'</div>'+
-               '<div class="nsent">'+esc((i.summary||'').slice(0,180))+'</div></div>'+
-               '<span class="d">'+esc(tIST(i.published))+'</span></div>'; }).join('')
+        var b=sentBucket(i.sentiment);
+        return '<div class="nrow"><span class="sdot '+b.c+'"></span>'+
+               '<div><div class="nh">'+esc(i.headline)+'</div>'+
+               '<div class="ns">'+esc((i.summary||'').slice(0,180))+
+               (i.published?' <span style="opacity:.7">· '+esc(tIST(i.published))+' IST</span>':'')+
+               '</div></div>'+
+               '<span class="nsent">'+b.l+'</span></div>'; }).join('')
       : '<div class="pend">Nothing on the desk.</div>';
-  h += '</div>';
+  h += read(s.read)+'</div>';
   return '<section>'+h+'</section>';
 }
 
@@ -581,13 +687,58 @@ function secResults(s){
   return '<section>'+h+'</section>';
 }
 
-function secRead(d){
-  var m=d.market_read||{};
-  var h = sh('08','Market Read','STATIC','composed from the numbers above');
-  h += '<div class="card"><div class="hero"><span class="pill p-bull">'+esc(m.bias||'—')+'</span></div>'+
-       '<div class="nsent">'+esc((m.support||[]).join(' · '))+'</div>'+
-       '<div class="eodnote">'+esc(m.note||'')+'</div></div>';
-  return '<section>'+h+'</section>';
+/* cc#853 — THE READ IS THE HERO, AND IT SITS AT THE TOP.
+   R3 opens the page with a standalone .hero (gradient panel, 3px left gradient rule via
+   .hero::before, .hlab kicker, .hbody prose, then a .hstats strip of five figures) BEFORE section
+   01, and has no section 08 at all. The shipped version rendered Market Read LAST, as a numbered
+   section, with .hero nested inside a .card (so the left gradient rule was clipped by the card's
+   overflow:hidden) and the supporting bits pushed through .nsent — the right-aligned sentiment
+   label, which is why that line rendered as a thin grey strip instead of body copy.
+
+   THE FIVE HERO FIGURES ARE NOT NEW DATA. Each is lifted from a section already on the page, so
+   the hero can never disagree with what is below it, and any tile whose source is missing is
+   simply omitted rather than shown as a dash. */
+function heroStat(k,v,n,cls){
+  return '<div class="hs"><div class="k">'+esc(k)+'</div>'+
+         '<div class="v'+(cls?' '+cls:'')+'">'+v+'</div>'+
+         '<div class="n">'+esc(n||'')+'</div></div>';
+}
+function secHero(d){
+  var m=d.market_read||{}, S=d.sections||{};
+  var stats='';
+  var ix=((S.ladders||{}).indexes||[])[0];
+  if(ix){
+    var pp=null,r1=null;
+    (ix.rungs||[]).forEach(function(r){
+      var lab=String(r.label||'').toUpperCase();
+      if(lab==='PP') pp=r; if(lab==='R1') r1=r;
+    });
+    if(pp) stats+=heroStat(ix.symbol+' pivot',num(pp.value,2),
+                  (ix.cmp!=null&&pp.value!=null)?('CMP sits '+num(Math.abs(ix.cmp-pp.value),0)+
+                    (ix.cmp>=pp.value?' above PP':' below PP')):'');
+    if(r1) stats+=heroStat('First resistance',num(r1.value,2),
+                  (r1.dist_pct!=null?Number(r1.dist_pct).toFixed(2)+'% room to R1':''),'pos');
+  }
+  var a=(S.internals||{}).adr;
+  if(a&&a.adr!=null) stats+=heroStat('Breadth ADR',num(a.adr,2),
+        num(a.advances)+' adv / '+num(a.declines)+' dec',(a.adr>=1?'pos':'neg'));
+  /* India VIX comes off the SAME tape tile the strip renders, not a second lookup. */
+  var tp=(S.global_tape||{});
+  var vx=((tp.tiles||[]).concat(tp.eod_tiles||[])).filter(function(t){return t.symbol==='INDIAVIX';})[0];
+  if(vx&&vx.price!=null) stats+=heroStat('India VIX',num(vx.price,2),
+        (vx.day_chg_pct!=null?(vx.day_chg_pct>0?'+':'')+Number(vx.day_chg_pct).toFixed(2)+'% on the day':''));
+  var rep=(S.reporting_today||{});
+  if(rep.count!=null) stats+=heroStat('Results today',String(rep.count),
+        ((S.yesterday_results||{}).reported_total!=null
+          ? (S.yesterday_results.reported_total+' reported yesterday') : ''));
+
+  var body = (m.support||[]).length ? (m.support||[]).join(' · ') : (m.note||'');
+  return '<div class="hero">'+
+    '<div class="hlab">THE READ · '+esc(String(d.date_ist||'').toUpperCase())+'</div>'+
+    '<div class="hbody"><b>'+esc(m.bias||'—')+'.</b> '+esc(body)+'</div>'+
+    (stats?'<div class="hstats">'+stats+'</div>':'')+
+    (m.note?'<div class="sparklab" style="margin-top:10px"><span>'+esc(m.note)+'</span></div>':'')+
+    '</div>';
 }
 
 /* ── cc#849 TILE DRAWER: chart + the cc#842 return block ───────────────────────────
@@ -741,10 +892,12 @@ function render(d){
   pill.textContent=(d.market||{}).label||'—';
   pill.className='mkt'+(((d.market||{}).state==='OPEN')?' open':'');
   var s=d.sections||{};
+  // cc#853: R3 order — hero READ first, then 01..07. There is no section 08; Market Read IS the hero.
   document.getElementById('digest').innerHTML =
+    secHero(d) +
     secTape(s.global_tape) + secLadders(s.ladders) + secInternals(s.internals) +
     secReporting(s.reporting_today) + secNews('05','What Moved',s.what_moved) +
-    secNews('06','Global Events',s.global_events) + secResults(s.yesterday_results) + secRead(d);
+    secNews('06','Global Events',s.global_events) + secResults(s.yesterday_results);
   var t=(s.global_tape||{});
   document.getElementById('footStats').textContent =
     ((t.tiles||[]).length+(t.eod_tiles||[]).length)+' global · '+

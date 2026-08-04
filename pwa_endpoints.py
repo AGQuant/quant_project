@@ -283,7 +283,9 @@ PWA_JS = """
     // page" — that rationale no longer holds, and rule 8 (NAV-COMPLETE, id=2987) requires a page to
     // carry a nav entry. Re-added on that basis, as ONE entry. If the founder still wants it out of
     // the bar, deleting this line is the whole change; the /digest route stays reachable either way.
-    ['/digest', '\\u25f1', 'Digest'],
+    // cc#853 (founder 04-Aug): Digest REMOVED from the main nav. It now lives in the V8 tab row,
+    // immediately after V6 BT (v8_dashboard.html). Exactly ONE Digest entry app-wide — this line
+    // is deliberately not an entry. cc#846 had re-added it here; the founder has since placed it.
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,

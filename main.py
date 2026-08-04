@@ -972,7 +972,9 @@ NAV_REGISTRY = {
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
-    "/digest":       ("Daily Digest",        "nav"),        # cc#846 rule id=2987
+    # cc#853: /digest is reachable from the V8 TAB ROW (after V6 BT), not the site nav — founder
+    # 04-Aug. Still injected + PROTECTED above; only its discovery point moved.
+    "/digest":       ("Daily Digest · V8 tab row (after V6 BT)", "v8-tab"),   # cc#846 -> cc#853
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
     "/screeners":    ("Screeners",            "nav"),   # cc#824

@@ -213,11 +213,17 @@ def _reporting_today(cur) -> Dict[str, Any]:
 
 
 def _news(cur, category: str, limit: int = 6) -> List[Dict[str, Any]]:
-    cur.execute("""SELECT headline_clean, COALESCE(summary, full_summary), source, published_time
+    # cc#853: sentiment added so the R3 news rows can carry their .sdot colour and .nsent label.
+    # It is READ from polished_news, never inferred here — the column is populated but its
+    # vocabulary is inconsistent (Bullish/Positive/positive, Bearish/Negative/negative, Cautious,
+    # Neutral/neutral), so it is passed through raw and normalised once, on the client.
+    cur.execute("""SELECT headline_clean, COALESCE(summary, full_summary), source, published_time,
+                          sentiment
                    FROM polished_news WHERE category=%s
                    ORDER BY published_time DESC LIMIT %s""", (category, limit))
     return [{"headline": r[0], "summary": r[1], "source": r[2],
-             "published": r[3].isoformat() if r[3] else None} for r in cur.fetchall()]
+             "published": r[3].isoformat() if r[3] else None,
+             "sentiment": r[4]} for r in cur.fetchall()]
 
 
 # ── 07 YESTERDAY'S RESULTS · SCORED — the strict three-condition match ────────────────────────
