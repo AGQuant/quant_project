@@ -133,7 +133,71 @@ MARKET_OPEN    = dt_time(9, 15)
 # informed: equity gives up the 09:15:00-09:16:00 ticks it used to get from the pre-open connection.
 # Correctness of the futures + extended legs from the open is worth more than 60s of equity ticks.
 WS_FIRST_CONNECT = dt_time(9, 16)
-MARKET_CLOSE   = dt_time(15, 30)
+
+# ── cc#855 SEBI CLOSING AUCTION SESSION (CAS), live 03-Aug-2026 ────────────────────────────────
+# SEBI circular HO/47/11/11(3)2025-MRD-POD2/I/2765/2026 (16-Jan-2026). The single
+# MARKET_CLOSE = 15:30 that used to gate every write is now WRONG IN BOTH DIRECTIONS: it accepted
+# dead-tape equity bars between 15:15 and 15:30, and it truncated real futures bars between 15:30
+# and 15:40. There is no longer one market close — there are three, by segment.
+#
+# WHO IS AFFECTED. CAS applies to CATEGORY I (F&O-eligible) cash stocks ONLY. That is exactly the
+# `fyers_eq` leg, which is subscribed from futures_universe.is_active. The `fyers_ext` leg is the
+# EXTENDED NON-F&O equity universe (cc#809) and is NOT in scope of the circular — those stocks keep
+# continuous trading to 15:30 and have no auction. Conflating the two legs would have tagged ~480
+# non-F&O symbols as auction bars they never had.
+EQ_CONTINUOUS_END = dt_time(15, 15)   # Category I cash: continuous trading ENDS
+EQ_AUCTION_END    = dt_time(15, 35)   # Category I cash: auction matched, closing price finalised
+EQ_NONFNO_CLOSE   = dt_time(15, 30)   # non-F&O cash (fyers_ext): UNCHANGED, no auction
+FUT_CLOSE         = dt_time(15, 40)   # equity derivatives (futures + options); VWAP window 15:10-15:40
+
+# The operational envelope: "is the trading day still running at all". Used by the boot-gap check,
+# the backfill hold, reconnect logic and the health loop — none of which reason about segments, all
+# of which must now stay open until the LAST segment stops. This is deliberately NOT a rename of
+# MARKET_CLOSE: it answers a different question ("is the session live") than the write guards
+# ("may THIS segment legitimately produce THIS bucket"), and it must never be used to gate a write.
+SESSION_END = FUT_CLOSE
+
+# Auction-window tags on intraday_prices.source. The column already exists, so no DDL is needed
+# (MAINTENANCE_LOCK_RULE id=3041 would have blocked an ALTER here anyway).
+AUCTION_WINDOW_SOURCE = 'fyers_eq_auction'   # 15:15-15:30 — order collection, NOT continuous trade
+AUCTION_CLOSE_SOURCE  = 'auction'            # 15:30-15:35 — the official closing-auction print
+
+# Option bars land in option_chain, not intraday_prices, so they never pass through
+# bar_source_tag() — their flush guards on FUT_CLOSE directly. Listed here anyway so the
+# set reads as 'what is a derivative', which is the question segment_close() asks.
+_DERIVATIVE_SOURCES = {'fyers_fut', 'fyers_fut_rest', 'fyers_opt'}
+
+
+def segment_close(source: str) -> dt_time:
+    """Latest bucket time `source` may legitimately produce. Anything at or after it is phantom."""
+    if source in _DERIVATIVE_SOURCES:
+        return FUT_CLOSE
+    if source == EXT_SOURCE:
+        return EQ_NONFNO_CLOSE
+    return EQ_AUCTION_END          # fyers_eq / fyers_hist — Category I cash
+
+
+def bar_source_tag(source, bt_time):
+    """cc#855: decide whether a bar is keepable AND under what source tag it must be stored.
+
+    Returns the source to PERSIST, or None if the bar must be rejected as off-session.
+
+    The auction is NOT price action. Between 15:15 and 15:30 a Category I stock has no continuous
+    market — orders are only being collected — and the 15:30 print is a single matched auction
+    price that routinely moves 1.5-2% on 50x normal volume (04-Aug: APOLLOHOSP 8884 -> 9050 on
+    2.59L shares; 11 of the top 12 moves that day were UP, i.e. a market-wide imbalance, not news).
+    Those bars are CAPTURED because the auction close is the official close and EOD reconciliation
+    needs it, but they are TAGGED so no momentum metric can ever mistake them for a 5-min bar.
+    """
+    if bt_time < MARKET_OPEN or bt_time >= segment_close(source):
+        return None
+    if source in _DERIVATIVE_SOURCES or source == EXT_SOURCE:
+        return source              # derivatives + non-F&O cash trade continuously; nothing to tag
+    if bt_time >= EQ_NONFNO_CLOSE:     # 15:30-15:35 → the official auction close print
+        return AUCTION_CLOSE_SOURCE
+    if bt_time >= EQ_CONTINUOUS_END:   # 15:15-15:30 → auction order-collection window
+        return AUCTION_WINDOW_SOURCE
+    return source
 
 INDEX_LTP_SYMBOLS = {
     'NIFTY50':    'NSE:NIFTY50-INDEX',
@@ -702,7 +766,8 @@ def _boot_gap_report(conn):
                          WHERE ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND timeframe='5m'""")
             last = c.fetchone()[0]
         now_ist = datetime.now(IST).replace(tzinfo=None)
-        mkt = is_trading_day(now_ist.date()) and MARKET_OPEN <= now_ist.time() <= MARKET_CLOSE
+        # cc#855: SESSION_END (15:40), not the old 15:30 — a futures bar at 15:35 is not a gap.
+        mkt = is_trading_day(now_ist.date()) and MARKET_OPEN <= now_ist.time() <= SESSION_END
         if last is None:
             log.info("BOOT GAP: no 5m bars yet today (cold / pre-market boot)")
             _ops_log(conn, 'info', 'feed_boot_gap',
@@ -1333,13 +1398,17 @@ class BarAggregator:
         sym, source = key
         try:
             # cc#193: NEVER persist an off-hours bar. Fyers streams phantom ticks
-            # on non-trading days and outside 09:15-15:30 (garbage levels — e.g.
+            # on non-trading days and outside session hours (garbage levels — e.g.
             # Sat 04-Jul BANKNIFTY 64,043 while the real Friday close was 58,255).
-            # Only bars inside a real trading session are real data. Was: only
-            # ts.time() >= MARKET_CLOSE rejected (no trading-day/pre-open guard).
+            # cc#855: the cutoff is now SEGMENT-AWARE and also decides the auction tag —
+            # bar_source_tag() returns None for a phantom bar, else the source to store under.
             bt = bar['ts']
-            if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
+            if not is_trading_day(bt.date()):
                 return
+            tagged = bar_source_tag(source, bt.time())
+            if tagged is None:
+                return
+            source = tagged
         except Exception:
             pass
         try:
@@ -1468,8 +1537,14 @@ class BarAggregator:
             sym, source = key
             try:
                 bt = bar['ts']
-                if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
+                if not is_trading_day(bt.date()):
                     continue   # cc#193: never persist an off-hours/phantom bar
+                # cc#855: segment-aware cutoff + auction tagging in one call. A rejected bar is
+                # phantom; a tagged one is real but must never read as continuous price action.
+                tagged = bar_source_tag(source, bt.time())
+                if tagged is None:
+                    continue
+                source = tagged
             except Exception:
                 pass
             rows.append((sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'],
@@ -1619,7 +1694,9 @@ class OptionBarStore:
         # ticks are garbage).
         try:
             bt = bar['bkt']
-            if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
+            # cc#855: options are EQUITY DERIVATIVES — they trade to 15:40 like futures, not to
+            # the old 15:30. These rows go to option_chain, so there is no source tag to apply.
+            if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= FUT_CLOSE:
                 return
         except Exception:
             pass
@@ -2133,7 +2210,7 @@ def _seed_cmp_from_rest(conn, token, equity_symbols):
 # session). Reuses cc#389's fetch_hist_5m + progress/log helpers (import only — no duplicated rules).
 def _phase_a_market_open():
     now = datetime.now(IST)
-    return now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+    return now.weekday() < 5 and MARKET_OPEN <= now.time() <= SESSION_END   # cc#855
 
 
 def _claim_phase_a_worker():
@@ -2321,8 +2398,10 @@ def run(auth_code=None):
             # (09:15-15:30 IST) — stale history bars caused a wrong-price paper entry.
             # If this thread wakes inside the live session, hold it until 15:35 IST.
             now = datetime.now(IST)
-            if now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE:
-                run_at  = now.replace(hour=15, minute=35, second=0, microsecond=0)
+            if now.weekday() < 5 and MARKET_OPEN <= now.time() <= SESSION_END:
+                # cc#855: hold to 15:45, past FUT_CLOSE — 15:35 now lands INSIDE the
+                # derivatives session and a backfill write there would race live bars.
+                run_at  = now.replace(hour=15, minute=45, second=0, microsecond=0)
                 wait_s  = max(0, (run_at - now).total_seconds())
                 log.info(f"Deferred backfill held to 15:35 IST (market open) — sleeping {wait_s/60:.0f} min")
                 time.sleep(wait_s)
@@ -2424,7 +2503,7 @@ def run(auth_code=None):
         # 18:00 heal-adjacent blip, is also safe to just resubscribe).
         now_t     = datetime.now(IST)
         _conn_state['established_at'] = now_t   # cc#843: anchors the sequence + the pre-open check
-        in_market = now_t.weekday() < 5 and MARKET_OPEN <= now_t.time() <= MARKET_CLOSE
+        in_market = now_t.weekday() < 5 and MARKET_OPEN <= now_t.time() <= SESSION_END   # cc#855
         if in_market or (_sub_state.get('day') == now_t.date() and _sub_state.get('done')):
             # cc#759 fix1/fix4: a reconnect MUST re-subscribe (never leave a connected WS with zero subs),
             # but must not race a running sequence on the same socket — take the SAME mutex. If a sequence
@@ -2829,7 +2908,7 @@ def run(auth_code=None):
             recent = -1 if (eq < 0 or fut < 0) else eq + fut
             uni_eq, uni_fut = len(equity_fyers_syms), len(futures_fyers_syms)
             now = datetime.now(IST)
-            in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+            in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= SESSION_END   # cc#855
             msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut} writing bars"
             # cc#759 fix2: a ticking count that EXCEEDS its universe leg is a double-subscription / counting
             # bug, NEVER health — it must ALERT and be treated as a failure (the 224/212 tell, LEARNING 2).
@@ -3134,7 +3213,7 @@ def run(auth_code=None):
             now    = datetime.now(IST)
             today  = now.date()
             now_dt = now.replace(tzinfo=None)
-            in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE)
+            in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= SESSION_END)   # cc#855
 
             # ── cc#660: worker heartbeat (every HEARTBEAT_WRITE_MIN, ANY hour) ────────────────
             if last_heartbeat is None or (now_dt - last_heartbeat).total_seconds() >= HEARTBEAT_WRITE_MIN * 60:

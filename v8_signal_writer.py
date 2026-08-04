@@ -277,6 +277,8 @@ def _write_adr_intraday(conn, sim_ts=None):
                 WITH li AS (
                     SELECT DISTINCT ON (symbol) symbol, close AS cmp
                     FROM intraday_prices WHERE ts::date = %s AND ts <= %s
+                      -- cc#855: never let the auction print be "the latest bar"
+                      AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
                     ORDER BY symbol, ts DESC
                 ),
                 pc AS (
@@ -308,7 +310,7 @@ def _write_adr_intraday(conn, sim_ts=None):
                     unchanged      = EXCLUDED.unchanged,
                     adr            = EXCLUDED.adr,
                     universe_count = EXCLUDED.universe_count,
-                    computed_at    = NOW()
+                    computed_at    = NOW() AT TIME ZONE 'Asia/Kolkata'
             """, (ts_5m, adv, dec, unc, adr, tot))
         conn.commit()
         log.debug(f"adr_intraday: {adv}A/{dec}D adr={adr} universe={tot}")
@@ -428,6 +430,35 @@ def _load_eod_history(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict]:
         }
     return history
 
+
+# ── cc#855 CLOSING-AUCTION SOURCES — NOT continuous price action ──────────────────────────────
+# SEBI CAS went live 03-Aug-2026 for Category I (F&O-eligible) cash stocks. worker/fyers_feed.py
+# now tags those bars: 'fyers_eq_auction' for the 15:15-15:30 order-collection window and 'auction'
+# for the 15:30 matched close print. An auction fill is a single matched price on ~50x normal
+# volume (04-Aug: APOLLOHOSP 8884 -> 9050, +1.87% on 2.59L shares; 11 of the top 12 moves that day
+# were UP — a market-wide imbalance, not news). It must never create or kill a signal.
+#
+# Most reads in this file already pin source='fyers_eq' and therefore exclude these tags BY
+# CONSTRUCTION. The exclusion below is for the handful that deliberately read ACROSS sources (the
+# ADR breadth CTEs and the NIFTY50 reference closes), which would otherwise pick the auction print
+# as "the latest bar" via DISTINCT ON ... ORDER BY ts DESC.
+AUCTION_SOURCES = ('fyers_eq_auction', 'auction')
+
+# ── cc#855 item 8: TIMEZONE CANON — IST, EVERYWHERE ───────────────────────────────────────────
+# Defect found during this audit: v8_metrics.computed_at was stored NAIVE UTC while
+# v8_qualified.signal_ts was stored NAIVE IST — same engine, same tick, two conventions. Evidence
+# (04-Aug 19:26 IST): MAX(signal_ts) = 15:30:16 reads -93.8 min old against NOW() (i.e. in the
+# FUTURE, so it cannot be UTC) and +236 min against IST now, which is correct. MAX(computed_at) =
+# 10:15:18 is 15:45 IST — exactly when the EOD engine runs — so it was UTC.
+#
+# CANONICAL: IST (Asia/Kolkata). This matches signal_ts, adr_intraday.ts, v8_paper_* and the
+# platform rule that all times are IST. Bare NOW() returns timestamptz and silently casts to the
+# SESSION timezone (UTC on Railway) when assigned to a naive `timestamp` column — that cast is the
+# whole bug, and it is the same class as cc#844's 330-minute phantom staleness. Every write here
+# is now NOW() AT TIME ZONE 'Asia/Kolkata', which is explicit and session-independent.
+#
+# Existing rows are migrated by a one-shot +5:30 UPDATE run immediately after this deploys, in the
+# overnight window when no writer tick can interleave.
 
 # -- Step 3: Load today's intraday bars (bulk) ---------------------------------
 
@@ -945,7 +976,7 @@ _UPSERT_METRICS_SQL = """
         week_index_52 = EXCLUDED.week_index_52,
         ma9_vs_ma21   = EXCLUDED.ma9_vs_ma21,
         vol_ratio     = EXCLUDED.vol_ratio,
-        computed_at   = NOW()
+        computed_at   = NOW() AT TIME ZONE 'Asia/Kolkata'
 """
 
 
@@ -1115,6 +1146,8 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
                     WITH li AS (
                         SELECT DISTINCT ON (symbol) symbol, close AS cmp
                         FROM intraday_prices WHERE ts::date = %s AND ts <= %s
+                          -- cc#855: never let the auction print be "the latest bar"
+                          AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
                         ORDER BY symbol, ts DESC
                     ),
                     pc AS (
@@ -1142,6 +1175,7 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
             cur.execute("""
                 SELECT close FROM intraday_prices
                 WHERE symbol='NIFTY50' AND ts::date=%s AND ts <= %s
+                  AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')   -- cc#855
                 ORDER BY ts DESC LIMIT 1
             """, (_d, _cut))
             lv = cur.fetchone()
@@ -1156,6 +1190,10 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
                 WITH days AS (
                     SELECT DISTINCT ON (ts::date) ts::date AS d, close::numeric AS c
                     FROM intraday_prices WHERE symbol='NIFTY50' AND ts::date < %s
+                      -- cc#855: reference closes stay on the CONTINUOUS basis. Mixing a 31-Jul
+                      -- continuous close against a 04-Aug auction close would compare two
+                      -- different price definitions across the 03-Aug methodology change.
+                      AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
                     ORDER BY ts::date DESC, ts DESC
                 ),
                 eod AS (
@@ -1542,7 +1580,7 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
                 INSERT INTO v8_funnel_counts (basket, score_date, counts)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW()
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
@@ -1706,7 +1744,7 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
                 INSERT INTO v8_funnel_counts (basket, score_date, counts)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW()
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
@@ -1853,7 +1891,7 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
                 INSERT INTO v8_funnel_counts (basket, score_date, counts)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW()
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
@@ -1990,7 +2028,7 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
                 INSERT INTO v8_funnel_counts (basket, score_date, counts)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW()
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:

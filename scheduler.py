@@ -175,9 +175,37 @@ def _bg_catchup_sweep():
 
 
 def _is_market_hours(now):
+    """Operational session window, 09:15-15:30. Deliberately UNCHANGED by cc#855 — the dispatch
+    consumers (V14 cycle, paper exits, watchdogs) keep their existing behaviour."""
     if now.weekday() >= 5: return False
     t = (now.hour, now.minute)
     return (9,15) <= t <= (15,30)
+
+
+# ── cc#855 SEBI CLOSING AUCTION SESSION: the day now has THREE boundaries, not one ─────────────
+def _is_cash_continuous(now):
+    """09:15-15:15 — while F&O-eligible CASH stocks have a CONTINUOUS market.
+
+    SEBI CAS (live 03-Aug-2026) ends continuous trading for Category I cash stocks at 15:15;
+    15:15-15:30 is order collection only and the close is a single matched auction print. The V8
+    signal writer reads the cash tape, so ticking it past 15:15 was reading a FROZEN tape: the
+    15:15 and 15:20 closes were byte-identical on NIFTY50, BANKNIFTY, FEDERALBNK and SONACOMS on
+    both 03-Aug and 04-Aug, which never occurred between 20-Jul and 31-Jul. Every 5-min tick after
+    15:15 re-stamped v8_qualified.signal_ts and adr_intraday with the same prices, so the last
+    three writes of the day were duplicates of the 15:15 state at best, and contaminated by the
+    auction print at worst."""
+    if now.weekday() >= 5: return False
+    t = (now.hour, now.minute)
+    return (9,15) <= t <= (15,15)
+
+
+def _is_session_live(now):
+    """09:15-15:40 — the OUTER envelope, open until the last segment stops. Equity derivatives now
+    trade to 15:40, so a job that must not compete with the live feed has to stay parked until
+    then; 15:30-15:40 is live futures tape, not off-market."""
+    if now.weekday() >= 5: return False
+    t = (now.hour, now.minute)
+    return (9,15) <= t <= (15,40)
 
 def _is_trading_day(d):
     """cc#207: weekend + NSE-holiday aware. Weekend-only fallback if the holiday
@@ -1699,7 +1727,7 @@ def _bg_gvm_backfill():
     if _gvm_backfill_running:
         return
     now = _ist_now()
-    if _is_market_hours(now):   # never compete with the live 5-min path
+    if _is_session_live(now):   # cc#855: never compete with the live 5-min path (to 15:40)
         return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -1747,7 +1775,7 @@ def _bg_gvm_backfill_ext():
     if _gvm_backfill_running:
         return
     now = _ist_now()
-    if _is_market_hours(now):
+    if _is_session_live(now):   # cc#855: off-market means past 15:40 now, not 15:30
         return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -1796,7 +1824,7 @@ def _bg_bt14_fut_oi():
     global _bt14_fut_oi_running
     if _bt14_fut_oi_running:
         return
-    if _is_market_hours(_ist_now()):   # never fetch/compete during market hours
+    if _is_session_live(_ist_now()):   # cc#855: futures tick to 15:40 — stay parked till then
         return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -3502,7 +3530,7 @@ async def _scheduler_loop():
             # guards already reset by _request_restart — fire an immediate recovery
             # tick (don't wait up to 5 min for the next m%5 dispatch) and keep looping.
             log.warning("scheduler: guards reset by watchdog/fail-streak — firing recovery tick")
-            if _is_market_hours(now):
+            if _is_cash_continuous(now):   # cc#855: recovery tick follows the same window
                 _spawn(_bg_signal_writer)
         # cc#622 C: morning prep pulled BEFORE 06:00 so the 06:00-09:10 pre-market window is empty
         # (deploys/market-open never land on a scheduled batch). Ordered stagger 05:05-05:58.
@@ -3580,7 +3608,9 @@ async def _scheduler_loop():
             _spawn(_bg_result_radar_snapshot)   # cc#772: post-close freeze of the Result Radar card (T-1 tag)
         if _is_trading_day(now.date()) and h == 16 and m == 15:
             _spawn(_bg_result_radar_log)        # cc#772: nightly T+1 outcome backfill for the study
-        if _is_market_hours(now) and m % 5 == 0:
+        # cc#855: the writer follows the CASH CONTINUOUS window (ends 15:15), not the old
+        # 15:30 — this is what moves the last adr_intraday / v8_qualified write to 15:15.
+        if _is_cash_continuous(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
         if m % 15 == 0:
@@ -3716,11 +3746,11 @@ async def _scheduler_loop():
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
         # resume (both no-op once flag='done' or a run is in-flight; off-market gate inside).
         if h == 2 and m == 20:  _spawn(_bg_gvm_backfill)
-        if m == 25 and not _is_market_hours(now):  _spawn(_bg_gvm_backfill)
+        if m == 25 and not _is_session_live(now):  _spawn(_bg_gvm_backfill)        # cc#855
         # cc#471: extension backfill (all 5yr-deep syms). Sequenced after the main run
         # (gate inside checks gvm_backfill_run='done') + shares the single-flight guard.
         if h == 2 and m == 40:  _spawn(_bg_gvm_backfill_ext)
-        if m == 45 and not _is_market_hours(now):  _spawn(_bg_gvm_backfill_ext)
+        if m == 45 and not _is_session_live(now):  _spawn(_bg_gvm_backfill_ext)    # cc#855
 
 
 async def _supervisor():

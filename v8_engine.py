@@ -94,7 +94,9 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     sector_day NUMERIC, sector_week NUMERIC, sector_month NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
     ma9_vs_ma21 NUMERIC, vol_ratio NUMERIC,
-    computed_at TIMESTAMP DEFAULT NOW(),
+    -- cc#855: IST is canonical (see v8_signal_writer TIMEZONE CANON note). A bare NOW()
+    -- default casts to the SESSION timezone (UTC on Railway) and reintroduces the mismatch.
+    computed_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata'),
     UNIQUE(symbol, score_date)
 );
 ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS sector_month NUMERIC;
@@ -163,7 +165,9 @@ CREATE TABLE IF NOT EXISTS v8_funnel_counts (
     basket TEXT NOT NULL,
     score_date DATE NOT NULL,
     counts JSONB NOT NULL,
-    computed_at TIMESTAMP DEFAULT NOW(),
+    -- cc#855: IST is canonical (see v8_signal_writer TIMEZONE CANON note). A bare NOW()
+    -- default casts to the SESSION timezone (UTC on Railway) and reintroduces the mismatch.
+    computed_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata'),
     UNIQUE(basket, score_date)
 );
 CREATE INDEX IF NOT EXISTS idx_v8_funnel_date ON v8_funnel_counts(score_date DESC);
@@ -326,7 +330,13 @@ def store_metrics(conn, m: Dict):
                 sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
                 sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
-                ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio
+                ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio,
+                -- cc#855: set EXPLICITLY. This upsert previously left computed_at to the column
+                -- DEFAULT, which on the live table is still a bare now() (= UTC on Railway).
+                -- Changing that default needs ALTER TABLE, which MAINTENANCE_LOCK_RULE id=3041
+                -- confines to a weekend Railway-console window — so it is PROPOSED, not run here.
+                -- Writing the value explicitly makes the code correct regardless of the default.
+                computed_at=NOW() AT TIME ZONE 'Asia/Kolkata'
         """, m)
         conn.commit()
 
@@ -388,7 +398,7 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                     INSERT INTO v8_funnel_counts (basket, score_date, counts)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (basket, score_date) DO UPDATE SET
-                        counts=EXCLUDED.counts, computed_at=NOW()
+                        counts=EXCLUDED.counts, computed_at=NOW() AT TIME ZONE 'Asia/Kolkata'   -- cc#855: IST canon
                 """, (basket, target_date, json.dumps(funnel)))
             conn.commit()
         except Exception as e:
@@ -471,7 +481,7 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                     INSERT INTO v8_funnel_counts (basket, score_date, counts)
                     VALUES ('sell_overbought', %s, %s)
                     ON CONFLICT (basket, score_date) DO UPDATE SET
-                        counts=EXCLUDED.counts, computed_at=NOW()
+                        counts=EXCLUDED.counts, computed_at=NOW() AT TIME ZONE 'Asia/Kolkata'   -- cc#855: IST canon
                 """, (target_date, json.dumps(so_counts)))
             conn.commit()
             log.info(f"write_signals: sell_overbought funnel written {so_counts}")

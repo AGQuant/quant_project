@@ -22,9 +22,16 @@ from datetime import date, datetime
 
 import nse_holidays
 
-# auto-entry window (IST): open 09:15, hard cut 15:20 — the writer stops opening at 15:20.
+# auto-entry window (IST): open 09:15, hard cut 15:15 — the writer stops opening at 15:15.
+# cc#855: cut moved 15:20 -> 15:15. SEBI's Closing Auction Session (live 03-Aug-2026) ends
+# CONTINUOUS trading for F&O-eligible cash stocks at 15:15; 15:15-15:30 is order collection only.
+# A 15:20 entry therefore had no continuous market to execute against — it would have been priced
+# off a dead tape (15:15 and 15:20 closes were byte-identical on NIFTY50/BANKNIFTY/FEDERALBNK/
+# SONACOMS on both 03-Aug and 04-Aug, which never happened 20-Jul to 31-Jul) or, worse, off the
+# auction print. Equity derivatives still trade to 15:40, but the basket entries are cash-referenced,
+# so the binding constraint is the cash continuous close.
 ENTRY_OPEN_HM = (9, 15)
-ENTRY_CUT_HM  = (15, 20)
+ENTRY_CUT_HM  = (15, 15)
 
 
 def is_trading_day(d: date) -> bool:
@@ -33,7 +40,7 @@ def is_trading_day(d: date) -> bool:
 
 
 def in_entry_window(now_ist: datetime, open_hm=ENTRY_OPEN_HM, cut_hm=ENTRY_CUT_HM) -> bool:
-    """True iff now_ist is within [09:15, 15:20] IST. Replaces the three identical
+    """True iff now_ist is within [09:15, 15:15] IST. Replaces the three identical
     market-hours blocks in the writer entry fns (mkt_open <= now <= mkt_cut)."""
     lo = now_ist.replace(hour=open_hm[0], minute=open_hm[1], second=0, microsecond=0)
     hi = now_ist.replace(hour=cut_hm[0],  minute=cut_hm[1],  second=0, microsecond=0)
