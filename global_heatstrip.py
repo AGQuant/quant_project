@@ -106,10 +106,26 @@ def build_strip(cur) -> Dict[str, Any]:
         per_sym.setdefault(r[0], []).append(r)
 
     # ── live intraday last tick for the 12 covered symbols ───────────────────────────────────
-    cur.execute("""SELECT DISTINCT ON (symbol) symbol, price, ts
-                   FROM global_intraday WHERE price IS NOT NULL
-                   ORDER BY symbol, ts DESC""")
-    live = {r[0]: (_f(r[1]), r[2]) for r in cur.fetchall()}
+    # COLUMN NAME (cc#848): global_intraday stores OHLC — open/high/low/CLOSE. It has NO `price`
+    # column; `price` belongs to global_indices (daily), which is why every daily query in this
+    # file worked while both intraday reads raised UndefinedColumn.
+    #
+    # ISOLATED (cc#848): this lookup is its own try/except because the only handler used to be at
+    # the endpoint, which returns {tiles: [], eod_tiles: [], error}. One bad column therefore
+    # blanked BOTH legs and all 17 tiles. The live tick is an ENRICHMENT over the daily row — if it
+    # fails, every tile still renders from global_indices with as_of_is_live=False, i.e. the strip
+    # degrades to EOD instead of disappearing. `live_error` is surfaced so a silent degrade is
+    # still visible rather than looking like a quiet market.
+    live, live_error = {}, None
+    try:
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, close, ts
+                       FROM global_intraday WHERE close IS NOT NULL
+                       ORDER BY symbol, ts DESC""")
+        live = {r[0]: (_f(r[1]), r[2]) for r in cur.fetchall()}
+    except Exception as e:
+        live_error = f"{type(e).__name__}: {str(e)[:160]}"
+        log.warning("cc#848 live intraday tick unavailable, degrading strip to EOD: %s", e)
+        cur.connection.rollback()
 
     # ── India VIX bridge: the REAL path (see module docstring), never a new fetch ─────────────
     vix_live, vix_ts = None, None
@@ -176,6 +192,8 @@ def build_strip(cur) -> Dict[str, Any]:
         "week_basis": f"rolling {WEEK_SESSIONS} sessions, per symbol's own session calendar",
         "inverted_symbols": sorted(INVERTED),
         "count": len(tiles),
+        "live_ticks": len(live),
+        "live_error": live_error,
     }
 
 
@@ -234,11 +252,19 @@ def build_detail(cur, symbol: str) -> Dict[str, Any]:
     # the spec is explicit that these are different series, not one with a gap.
     series, series_kind = [], "daily"
     if symbol not in EOD_ONLY:
-        cur.execute("""SELECT ts, price FROM global_intraday
-                       WHERE symbol=%s AND price IS NOT NULL ORDER BY ts""", (symbol,))
-        series = [{"t": str(r[0]), "p": float(r[1])} for r in cur.fetchall()]
-        if series:
-            series_kind = "intraday"
+        # cc#848: same column fix as build_strip — global_intraday is OHLC, the series reads CLOSE.
+        # The INDIAVIX branch below already read `close` (from intraday_prices) and was the working
+        # reference that made the mismatch obvious.
+        try:
+            cur.execute("""SELECT ts, close FROM global_intraday
+                           WHERE symbol=%s AND close IS NOT NULL ORDER BY ts""", (symbol,))
+            series = [{"t": str(r[0]), "p": float(r[1])} for r in cur.fetchall()]
+            if series:
+                series_kind = "intraday"
+        except Exception as e:
+            log.warning("cc#848 intraday drawer series for %s, falling back to daily: %s", symbol, e)
+            cur.connection.rollback()
+            series = []
     if symbol == "INDIAVIX":
         try:
             cur.execute("""SELECT ts, close FROM intraday_prices
