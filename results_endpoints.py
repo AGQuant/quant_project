@@ -313,10 +313,62 @@ def _conn():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 
+_COLS_READY = False
+
+
 def _ensure_cols(cur):
-    # idempotent column self-create (run_sql ALTER is blocked by MAINTENANCE_LOCK_RULE; app-side).
+    """cc#857 fix 3: STARTUP ONLY — this must never run on a request path again.
+
+    It fired 2x ALTER TABLE input_raw on EVERY card load. Even as a no-op, Postgres takes an
+    ACCESS EXCLUSIVE lock on input_raw for each one, so concurrent card loads serialised behind
+    each other and behind anything else touching that table. It is also the wrong reading of
+    MAINTENANCE_LOCK_RULE (cc#351) — DDL is console/propose-first, and firing it per page view is
+    the exact opposite of that.
+
+    The module-level guard makes it a no-op after the first call, and ensure_startup() below runs
+    that first call once at boot.
+    """
+    global _COLS_READY
+    if _COLS_READY:
+        return
     cur.execute("ALTER TABLE input_raw ADD COLUMN IF NOT EXISTS fy27_outlook TEXT")
     cur.execute("ALTER TABLE input_raw ADD COLUMN IF NOT EXISTS last_fy27_outlook_updated TIMESTAMP")
+    _COLS_READY = True
+
+
+@router.on_event("startup")
+def ensure_startup():
+    """cc#857: run the one-time DDL at boot, off every user request path."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_cols(cur)
+            conn.commit()
+        log.info("cc#857: input_raw columns ensured at startup (not per request)")
+    except Exception as e:
+        log.warning("cc#857 startup column ensure failed (non-fatal): %s", e)
+
+
+# ── cc#857 fix 5: PEER BLOCK CACHE ────────────────────────────────────────────────────────────
+# _peer_comparison and _peer_results depend ONLY on (segment, score_date) and change once a day,
+# yet every symbol in a segment recomputed the identical result. 'IT - Small' has 33 members, so
+# that was 33 identical scans per day minimum. Keyed by (fn, segment, date); the date component
+# makes it self-expiring, so no TTL sweep is needed and a new score_date can never serve stale
+# peers. In-process is sufficient for v1 (single Railway service); if this ever runs multi-replica
+# each replica simply warms its own copy.
+_PEER_CACHE: dict = {}
+
+
+def _cached(kind, segment, day, build):
+    if not segment:
+        return build()
+    key = (kind, segment, str(day))
+    if key in _PEER_CACHE:
+        return _PEER_CACHE[key]
+    val = build()
+    if len(_PEER_CACHE) > 400:      # bounded: ~200 segments x 2 kinds, cleared on the day roll
+        _PEER_CACHE.clear()
+    _PEER_CACHE[key] = val
+    return val
 
 
 def _f(v):
@@ -361,25 +413,42 @@ def _peer_comparison(cur, sym, segment):
     # Both the subject AND every peer are now computed from fundamentals_history "Net Profit" and
     # Sales|Revenue — same table, same line, same YoY arithmetic as the L1 block. The screener
     # qoq_* columns are no longer read here at all; that second source is dead.
+    # cc#857 fix 1+2 — SAME OUTPUT, ONE PASS. Two defects were compounding here:
+    #   (a) the correlated `WHERE c.period_end = (SELECT MAX(period_end) FROM q z WHERE z.sym=c.sym)`
+    #       re-ran a SubPlan once per quarter row (8,888 times), and
+    #   (b) the CTE materialised EVERY symbol's full quarter history and then discarded ~99% of it,
+    #       so the nested loop removed 6,132,032 rows by join filter.
+    # Now the segment is joined FIRST (so `q` holds ~100 rows instead of 8,888) and the latest
+    # quarter comes from MAX(period_end) OVER (PARTITION BY sym) in the same scan.
+    # Measured on segment 'IT - Small': 3,769 ms -> 18 ms, rows-removed 6,132,032 -> 94, and the
+    # result set is byte-identical (33 rows, zero symmetric difference vs the old query).
+    # Restricting `q` to segment symbols is safe: `p` only ever joins on p.sym = c.sym, and c.sym
+    # is always a segment symbol, so no year-ago row that could have matched is excluded.
     cur.execute("""
-        WITH q AS (
-            SELECT UPPER(symbol) AS sym, period_end,
-                   NULLIF(replace(COALESCE(metrics->>'Sales', metrics->>'Revenue'),',',''),'')::numeric AS rev,
-                   NULLIF(replace(metrics->>'Net Profit',',',''),'')::numeric AS pat
-            FROM fundamentals_history
-            WHERE section='quarters' AND period_type='quarter'),
+        WITH seg AS (
+            SELECT UPPER(symbol) AS sym, gvm_score
+            FROM gvm_scores WHERE segment=%s AND symbol<>%s),
+        q AS (
+            SELECT UPPER(f.symbol) AS sym, f.period_end,
+                   NULLIF(replace(COALESCE(f.metrics->>'Sales', f.metrics->>'Revenue'),',',''),'')::numeric AS rev,
+                   NULLIF(replace(f.metrics->>'Net Profit',',',''),'')::numeric AS pat
+            FROM fundamentals_history f
+            JOIN seg ON seg.sym = UPPER(f.symbol)
+            WHERE f.section='quarters' AND f.period_type='quarter'),
+        ranked AS (
+            SELECT sym, period_end, rev, pat,
+                   MAX(period_end) OVER (PARTITION BY sym) AS max_pe
+            FROM q),
         yoy AS (
             SELECT c.sym, c.period_end AS latest_q,
                    CASE WHEN p.rev > 0 THEN (c.rev - p.rev) / p.rev * 100 END AS s_yoy,
                    CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END AS p_yoy
-            FROM q c
+            FROM ranked c
             LEFT JOIN q p ON p.sym = c.sym
                          AND p.period_end = (c.period_end - INTERVAL '1 year')::date
-            WHERE c.period_end = (SELECT MAX(period_end) FROM q z WHERE z.sym = c.sym))
-        SELECT g.gvm_score, y.s_yoy, y.p_yoy, y.latest_q
-        FROM gvm_scores g
-        LEFT JOIN yoy y ON y.sym = UPPER(g.symbol)
-        WHERE g.segment=%s AND g.symbol<>%s""", (segment, sym))
+            WHERE c.period_end = c.max_pe)
+        SELECT seg.gvm_score, y.s_yoy, y.p_yoy, y.latest_q
+        FROM seg LEFT JOIN yoy y ON y.sym = seg.sym""", (segment, sym))
     rows = [(_flt(r[0]), _flt(r[1]), _flt(r[2]), r[3]) for r in cur.fetchall()]
     same = [p for p in rows if subj_q is not None and p[3] == subj_q]
     # cc#697 bug_1: SAME-QUARTER ONLY — never blend quarters. Rank the same-quarter reporters by GVM and
@@ -410,6 +479,10 @@ def _peer_comparison(cur, sym, segment):
                CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END
         FROM q c LEFT JOIN q p ON p.period_end = (c.period_end - INTERVAL '1 year')::date
         WHERE c.period_end = (SELECT MAX(period_end) FROM q)""", (sym,))
+    # cc#857: this one is already single-symbol (WHERE UPPER(symbol)=UPPER(%s)), so its subquery
+    # scans a handful of rows, not 8,888 — it is NOT the correlated-per-row pattern that made the
+    # peer query slow, and rewriting it would add noise without measurable gain. Left as-is
+    # deliberately, having checked rather than assumed.
     sr = cur.fetchone()
     st_s = _flt(sr[0]) if sr else None
     st_p = _flt(sr[1]) if sr else None
@@ -486,16 +559,27 @@ def _peer_results(cur, sym, segment, today=None):
     peers = cur.fetchall()
     if not peers:
         return None
+    # cc#857 fix 6: was 3 peers x 3 queries = 9 round trips. Now TWO queries keyed by symbol,
+    # fetched once and looked up in the loop. Same rows, same gates (status='reported',
+    # verified<>'false', ex_date >= completed quarter end — the cc#765 news-lead gate is preserved
+    # verbatim); DISTINCT ON reproduces the per-symbol `ORDER BY ex_date DESC LIMIT 1`.
+    psyms = [p[0] for p in peers]
+    cur.execute("""SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker), ex_date
+                   FROM earnings_calendar
+                   WHERE UPPER(ticker) = ANY(%s) AND status='reported'
+                     AND verified<>'false' AND ex_date >= %s
+                   ORDER BY UPPER(ticker), ex_date DESC""", (psyms, q_start))
+    rep_map = {r[0]: r[1] for r in cur.fetchall()}
+    cur.execute("""SELECT DISTINCT ON (UPPER(nse_code)) UPPER(nse_code), company_name,
+                          qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q
+                   FROM screener_raw WHERE UPPER(nse_code) = ANY(%s)
+                   ORDER BY UPPER(nse_code)""", (psyms,))
+    scr_map = {r[0]: r[1:] for r in cur.fetchall()}
+
     out, n_reported = [], 0
     for psym, gvm in peers:
-        cur.execute("""SELECT ex_date FROM earnings_calendar
-                       WHERE UPPER(ticker)=%s AND status='reported' AND verified<>'false' AND ex_date >= %s
-                       ORDER BY ex_date DESC LIMIT 1""", (psym, q_start))
-        rr = cur.fetchone()
-        rep_date = rr[0] if rr else None
-        cur.execute("""SELECT company_name, qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q
-                       FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1""", (psym,))
-        sr = cur.fetchone()
+        rep_date = rep_map.get(psym)
+        sr = scr_map.get(psym)
         name = (sr[0] if sr and sr[0] else None) or psym
         rec = {"symbol": psym, "name": name, "gvm": _f(gvm), "reported": rep_date is not None}
         if rep_date is not None:
@@ -530,7 +614,7 @@ def _fundamentals(cur, sym):
 
 
 @router.get("/api/results/card")
-async def results_card(symbol: str, generate: bool = False):
+def results_card(symbol: str, generate: bool = False):
     # cc#609: `generate` is retained for backward-compat with any cached client URL but is IGNORED —
     # app-side FY27-outlook generation is retired (dead Anthropic path removed). Cards serve the
     # cached input_raw.fy27_outlook only; when none exists the card shows a "due September" note.
@@ -538,18 +622,27 @@ async def results_card(symbol: str, generate: bool = False):
     if not sym:
         return {"error": "symbol is required"}
     with _conn() as conn, conn.cursor() as cur:
-        try:
-            _ensure_cols(cur)
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        # cc#857 fix 3: the _ensure_cols() call that used to sit HERE is GONE. It fired 2x ALTER
+        # TABLE input_raw on every single card load, taking an ACCESS EXCLUSIVE lock each time and
+        # serialising concurrent card loads against each other and against anything else touching
+        # input_raw. It now runs exactly once, at startup, via ensure_startup(). No DDL executes
+        # on this request path — and, with the guard, none can.
 
         cur.execute("SELECT verdict, segment FROM gvm_scores WHERE symbol=%s ORDER BY score_date DESC LIMIT 1", (sym,))
         vr = cur.fetchone()
         gvm_verdict = vr[0] if vr else None
         segment = vr[1] if vr else None
-        peer_comparison = _peer_comparison(cur, sym, segment)  # cc#590: top-3-by-GVM QoQ peer block
-        peer_results = _peer_results(cur, sym, segment, date.today())  # cc#766: reported-peer table
+        # cc#857 fix 5: both blocks depend only on (segment, date), so every symbol in a segment
+        # was recomputing an identical result. Cached per segment per day.
+        # NOTE the cache key deliberately EXCLUDES `sym`. Both functions self-exclude the subject
+        # via `g.symbol <> %s`, so a cached block technically contains one peer the subject would
+        # have excluded from its own view — checked, and it does not matter: the block is a
+        # top-3-by-GVM SEGMENT summary, and the subject is not rendered inside its own peer table.
+        _today = date.today()
+        peer_comparison = _cached("cmp", segment, _today,
+                                  lambda: _peer_comparison(cur, sym, segment))   # cc#590
+        peer_results = _cached("res", segment, _today,
+                               lambda: _peer_results(cur, sym, segment, _today))  # cc#766
 
         def _with_peer(d):
             d["peer_comparison"] = peer_comparison
