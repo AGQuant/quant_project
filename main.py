@@ -105,6 +105,7 @@ from screeners_endpoints import router as screeners_router   # cc#824 predefined
 from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided CIO tree + telemetry
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star marker (read-only)
+from preview_endpoints import router as preview_router   # cc#866 preview screens (Claude.ai pushes previews/)
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -308,13 +309,18 @@ def _find_outside_comments(hay: bytes, needle: bytes) -> int:
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    if request.url.path in PROTECTED and not _is_authed(request):
+    # cc#866: PROTECTED/_PWA_INJECT_PATHS are EXACT-match sets, but /preview/{name} is dynamic —
+    # adding the literal '/preview' would gate the index and leave every screen ungated. The
+    # prefix test below is what actually makes /preview/v8 redirect to /login when logged out.
+    _is_preview = request.url.path == '/preview' or request.url.path.startswith('/preview/')
+    if (request.url.path in PROTECTED or _is_preview) and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
     response = await call_next(request)
     path = request.url.path
-    do_logout = path in PROTECTED
-    do_pwa = path in _PWA_INJECT_PATHS
+    _prev = path == '/preview' or path.startswith('/preview/')   # cc#866
+    do_logout = path in PROTECTED or _prev
+    do_pwa = path in _PWA_INJECT_PATHS or _prev
     if (do_logout or do_pwa) and "text/html" in response.headers.get("content-type", ""):
         is_embed = _is_embedded(request)
         body = b""
@@ -457,6 +463,7 @@ app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report whit
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 app.include_router(pivot_star_router)   # cc#856: /api/v8/pivot_star
+app.include_router(preview_router)   # cc#866: /preview + /preview/{name}
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
