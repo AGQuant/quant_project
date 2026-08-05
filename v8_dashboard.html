@@ -3102,14 +3102,17 @@ function renderHeatStrip(d){
   h+='<div class="hs-lvl">'+hsGroups(live,'day',d)+'</div>';
   if(eod.length){
     // Founder-locked: a SEPARATE, visually distinct block. Not dimmed into the day row, not dropped.
-    h+='<div class="hs-head hs-head-eod"><span class="hs-title">EOD only</span>'
-      +'<span class="hs-sub">no intraday feed · each tile carries its own close date</span></div>';
+    // cc#852: this block is now DATA-DERIVED — it holds whatever has no tick right now, which during
+    // Asia/Europe hours is usually nothing (the block then hides entirely). The copy says CLOSED,
+    // not "no feed": a market outside its own session is closed, not broken, and must not read as stale.
+    h+='<div class="hs-head hs-head-eod"><span class="hs-title">Closed / awaiting tick</span>'
+      +'<span class="hs-sub">outside their market hours · each tile carries its own close date</span></div>';
     h+='<div class="hs-lvl hs-eod">'+hsGroups(eod,'day',d)+'</div>';
   }
   h+='<div class="hs-head"><span class="hs-title">Week</span>'
     +`<span class="hs-sub">rolling 5 sessions · each symbol's own calendar</span></div>`;
   h+='<div class="hs-lvl">'+hsGroups(live.concat(eod),'week',d)+'</div>';
-  h+='<div class="hs-foot">VIX tiles inverted — up = risk-off, on both levels. Tap a tile for returns and 52-week range.</div>';
+  h+='<div class="hs-foot">India VIX inverted — up = risk-off, on both levels. Tap a tile for returns and 52-week range.</div>';   // cc#852: US VIX retired from the tape
   h+='</div><div id="hs-drawer"></div>';
   return h;
 }

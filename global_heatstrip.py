@@ -43,12 +43,32 @@ _DB = os.getenv("DATABASE_URL", "")
 
 WEEK_SESSIONS = 5
 
-# The 5 symbols with no global_intraday coverage. Founder-locked: they render in their OWN EOD
-# BLOCK — visually distinct, each with its own as-of date. NOT dimmed into the day row, NOT excluded.
-EOD_ONLY = {"000001.SS", "^FTSE", "^GDAXI", "INDIAVIX", "^VIX"}
+# ── cc#852 TIER IS DERIVED FROM DATA, NOT FROM SET MEMBERSHIP ─────────────────────────────────
+# THE BUG THIS FIXES. EOD_ONLY used to be a static 5-symbol set and build_strip filed every tile
+# purely on `sym in EOD_ONLY`. India VIX ticks live all session (worker/fyers_feed.py subscribes
+# NSE:INDIAVIX-INDEX via INDEX_LTP_SYMBOLS; 1,181 rows in intraday_prices), and this module already
+# bridged to that feed and computed a LIVE price for it — and then filed the tile under eod_tiles
+# anyway, because the set said so. A live price rendered in the "no intraday feed" block.
+#
+# So membership no longer decides the tier. `eod_only` on each tile is now TRUE IFF that symbol has
+# no live tick, which is the same doctrine as ENGINE_LIVENESS_RULE (13829): the badge follows the
+# data, never the registration.
+#
+# NO_INTRADAY_FEED stays as a STATIC declaration of which symbols have no 5-minute feed wired at
+# all. It drives the 5m chart button ONLY (cc#849), never the tier — a transient feed gap must not
+# silently disable 5m charting for a market that genuinely has a feed.
+NO_INTRADAY_FEED = {"^FTSE", "^GDAXI"}
+
+# cc#852: symbols retired from the tape DISPLAY. Their history is deliberately retained in
+# global_indices (^VIX has 1,287 daily rows) so the decision is reversible without a backfill.
+# 000001.SS (Shanghai) is dropped outright — founder, unconditional, no probe — and is removed
+# from GLOBAL_TICKERS in global_indices.py as well. THAT removal is the load-bearing half: the
+# nightly Yahoo daily fetch would otherwise re-insert Shanghai and it would silently reappear.
+TAPE_HIDDEN = {"^VIX", "000001.SS"}
 
 # Inverted tiles: for volatility, UP is RISK-OFF. The inversion applies to BOTH the day and week
 # legs (founder-locked) — a green VIX week would say the opposite of what happened.
+# INDIAVIX stays here after cc#852 moved it out of the EOD block; only its TIER changed.
 INVERTED = {"^VIX", "INDIAVIX"}
 
 CATEGORY_ORDER = ["index", "volatility", "commodity", "currency", "crypto"]
@@ -103,6 +123,8 @@ def build_strip(cur) -> Dict[str, Any]:
     """, (WEEK_SESSIONS + 1,))
     per_sym: Dict[str, List[tuple]] = {}
     for r in cur.fetchall():
+        if r[0] in TAPE_HIDDEN:      # cc#852: retired from the tape; history kept in the table
+            continue
         per_sym.setdefault(r[0], []).append(r)
 
     # ── live intraday last tick for the 12 covered symbols ───────────────────────────────────
@@ -156,7 +178,9 @@ def build_strip(cur) -> Dict[str, Any]:
         # DAY = latest tick vs prev_close. Falls back to the stored daily chg_pct when there is no
         # tick — which is exactly the case for the five EOD symbols, and why they get their own
         # block rather than sitting in the day row pretending to be live.
-        is_live = lp is not None and sym not in EOD_ONLY or (sym == "INDIAVIX" and lp is not None)
+        # cc#852: liveness is simply "did we get a tick". The old form ANDed in set membership,
+        # which is what suppressed India VIX despite its Fyers tick arriving correctly.
+        is_live = lp is not None
         price = lp if lp is not None else daily_px
         day_chg = _pct(lp, prev_close) if (lp is not None and prev_close) else stored_chg
 
@@ -178,7 +202,8 @@ def build_strip(cur) -> Dict[str, Any]:
             "week_sessions": WEEK_SESSIONS,
             "as_of": str(lts) if (lts and is_live) else str(qdate),
             "as_of_is_live": bool(lts and is_live),
-            "eod_only": sym in EOD_ONLY,
+            # cc#852: DATA-DERIVED. No tick -> it renders in the EOD block, whoever it is.
+            "eod_only": not is_live,
             "inverted": inv,
             "sessions_available": len(rows),
             # ── cc#849 merge fields ───────────────────────────────────────────────────────────
@@ -189,10 +214,11 @@ def build_strip(cur) -> Dict[str, Any]:
             "tick_ts": str(lts) if lts else None,
             "prev_close": prev_close,          # PREV CLOSE badge for markets that are shut
             "quote_date": str(qdate) if qdate else None,
-            # 5m availability is decided by the founder-locked EOD_ONLY set, NOT by whether the
-            # feed happened to write a row in the last few minutes — a transient gap must not
-            # silently turn the 5m button off for a market that has a feed.
-            "has_intraday": sym not in EOD_ONLY,
+            # 5m availability is a STATIC declaration of what is wired, NOT whether the feed
+            # happened to write a row in the last few minutes — a transient gap must not silently
+            # turn the 5m button off for a market that has a feed. Deliberately independent of
+            # `eod_only` above: a market can be closed (no tick, EOD tier) and still have 5m history.
+            "has_intraday": sym not in NO_INTRADAY_FEED,
         })
 
     order = {c: i for i, c in enumerate(CATEGORY_ORDER)}
@@ -217,9 +243,12 @@ def build_strip(cur) -> Dict[str, Any]:
         "freshest_tick": freshest,
         "category_counts": cat_counts,
         # Honest disclosure, inherited verbatim in substance from the tab (cc#849 item (e)).
-        "disclosure": ("US indices tick live roughly 19:00–01:40 IST; outside that window they carry "
-                       "their last tick. US VIX is CBOE ^VIX — not the India VIX gate, which is the "
-                       "separate INDIAVIX tile."),
+                # cc#852: US VIX retired from the tape, so the line that disambiguated it is gone too.
+        # Market windows are stated because a tile outside its own session shows PREV CLOSE, and
+        # CLOSED IS NOT STALE — the reader needs to know which is which.
+        "disclosure": ("Approx IST windows \u2014 Asia 07:00\u201313:30 \u00b7 Europe 12:30\u201321:30 \u00b7 US 19:00\u201301:40. "
+                       "A market outside its own hours shows PREV CLOSE with its last tick time; "
+                       "that is closed, not stale. India VIX ticks live off the NSE feed."),
         # Every tick timestamp in this payload is naive IST wall-clock (global_intraday.ts and
         # intraday_prices.ts are both stored that way). Note that global_intraday.updated_at is
         # naive UTC — the two must never be compared. Ages are computed against IST now.
@@ -281,7 +310,7 @@ def build_detail(cur, symbol: str) -> Dict[str, Any]:
     # The drawer's chart: intraday for the covered symbols, daily-only for the five EOD ones —
     # the spec is explicit that these are different series, not one with a gap.
     series, series_kind = [], "daily"
-    if symbol not in EOD_ONLY:
+    if symbol not in NO_INTRADAY_FEED:   # cc#852
         # cc#848: same column fix as build_strip — global_intraday is OHLC, the series reads CLOSE.
         # The INDIAVIX branch below already read `close` (from intraday_prices) and was the working
         # reference that made the mismatch obvious.
@@ -318,7 +347,7 @@ def build_detail(cur, symbol: str) -> Dict[str, Any]:
         "sessions_in_52w": len(yr),
         "series": series, "series_kind": series_kind,
         "inverted": symbol in INVERTED,
-        "eod_only": symbol in EOD_ONLY,
+        "eod_only": symbol in NO_INTRADAY_FEED,   # cc#852: no wired 5m feed
         "basis": "global_indices daily history" + (" + global_intraday" if series_kind == "intraday" else ""),
     }
 
@@ -357,12 +386,12 @@ def build_chart(cur, symbol: str, tf: str) -> Dict[str, Any]:
         return {"error": f"unknown symbol: {sym}"}
     name, cat = head
     common = {"symbol": sym, "name": name, "category": cat, "timeframe": tf,
-              "inverted": sym in INVERTED, "has_intraday": sym not in EOD_ONLY}
+              "inverted": sym in INVERTED, "has_intraday": sym not in NO_INTRADAY_FEED}
 
     if tf == "5m":
         # Never silently fall back to daily here. A disabled button plus a plain reason is the
         # honest answer; a daily series relabelled "5m" is not.
-        if sym in EOD_ONLY:
+        if sym in NO_INTRADAY_FEED:
             return dict(common, kind="unavailable", bars=[], basis=None,
                         reason="No intraday feed for this market — 5-minute candles are not available.")
         cur.execute("""SELECT ts, open, high, low, close FROM global_intraday

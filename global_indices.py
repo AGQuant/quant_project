@@ -53,12 +53,19 @@ GLOBAL_TICKERS = [
     ("^DJI",      "Dow",         "index"),
     ("^GSPC",     "S&P 500",     "index"),
     ("^IXIC",     "Nasdaq",      "index"),
-    ("^VIX",      "US VIX",      "volatility"),
+    # cc#852: ^VIX (US VIX) RETIRED from the tape by founder decision 04-Aug. Removed from the
+    # daily fetch; its 1,287 rows of history in global_indices are deliberately KEPT so the
+    # decision is reversible by re-adding this line (history will have a gap from 05-Aug).
+    # Grep-verified before removal: no live consumer reads ^VIX — v10_endpoints.v10_vix reads
+    # INDIAVIX from intraday_prices and only MENTIONS ^VIX in a comment.
     ("^INDIAVIX", "India VIX",   "volatility", "INDIAVIX"),  # store as INDIAVIX (task #59)
     ("^N225",     "Nikkei",      "index"),
     ("^FTSE",     "FTSE",        "index"),
     ("^GDAXI",    "DAX",         "index"),
-    ("000001.SS", "Shanghai",    "index"),
+    # cc#852: 000001.SS (Shanghai) DROPPED UNCONDITIONALLY (founder 04-Aug, no probe). Claude web
+    # already deleted its 1,242 rows on 04-Aug. THIS LINE REMOVAL IS THE LOAD-BEARING HALF: without
+    # it the nightly Yahoo daily fetch re-inserts Shanghai on its next run and it silently
+    # reappears on the tape, making the delete temporary.
     # Commodities
     ("BZ=F",      "Brent",       "commodity"),
     ("CL=F",      "WTI",         "commodity"),

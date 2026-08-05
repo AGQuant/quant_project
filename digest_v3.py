@@ -51,9 +51,12 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 INDEXES = ["NIFTY50", "BANKNIFTY"]
 
-# cc#846: the five global symbols with no intraday feed. Named explicitly because the spec requires
-# them called out by name in the amber EOD note — "stale but unflagged" is the bug being fixed.
-EOD_ONLY = ["000001.SS", "^FTSE", "^GDAXI", "INDIAVIX", "^VIX"]
+# cc#852: the EOD set is no longer a hardcoded list. Shanghai is dropped, US VIX is retired from
+# the tape, and India VIX ticks live off the NSE feed — so the old five-symbol constant named three
+# symbols that either no longer exist on the tape or are not EOD at all. The tier now comes from
+# global_heatstrip.build_strip(), which derives it per tile from whether a tick actually arrived,
+# and the amber note is built from THAT result rather than from a constant that has to be
+# remembered. A hardcoded list is exactly what went stale here.
 
 RESULT_KEYWORDS = r"(profit|loss|revenue|income|Q1|results|rises|narrows|falls)"
 RESULT_WINDOW_HOURS = 20
@@ -106,8 +109,16 @@ def _global_tape(cur) -> Dict[str, Any]:
         log.warning("cc#846 global tape unavailable: %s", e)
         return {"tiles": [], "eod_tiles": [], "error": str(e)[:200], "tier": "EOD"}
     strip["tier"] = "LIVE"
-    strip["eod_note"] = ("No intraday feed for " + ", ".join(EOD_ONLY) +
-                         " — these carry their last CLOSE, shown separately with their own date.")
+    # cc#852: the note is built from the ACTUAL eod_tiles the component returned, naming the
+    # symbols that really have no tick right now. It is omitted entirely when the set is empty —
+    # after this card that is the normal case during Asia/Europe hours, and an empty amber banner
+    # saying "no intraday feed for " would be worse than no banner.
+    _eod = strip.get("eod_tiles") or []
+    strip["eod_note"] = (
+        "No tick yet for " + ", ".join((t.get("name") or t.get("symbol")) for t in _eod) +
+        " — these carry their last CLOSE with its own date. A market outside its own hours is "
+        "CLOSED, not stale."
+    ) if _eod else None
     tiles = (strip.get("tiles") or [])
     ups = sum(1 for t in tiles if (t.get("day_chg_pct") or 0) > 0)
     strip["read"] = (f"{ups} of {len(tiles)} live tiles higher on the day."
