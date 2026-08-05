@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from scorr_auth import _is_authed
+from news_guards import ensure_news_guards, suppressed_exclude
 
 log = logging.getLogger("scorr.news")
 router = APIRouter()
@@ -41,6 +42,12 @@ def _conn():
 # and display; raw_published_at is exposed separately for the rare original-date reference.
 # Ensured idempotently at import so the view exists wherever this code runs (Railway=truth,
 # GitHub=code) — CREATE OR REPLACE is a no-op when it already matches.
+#
+# cc#870: the view now also SKIPS SUPPRESSED STORIES. The SELECT list is byte-identical — same 17
+# columns in the same order — so every reader (the /news feed, the GVM page Latest News block via
+# /api/news/company, max_native_cards) is unaffected except that a flagged story stops appearing.
+# This is deliberately a WHERE and not a column change: CREATE OR REPLACE VIEW would refuse to run
+# at all if the column list drifted, which is a free guarantee that V5 holds.
 _V_POLISHED_ARTICLES_DDL = """
 CREATE OR REPLACE VIEW v_polished_articles AS
 SELECT p.id AS polished_id, p.raw_news_id AS raw_news_id, r.id AS raw_id,
@@ -51,13 +58,18 @@ SELECT p.id AS polished_id, p.raw_news_id AS raw_news_id, r.id AS raw_id,
        COALESCE(p.published_time, p.polished_at, r.published_at) AS display_time,
        r.published_at AS raw_published_at, p.polished_at
 FROM polished_news p JOIN raw_news r ON r.id = p.raw_news_id
-"""
+WHERE""" + suppressed_exclude("p.raw_news_id")
 
 
 def _ensure_polished_view():
     try:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute(_V_POLISHED_ARTICLES_DDL)
+        with _conn() as conn:
+            # cc#870: the guards go FIRST — the view references news_suppressed, so the table has
+            # to exist before CREATE OR REPLACE VIEW is attempted, or the view silently stays on
+            # its old definition and suppression looks wired when it is not.
+            ensure_news_guards(conn)
+            with conn.cursor() as cur:
+                cur.execute(_V_POLISHED_ARTICLES_DDL)
             conn.commit()
     except Exception:
         pass   # view is created out-of-band too; a transient DB hiccup here must not block import
@@ -204,6 +216,13 @@ _POSITION_POLISH_CLAUSE = (
 )
 
 
+# cc#870 item 3 — THE HALF THAT MAKES SUPPRESSION STICK. Hiding a story from the view is cosmetic
+# on its own: this candidate query is `raw_news with no polished child`, so the moment a suppressed
+# story loses its polished row it becomes eligible again and comes back on the next polish run.
+# Excluding it here means a flagged story is never re-picked, whatever happens to its polished row.
+_SUPPRESSED_CLAUSE = " AND " + suppressed_exclude("r.id")
+
+
 def _reco_exclude_clause(conn) -> str:
     """cc#787 FUNNEL 1 GUARD: broker/analyst reco rows can NEVER surface in the news-polish flow.
 
@@ -237,14 +256,14 @@ def news_unpolished(sample: int = 20):
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO)
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + _SUPPRESSED_CLAUSE)
         pending = cur.fetchone()[0]
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
                    r.source_name, r.url, r.published_at, r.relevance_score
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + """
+        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + _SUPPRESSED_CLAUSE + """
             ORDER BY r.relevance_score DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))
