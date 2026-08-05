@@ -1,0 +1,549 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorr Mobile — Design Ref R3 · V8 Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------------------
+   TOKENS — copied verbatim from v8_dashboard.html :root (sha 7c9cc1b, line 9).
+   Do NOT re-pick these. The mobile app is DARK (15913 theme_decision, founder
+   05-Aug-2026), and dark here means THIS palette, not a new one.
+   9016 pattern 10 keeps governing WEB client/analysis surfaces (light A-card).
+--------------------------------------------------------------------------- */
+:root{
+  --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+  --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+  --shadow:0 18px 44px rgba(3,7,20,.5);
+  --r:18px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);
+  font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+/* eyebrow / section label — 9016 pattern 7 */
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim)}
+h1{font-size:26px;font-weight:800;letter-spacing:-.01em;margin:6px 0 4px}
+h2{font-size:15px;font-weight:800;letter-spacing:.02em;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;line-height:1.6;margin:0}
+
+/* section separator — 9016 pattern 12 */
+section{border-top:1px solid var(--line);margin-top:34px;padding-top:18px}
+section > .eyebrow{margin-bottom:10px}
+
+.note{background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+  padding:13px 15px;font-size:12.5px;line-height:1.6;color:var(--mut);margin:12px 0}
+.note b{color:var(--txt)}
+.note.warn{border-color:rgba(245,185,74,.42);background:rgba(245,185,74,.06)}
+.note.stop{border-color:rgba(255,92,108,.42);background:rgba(255,92,108,.06)}
+
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+th{text-align:left;font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);border-bottom:1px solid var(--line2);padding:8px 9px;white-space:nowrap}
+td{border-bottom:1px solid var(--line);padding:9px;vertical-align:top;color:var(--mut);line-height:1.5}
+td.k{color:var(--txt);font-weight:600;white-space:nowrap}
+.scroll{overflow-x:auto}
+
+.tier{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.08em;
+  padding:2px 7px;border-radius:5px;white-space:nowrap}
+.t1{background:rgba(77,124,254,.16);color:#8FB0FF;border:1px solid rgba(77,124,254,.45)}
+.t2{background:rgba(55,211,232,.10);color:var(--cyan);border:1px solid rgba(55,211,232,.32)}
+.t3{background:rgba(148,166,210,.08);color:var(--dim);border:1px solid var(--line2)}
+
+/* --------------------------------------------------------------------------
+   THE SIGNATURE ELEMENT — STATE RAIL (15913 core_rules).
+   3px left edge. Four states, told apart by SHAPE, never by opacity alone.
+-------------------------------------------------------------------------- */
+.stack{max-width:392px;margin-top:14px}
+.c{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:14px 15px 14px 18px;margin-bottom:10px;overflow:hidden}
+.c::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.c.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.c.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.c.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.c.ref::before{background:var(--blu);top:14px;bottom:14px;border-radius:0 3px 3px 0}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.c.live::before{animation:none;opacity:1}}
+
+.chead{display:flex;align-items:center;gap:10px;min-height:44px}
+.ctitle{flex:1;min-width:0}
+.ctitle .t{font-size:13.5px;font-weight:700;letter-spacing:.01em}
+.ctitle .s{font-size:10.5px;color:var(--dim);margin-top:3px}
+.cval{text-align:right;white-space:nowrap}
+.cval .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:15px;font-weight:700;letter-spacing:-.01em}
+.cval .u{font-size:10px;color:var(--dim);margin-top:2px}
+.chev{color:var(--dim);font-size:16px;flex-shrink:0;width:12px;text-align:center}
+.pos{color:var(--grn)}.neg{color:var(--red)}.amb{color:var(--amber)}.mutc{color:var(--mut)}
+
+.chip{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.07em;
+  padding:2px 6px;border-radius:4px;vertical-align:middle}
+.chip.live{background:var(--grn-d);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+.chip.stale{background:rgba(245,185,74,.12);color:var(--amber);border:1px dashed rgba(245,185,74,.55)}
+.chip.closed{background:transparent;color:var(--dim);border:1px dashed var(--line2)}
+.chip.ref{background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4)}
+.chip.gate{background:var(--grn-d);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+
+.rank{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
+  border:1px solid var(--line);border-radius:4px;padding:1px 4px;margin-right:6px}
+
+.legend{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px}
+.lg{display:flex;gap:9px;align-items:flex-start;font-size:11.5px;color:var(--mut);max-width:250px;line-height:1.5}
+.lgbar{width:3px;height:34px;border-radius:2px;flex-shrink:0;margin-top:1px}
+
+ul{margin:8px 0 0;padding-left:17px;color:var(--mut);font-size:12.5px;line-height:1.75}
+li{margin-bottom:5px}
+li b,p b{color:var(--txt)}
+code{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
+  background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--cyan)}
+.src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--cyan)}
+</style>
+
+<div class="wrap">
+
+<div class="eyebrow">Scorr mobile · design reference · revision 3</div>
+<h1>V8 Dashboard — eleven tab surfaces as one ranked card stack</h1>
+<p class="sub">Authored by Claude.ai, 05-Aug-2026. Dark theme (15913). Assembled from
+UI_PATTERN_MASTER_INDEX_V1 (9016) and MOBILE_APP_FRAMEWORK_V1 (15913) — nothing here is a new
+pattern. Code read: <span class="mono">v8_dashboard.html</span> at sha
+<span class="mono">7c9cc1b</span>. Live values stamped from the DB at
+<span class="mono">05-Aug-2026 14:15 IST</span>. Spec copy: session_log 16065.</p>
+
+<div class="note stop">
+<b>All values in the mock stack below are SAMPLE data.</b> They were read from the live DB at stamp
+time so the shapes are honest, but they are frozen text. CC's job is to replace every one of them
+with the endpoint and field named in section 2 — the numbers here are placeholders, the sources are
+the specification.
+</div>
+
+<div class="note">
+<b>R3 is self-contained and does not depend on R1 or R2.</b> Those two files were authored into a
+chat sandbox that no longer exists and were never delivered to the repo — cc#861 is blocked for
+exactly this reason. R3 therefore restates the full card system rather than pointing at a ref that
+cannot be opened. The numbered chain rule holds: this file is
+<span class="mono">design_refs/scorr_mobile_R3.html</span>, and nothing is overwritten.
+</div>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">1 · What this ref inherits</div>
+<h2>Assembled, not invented</h2>
+<p class="sub">Every rule below already exists. The reference cites where, so CC can check the
+source instead of trusting this page.</p>
+<ul>
+  <li><b>9016 pattern 1</b> — stat tiles, uppercase muted section labels, trajectory tables. Card
+      interiors start from this component language.</li>
+  <li><b>9016 pattern 2</b> — shared components are built once and imported.
+      <span class="src">results_card.js</span>, the fib renderer, the volume three-tile row, the
+      C-A-R-D header strip and the Check renderer are all imported by mobile. Rebuilding any of
+      them for phone is a spec violation, not an optimisation.</li>
+  <li><b>9016 pattern 7</b> — a missing value renders <span class="mono">--</span>. Never a
+      fabricated <span class="mono">0.0</span>.</li>
+  <li><b>9016 pattern 9</b> — no page navigation for in-context actions. A card opens in place or
+      as a bottom sheet. Tapping a card never leaves the stack.</li>
+  <li><b>9016 pattern 12</b> — text-heavy cards (Live News, Results) use the shared section
+      separator: 1px rule, uppercase muted label, 1.55 line-height.</li>
+  <li><b>15913</b> — 768px breakpoint, no horizontal tab row below it, 44×44px tap targets,
+      skeletons sized to final height, every surface carries at least one PRIMARY.</li>
+</ul>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">2 · The eleven surfaces</div>
+<h2>Tier, rank and header value source</h2>
+<p class="sub">The tab list is <b>derived</b>, never typed out. Read
+<span class="mono">TAB_ORDER</span> = <span class="mono">[0,1,2,4,5,7,8,9,11,12,15]</span> and take
+labels from <span class="mono">TAB_LABELS</span>. The only new constant is the tier map below, and
+it is keyed by <b>panel index, not label text</b> — labels get renamed (cc#850 renamed index 12),
+panel indices are stable by repo convention.</p>
+
+<div class="scroll">
+<table>
+<thead><tr>
+  <th>#</th><th>Surface</th><th>Tier</th><th>Header value</th><th>Source</th>
+  <th>Field</th><th>As-of</th>
+</tr></thead>
+<tbody>
+<tr>
+  <td class="k mono">0</td><td class="k">Master Dashboard</td>
+  <td><span class="tier t1">PRIMARY</span></td>
+  <td>Open count + net unrealised, with the mood gate as the state chip</td>
+  <td class="src">/api/paper/status<br>/api/v8/market_mood</td>
+  <td class="mono">open_positions[].length · Σ unrealised_pnl − 500×n · mood tag + buy/sell slots</td>
+  <td>paper tick</td>
+</tr>
+<tr>
+  <td class="k mono">1</td><td class="k">Buy Reversal</td>
+  <td><span class="tier t1">PRIMARY</span></td>
+  <td>n SIGNAL · m OPEN</td>
+  <td class="src">/api/v8/qualified/buy_reversal</td>
+  <td class="mono">stocks[] split on status</td>
+  <td>engine tick</td>
+</tr>
+<tr>
+  <td class="k mono">2</td><td class="k">Buy Momentum</td>
+  <td><span class="tier t1">PRIMARY</span></td>
+  <td>n SIGNAL · m OPEN</td>
+  <td class="src">/api/v8/qualified/buy_momentum</td>
+  <td class="mono">stocks[] split on status</td>
+  <td>engine tick</td>
+</tr>
+<tr>
+  <td class="k mono">4</td><td class="k">Sell Reversal</td>
+  <td><span class="tier t1">PRIMARY</span></td>
+  <td>n SIGNAL · m OPEN</td>
+  <td class="src">/api/v8/qualified/sell_reversal</td>
+  <td class="mono">stocks[] split on status</td>
+  <td>engine tick</td>
+</tr>
+<tr>
+  <td class="k mono">5</td><td class="k">Sell Momentum</td>
+  <td><span class="tier t1">PRIMARY</span></td>
+  <td>n SIGNAL · m OPEN</td>
+  <td class="src">/api/v8/qualified/sell_momentum</td>
+  <td class="mono">stocks[] split on status</td>
+  <td>engine tick</td>
+</tr>
+<tr>
+  <td class="k mono">7</td><td class="k">Trade Log</td>
+  <td><span class="tier t2">SECONDARY</span></td>
+  <td>Net P&amp;L over the whole ledger + closed count</td>
+  <td class="src">/api/paper/status</td>
+  <td class="mono">all_summary.total_pnl − 500×all_summary.trades</td>
+  <td>paper tick</td>
+</tr>
+<tr>
+  <td class="k mono">8</td><td class="k">Day Log</td>
+  <td><span class="tier t2">SECONDARY</span></td>
+  <td>Today's net P&amp;L + trading days counted</td>
+  <td class="src">/api/v8/daylog</td>
+  <td class="mono">summary.total_net_pnl · days.length</td>
+  <td>latest <span class="mono">days[].date</span></td>
+</tr>
+<tr>
+  <td class="k mono">9</td><td class="k">Raw Data</td>
+  <td><span class="tier t3">TERTIARY</span></td>
+  <td>Symbol count in the latest score date</td>
+  <td class="src">/api/v8/metrics/all</td>
+  <td class="mono">rows.length</td>
+  <td class="mono">max(computed_at)</td>
+</tr>
+<tr>
+  <td class="k mono">11</td><td class="k">Live News</td>
+  <td><span class="tier t2">SECONDARY</span></td>
+  <td>Headline count in the 48h window + age of the newest headline</td>
+  <td class="src">/api/news/live?hours=48</td>
+  <td class="mono">domestic[].length + company[].length</td>
+  <td class="mono">max(published_at)</td>
+</tr>
+<tr>
+  <td class="k mono">12</td><td class="k">Results</td>
+  <td><span class="tier t2">SECONDARY</span></td>
+  <td>Upcoming results, of which in V8 universe, of which in blackout</td>
+  <td class="src">/api/v8/forthcoming-results</td>
+  <td class="mono">results[] · in_v8_universe · blackout</td>
+  <td>calendar refresh date</td>
+</tr>
+<tr>
+  <td class="k mono">15</td><td class="k">Matrix</td>
+  <td><span class="tier t3">TERTIARY</span></td>
+  <td>Baskets compared. Static spec, so no live value in the header</td>
+  <td class="src">BASKET_INFO (constant)<br>+ _mxLiveWR() over closed trades</td>
+  <td class="mono">MATRIX_COLS.length</td>
+  <td>none — REFERENCE</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="note">
+<b>Stack order = tier first, then TAB_ORDER position inside the tier.</b> Five PRIMARY, four
+SECONDARY, two TERTIARY. That keeps the order derivable in code: sort by
+<span class="mono">TIER[panelIdx]</span>, tie-break on
+<span class="mono">TAB_ORDER.indexOf(panelIdx)</span>. Adding or retiring a tab changes nothing but
+the tier map. Every surface has a PRIMARY, so the 15913 rule holds.
+</div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">3 · The stack</div>
+<h2>What a phone shows at 14:15 IST on a trading day</h2>
+<p class="sub">Sample values, read from the database at stamp time. The header alone answers
+“do I need to open this”.</p>
+
+<div class="stack">
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">01</span>Master Dashboard</div>
+        <div class="s">Book · mood gate · slots &nbsp;<span class="chip gate">GATE --</span></div>
+      </div>
+      <div class="cval"><div class="v">21</div><div class="u">open · P&amp;L --</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">02</span>Buy Reversal</div>
+        <div class="s">Last new signal 09:45 · <span class="chip live">LIVE</span></div>
+      </div>
+      <div class="cval"><div class="v pos">9</div><div class="u">signals</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">03</span>Buy Momentum</div>
+        <div class="s">Last new signal 11:20 · <span class="chip live">LIVE</span></div>
+      </div>
+      <div class="cval"><div class="v pos">2</div><div class="u">signals</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">04</span>Sell Reversal</div>
+        <div class="s">Last new signal 12:05 · <span class="chip live">LIVE</span></div>
+      </div>
+      <div class="cval"><div class="v neg">1</div><div class="u">signal</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">05</span>Sell Momentum</div>
+        <div class="s">Last new signal 12:35 · <span class="chip live">LIVE</span></div>
+      </div>
+      <div class="cval"><div class="v neg">6</div><div class="u">signals</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">06</span>Trade Log</div>
+        <div class="s">Full ledger · live baskets only</div>
+      </div>
+      <div class="cval"><div class="v mutc">85</div><div class="u">closed · net --</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">07</span>Day Log</div>
+        <div class="s">Day-by-day P&amp;L · loads on open</div>
+      </div>
+      <div class="cval"><div class="v mutc">--</div><div class="u">today net</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">08</span>Live News</div>
+        <div class="s">Market + stocks · newest 12m ago</div>
+      </div>
+      <div class="cval"><div class="v">575</div><div class="u">last 48h</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c stale">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">09</span>Results</div>
+        <div class="s">Blackout risk · <span class="chip stale">STALE 31h</span></div>
+      </div>
+      <div class="cval"><div class="v amb">--</div><div class="u">upcoming</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c live">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">10</span>Raw Data</div>
+        <div class="s">All metrics · 14:15 IST</div>
+      </div>
+      <div class="cval"><div class="v">208</div><div class="u">symbols</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+  <div class="c ref">
+    <div class="chead">
+      <div class="ctitle">
+        <div class="t"><span class="rank mono">11</span>Strategy Matrix</div>
+        <div class="s">Filters, exits, edge · <span class="chip ref">REFERENCE</span></div>
+      </div>
+      <div class="cval"><div class="v mutc">4</div><div class="u">baskets</div></div>
+      <div class="chev">›</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note">
+Cards showing <span class="mono">--</span> are values this ref did not query, not values the app
+may invent. Results shows the STALE treatment on purpose so the shape is visible in the ref.
+</div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">4 · State rail</div>
+<h2>Four states, told apart by shape</h2>
+<p class="sub">Reading the rails down the stack tells you the book without opening anything.
+Opacity alone is never the difference — colour-blind and bright-sunlight use both break that.</p>
+
+<div class="legend">
+  <div class="lg">
+    <div class="lgbar" style="background:var(--grn)"></div>
+    <div><b style="color:var(--txt)">LIVE</b> — solid, breathing. Data is inside its own cadence
+    window and the market is open.</div>
+  </div>
+  <div class="lg">
+    <div class="lgbar" style="background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)"></div>
+    <div><b style="color:var(--txt)">STALE</b> — long dashes, still. Past its window. The chip
+    always states the age, never just the word.</div>
+  </div>
+  <div class="lg">
+    <div class="lgbar" style="background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)"></div>
+    <div><b style="color:var(--txt)">CLOSED</b> — short dots. Market shut, or the gate is closed.
+    Not a fault. Reads “last session 15:30”.</div>
+  </div>
+  <div class="lg">
+    <div class="lgbar" style="background:var(--blu);height:26px;margin-top:5px"></div>
+    <div><b style="color:var(--txt)">REFERENCE</b> — short solid bar, inset. Static spec content.
+    Can never be stale. Matrix only.</div>
+  </div>
+</div>
+
+<div class="note warn">
+<b>After 15:30 nothing is STALE.</b> Outside market hours every live card flips to CLOSED and reads
+“last session 15:30”, not an amber warning. A dashboard that cries stale every evening trains the
+user to ignore the colour, and then it fails silently on the one morning it matters.
+</div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">5 · Freshness</div>
+<h2>Each surface times itself</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Surface</th><th>Cadence</th><th>STALE when</th><th>Age is measured from</th></tr></thead>
+<tbody>
+<tr><td class="k">Master · four baskets</td><td>5-min tick</td><td>tick older than 11 min</td><td class="mono">max(v8_metrics.computed_at)</td></tr>
+<tr><td class="k">Trade Log</td><td>5-min tick</td><td>tick older than 11 min</td><td>paper status payload</td></tr>
+<tr><td class="k">Day Log</td><td>EOD</td><td>latest row is older than the last trading day</td><td class="mono">max(days[].date)</td></tr>
+<tr><td class="k">Raw Data</td><td>5-min tick</td><td>tick older than 11 min</td><td class="mono">max(computed_at)</td></tr>
+<tr><td class="k">Live News</td><td>continuous</td><td>newest headline older than 3h</td><td class="mono">max(published_at)</td></tr>
+<tr><td class="k">Results</td><td>daily</td><td>calendar older than 24h</td><td>calendar refresh</td></tr>
+<tr><td class="k">Matrix</td><td>none</td><td>never</td><td>—</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">6 · Rules for the build</div>
+<h2>Five things that will otherwise go wrong</h2>
+
+<div class="note stop">
+<b>1 · A basket card's state comes from the engine tick, never from its last signal.</b>
+Buy Reversal last fired at 09:45. At 14:15 that is four and a half hours ago, and a naive
+“age of newest row” rule would paint it STALE or dead. It is neither — it is live and quiet.
+State = engine tick recency, shared by all four basket cards. Signal age is a separate,
+smaller line in the sub-title.
+</div>
+
+<div class="note stop">
+<b>2 · Never read <span class="mono">v8_filter_state.enabled</span> for the state chip.</b>
+All six rows in that table currently say <span class="mono">enabled = false</span>, while four
+baskets wrote signals today and 21 positions are open. The engine does not consult it. A card
+wired to that column would render every basket OFF during a live session. Basket state derives
+from <span class="mono">v8_qualified</span> write recency plus the engine tick. (That table
+looks abandoned — worth its own cleanup card, out of scope here.)
+</div>
+
+<div class="note warn">
+<b>3 · Zero is not missing.</b> A basket that genuinely qualified nobody shows
+<span class="mono">0 signals</span> with a CLOSED rail. A payload that failed to arrive shows
+<span class="mono">--</span> with a STALE rail. These are different facts and must look different.
+9016 pattern 7 forbids the fake zero, not the true one.
+</div>
+
+<div class="note warn">
+<b>4 · All age maths in IST.</b> <span class="mono">v8_metrics.computed_at</span> and
+<span class="mono">v8_qualified.signal_ts</span> are naive IST since cc#855. An age that comes out
+at exactly 330 minutes is the UTC offset, not an outage. Compare like with like before painting
+anything amber.
+</div>
+
+<div class="note warn">
+<b>5 · Live News header must use the newest article, not the fetch clock.</b> The desktop page
+prints the browser's own refresh time. That is when the phone asked, not how fresh the data is —
+a dead feed still shows a fresh clock. The mobile header states the newest
+<span class="mono">published_at</span>.
+</div>
+
+<h2 style="margin-top:22px">Do not touch</h2>
+<ul>
+  <li><span class="mono">TAB_ORDER</span> and <span class="mono">TAB_LABELS</span> stay exactly as
+      they are. Mobile reads them; it does not edit them.</li>
+  <li>Dormant panel indices 3, 6, 10, 13, 14, 16, 17 keep their label slots. Renumbering breaks
+      every deep link.</li>
+  <li>The desktop DOM above 768px is unchanged. This is an added layer, not a rewrite.</li>
+  <li>Shared components are imported. If a phone version of
+      <span class="mono">results_card.js</span> appears in the diff, the card is wrong.</li>
+</ul>
+</section>
+
+<!-- ================================================================== -->
+<section>
+<div class="eyebrow">7 · Open for the founder</div>
+<h2>Three calls this ref cannot make</h2>
+<ul>
+  <li><b>Master is one card or four?</b> Master holds the mood gate, the four P&amp;L tiles, the
+      position ladder and the sector strip. As one card it is the heaviest thing in the stack. As
+      four cards — Gate, Book, Realised, Sectors — the stack starts to explain itself. R3 draws it
+      as one; splitting it is a one-line change to the tier map.</li>
+  <li><b>Raw Data on a phone.</b> Seventeen metric columns over 208 symbols. It is tiered TERTIARY
+      here, but the honest option is to leave it desktop-only and say so on the card rather than
+      ship a table nobody can read.</li>
+  <li><b>Matrix as a card at all.</b> It is static strategy documentation. It may belong behind the
+      model launcher rather than in the trading stack.</li>
+</ul>
+</section>
+
+<div style="margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--dim);line-height:1.7">
+design_refs/scorr_mobile_R3.html · authored 05-Aug-2026 · dark theme per 15913 ·
+assembled from 9016 · source read v8_dashboard.html @ 7c9cc1b · spec copy session_log 16065 ·
+chains after R2, supersedes nothing · never overwrite a revision
+</div>
+
+</div>
