@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Intel · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — INTEL (polished news reading view)
+   Batch 7, screen 1. Dark per 15913. Tokens on .screen/.bnav, never bare :root.
+
+   CONTENT RULES CARRIED FROM THE APPROVED LIVE NEWS DESIGN (16170):
+   - The header states the age of the NEWEST HEADLINE, never a refresh clock.
+     A dead feed still shows a fresh clock; it can never show a fresh headline.
+   - Reading type is 13.5px minimum.
+   - Coverage is stated, so truncation is never silent.
+
+   INTEL-SPECIFIC DECISIONS (for founder review):
+   - The AI EDITORIAL leads and is the PRIMARY. It is the only content Scorr
+     writes itself; agency items are the feed below it.
+   - Sentiment is a WORD chip (Bullish / Neutral / Cautious / Bearish). The
+     card edge repeats the colour but never carries the meaning alone.
+   - Every value below is a REAL polished_news row read 05-Aug-2026 and frozen.
+     Nothing is invented. Counts are the real last-48h counts.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+/* one scrolling filter row — the trade-log pattern */
+.chips{display:flex;gap:7px;overflow-x:auto;padding:11px 12px 3px;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;min-height:34px;display:inline-flex;align-items:center;gap:6px;
+  padding:0 12px;border-radius:17px;border:1px solid var(--line2);
+  font-size:11.5px;font-weight:700;color:var(--mut);white-space:nowrap;
+  text-decoration:none}
+.chip .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
+.chip.on{color:var(--txt);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.14)}
+.chip.on .n{color:var(--blu)}
+
+.body{padding:11px 12px 0}
+
+/* cards */
+.c{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden}
+.c::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line2)}
+.c.bull::before{background:var(--grn)}
+.c.bear::before{background:var(--red)}
+.c.caut::before{background:var(--amber)}
+.c.ed{background:var(--panel2);border-color:var(--line2)}
+
+.meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:7px}
+.tag{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:700;
+  letter-spacing:.11em;padding:3px 7px;border-radius:4px;border:1px solid var(--line2);
+  color:var(--mut);white-space:nowrap}
+.tag.cat{color:var(--cyan);border-color:rgba(55,211,232,.4)}
+.tag.edt{color:var(--blu);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.tag.hi{color:var(--amber);border-color:rgba(245,185,74,.45)}
+.tag.bull{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
+.tag.neut{color:var(--mut)}
+.tag.caut{color:var(--amber);border-color:rgba(245,185,74,.45)}
+.tag.bear{color:var(--red);border-color:rgba(255,92,108,.45)}
+.when{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9.5px;color:var(--dim);white-space:nowrap}
+
+.hl{font-size:14.5px;font-weight:800;line-height:1.4;letter-spacing:-.005em}
+.sum{font-size:12.5px;color:var(--mut);line-height:1.55;margin-top:6px}
+
+/* the reading state — 13.5px minimum reading type */
+.read{font-size:13.5px;color:var(--txt);line-height:1.68;margin-top:10px}
+.read p{margin-top:9px}
+.read p:first-child{margin-top:0}
+.fold{margin-top:10px;min-height:44px;display:flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:700;color:var(--blu)}
+
+.syms{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.sy{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  color:var(--txt);background:var(--panel);border:1px solid var(--line2);
+  border-radius:5px;padding:3px 8px}
+.src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;
+  color:var(--dim);margin-top:9px}
+
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:15px 3px 8px}
+
+.cover{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+  text-align:center;padding:13px 0 3px}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; every headline, summary, count and time below
+    is a real polished_news row read on 05-Aug-2026. Nothing is invented.</span>
+  </div>
+
+  <div class="head">
+    <h1>Intel</h1>
+    <div class="s">newest headline 07:36 IST &middot; 232 items in the last 48h</div>
+  </div>
+
+  <div class="chips">
+    <a class="chip on" href="#">All <span class="n">232</span></a>
+    <a class="chip" href="#">Domestic <span class="n">144</span></a>
+    <a class="chip" href="#">Global <span class="n">68</span></a>
+    <a class="chip" href="#">Editorial <span class="n">15</span></a>
+    <a class="chip" href="#">IPO <span class="n">5</span></a>
+  </div>
+
+  <div class="body">
+
+    <div class="sect">TODAY'S EDITORIAL</div>
+
+    <!-- PRIMARY · the reading card, open -->
+    <div class="c ed bull">
+      <div class="meta">
+        <span class="tag edt">AI EDITORIAL</span>
+        <span class="tag hi">HIGH</span>
+        <span class="tag bull">BULLISH</span>
+        <span class="when">07:23</span>
+      </div>
+      <div class="hl">Foreign selling in Indian shares looks close to over</div>
+      <div class="read">
+        <p>Foreign investors have been selling Indian shares for a long time. That now
+        looks close to over. They bought in June and again in July. But look closer:
+        most of the money went into bonds, not shares.</p>
+        <p>That tells you something. They are buying the rupee and the interest rate
+        story first. The company profit story comes later.</p>
+        <p>Why the change? India is still growing faster than most other emerging
+        markets. Inflation has stayed under control. Government finances have not
+        slipped the way some other countries have. And the high share prices that
+        pushed them out earlier have partly settled&hellip;</p>
+      </div>
+      <div class="fold">Continue reading &#8595;</div>
+      <div class="syms"><span class="sy">NIFTY</span></div>
+      <div class="src">AI Editorial &middot; 05-Aug 07:23 IST</div>
+    </div>
+
+    <!-- second editorial, folded -->
+    <div class="c ed caut">
+      <div class="meta">
+        <span class="tag edt">AI EDITORIAL</span>
+        <span class="tag hi">HIGH</span>
+        <span class="tag caut">CAUTIOUS</span>
+        <span class="when">07:23</span>
+      </div>
+      <div class="hl">New closing auction is shaking the Nifty on expiry day</div>
+      <div class="sum">India changed how the closing price is decided. Week two has already
+      shown the problem people warned about &mdash; a hard move in the final minutes on
+      expiry day, on volume that did not match the rest of the day.</div>
+      <div class="fold">Read &#8250;</div>
+    </div>
+
+    <div class="sect">THE FEED</div>
+
+    <div class="c bull">
+      <div class="meta">
+        <span class="tag cat">DOMESTIC</span>
+        <span class="tag hi">HIGH</span>
+        <span class="tag bull">BULLISH</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Eleven Nifty companies get earnings upgrades of over 3% for FY27</div>
+      <div class="sum">June-quarter profits for index companies rose 11% from a year earlier
+      and beat expectations. Reliance Industries and SBI Life saw the bigger upgrades.</div>
+      <div class="syms"><span class="sy">RELIANCE</span><span class="sy">ICICIBANK</span><span class="sy">SBILIFE</span></div>
+      <div class="src">Economic Times Markets</div>
+    </div>
+
+    <div class="c bull">
+      <div class="meta">
+        <span class="tag cat">DOMESTIC</span>
+        <span class="tag hi">HIGH</span>
+        <span class="tag bull">BULLISH</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Tata's battery arm builds its own lithium cell technology</div>
+      <div class="sum">Agratas is developing lithium iron phosphate cells in-house as China
+      tightens export curbs on manufacturing know-how. A pilot line is being set up.</div>
+      <div class="src">Economic Times Industry</div>
+    </div>
+
+    <div class="c bull">
+      <div class="meta">
+        <span class="tag cat">GLOBAL</span>
+        <span class="tag neut">MEDIUM</span>
+        <span class="tag bull">BULLISH</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Amazon crosses $3 trillion in market value</div>
+      <div class="sum">It becomes only the fifth company ever to reach that level, after a
+      sharp rise in the share price.</div>
+      <div class="src">Economic Times Markets</div>
+    </div>
+
+    <div class="c">
+      <div class="meta">
+        <span class="tag cat">DOMESTIC</span>
+        <span class="tag neut">MEDIUM</span>
+        <span class="tag neut">NEUTRAL</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Early investors to sell Rs 2,002 crore of Paytm shares</div>
+      <div class="sum">Saif Partners and Elevation Capital plan to sell a 2.3% stake through
+      a block deal. It follows a 79% jump in the company's quarterly numbers.</div>
+      <div class="syms"><span class="sy">PAYTM</span></div>
+      <div class="src">Economic Times Markets</div>
+    </div>
+
+    <div class="c">
+      <div class="meta">
+        <span class="tag cat">DOMESTIC</span>
+        <span class="tag neut">MEDIUM</span>
+        <span class="tag neut">NEUTRAL</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Vedanta to hive off its real estate business</div>
+      <div class="sum">Shareholders will get one share of the new company, Vedanta Property
+      Platforms, for every 20 shares held. It will list later.</div>
+      <div class="syms"><span class="sy">VEDL</span></div>
+      <div class="src">Economic Times Markets</div>
+    </div>
+
+    <div class="c bull">
+      <div class="meta">
+        <span class="tag cat">GLOBAL</span>
+        <span class="tag neut">MEDIUM</span>
+        <span class="tag bull">BULLISH</span>
+        <span class="when">07:36</span>
+      </div>
+      <div class="hl">Asian shares follow Wall Street's tech-led rally</div>
+      <div class="sum">Markets across Asia rose. The yen steadied after the intervention
+      and oil eased as Middle East tension cooled.</div>
+      <div class="src">Economic Times Markets</div>
+    </div>
+
+    <div class="cover">showing 8 of 232 &middot; load more below &middot; truncation is never silent</div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      The editorial leads because it is the one thing Scorr writes itself; agency items
+      are the feed under it. Sentiment is always a word, never only a colour. The header
+      time is the newest headline's own time &mdash; a dead feed can fake a refresh clock,
+      it cannot fake a fresh headline.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> should tapping a feed card open the mentioned symbol's card
+      (R / GVM), or expand the story in place? The editorial expands in place; the feed
+      could go either way.
+    </div>
+
+    <div class="foot">
+      Batch 7 &middot; screen 1 of 2 &middot; Intel<br>
+      polished_news frozen 05-Aug-2026 &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn on" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
