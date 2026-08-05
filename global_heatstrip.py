@@ -57,15 +57,16 @@ WEEK_SESSIONS = 5
 # NO_INTRADAY_FEED stays as a STATIC declaration of which symbols have no 5-minute feed wired at
 # all. It drives the 5m chart button ONLY (cc#849), never the tier — a transient feed gap must not
 # silently disable 5m charting for a market that genuinely has a feed.
-# cc#852: ^GDAXI, ^FTSE and ^HSI were just wired into GLOBAL_INTRADAY_INDEX_TICKERS but have NOT
-# yet been proven to produce 5m bars from Yahoo. They stay listed here — 5m button DISABLED with the
-# "no intraday feed for this market" tooltip — until the deployed app writes real rows for them.
-# A new symbol is assumed feed-less until the data says otherwise; the card is explicit that the 5m
-# button must never be shown enabled and never silently fall back to daily. Removing a symbol from
-# this set is the LAST step of the probe, not the first.
-# NOTE this does NOT affect their tier: tier is data-derived, so the moment a tick lands they move
-# into the LIVE set on their own.
-NO_INTRADAY_FEED = {"^FTSE", "^GDAXI", "^HSI"}
+# cc#852 PROBE PASSED 05-Aug 07:29 IST — the set is now EMPTY. Every symbol on the tape has a
+# wired, verified 5-minute feed, so the 5m chart button is enabled everywhere.
+# Probe evidence (global_intraday, after triggering the live fetch on the deployed app because
+# Yahoo is unreachable from the build container):
+#     ^FTSE    511 bars  0 null closes  0.0% gap   12:30-21:00 IST  (Europe session)
+#     ^GDAXI   510 bars  0 null closes  0.0% gap   12:30-21:00 IST  (Europe session)
+#     ^HSI     348 bars  0 null closes  0.0% gap   07:30-07:12+     (ticking live at probe time)
+# The set is KEPT (not deleted) because it is the correct home for any future symbol added without
+# a 5m feed — the 5m button must never be enabled on a market that cannot fill it.
+NO_INTRADAY_FEED: set = set()
 
 # cc#852: symbols retired from the tape DISPLAY. Their history is deliberately retained in
 # global_indices (^VIX has 1,287 daily rows) so the decision is reversible without a backfill.
