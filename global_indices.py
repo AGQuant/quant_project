@@ -62,6 +62,11 @@ GLOBAL_TICKERS = [
     ("^N225",     "Nikkei",      "index"),
     ("^FTSE",     "FTSE",        "index"),
     ("^GDAXI",    "DAX",         "index"),
+    # cc#852: Hang Seng ADDED (founder 04-Aug) as the primary Asia addition. NEW SYMBOL — it had
+    # ZERO rows in global_indices, so it needs the daily fetch here PLUS a 5y backfill before the
+    # WEEK tile (rolling 5 sessions) and the 52w drawer metrics can compute; without history both
+    # return None. Session ~07:00-13:30 IST, i.e. live through the first half of the NSE day.
+    ("^HSI",      "Hang Seng",   "index"),
     # cc#852: 000001.SS (Shanghai) DROPPED UNCONDITIONALLY (founder 04-Aug, no probe). Claude web
     # already deleted its 1,242 rows on 04-Aug. THIS LINE REMOVAL IS THE LOAD-BEARING HALF: without
     # it the nightly Yahoo daily fetch re-inserts Shanghai on its next run and it silently
@@ -449,6 +454,16 @@ GLOBAL_INTRADAY_INDEX_TICKERS = [
     ("^GSPC", "SP500"),
     ("^IXIC", "NASDAQ"),
     ("^N225", "NIKKEI"),
+    # cc#852 (founder 04-Aug): Europe + Hang Seng on the 5m feed, so the tape is genuinely live
+    # through the NSE session rather than showing three stale closes. Both sit inside the existing
+    # 06:00-01:40 IST polling window, so no window change is needed:
+    #   Hang Seng  ~07:00-13:30 IST — live through the first half of the NSE day
+    #   DAX/FTSE   ~12:30-21:30 IST — come alive from midday and run past the NSE close
+    # Outside its own session a symbol simply writes no bar, ages out, and the tile flips to
+    # PREV CLOSE — which is the honest state, not a fault.
+    ("^GDAXI", "DAX"),
+    ("^FTSE",  "FTSE"),
+    ("^HSI",   "HANGSENG"),
 ]
 
 
