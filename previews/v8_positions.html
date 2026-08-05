@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Open positions · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — V8 OPEN POSITIONS  (Master Dashboard, opened)
+   Screen 4. Founder 05-Aug: the desktop table view and ladder view both fail on
+   a phone. This replaces BOTH.
+
+   WHY THE OLD ONES FAIL
+   - Table view: 13 columns. On a phone it becomes a sideways scroll where the
+     numbers you need are never on screen together.
+   - Ladder view: the rail is squeezed into ~140px beside other columns, so the
+     one thing it exists to show — where price sits between stop and target —
+     is the smallest element on the row.
+
+   WHAT THIS DOES INSTEAD
+   One card per position. The rail gets the FULL width, which makes a phone
+   better at this than the desktop, not worse. Everything else is arranged
+   around it: identity above, geometry in the middle, context below.
+
+   DIRECTION-AWARE BY CONSTRUCTION. Stop is always on the losing side and target
+   always on the winning side, so for a SHORT the target sits LEFT. Both ends are
+   labelled, so the rail can never be read backwards.
+
+   Real v8_paper_positions rows, read 05-Aug-2026. Frozen. No fetch.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;--well:#0D1428;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+  --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
+.head .t{flex:1}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px}
+.head .n{text-align:right}
+.head .n .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:18px;font-weight:700;line-height:1}
+.head .n .u{font-size:9px;color:var(--dim);margin-top:4px;letter-spacing:.04em}
+
+/* filter row — All / Long / Short, counts on the chip itself */
+.filt{display:flex;gap:7px;padding:12px 12px 4px}
+.fb{flex:1;min-height:40px;border-radius:9px;border:1px solid var(--line2);background:var(--panel);
+  color:var(--mut);font-family:inherit;font-size:11.5px;font-weight:700;display:flex;
+  align-items:center;justify-content:center;gap:6px}
+.fb b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px}
+.fb.on{background:var(--panel2);color:var(--txt)}
+.fb.long.on{background:var(--grn-d);color:var(--grn);border-color:rgba(47,212,139,.4)}
+.fb.short.on{background:var(--red-d);color:var(--red);border-color:rgba(255,92,108,.4)}
+
+.stack{padding:8px 12px 0}
+
+/* ---------------- THE POSITION CARD ---------------- */
+.p{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:13px 14px 14px 17px;margin-bottom:10px;overflow:hidden}
+.p::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.p.up::before{background:var(--grn)}
+.p.dn::before{background:var(--red)}
+
+/* row 1 — identity left, money right. The two things you look for first. */
+.r1{display:flex;align-items:flex-start;gap:10px}
+.id{flex:1;min-width:0}
+.sym{font-size:15px;font-weight:800;letter-spacing:-.01em}
+.tags{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
+.tag{font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 6px;border-radius:4px}
+.t-long{background:var(--grn-d);color:var(--grn)}
+.t-short{background:var(--red-d);color:var(--red)}
+.t-bk{background:rgba(148,166,210,.1);color:var(--mut);border:1px solid var(--line)}
+.money{text-align:right;white-space:nowrap}
+.money .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:17px;font-weight:700;line-height:1;letter-spacing:-.01em}
+.money .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:11px;font-weight:700;margin-top:4px}
+
+/* row 2 — THE RAIL. Full width. Stop on the losing side, target on the winning
+   side, always. Entry is a tick. CMP is a dot with its price above it. */
+.rail{margin:18px 2px 6px;position:relative;height:8px}
+.rt{position:absolute;inset:0;border-radius:4px;background:var(--well);border:1px solid var(--line)}
+.rf{position:absolute;top:0;bottom:0;border-radius:4px}
+.rf.up{background:linear-gradient(90deg,rgba(47,212,139,.35),var(--grn))}
+.rf.dn{background:linear-gradient(90deg,var(--red),rgba(255,92,108,.35))}
+.tick{position:absolute;top:-4px;width:2px;height:16px;background:var(--mut);border-radius:1px;
+  transform:translateX(-50%)}
+.cmp{position:absolute;top:-2px;width:12px;height:12px;border-radius:50%;
+  border:2px solid var(--panel);transform:translateX(-50%)}
+.cmp.up{background:var(--grn)}.cmp.dn{background:var(--red)}
+.cmpv{position:absolute;top:-26px;transform:translateX(-50%);white-space:nowrap;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:10.5px;font-weight:700;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:5px;padding:2px 6px}
+
+/* rail ends — labelled so it can never be read backwards */
+.ends{display:flex;justify-content:space-between;margin:12px 2px 0}
+.end{display:flex;flex-direction:column;gap:2px}
+.end.r{align-items:flex-end}
+.end .k{font-size:8.5px;font-weight:800;letter-spacing:.1em;color:var(--dim)}
+.end .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:11.5px;font-weight:700}
+.k-sl{color:var(--red)}.k-tg{color:var(--grn)}
+
+/* row 3 — context, quiet */
+.r3{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:11px;
+  border-top:1px solid var(--line);font-size:10.5px;color:var(--mut);align-items:center}
+.r3 .mono{color:var(--txt);font-weight:600}
+.sep{color:var(--dim);font-size:9px}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 15px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:var(--txt)}
+.foot{padding:20px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+.grn{color:var(--grn)}.red{color:var(--red)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Real v8_paper_positions rows, 05-Aug-2026. Five of 21 shown.</span>
+  </div>
+
+  <div class="head">
+    <div class="t">
+      <h1>Open positions</h1>
+      <div class="s">V8 paper book &middot; 15:30 IST close</div>
+    </div>
+    <div class="n">
+      <div class="v grn">21</div>
+      <div class="u">OPEN</div>
+    </div>
+  </div>
+
+  <div class="filt">
+    <button class="fb on">All <b>21</b></button>
+    <button class="fb long">Long <b>13</b></button>
+    <button class="fb short">Short <b>8</b></button>
+  </div>
+
+  <div class="stack">
+
+    <!-- OFSS · LONG · winning. CMP past entry, moving toward target on the right. -->
+    <div class="p up">
+      <div class="r1">
+        <div class="id">
+          <div class="sym">OFSS</div>
+          <div class="tags"><span class="tag t-long">LONG</span><span class="tag t-bk">Buy Reversal</span></div>
+        </div>
+        <div class="money">
+          <div class="v grn">+&#8377;18,400</div>
+          <div class="p2 grn">+1.59%</div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="rt"></div>
+        <div class="rf up" style="left:0;width:76.5%"></div>
+        <div class="tick" style="left:50%"></div>
+        <div class="cmp up" style="left:76.5%"></div>
+        <div class="cmpv" style="left:76.5%">11,740</div>
+      </div>
+      <div class="ends">
+        <div class="end"><span class="k k-sl">STOP</span><span class="n red">11,209</span></div>
+        <div class="end r"><span class="k k-tg">TARGET</span><span class="n grn">11,903</span></div>
+      </div>
+      <div class="r3">
+        <span>Entry <span class="mono">11,556</span></span><span class="sep">&middot;</span>
+        <span>100 qty</span><span class="sep">&middot;</span>
+        <span>Day 1</span><span class="sep">&middot;</span>
+        <span>Left <span class="mono grn">+&#8377;16,268</span></span>
+      </div>
+    </div>
+
+    <!-- INDUSINDBK · LONG · losing. CMP below entry, drifting toward the stop. -->
+    <div class="p dn">
+      <div class="r1">
+        <div class="id">
+          <div class="sym">INDUSINDBK</div>
+          <div class="tags"><span class="tag t-long">LONG</span><span class="tag t-bk">Buy Reversal</span></div>
+        </div>
+        <div class="money">
+          <div class="v red">&minus;&#8377;10,220</div>
+          <div class="p2 red">&minus;1.41%</div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="rt"></div>
+        <div class="rf dn" style="left:0;width:26.4%"></div>
+        <div class="tick" style="left:50%"></div>
+        <div class="cmp dn" style="left:26.4%"></div>
+        <div class="cmpv" style="left:26.4%">1,017.5</div>
+      </div>
+      <div class="ends">
+        <div class="end"><span class="k k-sl">STOP</span><span class="n red">1,001</span></div>
+        <div class="end r"><span class="k k-tg">TARGET</span><span class="n grn">1,063</span></div>
+      </div>
+      <div class="r3">
+        <span>Entry <span class="mono">1,032</span></span><span class="sep">&middot;</span>
+        <span>700 qty</span><span class="sep">&middot;</span>
+        <span>Day 1</span><span class="sep">&middot;</span>
+        <span>Left <span class="mono grn">+&#8377;31,892</span></span>
+      </div>
+    </div>
+
+    <!-- GODREJCP · SHORT · losing. Target is on the LEFT for a short. -->
+    <div class="p dn">
+      <div class="r1">
+        <div class="id">
+          <div class="sym">GODREJCP</div>
+          <div class="tags"><span class="tag t-short">SHORT</span><span class="tag t-bk">Sell Momentum</span></div>
+        </div>
+        <div class="money">
+          <div class="v red">&minus;&#8377;2,750</div>
+          <div class="p2 red">&minus;0.51%</div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="rt"></div>
+        <div class="rf dn" style="left:58.6%;width:41.4%"></div>
+        <div class="tick" style="left:50%"></div>
+        <div class="cmp dn" style="left:58.6%"></div>
+        <div class="cmpv" style="left:58.6%">1,071.9</div>
+      </div>
+      <div class="ends">
+        <div class="end"><span class="k k-tg">TARGET</span><span class="n grn">1,034</span></div>
+        <div class="end r"><span class="k k-sl">STOP</span><span class="n red">1,098</span></div>
+      </div>
+      <div class="r3">
+        <span>Entry <span class="mono">1,066</span></span><span class="sep">&middot;</span>
+        <span>500 qty</span><span class="sep">&middot;</span>
+        <span>Day 1</span><span class="sep">&middot;</span>
+        <span>Left <span class="mono grn">+&#8377;18,745</span></span>
+      </div>
+    </div>
+
+    <!-- MAXHEALTH · SHORT · just ahead -->
+    <div class="p up">
+      <div class="r1">
+        <div class="id">
+          <div class="sym">MAXHEALTH</div>
+          <div class="tags"><span class="tag t-short">SHORT</span><span class="tag t-bk">Sell Momentum</span></div>
+        </div>
+        <div class="money">
+          <div class="v grn">+&#8377;1,050</div>
+          <div class="p2 grn">+0.19%</div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="rt"></div>
+        <div class="rf up" style="left:46.9%;width:53.1%"></div>
+        <div class="tick" style="left:50%"></div>
+        <div class="cmp up" style="left:46.9%"></div>
+        <div class="cmpv" style="left:46.9%">1,075</div>
+      </div>
+      <div class="ends">
+        <div class="end"><span class="k k-tg">TARGET</span><span class="n grn">1,045</span></div>
+        <div class="end r"><span class="k k-sl">STOP</span><span class="n red">1,109</span></div>
+      </div>
+      <div class="r3">
+        <span>Entry <span class="mono">1,077</span></span><span class="sep">&middot;</span>
+        <span>525 qty</span><span class="sep">&middot;</span>
+        <span>Day 1</span><span class="sep">&middot;</span>
+        <span>Left <span class="mono grn">+&#8377;15,912</span></span>
+      </div>
+    </div>
+
+    <!-- BHARATFORG · LONG · barely ahead -->
+    <div class="p up">
+      <div class="r1">
+        <div class="id">
+          <div class="sym">BHARATFORG</div>
+          <div class="tags"><span class="tag t-long">LONG</span><span class="tag t-bk">Buy Reversal</span></div>
+        </div>
+        <div class="money">
+          <div class="v grn">+&#8377;2,500</div>
+          <div class="p2 grn">+0.23%</div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="rt"></div>
+        <div class="rf up" style="left:0;width:53.8%"></div>
+        <div class="tick" style="left:50%"></div>
+        <div class="cmp up" style="left:53.8%"></div>
+        <div class="cmpv" style="left:53.8%">2,200</div>
+      </div>
+      <div class="ends">
+        <div class="end"><span class="k k-sl">STOP</span><span class="n red">2,129</span></div>
+        <div class="end r"><span class="k k-tg">TARGET</span><span class="n grn">2,261</span></div>
+      </div>
+      <div class="r3">
+        <span>Entry <span class="mono">2,195</span></span><span class="sep">&middot;</span>
+        <span>500 qty</span><span class="sep">&middot;</span>
+        <span>Day 1</span><span class="sep">&middot;</span>
+        <span>Left <span class="mono grn">+&#8377;30,425</span></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <b>Read the rail.</b> Stop is always on the losing side and target on the winning side, so for
+    a SHORT the target sits on the LEFT. Both ends carry a word, not just a colour. The grey tick
+    is your entry, the dot is the current price. Fill runs from the stop side to the dot, so a long
+    fill means room used and a short fill means room left.
+  </div>
+
+  <div class="note">
+    <b>What the table gave up.</b> Thirteen desktop columns become four facts per card: what it is,
+    what it is worth, where price sits, and what is left. Entry time, sector day%, day P&amp;L% and
+    the rest are one tap deeper — they inform, they do not decide.
+  </div>
+
+  <div class="foot">
+    Screen 4 &middot; V8 open positions &middot; replaces table view and ladder view<br>
+    v8_paper_positions &middot; dummy data, no live fetch
+  </div>
+
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="#"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="/preview/v8"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
