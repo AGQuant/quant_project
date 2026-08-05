@@ -71,7 +71,9 @@ CREATE TABLE IF NOT EXISTS news_suppressed (
 """
 
 # The exclusion fragment. ONE definition, used by the view AND by the candidate query, so the two
-# halves of suppression can never drift apart. `%(alias)s` is the raw-id column being filtered.
+# halves of suppression can never drift apart. `raw_id_expr` is the caller's own raw-id column —
+# `p.raw_news_id` in the view, `r.id` in the candidate query. It is a code-supplied identifier, not
+# user input, so it is interpolated; every value the query actually filters on stays parameterised.
 def suppressed_exclude(raw_id_expr: str) -> str:
     return (f" NOT EXISTS (SELECT 1 FROM news_suppressed ns "
             f"WHERE ns.raw_news_id = {raw_id_expr}) ")
