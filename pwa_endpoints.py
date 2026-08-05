@@ -1077,6 +1077,13 @@ RESULTS_CARD_JS = """
     + '.rcard-lvl-b{color:var(--mut,#667085);background:transparent;border:1px solid var(--line,rgba(148,166,210,.35))}'
     /* cc#788 LEVEL 2 — View Detailed gate above the FY27 section */
     + '.rcard-detwrap{margin-top:14px}'
+    /* cc#858 — shimmer placeholders + the quiet failure line. Sized in _ctxSkeleton() to the real
+       block heights so the card does not jump when content lands. */
+    + '@keyframes rcardShimmer{0%{background-position:-380px 0}100%{background-position:380px 0}}'
+    + '.rcard-skel{border-radius:6px;margin:8px 0;background-size:760px 100%;'
+    + 'background:linear-gradient(90deg,rgba(148,163,184,.06) 0px,rgba(148,163,184,.16) 190px,rgba(148,163,184,.06) 380px);'
+    + 'animation:rcardShimmer 1.25s linear infinite}'
+    + '.rcard-ctx-fail{font-size:11.5px;color:var(--mut,#8a94a6);padding:8px 2px;font-style:italic}'
     + '.rcard-detbtn{display:inline-flex;align-items:center;gap:6px;min-height:38px;border:1px solid var(--line,rgba(148,166,210,.28));'
     + 'background:transparent;color:var(--txt,#101828);font:700 12px Sora,sans-serif;border-radius:8px;padding:8px 14px;cursor:pointer}'
     + '.rcard-detbtn:hover{background:rgba(148,166,210,.1)}'
@@ -1176,6 +1183,11 @@ RESULTS_CARD_JS = """
 
   // cc#784: fetch the card payload and the V2 analysis together, so the renderer sees both at once
   // and never has to re-paint. A missing/failed V2 read degrades to has_analysis:false (template card).
+  // cc#858: the CORE now returns without the four heavy blocks, and the context call fetches them
+  // in parallel. The core + V2 pair still resolve together (that pairing is cc#784's no-re-paint
+  // guarantee and is preserved); context arrives separately and paints into the already-visible card.
+  var CTX_TIMEOUT_MS = 8000;
+
   function _fetchCard(sym, extra){
     return Promise.all([
       fetch('/api/results/card?symbol='+encodeURIComponent(sym)+(extra||''), {cache:'no-store'})
@@ -1184,6 +1196,61 @@ RESULTS_CARD_JS = """
         .then(function(r){ return r.ok ? r.json() : {has_analysis:false}; })
         .catch(function(){ return {has_analysis:false}; })
     ]).then(function(res){ var d = res[0] || {}; d.v2 = res[1]; return d; });
+  }
+
+  // cc#858: heavy blocks, fetched after the card is already on screen. A client-side timeout is
+  // mandatory here — without one a hung request leaves the shimmer animating forever, which reads
+  // as "still loading" and is exactly the failure state the card forbids.
+  function _fetchCtx(sym){
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var t = setTimeout(function(){ try{ ctl && ctl.abort(); }catch(e){} }, CTX_TIMEOUT_MS);
+    return fetch('/api/results/card/context?symbol='+encodeURIComponent(sym),
+                 {cache:'no-store', signal: ctl ? ctl.signal : undefined})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .catch(function(e){ return {__failed:true, reason:String((e&&e.message)||e)}; })
+      .then(function(v){ clearTimeout(t); return v; });
+  }
+
+  // Shimmer placeholders. Heights are set to the real block heights so nothing JUMPS when content
+  // lands — a card that reflows after paint feels slower than one that waited, which would defeat
+  // the point of the split.
+  function _skel(h, label){
+    return '<div class="rcard-skel" data-skel="'+esc(label)+'" style="height:'+h+'px"></div>';
+  }
+  function _ctxSkeleton(){
+    return '<div class="rcard-ctx">'
+         +   _skel(96,  'peers')
+         +   _skel(120, 'peer-results')
+         +   _skel(84,  'news')
+         + '</div>';
+  }
+  // Each block paints INDEPENDENTLY as it resolves; a failed block shows a quiet line and never
+  // blocks its siblings.
+  function _ctxFail(msg){
+    return '<div class="rcard-ctx-fail">Could not load this section'+(msg?' \u00b7 '+esc(msg):'')+'</div>';
+  }
+
+  // cc#858: paint the heavy blocks into an ALREADY-VISIBLE card.
+  // The core render and the hydrated render use the SAME builder (cardHtml) with the same `d`, so
+  // the final DOM is byte-identical to the pre-split card — the only difference is WHEN the four
+  // context keys are populated. Everything above the context region renders from identical fields
+  // both times, so it does not move when the blocks land.
+  // If the context call fails, `d` keeps its null blocks and cardHtml simply hides those sections
+  // (they were already hidden-when-empty), then a quiet failure line is appended. The core card
+  // stays fully usable — never a blank card, never an endless shimmer.
+  function _hydrate(renderFn, sym, d){
+    _fetchCtx(sym).then(function(ctx){
+      if (!ctx || ctx.__failed){
+        try { renderFn(d, {ctxFailed: (ctx && ctx.reason) || 'timeout'}); } catch(e){}
+        return;
+      }
+      d.peer_comparison = ctx.peer_comparison;
+      d.peer_results    = ctx.peer_results;
+      d.raw_news        = ctx.raw_news;
+      d.polished_news   = ctx.polished_news;
+      d.__ctx_errors    = ctx.errors || {};
+      try { renderFn(d, {}); } catch(e){}
+    });
   }
 
   // cc#766: delegated toggle for the "Peer Results (N reported)" button — one listener covers both the
@@ -1600,7 +1667,15 @@ RESULTS_CARD_JS = """
     if (!container) return;
     container.innerHTML = '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Loading '+esc(sym)+'&hellip;</div>';
     _fetchCard(sym)
-      .then(function(d){ container.innerHTML = cardHtml(d, sym, {close:false}); })
+      .then(function(d){
+        // cc#858: paint the core immediately, with shimmer where the heavy blocks will land.
+        var paint = function(dd, o){
+          container.innerHTML = cardHtml(dd, sym, {close:false})
+            + ((o && o.ctxFailed) ? _ctxFail(o.ctxFailed) : '');
+        };
+        container.innerHTML = cardHtml(d, sym, {close:false}) + _ctxSkeleton();
+        _hydrate(paint, sym, d);
+      })
       .catch(function(){ container.innerHTML='<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result card unavailable.</div>'; });
   }
   // cc#753: COLLAPSED-by-default Position-News row. Renders a compact clickable header (symbol +
@@ -1647,7 +1722,10 @@ RESULTS_CARD_JS = """
     _cur = sym;
     if (gen) render({status:'upcoming', ex_date:null}, true);
     _fetchCard(sym, gen?'&generate=true':'')
-      .then(function(d){ render(d, false); })
+      .then(function(d){
+        render(d, false);                       // core paints NOW
+        _hydrate(function(dd){ render(dd, false); }, sym, d);   // heavy blocks stream in
+      })
       .catch(function(e){ renderMsg('Results card unavailable ('+e.message+'). The backend (cc#572) may still be deploying.'); });
   }
   function open(sym){ if(!sym) return; _cur=sym; box.innerHTML='<div class=\"rcard-body\">Loading '+esc(sym)+'...</div>'; ov.classList.add('on'); load(sym, false); }

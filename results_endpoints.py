@@ -613,8 +613,68 @@ def _fundamentals(cur, sym):
     return {"opg": _f(r[0]), "roce": _f(r[1]), "opm": _f(r[2]), "de": _f(r[3]), "roe": _f(r[4])}
 
 
+@router.get("/api/results/card/context")
+def results_card_context(symbol: str):
+    """cc#858: the four HEAVY blocks, fetched in parallel after the core card has already painted.
+
+    Deliberately independent of the core: a slow peer block must never hold back news and vice
+    versa, and if this whole call fails the core card stays fully usable — the client shows a quiet
+    "could not load" line per block rather than a blank card or an endless shimmer.
+
+    Each block is individually try/except-ed for the same reason. One failing block degrades to
+    null and names itself in `errors`; it does not take the other three down with it.
+    """
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"error": "symbol is required"}
+    out = {"symbol": sym, "peer_comparison": None, "peer_results": None,
+           "raw_news": None, "polished_news": None, "errors": {}}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT segment FROM gvm_scores WHERE symbol=%s
+                           ORDER BY score_date DESC LIMIT 1""", (sym,))
+            r = cur.fetchone()
+            segment = r[0] if r else None
+            out["segment"] = segment
+            today = date.today()
+            for key, build in (
+                ("peer_comparison", lambda: _cached("cmp", segment, today,
+                                                    lambda: _peer_comparison(cur, sym, segment))),
+                ("peer_results",    lambda: _cached("res", segment, today,
+                                                    lambda: _peer_results(cur, sym, segment, today))),
+                ("raw_news",        lambda: _raw_news(cur, sym, hours=168)),
+                ("polished_news",   lambda: _polished_by_symbol(cur, sym, days=30)),
+            ):
+                try:
+                    out[key] = build()
+                except Exception as e:
+                    out["errors"][key] = f"{type(e).__name__}: {str(e)[:120]}"
+                    log.warning("cc#858 context block %s failed for %s: %s", key, sym, e)
+                    try:
+                        conn.rollback()   # un-poison the txn so the remaining blocks still run
+                    except Exception:
+                        pass
+    except Exception as e:
+        log.exception("cc#858 card context failed")
+        out["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+    return out
+
+
 @router.get("/api/results/card")
-def results_card(symbol: str, generate: bool = False):
+def results_card(symbol: str, generate: bool = False, full: int = 0):
+    """cc#858: returns the FAST CORE by default; ?full=1 returns the original combined payload.
+
+    The four heavy blocks (peer_comparison, peer_results, raw_news, polished_news) moved to
+    GET /api/results/card/context, which the client fetches in parallel right after the core lands.
+    Everything the core returns is a single-row lookup and is already quick, so the card can paint
+    immediately instead of waiting on segment-wide peer work.
+
+    ?full=1 is kept so nothing that already calls this URL breaks — it returns the identical
+    original payload. Callers checked: pwa_endpoints.py (ScorrRCard, the shared R-card builder),
+    scorr_card_strip.js, scorr_result_corner.html, v8_dashboard.html. None passes `full`, so all of
+    them get the fast core and then the context call; the combined shape stays available for any
+    caller found later.
+    """
     # cc#609: `generate` is retained for backward-compat with any cached client URL but is IGNORED —
     # app-side FY27-outlook generation is retired (dead Anthropic path removed). Cards serve the
     # cached input_raw.fy27_outlook only; when none exists the card shows a "due September" note.
@@ -639,10 +699,13 @@ def results_card(symbol: str, generate: bool = False):
         # have excluded from its own view — checked, and it does not matter: the block is a
         # top-3-by-GVM SEGMENT summary, and the subject is not rendered inside its own peer table.
         _today = date.today()
+        # cc#858: skipped entirely on the fast path. cc#857 made them fast, but "fast" is still
+        # segment-wide work the header does not need in order to paint.
+        _want_ctx = bool(full)
         peer_comparison = _cached("cmp", segment, _today,
-                                  lambda: _peer_comparison(cur, sym, segment))   # cc#590
+                                  lambda: _peer_comparison(cur, sym, segment)) if _want_ctx else None
         peer_results = _cached("res", segment, _today,
-                               lambda: _peer_results(cur, sym, segment, _today))  # cc#766
+                               lambda: _peer_results(cur, sym, segment, _today)) if _want_ctx else None
 
         def _with_peer(d):
             d["peer_comparison"] = peer_comparison
@@ -688,8 +751,10 @@ def results_card(symbol: str, generate: bool = False):
         expectations = _expectations(cur, sym, _act_sales, _act_pat)
         l1 = _l1_quarter(cur, sym)                      # cc#797 block 1
         auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
-        raw_news = _raw_news(cur, sym, hours=168)   # cc#650: RAW headlines widened 48h -> 7 days
-        pol_news = _polished_by_symbol(cur, sym, days=30)
+        # cc#858: news also moves to the context call. cc#847 note preserved — _raw_news still
+        # reads position_news and that dependency is unchanged, it simply runs on the other endpoint.
+        raw_news = _raw_news(cur, sym, hours=168) if _want_ctx else None   # cc#650: 7-day window
+        pol_news = _polished_by_symbol(cur, sym, days=30) if _want_ctx else None
 
         def _sections(base):
             base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
