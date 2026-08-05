@@ -807,6 +807,61 @@ body{font-family:var(--mux-font);}
   -webkit-font-smoothing:antialiased;
 }
 .dt .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* ── cc#859 Part A · SHARED MOBILE SECTION CARD ─────────────────────────────────────────────
+   Structure only. The design ref (R2, cc#861) governs the finish; these rules implement the
+   grammar already written in MOBILE_APP_FRAMEWORK_V1 (15913) and cc#859 scope. Dark per 15913.
+   Scoped to <=767px so DESKTOP IS UNTOUCHED — cc#859 V6 requires zero desktop change, and the
+   existing nav CSS already uses this 767/768 split, so there is no 1px gap between them. */
+@media(max-width:767px){
+  .smc-stack{display:flex;flex-direction:column;gap:8px}   /* core rule 5: 8px between targets */
+  .smc{background:#0E1526;border:1px solid #1E2A44;border-radius:10px;overflow:hidden;
+    position:relative}
+  /* core rule 9 — THE STATE RAIL. 3px left edge; reading the rails down the stack tells you the
+     book without opening anything. Live cards breathe. */
+  .smc:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#334155}
+  .smc-state-live:before{background:#34D399;animation:smcBreathe 2.4s ease-in-out infinite}
+  .smc-state-stale:before{background:#FBBF24}
+  .smc-state-off:before{background:#475569}
+  @keyframes smcBreathe{0%,100%{opacity:1}50%{opacity:.45}}
+
+  /* core rule 4 header contract + core rule 5 tap targets: 44px min, full-width tappable */
+  .smc-hd{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:11px 13px;
+    background:none;border:0;text-align:left;cursor:pointer;color:inherit;font:inherit}
+  .smc-primary .smc-hd{cursor:default;padding-bottom:4px}
+  .smc-title{font:600 10.5px Sora,sans-serif;letter-spacing:.14em;text-transform:uppercase;
+    color:#64748B;flex:none}
+  /* numerals: IBM Plex Mono, >=13px on mobile (cc#859 item 6) */
+  .smc-val{margin-left:auto;font:600 13px 'IBM Plex Mono',monospace;color:#E6EDF7;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .smc-primary .smc-val{font-size:30px;font-weight:600;letter-spacing:-.01em}
+  .smc-chev{flex:none;color:#64748B;font-size:17px;line-height:1;transition:transform .16s;
+    min-width:22px;text-align:right}
+  .smc.open .smc-chev{transform:rotate(90deg)}
+
+  /* collapse: PRIMARY is always expanded and has no chevron (cc#859 item 3) */
+  .smc-body{display:none;padding:0 13px 13px}
+  .smc.open .smc-body,.smc-primary .smc-body{display:block}
+
+  /* core rule 10 — LIVE/STALE/OFF differ by SHAPE, not opacity */
+  .smc-chip{display:inline-flex;align-items:center;gap:5px;flex:none;
+    font:700 8.5px 'IBM Plex Mono',monospace;letter-spacing:.12em;padding:3px 6px;
+    border-radius:4px;border:1px solid}
+  .smc-chip.smc-live{color:#34D399;border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.12)}
+  .smc-chip.smc-stale{color:#FBBF24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.12)}
+  .smc-chip.smc-off{color:#94A3B8;border-color:#334155;background:transparent}
+  .smc-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+  .smc-ring{width:5px;height:5px;border-radius:50%;border:1.5px solid currentColor;background:transparent}
+  .smc-bar{width:6px;height:2px;background:currentColor;border-radius:1px}
+
+  /* core rule 7 — skeleton sized to final height, no layout jump */
+  .smc-skel{border-radius:7px;background:#131C31;animation:smcBreathe 1.4s ease-in-out infinite}
+
+  /* core rule 1 — NO horizontal tab row renders below the breakpoint. The mobile surfaces replace
+     them with .smc-stack; this is the backstop so a page that has not been converted yet cannot
+     leak a wrapped tab row onto a phone. */
+  .smc-mobile-host .tabs{display:none!important}
+}
+
 /* ── cc#860 MODEL LAUNCHER — dark, assembled from 9016; no new visual language ────────────── */
 .scorr-ml-btn{margin-left:auto;min-height:44px;padding:8px 14px;border-radius:8px;cursor:pointer;
   border:1px solid var(--line2,rgba(148,166,210,.3));background:transparent;
@@ -1970,6 +2025,8 @@ def _read_root_js(name):
 
 
 SCORR_CARD_COMMON_JS = _read_root_js("scorr_card_common.js")
+# cc#859 Part A: the shared mobile section card — imported by cc#862 and cc#863, never redefined.
+SCORR_MOBILE_CARDS_JS = _read_root_js("scorr_mobile_cards.js")
 SCORR_ANALYSIS_CARD_JS = _read_root_js("scorr_analysis_card.js")
 SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
 
@@ -1977,6 +2034,11 @@ SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
 @router.get("/scorr_card_common.js")
 def pwa_scorr_card_common_js():
     return Response(SCORR_CARD_COMMON_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_mobile_cards.js")
+def pwa_scorr_mobile_cards_js():
+    return Response(SCORR_MOBILE_CARDS_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_analysis_card.js")

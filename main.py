@@ -272,8 +272,11 @@ _MOBILE_HEAD = (
     # cc#805 DEPENDENCY ORDER — scorr_card_common.js FIRST. It owns the primitives every other card
     # file binds to (num/sign/getJSON/newsEsc, the volume tiles, the heat cells, the sparkline), and
     # both scorr_analysis_card.js and scorr_cockpit_card.js bail out with a console warning if
-    # window.ScorrCardCommon is not already there. Do not reorder these five tags.
+    # window.ScorrCardCommon is not already there. Do not reorder these tags.
+    # cc#859 Part A added scorr_mobile_cards.js — it is self-contained (no ScorrCardCommon
+    # dependency), so its position is not load-bearing, but it must precede its consumers.
     + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
+    + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/results_card.js?v=' + _BUILD_B + b'" defer></script>'       # cc#573: shared Results R-pill + card
     + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card (letter C)
