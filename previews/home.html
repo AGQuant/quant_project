@@ -11,10 +11,19 @@
    Screen 2. Design ref design_refs/scorr_mobile_R4.html (fa0f1f2).
    Tokens verbatim from scorr_home.html :root (9ffbcba). Dark, per 15913.
 
-   ALL VALUES ARE DUMMY — but every one is a real row read from the DB on
-   05-Aug-2026. Nothing here fetches. Wiring is a separate cc_task.
+   THEME ISOLATION (05-Aug): /static/mobile.css is injected AFTER this block and
+   carries `:root[data-theme="light"]{...}`, which out-specifies a bare `:root`.
+   Tokens therefore live on .screen/.bnav — custom properties resolve from the
+   nearest ancestor, so this wins without touching any shared file. body colours
+   are literal hex for the same reason.
+
+   ALL VALUES ARE DUMMY — every one a real DB row from 05-Aug-2026. No fetch.
 ============================================================================= */
-:root{
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+
+.screen,.bnav{
   --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
   --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
   --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
@@ -22,11 +31,9 @@
   --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
   --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
 }
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
-  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
-.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
 
 .dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
   padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
@@ -39,7 +46,7 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
 .si{flex:1;min-width:0}
 .si .n{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
 .si .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
-  font-size:14px;font-weight:700;margin-top:3px}
+  font-size:14px;font-weight:700;margin-top:3px;color:var(--txt)}
 .si .d{font-size:10.5px;font-weight:700;margin-left:6px}
 .sdiv{width:1px;height:28px;background:var(--line);margin:0 12px}
 .sclosed{font-size:8.5px;font-weight:800;letter-spacing:.06em;color:var(--dim);
@@ -47,7 +54,6 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
 
 .body{padding:14px 12px 0}
 
-/* ---- book switcher ---- */
 .seg{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:11px;
   padding:3px;margin-bottom:13px}
 .segb{flex:1;text-align:center;font-size:11px;font-weight:800;letter-spacing:.04em;
@@ -78,7 +84,7 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
 .bk{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
 .bk .l{font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
 .bk .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
-  font-size:14px;font-weight:700;margin-top:4px}
+  font-size:14px;font-weight:700;margin-top:4px;color:var(--txt)}
 .flatmsg{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:14px}
 
 /* ---- position rows ---- */
@@ -87,7 +93,7 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
 .pr{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
   padding:10px 12px;margin-bottom:7px}
 .prt{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.psym{font-weight:800;font-size:13.5px}
+.psym{font-weight:800;font-size:13.5px;color:var(--txt)}
 .pill{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap}
 .p-short{background:var(--red-d);color:var(--red)}
 .p-long{background:var(--grn-d);color:var(--grn)}
@@ -119,7 +125,7 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
 
 .models{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .mt{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px;
-  min-height:76px;text-decoration:none;color:inherit;display:block}
+  min-height:76px;text-decoration:none;color:var(--txt);display:block}
 .mt .nm{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:7px}
 .mt .ds{font-size:10.5px;color:var(--mut);margin-top:5px;line-height:1.4}
 .ldot{width:6px;height:6px;border-radius:50%;background:var(--grn);flex-shrink:0}
@@ -151,7 +157,6 @@ html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
     Nothing here is live.</span>
   </div>
 
-  <!-- index strip -->
   <div class="strip">
     <div class="si">
       <div class="n">Nifty 50</div>
