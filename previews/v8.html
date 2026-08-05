@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>V8 · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — V8 DASHBOARD
+   Screen 1 of the mobile set. Design ref design_refs/scorr_mobile_R3.html (c6847780).
+   Tokens copied verbatim from v8_dashboard.html :root (7c9cc1b). Dark, per 15913.
+
+   ALL VALUES ON THIS SCREEN ARE DUMMY. They are real numbers read from the DB on
+   05-Aug-2026 14:15 IST, frozen into the markup so the layout can be judged. Nothing
+   here fetches anything. Wiring is a separate cc_task — see the DUMMY banner.
+============================================================================= */
+:root{
+  --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+  --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+/* the phone column. On desktop it centres; on a phone it fills. */
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;background:var(--bg)}
+
+/* ---- dummy banner ---- */
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--amber);
+  display:flex;gap:7px;align-items:center;line-height:1.45}
+.dummy b{font-weight:800}
+
+/* ---- page head ---- */
+.head{padding:15px 14px 11px;border-bottom:1px solid var(--line);
+  display:flex;align-items:flex-start;gap:10px}
+.head .t{flex:1;min-width:0}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:3px}
+.gate{font-size:9px;font-weight:800;letter-spacing:.07em;padding:3px 8px;border-radius:6px;
+  white-space:nowrap;background:var(--grn-d);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+
+/* ---- tier separator ---- */
+.tierlab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);padding:0 15px;margin:18px 0 8px;display:flex;align-items:center;gap:9px}
+.tierlab::after{content:'';flex:1;height:1px;background:var(--line)}
+
+/* =========================================================================
+   THE CARD — signature element is the STATE RAIL, a 3px left edge.
+   Four states told apart by SHAPE, never opacity alone.
+   These are NAV cards (they lead to a tab), so every one carries a chevron
+   whatever its tier — session_log 16157.
+========================================================================= */
+.stack{padding:0 12px}
+.c{position:relative;display:block;width:100%;text-align:left;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
+  font-family:inherit;color:inherit;cursor:pointer;min-height:60px}
+.c:active{background:var(--panel2)}
+.c::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.c.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.c.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.c.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.c.ref::before{background:var(--blu);top:14px;bottom:14px;border-radius:0 3px 3px 0}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.c.live::before{animation:none;opacity:1}}
+
+.row{display:flex;align-items:center;gap:11px;min-height:44px}
+.ttl{flex:1;min-width:0}
+.ttl .n{font-size:13.5px;font-weight:700;letter-spacing:.01em}
+.ttl .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;align-items:center;
+  gap:6px;flex-wrap:wrap}
+.val{text-align:right;white-space:nowrap}
+.val .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:17px;font-weight:700;line-height:1;letter-spacing:-.01em}
+.val .u{font-size:9.5px;color:var(--dim);margin-top:4px;letter-spacing:.02em}
+.chev{color:var(--dim);font-size:17px;flex-shrink:0;width:10px;text-align:center;line-height:1}
+
+.grn{color:var(--grn)}.red{color:var(--red)}.amb{color:var(--amber)}.mut{color:var(--mut)}
+
+.chip{font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:4px}
+.chip.live{background:var(--grn-d);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+.chip.stale{background:rgba(245,185,74,.12);color:var(--amber);border:1px dashed rgba(245,185,74,.55)}
+.chip.closed{background:transparent;color:var(--dim);border:1px dashed var(--line2)}
+.chip.ref{background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4)}
+
+/* ---- legend ---- */
+.legend{margin:22px 12px 0;padding:13px 14px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px}
+.legend .h{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--dim);margin-bottom:11px}
+.lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;
+  color:var(--mut);line-height:1.5}
+.lrow:last-child{margin-bottom:0}
+.lbar{width:3px;height:30px;border-radius:2px;flex-shrink:0;margin-top:1px}
+.lrow b{color:var(--txt);font-weight:700}
+
+.foot{padding:20px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+/* ---- bottom nav — five slots, the only navigation below 768px (637 + 15913) ---- */
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;
+  display:flex;background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);
+  padding:4px 0;min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Real values frozen at 05-Aug 14:15 IST. Nothing on this screen
+    is live — layout review only.</span>
+  </div>
+
+  <div class="head">
+    <div class="t">
+      <h1>V8</h1>
+      <div class="s">Long-short futures &middot; 209 symbols &middot; 14:15 IST</div>
+    </div>
+    <span class="gate">GATE --</span>
+  </div>
+
+  <!-- ================= PRIMARY ================= -->
+  <div class="tierlab">Primary</div>
+  <div class="stack">
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Master Dashboard</div>
+          <div class="m">Book &middot; mood gate &middot; slots <span class="chip live">LIVE</span></div>
+        </div>
+        <div class="val"><div class="v">21</div><div class="u">open &middot; P&amp;L --</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Buy Reversal</div>
+          <div class="m">Last new signal 09:45 <span class="chip live">LIVE</span></div>
+        </div>
+        <div class="val"><div class="v grn">9</div><div class="u">signals</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Buy Momentum</div>
+          <div class="m">Last new signal 11:20 <span class="chip live">LIVE</span></div>
+        </div>
+        <div class="val"><div class="v grn">2</div><div class="u">signals</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Sell Reversal</div>
+          <div class="m">Last new signal 12:05 <span class="chip live">LIVE</span></div>
+        </div>
+        <div class="val"><div class="v red">1</div><div class="u">signal</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Sell Momentum</div>
+          <div class="m">Last new signal 12:35 <span class="chip live">LIVE</span></div>
+        </div>
+        <div class="val"><div class="v red">6</div><div class="u">signals</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+  </div>
+
+  <!-- ================= SECONDARY ================= -->
+  <div class="tierlab">Secondary</div>
+  <div class="stack">
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Trade Log</div>
+          <div class="m">Full ledger &middot; live baskets only</div>
+        </div>
+        <div class="val"><div class="v mut">85</div><div class="u">closed &middot; net --</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Day Log</div>
+          <div class="m">Day-by-day P&amp;L &middot; loads on open</div>
+        </div>
+        <div class="val"><div class="v mut">--</div><div class="u">today net</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Live News</div>
+          <div class="m">Market + stocks &middot; newest 12m ago</div>
+        </div>
+        <div class="val"><div class="v">575</div><div class="u">last 48h</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c stale">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Results</div>
+          <div class="m">Blackout risk <span class="chip stale">STALE 31h</span></div>
+        </div>
+        <div class="val"><div class="v amb">--</div><div class="u">upcoming</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+  </div>
+
+  <!-- ================= TERTIARY ================= -->
+  <div class="tierlab">Reference</div>
+  <div class="stack">
+
+    <button class="c live">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Raw Data</div>
+          <div class="m">All metrics &middot; 14:15 IST</div>
+        </div>
+        <div class="val"><div class="v">208</div><div class="u">symbols</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+    <button class="c ref">
+      <div class="row">
+        <div class="ttl">
+          <div class="n">Strategy Matrix</div>
+          <div class="m">Filters, exits, edge <span class="chip ref">REFERENCE</span></div>
+        </div>
+        <div class="val"><div class="v mut">4</div><div class="u">baskets</div></div>
+        <div class="chev">&rsaquo;</div>
+      </div>
+    </button>
+
+  </div>
+
+  <!-- ================= LEGEND ================= -->
+  <div class="legend">
+    <div class="h">Reading the rails</div>
+    <div class="lrow">
+      <div class="lbar" style="background:var(--grn)"></div>
+      <div><b>Live</b> — solid, breathing. Inside its own time window, market open.</div>
+    </div>
+    <div class="lrow">
+      <div class="lbar" style="background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)"></div>
+      <div><b>Stale</b> — long dashes, still. Past its window. Always states its age.</div>
+    </div>
+    <div class="lrow">
+      <div class="lbar" style="background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)"></div>
+      <div><b>Closed</b> — short dots. Market shut or gate closed. Not a fault.</div>
+    </div>
+    <div class="lrow">
+      <div class="lbar" style="background:var(--blu);height:22px;margin-top:5px"></div>
+      <div><b>Reference</b> — short solid bar. Static spec. Can never be stale.</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Screen 1 &middot; V8 &middot; eleven tabs, one stack<br>
+    design_refs/scorr_mobile_R3.html &middot; dummy data, no live fetch
+  </div>
+
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="#"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="#"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
