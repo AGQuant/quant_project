@@ -22,6 +22,39 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 8. NAV-COMPLETE SHIPPING (locked session_log id=2987, set 12-Jul-2026): a PAGE task is NOT done until it (a) is deployed live on scorr.in AND (b) has a nav entry in the navbar. The LIVE nav is ONE source — the `NAV` array in `pwa_endpoints.py` (pwa.js injects it into `#scorr-nav` on every page and OVERRIDES per-page hardcoded navs — editing a page's own nav does nothing on the live bar). New page => add its route to that NAV array (desktop top-nav + mobile "More" sheet auto-build from it), keep it collision-free + cache-protected (add to `_PWA_INJECT_PATHS` + `PROTECTED` in main.py), mirror it in the `NAV_REGISTRY` map in main.py, and state the label+URL in the task result. Self-check this before marking any page task done.
 9. **ENGINE_LIVENESS_RULE (session_log id=13829, set 02-Aug-2026):** no engine, basket, strategy or scheduled-content task is DONE until (a) its job row exists in `scheduler_master` (or a registry-derived enumeration provably covers it) AND (b) **first-run evidence** is stated in the task result — inception rows / first output / first tick, with row counts, or an explicitly logged valid-empty outcome (e.g. a cash month). **Built-and-registered is NOT live; the badge follows the data, never precedes it.** Corollaries: monthly/weekly boundaries must roll forward over weekends/holidays *by construction* (a boundary that can land on a non-trading day and skip is a defect); scheduler enumeration must be REGISTRY-DERIVED (`is_active`), never a hardcoded name list; a LIVE/PAPER-LIVE badge must derive from actual run data, never from registration alone. Origin: 02-Aug, three engines found built-but-never-breathing in one day (QB contra_value + breakout_52w cc#838; V9 Brahmastra cc#840).
 10. MAINTENANCE_LOCK_RULE (cc#351, set 12-Jul-2026): lock-taking maintenance (REINDEX / VACUUM FULL / CLUSTER / ALTER TABLE) is **Railway-console-only, weekends, propose-first** — the `run_sql` MCP path now hard-blocks them (10-Jul incident: a REINDEX wedged ~45 min behind an idle-in-transaction lock). DB-level `idle_in_transaction_session_timeout=300000` (5 min) auto-kills stale open txns. **Diagnostic tasks are READ-ONLY** — never run remediation beyond a task's explicit scope.
+11. **ROLE_CHARTER_V2 (session_log id=16159, founder-set 05-Aug-2026):** FIRST PART is Claude AI, SECOND PART is Claude Code. See the Role Split section below. This SUPERSEDES the old "never push code from Claude.ai chat" line — Claude AI now pushes design refs, new-product first builds and doctrine files. CC still owns every engine, all wiring, all data connection and every iteration after the first build.
+
+## Role Split — who pushes what (ROLE_CHARTER_V2, 05-Aug-2026)
+
+The rule follows the SEAT, not the model. Claude AI may be Fable or Opus; the split is the same.
+
+**FIRST PART — Claude AI pushes**
+- `design_refs/**` — the numbered ref chain (R1, R2, R3 …). Never overwrite a revision.
+- The FIRST BUILD of a new product, screener or page: its own new file, standing alone.
+- New product ARCHITECTURE documents.
+- Doctrine and context files: `CLAUDE.md`, `API_REFERENCE.md`, `SPEC_REGISTRY_INDEX.md`.
+- All DB writes: `session_log`, `cc_tasks`, registry and reference tables.
+
+**SECOND PART — CC owns**
+- Wiring the first build in: `include_router` in main.py, the `NAV` array in `pwa_endpoints.py`, `_PWA_INJECT_PATHS`, `PROTECTED`, `NAV_REGISTRY`.
+- Connecting live data — replacing every sample value with a real endpoint and field.
+- All backend endpoints, and every iteration after the first build.
+- Engines, scheduler, `worker/**`, `v8_signal_writer`, anything on the live trading path.
+- All bug fixes, and every later revision of a file Claude AI first created.
+
+**Hard lines that do not move**
+- Claude AI NEVER pushes an engine, the scheduler, `worker/**`, or any file on the live trading path — not even a first build.
+- Claude AI NEVER edits `main.py`. It stays wiring only and CC owns it.
+- Claude AI NEVER pushes a second revision of a file CC has taken over. Once CC owns it, it owns it.
+- Rules 8, 9, 10 and the FEED WORKER DEPLOY RULE are unaffected.
+
+**Safeguards on a Claude AI push**
+- Validate before pushing: `ast.parse` for Python, `node --check` for JS. Never push a file that has not parsed.
+- Verify AFTER pushing by reading the artifact back from the repo — present, size, sha. A push response is a claim, not evidence (origin cc#842 → cc#848).
+- Sample data must be stamped as sample inside the file. A first build is never a source of truth.
+
+**Handoff point**
+Claude AI pushes the new file and files the `cc_task`. CC wires it in and connects the data. The card must resolve every open design question — a card that leaves a decision open is an unfinished card, not a question for CC.
 
 ## Deploy policy
 - RULE_7 (deploy-window "no deploy 09:00–15:35 IST", referenced in cc_task specs) is **SUSPENDED as of 07-Jul-2026** — dev-stage, product NOT live (policy id=1713). Deploy anytime, including market hours; task specs that reassert RULE_7 are overridden while in dev mode. Re-instate this window only when the product goes live.
@@ -30,6 +63,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 ## Reporting style (CC → Arpit)
 - After a push/deploy: keep the reply SHORT — confirm what was pushed (file + commit/sha) and state what's next (next pending task or remaining items). No long recaps or re-explanations.
 - **PUSH CONFIRMATION SIGNAL (set 08-Jul-2026):** every time code is pushed to `main`, end the reply with the line `DONE WHAT NEXT` in ALL CAPS (on its own line, after the short file+sha confirm). This is Arpit's deploy-confirmed handshake — seeing `DONE WHAT NEXT` = task is pushed/deploying and CC is ready for the next. Canonical: session_log DONE_WHAT_NEXT_PUSH_SIGNAL_V1.
+- **SIMPLE LANGUAGE (session_log id=15671):** write to Arpit in plain, short sentences. No heavy vocabulary. This binds every output, including task results and any content written for the site.
 
 ## Key Files
 | File | Purpose | Size |
@@ -39,11 +73,19 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 | v8_signal_writer.py | Live 5-min signal engine | ~61KB |
 | v8_engine.py | EOD engine runs 15:45 IST | ~23KB |
 | scanner_endpoints.py | Scanner API + /scanners HTML route | ~6KB |
+| scorr_mobile_cards.js | Shared mobile section/nav card module (cc#859 Part A, e850256) | ~ |
 | cc_task_endpoints.py | Task queue API (to be created) | |
 | scorr_cockpit.html | Main nav shell | ~41KB |
 | scorr_scanners.html | Scanners page (3 tabs) | ~8KB |
-| scorr_home.html | Home page | ~6KB |
+| scorr_home.html | Home page | ~56KB |
+| v8_dashboard.html | V8 dashboard, 11 tabs (TAB_ORDER) | ~375KB |
 | API_REFERENCE.md | Full endpoint reference (repo root) | ~14KB |
+
+## Mobile app build (05-Aug-2026)
+- Framework: session_log **15913** (MOBILE_APP_FRAMEWORK_V1). Dark theme. 768px breakpoint, no tab rows below it, one bottom nav of five items: Home · GVM · Check · Intel · Models.
+- Card roles: session_log **16157**. SECTION cards hold content inline — a PRIMARY section card is always expanded and has NO chevron. NAV cards lead elsewhere and ALWAYS carry a chevron whatever the tier. One module, `scorr_mobile_cards.js`, takes a role parameter. Never fork it.
+- Design refs: `design_refs/scorr_mobile_R3.html` (V8, eleven tab surfaces, commit c6847780) and `design_refs/scorr_mobile_R4.html` (Home, commit fa0f1f2). R3's surface map is also stored as session_log **16065**.
+- Refs are a numbered chain. Never overwrite a revision, never delete a prior one.
 
 ## CC Task System — 2-Way Workflow
 
@@ -93,5 +135,6 @@ Key endpoints: /api/v8/*, /api/scanners/*, /api/qb/*, /api/gvm/*, /api/paper/*, 
 - day_1d fix live from 19-Jun-2026 (first market day after fix)
 
 ## Workflow
-Claude.ai → INSERT cc_tasks → Arpit tells CC "read cc tasks" → CC claims + implements + logs → Claude.ai verifies
-Never push code from Claude.ai chat. Claude Code owns all file changes.
+Claude AI designs and pushes the FIRST PART → INSERTs the cc_task → Arpit tells CC "read cc tasks" →
+CC claims, wires it in, connects real data, logs and pushes → Claude AI verifies with BOTH the
+committed diff AND a DB query on real rows. A CC result is a claim, not evidence.
