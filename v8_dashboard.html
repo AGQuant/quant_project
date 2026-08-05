@@ -886,7 +886,7 @@ const BASKETS=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Results","Global Indices","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];
+  "Results","Global Indices (retired cc#849)","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];
 // cc#294: Position News = 14 (retired cc#847) · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17
 // cc#850: index 12 relabelled "Forthcoming Results" -> "Results". LABEL ONLY — panel id (panel12),
 // the i===12 lazy-load branch, loadForthcoming()/FR_LOADED and the /api route behind it are all
@@ -907,7 +907,18 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // Rules" tab; cc#510 (founder decision, 18-Jul-2026) removed it again -- the per-basket i-button
 // popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt specs, so the dedicated
 // tab was redundant. renderBasketRules() deleted; index 3 reverts to its cc#502 dormant state.
-const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,15];   // cc#847: Position News (14) removed — panel14 dormant, label slot kept so Matrix(15)/V9(16)/OH-OL(17) panel ids do not shift   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
+const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,15];
+// cc#850 TARGET STATE REACHED — ELEVEN items, ONE row:
+//   Master Dashboard | Buy Reversal | Buy Momentum | Sell Reversal | Sell Momentum |
+//   Trade Log | Day Log | Raw Data | Live News | Results | Matrix
+// cc#849 removed Global Indices (13) once the digest global section was verified live in
+// production; Matrix (15) is therefore promoted to the main line by simply being last in the
+// array. There was never a separate sub-nav CONTAINER to delete — .tabs is a single
+// flex-wrap:wrap div (line ~72), so the founder's "second row" was only wrapping, and it
+// disappears once the item count drops.
+// Dormant panels, label slots deliberately KEPT so panel ids never shift (the repo convention
+// from cc#263/#426/#447/#502/#847): 3 Buy S1 Bounce · 6 Sell Overbought · 10 Paper Missed ·
+// 13 Global Indices · 14 Position News · 16 V9 Pairs · 17 OH-OL.
 
 // -- Basket info --------------------------------------------------------------
 // cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce RETIRED (ring-fenced
@@ -2118,8 +2129,9 @@ function selectTab(i){
   if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
   // cc#281: Global Indices polls every 5 min WHILE its tab is active; the timer is cleared when
   // any other tab is selected so it never polls in the background.
-  if(i===13){loadGlobalIndices();if(!GI_TIMER)GI_TIMER=setInterval(loadGlobalIndices,5*60*1000);}
-  else if(GI_TIMER){clearInterval(GI_TIMER);GI_TIMER=null;}
+  // cc#849: Global Indices (13) RETIRED — the digest global section supersedes it. Its lazy-load
+  // AND its 5-min poller are removed together; leaving the poller would keep hitting
+  // /api/global/heatstrip every 5 minutes for a tab nobody can open.
   // cc#847: Position News lazy-load removed with the tab.
   // cc#275: VIX is now a popout overlay (openVix/closeVix), no longer tab-toggled here.
 }
