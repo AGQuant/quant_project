@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Models &amp; tools · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — MODELS & TOOLS
+   Six founder-approved surfaces, 05-Aug-2026: Trade Check, V10, GVM,
+   V14 Intraday, Sector, Scanners. Reasoning: session_log 16222.
+   PLACEHOLDER VALUES BY DESIGN — CC plugs real endpoints later. No fetch.
+   Tokens are literal hex / scoped to .screen so the injected light theme
+   cannot override them.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#070B16;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen{max-width:430px;margin:0 auto;padding:0 0 60px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.grn{color:#2FD48B}.red{color:#FF5C6C}.amb{color:#F5B94A}.mut{color:#8C99BD}.dim{color:#5E6B8F}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);padding:8px 14px;
+  font-size:10.5px;font-weight:700;color:#F5B94A;display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.wrap{padding:18px 14px 0}
+.ttl{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#4D7CFE;
+  margin:32px 2px 10px;display:flex;align-items:center;gap:9px}
+.ttl:first-child{margin-top:0}
+.ttl::after{content:'';flex:1;height:1px;background:rgba(77,124,254,.28)}
+.scr{background:#0A0F1E;border:1px solid rgba(148,166,210,.24);border-radius:16px;padding:14px 12px;overflow:hidden}
+.ph{font-size:9px;color:#5E6B8F;text-align:center;padding:9px 0 2px;letter-spacing:.05em}
+.lab{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:#5E6B8F;
+  margin:14px 2px 8px;display:flex;align-items:center;gap:9px}
+.lab::after{content:'';flex:1;height:1px;background:rgba(148,166,210,.14)}
+.srch{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 14px;background:#121A33;
+  border:1px solid rgba(148,166,210,.24);border-radius:12px;color:#5E6B8F;font-size:13.5px;margin-bottom:11px}
+.pillrow{display:flex;gap:6px;overflow-x:auto;padding-bottom:11px;scrollbar-width:none}
+.pillrow::-webkit-scrollbar{display:none}
+.fp{flex-shrink:0;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid rgba(148,166,210,.24);
+  background:#121A33;color:#8C99BD;font-size:10.5px;font-weight:700;display:flex;align-items:center;gap:5px}
+.fp.on{background:#182241;color:#E9EEFB}
+
+/* trade check */
+.dirs{display:flex;gap:7px;margin-bottom:14px}
+.db{flex:1;min-height:42px;border-radius:10px;border:1px solid rgba(148,166,210,.24);background:#121A33;
+  color:#8C99BD;font-size:12px;font-weight:800;letter-spacing:.05em;display:flex;align-items:center;justify-content:center}
+.db.l{background:rgba(47,212,139,.14);color:#2FD48B;border-color:rgba(47,212,139,.4)}
+.verd{position:relative;background:linear-gradient(168deg,#121A33,#0F1730);border:1px solid rgba(47,212,139,.35);
+  border-radius:16px;padding:16px 16px 14px 19px;overflow:hidden}
+.verd::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#2FD48B}
+.vt{display:flex;align-items:baseline;gap:9px}
+.vsym{font-size:16px;font-weight:800}
+.vcmp{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:#8C99BD}
+.vrow{display:flex;align-items:flex-end;gap:14px;margin-top:13px}
+.vscore{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:42px;font-weight:700;line-height:.9;letter-spacing:-.03em}
+.vscore s{text-decoration:none;font-size:15px;color:#5E6B8F}
+.vcall{margin-left:auto;text-align:right}
+.vcall .w{font-size:17px;font-weight:900}
+.vcall .c2{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.dial{display:flex;gap:3px;margin-top:15px}
+.dl{flex:1;height:6px;border-radius:3px;background:#0D1428}
+.dl.on{background:#2FD48B}.dl.off{background:#334155}
+.rules{margin-top:13px;padding-top:12px;border-top:1px solid rgba(148,166,210,.14);display:grid;gap:8px}
+.ru{display:flex;align-items:center;gap:9px;font-size:11.5px}
+.ru .i{width:16px;height:16px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:800;flex-shrink:0;background:rgba(255,92,108,.14);color:#FF5C6C}
+.ru .t{flex:1;color:#8C99BD}
+.ru .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:#5E6B8F}
+.more2{text-align:center;min-height:42px;line-height:42px;margin-top:11px;border:1px solid rgba(148,166,210,.24);
+  border-radius:10px;color:#4D7CFE;font-size:11.5px;font-weight:700}
+
+/* v10 */
+.idx{background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:15px;padding:14px 15px 13px 18px;
+  margin-bottom:10px;position:relative;overflow:hidden}
+.idx::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.idx.lg::before{background:#2FD48B}.idx.sh::before{background:#FF5C6C}
+.it{display:flex;align-items:baseline;gap:9px}
+.inm{font-size:14px;font-weight:800}
+.ilv{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;font-weight:700}
+.sig{display:flex;align-items:center;gap:10px;margin-top:13px}
+.sbig{font-size:23px;font-weight:900;letter-spacing:-.01em}
+.sfor{font-size:10px;color:#5E6B8F;margin-top:3px}
+.stf{margin-left:auto;text-align:right}
+.stf .k{font-size:8px;font-weight:800;letter-spacing:.1em;color:#5E6B8F}
+.stf .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;margin-top:3px}
+.dist{position:relative;height:20px;margin-top:14px}
+.dt3{position:absolute;top:8px;left:0;right:0;height:4px;border-radius:2px;background:#0D1428;border:1px solid rgba(148,166,210,.14)}
+.df{position:absolute;top:8px;height:4px;border-radius:2px;background:#2FD48B}
+.dd{position:absolute;top:5px;width:10px;height:10px;border-radius:50%;background:#E9EEFB;border:2px solid #121A33;transform:translateX(-50%)}
+.dlb{display:flex;justify-content:space-between;margin-top:3px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:#5E6B8F}
+.pos2{display:flex;align-items:center;gap:9px;padding:10px 12px;background:#0D1428;border:1px solid rgba(148,166,210,.14);
+  border-radius:10px;margin-top:12px;font-size:11px;color:#8C99BD}
+.pos2 b{font-family:'IBM Plex Mono',ui-monospace,monospace;color:#E9EEFB}
+
+/* gvm */
+.gcard{background:linear-gradient(168deg,#121A33,#0F1730);border:1px solid rgba(148,166,210,.14);border-radius:16px;padding:16px;margin-bottom:10px}
+.gt{display:flex;align-items:baseline;gap:9px}
+.gsym{font-size:16px;font-weight:800}
+.gsec{font-size:10px;color:#5E6B8F}
+.gcmp{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:#8C99BD}
+.grow{display:flex;align-items:flex-end;gap:14px;margin-top:14px}
+.gsc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:44px;font-weight:700;line-height:.9;letter-spacing:-.03em}
+.gsc s{text-decoration:none;font-size:16px;color:#5E6B8F}
+.grate{margin-left:auto;text-align:right}
+.grate .w{font-size:16px;font-weight:900}
+.grate .c{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.pil{margin-top:16px;display:grid;gap:11px}
+.pr2{display:grid;grid-template-columns:74px 1fr 30px;align-items:center;gap:10px}
+.pr2 .k{font-size:9.5px;font-weight:800;letter-spacing:.08em;color:#8C99BD}
+.pbar{height:8px;border-radius:4px;background:#0D1428;border:1px solid rgba(148,166,210,.14);overflow:visible;position:relative}
+.pbar i{display:block;height:100%;border-radius:4px}
+.pmed{position:absolute;top:-3px;width:2px;height:14px;background:#8C99BD;transform:translateX(-50%)}
+.pr2 .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
+.peer{margin-top:15px;padding-top:13px;border-top:1px solid rgba(148,166,210,.14);font-size:11px;color:#8C99BD;line-height:1.55}
+.peer b{color:#E9EEFB}
+.acc2{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 13px;background:#121A33;
+  border:1px solid rgba(148,166,210,.14);border-radius:11px;margin-bottom:7px;font-size:12px;font-weight:600;color:#8C99BD}
+
+/* v14 */
+.sess{position:relative;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:15px;
+  padding:14px 15px 13px 18px;overflow:hidden;margin-bottom:11px}
+.sess::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:repeating-linear-gradient(180deg,#5E6B8F 0 4px,transparent 4px 10px)}
+.st2{display:flex;align-items:baseline;gap:9px}
+.sw{font-size:19px;font-weight:800}
+.sb2{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.08em;padding:3px 8px;border-radius:5px;
+  color:#5E6B8F;border:1px dashed rgba(148,166,210,.24)}
+.clock{display:flex;align-items:center;gap:4px;margin-top:14px}
+.cs{flex:1;height:7px;border-radius:3px;background:#0D1428}
+.cs.done{background:#2FD48B}.cs.sq{background:#F5B94A}
+.ck{display:flex;justify-content:space-between;margin-top:6px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:#5E6B8F}
+.gts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:14px}
+.gt2{position:relative;background:#0D1428;border:1px solid rgba(148,166,210,.14);border-radius:10px;padding:8px 9px 7px 11px;overflow:hidden}
+.gt2::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.gt2.p::before{background:#2FD48B}.gt2.f::before{background:#FF5C6C}
+.gt2 .k{font-size:8px;font-weight:800;letter-spacing:.09em;color:#5E6B8F}
+.gt2 .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:3px}
+.setup{display:flex;align-items:center;gap:9px;padding:11px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);
+  border-radius:11px;margin-bottom:7px;position:relative;overflow:hidden}
+.setup::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#334155}
+.setup.a::before{background:#2FD48B}
+.setup .l{flex:1}
+.setup .s{font-size:13px;font-weight:800}
+.setup .d{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.setup .m{text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.setup .m .v{font-size:13.5px;font-weight:700}
+.setup .m .p{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.empty{text-align:center;padding:22px 14px;color:#5E6B8F;font-size:12px;line-height:1.6}
+.empty b{color:#8C99BD;display:block;margin-bottom:5px;font-size:13px}
+
+/* sector */
+.rot{display:flex;gap:6px;margin-bottom:13px}
+.rb{flex:1;min-height:36px;border-radius:9px;border:1px solid rgba(148,166,210,.24);background:#121A33;
+  color:#8C99BD;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.rb.on{background:#182241;color:#E9EEFB}
+.sr{display:flex;align-items:center;gap:11px;padding:11px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);
+  border-radius:11px;margin-bottom:7px;position:relative;overflow:hidden}
+.sr::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.sr.u::before{background:#2FD48B}.sr.d::before{background:#FF5C6C}.sr.f::before{background:#334155}
+.sr .nm{flex:1;min-width:0}
+.sr .n2{font-size:12.5px;font-weight:700}
+.sr .g{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.flow{width:74px;height:22px;position:relative}
+.fl2{position:absolute;top:9px;left:0;right:0;height:3px;border-radius:2px;background:#0D1428}
+.fm{position:absolute;top:5px;width:2px;height:11px;background:#5E6B8F;left:50%;transform:translateX(-50%)}
+.fd{position:absolute;top:6px;width:9px;height:9px;border-radius:50%;border:2px solid #121A33;transform:translateX(-50%)}
+.sr .pc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;width:52px;text-align:right}
+.brief{background:#0D1428;border:1px solid rgba(148,166,210,.14);border-radius:11px;padding:12px 13px;
+  margin:-2px 0 9px;font-size:11.5px;color:#8C99BD;line-height:1.6}
+.brief b{color:#E9EEFB}
+.bh{font-size:8.5px;font-weight:800;letter-spacing:.1em;color:#5E6B8F;margin-bottom:6px}
+
+/* scanners */
+.tabs{display:flex;background:#0D1428;border:1px solid rgba(148,166,210,.14);border-radius:11px;padding:3px;margin-bottom:13px}
+.tb{flex:1;text-align:center;font-size:11px;font-weight:800;color:#8C99BD;min-height:38px;line-height:38px;border-radius:8px}
+.tb.on{background:#182241;color:#E9EEFB}
+.hit{display:flex;align-items:center;gap:10px;padding:12px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);
+  border-radius:11px;margin-bottom:7px;position:relative;overflow:hidden}
+.hit::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#2FD48B}
+.hit .l{flex:1;min-width:0}
+.hit .s{font-size:13px;font-weight:800;display:flex;align-items:center;gap:6px}
+.mini{font-size:8px;font-weight:800;letter-spacing:.07em;padding:2px 5px;border-radius:3px;
+  background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4)}
+.hit .ch{display:flex;gap:5px;margin-top:6px}
+.hit .ch span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:600;padding:2px 6px;
+  border-radius:4px;background:rgba(148,166,210,.08);border:1px solid rgba(148,166,210,.14);color:#8C99BD}
+.hit .g2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:16px;font-weight:700;width:38px;text-align:right}
+.cnt{font-size:10px;color:#5E6B8F;margin-bottom:9px;padding:0 3px}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;background:#121A33;
+  border-top:1px solid rgba(148,166,210,.24);padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:#5E6B8F;padding:4px 0;min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:#4D7CFE}
+</style></head><body>
+<div class="screen">
+
+<div class="dummy"><span>&#9888;</span><span><b>PLACEHOLDER VALUES.</b> Layout approved 05-Aug.
+Real fields are plugged by the wiring card &mdash; nothing here fetches.</span></div>
+
+<div class="wrap">
+
+<div class="ttl">1 &middot; Trade Check</div>
+<div class="scr">
+  <div class="srch"><span>&#9906;</span><span>Symbol&hellip;</span></div>
+  <div class="dirs"><span class="db l">LONG</span><span class="db">SHORT</span></div>
+  <div class="verd">
+    <div class="vt"><span class="vsym">SYMBOL</span><span class="vcmp">CMP 1,742 &middot; 15:30</span></div>
+    <div class="vrow"><span class="vscore grn">16<s>/20</s></span>
+      <span class="vcall"><span class="w grn">TAKE IT</span><span class="c2">High conviction</span></span></div>
+    <div class="dial">
+      <span class="dl on"></span><span class="dl on"></span><span class="dl on"></span><span class="dl on"></span>
+      <span class="dl on"></span><span class="dl on"></span><span class="dl on"></span><span class="dl on"></span>
+      <span class="dl on"></span><span class="dl on"></span><span class="dl on"></span><span class="dl on"></span>
+      <span class="dl on"></span><span class="dl on"></span><span class="dl on"></span><span class="dl on"></span>
+      <span class="dl off"></span><span class="dl off"></span><span class="dl off"></span><span class="dl off"></span></div>
+    <div class="rules">
+      <div class="ru"><span class="i">&times;</span><span class="t">R17 Valuation &mdash; above peer median</span><span class="v">PE 38</span></div>
+      <div class="ru"><span class="i">&times;</span><span class="t">R6 Weekly trend &mdash; below 20W</span><span class="v">&minus;2.1%</span></div>
+      <div class="ru"><span class="i">&times;</span><span class="t">R13 Volume &mdash; below average</span><span class="v">0.7x</span></div>
+      <div class="ru"><span class="i">&times;</span><span class="t">R20 Delta GVM 180d &mdash; falling</span><span class="v">&minus;0.9</span></div>
+    </div>
+    <div class="more2">Show 16 passing rules &#9662;</div>
+  </div>
+  <div class="ph">answer first &middot; only failures shown by default</div>
+</div>
+
+<div class="ttl">2 &middot; V10</div>
+<div class="scr">
+  <div class="idx lg">
+    <div class="it"><span class="inm">NIFTY 50</span><span class="ilv grn">24,624.65</span></div>
+    <div class="sig"><div><div class="sbig grn">LONG</div><div class="sfor">since 31 Jul &middot; 4 sessions</div></div>
+      <div class="stf"><div class="k">SUPERTREND</div><div class="v">24,180</div></div></div>
+    <div class="dist"><div class="dt3"></div><div class="df" style="left:0;width:66%"></div><div class="dd" style="left:66%"></div></div>
+    <div class="dlb"><span>Flip at 24,180</span><span class="grn">1.8% away</span></div>
+    <div class="pos2"><span>Paper</span><b>+Rs.18,240</b><span class="dim">&middot;</span><span>2 open</span></div>
+  </div>
+  <div class="idx sh">
+    <div class="it"><span class="inm">BANK NIFTY</span><span class="ilv red">57,739.95</span></div>
+    <div class="sig"><div><div class="sbig red">SHORT</div><div class="sfor">since 04 Aug &middot; 2 sessions</div></div>
+      <div class="stf"><div class="k">SUPERTREND</div><div class="v">58,410</div></div></div>
+    <div class="dist"><div class="dt3"></div><div class="df" style="left:0;width:82%;background:#FF5C6C"></div><div class="dd" style="left:82%"></div></div>
+    <div class="dlb"><span>Flip at 58,410</span><span class="amb">1.2% away</span></div>
+    <div class="pos2"><span>Paper</span><b class="red">&minus;Rs.3,110</b><span class="dim">&middot;</span><span>1 open</span></div>
+  </div>
+  <div class="ph">signal is the biggest word &middot; rail shows distance to the flip</div>
+</div>
+
+<div class="ttl">3 &middot; GVM</div>
+<div class="scr">
+  <div class="srch"><span>&#9906;</span><span>Search company&hellip;</span></div>
+  <div class="gcard">
+    <div class="gt"><span class="gsym">SYMBOL</span><span class="gsec">Sector name</span><span class="gcmp">CMP 1,742</span></div>
+    <div class="grow"><span class="gsc grn">8.4<s>/10</s></span>
+      <span class="grate"><span class="w grn">STRONG</span><span class="c">Top 8% of sector</span></span></div>
+    <div class="pil">
+      <div class="pr2"><span class="k">GROWTH</span>
+        <span class="pbar"><i style="width:86%;background:#2FD48B"></i><span class="pmed" style="left:58%"></span></span>
+        <span class="v grn">8.6</span></div>
+      <div class="pr2"><span class="k">VALUE</span>
+        <span class="pbar"><i style="width:41%;background:#F5B94A"></i><span class="pmed" style="left:55%"></span></span>
+        <span class="v amb">4.1</span></div>
+      <div class="pr2"><span class="k">MOMENTUM</span>
+        <span class="pbar"><i style="width:92%;background:#2FD48B"></i><span class="pmed" style="left:50%"></span></span>
+        <span class="v grn">9.2</span></div>
+    </div>
+    <div class="peer">The grey mark on each bar is the <b>sector median</b>. Growth and momentum sit
+      well above it; value sits below, which is what a run like this usually costs.</div>
+  </div>
+  <div class="acc2"><span>All 14 parameters</span><span class="dim">&#9656;</span></div>
+  <div class="acc2"><span>Peer comparison &middot; 22 companies</span><span class="dim">&#9656;</span></div>
+  <div class="acc2"><span>Score history &middot; 180 days</span><span class="dim">&#9656;</span></div>
+  <div class="ph">a score means nothing without the peer median beside it</div>
+</div>
+
+<div class="ttl">4 &middot; V14 Intraday</div>
+<div class="scr">
+  <div class="sess">
+    <div class="st2"><span class="sw">Session closed</span><span class="sb2">SQUARED OFF 15:15</span></div>
+    <div class="clock">
+      <span class="cs done"></span><span class="cs done"></span><span class="cs done"></span>
+      <span class="cs done"></span><span class="cs done"></span><span class="cs done"></span>
+      <span class="cs done"></span><span class="cs done"></span><span class="cs sq"></span></div>
+    <div class="ck"><span>09:15</span><span class="amb">15:15 square-off</span><span>15:30</span></div>
+    <div class="gts">
+      <div class="gt2 p"><div class="k">MOOD GATE</div><div class="v grn">OPEN</div></div>
+      <div class="gt2 p"><div class="k">ADR</div><div class="v grn">1.24</div></div>
+      <div class="gt2 f"><div class="k">VIX</div><div class="v red">HIGH</div></div>
+      <div class="gt2 p"><div class="k">BREADTH</div><div class="v grn">+62%</div></div>
+    </div>
+  </div>
+  <div class="setup a"><div class="l"><div class="s">SYMBOL</div>
+    <div class="d">Opening range break &middot; 09:35 &rarr; 14:50</div></div>
+    <div class="m"><div class="v grn">+Rs.7,420</div><div class="p">closed at square-off</div></div></div>
+  <div class="setup"><div class="l"><div class="s">SYMBOL</div>
+    <div class="d">VWAP reversion &middot; 11:20 &rarr; 13:05</div></div>
+    <div class="m"><div class="v red">&minus;Rs.2,180</div><div class="p">stop</div></div></div>
+  <div class="empty"><b>Nothing open</b>Everything squares off at 15:15 by design.
+    Next session opens 09:15 tomorrow.</div>
+  <div class="ph">time is the headline, not a timestamp in the corner</div>
+</div>
+
+<div class="ttl">5 &middot; Sector</div>
+<div class="scr">
+  <div class="rot"><span class="rb on">1 Week</span><span class="rb">1 Month</span><span class="rb">3 Month</span></div>
+  <div class="lab">Money moving in</div>
+  <div class="sr u"><div class="nm"><div class="n2">Sector name</div><div class="g">GVM 7.8 &middot; 14 stocks</div></div>
+    <div class="flow"><div class="fl2"></div><div class="fm"></div><div class="fd" style="left:84%;background:#2FD48B"></div></div>
+    <div class="pc grn">+4.2%</div></div>
+  <div class="brief"><div class="bh">WHY</div>Two large names in this sector reported ahead of
+    expectations this week, and the buying has spread to the mid-caps behind them.
+    <b>Breadth is wide</b>, which is what separates a rotation from a single-stock story.</div>
+  <div class="sr u"><div class="nm"><div class="n2">Sector name</div><div class="g">GVM 7.1 &middot; 9 stocks</div></div>
+    <div class="flow"><div class="fl2"></div><div class="fm"></div><div class="fd" style="left:71%;background:#2FD48B"></div></div>
+    <div class="pc grn">+2.6%</div></div>
+  <div class="sr f"><div class="nm"><div class="n2">Sector name</div><div class="g">GVM 6.0 &middot; 18 stocks</div></div>
+    <div class="flow"><div class="fl2"></div><div class="fm"></div><div class="fd" style="left:52%;background:#8C99BD"></div></div>
+    <div class="pc mut">+0.2%</div></div>
+  <div class="lab">Money moving out</div>
+  <div class="sr d"><div class="nm"><div class="n2">Sector name</div><div class="g">GVM 5.2 &middot; 11 stocks</div></div>
+    <div class="flow"><div class="fl2"></div><div class="fm"></div><div class="fd" style="left:18%;background:#FF5C6C"></div></div>
+    <div class="pc red">&minus;3.4%</div></div>
+  <div class="ph">rotation is movement &mdash; a grid of tiles cannot show it</div>
+</div>
+
+<div class="ttl">6 &middot; Scanners</div>
+<div class="scr">
+  <div class="tabs"><span class="tb">Intraday</span><span class="tb on">Positional</span><span class="tb">Investment</span></div>
+  <div class="pillrow"><span class="fp on">GVM &ge; 7</span><span class="fp">Buy Reversal</span>
+    <span class="fp">Vol &gt; 1.5x</span><span class="fp">Above 50 DMA</span><span class="fp">Sort: GVM &#9662;</span></div>
+  <div class="cnt">11 of 209 symbols pass &middot; as of 15:30 IST</div>
+  <div class="hit"><div class="l"><div class="s">SYMBOL <span class="mini">BUY REVERSAL</span></div>
+    <div class="ch"><span>1D +1.2%</span><span>Vol 1.7x</span><span>S1 bounce</span></div></div><div class="g2 grn">8.4</div></div>
+  <div class="hit"><div class="l"><div class="s">SYMBOL <span class="mini">BUY REVERSAL</span></div>
+    <div class="ch"><span>1D +0.9%</span><span>Vol 2.1x</span><span>S1 bounce</span></div></div><div class="g2 grn">7.9</div></div>
+  <div class="hit"><div class="l"><div class="s">SYMBOL <span class="mini">BUY MOMENTUM</span></div>
+    <div class="ch"><span>1D +2.4%</span><span>Vol 1.6x</span><span>2D +3.1%</span></div></div><div class="g2 grn">7.2</div></div>
+  <div class="ph">one row shape on all three tabs &middot; every hit says why it hit</div>
+</div>
+
+<div class="ph" style="padding:26px 0 0">Six surfaces &middot; session_log 16222</div>
+</div></div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="#"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body></html>
