@@ -372,6 +372,86 @@ PWA_JS = """
     applyTheme(curTheme());   // sync meta + button to the theme the head script already applied
   }
 
+  // ── cc#860 MODEL LAUNCHER — ONE shared component, both surfaces ─────────────────────────────
+  // Built once here and injected by pwa.js, which runs on every injected page. Desktop opens it
+  // from a header button; mobile opens it from the nav. Same DOM, same fetch, same renderer —
+  // duplicating it per surface is a spec violation under 9016 pattern 2 / framework core rule 8.
+  //
+  // The badge is computed SERVER-SIDE (model_launcher.badge_for) and rendered here verbatim. No
+  // liveness logic lives in JS, so the launcher and any other consumer of /api/models/status can
+  // never disagree about whether a model is running.
+  (function () {
+    if (document.getElementById('scorr-ml-ov')) return;
+
+    var ov = document.createElement('div');
+    ov.className = 'scorr-ml-ov'; ov.id = 'scorr-ml-ov';
+    ov.innerHTML = '<div class="scorr-ml" role="dialog" aria-modal="true" aria-label="Models">'
+      + '<div class="scorr-ml-hd"><h4>Models</h4>'
+      + '<span class="scorr-ml-sub" id="scorr-ml-sub"></span>'
+      + '<button class="scorr-ml-x" id="scorr-ml-x" aria-label="Close">×</button></div>'
+      + '<div class="scorr-ml-grid" id="scorr-ml-grid">'
+      + '<div class="scorr-ml-skel"></div><div class="scorr-ml-skel"></div>'
+      + '<div class="scorr-ml-skel"></div><div class="scorr-ml-skel"></div></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeML(); });
+    document.getElementById('scorr-ml-x').addEventListener('click', closeML);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeML(); });
+
+    function closeML() { ov.classList.remove('open'); }
+
+    function esc(t) {
+      return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; });
+    }
+
+    function card(m) {
+      // STALE differs from LIVE by SHAPE, not opacity (card item 9 / framework core rule 10):
+      // LIVE is a filled pulsing dot, STALE a hollow ring, OFF a flat bar. A colour-blind or
+      // glancing user must never read a dead engine as a running one.
+      var st = m.state, cls = 'ml-' + st.toLowerCase();
+      var glyph = st === 'LIVE' ? '<span class="ml-dot"></span>'
+                : st === 'STALE' ? '<span class="ml-ring"></span>'
+                : '<span class="ml-bar"></span>';
+      // STALE always states its own age — "stale" without a number is not actionable.
+      var sub = (st === 'STALE') ? esc(m.state_reason || m.last_run_human)
+              : (st === 'OFF')   ? esc(m.state_reason || 'not running')
+              : esc(m.last_run_human || '');
+      return '<a class="scorr-ml-card ' + cls + '" href="' + esc(m.route) + '">'
+        + '<div class="ml-top"><span class="ml-name">' + esc(m.display_name) + '</span>'
+        + '<span class="ml-badge ' + cls + '">' + glyph + st + '</span></div>'
+        + (m.description ? '<div class="ml-desc">' + esc(m.description) + '</div>' : '')
+        + '<div class="ml-foot">' + sub + '</div></a>';
+    }
+
+    function load() {
+      fetch('/api/models/status', {cache: 'no-store'})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var g = document.getElementById('scorr-ml-grid');
+          var ms = (d && d.models) || [];
+          if (!ms.length) {
+            g.innerHTML = '<div class="scorr-ml-empty">'
+              + esc((d && d.error) || 'No models registered.') + '</div>';
+            return;
+          }
+          g.innerHTML = ms.map(card).join('');
+          var c = d.counts || {};
+          var sub = document.getElementById('scorr-ml-sub');
+          if (sub) sub.textContent = (c.LIVE || 0) + ' live'
+            + ((c.STALE || 0) ? ' · ' + c.STALE + ' stale' : '')
+            + ((c.OFF || 0) ? ' · ' + c.OFF + ' off' : '')
+            + (d.in_session ? '' : ' · market closed');
+        })
+        .catch(function () {
+          document.getElementById('scorr-ml-grid').innerHTML =
+            '<div class="scorr-ml-empty">Could not load model status.</div>';
+        });
+    }
+
+    // Exposed so any surface can open it — this IS the "one button" the card asks for.
+    window.ScorrModels = { open: function () { ov.classList.add('open'); load(); }, close: closeML };
+  })();
+
   // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637; nav registry
   //    updated cc#396/#397): normalize #scorr-nav on every injected page from the NAV array above,
   //    active-by-path. Removes per-page nav drift. Scrolls horizontally; hidden on mobile (bottom nav).
@@ -417,7 +497,16 @@ PWA_JS = """
       var act = isActive(it[0]);
       return sep + '<a' + (act ? ' class="active"' : '') + ' href="' + it[0] + '">'
         + '<span class="ic">' + it[1] + '</span>' + it[2] + '</a>';
-    }).join('');
+    }).join('')
+    // cc#860 item 6: launcher button, header RIGHT. Deliberately appended AFTER the NAV map and
+    // NOT added to the NAV array — item 7 requires the desktop top-nav itself to be unchanged, and
+    // a NAV entry would also duplicate it into the mobile More sheet.
+    + '<button type="button" class="scorr-ml-btn" id="scorr-ml-open" '
+    + 'aria-label="Models">\u25f1 Models</button>';
+    var _mlb = document.getElementById('scorr-ml-open');
+    if (_mlb) _mlb.addEventListener('click', function () {
+      if (window.ScorrModels) window.ScorrModels.open();
+    });
   })();
 
   // 5) install prompt
@@ -718,6 +807,48 @@ body{font-family:var(--mux-font);}
   -webkit-font-smoothing:antialiased;
 }
 .dt .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* ── cc#860 MODEL LAUNCHER — dark, assembled from 9016; no new visual language ────────────── */
+.scorr-ml-btn{margin-left:auto;min-height:44px;padding:8px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line2,rgba(148,166,210,.3));background:transparent;
+  color:var(--txt,#e6edf7);font:700 12px Sora,sans-serif;letter-spacing:.02em}
+.scorr-ml-btn:hover{background:rgba(148,166,210,.12)}
+.scorr-ml-ov{position:fixed;inset:0;z-index:95;display:none;background:rgba(5,9,18,.72)}
+.scorr-ml-ov.open{display:block}
+.scorr-ml{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,94vw);
+  max-height:86vh;overflow-y:auto;background:#0E1526;border:1px solid #2A3A5C;border-radius:12px}
+.scorr-ml-hd{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1E2A44}
+.scorr-ml-hd h4{margin:0;font:800 15px Sora,sans-serif;color:#E6EDF7}
+.scorr-ml-sub{font:500 11px 'IBM Plex Mono',monospace;color:#64748B}
+.scorr-ml-x{margin-left:auto;min-width:44px;min-height:44px;background:none;border:none;
+  color:#64748B;font-size:22px;cursor:pointer}
+.scorr-ml-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}
+@media(max-width:600px){.scorr-ml-grid{grid-template-columns:1fr}}
+.scorr-ml-card{display:block;min-height:44px;padding:12px 14px;border-radius:9px;
+  background:#131C31;border:1px solid #1E2A44;text-decoration:none;position:relative;overflow:hidden}
+.scorr-ml-card:hover{border-color:#2A3A5C}
+/* the state rail — 3px coloured left edge, framework signature element */
+.scorr-ml-card:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.scorr-ml-card.ml-live:before{background:#34D399}
+.scorr-ml-card.ml-stale:before{background:#FBBF24}
+.scorr-ml-card.ml-off:before{background:#475569}
+.ml-top{display:flex;align-items:center;gap:8px}
+.ml-name{font:700 13.5px Sora,sans-serif;color:#E6EDF7}
+.ml-desc{font-size:11.5px;color:#9DAEC8;margin-top:3px;line-height:1.4}
+.ml-foot{font:500 10.5px 'IBM Plex Mono',monospace;color:#64748B;margin-top:6px}
+.ml-badge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;
+  font:700 9px 'IBM Plex Mono',monospace;letter-spacing:.12em;padding:3px 7px;border-radius:4px;border:1px solid}
+.ml-badge.ml-live{color:#34D399;border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.12)}
+.ml-badge.ml-stale{color:#FBBF24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.12)}
+.ml-badge.ml-off{color:#94A3B8;border-color:#334155;background:transparent}
+/* SHAPE, not opacity: filled pulsing dot / hollow ring / flat bar (item 9) */
+.ml-dot{width:6px;height:6px;border-radius:50%;background:#34D399;animation:mlPulse 2s infinite}
+.ml-ring{width:6px;height:6px;border-radius:50%;border:1.5px solid #FBBF24;background:transparent}
+.ml-bar{width:7px;height:2px;background:#94A3B8;border-radius:1px}
+@keyframes mlPulse{0%,100%{opacity:1}50%{opacity:.3}}
+.scorr-ml-skel{height:78px;border-radius:9px;background:#131C31;
+  animation:mlPulse 1.4s ease-in-out infinite}
+.scorr-ml-empty{grid-column:1/-1;padding:20px;text-align:center;font-size:12px;color:#64748B}
+
 /* header + LIVE/STALE feed chip */
 .dt .hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 12px;position:sticky;top:0;background:linear-gradient(var(--ink) 82%,transparent);z-index:30}
 .dt .brand{font-weight:800;font-size:17px}.dt .brand b{color:var(--blue)}
