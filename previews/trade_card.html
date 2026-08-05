@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trade card · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR — UNIFIED V8 TRADE CARD
+   Founder feedback 05-Aug-2026, from two screenshots of the live V8 dashboard:
+     1. "Master dashboard trade card is different from buy reversal trade card"
+     2. "second green colour not looking good, better no colour"
+     3. "target SL pivot range can show wide and clean with stock position in range"
+
+   ONE CARD. The same component renders a SIGNAL, an OPEN position and a CLOSED
+   trade. A trade is one object; rendering it two ways is the 9016 rule-11 defect
+   (an element specified twice means a missing index entry).
+
+   NO FILL. The card background is the panel colour in every state. Profit and
+   loss are carried by the NUMBER and by the 3px state rail, never by washing the
+   whole card green. A green card is unreadable and it also spends the strongest
+   signal on the least important fact.
+
+   THE RAIL IS THE POINT. Full card width: STOP on one end, TARGET on the other,
+   ENTRY as a fixed notch, CMP as the moving dot. Where the dot sits IS the trade.
+   Direction is handled by which end is red: on a SHORT the stop is on the right.
+
+   Every value below is a REAL row read 05-Aug-2026 from v8_paper_positions +
+   intraday_prices. Nothing invented.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:14px 12px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:18px 3px 8px}
+.sect:first-child{margin-top:2px}
+
+/* ---------- THE CARD ---------- */
+.t{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 14px 15px 17px;margin-bottom:10px;overflow:hidden}
+.t::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.t.up::before{background:var(--grn)}
+.t.dn::before{background:var(--red)}
+.t.flat::before{background:var(--line2)}
+.t.sig::before{background:repeating-linear-gradient(180deg,var(--blu) 0 4px,transparent 4px 10px)}
+
+/* row 1 — identity */
+.r1{display:flex;align-items:baseline;gap:8px}
+.sym{font-size:16px;font-weight:800;letter-spacing:-.01em}
+.age{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim)}
+.dir{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+  font-weight:700;letter-spacing:.11em;padding:3px 8px;border-radius:4px;border:1px solid}
+.dir.long{color:var(--grn);border-color:rgba(47,212,139,.45)}
+.dir.short{color:var(--red);border-color:rgba(255,92,108,.45)}
+
+/* row 2 — basket + the money */
+.r2{display:flex;align-items:baseline;gap:9px;margin-top:9px}
+.bk{font-size:11px;font-weight:700;color:var(--mut);border:1px solid var(--line2);
+  border-radius:6px;padding:3px 9px}
+.pnl{margin-left:auto;font-size:19px;font-weight:800;letter-spacing:-.02em;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pnl.up{color:var(--grn)} .pnl.dn{color:var(--red)} .pnl.flat{color:var(--mut)}
+.pct{font-size:12px;font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pct.up{color:var(--grn)} .pct.dn{color:var(--red)} .pct.flat{color:var(--mut)}
+
+/* ---------- THE RAIL ---------- */
+.rail{margin-top:15px}
+.rwrap{position:relative;height:26px}
+.track{position:absolute;left:0;right:0;top:11px;height:4px;border-radius:2px;
+  background:rgba(148,166,210,.16)}
+.fill{position:absolute;top:11px;height:4px;border-radius:2px}
+.fill.up{background:var(--grn)} .fill.dn{background:var(--red)}
+.entry{position:absolute;top:5px;width:2px;height:16px;background:var(--mut);border-radius:1px}
+.dot{position:absolute;top:6px;width:13px;height:13px;border-radius:50%;
+  border:2.5px solid var(--bg);margin-left:-6.5px}
+.dot.up{background:var(--grn)} .dot.dn{background:var(--red)}
+.cmp{position:absolute;top:-9px;transform:translateX(-50%);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;
+  color:var(--txt);background:var(--panel2);border:1px solid var(--line2);
+  border-radius:5px;padding:2px 7px;white-space:nowrap}
+.ends{display:flex;justify-content:space-between;margin-top:5px}
+.end{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700}
+.end .k{display:block;font-size:8px;letter-spacing:.11em;font-weight:700;
+  color:var(--dim);margin-bottom:2px}
+.end.stop{color:var(--red)} .end.tgt{color:var(--grn)}
+.end.tgt{text-align:right}
+.entryline{text-align:center;margin-top:7px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9.5px;color:var(--dim)}
+
+/* signal state */
+.gate{margin-top:11px;font-size:11px;color:var(--mut);line-height:1.5}
+.gate b{color:var(--amber);font-weight:700}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; every price, stop, target and P&amp;L below is a real
+    v8_paper_positions row read 05-Aug-2026.</span>
+  </div>
+
+  <div class="head">
+    <h1>Trade card</h1>
+    <div class="s">one card &middot; signal, open and closed &middot; no fill colour</div>
+  </div>
+
+  <div class="body">
+
+    <div class="sect">OPEN &middot; IN PROFIT</div>
+
+    <!-- OFSS: LONG, well into profit, dot past entry heading to target -->
+    <div class="t up">
+      <div class="r1">
+        <span class="sym">OFSS</span>
+        <span class="age">05 Aug 09:25 &middot; D1</span>
+        <span class="dir long">LONG</span>
+      </div>
+      <div class="r2">
+        <span class="bk">Buy Reversal</span>
+        <span class="pnl up">+Rs.18,400</span>
+        <span class="pct up">+1.59%</span>
+      </div>
+      <div class="rail">
+        <div class="rwrap">
+          <div class="track"></div>
+          <div class="fill up" style="left:50%;width:26.5%"></div>
+          <div class="entry" style="left:50%"></div>
+          <div class="dot up" style="left:76.5%"></div>
+          <div class="cmp" style="left:76.5%">11,740</div>
+        </div>
+        <div class="ends">
+          <span class="end stop"><span class="k">STOP</span>11,209</span>
+          <span class="end tgt"><span class="k">TARGET</span>11,903</span>
+        </div>
+        <div class="entryline">entry 11,556 &middot; 53% of the way to target</div>
+      </div>
+    </div>
+
+    <!-- BHARATFORG: LONG, small profit, dot just past entry -->
+    <div class="t up">
+      <div class="r1">
+        <span class="sym">BHARATFORG</span>
+        <span class="age">05 Aug 09:20 &middot; D1</span>
+        <span class="dir long">LONG</span>
+      </div>
+      <div class="r2">
+        <span class="bk">Buy Reversal</span>
+        <span class="pnl up">+Rs.2,500</span>
+        <span class="pct up">+0.23%</span>
+      </div>
+      <div class="rail">
+        <div class="rwrap">
+          <div class="track"></div>
+          <div class="fill up" style="left:50%;width:3.8%"></div>
+          <div class="entry" style="left:50%"></div>
+          <div class="dot up" style="left:53.8%"></div>
+          <div class="cmp" style="left:53.8%">2,200</div>
+        </div>
+        <div class="ends">
+          <span class="end stop"><span class="k">STOP</span>2,129</span>
+          <span class="end tgt"><span class="k">TARGET</span>2,261</span>
+        </div>
+        <div class="entryline">entry 2,195 &middot; 8% of the way to target</div>
+      </div>
+    </div>
+
+    <div class="sect">OPEN &middot; SHORT, AND LOSING</div>
+
+    <!-- GODREJCP: SHORT. Stop is on the RIGHT. Price moved up = against us. -->
+    <div class="t dn">
+      <div class="r1">
+        <span class="sym">GODREJCP</span>
+        <span class="age">05 Aug 10:20 &middot; D1</span>
+        <span class="dir short">SHORT</span>
+      </div>
+      <div class="r2">
+        <span class="bk">Sell Momentum</span>
+        <span class="pnl dn">&minus;Rs.2,750</span>
+        <span class="pct dn">&minus;0.51%</span>
+      </div>
+      <div class="rail">
+        <div class="rwrap">
+          <div class="track"></div>
+          <div class="fill dn" style="left:50%;width:8.6%"></div>
+          <div class="entry" style="left:50%"></div>
+          <div class="dot dn" style="left:58.6%"></div>
+          <div class="cmp" style="left:58.6%">1,071.9</div>
+        </div>
+        <div class="ends">
+          <span class="end tgt"><span class="k">TARGET</span>1,034.4</span>
+          <span class="end stop" style="text-align:right"><span class="k">STOP</span>1,098.4</span>
+        </div>
+        <div class="entryline">entry 1,066.4 &middot; 17% of the way to stop</div>
+      </div>
+    </div>
+
+    <!-- IEX: SHORT, small loss, older -->
+    <div class="t dn">
+      <div class="r1">
+        <span class="sym">IEX</span>
+        <span class="age">04 Aug 12:00 &middot; D2</span>
+        <span class="dir short">SHORT</span>
+      </div>
+      <div class="r2">
+        <span class="bk">Sell Momentum</span>
+        <span class="pnl dn">&minus;Rs.1,653</span>
+        <span class="pct dn">&minus;0.29%</span>
+      </div>
+      <div class="rail">
+        <div class="rwrap">
+          <div class="track"></div>
+          <div class="fill dn" style="left:50%;width:4.9%"></div>
+          <div class="entry" style="left:50%"></div>
+          <div class="dot dn" style="left:54.9%"></div>
+          <div class="cmp" style="left:54.9%">129.6</div>
+        </div>
+        <div class="ends">
+          <span class="end tgt"><span class="k">TARGET</span>125.3</span>
+          <span class="end stop" style="text-align:right"><span class="k">STOP</span>133.1</span>
+        </div>
+        <div class="entryline">entry 129.2 &middot; 10% of the way to stop</div>
+      </div>
+    </div>
+
+    <div class="sect">SIGNAL &middot; NOT ENTERED YET</div>
+
+    <!-- ABCAPITAL as a SIGNAL state: same card, blue dashed rail, gate line -->
+    <div class="t sig">
+      <div class="r1">
+        <span class="sym">ABCAPITAL</span>
+        <span class="age">05 Aug 09:20 &middot; today</span>
+        <span class="dir long">LONG</span>
+      </div>
+      <div class="r2">
+        <span class="bk">Buy Reversal</span>
+        <span class="pnl flat">--</span>
+        <span class="pct flat">no position</span>
+      </div>
+      <div class="rail">
+        <div class="rwrap">
+          <div class="track"></div>
+          <div class="entry" style="left:50%"></div>
+          <div class="dot" style="left:52.8%;background:#4D7CFE"></div>
+          <div class="cmp" style="left:52.8%">420.7</div>
+        </div>
+        <div class="ends">
+          <span class="end stop"><span class="k">STOP</span>407.4</span>
+          <span class="end tgt"><span class="k">TARGET</span>432.6</span>
+        </div>
+        <div class="entryline">entry would be 420.0</div>
+      </div>
+      <div class="gate">Qualified today, entry gated &mdash; <b>slots full</b>.</div>
+    </div>
+
+    <div class="note">
+      <b>What changed, and why.</b> One card now covers signal, open and closed &mdash; a trade is one
+      object, so it gets one design. The green wash is gone: profit and loss are carried by the number
+      and by the 3px rail on the left edge. A whole green card is hard to read and it spends your
+      strongest visual signal on the least important fact.
+    </div>
+
+    <div class="note">
+      <b>The rail is the card.</b> Stop at one end, target at the other, entry as the grey notch, and
+      the moving dot is where the price is now. You can read the trade without reading a single
+      number. On a SHORT the stop sits on the RIGHT, so up is always bad on that card &mdash; the
+      shape flips with the direction instead of you having to remember it.
+    </div>
+
+    <div class="note">
+      <b>One call for you.</b> The old card carried chips for 1D, 2D, DMA50, RSIm and GVM. I have left
+      them off, because they are entry-decision facts and this card is about a trade you already have.
+      Say the word if you want them back on the SIGNAL state only, where they still decide something.
+    </div>
+
+    <div class="foot">
+      Unified V8 trade card &middot; founder feedback 05-Aug-2026<br>
+      v8_paper_positions frozen 05-Aug &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
