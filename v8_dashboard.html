@@ -192,6 +192,8 @@
   .b-open{background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.35)}
   .b-slotfull{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   .b-qualified{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
+  /* cc#856 pivot star — marker only, no interaction, no entry semantics */
+  .pv-star{margin-left:4px;font-size:11px;cursor:help;vertical-align:middle}
   .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
@@ -2542,9 +2544,31 @@ function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?
 // cc#517 Part D: F&O ban chip -- exchange forbids fresh positions; the writer already skips new
 // entries (v8_signal_writer.py), this just makes the restriction visible on the row.
 function _banChip(x){return x&&x.banned?' <span class="badge" style="background:rgba(255,92,108,.16);color:var(--red)" title="F&O ban list -- no new entries today">BAN</span>':'';}
+// ── cc#856 PIVOT STAR — DISPLAY MARKER ONLY ──────────────────────────────────────────────────
+// A blue star means the signal touched S1 in the last 3 CLOSED sessions and is back near it while
+// up on the day and above its 50-DMA; red is the mirror on R1. It is CONTEXT on a signal that
+// already qualified elsewhere — never an entry cue. session_log 5646 killed this exact condition
+// set as a trade rule (9 trades / 55.6% WR, and 53 / 34.0% / -0.75 EV without the Nifty gate), so
+// NO copy here — glyph, title or aria-label — may say buy, sell, entry or target. The tooltip text
+// is built SERVER-SIDE by v8_pivot_star.star_note() so the wording cannot drift on this surface.
+let PIVOT_STARS={};
+async function loadPivotStars(){
+  try{
+    const d=await getJSON('/api/v8/pivot_star');
+    const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
+    PIVOT_STARS=m;
+  }catch(e){ PIVOT_STARS={}; }   // a failed star fetch must never blank a signal table
+}
+function pivotStar(sym){
+  const s=PIVOT_STARS[sym]; if(!s) return '';
+  const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
+  const note = (s.note||'').replace(/"/g,'&quot;');
+  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
+}
+
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
+    <td class="sym">${x.symbol}${pivotStar(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -2569,6 +2593,9 @@ function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{
         ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
         <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span></div>
       <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div></div>`;}).join('')}</div>`;}
+// cc#856: stars refresh with the basket panels; failure is silent by design.
+try{ loadPivotStars(); }catch(e){}
+
 function renderFunnel(b){
   const d=cache['q_'+b.id];if(!d)return'<div class="loading">...</div>';
   const isSell=b.id.startsWith('sell');

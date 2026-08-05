@@ -541,6 +541,17 @@ def health_state() -> dict:
 
 # ── job wrappers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+def _bg_pivot_star():
+    """cc#856: evaluate + log the pivot star. Named function (not a lambda) so _spawn records a
+    real job name in scheduler_master rather than '<lambda>' — SCHEDULER_MASTER_RULE 5700."""
+    try:
+        import v8_pivot_star
+        res = v8_pivot_star.run_tick()
+        log.info(f"pivot_star: {res}")
+    except Exception as e:
+        log.error(f"pivot_star: {e}")
+
+
 def _bg_signal_writer():
     global _signal_writer_started_at, _signal_writer_token
     global _signal_writer_fail_streak, _last_signal_writer_ok
@@ -3612,6 +3623,12 @@ async def _scheduler_loop():
         # 15:30 — this is what moves the last adr_intraday / v8_qualified write to 15:15.
         if _is_cash_continuous(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
+        # cc#856: pivot-star marker. Runs AFTER the writer on the same 5-min tick and on the same
+        # cash-continuous window, because it reads v8_qualified — evaluating it past 15:15 would
+        # mark stars off the frozen auction tape (cc#855). READ-ONLY w.r.t. the engine: it writes
+        # only v8_pivot_star_log and can never create a qualification or a paper entry.
+        if _is_cash_continuous(now) and _is_trading_day(now.date()) and m % 5 == 0:
+            _spawn(_bg_pivot_star)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
         if m % 15 == 0:
             # cc#660: 15-min ALL-DAYS worker-liveness (heartbeat >45min) + off-hours incident relay.

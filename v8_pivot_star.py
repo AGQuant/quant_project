@@ -1,0 +1,330 @@
+"""
+v8_pivot_star.py — cc#856 PIVOT_STAR_V1 (founder 05-Aug-2026).
+
+A read-side REVERSAL MARKER on V8 signals, plus a measurement log.
+
+  BLUE star  a BUY-basket signal that touched S1 in the last 3 CLOSED sessions, is now within
+             2% of today's S1, is up on the day, and is above its 50-DMA.
+  RED star   the mirror on R1 for SELL-basket signals.
+
+WHY THIS IS A MARKER AND NOT A BASKET — THE WHOLE POINT OF THE CARD.
+session_log 5646 (BUY_S1_BOUNCE_KILLED_17JUL) killed buy_s1_bounce on 17-Jul-2026. A 1-year
+5-minute replay of this exact condition set produced 9 trades / 55.6% WR / +0.07 EV, and with the
+Nifty gate removed 53 trades / 34.0% WR / -0.75 EV. As a TRADE RULE this is known-negative. It is
+permitted here only as CONTEXT on a signal that already qualified through a basket that does have
+positive evidence. So:
+
+  * nothing in this module writes to v8_qualified, v8_paper_* or any slot,
+  * no star can create a paper entry,
+  * no UI copy may imply an entry (see the tooltip contract in `star_note`),
+  * v8_signal_writer.py is never imported or touched.
+
+EVALUATION SCOPE — AND A CONTRADICTION IN THE CARD, RESOLVED DELIBERATELY.
+The card's scope items 3 and 4 say the rule is "evaluated only on symbols already present in
+v8_qualified" for a BUY / SELL basket, and item 10 says the glyph renders "next to the symbol on
+the V8 signal rows" — you can only mark a signal row if the symbol IS one. So the star is
+qualified-scoped, and that is what this module does.
+
+But the card's own verify items expect 7 red stars on 04-Aug, and its evidence block cites a
+"universe: 209 active futures" study. Those cannot both hold: on 04-Aug v8_qualified carried
+exactly ONE sell-basket row (sell_momentum), so the maximum possible red count under the stated
+scope is 1, not 7. Reproducing the founder's funnel over the FUTURES UNIVERSE instead returns
+blue 63 / red 97 over 22 sessions with 8 red on 04-Aug — the same shape as their 50 / 80 / 7, so
+their study was clearly universe-wide. Read together, the universe numbers are a FEASIBILITY test
+of the rule (it fires ~2-4 times a day across 209 symbols, so it will not flood anything), not a
+prediction of how many stars appear on screen. The stars themselves are a subset landing on
+qualified signals.
+
+EVAL_SCOPE below makes that switchable in one line if the founder wants the universe reading.
+
+The one founder finding this module DOES reproduce exactly: red stars with cmp < dma_50 return
+ZERO rows over 22 sessions. Condition (d) is deliberately NOT inverted for the red star — a stock
+at R1 is at recent highs by construction. Do not "fix" it.
+"""
+
+import os
+import logging
+from datetime import date, datetime
+from typing import Dict, Any, List, Optional
+
+import psycopg2
+import pytz
+from fastapi import APIRouter
+
+log = logging.getLogger("scorr.pivot_star")
+router = APIRouter()
+_DB = os.getenv("DATABASE_URL", "")
+IST = pytz.timezone("Asia/Kolkata")
+
+TOUCH_SESSIONS = 3      # CLOSED sessions only — never an intraday low/high (card item 6)
+NEAR_LEVEL_PCT = 2.0    # |cmp - level| / level * 100
+NEAR_PP_PCT    = 1.0    # recorded only, never rendered (card item 5)
+
+# "qualified" = the card's scope. "universe" = the founder's feasibility-study scope, kept so the
+# switch is one line if they want it. Changing this changes WHICH SYMBOLS ARE EVALUATED only —
+# never what the rule is.
+EVAL_SCOPE = "qualified"
+
+# Direction comes from the basket NAME PREFIX, not a hardcoded basket list, so a new buy_*/sell_*
+# basket is covered automatically (SCHEDULER_MASTER_RULE 5700's registry-derived doctrine applied
+# to basket enumeration).
+def _direction(basket: str) -> Optional[str]:
+    b = (basket or "").lower()
+    if b.startswith("buy"):
+        return "BUY"
+    if b.startswith("sell"):
+        return "SELL"
+    return None
+
+
+def _conn():
+    return psycopg2.connect(_DB)
+
+
+def _f(v) -> Optional[float]:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ist_now() -> datetime:
+    return datetime.now(IST).replace(tzinfo=None)
+
+
+def ensure_schema(conn):
+    """CREATE TABLE only. There is deliberately NO ALTER TABLE anywhere in this module —
+    MAINTENANCE_LOCK_RULE (cc#351) confines those to a weekend Railway console window, and cc#857
+    is concurrently removing per-request DDL from the R card for the same reason."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS v8_pivot_star_log (
+              id bigserial PRIMARY KEY,
+              star_date date NOT NULL,
+              first_seen_ts timestamp NOT NULL,
+              symbol text NOT NULL,
+              basket text,
+              direction text NOT NULL,
+              star_color text NOT NULL,
+              level_name text,
+              level_value numeric,
+              pp numeric,
+              cmp_at_star numeric,
+              pct_from_level numeric,
+              near_pp boolean,
+              day_1d numeric,
+              dma_50 numeric,
+              touched_dates date[],
+              created_at timestamp DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata'),
+              CONSTRAINT v8_pivot_star_log_uniq UNIQUE (symbol, star_date, direction)
+            )""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pivot_star_date ON v8_pivot_star_log(star_date DESC)")
+    conn.commit()
+
+
+# ── evaluation ────────────────────────────────────────────────────────────────────────────────
+def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """Return today's stars. PURE READ — this function writes nothing."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        # Candidate set. Under the card's scope this is v8_qualified for today; the universe branch
+        # exists only so the founder's feasibility reading is reproducible without a code rewrite.
+        if EVAL_SCOPE == "universe":
+            cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        else:
+            cur.execute("""SELECT DISTINCT ON (symbol) symbol, basket
+                           FROM v8_qualified WHERE signal_date=%s
+                           ORDER BY symbol, id DESC""", (d,))
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+
+        # Today's pivots.
+        cur.execute("""SELECT symbol, s1, r1, pp FROM v8_paper_pivots
+                       WHERE pivot_date=%s AND symbol = ANY(%s)""", (d, syms))
+        piv = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
+
+        # Live CMP through the SHARED resolver (cc#811/#835) — never a private price path. Falls
+        # back to the last close so an out-of-hours run still evaluates rather than returning empty.
+        live = {}
+        try:
+            import cmp_resolver
+            live = cmp_resolver.resolve_cmp_many(cur, syms)
+        except Exception as e:
+            log.warning("cc#856 live CMP unavailable, using last close: %s", e)
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                       WHERE symbol = ANY(%s) AND close > 0 ORDER BY symbol, price_date DESC""", (syms,))
+        eod = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, dma_50, day_1d FROM v8_metrics
+                       WHERE symbol = ANY(%s) AND score_date <= %s
+                       ORDER BY symbol, score_date DESC""", (syms, d))
+        met = {r[0]: (_f(r[1]), _f(r[2])) for r in cur.fetchall()}
+
+        # THE TOUCH TEST — CLOSED SESSIONS ONLY (card item 6). Each prior session's low/high is
+        # compared against THAT SESSION'S OWN pivot, never today's: a pivot is only meaningful for
+        # the day it was computed for, and comparing an old low to a new S1 would invent touches.
+        cur.execute("""
+            WITH sess AS (
+                SELECT DISTINCT price_date FROM raw_prices
+                WHERE price_date < %s ORDER BY price_date DESC LIMIT %s)
+            SELECT rp.symbol,
+                   ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.low  <= pv.s1) AS s1_dates,
+                   ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.high >= pv.r1) AS r1_dates
+            FROM raw_prices rp
+            JOIN sess ON sess.price_date = rp.price_date
+            JOIN v8_paper_pivots pv ON pv.symbol = rp.symbol AND pv.pivot_date = rp.price_date
+            WHERE rp.symbol = ANY(%s)
+            GROUP BY rp.symbol
+        """, (d, TOUCH_SESSIONS, syms))
+        touch = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+
+    out = []
+    for sym, basket in cands:
+        direction = _direction(basket) if basket else None
+        p = piv.get(sym)
+        m = met.get(sym)
+        if not p or not m:
+            continue
+        s1, r1, pp = p
+        dma_50, day_1d = m
+        cmp_v = (live.get(sym) or {}).get("cmp") if live else None
+        if cmp_v is None:
+            cmp_v = eod.get(sym)
+        if cmp_v is None or dma_50 is None or day_1d is None:
+            continue
+        s1_dates, r1_dates = touch.get(sym, (None, None))
+
+        # near_pp is COMPUTED AND STORED but never rendered and never part of the star condition
+        # (card item 5). Founder-tested: a PP clause alone produced 331 stars over 22 sessions,
+        # peaking at 69 of 209 in a day — it would flood the screen. Recorded for a 4-6 week review.
+        near_pp = bool(pp and abs(cmp_v - pp) / pp * 100.0 <= NEAR_PP_PCT)
+
+        star = None
+        if direction in (None, "BUY") and s1 and s1_dates:
+            if abs(cmp_v - s1) / s1 * 100.0 <= NEAR_LEVEL_PCT and day_1d > 0 and cmp_v > dma_50:
+                star = ("BLUE", "S1", s1, s1_dates)
+        if star is None and direction in (None, "SELL") and r1 and r1_dates:
+            # (d) is NOT inverted. Verified over 22 sessions: cmp < dma_50 returns ZERO rows,
+            # because a stock at R1 is at recent highs by construction.
+            if abs(cmp_v - r1) / r1 * 100.0 <= NEAR_LEVEL_PCT and day_1d < 0 and cmp_v > dma_50:
+                star = ("RED", "R1", r1, r1_dates)
+        if star is None:
+            continue
+
+        colour, level_name, level_value, tdates = star
+        out.append({
+            "symbol": sym, "basket": basket,
+            "direction": "BUY" if colour == "BLUE" else "SELL",
+            "star_color": colour, "level_name": level_name,
+            "level_value": round(level_value, 2),
+            "pp": round(pp, 2) if pp else None,
+            "cmp_at_star": round(cmp_v, 2),
+            "pct_from_level": round((cmp_v - level_value) / level_value * 100.0, 2),
+            "near_pp": near_pp,
+            "day_1d": round(day_1d, 2), "dma_50": round(dma_50, 2),
+            "touched_dates": [str(x) for x in (tdates or [])],
+        })
+    return out
+
+
+def star_note(s: Dict[str, Any]) -> str:
+    """Tooltip text. FACTS ONLY — no buy/sell/entry/target wording anywhere, per the card and the
+    5646 reasoning. This function is the single place that copy is written, so it cannot drift."""
+    td = s.get("touched_dates") or []
+    when = td[-1] if td else "recently"
+    side = "above" if (s.get("pct_from_level") or 0) >= 0 else "below"
+    return (f"touched {s['level_name']} on {when}, now {abs(s.get('pct_from_level') or 0):.1f}% "
+            f"{side} it, {'up' if s['day_1d'] >= 0 else 'down'} {abs(s['day_1d']):.1f}% today")
+
+
+def run_tick(conn=None) -> Dict[str, Any]:
+    """One 5-min tick: evaluate, then log FIRST FIRE ONLY.
+
+    ON CONFLICT DO NOTHING is what makes first_seen_ts and cmp_at_star immutable — a later tick on
+    the same day must never overwrite the moment the star first appeared (card item 7). That is the
+    whole measurement value of the log: when it fired and at what price.
+    """
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        ensure_schema(conn)
+        d = _ist_now().date()
+        stars = evaluate(conn, d)
+        ts = _ist_now()
+        wrote = 0
+        with conn.cursor() as cur:
+            for s in stars:
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, basket, direction, star_color,
+                       level_name, level_value, pp, cmp_at_star, pct_from_level, near_pp,
+                       day_1d, dma_50, touched_dates)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (d, ts, s["symbol"], s["basket"], s["direction"], s["star_color"],
+                      s["level_name"], s["level_value"], s["pp"], s["cmp_at_star"],
+                      s["pct_from_level"], s["near_pp"], s["day_1d"], s["dma_50"],
+                      s["touched_dates"] or None))
+                wrote += cur.rowcount
+        conn.commit()
+        # A ZERO-STAR DAY IS VALID and is logged as such rather than silently passing — 8 of the
+        # founder's 22 sampled sessions had no blue star at all (ENGINE_LIVENESS_RULE 13829: an
+        # explicitly logged valid-empty outcome is evidence, silence is not).
+        log.info("cc#856 pivot_star tick: %d stars evaluated, %d newly logged%s",
+                 len(stars), wrote, " (VALID ZERO-STAR TICK)" if not stars else "")
+        return {"ok": True, "date": str(d), "evaluated": len(stars), "new_rows": wrote,
+                "zero_star_tick": not stars, "scope": EVAL_SCOPE}
+    except Exception as e:
+        log.exception("cc#856 pivot_star tick failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@router.get("/api/v8/pivot_star")
+def pivot_star(star_date: Optional[str] = None):
+    """Today's starred symbols. Read-only; never triggers a write."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            d = star_date or str(_ist_now().date())
+            cur.execute("""
+                SELECT symbol, basket, direction, star_color, level_name, level_value,
+                       pct_from_level, day_1d, near_pp, cmp_at_star, first_seen_ts, touched_dates
+                FROM v8_pivot_star_log WHERE star_date=%s
+                ORDER BY star_color, symbol""", (d,))
+            rows = [{
+                "symbol": r[0], "basket": r[1], "direction": r[2], "star_color": r[3],
+                "level_name": r[4], "level_value": _f(r[5]), "pct_from_level": _f(r[6]),
+                "day_1d": _f(r[7]), "near_pp": r[8], "cmp_at_star": _f(r[9]),
+                "first_seen_ts": str(r[10]) if r[10] else None,
+                "touched_dates": [str(x) for x in (r[11] or [])],
+            } for r in cur.fetchall()]
+            for r in rows:
+                r["note"] = star_note(r)
+            return {
+                "star_date": d, "count": len(rows), "stars": rows,
+                "scope": EVAL_SCOPE,
+                "rule": ("BLUE: BUY signal touched S1 in the last 3 closed sessions, now within 2% "
+                         "of S1, up on the day, above 50-DMA. RED: mirrored on R1 for SELL signals "
+                         "(the above-50-DMA clause is NOT inverted — verified zero rows otherwise)."),
+                "basis": ("DISPLAY MARKER + MEASUREMENT LOG ONLY. Not a qualification rule, not a "
+                          "basket, not a slot; it never creates a paper entry (session_log 5646)."),
+                "near_pp_note": "near_pp is recorded for a 4-6 week review only and is never rendered.",
+            }
+    except Exception as e:
+        log.exception("pivot_star endpoint failed")
+        return {"star_date": star_date, "stars": [], "count": 0,
+                "error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+
+@router.post("/api/v8/pivot_star/run")
+def pivot_star_run():
+    """Manual tick (ops/verification). The scheduled 5-min job calls run_tick() directly."""
+    return run_tick()

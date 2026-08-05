@@ -104,6 +104,7 @@ from fundamentals_scraper import router as fundamentals_scraper_router   # cc#36
 from screeners_endpoints import router as screeners_router   # cc#824 predefined screeners (read-only)
 from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided CIO tree + telemetry
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
+from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star marker (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
 from digest_v3 import router as digest_v3_router   # cc#846 Daily Digest V3 (read-only render)
@@ -451,6 +452,7 @@ app.include_router(hr_report_router)   # cc#398 Portfolio Health Report (report 
 app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report white-label PDF
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
+app.include_router(pivot_star_router)   # cc#856: /api/v8/pivot_star
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
 app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
