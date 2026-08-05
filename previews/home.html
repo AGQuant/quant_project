@@ -11,11 +11,15 @@
    Screen 2. Design ref design_refs/scorr_mobile_R4.html (fa0f1f2).
    Tokens verbatim from scorr_home.html :root (9ffbcba). Dark, per 15913.
 
-   THEME ISOLATION (05-Aug): /static/mobile.css is injected AFTER this block and
-   carries `:root[data-theme="light"]{...}`, which out-specifies a bare `:root`.
-   Tokens therefore live on .screen/.bnav — custom properties resolve from the
-   nearest ancestor, so this wins without touching any shared file. body colours
-   are literal hex for the same reason.
+   FOUNDER DECISION 05-Aug (session_log 16185): on mobile there is ONE book.
+   SmartGain IS the portfolio. Client and Test Trade are removed from this
+   surface — nothing deleted from the code or DB, the desktop page keeps all
+   three. A phone should not ask which book you are in.
+
+   THEME ISOLATION: /static/mobile.css is injected AFTER this block and carries
+   `:root[data-theme="light"]{...}`, which out-specifies a bare `:root`. Tokens
+   therefore live on .screen/.bnav — custom properties resolve from the nearest
+   ancestor, so this wins without touching any shared file.
 
    ALL VALUES ARE DUMMY — every one a real DB row from 05-Aug-2026. No fetch.
 ============================================================================= */
@@ -52,14 +56,7 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
 .sclosed{font-size:8.5px;font-weight:800;letter-spacing:.06em;color:var(--dim);
   border:1px dashed var(--line2);border-radius:4px;padding:2px 6px;white-space:nowrap}
 
-.body{padding:14px 12px 0}
-
-.seg{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:11px;
-  padding:3px;margin-bottom:13px}
-.segb{flex:1;text-align:center;font-size:11px;font-weight:800;letter-spacing:.04em;
-  text-transform:uppercase;color:var(--mut);padding:0;min-height:40px;line-height:40px;
-  border-radius:8px;border:none;background:transparent;font-family:inherit}
-.segb.on{background:var(--panel);color:var(--txt)}
+.body{padding:16px 12px 0}
 
 /* ---- hero: PRIMARY section card. No chevron, never collapses (16157). ---- */
 .hero{position:relative;background:var(--panel);border:1px solid var(--line);
@@ -121,6 +118,7 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
 
 .slab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
   color:var(--dim);margin:22px 3px 10px;display:flex;align-items:center;gap:9px}
+.slab.first{margin-top:0}
 .slab::after{content:'';flex:1;height:1px;background:var(--line)}
 
 .models{display:grid;grid-template-columns:1fr 1fr;gap:9px}
@@ -172,11 +170,7 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
 
   <div class="body">
 
-    <div class="seg">
-      <button class="segb on">SmartGain</button>
-      <button class="segb">Client</button>
-      <button class="segb">Test</button>
-    </div>
+    <div class="slab first">My Portfolio</div>
 
     <!-- ============ HERO — this week, real, FLAT ============ -->
     <div class="hero flat">
@@ -200,8 +194,10 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
     </div>
 
     <div class="note">
-      Above is the real state right now — the book is flat. Below is the same card with the book
-      open, so the full layout can be judged. Both are real: 04-Aug fills marked to the 05-Aug close.
+      One book, no switcher. Client and Test Trade are desk tools and no longer appear on the phone
+      — nothing is deleted, the desktop page keeps all three. Above is the real state right now:
+      the book is flat. Below is the same card with the book open, so the full layout can be judged.
+      Both are real — 04-Aug fills marked to the 05-Aug close.
     </div>
 
     <!-- ============ HERO — book open ============ -->
@@ -322,8 +318,8 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
     </div>
 
     <div class="foot">
-      Screen 2 &middot; Home &middot; book first, models second, tools third<br>
-      design_refs/scorr_mobile_R4.html &middot; dummy data, no live fetch
+      Screen 2 &middot; Home &middot; one portfolio, models second, tools third<br>
+      design_refs/scorr_mobile_R4.html &middot; session_log 16185 &middot; dummy data, no live fetch
     </div>
 
   </div>
