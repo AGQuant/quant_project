@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>V8 surfaces · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — V8 SURFACES (8 of 11; the stack and open positions
+   have their own screens). Founder-approved 05-Aug-2026 in three batches.
+   Decisions + reasoning: session_log 16170.
+
+   PLACEHOLDER VALUES BY DESIGN. Layout is settled first; CC plugs the real
+   endpoint and field later. Nothing here fetches.
+
+   Tokens on .screen so the injected light theme cannot override them.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#070B16;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen{max-width:430px;margin:0 auto;padding:0 0 60px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.grn{color:#2FD48B}.red{color:#FF5C6C}.amb{color:#F5B94A}.mut{color:#8C99BD}.dim{color:#5E6B8F}
+
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:#F5B94A;display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.wrap{padding:18px 14px 0}
+.ttl{font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#4D7CFE;
+  margin:32px 2px 10px;display:flex;align-items:center;gap:9px}
+.ttl:first-child{margin-top:0}
+.ttl::after{content:'';flex:1;height:1px;background:rgba(77,124,254,.28)}
+.scr{background:#0A0F1E;border:1px solid rgba(148,166,210,.24);border-radius:16px;padding:14px 12px;overflow:hidden}
+.ph{font-size:9px;color:#5E6B8F;text-align:center;padding:9px 0 2px;letter-spacing:.05em}
+.lab{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:#5E6B8F}
+
+/* mood gate */
+.gate{background:linear-gradient(168deg,#121A33,#0F1730);border:1px solid rgba(148,166,210,.14);border-radius:16px;padding:15px 15px 13px}
+.gtop{display:flex;align-items:baseline;gap:10px}
+.mood{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.mtag{font-size:9px;font-weight:800;letter-spacing:.09em;padding:3px 8px;border-radius:5px;background:rgba(47,212,139,.14);color:#2FD48B;border:1px solid rgba(47,212,139,.4)}
+.asof{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#5E6B8F}
+.segs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}
+.sg{position:relative;background:#0D1428;border:1px solid rgba(148,166,210,.14);border-radius:10px;padding:8px 7px 7px 10px;overflow:hidden}
+.sg::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.sg.pass::before{background:#2FD48B}.sg.fail::before{background:#FF5C6C}
+.sg .k{font-size:8px;font-weight:800;letter-spacing:.09em;color:#5E6B8F}
+.sg .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;margin-top:3px}
+.slots{margin-top:14px;padding-top:12px;border-top:1px solid rgba(148,166,210,.14);display:grid;gap:10px}
+.sl{display:grid;grid-template-columns:38px 1fr 44px;align-items:center;gap:10px}
+.sl .k{font-size:9.5px;font-weight:800;letter-spacing:.08em;color:#8C99BD}
+.bar{height:8px;border-radius:4px;background:#0D1428;border:1px solid rgba(148,166,210,.14);overflow:hidden}
+.fill{height:100%;border-radius:4px}
+.f-b{background:linear-gradient(90deg,#1E9E68,#2FD48B)}.f-s{background:linear-gradient(90deg,#C2404E,#FF5C6C)}
+.sl .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
+
+/* signal card */
+.c{position:relative;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:13px;padding:12px 13px 12px 16px;margin-bottom:9px;overflow:hidden}
+.c::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#334155}
+.c.up::before{background:#2FD48B}.c.dn::before{background:#FF5C6C}
+.sc-top{display:flex;align-items:baseline;gap:7px}
+.sym{font-size:14.5px;font-weight:800}
+.star{font-size:12px;margin-left:-2px;color:#4D7CFE}
+.chip{font-size:8.5px;font-weight:800;letter-spacing:.08em;padding:2px 6px;border-radius:4px}
+.ch-open{background:rgba(47,212,139,.14);color:#2FD48B;border:1px solid rgba(47,212,139,.4)}
+.ch-sig{background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4)}
+.ch-ban{background:rgba(255,92,108,.13);color:#FF5C6C;border:1px solid rgba(255,92,108,.4)}
+.ago{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#5E6B8F}
+.gvm{display:flex;align-items:baseline;gap:8px;margin-top:9px}
+.gvm .b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;font-weight:700;line-height:1}
+.gvm .l{font-size:9px;font-weight:800;letter-spacing:.1em;color:#5E6B8F}
+.gvm .cmp{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700}
+.mets{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+.m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;padding:3px 7px;border-radius:5px;background:rgba(148,166,210,.08);border:1px solid rgba(148,166,210,.14);color:#8C99BD}
+.m.g{color:#2FD48B;background:rgba(47,212,139,.10);border-color:rgba(47,212,139,.28)}
+.m.r{color:#FF5C6C;background:rgba(255,92,108,.10);border-color:rgba(255,92,108,.28)}
+.pv{position:relative;height:22px;margin-top:13px}
+.pvt{position:absolute;top:9px;left:0;right:0;height:4px;border-radius:2px;background:#0D1428;border:1px solid rgba(148,166,210,.14)}
+.pvm{position:absolute;top:5px;width:2px;height:12px;background:#8C99BD;transform:translateX(-50%)}
+.pvd{position:absolute;top:6px;width:10px;height:10px;border-radius:50%;background:#2FD48B;border:2px solid #121A33;transform:translateX(-50%)}
+.pvl{display:flex;justify-content:space-between;margin-top:2px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px}
+
+/* kpi + rows */
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.k1{background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:12px;padding:11px 12px}
+.k1 .k{font-size:8.5px;font-weight:800;letter-spacing:.11em;color:#5E6B8F}
+.k1 .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:19px;font-weight:700;margin-top:6px;line-height:1}
+.k1 .s{font-size:9.5px;color:#5E6B8F;margin-top:5px}
+.acc{height:4px;border-radius:2px;background:#0D1428;margin-top:8px;overflow:hidden}
+.acc i{display:block;height:100%;background:#2FD48B}
+.pills{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;scrollbar-width:none}
+.pills::-webkit-scrollbar{display:none}
+.pl{flex-shrink:0;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgba(148,166,210,.24);background:#121A33;color:#8C99BD;font-size:11px;font-weight:700;display:flex;align-items:center}
+.pl.on{background:#182241;color:#E9EEFB}
+.tr{display:flex;align-items:center;gap:9px;padding:11px 12px;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:11px;margin-bottom:7px}
+.tr .l{flex:1;min-width:0}
+.tr .s{font-size:13px;font-weight:800}
+.tr .d{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.tr .m2{text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.tr .m2 .v{font-size:14px;font-weight:700}
+.tr .m2 .p{font-size:10px;margin-top:3px}
+.res{font-size:8px;font-weight:800;letter-spacing:.08em;padding:2px 5px;border-radius:3px;margin-left:6px}
+.r-t{background:rgba(47,212,139,.14);color:#2FD48B}
+.r-s{background:rgba(255,92,108,.13);color:#FF5C6C}
+
+/* day log */
+.hero{background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:14px;padding:13px 14px;margin-bottom:11px}
+.hero .k{font-size:8.5px;font-weight:800;letter-spacing:.12em;color:#5E6B8F}
+.hero .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:700;margin-top:6px;line-height:1}
+.hero .s{font-size:10px;color:#5E6B8F;margin-top:6px}
+.spark{display:flex;align-items:flex-end;gap:3px;height:44px;margin-top:13px}
+.sb{flex:1;border-radius:2px;min-height:2px}
+.sb.p{background:#2FD48B}.sb.n{background:#FF5C6C}
+.sx{display:flex;justify-content:space-between;margin-top:5px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:#5E6B8F}
+.dr{display:flex;align-items:center;gap:10px;padding:11px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:11px;margin-bottom:7px;position:relative;overflow:hidden}
+.dr::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.dr.p::before{background:#2FD48B}.dr.n::before{background:#FF5C6C}
+.dr .d{flex:1}
+.dr .dt{font-size:12.5px;font-weight:700}
+.dr .fl{font-size:9.5px;color:#5E6B8F;margin-top:3px}
+.dr .m2{text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.dr .m2 .v{font-size:14px;font-weight:700}
+.dr .m2 .p2{font-size:10px;margin-top:3px;color:#5E6B8F}
+
+/* raw data */
+.srch{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 13px;background:#121A33;border:1px solid rgba(148,166,210,.24);border-radius:11px;color:#5E6B8F;font-size:13px;margin-bottom:10px}
+.sp{flex-shrink:0;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid rgba(148,166,210,.24);background:#121A33;color:#8C99BD;font-size:10.5px;font-weight:700;display:flex;align-items:center;gap:5px}
+.sp.on{background:#182241;color:#E9EEFB}
+.rw{display:flex;align-items:center;gap:11px;padding:11px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:11px;margin-bottom:6px}
+.rw .s{font-size:13px;font-weight:800;flex:1;min-width:0}
+.rw .g{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;width:36px;text-align:right}
+.rw .mm{display:flex;gap:5px}
+.rw .mm span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:rgba(148,166,210,.08);border:1px solid rgba(148,166,210,.14);color:#8C99BD}
+.rw .cx{color:#5E6B8F;font-size:14px}
+.exp{background:#0D1428;border:1px solid rgba(148,166,210,.14);border-top:none;border-radius:0 0 11px 11px;padding:11px 13px;margin:-9px 0 6px}
+.eg{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px}
+.eg div{display:flex;justify-content:space-between;font-size:10.5px;color:#8C99BD}
+.eg b{font-family:'IBM Plex Mono',ui-monospace,monospace;color:#E9EEFB;font-weight:600}
+
+/* news */
+.nh{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.live{font-size:9px;font-weight:800;letter-spacing:.09em;padding:3px 8px;border-radius:5px;background:rgba(47,212,139,.14);color:#2FD48B;border:1px solid rgba(47,212,139,.4)}
+.nh .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:#5E6B8F;margin-left:auto}
+.itm{padding:13px 2px;border-bottom:1px solid rgba(148,166,210,.14)}
+.itm:last-child{border-bottom:none}
+.itg{font-size:8.5px;font-weight:800;letter-spacing:.07em;padding:2px 6px;border-radius:4px;background:rgba(55,211,232,.10);color:#37D3E8;border:1px solid rgba(55,211,232,.32);margin-right:7px}
+.ith{font-size:13.5px;font-weight:600;line-height:1.45}
+.itm2{font-size:10px;color:#5E6B8F;margin-top:7px;display:flex;gap:7px;align-items:center}
+.dt2{color:#5E6B8F;font-size:8px}
+.more{text-align:center;min-height:44px;line-height:44px;margin-top:12px;border:1px solid rgba(148,166,210,.24);border-radius:10px;color:#4D7CFE;font-size:12px;font-weight:700}
+
+/* results */
+.warn{background:rgba(245,185,74,.08);border:1px solid rgba(245,185,74,.4);border-radius:13px;padding:12px 14px;margin-bottom:14px}
+.warn .k{font-size:9px;font-weight:800;letter-spacing:.11em;color:#F5B94A}
+.warn .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:20px;font-weight:700;margin-top:6px;line-height:1;color:#F5B94A}
+.warn .s{font-size:10.5px;color:#8C99BD;margin-top:7px;line-height:1.5}
+.dh{display:flex;align-items:baseline;gap:9px;margin:16px 2px 8px}
+.dh .d{font-size:12px;font-weight:800}
+.dh .r{font-size:9.5px;color:#5E6B8F}
+.dh::after{content:'';flex:1;height:1px;background:rgba(148,166,210,.14)}
+.rr{display:flex;align-items:center;gap:9px;padding:11px 13px;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:11px;margin-bottom:7px;position:relative;overflow:hidden}
+.rr::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#334155}
+.rr.blk::before{background:#F5B94A}.rr.held::before{background:#4D7CFE}
+.rr .s{font-size:13px;font-weight:800;flex:1}
+.tg{font-size:8.5px;font-weight:800;letter-spacing:.07em;padding:2px 6px;border-radius:4px}
+.t-blk{background:rgba(245,185,74,.12);color:#F5B94A;border:1px solid rgba(245,185,74,.45)}
+.t-held{background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4)}
+.t-u{background:rgba(148,166,210,.08);color:#8C99BD;border:1px solid rgba(148,166,210,.16)}
+
+/* matrix */
+.mb{position:relative;background:#121A33;border:1px solid rgba(148,166,210,.14);border-radius:14px;padding:13px 14px 12px 17px;margin-bottom:10px;overflow:hidden}
+.mb::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:#4D7CFE}
+.mt2{display:flex;align-items:baseline;gap:8px}
+.mt2 .nm{font-size:14.5px;font-weight:800}
+.ver{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:#5E6B8F;border:1px solid rgba(148,166,210,.16);border-radius:4px;padding:1px 5px}
+.side2{margin-left:auto;font-size:8.5px;font-weight:800;letter-spacing:.08em;padding:2px 6px;border-radius:4px}
+.sd-l{background:rgba(47,212,139,.14);color:#2FD48B}.sd-s{background:rgba(255,92,108,.13);color:#FF5C6C}
+.edge{display:flex;gap:16px;margin-top:12px;padding:10px 0;border-top:1px solid rgba(148,166,210,.14);border-bottom:1px solid rgba(148,166,210,.14)}
+.ed{flex:1}
+.ed .k{font-size:8px;font-weight:800;letter-spacing:.1em;color:#5E6B8F}
+.ed .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;margin-top:4px}
+.rule{display:flex;gap:8px;margin-top:9px;font-size:10.5px;color:#8C99BD;line-height:1.5}
+.rule .k{font-size:8.5px;font-weight:800;letter-spacing:.09em;color:#5E6B8F;min-width:52px;padding-top:2px}
+.rule .v{flex:1}
+.rule .v b{color:#E9EEFB;font-weight:600}
+.refchip{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.07em;padding:2px 6px;border-radius:4px;background:rgba(77,124,254,.12);color:#8FB0FF;border:1px solid rgba(77,124,254,.4);margin-bottom:12px}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;background:#121A33;border-top:1px solid rgba(148,166,210,.24);padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:#5E6B8F;padding:4px 0;min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:#4D7CFE}
+</style></head><body>
+<div class="screen">
+
+<div class="dummy"><span>&#9888;</span><span><b>PLACEHOLDER VALUES.</b> Layout approved 05-Aug.
+Real fields are plugged by the wiring card &mdash; nothing here fetches.</span></div>
+
+<div class="wrap">
+
+<div class="ttl">1 &middot; Mood gate</div>
+<div class="scr">
+  <div class="gate">
+    <div class="gtop"><span class="mood grn">BULLISH</span><span class="mtag">GATE OPEN</span><span class="asof">15:30</span></div>
+    <div class="segs">
+      <div class="sg pass"><div class="k">ADR</div><div class="v grn">1.24</div></div>
+      <div class="sg pass"><div class="k">DAY</div><div class="v grn">+0.4%</div></div>
+      <div class="sg fail"><div class="k">WEEK</div><div class="v red">&minus;1.1%</div></div>
+      <div class="sg pass"><div class="k">MONTH</div><div class="v grn">+2.8%</div></div>
+    </div>
+    <div class="slots">
+      <div class="sl"><span class="k">BUY</span><span class="bar"><i class="fill f-b" style="width:70%"></i></span><span class="n grn">14/20</span></div>
+      <div class="sl"><span class="k">SELL</span><span class="bar"><i class="fill f-s" style="width:60%"></i></span><span class="n red">6/10</span></div>
+    </div>
+  </div>
+  <div class="ph">verdict is the headline &middot; pass/fail readable from the edge</div>
+</div>
+
+<div class="ttl">2 &middot; Basket signals &mdash; one design, all four tabs</div>
+<div class="scr">
+  <div class="c up">
+    <div class="sc-top"><span class="sym">SYMBOL</span><span class="star">&#9733;</span><span class="chip ch-open">OPEN</span><span class="ago">09:45</span></div>
+    <div class="gvm"><span class="b grn">8.4</span><span class="l">GVM</span><span class="cmp">CMP 1,742</span></div>
+    <div class="mets"><span class="m g">1D +1.2%</span><span class="m g">2D +2.0%</span><span class="m">DMA50 1,690</span><span class="m">RSIm 61</span></div>
+    <div class="pv"><div class="pvt"></div><div class="pvm" style="left:44%"></div><div class="pvd" style="left:68%"></div></div>
+    <div class="pvl"><span class="red">S1 1,684</span><span class="mut">PP 1,712</span><span class="grn">R1 1,769</span></div>
+  </div>
+  <div class="c">
+    <div class="sc-top"><span class="sym">SYMBOL</span><span class="chip ch-sig">SIGNAL</span><span class="chip ch-ban">F&amp;O BAN</span><span class="ago">12:35</span></div>
+    <div class="gvm"><span class="b amb">6.1</span><span class="l">GVM</span><span class="cmp">CMP 486</span></div>
+    <div class="mets"><span class="m r">1D &minus;0.8%</span><span class="m">2D +0.3%</span><span class="m">DMA50 492</span><span class="m">RSIm 47</span></div>
+    <div class="pv"><div class="pvt"></div><div class="pvm" style="left:52%"></div><div class="pvd" style="left:38%;background:#F5B94A"></div></div>
+    <div class="pvl"><span class="red">S1 478</span><span class="mut">PP 489</span><span class="grn">R1 501</span></div>
+  </div>
+  <div class="ph">GVM is the headline because it is the gate</div>
+</div>
+
+<div class="ttl">3 &middot; Trade log</div>
+<div class="scr">
+  <div class="kpi">
+    <div class="k1"><div class="k">NET P&amp;L</div><div class="v grn">+Rs.2,84,323</div><div class="s">Gross 2,97,323 &minus; brokerage 13,000</div></div>
+    <div class="k1"><div class="k">ACCURACY</div><div class="v grn">78.6%</div><div class="acc"><i style="width:78.6%"></i></div><div class="s">avg win +2.4% &middot; avg loss &minus;1.1%</div></div>
+  </div>
+  <div class="pills"><span class="pl on">All</span><span class="pl">1 Week</span><span class="pl">1 Month</span><span class="pl">Buy Reversal</span><span class="pl">Sell Mom</span></div>
+  <div class="tr"><div class="l"><div class="s">SYMBOL <span class="res r-t">TARGET</span></div><div class="d">Buy Reversal &middot; 3 days &middot; 04 Aug</div></div><div class="m2"><div class="v grn">+Rs.18,400</div><div class="p grn">+1.59%</div></div></div>
+  <div class="tr"><div class="l"><div class="s">SYMBOL <span class="res r-s">SL</span></div><div class="d">Sell Momentum &middot; 1 day &middot; 04 Aug</div></div><div class="m2"><div class="v red">&minus;Rs.6,220</div><div class="p red">&minus;0.94%</div></div></div>
+  <div class="tr"><div class="l"><div class="s">SYMBOL <span class="res r-t">TARGET</span></div><div class="d">Buy Momentum &middot; 6 days &middot; 31 Jul</div></div><div class="m2"><div class="v grn">+Rs.12,663</div><div class="p grn">+0.86%</div></div></div>
+  <div class="ph">accuracy never shows without avg win and avg loss</div>
+</div>
+
+<div class="ttl">4 &middot; Day log</div>
+<div class="scr">
+  <div class="hero">
+    <div class="k">NET P&amp;L &middot; 22 TRADING DAYS</div>
+    <div class="v grn">+Rs.2,84,323</div>
+    <div class="s">Capital Rs.50,00,000 &middot; +5.69% &middot; Rs.500 per closed trade</div>
+    <div class="spark">
+      <div class="sb p" style="height:38%"></div><div class="sb n" style="height:22%"></div>
+      <div class="sb p" style="height:64%"></div><div class="sb p" style="height:30%"></div>
+      <div class="sb n" style="height:48%"></div><div class="sb p" style="height:88%"></div>
+      <div class="sb p" style="height:26%"></div><div class="sb n" style="height:14%"></div>
+      <div class="sb p" style="height:56%"></div><div class="sb p" style="height:72%"></div>
+      <div class="sb n" style="height:34%"></div><div class="sb p" style="height:44%"></div>
+    </div>
+    <div class="sx"><span>18 Jul</span><span>05 Aug</span></div>
+  </div>
+  <div class="dr p"><div class="d"><div class="dt">05 Aug</div><div class="fl">8 opened &middot; 5 closed &middot; 20 net open</div></div><div class="m2"><div class="v grn">+Rs.24,180</div><div class="p2">+0.48%</div></div></div>
+  <div class="dr n"><div class="d"><div class="dt">04 Aug</div><div class="fl">4 opened &middot; 6 closed &middot; 17 net open</div></div><div class="m2"><div class="v red">&minus;Rs.9,640</div><div class="p2">&minus;0.19%</div></div></div>
+  <div class="dr p"><div class="d"><div class="dt">01 Aug</div><div class="fl">6 opened &middot; 3 closed &middot; 19 net open</div></div><div class="m2"><div class="v grn">+Rs.41,220</div><div class="p2">+0.82%</div></div></div>
+  <div class="ph">the bars are what the table could never show</div>
+</div>
+
+<div class="ttl">5 &middot; Raw data</div>
+<div class="scr">
+  <div class="srch"><span>&#9906;</span><span>Search symbol&hellip;</span></div>
+  <div class="pills"><span class="sp on">GVM &#9662;</span><span class="sp">1D</span><span class="sp">1W</span><span class="sp">1M</span><span class="sp">RSI m</span><span class="sp">Vol ratio</span><span class="sp">52W</span></div>
+  <div class="rw"><span class="s">SYMBOL</span><span class="mm"><span>1D +1.2%</span><span>RSI 61</span></span><span class="g grn">8.4</span><span class="cx">&#9662;</span></div>
+  <div class="exp"><div class="eg">
+    <div><span>Day 1D</span><b class="grn">+1.2%</b></div><div><span>Mom 2D</span><b class="grn">+2.0%</b></div>
+    <div><span>Week</span><b class="grn">+3.4%</b></div><div><span>Month</span><b class="red">&minus;1.1%</b></div>
+    <div><span>DMA 50</span><b>1,690</b></div><div><span>DMA 200</span><b>1,544</b></div>
+    <div><span>RSI month</span><b>61</b></div><div><span>RSI week</span><b>58</b></div>
+    <div><span>52W index</span><b>84</b></div><div><span>Vol ratio</span><b class="grn">1.7</b></div>
+    <div><span>Sector 1W</span><b class="grn">+2.1%</b></div><div><span>Sector 1M</span><b>+0.3%</b></div>
+  </div></div>
+  <div class="rw"><span class="s">SYMBOL</span><span class="mm"><span>1D &minus;0.8%</span><span>RSI 47</span></span><span class="g amb">6.1</span><span class="cx">&#9656;</span></div>
+  <div class="rw"><span class="s">SYMBOL</span><span class="mm"><span>1D +0.3%</span><span>RSI 55</span></span><span class="g grn">7.6</span><span class="cx">&#9656;</span></div>
+  <div class="ph">not a table &mdash; a lookup. 208 symbols, search first</div>
+</div>
+
+<div class="ttl">6 &middot; Live news</div>
+<div class="scr">
+  <div class="nh"><span class="live">&#9679; LIVE</span><span class="mut" style="font-size:11px">Newest 12m ago</span><span class="c2">575 in 48h</span></div>
+  <div class="itm"><div class="ith"><span class="itg">SYMBOL</span>Headline sits here at a size you can actually read on a phone, two lines if it needs them.</div><div class="itm2"><span>Source name</span><span class="dt2">&#9679;</span><span>12m ago</span></div></div>
+  <div class="itm"><div class="ith">Market-wide headline with no symbol tag, because it is not about one company.</div><div class="itm2"><span>Source name</span><span class="dt2">&#9679;</span><span>38m ago</span></div></div>
+  <div class="itm"><div class="ith"><span class="itg">SYMBOL</span>Another company headline, newest first, no link out.</div><div class="itm2"><span>Source name</span><span class="dt2">&#9679;</span><span>1h ago</span></div></div>
+  <div class="more">Show 30 older &#9662;</div>
+  <div class="ph">age of the newest headline, never the browser clock</div>
+</div>
+
+<div class="ttl">7 &middot; Results</div>
+<div class="scr">
+  <div class="warn">
+    <div class="k">&#9888; BLACKOUT &mdash; YOU HOLD THESE</div>
+    <div class="v">3 positions</div>
+    <div class="s">Reporting within 2 sessions. No new entries, and existing positions are yours to decide on before the print.</div>
+  </div>
+  <div class="dh"><span class="d">Tomorrow &middot; 06 Aug</span><span class="r">4 results</span></div>
+  <div class="rr blk"><span class="s">SYMBOL</span><span class="tg t-held">HELD</span><span class="tg t-blk">BLACKOUT</span></div>
+  <div class="rr blk"><span class="s">SYMBOL</span><span class="tg t-held">HELD</span><span class="tg t-blk">BLACKOUT</span></div>
+  <div class="rr"><span class="s">SYMBOL</span><span class="tg t-u">IN UNIVERSE</span></div>
+  <div class="dh"><span class="d">Fri &middot; 08 Aug</span><span class="r">6 results</span></div>
+  <div class="rr held"><span class="s">SYMBOL</span><span class="tg t-held">HELD</span></div>
+  <div class="rr"><span class="s">SYMBOL</span><span class="tg t-u">IN UNIVERSE</span></div>
+  <div class="ph">leads with the decision you have to make tonight</div>
+</div>
+
+<div class="ttl">8 &middot; Strategy matrix</div>
+<div class="scr">
+  <span class="refchip">REFERENCE &middot; STATIC SPEC</span>
+  <div class="mb">
+    <div class="mt2"><span class="nm">Buy Reversal</span><span class="ver">V6</span><span class="side2 sd-l">LONG</span></div>
+    <div class="edge">
+      <div class="ed"><div class="k">TARGET</div><div class="v grn">+3.0%</div></div>
+      <div class="ed"><div class="k">STOP</div><div class="v red">&minus;3.0%</div></div>
+      <div class="ed"><div class="k">HIT RATE</div><div class="v">62%</div></div>
+    </div>
+    <div class="rule"><span class="k">ENTRY</span><span class="v">Seven conditions, all must hold. Price reversing off <b>S1</b> with GVM at or above the gate.</span></div>
+    <div class="rule"><span class="k">EXIT</span><span class="v">Target, stop, or the EOD rule &mdash; whichever comes first. <b>No requalification</b> once open.</span></div>
+    <div class="rule"><span class="k">NOTE</span><span class="v">Performance counts only V6-stamped trades. Earlier versions are a different book.</span></div>
+  </div>
+  <div class="mb">
+    <div class="mt2"><span class="nm">Sell Momentum</span><span class="ver">V4 N5I</span><span class="side2 sd-s">SHORT</span></div>
+    <div class="edge">
+      <div class="ed"><div class="k">TARGET</div><div class="v grn">+3.0%</div></div>
+      <div class="ed"><div class="k">STOP</div><div class="v red">&minus;3.0%</div></div>
+      <div class="ed"><div class="k">HIT RATE</div><div class="v">58%</div></div>
+    </div>
+    <div class="rule"><span class="k">ENTRY</span><span class="v">Momentum breaking down with <b>mom 2D</b> negative. Weekly RSI was removed in Aug-2026.</span></div>
+    <div class="rule"><span class="k">EXIT</span><span class="v">Target, stop, or EOD. Same discipline as the long side.</span></div>
+    <div class="rule"><span class="k">NOTE</span><span class="v">A tightened filter silently starved this basket once. Any change to it is a spec change, not a tweak.</span></div>
+  </div>
+  <div class="ph">one card per basket &mdash; a narrow screen cannot compare sideways</div>
+</div>
+
+<div class="ph" style="padding:26px 0 0">All eleven V8 surfaces &middot; session_log 16170</div>
+</div></div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="#"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="/preview/v8"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body></html>
