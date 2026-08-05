@@ -301,7 +301,14 @@ PWA_JS = """
     // one that becomes typed-URL-only. Recorded as such in main.py NAV_REGISTRY (rule id=2987).
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
-    ['/scheduler-master', '\\u2699', 'Scheduler']
+    ['/scheduler-master', '\\u2699', 'Scheduler'],
+    // cc#867 (founder 05-Aug): Previews. The founder uses the INSTALLED PWA, which has no address
+    // bar, so /preview/* was unreachable for him even though cc#866 shipped the route. This array
+    // renders in BOTH form factors, so this ONE line puts a Previews row in the mobile More sheet
+    // and on the desktop top-nav — no PRIMARY change, no second entry.
+    // TEMPORARY BY DESIGN: this exists for the review period only. Deleting this one line is the
+    // entire rollback; the /preview route and preview_endpoints.py stay untouched either way.
+    ['/preview', '\\u25f1', 'Previews']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {

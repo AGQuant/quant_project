@@ -982,6 +982,9 @@ def adaptive_dashboard_page():
 # INTERNAL = deliberately not in nav (test/dev). Keep this in sync when adding a page (nav-complete
 # shipping rule: a page is not "done" until it is routed + in BOTH navs, collision-free, cache-safe).
 NAV_REGISTRY = {
+    # cc#867: temporary review-period entry. Mirrored here so the registry cannot drift from
+    # the live NAV array (rule 2987). Removing the pwa_endpoints.py line is the whole rollback.
+    "/preview":      ("Previews \u2014 review screens, temporary", "nav"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),
