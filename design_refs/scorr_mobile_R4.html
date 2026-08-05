@@ -1,0 +1,434 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorr Mobile — Design Ref R4 · Home</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* TOKENS — verbatim from scorr_home.html :root (sha 9ffbcba). Same palette as R3. */
+:root{
+  --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+  --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+h1{font-size:26px;font-weight:800;letter-spacing:-.01em;margin:6px 0 4px}
+h2{font-size:15px;font-weight:800;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;line-height:1.6;margin:0}
+section{border-top:1px solid var(--line);margin-top:34px;padding-top:18px}
+section > .eyebrow{margin-bottom:10px}
+.note{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:13px 15px;
+  font-size:12.5px;line-height:1.6;color:var(--mut);margin:12px 0}
+.note b{color:var(--txt)}
+.note.warn{border-color:rgba(245,185,74,.42);background:rgba(245,185,74,.06)}
+.note.stop{border-color:rgba(255,92,108,.42);background:rgba(255,92,108,.06)}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+th{text-align:left;font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);border-bottom:1px solid var(--line2);padding:8px 9px;white-space:nowrap}
+td{border-bottom:1px solid var(--line);padding:9px;vertical-align:top;color:var(--mut);line-height:1.5}
+td.k{color:var(--txt);font-weight:600;white-space:nowrap}
+.scroll{overflow-x:auto}
+.tier{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.08em;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.t1{background:rgba(77,124,254,.16);color:#8FB0FF;border:1px solid rgba(77,124,254,.45)}
+.t2{background:rgba(55,211,232,.10);color:var(--cyan);border:1px solid rgba(55,211,232,.32)}
+.t3{background:rgba(148,166,210,.08);color:var(--dim);border:1px solid var(--line2)}
+.t0{background:rgba(148,166,210,.06);color:var(--mut);border:1px dashed var(--line2)}
+ul{margin:8px 0 0;padding-left:17px;color:var(--mut);font-size:12.5px;line-height:1.75}
+li{margin-bottom:5px} li b,p b{color:var(--txt)}
+.src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--cyan)}
+
+/* ---------- PHONE MOCK ---------- */
+.phones{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px}
+.phone{width:360px;background:var(--bg);border:1px solid var(--line2);border-radius:22px;
+  padding:0 0 6px;overflow:hidden;box-shadow:0 18px 44px rgba(3,7,20,.5)}
+.plabel{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);margin:0 0 7px 3px}
+
+/* index strip — chrome, not a card */
+.strip{display:flex;gap:0;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:9px 12px;align-items:center}
+.sitem{flex:1;min-width:0}
+.sitem .n{font-size:9.5px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
+.sitem .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:13px;font-weight:700;margin-top:2px}
+.sitem .d{font-size:10px;font-weight:700;margin-left:5px}
+.sdiv{width:1px;height:26px;background:var(--line);margin:0 10px}
+
+.body{padding:14px 13px 0}
+.seg{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:12px}
+.segb{flex:1;text-align:center;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--mut);padding:9px 0;border-radius:8px}
+.segb.on{background:var(--panel);color:var(--txt)}
+
+.hero{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:15px 15px 13px 18px;overflow:hidden}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--grn);
+  animation:breathe 2.6s ease-in-out infinite}
+.hero.flat::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px);animation:none}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.hero::before{animation:none;opacity:1}}
+.htop{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:11px}
+.hlab{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.hbadge{font-size:9px;font-weight:800;padding:2px 8px;border-radius:9px;background:var(--grn-d);
+  color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+.hbig{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:31px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.hcap{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-top:6px}
+.buckets{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:13px}
+.bk{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.bk .l{font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.bk .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:14px;font-weight:700;margin-top:3px}
+.buckets2{grid-template-columns:1fr 1fr;margin-top:7px}
+.grn{color:var(--grn)}.red{color:var(--red)}.mut{color:var(--mut)}.dim{color:var(--dim)}
+
+/* position row anatomy */
+.prow{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px}
+.prow-t{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.psym{font-weight:800;font-size:13px;color:var(--dim);border:1px dashed var(--line2);border-radius:5px;padding:0 7px}
+.pill{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:9px}
+.p-long{background:var(--grn-d);color:var(--grn)}
+.p-src{background:transparent;color:var(--mut);border:1px dashed var(--mut);font-style:italic}
+.pmtm{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px;color:var(--dim)}
+.psub{font-size:10.5px;color:var(--dim);margin-top:5px}
+.anno{font-size:9.5px;color:var(--blu);margin-top:6px;line-height:1.5}
+
+.expand{display:flex;align-items:center;justify-content:space-between;background:var(--panel2);
+  border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:11px;
+  font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.flatmsg{font-size:12px;color:var(--mut);line-height:1.6;margin-top:12px}
+.cta{display:block;text-align:center;min-height:44px;line-height:44px;margin-top:12px;
+  border-top:1px solid var(--line);color:var(--blu);font-weight:700;font-size:13px}
+
+.slab{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+  margin:18px 0 9px}
+.models{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mt{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.mt .nm{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:6px}
+.mt .ds{font-size:10.5px;color:var(--mut);margin-top:4px;line-height:1.4}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);display:inline-block}
+.dot.off{background:var(--dim)}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.tool{font-size:11px;font-weight:600;color:var(--mut);background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:9px 11px;min-height:40px;display:flex;align-items:center}
+
+.bnav{display:flex;background:var(--panel);border-top:1px solid var(--line2);margin-top:16px;padding:6px 0 4px}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0}
+.bn .i{display:block;font-size:15px;margin-bottom:3px}
+.bn.on{color:var(--blu)}
+</style>
+
+<div class="wrap">
+
+<div class="eyebrow">Scorr mobile · design reference · revision 4</div>
+<h1>Home — the book first, the models second, everything else third</h1>
+<p class="sub">Authored by Claude.ai, 05-Aug-2026. Dark theme (15913), same tokens as R3. Code read:
+<span class="mono">scorr_home.html</span> at sha <span class="mono">9ffbcba</span>. Values below are
+real rows from the database, read at authoring time. Chains after R3; supersedes nothing.</p>
+
+<div class="note stop">
+<b>Every number in the mock is SAMPLE data.</b> Real, but frozen. CC replaces each one with the
+endpoint and field named in section 3. A design ref is never a source of truth.
+</div>
+
+<!-- ============================================================ -->
+<section>
+<div class="eyebrow">1 · Bottom nav</div>
+<h2>Five slots, one navigation</h2>
+<p class="sub">From NAV_UX_SPEC_V1 (637): the mobile bottom nav carries the five items flagged
+<span class="mono">mobile:true</span> — Home, GVM, Check, Intel, V10. MOBILE_APP_FRAMEWORK_V1
+(15913) amends slot 5: <b>V10 becomes Models</b>, the registry-driven launcher from cc#860. V10
+does not disappear — it moves inside the launcher, where its LIVE badge follows run data.</p>
+<div class="note">
+Below 768px this is the <b>only</b> navigation. No top nav, no More sheet, no horizontal tab row —
+15913 core rule. The desktop <span class="mono">.model-nav</span> strip at the top of
+<span class="mono">scorr_home.html</span> hides below the breakpoint.
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<div class="eyebrow">2 · The screen</div>
+<h2>Loaded book, and the flat book</h2>
+<p class="sub">Two states, both real. The left is week 27-Jul (4 open, ₹15,670.36 net). The right is
+this week, 03-Aug — the book is genuinely flat, and that is a state the design has to handle well
+rather than treat as an error.</p>
+
+<div class="phones">
+
+  <!-- ============ PHONE 1 — loaded ============ -->
+  <div>
+  <div class="plabel">A · book open</div>
+  <div class="phone">
+
+    <div class="strip">
+      <div class="sitem"><div class="n">Nifty 50</div><div class="v">--<span class="d dim">--</span></div></div>
+      <div class="sdiv"></div>
+      <div class="sitem"><div class="n">Bank Nifty</div><div class="v">--<span class="d dim">--</span></div></div>
+    </div>
+
+    <div class="body">
+      <div class="seg">
+        <div class="segb on">SmartGain</div><div class="segb">Client</div><div class="segb">Test</div>
+      </div>
+
+      <div class="hero">
+        <div class="htop">
+          <div class="hlab">Week M2M · MHK40</div>
+          <span class="hbadge">LIVE</span>
+        </div>
+        <div class="hbig grn">+₹15,670.36</div>
+        <div class="hcap">Net = Realised + Unrealised − Brokerage</div>
+
+        <div class="buckets">
+          <div class="bk"><div class="l">Realised</div><div class="v grn">+₹15,491</div></div>
+          <div class="bk"><div class="l">Unrealised</div><div class="v grn">+₹575</div></div>
+          <div class="bk"><div class="l">Brokerage</div><div class="v mut">−₹395.64</div></div>
+        </div>
+        <div class="buckets buckets2">
+          <div class="bk"><div class="l">Long value</div><div class="v">₹4,63,914</div></div>
+          <div class="bk"><div class="l">Short value</div><div class="v dim">₹0</div></div>
+        </div>
+
+        <div class="slab" style="margin:14px 0 0">Long · 4 open</div>
+        <div class="prow">
+          <div class="prow-t">
+            <span class="psym">SYMBOL</span>
+            <span class="pill p-long">LONG</span>
+            <span class="pill p-src">Undefined</span>
+            <span class="pmtm">+₹0,000</span>
+          </div>
+          <div class="psub">000 qty · ₹0,00,000 · +0.00% · Wt 00.0%</div>
+          <div class="psub">Avg ₹000.00 · CMP ₹000.00</div>
+          <div class="anno">▲ Row anatomy. Symbol · direction · source pill (tap to set) ·
+            M2M right-aligned · qty/value/gain/weight · avg and CMP. Unchanged from desktop —
+            it already works on a phone.</div>
+        </div>
+
+        <div class="expand"><span>▸ Daily M2M &amp; closed trades</span><span>+₹15,670 net</span></div>
+        <div class="cta">View Holdings ›</div>
+      </div>
+
+      <div class="slab">Models</div>
+      <div class="models">
+        <div class="mt"><div class="nm"><span class="dot"></span>V8</div>
+          <div class="ds">Live 5-min signals across the futures universe</div></div>
+        <div class="mt"><div class="nm"><span class="dot"></span>V10</div>
+          <div class="ds">Supertrend and EMA on Nifty and Bank Nifty</div></div>
+        <div class="mt"><div class="nm"><span class="dot off"></span>V14 Intraday</div>
+          <div class="ds">Intraday engine, squares off at 15:15</div></div>
+        <div class="mt"><div class="nm"><span class="dot"></span>Trade Check</div>
+          <div class="ds">Score any symbol before you take the trade</div></div>
+      </div>
+
+      <div class="slab">Tools</div>
+      <div class="tools">
+        <span class="tool">Sector</span><span class="tool">Scanners</span><span class="tool">QB</span>
+        <span class="tool">GVM</span><span class="tool">Intel</span><span class="tool">FPC</span>
+        <span class="tool">Max</span><span class="tool">Holdings</span><span class="tool">V12</span>
+        <span class="tool">V13</span>
+      </div>
+    </div>
+
+    <div class="bnav">
+      <div class="bn on"><span class="i">⌂</span>Home</div>
+      <div class="bn"><span class="i">◉</span>GVM</div>
+      <div class="bn"><span class="i">✓</span>Check</div>
+      <div class="bn"><span class="i">▤</span>Intel</div>
+      <div class="bn"><span class="i">▦</span>Models</div>
+    </div>
+  </div>
+  </div>
+
+  <!-- ============ PHONE 2 — flat ============ -->
+  <div>
+  <div class="plabel">B · book flat (this week, real)</div>
+  <div class="phone">
+
+    <div class="strip">
+      <div class="sitem"><div class="n">Nifty 50</div><div class="v">--<span class="d dim">--</span></div></div>
+      <div class="sdiv"></div>
+      <div class="sitem"><div class="n">Bank Nifty</div><div class="v">--<span class="d dim">--</span></div></div>
+    </div>
+
+    <div class="body">
+      <div class="seg">
+        <div class="segb on">SmartGain</div><div class="segb">Client</div><div class="segb">Test</div>
+      </div>
+
+      <div class="hero flat">
+        <div class="htop">
+          <div class="hlab">Week M2M · MHK40</div>
+          <span class="hbadge" style="background:transparent;color:var(--dim);border:1px dashed var(--line2)">FLAT</span>
+        </div>
+        <div class="hbig grn">+₹200.38</div>
+        <div class="hcap">Realised this week · nothing open</div>
+
+        <div class="buckets">
+          <div class="bk"><div class="l">Realised</div><div class="v grn">+₹407</div></div>
+          <div class="bk"><div class="l">Unrealised</div><div class="v dim">₹0</div></div>
+          <div class="bk"><div class="l">Brokerage</div><div class="v mut">−₹206.62</div></div>
+        </div>
+
+        <div class="flatmsg">No positions open. Six trades closed this week.</div>
+        <div class="expand"><span>▸ Daily M2M &amp; closed trades</span><span>6 closed</span></div>
+        <div class="cta">View Holdings ›</div>
+      </div>
+
+      <div class="slab">Models</div>
+      <div class="models">
+        <div class="mt"><div class="nm"><span class="dot"></span>V8</div>
+          <div class="ds">Live 5-min signals across the futures universe</div></div>
+        <div class="mt"><div class="nm"><span class="dot"></span>V10</div>
+          <div class="ds">Supertrend and EMA on Nifty and Bank Nifty</div></div>
+      </div>
+    </div>
+
+    <div class="bnav">
+      <div class="bn on"><span class="i">⌂</span>Home</div>
+      <div class="bn"><span class="i">◉</span>GVM</div>
+      <div class="bn"><span class="i">✓</span>Check</div>
+      <div class="bn"><span class="i">▤</span>Intel</div>
+      <div class="bn"><span class="i">▦</span>Models</div>
+    </div>
+  </div>
+  </div>
+
+</div>
+
+<div class="note warn">
+<b>The flat state is not an empty state.</b> The book being flat is information, not a failure. It
+keeps the real realised figure, drops the Unrealised and Long/Short tiles that would all read zero,
+and says plainly what happened. It never shows a spinner, an error, or a row of zeros.
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<div class="eyebrow">3 · Sources</div>
+<h2>Tier and header value source</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Block</th><th>Tier</th><th>Header value</th><th>Source</th><th>Field</th></tr></thead>
+<tbody>
+<tr><td class="k">Index strip</td><td><span class="tier t0">CHROME</span></td>
+  <td>Nifty 50 and Bank Nifty, last price + day%</td>
+  <td class="src">/api/v8/domestic_live</td>
+  <td>NOT YET VERIFIED — field names must be read off the endpoint before wiring. This block does
+      not exist on the current Home; it is new in cc#862.</td></tr>
+<tr><td class="k">Book switcher</td><td><span class="tier t0">CHROME</span></td>
+  <td>SmartGain · Client · Test</td><td>local state</td>
+  <td class="mono">setSGView()</td></tr>
+<tr><td class="k">SmartGain hero</td><td><span class="tier t1">PRIMARY</span></td>
+  <td>Week net M2M, big. Realised / Unrealised / Brokerage beneath.</td>
+  <td class="src">/api/smartgain/m2m</td>
+  <td class="mono">net · realised · unrealised · brokerage · gross · positions[]</td></tr>
+<tr><td class="k">Long / Short value</td><td><span class="tier t1">PRIMARY</span></td>
+  <td>Open value per side</td><td class="src">/api/smartgain/m2m</td>
+  <td class="mono">Σ(qty × ltp) per direction</td></tr>
+<tr><td class="k">Position rows</td><td><span class="tier t1">PRIMARY</span></td>
+  <td>Long group then Short, each sorted by signed gain%</td>
+  <td class="src">/api/smartgain/m2m</td>
+  <td class="mono">positions[] · pricing_method · source_tag · v8_basket</td></tr>
+<tr><td class="k">Daily M2M panel</td><td><span class="tier t2">SECONDARY</span></td>
+  <td>Week net on the collapsed tab</td><td class="src">/api/smartgain/daily_m2m</td>
+  <td class="mono">week_net · days[] · closed_positions[]</td></tr>
+<tr><td class="k">Client / Test books</td><td><span class="tier t2">SECONDARY</span></td>
+  <td>Open count and grand total M2M</td>
+  <td class="src">/api/clients/positions<br>/api/test/positions</td>
+  <td class="mono">grand_total_mtm · total_positions</td></tr>
+<tr><td class="k">Models</td><td><span class="tier t2">SECONDARY</span></td>
+  <td>Four public models, live dot per model</td>
+  <td class="src">model_registry</td>
+  <td class="mono">is_public = true, ORDER BY sort_order</td></tr>
+<tr><td class="k">Tools</td><td><span class="tier t3">TERTIARY</span></td>
+  <td>Label only, no value</td><td>static route list</td>
+  <td>the non-model pages</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<div class="eyebrow">4 · Rules for the build</div>
+<h2>What will otherwise go wrong</h2>
+
+<div class="note stop">
+<b>1 · Model tiles are registry-derived. Tool chips are not.</b> The four model tiles come from
+<span class="mono">model_registry WHERE is_public = true</span> — four rows today: V8, V10,
+V14 Intraday, Trade Check. Never hardcode that list (SCHEDULER_MASTER_RULE 5700). The Tools chips
+are plain navigation to pages, not engines, so a static route list is correct there. Do not blur
+the two.
+</div>
+
+<div class="note stop">
+<b>2 · The live dot follows run data, not the registry row.</b> ENGINE_LIVENESS_RULE (13829). A
+model appearing in <span class="mono">model_registry</span> means it is registered, not that it
+ran. Join to <span class="mono">scheduler_master</span> for last-run and light the dot from that.
+V14 shows a grey dot in the mock on purpose to make the difference visible.
+</div>
+
+<div class="note warn">
+<b>3 · The STALE badge already exists — reuse it.</b>
+<span class="mono">/api/smartgain/m2m</span> returns <span class="mono">stale</span> and
+<span class="mono">degraded</span> flags, and the current page already renders a STALE chip from
+them (cc#771). Mobile reads the same flags. Do not invent a second staleness rule for this card.
+</div>
+
+<div class="note warn">
+<b>4 · Keep the retry, keep "no live price".</b> Two behaviours on the current page are hard-won
+and must survive the re-skin: the single silent retry before showing "Could not load" (cc#771), and
+<span class="mono">pricing_method = "unavailable"</span> rendering as an amber "no live price"
+rather than a blank or a wrong CMP (cc#161). Both are data-honesty, not styling.
+</div>
+
+<div class="note warn">
+<b>5 · Thirteen tiles become four plus ten chips.</b> The current Home hides 13 equal-weight tiles
+behind a "Show All" button. Nothing is lost in this design — every route survives — but the four
+models are promoted and the rest become quiet chips. If a route is missing after the re-skin, that
+is a bug, not a simplification.
+</div>
+
+<h2 style="margin-top:22px">Do not touch</h2>
+<ul>
+  <li>The source-pill editor and its delegated click handler. It survives the 30s re-render on
+      purpose; a naive re-write will break editing.</li>
+  <li>The 30s SmartGain poll and the 120s daily-M2M poll, including the rule that the chart only
+      auto-refreshes while viewing the current week.</li>
+  <li><span class="mono">cache:'no-store'</span> on every book fetch (cc#769).</li>
+  <li>Desktop DOM above 768px.</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<div class="eyebrow">5 · Open for the founder</div>
+<h2>Three calls</h2>
+<ul>
+  <li><b>Index strip — two indices or more?</b> Drawn as Nifty 50 and Bank Nifty. Adding VIX or a
+      global item makes it a scrolling strip, which competes with the hero for the top of the
+      screen. Two is the recommendation.</li>
+  <li><b>Client and Test books on the phone at all?</b> They are your operating tools, not a retail
+      surface. Keeping the three-way switch on mobile is fine for you and wrong for a customer.
+      This may be the first place the retail app and your own app need to differ.</li>
+  <li><b>Tools as chips, or drop them from Home entirely</b> and let the Models launcher carry
+      everything. Chips keep every route reachable, which is why R4 draws them.</li>
+</ul>
+</section>
+
+<div style="margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:11px;color:var(--dim);line-height:1.7">
+design_refs/scorr_mobile_R4.html · authored 05-Aug-2026 · dark theme per 15913 ·
+nav per 637 as amended by 15913 · source read scorr_home.html @ 9ffbcba ·
+chains after R3 · never overwrite a revision
+</div>
+
+</div>
