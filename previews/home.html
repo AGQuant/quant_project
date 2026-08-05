@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — HOME
+   Screen 2. Design ref design_refs/scorr_mobile_R4.html (fa0f1f2).
+   Tokens verbatim from scorr_home.html :root (9ffbcba). Dark, per 15913.
+
+   ALL VALUES ARE DUMMY — but every one is a real row read from the DB on
+   05-Aug-2026. Nothing here fetches. Wiring is a separate cc_task.
+============================================================================= */
+:root{
+  --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+  --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh}
+
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+
+/* ---- index strip: chrome, not a card ---- */
+.strip{display:flex;align-items:center;background:var(--panel);
+  border-bottom:1px solid var(--line);padding:10px 14px}
+.si{flex:1;min-width:0}
+.si .n{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.si .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:14px;font-weight:700;margin-top:3px}
+.si .d{font-size:10.5px;font-weight:700;margin-left:6px}
+.sdiv{width:1px;height:28px;background:var(--line);margin:0 12px}
+.sclosed{font-size:8.5px;font-weight:800;letter-spacing:.06em;color:var(--dim);
+  border:1px dashed var(--line2);border-radius:4px;padding:2px 6px;white-space:nowrap}
+
+.body{padding:14px 12px 0}
+
+/* ---- book switcher ---- */
+.seg{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:11px;
+  padding:3px;margin-bottom:13px}
+.segb{flex:1;text-align:center;font-size:11px;font-weight:800;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--mut);padding:0;min-height:40px;line-height:40px;
+  border-radius:8px;border:none;background:transparent;font-family:inherit}
+.segb.on{background:var(--panel);color:var(--txt)}
+
+/* ---- hero: PRIMARY section card. No chevron, never collapses (16157). ---- */
+.hero{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:16px;padding:15px 15px 14px 18px;overflow:hidden;margin-bottom:11px}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--grn);
+  animation:breathe 2.6s ease-in-out infinite}
+.hero.flat::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px);
+  animation:none}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.hero::before{animation:none;opacity:1}}
+.htop{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:10px}
+.hlab{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.hbadge{font-size:9px;font-weight:800;padding:3px 8px;border-radius:9px;white-space:nowrap;
+  background:var(--grn-d);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+.hbadge.off{background:transparent;color:var(--dim);border:1px dashed var(--line2)}
+.hbig{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:32px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.hcap{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--dim);margin-top:7px}
+.bks{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:14px}
+.bks2{grid-template-columns:1fr 1fr;margin-top:7px}
+.bk{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.bk .l{font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.bk .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:14px;font-weight:700;margin-top:4px}
+.flatmsg{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:14px}
+
+/* ---- position rows ---- */
+.grp{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mut);margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.pr{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;margin-bottom:7px}
+.prt{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.psym{font-weight:800;font-size:13.5px}
+.pill{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap}
+.p-short{background:var(--red-d);color:var(--red)}
+.p-long{background:var(--grn-d);color:var(--grn)}
+.p-src{background:transparent;color:var(--mut);border:1px dashed var(--mut);font-style:italic}
+.pmtm{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-weight:800;font-size:13.5px}
+.psub{font-size:10.5px;color:var(--mut);margin-top:5px;display:flex;gap:7px;flex-wrap:wrap;
+  align-items:center}
+.pwt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:9.5px;
+  color:var(--mut);background:rgba(148,166,210,.1);border:1px solid var(--line);
+  border-radius:6px;padding:1px 6px}
+.pavg{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.dot{color:var(--dim);font-size:9px}
+
+.expand{display:flex;align-items:center;justify-content:space-between;background:var(--panel2);
+  border:1px solid var(--line);border-radius:10px;padding:0 12px;margin-top:12px;min-height:44px;
+  font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.cta{display:block;text-align:center;min-height:44px;line-height:44px;margin-top:12px;
+  border-top:1px solid var(--line);color:var(--blu);font-weight:700;font-size:13px;
+  text-decoration:none}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:0 3px 9px;
+  border-left:2px solid var(--line2);padding-left:9px}
+
+.slab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);margin:22px 3px 10px;display:flex;align-items:center;gap:9px}
+.slab::after{content:'';flex:1;height:1px;background:var(--line)}
+
+.models{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.mt{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px;
+  min-height:76px;text-decoration:none;color:inherit;display:block}
+.mt .nm{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:7px}
+.mt .ds{font-size:10.5px;color:var(--mut);margin-top:5px;line-height:1.4}
+.ldot{width:6px;height:6px;border-radius:50%;background:var(--grn);flex-shrink:0}
+.ldot.off{background:var(--dim)}
+
+.tools{display:flex;flex-wrap:wrap;gap:7px}
+.tool{font-size:11.5px;font-weight:600;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;padding:0 13px;min-height:42px;
+  display:flex;align-items:center;text-decoration:none}
+
+.grn{color:var(--grn)}.red{color:var(--red)}.mut{color:var(--mut)}.dim{color:var(--dim)}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Every figure is a real DB row from 05-Aug-2026, frozen into the page.
+    Nothing here is live.</span>
+  </div>
+
+  <!-- index strip -->
+  <div class="strip">
+    <div class="si">
+      <div class="n">Nifty 50</div>
+      <div class="v">24,624.65<span class="d grn">+0.04%</span></div>
+    </div>
+    <div class="sdiv"></div>
+    <div class="si">
+      <div class="n">Bank Nifty</div>
+      <div class="v">57,739.95<span class="d red">&minus;0.29%</span></div>
+    </div>
+    <span class="sclosed">CLOSED 05 AUG</span>
+  </div>
+
+  <div class="body">
+
+    <div class="seg">
+      <button class="segb on">SmartGain</button>
+      <button class="segb">Client</button>
+      <button class="segb">Test</button>
+    </div>
+
+    <!-- ============ HERO — this week, real, FLAT ============ -->
+    <div class="hero flat">
+      <div class="htop">
+        <div class="hlab">Week M2M &middot; MHK40</div>
+        <span class="hbadge off">FLAT</span>
+      </div>
+      <div class="hbig grn">+&#8377;200.38</div>
+      <div class="hcap">Realised this week &middot; nothing open</div>
+
+      <div class="bks">
+        <div class="bk"><div class="l">Realised</div><div class="v grn">+&#8377;407</div></div>
+        <div class="bk"><div class="l">Unrealised</div><div class="v dim">&#8377;0</div></div>
+        <div class="bk"><div class="l">Brokerage</div><div class="v mut">&minus;&#8377;206.62</div></div>
+      </div>
+
+      <div class="flatmsg">No positions open. Six trades closed this week.</div>
+
+      <div class="expand"><span>&#9656; Daily M2M &amp; closed trades</span><span>6 closed</span></div>
+      <a class="cta" href="#">View Holdings &rsaquo;</a>
+    </div>
+
+    <div class="note">
+      Above is the real state right now — the book is flat. Below is the same card with the book
+      open, so the full layout can be judged. Both are real: 04-Aug fills marked to the 05-Aug close.
+    </div>
+
+    <!-- ============ HERO — book open ============ -->
+    <div class="hero">
+      <div class="htop">
+        <div class="hlab">Week M2M &middot; MHK40</div>
+        <span class="hbadge">LIVE</span>
+      </div>
+      <div class="hbig red">&minus;&#8377;7,186.50</div>
+      <div class="hcap">Net = Realised + Unrealised &minus; Brokerage</div>
+
+      <div class="bks">
+        <div class="bk"><div class="l">Realised</div><div class="v dim">&#8377;0</div></div>
+        <div class="bk"><div class="l">Unrealised</div><div class="v red">&minus;&#8377;7,187</div></div>
+        <div class="bk"><div class="l">Brokerage</div><div class="v mut">&minus;&#8377;84.19</div></div>
+      </div>
+      <div class="bks bks2">
+        <div class="bk"><div class="l">Long value</div><div class="v dim">&#8377;0</div></div>
+        <div class="bk"><div class="l">Short value</div><div class="v">&#8377;7,64,942</div></div>
+      </div>
+
+      <div class="grp">Short &middot; 4 open</div>
+
+      <div class="pr">
+        <div class="prt">
+          <span class="psym">NIFTY</span>
+          <span class="pill p-short">SHORT</span>
+          <span class="pill p-src">Undefined</span>
+          <span class="pmtm red">&minus;&#8377;347</span>
+        </div>
+        <div class="psub"><span>10 qty</span><span class="dot">&middot;</span><span>&#8377;2,46,247</span>
+          <span class="dot">&middot;</span><span class="red">&minus;0.14%</span>
+          <span class="pwt">Wt 32.2%</span></div>
+        <div class="pavg">Avg &#8377;24,590.00 &middot; CMP &#8377;24,624.65</div>
+      </div>
+
+      <div class="pr">
+        <div class="prt">
+          <span class="psym">APOLLOHOSP</span>
+          <span class="pill p-short">SHORT</span>
+          <span class="pill p-src">Sell Momentum</span>
+          <span class="pmtm red">&minus;&#8377;1,010</span>
+        </div>
+        <div class="psub"><span>20 qty</span><span class="dot">&middot;</span><span>&#8377;1,78,200</span>
+          <span class="dot">&middot;</span><span class="red">&minus;0.57%</span>
+          <span class="pwt">Wt 23.3%</span></div>
+        <div class="pavg">Avg &#8377;8,859.50 &middot; CMP &#8377;8,910.00</div>
+      </div>
+
+      <div class="pr">
+        <div class="prt">
+          <span class="psym">PETRONET</span>
+          <span class="pill p-short">SHORT</span>
+          <span class="pill p-src">Undefined</span>
+          <span class="pmtm red">&minus;&#8377;2,300</span>
+        </div>
+        <div class="psub"><span>1,000 qty</span><span class="dot">&middot;</span><span>&#8377;2,80,800</span>
+          <span class="dot">&middot;</span><span class="red">&minus;0.83%</span>
+          <span class="pwt">Wt 36.7%</span></div>
+        <div class="pavg">Avg &#8377;278.50 &middot; CMP &#8377;280.80</div>
+      </div>
+
+      <div class="pr">
+        <div class="prt">
+          <span class="psym">HINDZINC</span>
+          <span class="pill p-short">SHORT</span>
+          <span class="pill p-src">Sell Reversal</span>
+          <span class="pmtm red">&minus;&#8377;3,530</span>
+        </div>
+        <div class="psub"><span>100 qty</span><span class="dot">&middot;</span><span>&#8377;59,695</span>
+          <span class="dot">&middot;</span><span class="red">&minus;6.28%</span>
+          <span class="pwt">Wt 7.8%</span></div>
+        <div class="pavg">Avg &#8377;561.65 &middot; CMP &#8377;596.95</div>
+      </div>
+
+      <div class="expand"><span>&#9656; Daily M2M &amp; closed trades</span><span>&minus;&#8377;7,187</span></div>
+      <a class="cta" href="#">View Holdings &rsaquo;</a>
+    </div>
+
+    <!-- ============ MODELS ============ -->
+    <div class="slab">Models</div>
+    <div class="models">
+      <a class="mt" href="/preview/v8">
+        <div class="nm"><span class="ldot"></span>V8</div>
+        <div class="ds">Live 5-min signals across the futures universe</div>
+      </a>
+      <a class="mt" href="#">
+        <div class="nm"><span class="ldot"></span>V10</div>
+        <div class="ds">Supertrend and EMA on Nifty and Bank Nifty</div>
+      </a>
+      <a class="mt" href="#">
+        <div class="nm"><span class="ldot off"></span>V14 Intraday</div>
+        <div class="ds">Intraday engine, squares off at 15:15</div>
+      </a>
+      <a class="mt" href="#">
+        <div class="nm"><span class="ldot"></span>Trade Check</div>
+        <div class="ds">Score any symbol before you take the trade</div>
+      </a>
+    </div>
+    <div class="note" style="margin-top:10px">
+      Four tiles, taken from model_registry where is_public is true. Never a typed list. The dot is
+      lit from the model's last run, not from the row existing — V14 is grey on purpose.
+    </div>
+
+    <!-- ============ TOOLS ============ -->
+    <div class="slab">Tools</div>
+    <div class="tools">
+      <a class="tool" href="#">Sector</a>
+      <a class="tool" href="#">Scanners</a>
+      <a class="tool" href="#">QB</a>
+      <a class="tool" href="#">GVM</a>
+      <a class="tool" href="#">Intel</a>
+      <a class="tool" href="#">FPC</a>
+      <a class="tool" href="#">Max</a>
+      <a class="tool" href="#">Holdings</a>
+      <a class="tool" href="#">V12</a>
+      <a class="tool" href="#">V13</a>
+    </div>
+
+    <div class="foot">
+      Screen 2 &middot; Home &middot; book first, models second, tools third<br>
+      design_refs/scorr_mobile_R4.html &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn on" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="#"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/v8"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
