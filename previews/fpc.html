@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planner · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — FPC / PLANNER (Batch 9, screen 2)
+   Dark per 15913. The web FPC (fpc_v11.html) is a full multi-section
+   calculator; a phone gets the OPPOSITE shape: one goal, a few inputs,
+   one big answer, assumptions stated.
+
+   DESIGN DECISIONS (for founder review):
+   - Mobile planner = ONE question at a time. The picker at top switches goal
+     (Retirement / Child education / Buy a house / Wealth target). One screen,
+     one answer, never eleven sections.
+   - The ANSWER is the PRIMARY: the monthly SIP needed. Everything else exists
+     to justify that one number.
+   - Assumptions are on the card, not buried: 12% return pre-retirement, 6%
+     inflation. Editable. A calculator that hides its assumptions is a toy.
+   - The worked example below is ARITHMETIC, not user data: Rs 5 crore target,
+     20 years, 12% -> Rs 50,000/month. The maths is real; the person is
+     illustrative and the card SAYS so. No user figures exist to freeze.
+   - Numbers formatted the Indian way: lakh / crore, never millions.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;--cyan:#37D3E8;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:12px 12px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:16px 3px 8px}
+.sect:first-child{margin-top:2px}
+
+/* goal picker — one scrolling row */
+.chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;min-height:36px;display:inline-flex;align-items:center;
+  padding:0 13px;border-radius:18px;border:1px solid var(--line2);
+  font-size:11.5px;font-weight:700;color:var(--mut);white-space:nowrap}
+.chip.on{color:var(--txt);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.14)}
+
+/* inputs */
+.in{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:11px 13px;margin-bottom:8px;display:flex;align-items:baseline;gap:10px;min-height:48px}
+.ink{font-size:12px;font-weight:700;color:var(--mut)}
+.inv{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:15px;font-weight:800;color:var(--txt)}
+.inv .u{font-size:10px;color:var(--dim);font-weight:700;margin-left:3px}
+
+/* the answer — PRIMARY */
+.ans{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:16px 15px 15px 19px;overflow:hidden;margin-top:12px}
+.ans::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blu)}
+.ak{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.13em;color:var(--dim)}
+.av{font-size:31px;font-weight:800;letter-spacing:-.02em;margin-top:4px;color:var(--cyan);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.av .u{font-size:13px;color:var(--mut);font-weight:700}
+.asub{font-size:12px;color:var(--mut);line-height:1.55;margin-top:8px}
+.asub b{color:var(--txt)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.sp{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.sp .k{font-size:8.5px;letter-spacing:.11em;font-weight:700;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.sp .v{font-size:13px;font-weight:800;margin-top:3px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.sp .v.g{color:var(--grn)}
+
+/* assumptions */
+.ass{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.as1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:4px 9px;border-radius:5px;border:1px dashed var(--line2);color:var(--dim)}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> The worked example below is illustrative arithmetic &mdash; the maths
+    is real, the person is not. No user figures exist yet to freeze in.</span>
+  </div>
+
+  <div class="head">
+    <h1>Planner</h1>
+    <div class="s">one goal &middot; one answer &middot; assumptions stated</div>
+  </div>
+
+  <div class="body">
+
+    <div class="chips">
+      <span class="chip on">Wealth target</span>
+      <span class="chip">Retirement</span>
+      <span class="chip">Child education</span>
+      <span class="chip">Buy a house</span>
+    </div>
+
+    <div class="sect">YOUR THREE INPUTS</div>
+
+    <div class="in"><span class="ink">I want to reach</span><span class="inv">Rs 5<span class="u">crore</span></span></div>
+    <div class="in"><span class="ink">In</span><span class="inv">20<span class="u">years</span></span></div>
+    <div class="in"><span class="ink">Already invested</span><span class="inv">Rs 10<span class="u">lakh</span></span></div>
+
+    <!-- PRIMARY · the answer -->
+    <div class="ans">
+      <div class="ak">MONTHLY SIP NEEDED</div>
+      <div class="av">Rs 40,700<span class="u">/month</span></div>
+      <div class="asub">Your existing <b>Rs 10 lakh</b> grows to about <b>Rs 96 lakh</b> on its
+      own in 20 years. The SIP builds the remaining <b>Rs 4.04 crore</b>. Start a year later
+      and the same goal needs <b>Rs 46,200</b> &mdash; waiting has a price, and this is it.</div>
+      <div class="split">
+        <div class="sp"><div class="k">YOU INVEST</div><div class="v">Rs 1.08 Cr</div></div>
+        <div class="sp"><div class="k">GROWTH EARNS</div><div class="v g">Rs 3.92 Cr</div></div>
+      </div>
+      <div class="ass">
+        <span class="as1">returns 12%/yr &middot; edit</span>
+        <span class="as1">inflation 6% &middot; edit</span>
+        <span class="as1">step-up 0% &middot; edit</span>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      The phone gets the opposite of the web calculator: one goal, three inputs, one big
+      answer. The answer card carries its own assumptions as editable chips &mdash; a
+      calculator that hides its assumptions is a toy. The invest-vs-growth split is the
+      honest teaching moment: over 20 years the market puts in more than you do. The
+      cost-of-waiting line is deliberate; it converts advice into a number.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> in Rs 5 crore at 6% inflation, today's buying power is about
+      Rs 1.56 crore. Show that inflation-adjusted line on the answer card by default, or
+      behind a tap? Default is honest but can demoralise; behind a tap is gentler.
+    </div>
+
+    <div class="foot">
+      Batch 9 &middot; screen 2 of 2 &middot; Planner (FPC)<br>
+      illustrative arithmetic, stated as such &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
