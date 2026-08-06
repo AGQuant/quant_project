@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>CIO · Models</title>
@@ -33,7 +34,7 @@ const API = "";
 const MCP = `${API}/mcp`;
 
 async function mcpCall(tool, args = {}) {
-  const r = await fetch(MCP, {
+  const r = await fetchWithTimeout(MCP, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } }),
@@ -46,7 +47,7 @@ async function mcpCall(tool, args = {}) {
 async function apiGet(path, opts) {
   // cc#268: optional fetch opts (e.g. { signal }) so callers can cancel in-flight requests.
   // Backward-compatible — existing single-arg callers pass opts=undefined (a no-op for fetch).
-  const r = await fetch(`${API}${path}`, opts);
+  const r = await fetchWithTimeout(`${API}${path}`, opts);
   if (!r.ok) throw new Error(`${r.status}`);
   return r.json();
 }

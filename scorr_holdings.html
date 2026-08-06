@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smartgain</title>
@@ -287,7 +288,7 @@ const reasonLabel = r => {
 /* ── Holdings ── */
 async function loadHoldings(smooth=false) {
   try {
-    const r = await fetch(API+"/api/smartgain/m2m", {cache:'no-store'});
+    const r = await fetchWithTimeout(API+"/api/smartgain/m2m", {cache:'no-store'});
     const d = await r.json();
     // cc#763: never leave the "Loading positions…" spinner hanging — clear it on an error response too
     // (first load only; a transient refresh failure keeps the already-rendered positions).
@@ -679,7 +680,7 @@ function renderClosed(d){
 
 async function loadM2M(range){
   try{
-    const r=await fetch(API+"/api/smartgain/daily_m2m?range="+range, {cache:'no-store'});   // cc#763: always a fresh recompute, never a cached replay
+    const r=await fetchWithTimeout(API+"/api/smartgain/daily_m2m?range="+range, {cache:'no-store'});   // cc#763: always a fresh recompute, never a cached replay
     const d=await r.json();
     document.getElementById("m2m-card").style.display="block";
     // cc#181: checksum banner rides on every range response — wrong data can never

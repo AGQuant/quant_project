@@ -163,6 +163,7 @@
   </div>
 </div>
 
+<script src="/scorr_card_common.js"></script>
 <script>
 const API=location.origin;
 const STEP_NAMES=['Universe','Entry','Exit','Backtest','Deploy'];
@@ -196,7 +197,7 @@ async function previewUniverse(){
   const body={filters};if(segment)body.filters.segments=[segment];
   const el=document.getElementById('u_result');el.style.display='inline-block';el.textContent='Previewing…';
   try{
-    const r=await fetch(API+'/api/v12/universe/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filters:body.filters})});
+    const r=await fetchWithTimeout(API+'/api/v12/universe/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filters:body.filters})});
     const j=await r.json();
     if(j.error){el.textContent=j.error;return;}
     el.textContent=j.total+' stocks';
@@ -226,7 +227,7 @@ async function runBacktest(){
   const stEl=document.getElementById('b_status');const btn=document.getElementById('runBtn');
   btn.disabled=true;stEl.textContent='Submitting…';document.getElementById('results').innerHTML='';
   try{
-    const r=await fetch(API+'/api/v12/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r=await fetchWithTimeout(API+'/api/v12/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();
     if(j.error){stEl.textContent=j.error+(j.errors?': '+j.errors.join('; '):'');btn.disabled=false;return;}
     const id=j.backtest_id;stEl.textContent='Running… (backtest #'+id+')';
@@ -237,7 +238,7 @@ async function runBacktest(){
 }
 async function pollBacktest(id){
   try{
-    const r=await fetch(API+'/api/v12/backtest/'+id);const j=await r.json();
+    const r=await fetchWithTimeout(API+'/api/v12/backtest/'+id);const j=await r.json();
     if(j.status==='done'){clearInterval(pollTimer);document.getElementById('runBtn').disabled=false;
       document.getElementById('b_status').textContent='Done.';renderResults(j.result);}
     else if(j.status==='error'){clearInterval(pollTimer);document.getElementById('runBtn').disabled=false;
@@ -313,7 +314,7 @@ function presetCard(p){
 }
 async function loadPresets(){
   try{
-    const r=await fetch(API+'/api/v12/presets');const j=await r.json();
+    const r=await fetchWithTimeout(API+'/api/v12/presets');const j=await r.json();
     PRESETS=(j&&j.presets)||[];
     const box=document.getElementById('presets');if(!box)return;
     box.innerHTML=PRESETS.length?

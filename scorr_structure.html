@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Structure</title>
@@ -149,7 +150,7 @@ $('sym').addEventListener('keydown',function(e){
 document.addEventListener('click',e=>{if(!e.target.closest('.symwrap'))hideAc();});
 async function fetchAc(q){
   try{
-    const d=await(await fetch('/api/gvm/search?q='+encodeURIComponent(q)+'&limit=8')).json();
+    const d=await(await fetchWithTimeout('/api/gvm/search?q='+encodeURIComponent(q)+'&limit=8')).json();
     acItems=d.results||[];acIdx=-1;
     if(!acItems.length){hideAc();return;}
     $('ac').innerHTML=acItems.map((r,i)=>'<div class="ac-row" data-i="'+i+'" onclick="pick(\''+r.symbol+'\')"><span class="ac-sym">'+r.symbol+'</span><span class="ac-nm">'+(r.company_name||'')+'</span></div>').join('');
@@ -169,7 +170,7 @@ async function analyze(){
   $('result').innerHTML='<div class="empty">Analyzing '+sym+' ('+DIR+')...</div>';
   $('actbar').classList.remove('on');
   try{
-    const d=await(await fetch('/api/structure/'+encodeURIComponent(sym)+'?direction='+DIR)).json();
+    const d=await(await fetchWithTimeout('/api/structure/'+encodeURIComponent(sym)+'?direction='+DIR)).json();
     if(d.detail){$('result').innerHTML='<div class="empty err">'+d.detail+'</div>';}
     else render(d);
   }catch(e){$('result').innerHTML='<div class="empty err">'+e.message+'</div>';}

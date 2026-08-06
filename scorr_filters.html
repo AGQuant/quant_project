@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>V13 Screener</title>
@@ -333,7 +334,7 @@ function applyState(st){
 
 async function loadPresets(){
   try{
-    const r=await fetch('/api/v13/presets');
+    const r=await fetchWithTimeout('/api/v13/presets');
     if(!r.ok) return;   // 401 when not authed — silently skip
     const j=await r.json();
     PRESETS=j.presets||[];
@@ -368,7 +369,7 @@ async function savePreset(){
   if(!name) return;
   const st=gatherState();
   try{
-    const r=await fetch('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetchWithTimeout('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name, filters:st.filters, sort_key:st.sort_key, sort_dir:st.sort_dir})});
     if(!r.ok){ alert('Could not save theme ('+r.status+')'); return; }
     const j=await r.json();
@@ -391,7 +392,7 @@ async function renamePreset(id,ev){
   const name=(prompt('Rename theme:', p.name)||'').trim();
   if(!name || name===p.name) return;
   try{
-    const r=await fetch('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+    const r=await fetchWithTimeout('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name})});
     if(!r.ok){ alert(r.status===409?'That name is already taken':'Rename failed ('+r.status+')'); return; }
     await loadPresets();
@@ -403,7 +404,7 @@ async function deletePreset(id,ev){
   const p=PRESETS.find(x=>x.id===id); if(!p) return;
   if(!confirm('Delete theme "'+p.name+'"?')) return;
   try{
-    const r=await fetch('/api/v13/presets/'+id,{method:'DELETE'});
+    const r=await fetchWithTimeout('/api/v13/presets/'+id,{method:'DELETE'});
     if(!r.ok){ alert('Delete failed ('+r.status+')'); return; }
     if(ACTIVE_PRESET===id) ACTIVE_PRESET=null;
     await loadPresets();
@@ -415,10 +416,10 @@ async function loadData(){
   dot.className='dot busy';
   try{
     const [metrics,live,pivots,dayRange]=await Promise.all([
-      fetch('/api/v8/metrics/all').then(r=>r.json()),
-      fetch('/api/v8/live_metrics').then(r=>r.json()),
-      fetch('/api/paper/pivots?limit=300').then(r=>r.json()),
-      fetch('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
+      fetchWithTimeout('/api/v8/metrics/all').then(r=>r.json()),
+      fetchWithTimeout('/api/v8/live_metrics').then(r=>r.json()),
+      fetchWithTimeout('/api/paper/pivots?limit=300').then(r=>r.json()),
+      fetchWithTimeout('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
     ]);
 
     const liveArr = (live && Array.isArray(live.rows)) ? live.rows : (Array.isArray(live)?live:[]);

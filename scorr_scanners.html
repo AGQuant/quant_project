@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Scanners</title>
@@ -159,7 +160,7 @@ async function loadSide(side){
   const dot=document.getElementById(side+'-dot'),st=document.getElementById(side+'-st'),tbl=document.getElementById(side+'-tbl');
   dot.className='dot busy';st.textContent='Scanning...';
   try{
-    const data=await(await fetch(EP[side]+'?limit=40')).json();
+    const data=await(await fetchWithTimeout(EP[side]+'?limit=40')).json();
     window._loaded[side]=true;
     window._nm[side]=data.near_misses||[];
     if(data.now)window._nmtime=hhmm(data.now);

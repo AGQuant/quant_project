@@ -153,7 +153,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
   // calling .json() on it threw "SyntaxError: Unexpected token I, Internal S..." straight into the
   // shelf — a parse exception where a readable error card belongs. Same shape as getJSON() in
   // scorr_card_common.js: read the body as text, surface the server's own message.
-  fetch('/api/health/portfolios').then(function(r){
+  fetchWithTimeout('/api/health/portfolios').then(function(r){
     return r.text().then(function(t){
       var d=null; try{ d=JSON.parse(t); }catch(e){}
       if(!r.ok && !d) throw new Error('server returned '+r.status+' — '+(t||'no body').slice(0,140));

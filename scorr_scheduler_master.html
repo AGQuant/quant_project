@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scheduler Master · Scorr</title>
@@ -182,7 +183,7 @@ tr.hidden{display:none}
     });
   });
 
-  fetch("/api/scheduler/master").then(function(r){return r.json()}).then(function(d){
+  fetchWithTimeout("/api/scheduler/master").then(function(r){return r.json()}).then(function(d){
     var jobs=(d&&d.jobs)||[];
     document.getElementById("msg").style.display="none";
     document.getElementById("filters").style.display="flex";

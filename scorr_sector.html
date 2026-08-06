@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Sector</title>
@@ -150,7 +151,7 @@ function SectorBrief({segment, defaultOpen=false, hideConstituents=false}) {
   const [open, setOpen] = useState(defaultOpen);
   const load = (refresh=false) => {
     setLoading(true);
-    fetch(`/api/sector/brief?segment=${encodeURIComponent(segment)}${refresh?"&refresh=true":""}`)
+    fetchWithTimeout(`/api/sector/brief?segment=${encodeURIComponent(segment)}${refresh?"&refresh=true":""}`)
       .then(r=>r.json()).then(d=>{ setBrief(d); setLoading(false); }).catch(()=>setLoading(false));
   };
   useEffect(()=>{ if(defaultOpen) load(); },[]);  // auto-load when opened by default (Sector Search)
@@ -402,7 +403,7 @@ function ThemesSection() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
   useEffect(()=>{
-    fetch("/api/sector/themes").then(r=>r.json()).then(d=>{ setData(d); setLoading(false); }).catch(()=>setLoading(false));
+    fetchWithTimeout("/api/sector/themes").then(r=>r.json()).then(d=>{ setData(d); setLoading(false); }).catch(()=>setLoading(false));
   },[]);
   if (loading) return (<div style={{textAlign:"center",padding:"30px",color:"var(--mut)",fontSize:12,marginTop:24}}><div style={{width:24,height:24,border:"2px solid var(--line)",borderTop:"2px solid #9B7CFF",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/><div>Loading emerging themes…</div></div>);
   if (!data || data.error) return null;
@@ -489,7 +490,7 @@ function SectorSearch({allSectors}) {
 
   const pick = (seg) => {
     setSelected(seg); setQuery(seg); setShowSug(false); setBrief(null); setLoading(true);
-    fetch(`/api/sector/brief?segment=${encodeURIComponent(seg)}`)
+    fetchWithTimeout(`/api/sector/brief?segment=${encodeURIComponent(seg)}`)
       .then(r=>r.json()).then(dd=>{ setBrief(dd); setLoading(false); }).catch(()=>setLoading(false));
   };
 
@@ -590,7 +591,7 @@ function App() {
   const [tab, setTab] = useState("themes");
   const [sel, setSel] = useState(null);
   useEffect(()=>{
-    fetch("/api/sector/rotation").then(r=>r.json()).then(data=>{ data.error?setE(data.error):setD(data); }).catch(e=>setE(e.message));
+    fetchWithTimeout("/api/sector/rotation").then(r=>r.json()).then(data=>{ data.error?setE(data.error):setD(data); }).catch(e=>setE(e.message));
   },[]);
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;

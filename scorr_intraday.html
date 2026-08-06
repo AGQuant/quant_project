@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TC Scanner</title>
@@ -226,7 +227,7 @@ async function openInfo(){
   if(tcSpecCache){ body.innerHTML=renderInfoBody(tcSpecCache); return; }
   body.innerHTML='Loading…';
   try{
-    const r=await fetch('/api/scanners/tc/spec');
+    const r=await fetchWithTimeout('/api/scanners/tc/spec');
     const s=await r.json();
     tcSpecCache=s;
     body.innerHTML=renderInfoBody(s);
@@ -377,7 +378,7 @@ async function load(silent){
     });
   }
   try{
-    const r = await fetch('/api/scanners/tc/holds');
+    const r = await fetchWithTimeout('/api/scanners/tc/holds');
     if(!r.ok){ if(!silent) console.error('TC Scanner', r.status); return; }
     data = await r.json();
     render();
@@ -432,13 +433,13 @@ async function loadOrb(silent){
     document.getElementById('panelORB').innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
   }
   try{
-    const r1 = await fetch('/api/scanners/orb_ag');   // triggers a fresh scan + records qualifiers
+    const r1 = await fetchWithTimeout('/api/scanners/orb_ag');   // triggers a fresh scan + records qualifiers
     if(!r1.ok){ if(!silent) console.error('ORB AG scan', r1.status); return; }
     const scan = await r1.json();
     if(scan.status === 'outside_window'){
       orbData = { status: 'outside_window', rows: [] };
     } else {
-      const r2 = await fetch('/api/scanners/intraday/watchlist?direction=LONG&basket=orb_ag');
+      const r2 = await fetchWithTimeout('/api/scanners/intraday/watchlist?direction=LONG&basket=orb_ag');
       if(!r2.ok){ if(!silent) console.error('ORB AG watchlist', r2.status); return; }
       const wl = await r2.json();
       orbData = { status: 'ok', rows: wl.rows || [] };
@@ -491,7 +492,7 @@ function renderRadarPanel(){
 async function loadRadar(silent){
   if(!silent && currentSide==='RADAR') document.getElementById('panelRADAR').innerHTML='<div class="empty" style="padding:40px">Loading…</div>';
   try{
-    const r = await fetch('/api/scanners/result_radar', {cache:'no-store'});
+    const r = await fetchWithTimeout('/api/scanners/result_radar', {cache:'no-store'});
     radarData = await r.json();
     if(currentSide==='RADAR') document.getElementById('panelRADAR').innerHTML = renderRadarPanel();
   }catch(e){ if(!silent) console.error('Result Radar error', e); }
@@ -501,7 +502,7 @@ async function openRadarRules(){
   document.getElementById('infoTitle').textContent = 'Result Radar · how it works';
   const body=document.getElementById('infoBody'); body.innerHTML='Loading…';
   try{
-    const s = await (await fetch('/api/scanners/result_radar/rules')).json();
+    const s = await (await fetchWithTimeout('/api/scanners/result_radar/rules')).json();
     body.innerHTML = (s.sections||[]).map(x=>`<div style="margin-top:10px"><div style="font-weight:700;color:var(--cyan)">${x.h}</div><div style="margin-top:2px">${x.p}</div></div>`).join('')
       + `<div style="margin-top:12px;color:var(--dim);font-size:11px">${s.disclaimer||''}</div>`;
   }catch(e){ body.innerHTML='<span style="color:var(--red)">Rules unavailable: '+e+'</span>'; }
@@ -510,7 +511,7 @@ async function openStrategies(){
   document.getElementById('stratOv').classList.add('open');
   const body=document.getElementById('stratBody'); body.innerHTML='Loading…';
   try{
-    const s = await (await fetch('/api/scanners/registry')).json();
+    const s = await (await fetchWithTimeout('/api/scanners/registry')).json();
     body.innerHTML = (s.strategies||[]).map(x=>{
       const here = (x.url==='/scanners' && x.tab);
       const act = here ? `onclick="closeStrat();selectTab('${x.tab}')"` : `onclick="location.href='${x.url}'"`;

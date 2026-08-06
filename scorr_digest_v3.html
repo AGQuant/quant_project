@@ -324,6 +324,7 @@ section{margin-top:26px}
 </div>
 </div>
 
+<script src="/scorr_card_common.js"></script>
 <script>
 /* cc#846 DAILY DIGEST V3 — live bindings behind design_refs/scorr_digest_v3_R2.html.
    Read-only render. Content contract is session_log 965 v2.3; V3 is presentation only. */
@@ -810,7 +811,7 @@ function gdTf(tf){
 function gdDetail(sym){
   var box=document.getElementById('gdRets');
   box.innerHTML='<div class="gdmsg">Loading…</div>';
-  fetch('/api/global/heatstrip/'+encodeURIComponent(sym))
+  fetchWithTimeout('/api/global/heatstrip/'+encodeURIComponent(sym))
     .then(function(r){return r.json();}).then(function(d){
       if(!d || d.error){ box.innerHTML='<div class="gdmsg">'+esc((d&&d.error)||'unavailable')+'</div>'; return; }
       GD.detail=d;
@@ -829,7 +830,7 @@ function gdChart(){
   var box=document.getElementById('gdChart'), lab=document.getElementById('gdBasis');
   var sym=GD.sym, tf=GD.tf;
   lab.textContent='Loading…';
-  fetch('/api/global/chart/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(tf))
+  fetchWithTimeout('/api/global/chart/'+encodeURIComponent(sym)+'?tf='+encodeURIComponent(tf))
     .then(function(r){return r.json();}).then(function(d){
       if(GD.sym!==sym || GD.tf!==tf) return;                 /* a newer click won */
       if(!d || d.kind==='unavailable' || d.error || !(d.bars||[]).length){
@@ -905,7 +906,7 @@ function render(d){
     ((s.yesterday_results||{}).reported_total||0)+' results';
 }
 
-fetch('/api/digest/v3').then(function(r){return r.text();}).then(function(t){
+fetchWithTimeout('/api/digest/v3').then(function(r){return r.text();}).then(function(t){
   var d=null; try{ d=JSON.parse(t); }catch(e){}
   if(!d) throw new Error('unreadable response');
   if(d.error && !d.sections) throw new Error(d.error);

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Custom Screener</title>
@@ -231,7 +232,7 @@ function lbl(){
 
 async function loadMeta(){
   try{
-    var d=await(await fetch("/api/v12/filters/meta")).json();
+    var d=await(await fetchWithTimeout("/api/v12/filters/meta")).json();
     var list=$("seg_list"); if(!list) return;
     (d.segments||[]).forEach(function(s){
       var l=document.createElement("label"); l.setAttribute("data-seg", s.segment.toLowerCase());
@@ -368,7 +369,7 @@ async function run(){
   $("hint").classList.add("on");
   try{
     var p=buildQuery();
-    var d=await(await fetch("/api/v12/screen?"+p.toString())).json();
+    var d=await(await fetchWithTimeout("/api/v12/screen?"+p.toString())).json();
     if(my!==seq) return;                 // a newer request superseded this one
     var rows=d.stocks||[], total=d.total||0;
     setCount(total);
@@ -416,7 +417,7 @@ function resetAll(){
 var PRESETS=[], ACTIVE_PRESET=null;
 async function loadPresets(){
   try{
-    var r=await fetch("/api/v13/presets?scope="+SCOPE);
+    var r=await fetchWithTimeout("/api/v13/presets?scope="+SCOPE);
     if(!r.ok) return;                          // 401 when not authed — skip
     var j=await r.json(); PRESETS=j.presets||[];
     if(ACTIVE_PRESET!=null && !PRESETS.some(function(p){return p.id===ACTIVE_PRESET;})) ACTIVE_PRESET=null;
@@ -443,7 +444,7 @@ async function savePreset(){
   var name=(prompt("Save current filters as theme:", active?active.name:"")||"").trim();
   if(!name) return;
   try{
-    var r=await fetch("/api/v13/presets",{method:"POST",headers:{"Content-Type":"application/json"},
+    var r=await fetchWithTimeout("/api/v13/presets",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({name:name, scope:SCOPE, filters:captureState()})});
     if(!r.ok){ alert("Could not save theme ("+r.status+")"); return; }
     var j=await r.json(); ACTIVE_PRESET=j.preset&&j.preset.id;
@@ -460,7 +461,7 @@ async function renamePreset(id,ev){
   var name=(prompt("Rename theme:", p.name)||"").trim();
   if(!name||name===p.name) return;
   try{
-    var r=await fetch("/api/v13/presets/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name})});
+    var r=await fetchWithTimeout("/api/v13/presets/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name})});
     if(!r.ok){ alert(r.status===409?"That name is already taken":"Rename failed ("+r.status+")"); return; }
     await loadPresets();
   }catch(e){ alert("Rename failed: "+e.message); }
@@ -470,7 +471,7 @@ async function deletePreset(id,ev){
   var p=PRESETS.find(function(x){return x.id===id;}); if(!p) return;
   if(!confirm('Delete theme "'+p.name+'"?')) return;
   try{
-    var r=await fetch("/api/v13/presets/"+id,{method:"DELETE"});
+    var r=await fetchWithTimeout("/api/v13/presets/"+id,{method:"DELETE"});
     if(!r.ok){ alert("Delete failed ("+r.status+")"); return; }
     if(ACTIVE_PRESET===id) ACTIVE_PRESET=null;
     await loadPresets();

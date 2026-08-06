@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ask</title>
@@ -217,7 +218,7 @@ function load(){try{const r=localStorage.getItem(STORE);if(r){const s=JSON.parse
   history=s.history||[];if(s.reasonOn!==undefined)reasonOn=s.reasonOn;}}catch(e){}}
 
 async function dbPersist(){
-  try{await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+  try{await fetchWithTimeout('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'run_sql',
       arguments:{query:`INSERT INTO max_chats (id,user_key,title,history,cost,tin,tout,renamed,updated_at)
         VALUES ('ask_${USER_KEY}','${USER_KEY}_ask','Ask session','${JSON.stringify(history).replace(/'/g,"''")}',${totalCost},0,0,false,NOW())
@@ -234,7 +235,7 @@ async function send(){
   document.getElementById('msgs').scrollTop=1e9;
   try{
     const t0=Date.now();
-    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetchWithTimeout(API,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({messages:history,model:reasonOn?'claude-sonnet-4-6':null,
         use_tools:true,max_tokens:reasonOn?3000:0,claude_on:reasonOn,budget_cap_usd:0.05})});
     const d=await r.json();

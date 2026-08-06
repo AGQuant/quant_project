@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QB</title>
@@ -270,9 +271,9 @@ const c=(n)=>+n>0?'pos':+n<0?'neg':'neu';
 async function init(){
   try{
     const [qb,alpha,reg]=await Promise.all([
-      fetch('/api/performance/qb').then(r=>r.json()),
-      fetch('/api/performance/alpha').then(r=>r.json()),
-      fetch('/api/qb/registry').then(r=>r.json()),
+      fetchWithTimeout('/api/performance/qb').then(r=>r.json()),
+      fetchWithTimeout('/api/performance/alpha').then(r=>r.json()),
+      fetchWithTimeout('/api/qb/registry').then(r=>r.json()),
     ]);
 
     const tot=qb.total_pnl||0;
@@ -407,7 +408,7 @@ async function loadNavChart(key,panel){
   panel.innerHTML='<div style="padding:14px 2px;font-size:11.5px;opacity:.65">Loading…</div>';
   let d=null;
   try{
-    const r=await fetch(`/api/qb/nav?basket_name=${encodeURIComponent(key)}&window=${win}`);
+    const r=await fetchWithTimeout(`/api/qb/nav?basket_name=${encodeURIComponent(key)}&window=${win}`);
     const t=await r.text();
     try{ d=JSON.parse(t); }catch(e){}
     if(!d) throw new Error('unreadable response');
@@ -518,8 +519,8 @@ async function switchTab(tab){
 async function showHoldings(body){
   try{
     const [data,summ]=await Promise.all([
-      fetch(`/api/qb/positions?basket_name=${curBasket}&status=open`).then(r=>r.json()),
-      fetch(`/api/qb/summary?basket_name=${curBasket}`).then(r=>r.json()),
+      fetchWithTimeout(`/api/qb/positions?basket_name=${curBasket}&status=open`).then(r=>r.json()),
+      fetchWithTimeout(`/api/qb/summary?basket_name=${curBasket}`).then(r=>r.json()),
     ]);
     let sum='';
     if(summ&&!summ.error){
@@ -553,7 +554,7 @@ async function showHoldings(body){
 
 async function showRebalance(body){
   try{
-    const data=await fetch(`/api/qb/rebalance_log?basket_name=${curBasket}&limit=10`).then(r=>r.json());
+    const data=await fetchWithTimeout(`/api/qb/rebalance_log?basket_name=${curBasket}&limit=10`).then(r=>r.json());
     if(!Array.isArray(data)||!data.length){body.innerHTML='<div class="msg">No rebalance history yet. First rebalance: Large Cap + Mid Cap on 4 Jul 2026.</div>';return;}
     body.innerHTML=`<div class="tbl-wrap"><table>
       <thead><tr>

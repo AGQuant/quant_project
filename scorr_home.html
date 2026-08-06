@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard</title>
@@ -505,7 +506,7 @@ async function _srcSave(val){
   if(c.kind==='client'){ url='/api/clients/position/source_tag'; body={id:Number(c.id), source_tag:tag}; }
   else if(c.kind==='test'){ url='/api/test/position/source_tag'; body={id:Number(c.id), source_tag:tag}; }
   else { url='/api/smartgain/position/source_tag'; body={symbol:c.sym, direction:c.dir, source_tag:tag}; }
-  try{ await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){}
+  try{ await fetchWithTimeout(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){}
   const kind=c.kind; closeSourceTag();
   if(kind==='client') loadBook(CLIENT_BOOK); else if(kind==='test') loadBook(TEST_BOOK); else loadSG();
 }
@@ -530,7 +531,7 @@ const ago = ts => {
 
 async function loadSG(_retry) {
   try {
-    const r = await fetch("/api/smartgain/m2m", {cache:'no-store'});   // cc#769: always fresh, never a stale cached body
+    const r = await fetchWithTimeout("/api/smartgain/m2m", {cache:'no-store'});   // cc#769: always fresh, never a stale cached body
     const d = await r.json();
     // cc#769 fix_1: NEVER leave "Week M2M" stranded at "Loading…". cc#771 fix_4: auto-retry ONCE on a
     // failure before showing "Could not load" (the endpoint now degrades to a stored weekly figure, so a
@@ -763,7 +764,7 @@ function renderBookPnl(d, book) {
 }
 async function loadBook(book) {
   try {
-    const r = await fetch(book.posEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
+    const r = await fetchWithTimeout(book.posEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
     if (d.error) { document.getElementById(book.pfx + "-pos").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
     renderBookPositions(d, book);
@@ -817,7 +818,7 @@ function renderBookRealised(d, book) {
 }
 async function loadBookRealised(book) {
   try {
-    const r = await fetch(book.realEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
+    const r = await fetchWithTimeout(book.realEP, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
     if (d.error) { document.getElementById(book.pfx + "-real").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
     renderBookRealised(d, book);
@@ -890,7 +891,7 @@ let sgThisWeek = null;   // the real current week (nav upper bound)
 async function loadDailyM2M(weekStart) {
   try {
     const url = "/api/smartgain/daily_m2m" + (weekStart ? "?week_start=" + weekStart : "");
-    const r = await fetch(url, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
+    const r = await fetchWithTimeout(url, {cache:'no-store'});   // cc#769: no-store (cc#763 pattern)
     const d = await r.json();
     if (d.error) return;   // additive chart panel (collapsed by default) — no loading state to strand
     sgCurWeek = d.week_start;

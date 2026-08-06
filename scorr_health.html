@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portfolio Health Report · Scorr</title>
@@ -692,7 +693,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
   // fields are ever returned by the endpoint (cc#758).
   function loadSaved(){
     var box=$('hr-saved'); if(!box) return;
-    fetch('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout('/api/health/portfolios').then(function(r){return r.json();}).then(function(d){
       var ps=(d&&d.portfolios)||[];
       if(!ps.length){ box.innerHTML=''; return; }
       var nsepay=ps.filter(function(p){return p.active&&p.category==='NSEPAY';});
@@ -736,7 +737,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
   function loadRepair(){
     if(!pid) return;
     var page=$('hr-repair-page'); if(!page) return;
-    fetch('/api/health/portfolio/'+pid).then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout('/api/health/portfolio/'+pid).then(function(r){return r.json();}).then(function(d){
       if(d.error) return;
       window._hrHoldings=(d.holdings||[]).map(function(h){return {symbol:h.symbol||'',qty:h.qty,avg_price:h.avg_price};});
       window._hrSource=d.source||'';
@@ -779,21 +780,21 @@ html,body{margin:0;padding:0;background:var(--bg);}
   function rpAdd(){ rpSync(); window._hrHoldings.push({symbol:'',qty:null,avg_price:null}); renderRepair(); }
   function rpMsg(t,c){ var m=$('hr-repair-msg'); if(m){ m.textContent=t; m.style.color=c||'var(--muted)'; } }
   function rpSave(){ var hs=rpSync(); rpMsg('Saving…');
-    fetch('/api/health/portfolio/'+pid+'/holdings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({holdings:hs})})
+    fetchWithTimeout('/api/health/portfolio/'+pid+'/holdings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({holdings:hs})})
       .then(function(r){return r.json();}).then(function(d){ if(d.error){ rpMsg(d.error,'var(--red)'); return; }
         rpMsg('Saved '+d.saved+' holdings'+(d.unresolved?(' · '+d.unresolved+' unresolved'):'')+'. Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); })
       .catch(function(e){ rpMsg('Save failed: '+e,'var(--red)'); }); }
   function rpMergePreview(){ rpMsg('Checking duplicates…');
-    fetch('/api/health/portfolio/'+pid+'/merge_preview').then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout('/api/health/portfolio/'+pid+'/merge_preview').then(function(r){return r.json();}).then(function(d){
       if(!d.has_duplicates){ rpMsg('No duplicate symbols found.'); return; }
       var lines=d.duplicates.map(function(x){return x.symbol+': '+x.rows+' rows → qty '+x.merged_qty+' @ avg '+x.merged_avg;}).join('\n');
       if(confirm('Merge these duplicates (summed qty, weighted-avg price)?\n\n'+lines)){ rpMsg('Merging…');
-        fetch('/api/health/portfolio/'+pid+'/merge',{method:'POST'}).then(function(r){return r.json();}).then(function(m){ if(m.error){ rpMsg(m.error,'var(--red)'); return; }
+        fetchWithTimeout('/api/health/portfolio/'+pid+'/merge',{method:'POST'}).then(function(r){return r.json();}).then(function(m){ if(m.error){ rpMsg(m.error,'var(--red)'); return; }
           rpMsg('Merged → '+m.symbols+' symbols. Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); }).catch(function(e){ rpMsg('Merge failed: '+e,'var(--red)'); });
       } else { rpMsg(''); }
     }).catch(function(e){ rpMsg('Preview failed: '+e,'var(--red)'); }); }
   function rpToggle(){ if(!confirm('Toggle this portfolio active/inactive?')) return; rpMsg('Updating…');
-    fetch('/api/health/portfolio/'+pid+'/toggle_active',{method:'POST'}).then(function(r){return r.json();}).then(function(d){ if(d.error){ rpMsg(d.error,'var(--red)'); return; }
+    fetchWithTimeout('/api/health/portfolio/'+pid+'/toggle_active',{method:'POST'}).then(function(r){return r.json();}).then(function(d){ if(d.error){ rpMsg(d.error,'var(--red)'); return; }
       rpMsg('Now '+(d.active?'ACTIVE':'INACTIVE')+' ('+d.source+'). Reloading…','var(--grn)'); setTimeout(function(){ location.reload(); },900); }).catch(function(e){ rpMsg('Toggle failed: '+e,'var(--red)'); }); }
   // the repair grid uses inline onclick handlers — this script is an IIFE, so expose them on window.
   window.rpDel=rpDel; window.rpAdd=rpAdd; window.rpSave=rpSave; window.rpMergePreview=rpMergePreview; window.rpToggle=rpToggle;
@@ -805,7 +806,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
     if(file) fd.append('file', file);
     else if(text && text.trim()) fd.append('text', text);
     else { msg.textContent='Provide a file or paste rows.'; msg.style.color='var(--red)'; return; }
-    fetch('/api/health/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout('/api/health/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
       if(d.error && !(d.rows&&d.rows.length)){ msg.textContent=d.error; msg.style.color='var(--red)'; return; }
       if(d.warning) { msg.textContent=d.warning; msg.style.color='var(--amb)'; } else { msg.textContent=(d.resolved||0)+' of '+(d.count||0)+' symbols resolved.'; msg.style.color='var(--muted)'; }
       renderGrid(d.rows||[]);
@@ -844,7 +845,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
       holdings.push({symbol:sym, qty:qv?parseFloat(qv):null, avg_price:av?parseFloat(av):null});
     });
     if(!holdings.length){ msg.textContent='Nothing to save.'; msg.style.color='var(--red)'; return; }
-    fetch('/api/health/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    fetchWithTimeout('/api/health/save',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name:($('hr-pname').value||'My Portfolio'), source:'upload', holdings:holdings})})
       .then(function(r){return r.json();}).then(function(d){
         if(d.error || !d.portfolio_id){ msg.textContent=d.error||'Save failed.'; msg.style.color='var(--red)'; return; }
@@ -855,7 +856,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
   // ---------------------------------------------------------------- boot
   function load(method){
     var url='/api/health/'+(method==='POST'?'refresh':'report')+'/'+pid;
-    fetch(url,{method:method||'GET'}).then(function(r){return r.json();}).then(render)
+    fetchWithTimeout(url,{method:method||'GET'}).then(function(r){return r.json();}).then(render)
       .then(function(){ if(wl) applyWhiteLabel(); })
       .catch(function(e){ showMsg('Failed to load report: '+e); });
   }
@@ -881,12 +882,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
       if(hurl){ try{ window.open(hurl,'_blank'); }catch(e){} }
       done();
     }
-    fetch('/api/health/report_pdf_self/'+encodeURIComponent(pid))
+    fetchWithTimeout('/api/health/report_pdf_self/'+encodeURIComponent(pid))
       .then(function(r){ if(!r.ok) throw new Error('mint HTTP '+r.status); return r.json(); })
       .then(function(d){
         if(!d || !d.url) throw new Error((d&&d.error)||'mint failed');
         var hurl=d.html_url, fname=d.filename||'Portfolio_Health.pdf';
-        return fetch(d.url).then(function(pr){
+        return fetchWithTimeout(d.url).then(function(pr){
           var ct=pr.headers.get('content-type')||'';
           if(!pr.ok || ct.indexOf('application/pdf')<0){ fallback(hurl); return; }
           return pr.blob().then(function(b){

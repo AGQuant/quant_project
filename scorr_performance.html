@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Performance</title>
@@ -107,7 +108,7 @@ function sw(t){
 }
 async function loadQB(){
   try{
-    const d=await(await fetch('/api/performance/qb')).json();
+    const d=await(await fetchWithTimeout('/api/performance/qb')).json();
     document.getElementById('qb-cards').innerHTML=
       '<div class="card"><div class="k">Total P&amp;L</div><div class="v '+pnlCls(d.total_pnl)+'">'+inr(d.total_pnl)+'</div><div class="s">'+d.total_positions+' open positions</div></div>'+
       (d.baskets||[]).map(b=>'<div class="card"><div class="k">'+b.basket.replace(/_/g,\' \')+'</div><div class="v '+pnlCls(b.pnl)+'">'+inr(b.pnl)+'</div><div class="s">'+pct(b.return_pct)+' · '+b.positions+' pos</div></div>').join('');
@@ -119,7 +120,7 @@ async function loadQB(){
 }
 async function loadAlpha(){
   try{
-    const d=await(await fetch('/api/performance/alpha')).json();
+    const d=await(await fetchWithTimeout('/api/performance/alpha')).json();
     const t=d.total||{};
     document.getElementById('alpha-cards').innerHTML=
       '<div class="card"><div class="k">Nifty500 Benchmark</div><div class="v nt">'+pct(d.benchmark_return)+'</div><div class="s">base '+d.base_date+'</div></div>'+
@@ -133,7 +134,7 @@ async function loadAlpha(){
 }
 async function loadOpt(){
   try{
-    const d=await(await fetch('/api/performance/options')).json();
+    const d=await(await fetchWithTimeout('/api/performance/options')).json();
     document.getElementById('opt-cards').innerHTML=
       '<div class="card"><div class="k">Total P&amp;L</div><div class="v '+pnlCls(d.total_pnl)+'">'+inr(d.total_pnl)+'</div><div class="s">'+d.total_trades+' trades · '+d.strategy+'</div></div>'+
       (d.by_ticker||[]).map(t=>'<div class="card"><div class="k">'+t.ticker+'</div><div class="v '+pnlCls(t.pnl)+'">'+inr(t.pnl)+'</div><div class="s">'+t.trades+' trades · '+t.wins+'W/'+t.losses+'L</div></div>').join('');

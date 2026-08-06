@@ -91,8 +91,57 @@
    *
    * newsEsc — single definition, verbatim.
    */
+  /* ── cc#878: fetchWithTimeout — THE ONE TIMEOUT, SITE-WIDE ────────────────────────────────
+     cc#869 finding 7 / P0-B: 129 of 134 fetch() call sites in the served front end had no
+     deadline. A request that never returns leaves a spinner or shimmer animating forever, which
+     reads as "still loading" and never as "failed" — so the founder's phone showed a loading
+     screen for a hung request instead of an error he could act on. cc#858 established the
+     AbortController principle on the R card and it was applied nowhere else.
+
+     This is deliberately a thin wrapper, not a new transport: same signature as fetch, same
+     return, same Response. It only guarantees the promise SETTLES. On timeout it rejects with a
+     named error so an existing .catch() renders its failed state without any change, and so a
+     caller can tell a timeout apart from an HTTP error.
+
+     15s default: comfortably above the slowest measured surface (cc#869 timed the worst query at
+     93.7ms and the heaviest page assembly well under a second), and low enough that a human still
+     reads it as "that failed" rather than "still going". */
+  function fetchWithTimeout(url, opts, ms){
+    opts = opts || {};
+    var ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var t  = null;
+    var weTimedOut = false;   // OUR deadline fired, as opposed to the caller cancelling
+    if (ac) {
+      /* Respect a signal the caller already passed — abort ours when theirs fires, so a page that
+         cancels its own in-flight request keeps working. */
+      if (opts.signal && typeof opts.signal.addEventListener === 'function') {
+        opts.signal.addEventListener('abort', function(){ try { ac.abort(); } catch(e){} });
+      }
+      opts = Object.assign({}, opts, { signal: ac.signal });
+      t = setTimeout(function(){ weTimedOut = true; try { ac.abort(); } catch(e){} }, ms == null ? 15000 : ms);
+    }
+    return fetch(url, opts).then(function(r){
+      if (t) clearTimeout(t);
+      return r;
+    }, function(err){
+      if (t) clearTimeout(t);
+      /* Only OUR deadline becomes a TimeoutError. A caller that aborted its own request
+         gets its AbortError back unchanged — mislabelling a deliberate cancel as a timeout
+         would send the page into a failed state it never asked for. */
+      if (weTimedOut && err && err.name === 'AbortError') {
+        var e = new Error('Request timed out after ' + (ms == null ? 15000 : ms) + 'ms: ' + url);
+        e.name = 'TimeoutError';
+        e.timedOut = true;
+        throw e;
+      }
+      throw err;
+    });
+  }
+
   async function getJSON(path){
-    const r=await fetch(API_BASE+path,{headers:{'Accept':'application/json'}});
+    /* cc#878: every getJSON caller inherits the deadline for free — this one line covers the 58
+       call sites in v8_dashboard.html alone. */
+    const r=await fetchWithTimeout(API_BASE+path,{headers:{'Accept':'application/json'}});
     if(!r.ok) throw new Error(`${path} -> HTTP ${r.status}`);
     return r.json();
   }
@@ -152,8 +201,55 @@
 
   /* ── publication ──────────────────────────────────────────────────────────────────────────
    * Namespace first (always authoritative), then the guarded bare globals. */
+  /* ── cc#878: THE BACKSTOP — a timeout must never leave a shimmer running ───────────────────
+     Twelve call sites across the app are plain `.then()` chains with no `.catch()`. Before this
+     card they hung forever; with a deadline they now REJECT, and an unhandled rejection means the
+     `.then()` never runs — so whatever "Loading..." markup is sitting in the container stays on
+     screen. That is the same symptom by a different route, and patching twelve sites by hand would
+     miss the thirteenth someone writes next month.
+
+     So the failed state is handled once, globally, and only for OUR timeouts (err.timedOut). A
+     genuine HTTP error or a page's own AbortError is left completely alone — those already have
+     owners, and hijacking them would stamp "failed to load" over states that are handled properly.
+
+     It replaces every still-visible loading placeholder with a retry-able line. Retry is a reload
+     rather than a re-issue of the one request, because from here we cannot know which of several
+     in-flight calls fed which container — and a reload is honest and always correct. */
+  var LOADING_SELECTORS = '.loading, .sg-loading, .bt-loading, .dc-skel, .smc-skel';
+
+  function _renderTimeoutFailure(err) {
+    var nodes;
+    try { nodes = document.querySelectorAll(LOADING_SELECTORS); } catch (e) { return; }
+    if (!nodes || !nodes.length) return;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.getAttribute('data-scorr-failed') === '1') continue;   // don't stack messages
+      n.setAttribute('data-scorr-failed', '1');
+      n.innerHTML =
+        '<div style="padding:10px 12px;border:1px solid var(--line2,#2a3548);border-radius:8px;' +
+        'font-size:12px;color:var(--dim,#7c8aa5);display:flex;align-items:center;gap:10px;' +
+        'flex-wrap:wrap">' +
+          '<span>Failed to load &mdash; the request timed out.</span>' +
+          '<button type="button" onclick="location.reload()" style="padding:5px 12px;border-radius:6px;' +
+          'border:1px solid var(--line2,#2a3548);background:transparent;color:inherit;cursor:pointer;' +
+          'font:inherit;min-height:32px">Retry</button>' +
+        '</div>';
+    }
+    try { console.error('[cc#878] request timed out:', err && err.message); } catch (e) {}
+  }
+
+  if (typeof window.addEventListener === 'function' && !window.__scorrTimeoutBackstop) {
+    window.__scorrTimeoutBackstop = true;
+    window.addEventListener('unhandledrejection', function (ev) {
+      var err = ev && ev.reason;
+      if (!err || !err.timedOut) return;    // ours only — never touch someone else's rejection
+      _renderTimeoutFailure(err);
+    });
+  }
+
   var API = {
     num: num, sign: sign, getJSON: getJSON, newsEsc: newsEsc,
+    fetchWithTimeout: fetchWithTimeout,   // cc#878
     _volCol: _volCol, _volTile: _volTile, _volTilesHtml: _volTilesHtml, qaVolExplain: qaVolExplain,
     _heatBg: _heatBg, _heatTile: _heatTile, _deltaGrade: _deltaGrade,
     _perfGrade: _perfGrade, _perfTile: _perfTile, _qaSpark: _qaSpark,

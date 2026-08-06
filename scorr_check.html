@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Check</title>
@@ -758,7 +759,7 @@ function setMode(m){
 async function fetchAC(q){
   if(q.length<1){closeAC();return;}
   try{
-    const r=await fetch('/api/gvm/search?q='+encodeURIComponent(q)+'&limit=7');
+    const r=await fetchWithTimeout('/api/gvm/search?q='+encodeURIComponent(q)+'&limit=7');
     if(!r.ok)return;
     const d=await r.json();
     acItems=(d.results||d||[]).slice(0,7);
@@ -854,7 +855,7 @@ async function run(){
 // cc#399: /check now runs the v4 dual-style engine. LONG -> BUY (MOM+REV), SHORT -> SELL (MOM+REV).
 async function runTradeCheck(sym){
   const v4side=(mode==='SHORT')?'SELL':'BUY';
-  const r=await fetch('/api/trade-check/v4/dual?symbol='+encodeURIComponent(sym)+'&side='+v4side);
+  const r=await fetchWithTimeout('/api/trade-check/v4/dual?symbol='+encodeURIComponent(sym)+'&side='+v4side);
   document.getElementById('loading').classList.remove('show');
   if(!r.ok){showErr('Server error '+r.status+' — trade check failed. Try again shortly.');return;}
   let d;
@@ -1164,7 +1165,7 @@ async function loadDetail(sym, uiMode){
   box.innerHTML='<div class="v4-det-msg">Loading detailed structure for '+sym+'…</div>';
   const side=(uiMode==='SHORT')?'SELL':'BUY';
   try{
-    const r=await fetch('/api/trade-check/v4/detail?symbol='+encodeURIComponent(sym)+'&side='+side);
+    const r=await fetchWithTimeout('/api/trade-check/v4/detail?symbol='+encodeURIComponent(sym)+'&side='+side);
     const d=await r.json();
     if(d.error){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">'+d.error+'</div>';return;}
     renderTcDetail(box, d, uiMode);
@@ -1458,7 +1459,7 @@ function cr16Pos(pos){ // colour the zone chip like the bar
 }
 
 async function runInvestCheck(sym){
-  const r=await fetch('/api/investment-check?symbol='+encodeURIComponent(sym));
+  const r=await fetchWithTimeout('/api/investment-check?symbol='+encodeURIComponent(sym));
   document.getElementById('loading').classList.remove('show');
   if(!r.ok){showErr('Server error '+r.status+' — investment check failed.');return;}
   let d;
@@ -1509,7 +1510,7 @@ async function loadRoom(sym, side){
   const card=document.getElementById('roomCard');
   if(side!=='LONG'&&side!=='SHORT'){card.classList.remove('show');return;}
   try{
-    const r=await fetch('/api/structure/'+encodeURIComponent(sym)+'?direction='+side);
+    const r=await fetchWithTimeout('/api/structure/'+encodeURIComponent(sym)+'?direction='+side);
     if(!r.ok){card.classList.remove('show');return;}
     const d=await r.json();
     if(!d||d.detail||!d.room){card.classList.remove('show');return;}
@@ -1648,7 +1649,7 @@ async function loadInvestDetail(sym){
   box.classList.add('show');
   box.innerHTML='<div class="v4-det-msg">Loading detailed evidence for '+sym+'…</div>';
   try{
-    const r=await fetch('/api/investment-check/detail?symbol='+encodeURIComponent(sym));
+    const r=await fetchWithTimeout('/api/investment-check/detail?symbol='+encodeURIComponent(sym));
     const d=await r.json();
     if(d.error){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">'+d.error+'</div>';return;}
     renderInvestDetail(box, d);
@@ -1725,7 +1726,7 @@ function renderInvestDetail(box, d){
 
   // Fib panel: lazy-load the EXISTING /api/trade-check/fibcheck (1Y lookback, INVEST is
   // long-only so SELL=false), reusing _detFibChart verbatim — no new fib math, no duplication.
-  fetch('/api/trade-check/fibcheck?symbol='+encodeURIComponent(d.symbol)+'&lookback=1y')
+  fetchWithTimeout('/api/trade-check/fibcheck?symbol='+encodeURIComponent(d.symbol)+'&lookback=1y')
     .then(r=>r.json()).then(fb=>{
       const host=document.getElementById('invFib_'+d.symbol); if(!host)return;
       if(fb.error){host.textContent='Fib data unavailable: '+fb.error;return;}
@@ -1756,7 +1757,7 @@ async function loadScreen(universe){
   document.getElementById('screenBtn').disabled=true;
   document.getElementById('runBtn').disabled=true;
   try{
-    const r=await fetch('/api/trade-check/screen-nifty50?n='+n+'&top=10');
+    const r=await fetchWithTimeout('/api/trade-check/screen-nifty50?n='+n+'&top=10');
     clearInterval(tk);ld.classList.remove('show');
     if(!r.ok){showErr('Screener server error '+r.status+'.');return;}
     const d=await r.json();
@@ -1821,7 +1822,7 @@ async function loadV4Scan(){
   tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div>';
   if(meta)meta.textContent='…';
   let d;
-  try{const r=await fetch('/api/trade-check/v4/scan?side='+_v4side()+'&limit=250');d=await r.json();}
+  try{const r=await fetchWithTimeout('/api/trade-check/v4/scan?side='+_v4side()+'&limit=250');d=await r.json();}
   catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
   if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
   if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s'+(d.as_of?' · as-of '+d.as_of:'');
@@ -1935,7 +1936,7 @@ async function loadMovers(side){
   document.getElementById('scrMeta').textContent='loading…';
   document.getElementById('moversWrap').innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">Loading movers…</div>';
   try{
-    const r=await fetch('/api/trade-check/movers?universe=futures&side='+side);
+    const r=await fetchWithTimeout('/api/trade-check/movers?universe=futures&side='+side);
     const d=await r.json();
     renderMovers(d);
     document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
@@ -2025,7 +2026,7 @@ async function refreshTcCache(){
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('icRefreshBtn').disabled=true;
   try{
-    const r=await fetch('/api/trade-check/tc-cache/refresh',{method:'POST'});
+    const r=await fetchWithTimeout('/api/trade-check/tc-cache/refresh',{method:'POST'});
     clearInterval(tk);ld.classList.remove('show');
     if(!r.ok){showErr('Cache refresh error '+r.status+'.');return;}
     const d=await r.json();
@@ -2042,7 +2043,7 @@ async function loadIntraday(side){
   ld.className='loading show';ld.textContent='Running intraday scan…';
   document.getElementById('scrResult').classList.remove('show');
   try{
-    const r=await fetch('/api/trade-check/intraday-scan?side='+side);
+    const r=await fetchWithTimeout('/api/trade-check/intraday-scan?side='+side);
     ld.classList.remove('show');
     if(!r.ok){showErr('Intraday scan error '+r.status+'.');return;}
     const d=await r.json();

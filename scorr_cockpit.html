@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Max</title>
@@ -482,7 +483,7 @@ function ivrIndex(nodes){
 
 async function ivrLoad(){
   try{
-    const r=await fetch('/api/max/ivr/tree');
+    const r=await fetchWithTimeout('/api/max/ivr/tree');
     const t=await r.text();
     let d=null; try{ d=JSON.parse(t); }catch(e){}
     if(!d) throw new Error('unreadable tree response — '+(t||'empty').slice(0,120));
@@ -495,7 +496,7 @@ async function ivrLoad(){
 
 function ivrTap(nodeId){
   // Fire-and-forget. Navigation must never wait on, or be broken by, telemetry.
-  try{ fetch('/api/max/ivr/tap',{method:'POST',headers:{'Content-Type':'application/json'},
+  try{ fetchWithTimeout('/api/max/ivr/tap',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({node_id:nodeId,session_id:IVR_SESSION})}).catch(()=>{}); }catch(e){}
 }
 
@@ -583,7 +584,7 @@ async function ivrRunCard(n){
   ivrAnswerStatic(n.label,'_Reading…_');
   let d=null;
   try{
-    const r=await fetch('/api/max/card/'+encodeURIComponent(n.action_intent)+'?'+qs.toString());
+    const r=await fetchWithTimeout('/api/max/card/'+encodeURIComponent(n.action_intent)+'?'+qs.toString());
     const t=await r.text();
     try{ d=JSON.parse(t); }catch(e){}
     if(!d) throw new Error('unreadable card response');
@@ -970,7 +971,7 @@ function loadLocal(){try{const r=localStorage.getItem(STORE);
   }}catch(e){}}
 
 async function dbPersist(){
-  try{await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+  try{await fetchWithTimeout('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'run_sql',
       arguments:{query:`INSERT INTO max_chats (id,user_key,title,history,cost,tin,tout,renamed,updated_at)
         VALUES ('max_${USER_KEY}','${USER_KEY}','Max session','${JSON.stringify(history).replace(/'/g,"''")}',${totalCost},0,0,false,NOW())
@@ -991,7 +992,7 @@ async function send(){
   currentController=new AbortController();
   try{
     const t0=Date.now();
-    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetchWithTimeout(API,{method:'POST',headers:{'Content-Type':'application/json'},
       signal:currentController.signal,
       body:JSON.stringify({messages:history,mode:mode,claude_on:(mode!=='native'),
         use_tools:false,budget_cap_usd:BUDGET})});
@@ -1023,7 +1024,7 @@ qEl.addEventListener('keydown',function(e){
 });
 
 async function checkHealth(){
-  try{const r=await fetch('/api/scorr/chat/health');const d=await r.json();
+  try{const r=await fetchWithTimeout('/api/scorr/chat/health');const d=await r.json();
     document.getElementById('statusDot').style.background=
       (d.status==='ok'&&d.anthropic_api_key_set)?'var(--grn)':'var(--red)';
   }catch{document.getElementById('statusDot').style.background='var(--red)';}

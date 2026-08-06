@@ -188,6 +188,7 @@
   <div class="foot" id="foot"></div>
 </div>
 
+<script src="/scorr_card_common.js"></script>
 <script>
 // cc#384 — ONE registry constant powers the whole page (founder: keep the data model clean).
 // Row shape: [name, measures, source, cadence, usedBy[], status]. status omitted => 'active'.
@@ -448,10 +449,10 @@ function renderResults(){
 async function loadData(){
   try{
     const [metrics,live,pivots,dayRange]=await Promise.all([
-      fetch('/api/v8/metrics/all').then(r=>r.json()),
-      fetch('/api/v8/live_metrics').then(r=>r.json()),
-      fetch('/api/paper/pivots?limit=300').then(r=>r.json()),
-      fetch('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
+      fetchWithTimeout('/api/v8/metrics/all').then(r=>r.json()),
+      fetchWithTimeout('/api/v8/live_metrics').then(r=>r.json()),
+      fetchWithTimeout('/api/paper/pivots?limit=300').then(r=>r.json()),
+      fetchWithTimeout('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
     ]);
     const liveArr=(live&&Array.isArray(live.rows))?live.rows:(Array.isArray(live)?live:[]);
     AS_OF=(live&&live.as_of)?live.as_of:null;
@@ -478,7 +479,7 @@ async function loadData(){
   }catch(e){document.getElementById('results').innerHTML='<div class="foot" style="padding:18px">Data error: '+e.message+'</div>';}
 }
 
-async function loadPresets(){try{const r=await fetch('/api/v13/presets');if(!r.ok)return;const j=await r.json();PRESETS=j.presets||[];
+async function loadPresets(){try{const r=await fetchWithTimeout('/api/v13/presets');if(!r.ok)return;const j=await r.json();PRESETS=j.presets||[];
   if(ACTIVE_PRESET!=null&&!PRESETS.some(p=>p.id===ACTIVE_PRESET))ACTIVE_PRESET=null;renderPresets();}catch(e){}}
 function renderPresets(){const el=document.getElementById('presets');if(!el)return;
   let html='<button class="psave" onclick="savePreset()">&#43; Save theme</button>';
@@ -493,13 +494,13 @@ function applyState(st){const byKey={};(st.filters||[]).forEach(x=>byKey[x.key]=
   Object.keys(FILT).forEach(k=>{const s=byKey[k];if(s){FILT[k].on=!!s.checked;if(s.min!=null&&!isNaN(s.min))FILT[k].min=s.min;if(s.max!=null&&!isNaN(s.max))FILT[k].max=s.max;}else FILT[k].on=false;});
   if(st.sort_key){SORT_KEY=st.sort_key;SORT_DIR=(st.sort_dir===1?1:-1);}renderV13();renderResults();}
 async function savePreset(){const active=PRESETS.find(p=>p.id===ACTIVE_PRESET);const name=(prompt('Save current filters as theme:',active?active.name:'')||'').trim();if(!name)return;const st=gatherState();
-  try{const r=await fetch('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,filters:st.filters,sort_key:st.sort_key,sort_dir:st.sort_dir})});
+  try{const r=await fetchWithTimeout('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,filters:st.filters,sort_key:st.sort_key,sort_dir:st.sort_dir})});
     if(!r.ok){alert('Could not save ('+r.status+')');return;}const j=await r.json();ACTIVE_PRESET=j.preset&&j.preset.id;await loadPresets();}catch(e){alert('Save failed: '+e.message);}}
 function applyPreset(id){const p=PRESETS.find(x=>x.id===id);if(!p)return;ACTIVE_PRESET=id;applyState({filters:p.filters,sort_key:p.sort_key,sort_dir:p.sort_dir});renderPresets();}
 async function renamePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.find(x=>x.id===id);if(!p)return;const name=(prompt('Rename theme:',p.name)||'').trim();if(!name||name===p.name)return;
-  try{const r=await fetch('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});if(!r.ok){alert(r.status===409?'Name taken':'Rename failed');return;}await loadPresets();}catch(e){alert('Rename failed');}}
+  try{const r=await fetchWithTimeout('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});if(!r.ok){alert(r.status===409?'Name taken':'Rename failed');return;}await loadPresets();}catch(e){alert('Rename failed');}}
 async function deletePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.find(x=>x.id===id);if(!p)return;if(!confirm('Delete theme "'+p.name+'"?'))return;
-  try{const r=await fetch('/api/v13/presets/'+id,{method:'DELETE'});if(!r.ok){alert('Delete failed');return;}if(ACTIVE_PRESET===id)ACTIVE_PRESET=null;await loadPresets();}catch(e){}}
+  try{const r=await fetchWithTimeout('/api/v13/presets/'+id,{method:'DELETE'});if(!r.ok){alert('Delete failed');return;}if(ACTIVE_PRESET===id)ACTIVE_PRESET=null;await loadPresets();}catch(e){}}
 // ── cc#460: Themes section — DB-driven saved-screen cards from v13_presets (the Fable pipeline
 // reverse-engineers a shared chart into filter logic and INSERTs a named preset; this section shows
 // them, no deploy needed). Fable presets use the {fieldkey:{min?,max?}} jsonb shape. Run applies the

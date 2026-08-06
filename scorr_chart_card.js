@@ -652,7 +652,7 @@
   function _fmt(n) { return (n == null || !isFinite(n)) ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 
   function _getJSON(url) {
-    return fetch(url, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+    return fetchWithTimeout(url, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
   }
 
   function _probeFutures(sym) {

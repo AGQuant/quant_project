@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Market Intelligence &#183; Source AI</title>
@@ -480,7 +481,7 @@ async function load(){
   document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
 
   try{
-    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=${NEWS_INITIAL}&offset=0`, { signal });
+    const r = await fetchWithTimeout(`${API}/api/news/polished?category=${activeCat}&limit=${NEWS_INITIAL}&offset=0`, { signal });
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
 
@@ -521,7 +522,7 @@ async function loadMore(){
   const activeCat = curCat;
   const batch = Math.min(NEWS_BATCH, NEWS_CAP - articles.length);
   try{
-    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=${batch}&offset=${newsOffset}`);
+    const r = await fetchWithTimeout(`${API}/api/news/polished?category=${activeCat}&limit=${batch}&offset=${newsOffset}`);
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     if(curCat !== activeCat) return; // tab switched mid-fetch — discard
@@ -640,7 +641,7 @@ async function loadKnowledge(){
   btn.disabled = true;
   document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
   try{
-    const r = await fetch(`${API}/api/knowledge/articles?limit=500`, { signal });   // cc#204: was 100 → dropped the 20 oldest (Basics core)
+    const r = await fetchWithTimeout(`${API}/api/knowledge/articles?limit=500`, { signal });   // cc#204: was 100 → dropped the 20 oldest (Basics core)
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     if(curCat !== "learn") return; // tab switched mid-fetch
@@ -792,7 +793,7 @@ async function toggleKb(slug, btn){
   try{
     let md = _kbCache[slug];
     if(md == null){
-      const r = await fetch(`${API}/api/knowledge/articles/${encodeURIComponent(slug)}`);
+      const r = await fetchWithTimeout(`${API}/api/knowledge/articles/${encodeURIComponent(slug)}`);
       if(!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       md = d.content_md || "";
@@ -856,7 +857,7 @@ function hydrateTcBadges(){
     el.setAttribute('data-done','1');
     if(_tcBadgeCache[sym] !== undefined){ el.innerHTML = _tcBadgeHtml(_tcBadgeCache[sym]); return; }
     Promise.all(['LONG','SHORT'].map(function(dir){
-      return fetch('/api/trade-check/v4?symbol='+encodeURIComponent(sym)+'&direction='+dir)
+      return fetchWithTimeout('/api/trade-check/v4?symbol='+encodeURIComponent(sym)+'&direction='+dir)
         .then(function(r){return r.json()}).catch(function(){return null;});
     })).then(function(rs){
       var best = null;
@@ -1016,7 +1017,7 @@ function openGalaxyArticle(a){
   function render(md){ var body=sc.querySelector(".ga-body"); if(!body) return;
     body.innerHTML = (md && md.trim()) ? renderMd(md) : '<p class="ga-soon">Full article coming soon.</p>'; }
   if(_kbCache[slug]!=null){ render(_kbCache[slug]); return; }   // lazy fetch, cache per slug
-  fetch(API+"/api/knowledge/articles/"+encodeURIComponent(slug)).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+  fetchWithTimeout(API+"/api/knowledge/articles/"+encodeURIComponent(slug)).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
     .then(function(d){ _kbCache[slug]=d.content_md||""; render(_kbCache[slug]); })
     .catch(function(){ render(""); });
 }

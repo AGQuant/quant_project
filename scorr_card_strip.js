@@ -87,7 +87,7 @@
   function _loadFutures() {
     if (_futures || _futReq) return;
     try {
-      _futReq = fetch('/api/v8/futures/list?active_only=true', { headers: { Accept: 'application/json' } })
+      _futReq = fetchWithTimeout('/api/v8/futures/list?active_only=true', { headers: { Accept: 'application/json' } })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           var arr = d && (d.stocks || d.futures || d.symbols || d.data || (Array.isArray(d) ? d : null));

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>V10</title>
@@ -354,7 +355,7 @@ const D = {
 /* ════════════════════════════════════════════════════════════════
    LIVE WIRING — each loader behind its own try/catch
 ════════════════════════════════════════════════════════════════ */
-async function getJSON(u){ const r=await fetch(u); if(!r.ok) throw new Error(u+' '+r.status); return r.json(); }
+async function getJSON(u){ const r=await fetchWithTimeout(u); if(!r.ok) throw new Error(u+' '+r.status); return r.json(); }
 const rowsOf = x => Array.isArray(x)?x:(x&&Array.isArray(x.rows))?x.rows:(x&&Array.isArray(x.data))?x.data:(x&&Array.isArray(x.stocks))?x.stocks:(x&&Array.isArray(x.open_positions))?x.open_positions:(x&&Array.isArray(x.closed_trades))?x.closed_trades:[];
 const istNow = () => new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
 function isMarketHours(){
@@ -950,9 +951,9 @@ async function loadV10Chart(){
   let candles,open,closed;
   try{
     const [cr,pr,tr]=await Promise.all([
-      fetch('/api/v10/candles?symbol='+encodeURIComponent(_v10sym)+'&days=30').then(r=>r.json()),
-      fetch('/api/v10/positions').then(r=>r.json()),
-      fetch('/api/v10/trades?limit=500').then(r=>r.json())
+      fetchWithTimeout('/api/v10/candles?symbol='+encodeURIComponent(_v10sym)+'&days=30').then(r=>r.json()),
+      fetchWithTimeout('/api/v10/positions').then(r=>r.json()),
+      fetchWithTimeout('/api/v10/trades?limit=500').then(r=>r.json())
     ]);
     candles=(cr&&cr.candles)||[]; open=(pr&&pr.open_positions)||[]; closed=(tr&&tr.closed_trades)||[];
   }catch(e){

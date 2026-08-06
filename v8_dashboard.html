@@ -1334,7 +1334,7 @@ async function openIdxPos(){
   card.classList.add('open');
   let rows;
   try{
-    const r=await fetch(API_BASE+EP.v10Positions);
+    const r=await fetchWithTimeout(API_BASE+EP.v10Positions);
     const d=await r.json();
     rows=(d&&d.open_positions)||[];
   }catch(e){
@@ -2058,7 +2058,7 @@ function hydrateTcStars(rows){
   const paint=()=>{(rows||[]).forEach(x=>{if(x&&x.symbol&&x.side)_fillTcStar(x.symbol+'|'+x.side);});};
   if(now-_tcStarsFetchedAt<60000&&_tcStarCache.size){paint();return;}
   _tcStarsFetchedAt=now;
-  fetch('/api/trade-check/position-stars')
+  fetchWithTimeout('/api/trade-check/position-stars')
     .then(r=>r.json()).then(d=>{
       const map=(d&&d.stars)||{};
       Object.keys(map).forEach(key=>{const v=map[key];
@@ -3577,7 +3577,7 @@ setInterval(loadNews,15*60*1000);
 // cc_task #85: poll Fyers feed health every 60s -> GREEN/YELLOW/RED badge.
 async function pollFeedHealth(){
   try{
-    const r=await fetch(API_BASE+'/api/health/feed',{headers:{'Accept':'application/json'}});
+    const r=await fetchWithTimeout(API_BASE+'/api/health/feed',{headers:{'Accept':'application/json'}});
     const d=await r.json();
     const badge=document.getElementById('feedBadge');
     const txt=document.getElementById('feedBadgeTxt');
@@ -4414,9 +4414,9 @@ async function loadV10Chart(){
   let candles,open,closed;
   try{
     const [cr,pr,tr]=await Promise.all([
-      fetch('/api/v10/candles?symbol='+encodeURIComponent(_v10sym)+'&days=30').then(r=>r.json()),
-      fetch('/api/v10/positions').then(r=>r.json()),
-      fetch('/api/v10/trades?limit=500').then(r=>r.json())
+      fetchWithTimeout('/api/v10/candles?symbol='+encodeURIComponent(_v10sym)+'&days=30').then(r=>r.json()),
+      fetchWithTimeout('/api/v10/positions').then(r=>r.json()),
+      fetchWithTimeout('/api/v10/trades?limit=500').then(r=>r.json())
     ]);
     candles=(cr&&cr.candles)||[]; open=(pr&&pr.open_positions)||[]; closed=(tr&&tr.closed_trades)||[];
   }catch(e){
@@ -4884,7 +4884,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     msgEl.style.display='none'; msgEl.textContent='';
     btn.disabled=true; btn.innerHTML='<span class="bt-spin"></span>Running&#8230;';
     var body={basket:el('btBasket').value, params:collectParams()};
-    fetch(BASE+'/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    fetchWithTimeout(BASE+'/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j};});})
       .then(function(res){
         if(!res.ok){
@@ -4903,7 +4903,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 
   window.btLoadRuns=function(){
     var tb=el('btRunsBody');
-    fetch(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
       var rows=(d&&d.runs)||[];
       if(!rows.length){tb.innerHTML='<tr><td colspan="10" class="bt-empty">No runs yet.</td></tr>';return;}
       tb.innerHTML=rows.map(function(r){
@@ -4926,7 +4926,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   };
 
   window.btDelete=function(id){
-    fetch(BASE+'/run/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){
+    fetchWithTimeout(BASE+'/run/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){
       if(_sel===id){_sel=null;el('btTradesCard').style.display='none';}
       btLoadRuns();
     }).catch(function(){btLoadRuns();});
@@ -4942,7 +4942,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     el('btTradesTitle').textContent='Trade log · run #'+id;
     sum.innerHTML=''; body.innerHTML='<tr><td colspan="7" class="bt-loading">Loading trades&#8230;</td></tr>';
     // pull the run row for summary from the runs list
-    fetch(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
       var run=((d&&d.runs)||[]).filter(function(x){return x.run_id===id;})[0]||{};
       sum.innerHTML=sbox('Basket',esc(run.basket||'--'))
         +sbox('Trades',run.n_trades==null?'--':esc(run.n_trades))
@@ -4950,7 +4950,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +sbox('Avg ret',num(run.avg_ret_pct),cls(run.avg_ret_pct))
         +sbox('Net ret',num(run.net_ret_pct),cls(run.net_ret_pct));
     });
-    fetch(BASE+'/trades?run_id='+id).then(function(r){return r.json();}).then(function(d){
+    fetchWithTimeout(BASE+'/trades?run_id='+id).then(function(r){return r.json();}).then(function(d){
       var t=(d&&d.trades)||[];
       if(!t.length){body.innerHTML='<tr><td colspan="7" class="bt-empty">No trades for this run.</td></tr>';return;}
       body.innerHTML=t.map(function(x){

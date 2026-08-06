@@ -63,6 +63,7 @@
   </div>
 </div>
 
+<script src="/scorr_card_common.js"></script>
 <script>
 // cc#824 — read-only screener page. Every number here was computed by the nightly job; the only
 // live value is CMP/Day%, overlaid server-side through the shared cc#811 resolver so this page can
@@ -104,7 +105,7 @@ function pick(id){
   CUR = id; renderTabs();
   document.getElementById('body').innerHTML =
     '<tr><td colspan="20" class="empty">Loading…</td></tr>';
-  fetch('/api/screeners/'+id,{headers:{Accept:'application/json'}})
+  fetchWithTimeout('/api/screeners/'+id,{headers:{Accept:'application/json'}})
     .then(function(r){return r.json();}).then(renderScreen)
     .catch(function(){
       document.getElementById('body').innerHTML =
@@ -153,7 +154,7 @@ function renderScreen(d){
     d.name + ' · ' + rows.length + ' stocks · sorted by ' + (d.sort_key||'GVM');
 }
 
-fetch('/api/screeners',{headers:{Accept:'application/json'}})
+fetchWithTimeout('/api/screeners',{headers:{Accept:'application/json'}})
   .then(function(r){return r.json();})
   .then(function(d){
     SCREENS = (d && d.screens) || [];

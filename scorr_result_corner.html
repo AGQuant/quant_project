@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/scorr_card_common.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Result Corner · Scorr</title>
@@ -219,7 +220,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const inr=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
 const pctS=v=>v==null?'—':(v>=0?'+':'−')+Math.abs(v).toFixed(1)+'%';
 const cls=v=>v==null?'':(v>0?'pos':(v<0?'neg':''));
-async function J(u){const r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json();}
+async function J(u){const r=await fetchWithTimeout(u);if(!r.ok)throw new Error(r.status);return r.json();}
 
 // intensity grade for the sector heat cells (green good / red bad by magnitude)
 function grade(v){ if(v==null)return ''; const a=Math.abs(v),t=v>=0?'g':'r';
