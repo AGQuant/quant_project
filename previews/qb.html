@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quant Baskets · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — QUANT BASKETS
+   Batch 7, screen 2. Dark per 15913. Tokens on .screen/.bnav, never bare :root.
+
+   DESIGN DECISIONS (for founder review):
+   - The BOOK leads. One PRIMARY hero: total unrealised across all six baskets,
+     with invested, open count and realised stated. Realised is NEGATIVE right
+     now (stop exits) and is shown honestly — hiding it would be a lie of
+     omission on a surface headed for retail.
+   - One basket = one SECONDARY card, ranked by NAV (best first). NAV since
+     inception (base 100) is the headline number because it is the only figure
+     that survives rebalances; unrealised P&L resets every time the basket
+     turns over.
+   - Each card states its own strategy in ONE plain line (from the registry),
+     top-3 holdings as chips, and the shared next rebalance date.
+   - Rebalance date is stated ONCE in the header area, not six times — all six
+     share 06-Sep (small_cap 01-Sep is the exception and its card says so).
+   - Every value is a REAL row read 06-Aug-2026 from quant_paper_positions,
+     qb_nav_daily and quant_basket_registry. Nothing invented.
+   - TRAP recorded: quant_paper_positions.status is LOWERCASE (open /
+     exited_stop). Uppercase filters return a false zero book.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;--cyan:#37D3E8;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:12px 12px 0}
+
+/* hero — PRIMARY */
+.hero{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 15px 19px;overflow:hidden;margin-bottom:12px}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--grn)}
+.hk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.13em;color:var(--dim)}
+.hv{font-size:29px;font-weight:800;letter-spacing:-.02em;margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
+.hv .pc{font-size:14px;font-weight:700;margin-left:7px}
+.hgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:13px}
+.hc{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.hc .k{font-size:8.5px;letter-spacing:.11em;font-weight:700;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hc .v{font-size:13px;font-weight:800;margin-top:3px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hc .v.dn{color:var(--red)}
+.hnote{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.5}
+
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:16px 3px 8px}
+
+/* basket card — SECONDARY NAV card (chevron: it opens the basket) */
+.b{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:12px 13px 13px 17px;margin-bottom:9px;overflow:hidden;min-height:44px}
+.b::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--grn)}
+.b.dn::before{background:var(--red)}
+.br1{display:flex;align-items:center;gap:8px}
+.bn{font-size:14.5px;font-weight:800;letter-spacing:-.005em}
+.nav{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:15px;font-weight:800;color:var(--grn)}
+.nav.dn{color:var(--red)}
+.nav .k{font-size:8.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);margin-right:5px}
+.chev{color:var(--dim);font-size:15px;margin-left:8px}
+.strat{font-size:11px;color:var(--mut);line-height:1.5;margin-top:6px}
+.br2{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+.st{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:3px 8px;border-radius:5px;border:1px solid var(--line2);color:var(--mut)}
+.st.up{color:var(--grn);border-color:rgba(47,212,139,.4)}
+.st.dn{color:var(--red);border-color:rgba(255,92,108,.4)}
+.holds{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.hd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  color:var(--txt);background:var(--panel2);border:1px solid var(--line2);
+  border-radius:5px;padding:3px 8px}
+.hd .p{color:var(--grn);margin-left:4px}
+.hd .p.dn{color:var(--red)}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn2{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn2 .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn2.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; every NAV, position and P&amp;L below is a real row
+    read 06-Aug-2026 from the live basket book. Nothing invented.</span>
+  </div>
+
+  <div class="head">
+    <h1>Quant Baskets</h1>
+    <div class="s">6 baskets &middot; marked 05-Aug EOD &middot; next rebalance 06 Sep</div>
+  </div>
+
+  <div class="body">
+
+    <!-- PRIMARY · the book -->
+    <div class="hero">
+      <div class="hk">UNREALISED &middot; ALL BASKETS</div>
+      <div class="hv">+Rs.1,84,102<span class="pc">+8.9%</span></div>
+      <div class="hgrid">
+        <div class="hc"><div class="k">INVESTED</div><div class="v">Rs.20.7L</div></div>
+        <div class="hc"><div class="k">OPEN</div><div class="v">63</div></div>
+        <div class="hc"><div class="k">REALISED</div><div class="v dn">&minus;Rs.46,519</div></div>
+      </div>
+      <div class="hnote">Realised is negative because the only closed positions so far are
+      stop-loss exits &mdash; 21 stops across five baskets. The winners are still open.
+      That is normal for a book this young and it is stated, not hidden.</div>
+    </div>
+
+    <div class="sect">BASKETS &middot; BY NAV SINCE START (BASE 100)</div>
+
+    <!-- small_cap · NAV 109.9 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Small Cap</span>
+        <span class="nav"><span class="k">NAV</span>109.9</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">Five futuristic themes, only companies scoring GVM 8 or above.
+      Rebalances quarterly &mdash; next 01 Sep, earlier than the rest.</div>
+      <div class="br2">
+        <span class="st up">+Rs.62,021 open</span>
+        <span class="st">15 positions</span>
+        <span class="st dn">7 stops hit</span>
+      </div>
+      <div class="holds">
+        <span class="hd">CARTRADE<span class="p">+57.7%</span></span>
+        <span class="hd">SANSERA<span class="p">+36.1%</span></span>
+        <span class="hd">UNIPARTS<span class="p">+32.8%</span></span>
+      </div>
+    </div>
+
+    <!-- mid_cap · NAV 108.1 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Mid Cap</span>
+        <span class="nav"><span class="k">NAV</span>108.1</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">Companies ranked 101&ndash;250 by size. GVM 7.5+, growth above 7,
+      momentum above 7. Monthly rebalance.</div>
+      <div class="br2">
+        <span class="st up">+Rs.53,232 open</span>
+        <span class="st">12 positions</span>
+        <span class="st dn">4 stops hit</span>
+      </div>
+      <div class="holds">
+        <span class="hd">WELCORP<span class="p">+33.8%</span></span>
+        <span class="hd">RADICO<span class="p">+28.3%</span></span>
+        <span class="hd">ABCAPITAL<span class="p">+20.0%</span></span>
+      </div>
+    </div>
+
+    <!-- alpha_multicap · NAV 104.5 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Alpha Multicap</span>
+        <span class="nav"><span class="k">NAV</span>104.5</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">The strictest gate: GVM and Value both 7.5+, momentum above 7 and
+      still improving. Top 12 from the Nifty 500, equal weight. Spare slots sit in cash.</div>
+      <div class="br2">
+        <span class="st up">+Rs.35,368 open</span>
+        <span class="st">13 positions</span>
+        <span class="st dn">4 stops hit</span>
+      </div>
+      <div class="holds">
+        <span class="hd">RADICO<span class="p">+29.2%</span></span>
+        <span class="hd">GRWRHITECH<span class="p">+23.6%</span></span>
+        <span class="hd">SYRMA<span class="p">+23.5%</span></span>
+      </div>
+    </div>
+
+    <!-- breakout_52w · NAV 101.7 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Breakout 52W</span>
+        <span class="nav"><span class="k">NAV</span>101.7</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">Buys strength at 52-week highs: GVM 7.5+ within 10% of the high on
+      real volume. Top 10 by one-year return. Youngest basket &mdash; started 31 Jul.</div>
+      <div class="br2">
+        <span class="st up">+Rs.7,266 open</span>
+        <span class="st">9 positions</span>
+        <span class="st">0 stops hit</span>
+      </div>
+      <div class="holds">
+        <span class="hd">9 names held</span>
+        <span class="hd">1 slot in cash</span>
+      </div>
+    </div>
+
+    <!-- contra_value · NAV 101.7 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Contra Value</span>
+        <span class="nav"><span class="k">NAV</span>101.7</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">Quality companies that are cheap and washed out: strong scores,
+      weak momentum, price just turning. Takes profit when momentum returns. Started 31 Jul.</div>
+      <div class="br2">
+        <span class="st up">+Rs.4,828 open</span>
+        <span class="st">4 positions</span>
+        <span class="st up">2 stops +Rs.4,486</span>
+      </div>
+      <div class="holds">
+        <span class="hd">4 names held</span>
+        <span class="hd">6 slots in cash</span>
+      </div>
+    </div>
+
+    <!-- large_cap · NAV 101.2 -->
+    <div class="b">
+      <div class="br1">
+        <span class="bn">Large Cap</span>
+        <span class="nav"><span class="k">NAV</span>101.2</span>
+        <span class="chev">&#8250;</span>
+      </div>
+      <div class="strat">The top 100 companies by size. GVM 7+, growth above 7, at least 10%
+      estimated upside. Monthly rebalance.</div>
+      <div class="br2">
+        <span class="st up">+Rs.21,387 open</span>
+        <span class="st">10 positions</span>
+        <span class="st dn">4 stops hit</span>
+      </div>
+      <div class="holds">
+        <span class="hd">10 names held</span>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      NAV since start is the headline per basket, not unrealised P&L &mdash; NAV survives
+      rebalances, P&L resets on every turnover. Baskets rank by NAV so the best sits on top.
+      Each card states its strategy in one plain line taken from the registry. Negative
+      realised is stated in the hero with its reason.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> tapping a basket should open its full holdings list &mdash; that is the
+      chevron''s promise. Is that a bottom sheet on this screen, or its own page per basket?
+    </div>
+
+    <div class="foot">
+      Batch 7 &middot; screen 2 of 2 &middot; Quant Baskets<br>
+      quant_paper_positions + qb_nav_daily frozen 06-Aug-2026 &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn2" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn2" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn2" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn2" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn2 on" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
