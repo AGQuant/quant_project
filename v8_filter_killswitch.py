@@ -107,6 +107,14 @@ def _wr_since(cur, basket: str, since_ts) -> tuple:
 
 
 def _disable(conn, basket: str, reason: str):
+    """RETIRED cc#875 (founder decision, session_log 16710). DEAD-PRESERVED, not deleted.
+
+    No code path reaches this any more — run_killswitch_check no longer evaluates the two
+    switches, so nothing calls _disable(). Kept intact, in the repo convention used for OH-OL and
+    Raw Data, because it is the only written record of HOW the five historical disables were
+    written (state + log in ONE transaction), and cc#873's archaeology depends on that being
+    readable. Deleting it would delete the explanation of the five rows it produced.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """UPDATE v8_filter_state
@@ -164,81 +172,64 @@ def check_state_log_divergence(conn) -> list:
 
 
 def run_killswitch_check(conn) -> dict:
-    """Evaluate both kill-switches for every currently-enabled basket. Returns a
-    per-basket summary. Idempotent — safe to run nightly."""
+    """NIGHTLY JOB. As of cc#875 this runs the DIVERGENCE GUARD ONLY.
+
+    RETIRED cc#875 — founder decision, session_log 16710
+    (V21_KILLSWITCH_RETIRED_AND_CC873_RECONCILE_A_06AUG2026). The two kill-switches (starvation
+    and WR decay) no longer evaluate and _disable() is no longer reachable from any code path.
+
+    Why: cc#502 turned all four surviving baskets into dedicated strict-AND handlers, and none of
+    them calls v21_hard_gate_pass. v8_signal_writer._load_filter_state is dead code (cc#869/cc#873
+    confirmed it is defined and never called). V21_BASELINE_WR is marked STALE by its own comment.
+    So the switch was policing a subsystem nothing calls, judging it against baselines the code
+    itself calls out of date. Auto-disable protection is not wanted for the rebuilt baskets at
+    this stage.
+
+    What STILL runs, deliberately: check_state_log_divergence (cc#873 item 6). It is a
+    data-integrity guard on two tables, independent of the kill-switch logic, and the tables are
+    kept as frozen historical record. The scheduler row stays registered and this function keeps
+    returning a summary so the guard's liveness remains observable (ENGINE_LIVENESS_RULE 13829) —
+    a job that stops reporting is indistinguishable from a job that stopped running.
+
+    Nothing here writes to v8_filter_state or v8_filter_state_log. Read-only by design now.
+    """
     out = {}
 
-    # cc#873: divergence FIRST, and independent of `enabled`. The per-basket loop below skips
-    # disabled baskets outright, which is precisely why a basket sitting wrongly at enabled=FALSE
-    # was never looked at again. Every value in `out` stays a dict so the scheduler's
-    # `r.get("status")` over res.items() is safe on this entry too.
+    # cc#873: the divergence guard, and it runs independently of `enabled`. The old per-basket
+    # loop returned early on any disabled basket, which is precisely why buy_reversal sitting
+    # wrongly at enabled=FALSE was never looked at again for four weeks.
     try:
         _div = check_state_log_divergence(conn)
     except Exception as e:
         log.error(f"cc#873 divergence check failed: {e}")
         _div = []
+
+    # Every value in `out` is a dict, so the scheduler's `r.get("status")` over res.items() is
+    # safe on every entry including these two.
     out["_state_log_divergence"] = {"count": len(_div), "baskets": [d["basket"] for d in _div],
                                     "detail": _div}
+    out["_evaluation"] = {"status": "retired",
+                          "since": "cc#875 / session_log 16710 (06-Aug-2026)",
+                          "note": ("V2.1 starvation + WR-decay evaluation retired; _disable() is "
+                                   "unreachable. Divergence guard only.")}
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """SELECT basket, enabled, baseline_wr, normal_rate, enabled_at
-               FROM v8_filter_state ORDER BY basket""")
-        rows = cur.fetchall()
-        last5 = _last_n_trading_days(cur, STARVATION_WINDOW_TD)
-
-    _div_baskets = set(out["_state_log_divergence"]["baskets"])
-    for basket, enabled, baseline_wr, normal_rate, enabled_at in rows:
-        if not enabled:
-            # cc#873: a disabled basket is still worth a word when its log disagrees — otherwise the
-            # only trace of the drift is an alert row nobody joins back to this summary.
-            out[basket] = {"status": "disabled",
+    # Per-basket state is still REPORTED — read-only, no judgment, no writes. Keeping it means the
+    # nightly summary still shows what the frozen tables say, so the retirement is visible as data
+    # rather than as an absence.
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT basket, enabled, disabled_at, disabled_reason
+                           FROM v8_filter_state ORDER BY basket""")
+            rows = cur.fetchall()
+        _div_baskets = set(out["_state_log_divergence"]["baskets"])
+        for basket, enabled, disabled_at, reason in rows:
+            out[basket] = {"status": "enabled" if enabled else "disabled",
+                           "evaluation": "retired",
+                           "disabled_at": str(disabled_at) if disabled_at else None,
+                           "disabled_reason": reason,
                            "state_log_divergence": basket in _div_baskets}
-            continue
-        since_date = (enabled_at.date() if hasattr(enabled_at, "date") else enabled_at)
-        with conn.cursor() as cur:
-            td      = _trading_days_since(cur, since_date)
-            signals = _signals_since(cur, basket, since_date)
+    except Exception as e:
+        log.error(f"cc#875 state read failed: {e}")
 
-        # Sample discipline — no judgment until the sample is big enough.
-        if td < SAMPLE_MIN_TRADING_DAYS and signals < SAMPLE_MIN_SIGNALS:
-            out[basket] = {"status": "warming_up", "trading_days": td,
-                           "signals": signals}
-            continue
-
-        tripped = None
-
-        # Rule 2 — WR decay.
-        with conn.cursor() as cur:
-            closed, wr = _wr_since(cur, basket, enabled_at)
-        if wr is not None and closed >= WR_MIN_CLOSED and baseline_wr is not None:
-            if wr < float(baseline_wr) - WR_DROP_PP:
-                tripped = (f"WR decay: rolling {wr:.1f}% over {closed} closed vs "
-                           f"baseline {float(baseline_wr):.1f}% "
-                           f"(> {WR_DROP_PP:.0f}pp below)")
-
-        # Rule 1 — starvation (only meaningful once >= window trading days exist).
-        if tripped is None and normal_rate and len(last5) >= STARVATION_WINDOW_TD:
-            with conn.cursor() as cur:
-                win_signals = _signals_in_window(cur, basket, last5)
-            expected = float(normal_rate) * STARVATION_WINDOW_TD
-            if win_signals < STARVATION_FRACTION * expected:
-                tripped = (f"starvation: {win_signals} signals in last "
-                           f"{STARVATION_WINDOW_TD} trading days vs expected "
-                           f"~{expected:.1f} (< {int(STARVATION_FRACTION*100)}%)")
-
-        if tripped:
-            _disable(conn, basket, tripped)
-            _log_alert(conn, basket,
-                       f"V2.1 filters AUTO-DISABLED — {tripped}. Basket reverted to "
-                       f"locked behavior. Will NOT auto-re-enable; review + re-enable "
-                       f"manually.")
-            out[basket] = {"status": "TRIPPED_DISABLED", "reason": tripped,
-                           "wr": wr, "closed": closed, "signals": signals,
-                           "trading_days": td}
-        else:
-            out[basket] = {"status": "ok", "wr": wr, "closed": closed,
-                           "signals": signals, "trading_days": td}
-
-    log.info(f"killswitch check: {out}")
+    log.info(f"killswitch check (divergence only, evaluation retired cc#875): {out}")
     return out

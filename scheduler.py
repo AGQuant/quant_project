@@ -992,10 +992,18 @@ def _bg_qb_intraday_mark():
     finally: _qb_intraday_mark_running = False
 
 def _bg_v21_killswitch():
-    """cc#158: nightly V2.1 candidate-filter kill-switch check (16:10 IST, after
-    close + ADR/TC). Auto-disables a basket's V2.1 filters + alerts if signal
-    count starves or rolling WR decays >10pp below baseline (respecting the
-    20-trading-day / 15-signal sample-discipline warmup). Never auto-re-enables."""
+    """Nightly 16:10 IST job. cc#875: now the STATE/LOG DIVERGENCE GUARD ONLY.
+
+    cc#158 shipped this as the V2.1 kill-switch evaluation (starvation + WR decay, auto-disable +
+    alert). That evaluation is RETIRED by founder decision, session_log 16710 — cc#502 left no
+    caller of the V2.1 hard gate, so it was policing a subsystem nothing calls.
+
+    The job row STAYS registered and this keeps running, deliberately: it now performs cc#873's
+    check_state_log_divergence, which alerts when v8_filter_state and v8_filter_state_log disagree
+    about a basket. Keeping it scheduled is what keeps the guard's liveness observable
+    (ENGINE_LIVENESS_RULE 13829) — a guard that stops reporting looks the same as one that stopped
+    running. `tripped` below is now always empty by construction; that is the retirement, not a
+    fault."""
     global _v21_ks_ran_today
     today = _ist_now().date()
     if _v21_ks_ran_today == today: return _SKIPPED
