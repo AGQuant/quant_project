@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Daily Digest · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — DAILY DIGEST (Batch 8, screen 1)
+   Content contract: daily_digest_format_v2 (spec 965), rendered mobile.
+   Dark per 15913. Tokens on .screen/.bnav, never bare :root.
+
+   DESIGN DECISIONS (for founder review):
+   - The digest answers ONE question: what happened while you slept and what
+     does the day open into. Order: our market first, then the world, then
+     the levels that matter today, then the morning editorial.
+   - Time-of-day honesty: before 09:15 the header says PRE-MARKET and domestic
+     numbers are yesterday's close, labelled as such. A digest can never
+     pretend yesterday's close is a live price.
+   - Global rows are grouped: indices / commodities / currency. Nikkei +3.99%
+     is the outlier and leads its group — sorted by |move|, not alphabet.
+   - Pivots for both indices on one line each: S1 · PP · R1. These are today's
+     working levels from the rolling-5d build.
+   - Every value is a REAL row read 06-Aug-2026 (raw_prices, global_indices,
+     adr_daily, pcr_daily, v8_paper_pivots, polished_news). Nothing invented.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;--cyan:#37D3E8;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:12px 12px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:16px 3px 8px}
+.sect:first-child{margin-top:2px}
+
+.c{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 14px 13px 17px;margin-bottom:9px;overflow:hidden}
+.c::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line2)}
+.c.pri{background:var(--panel2);border-color:var(--line2)}
+.c.pri::before{background:repeating-linear-gradient(180deg,var(--dim) 0 3px,transparent 3px 8px)}
+.c.ref::before{background:var(--blu);top:8px;bottom:8px}
+
+.ix{display:flex;align-items:baseline;gap:9px;padding:5px 0}
+.ix+.ix{border-top:1px solid var(--line)}
+.ixn{font-size:13px;font-weight:800;min-width:96px}
+.ixv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13.5px;font-weight:700}
+.ixc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:12px;font-weight:800}
+.up{color:var(--grn)}.dn{color:var(--red)}.fl{color:var(--mut)}
+.asof{font-size:9.5px;color:var(--dim);margin-top:8px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+.mrow{display:flex;align-items:baseline;gap:8px;padding:4px 0;font-size:12.5px}
+.mrow+.mrow{border-top:1px solid var(--line)}
+.mn{font-weight:700;min-width:88px}
+.mv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;color:var(--mut)}
+.mc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:800}
+
+.pv{display:flex;align-items:baseline;gap:0;margin-top:7px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700}
+.pv .nm{font-family:'Sora';font-size:12px;font-weight:800;min-width:96px;color:var(--txt)}
+.pv .s1{color:var(--red)} .pv .pp{color:var(--mut);margin:0 auto} .pv .r1{color:var(--grn);margin-left:auto}
+.pv .k{font-size:8px;letter-spacing:.1em;color:var(--dim);display:block}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mini{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.mini .k{font-size:8.5px;letter-spacing:.11em;font-weight:700;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mini .v{font-size:16px;font-weight:800;margin-top:3px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mini .s{font-size:9.5px;color:var(--dim);margin-top:2px}
+
+.ed{font-size:14px;font-weight:800;line-height:1.4}
+.edsum{font-size:12px;color:var(--mut);line-height:1.55;margin-top:5px}
+.edgo{margin-top:9px;min-height:34px;display:flex;align-items:center;
+  font-size:11.5px;font-weight:700;color:var(--blu)}
+.chev{margin-left:auto;color:var(--dim);font-size:15px}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; every price, level and change below is a real row
+    read 06-Aug-2026 pre-market. Nothing invented.</span>
+  </div>
+
+  <div class="head">
+    <h1>Daily Digest</h1>
+    <div class="s">Thu 06 Aug &middot; PRE-MARKET &middot; market opens 09:15</div>
+  </div>
+
+  <div class="body">
+
+    <div class="sect">OUR MARKET &middot; YESTERDAY'S CLOSE</div>
+
+    <!-- PRIMARY -->
+    <div class="c pri">
+      <div class="ix">
+        <span class="ixn">NIFTY 50</span>
+        <span class="ixv">24,625</span>
+        <span class="ixc fl">+0.04%</span>
+      </div>
+      <div class="ix">
+        <span class="ixn">BANK NIFTY</span>
+        <span class="ixv">57,740</span>
+        <span class="ixc dn">&minus;0.29%</span>
+      </div>
+      <div class="two" style="margin-top:10px">
+        <div class="mini">
+          <div class="k">ADR &middot; BREADTH</div>
+          <div class="v up">1.40</div>
+          <div class="s">advancers lead</div>
+        </div>
+        <div class="mini">
+          <div class="k">NIFTY PCR</div>
+          <div class="v fl">0.97</div>
+          <div class="s">balanced</div>
+        </div>
+      </div>
+      <div class="asof">as of Wed 05 Aug 15:30 close &middot; these are NOT live prices</div>
+    </div>
+
+    <div class="sect">TODAY'S WORKING LEVELS &middot; ROLLING 5-DAY</div>
+
+    <div class="c ref">
+      <div class="pv">
+        <span class="nm">NIFTY 50</span>
+        <span class="s1"><span class="k">S1</span>24,283</span>
+        <span class="pp"><span class="k">PIVOT</span>24,529</span>
+        <span class="r1"><span class="k">R1</span>24,870</span>
+      </div>
+      <div class="pv" style="margin-top:11px">
+        <span class="nm">BANK NIFTY</span>
+        <span class="s1"><span class="k">S1</span>56,923</span>
+        <span class="pp"><span class="k">PIVOT</span>57,586</span>
+        <span class="r1"><span class="k">R1</span>58,402</span>
+      </div>
+    </div>
+
+    <div class="sect">OVERNIGHT &middot; THE WORLD</div>
+
+    <div class="c">
+      <div class="mrow"><span class="mn">Nikkei</span><span class="mv">66,300</span><span class="mc up">+3.99%</span></div>
+      <div class="mrow"><span class="mn">Nasdaq</span><span class="mv">26,363</span><span class="mc dn">&minus;0.83%</span></div>
+      <div class="mrow"><span class="mn">Dow</span><span class="mv">54,349</span><span class="mc up">+0.49%</span></div>
+      <div class="mrow"><span class="mn">DAX</span><span class="mv">26,126</span><span class="mc up">+0.48%</span></div>
+      <div class="mrow"><span class="mn">Hang Seng</span><span class="mv">25,916</span><span class="mc dn">&minus;0.36%</span></div>
+      <div class="mrow"><span class="mn">S&amp;P 500</span><span class="mv">7,724</span><span class="mc dn">&minus;0.17%</span></div>
+    </div>
+
+    <div class="c">
+      <div class="mrow"><span class="mn">Gold</span><span class="mv">$4,150</span><span class="mc up">+2.87%</span></div>
+      <div class="mrow"><span class="mn">Silver</span><span class="mv">$60.2</span><span class="mc up">+4.20%</span></div>
+      <div class="mrow"><span class="mn">Brent</span><span class="mv">$79.1</span><span class="mc dn">&minus;0.40%</span></div>
+      <div class="mrow"><span class="mn">USD-INR</span><span class="mv">95.11</span><span class="mc up">&minus;0.24%</span></div>
+      <div class="mrow"><span class="mn">India VIX</span><span class="mv">12.2</span><span class="mc fl">+1.09%</span></div>
+    </div>
+
+    <div class="sect">THIS MORNING'S EDITORIAL</div>
+
+    <div class="c">
+      <div class="ed">The government sold LIC shares in secret, and it worked</div>
+      <div class="edsum">The Rs 31,552 crore sale was kept from bankers until the last moment.
+      Public ownership of LIC has now reached 10% ahead of schedule.</div>
+      <div class="edgo">Read in Intel <span class="chev">&#8250;</span></div>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      Pre-market honesty: before 09:15 the domestic card says YESTERDAY'S CLOSE and states
+      the as-of line under the numbers &mdash; a digest never dresses a close as a live price.
+      Global rows sort by size of move, not alphabet, so the outlier leads. USD-INR shows a
+      green minus: the number fell, which is the rupee strengthening &mdash; colour follows
+      what is GOOD for India, sign follows the number.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> after 09:15 this same screen flips its top card to LIVE (rail breathing,
+      live NIFTY and Bank Nifty). Is the digest a morning-only page, or should it stay useful
+      all day in that live form?
+    </div>
+
+    <div class="foot">
+      Batch 8 &middot; screen 1 of 2 &middot; Daily Digest<br>
+      raw_prices + global_indices + pivots frozen 06-Aug &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn on" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
