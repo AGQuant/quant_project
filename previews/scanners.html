@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scanners · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — SCANNERS (dedicated screen)
+   Dark per 15913. The web page is a 3-tab screener. Below 768px no horizontal
+   tab row renders (core rule) — so the three scanners become three STACKED
+   SECTIONS with a filter chip row that jumps between them.
+
+   DESIGN DECISIONS (for founder review):
+   - Each scanner states its HORIZON in words on its header: Intraday (today,
+     square off by close) / Positional (days to weeks) / Investment (months+).
+     Same page, three different clocks — mixing them unlabelled is how a swing
+     idea becomes an accidental investment.
+   - Each section states its own FRESHNESS: intraday is market-hours only and
+     reads CLOSED now (pre-open) with -- rows, never fake numbers. Positional
+     carries yesterday's V8 qualified; Investment carries last night's GVM.
+   - Missing renders --. The intraday scanner outside market hours is the
+     invariant's clearest test case, so it is shown in its true CLOSED state.
+   - Every populated value is a REAL row: v8_qualified (05-Aug signal date)
+     and gvm_scores (last night). Nothing invented.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:11px 12px 0}
+.chips{display:flex;gap:7px;padding:0 0 4px}
+.chip{flex:1;min-height:36px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:11px;border:1px solid var(--line2);font-size:11px;font-weight:700;color:var(--mut)}
+.chip.on{color:var(--txt);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.14)}
+
+.shead{display:flex;align-items:baseline;gap:8px;margin:15px 3px 8px}
+.st{font-size:13.5px;font-weight:800}
+.hz{font-size:9.5px;color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.fresh{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:8.5px;font-weight:700;letter-spacing:.1em;padding:3px 7px;border-radius:4px;
+  border:1px solid var(--line2);color:var(--dim)}
+.fresh.live{color:var(--grn);border-color:rgba(47,212,139,.4)}
+
+.row{display:flex;align-items:center;gap:10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:10px 13px;margin-bottom:6px;min-height:48px}
+.sy{font-size:13px;font-weight:800}
+.bx{font-size:9px;color:var(--dim);margin-top:2px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.m1{margin-left:auto;text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mv{font-size:12.5px;font-weight:800}
+.mk{font-size:8px;letter-spacing:.1em;color:var(--dim);font-weight:700;margin-top:1px}
+.g{color:var(--grn)}
+.closed{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:13px;position:relative;overflow:hidden;margin-bottom:6px}
+.closed::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:repeating-linear-gradient(180deg,var(--dim) 0 2px,transparent 2px 7px)}
+.ct{font-size:12px;font-weight:800;color:var(--mut)}
+.cs{font-size:11px;color:var(--dim);line-height:1.55;margin-top:5px}
+.dashes{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--dim);
+  margin-top:8px;letter-spacing:.05em}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; positional and investment rows are real (05-Aug
+    signals, last night's GVM). Intraday shows its TRUE closed state. Nothing invented.</span>
+  </div>
+
+  <div class="head">
+    <h1>Scanners</h1>
+    <div class="s">three scanners &middot; three horizons &middot; each states its own clock</div>
+  </div>
+
+  <div class="body">
+
+    <div class="chips">
+      <span class="chip">Intraday</span>
+      <span class="chip on">Positional</span>
+      <span class="chip">Investment</span>
+    </div>
+
+    <div class="shead">
+      <span class="st">Intraday</span>
+      <span class="hz">today only &middot; square off by close</span>
+      <span class="fresh">CLOSED</span>
+    </div>
+
+    <div class="closed">
+      <div class="ct">Market opens 09:15</div>
+      <div class="cs">The intraday scanner runs only during market hours &mdash; it reads live
+      5-minute strength, and there is none to read right now. It never shows yesterday's
+      rows as if they were today's.</div>
+      <div class="dashes">-- &middot; -- &middot; -- &middot; --</div>
+    </div>
+
+    <div class="shead">
+      <span class="st">Positional</span>
+      <span class="hz">days to weeks &middot; V8 qualified</span>
+      <span class="fresh">05 AUG EOD</span>
+    </div>
+
+    <div class="row"><div><div class="sy">ABCAPITAL</div><div class="bx">buy_reversal &middot; also in buy_momentum</div></div><div class="m1"><div class="mv g">8.0</div><div class="mk">GVM</div></div><div class="m1"><div class="mv">+6.6%</div><div class="mk">WEEK</div></div></div>
+    <div class="row"><div><div class="sy">OFSS</div><div class="bx">buy_reversal</div></div><div class="m1"><div class="mv g">8.0</div><div class="mk">GVM</div></div><div class="m1"><div class="mv">+1.5%</div><div class="mk">WEEK</div></div></div>
+    <div class="row"><div><div class="sy">SHRIRAMFIN</div><div class="bx">buy_reversal</div></div><div class="m1"><div class="mv g">7.9</div><div class="mk">GVM</div></div><div class="m1"><div class="mv">+5.3%</div><div class="mk">WEEK</div></div></div>
+    <div class="row"><div><div class="sy">BAJAJ-AUTO</div><div class="bx">buy_momentum</div></div><div class="m1"><div class="mv g">7.8</div><div class="mk">GVM</div></div><div class="m1"><div class="mv">+2.8%</div><div class="mk">WEEK</div></div></div>
+
+    <div class="shead">
+      <span class="st">Investment</span>
+      <span class="hz">months+ &middot; GVM quality</span>
+      <span class="fresh">NIGHTLY 22:00</span>
+    </div>
+
+    <div class="row"><div><div class="sy">ADOR</div><div class="bx">Excellent</div></div><div class="m1"><div class="mv g">8.4</div><div class="mk">GVM</div></div></div>
+    <div class="row"><div><div class="sy">UNIPARTS</div><div class="bx">Excellent</div></div><div class="m1"><div class="mv g">8.4</div><div class="mk">GVM</div></div></div>
+    <div class="row"><div><div class="sy">WELCORP</div><div class="bx">Excellent</div></div><div class="m1"><div class="mv g">8.3</div><div class="mk">GVM</div></div></div>
+    <div class="row"><div><div class="sy">FIEMIND</div><div class="bx">Excellent</div></div><div class="m1"><div class="mv g">8.3</div><div class="mk">GVM</div></div></div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      Three scanners, three clocks &mdash; each header states its horizon in words and its own
+      freshness badge, because mixing an intraday idea with an investment idea unlabelled is
+      how a day trade becomes an accidental holding. The intraday section is shown in its TRUE
+      pre-open state: CLOSED, with -- rows. It never dresses yesterday as today &mdash; this is
+      the missing-renders-as-dashes invariant's clearest test case, shown deliberately.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> the chip row currently JUMPS to a section (all three stacked, one page).
+      Alternative: chips FILTER to one section at a time. Stacked shows everything in one
+      scroll; filtered is calmer. Which reads better on your phone?
+    </div>
+
+    <div class="foot">
+      Dedicated screen &middot; Scanners<br>
+      v8_qualified + gvm_scores frozen 06-Aug &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="/preview/gvm"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="/preview/check"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
