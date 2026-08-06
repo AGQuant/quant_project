@@ -118,10 +118,68 @@ def _disable(conn, basket: str, reason: str):
     conn.commit()
 
 
+def check_state_log_divergence(conn) -> list:
+    """cc#873 — STATE vs POINT-IN-TIME LOG must agree. Returns the baskets where they do not.
+
+    v8_filter_state is what LIVE reads; v8_filter_state_log is what a sim/BT7 replay reads to
+    reconstruct the gate as of a past day (cc#324). _disable() writes BOTH in one transaction, so
+    under normal operation they can never drift. If they have drifted, something wrote the state
+    table out of band — and the two readers are now disagreeing about history with nothing on
+    screen to say so. That is exactly what happened to buy_reversal: enabled=FALSE in state,
+    disabled_at NULL, and no FALSE row in the log, undetected from 09-Jul to 06-Aug.
+
+    LOUD, NOT SILENT. This raises through the existing _log_alert path (ops_log category=alert +
+    cc_task_logs #158), the same channel a kill-switch trip uses. It fires on every nightly run
+    while the divergence stands — that repetition IS the alarm, and it stops the moment state and
+    log agree again. It never writes to either table: detecting drift and deciding the true
+    history are different jobs, and the second one needs a human.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT s.basket, s.enabled, x.enabled AS log_enabled, x.changed_at, s.disabled_at
+            FROM v8_filter_state s
+            LEFT JOIN LATERAL (
+                SELECT enabled, changed_at FROM v8_filter_state_log l
+                WHERE l.basket = s.basket ORDER BY id DESC LIMIT 1
+            ) x ON TRUE
+            WHERE s.enabled IS DISTINCT FROM x.enabled
+            ORDER BY s.basket
+        """)
+        rows = cur.fetchall()
+
+    diverged = []
+    for basket, state_enabled, log_enabled, changed_at, disabled_at in rows:
+        d = {"basket": basket, "state_enabled": state_enabled, "log_enabled": log_enabled,
+             "log_changed_at": str(changed_at) if changed_at else None,
+             "state_disabled_at": str(disabled_at) if disabled_at else None}
+        diverged.append(d)
+        _log_alert(conn, basket,
+                   f"STATE/LOG DIVERGENCE — v8_filter_state.enabled={state_enabled} but the latest "
+                   f"v8_filter_state_log row says enabled={log_enabled} "
+                   f"(changed_at={d['log_changed_at']}, state.disabled_at={d['state_disabled_at']}). "
+                   f"LIVE and every point-in-time replay disagree about this basket. The kill-switch "
+                   f"writes both together, so this was written out of band. Reconcile the log; do not "
+                   f"guess a timestamp.")
+    return diverged
+
+
 def run_killswitch_check(conn) -> dict:
     """Evaluate both kill-switches for every currently-enabled basket. Returns a
     per-basket summary. Idempotent — safe to run nightly."""
     out = {}
+
+    # cc#873: divergence FIRST, and independent of `enabled`. The per-basket loop below skips
+    # disabled baskets outright, which is precisely why a basket sitting wrongly at enabled=FALSE
+    # was never looked at again. Every value in `out` stays a dict so the scheduler's
+    # `r.get("status")` over res.items() is safe on this entry too.
+    try:
+        _div = check_state_log_divergence(conn)
+    except Exception as e:
+        log.error(f"cc#873 divergence check failed: {e}")
+        _div = []
+    out["_state_log_divergence"] = {"count": len(_div), "baskets": [d["basket"] for d in _div],
+                                    "detail": _div}
+
     with conn.cursor() as cur:
         cur.execute(
             """SELECT basket, enabled, baseline_wr, normal_rate, enabled_at
@@ -129,9 +187,13 @@ def run_killswitch_check(conn) -> dict:
         rows = cur.fetchall()
         last5 = _last_n_trading_days(cur, STARVATION_WINDOW_TD)
 
+    _div_baskets = set(out["_state_log_divergence"]["baskets"])
     for basket, enabled, baseline_wr, normal_rate, enabled_at in rows:
         if not enabled:
-            out[basket] = {"status": "disabled"}
+            # cc#873: a disabled basket is still worth a word when its log disagrees — otherwise the
+            # only trace of the drift is an alert row nobody joins back to this summary.
+            out[basket] = {"status": "disabled",
+                           "state_log_divergence": basket in _div_baskets}
             continue
         since_date = (enabled_at.date() if hasattr(enabled_at, "date") else enabled_at)
         with conn.cursor() as cur:
