@@ -1478,7 +1478,11 @@ class BarAggregator:
             except Exception:
                 pass
             try:
-                self.conn = psycopg2.connect(DATABASE_URL)
+                # cc#876: get_db(), not a bare connect — this reconnect path used to rebuild
+                # the connection WITHOUT timeouts or keepalives, so a socket that died once
+                # could be replaced by one that hangs the next time. The safe wrapper already
+                # existed; these two call sites simply bypassed it.
+                self.conn = get_db()
                 self._db_reconnect_attempted = True
             except Exception as e2:
                 log.critical(f"flush {sym} ({source}): DB reconnect FAILED ({e2}) — "
@@ -1783,7 +1787,11 @@ class OptionBarStore:
             except Exception:
                 pass
             try:
-                self.conn = psycopg2.connect(DATABASE_URL)
+                # cc#876: get_db(), not a bare connect — this reconnect path used to rebuild
+                # the connection WITHOUT timeouts or keepalives, so a socket that died once
+                # could be replaced by one that hangs the next time. The safe wrapper already
+                # existed; these two call sites simply bypassed it.
+                self.conn = get_db()
                 self._db_reconnect_attempted = True
             except Exception as e2:
                 log.critical(f"option_bar flush {fsym}: DB reconnect FAILED ({e2}) — "

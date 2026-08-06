@@ -191,7 +191,16 @@ def auto_login(conn=None):
     is never touched — this function must NEVER be able to close a
     caller-supplied connection (root cause of the worker's global DB conn
     dying right after boot auth on 16-Jul)."""
-    own_conn = psycopg2.connect(DATABASE_URL)
+    # cc#876: same untimed-connect hazard as worker/fyers_feed.py get_db(). This connection is
+    # opened on the boot/auth path — the one path where a hang is most expensive, because nothing
+    # is ticking yet to notice. connect_timeout + keepalives + statement_timeout turn a dead socket
+    # into an ordinary OperationalError the caller can act on, instead of a silent forever-wait.
+    own_conn = psycopg2.connect(
+        DATABASE_URL,
+        connect_timeout=10,
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
+        options="-c statement_timeout=120000",
+    )
     try:
         _ensure_attempt_col(own_conn)
         if _too_soon(own_conn):
