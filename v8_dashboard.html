@@ -2620,17 +2620,22 @@ function renderFunnel(b){
 
 // cc#370: Trade log filters — Duration (calendar window) + Basket. Client-side (all closed trades
 // already load in recent_trades). State persists across paper refreshes; setters re-render panel7.
-// cc#817: TLOG_RETIRED — show baskets that no longer run. Default OFF: the Trade Log's headline
-// numbers should describe the book that is actually trading, not one that includes a retired
-// basket's closed era. Session-scoped by design (spec: no persistence required).
-let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=false;
+// cc#817: TLOG_RETIRED — show baskets that no longer run. Session-scoped by design.
+// cc#871 (founder 05-Aug-2026): DEFAULT FLIPPED TO ON. cc#817 defaulted it OFF so the headline
+// described only the book still trading. That contradicts cc#751, which is the older and the
+// governing rule: the Trade Log IS the complete ledger, and the era/liveness split belongs to the
+// fresh-book headline and to the Day Log, not to this tab. The founder's instruction is explicit —
+// with DURATION=All and BASKET=All this tab must read 86 trades across all five baskets, retired
+// or not. cc#817's view is not lost: the toggle still hides retired baskets in one tap.
+let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=true;
 function setTlogDur(v){TLOG_DUR=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogBasket(v){TLOG_BASKET=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogRetired(v){
   TLOG_RETIRED=!!v;
   // Turning retired OFF while a retired basket is the active filter would leave the view pinned to
   // a basket whose pill just disappeared — reset to All so the tab can never end up showing nothing.
-  if(!TLOG_RETIRED){const live=(window.BASKETS||[]).map(b=>b.id);if(TLOG_BASKET!=='all'&&live.indexOf(TLOG_BASKET)<0)TLOG_BASKET='all';}
+  // cc#871: BASKETS, not window.BASKETS — see the note at the _liveBk line in renderTradeLog().
+  if(!TLOG_RETIRED){const live=BASKETS.map(b=>b.id);if(TLOG_BASKET!=='all'&&live.indexOf(TLOG_BASKET)<0)TLOG_BASKET='all';}
   const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();
 }
 function _istDateMinus(days){   // YYYY-MM-DD of (IST today - days), for calendar-window filtering
@@ -2649,7 +2654,16 @@ function renderTradeLog(){
   // retired (buy_s1_bounce, sell_overbought, and anything future that stops running). Default view
   // hides them entirely — no pill, no rows — and, critically, EXCLUDES THEM FROM THE SUMMARY.
   // Derived from BASKETS rather than a hardcoded retired list, so retiring a basket needs no edit here.
-  const _liveBk=(window.BASKETS||[]).map(b=>b.id);
+  //
+  // cc#871 — THE BUG THAT MADE EVERY KPI READ ZERO. This line said `window.BASKETS`. BASKETS is
+  // declared with `const` at the top of this script (line ~885), and a top-level `const` in a
+  // classic <script> lives in script scope, NOT on the global object — so `window.BASKETS` was
+  // ALWAYS undefined and `||[]` quietly turned it into an empty array. With no live baskets, every
+  // basket in the ledger counted as retired: 5 of 5, which is exactly the "Show retired (5)" on the
+  // founder's screenshot. The default hid all five, so all 86 trades were filtered out and every
+  // KPI box printed 0 while the Day Log on the same page printed 26. Reading BASKETS directly gives
+  // the four live ids, so only buy_s1_bounce is retired — 1, not 5.
+  const _liveBk=BASKETS.map(b=>b.id);
   const _retiredBk=[...new Set(_allT.map(x=>x.basket).filter(b=>b&&_liveBk.indexOf(b)<0))];
   if(!TLOG_RETIRED&&_retiredBk.length)t=t.filter(x=>_liveBk.indexOf(x.basket||'')>=0);
   // cc#370: apply the Duration + Basket filters (combine); default All/All = no filtering.
@@ -2686,8 +2700,14 @@ function renderTradeLog(){
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
   // cc#751: DYNAMIC basket row — derived from the baskets actually present in the trade ledger (union
   // any currently-qualifying basket), so it always reflects what has run/is running instead of a stale
-  // hardcoded 6. Canonical display order; unknown baskets sort last. Reconciliation of the running-basket
-  // source of truth (v8_filter_state vs live v8_qualified writes) is documented for the founder.
+  // hardcoded 6. Canonical display order; unknown baskets sort last.
+  //
+  // cc#871 item 4 — WHAT "RETIRED" IS ALLOWED TO MEAN HERE. Never v8_filter_state. cc#868 flagged
+  // that table BLOCKED_SOURCE: all six baskets read enabled=false, with 17-Jul-to-30-Jul starvation
+  // and WR-decay reasons, on a day v8_qualified wrote 19 rows. Nothing on this tab reads it, and
+  // nothing should. The live set is BASKETS above, and it already matches the explicit source —
+  // the only two baskets it omits are the two with session_log kills, buy_s1_bounce (id 5646) and
+  // sell_overbought (id 5642), both killed 17-Jul. Retiring a basket = removing it from BASKETS.
   const _bkOrder=['buy_reversal','buy_momentum','buy_s1_bounce','sell_reversal','sell_momentum','sell_overbought'];
   // cc#817: the pill row follows the same rule as the rows — retired baskets only appear when the
   // toggle is on, and then carry a RETIRED tag so a pill can never be mistaken for a live basket.
@@ -2701,7 +2721,19 @@ function renderTradeLog(){
   }).join('');
   // cc#817: the toggle only exists when there IS something retired to reveal — an inert control on a
   // clean ledger is noise. Session-scoped (no persistence), per spec.
-  const retBtn=_retiredBk.length?`<button class="btn${TLOG_RETIRED?' on':''}" onclick="setTlogRetired(${TLOG_RETIRED?'false':'true'})" title="${_retiredBk.map(basketLabel).join(', ')} — no longer running; hidden from rows and from the summary by default">${TLOG_RETIRED?'Hide':'Show'} retired (${_retiredBk.length})</button>`:'';
+  // cc#871: it now starts ON, so the title says what HIDING would do rather than describing a
+  // default that no longer exists.
+  const retBtn=_retiredBk.length?`<button class="btn${TLOG_RETIRED?' on':''}" onclick="setTlogRetired(${TLOG_RETIRED?'false':'true'})" title="${_retiredBk.map(basketLabel).join(', ')} — no longer running. Included by default; hide to see only the baskets still trading.">${TLOG_RETIRED?'Hide':'Show'} retired (${_retiredBk.length})</button>`:'';
+  // cc#871 item 5 — SAY WHICH SET THIS TAB IS COUNTING. The Trade Log and the Day Log sit on the
+  // same page and legitimately print different totals: this tab counts EVERY closed trade since
+  // inception, the Day Log counts only the post-cutover era (cc#504). Two correct views of two
+  // different sets is fine; two numbers on one screen with nothing saying why is not.
+  const scopeNote=isAll
+    ? 'Counting the COMPLETE ledger &mdash; every closed trade since inception, all baskets, retired included. The Day Log tab counts only the post&#8209;cutover era, so its totals are smaller on purpose.'
+    : ('Counting a FILTERED subset &mdash; '+[TLOG_DUR==='all'?null:(TLOG_DUR==='1w'?'last 1 week':'last 1 month'),
+        TLOG_BASKET==='all'?null:basketLabel(TLOG_BASKET),
+        TLOG_RETIRED?null:'retired baskets hidden'].filter(Boolean).join(' &middot; ')+
+       '. Clear all three to see the complete ledger.');
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}${retBtn?'<span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>'+retBtn:''}</div>
@@ -2713,7 +2745,8 @@ function renderTradeLog(){
     <div class="card"><div class="k">Accuracy</div><div class="v" style="color:${bAccCol}">${bAcc==null?'--':bAcc.toFixed(1)+'%'}</div><div class="v-sub">avg win ${bAvgWin==null?'--':sign(bAvgWin,2)+'%'} / avg loss ${bAvgLoss==null?'--':sign(bAvgLoss,2)+'%'}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(bNet)}">${inr(bNet)}</div><div class="v-sub">Gross ${inr(bPnl)} &minus; Brokerage ${inr(bPnl-bNet)}</div></div>
     <div class="card"><div class="k">Avg Ret (net)</div><div class="v ${pnlCls(bAvgNet)}">${sign(bAvgNet)}%</div><div class="v-sub">gross ${sign(bAvg)}%</div></div>
-  </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})${isAll?'':` &middot; showing ${t.length} filtered trade${t.length===1?'':'s'}`}</div>`;
+  </div><div style="font-size:10px;color:var(--dim);margin-bottom:4px">${scopeNote}</div>
+  <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})${isAll?'':` &middot; showing ${t.length} filtered trade${t.length===1?'':'s'}`}</div>`;
   const desktopTable=`<div class="ptitle">Recent Closed Trades</div>`+
     sortTbl('tlog',
     [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],["exit_ts","Exit Time"],["entry_price","Entry"],["exit_price","Exit"],["return_pct","Ret %"],["pnl","Gross P&L"],["net_pnl","Net P&L"],["result","Result"]],
