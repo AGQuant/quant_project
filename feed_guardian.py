@@ -208,6 +208,23 @@ def _cmd_ack(cur):
 
 
 # ── per-leg freshness read ───────────────────────────────────────────────────
+def _trading_day(d) -> bool:
+    """cc#876: canonical trading-day test, with a deliberately CONSERVATIVE fallback.
+
+    The dead-null classification below only fires on a trading day, so getting this wrong in the
+    permissive direction would page the founder on a holiday. If nse_holidays is unavailable for
+    any reason we fall back to weekday-only, which can only ever over-report a holiday as a
+    trading day — so the fallback is paired with the same 09:25-15:30 window, and a holiday
+    produces at most one Telegram, never a repair command loop.
+    """
+    try:
+        from nse_holidays import is_trading_day
+        return bool(is_trading_day(d))
+    except Exception as e:
+        log.warning(f"cc#876 _trading_day fell back to weekday test: {e}")
+        return d.weekday() < 5
+
+
 def _leg_ages(cur, now):
     """Age (minutes) of the newest 5m bar per source, TODAY only. None if no bar yet today."""
     ages = {}
@@ -380,6 +397,23 @@ def guardian_tick():
             any_fresh = any(fresh.values())
             all_stale = not any_fresh
 
+            # cc#876 item 4 — NULL DURING MARKET HOURS MEANS DEAD, NOT UNKNOWN.
+            # _leg_ages returns None when a source has NO bar at all today. That is the MOST dead
+            # a leg can be, and it was the one state this function did nothing about: the
+            # all-stale branch below used to also require `any(a is not None ...)`, so a feed that
+            # produced literally zero bars fell through to the else-branch, cleared its own repair
+            # ladder and issued no command. On 06-Aug the worker was dead from 09:15 and the
+            # guardian ticked all morning with legs {eq:null, fut:null} and actions:[] — a totally
+            # silent feed read as "nothing to report" for four hours.
+            # Past the open grace, a null age is DEAD. Before the grace (and off-hours, and on a
+            # non-trading day) null is genuinely "no bars yet, and none expected", so it stays
+            # unknown and nothing fires — that distinction is the whole fix.
+            _past_grace = (_trading_day(now.date())
+                           and dt_time(9, 25) <= now.time() <= dt_time(15, 30))
+            dead_null = [s for s, a in ages.items() if a is None] if _past_grace else []
+            if dead_null:
+                summary["dead_null_legs"] = dead_null
+
             # (1) feed-silent-at-open (cc#229) — only in the 09:20-09:30 window
             if dt_time(9, 20) <= now.time() <= dt_time(9, 30):
                 nbars = _bars_since_open(cur, now)
@@ -395,13 +429,17 @@ def guardian_tick():
             # (2) per-leg detect -> REPAIR via the cc#661 bounded ladder (resubscribe x2 ->
             #     restart x2 -> STAND DOWN silent). A stood-down leg issues NO command and NO
             #     Telegram until a new day, a manual reset, or self-recovery.
-            if all_stale and any(a is not None for a in ages.values()):
+            # cc#876: `or dead_null` is the fix. The old condition was `all_stale and any(a is not
+            # None ...)` — it demanded that at least one leg have a REAL age before it would act,
+            # which excluded the total-silence case exactly.
+            if all_stale and (any(a is not None for a in ages.values()) or dead_null):
                 # full-feed silence — run the ladder on "_all"; per-leg ladders stay untouched
                 # (they clear naturally once one leg returns). One first-detection heads-up only.
-                action = _ladder_step(cur, state, legs, "_all", "all", now,
-                                      f"ALL legs stale ({summary['legs']})", summary)
+                _why = (f"NO BARS AT ALL today for {', '.join(dead_null)} during market hours"
+                        if dead_null else f"ALL legs stale ({summary['legs']})")
+                action = _ladder_step(cur, state, legs, "_all", "all", now, _why, summary)
                 if action == "resubscribe" and not _throttled(state, "all_stale", now):
-                    _telegram(f"FEED FULL SILENCE — all legs stale ({summary['legs']}). "
+                    _telegram(f"FEED FULL SILENCE — {_why}. "
                               f"Guardian attempting recovery; truthful-friendship likely down.")
                     _mark_alert(state, "all_stale", now)
             else:

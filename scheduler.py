@@ -2122,6 +2122,61 @@ def _bg_guardian_tick():
         log.error(f"guardian_tick: {e}")
 
 
+# cc#876 item 3 — THE DEAD-MAN ALERT THAT WAS MISSING ON 06-AUG.
+# The founder found a 22-hour feed outage from HAL's price on his phone, not from the system. The
+# DB-side writer_no_intraday_bars alert fired all morning and reached no human; feed_guardian
+# ticked with both legs null and did nothing (cc#876 item 4 fixes that separately).
+#
+# This is deliberately the DUMBEST possible check, and deliberately APP-SIDE. It asks one
+# question — is the market open and is the newest bar older than 30 minutes — and it runs in the
+# app process, NOT in worker/**, so it cannot share the fate of the thing it is watching
+# (FYERS_INTEGRATION_LEARNINGS cross-cutting #3: a supervisor inside the supervised process is not
+# a supervisor). Every other feed alarm on 06-Aug lived downstream of something that was also dead.
+_DEADMAN_STALE_MIN   = 30     # newest bar older than this during market hours = page a human
+_DEADMAN_REALERT_MIN = 60     # repeat at most hourly while the condition holds
+_deadman_last_alert  = None
+
+
+def _bg_feed_deadman():
+    """cc#876: market open + newest intraday bar > 30 min old -> Telegram the founder. Hourly cap.
+
+    No repair, no command, no restart — this one only pages. Repair is feed_guardian's job and it
+    has its own bounded ladder; mixing the two is how an alert ends up gated behind a repair
+    decision, which is exactly what silenced 06-Aug.
+    """
+    global _deadman_last_alert
+    now = _ist_now()
+    if now.weekday() >= 5 or not _is_trading_day(now.date()):
+        return _SKIPPED
+    # 09:45 floor, not 09:15: the first 5m bars need time to land, and a 30-min threshold at 09:20
+    # would fire every single morning.
+    if not (dt_time(9, 45) <= now.time() <= dt_time(15, 30)):
+        return _SKIPPED
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT MAX(ts) FROM intraday_prices WHERE ts::date = %s", (now.date(),))
+            last = cur.fetchone()[0]
+    except Exception as e:
+        log.error(f"feed_deadman: DB read failed ({e}) — no alert on a bad read")
+        return
+    # NULL = not one bar today. That is the 06-Aug state, and it is the loudest case, not a
+    # reason to stay quiet (same null-is-dead rule as cc#876 item 4 in feed_guardian).
+    age = None if last is None else (now.replace(tzinfo=None) - last).total_seconds() / 60.0
+    if age is not None and age <= _DEADMAN_STALE_MIN:
+        _deadman_last_alert = None      # recovered — re-arm so the next outage pages immediately
+        return
+    if _deadman_last_alert is not None and \
+            (now - _deadman_last_alert).total_seconds() < _DEADMAN_REALERT_MIN * 60:
+        return
+    _deadman_last_alert = now
+    what = "NO BARS AT ALL today" if age is None else f"newest bar {age:.0f} min old"
+    msg = (f"🚨 FEED DEAD — {what} at {now:%H:%M IST} with the market OPEN. "
+           f"Check the truthful-friendship worker; v8 signals are running blind.")
+    _log_alert("feed_deadman", msg)
+    _alert_telegram(msg)
+    log.critical(f"feed_deadman: {msg}")
+
+
 def _bg_guardian_offhours():
     """cc#660: 15-min ALL-DAYS worker-liveness tick (heartbeat >45min -> Telegram) + off-hours
     incident relay. Weekend worker death becomes a <=45-min alert, not a 13h discovery."""
@@ -3638,6 +3693,12 @@ async def _scheduler_loop():
         if _is_cash_continuous(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_pivot_star)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
+        # cc#876 item 3: dead-man page. Dispatched on the BARE 5-minute tick with NO outer gate on
+        # purpose — the job carries its own 09:45-15:30 trading-day gate, so no future edit to
+        # _is_cash_continuous or to the guardian's dispatch can silently disable the one alarm whose
+        # entire job is to notice that everything else went quiet.
+        if m % 5 == 0:
+            _spawn(_bg_feed_deadman)
         if m % 15 == 0:
             # cc#660: 15-min ALL-DAYS worker-liveness (heartbeat >45min) + off-hours incident relay.
             # Replaces the m%5 feed_incident_relay — worker incidents any hour still surface here.
