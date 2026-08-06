@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trade Check · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — TRADE CHECK (bottom-nav slot 3, dedicated screen)
+   Dark per 15913. models_tools carried only a tile; this is the full page.
+
+   DESIGN DECISIONS (for founder review):
+   - SEARCH + SIDE first: you arrive with a trade in mind. Symbol and
+     LONG/SHORT toggle, one Run button.
+   - The VERDICT is a WORD (PROCEED / WATCH / STAND ASIDE) with the score
+     beside it — never a colour to memorise, never a bare number.
+   - The gaps ARE the product. Every failed rule prints as value vs required
+     ("GVM 6.10, needs 7.0") — a checklist that only says 11/15 teaches
+     nothing; one that names the four gaps teaches the trade.
+   - Passed rules collapse to one line. You read what is WRONG, not 11
+     congratulations.
+   - Data honesty: these rows come from tc_cache computed 18-Jun and the
+     header SAYS so. A stale check is shown as stale, never dressed as fresh.
+   - Every value is a REAL tc_cache row: PGEL LONG 11/15 WATCH with its 4
+     real gaps, IEX SHORT 7.5/14 FAIL. Nothing invented.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:12px 12px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:16px 3px 8px}
+.sect:first-child{margin-top:2px}
+
+/* input row */
+.inrow{display:flex;gap:8px}
+.sfld{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 13px}
+.sfld .ph{font-size:13px;font-weight:700;color:var(--txt)}
+.tog{display:flex;border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.tg{min-height:48px;display:flex;align-items:center;padding:0 13px;font-size:11.5px;
+  font-weight:800;color:var(--dim)}
+.tg.on{background:rgba(47,212,139,.14);color:var(--grn)}
+.run{width:100%;min-height:48px;background:var(--blu);border:none;border-radius:12px;
+  color:#fff;font-family:'Sora';font-size:14px;font-weight:800;margin-top:9px}
+
+/* verdict card — PRIMARY */
+.v{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 15px 19px;overflow:hidden;margin-bottom:10px}
+.v::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber)}
+.v.bad::before{background:var(--red)}
+.v1{display:flex;align-items:baseline;gap:9px}
+.vsym{font-size:16.5px;font-weight:800}
+.vside{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.1em;padding:3px 8px;border-radius:4px;border:1px solid rgba(47,212,139,.45);color:var(--grn)}
+.vside.sh{border-color:rgba(255,92,108,.45);color:var(--red)}
+.vpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:12px;font-weight:700;color:var(--mut)}
+.v2{display:flex;align-items:center;gap:11px;margin-top:11px}
+.word{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--amber)}
+.word.bad{color:var(--red)}
+.score{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:19px;font-weight:800}
+.score .of{font-size:11px;color:var(--dim)}
+.counts{display:flex;gap:7px;margin-top:10px}
+.ct{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:4px 9px;border-radius:5px;border:1px solid var(--line2);color:var(--mut)}
+.ct.p{color:var(--grn);border-color:rgba(47,212,139,.4)}
+.ct.w{color:var(--amber);border-color:rgba(245,185,74,.4)}
+.ct.f{color:var(--red);border-color:rgba(255,92,108,.4)}
+.vsub{font-size:11.5px;color:var(--mut);line-height:1.55;margin-top:10px}
+.vsub b{color:var(--txt)}
+
+/* gap rows */
+.g{display:flex;align-items:baseline;gap:9px;background:var(--panel);
+  border:1px solid var(--line);border-left:3px solid var(--red);border-radius:0 11px 11px 0;
+  padding:9px 12px;margin-bottom:6px}
+.gr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  color:var(--txt);min-width:78px}
+.gv{font-size:11px;color:var(--mut);line-height:1.5}
+.gv b{color:var(--red);font-weight:700}
+.pass1{font-size:11px;color:var(--dim);padding:8px 3px 0;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Frozen &mdash; both verdicts below are real tc_cache rows
+    computed 18-Jun and labelled with that date. Nothing invented, nothing re-dated.</span>
+  </div>
+
+  <div class="head">
+    <h1>Trade Check</h1>
+    <div class="s">score the trade before you take it &middot; 20-rule checklist v4</div>
+  </div>
+
+  <div class="body">
+
+    <div class="inrow">
+      <div class="sfld"><span style="color:var(--dim)">&#9906;</span><span class="ph">PGEL</span></div>
+      <div class="tog"><span class="tg on">LONG</span><span class="tg">SHORT</span></div>
+    </div>
+    <button class="run" type="button">Run the check</button>
+
+    <div class="sect">THE VERDICT &middot; GAPS FIRST</div>
+
+    <!-- PRIMARY · PGEL LONG · real row -->
+    <div class="v">
+      <div class="v1">
+        <span class="vsym">PGEL</span>
+        <span class="vside">LONG</span>
+        <span class="vpx">CMP 563 &middot; checked 18 Jun</span>
+      </div>
+      <div class="v2">
+        <span class="word">WATCH</span>
+        <span class="score">11<span class="of">/15</span></span>
+      </div>
+      <div class="counts">
+        <span class="ct p">11 PASS</span>
+        <span class="ct w">0 WATCH</span>
+        <span class="ct f">4 FAIL</span>
+      </div>
+      <div class="vsub"><b>Read the gaps, not the score.</b> Eleven of fifteen passed &mdash;
+      but the four that failed are the ones that pay for the stop-loss:</div>
+    </div>
+
+    <div class="g"><span class="gr">R4 GVM</span><span class="gv">quality score <b>6.10</b> &mdash; needs 7.0. The company is not scored strong enough to lean on.</span></div>
+    <div class="g"><span class="gr">R6 TREND</span><span class="gv">price above all 3 averages but <b>RSI monthly 48</b> &mdash; needs 50. The longer trend has not confirmed.</span></div>
+    <div class="g"><span class="gr">R12 PATTERN</span><span class="gv"><b>no setup</b> &mdash; lower lows, no contraction. There is nothing to enter against.</span></div>
+    <div class="g"><span class="gr">F7 DERIV</span><span class="gv">futures basis flat, <b>OI &minus;9,500</b> &mdash; the derivatives market is not positioned with you.</span></div>
+    <div class="pass1">+ 11 rules passed &middot; tap to expand the full sheet</div>
+
+    <div class="sect">A CLEAN STAND-ASIDE &middot; FOR CONTRAST</div>
+
+    <div class="v bad">
+      <div class="v1">
+        <span class="vsym">IEX</span>
+        <span class="vside sh">SHORT</span>
+        <span class="vpx">CMP 124 &middot; checked 18 Jun</span>
+      </div>
+      <div class="v2">
+        <span class="word bad">STAND ASIDE</span>
+        <span class="score">7.5<span class="of">/14</span></span>
+      </div>
+      <div class="counts">
+        <span class="ct p">7 PASS</span>
+        <span class="ct w">1 WATCH</span>
+        <span class="ct f">6 FAIL</span>
+      </div>
+      <div class="vsub">Six fails including the market itself &mdash; ADR 1.97 means the whole
+      tape is bullish, and shorting a single stock against a bullish tape is the most
+      expensive habit in trading. The checklist exists to catch exactly this.</div>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      The verdict is a WORD with the score beside it, never a bare number. Failed rules print
+      value against required in plain words &mdash; "GVM 6.10, needs 7.0" teaches; "11/15"
+      does not. Passed rules collapse to one line: you read what is wrong, not eleven
+      congratulations. And the check states its own age &mdash; these rows are from 18-Jun
+      and the card says so, because a stale check dressed as fresh is how bad trades happen.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> should Run the check on a name in your open book automatically use
+      the position's side, with a held badge on the verdict card? The data exists to do it.
+    </div>
+
+    <div class="foot">
+      Nav-slot screen &middot; Trade Check<br>
+      tc_cache frozen (computed 18-Jun, stated) &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="/preview/gvm"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn on" href="/preview/check"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
