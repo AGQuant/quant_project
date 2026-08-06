@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Holdings · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — HOLDINGS (Batch 8, screen 2)
+   Dark per 15913. Tokens on .screen/.bnav, never bare :root.
+
+   THE HONEST PROBLEM THIS SCREEN SOLVES:
+   smartgain_holdings has ZERO rows right now (confirmed 06-Aug, and by cc#868).
+   The dummy rule says values are real rows frozen in — and the real state IS
+   empty. So this preview designs the EMPTY STATE first, because that is what
+   would render today, and shows the populated row layout ONCE as a sample
+   stamped STRUCTURE ONLY with -- in every value slot. No holding is invented.
+
+   An empty book that says so plainly beats a fake full one. The empty state is
+   a real state of a real product and it deserves design, not apology.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen,.bnav{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;
+}
+.screen{max-width:430px;margin:0 auto;padding-bottom:78px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
+.head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.body{padding:12px 12px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:16px 3px 8px}
+.sect:first-child{margin-top:2px}
+
+/* empty hero — PRIMARY, flat state */
+.hero{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:16px 15px 16px 19px;overflow:hidden;margin-bottom:9px}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:repeating-linear-gradient(180deg,var(--dim) 0 2px,transparent 2px 7px)}
+.hk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.13em;color:var(--dim)}
+.hv{font-size:29px;font-weight:800;letter-spacing:-.02em;margin-top:4px;color:var(--mut);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hsub{font-size:12.5px;color:var(--mut);line-height:1.55;margin-top:9px}
+.hsub b{color:var(--txt);font-weight:700}
+.hgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
+.hc{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.hc .k{font-size:8.5px;letter-spacing:.11em;font-weight:700;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hc .v{font-size:13px;font-weight:800;margin-top:3px;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+/* actions — where a holding comes from */
+.act{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
+  display:flex;align-items:center;gap:10px;min-height:44px}
+.act::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line2)}
+.at{font-size:13px;font-weight:800}
+.as{font-size:10.5px;color:var(--dim);margin-top:2px;line-height:1.45}
+.chev{margin-left:auto;color:var(--dim);font-size:16px}
+
+/* sample row — REFERENCE, structure only */
+.sample{position:relative;background:var(--panel);border:1px dashed var(--line2);
+  border-radius:14px;padding:12px 13px 12px 17px;overflow:hidden;opacity:.92}
+.sample::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:3px;background:var(--blu)}
+.stamp{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--blu);
+  border:1px solid rgba(77,124,254,.5);border-radius:4px;padding:2px 7px;margin-bottom:9px}
+.sr1{display:flex;align-items:baseline;gap:8px}
+.ssym{font-size:14.5px;font-weight:800;color:var(--dim)}
+.sqty{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
+.spnl{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:15px;font-weight:800;color:var(--dim)}
+.sr2{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.sc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:3px 8px;border-radius:5px;border:1px solid var(--line);color:var(--dim)}
+
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;display:flex;
+  background:var(--panel);border-top:1px solid var(--line2);
+  padding:7px 0 max(6px,env(safe-area-inset-bottom));z-index:50}
+.bn{flex:1;text-align:center;font-size:9.5px;font-weight:700;color:var(--dim);padding:4px 0;
+  min-height:44px;text-decoration:none}
+.bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
+.bn.on{color:var(--blu)}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> The empty state below is the REAL state &mdash; smartgain_holdings
+    holds zero rows as of 06-Aug-2026. The sample row is layout only; no holding is invented.</span>
+  </div>
+
+  <div class="head">
+    <h1>Holdings</h1>
+    <div class="s">My Portfolio &middot; SmartGain book &middot; as of Thu 06 Aug</div>
+  </div>
+
+  <div class="body">
+
+    <div class="sect">THE BOOK</div>
+
+    <!-- PRIMARY · flat state, and it says so -->
+    <div class="hero">
+      <div class="hk">HOLDINGS VALUE</div>
+      <div class="hv">--</div>
+      <div class="hsub"><b>The book is flat.</b> No open holdings right now. The last positions
+      were closed and nothing new has been entered. That is a real state, not an error &mdash;
+      a flat book between trades is where discipline lives.</div>
+      <div class="hgrid">
+        <div class="hc"><div class="k">HOLDINGS</div><div class="v">0</div></div>
+        <div class="hc"><div class="k">INVESTED</div><div class="v">--</div></div>
+        <div class="hc"><div class="k">UNREALISED</div><div class="v">--</div></div>
+      </div>
+    </div>
+
+    <div class="sect">WHERE THE NEXT HOLDING COMES FROM</div>
+
+    <a class="act" href="/preview/qb">
+      <div>
+        <div class="at">Quant Baskets</div>
+        <div class="as">Six rule-driven baskets are live &mdash; 63 open positions, best NAV 109.9</div>
+      </div>
+      <span class="chev">&#8250;</span>
+    </a>
+    <a class="act" href="#">
+      <div>
+        <div class="at">Trade Check</div>
+        <div class="as">Score any stock against the 20-rule checklist before you commit</div>
+      </div>
+      <span class="chev">&#8250;</span>
+    </a>
+    <a class="act" href="#">
+      <div>
+        <div class="at">Today's signals</div>
+        <div class="as">V8 qualified 19 names yesterday &mdash; see what the engine likes</div>
+      </div>
+      <span class="chev">&#8250;</span>
+    </a>
+
+    <div class="sect">WHAT A HOLDING LOOKS LIKE HERE</div>
+
+    <div class="sample">
+      <span class="stamp">STRUCTURE ONLY &middot; NOT A HOLDING</span>
+      <div class="sr1">
+        <span class="ssym">SYMBOL</span>
+        <span class="sqty">qty -- &middot; avg --</span>
+        <span class="spnl">--</span>
+      </div>
+      <div class="sr2">
+        <span class="sc">invested --</span>
+        <span class="sc">CMP --</span>
+        <span class="sc">day --</span>
+        <span class="sc">GVM --</span>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      The empty state is designed first because it is TRUE today &mdash; the table has zero
+      rows, and Home's hero will meet the same fact when it is promoted. Empty says so in
+      words and routes you to where a holding comes from; it never fakes a number. The
+      sample row is stamped and dashed so it can never be mistaken for a position, and
+      every slot shows -- because missing is never 0.0.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> when the book has holdings, should closed/exited positions live on
+      this screen under a HISTORY section, or stay only in the P&L reports?
+    </div>
+
+    <div class="foot">
+      Batch 8 &middot; screen 2 of 2 &middot; Holdings<br>
+      smartgain_holdings read 06-Aug-2026: zero rows &middot; dummy data, no live fetch
+    </div>
+
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn on" href="/preview/home"><span class="i">&#8962;</span>Home</a>
+  <a class="bn" href="#"><span class="i">&#9673;</span>GVM</a>
+  <a class="bn" href="#"><span class="i">&#10003;</span>Check</a>
+  <a class="bn" href="/preview/intel"><span class="i">&#9636;</span>Intel</a>
+  <a class="bn" href="/preview/models"><span class="i">&#9638;</span>Models</a>
+</nav>
+</body>
+</html>
