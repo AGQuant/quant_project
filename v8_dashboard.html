@@ -2650,7 +2650,7 @@ function renderTradeLog(){
   // if an older API build hasn't shipped the full-history ones yet.
   const _allT=p.all_trades||p.recent_trades||[];
   let t=_allT.slice();const s=p.all_summary||p.summary||{};
-  // cc#817: RETIRED baskets. A basket present in the ledger but absent from window.BASKETS is
+  // cc#817: RETIRED baskets. A basket present in the ledger but absent from BASKETS is
   // retired (buy_s1_bounce, sell_overbought, and anything future that stops running). Default view
   // hides them entirely — no pill, no rows — and, critically, EXCLUDES THEM FROM THE SUMMARY.
   // Derived from BASKETS rather than a hardcoded retired list, so retiring a basket needs no edit here.
