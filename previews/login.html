@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Login · Scorr mobile preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR MOBILE PREVIEW — LOGIN (Batch 10, the final tail screen)
+   Dark per 15913. Tokens on .screen, never bare :root.
+
+   DESIGN DECISIONS (for founder review):
+   - One screen, one action. Identifier + password + one button. No signup
+     link, no social buttons, no marketing panel — this is a private product
+     until Jan-2027 and the login page should say exactly that much.
+   - The wordmark is the only brand element. No tagline pitch: a person at
+     this screen has already decided to log in.
+   - ALL THREE STATES are shown stacked below (idle / working / failed) so the
+     review covers them in one pass. In the wired page only one renders.
+   - Failure copy is honest and blame-free: it says what happened and what to
+     do, never scolds, never reveals whether the id or the password was wrong
+     (that difference is an enumeration leak).
+   - Working state: the button becomes the status. No spinner overlay — the
+     button itself says Signing in, disabled, so state lives where the tap was.
+   - 44px+ targets, autocomplete attributes correct, password managers work.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+.screen{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A;
+  max-width:430px;margin:0 auto;padding-bottom:40px;min-height:100vh;
+  background:var(--bg);color:var(--txt)}
+.dummy{background:rgba(245,185,74,.10);border-bottom:1px solid rgba(245,185,74,.4);
+  padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
+  display:flex;gap:7px;line-height:1.45}
+.dummy b{font-weight:800}
+.body{padding:12px 16px 0}
+.sect{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.14em;color:var(--dim);margin:18px 3px 9px}
+
+.wrap{padding:34px 0 6px;text-align:center}
+.mark{font-size:26px;font-weight:800;letter-spacing:-.02em}
+.mark .dot{color:var(--blu)}
+.msub{font-size:10.5px;color:var(--dim);margin-top:5px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;
+  padding:16px 15px;margin-bottom:10px}
+.fld{margin-bottom:11px}
+.lab{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--mut);
+  margin-bottom:6px;display:block}
+.inp{width:100%;min-height:48px;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:11px;color:var(--txt);font-family:'Sora';font-size:14px;font-weight:600;
+  padding:0 14px;outline:none}
+.inp::placeholder{color:var(--dim);font-weight:400}
+.inp:focus{border-color:rgba(77,124,254,.6)}
+.btn{width:100%;min-height:50px;background:var(--blu);border:none;border-radius:12px;
+  color:#fff;font-family:'Sora';font-size:14.5px;font-weight:800;letter-spacing:.01em;
+  margin-top:4px}
+.btn.busy{background:var(--panel2);color:var(--mut);border:1px solid var(--line2)}
+.hint{font-size:10.5px;color:var(--dim);text-align:center;margin-top:12px;line-height:1.55}
+
+.err{display:flex;gap:9px;background:rgba(255,92,108,.09);border:1px solid rgba(255,92,108,.4);
+  border-radius:11px;padding:10px 12px;margin-bottom:11px;align-items:flex-start}
+.err .t{font-size:12px;color:var(--txt);line-height:1.5}
+.err .t b{color:var(--red)}
+
+.dots{display:inline-block}
+.note{font-size:10.5px;color:var(--dim);line-height:1.6;margin:16px 3px 0;
+  border-left:2px solid var(--line2);padding-left:9px}
+.note b{color:#E9EEFB}
+.foot{padding:22px 15px 10px;font-size:10px;color:var(--dim);line-height:1.7;text-align:center}
+</style>
+</head>
+<body>
+<div class="screen">
+
+  <div class="dummy">
+    <span>&#9888;</span>
+    <span><b>DUMMY DATA.</b> Static preview &mdash; the button submits nothing. All three states
+    are shown stacked; the wired page renders one at a time.</span>
+  </div>
+
+  <div class="wrap">
+    <div class="mark">scorr<span class="dot">.</span>in</div>
+    <div class="msub">evidence-based investing</div>
+  </div>
+
+  <div class="body">
+
+    <div class="sect">STATE 1 &middot; IDLE (the default)</div>
+
+    <div class="card">
+      <div class="fld">
+        <label class="lab" for="u1">USER ID</label>
+        <input class="inp" id="u1" type="text" placeholder="your id" autocomplete="username" autocapitalize="none" spellcheck="false">
+      </div>
+      <div class="fld">
+        <label class="lab" for="p1">PASSWORD</label>
+        <input class="inp" id="p1" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" autocomplete="current-password">
+      </div>
+      <button class="btn" type="button">Sign in</button>
+      <div class="hint">Private beta. Access is by invitation until launch &mdash;<br>there is nothing to sign up for yet.</div>
+    </div>
+
+    <div class="sect">STATE 2 &middot; WORKING (button becomes the status)</div>
+
+    <div class="card">
+      <div class="fld">
+        <label class="lab" for="u2">USER ID</label>
+        <input class="inp" id="u2" type="text" value="arpit" disabled>
+      </div>
+      <div class="fld">
+        <label class="lab" for="p2">PASSWORD</label>
+        <input class="inp" id="p2" type="password" value="password" disabled>
+      </div>
+      <button class="btn busy" type="button" disabled>Signing in<span class="dots">&hellip;</span></button>
+    </div>
+
+    <div class="sect">STATE 3 &middot; FAILED (honest, blame-free, no enumeration)</div>
+
+    <div class="card">
+      <div class="err">
+        <span style="color:var(--red)">&#9888;</span>
+        <div class="t"><b>That did not match.</b> Check the id and password and try again.
+        After 5 attempts, sign-in pauses for 15 minutes.</div>
+      </div>
+      <div class="fld">
+        <label class="lab" for="u3">USER ID</label>
+        <input class="inp" id="u3" type="text" value="arpit">
+      </div>
+      <div class="fld">
+        <label class="lab" for="p3">PASSWORD</label>
+        <input class="inp" id="p3" type="password" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;">
+      </div>
+      <button class="btn" type="button">Try again</button>
+    </div>
+
+    <div class="note">
+      <b>Design calls in this screen, for your review.</b>
+      One action, no noise: no signup, no social login, no marketing &mdash; a private product's
+      login should admit it is private, and the hint line does. The error never says WHICH
+      field was wrong; confirming a valid user id to a stranger is an enumeration leak. The
+      working state lives in the button, where the tap happened, instead of a spinner overlay.
+      Password field keeps native type=password so managers and autofill work.
+    </div>
+
+    <div class="note">
+      <b>Open call:</b> when launch nears, this page grows a sign-up path. Does the beta hint
+      line become the sign-up link then, or does sign-up live on a separate marketing page and
+      this screen stays pure?
+    </div>
+
+    <div class="foot">
+      Batch 10 &middot; the final tail screen &middot; Login<br>
+      static preview, no live submit &middot; design pipeline complete
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
