@@ -329,7 +329,44 @@ log = logging.getLogger('fyers_feed')
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-def get_db(): return psycopg2.connect(DATABASE_URL)
+# cc#876 — THE ROOT CAUSE OF THE 05/06-AUG 22-HOUR OUTAGE, fixed at the connect.
+#
+# This used to be a bare psycopg2.connect(DATABASE_URL): no connect_timeout, no TCP keepalives,
+# no statement_timeout. A silently dropped socket (Railway proxy idle-drop, NAT timeout, a DB
+# restart) leaves the kernel with no idea the peer is gone, so the next execute() sends bytes into
+# a black hole and waits for a reply that never comes. It does not raise. It does not return.
+#
+# That single property defeated EVERY guard in this file, because all of them are built on
+# `except`: _mark_db_error only flags psycopg error classes, consecutive_db_failures >= 3 only
+# counts raised errors before its os._exit(1), and _housekeeping_supervised wraps the loop in
+# `except Exception`. None of them can see a call that never returns. On 05-Aug the housekeeping
+# loop blocked here at ~15:28 and the process sat alive-but-silent for 22 hours.
+#
+# The three settings below convert that hang into an ordinary OperationalError, which the existing
+# machinery already knows how to handle: reconnect once, count the failure, exit loudly at three.
+#   keepalives_*   — the important one. The kernel probes a dead peer and errors the socket in
+#                    roughly 60s instead of waiting forever.
+#   connect_timeout — a connect to a black hole fails fast instead of blocking the caller.
+#   statement_timeout — a backstop for a query that is served but never completes. 120s is far
+#                    above anything this file runs (bar upserts, small health reads), so it can
+#                    only ever fire on something already pathological.
+DB_CONNECT_TIMEOUT_S    = 10
+DB_STATEMENT_TIMEOUT_MS = 120000
+
+
+def get_db():
+    return psycopg2.connect(
+        DATABASE_URL,
+        connect_timeout=DB_CONNECT_TIMEOUT_S,
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
+        options=f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}",
+    )
+# cc#876: module-level so BOTH on_connect (defined early) and _force_reconnect (defined much
+# later, inside the same enclosing function) bind the same object regardless of definition order.
+RECONNECT_DEADLINE_S = 120
+_RECONNECT_CONFIRMED = threading.Event()
+
+
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
 
 
@@ -2489,6 +2526,7 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
+        _RECONNECT_CONFIRMED.set()   # cc#876: satisfies the forced-reconnect deadline timer
         # cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL (root_cause_1_ws_premarket_zombie):
         # boot-time/connect-time auto-subscribe is REMOVED ENTIRELY. Subscriptions made on a
         # PRE-OPEN Fyers WS session silently do not survive to market open — the OPEN_RACE_GUARD
@@ -2841,9 +2879,38 @@ def run(auth_code=None):
             except Exception: pass
             os._exit(1)
 
+    # cc#876 item 2 — THE WATCHDOG OF THE WATCHDOG.
+    # cc#759 fix3 put a deadline on close_connection() itself, and that guard worked on 05-Aug:
+    # the close returned and its ops_log row was written. What had NO deadline was everything
+    # AFTER it — the SDK's own reconnect, on_connect, and the re-subscribe. The recovery sequence
+    # started and simply never finished, and because a hang raises nothing, no `except` anywhere
+    # could see it. Rung 2 could not save us either: rung 1 fired at 15:28 and the next health
+    # check is HEALTH_LOG_MINS(5) later, past the close — the ladder had no clock left to climb.
+    #
+    # So the whole sequence now carries its own completion deadline, on its own thread, and a
+    # sequence that has not confirmed a reconnect by then becomes a CRASH. That is the trade this
+    # incident bought: a crash gets a free Railway restart, a hang gets 22 hours of silence.
     def _force_reconnect():
         """change_1: drop the socket so the SDK (reconnect=True) re-establishes and on_connect
-        re-subscribes the full universe. cc#759 fix3: the close is now timeout-guarded (os._exit on hang)."""
+        re-subscribes the full universe. cc#759 fix3: the close is timeout-guarded (os._exit on
+        hang). cc#876: the RECONNECT that follows is now deadline-guarded too."""
+        _RECONNECT_CONFIRMED.clear()
+
+        def _deadline():
+            if _RECONNECT_CONFIRMED.wait(RECONNECT_DEADLINE_S):
+                log.info(f"FEED: reconnect confirmed within {RECONNECT_DEADLINE_S}s (cc#876)")
+                return
+            log.critical(f"FEED: forced reconnect did NOT confirm within {RECONNECT_DEADLINE_S}s "
+                         "— os._exit(1) for a clean Railway restart. A hung recovery must become a "
+                         "crash (cc#876 incident 9).")
+            try:
+                _log_feed_incident("feed_reconnect_deadline_exit",
+                                   f"no on_connect within {RECONNECT_DEADLINE_S}s of forced close")
+            except Exception:
+                pass
+            os._exit(1)
+
+        threading.Thread(target=_deadline, daemon=True).start()
         _forced_close("watchdog/force reconnect")
 
     def _log_feed_incident(kind, detail):
