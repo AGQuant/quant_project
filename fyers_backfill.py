@@ -21,7 +21,7 @@ Shared by fyers_feed.py (imported). Can also be run standalone:
 """
 
 import argparse, os, time, logging
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta, date, time as dt_time   # cc#876: date for FROZEN_SESSIONS
 import pytz, psycopg2, requests
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -104,7 +104,41 @@ def get_universe(conn, futures=False):
     return sorted(syms - (FUT_SKIP if futures else SKIP_SYMBOLS))
 
 
+# cc#876 item 5 — FOUNDER-LOCKED FROZEN BOUNDARY (session_log 16747).
+# 05-Aug-2026 officially ends at 15:20:00 IST. The feed died at 15:27 that day and the session was
+# frozen there by founder decision, so any bar stamped after 15:20 on that date is not late data —
+# it is data that must not exist. A backfill asked for a date range is the one thing careless
+# enough to reintroduce it, because it fetches whole days and does not know about the freeze.
+#
+# The guard lives HERE, in the shared writer, rather than at each call site: upsert_candles is the
+# single function every Fyers backfill path goes through (worker/fyers_hist_backfill.py,
+# fyers_range_backfill_endpoints.py, worker/fyers_feed.py's healers, bt14_fut_oi.py), so one filter
+# covers all of them and a new caller inherits it for free. Dropping rows silently would be its own
+# sin, so it logs the count every time it bites.
+FROZEN_SESSIONS = {date(2026, 8, 5): dt_time(15, 20, 0)}   # {date: last permitted ts time, inclusive}
+
+
+def _drop_frozen(rows):
+    """Remove any candle that falls past a frozen session's cutoff. Returns (kept, dropped_count)."""
+    if not rows:
+        return rows, 0
+    kept, dropped = [], 0
+    for r in rows:
+        ts = r[1]                      # (symbol, ts, o, h, l, c, v, timeframe, source)
+        cut = FROZEN_SESSIONS.get(ts.date()) if hasattr(ts, "date") else None
+        if cut is not None and ts.time() > cut:
+            dropped += 1
+            continue
+        kept.append(r)
+    return kept, dropped
+
+
 def upsert_candles(conn, rows, on_conflict='update'):
+    if not rows: return
+    rows, _dropped = _drop_frozen(rows)
+    if _dropped:
+        log.warning(f"cc#876 frozen-session guard: dropped {_dropped} candle(s) past a locked "
+                    f"cutoff {FROZEN_SESSIONS} (session_log 16747) — this is intended, not a fault")
     if not rows: return
     # cc#184: futures backfill uses DO NOTHING so it never overwrites native
     # WebSocket fut bars (e.g. 03-Jul). Equity healer keeps DO UPDATE.
