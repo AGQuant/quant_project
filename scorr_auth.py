@@ -100,18 +100,65 @@ def _clear_fails(ip: str):
     _FAILED.pop(ip, None)
 
 
+# ── cc#877: the auth check must not be a DB connection ────────────────────────────────────────
+# cc#869 finding 1: main.py's `async def auth_gate` calls _is_authed() before EVERY protected page,
+# and _is_authed() opened a brand-new psycopg connection to run one query — measured at 0.044 ms.
+# The query was never the cost; the TCP+TLS+Postgres handshake was, and because the middleware is
+# async it ran ON the event loop, so while that handshake was in flight no other request on the
+# whole service could progress. That is the single hottest path in the app.
+#
+# A 60-second positive-only cache removes the connection from the common case entirely.
+#
+# POSITIVE RESULTS ONLY, and that asymmetry is the security property: a valid token is cached and
+# costs nothing for 60s; a failed lookup is NEVER cached, so a revoked or forged token is re-checked
+# against the database on every single request. The cache can only ever let a session live slightly
+# too long — it can never let one in.
+#
+# Revocation stays real: /logout evicts the token in the same request that DELETEs its row, so the
+# logging-out browser is locked out immediately. A different client holding the same token ages out
+# within 60s, which the card accepts explicitly.
+_AUTH_CACHE: dict = {}          # {token: monotonic deadline after which it must be re-checked}
+_AUTH_CACHE_TTL_S  = 60
+_AUTH_CACHE_MAX    = 1000       # hard cap so a spray of tokens cannot grow this without bound
+
+
+def _cache_put(token: str) -> None:
+    if len(_AUTH_CACHE) >= _AUTH_CACHE_MAX:
+        # Evict the entry closest to expiry. dict preserves insertion order, but deadlines are what
+        # matter, and min() over <=1000 items is trivial next to the DB round-trip it replaces.
+        try:
+            del _AUTH_CACHE[min(_AUTH_CACHE, key=_AUTH_CACHE.get)]
+        except (ValueError, KeyError):
+            _AUTH_CACHE.clear()
+    _AUTH_CACHE[token] = time.monotonic() + _AUTH_CACHE_TTL_S
+
+
+def _cache_evict(token: str) -> None:
+    _AUTH_CACHE.pop(token, None)
+
+
 def _is_authed(request: Request) -> bool:
     token = request.cookies.get(COOKIE_NAME, "")
     if not token:
         return False
+    # cc#877 FAST PATH — a repeat request inside the TTL does ZERO DB work: no connect, no query,
+    # no socket. This is the branch that every protected page load now takes.
+    hit = _AUTH_CACHE.get(token)
+    if hit is not None:
+        if hit > time.monotonic():
+            return True
+        _AUTH_CACHE.pop(token, None)      # expired — fall through and re-verify against the DB
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1 FROM auth_sessions WHERE token=%s AND expires_at > now()", (token,))
-            return cur.fetchone() is not None
+            ok = cur.fetchone() is not None
     except Exception as e:
         # fail closed — a DB blip redirects to /login rather than granting access
         log.warning(f"auth session check failed: {e}")
         return False
+    if ok:
+        _cache_put(token)                 # positive only; a miss is never remembered
+    return ok
 
 
 def _new_session_token() -> str:
@@ -251,7 +298,12 @@ async def login_post(request: Request):
 
 @router.get("/logout", include_in_schema=False)
 async def logout(request: Request):
-    _revoke_token(request.cookies.get(COOKIE_NAME, ""))
+    _tok = request.cookies.get(COOKIE_NAME, "")
+    # cc#877: evict BEFORE the DB delete, not after. If _revoke_token were to raise, the token
+    # would still be out of this process's cache, so a failed revoke can never leave a logged-out
+    # browser authenticated for another 60 seconds.
+    _cache_evict(_tok)
+    _revoke_token(_tok)
     response = RedirectResponse(url="/login", status_code=302)
     response.set_cookie(
         COOKIE_NAME, "",
