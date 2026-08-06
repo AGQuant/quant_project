@@ -45,6 +45,15 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
   padding:8px 14px;font-size:10.5px;font-weight:700;color:var(--amber);
   display:flex;gap:7px;line-height:1.45}
 .dummy b{font-weight:800}
+/* cc#881 (session_log 16916 MOBILE_SCREEN_TRIAGE_V1): the screen's triage status, shown on the
+   screen itself so nobody has to read the DB to know where it stands. Joins the existing amber
+   DUMMY strip as a right-aligned pill — no new banner, no layout shift. */
+.triage{margin-left:auto;align-self:center;flex-shrink:0;cursor:help;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.08em;padding:2px 7px;border-radius:4px;border:1px solid currentColor;line-height:1.5}
+.triage-imp{color:#2fd48b}
+.triage-may{color:#7c8aa5}
+.triage-redesign{color:#f5b94a}
 .head{padding:15px 14px 12px;border-bottom:1px solid var(--line)}
 .head h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
 .head .s{font-size:10.5px;color:var(--dim);margin-top:4px;
@@ -131,6 +140,7 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
     <span>&#9888;</span>
     <span><b>DUMMY DATA.</b> Frozen &mdash; every price, stop, target and P&amp;L below is a real
     v8_paper_positions row read 05-Aug-2026.</span>
+    <span class="triage triage-imp" title="shared component all trade surfaces use">IMP</span>
   </div>
 
   <div class="head">
