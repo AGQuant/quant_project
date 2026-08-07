@@ -909,10 +909,15 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // Rules" tab; cc#510 (founder decision, 18-Jul-2026) removed it again -- the per-basket i-button
 // popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt specs, so the dedicated
 // tab was redundant. renderBasketRules() deleted; index 3 reverts to its cc#502 dormant state.
-const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,15];
-// cc#850 TARGET STATE REACHED — ELEVEN items, ONE row:
+// cc#872 (founder correction 07-Aug, session_log 17021): Live News (11) and Results (12) removed.
+// Those two were SECOND doorways to content that already has a first one — /news and
+// /result-corner are standing, nav-listed pages. Raw Data (9) and Matrix (15) STAY: the founder's
+// ruling is that this website IS the professional dashboard and is their permanent home. The
+// card's original four-tab scope and its item 3 (unreference-but-keep) are void.
+const TAB_ORDER=[0,1,2,4,5,7,8,9,15];
+// cc#872 STATE — NINE items, ONE row:
 //   Master Dashboard | Buy Reversal | Buy Momentum | Sell Reversal | Sell Momentum |
-//   Trade Log | Day Log | Raw Data | Live News | Results | Matrix
+//   Trade Log | Day Log | Raw Data | Matrix
 // cc#849 removed Global Indices (13) once the digest global section was verified live in
 // production; Matrix (15) is therefore promoted to the main line by simply being last in the
 // array. There was never a separate sub-nav CONTAINER to delete — .tabs is a single
@@ -2156,7 +2161,10 @@ function selectTab(i){
   });
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
-  if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
+  // cc#872: the Results (12) lazy-load is removed with its tab. loadForthcoming()/FR_LOADED and
+  // the /api route behind them are untouched — panel12 simply has no button, so this branch could
+  // never fire again and an unreachable lazy-load is a dead click waiting to be re-wired wrong.
+  // The content itself lives on /result-corner, which is unchanged and still in the NAV array.
   // cc#281: Global Indices polls every 5 min WHILE its tab is active; the timer is cleared when
   // any other tab is selected so it never polls in the background.
   // cc#849: Global Indices (13) RETIRED — the digest global section supersedes it. Its lazy-load
@@ -3638,8 +3646,12 @@ function toggleAuto(){
 
 loadAll();
 autoTimer=setInterval(autoRefresh,5*60*1000);
-loadNews();
-setInterval(loadNews,15*60*1000);
+// cc#872: loadNews() and its 15-minute poller are removed WITH the Live News tab. This is the
+// same mistake cc#849 named a few lines up in selectTab — leaving the poller would keep hitting
+// /api/news/live?hours=48&per_cat=300 every 15 minutes, forever, for a panel nobody can open.
+// It also ran at parse time on the critical path, which is the cc#869 class of slowness.
+// loadNews()/renderNews()/newsList() and panel11 all stay in the file, unreferenced and intact.
+// The headlines themselves are unaffected: /news is a standing page and is still in the NAV array.
 
 // cc_task #85: poll Fyers feed health every 60s -> GREEN/YELLOW/RED badge.
 async function pollFeedHealth(){
