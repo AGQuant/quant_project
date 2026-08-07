@@ -313,10 +313,10 @@ PWA_JS = """
     // top-nav and the mobile More sheet both build from this array. These are JS comments,
     // not Python: this array lives INSIDE the pwa.js string, and a '#' here is a syntax
     // error that kills the whole injected bundle site-wide (the cc#853 class).
-    ['/m/intel', '\\u25a4', 'Intel (mobile)'],
-    ['/m/positions', '\\u25e7', 'Open Book (mobile)'],
-    ['/m/qb', '\\u25f0', 'Baskets (mobile)'],
-    ['/m/gvm', '\\u25c8', 'GVM (mobile)']
+    ['/m/intel', '\\u25a4', 'Intel (mobile)', 'm'],
+    ['/m/positions', '\\u25e7', 'Open Book (mobile)', 'm'],
+    ['/m/qb', '\\u25f0', 'Baskets (mobile)', 'm'],
+    ['/m/gvm', '\\u25c8', 'GVM (mobile)', 'm']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {
@@ -326,6 +326,17 @@ PWA_JS = """
     return p === base || p.indexOf(base + '/') === 0;   // prefix match: sub-views highlight
   }
   function navByPath(pp) { for (var i = 0; i < NAV.length; i++) { if (NAV[i][0] === pp) return NAV[i]; } return null; }
+
+  // cc#882 — ONE array, TWO form factors. Optional 4th element: 'm' = mobile-only,
+  // 'd' = desktop-only, absent = both. Backwards compatible, so every existing 3-element entry
+  // keeps rendering in both places untouched.
+  // Why this exists: cc#874 added its promoted /m/* retail screens as plain entries, and this
+  // array renders in BOTH the desktop top bar and the mobile More sheet — so "Intel (mobile)"
+  // landed on the professional web nav. Under 16915 (web = professional, app = retail subset) a
+  // retail screen must never sit on the professional bar. The flag FILTERS RENDERING; it never
+  // forks the array, so rule 2987's single source is preserved.
+  function forDesktop(it) { return it[3] !== 'm'; }
+  function forMobile(it)  { return it[3] !== 'd'; }
 
   // 4) mobile bottom nav — 4 primary slots + More (opens all-destinations sheet)
   var PRIMARY = ['/', '/dashboard', '/cio2?model=gvm', '/check'];
@@ -348,7 +359,7 @@ PWA_JS = """
     // one-time sheet: every remaining destination + Logout
     var ov = document.createElement('div');
     ov.className = 'pwa-sheet-ov'; ov.id = 'pwa-sheet-ov';
-    var rows = NAV.filter(function (it) { return PRIMARY.indexOf(it[0]) === -1; })
+    var rows = NAV.filter(function (it) { return PRIMARY.indexOf(it[0]) === -1 && forMobile(it); })   // cc#882
       .map(function (it) {
         return '<a class="' + (isActive(it[0]) ? 'active' : '') + '" href="' + it[0] + '">'
           + '<span class="ic">' + it[1] + '</span>' + it[2] + '</a>';
@@ -507,7 +518,7 @@ PWA_JS = """
       document.body.insertBefore(host, document.body.firstChild);
     }
     host.className = 'scorr-cnav';
-    host.innerHTML = NAV.map(function (it, i) {
+    host.innerHTML = NAV.filter(forDesktop).map(function (it, i) {   // cc#882: no retail /m/* on the professional bar
       var sep = i ? '<span class="sep"></span>' : '';
       var act = isActive(it[0]);
       return sep + '<a' + (act ? ' class="active"' : '') + ' href="' + it[0] + '">'

@@ -996,10 +996,15 @@ NAV_REGISTRY = {
     # cc#874: promoted mobile screens. Mirrored here so the registry cannot drift from the live
     # NAV array (rule 2987). One entry per WIRED screen only — an unwired screen must never
     # appear in the registry, or the registry starts claiming pages that do not exist.
-    "/m/intel":      ("Intel (mobile)",       "nav"),
-    "/m/positions":  ("Open Book (mobile)",   "nav"),
-    "/m/qb":         ("Baskets (mobile)",     "nav"),
-    "/m/gvm":        ("GVM (mobile)",         "nav"),
+    # cc#882 item 5: the status now states the FORM FACTOR too. These carry the 'm' flag in the
+    # NAV array, so they render in the mobile More sheet and are filtered OUT of the desktop top
+    # bar — a retail screen must never sit on the professional web nav (16915). "nav-mobile" is
+    # the registry saying which bar an entry actually appears on, so the registry cannot claim a
+    # desktop destination that the desktop never renders.
+    "/m/intel":      ("Intel (mobile)",       "nav-mobile"),
+    "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
+    "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
+    "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),
