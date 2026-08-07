@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<!-- previews/home_v2.html — HOME v2: scrollable market-first dashboard (founder 07-Aug-2026)
+     PLACEHOLDER VALUES THROUGHOUT — stamped per framework 15913. A preview is never a source of truth.
+     Change vs wired /m/home: market-first scroll; My Portfolio (SmartGain) DEMOTED to mid-scroll section
+     per founder instruction "part of dashboard somewhere down". Nothing hidden.
+     Framework: 15913 (dark, tiers, state rail, header contract), 16915 (retail language), 16157 (nav vs section cards). -->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Scorr · Home v2 (preview)</title>
+<style>
+/* tokens on .screen — NEVER bare :root (mobile.css injects :root[data-theme=light] later and out-specifies it) */
+.screen{
+  --bg:#0b0f14; --card:#121821; --card2:#0f141c; --line:#1e2836;
+  --tx:#e8edf4; --tx2:#8fa0b5; --tx3:#5b6b80;
+  --up:#22c07a; --dn:#ef5350; --amber:#e0a63c; --blue:#4f8dd9; --grey:#5b6b80;
+  --rail-live:var(--up); --r:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#0b0f14;color:#e8edf4;font:15px/1.45 -apple-system,'Segoe UI',Roboto,sans-serif}
+.screen{max-width:480px;margin:0 auto;padding:0 14px 92px;background:var(--bg);min-height:100vh}
+
+/* header */
+.hd{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 10px;position:sticky;top:0;background:var(--bg);z-index:5}
+.logo{font-weight:800;font-size:19px;letter-spacing:.4px}.logo b{color:var(--up)}
+.sess{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--tx2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--grey)}
+.dot.live{background:var(--up);animation:br 2.4s ease-in-out infinite}
+@keyframes br{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* index strip */
+.idx{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:2px 0 14px}
+.ix{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
+.ix .n{font-size:11px;color:var(--tx3);letter-spacing:.6px;text-transform:uppercase}
+.ix .v{font-weight:700;font-size:16px;margin-top:2px}.ix .c{font-size:12px;margin-left:6px}
+.up{color:var(--up)}.dn{color:var(--dn)}
+
+/* cards + state rail (framework signature: shape-coded 3px edge) */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.card.live::before{background:var(--rail-live);animation:br 2.4s ease-in-out infinite}
+.card.closed::before{background:repeating-linear-gradient(to bottom,var(--grey) 0 4px,transparent 4px 9px)} /* short grey dots */
+.card.ref::before{background:repeating-linear-gradient(to bottom,var(--blue) 0 6px,transparent 6px 10px);left:2px} /* blue inset */
+.chd{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;min-height:44px;cursor:pointer}
+.chd .t{font-weight:700;font-size:14px}
+.chd .rgt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx2)}
+.chev{color:var(--tx3);font-size:16px}
+.chip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;background:var(--card2);border:1px solid var(--line)}
+.chip.g{color:var(--up)}.chip.r{color:var(--dn)}.chip.a{color:var(--amber)}.chip.b{color:var(--blue)}
+.cb{padding:0 14px 13px}
+.sect{font-size:11px;letter-spacing:1px;color:var(--tx3);text-transform:uppercase;margin:18px 2px 8px;font-weight:700}
+
+/* hero — the market today */
+.hero .mood{font-size:34px;font-weight:800;letter-spacing:.3px;animation:br 3s ease-in-out infinite}
+.hero .why{color:var(--tx2);font-size:13px;margin-top:3px}
+.hchips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+
+/* rows */
+.row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);min-height:44px}
+.row:first-child{border-top:0}
+.row .l{display:flex;flex-direction:column}.row .sym{font-weight:700;font-size:14px}
+.row .sub{font-size:11.5px;color:var(--tx3);margin-top:1px}
+.row .r{text-align:right}.row .pv{font-weight:700}.row .pc{font-size:12px}
+
+/* stat trio */
+.trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.st{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;text-align:center}
+.st .k{font-size:10.5px;color:var(--tx3);text-transform:uppercase;letter-spacing:.5px}
+.st .v{font-weight:800;font-size:15px;margin-top:2px}
+
+/* intel rows */
+.news{padding:9px 0;border-top:1px solid var(--line)}
+.news:first-child{border-top:0}
+.news .h{font-size:13.5px;font-weight:600;line-height:1.35}
+.news .m{font-size:11px;color:var(--tx3);margin-top:3px;display:flex;gap:8px;align-items:center}
+
+/* tools */
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:4px}
+.tool{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 6px;text-align:center;min-height:44px;font-size:12.5px;font-weight:600;color:var(--tx2)}
+.tool span{display:block;font-size:17px;margin-bottom:3px}
+
+/* bottom nav */
+.bnav{position:fixed;left:0;right:0;bottom:0;background:#0d1219;border-top:1px solid var(--line);display:flex;max-width:480px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom)}
+.bn{flex:1;text-align:center;padding:9px 0 7px;color:var(--tx3);font-size:10.5px;min-height:44px}
+.bn span{display:block;font-size:18px;margin-bottom:1px}
+.bn.on{color:var(--up);font-weight:700}
+.stamp{font-size:10px;color:var(--tx3);text-align:center;padding:14px 0 4px;letter-spacing:.5px}
+</style></head><body><div class="screen">
+
+<div class="hd">
+  <div class="logo">Sc<b>o</b>rr</div>
+  <div class="sess"><span class="dot"></span>Market closed · 16:12 IST</div>
+</div>
+
+<!-- settled: exactly two indices -->
+<div class="idx">
+  <div class="ix"><div class="n">Nifty 50</div><div class="v">24,562<span class="c dn">−0.27%</span></div></div>
+  <div class="ix"><div class="n">Bank Nifty</div><div class="v">52,905<span class="c up">+0.14%</span></div></div>
+</div>
+
+<!-- 1 · HERO — the market today (PRIMARY) -->
+<div class="card closed hero">
+  <div class="chd"><div class="t">The market today</div><div class="rgt"><span class="chip">CLOSED</span></div></div>
+  <div class="cb">
+    <div class="mood" style="color:var(--amber)">Neutral</div>
+    <div class="why">2 of 4 checks failed today, so the engine traded carefully.</div>
+    <div class="hchips">
+      <span class="chip r">Day −0.27%</span>
+      <span class="chip g">Week +0.99%</span>
+      <span class="chip g">Month +2.83%</span>
+      <span class="chip a">ADR 0.59</span>
+    </div>
+  </div>
+</div>
+
+<!-- 2 · what the engine did -->
+<div class="sect">Today's signals</div>
+<div class="card closed">
+  <div class="chd"><div class="t">V8 Engine</div><div class="rgt">4 signals today <span class="chev">›</span></div></div>
+  <div class="cb">
+    <div class="row"><div class="l"><span class="sym">GLENMARK</span><span class="sub">Buy Reversal · 14:35</span></div><div class="r"><div class="pv">2,301</div><div class="pc up">+1.9% since</div></div></div>
+    <div class="row"><div class="l"><span class="sym">APLAPOLLO</span><span class="sub">Buy Momentum · 14:55</span></div><div class="r"><div class="pv">1,978</div><div class="pc up">+0.4% since</div></div></div>
+  </div>
+</div>
+
+<!-- 3 · the open book -->
+<div class="card closed">
+  <div class="chd"><div class="t">Open Book</div><div class="rgt">21 positions <span class="chev">›</span></div></div>
+  <div class="cb">
+    <div class="trio">
+      <div class="st"><div class="k">Unrealised</div><div class="v dn">−21,805</div></div>
+      <div class="st"><div class="k">Realised</div><div class="v up">4,07,219</div></div>
+      <div class="st"><div class="k">Win / Loss</div><div class="v">17 / 5</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 4 · MY PORTFOLIO — SmartGain, deliberately demoted to mid-scroll (founder 07-Aug). Present, never hidden. -->
+<div class="sect">My portfolio</div>
+<div class="card closed">
+  <div class="chd"><div class="t">My Portfolio</div><div class="rgt"><span class="chip r">Week −6,093</span> <span class="chev">›</span></div></div>
+  <div class="cb">
+    <div class="row"><div class="l"><span class="sym">NMDC</span><span class="sub">Long 2,000 · Aug fut</span></div><div class="r"><div class="pv">85.2</div><div class="pc dn">−3,580</div></div></div>
+    <div class="row"><div class="l"><span class="sym">GLENMARK</span><span class="sub">Long 100 · Aug fut</span></div><div class="r"><div class="pv">--</div><div class="pc" style="color:var(--tx3)">fresh today</div></div></div>
+    <div class="row"><div class="l"><span class="sym">APLAPOLLO</span><span class="sub">Long 50 · Aug fut</span></div><div class="r"><div class="pv">--</div><div class="pc" style="color:var(--tx3)">fresh today</div></div></div>
+  </div>
+</div>
+
+<!-- 5 · read -->
+<div class="sect">Worth reading</div>
+<div class="card ref">
+  <div class="chd"><div class="t">Intel</div><div class="rgt">105 stories today <span class="chev">›</span></div></div>
+  <div class="cb">
+    <div class="news"><div class="h">The market's biggest plumbing change is having a rough first week</div><div class="m"><span class="chip b">Editorial</span> 5 min read</div></div>
+    <div class="news"><div class="h">Banks quietly repriced the RBI — fewer hikes ahead</div><div class="m"><span class="chip b">Editorial</span> 4 min read</div></div>
+    <div class="news"><div class="h">Hero MotoCorp beats with a 29% profit jump</div><div class="m">Domestic · 15:40</div></div>
+  </div>
+</div>
+
+<div class="card ref">
+  <div class="chd"><div class="t">Results Corner</div><div class="rgt">67 new today <span class="chev">›</span></div></div>
+  <div class="cb"><div class="news" style="border-top:0"><div class="h">Q1 season: 391 companies covered — every result explained in plain words.</div></div></div>
+</div>
+
+<!-- 6 · tools (settled: chips stay on Home so no route is stranded) -->
+<div class="sect">Tools</div>
+<div class="tools">
+  <div class="tool"><span>◆</span>GVM</div>
+  <div class="tool"><span>✓</span>Check</div>
+  <div class="tool"><span>▦</span>Baskets</div>
+  <div class="tool"><span>☀</span>Digest</div>
+  <div class="tool"><span>⬡</span>Sector</div>
+  <div class="tool"><span>₹</span>FPC</div>
+</div>
+
+<div class="stamp">PREVIEW · placeholder values · home_v2 · 07-Aug-2026</div>
+</div>
+
+<div class="bnav">
+  <div class="bn on"><span>⌂</span>Home</div>
+  <div class="bn"><span>◆</span>GVM</div>
+  <div class="bn"><span>✓</span>Check</div>
+  <div class="bn"><span>◎</span>Intel</div>
+  <div class="bn"><span>▦</span>Models</div>
+</div>
+</body></html>
