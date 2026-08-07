@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>V8 · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — V8, PROMOTED. previews/v8.html stays frozen (item 9). 16916: "signal surface, approved".
+  RETAIL FIRST (16915/17021): what signalled today, is the gate open, how is the book. The eleven
+  tab surfaces, the filter funnels and Raw Data are professional depth and stay on the WEB
+  dashboard — the app is a lighter subset of the ONE product, not a second dashboard.
+  The mood gate REUSES v8_endpoints.market_mood(), so the app cannot show a different verdict from
+  the web (DISPLAY_PARITY 16202). Basket counts come from v8_qualified — never v8_filter_state.
+-->
+<div class="screen">
+  <div class="head"><h1>V8</h1><div class="s" id="sub">loading…</div></div>
+  <div class="body" id="body"><div class="loading">Loading signals…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/v8"><span class="i">◍</span>V8</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function n(v, dp){
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN',
+    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
+}
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+function inr(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+function failBox(host, sub, e){
+  document.getElementById(host).innerHTML =
+    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  if (sub) document.getElementById(sub).textContent = 'failed to load';
+}
+
+fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+  document.getElementById('sub').innerHTML =
+    'long-short futures · ' + d.universe + ' symbols ' + railHtml(d.rail);
+  var g = d.gate || {};
+  var gateCard = '<div class="c ' + (g.open === true ? 'long' : g.open === false ? 'short' : '') + '">'
+    + '<div class="meta"><span class="tag cat">MARKET GATE</span>'
+    + '<span class="when">' + esc(g.as_of || '--') + '</span></div>'
+    + '<div class="hl">' + esc(g.verdict || '--') + '</div>'
+    + '<div class="sum">' + (g.open === true ? 'Gate is open — new entries allowed.'
+        : g.open === false ? 'Gate is shut — no new entries today.'
+        : 'Gate state unavailable.') + '</div></div>';
+  var rows = (d.baskets || []).map(function(b){
+    return '<div style="display:flex;align-items:baseline;gap:10px;padding:9px 0;border-top:1px solid var(--line)">'
+      + '<span style="flex:1;font-weight:700;font-size:13px">' + esc(b.label) + '</span>'
+      + '<span class="mono" style="font-size:14px;font-weight:800">' + b.signals + '</span></div>';
+  }).join('') || '<div class="sum" style="padding:9px 0">No baskets signalled today.</div>';
+  var book = '<div class="c"><div class="meta"><span class="tag cat">PAPER BOOK</span></div>'
+    + '<div class="sum mono">' + d.open_positions + ' open · ' + d.ledger.trades
+    + ' closed all-time · gross <span class="' + cls(d.ledger.gross_pnl) + '">'
+    + inr(d.ledger.gross_pnl) + '</span></div>'
+    + '<div class="fold" onclick="location.href=\'/m/positions\'">Open the book ›</div></div>';
+  document.getElementById('body').innerHTML = gateCard
+    + '<div class="c"><div class="meta"><span class="tag cat">SIGNALS TODAY</span>'
+    + '<span class="when">' + d.signals_today + ' total</span></div>' + rows + '</div>' + book;
+}).catch(function(e){ failBox('body','sub',e); });
+</script>
+</body>
+</html>

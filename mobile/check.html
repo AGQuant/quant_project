@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — CHECK, PROMOTED. previews/check.html stays frozen (item 9).
+  TRAP (c) IS THE POINT OF THIS SCREEN: tc_cache has not been recomputed since 18-Jun-2026, which
+  is 50 days. The staleness banner is rendered from DATA (freshness.stale / age_days), it sits ABOVE
+  the results, and every card repeats its own computed_at. A 50-day-old verdict shown as today''s
+  answer is worse than no answer, so this screen never dresses it as fresh.
+  The rail reads REFERENCE, not LIVE: a cache with no running writer must say what it is.
+-->
+<div class="screen">
+  <div class="head"><h1>Trade Check</h1><div class="s" id="sub">loading…</div></div>
+  <div style="margin:11px 12px 0;display:flex;gap:8px">
+    <input id="q" type="search" placeholder="Search a symbol" autocomplete="off"
+      style="flex:1;min-height:44px;padding:0 13px;border-radius:11px;background:var(--panel);
+      border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:13.5px;outline:none">
+  </div>
+  <div id="stale"></div>
+  <div class="body" id="body"><div class="loading">Loading verdicts…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn on" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/v8"><span class="i">◍</span>V8</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function n(v, dp){
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN',
+    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
+}
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+function inr(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+function failBox(host, sub, e){
+  document.getElementById(host).innerHTML =
+    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  if (sub) document.getElementById(sub).textContent = 'failed to load';
+}
+
+function vClass(v){
+  v = (v || '').toUpperCase();
+  if (v.indexOf('STRONG') > -1 || v.indexOf('VALID') > -1 || v.indexOf('TAKE') > -1) return 'bull';
+  if (v.indexOf('AVOID') > -1 || v.indexOf('WEAK') > -1) return 'bear';
+  return 'neut';
+}
+function card(x){
+  return '<div class="c ' + vClass(x.verdict) + '">'
+    + '<div class="meta"><span class="tag ' + vClass(x.verdict) + '">'
+      + esc((x.verdict || 'NO VERDICT').toUpperCase()) + '</span>'
+    + '<span class="tag cat">' + esc(x.side || '--') + '</span>'
+    + '<span class="when">' + esc(x.computed_at || '--') + '</span></div>'
+    + '<div class="hl">' + esc(x.symbol) + '<span class="mono" style="float:right;font-size:13px">'
+      + n(x.score, 1) + (x.total ? '/' + n(x.total, 0) : '') + '</span></div>'
+    + '<div class="sum mono">CMP ' + px(x.cmp) + ' · pivot ' + px(x.pivot)
+      + ' · ' + (x.pass == null ? '--' : x.pass) + ' pass / '
+      + (x.fail == null ? '--' : x.fail) + ' fail / '
+      + (x.watch == null ? '--' : x.watch) + ' watch</div>'
+    + (x.not_passed ? '<div class="sum">Not passed: ' + esc(x.not_passed) + '</div>' : '')
+    + '</div>';
+}
+function load(q){
+  document.getElementById('body').innerHTML = '<div class="loading">Loading verdicts…</div>';
+  fetchWithTimeout('/api/mobile/check?limit=20' + (q ? '&symbol=' + encodeURIComponent(q) : ''))
+    .then(function(r){ return r.json(); }).then(function(d){
+    if (d.error) throw new Error(d.error);
+    var f = d.freshness || {};
+    document.getElementById('sub').innerHTML = d.count + ' verdicts ' + railHtml(d.rail);
+    document.getElementById('stale').innerHTML = f.stale
+      ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
+        + 'background:rgba(245,185,74,.10);border:1px solid rgba(245,185,74,.4);'
+        + 'color:var(--amber);font-size:11.5px;font-weight:700;line-height:1.5">'
+        + '⚠ ' + esc(f.note) + ' Last computed ' + esc(f.computed_at)
+        + ' (' + n(f.age_days, 0) + ' days ago).</div>'
+      : '';
+    document.getElementById('body').innerHTML = d.count
+      ? d.results.map(card).join('')
+      : '<div class="empty"><b>Nothing found</b>No cached verdict for "' + esc(d.query || '') + '".</div>';
+  }).catch(function(e){ failBox('body','sub',e); });
+}
+var t = null;
+document.getElementById('q').addEventListener('input', function(e){
+  clearTimeout(t); var v = e.target.value.trim();
+  t = setTimeout(function(){ load(v); }, 300);
+});
+load('');
+</script>
+</body>
+</html>

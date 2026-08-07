@@ -233,6 +233,7 @@ PROTECTED.add("/digest")   # cc#846: gate + no-store
 # one nav). Injecting both would put two navigations on one screen.
 PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
 PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
+PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # cc#874
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -1005,6 +1006,9 @@ NAV_REGISTRY = {
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),
+    "/m/v8":         ("V8 (mobile)",          "nav-mobile"),
+    "/m/check":      ("Trade Check (mobile)", "nav-mobile"),
+    "/m/home":       ("Home (mobile)",        "nav-mobile"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),

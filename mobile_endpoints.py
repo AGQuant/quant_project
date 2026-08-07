@@ -483,6 +483,208 @@ def m_gvm():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
+# V8 — the signal surface. 16916: "signal surface, approved".
+# DISPLAY_PARITY 16202 is enforced BY CONSTRUCTION here: the mood gate reuses v8_endpoints
+# .market_mood() rather than re-deriving it. Two implementations of one number is how the app and
+# the web start disagreeing, and the rule says they never may.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/v8")
+def mobile_v8(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    mood = None
+    try:
+        from v8_endpoints import market_mood
+        mood = market_mood()
+    except Exception as e:
+        log.warning("mobile v8: market_mood unavailable (%s)", e)
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM futures_universe WHERE is_active")
+            universe = cur.fetchone()[0]
+            # Basket counts come from v8_qualified — what actually signalled today. NEVER from
+            # v8_filter_state (trap d): cc#868 flagged it BLOCKED_SOURCE because all six baskets
+            # read disabled while four were producing signals.
+            cur.execute("""
+                SELECT basket, COUNT(*) AS n, MAX(signal_ts) AS newest
+                FROM v8_qualified
+                WHERE signal_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                GROUP BY basket ORDER BY n DESC
+            """)
+            baskets = _rows(cur)
+            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
+            open_pos = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) AS n, SUM(pnl) AS pnl FROM v8_paper_trades")
+            led = _rows(cur)[0]
+    except Exception as e:
+        log.exception("mobile v8 failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "baskets": []}
+
+    newest = max([b["newest"] for b in baskets if b["newest"]], default=None)
+    return {
+        "universe": universe,
+        "gate": {
+            "verdict": (mood or {}).get("verdict"),
+            "open": (mood or {}).get("gate_open"),
+            "as_of": (mood or {}).get("as_of"),
+        } if mood else {"verdict": None, "open": None, "as_of": None},
+        "baskets": [{"slug": b["basket"], "label": basket_label(b["basket"]), "signals": b["n"]}
+                    for b in baskets],
+        "signals_today": sum(b["n"] for b in baskets),
+        "open_positions": open_pos,
+        "ledger": {"trades": led["n"], "gross_pnl": float(led["pnl"]) if led["pnl"] is not None else None},
+        "rail": rail_state(newest, 5, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/v8", response_class=HTMLResponse)
+def m_v8():
+    return _page("v8")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# CHECK — 16916: "should-I-take-this-trade is core retail value".
+# TRAP (c), AND IT IS THE WHOLE POINT OF THIS SCREEN: tc_cache has not been written since
+# 18-Jun-2026. The verdict card PRINTS computed_at and how old it is. Stale stated, never dressed
+# as fresh — a 50-day-old verdict presented as today's answer is worse than no answer.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/check")
+def mobile_check(request: Request, symbol: str = "", limit: int = 20):
+    g = _guard(request)
+    if g:
+        return g
+    sym = (symbol or "").strip().upper()
+    limit = max(1, min(limit, 50))
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            if sym:
+                cur.execute("""
+                    SELECT symbol, side, cmp, score, total, n_pass, n_fail, n_watch,
+                           not_passed, pivot, verdict_class, computed_at
+                    FROM tc_cache WHERE symbol = %s ORDER BY computed_at DESC
+                """, (sym,))
+            else:
+                cur.execute("""
+                    SELECT symbol, side, cmp, score, total, n_pass, n_fail, n_watch,
+                           not_passed, pivot, verdict_class, computed_at
+                    FROM tc_cache ORDER BY score DESC NULLS LAST LIMIT %s
+                """, (limit,))
+            rows = _rows(cur)
+            cur.execute("SELECT MAX(computed_at) FROM tc_cache")
+            newest = cur.fetchone()[0]
+    except Exception as e:
+        log.exception("mobile check failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "results": []}
+
+    age_days = ((now - newest).total_seconds() / 86400.0) if newest else None
+    def f(v):
+        return float(v) if v is not None else None
+    return {
+        "query": sym or None,
+        "results": [{
+            "symbol": r["symbol"], "side": r["side"], "cmp": f(r["cmp"]),
+            "score": f(r["score"]), "total": f(r["total"]),
+            "pass": r["n_pass"], "fail": r["n_fail"], "watch": r["n_watch"],
+            "not_passed": r["not_passed"], "pivot": f(r["pivot"]),
+            "verdict": r["verdict_class"],
+            "computed_at": r["computed_at"].strftime("%d-%b-%Y %H:%M") if r["computed_at"] else None,
+        } for r in rows],
+        "count": len(rows),
+        # The staleness banner is DATA, not decoration — the screen renders whatever this says.
+        "freshness": {
+            "computed_at": newest.strftime("%d-%b-%Y %H:%M IST") if newest else None,
+            "age_days": round(age_days, 1) if age_days is not None else None,
+            "stale": bool(age_days is not None and age_days > 1),
+            "note": ("Trade Check has not been recomputed since "
+                     + (newest.strftime("%d-%b-%Y") if newest else "never")
+                     + ". These verdicts are historical, not today's.") if age_days and age_days > 1 else None,
+        },
+        # REFERENCE, not LIVE: this surface is a cache with no running writer, and the rail must
+        # say what it is rather than borrow the session clock.
+        "rail": {"state": "REFERENCE", "why": "cached verdicts, no live recompute"},
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/check", response_class=HTMLResponse)
+def m_check():
+    return _page("check")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# HOME — the front door. Contract: 24 values, 18 of them SOURCED_BUT_EMPTY because
+# smartgain_holdings has zero rows. The designed EMPTY STATE renders; never a spinner, never a
+# fabricated zero. domestic_live is reused from v8_endpoints for parity.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/home")
+def mobile_home(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    idx = {}
+    try:
+        from v8_endpoints import domestic_live
+        idx = domestic_live() or {}
+    except Exception as e:
+        log.warning("mobile home: domestic_live unavailable (%s)", e)
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS n, SUM(mtm) AS mtm, SUM(qty * ltp) AS value,
+                       MAX(updated_at) AS updated_at
+                FROM smartgain_holdings
+            """)
+            sg = _rows(cur)[0]
+            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
+            v8_open = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM quant_paper_positions WHERE status='open'")
+            qb_open = cur.fetchone()[0]
+            cur.execute("""
+                SELECT COUNT(*) FROM v_polished_articles
+                WHERE display_time >= NOW() - INTERVAL '24 hours'
+            """)
+            news_24h = cur.fetchone()[0]
+    except Exception as e:
+        log.exception("mobile home failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+    def f(v):
+        return float(v) if v is not None else None
+    book_empty = not sg["n"]
+    return {
+        "indices": [{
+            "name": "Nifty 50" if k == "NIFTY50" else "Bank Nifty",
+            "close": v.get("close"), "chg_pct": v.get("chg_pct"), "source": v.get("source"),
+        } for k, v in idx.items()],
+        # SOURCED_BUT_EMPTY, per the contract. The source is correct and returns nothing today, so
+        # the screen says the book is flat rather than printing 0.00 as if it were a measurement.
+        "book": {
+            "empty": book_empty,
+            "positions": sg["n"],
+            "mtm": f(sg["mtm"]),
+            "value": f(sg["value"]),
+            "state": "FLAT" if book_empty else "LIVE",
+            "message": ("No positions open." if book_empty else None),
+        },
+        "shortcuts": {"v8_open": v8_open, "qb_open": qb_open, "news_24h": news_24h},
+        "rail": rail_state(sg["updated_at"], 1440, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "time": now.strftime("%H:%M"),
+        "date": now.strftime("%a %d %b"),
+    }
+
+
+@router.get("/m/home", response_class=HTMLResponse)
+def m_home():
+    return _page("home")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
 # SHARED — server clock, so no promoted screen ever derives a session state from the phone's clock.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/now")

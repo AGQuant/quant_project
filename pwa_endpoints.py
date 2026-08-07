@@ -316,7 +316,10 @@ PWA_JS = """
     ['/m/intel', '\\u25a4', 'Intel (mobile)', 'm'],
     ['/m/positions', '\\u25e7', 'Open Book (mobile)', 'm'],
     ['/m/qb', '\\u25f0', 'Baskets (mobile)', 'm'],
-    ['/m/gvm', '\\u25c8', 'GVM (mobile)', 'm']
+    ['/m/gvm', '\\u25c8', 'GVM (mobile)', 'm'],
+    ['/m/v8', '\\u26a1', 'V8 (mobile)', 'm'],
+    ['/m/check', '\\u2713', 'Trade Check (mobile)', 'm'],
+    ['/m/home', '\\u2302', 'Home (mobile)', 'm']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {
