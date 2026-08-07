@@ -232,6 +232,7 @@ PROTECTED.add("/digest")   # cc#846: gate + no-store
 # #scorr-nav, and these screens carry their own 5-slot bottom nav per 15913 (no tab rows,
 # one nav). Injecting both would put two navigations on one screen.
 PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
+PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -997,6 +998,8 @@ NAV_REGISTRY = {
     # appear in the registry, or the registry starts claiming pages that do not exist.
     "/m/intel":      ("Intel (mobile)",       "nav"),
     "/m/positions":  ("Open Book (mobile)",   "nav"),
+    "/m/qb":         ("Baskets (mobile)",     "nav"),
+    "/m/gvm":        ("GVM (mobile)",         "nav"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),

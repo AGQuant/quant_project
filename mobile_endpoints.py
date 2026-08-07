@@ -6,12 +6,20 @@ into previews/*.html. Each approved screen is REBUILT here as its own routed tem
 shared modules. The previews stay frozen dummy forever — they are the founder's review record and
 Claude.ai owns them (16159).
 
-SCOPE — 12 IMP SCREENS, NOT 18. session_log 16916 (MOBILE_SCREEN_TRIAGE_V1, 12:19 IST 06-Aug) is
-LATER than cc#874's filing and names the card explicitly: "Scope trims from 18 to 12 screens: wire
-the IMP list; MAY screens keep their previews and their contract entries but are NOT wired in
-cc#874; scanners waits for the redesigned preview; v8_surfaces content folds under v8/positions."
-So the MAY five (models, models_tools, holdings, fpc, sector) and scanners are deliberately not
-routed here. Under-wiring is additive to fix; over-wiring is not.
+SCOPE — 11 WIRABLE IMP SCREENS, NOT 18. session_log 16916 (MOBILE_SCREEN_TRIAGE_V1) is later than
+cc#874's filing and names the card explicitly: wire the IMP list; MAY screens keep their previews
+and their contract entries but are NOT wired here; scanners waits for its redesigned preview;
+v8_surfaces folds under v8/positions. So the MAY five (models, models_tools, holdings, fpc, sector)
+and scanners are deliberately not routed.
+
+16916 lists TWELVE IMP items, but symbol_bottom_sheet is marked "NOT YET DESIGNED — design next".
+There is no preview to promote, so it is a Claude.ai design dependency and not wirable here.
+Founder confirmed the wirable set is ELEVEN (session_log 17021).
+
+ARCHITECTURE, carried forward (17021, and 16915): the mobile app is a LIGHTER SUBSET OF THE ONE WEB
+PRODUCT. There is no second dashboard, now or later. The split is depth and presentation, never
+accuracy — DISPLAY_PARITY 16202 means the app never shows a DIFFERENT number from the web, only
+fewer of them, with the same marker, meaning and colours. Retail language throughout: plain, short.
 
 FIELD NAMES COME FROM ONE PLACE. docs/PREVIEW_DATA_CONTRACT.md (cc#868, commit 115ffa3) is the only
 source for endpoint paths and column names. A value that is not in the contract renders `--` with a
@@ -295,6 +303,183 @@ def mobile_v8_positions(request: Request):
 @router.get("/m/positions", response_class=HTMLResponse)
 def m_positions():
     return _page("positions")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# QUANT BASKETS — 16916 calls this "ready-made baskets, easiest retail product".
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+BASKET_LABELS = {
+    # cc#874: slug -> human name, mapped ONCE here and shared (cc#880 item 4 asks for exactly this
+    # single mapping point, so the mobile and web surfaces cannot drift apart on a label).
+    "large_cap": "Large Cap", "mid_cap": "Mid Cap", "small_cap": "Small Cap",
+    "alpha_multicap": "Alpha Multicap", "breakout_52w": "52w Breakout",
+    "contra_value": "Contra Value",
+    "buy_reversal": "Buy Reversal", "buy_momentum": "Buy Momentum",
+    "sell_reversal": "Sell Reversal", "sell_momentum": "Sell Momentum",
+    "buy_s1_bounce": "S1 Bounce", "sell_overbought": "Sell Overbought",
+}
+
+
+def basket_label(slug):
+    """Human name for a basket slug. An UNKNOWN slug degrades to a de-slugged version rather than
+    to '--': the basket genuinely exists in the data, we just have not named it yet, and hiding a
+    real basket behind a dash would be worse than showing an imperfect label."""
+    if not slug:
+        return "--"
+    return BASKET_LABELS.get(slug) or slug.replace("_", " ").title()
+
+
+@router.get("/api/mobile/qb")
+def mobile_qb(request: Request):
+    """Quant Baskets — one row per basket, plus its open holdings.
+
+    TRAP (a): quant_paper_positions.status is LOWERCASE ('open' / 'exited_stop'). Verified live:
+    62 open / 22 exited_stop. An uppercase filter here returns silently nothing, which is the
+    worst kind of wrong — a real book that renders as an empty one.
+    """
+    g = _guard(request)
+    if g:
+        return g
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT basket_name,
+                       COUNT(*)                                   AS positions,
+                       SUM(current_value)                         AS market_value,
+                       SUM(pnl)                                   AS unrealised,
+                       SUM(qty * entry_price)                     AS invested,
+                       MAX(updated_at)                            AS updated_at
+                FROM quant_paper_positions
+                WHERE status = 'open'
+                GROUP BY basket_name
+                ORDER BY SUM(current_value) DESC NULLS LAST
+            """)
+            baskets = _rows(cur)
+            cur.execute("""
+                SELECT basket_name, symbol, qty, entry_price, current_price, pnl, pnl_pct,
+                       current_value, entry_date
+                FROM quant_paper_positions
+                WHERE status = 'open'
+                ORDER BY basket_name, current_value DESC NULLS LAST
+            """)
+            holdings = _rows(cur)
+    except Exception as e:
+        log.exception("mobile qb failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "baskets": [], "count": 0}
+
+    def f(v):
+        return float(v) if v is not None else None
+
+    by_basket = {}
+    for h in holdings:
+        by_basket.setdefault(h["basket_name"], []).append({
+            "symbol": h["symbol"], "qty": f(h["qty"]),
+            "entry": f(h["entry_price"]), "cmp": f(h["current_price"]),
+            "pnl": f(h["pnl"]), "pnl_pct": f(h["pnl_pct"]),
+            "value": f(h["current_value"]),
+            "since": h["entry_date"].strftime("%d %b") if h["entry_date"] else None,
+        })
+
+    newest = max([b["updated_at"] for b in baskets if b["updated_at"]], default=None)
+    out = []
+    for b in baskets:
+        inv, mv = f(b["invested"]), f(b["market_value"])
+        out.append({
+            "slug": b["basket_name"], "label": basket_label(b["basket_name"]),
+            "positions": b["positions"], "market_value": mv,
+            "unrealised": f(b["unrealised"]),
+            "invested": inv,
+            "ret_pct": round((mv - inv) / inv * 100.0, 2) if inv else None,
+            "holdings": by_basket.get(b["basket_name"], []),
+        })
+    tot_mv = sum(x["market_value"] or 0 for x in out)
+    tot_un = sum(x["unrealised"] or 0 for x in out)
+    return {
+        "baskets": out,
+        "count": len(out),
+        "total_value": round(tot_mv, 2) if out else None,
+        "total_unrealised": round(tot_un, 2) if out else None,
+        # Baskets are marked once a day, not every 5 minutes — the rail cadence says so rather
+        # than judging a daily job against an intraday clock (the cc#841 false-positive class).
+        "rail": rail_state(newest, 1440, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/qb", response_class=HTMLResponse)
+def m_qb():
+    return _page("qb")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# GVM — 16916: "score+verdict, most retail-friendly surface".
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/gvm")
+def mobile_gvm(request: Request, q: str = "", limit: int = 25):
+    """Search or top-ranked. ONE query either way.
+
+    gvm_score is the EOD frozen value (V8 architecture, locked 18-Jun) — the rail says CLOSED
+    rather than STALE out of hours, because a nightly score is not late at lunchtime.
+    """
+    g = _guard(request)
+    if g:
+        return g
+    limit = max(1, min(limit, 50))
+    q = (q or "").strip().upper()
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            if q:
+                cur.execute("""
+                    SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict,
+                           gvm_overall_label, growth_label, value_label, momentum_label,
+                           segment, price, rank, punchline, score_date
+                    FROM gvm_scores
+                    WHERE symbol LIKE %s OR UPPER(company_name) LIKE %s
+                    ORDER BY (symbol = %s) DESC, gvm_score DESC NULLS LAST
+                    LIMIT %s
+                """, (f"{q}%", f"%{q}%", q, limit))
+            else:
+                cur.execute("""
+                    SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict,
+                           gvm_overall_label, growth_label, value_label, momentum_label,
+                           segment, price, rank, punchline, score_date
+                    FROM gvm_scores
+                    ORDER BY gvm_score DESC NULLS LAST
+                    LIMIT %s
+                """, (limit,))
+            rows = _rows(cur)
+    except Exception as e:
+        log.exception("mobile gvm failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "results": [], "count": 0}
+
+    def f(v):
+        return float(v) if v is not None else None
+
+    newest = max([r["score_date"] for r in rows if r["score_date"]], default=None)
+    newest_dt = datetime.combine(newest, dt_time(22, 0)) if newest else None
+    return {
+        "query": q or None,
+        "results": [{
+            "symbol": r["symbol"], "name": r["company_name"],
+            "gvm": f(r["gvm_score"]), "g": f(r["g_score"]), "v": f(r["v_score"]), "m": f(r["m_score"]),
+            "verdict": r["verdict"], "label": r["gvm_overall_label"],
+            "growth": r["growth_label"], "value": r["value_label"], "momentum": r["momentum_label"],
+            "segment": r["segment"], "price": f(r["price"]), "rank": r["rank"],
+            "punchline": r["punchline"],
+            "as_of": r["score_date"].strftime("%d %b") if r["score_date"] else None,
+        } for r in rows],
+        "count": len(rows),
+        # cadence 1440: GVM is scored nightly at 22:00 (V8 architecture, EOD frozen).
+        "rail": rail_state(newest_dt, 1440, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/gvm", response_class=HTMLResponse)
+def m_gvm():
+    return _page("gvm")
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════

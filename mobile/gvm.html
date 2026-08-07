@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GVM · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+.srch{margin:11px 12px 0;display:flex;gap:8px}
+.srch input{flex:1;min-height:44px;padding:0 13px;border-radius:11px;background:var(--panel);
+  border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:13.5px;outline:none}
+.srch input:focus{border-color:rgba(77,124,254,.55)}
+.score{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:700;line-height:1}
+.gvm3{display:flex;gap:7px;margin-top:9px}
+.gvm3 div{flex:1;background:var(--panel2);border-radius:9px;padding:7px 8px;text-align:center}
+.gvm3 .k{font-size:8.5px;letter-spacing:.12em;color:var(--dim);font-weight:700}
+.gvm3 .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;margin-top:2px}
+</style>
+</head>
+<body>
+<!--
+  cc#874 — GVM, PROMOTED. previews/gvm.html stays frozen (item 9).
+  16916: "score+verdict, most retail-friendly surface".
+
+  RETAIL FIRST (16915 / 17021): one score, one verdict, one plain-language line. The 60-odd
+  per-metric raw/peer/rating columns behind gvm_scores are professional depth and stay on the web
+  dashboard by design, not by neglect. Same numbers, fewer of them (DISPLAY_PARITY 16202).
+
+  gvm_score is EOD-frozen (V8 architecture, 22:00 nightly), so the rail reads CLOSED out of hours
+  rather than STALE — a nightly score is not late at lunchtime.
+  gvm_overall_label and rank are NULL in the live table today; per the contract they render '--'
+  with a title naming the gap, never a substituted value.
+-->
+<div class="screen">
+  <div class="head">
+    <h1>GVM</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+
+  <div class="srch">
+    <input id="q" type="search" placeholder="Search a company or symbol" autocomplete="off">
+  </div>
+
+  <div class="body" id="body"><div class="loading">Loading scores…</div></div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn on" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function n(v, dp){
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
+  return Number(v).toFixed(dp == null ? 2 : dp);
+}
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+/* A missing value that the contract knows is missing says WHY on tap, rather than pretending. */
+function gap(label){
+  return '<span title="' + esc(label) + '" style="color:var(--dim)">--</span>';
+}
+function scoreCol(g){
+  if (g == null) return 'var(--dim)';
+  return g >= 7.5 ? 'var(--grn)' : (g >= 5 ? 'var(--amber)' : 'var(--red)');
+}
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+
+function card(x){
+  return '<div class="c">'
+    + '<div class="meta">'
+      + '<span class="tag cat">' + esc(x.segment || 'UNCLASSIFIED') + '</span>'
+      + (x.verdict ? '<span class="tag ' + (x.gvm >= 7.5 ? 'bull' : x.gvm >= 5 ? 'neut' : 'bear') + '">'
+          + esc(x.verdict.toUpperCase()) + '</span>' : '')
+      + '<span class="when">' + esc(x.as_of || '--') + '</span>'
+    + '</div>'
+    + '<div style="display:flex;align-items:flex-start;gap:12px">'
+      + '<div style="flex:1">'
+        + '<div class="hl">' + esc(x.symbol) + '</div>'
+        + '<div class="sum">' + esc(x.name || '--') + '</div>'
+      + '</div>'
+      + '<div style="text-align:right">'
+        + '<div class="score" style="color:' + scoreCol(x.gvm) + '">' + n(x.gvm, 2) + '</div>'
+        + '<div class="mono" style="font-size:10px;color:var(--dim);margin-top:3px">CMP ' + px(x.price) + '</div>'
+      + '</div>'
+    + '</div>'
+    + '<div class="gvm3">'
+      + '<div><div class="k">GROWTH</div><div class="v">' + n(x.g, 1) + '</div></div>'
+      + '<div><div class="k">VALUE</div><div class="v">' + n(x.v, 1) + '</div></div>'
+      + '<div><div class="k">MOMENTUM</div><div class="v">' + n(x.m, 1) + '</div></div>'
+    + '</div>'
+    + (x.punchline ? '<div class="sum" style="margin-top:9px">' + esc(x.punchline) + '</div>' : '')
+    + '<div class="src">Rank ' + (x.rank == null ? gap('rank is NULL in gvm_scores today') : esc(x.rank))
+      + ' · ' + (x.label ? esc(x.label) : gap('gvm_overall_label is NULL in gvm_scores today')) + '</div>'
+    + '</div>';
+}
+
+function load(q){
+  document.getElementById('body').innerHTML = '<div class="loading">Loading scores…</div>';
+  fetchWithTimeout('/api/mobile/gvm?limit=25' + (q ? '&q=' + encodeURIComponent(q) : ''))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      document.getElementById('sub').innerHTML =
+        (d.query ? 'search "' + esc(d.query) + '" · ' : 'top ranked · ') + d.count + ' shown '
+        + railHtml(d.rail);
+      document.getElementById('body').innerHTML = d.count
+        ? d.results.map(card).join('')
+        : '<div class="empty"><b>Nothing found</b>No company matches "' + esc(d.query || '') + '".</div>';
+    })
+    .catch(function(e){
+      document.getElementById('body').innerHTML =
+        '<div class="empty"><b>Could not load GVM</b>' + esc(e.message)
+        + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+      document.getElementById('sub').textContent = 'failed to load';
+    });
+}
+
+var t = null;
+document.getElementById('q').addEventListener('input', function(e){
+  clearTimeout(t);
+  var v = e.target.value.trim();
+  t = setTimeout(function(){ load(v); }, 300);   /* debounce — one request per pause, not per key */
+});
+load('');
+</script>
+</body>
+</html>

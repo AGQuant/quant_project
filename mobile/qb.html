@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Baskets · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — QUANT BASKETS, PROMOTED. previews/qb.html stays frozen (item 9).
+  16916: "ready-made baskets, easiest retail product".
+
+  RETAIL FIRST (16915 + founder 17021): the app is a LIGHTER SUBSET of the one web product, never
+  a second dashboard and never a shrunk copy. So this screen answers one question — what do I own
+  in each basket and is it up — and leaves allocation mechanics, entry gates and rebalance history
+  to the web dashboard. DISPLAY_PARITY 16202 still binds: the numbers here are the SAME numbers,
+  just fewer of them.
+
+  TRAP (a): quant_paper_positions.status is LOWERCASE. Verified live before wiring: 62 'open',
+  22 'exited_stop'. An uppercase filter renders a real book as an empty one.
+-->
+<div class="screen">
+  <div class="head">
+    <h1>Baskets</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+  <div class="body" id="body"><div class="loading">Loading baskets…</div></div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+/* 15913 rule 6 — absent renders '--', never 0.0. */
+function n(v, dp){
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN',
+    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
+}
+function inr(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return (x < 0 ? '−' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+
+var OPEN = {};   /* which basket is expanded — SECONDARY cards carry a chevron (16157) */
+
+function holdingRow(h){
+  return '<div style="display:flex;gap:8px;align-items:baseline;padding:7px 0;border-top:1px solid var(--line)">'
+    + '<span class="mono" style="font-weight:700;font-size:12px;flex:1">' + esc(h.symbol) + '</span>'
+    + '<span class="mono" style="font-size:11px;color:var(--mut)">' + n(h.qty, 0) + ' @ ' + px(h.entry) + '</span>'
+    + '<span class="mono ' + cls(h.pnl) + '" style="font-size:12px;font-weight:700;min-width:74px;text-align:right">'
+      + inr(h.pnl) + '</span>'
+    + '</div>';
+}
+
+function basketCard(b){
+  var open = OPEN[b.slug];
+  return '<div class="c ' + (b.unrealised >= 0 ? 'long' : 'short') + '">'
+    + '<button class="fold" style="width:100%;justify-content:flex-start;margin:0;color:inherit"'
+      + ' onclick="toggle(\'' + esc(b.slug) + '\')">'
+      + '<span style="flex:1;text-align:left">'
+        + '<span class="hl">' + esc(b.label) + '</span>'
+        + '<span class="sum mono" style="margin-top:4px;display:block">'
+          + b.positions + ' holdings · ' + inr(b.market_value) + '</span>'
+      + '</span>'
+      + '<span class="mono ' + cls(b.unrealised) + '" style="font-size:13px;font-weight:800">'
+        + inr(b.unrealised) + '<br><span style="font-size:10px">'
+        + (b.ret_pct == null ? '--' : (b.ret_pct >= 0 ? '+' : '') + n(b.ret_pct) + '%') + '</span></span>'
+      + '<span style="margin-left:8px;color:var(--dim)">' + (open ? '⌄' : '›') + '</span>'
+    + '</button>'
+    + (open ? '<div style="margin-top:8px">' + (b.holdings || []).map(holdingRow).join('') + '</div>' : '')
+    + '</div>';
+}
+
+function toggle(slug){ OPEN[slug] = !OPEN[slug]; render(); }
+
+var DATA = null;
+function render(){
+  var d = DATA;
+  document.getElementById('sub').innerHTML =
+    d.count + ' baskets · ' + inr(d.total_value) + ' value · '
+    + '<span class="' + cls(d.total_unrealised) + '">' + inr(d.total_unrealised) + '</span> '
+    + railHtml(d.rail);
+  document.getElementById('body').innerHTML = d.count
+    ? d.baskets.map(basketCard).join('')
+    : '<div class="empty"><b>No open basket positions</b>Baskets appear here once the engine takes its first position.</div>';
+}
+
+fetchWithTimeout('/api/mobile/qb')
+  .then(function(r){ return r.json(); })
+  .then(function(d){ if (d.error) throw new Error(d.error); DATA = d; render(); })
+  .catch(function(e){
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>Could not load baskets</b>' + esc(e.message)
+      + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+    document.getElementById('sub').textContent = 'failed to load';
+  });
+</script>
+</body>
+</html>

@@ -314,7 +314,9 @@ PWA_JS = """
     // not Python: this array lives INSIDE the pwa.js string, and a '#' here is a syntax
     // error that kills the whole injected bundle site-wide (the cc#853 class).
     ['/m/intel', '\\u25a4', 'Intel (mobile)'],
-    ['/m/positions', '\\u25e7', 'Open Book (mobile)']
+    ['/m/positions', '\\u25e7', 'Open Book (mobile)'],
+    ['/m/qb', '\\u25f0', 'Baskets (mobile)'],
+    ['/m/gvm', '\\u25c8', 'GVM (mobile)']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {
