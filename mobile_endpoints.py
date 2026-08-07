@@ -578,10 +578,20 @@ def mobile_v8(request: Request):
     newest = max([b["newest"] for b in baskets if b["newest"]], default=None)
     return {
         "universe": universe,
+        # cc#887 follow-up — THE SAME MISTAKE, QUIETER. This read "verdict", "gate_open" and
+        # "as_of"; market_mood() returns NONE of those three. Its actual keys are checked_at,
+        # checks, fails, mood, buy_slots, sell_slots, total_slots, slot_note, breadth_source,
+        # nifty_source, adr_detail. So the gate card has been printing three nulls since cc#874 —
+        # no crash, no error box, just silently empty, which is the worse failure of the two
+        # because nothing ever told anyone.
+        # Found by checking the source of every endpoint this module reuses after the home screen
+        # turned out to have assumed a shape too. `open` is derived: the gate is open when no
+        # check failed. fails is a count, so a falsy 0 means open — written explicitly rather than
+        # with `not fails`, because `not None` would also read as open if the key ever vanished.
         "gate": {
-            "verdict": (mood or {}).get("verdict"),
-            "open": (mood or {}).get("gate_open"),
-            "as_of": (mood or {}).get("as_of"),
+            "verdict": (mood or {}).get("mood"),
+            "open": ((mood or {}).get("fails") == 0) if (mood or {}).get("fails") is not None else None,
+            "as_of": (mood or {}).get("checked_at"),
         } if mood else {"verdict": None, "open": None, "as_of": None},
         "baskets": [{"slug": b["basket"], "label": basket_label(b["basket"]), "signals": b["n"]}
                     for b in baskets],
@@ -719,10 +729,25 @@ def mobile_home(request: Request):
         return float(v) if v is not None else None
     book_empty = not sg["n"]
     return {
+        # cc#887 follow-up — THE SECOND BUG ON THIS SCREEN, and the one the founder actually saw.
+        # domestic_live() returns a WRAPPER: {"as_of": "<string>", "indices": {"NIFTY50": {...},
+        # "BANKNIFTY": {...}}}. This comprehension iterated the TOP level, so it hit "as_of",
+        # whose value is a str, and called .get on it -> AttributeError: 'str' object has no
+        # attribute 'get'. It also would have labelled the "indices" key itself "Bank Nifty".
+        #
+        # Why it hid behind the timezone crash: on 07-Aug the feed was down, so domestic_live()
+        # raised, the except left idx = {}, and an empty .items() produced no error — leaving
+        # rail_state to raise the TypeError instead. With the feed healthy the wrapper comes back
+        # populated and THIS fires first, because a dict literal evaluates its values in source
+        # order and "indices" is built before "rail". Fixing one revealed the other; that is the
+        # cc#887 guard doing its job, not a regression from it.
+        #
+        # Reading the "indices" key by name also makes the shape explicit, so a future change to
+        # the wrapper is a KeyError-free empty list rather than a crash.
         "indices": [{
             "name": "Nifty 50" if k == "NIFTY50" else "Bank Nifty",
             "close": v.get("close"), "chg_pct": v.get("chg_pct"), "source": v.get("source"),
-        } for k, v in idx.items()],
+        } for k, v in (idx.get("indices") or {}).items() if isinstance(v, dict)],
         # SOURCED_BUT_EMPTY, per the contract. The source is correct and returns nothing today, so
         # the screen says the book is flat rather than printing 0.00 as if it were a measurement.
         "book": {
