@@ -106,6 +106,7 @@ from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star marker (read-only)
 from preview_endpoints import router as preview_router   # cc#866 preview screens (Claude.ai pushes previews/)
+from mobile_endpoints import router as mobile_router     # cc#874 promoted mobile screens (/m/*)
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -226,6 +227,11 @@ PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) 
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 PROTECTED.add("/screeners")   # cc#824: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
+# cc#874: promoted mobile screens are login-gated like every other page. Added to PROTECTED
+# only — deliberately NOT to _PWA_INJECT_PATHS: pwa.js injects the DESKTOP navbar into
+# #scorr-nav, and these screens carry their own 5-slot bottom nav per 15913 (no tab rows,
+# one nav). Injecting both would put two navigations on one screen.
+PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -464,6 +470,7 @@ app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, 
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 app.include_router(pivot_star_router)   # cc#856: /api/v8/pivot_star
 app.include_router(preview_router)   # cc#866: /preview + /preview/{name}
+app.include_router(mobile_router)    # cc#874: promoted mobile screens — all logic in mobile_endpoints.py
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
@@ -985,6 +992,11 @@ NAV_REGISTRY = {
     # cc#867: temporary review-period entry. Mirrored here so the registry cannot drift from
     # the live NAV array (rule 2987). Removing the pwa_endpoints.py line is the whole rollback.
     "/preview":      ("Previews \u2014 review screens, temporary", "nav"),
+    # cc#874: promoted mobile screens. Mirrored here so the registry cannot drift from the live
+    # NAV array (rule 2987). One entry per WIRED screen only — an unwired screen must never
+    # appear in the registry, or the registry starts claiming pages that do not exist.
+    "/m/intel":      ("Intel (mobile)",       "nav"),
+    "/m/positions":  ("Open Book (mobile)",   "nav"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),

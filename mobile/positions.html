@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Open Book · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — V8 POSITIONS, PROMOTED. previews/v8_positions.html stays frozen (item 9).
+
+  Contract: 14 values — 13 SOURCED, 1 SOURCED_BUT_EMPTY (the pivot star). The star is a real
+  column on a real table that cc#856 shipped and bg_pivot_star writes every 5 minutes; it is
+  simply empty until the rule first fires. So an absent star renders as NOTHING — never a
+  spinner, never a placeholder that implies a star was expected and lost.
+
+  TRAPS observed, each already a paid-for lesson:
+   - entry_ts is NAIVE IST. It is formatted server-side and printed raw. No conversion anywhere.
+   - v8_filter_state is NOT read. Basket names come from the trades themselves.
+   - price precision: under 100 gets one decimal, above gets none (16170).
+-->
+<div class="screen">
+
+  <div class="head">
+    <h1>Open Book</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+
+  <div class="body" id="body">
+    <div class="loading">Loading positions…</div>
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* 15913 rule 6 — a missing value is '--', never 0.0. One place makes that decision. */
+function n(v, dp){
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN',
+    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
+}
+/* 16170 price precision: under 100 shows one decimal, at or above shows none. */
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+function inr(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return (x < 0 ? '−' : '+') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>'
+       + esc(r.state) + '</span>';
+}
+
+function row(p){
+  var side = p.side === 'SHORT' ? 'short' : 'long';
+  /* The star is the SOURCED_BUT_EMPTY value. Present -> render it in its own colour. Absent ->
+     render nothing at all, because "no star today" is a real answer, not a missing one. */
+  var star = p.star
+    ? ' <span style="color:' + (p.star === 'red' ? 'var(--red)' : 'var(--blu)') + '">★</span>' : '';
+  var isNew = p.is_new ? ' <span class="tag hi">NEW</span>' : '';
+  return '<div class="c ' + side + '">'
+    + '<div class="meta">'
+      + '<span class="tag ' + (side === 'short' ? 'bear' : 'bull') + '">' + esc(p.side) + '</span>'
+      + '<span class="tag cat">' + esc((p.basket || '').replace(/_/g, ' ').toUpperCase()) + '</span>'
+      + isNew
+      + '<span class="when">' + esc(p.entry_ts || '--') + '</span>'
+    + '</div>'
+    + '<div class="hl">' + esc(p.symbol) + star
+      + ' <span class="mono ' + cls(p.pnl) + '" style="float:right;font-size:13px">'
+      + inr(p.pnl) + '</span></div>'
+    + '<div class="sum mono">'
+      + 'Entry ' + px(p.entry) + ' · CMP ' + px(p.cmp)
+      + ' · <span class="' + cls(p.ret_pct) + '">' + (p.ret_pct == null ? '--' : n(p.ret_pct) + '%') + '</span>'
+      + '<br>Stop ' + px(p.stop) + ' · Target ' + px(p.target) + ' · ' + n(p.qty, 0) + ' qty'
+    + '</div>'
+    + '</div>';
+}
+
+fetchWithTimeout('/api/mobile/v8_positions')
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if (d.error) throw new Error(d.error);
+    document.getElementById('sub').innerHTML =
+      d.count + ' open · net <span class="' + cls(d.net_pnl) + '">' + inr(d.net_pnl) + '</span> '
+      + railHtml(d.rail);
+    if (!d.count) {
+      /* The designed empty state — a flat book is a fact, not a failure. */
+      document.getElementById('body').innerHTML =
+        '<div class="empty"><b>No open positions</b>'
+        + 'The paper book is flat. New entries appear here as the engine takes them.</div>';
+      return;
+    }
+    document.getElementById('body').innerHTML = d.positions.map(row).join('')
+      + (d.star_source_empty
+          ? '<div class="cover">No pivot stars today — v8_pivot_star_log is empty for this date.</div>'
+          : '');
+  })
+  .catch(function(e){
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>Could not load the book</b>' + esc(e.message)
+      + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+    document.getElementById('sub').textContent = 'failed to load';
+  });
+</script>
+</body>
+</html>

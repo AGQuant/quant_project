@@ -308,7 +308,13 @@ PWA_JS = """
     // and on the desktop top-nav — no PRIMARY change, no second entry.
     // TEMPORARY BY DESIGN: this exists for the review period only. Deleting this one line is the
     // entire rollback; the /preview route and preview_endpoints.py stay untouched either way.
-    ['/preview', '\\u25f1', 'Previews']
+    ['/preview', '\\u25f1', 'Previews'],
+    // cc#874: promoted mobile screens. ONE source for the live nav (rule 2987) — desktop
+    // top-nav and the mobile More sheet both build from this array. These are JS comments,
+    // not Python: this array lives INSIDE the pwa.js string, and a '#' here is a syntax
+    // error that kills the whole injected bundle site-wide (the cc#853 class).
+    ['/m/intel', '\\u25a4', 'Intel (mobile)'],
+    ['/m/positions', '\\u25e7', 'Open Book (mobile)']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {

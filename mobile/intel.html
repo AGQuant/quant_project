@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Intel · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — INTEL, PROMOTED. The frozen review copy stays at previews/intel.html and is never
+  touched (item 9); this is the rebuilt page reading live data (16230).
+
+  Contract: 12 values, all SOURCED. Every field below comes from docs/PREVIEW_DATA_CONTRACT.md
+  via /api/mobile/intel, which reads v_polished_articles — the canonical view, so cc#870's
+  suppression is inherited and a culled story can never surface here.
+
+  DESIGN RULES CARRIED FROM THE APPROVED PREVIEW (16170), not re-decided while wiring:
+   - the header states the age of the NEWEST HEADLINE, never a refresh clock. A dead feed still
+     shows a fresh clock; it can never show a fresh headline.
+   - AI Editorial leads and is the PRIMARY, always expanded, no chevron (16157).
+   - sentiment is a WORD chip; the card edge repeats the colour but never carries the meaning.
+   - reading type is 13.5px minimum.
+   - coverage is stated, so truncation is never silent.
+-->
+<div class="screen">
+
+  <div class="head">
+    <h1>Intel</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="body" id="body">
+    <div class="loading">Loading intel…</div>
+  </div>
+
+  <div class="cover" id="cover"></div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn on" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+/* One fetch for the whole screen (item 6) — not one per value. fetchWithTimeout is cc#878's
+   shared helper, so a hung request becomes a visible failure instead of a permanent shimmer. */
+var STATE = { data: null, cat: 'All' };
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+function sentClass(s){
+  if (s === 'BULLISH') return 'bull';
+  if (s === 'BEARISH') return 'bear';
+  if (s === 'CAUTIOUS') return 'caut';
+  return 'neut';
+}
+
+function card(a, isEditorial){
+  var edge = sentClass(a.sentiment);
+  var tags = '';
+  if (isEditorial) tags += '<span class="tag edt">AI EDITORIAL</span>';
+  else if (a.category) tags += '<span class="tag cat">' + esc(a.category.toUpperCase()) + '</span>';
+  if (a.impact) tags += '<span class="tag hi">' + esc(a.impact) + '</span>';
+  if (a.sentiment) tags += '<span class="tag ' + edge + '">' + esc(a.sentiment) + '</span>';
+
+  /* The reading state. full_summary is the article; summary is the one-line stand-in. A short
+     with no body renders its summary rather than an empty card — never a fabricated paragraph. */
+  var bodyHtml = '';
+  if (isEditorial && a.body) {
+    var paras = String(a.body).split(/\n{2,}/).slice(0, 3)
+      .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
+    bodyHtml = '<div class="read">' + paras + '</div>'
+             + '<button class="fold" onclick="openFull(' + a.id + ')">Continue reading ↓</button>';
+  } else if (a.summary) {
+    bodyHtml = '<div class="sum">' + esc(a.summary) + '</div>';
+  }
+
+  var syms = (a.symbols || []).length
+    ? '<div class="syms">' + a.symbols.slice(0, 6).map(function(s){
+        return '<span class="sy">' + esc(s) + '</span>'; }).join('') + '</div>' : '';
+
+  return '<div class="c ' + (isEditorial ? 'ed ' : '') + edge + '">'
+    + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
+    + '<div class="hl">' + esc(a.headline) + '</div>'
+    + bodyHtml + syms
+    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' · ' + esc(a.when_full) : '') + '</div>'
+    + '</div>';
+}
+
+function openFull(id){
+  var a = (STATE.data.editorials || []).concat(STATE.data.feed || [])
+            .filter(function(x){ return x.id === id; })[0];
+  if (!a || !a.body) return;
+  var el = document.getElementById('full-' + id);
+  if (el) { el.scrollIntoView({behavior:'smooth'}); return; }
+  var host = document.getElementById('body');
+  var d = document.createElement('div');
+  d.id = 'full-' + id;
+  d.className = 'c ed';
+  d.innerHTML = '<div class="hl">' + esc(a.headline) + '</div><div class="read">'
+    + String(a.body).split(/\n{2,}/).map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('')
+    + '</div>';
+  host.appendChild(d);
+  d.scrollIntoView({behavior:'smooth'});
+}
+
+function render(){
+  var d = STATE.data;
+  document.getElementById('sub').textContent =
+    'newest headline ' + (d.header.newest || '--') + ' · ' + d.header.count
+    + ' items in the last ' + d.header.hours + 'h';
+
+  var total = d.header.count;
+  var chips = [{label:'All', n: total}].concat(d.chips);
+  document.getElementById('chips').innerHTML = chips.map(function(c){
+    return '<button class="chip' + (c.label === STATE.cat ? ' on' : '') + '" onclick="pick(\'' +
+      esc(c.label).replace(/'/g, "\\'") + '\')">' + esc(c.label) +
+      ' <span class="n">' + c.n + '</span></button>';
+  }).join('');
+
+  var eds  = d.editorials || [], feed = d.feed || [];
+  if (STATE.cat !== 'All') {
+    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
+    feed = feed.filter(function(a){ return a.category === STATE.cat; });
+  }
+  var html = '';
+  if (eds.length)  html += '<div class="sect">TODAY\'S EDITORIAL</div>'
+                        + eds.map(function(a){ return card(a, true); }).join('');
+  if (feed.length) html += '<div class="sect">THE FEED</div>'
+                        + feed.map(function(a){ return card(a, false); }).join('');
+  if (!html) html = '<div class="empty"><b>Nothing in this filter</b>'
+                  + 'No polished items in the last ' + d.header.hours + ' hours for '
+                  + esc(STATE.cat) + '.</div>';
+  document.getElementById('body').innerHTML = html;
+  document.getElementById('cover').textContent =
+    'showing ' + (eds.length + feed.length) + ' of ' + total;
+}
+
+function pick(cat){ STATE.cat = cat; render(); }
+
+fetchWithTimeout('/api/mobile/intel?hours=48&limit=40')
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if (d.error) throw new Error(d.error);
+    STATE.data = d;
+    render();
+  })
+  .catch(function(e){
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>Could not load intel</b>' + esc(e.message) +
+      '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+    document.getElementById('sub').textContent = 'failed to load';
+  });
+</script>
+</body>
+</html>
