@@ -2006,7 +2006,25 @@ function qaChartClose(){
 // -- Core utils --------------------------------------------------------------
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
-function setMasterSide(s){MASTER_SIDE=s;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+// cc#880: basket filter on the Positions tab, a SECOND row under the direction chips. Single-select,
+// combines with MASTER_SIDE (Sell Reversal + SHORT applies both). Session-scoped like MASTER_SIDE —
+// a filter that outlives the visit is a filter the founder forgets he set.
+let MASTER_BASKET='all';
+function setMasterSide(s){
+  MASTER_SIDE=s;
+  // cc#880: the chip LIST is faceted by direction, so switching direction can strand the selected
+  // basket on a set that no longer contains it — the chip disappears while its filter keeps
+  // applying, and the table reads empty with no visible reason. Reset to All when that happens.
+  _masterBasketReconcile();
+  const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();
+}
+function setMasterBasket(b){MASTER_BASKET=b;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+function _masterBasketReconcile(){
+  if(MASTER_BASKET==='all')return;
+  const p=cache.paper,allOpen=(p&&p.open_positions)||[];
+  const inSide=MASTER_SIDE==='all'?allOpen:allOpen.filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase());
+  if(!inSide.some(x=>(x.basket||'')===MASTER_BASKET))MASTER_BASKET='all';
+}
 // cc#274 Table/Ladder toggle. cc#331: Ladder is the default on phones (its cc#288 rows are
 // mobile-friendly); choice persists per device via localStorage.
 let OPENPOS_VIEW=(function(){try{var s=localStorage.getItem('v8_openpos_view');if(s)return s;}catch(e){}
@@ -2068,7 +2086,17 @@ function hydrateTcStars(rows){
     }).catch(function(){});
 }
 // cc_task #76 4c: capitalised basket label + buy=green / sell=red pill
-function basketLabel(b){return({buy_reversal:'Buy Reversal',buy_momentum:'Buy Momentum',buy_s1_bounce:'Buy S1 Bounce',sell_reversal:'Sell Reversal',sell_momentum:'Sell Momentum',sell_overbought:'Sell Overbought'})[b]||(b||'').replace(/_/g,' ');}
+// cc#880 item 4: the slug -> label map moved to scorr_card_common.js so ONE dictionary answers for
+// the web dashboard and the mobile app. This wrapper stays because ~40 call sites on this page call
+// basketLabel by name; only its body moved. Note the map was NOT identical before this card — this
+// page said "Buy S1 Bounce" where mobile said "S1 Bounce". The shared map settles it as "S1 Bounce",
+// which is the name the founder used in the cc#880 card.
+// The `||` fallback is a load-order guard, not a second map: scorr_card_common.js is loaded at the
+// top of this page (line ~848) without defer, so it is always present by the time anything renders.
+function basketLabel(b){
+  if(typeof scorrBasketLabel==='function')return scorrBasketLabel(b);
+  return (b||'').replace(/_/g,' ');
+}
 // cc#728: Buy Reversal -> aqua (--cyan #37D3E8 family), Sell Reversal -> amber (--amber #F5B94A
 // family); every other basket keeps its prior buy=green / sell=red styling untouched. One function =
 // consistent across Table, Ladder and mobile-card views (all render via basketPill).
@@ -2328,19 +2356,29 @@ function renderMaster(){
   const cntLong=allOpen.filter(x=>(x.side||'').toUpperCase()==='LONG').length;
   const cntShort=allOpen.filter(x=>(x.side||'').toUpperCase()==='SHORT').length;
   // toggle filter (All/Long/Short), then default sort desc by Net P&L (winners first)
-  const open=(MASTER_SIDE==='all'?allOpen:allOpen.filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase()))
+  // cc#880: the direction filter is applied FIRST and kept as its own set, because the basket chips
+  // are faceted off it — chip counts have to describe the rows you would actually get, not the rows
+  // that exist ignoring the direction you already picked.
+  const _bySide=(MASTER_SIDE==='all'?allOpen:allOpen.filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase()));
+  const open=(MASTER_BASKET==='all'?_bySide:_bySide.filter(x=>(x.basket||'')===MASTER_BASKET))
     .slice().sort((a,b)=>(Number(b.unrealised_pnl||0))-(Number(a.unrealised_pnl||0)));
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const netUnreal=unreal-open.length*BROKERAGE_PER_TRADE;
   // cc#129 bug_2: Realised + Win/Loss cards also cascade with the Long/Short filter.
   // 'all' uses the authoritative summary totals; long/short recompute from the
   // already-fetched recent_trades (closed) on that side.
+  // cc#880: the basket filter cascades into these cards for the SAME reason the direction filter
+  // already did. Showing one basket's open rows under the whole book's realised P&L is the cc#817
+  // class of error — filtered rows sitting beneath an unfiltered headline, with nothing saying so.
+  // The API summary is authoritative only when BOTH filters are off; any filter recomputes.
   let totalClosedPnl,netClosed,winsTxt,lossTxt;
-  if(MASTER_SIDE==='all'){
+  if(MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
     totalClosedPnl=Number(sum.total_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
     winsTxt=sum.wins??'--';lossTxt=sum.losses??'--';
   }else{
-    const cl=((p&&p.recent_trades)||[]).filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase());
+    const cl=((p&&p.recent_trades)||[])
+      .filter(x=>MASTER_SIDE==='all'||(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase())
+      .filter(x=>MASTER_BASKET==='all'||(x.basket||'')===MASTER_BASKET);
     totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
     winsTxt=cl.filter(x=>Number(x.pnl||0)>0).length;lossTxt=cl.filter(x=>Number(x.pnl||0)<=0).length;
   }
@@ -2372,7 +2410,25 @@ function renderMaster(){
     else if(on&&key==='short')s='background:rgba(255,92,108,.13);color:var(--red);border:1px solid rgba(255,92,108,.4)';
     return`<button onclick="setMasterSide('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s">${label} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${cnt}</b></button>`;
   };
-  const toggle=`<div style="display:flex;gap:6px;margin-bottom:12px">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`;
+  // cc#880: SECOND ROW — basket chips, single-select, combining with the direction row above.
+  // The list is derived from _bySide (the direction-filtered rows) via the shared
+  // scorrBasketFacets, so a basket with no rows on the chosen side shows NO chip, and a retired
+  // basket still holding open rows DOES — both straight out of the data, no hardcoded array.
+  const _bkFacets=(typeof scorrBasketFacets==='function')?scorrBasketFacets(_bySide):[];
+  const bchip=(key,label,cnt)=>{
+    const on=MASTER_BASKET===key;
+    const s=on?'background:rgba(77,124,254,.15);color:var(--blu,#4d7cfe);border:1px solid rgba(77,124,254,.45)'
+              :'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
+    return`<button onclick="setMasterBasket('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s;white-space:nowrap;min-height:36px">${label} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${cnt}</b></button>`;
+  };
+  // The row is omitted entirely when there is at most one basket in view — a filter offering a
+  // single choice is not a filter, it is furniture.
+  const basketRow=_bkFacets.length>1
+    ? `<div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px">`
+      + bchip('all','All',_bySide.length)
+      + _bkFacets.map(f=>bchip(f.slug,f.label,f.n)).join('')
+      + `</div>` : '';
+  const toggle=`<div style="display:flex;gap:6px;margin-bottom:${_bkFacets.length>1?'8px':'12px'}">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`+basketRow;
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
@@ -2668,6 +2724,10 @@ function renderTradeLog(){
   if(!TLOG_RETIRED&&_retiredBk.length)t=t.filter(x=>_liveBk.indexOf(x.basket||'')>=0);
   // cc#370: apply the Duration + Basket filters (combine); default All/All = no filtering.
   if(TLOG_DUR!=='all'){const cut=_istDateMinus(TLOG_DUR==='1w'?7:30);t=t.filter(x=>String(x.exit_ts||'').slice(0,10)>=cut);}
+  // cc#880: snapshot the set BEFORE the basket filter. The chip counts are faceted off this, so
+  // each chip states how many trades you get if you tap it under the duration and retired settings
+  // already in force — not a global count that stops matching the moment a duration is chosen.
+  const _preBasket=t.slice();
   if(TLOG_BASKET!=='all')t=t.filter(x=>(x.basket||'')===TLOG_BASKET);
   // cc#370: All/All shows the authoritative summary totals; ANY filter recomputes from the subset.
   // cc#817: the API summary (s) covers the WHOLE ledger, retired baskets included — so it is only
@@ -2714,10 +2774,17 @@ function renderTradeLog(){
   const _presentBk=[...new Set([..._allT.map(x=>x.basket),..._liveBk].filter(Boolean))]
     .filter(v=>TLOG_RETIRED||_liveBk.indexOf(v)>=0);
   _presentBk.sort((a,b)=>{const ia=_bkOrder.indexOf(a),ib=_bkOrder.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||String(a).localeCompare(String(b));});
+  // cc#880 item 3: each chip carries its own COUNT, e.g. "Buy Reversal 19". Counted off _preBasket
+  // (duration + retired applied, basket not) so the number is what tapping the chip actually gives.
+  // A basket present in _presentBk but with zero rows under the current duration still shows, with
+  // a 0 — a chip that vanishes when you narrow the window looks like data loss; a visible 0 is an
+  // answer. cc#751's derivation of the LIST is untouched.
+  const _bkCount=_preBasket.reduce((m,x)=>{const b=x.basket||'';if(b)m[b]=(m[b]||0)+1;return m;},{});
   const bkBtns=[['all','All'],..._presentBk.map(v=>[v,basketLabel(v)])].map(([v,l])=>{
     const ret=(v!=='all'&&_liveBk.indexOf(v)<0);
     const tag=ret?' <span style="font-size:8px;font-weight:800;letter-spacing:.4px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">RETIRED</span>':'';
-    return `<button class="btn${TLOG_BASKET===v?' on':''}"${ret?' style="opacity:.72"':''} onclick="setTlogBasket('${v}')">${l}${tag}</button>`;
+    const cnt=v==='all'?_preBasket.length:(_bkCount[v]||0);
+    return `<button class="btn${TLOG_BASKET===v?' on':''}"${ret?' style="opacity:.72"':''} onclick="setTlogBasket('${v}')">${l} <b style="font-variant-numeric:tabular-nums">${cnt}</b>${tag}</button>`;
   }).join('');
   // cc#817: the toggle only exists when there IS something retired to reveal — an inert control on a
   // clean ledger is noise. Session-scoped (no persistence), per spec.

@@ -247,9 +247,62 @@
     });
   }
 
+  /* ── cc#880: BASKET IDENTITY — ONE MAP, ONE DERIVATION ────────────────────────────────────
+     Card item 4 asks for the slug -> human name mapping to exist in exactly one place, because
+     two copies of a label map is two labels for the same basket the day someone edits one. Before
+     this card there were two: v8_dashboard.html said "Buy S1 Bounce" and mobile_endpoints.py said
+     "S1 Bounce" for the SAME slug. This map is now the canonical JS answer; the dashboard's own
+     basketLabel() delegates here, so both surfaces read one dictionary.
+
+     The Python side (mobile_endpoints.BASKET_LABELS) still exists because a server cannot call a
+     browser file — it is aligned to this map by hand and both carry a note saying so. Two
+     runtimes is the honest floor; two DIFFERENT answers is not.
+
+     Card item 2 is the other half: the chip LIST is derived from the DATA, never from a hardcoded
+     array. scorrBasketFacets does that derivation once, so no surface can quietly reintroduce a
+     fixed list of five. A retired basket with historical rows still gets a chip because it is IN
+     the rows; a basket with zero rows gets none because it is not. */
+  var SCORR_BASKET_LABELS = {
+    buy_reversal: 'Buy Reversal',
+    buy_momentum: 'Buy Momentum',
+    sell_reversal: 'Sell Reversal',
+    sell_momentum: 'Sell Momentum',
+    buy_s1_bounce: 'S1 Bounce',
+    sell_overbought: 'Sell Overbought'
+  };
+  /* Canonical display order. A slug not listed here sorts last rather than being dropped — an
+     unnamed basket is a naming gap, not a reason to hide real trades. */
+  var SCORR_BASKET_ORDER = ['buy_reversal', 'buy_momentum', 'buy_s1_bounce',
+                            'sell_reversal', 'sell_momentum', 'sell_overbought'];
+
+  function scorrBasketLabel(slug) {
+    if (!slug) return '--';
+    return SCORR_BASKET_LABELS[slug] || String(slug).replace(/_/g, ' ');
+  }
+
+  /* Derive the chip list from a row set. Returns [{slug, label, n}] in canonical order.
+     `pick` reads the basket off a row (defaults to row.basket). Rows with no basket are ignored
+     rather than bucketed under '' — a blank chip filters to nothing and helps no one. */
+  function scorrBasketFacets(rows, pick) {
+    var get = pick || function (r) { return r && r.basket; };
+    var counts = {};
+    (rows || []).forEach(function (r) {
+      var b = get(r);
+      if (!b) return;
+      counts[b] = (counts[b] || 0) + 1;
+    });
+    return Object.keys(counts).map(function (b) {
+      return { slug: b, label: scorrBasketLabel(b), n: counts[b] };
+    }).sort(function (a, b) {
+      var ia = SCORR_BASKET_ORDER.indexOf(a.slug), ib = SCORR_BASKET_ORDER.indexOf(b.slug);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.slug.localeCompare(b.slug);
+    });
+  }
+
   var API = {
     num: num, sign: sign, getJSON: getJSON, newsEsc: newsEsc,
     fetchWithTimeout: fetchWithTimeout,   // cc#878
+    scorrBasketLabel: scorrBasketLabel, scorrBasketFacets: scorrBasketFacets,   // cc#880
     _volCol: _volCol, _volTile: _volTile, _volTilesHtml: _volTilesHtml, qaVolExplain: qaVolExplain,
     _heatBg: _heatBg, _heatTile: _heatTile, _deltaGrade: _deltaGrade,
     _perfGrade: _perfGrade, _perfTile: _perfTile, _qaSpark: _qaSpark,
@@ -265,4 +318,9 @@
     window[k] = API[k];
   });
   if (typeof window._MONO === 'undefined') window._MONO = _MONO;
+  /* cc#880: the label MAP itself is published too, not just the accessor — a surface that needs to
+     know the full set (rather than translate one slug) should read this rather than write its own. */
+  if (typeof window.SCORR_BASKET_LABELS === 'undefined') window.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
+  API.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
+  API.SCORR_BASKET_ORDER = SCORR_BASKET_ORDER;
 })();

@@ -29,6 +29,11 @@
     <div class="s" id="sub">loading…</div>
   </div>
 
+  <!-- cc#880: two filter rows. Direction first, baskets under it. Both scroll horizontally in one
+       row and never wrap, matching the preview tab-row pattern. -->
+  <div class="chips" id="dirchips"></div>
+  <div class="chips" id="bkchips" style="padding-top:3px"></div>
+
   <div class="body" id="body">
     <div class="loading">Loading positions…</div>
   </div>
@@ -97,24 +102,91 @@ function row(p){
     + '</div>';
 }
 
+/* ── cc#880 BASKET + DIRECTION FILTERS ────────────────────────────────────────────────────────
+   Filtering is client-side on the ONE payload the screen already fetches (item 6 of cc#874: one
+   call per screen). A chip tap must never be a round trip.
+
+   The basket chip LIST is derived from the DATA via scorrBasketFacets in scorr_card_common.js —
+   never a hardcoded array, so a basket with no open rows shows no chip and a retired basket still
+   holding an open position does. The direction filter is applied FIRST and the chips are faceted
+   off that set, so each count is what tapping it actually returns. */
+var DATA = null, SIDE = 'all', BASKET = 'all';
+
+function bySide(){
+  if (!DATA) return [];
+  return SIDE === 'all' ? DATA.positions
+    : DATA.positions.filter(function(p){ return (p.side || '').toUpperCase() === SIDE; });
+}
+function visible(){
+  var rows = bySide();
+  return BASKET === 'all' ? rows : rows.filter(function(p){ return (p.basket || '') === BASKET; });
+}
+function setSide(s){
+  SIDE = s;
+  /* Switching direction can leave the chosen basket with no rows — the chip would disappear while
+     its filter kept applying, and the list would read empty with nothing on screen explaining why.
+     Reset to All when the selection no longer exists. */
+  if (BASKET !== 'all' && !bySide().some(function(p){ return (p.basket || '') === BASKET; })) BASKET = 'all';
+  render();
+}
+function setBasket(b){ BASKET = b; render(); }
+
+function chip(on, label, n, fn, arg){
+  return '<button class="chip' + (on ? ' on' : '') + '" onclick="' + fn + '(\'' + esc(arg) + '\')">'
+    + esc(label) + ' <span class="n">' + n + '</span></button>';
+}
+
+function render(){
+  var d = DATA, all = d.positions || [], side = bySide(), rows = visible();
+
+  var nLong  = all.filter(function(p){ return (p.side || '').toUpperCase() === 'LONG'; }).length;
+  var nShort = all.filter(function(p){ return (p.side || '').toUpperCase() === 'SHORT'; }).length;
+  document.getElementById('dirchips').innerHTML =
+    chip(SIDE === 'all', 'All', all.length, 'setSide', 'all')
+    + chip(SIDE === 'LONG', 'Long', nLong, 'setSide', 'LONG')
+    + chip(SIDE === 'SHORT', 'Short', nShort, 'setSide', 'SHORT');
+
+  var facets = (typeof scorrBasketFacets === 'function') ? scorrBasketFacets(side) : [];
+  /* One basket in view is not a choice — the row is omitted rather than shown as furniture. */
+  document.getElementById('bkchips').innerHTML = facets.length > 1
+    ? chip(BASKET === 'all', 'All', side.length, 'setBasket', 'all')
+      + facets.map(function(f){
+          return chip(BASKET === f.slug, f.label, f.n, 'setBasket', f.slug); }).join('')
+    : '';
+
+  /* The header counts the VISIBLE set, so the number and the list can never disagree. */
+  var net = rows.reduce(function(a, p){ return a + (p.pnl == null ? 0 : Number(p.pnl)); }, 0);
+  document.getElementById('sub').innerHTML =
+    rows.length + ' open · net <span class="' + cls(net) + '">' + inr(net) + '</span> '
+    + railHtml(d.rail);
+
+  if (!all.length) {
+    /* The designed empty state — a flat book is a fact, not a failure. */
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>No open positions</b>'
+      + 'The paper book is flat. New entries appear here as the engine takes them.</div>';
+    return;
+  }
+  if (!rows.length) {
+    /* Distinct from a flat book: the book has rows, this filter has none. Saying which is which
+       stops a filter from looking like an outage. */
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>Nothing in this filter</b>'
+      + 'No open position matches the selected filters. Tap All to see the whole book.</div>';
+    return;
+  }
+  document.getElementById('body').innerHTML = rows.map(row).join('')
+    + (d.star_source_empty
+        ? '<div class="cover">No pivot stars today — v8_pivot_star_log is empty for this date.</div>'
+        : '');
+}
+
 fetchWithTimeout('/api/mobile/v8_positions')
   .then(function(r){ return r.json(); })
   .then(function(d){
     if (d.error) throw new Error(d.error);
-    document.getElementById('sub').innerHTML =
-      d.count + ' open · net <span class="' + cls(d.net_pnl) + '">' + inr(d.net_pnl) + '</span> '
-      + railHtml(d.rail);
-    if (!d.count) {
-      /* The designed empty state — a flat book is a fact, not a failure. */
-      document.getElementById('body').innerHTML =
-        '<div class="empty"><b>No open positions</b>'
-        + 'The paper book is flat. New entries appear here as the engine takes them.</div>';
-      return;
-    }
-    document.getElementById('body').innerHTML = d.positions.map(row).join('')
-      + (d.star_source_empty
-          ? '<div class="cover">No pivot stars today — v8_pivot_star_log is empty for this date.</div>'
-          : '');
+    DATA = d;
+    render();
   })
   .catch(function(e){
     document.getElementById('body').innerHTML =

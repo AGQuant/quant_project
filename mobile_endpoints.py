@@ -859,7 +859,11 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
 .chips{display:flex;gap:7px;overflow-x:auto;padding:11px 12px 3px;
   scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:0 0 auto;min-height:34px;display:inline-flex;align-items:center;gap:6px;
+/* cc#880 item 5: 44px tap targets. Raised from 34px GLOBALLY rather than only on the new filter
+   rows — 44px is the accessibility floor, and card item 1 asks for one pattern everywhere, so a
+   34px chip on Intel next to a 44px chip on the Open Book would be the drift this card exists to
+   remove. Affects every .chip row in the app (Intel categories, the Retry buttons). */
+.chip{flex:0 0 auto;min-height:44px;display:inline-flex;align-items:center;gap:6px;
   padding:0 12px;border-radius:17px;border:1px solid var(--line2);background:transparent;
   font-size:11.5px;font-weight:700;color:var(--mut);white-space:nowrap;
   text-decoration:none;font-family:inherit;cursor:pointer}
