@@ -43,8 +43,9 @@ PERFORMANCE — THIS FILE IS BORN CLEAN (cc#869 findings 2+3, enforced by cc#879
 """
 
 import os
+import functools
 import logging
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta, timezone
 
 import psycopg
 from fastapi import APIRouter, Request
@@ -62,9 +63,46 @@ MARKET_OPEN = dt_time(9, 15)
 EQ_CONTINUOUS_END = dt_time(15, 15)   # cc#855 segment boundaries
 SESSION_END = dt_time(15, 40)
 
+# Only used to coerce a stray tz-aware value in rail_state. Every timestamp in this module is
+# naive IST by convention; this exists so a forgotten SQL conversion degrades to a warning.
+_IST = timezone(timedelta(hours=5, minutes=30))
+
 
 def _conn():
     return psycopg.connect(DATABASE_URL)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#887 — THE ESCAPE ROUTE, CLOSED ONCE INSTEAD OF ELEVEN TIMES
+#
+# Every handler here already returns {"error": ...} when its QUERY fails, and mobile/*.html
+# renders that as the retry box. But every handler also BUILT ITS RESPONSE outside that try — an
+# AST scan found this in all ELEVEN API handlers, not the eight the card listed (mobile_v8,
+# mobile_digest and mobile_now were missed). Anything raising while the payload is assembled
+# escapes as FastAPI's plain-text 500, the phone's r.json() dies on "Unexpected token I", and the
+# failure box that exists for exactly this never renders.
+#
+# The card asks for a try/except around each return. This decorator is that requirement met once,
+# and it is deliberately different from the literal instruction for two reasons: eleven hand-edited
+# try blocks is eleven chances to indent one wrong, and — the reason that actually matters — a
+# per-handler fix does nothing for the twelfth handler someone adds next month. This is the same
+# argument cc#878 made when it put the timeout backstop in one place rather than patching twelve
+# call sites.
+#
+# It returns HTTP 200 with an {"error": ...} body on purpose: that is the shape the in-try path
+# already returns and the shape every template's failBox reads. A 500 here would be more correct
+# in the abstract and would break every screen that already handles this correctly.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+def _json_safe(fn):
+    """Guarantee a mobile API handler answers with JSON, never a raw 500."""
+    @functools.wraps(fn)          # keeps the signature FastAPI introspects for its dependencies
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            log.exception("%s escaped with an unhandled exception", fn.__name__)
+            return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+    return wrapper
 
 
 def _rows(cur):
@@ -94,6 +132,16 @@ def rail_state(last_ts, cadence_min: float, now_ist: datetime, is_trading_day: b
         return {"state": "CLOSED" if not in_session else "STALE",
                 "age_min": None,
                 "why": "no data yet today" if in_session else "market closed"}
+    # cc#887, defence in depth. Every caller is supposed to hand this a NAIVE IST value, converted
+    # in SQL. One did not — smartgain_holdings.updated_at is timestamptz — and the bare TypeError
+    # from subtracting an aware value took the whole home screen down with a raw 500. The
+    # conversion still belongs in SQL, so this does not silently absorb the mistake: it logs a
+    # warning naming the omission and carries on, because a screen that renders while telling us
+    # about a bug beats a screen that dies to prove one.
+    if getattr(last_ts, "tzinfo", None) is not None:
+        log.warning("rail_state got a tz-AWARE timestamp (%s) — convert it in SQL with "
+                    "AT TIME ZONE 'Asia/Kolkata'. Coercing to naive IST for this call.", last_ts)
+        last_ts = last_ts.astimezone(_IST).replace(tzinfo=None)
     age = (now_ist - last_ts).total_seconds() / 60.0
     if not in_session:
         return {"state": "CLOSED", "age_min": round(age, 1),
@@ -139,6 +187,7 @@ def _guard(request: Request):
 # INTEL — contract: 12 values, 12 SOURCED, 0 empty, 0 unsourced. The cleanest screen in the set.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/intel")
+@_json_safe   # cc#887
 def mobile_intel(request: Request, hours: int = 48, limit: int = 40):
     """ONE call for the whole screen: header, chips and both content sections (item 6).
 
@@ -222,6 +271,7 @@ def m_intel():
 # V8 POSITIONS — contract: 14 values, 13 SOURCED, 1 SOURCED_BUT_EMPTY (the pivot star).
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/v8_positions")
+@_json_safe   # cc#887
 def mobile_v8_positions(request: Request):
     """The open book. ONE query for the rows, one for the star, one for the rail.
 
@@ -330,6 +380,7 @@ def basket_label(slug):
 
 
 @router.get("/api/mobile/qb")
+@_json_safe   # cc#887
 def mobile_qb(request: Request):
     """Quant Baskets — one row per basket, plus its open holdings.
 
@@ -416,6 +467,7 @@ def m_qb():
 # GVM — 16916: "score+verdict, most retail-friendly surface".
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/gvm")
+@_json_safe   # cc#887
 def mobile_gvm(request: Request, q: str = "", limit: int = 25):
     """Search or top-ranked. ONE query either way.
 
@@ -489,6 +541,7 @@ def m_gvm():
 # the web start disagreeing, and the rule says they never may.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/v8")
+@_json_safe   # cc#887
 def mobile_v8(request: Request):
     g = _guard(request)
     if g:
@@ -552,6 +605,7 @@ def m_v8():
 # as fresh — a 50-day-old verdict presented as today's answer is worse than no answer.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/check")
+@_json_safe   # cc#887
 def mobile_check(request: Request, symbol: str = "", limit: int = 20):
     g = _guard(request)
     if g:
@@ -621,6 +675,7 @@ def m_check():
 # fabricated zero. domestic_live is reused from v8_endpoints for parity.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/home")
+@_json_safe   # cc#887
 def mobile_home(request: Request):
     g = _guard(request)
     if g:
@@ -635,8 +690,15 @@ def mobile_home(request: Request):
         now = _ist_now()
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
+                -- cc#887: smartgain_holdings.updated_at is TIMESTAMPTZ — the ONLY tz-aware column
+                -- any mobile handler reads. Verified against information_schema: intraday_prices.ts,
+                -- quant_paper_positions.updated_at, earnings_calendar.last_updated and
+                -- v8_paper_positions.entry_ts are all naive. Passing it raw to rail_state, whose
+                -- `now` is naive IST, raises "can't subtract offset-naive and offset-aware
+                -- datetimes". Converted HERE, in SQL, once — the same doctrine the models handler
+                -- already uses for scheduler_master.last_run_at.
                 SELECT COUNT(*) AS n, SUM(mtm) AS mtm, SUM(qty * ltp) AS value,
-                       MAX(updated_at) AS updated_at
+                       MAX(updated_at AT TIME ZONE 'Asia/Kolkata') AS updated_at
                 FROM smartgain_holdings
             """)
             sg = _rows(cur)[0]
@@ -689,6 +751,7 @@ def m_home():
 # web /digest render the SAME brief (DISPLAY_PARITY 16202). No second builder.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/digest")
+@_json_safe   # cc#887
 def mobile_digest(request: Request):
     g = _guard(request)
     if g:
@@ -726,6 +789,7 @@ def m_digest():
 # RESULTS — 16916: "results season, every retail holder".
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/results")
+@_json_safe   # cc#887
 def mobile_results(request: Request, days: int = 10, limit: int = 60):
     """Upcoming result dates, nearest first, with the V8 universe flagged."""
     g = _guard(request)
@@ -841,6 +905,7 @@ MODEL_STALE_MIN = 15.0        # a 5-min job is late once it is three cycles behi
 
 
 @router.get("/api/mobile/models")
+@_json_safe   # cc#887
 def mobile_models(request: Request):
     """Model tiles from model_registry, with a state derived from real run rows."""
     g = _guard(request)
@@ -954,6 +1019,7 @@ def wants_mobile_home(request: Request) -> bool:
 # SHARED — server clock, so no promoted screen ever derives a session state from the phone's clock.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/now")
+@_json_safe   # cc#887
 def mobile_now():
     try:
         with _conn() as conn, conn.cursor() as cur:
