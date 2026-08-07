@@ -101,6 +101,21 @@ def _cfg_set(cur, key, value):
 
 # ── 1. SCHEMA ────────────────────────────────────────────────────────────────────
 
+# cc#879 (cc#869 finding 3 / P0-A): seven GET routes here ran ensure_tables() on every request,
+# each carrying CREATE TABLE + CREATE INDEX. Cheaper than an ALTER, but still DDL on a read path and
+# still a lock. The DDL text is untouched; only when it runs moved.
+@router.on_event("startup")
+def _ensure_ops_metrics_schema_on_startup():
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            ensure_tables(cur)
+            conn.commit()
+        log.info("cc#879: ops_metrics schema ensured at startup")
+    except Exception as e:
+        log.error(f"cc#879: ops_metrics schema ensure FAILED at startup: {e}. "
+                  f"Reads may error until fixed; NOT retried per-request by design.")
+
+
 def ensure_tables(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS sector_kpi_registry (
         id SERIAL PRIMARY KEY, sector TEXT NOT NULL, metric_name TEXT NOT NULL,
@@ -1887,7 +1902,7 @@ def _recompute_peer_benchmark(conn):
 @router.get("/api/ops_metrics/registry")
 def get_registry(sector: str = ""):
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         if sector:
             cur.execute("""SELECT sector, metric_name, display_name, unit, direction, tier
                            FROM sector_kpi_registry WHERE sector=%s ORDER BY tier, metric_name""", (sector,))
@@ -1913,7 +1928,7 @@ def get_company_ops_metrics(symbol: str):
     chronological order in practice."""
     sym = symbol.strip().upper()
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         sector = _sector_for_symbol(cur, sym)
         cur.execute("SELECT segment FROM gvm_scores WHERE symbol=%s", (sym,))
         r = cur.fetchone()
@@ -2005,7 +2020,7 @@ def get_company_ops_metrics(symbol: str):
 def get_guidance_tracker(symbol: str):
     sym = symbol.strip().upper()
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         cur.execute("""SELECT quarter_guided, quarter_actual, item_text, guided_quote,
                               actual_outcome, actual_quote, status, computed_at
                        FROM guidance_tracker WHERE symbol=%s ORDER BY quarter_guided DESC, id ASC""", (sym,))
@@ -2020,7 +2035,7 @@ def get_guidance_tracker(symbol: str):
 @router.get("/api/ops_metrics/sector_trend")
 def get_sector_trend(sector: str, metric_name: str):
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         cur.execute("""SELECT quarter, median_value, n_companies, computed_at FROM sector_ops_trends
                        WHERE sector=%s AND metric_name=%s ORDER BY computed_at ASC""", (sector, metric_name))
         rows = [{"quarter": r[0], "median_value": float(r[1]) if r[1] is not None else None,
@@ -2036,7 +2051,7 @@ def get_segment_trends(segment: str):
     trends for that sector in one call, so the UI doesn't need to know about _infer_sector."""
     sector = _infer_sector(segment)
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         registry = [m for m in _registry_for_sector(cur, sector) if m["tier"] == "core"]
         out = []
         for m in registry:
@@ -2055,7 +2070,7 @@ def get_segment_trends(segment: str):
 def get_concall_summary(symbol: str):
     sym = symbol.strip().upper()
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         cur.execute("""SELECT quarter, summary, key_metrics, guidance, tone, source_docs, computed_at
                        FROM concall_summaries WHERE symbol=%s ORDER BY quarter DESC LIMIT 1""", (sym,))
         r = cur.fetchone()
@@ -2116,7 +2131,7 @@ def admin_arm_text_fetch(token: str = ""):
 @router.get("/api/admin/ops_metrics/status")
 def admin_status():
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
+        pass   # cc#879: ensure_* moved to the startup hook
         cur.execute("SELECT COUNT(*) FROM sector_kpi_registry")
         n_registry = cur.fetchone()[0]
         cur.execute("SELECT COUNT(DISTINCT symbol) FROM doc_registry")

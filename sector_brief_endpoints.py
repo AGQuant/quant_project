@@ -7,6 +7,18 @@ log = logging.getLogger("scorr")
 def get_conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
+# cc#879 (cc#869 finding 3 / P0-A): GET /api/sector/brief and the status route ran _ensure_table()
+# on every request. Moved to startup; the DDL text is unchanged.
+@router.on_event("startup")
+def _ensure_sector_brief_table_on_startup():
+    try:
+        _ensure_table()
+        log.info("cc#879: sector_brief table ensured at startup")
+    except Exception as e:
+        log.error(f"cc#879: sector_brief ensure FAILED at startup: {e}. "
+                  f"Brief reads may error until fixed; NOT retried per-request by design.")
+
+
 def _ensure_table():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
@@ -157,7 +169,7 @@ async def _batch_job(refresh: bool = False):
 # ── Single brief (lazy generate + cache) ─────────────────────
 @router.get("/api/sector/brief")
 async def sector_brief(segment: str, refresh: bool = False):
-    _ensure_table()
+    pass   # cc#879: ensure_* moved to the startup hook
     if not refresh:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -200,7 +212,7 @@ async def sector_brief_batch(background_tasks: BackgroundTasks,
 # ── Status check ─────────────────────────────────────────────
 @router.get("/api/admin/sector/brief/status")
 def sector_brief_status():
-    _ensure_table()
+    pass   # cc#879: ensure_* moved to the startup hook
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(DISTINCT segment) FROM sector_ratings WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)")
         total = cur.fetchone()[0]

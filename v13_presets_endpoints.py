@@ -17,6 +17,7 @@ re-save with the same (scope, name) overwrites (upsert).
 Auth-gated the same way as the screener pages — the scorr_auth session cookie.
 The browser sends it automatically on same-origin fetches.
 """
+import logging
 import os
 import json
 import psycopg
@@ -25,6 +26,7 @@ from fastapi import APIRouter, Request, HTTPException
 from scorr_auth import _is_authed
 
 router = APIRouter()
+_log = logging.getLogger("scorr.v13_presets")   # cc#879
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
@@ -59,12 +61,26 @@ def _ensure_table():
         conn.commit()
 
 
-try:
-    _ensure_table()
-except Exception:
-    # DB may be unreachable at import time on cold boot — the table is also
-    # created on first write; never block app startup on this.
-    pass
+# cc#879 (cc#869 finding 3 / P0-A): this used to run at IMPORT time, and every handler below ALSO
+# called _ensure_table() on every request. That per-request DDL is the defect — ALTER TABLE takes an
+# ACCESS EXCLUSIVE lock even when ADD COLUMN IF NOT EXISTS is a logical no-op, so a plain GET could
+# queue every other access to v13_presets behind it. On a busy table that is the 10-Jul incident
+# shape, fired from a page load instead of a console.
+#
+# Import time was also the wrong moment: the DB is frequently unreachable then on a cold boot, which
+# is exactly why the old code had to swallow the failure silently. A startup hook runs after the app
+# is up, so it usually succeeds — and when it does not, it now says so LOUDLY instead of leaving a
+# silent gap that the next request quietly papered over.
+@router.on_event("startup")
+def _ensure_table_on_startup():
+    try:
+        _ensure_table()
+        _log.info("cc#879: v13_presets schema ensured at startup")
+    except Exception as e:
+        # Loud, but never fatal — the app must boot (card item 4).
+        _log.error(f"cc#879: v13_presets ensure FAILED at startup: {e}. "
+                   f"Preset reads/writes will error until this is fixed; the DDL is NOT retried "
+                   f"per-request by design.")
 
 
 def _gate(request: Request):
@@ -87,7 +103,6 @@ _COLS = "id,name,filters,sort_key,sort_dir,scope,created_at,updated_at"
 @router.get("/api/v13/presets")
 def list_presets(request: Request, scope: str = "v13"):
     _gate(request)
-    _ensure_table()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"SELECT {_COLS} FROM v13_presets WHERE scope=%s ORDER BY LOWER(name)", [scope])
         rows = [_row(r) for r in cur.fetchall()]
@@ -108,7 +123,6 @@ def save_preset(request: Request, body: dict):
     scope = (body.get("scope") or "v13").strip() or "v13"
     sort_key = body.get("sort_key")
     sort_dir = body.get("sort_dir")
-    _ensure_table()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
             INSERT INTO v13_presets (name, filters, sort_key, sort_dir, scope)
@@ -288,7 +302,6 @@ def theme_save_validated(body: dict):
             return {"refused": "count=0 — the filters match no stocks; loosen them", "count": 0}
         if cnt > 500:
             return {"refused": f"count={cnt} (>500) — too broad; tighten the filters", "count": cnt}
-        _ensure_table()
         mode = (body.get("mode") or "insert").lower()
         pid = body.get("id")
         if mode == "update" and pid:
@@ -314,7 +327,6 @@ def theme_save_validated(body: dict):
 def theme_list():
     """cc#461 tool_3: all global theme presets with id, name, filter summary."""
     with _conn() as conn, conn.cursor() as cur:
-        _ensure_table()
         cur.execute("SELECT id, name, filters, sort_key, sort_dir FROM v13_presets WHERE scope='global' ORDER BY LOWER(name)")
         out = []
         for r in cur.fetchall():

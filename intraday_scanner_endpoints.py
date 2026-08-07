@@ -24,6 +24,7 @@ Bar math uses ORDER BY ts DESC LIMIT N (timezone-safe); absolute time uses IST.
 """
 
 import os
+import logging
 import math
 from datetime import datetime, time as dtime
 from typing import Optional
@@ -37,6 +38,29 @@ from fastapi import APIRouter, HTTPException
 from v8_endpoints import FILTER_CONFIG, _get_buy_reversal_live_filters, _passes_filter
 
 router = APIRouter()
+_log = logging.getLogger("scorr.intraday_scanner")   # cc#879
+
+# cc#879 (cc#869 finding 3 / P0-A) — THE ALTER TABLE THAT RAN ON EVERY SCANNER REQUEST.
+# intraday_watchlist got `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on FOUR GET routes
+# (/api/scanners/intraday, /intraday/short, /intraday/watchlist, /orb_ag). IF NOT EXISTS makes it a
+# no-op logically, NOT lock-wise: it still takes an ACCESS EXCLUSIVE lock. Loading the /scanners
+# page fired four of them, so a page load could queue every other access to that table behind
+# itself — the 10-Jul incident shape, from a phone instead of a console.
+# The DDL text is unchanged. Only when it runs moved: once at startup, not per request.
+@router.on_event("startup")
+def _ensure_watchlist_cols_on_startup():
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("ALTER TABLE intraday_watchlist ADD COLUMN IF NOT EXISTS target NUMERIC, "
+                        "ADD COLUMN IF NOT EXISTS stop_loss NUMERIC")
+            conn.commit()
+        _log.info("cc#879: intraday_watchlist columns ensured at startup")
+    except Exception as e:
+        # Loud, never fatal — the app must boot (card item 4).
+        _log.error(f"cc#879: intraday_watchlist ensure FAILED at startup: {e}. "
+                   f"Scanner reads/writes may error until this is fixed; it is NOT retried "
+                   f"per-request by design.")
+
 IST = ZoneInfo("Asia/Kolkata")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -466,9 +490,7 @@ def _record_watchlist(signals: list, signal_ts: datetime, direction: str = "LONG
                      s["gate1_score"], s["gate2_ma_pass"], s["gate3_tc_score"], s["gate4_room_pct"],
                      Json(s["checks"]), tgt, sl))
     with _conn() as conn, conn.cursor() as cur:
-        # cc#481 change_3: app-side ADD COLUMN (never the run_sql lock path).
-        cur.execute("ALTER TABLE intraday_watchlist ADD COLUMN IF NOT EXISTS target NUMERIC, "
-                    "ADD COLUMN IF NOT EXISTS stop_loss NUMERIC")
+        # cc#879: the per-request column-add DDL moved to the startup hook near the top.
         cur.executemany("""
             INSERT INTO intraday_watchlist
                 (symbol, basket, direction, signal_ts, entry_price, gate1_bucket,
@@ -690,9 +712,7 @@ def scanner_intraday_watchlist(date: Optional[str] = None, direction: Optional[s
         params.append(basket)
     where = " AND ".join(clauses)
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("ALTER TABLE intraday_watchlist ADD COLUMN IF NOT EXISTS target NUMERIC, "
-                    "ADD COLUMN IF NOT EXISTS stop_loss NUMERIC")   # cc#481: safe before SELECT on fresh DB
-        conn.commit()
+        # cc#879: the per-request column-add DDL moved to the startup hook near the top.
         cur.execute(f"""
             SELECT w.symbol, w.basket, w.direction, w.signal_date, w.signal_ts, w.entry_price,
                    w.gate1_score, w.gate2_ma_pass, w.gate3_tc_score, w.gate4_room_pct,

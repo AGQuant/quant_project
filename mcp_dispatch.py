@@ -147,6 +147,27 @@ MCP_TOOLS = [
     {"name":"stock_views_feed","description":"cc#787 FUNNEL 2 (Stock Views raw feed): raw_news from the last `hours` that is EITHER broker/analyst recommendation content (is_reco) OR a catalyst on a stock in the ACTIVE futures universe. Scope is deliberately narrow so volume cannot explode — source_type domestic|company ONLY (no Reuters/Bloomberg global), IPO/listing/GMP content excluded, canonical rows only. Returns {hours, total_count, returned, capped_at, truncated, reco_count, reco_column_present, articles:[{raw_id,symbol,headline,description,source_name,source_type,url,published_at,is_reco}]} — capped at 200 rows newest-first, with total_count so you see real volume without pulling everything. This is what you scan on 'stock views' for P1/P2 candidates. Read-only. Distinct from stock_views_shortlist, which TC-scores already-POLISHED news; this is the raw upstream feed and is the only place reco content appears (funnel 1 / news-polish never shows it).","inputSchema":{"type":"object","properties":{"hours":{"type":"integer","description":"lookback window, default 48, max 168"}},"required":[]}},
 ]
 
+# cc#879 item 6 — the two synchronous DB sections of _call_tool, lifted out so they can run in a
+# worker thread instead of on the event loop. Bodies are unchanged; only where they execute moves.
+def _run_sql_blocking(q):
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(q)
+            if cur.description:
+                cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                conn.commit(); return {"rows": rows, "count": len(rows)}
+            conn.commit(); return {"status": "ok", "rowcount": cur.rowcount}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _blackout_rows_blocking(sym):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT ticker,ex_date,event_type FROM earnings_calendar WHERE UPPER(ticker)=%s "
+                    "ORDER BY id DESC LIMIT 5", (sym,))
+        return cur.fetchall()
+
+
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
         h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
@@ -213,22 +234,20 @@ async def _call_tool(name, args):
                 return {"error": f"BLOCKED by MAINTENANCE_LOCK_RULE (cc#351): '{_blocked}' is a lock-taking "
                                  f"maintenance op and must not run via the single-connection run_sql path. "
                                  f"Run it from the Railway console on a weekend, propose-first."}
-            try:
-                with get_conn() as conn, conn.cursor() as cur:
-                    cur.execute(q)
-                    if cur.description:
-                        cols = [d[0] for d in cur.description]; rows = [dict(zip(cols,r)) for r in cur.fetchall()]
-                        conn.commit(); return {"rows": rows, "count": len(rows)}
-                    conn.commit(); return {"status":"ok","rowcount":cur.rowcount}
-            except Exception as e: return {"error": str(e)}
+            # cc#879 item 6 (cc#869 finding 2): this ran psycopg DIRECTLY on the event loop, inside
+            # an async handler. run_sql accepts an ARBITRARY query, so the block was unbounded —
+            # cc#869 measured a 11.2s query against gvm_history, and for those 11 seconds nothing
+            # else on the service could progress. Every Claude tool call enters here, which is why
+            # the app felt stuck precisely while Claude was working on it.
+            # The handler itself is properly async (httpx.AsyncClient throughout) and stays that
+            # way; only the blocking section moves to a worker thread.
+            return await asyncio.to_thread(_run_sql_blocking, q)
         elif name == "load_input_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_earnings_from_screener": r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers=h); return r.json()
         elif name == "check_blackout":
             sym = args["symbol"].upper()
-            with get_conn() as conn, conn.cursor() as cur:
-                cur.execute("SELECT ticker,ex_date,event_type FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY id DESC LIMIT 5", (sym,))
-                rows = cur.fetchall()
+            rows = await asyncio.to_thread(_blackout_rows_blocking, sym)   # cc#879: off the loop
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
         elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers=h); return r.json()
         elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path","")}, headers=h); return r.json()

@@ -23,6 +23,7 @@ from fastapi import APIRouter
 
 log = logging.getLogger("scorr.mf")
 router = APIRouter()
+_log = logging.getLogger("scorr.mf_pipeline")   # cc#879
 _DB = os.getenv("DATABASE_URL", "")
 _AMFI_NAV = "https://www.amfiindia.com/spages/NAVAll.txt"
 _MFAPI = "https://api.mfapi.in/mf/{code}"
@@ -42,6 +43,32 @@ def _oplog(cur, title, details, category="mf_pipeline"):
 
 
 # ── schema ────────────────────────────────────────────────────────────────────────
+# cc#879 (cc#869 finding 3 / P0-A) — THE ENSURE CALLS THAT RAN ON EVERY V15 REQUEST.
+# Ten GET routes here called ensure_tables() / _ensure_returns_cols() / _ensure_cat_avg_return_cols()
+# on EVERY request. Those carry ALTER TABLE, and ADD COLUMN IF NOT EXISTS is a no-op logically but
+# NOT lock-wise — it still takes an ACCESS EXCLUSIVE lock on mf_master and mf_nav_history. A read
+# request could therefore queue every other access to those tables behind itself.
+#
+# The DDL text is untouched (card item 5). Only when it runs moved: once, here, at startup.
+# The calls inside BACKGROUND and ADMIN paths are deliberately LEFT — they are not on the
+# per-request hot path, several run before a bulk load where the schema genuinely must be current,
+# and the card orders POST/admin last.
+@router.on_event("startup")
+def _ensure_mf_schema_on_startup():
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            ensure_tables(cur)
+            _ensure_returns_cols(cur)
+            _ensure_cat_avg_return_cols(cur)
+            conn.commit()
+        _log.info("cc#879: mf/v15 schema ensured at startup")
+    except Exception as e:
+        # Loud, never fatal — the app must boot (card item 4).
+        _log.error(f"cc#879: mf/v15 schema ensure FAILED at startup: {e}. "
+                   f"V15 reads may error until this is fixed; it is NOT retried per-request "
+                   f"by design.")
+
+
 def ensure_tables(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_master (
         scheme_code TEXT PRIMARY KEY, amfi_code TEXT, isin TEXT, name TEXT NOT NULL, amc TEXT,
@@ -1173,7 +1200,6 @@ def v15_search(q: str = "", limit: int = 12, cats: str = "", top: int = 0):
     if not q and not top:
         return {"count": 0, "results": []}
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         # cc#520: debt strays (Banking & PSU) must not appear in search results.
         if not q:
             # Empty-input focus: top of the category by MQS. Unscored funds sink rather than
@@ -1231,9 +1257,8 @@ def v15_fund(scheme_code: str, peer_cats: str = ""):   # cc#723: optional comma-
     Wiring red flags to it would present fabricated concentration numbers as real -- flagged
     for founder re-scrape, not silently shipped."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         try:
-            _ensure_returns_cols(cur); _ensure_cat_avg_return_cols(cur); conn.commit()
+            pass   # cc#879: ensure_* moved to the startup hook (was per-request DDL)
         except Exception:
             conn.rollback()
         cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, m.expense_ratio, m.aum_cr,
@@ -1365,7 +1390,6 @@ def v15_stats():
     """cc#519: live scored-fund count for the page header chip -- avoids hardcoding a count
     that goes stale after the next nightly recompute."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         cur.execute("SELECT COUNT(*) FROM mf_scores")
         scored = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM mf_master WHERE category = ANY(%s)",
@@ -1391,9 +1415,8 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
     _cats = [c.strip() for c in cat.split(",") if c.strip()]
     _wl_cats = [c for c in _cats if c in EQUITY_CATEGORY_WHITELIST]
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         try:
-            _ensure_returns_cols(cur); conn.commit()
+            pass   # cc#879: ensure_* moved to the startup hook (was per-request DDL)
         except Exception:
             conn.rollback()
         # cc#520: debt strays (Banking & PSU) must not appear in the screener.
@@ -1482,7 +1505,6 @@ def v15_screener_selftest():
 def mf_search(q: str = "", limit: int = 20):
     q = (q or "").strip()
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         if q:
             cur.execute("""SELECT scheme_code, name, amc, category, curated
                            FROM mf_master WHERE name ILIKE %s OR amc ILIKE %s OR category ILIKE %s
@@ -2282,7 +2304,6 @@ def mf_coverage_report():
     schemes have aum_cr / expense_ratio / returns / holdings populated. Meaningful only after
     a Railway-executed run_monthly/run_weekly (this session's own probes cannot populate it)."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         cur.execute("""
             SELECT category, COUNT(*) AS n, COUNT(aum_cr) AS n_aum, COUNT(expense_ratio) AS n_er,
                    COUNT(ret_1y) AS n_ret_1y, COUNT(ret_3y) AS n_ret_3y, COUNT(ret_5y) AS n_ret_5y
@@ -2306,7 +2327,6 @@ def mf_coverage_report():
 def mf_curated():
     """The founder 12-fund curated screener rows (cc#467 screener table)."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         cur.execute("""SELECT scheme_code, name, amc, category, crisil_rank,
                        expense_ratio, aum_cr, ret_1y, ret_3y, ret_5y, flags
                        FROM mf_master WHERE curated ORDER BY category, name""")
@@ -2319,7 +2339,6 @@ def mf_curated():
 def mf_fund(scheme_code: str):
     """Deep-dive read: master + look-through holdings joined to per-stock GVM (works today) + NAV series."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         cur.execute("SELECT * FROM mf_master WHERE scheme_code=%s", (scheme_code,))
         r = cur.fetchone()
         if not r:
@@ -3005,7 +3024,6 @@ def mf_mc_discover():
     few candidate GETs — seconds, not minutes) and return its findings directly. Inspect
     ops_log (MF_MC_DISCOVERY / MF_MC_SEARCH_PROBE) for the full raw evidence."""
     with _conn() as conn, conn.cursor() as cur:
-        ensure_tables(cur)
         res = _discover_mc_search_api(cur)
         conn.commit()
     return {"discovery": res}
