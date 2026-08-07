@@ -108,6 +108,7 @@ from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star mark
 from preview_endpoints import router as preview_router   # cc#866 preview screens (Claude.ai pushes previews/)
 from mobile_endpoints import router as mobile_router     # cc#874 promoted mobile screens (/m/*)
 from v8_futures_book import router as v8_futures_book_router   # cc#885 /api/v8/futures_book
+from mobile_endpoints import wants_mobile_home                 # cc#886 mobile entry decision
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -236,6 +237,7 @@ PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
 PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
 PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # cc#874
 PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
+PROTECTED.add("/m/models")   # cc#886 slot 5
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -858,7 +860,13 @@ async def startup():
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/", response_class=HTMLResponse)
-def home():
+def home(request: Request):
+    # cc#886: the front door. cc#874 wired eleven /m/* screens and no card ever repointed the
+    # entry, so the installed app still opened this desktop page. The decision lives in
+    # mobile_endpoints.wants_mobile_home (phone UA + top-level navigation only); this route stays
+    # wiring. Desktop is untouched — no UA match, no redirect.
+    if wants_mobile_home(request):
+        return RedirectResponse("/m/home", status_code=302)
     return _page("scorr_home.html")
 
 @app.get("/status")
@@ -1019,6 +1027,7 @@ NAV_REGISTRY = {
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
+    "/m/models":     ("Models (mobile)",       "nav-mobile"),   # cc#886 bottom-nav slot 5
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
     # accounts for every /m/ route rather than only the navigable ones.

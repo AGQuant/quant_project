@@ -805,6 +805,152 @@ def m_login():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
+# MODELS — cc#886 slot 5. The launcher, and the app's "everything else" surface.
+#
+# REGISTRY-DERIVED, NEVER A NAME LIST (ENGINE_LIVENESS_RULE 13829). The tiles come from
+# model_registry joined to scheduler_master on job_name. Adding a model to the registry adds a
+# tile; nothing here needs editing. A hardcoded list here would be the exact defect rule 9 was
+# written for — three engines were found built-but-never-breathing on 02-Aug because enumeration
+# and reality had drifted apart.
+#
+# THE BADGE FOLLOWS THE DATA. A tile is LIVE only when its job actually ran inside its cadence
+# during the session. Registered-but-never-run reads NOT RUN YET, in words, and never green.
+# Outside market hours a 5-minute job is CLOSED, not stale — calling it stale after the close is
+# the cc#841 false-positive that lights every surface red every evening.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+# Where a model's web route has a wired mobile twin, the tile goes to the twin (card item 2:
+# "each tile linking to its wired /m/* or web page"). This is a ROUTE TRANSLATION, not an
+# enumeration of models — the models themselves still come entirely from model_registry.
+_WEB_TO_MOBILE = {
+    "/dashboard": "/m/v8",
+    "/check": "/m/check",
+    "/": "/m/home",
+}
+
+# The app's own screens, for the "Everything else" section. Derived from THIS module's routes —
+# mobile_endpoints owns them, so this is its own source, not a second copy of the NAV array.
+_MOBILE_DESTINATIONS = [
+    ("/m/home", "Home"), ("/m/v8", "V8"), ("/m/positions", "Open Book"),
+    ("/m/qb", "Baskets"), ("/m/gvm", "GVM"), ("/m/check", "Trade Check"),
+    ("/m/intel", "Intel"), ("/m/digest", "Daily Digest"), ("/m/results", "Results"),
+    ("/preview", "Previews"),
+]
+
+MODEL_STALE_MIN = 15.0        # a 5-min job is late once it is three cycles behind
+
+
+@router.get("/api/mobile/models")
+def mobile_models(request: Request):
+    """Model tiles from model_registry, with a state derived from real run rows."""
+    g = _guard(request)
+    if g:
+        return g
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                -- last_run_at is tz-aware; every other clock in this module is NAIVE IST. The
+                -- conversion happens HERE, once, in SQL, so nothing downstream ever compares a
+                -- naive value with an aware one (the cc#844 phantom-330-minute class).
+                SELECT m.display_name, m.description, m.route, m.job_name, m.is_public,
+                       s.active, s.last_status, s.cadence_human,
+                       (s.last_run_at AT TIME ZONE 'Asia/Kolkata') AS last_run_ist
+                FROM model_registry m
+                LEFT JOIN scheduler_master s ON s.job_name = m.job_name
+                ORDER BY m.sort_order, m.id
+            """)
+            rows = _rows(cur)
+    except Exception as e:
+        log.exception("mobile models failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "models": [], "count": 0}
+
+    t = now.time()
+    in_session = now.weekday() < 5 and MARKET_OPEN <= t <= SESSION_END
+    out, hidden = [], 0
+    for r in rows:
+        if not r["is_public"]:
+            hidden += 1
+            continue
+        last = r["last_run_ist"]        # already naive IST, converted in SQL above
+        age_min = None if last is None else (now - last).total_seconds() / 60.0
+
+        if not r["active"]:
+            state, why = "OFF", "not scheduled — this model is registered but switched off"
+        elif last is None:
+            # Registered is not running. This is the state rule 9 exists to make visible.
+            state, why = "NOT RUN YET", "registered, but no run has ever been recorded"
+        elif not in_session:
+            state, why = "CLOSED", f"market closed · last run {_ago(age_min)}"
+        elif age_min is not None and age_min <= MODEL_STALE_MIN:
+            state, why = "LIVE", f"ran {_ago(age_min)}"
+        else:
+            state, why = "STALE", f"last run {_ago(age_min)} — expected every few minutes"
+        if r["last_status"] and r["last_status"] != "ok" and state in ("LIVE", "CLOSED"):
+            state, why = "ERROR", f"last run reported {r['last_status']}"
+
+        web = r["route"] or ""
+        out.append({
+            "name": r["display_name"],
+            "description": r["description"],
+            "href": _WEB_TO_MOBILE.get(web, web),
+            "on_mobile": web in _WEB_TO_MOBILE,
+            "web_route": web,
+            "job": r["job_name"],
+            "state": state,
+            "why": why,
+            "last_run": last.strftime("%d %b %H:%M") if last else None,
+        })
+
+    return {
+        "models": out,
+        "count": len(out),
+        "internal_hidden": hidden,
+        "destinations": [{"href": h, "label": l} for h, l in _MOBILE_DESTINATIONS],
+        "in_session": in_session,
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/models", response_class=HTMLResponse)
+def m_models():
+    return _page("models")
+
+
+# ── cc#886 item 3: THE FRONT DOOR ─────────────────────────────────────────────────────────────
+# cc#874 wired eleven /m/* screens and no card ever repointed the entry, so the installed app
+# still opened `/` — the old desktop home. The founder was looking at the old product with live
+# data in it, which is why it read as a caching problem and was not one.
+#
+# The redirect is the half that reaches ALREADY-INSTALLED apps: a WebAPK's manifest is frozen at
+# install time, so changing start_url alone would fix only future installs. Both ship together.
+#
+# NAVIGATIONS ONLY. Sec-Fetch-Mode tells a top-level navigation apart from a fetch/XHR; without
+# that check an API call to `/` would be answered with a redirect. Desktop is untouched by
+# construction — no UA match, no redirect, byte-identical behaviour (cc#882 m-flag rule stands).
+_MOBILE_UA_HINTS = ("iphone", "android", "ipod", "windows phone", "mobile safari", "iemobile")
+
+
+def wants_mobile_home(request: Request) -> bool:
+    """True when this is a phone making a top-level navigation to the site root."""
+    try:
+        mode = (request.headers.get("sec-fetch-mode") or "").lower()
+        dest = (request.headers.get("sec-fetch-dest") or "").lower()
+        # If the browser sends the hints, respect them: only a real page load qualifies. If it
+        # sends none (older browsers), fall through to the UA test rather than refuse outright.
+        if mode and mode != "navigate":
+            return False
+        if dest and dest not in ("document", "empty", ""):
+            return False
+        ua = (request.headers.get("user-agent") or "").lower()
+        if "ipad" in ua or "tablet" in ua:
+            return False        # tablets get the full web product (16915)
+        return any(h in ua for h in _MOBILE_UA_HINTS)
+    except Exception:
+        return False            # any doubt at all -> serve the existing page, never a redirect loop
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
 # SHARED — server clock, so no promoted screen ever derives a session state from the phone's clock.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/now")

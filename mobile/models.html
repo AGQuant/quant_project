@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Models · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+.tile{display:flex;align-items:center;gap:11px;text-decoration:none;color:inherit}
+.tile .go{color:var(--dim);font-size:17px}
+.dest{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px}
+.dest a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:11px;
+  background:var(--panel);border:1px solid var(--line);color:var(--txt);text-decoration:none;
+  font-size:12.5px;font-weight:700}
+</style>
+</head>
+<body>
+<!--
+  cc#886 — MODELS, slot 5 of the framework five (15913). Two jobs on one screen:
+   1. the model tiles, and
+   2. the app's "everything else" list, so no wired screen is ever stranded (rule 2987).
+
+  REGISTRY-DERIVED (13829): tiles come from model_registry joined to scheduler_master. Adding a
+  model to the registry adds a tile. There is no name list in this file or in the endpoint.
+
+  THE BADGE FOLLOWS THE DATA. LIVE means the job actually ran inside its cadence this session.
+  A model that is registered but has never run reads NOT RUN YET, in words, and is never green —
+  that state is the whole point of rule 9, and it is the one a hardcoded badge would hide.
+-->
+<div class="screen">
+  <div class="head">
+    <h1>Models</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+  <div class="body" id="body"><div class="loading">Loading models…</div></div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn on" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* One place decides what a state looks like. The words are the meaning; the colour only repeats
+   it, so the screen still reads correctly to anyone who cannot separate the two. */
+function stateTag(m){
+  var cls = 'neut';
+  if (m.state === 'LIVE') cls = 'bull';
+  else if (m.state === 'ERROR' || m.state === 'STALE') cls = 'bear';
+  else if (m.state === 'NOT RUN YET' || m.state === 'OFF') cls = 'caut';
+  return '<span class="tag ' + cls + '" title="' + esc(m.why) + '">' + esc(m.state) + '</span>';
+}
+
+function tile(m){
+  return '<div class="c">'
+    + '<a class="tile" href="' + esc(m.href) + '">'
+      + '<span style="flex:1">'
+        + '<span class="hl">' + esc(m.name) + '</span>'
+        + '<span class="meta" style="margin-top:6px">' + stateTag(m)
+          + (m.on_mobile ? '' : '<span class="tag cat">WEB</span>')
+          + '<span class="when">' + (m.last_run ? esc(m.last_run) : 'never') + '</span></span>'
+        + (m.description ? '<span class="sum" style="display:block">' + esc(m.description) + '</span>' : '')
+      + '</span>'
+      + '<span class="go">›</span>'
+    + '</a></div>';
+}
+
+fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+  var live = (d.models || []).filter(function(m){ return m.state === 'LIVE'; }).length;
+  document.getElementById('sub').textContent =
+    d.count + ' models · ' + live + ' live now'
+    + (d.internal_hidden ? ' · ' + d.internal_hidden + ' internal not shown' : '');
+
+  var html = (d.models || []).map(tile).join('')
+    || '<div class="empty"><b>No models registered</b>model_registry is empty.</div>';
+
+  /* Everything else. This is what stops a wired screen from being unreachable once the bottom
+     bar is only five items (rule 2987). */
+  html += '<div class="sect">EVERYTHING ELSE</div>'
+    + '<div class="dest">' + (d.destinations || []).map(function(x){
+        return '<a href="' + esc(x.href) + '">' + esc(x.label) + '</a>'; }).join('')
+    + '<a href="/logout">Log out</a></div>';
+
+  document.getElementById('body').innerHTML = html;
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load models</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  document.getElementById('sub').textContent = 'failed to load';
+});
+</script>
+</body>
+</html>

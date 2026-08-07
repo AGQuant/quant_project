@@ -76,6 +76,13 @@ MANIFEST = {
     "name": "Scorr — Invest Like an Institution",
     "short_name": "Scorr",
     "description": "AI-powered market intelligence. GVM scores, V8 signals, Trade Check.",
+    # cc#886 item 3 — DELIBERATELY STILL "/". The card offers start_url as an option alongside the
+    # redirect. It is not taken, and the reason matters: this manifest is shared by phone AND
+    # desktop installs, so pointing start_url at /m/home would open the retail phone app on a
+    # desktop install — which item 5 forbids ("desktop untouched"). "/" plus the UA-gated redirect
+    # in main.py sends phones to /m/home and leaves desktop exactly where it was. The redirect is
+    # also the half that reaches ALREADY-INSTALLED WebAPKs, whose manifest is frozen at install
+    # time, so it does the work start_url could not have done anyway.
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
@@ -321,7 +328,8 @@ PWA_JS = """
     ['/m/check', '\\u2713', 'Trade Check (mobile)', 'm'],
     ['/m/home', '\\u2302', 'Home (mobile)', 'm'],
     ['/m/digest', '\\u25a5', 'Daily Digest (mobile)', 'm'],
-    ['/m/results', '\\u25f7', 'Results (mobile)', 'm']
+    ['/m/results', '\\u25f7', 'Results (mobile)', 'm'],
+    ['/m/models', '\\u25cd', 'Models (mobile)', 'm']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {
@@ -344,16 +352,27 @@ PWA_JS = """
   function forMobile(it)  { return it[3] !== 'd'; }
 
   // 4) mobile bottom nav — 4 primary slots + More (opens all-destinations sheet)
-  var PRIMARY = ['/', '/dashboard', '/cio2?model=gvm', '/check'];
+  // cc#886: THE SECOND HALF OF THE ROOT CAUSE. cc#874 wired eleven /m/* screens; this bar still
+  // pointed at the OLD web pages (/, /dashboard, /cio2, /check), so even a founder who reached a
+  // new screen was one tap from the old product. Repointed to the framework four (15913); slot 5
+  // is the More sheet, and Models sits INSIDE the app's own five-slot bar on every /m/* template.
+  // The sheet is kept rather than replaced by a Models button, because it is what guarantees
+  // nothing is stranded (rule 2987) on the legacy pages this bar renders on.
+  var PRIMARY = ['/m/home', '/m/gvm', '/m/check', '/m/intel'];
   if (!document.getElementById('pwa-mobile-nav')) {
     var nav = document.createElement('div');
     nav.className = 'pwa-mnav'; nav.id = 'pwa-mobile-nav';
     var mhtml = '';
+    // cc#886: the NAV labels carry a "(mobile)" suffix so the More sheet can tell the app screen
+    // apart from its web twin. A bottom-bar slot is ~60px wide and has no room for it — and the
+    // founder does not need to be told he is on mobile while holding the phone. One label, two
+    // renderings; the array is still the single source (rule 2987).
+    function shortLabel(s) { return String(s).replace(/\\s*\\(mobile\\)\\s*$/i, ''); }
     PRIMARY.forEach(function (pp) {
       var it = navByPath(pp); if (!it) return;
       var active = isActive(it[0]) ? ' active' : '';
       mhtml += '<a class="pwa-mn' + active + '" href="' + it[0] + '">'
-        + '<span class="ic">' + it[1] + '</span><span>' + it[2] + '</span></a>';
+        + '<span class="ic">' + it[1] + '</span><span>' + shortLabel(it[2]) + '</span></a>';
     });
     var inSheet = NAV.some(function (it) { return PRIMARY.indexOf(it[0]) === -1 && isActive(it[0]); });
     mhtml += '<button type="button" class="pwa-mn' + (inSheet ? ' active' : '') + '" id="pwa-more-btn">'
