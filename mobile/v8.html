@@ -58,7 +58,37 @@ function failBox(host, sub, e){
   if (sub) document.getElementById(sub).textContent = 'failed to load';
 }
 
-fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(function(d){
+/* cc#888 item 3: basket rows expand inline to the symbols that signalled. A count answers a
+   dashboard question; a retail user wants the names and the times. Same fold pattern as the book
+   card. Session-scoped open state — a filter that outlives the visit is one the founder forgets
+   he set. */
+var VDATA = null, VOPEN = {};
+function toggleBasket(slug){ VOPEN[slug] = !VOPEN[slug]; renderV8(); }
+
+function basketRow(b){
+  var open = VOPEN[b.slug];
+  var head = '<button type="button" onclick="toggleBasket(\'' + esc(b.slug) + '\')"'
+    + ' style="display:flex;align-items:baseline;gap:10px;padding:9px 0;width:100%;min-height:44px;'
+    + 'border:0;border-top:1px solid var(--line);background:none;color:inherit;font:inherit;'
+    + 'cursor:pointer;text-align:left">'
+    + '<span style="flex:1;font-weight:700;font-size:13px">' + esc(b.label) + '</span>'
+    + '<span class="mono" style="font-size:14px;font-weight:800">' + b.signals + '</span>'
+    + '<span style="color:var(--dim);margin-left:6px">' + (open ? '\u2304' : '\u203a') + '</span>'
+    + '</button>';
+  if (!open) return head;
+  var syms = (b.symbols || []).map(function(x){
+    return '<div style="display:flex;gap:8px;align-items:baseline;padding:5px 0 5px 2px">'
+      + '<span class="mono" style="flex:1;font-size:12.5px;font-weight:700">' + esc(x.symbol) + '</span>'
+      + '<span class="mono" style="font-size:11px;color:var(--mut)">' + esc(x.at || '--') + '</span>'
+      + '</div>'; }).join('');
+  if (!syms) syms = '<div class="sum" style="padding:5px 0">No symbols recorded for this basket.</div>';
+  /* Truncation is stated, never silent — the cap is 20 per basket server-side. */
+  if (b.truncated) syms += '<div class="src">+' + b.truncated + ' more not shown</div>';
+  return head + '<div style="padding-bottom:6px">' + syms + '</div>';
+}
+
+function renderV8(){
+  var d = VDATA;
   if (d.error) throw new Error(d.error);
   document.getElementById('sub').innerHTML =
     'long-short futures · ' + d.universe + ' symbols ' + railHtml(d.rail);
@@ -70,11 +100,8 @@ fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(fu
     + '<div class="sum">' + (g.open === true ? 'Gate is open — new entries allowed.'
         : g.open === false ? 'Gate is shut — no new entries today.'
         : 'Gate state unavailable.') + '</div></div>';
-  var rows = (d.baskets || []).map(function(b){
-    return '<div style="display:flex;align-items:baseline;gap:10px;padding:9px 0;border-top:1px solid var(--line)">'
-      + '<span style="flex:1;font-weight:700;font-size:13px">' + esc(b.label) + '</span>'
-      + '<span class="mono" style="font-size:14px;font-weight:800">' + b.signals + '</span></div>';
-  }).join('') || '<div class="sum" style="padding:9px 0">No baskets signalled today.</div>';
+  var rows = (d.baskets || []).map(basketRow).join('')
+    || '<div class="sum" style="padding:9px 0">No baskets signalled today.</div>';
   var book = '<div class="c"><div class="meta"><span class="tag cat">PAPER BOOK</span></div>'
     + '<div class="sum mono">' + d.open_positions + ' open · ' + d.ledger.trades
     + ' closed all-time · gross <span class="' + cls(d.ledger.gross_pnl) + '">'
@@ -82,7 +109,13 @@ fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(fu
     + '<div class="fold" onclick="location.href=\'/m/positions\'">Open the book ›</div></div>';
   document.getElementById('body').innerHTML = gateCard
     + '<div class="c"><div class="meta"><span class="tag cat">SIGNALS TODAY</span>'
-    + '<span class="when">' + d.signals_today + ' total</span></div>' + rows + '</div>' + book;
+    + '<span class="when">' + d.signals_today + ' total \u00b7 tap a basket</span></div>'
+    + rows + '</div>' + book;
+}
+
+fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+  VDATA = d; renderV8();
 }).catch(function(e){ failBox('body','sub',e); });
 </script>
 </body>

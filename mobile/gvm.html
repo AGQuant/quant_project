@@ -104,8 +104,15 @@ function card(x){
       + '<div><div class="k">MOMENTUM</div><div class="v">' + n(x.m, 1) + '</div></div>'
     + '</div>'
     + (x.punchline ? '<div class="sum" style="margin-top:9px">' + esc(x.punchline) + '</div>' : '')
-    + '<div class="src">Rank ' + (x.rank == null ? gap('rank is NULL in gvm_scores today') : esc(x.rank))
-      + ' · ' + (x.label ? esc(x.label) : gap('gvm_overall_label is NULL in gvm_scores today')) + '</div>'
+    /* cc#888 item 4. Rank used to print '--' on every card because gvm_scores.rank is NULL on all
+       1,793 rows; it is now DERIVED server-side with a RANK() window over the whole universe, so
+       this is a real position out of a real total.
+       The label segment is DROPPED ENTIRELY when gvm_overall_label is NULL, rather than printed
+       as '--'. A dash with a tooltip is right when a value is expected and missing; this column is
+       simply not populated for anyone, so a permanent dash on every card is noise that teaches
+       the eye to ignore the footer. */
+    + '<div class="src">Rank ' + (x.rank == null ? gap('rank not returned') : esc(x.rank))
+      + (x.label ? ' · ' + esc(x.label) : '') + '</div>'
     + '</div>';
 }
 

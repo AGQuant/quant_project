@@ -11,11 +11,15 @@
 <body>
 <!--
   cc#874 — CHECK, PROMOTED. previews/check.html stays frozen (item 9).
-  TRAP (c) IS THE POINT OF THIS SCREEN: tc_cache has not been recomputed since 18-Jun-2026, which
-  is 50 days. The staleness banner is rendered from DATA (freshness.stale / age_days), it sits ABOVE
-  the results, and every card repeats its own computed_at. A 50-day-old verdict shown as today''s
-  answer is worse than no answer, so this screen never dresses it as fresh.
-  The rail reads REFERENCE, not LIVE: a cache with no running writer must say what it is.
+
+  cc#888 SOURCE SWAP: this screen read tc_cache, dead since 18-Jun. bg_tc_lite writes
+  tc_screener_cache every session, so the retail "should I take this trade?" question is now
+  answered with TODAY's verdicts instead of June's.
+
+  THE STALENESS BANNER STAYS, and that is deliberate. It reads clean today, but it is rendered
+  from DATA (freshness.stale / age_days) and every card repeats its own computed_at — so the day
+  the writer dies, the screen says so instead of showing old answers as if they were current.
+  A banner that only ever appears when something is wrong is only proven by leaving it in.
 -->
 <div class="screen">
   <div class="head"><h1>Trade Check</h1><div class="s" id="sub">loading…</div></div>
@@ -24,6 +28,10 @@
       style="flex:1;min-height:44px;padding:0 13px;border-radius:11px;background:var(--panel);
       border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:13.5px;outline:none">
   </div>
+  <!-- cc#888 item 2: LONG | SHORT, 44px chips, same pattern as Intel's categories. A searched
+       symbol ignores the toggle and shows both sides, because the question about one stock is
+       "is there a trade here at all". -->
+  <div class="chips" id="sidechips"></div>
   <div id="stale"></div>
   <div class="body" id="body"><div class="loading">Loading verdicts…</div></div>
 </div>
@@ -70,6 +78,9 @@ function vClass(v){
   if (v.indexOf('AVOID') > -1 || v.indexOf('WEAK') > -1) return 'bear';
   return 'neut';
 }
+/* cc#888 item 2 + verify (d): the pass / fail / watch line is GONE. tc_screener_cache has no
+   such columns, and deriving counts from failed_rules would print a guess in the shape of a
+   measurement. The line is now CMP · pivot zone · verdict, all of which are real columns. */
 function card(x){
   return '<div class="c ' + vClass(x.verdict) + '">'
     + '<div class="meta"><span class="tag ' + vClass(x.verdict) + '">'
@@ -77,21 +88,34 @@ function card(x){
     + '<span class="tag cat">' + esc(x.side || '--') + '</span>'
     + '<span class="when">' + esc(x.computed_at || '--') + '</span></div>'
     + '<div class="hl">' + esc(x.symbol) + '<span class="mono" style="float:right;font-size:13px">'
-      + n(x.score, 1) + (x.total ? '/' + n(x.total, 0) : '') + '</span></div>'
-    + '<div class="sum mono">CMP ' + px(x.cmp) + ' · pivot ' + px(x.pivot)
-      + ' · ' + (x.pass == null ? '--' : x.pass) + ' pass / '
-      + (x.fail == null ? '--' : x.fail) + ' fail / '
-      + (x.watch == null ? '--' : x.watch) + ' watch</div>'
+      + n(x.score, 1) + '</span></div>'
+    + '<div class="sum mono">CMP ' + px(x.cmp)
+      + (x.pivot_zone ? ' · ' + esc(x.pivot_zone) : '')
+      + ' · ' + esc(x.verdict || '--') + '</div>'
     + (x.not_passed ? '<div class="sum">Not passed: ' + esc(x.not_passed) + '</div>' : '')
     + '</div>';
 }
+
+var SIDE = 'LONG';
+function setSide(s){ SIDE = s; load(document.getElementById('q').value.trim()); }
+function renderSideChips(active){
+  /* Hidden while a symbol search is running — the toggle does not apply there, and a control
+     that silently stops working is worse than one that steps aside. */
+  document.getElementById('sidechips').innerHTML = active ? '' :
+    ['LONG','SHORT'].map(function(s){
+      return '<button class="chip' + (SIDE === s ? ' on' : '') + '" onclick="setSide(\'' + s + '\')">'
+        + s.charAt(0) + s.slice(1).toLowerCase() + '</button>'; }).join('');
+}
 function load(q){
   document.getElementById('body').innerHTML = '<div class="loading">Loading verdicts…</div>';
-  fetchWithTimeout('/api/mobile/check?limit=20' + (q ? '&symbol=' + encodeURIComponent(q) : ''))
+  fetchWithTimeout('/api/mobile/check?limit=20&side=' + SIDE
+                   + (q ? '&symbol=' + encodeURIComponent(q) : ''))
     .then(function(r){ return r.json(); }).then(function(d){
     if (d.error) throw new Error(d.error);
     var f = d.freshness || {};
-    document.getElementById('sub').innerHTML = d.count + ' verdicts ' + railHtml(d.rail);
+    renderSideChips(!!d.query);
+    document.getElementById('sub').innerHTML = d.count + ' verdicts'
+      + (d.query ? ' for ' + esc(d.query) : ' \u00b7 ' + SIDE.toLowerCase()) + ' ' + railHtml(d.rail);
     document.getElementById('stale').innerHTML = f.stale
       ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
         + 'background:rgba(245,185,74,.10);border:1px solid rgba(245,185,74,.4);'
@@ -101,7 +125,9 @@ function load(q){
       : '';
     document.getElementById('body').innerHTML = d.count
       ? d.results.map(card).join('')
-      : '<div class="empty"><b>Nothing found</b>No cached verdict for "' + esc(d.query || '') + '".</div>';
+      : '<div class="empty"><b>Nothing found</b>'
+        + (d.query ? 'No verdict for "' + esc(d.query) + '" in today\'s run.'
+                   : 'No ' + SIDE.toLowerCase() + ' verdicts in today\'s run.') + '</div>';
   }).catch(function(e){ failBox('body','sub',e); });
 }
 var t = null;

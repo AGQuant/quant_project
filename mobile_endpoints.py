@@ -482,23 +482,36 @@ def mobile_gvm(request: Request, q: str = "", limit: int = 25):
     try:
         now = _ist_now()
         with _conn() as conn, conn.cursor() as cur:
-            if q:
-                cur.execute("""
+            # cc#888 item 4 — RANK IS DERIVED, because the stored column is empty. gvm_scores.rank
+            # is NULL on ALL 1,793 rows, so every card printed "Rank --". The number is trivially
+            # computable and the ordering is already the product's own.
+            #
+            # The window sits in a CTE that runs over the WHOLE table BEFORE any filter. That
+            # matters for search: ranking after filtering would tell a searched company it is
+            # rank 1 of the two rows that matched, which is a confident lie. This way it gets its
+            # true position out of 1,793.
+            # Verified single-date: gvm_scores holds one row per symbol for one score_date, so the
+            # window needs no date partition. If history is ever added this needs PARTITION BY
+            # score_date — noted here rather than left to be discovered.
+            ranked = """
+                WITH r AS (
                     SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict,
                            gvm_overall_label, growth_label, value_label, momentum_label,
-                           segment, price, rank, punchline, score_date
+                           segment, price, punchline, score_date,
+                           RANK() OVER (ORDER BY gvm_score DESC NULLS LAST) AS rank
                     FROM gvm_scores
+                )
+                SELECT * FROM r
+            """
+            if q:
+                cur.execute(ranked + """
                     WHERE symbol LIKE %s OR UPPER(company_name) LIKE %s
                     ORDER BY (symbol = %s) DESC, gvm_score DESC NULLS LAST
                     LIMIT %s
                 """, (f"{q}%", f"%{q}%", q, limit))
             else:
-                cur.execute("""
-                    SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict,
-                           gvm_overall_label, growth_label, value_label, momentum_label,
-                           segment, price, rank, punchline, score_date
-                    FROM gvm_scores
-                    ORDER BY gvm_score DESC NULLS LAST
+                cur.execute(ranked + """
+                    ORDER BY rank
                     LIMIT %s
                 """, (limit,))
             rows = _rows(cur)
@@ -567,6 +580,22 @@ def mobile_v8(request: Request):
                 GROUP BY basket ORDER BY n DESC
             """)
             baskets = _rows(cur)
+            # cc#888 item 3: WHICH stocks signalled, not just how many. A count answers a
+            # dashboard question; a retail user wants the names. Capped at 20 per basket in SQL
+            # rather than in Python, so a heavy day never ships 400 rows to a phone to throw most
+            # of them away.
+            # signal_ts is NAIVE IST (verified: timestamp without time zone) — no conversion, and
+            # the format is applied here so the template never parses a timestamp.
+            cur.execute("""
+                SELECT basket, symbol, signal_ts FROM (
+                    SELECT basket, symbol, signal_ts,
+                           ROW_NUMBER() OVER (PARTITION BY basket ORDER BY signal_ts DESC) AS rn
+                    FROM v8_qualified
+                    WHERE signal_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                ) s WHERE rn <= 20
+                ORDER BY basket, signal_ts DESC
+            """)
+            sig_rows = _rows(cur)
             cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
             open_pos = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) AS n, SUM(pnl) AS pnl FROM v8_paper_trades")
@@ -593,8 +622,16 @@ def mobile_v8(request: Request):
             "open": ((mood or {}).get("fails") == 0) if (mood or {}).get("fails") is not None else None,
             "as_of": (mood or {}).get("checked_at"),
         } if mood else {"verdict": None, "open": None, "as_of": None},
-        "baskets": [{"slug": b["basket"], "label": basket_label(b["basket"]), "signals": b["n"]}
-                    for b in baskets],
+        # cc#888 item 3: each basket carries its symbols so the row can expand inline. `truncated`
+        # is stated rather than left implicit — if a basket signalled more than the 20 cap, the
+        # screen says so instead of quietly showing a subset as if it were the whole list.
+        "baskets": [{
+            "slug": b["basket"], "label": basket_label(b["basket"]), "signals": b["n"],
+            "symbols": [{"symbol": s["symbol"],
+                         "at": s["signal_ts"].strftime("%H:%M") if s["signal_ts"] else None}
+                        for s in sig_rows if s["basket"] == b["basket"]],
+            "truncated": max(0, b["n"] - 20),
+        } for b in baskets],
         "signals_today": sum(b["n"] for b in baskets),
         "open_positions": open_pos,
         "ledger": {"trades": led["n"], "gross_pnl": float(led["pnl"]) if led["pnl"] is not None else None},
@@ -616,29 +653,51 @@ def m_v8():
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/check")
 @_json_safe   # cc#887
-def mobile_check(request: Request, symbol: str = "", limit: int = 20):
+def mobile_check(request: Request, symbol: str = "", side: str = "LONG", limit: int = 20):
     g = _guard(request)
     if g:
         return g
     sym = (symbol or "").strip().upper()
+    side = (side or "LONG").strip().upper()
+    if side not in ("LONG", "SHORT"):
+        side = "LONG"
     limit = max(1, min(limit, 50))
     try:
         now = _ist_now()
         with _conn() as conn, conn.cursor() as cur:
+            # cc#888 item 1 — SOURCE SWAP. This read tc_cache, whose newest row is 18-Jun: fifty
+            # days dead, no writer, and the app's core retail question ("should I take this
+            # trade?") was being answered with June's verdicts. bg_tc_lite writes
+            # tc_screener_cache EVERY session — 418 rows today, computed 16:00 IST. The right
+            # answers were one table over the whole time.
+            # tc_cache itself is untouched: its web consumers keep it (card do_not_touch).
+            #
+            # computed_at is TIMESTAMPTZ — converted in SQL, never in Python. That is the cc#887
+            # class, and it cost the home screen a raw 500 yesterday.
+            #
+            # ORDER BY carries an explicit `symbol` tiebreak. Scores tie often (three symbols at
+            # 17.5 today), and `ORDER BY score DESC` alone leaves the top-5 to physical row order —
+            # so the same query could answer differently on two runs. A parity check against a
+            # non-deterministic list proves nothing.
+            base = """
+                SELECT symbol, side, score, verdict, cmp, pivot_zone, failed_rules,
+                       (computed_at AT TIME ZONE 'Asia/Kolkata') AS computed_at
+                FROM tc_screener_cache
+                WHERE run_date = (SELECT MAX(run_date) FROM tc_screener_cache)
+            """
             if sym:
-                cur.execute("""
-                    SELECT symbol, side, cmp, score, total, n_pass, n_fail, n_watch,
-                           not_passed, pivot, verdict_class, computed_at
-                    FROM tc_cache WHERE symbol = %s ORDER BY computed_at DESC
-                """, (sym,))
+                # A searched symbol returns BOTH sides — the retail question about one stock is
+                # "is there a trade here at all", not "is there a long here".
+                cur.execute(base + " AND symbol = %s ORDER BY side, score DESC, symbol", (sym,))
             else:
-                cur.execute("""
-                    SELECT symbol, side, cmp, score, total, n_pass, n_fail, n_watch,
-                           not_passed, pivot, verdict_class, computed_at
-                    FROM tc_cache ORDER BY score DESC NULLS LAST LIMIT %s
-                """, (limit,))
+                cur.execute(base + " AND side = %s ORDER BY score DESC, symbol LIMIT %s",
+                            (side, limit))
             rows = _rows(cur)
-            cur.execute("SELECT MAX(computed_at) FROM tc_cache")
+            cur.execute("""
+                SELECT MAX(computed_at AT TIME ZONE 'Asia/Kolkata')
+                FROM tc_screener_cache
+                WHERE run_date = (SELECT MAX(run_date) FROM tc_screener_cache)
+            """)
             newest = cur.fetchone()[0]
     except Exception as e:
         log.exception("mobile check failed")
@@ -649,16 +708,25 @@ def mobile_check(request: Request, symbol: str = "", limit: int = 20):
         return float(v) if v is not None else None
     return {
         "query": sym or None,
+        "side": None if sym else side,
         "results": [{
             "symbol": r["symbol"], "side": r["side"], "cmp": f(r["cmp"]),
-            "score": f(r["score"]), "total": f(r["total"]),
-            "pass": r["n_pass"], "fail": r["n_fail"], "watch": r["n_watch"],
-            "not_passed": r["not_passed"], "pivot": f(r["pivot"]),
-            "verdict": r["verdict_class"],
-            "computed_at": r["computed_at"].strftime("%d-%b-%Y %H:%M") if r["computed_at"] else None,
+            "score": f(r["score"]),
+            # ARRAY column -> one readable line. Empty means nothing failed, which is a real
+            # answer and renders as nothing rather than as an empty label.
+            "not_passed": ", ".join(r["failed_rules"]) if r["failed_rules"] else None,
+            "pivot_zone": r["pivot_zone"],
+            "verdict": r["verdict"],
+            "computed_at": r["computed_at"].strftime("%d-%b %H:%M") if r["computed_at"] else None,
         } for r in rows],
         "count": len(rows),
-        # The staleness banner is DATA, not decoration — the screen renders whatever this says.
+        # cc#888: n_pass / n_fail / n_watch and `total` DO NOT EXIST in tc_screener_cache. They are
+        # removed rather than derived — a pass/fail count invented from failed_rules would look
+        # like a measurement and be a guess. The card is explicit: do not fabricate.
+        #
+        # The staleness banner STAYS even though it now reads fresh. It is data, not decoration:
+        # if bg_tc_lite ever dies, this is what tells the founder honestly instead of a screen
+        # that keeps showing yesterday's verdicts as if they were today's.
         "freshness": {
             "computed_at": newest.strftime("%d-%b-%Y %H:%M IST") if newest else None,
             "age_days": round(age_days, 1) if age_days is not None else None,
@@ -667,9 +735,10 @@ def mobile_check(request: Request, symbol: str = "", limit: int = 20):
                      + (newest.strftime("%d-%b-%Y") if newest else "never")
                      + ". These verdicts are historical, not today's.") if age_days and age_days > 1 else None,
         },
-        # REFERENCE, not LIVE: this surface is a cache with no running writer, and the rail must
-        # say what it is rather than borrow the session clock.
-        "rail": {"state": "REFERENCE", "why": "cached verdicts, no live recompute"},
+        # cc#888: was REFERENCE against a 1440-minute cadence, which described the dead table.
+        # bg_tc_lite runs every 5 minutes in session, so the rail is judged on that — and after
+        # the close it reads CLOSED, not stale (cc#841).
+        "rail": rail_state(newest, 5, now),
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -915,6 +984,12 @@ _WEB_TO_MOBILE = {
     "/dashboard": "/m/v8",
     "/check": "/m/check",
     "/": "/m/home",
+    # cc#888 item 5. Both keys verified against model_registry.route with a SELECT before being
+    # written here, as the card requires — id 8 is exactly "/quant-basket" and id 7 is exactly
+    # "/cio2?model=gvm", query string included. A near-miss key would silently fall through to the
+    # desktop page and look like a design choice rather than a typo.
+    "/quant-basket": "/m/qb",
+    "/cio2?model=gvm": "/m/gvm",
 }
 
 # The app's own screens, for the "Everything else" section. Derived from THIS module's routes —
