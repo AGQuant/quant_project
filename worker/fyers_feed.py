@@ -2748,14 +2748,31 @@ def run(auth_code=None):
             log.info(f"cc#843 probe ({label}): -300 received — subscribe pipeline is ALIVE")
             _log_feed_incident("feed_probe_ok", f"{label}: -300 received for {psym}")
         else:
+            # ── cc#886 HOTFIX, 07-Aug 12:45 IST — THE PROBE IS REPORT-ONLY UNTIL IT IS TRUSTED ──
+            # This probe shipped with cc#843 but NEVER RAN: it read feed_ext_blacklist ORDER BY
+            # created_at, a column that has never existed, so it threw on every boot for days.
+            # cc#884 item 2 fixed the column name — and the very first live run, 12:39:28 today,
+            # declared the connection subscribe-dead and forced a close. The feed then did not
+            # come back and the tape was dark from 12:35.
+            #
+            # I do not yet know whether that verdict was RIGHT. Both readings are live:
+            #   * correct — a mid-market boot connection really can come up poisoned; that is the
+            #     whole cc#843 doctrine, and QPOWER-EQ was genuinely -300'd on 05-Aug, so the
+            #     probe symbol is sound.
+            #   * false   — the probe fired 20s after a 780-symbol subscribe finished and waits
+            #     only 12s for the -300 frame. Under that load the frame may simply be late.
+            # Either way, a code path with ZERO production runs behind it must not be the thing
+            # that can close the live socket. It keeps its eyes and loses its hands: the verdict is
+            # still logged every time, so the evidence to settle the question accumulates on real
+            # connections, and the cc#876 deadline guard plus the guardian's own rungs remain the
+            # actual recovery path — both of which HAVE run in production.
+            # Re-arm only after feed_probe_ok / feed_probe_dead rows show it agrees with reality.
             log.error(f"cc#843 probe ({label}): NO -300 within {PROBE_WAIT_SEC}s for a known-invalid "
-                      f"symbol — connection is SUBSCRIBE-DEAD, forcing a clean reconnect")
-            _log_feed_incident("feed_probe_dead",
-                               f"{label}: no -300 for {psym} in {PROBE_WAIT_SEC}s — subscribe-dead")
-            try:
-                _force_reconnect()
-            except Exception as e:
-                log.error(f"cc#843 probe ({label}): reconnect failed: {e}")
+                      f"symbol — would have called this connection SUBSCRIBE-DEAD. cc#886: "
+                      f"REPORT-ONLY, no forced reconnect (see the note at this line).")
+            _log_feed_incident("feed_probe_dead_reportonly",
+                               f"{label}: no -300 for {psym} in {PROBE_WAIT_SEC}s — verdict logged, "
+                               f"NO action taken (cc#886 hotfix)")
         return alive
 
     # ── cc#843 fix_3a: ONE pending corrected-universe resubscribe ────────────────────────────
