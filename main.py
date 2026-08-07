@@ -107,6 +107,7 @@ from max_native_cards import router as max_cards_router   # cc#836 phase B: nati
 from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star marker (read-only)
 from preview_endpoints import router as preview_router   # cc#866 preview screens (Claude.ai pushes previews/)
 from mobile_endpoints import router as mobile_router     # cc#874 promoted mobile screens (/m/*)
+from v8_futures_book import router as v8_futures_book_router   # cc#885 /api/v8/futures_book
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -477,6 +478,9 @@ app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} 
 app.include_router(pivot_star_router)   # cc#856: /api/v8/pivot_star
 app.include_router(preview_router)   # cc#866: /preview + /preview/{name}
 app.include_router(mobile_router)    # cc#874: promoted mobile screens — all logic in mobile_endpoints.py
+# cc#885: futures-basis open book. Its own file and its own route ON PURPOSE — /api/paper/status
+# is untouched, so the Equity path stays byte-identical and issues no extra query.
+app.include_router(v8_futures_book_router)
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}

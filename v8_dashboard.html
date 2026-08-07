@@ -2024,6 +2024,41 @@ function setMasterSide(s){
   const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();
 }
 function setMasterBasket(b){MASTER_BASKET=b;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+// ── cc#885: EQUITY | FUTURES price basis ────────────────────────────────────────────────────
+// Default 'equity', and the equity path is deliberately untouched: when MASTER_BASIS is 'equity'
+// nothing below runs, no extra request is made, and renderMaster produces exactly the markup it
+// produced before this card. The futures book is a SEPARATE endpoint (/api/v8/futures_book) so
+// /api/paper/status never changes shape.
+let MASTER_BASIS='equity';
+let FUTBOOK=null, FUTBOOK_LOADING=false;
+function setMasterBasis(b){
+  MASTER_BASIS=b;
+  const el=document.getElementById('panel0');
+  if(b==='futures'&&!FUTBOOK&&!FUTBOOK_LOADING){
+    FUTBOOK_LOADING=true;
+    // Lazy, once per page load. The book is re-read on the normal 5-min refresh via loadFutBook().
+    loadFutBook().then(()=>{const e2=document.getElementById('panel0');if(e2)e2.innerHTML=renderMaster();});
+  }
+  if(el)el.innerHTML=renderMaster();
+}
+async function loadFutBook(){
+  try{
+    FUTBOOK=await getJSON(API_BASE+'/api/v8/futures_book');
+  }catch(e){
+    FUTBOOK={error:String(e&&e.message||e), positions:[], count:0};
+  }finally{
+    FUTBOOK_LOADING=false;
+  }
+  return FUTBOOK;
+}
+// Merge by symbol. The futures book carries the SAME position identity as the equity book, so a
+// row keeps its side, basket and qty and only its PRICES change basis. Nothing is invented: a
+// position the futures book does not return (pre-series) simply has no futures row.
+function futRowFor(sym){
+  if(!FUTBOOK||!FUTBOOK.positions)return null;
+  for(let i=0;i<FUTBOOK.positions.length;i++){if(FUTBOOK.positions[i].symbol===sym)return FUTBOOK.positions[i];}
+  return null;
+}
 function _masterBasketReconcile(){
   if(MASTER_BASKET==='all')return;
   const p=cache.paper,allOpen=(p&&p.open_positions)||[];
@@ -2368,8 +2403,28 @@ function renderMaster(){
   // are faceted off it — chip counts have to describe the rows you would actually get, not the rows
   // that exist ignoring the direction you already picked.
   const _bySide=(MASTER_SIDE==='all'?allOpen:allOpen.filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase()));
-  const open=(MASTER_BASKET==='all'?_bySide:_bySide.filter(x=>(x.basket||'')===MASTER_BASKET))
-    .slice().sort((a,b)=>(Number(b.unrealised_pnl||0))-(Number(a.unrealised_pnl||0)));
+  let open=(MASTER_BASKET==='all'?_bySide:_bySide.filter(x=>(x.basket||'')===MASTER_BASKET))
+    .slice();
+  // ── cc#885: THE PRICE BASIS. In Equity mode this whole block is skipped, so `open` is the same
+  // array the old code sorted and every downstream number is produced by unchanged code — that is
+  // what "byte-identical equity path" means in practice.
+  // In Futures mode each row KEEPS its identity (symbol, side, qty, basket) and swaps only its
+  // PRICES. target and stop_loss are deliberately NOT swapped: they are engine levels set on the
+  // cash price, and re-deriving them in futures terms would invent risk levels the engine never
+  // traded on. They are labelled EQ instead (card item 6).
+  // A row the futures book does not return is a PRE-SERIES position — dropped here and counted in
+  // the on-screen note, never given a derived entry.
+  if(MASTER_BASIS==='futures'&&FUTBOOK&&FUTBOOK.positions){
+    open=open.map(x=>{
+      const f=futRowFor(x.symbol);
+      if(!f)return null;
+      return{...x,
+        entry_price:f.fut_entry, cmp:f.fut_cmp, prev_close:f.fut_prev_close,
+        unrealised_pnl:f.fut_pnl, _basis:'FUT', _futGap:f.gap,
+        _eqEntry:f.eq_entry, _futEntryTs:f.fut_entry_ts};
+    }).filter(Boolean);
+  }
+  open=open.sort((a,b)=>(Number(b.unrealised_pnl||0))-(Number(a.unrealised_pnl||0)));
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const netUnreal=unreal-open.length*BROKERAGE_PER_TRADE;
   // cc#129 bug_2: Realised + Win/Loss cards also cascade with the Long/Short filter.
@@ -2403,11 +2458,18 @@ function renderMaster(){
   const top8=secArr.filter(s=>s.avg_day_1d>0).slice(0,8);const bot8=secArr.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
   // 4 cards — Open Positions | Unrealised PnL | Realised PnL | Win/Loss. cc#129 bug_2:
   // ALL four now reflect the active Long/Short toggle (Realised/Win-Loss per-side via recent_trades).
+  // cc#885 item 7 + verify 4: STATE EVERY BASIS ON SCREEN. This is a deliberately different-basis
+  // view, so the honest form of DISPLAY_PARITY (16202) here is labelling, not matching. Unrealised
+  // moves to the futures book; Realised does NOT — closed trades were settled on the equity
+  // convention and restating them would be a rewrite of history, so it keeps its EQ marker in both
+  // modes. In Equity mode the tag is the empty string and the markup is unchanged.
+  const _fut=(MASTER_BASIS==='futures');
+  const _bTag=(b)=>_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">${b}</span>`:'';
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
-    <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
-    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
-    <div class="card"><div class="k">Win / Loss</div><div class="v">${winsTxt}/${lossTxt}</div></div>
+    <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
+    <div class="card"><div class="k">Realised P&L${_bTag('EQ')}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
+    <div class="card"><div class="k">Win / Loss${_bTag('EQ')}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
   const tgl=(key,label,cnt)=>{
@@ -2436,7 +2498,34 @@ function renderMaster(){
       + bchip('all','All',_bySide.length)
       + _bkFacets.map(f=>bchip(f.slug,f.label,f.n)).join('')
       + `</div>` : '';
-  const toggle=`<div style="display:flex;gap:6px;margin-bottom:${_bkFacets.length>1?'8px':'12px'}">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`+basketRow;
+  // cc#885: PRICE BASIS pill, on the same row as the direction chips. Deliberately separated by a
+  // divider — direction and basket FILTER the rows, this changes what every price MEANS. Putting
+  // it in the same visual group as a filter would suggest it were one.
+  const bas=(key,label)=>{
+    const on=MASTER_BASIS===key;
+    const s=on?'background:rgba(245,185,74,.15);color:var(--amber);border:1px solid rgba(245,185,74,.45)'
+              :'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
+    return`<button onclick="setMasterBasis('${key}')" style="${s};font:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s;white-space:nowrap">${label}</button>`;
+  };
+  const basisRow=`<span style="width:1px;height:20px;background:var(--line2);margin:0 4px;align-self:center"></span>`
+    + bas('equity','Equity') + bas('futures','Futures');
+  // cc#885 item 5: the exclusion is STATED, never silent. The sentence and its count come from the
+  // endpoint, which derives them from the real series start — nothing here is hardcoded.
+  let futNote='';
+  if(_fut){
+    if(FUTBOOK_LOADING||!FUTBOOK){
+      futNote=`<div style="font-size:10px;color:var(--dim);margin-bottom:10px">Loading the futures book…</div>`;
+    }else if(FUTBOOK.error){
+      futNote=`<div style="font-size:10px;color:var(--red);margin-bottom:10px">Futures book unavailable — ${FUTBOOK.error}. Switch back to Equity for the live cash book.</div>`;
+    }else{
+      const _gapN=(FUTBOOK.positions||[]).filter(p=>p.gap).length;
+      futNote=`<div style="font-size:10px;color:var(--amber);margin-bottom:10px">${FUTBOOK.note}`
+        + ` &middot; every price on this view is a <b>fyers_fut</b> bar; Target, SL and Realised P&amp;L stay on the equity basis and are marked EQ`
+        + (_gapN?` &middot; ${_gapN} position${_gapN===1?'':'s'} shows no futures entry (no bar at its signal) — hover the row for the reason`:'')
+        + `</div>`;
+    }
+  }
+  const toggle=`<div style="display:flex;gap:6px;margin-bottom:${_bkFacets.length>1?'8px':'12px'};flex-wrap:wrap">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}${basisRow}</div>`+basketRow+futNote;
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
@@ -2471,14 +2560,19 @@ function renderMaster(){
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
+  // cc#885 item 6 + verify 4: in Futures mode the price columns are futures prices and say so,
+  // while Target and SL keep the engine's cash levels and are marked EQ. A column that changed
+  // basis and a column that did not must not look alike.
+  const _cEntry=_fut?"Entry FUT":"Entry", _cCmp=_fut?"CMP FUT":"CMP";
+  const _cTgt=_fut?"Target EQ":"Target", _cSl=_fut?"SL EQ":"SL";
   const openPosTable=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price",_cEntry],["cmp",_cCmp],["target",_cTgt],["stop_loss",_cSl],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
     openRows,x=>`<tr>
       <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
       <td style="text-align:center">${x.days}</td>
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
-      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.entry_price)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums${x._futGap?';color:var(--dim)':''}"${x._futGap?` title="${String(x._futGap).replace(/"/g,'&quot;')}"`:''}>${x.entry_price==null?'--':num(x.entry_price)}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.cmp)}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${num(x.target)}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${num(x.stop_loss)}</td>
