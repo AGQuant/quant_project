@@ -234,6 +234,10 @@ PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
 PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
 PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # cc#874
+PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
+# /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
+# gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
+# duplicates no auth logic of its own.
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -1009,6 +1013,12 @@ NAV_REGISTRY = {
     "/m/v8":         ("V8 (mobile)",          "nav-mobile"),
     "/m/check":      ("Trade Check (mobile)", "nav-mobile"),
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
+    "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
+    "/m/results":    ("Results (mobile)",      "nav-mobile"),
+    # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
+    # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
+    # accounts for every /m/ route rather than only the navigable ones.
+    "/m/login":      ("Login (mobile)",        "typed-url"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),

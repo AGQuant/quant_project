@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Digest · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — DIGEST, PROMOTED. previews/digest.html stays frozen (item 9).
+  16916: "morning brief, daily habit". The content comes from digest_v3.build_digest — the SAME
+  builder the web /digest uses — so the app can never show a different brief (DISPLAY_PARITY
+  16202). This screen only reshapes it for a phone; it never invents or reorders a section.
+  Rendered defensively: the builder's shape may change, so anything unrecognised is skipped
+  rather than crashing the screen.
+
+  The payload is digest_v3's own — {market, date_ist, sections:{...}, market_read}. The CONTENT
+  lives under `sections`, so this screen reads that key by name. Walking the top level instead
+  would print `generated_at` and `spec` and silently drop every real section, because each one is
+  a nested object.
+
+-->
+<div class="screen">
+  <div class="head"><h1>Daily Digest</h1><div class="s" id="sub">loading…</div></div>
+  <div class="body" id="body"><div class="loading">Loading the brief…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/v8"><span class="i">◍</span>V8</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+function failBox(host, sub, e){
+  document.getElementById(host).innerHTML =
+    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  if (sub) document.getElementById(sub).textContent = 'failed to load';
+}
+
+function val(v){
+  if (v === null || v === undefined || v === '') return '--';
+  if (typeof v === 'number') return (Math.round(v * 100) / 100).toLocaleString('en-IN');
+  return String(v);
+}
+function cls(v){ return (typeof v === 'number') ? (v >= 0 ? 'pos' : 'neg') : ''; }
+
+/* One row of a section. The builder uses different names for the same two ideas across sections
+   (tiles vs items vs rows; name vs symbol vs headline), so the label and the number are each
+   picked from a short ordered list rather than assumed. An item that yields no label is dropped —
+   a blank row is worse than one fewer row. */
+function itemRow(x){
+  if (x === null || x === undefined) return '';
+  if (typeof x !== 'object') return '<div class="sum" style="padding:5px 0">' + esc(x) + '</div>';
+  var k = x.name || x.symbol || x.headline || x.title || x.label || x.ticker || '';
+  if (!k) return '';
+  var v = [x.day_chg_pct, x.chg_pct, x.value, x.score, x.close, x.last, x.sentiment]
+            .filter(function(y){ return y !== null && y !== undefined && y !== ''; })[0];
+  var pct = (x.day_chg_pct != null || x.chg_pct != null);
+  return '<div style="display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line)">'
+    + '<span style="flex:1;font-size:12.5px">' + esc(k) + '</span>'
+    + '<span class="mono ' + cls(v) + '" style="font-size:12px">'
+    + esc(val(v)) + (pct && typeof v === 'number' ? '%' : '') + '</span></div>';
+}
+
+/* A section of digest_v3's payload. Its rows live under one of tiles/items/rows/ladders; its
+   one-line read, when the builder wrote one, leads the card. Anything with neither is skipped
+   rather than rendered as an empty titled box. */
+function section(title, obj){
+  if (!obj || typeof obj !== 'object') return '';
+  if (obj.error) {
+    return '<div class="c"><div class="meta"><span class="tag cat">'
+      + esc(title.replace(/_/g, ' ').toUpperCase()) + '</span></div>'
+      + '<div class="sum">Not available — ' + esc(obj.error) + '</div></div>';
+  }
+  var list = null;
+  ['tiles', 'items', 'rows', 'ladders', 'companies', 'results'].forEach(function(key){
+    if (!list && Array.isArray(obj[key])) list = obj[key];
+  });
+  if (!list && Array.isArray(obj)) list = obj;
+  var rows = (list || []).slice(0, 12).map(itemRow).join('');
+  var read = obj.read ? '<div class="sum">' + esc(obj.read) + '</div>' : '';
+  var note = obj.eod_note ? '<div class="src">' + esc(obj.eod_note) + '</div>' : '';
+  if (!rows.trim() && !read) return '';
+  var tier = obj.tier ? '<span class="tag hi">' + esc(obj.tier) + '</span>' : '';
+  return '<div class="c"><div class="meta"><span class="tag cat">'
+    + esc(title.replace(/_/g, ' ').toUpperCase()) + '</span>' + tier + '</div>'
+    + read + rows + note + '</div>';
+}
+
+fetchWithTimeout('/api/mobile/digest').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+  var dg = d.digest || {};
+  var secs = dg.sections || {};
+  var keys = Object.keys(secs);
+  var mkt = (d.market && d.market.label) ? d.market.label : '';
+  document.getElementById('sub').innerHTML =
+    esc(d.date_ist || '') + (mkt ? ' · ' + esc(mkt) : '') + ' ' + railHtml(d.rail);
+
+  var html = '';
+  /* The market read leads, because it is the one line that answers "what is today". It is
+     composed only from numbers the sections below print (965 MARKET_READ_FRAMEWORK) — no new
+     data, so it can never disagree with the cards under it. */
+  var mr = dg.market_read;
+  if (mr && mr.bias) {
+    html += '<div class="c ed"><div class="meta"><span class="tag edt">MARKET READ</span></div>'
+      + '<div class="hl">' + esc(mr.bias) + '</div>'
+      + ((mr.support || []).length ? '<div class="sum">' + esc(mr.support.join(' · ')) + '</div>' : '')
+      + '</div>';
+  }
+  html += keys.map(function(k){ return section(k, secs[k]); }).join('');
+  document.getElementById('body').innerHTML = html
+    || '<div class="empty"><b>No brief yet today</b>The digest is built each morning.</div>';
+}).catch(function(e){ failBox('body','sub',e); });
+</script>
+</body>
+</html>

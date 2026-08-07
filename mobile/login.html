@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — LOGIN, PROMOTED. previews/login.html stays frozen (item 9). 16916: "necessary".
+
+  THE THINNEST SCREEN IN THE SET, ON PURPOSE. It posts to the EXISTING /login endpoint in
+  scorr_auth.py and duplicates NO auth logic: the password check, the 5-per-10-min IP rate limit,
+  the session token mint and the cookie flags all stay in the one module that owns them. A second
+  implementation of a login is how an auth bypass gets built by accident.
+
+  The field is named `password`, which scorr_auth.login_post accepts as its documented defensive
+  fallback. It does NOT carry the cc#709 randomised field name, because that is generated inside
+  _login_page() server-side — so this form trades a little autofill resistance for not forking the
+  auth surface. Stated here rather than silently relied on.
+
+  This route is NOT in PROTECTED — gating the login page behind the login is a lockout.
+-->
+<div class="screen" style="display:flex;align-items:center;justify-content:center;padding-bottom:0;min-height:100vh">
+  <div style="width:100%;max-width:340px;padding:0 20px">
+    <div style="text-align:center;margin-bottom:30px">
+      <div style="font-size:27px;font-weight:800;letter-spacing:-.02em">Scorr</div>
+      <div class="mono" style="font-size:10px;color:var(--dim);letter-spacing:.14em;margin-top:6px">
+        INVESTMENT RESEARCH</div>
+    </div>
+    <form method="POST" action="/login" autocomplete="off">
+      <input type="hidden" name="next" value="/m/home">
+      <input type="password" name="password" placeholder="Password" autofocus
+        autocomplete="new-password" inputmode="numeric"
+        style="width:100%;min-height:48px;padding:0 15px;border-radius:12px;background:var(--panel);
+        border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:15px;
+        outline:none;margin-bottom:11px">
+      <button type="submit"
+        style="width:100%;min-height:48px;border-radius:12px;border:0;background:var(--blu);
+        color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer">Sign in</button>
+    </form>
+    <div style="text-align:center;font-size:10px;color:var(--dim);margin-top:22px">
+      Authorised access only</div>
+  </div>
+</div>
+</body>
+</html>

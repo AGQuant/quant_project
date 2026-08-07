@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Results · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#874 — RESULTS, PROMOTED. previews/results.html stays frozen (item 9).
+  16916: "results season, every retail holder". Grouped by DAY because that is the question a
+  retail holder actually asks — who reports this week — rather than a flat sortable table, which
+  is the professional shape and stays on the web.
+  V8-universe names sort first within a day and carry a chip, since those are the ones that can
+  hit a blackout.
+-->
+<div class="screen">
+  <div class="head"><h1>Results</h1><div class="s" id="sub">loading…</div></div>
+  <div class="body" id="body"><div class="loading">Loading calendar…</div></div>
+  <div class="cover" id="cover"></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/v8"><span class="i">◍</span>V8</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function railHtml(r){
+  if (!r) return '';
+  var s = (r.state || 'CLOSED').toLowerCase();
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+function failBox(host, sub, e){
+  document.getElementById(host).innerHTML =
+    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  if (sub) document.getElementById(sub).textContent = 'failed to load';
+}
+
+fetchWithTimeout('/api/mobile/results?days=10&limit=60').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+  document.getElementById('sub').innerHTML =
+    d.total_in_window + ' companies in the next ' + d.window_days + ' days ' + railHtml(d.rail);
+  document.getElementById('body').innerHTML = (d.days || []).length
+    ? d.days.map(function(day){
+        return '<div class="sect">' + esc(day.label).toUpperCase() + ' &middot; ' + day.n + '</div>'
+          + '<div class="c">' + day.companies.map(function(c){
+              return '<div style="display:flex;align-items:baseline;gap:8px;padding:7px 0;border-top:1px solid var(--line)">'
+                + '<span class="mono" style="font-weight:700;font-size:12.5px">' + esc(c.symbol) + '</span>'
+                + (c.in_v8 ? '<span class="tag bull">V8</span>' : '')
+                + '<span class="sum" style="flex:1;margin:0;font-size:11.5px">' + esc(c.name || '') + '</span>'
+                + '</div>';
+            }).join('') + '</div>';
+      }).join('')
+    : '<div class="empty"><b>Nothing scheduled</b>No results in the next ' + d.window_days + ' days.</div>';
+  document.getElementById('cover').textContent = d.coverage;
+}).catch(function(e){ failBox('body','sub',e); });
+</script>
+</body>
+</html>

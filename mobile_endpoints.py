@@ -685,6 +685,126 @@ def m_home():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
+# DIGEST — 16916: "morning brief, daily habit". Reuses digest_v3.build_digest so the app and the
+# web /digest render the SAME brief (DISPLAY_PARITY 16202). No second builder.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/digest")
+def mobile_digest(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    try:
+        now = _ist_now()
+        # Call the WEB endpoint function itself, not just the builder. Two reasons, both learned
+        # the hard way:
+        #   1. build_digest(cur) is written against a psycopg2 cursor. This module is psycopg3.
+        #      Handing a foreign driver's cursor to code that was never tested with it is exactly
+        #      how a screen half-renders. digest_v3.digest_v3() opens its OWN psycopg2 connection.
+        #   2. It already carries digest_v3's own try/except shape, so the app and the web fail
+        #      the same way as well as succeed the same way.
+        # This is the same code path /digest runs — DISPLAY_PARITY 16202 by construction.
+        from digest_v3 import digest_v3 as _web_digest
+        d = _web_digest() or {}
+    except Exception as e:
+        log.exception("mobile digest failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "sections": {}}
+    if d.get("error"):
+        return {"error": d["error"], "sections": {}}
+    # The builder owns the content; this endpoint only reshapes it for a phone and never invents a
+    # section. Whatever build_digest returns is what the web shows.
+    return {"digest": d, "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "market": d.get("market") or {}, "date_ist": d.get("date_ist"),
+            "rail": {"state": "REFERENCE", "why": "daily brief, built once per morning"}}
+
+
+@router.get("/m/digest", response_class=HTMLResponse)
+def m_digest():
+    return _page("digest")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# RESULTS — 16916: "results season, every retail holder".
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/api/mobile/results")
+def mobile_results(request: Request, days: int = 10, limit: int = 60):
+    """Upcoming result dates, nearest first, with the V8 universe flagged."""
+    g = _guard(request)
+    if g:
+        return g
+    days = max(1, min(days, 60))
+    limit = max(1, min(limit, 200))
+    try:
+        now = _ist_now()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT e.ticker, e.company_name, e.ex_date, e.event_type, e.status,
+                       EXISTS (SELECT 1 FROM futures_universe f
+                               WHERE f.symbol = e.ticker AND f.is_active) AS in_v8
+                FROM earnings_calendar e
+                WHERE e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                  AND e.ex_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + %s
+                ORDER BY e.ex_date, (NOT EXISTS (SELECT 1 FROM futures_universe f
+                               WHERE f.symbol = e.ticker AND f.is_active)), e.ticker
+                LIMIT %s
+            """, (days, limit))
+            rows = _rows(cur)
+            cur.execute("""
+                SELECT COUNT(*) FROM earnings_calendar
+                WHERE ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                  AND ex_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + %s
+            """, (days,))
+            total = cur.fetchone()[0]
+            cur.execute("SELECT MAX(last_updated) FROM earnings_calendar")
+            newest = cur.fetchone()[0]
+    except Exception as e:
+        log.exception("mobile results failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "results": []}
+
+    by_day = {}
+    for r in rows:
+        by_day.setdefault(r["ex_date"].strftime("%Y-%m-%d"), []).append({
+            "symbol": r["ticker"], "name": r["company_name"],
+            "event": r["event_type"], "status": r["status"], "in_v8": r["in_v8"],
+        })
+    return {
+        "days": [{"date": k,
+                  "label": datetime.strptime(k, "%Y-%m-%d").strftime("%a %d %b"),
+                  "companies": v, "n": len(v)} for k, v in sorted(by_day.items())],
+        "count": len(rows),
+        "total_in_window": total,
+        "window_days": days,
+        "coverage": f"showing {len(rows)} of {total} in the next {days} days",
+        # The calendar is loaded nightly, so it is REFERENCE against a daily cadence rather than
+        # judged against the intraday clock.
+        "rail": rail_state(newest, 1440, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+@router.get("/m/results", response_class=HTMLResponse)
+def m_results():
+    return _page("results")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# LOGIN — 16916: "necessary". Deliberately the THINNEST screen in the set.
+#
+# It posts to the EXISTING /login endpoint in scorr_auth.py. No auth logic is duplicated here:
+# the password check, the 5-per-10-min IP rate limit, the session token mint and the cookie flags
+# all stay in the one place that already owns them. A second implementation of a login is how an
+# auth bypass gets built by accident.
+#
+# NOT in PROTECTED, per card item 7 — gating the login page behind the login is a lockout.
+# scorr_auth randomises its field name per page load to defeat autofill (cc#709); this form uses
+# the plain `password` name, which login_post already accepts as its documented defensive
+# fallback. Stated rather than silently relied on.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+@router.get("/m/login", response_class=HTMLResponse)
+def m_login():
+    return _page("login")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
 # SHARED — server clock, so no promoted screen ever derives a session state from the phone's clock.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/now")
