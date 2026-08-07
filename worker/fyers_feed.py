@@ -1924,6 +1924,14 @@ def poll_futures_oi(token, fut_syms, agg):
     if not _OI_POLL_LOCK.acquire(blocking=False):
         log.info("OI poll skipped — previous cycle still running")
         return
+    # cc#883 item 2: when the detector has ruled REST degraded (empty bodies while the WS is
+    # demonstrably alive), the pollers stand down for a while instead of continuing to knock.
+    # Skipping a cycle costs OI freshness on the next futures bar; continuing to hammer a
+    # throttling endpoint costs the account (cc#770 found the same shape from the other end).
+    if _rest_is_degraded():
+        _OI_POLL_LOCK.release()
+        log.warning("OI poll SKIPPED — REST marked degraded (cc#883 backoff); WS is unaffected")
+        return
     try:
         log.info(f"OI poll starting: {len(fut_syms)} futures via depth API")
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
@@ -2003,6 +2011,52 @@ _STOCK_OPT_OI_POLL_LOCK = threading.Lock()   # cc#375: separate lock so a slow s
 DEAD_TOKEN_THRESHOLD = 10
 _auth_lock  = threading.Lock()
 _auth_state = {'consec': 0, 'dead_flag': False}
+
+# ── cc#883 item 2: WS-LIVENESS CROSS-CHECK ────────────────────────────────────────────────────
+# 07-Aug, ~09:55: the REST legs (index LTP + OI depth) started returning empty while the WS was
+# ticking perfectly — 212 equity and 208 futures symbols, bars landing every 5 minutes. The
+# detector above counted ten empties and declared the TOKEN dead. It was not: a token that is
+# dead for REST is dead for the WS too, and the WS was demonstrably alive. The self-heal then
+# relogged in with a stale PIN every 90 seconds and Fyers blocked the account at 10:07.
+#
+# So the rule is now: REST-empty AND WS-alive is a REST problem, never a token problem. It logs
+# feed_rest_degraded, backs the REST pollers off, and does NOT touch authentication. Only
+# REST-dead AND WS-dead (or an explicit 401) is allowed to reach the relogin path.
+#
+# The evidence is the WS itself rather than a DB read: on_message stamps a monotonic clock per
+# leg on every accepted tick, so "is the socket delivering data" is answered by the socket.
+WS_ALIVE_MAX_AGE_S   = 360          # 6 minutes — one missed 5-min bar plus slack, per the guardian
+REST_DEGRADED_SEC    = 900          # how long a degraded verdict backs the REST pollers off
+_ws_last_tick        = {'fyers_eq': 0.0, 'fyers_fut': 0.0}
+_rest_degraded_until = 0.0
+
+
+def _note_ws_tick(source):
+    """Stamped on every accepted WS tick. Deliberately lock-free: a float store is atomic under
+    the GIL, this runs on the hot message path, and a stamp that is one tick stale changes no
+    decision that a 6-minute window makes."""
+    if source in _ws_last_tick:
+        _ws_last_tick[source] = time.monotonic()
+
+
+def _ws_alive(max_age_s=WS_ALIVE_MAX_AGE_S):
+    """(alive, detail). Alive when EITHER leg has ticked inside the window — the card's rule.
+    One leg can legitimately go quiet (futures after 15:30, a thin equity session); both going
+    quiet at once while REST is also empty is the only shape that means the token."""
+    now = time.monotonic()
+    ages = {k: (None if v <= 0 else round(now - v, 1)) for k, v in _ws_last_tick.items()}
+    fresh = [k for k, a in ages.items() if a is not None and a <= max_age_s]
+    return (bool(fresh), {'ages_sec': ages, 'fresh_legs': fresh, 'window_sec': max_age_s})
+
+
+def _mark_rest_degraded():
+    """Back the REST pollers off without touching auth."""
+    global _rest_degraded_until
+    _rest_degraded_until = time.monotonic() + REST_DEGRADED_SEC
+
+
+def _rest_is_degraded():
+    return time.monotonic() < _rest_degraded_until
 
 
 def _dead_signal(r):
@@ -2137,6 +2191,24 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
         lock.release()
 
 
+def _subscribe_union(*groups):
+    """cc#884 item 3: THE one place the full subscribe set is assembled.
+
+    The reconnect path and the scheduled sequence used to each build their own list. When a
+    reconnect landed inside the scheduled window on 06-Aug they both subscribed, and post-verify
+    counted eq 212 against a 206-symbol universe (ops_log 17059). Two builders is how two callers
+    end up disagreeing about what "everything" means; one builder, order-preserving and deduped,
+    is how they cannot."""
+    out, seen = [], set()
+    for g in groups:
+        for s in (g or []):
+            if s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+    return out
+
+
 def _batched_subscribe(ws, symbols, action='sub', label=''):
     """cc#151: single batched code path for subscribe/unsubscribe (WS_SUB_BATCH chunks
     + sleep + per-batch log). cc_task #88 batching was applied to on_connect only — the
@@ -2145,6 +2217,23 @@ def _batched_subscribe(ws, symbols, action='sub', label=''):
     This is now the ONLY subscribe/unsubscribe path, used by both on_connect and roll."""
     if not symbols:
         return
+    # cc#884 item 3 — IDEMPOTENT BY CONSTRUCTION. On 09-Aug-06 09:16:02 a reconnect fired inside
+    # the scheduled sequence's window and both paths subscribed; post-verify then counted eq
+    # 212 against a 206-symbol universe (ops_log 17059) — the same symbol twice, counted twice.
+    # Deduplicating here, at the ONE choke point every subscribe passes through, means "same
+    # symbol twice" collapses to one entry no matter which two callers race. Order is preserved
+    # so the canary/full batching order (cc#843) is unchanged.
+    seen = set()
+    deduped = []
+    for s in symbols:
+        if s in seen:
+            continue
+        seen.add(s)
+        deduped.append(s)
+    if len(deduped) != len(symbols):
+        log.warning(f"_batched_subscribe({label or action}): {len(symbols) - len(deduped)} duplicate "
+                    f"symbol(s) collapsed — {len(symbols)} requested, {len(deduped)} sent")
+    symbols = deduped
     verb = 'Subscribing' if action == 'sub' else 'Unsubscribing'
     tag = f" ({label})" if label else ""
     log.info(f"{verb} {len(symbols)} symbols{tag} in batches of {WS_SUB_BATCH}")
@@ -2516,6 +2605,7 @@ def run(auth_code=None):
                 return
 
             if fsym in equity_set:
+                _note_ws_tick('fyers_eq')   # cc#883 item 2: proof the socket is delivering
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
             elif fsym in ext_set:
                 # cc#809: extended (non-F&O) equity — identical spot handling, own source tag so it
@@ -2524,6 +2614,7 @@ def run(auth_code=None):
             elif fsym in futures_set:
                 # OI not in WS — sourced from depth REST poll (agg.last_oi)
                 nse = from_fyers_symbol(fsym)
+                _note_ws_tick('fyers_fut')   # cc#883 item 2
                 agg.on_tick(nse, float(ltp), float(vol),
                             source='fyers_fut', oi=agg.last_oi.get(nse))
             else:
@@ -2555,8 +2646,18 @@ def run(auth_code=None):
             # but must not race a running sequence on the same socket — take the SAME mutex. If a sequence
             # holds it, that sequence owns the (re)subscribe, so defer to it rather than double-subscribe.
             if _subscribe_lock.acquire(blocking=False):
+                # cc#884 item 3: NAME THE HOLDER. This path took the mutex without ever writing
+                # _sub_state['holder'], so when it won the race the scheduled sequence logged
+                # "blocked, holder=None" (ops_log 17056, 09:16:02) — a mutex report that names
+                # nobody is a mutex report that cannot be acted on. Set on acquire, cleared in
+                # the same finally as the release, so the two can never drift apart.
+                _sub_state['holder'] = 'reconnect'
                 try:
-                    sub_list = equity_fyers_syms + futures_fyers_syms + ext_fyers_syms + list(option_syms)   # cc#809
+                    # cc#884 item 3: ONE deduped union, built by the shared helper the scheduled
+                    # sequence also uses, so a reconnect landing inside the scheduled window can
+                    # no longer produce a different (or doubled) symbol set.
+                    sub_list = _subscribe_union(equity_fyers_syms, futures_fyers_syms,
+                                                ext_fyers_syms, option_syms)
                     log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — re-subscribing "
                              f"{len(sub_list)} symbols ({len(option_syms)} options; post-sequence "
                              "reconnect, safe side of the pre-open trap)")
@@ -2565,6 +2666,7 @@ def run(auth_code=None):
                     _sub_state['last_ok'] = time.monotonic()
                     threading.Thread(target=_verify_subscribe_survivors, args=('reconnect',), daemon=True).start()
                 finally:
+                    _sub_state['holder'] = None
                     _subscribe_lock.release()
             else:
                 log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — a subscribe sequence is "
@@ -2593,7 +2695,12 @@ def run(auth_code=None):
     def _probe_symbol(c):
         try:
             with c.cursor() as cur:
-                cur.execute("SELECT symbol FROM feed_ext_blacklist ORDER BY created_at DESC LIMIT 1")
+                # cc#884 item 2: this said ORDER BY created_at. That column has never existed —
+                # EXT_BLACKLIST_SCHEMA_SQL (line ~318) creates `added_at`. So the probe threw
+                # "column created_at does not exist" on EVERY boot and the cc#843 -300 probe never
+                # ran once, silently, since it shipped. Fixed by naming the real column rather than
+                # adding a second one: no DDL, nothing to migrate, and the schema stays the source.
+                cur.execute("SELECT symbol FROM feed_ext_blacklist ORDER BY added_at DESC LIMIT 1")
                 r = cur.fetchone()
             if r and r[0]:
                 return fyers_eq_symbol(r[0])
@@ -2673,8 +2780,9 @@ def run(auth_code=None):
         def _worker():
             try:
                 while True:
-                    sub_list = (equity_fyers_syms + futures_fyers_syms + ext_fyers_syms
-                                + list(option_syms))
+                    # cc#884 item 3: same single deduped builder as the reconnect and scheduled paths.
+                    sub_list = _subscribe_union(equity_fyers_syms, futures_fyers_syms,
+                                                ext_fyers_syms, option_syms)
                     log.info(f"WS -300 recovery: re-subscribing corrected universe "
                              f"({len(sub_list)} symbols) [{reason}]")
                     _batched_subscribe(fyers_ws, sub_list, action='sub',
@@ -3073,6 +3181,34 @@ def run(auth_code=None):
             if eq < 0 or fut < 0 or ext < 0:
                 log.warning("cc#809 stage 3: DB read failed — no grading, no action (extended leg left up)")
                 return
+            # ── cc#884 item 1: MARKET-HOURS GUARD ON THE HALT ──────────────────────────────
+            # 06-Aug: the ext leg was working — 495 of 500 ticking at 13:57 (ops_log 16773). The
+            # cc#876 worker deploys rebooted at 15:36 and 15:40, verification ran at 15:42, read
+            # eq 0 and ext 0 because the equity session had ENDED at 15:15, graded that as
+            # core-below-floor, unsubscribed the ext leg and set feed_ext_stage=off (16898/16899).
+            # Nothing was broken. The clock was.
+            #
+            # A count of zero after the close is not a failure, it is the market being shut. So a
+            # leg is only GRADED inside its own session (cc#855 constants): the equity legs
+            # 09:15-15:15, futures 09:15-15:40, trading days only. Outside that the verification
+            # reports and returns, and feed_ext_stage is left EXACTLY as found — a post-close boot
+            # must never be able to disable the leg.
+            _n = datetime.now(IST)
+            _trading = _n.weekday() < 5 and is_trading_day(_n.date())
+            _eq_gradeable  = _trading and MARKET_OPEN <= _n.time() <= EQ_CONTINUOUS_END
+            _fut_gradeable = _trading and MARKET_OPEN <= _n.time() <= FUT_CLOSE
+            if not (_eq_gradeable and _fut_gradeable):
+                log.info(
+                    f"cc#809 stage 3 ({trigger}): OFF-HOURS at {_n.strftime('%H:%M:%S')} IST "
+                    f"(trading_day={_trading}, eq_gradeable={_eq_gradeable}, "
+                    f"fut_gradeable={_fut_gradeable}) — ext={ext} eq={eq} fut={fut} reported, "
+                    f"NOT graded. {EXT_STAGE_FLAG} left untouched (cc#884 item 1).")
+                _ops_log(conn, 'feed', 'feed_ext_stage_offhours',
+                         {"trigger": trigger, "eq": eq, "fut": fut, "ext": ext,
+                          "ext_subscribed": len(ext_fyers_syms), "trading_day": _trading,
+                          "eq_gradeable": _eq_gradeable, "fut_gradeable": _fut_gradeable,
+                          "action": "none — flag untouched", "ist": _ist_now_str()})
+                return
             frac = ext / float(len(ext_fyers_syms)) if ext_fyers_syms else 0.0
             core_ok = eq >= WATCHDOG_MIN_SYMBOLS and fut >= WATCHDOG_MIN_SYMBOLS
             ext_ok  = frac >= EXT_MIN_TICK_FRACTION
@@ -3468,7 +3604,27 @@ def run(auth_code=None):
                 except Exception as _pe:
                     log.warning(f"cc#473 dead-token probe failed (non-fatal): {_pe}")
                 if _consume_dead_flag():
-                    _self_heal_token(f"{DEAD_TOKEN_THRESHOLD} consecutive dead-token (empty/401) REST responses")
+                    # cc#883 item 2: the cross-check that was missing on 07-Aug. Ten empty REST
+                    # responses only mean the TOKEN is dead if the WS is dead too. If the socket
+                    # is still delivering ticks, this is the REST endpoint throttling us, and
+                    # relogging in cannot fix it — it can only burn broker attempts, which is
+                    # exactly what happened at 09:55 and cost the account a block at 10:07.
+                    _alive, _ws_detail = _ws_alive()
+                    if _alive:
+                        _mark_rest_degraded()
+                        log.error(
+                            f"cc#883: {DEAD_TOKEN_THRESHOLD} consecutive empty REST responses, but "
+                            f"the WS is ALIVE ({_ws_detail['fresh_legs']} fresh within "
+                            f"{_ws_detail['window_sec']}s) — this is a REST problem, NOT a dead "
+                            f"token. Backing REST off {REST_DEGRADED_SEC}s. No relogin.")
+                        _log_feed_incident(
+                            "feed_rest_degraded",
+                            f"REST empty x{DEAD_TOKEN_THRESHOLD} while WS alive "
+                            f"{_ws_detail} — backoff {REST_DEGRADED_SEC}s, relogin suppressed")
+                    else:
+                        _self_heal_token(
+                            f"{DEAD_TOKEN_THRESHOLD} consecutive dead-token (empty/401) REST "
+                            f"responses AND the WS is silent ({_ws_detail})")
 
             # cc#189: reset the once-per-day 09:30 deadline alert each trading day.
             if opt_gate_day != today:
@@ -3800,4 +3956,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--auth-code', type=str, default=None)
     args = parser.parse_args()
+    # cc#883 item 3: ALL auth-path schema work happens HERE, once, before run() starts any WS,
+    # housekeeping or auth thread. It used to run inside every login (ALTER TABLE fyers_tokens
+    # ADD COLUMN IF NOT EXISTS last_attempt) — on 07-Aug that ALTER queued behind an
+    # idle-in-transaction reader on the same table and killed four minutes of reloginsics.
+    # It never raises: a migration that cannot get its lock alerts and returns False, because
+    # the feed's job is to tick and refusing to boot would be the worse failure.
+    try:
+        import fyers_autologin as _autologin_boot
+        _autologin_boot.migrate_schema()
+    except Exception as _mig_e:
+        log.error(f"cc#883 boot migration could not run: {_mig_e}")
     run(auth_code=args.auth_code)
