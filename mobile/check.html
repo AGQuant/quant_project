@@ -7,6 +7,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_card_strip.js"></script>
+<script src="/scorr_chart_card.js"></script>
+<script src="/scorr_analysis_card.js"></script>
+<script src="/results_card.js"></script>
+<script src="/scorr_cockpit_card.js"></script>
 <style>
 /*
   cc#890 — CHECK reskinned to previews/check.html (approved design, markup+CSS ported, live data).
@@ -21,7 +26,11 @@
   the rule name, and the chip shows the gap COUNT, which is real. Score renders without "/total"
   because the source has no total.
   First card ships expanded; the rest expand on tap.
+  cc#894 item 1 (17868): the shared web C·A·R·D strip on every verdict card
+  (window.ScorrCardRow, rule cc#789 — never re-implemented). Strip taps don't fold the card.
+  :root bridge maps web card CSS vars onto the dark palette.
 */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
 .inrow{display:flex;gap:8px;margin:12px 12px 0}
 .sfld{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);
   border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 13px}
@@ -36,7 +45,7 @@
 .v{position:relative;background:var(--panel2);border:1px solid var(--line2);
   border-radius:15px;padding:15px 15px 12px 19px;overflow:hidden;margin-bottom:8px;cursor:pointer}
 .v::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--amber))}
-.v1{display:flex;align-items:baseline;gap:9px}
+.v1{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .vsym{font-size:16.5px;font-weight:800}
 .vside{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
   letter-spacing:.1em;padding:3px 8px;border-radius:4px;border:1px solid rgba(47,212,139,.45);color:var(--grn)}
@@ -110,7 +119,11 @@ function railHtml(r){
   var s = (r.state || 'CLOSED').toLowerCase();
   return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
 }
-
+function strip(sym){
+  /* full web C·A·R·D popups, compact size — shared component, rule cc#789 */
+  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
+  return '';
+}
 function gaps(x){
   if (!x.not_passed) return [];
   return String(x.not_passed).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
@@ -118,11 +131,12 @@ function gaps(x){
 function card(x, i, open){
   var gp = gaps(x);
   var short_ = (x.side || '').toUpperCase() === 'SHORT';
-  var h = '<div class="v" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(' + i + ')">'
+  var h = '<div class="v" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(event,' + i + ')">'
     + '<div class="v1"><span class="vsym">' + esc(x.symbol) + '</span>'
     + '<span class="vside' + (short_ ? ' sh' : '') + '">' + esc(x.side || '') + '</span>'
+    + strip(x.symbol)
     + '<span class="vpx">CMP ' + px(x.cmp)
-    + (x.computed_at ? ' · ' + esc(x.computed_at) : '') + '</span></div>'
+    + (x.computed_at ? ' \u00b7 ' + esc(x.computed_at) : '') + '</span></div>'
     + '<div class="v2"><span class="word">' + esc((x.verdict || '--').toUpperCase()) + '</span>'
     + '<span class="score">' + n1(x.score) + '</span></div>'
     + '<div class="counts">'
@@ -143,7 +157,7 @@ function card(x, i, open){
 function render(d){
   var rs = d.results || [];
   document.getElementById('sub').innerHTML =
-    d.count + ' verdicts · ' + (d.query ? 'both sides' : esc(STATE.side)) + ' ' + railHtml(d.rail);
+    d.count + ' verdicts \u00b7 ' + (d.query ? 'both sides' : esc(STATE.side)) + ' ' + railHtml(d.rail);
   var f = d.freshness || {};
   document.getElementById('stale').innerHTML = f.stale
     ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
@@ -152,12 +166,15 @@ function render(d){
       + '&#9888; ' + esc(f.note || 'Verdicts are stale.') + '</div>'
     : '';
   document.getElementById('body').innerHTML = rs.length
-    ? '<div class="sect">THE VERDICT · GAPS FIRST</div>'
+    ? '<div class="sect">THE VERDICT \u00b7 GAPS FIRST</div>'
       + rs.map(function(x, i){ return card(x, i, i === STATE.open); }).join('')
     : '<div class="empty"><b>Nothing found</b>No cached verdict for "' + esc(d.query || '') + '".</div>';
   window.__rows = rs;
 }
-function toggle(i){ STATE.open = (STATE.open === i ? -1 : i); render(window.__d); }
+function toggle(ev, i){
+  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
+  STATE.open = (STATE.open === i ? -1 : i); render(window.__d);
+}
 function setSide(s){
   STATE.side = s; STATE.open = 0;
   document.getElementById('tgL').className = 'tg' + (s === 'LONG' ? ' on' : '');
