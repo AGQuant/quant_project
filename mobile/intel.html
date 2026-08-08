@@ -10,20 +10,17 @@
 </head>
 <body>
 <!--
-  cc#874 — INTEL, PROMOTED. The frozen review copy stays at previews/intel.html and is never
-  touched (item 9); this is the rebuilt page reading live data (16230).
+  cc#874 — INTEL, PROMOTED. The frozen review copy stays at previews/intel.html (item 9).
+  cc#890 (Claude direct push, CHARTER_OVERRIDE_08AUG2026, session_log 17783) — preview fidelity
+  pass: the preview shows ONE open editorial (the primary) and folds every later editorial to
+  headline + summary + "Read ›". The live page expanded all of them, which buries the feed a
+  screen and a half down. Now: editorial[0] open with body, editorial[1..] folded, tap opens the
+  full text in place via the existing openFull(). Everything else already matched the preview.
 
-  Contract: 12 values, all SOURCED. Every field below comes from docs/PREVIEW_DATA_CONTRACT.md
-  via /api/mobile/intel, which reads v_polished_articles — the canonical view, so cc#870's
-  suppression is inherited and a culled story can never surface here.
-
-  DESIGN RULES CARRIED FROM THE APPROVED PREVIEW (16170), not re-decided while wiring:
-   - the header states the age of the NEWEST HEADLINE, never a refresh clock. A dead feed still
-     shows a fresh clock; it can never show a fresh headline.
-   - AI Editorial leads and is the PRIMARY, always expanded, no chevron (16157).
-   - sentiment is a WORD chip; the card edge repeats the colour but never carries the meaning.
-   - reading type is 13.5px minimum.
-   - coverage is stated, so truncation is never silent.
+  Contract: 12 values, all SOURCED (docs/PREVIEW_DATA_CONTRACT.md via /api/mobile/intel, reading
+  v_polished_articles — cc#870 suppression inherited).
+  DESIGN RULES (16170): header states the age of the NEWEST HEADLINE, never a refresh clock;
+  AI Editorial leads; sentiment is a WORD chip; reading type 13.5px minimum; coverage stated.
 -->
 <div class="screen">
 
@@ -50,8 +47,7 @@
 </nav>
 
 <script>
-/* One fetch for the whole screen (item 6) — not one per value. fetchWithTimeout is cc#878's
-   shared helper, so a hung request becomes a visible failure instead of a permanent shimmer. */
+/* One fetch for the whole screen (item 6). fetchWithTimeout is cc#878's shared helper. */
 var STATE = { data: null, cat: 'All' };
 
 function esc(s){ return String(s == null ? '' : s)
@@ -64,22 +60,26 @@ function sentClass(s){
   return 'neut';
 }
 
-function card(a, isEditorial){
+/* mode: 'open' = primary editorial with body; 'folded' = editorial as headline+summary+Read;
+   'feed' = agency item. Preview grammar exactly. */
+function card(a, mode){
   var edge = sentClass(a.sentiment);
+  var isEd = (mode === 'open' || mode === 'folded');
   var tags = '';
-  if (isEditorial) tags += '<span class="tag edt">AI EDITORIAL</span>';
+  if (isEd) tags += '<span class="tag edt">AI EDITORIAL</span>';
   else if (a.category) tags += '<span class="tag cat">' + esc(a.category.toUpperCase()) + '</span>';
   if (a.impact) tags += '<span class="tag hi">' + esc(a.impact) + '</span>';
   if (a.sentiment) tags += '<span class="tag ' + edge + '">' + esc(a.sentiment) + '</span>';
 
-  /* The reading state. full_summary is the article; summary is the one-line stand-in. A short
-     with no body renders its summary rather than an empty card — never a fabricated paragraph. */
   var bodyHtml = '';
-  if (isEditorial && a.body) {
+  if (mode === 'open' && a.body) {
     var paras = String(a.body).split(/\n{2,}/).slice(0, 3)
       .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
     bodyHtml = '<div class="read">' + paras + '</div>'
-             + '<button class="fold" onclick="openFull(' + a.id + ')">Continue reading ↓</button>';
+             + '<button class="fold" onclick="openFull(' + a.id + ')">Continue reading \u2193</button>';
+  } else if (mode === 'folded') {
+    if (a.summary) bodyHtml = '<div class="sum">' + esc(a.summary) + '</div>';
+    if (a.body) bodyHtml += '<button class="fold" onclick="openFull(' + a.id + ')">Read \u203a</button>';
   } else if (a.summary) {
     bodyHtml = '<div class="sum">' + esc(a.summary) + '</div>';
   }
@@ -88,11 +88,11 @@ function card(a, isEditorial){
     ? '<div class="syms">' + a.symbols.slice(0, 6).map(function(s){
         return '<span class="sy">' + esc(s) + '</span>'; }).join('') + '</div>' : '';
 
-  return '<div class="c ' + (isEditorial ? 'ed ' : '') + edge + '">'
+  return '<div class="c ' + (isEd ? 'ed ' : '') + edge + '">'
     + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
     + '<div class="hl">' + esc(a.headline) + '</div>'
     + bodyHtml + syms
-    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' · ' + esc(a.when_full) : '') + '</div>'
+    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' \u00b7 ' + esc(a.when_full) : '') + '</div>'
     + '</div>';
 }
 
@@ -116,7 +116,7 @@ function openFull(id){
 function render(){
   var d = STATE.data;
   document.getElementById('sub').textContent =
-    'newest headline ' + (d.header.newest || '--') + ' · ' + d.header.count
+    'newest headline ' + (d.header.newest || '--') + ' \u00b7 ' + d.header.count
     + ' items in the last ' + d.header.hours + 'h';
 
   var total = d.header.count;
@@ -133,10 +133,14 @@ function render(){
     feed = feed.filter(function(a){ return a.category === STATE.cat; });
   }
   var html = '';
-  if (eds.length)  html += '<div class="sect">TODAY\'S EDITORIAL</div>'
-                        + eds.map(function(a){ return card(a, true); }).join('');
+  if (eds.length){
+    html += '<div class="sect">TODAY\'S EDITORIAL</div>';
+    /* cc#890: preview fidelity — the FIRST editorial is the open reading card; every later
+       editorial folds to headline + summary + Read, exactly as the approved preview shows. */
+    html += eds.map(function(a, i){ return card(a, i === 0 ? 'open' : 'folded'); }).join('');
+  }
   if (feed.length) html += '<div class="sect">THE FEED</div>'
-                        + feed.map(function(a){ return card(a, false); }).join('');
+                        + feed.map(function(a){ return card(a, 'feed'); }).join('');
   if (!html) html = '<div class="empty"><b>Nothing in this filter</b>'
                   + 'No polished items in the last ' + d.header.hours + ' hours for '
                   + esc(STATE.cat) + '.</div>';
