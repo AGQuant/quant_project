@@ -3,24 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Home · Scorr</title>
+<title>Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/*
+  cc#889 — HOME rebuilt to previews/home_v2.html (founder 07-Aug: market-first scroll, My
+  Portfolio demoted mid-scroll, tools grid). Pushed by Claude (Fable) under
+  CHARTER_OVERRIDE_08AUG2026 (session_log 17783). Layout classes below are ported from the
+  approved preview onto the app's shared tokens (.screen vars from mobile_app.css). They live in
+  this page for now; cc#890 consolidates them into the shared MOBILE_CSS block when the next
+  screens reuse them — noted as a deliberate, temporary deviation from spec item 2.
+  ONE fetch: /api/mobile/home2. Placeholder values never render — every section is live or its
+  honest empty state.
+*/
+.idx{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:11px 12px 3px}
+.ix{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
+.ix .n{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+.ix .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:16px;margin-top:2px}
+.ix .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;margin-left:6px;font-weight:700}
+.hero-mood{font-size:32px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
+.hchips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+.hc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  padding:5px 9px;border-radius:14px;border:1px solid var(--line2);color:var(--mut)}
+.hc.ok{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
+.hc.bad{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
+.chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;margin-bottom:6px}
+.chd .t{font-weight:800;font-size:14px}
+.chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.chev{color:var(--dim);font-size:16px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);min-height:44px}
+.row:first-of-type{border-top:0}
+.row .sym{font-weight:700;font-size:13.5px}
+.row .sub{font-size:11px;color:var(--dim);margin-top:1px}
+.row .r{text-align:right}
+.row .pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px}
+.row .pc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;margin-top:1px}
+.trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.st{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 8px;text-align:center}
+.st .k{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.st .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:14px;margin-top:3px}
+.news{padding:9px 0;border-top:1px solid var(--line)}
+.news:first-of-type{border-top:0}
+.news .h{font-size:13px;font-weight:600;line-height:1.4}
+.news .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;gap:8px;align-items:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:0 12px}
+.tool{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 6px;
+  text-align:center;min-height:44px;font-size:12px;font-weight:700;color:var(--mut);
+  text-decoration:none;display:block}
+.tool span{display:block;font-size:17px;margin-bottom:3px}
+a.card-link{text-decoration:none;color:inherit;display:block}
+</style>
 </head>
 <body>
-<!--
-  cc#874 — HOME, PROMOTED. previews/home.html stays frozen (item 9). 16916: "front door, approved".
-  Contract: 24 values, 18 SOURCED_BUT_EMPTY because smartgain_holdings has ZERO rows today. The
-  source is correct and returns nothing, so the DESIGNED EMPTY STATE renders — the book says it is
-  flat. It never prints 0.00 as if that were a measurement, and never a spinner.
-  Index tiles reuse v8_endpoints.domestic_live() so the app cannot show a different close from the
-  web (DISPLAY_PARITY 16202).
--->
 <div class="screen">
-  <div class="head"><h1 id="hi">Scorr</h1><div class="s" id="sub">loading…</div></div>
-  <div class="body" id="body"><div class="loading">Loading…</div></div>
+  <div class="head" style="display:flex;align-items:center;justify-content:space-between">
+    <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
+    <div class="s" id="sess">loading…</div>
+  </div>
+
+  <div class="idx" id="idx"></div>
+  <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
 </div>
+
 <nav class="bnav">
   <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -28,17 +77,17 @@
   <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
+
 <script>
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n(v, dp){
-  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
-  return Number(v).toLocaleString('en-IN',
-    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
-}
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+}
+function pct(v, dp){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v); return (x >= 0 ? '+' : '') + x.toFixed(dp == null ? 2 : dp) + '%';
 }
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
@@ -46,53 +95,123 @@ function inr(v){
   return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
 function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+function moodColor(m){
+  m = (m || '').toLowerCase();
+  if (m.indexOf('bullish') > -1) return 'var(--grn)';
+  if (m.indexOf('bearish') > -1) return 'var(--red)';
+  return 'var(--amber)';
+}
 function railHtml(r){
   if (!r) return '';
   var s = (r.state || 'CLOSED').toLowerCase();
   return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
 }
-function failBox(host, sub, e){
-  document.getElementById(host).innerHTML =
+
+fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then(function(d){
+  if (d.error) throw new Error(d.error);
+
+  document.getElementById('sess').textContent = d.session.label;
+
+  document.getElementById('idx').innerHTML = (d.indices || []).map(function(ix){
+    return '<div class="ix"><div class="n">' + esc(ix.name) + '</div>'
+      + '<div class="v">' + px(ix.close)
+      + '<span class="d ' + cls(ix.chg_pct) + '">' + pct(ix.chg_pct) + '</span></div></div>';
+  }).join('') || '';
+
+  var h = '';
+
+  /* 1 · HERO — the market today */
+  var hero = d.hero || {};
+  h += '<div class="c"><div class="chd"><div class="t">The market today</div>'
+    + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
+    + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + esc(hero.mood || '--') + '</div>'
+    + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
+    + '<div class="hchips">' + (hero.chips || []).map(function(c){
+        var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
+        var val = (c.value == null) ? '--'
+                : (String(c.label).indexOf('ADR') > -1 ? Number(c.value).toFixed(2) : pct(c.value));
+        return '<span class="hc' + k + '">' + esc(c.label) + ' ' + esc(val) + '</span>';
+      }).join('') + '</div></div>';
+
+  /* 2 · today's signals */
+  var sg = d.signals || {};
+  h += '<div class="sect">TODAY\'S SIGNALS</div>'
+    + '<a class="card-link" href="/m/v8"><div class="c"><div class="chd"><div class="t">V8 Engine</div>'
+    + '<div class="rgt">' + (sg.today || 0) + ' signals today ' + railHtml(sg.rail) + ' <span class="chev">\u203a</span></div></div>'
+    + ((sg.top || []).map(function(s){
+        return '<div class="row"><div class="l"><div class="sym">' + esc(s.symbol) + '</div>'
+          + '<div class="sub">' + esc(s.basket) + (s.at ? ' \u00b7 ' + esc(s.at) : '') + '</div></div>'
+          + '<div class="r"><div class="pv">' + px(s.price) + '</div>'
+          + (s.since_pct == null ? ''
+             : '<div class="pc ' + cls(s.since_pct) + '">' + pct(s.since_pct) + ' since</div>')
+          + '</div></div>';
+      }).join('') || '<div class="sum" style="padding:8px 0">No signals yet today.</div>')
+    + '</div></a>';
+
+  /* 3 · the open book */
+  var bk = d.book || {};
+  h += '<a class="card-link" href="/m/positions"><div class="c"><div class="chd"><div class="t">Open Book</div>'
+    + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="chev">\u203a</span></div></div>'
+    + '<div class="trio">'
+    + '<div class="st"><div class="k">Unrealised</div><div class="v ' + cls(bk.unrealised) + '">' + inr(bk.unrealised) + '</div></div>'
+    + '<div class="st"><div class="k">Realised</div><div class="v ' + cls(bk.realised) + '">' + inr(bk.realised) + '</div></div>'
+    + '<div class="st"><div class="k">Win / Loss</div><div class="v">' + (bk.wins == null ? '--' : bk.wins + ' / ' + bk.losses) + '</div></div>'
+    + '</div></div></a>';
+
+  /* 4 · MY PORTFOLIO — deliberately mid-scroll (founder 07-Aug), present, never hidden */
+  var pf = d.portfolio || {};
+  h += '<div class="sect">MY PORTFOLIO</div>'
+    + '<div class="c"><div class="chd"><div class="t">My Portfolio</div>'
+    + '<div class="rgt">' + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
+    + railHtml(pf.rail) + '</div></div>'
+    + (pf.empty
+        ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
+        : (pf.rows || []).map(function(r){
+            return '<div class="row"><div class="l"><div class="sym">' + esc(r.symbol) + '</div>'
+              + '<div class="sub">' + esc(r.direction) + ' ' + (r.qty == null ? '--' : Number(r.qty).toLocaleString('en-IN')) + '</div></div>'
+              + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
+              + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>';
+          }).join(''))
+    + '</div>';
+
+  /* 5 · worth reading */
+  var rd = d.reading || {};
+  h += '<div class="sect">WORTH READING</div>'
+    + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Intel</div>'
+    + '<div class="rgt">' + (rd.count_24h || 0) + ' stories today <span class="chev">\u203a</span></div></div>'
+    + ((rd.items || []).map(function(n){
+        var edt = n.category === 'AI Editorial';
+        return '<div class="news"><div class="h">' + esc(n.headline) + '</div>'
+          + '<div class="m">' + (edt ? '<span class="tag edt">EDITORIAL</span>' : esc(n.category || ''))
+          + (n.when ? ' ' + esc(n.when) : '') + '</div></div>';
+      }).join('') || '<div class="sum" style="padding:8px 0">Nothing new in the last day.</div>')
+    + '</div></a>';
+
+  var rs = d.results || {};
+  h += '<a class="card-link" href="/m/results"><div class="c"><div class="chd"><div class="t">Results Corner</div>'
+    + '<div class="rgt">' + (rs.today || 0) + ' report today <span class="chev">\u203a</span></div></div>'
+    + '<div class="sum">Every result explained in plain words.</div></div></a>';
+
+  /* 6 · tools — Screeners / Sector / FPC tiles join here when cc#892 lands */
+  h += '<div class="sect">TOOLS</div>';
+  document.getElementById('body').innerHTML = h;
+
+  var tools = document.createElement('div');
+  tools.className = 'tools';
+  tools.innerHTML =
+      '<a class="tool" href="/m/gvm"><span>\u25c8</span>GVM</a>'
+    + '<a class="tool" href="/m/check"><span>\u2713</span>Check</a>'
+    + '<a class="tool" href="/m/qb"><span>\u25a6</span>Baskets</a>'
+    + '<a class="tool" href="/m/digest"><span>\u2600</span>Digest</a>'
+    + '<a class="tool" href="/m/positions"><span>\u25e7</span>Open Book</a>'
+    + '<a class="tool" href="/m/results"><span>\u2263</span>Results</a>';
+  document.getElementById('body').appendChild(tools);
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
     + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  if (sub) document.getElementById(sub).textContent = 'failed to load';
-}
-
-fetchWithTimeout('/api/mobile/home').then(function(r){ return r.json(); }).then(function(d){
-  if (d.error) throw new Error(d.error);
-  document.getElementById('sub').innerHTML = esc(d.date) + ' · ' + esc(d.time) + ' IST ' + railHtml(d.rail);
-  var tiles = (d.indices || []).map(function(i){
-    return '<div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 12px">'
-      + '<div style="font-size:10.5px;color:var(--dim);font-weight:700">' + esc(i.name) + '</div>'
-      + '<div class="mono" style="font-size:17px;font-weight:800;margin-top:3px">' + px(i.close) + '</div>'
-      + '<div class="mono ' + cls(i.chg_pct) + '" style="font-size:11px;margin-top:2px">'
-      + (i.chg_pct == null ? '--' : (i.chg_pct >= 0 ? '+' : '') + n(i.chg_pct) + '%') + '</div></div>';
-  }).join('');
-  var b = d.book || {};
-  var bookCard = '<div class="c">'
-    + '<div class="meta"><span class="tag cat">MY BOOK</span>'
-    + '<span class="tag ' + (b.empty ? 'neut' : 'bull') + '">' + esc(b.state) + '</span></div>'
-    + (b.empty
-        ? '<div class="empty" style="padding:14px 0 4px"><b>' + esc(b.message) + '</b>'
-          + 'Positions appear here as soon as the book has one.</div>'
-        : '<div class="hl mono ' + cls(b.mtm) + '">' + inr(b.mtm) + '</div>'
-          + '<div class="sum mono">' + b.positions + ' positions · ' + inr(b.value) + ' value</div>')
-    + '</div>';
-  var s = d.shortcuts || {};
-  var links = [['/m/v8','V8 signals', s.v8_open + ' open'],
-               ['/m/qb','Baskets', s.qb_open + ' holdings'],
-               ['/m/intel','Intel', s.news_24h + ' items today'],
-               ['/m/gvm','GVM scores', 'search a company'],
-               ['/m/check','Trade Check', 'cached verdicts']]
-    .map(function(l){
-      return '<a class="c" style="display:flex;align-items:center;text-decoration:none;color:inherit" href="' + l[0] + '">'
-        + '<span style="flex:1"><span class="hl">' + esc(l[1]) + '</span>'
-        + '<span class="sum" style="display:block;margin-top:3px">' + esc(l[2]) + '</span></span>'
-        + '<span style="color:var(--dim)">›</span></a>';
-    }).join('');
-  document.getElementById('body').innerHTML =
-    '<div style="display:flex;gap:9px;margin-bottom:11px">' + tiles + '</div>' + bookCard + links;
-}).catch(function(e){ failBox('body','sub',e); });
+  document.getElementById('sess').textContent = 'failed to load';
+});
 </script>
 </body>
 </html>
