@@ -152,6 +152,13 @@
 .isr span:last-child{margin-left:auto}
 .digl{display:block;margin-top:13px;padding-top:11px;border-top:1px solid var(--line);
   font-size:12.5px;font-weight:700;color:var(--blu,#4D7CFE);text-decoration:none}
+/* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
+.pmood{margin-bottom:4px}
+.pmood .pw{font-size:21px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+.pmeter{display:flex;gap:4px;margin:8px 0 5px}
+.pmeter i{flex:1;height:5px;border-radius:3px;background:var(--line2);opacity:.45}
+.pmeter i.on{opacity:1}
+.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
   letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
 .v10r{display:flex;align-items:center;gap:8px;min-height:32px}
@@ -838,11 +845,62 @@ function idxRow(name, sym, level){
         : '<div class="ibar"><div class="idot" style="left:' + (pos * 100).toFixed(1) + '%"></div></div>'
           + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>');
 }
+/* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
+   PCR_MOOD_MAPPING_V1, founder-locked in session_log 18024, and CONTRARIAN by decision: a LOW
+   put/call ratio means the crowd is not buying protection, which reads as Fear; a HIGH one reads
+   as Greed.
+
+   WHICH BANDS — the card carried TWO tables and they disagree. `rescope_08aug` lists
+   <=0.7/0.7-0.9/0.9-1.1/1.1-1.3/>=1.3 with a "Neutral" middle; `bands_final` lists
+   <0.5/0.5-0.8/0.8-1.0/1.0-1.4/>1.4 with a "Caution" middle and says in its own words that it
+   SUPERSEDES the rescope text. I read session_log 18024 to settle it rather than pick: the entry
+   is titled "bands_FINAL_founder_08aug" and matches the second table. That is what is implemented.
+
+   The bands are deliberately wide at the extremes. 18024 states 46 days of history with min 0.50,
+   median 0.90, max 1.28 — which the DB confirms exactly (46 rows, 0.499 / 0.898 / 1.283) — so
+   over that whole history the labels fall 1 Extreme Fear, 12 Fear, 23 Caution, 10 Greed, 0
+   Extreme Greed. Extremes SHOULD be rare; that is the design, not a bug.
+
+   ONE DERIVATION: this reads hero.pcr, the same value the card-1 PCR chip shows. No second fetch
+   and no second computation. Null PCR renders NOTHING — never a guessed label. */
+var PCR_BANDS = [
+  [-Infinity, 0.5, 'Extreme Fear', 'var(--red,#FF5C6C)'],
+  [0.5,       0.8, 'Fear',         'var(--red,#FF5C6C)'],
+  [0.8,       1.0, 'Caution',      'var(--amber,#F5B94A)'],
+  [1.0,       1.4, 'Greed',        'var(--grn,#2FD48B)'],
+  [1.4,  Infinity, 'Extreme Greed','var(--grn,#2FD48B)']
+];
+function pcrBand(v){
+  if (v == null || isNaN(Number(v))) return -1;
+  var x = Number(v);
+  /* Written as literal cut-offs rather than a loop over the table, because a loop got the top
+     edge wrong: 18024 says "1.0-1.4 Greed; >1.4 Extreme Greed", so 1.4 itself is GREED, and a
+     half-open [1.0,1.4) test dropped exactly 1.4 through to no label at all. These four lines
+     mirror 18024 one for one — "<0.5", "0.5-0.8", "0.8-1.0", "1.0-1.4", then ">1.4". */
+  if (x < 0.5)  return 0;      // Extreme Fear
+  if (x < 0.8)  return 1;      // Fear
+  if (x < 1.0)  return 2;      // Caution
+  if (x <= 1.4) return 3;      // Greed   — 1.4 inclusive
+  return 4;                    // Extreme Greed — strictly above 1.4
+}
+function pcrMood(hero){
+  var i = pcrBand(hero.pcr);
+  if (i < 0) return '';                      // no PCR = no label, never a guess
+  var b = PCR_BANDS[i];
+  return '<div class="pmood"><div class="pw" style="color:' + b[3] + '">' + esc(b[2]) + '</div>'
+    + '<div class="pmeter">' + PCR_BANDS.map(function(x, j){
+        return '<i class="' + (j === i ? 'on' : '') + '"'
+          + (j === i ? ' style="background:' + b[3] + '"' : '') + '></i>';
+      }).join('') + '</div>'
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
+    + (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) : '') + '</div></div>';
+}
 function heroCard2(d){
   var t = {};
   (d.ticker || []).forEach(function(x){ t[x.name] = x.price; });
-  return '<div class="c"><div class="chd"><div class="t">Index range</div>'
+  return '<div class="c"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
+    + pcrMood(d.hero || {})
     + idxRow('NIFTY 50', 'NIFTY50', t['NIFTY'])
     + idxRow('BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
     + '<a class="digl" href="/m/digest">Read the Daily Digest &#8594;</a>'

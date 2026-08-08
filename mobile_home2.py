@@ -425,12 +425,17 @@ def mobile_home2(request: Request):
         v10 = _v10_state(cur)
 
         # 0c · PCR + VIX latest for the hero chips (server-side; frontend never guesses keys)
+        # cc#927: price_date comes along so card 2 can CITE the as-of beside the mood label it
+        # derives. Same row, same query, one extra column — not a second fetch (18024: "same PCR
+        # the hero chip reads — one derivation").
         cur.execute("""
-            SELECT pcr FROM pcr_daily WHERE underlying='NIFTY' AND pcr IS NOT NULL
+            SELECT pcr, price_date FROM pcr_daily
+            WHERE underlying='NIFTY' AND pcr IS NOT NULL
             ORDER BY price_date DESC LIMIT 1
         """)
         _p = cur.fetchone()
         pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
+        pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
         cur.execute("""
             SELECT price, chg_pct FROM global_indices WHERE name='India VIX' AND price IS NOT NULL
             ORDER BY quote_date DESC LIMIT 1
@@ -637,6 +642,7 @@ def mobile_home2(request: Request):
                     else "Gate state unavailable."),
             "chips": chips,
             "pcr": pcr_latest,
+            "pcr_date": pcr_date,
             "vix": vix_latest,
             "v10": v10,
             "as_of": (mood or {}).get("checked_at"),
