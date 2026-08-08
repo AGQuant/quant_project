@@ -18,6 +18,13 @@ DATA DOCTRINE, inherited:
   * since-% on a signal uses v8_qualified.cmp (price AT signal) vs the live LATERAL close, with
     the sign flipped for sell_* baskets. Both prices real; nothing derived from a close alone.
   * A section whose source returns nothing states so (empty:true / message) — never a fake zero.
+  * BOOK = WEB MASTER DASHBOARD FORMULA, exactly (founder caught the drift 08-Aug: app showed
+    all-time 6.26L where web showed 3.49L). The web book is the FRESH ERA only —
+    entry_ts >= app_config.v8_paper_rebuild_cutover_ts (cc#504 cutover, era doctrine cc#510),
+    basket 's1_reclaim_obs' excluded — with REALISED shown NET of Rs.500/closed-trade brokerage
+    and W/L counted as clean result='TARGET' vs result='SL' (gap/gate/conflict exits count in the
+    money, not in W/L). Verified against DB 08-Aug: 33 trades, gross 366,112, net 349,612,
+    TARGET 13 / SL 5 — identical to the web cards. Open/unrealised use the same era scope.
 """
 
 import logging
@@ -35,6 +42,7 @@ log = logging.getLogger("scorr.mobile.home2")
 router = APIRouter()
 
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
+BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
 
 @router.get("/api/mobile/home2")
@@ -62,6 +70,11 @@ def mobile_home2(request: Request):
     is_td = now.weekday() < 5            # holiday table read lives in /api/mobile/now; weekday is
                                          # enough for the rails here and never lies bullish
     with _conn() as conn, conn.cursor() as cur:
+        # fresh-era cutover — the same app_config key the web daylog reads (cc#510)
+        cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
+        _row = cur.fetchone()
+        cutover = _row[0] if _row and _row[0] else None
+
         # 1 · today's signals, newest 3, with the live price beside the signal price
         cur.execute("""
             SELECT q.symbol, q.basket, q.signal_ts, q.cmp AS signal_cmp,
@@ -83,8 +96,7 @@ def mobile_home2(request: Request):
         """)
         sig_head = _rows(cur)[0]
 
-        # 2 · open book: live unrealised over OPEN positions (same LATERAL resolver as the
-        #     positions screen, so the two surfaces cannot disagree), realised + W/L from trades
+        # 2 · open book — FRESH ERA, the web Master Dashboard scope (see header doctrine)
         cur.execute("""
             SELECT COALESCE(SUM(
                        (COALESCE(lp.cmp, p.entry_price) - p.entry_price) * p.qty *
@@ -98,14 +110,18 @@ def mobile_home2(request: Request):
                 ORDER BY ts DESC LIMIT 1
             ) lp ON true
             WHERE p.status = 'OPEN'
-        """)
+              AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
+              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
+        """, {"cut": cutover})
         book_live = _rows(cur)[0]
         cur.execute("""
-            SELECT COUNT(*) AS trades, COALESCE(SUM(pnl), 0) AS realised,
-                   COUNT(*) FILTER (WHERE pnl > 0) AS wins,
-                   COUNT(*) FILTER (WHERE pnl < 0) AS losses
+            SELECT COUNT(*) AS trades, COALESCE(SUM(pnl), 0) AS gross,
+                   COUNT(*) FILTER (WHERE result = 'TARGET') AS wins,
+                   COUNT(*) FILTER (WHERE result = 'SL') AS losses
             FROM v8_paper_trades
-        """)
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND basket IS DISTINCT FROM 's1_reclaim_obs'
+        """, {"cut": cutover})
         led = _rows(cur)[0]
 
         # 3 · my portfolio (SmartGain) — rows + aggregate. TIMESTAMPTZ converted in SQL.
@@ -177,6 +193,8 @@ def mobile_home2(request: Request):
     t = now.time()
     market_open = bool(is_td and MARKET_OPEN <= t <= SESSION_END)
 
+    gross = f(led["gross"]) or 0.0
+    brokerage = (led["trades"] or 0) * BROKERAGE_PER_TRADE
     return {
         "session": {
             "market_open": market_open,
@@ -205,8 +223,11 @@ def mobile_home2(request: Request):
         "book": {
             "open": book_live["open_n"],
             "unrealised": round(f(book_live["unrealised"]) or 0.0, 2),
-            "realised": round(f(led["realised"]) or 0.0, 2),
+            "realised": round(gross - brokerage, 2),      # NET, exactly the web card
+            "gross": round(gross, 2),
+            "brokerage": brokerage,
             "wins": led["wins"], "losses": led["losses"], "trades": led["trades"],
+            "era": "fresh",
         },
         "portfolio": {
             "empty": pf_empty,
