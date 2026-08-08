@@ -61,9 +61,15 @@ router = APIRouter()
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
-# Ticker order: the market experience reads domestic first, then world indices, then the
-# commodity/currency/crypto tail — same families the Daily Digest global section carries.
-_TICKER_ORDER = ["index", "volatility", "commodity", "currency", "crypto"]
+# Ticker order (founder 08-Aug batch 4): EXPLICIT Indian-investor relevance, not family order.
+# NIFTY/BANKNIFTY lead (added first, live), then: India VIX (fear gauge) -> US overnight cue
+# (Dow, Nasdaq, S&P) -> Asia same-session (Nikkei, Hang Seng) -> Europe (FTSE, DAX) -> currency
+# pressure (USDINR, DXY) -> commodities (Gold, Silver, Brent, WTI, Nat Gas) -> Bitcoin last.
+# A name not on this list still renders (after the listed ones) — new feed additions are never
+# silently dropped from the tape.
+_TICKER_NAME_ORDER = ["India VIX", "Dow", "Nasdaq", "S&P 500", "Nikkei", "Hang Seng",
+                      "FTSE", "DAX", "USDINR", "DXY", "Gold", "Silver", "Brent", "WTI",
+                      "Natural Gas", "Bitcoin"]
 
 
 def _v10_state(cur):
@@ -276,15 +282,15 @@ def mobile_home2(request: Request):
     def f(v):
         return float(v) if v is not None else None
 
-    # ── ticker: NIFTY/BANKNIFTY first (live), then the global tail in family order ─────────
+    # ── ticker: NIFTY/BANKNIFTY first (live), then the global tail in Indian-investor order ──
     ticker = []
     for k, v in (idx.get("indices") or {}).items():
         if isinstance(v, dict):
             ticker.append({"name": "NIFTY" if k == "NIFTY50" else "BANKNIFTY",
                            "price": v.get("close"), "chg_pct": v.get("chg_pct"),
                            "category": "domestic"})
-    _fam = {c: i for i, c in enumerate(_TICKER_ORDER)}
-    for r in sorted(glob_rows, key=lambda r: (_fam.get(r["category"], 99), r["name"])):
+    _pos = {n: i for i, n in enumerate(_TICKER_NAME_ORDER)}
+    for r in sorted(glob_rows, key=lambda r: (_pos.get(r["name"], 99), r["name"])):
         ticker.append({"name": r["name"], "price": f(r["price"]),
                        "chg_pct": f(r["chg_pct"]), "category": r["category"]})
 
