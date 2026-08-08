@@ -7,20 +7,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_card_strip.js"></script>
+<script src="/scorr_chart_card.js"></script>
+<script src="/scorr_analysis_card.js"></script>
+<script src="/results_card.js"></script>
+<script src="/scorr_cockpit_card.js"></script>
 <style>
 /*
   cc#891 — V8 reskinned to previews/v8.html (tiered card stack, rails legend).
-  cc#894 (Fable direct, 17783) — depth per founder's row-by-row decisions:
-    * SLOTS line in the gate (Buy/Sell/Total) — read from /api/v8/market_mood, the web's own
-      source (16202), because the mobile aggregate does not carry slots and mobile_endpoints
-      stays untouched until the final maintenance pass.
-    * FUNNEL line inside each basket card — universe -> stages -> FINAL from
-      /api/v8/funnel/{basket}, fetched lazily on first expand; counts only (founder dropped the
-      stock-by-filter matrix). Response keys rendered defensively; unknowns state themselves.
-    * TRADE LEDGER expands to the last 20 closed trades, and DAY LOG renders day-by-day P&L —
-      both from /api/mobile/trades (one call).
+  cc#894 (Fable direct, 17868) — founder's row decisions:
+    * SLOTS in the gate (from /api/v8/market_mood, the web's own source).
+    * FUNNEL line per basket (/api/v8/funnel/{basket}, lazy, counts only).
+    * TRADE LEDGER rows + DAY LOG (/api/mobile/trades).
+    * C·A·R·D strip (item 1) on every signal row and ledger row — the SAME shared components the
+      web uses, rendered via window.ScorrCardRow per rule cc#789. Full Chart/Analysis/Result/
+      Cockpit popups, zero duplication. :root bridge maps web CSS vars to the dark palette.
   Raw Data / Strategy Matrix / thresholds remain web-only by founder ruling.
 */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
 .headx{padding:15px 14px 11px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
 .headx .t{flex:1;min-width:0}
 .headx h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
@@ -57,20 +61,19 @@
 .chev{color:var(--dim);font-size:17px;flex-shrink:0;width:10px;text-align:center;line-height:1;transition:transform .15s}
 .vc.openx .chev{transform:rotate(90deg)}
 .grn{color:var(--grn)}.redx{color:var(--red)}.mut{color:var(--mut)}
-.syrow{display:flex;align-items:baseline;gap:10px;padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px}
-.syrow .sy2{font-weight:700;font-size:12.5px;flex:1}
+.syrow{display:flex;align-items:center;gap:8px;padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;flex-wrap:wrap}
+.syrow .sy2{font-weight:700;font-size:12.5px;margin-right:auto}
 .syrow .at{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--dim)}
 .more{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);padding:8px 0 0 2px}
 .fun{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--mut);
   padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;line-height:1.6}
 .fun b{color:var(--txt)}
-.trow{display:flex;align-items:baseline;gap:8px;padding:7px 0 0 2px;border-top:1px solid var(--line);margin-top:8px;font-size:11.5px}
-.trow .sy2{font-weight:700;flex:1}
+.trow{display:flex;align-items:center;gap:8px;padding:7px 0 0 2px;border-top:1px solid var(--line);margin-top:8px;font-size:11.5px;flex-wrap:wrap}
+.trow .sy2{font-weight:700;margin-right:auto}
 .trow .mono2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px}
 .legend{margin:22px 12px 0;padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .legend .h{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
 .lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;color:var(--mut);line-height:1.5}
-.lrow:last-child{margin-bottom:0}
 .lbar{width:3px;height:30px;border-radius:2px;flex-shrink:0;margin-top:1px}
 .lrow b{color:var(--txt);font-weight:700}
 </style>
@@ -101,7 +104,7 @@ var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function px(v){ if (v==null||isNaN(Number(v))) return '--';
+function pxv(v){ if (v==null||isNaN(Number(v))) return '--';
   var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
@@ -112,12 +115,16 @@ function railCls(r){
   var s = (r && r.state || 'CLOSED').toUpperCase();
   return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
 }
+function strip(sym){
+  /* full web C·A·R·D popups, compact size — shared component, rule cc#789 */
+  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
+  return '';
+}
 function funLine(slug){
   var f = STATE.funnels[slug];
   if (f === undefined) return '';
   if (f === 'loading') return '<div class="fun">funnel: loading…</div>';
   if (!f) return '<div class="fun">funnel unavailable</div>';
-  /* defensive: accept {stages:[{name,count}]} | {funnel:[...]} | flat object of numbers */
   var parts = [];
   var list = f.stages || f.funnel || null;
   if (Array.isArray(list)){
@@ -138,7 +145,7 @@ function basketCard(b, i, rcls){
   var open = STATE.open === i;
   var buy = String(b.slug || '').indexOf('sell') !== 0;
   var last = (b.symbols && b.symbols[0] && b.symbols[0].at) ? 'Last new signal ' + esc(b.symbols[0].at) : 'No new signals';
-  var h = '<button class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(' + i + ',\'' + esc(b.slug) + '\')">'
+  var h = '<div class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(event,' + i + ',\'' + esc(b.slug) + '\')">'
     + '<div class="vrow"><div class="ttl"><div class="n">' + esc(b.label) + '</div>'
     + '<div class="m">' + last + '</div></div>'
     + '<div class="val"><div class="v ' + (buy ? 'grn' : 'redx') + '">' + b.signals + '</div>'
@@ -148,12 +155,13 @@ function basketCard(b, i, rcls){
     h += funLine(b.slug);
     h += (b.symbols || []).map(function(s){
       return '<div class="syrow"><span class="sy2">' + esc(s.symbol) + '</span>'
+        + strip(s.symbol)
         + '<span class="at">' + esc(s.at || '') + '</span></div>';
     }).join('');
     if (b.truncated > 0) h += '<div class="more">and ' + b.truncated + ' more today</div>';
     if (!(b.symbols || []).length) h += '<div class="more">no symbols recorded</div>';
   }
-  return h + '</button>';
+  return h + '</div>';
 }
 function ledgerBlock(){
   var L = STATE.ledger;
@@ -162,7 +170,8 @@ function ledgerBlock(){
   var h = (L.trades || []).map(function(t){
     return '<div class="trow"><span class="sy2">' + esc(t.symbol)
       + ' <span class="mut" style="font-size:9.5px">' + esc(t.side) + ' · ' + esc(t.basket || '') + '</span></span>'
-      + '<span class="mono2 mut">' + px(t.entry) + ' \u2192 ' + px(t.exit) + '</span>'
+      + strip(t.symbol)
+      + '<span class="mono2 mut">' + pxv(t.entry) + ' \u2192 ' + pxv(t.exit) + '</span>'
       + '<span class="mono2 ' + ((t.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(t.pnl) + '</span></div>';
   }).join('');
   h += '<div class="fun" style="margin-top:12px"><b>DAY LOG</b></div>';
@@ -190,16 +199,16 @@ function render(){
 
   h += '<div class="tierlab">The book</div><div class="stack">'
     + '<a class="vc ' + rcls + '" href="/m/positions"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L</div></div>'
+    + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L · CARD on each</div></div>'
     + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
     + '<div class="chev">\u203a</div></div></a>'
-    + '<button class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger()"><div class="vrow">'
+    + '<div class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger(event)"><div class="vrow">'
     + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">All-time closed trades · tap for rows + day log</div></div>'
     + '<div class="val"><div class="v ' + ((d.ledger.gross_pnl || 0) >= 0 ? 'grn' : 'redx') + '">'
     + d.ledger.trades + '</div><div class="u">closed · ' + inr(d.ledger.gross_pnl) + '</div></div>'
     + '<div class="chev">\u203a</div></div>'
     + (STATE.ledgerOpen ? ledgerBlock() : '')
-    + '</button>'
+    + '</div>'
     + '</div>';
 
   h += '<div class="tierlab">More</div><div class="stack">'
@@ -224,7 +233,9 @@ function render(){
 
   document.getElementById('body').innerHTML = h;
 }
-function tog(i, slug){
+function tog(ev, i, slug){
+  /* taps on C·A·R·D buttons inside the card must open the popup, not fold the card */
+  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.open = (STATE.open === i ? -1 : i);
   if (STATE.open === i && STATE.funnels[slug] === undefined){
     STATE.funnels[slug] = 'loading'; render();
@@ -236,7 +247,8 @@ function tog(i, slug){
   }
   render();
 }
-function togLedger(){
+function togLedger(ev){
+  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.ledgerOpen = !STATE.ledgerOpen;
   if (STATE.ledgerOpen && !STATE.ledger){
     STATE.ledger = 'loading'; render();
