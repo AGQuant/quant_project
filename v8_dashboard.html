@@ -2741,7 +2741,12 @@ function pivotStar(sym){
   const s=PIVOT_STARS[sym]; if(!s) return '';
   const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
   const note = (s.note||'').replace(/"/g,'&quot;');
-  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
+  // cc#932 (PIVOT_STAR_V2, session_log 18052): the sell side is a CIRCLE, never a star. The glyph
+  // is taken from the SERVER's `glyph` field rather than decided here, so /dashboard and /m/v8
+  // cannot disagree about it (DISPLAY_PARITY 16202). Falls back to direction for a cached older
+  // response that predates the field.
+  const isCircle = (s.glyph ? s.glyph==='circle' : s.direction==='SELL');
+  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">${isCircle?'\u25CF':'\u2605'}</span>`;
 }
 
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';

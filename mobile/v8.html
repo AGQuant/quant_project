@@ -83,6 +83,7 @@
 .tagx.long{color:var(--grn)}
 .tagx.short{color:var(--red)}
 .pc1 .bk{font-size:10px;color:var(--dim);margin-left:auto;text-align:right;flex:none}
+.pvm{font-size:12px;line-height:1;margin-left:-2px}   /* cc#932 pivot marker */
 .pc2{display:flex;align-items:baseline;gap:9px;margin:7px 0 2px}
 .pc2 .pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;
   letter-spacing:-.01em}
@@ -155,7 +156,7 @@
 <script>
 var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
               mood: null, book: null, group: 'period', instrument: 'equity',
-              sub: {}, pop: null, fold: {} };
+              sub: {}, pop: null, fold: {}, stars: {} };   // cc#932: pivot markers by symbol
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -424,6 +425,19 @@ function posTap(id){
   STATE.pop = (STATE.pop === id) ? null : id;
   render();
 }
+/* cc#932 PIVOT_STAR_V2 marker (session_log 18052). SAME ENDPOINT as /dashboard —
+   /api/v8/pivot_star — and the SAME server-supplied glyph and note, so the two surfaces cannot
+   disagree (DISPLAY_PARITY 16202, "same component/endpoint, no fork"). Nothing is re-derived
+   here: colour follows star_color, shape follows glyph, and the tooltip is the server's own
+   facts-only star_note(), which is the V1 hard wall this card keeps. */
+function pivotMark(sym){
+  var s = (STATE.stars || {})[sym];
+  if (!s) return '';
+  var col = s.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
+  var circle = (s.glyph ? s.glyph === 'circle' : s.direction === 'SELL');
+  return '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">'
+    + (circle ? '\u25CF' : '\u2605') + '</span>';
+}
 function posCard(p){
   var col = (p.unrealised == null) ? 'var(--mut)'
           : (p.unrealised >= 0 ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
@@ -456,7 +470,7 @@ function posCard(p){
       + '</div></div>'
     : '';
   return '<div class="pcard' + (open ? ' openx' : '') + '" onclick="posTap(' + p.id + ')">'
-    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
+    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>' + pivotMark(p.symbol)
     + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
     + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
     + '<div class="pc2"><span class="pnl ' + cls(p.unrealised) + '">' + inr(p.unrealised) + '</span>'
@@ -679,9 +693,12 @@ Promise.all([
   fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }),
   fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; }),
   fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; })
+  fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; }),
+  fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
-  var d = res[0], mood = res[1], L = res[2], bk = res[3];
+  var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4];
+  // cc#932: a failed marker fetch must never blank the book — same guard the web uses.
+  if (ps && ps.stars) ps.stars.forEach(function(x){ STATE.stars[x.symbol] = x; });
   if (d.error) throw new Error(d.error);
   STATE.d = d;
   STATE.mood = (mood && !mood.error) ? mood : null;

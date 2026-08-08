@@ -57,17 +57,39 @@ _DB = os.getenv("DATABASE_URL", "")
 IST = pytz.timezone("Asia/Kolkata")
 
 TOUCH_SESSIONS = 3      # CLOSED sessions only — never an intraday low/high (card item 6)
-NEAR_LEVEL_PCT = 2.0    # |cmp - level| / level * 100
+NEAR_LEVEL_PCT = 2.0    # band width either side of the level, in %
 NEAR_PP_PCT    = 1.0    # recorded only, never rendered (card item 5)
 
-# "qualified" = the card's scope. "universe" = the founder's feasibility-study scope, kept so the
-# switch is one line if they want it. Changing this changes WHICH SYMBOLS ARE EVALUATED only —
-# never what the rule is.
-EVAL_SCOPE = "qualified"
+# ── cc#932 PIVOT_STAR_V2 — founder-locked in session_log 18052 ────────────────────────────────
+# The V1 conditions and scope are SUPERSEDED. V2, verbatim from 18052:
+#   BUY  (glyph = star, blue)
+#     1 TOUCH     in the last 3 closed sessions, session low <= THAT session's own S1
+#     2 POSITION  cmp between S1 and S1*1.02  OR  cmp > PP
+#     3 STABILITY day_1d between -1 and +2  AND  mom_2d between -1 and +2
+#   SELL (glyph = circle, red) — mirrored on R1
+#     1 TOUCH     session high >= that session's own R1
+#     2 POSITION  cmp between R1*0.98 and R1  OR  cmp < PP
+#     3 STABILITY day_1d between -2 and +1  AND  mom_2d between -2 and +1
+# V1's "up on the day" and "above 50-DMA" clauses are GONE — the stability band replaces them.
+# dma_50 is still read and still logged, because the column exists and dropping the record would
+# lose history for the 4-6 week review; it is simply no longer a condition.
+STAB_BUY  = (-1.0, 2.0)     # day_1d and mom_2d must BOTH sit inside this, buy side
+STAB_SELL = (-2.0, 1.0)     # mirrored band, sell side
 
-# Direction comes from the basket NAME PREFIX, not a hardcoded basket list, so a new buy_*/sell_*
-# basket is covered automatically (SCHEDULER_MASTER_RULE 5700's registry-derived doctrine applied
-# to basket enumeration).
+# GLYPH IS PART OF THE SPEC, not a template choice: buy = star, sell = CIRCLE, never a star on the
+# sell side. Served from here so web and mobile cannot disagree about it (DISPLAY_PARITY 16202).
+GLYPH = {"BUY": "star", "SELL": "circle"}
+
+# cc#932: the scope is now the OPEN PAPER BOOK. "qualified" (V1) and "universe" (the founder's
+# feasibility read) are kept so either is a one-line switch, but 18052 locks "positions".
+# Changing this changes WHICH SYMBOLS ARE EVALUATED only — never what the rule is.
+EVAL_SCOPE = "positions"
+
+# RETIRED BY cc#932, KEPT DELIBERATELY. Under V1 the basket prefix decided which side a symbol was
+# tested on. V2 tests BOTH sides on every candidate — the marker describes the STOCK's behaviour
+# against its own pivots, not the direction we are positioned in (18052's own example, MAXHEALTH,
+# is a SHORT position carrying a BUY star). Left in place because the "universe"/"qualified" scopes
+# still exist as one-line switches and would want it back; it has no caller today.
 def _direction(basket: str) -> Optional[str]:
     b = (basket or "").lower()
     if b.startswith("buy"):
@@ -131,6 +153,18 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
         # exists only so the founder's feasibility reading is reproducible without a code rewrite.
         if EVAL_SCOPE == "universe":
             cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        elif EVAL_SCOPE == "positions":
+            # cc#932: the OPEN paper book. Same era scope the book itself uses everywhere else
+            # (cc#504 cutover, s1_reclaim_obs excluded), so this marks the positions the founder
+            # is actually looking at and cannot mark a row the book does not show.
+            cur.execute("""
+                SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+                FROM v8_paper_positions p
+                LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                WHERE p.status = 'OPEN'
+                  AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                  AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
+                ORDER BY p.symbol, p.entry_ts DESC""")
         else:
             cur.execute("""SELECT DISTINCT ON (symbol) symbol, basket
                            FROM v8_qualified WHERE signal_date=%s
@@ -157,10 +191,11 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
                        WHERE symbol = ANY(%s) AND close > 0 ORDER BY symbol, price_date DESC""", (syms,))
         eod = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, dma_50, day_1d FROM v8_metrics
+        # cc#932: mom_2d joins day_1d — both are needed for the V2 stability band.
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, dma_50, day_1d, mom_2d FROM v8_metrics
                        WHERE symbol = ANY(%s) AND score_date <= %s
                        ORDER BY symbol, score_date DESC""", (syms, d))
-        met = {r[0]: (_f(r[1]), _f(r[2])) for r in cur.fetchall()}
+        met = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
 
         # THE TOUCH TEST — CLOSED SESSIONS ONLY (card item 6). Each prior session's low/high is
         # compared against THAT SESSION'S OWN pivot, never today's: a pivot is only meaningful for
@@ -180,19 +215,24 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
         """, (d, TOUCH_SESSIONS, syms))
         touch = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
+    def _band(v, lo_hi):
+        return v is not None and lo_hi[0] <= v <= lo_hi[1]
+
     out = []
     for sym, basket in cands:
-        direction = _direction(basket) if basket else None
         p = piv.get(sym)
         m = met.get(sym)
         if not p or not m:
             continue
         s1, r1, pp = p
-        dma_50, day_1d = m
+        dma_50, day_1d, mom_2d = m
         cmp_v = (live.get(sym) or {}).get("cmp") if live else None
         if cmp_v is None:
             cmp_v = eod.get(sym)
-        if cmp_v is None or dma_50 is None or day_1d is None:
+        # dma_50 is no longer a CONDITION (V2), so it must not gate evaluation either — it is only
+        # carried into the log. day_1d and mom_2d ARE conditions, so a missing one skips the symbol
+        # rather than being treated as passing.
+        if cmp_v is None or day_1d is None or mom_2d is None:
             continue
         s1_dates, r1_dates = touch.get(sym, (None, None))
 
@@ -201,14 +241,18 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
         # peaking at 69 of 209 in a day — it would flood the screen. Recorded for a 4-6 week review.
         near_pp = bool(pp and abs(cmp_v - pp) / pp * 100.0 <= NEAR_PP_PCT)
 
+        # cc#932 V2. NOTE the direction is NOT taken from the position's own side: the marker
+        # describes how the STOCK is behaving against its pivots, not which way we happen to be
+        # positioned. Fable's locked example proves it — MAXHEALTH carries a SHORT position and is
+        # the one BUY star on 07-Aug. Buy side is tested first, so a symbol can only take one glyph.
         star = None
-        if direction in (None, "BUY") and s1 and s1_dates:
-            if abs(cmp_v - s1) / s1 * 100.0 <= NEAR_LEVEL_PCT and day_1d > 0 and cmp_v > dma_50:
+        if s1 and s1_dates:
+            pos_ok = (s1 <= cmp_v <= s1 * (1.0 + NEAR_LEVEL_PCT / 100.0)) or (pp is not None and cmp_v > pp)
+            if pos_ok and _band(day_1d, STAB_BUY) and _band(mom_2d, STAB_BUY):
                 star = ("BLUE", "S1", s1, s1_dates)
-        if star is None and direction in (None, "SELL") and r1 and r1_dates:
-            # (d) is NOT inverted. Verified over 22 sessions: cmp < dma_50 returns ZERO rows,
-            # because a stock at R1 is at recent highs by construction.
-            if abs(cmp_v - r1) / r1 * 100.0 <= NEAR_LEVEL_PCT and day_1d < 0 and cmp_v > dma_50:
+        if star is None and r1 and r1_dates:
+            pos_ok = (r1 * (1.0 - NEAR_LEVEL_PCT / 100.0) <= cmp_v <= r1) or (pp is not None and cmp_v < pp)
+            if pos_ok and _band(day_1d, STAB_SELL) and _band(mom_2d, STAB_SELL):
                 star = ("RED", "R1", r1, r1_dates)
         if star is None:
             continue
@@ -223,7 +267,10 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
             "cmp_at_star": round(cmp_v, 2),
             "pct_from_level": round((cmp_v - level_value) / level_value * 100.0, 2),
             "near_pp": near_pp,
-            "day_1d": round(day_1d, 2), "dma_50": round(dma_50, 2),
+            "day_1d": round(day_1d, 2),
+            "mom_2d": round(mom_2d, 2),
+            "dma_50": round(dma_50, 2) if dma_50 is not None else None,
+            "glyph": GLYPH["BUY" if colour == "BLUE" else "SELL"],
             "touched_dates": [str(x) for x in (tdates or [])],
         })
     return out
@@ -235,8 +282,13 @@ def star_note(s: Dict[str, Any]) -> str:
     td = s.get("touched_dates") or []
     when = td[-1] if td else "recently"
     side = "above" if (s.get("pct_from_level") or 0) >= 0 else "below"
+    # cc#932: mom_2d is cited when present. Still FACTS ONLY — no buy/sell/entry/target wording.
+    # It is absent on a row read back from the log (no such column), and the sentence simply omits
+    # it rather than printing a placeholder.
+    m2 = s.get("mom_2d")
+    tail = f", 2-day {m2:+.1f}%" if isinstance(m2, (int, float)) else ""
     return (f"touched {s['level_name']} on {when}, now {abs(s.get('pct_from_level') or 0):.1f}% "
-            f"{side} it, {'up' if s['day_1d'] >= 0 else 'down'} {abs(s['day_1d']):.1f}% today")
+            f"{side} it, {'up' if s['day_1d'] >= 0 else 'down'} {abs(s['day_1d']):.1f}% today{tail}")
 
 
 def run_tick(conn=None) -> Dict[str, Any]:
@@ -299,21 +351,36 @@ def pivot_star(star_date: Optional[str] = None):
                        pct_from_level, day_1d, near_pp, cmp_at_star, first_seen_ts, touched_dates
                 FROM v8_pivot_star_log WHERE star_date=%s
                 ORDER BY star_color, symbol""", (d,))
+            # cc#932: `glyph` is DERIVED from the stored direction, so it needs no new column and
+            # no ALTER TABLE (MAINTENANCE_LOCK_RULE cc#351 forbids one here). Every existing field
+            # is untouched, so the response stays backward-compatible — consumers that ignore
+            # `glyph` keep working exactly as before.
             rows = [{
                 "symbol": r[0], "basket": r[1], "direction": r[2], "star_color": r[3],
                 "level_name": r[4], "level_value": _f(r[5]), "pct_from_level": _f(r[6]),
                 "day_1d": _f(r[7]), "near_pp": r[8], "cmp_at_star": _f(r[9]),
                 "first_seen_ts": str(r[10]) if r[10] else None,
                 "touched_dates": [str(x) for x in (r[11] or [])],
+                "glyph": GLYPH.get(r[2], "star"),
+                "spec_version": "V2",
             } for r in cur.fetchall()]
             for r in rows:
                 r["note"] = star_note(r)
             return {
                 "star_date": d, "count": len(rows), "stars": rows,
                 "scope": EVAL_SCOPE,
-                "rule": ("BLUE: BUY signal touched S1 in the last 3 closed sessions, now within 2% "
-                         "of S1, up on the day, above 50-DMA. RED: mirrored on R1 for SELL signals "
-                         "(the above-50-DMA clause is NOT inverted — verified zero rows otherwise)."),
+                "rule": ("PIVOT_STAR_V2 (session_log 18052), evaluated on the OPEN paper book. "
+                         "STAR (blue, buy side): touched its own S1 in the last 3 closed sessions; "
+                         "cmp within 2% above S1 or above PP; day_1d and mom_2d both between -1 "
+                         "and +2. CIRCLE (red, sell side): mirrored on R1 — touched R1, cmp within "
+                         "2% below R1 or below PP, day_1d and mom_2d both between -2 and +1. The "
+                         "glyph is never a star on the sell side."),
+                "spec_version": "V2",
+                "spec_version_note": ("v8_pivot_star_log has no free text column for a version "
+                                      "stamp and ALTER TABLE is not permitted from here "
+                                      "(MAINTENANCE_LOCK_RULE cc#351). It needs none: the table "
+                                      "held ZERO rows at the moment V2 shipped (cc#931 — V1 never "
+                                      "wrote once), so every row in it is V2 by construction."),
                 "basis": ("DISPLAY MARKER + MEASUREMENT LOG ONLY. Not a qualification rule, not a "
                           "basket, not a slot; it never creates a paper entry (session_log 5646)."),
                 "near_pp_note": "near_pp is recorded for a 4-6 week review only and is never rendered.",
