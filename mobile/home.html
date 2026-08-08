@@ -71,14 +71,48 @@
 .v10tg button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .v10st{display:flex;gap:10px;flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:10px;color:var(--dim);margin:2px 0 8px}
-.v10tr{display:flex;align-items:center;gap:9px;padding:9px 3px;border-bottom:1px solid var(--line);
-  min-height:46px;cursor:pointer}
-.v10tr.sel{background:rgba(77,124,254,.10)}
-.v10tr .a{flex:1;min-width:0}
-.v10tr .d1{font-size:12.5px;font-weight:800}
-.v10tr .d2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:2px}
-.v10tr .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:800;text-align:right}
-.v10tr .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);text-align:right;margin-top:2px}
+/* ── cc#928: chart window + panned history ─────────────────────────────────────────────────── */
+.v10cv{position:relative}
+.v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
+  text-align:center;padding:3px 0 2px;opacity:.8}
+/* ── cc#928: trade log — F/O tabs, month headers, row anatomy ──────────────────────────────── */
+.lgtabs{display:flex;gap:6px;margin:2px 0 4px}
+.lgt{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;
+  font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.lgt i{font-style:normal;color:var(--dim);margin-left:3px}
+.lgt.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.lgt.on i{color:var(--blu,#4D7CFE)}
+.mhd{display:flex;align-items:center;gap:8px;padding:10px 2px 5px;margin-top:4px;
+  border-bottom:1px solid var(--line);cursor:pointer}
+.mhd .mn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--dim);flex:1}
+.mhd .mp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:800}
+.mhd .mc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
+.mhd .mx{font-size:10px;color:var(--dim);min-width:12px;text-align:right}
+.mhd.op .mn{color:var(--amber,#F5B94A)}
+.tr2{display:flex;align-items:stretch;gap:9px;padding:8px 3px;border-bottom:1px solid var(--line);
+  min-height:54px;cursor:pointer}
+.tr2.sel{background:rgba(77,124,254,.10)}
+.tr2 .rl{width:3px;border-radius:2px;flex:none;background:var(--line2)}
+.tr2.wn .rl{background:var(--grn,#2FD48B)}
+.tr2.ls .rl{background:var(--red,#FF5C6C)}
+.tr2.op .rl{background:var(--amber,#F5B94A)}
+.tr2 .mid{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.tr2 .l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
+.tr2 .pill{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+  letter-spacing:.06em;padding:2px 6px;border-radius:5px}
+.tr2 .pill.lg{color:var(--grn,#2FD48B);background:rgba(47,212,139,.13)}
+.tr2 .pill.sh{color:var(--red,#FF5C6C);background:rgba(255,92,108,.13)}
+.tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--mut)}
+.tr2 .pr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700}
+.tr2 .l2{display:flex;gap:7px;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9px;color:var(--dim)}
+.tr2 .rsn{border:1px solid var(--line2);border-radius:4px;padding:1px 5px;font-weight:700}
+.tr2 .rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
+.tr2 .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
+.tr2 .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:2px}
 /* ── cc#907: the V8 Open Book trio overflowed its card on the founder's phone ────────────────
    TWO fixes, because they solve two different halves and either alone still breaks.
    STRUCTURE: a grid item's automatic minimum is its min-content width, so a 1fr track GROWS to
@@ -565,7 +599,8 @@ function togTrend(ev, kind){
        visible immediately.
    The server does the matching (mobile_home2.mobile_v10chart) — dates converted to IST in SQL,
    FUT legs only, trades older than the window dropped and counted, never clamped onto a candle. */
-var V10 = { sym: 'NIFTY50', data: null, sel: null };
+var V10 = { sym: 'NIFTY50', data: null, sel: null,
+            leg: 'FUT', win: null, mfold: {} };   // cc#928: F/O tab, chart window, month folds
 
 function v10Icon(sym){
   return '<button class="v10ic" onclick="openV10(event,\'' + sym + '\')" aria-label="V10 chart"'
@@ -577,6 +612,7 @@ function v10Icon(sym){
 function openV10(ev, sym){
   if (ev){ ev.stopPropagation(); ev.preventDefault(); }
   V10.sym = sym || 'NIFTY50';
+  V10.win = null; V10.mfold = {};   // cc#928: fresh index, fresh window
   var ov = document.getElementById('v10ov');
   if (ov) ov.classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -590,7 +626,7 @@ function closeV10(){
 }
 function setV10(sym){
   if (V10.sym === sym) return;
-  V10.sym = sym; V10.sel = null;
+  V10.sym = sym; V10.sel = null; V10.win = null; V10.mfold = {};
   loadV10();
 }
 function v10Toggle(){
@@ -621,37 +657,56 @@ function loadV10(){
         + '<div class="empty"><b>Chart unavailable</b>' + esc(e.message) + '</div>';
     });
 }
-function v10Sel(id){
-  V10.sel = (V10.sel === id) ? null : id;
-  renderV10();
+/* ══ cc#928: WINDOWED CHART + THUMB PAN ════════════════════════════════════════════════════
+   64 sessions at once was too dense to read on a phone. The full series still loads once; the
+   chart now shows a ONE MONTH window (22 sessions) and you drag it back through history with a
+   thumb. Dragging RIGHT moves the window BACK in time, which is the direction every chart app
+   uses — you are pulling the paper rightwards to see what came before.
+
+   The drag must not fight the page: the SVG carries touch-action:pan-y, and the handler only
+   calls preventDefault once the gesture is clearly HORIZONTAL (|dx| > |dy|). A vertical swipe
+   therefore scrolls the page as normal and never gets swallowed by the chart. */
+var V10_WIN = 22;                       // ~1 trading month
+
+function v10Clamp(i, n){ return Math.max(0, Math.min(Math.max(0, n - V10_WIN), i)); }
+function v10Window(d){
+  var n = (d.series || []).length;
+  if (V10.win == null) V10.win = Math.max(0, n - V10_WIN);   // default = the most recent month
+  V10.win = v10Clamp(V10.win, n);
+  return { from: V10.win, to: Math.min(n, V10.win + V10_WIN) };
 }
-/* candles + pins, hand-drawn SVG. Scale spans the candle highs/lows AND every pin price, so a
-   trade filled outside the day's 5-min range (the engine's 15:30 close tick is one) still lands
-   on the chart instead of being clipped off it. */
+/* slide the window so a given date sits inside it — used when a trade row is tapped */
+function v10ShowDate(d, iso){
+  var s = d.series || [];
+  for (var i = 0; i < s.length; i++){
+    if (s[i].d === iso){
+      V10.win = v10Clamp(i - Math.floor(V10_WIN / 2), s.length);
+      return true;
+    }
+  }
+  return false;
+}
+
 function v10Svg(d){
-  /* cc#920 — a CLEAN LINE, not candlesticks. The founder called the candle version clumsy and he
-     is right for this job: 64 daily OHLC bars at ~5px each on a phone is texture, not information,
-     and the question this screen answers is "where did the model buy and sell". So the price is a
-     thin closing line with a soft fill, and the trades are the only other marks on it.
-     MARKERS: entry = triangle pointing UP under the line, coloured by side (BUY green, SELL red);
-     exit = triangle pointing DOWN over the line, coloured by OUTCOME (win green, loss red). Both
-     are tappable and select their trade, which highlights its row in the log below and draws that
-     trade's own labels. Everything else dims, so one trade can be read at a time without clutter. */
-  var s = d.series || [], n = s.length;
+  var all = d.series || [];
+  var w = v10Window(d);
+  var s = all.slice(w.from, w.to), n = s.length;
   if (n < 2) return '<div class="sum">Not enough price history for this window.</div>';
   var W = 360, H = 200, PL = 4, PR = 42, PT = 16, PB = 20;
   var lo = Infinity, hi = -Infinity;
   s.forEach(function(p){ if (p.c < lo) lo = p.c; if (p.c > hi) hi = p.c; });
+  var inWin = {};
+  s.forEach(function(p, i){ inWin[p.d] = i; });
   (d.pins || []).forEach(function(p){
-    if (p.price != null){ if (p.price < lo) lo = p.price; if (p.price > hi) hi = p.price; }
+    if (inWin[p.d] !== undefined && p.price != null){
+      if (p.price < lo) lo = p.price; if (p.price > hi) hi = p.price;
+    }
   });
   var pad = (hi - lo) * 0.08 || 1;
   lo -= pad; hi += pad;
   var rng = (hi - lo) || 1;
   var xs = function(i){ return PL + i / (n - 1) * (W - PL - PR); };
   var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
-  var idx = {};
-  s.forEach(function(p, i){ idx[p.d] = i; });
 
   var out = [];
   for (var g = 0; g <= 3; g++){
@@ -670,15 +725,15 @@ function v10Svg(d){
 
   var selPins = [];
   (d.pins || []).forEach(function(p){
-    var i = idx[p.d];
-    if (i === undefined) return;
+    var i = inWin[p.d];
+    if (i === undefined) return;                    // outside the visible month
     var x = xs(i), y = ys(p.price != null ? p.price : s[i].c);
     var isSel = (p.id === V10.sel), dim = (V10.sel != null && !isSel);
     var entry = (p.kind !== 'exit');
     var col = entry ? (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)')
                     : (p.win ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
-    var t = entry ? [[x, y + 4], [x - 4.5, y + 11], [x + 4.5, y + 11]]      // points up, below line
-                  : [[x, y - 4], [x - 4.5, y - 11], [x + 4.5, y - 11]];     // points down, above
+    var t = entry ? [[x, y + 4], [x - 4.5, y + 11], [x + 4.5, y + 11]]
+                  : [[x, y - 4], [x - 4.5, y - 11], [x + 4.5, y - 11]];
     out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
       + '" fill="' + col + '" opacity="' + (dim ? '.25' : '1') + '"'
       + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
@@ -709,142 +764,170 @@ function v10Svg(d){
     + ' font-family="IBM Plex Mono,monospace">' + esc(dlab(s[0].d)) + '</text>');
   out.push('<text x="' + (W - PR).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="end" font-size="9"'
     + ' fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(dlab(s[n - 1].d)) + '</text>');
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
-    + ' style="width:100%;height:' + H + 'px;display:block">' + out.join('') + '</svg>';
+
+  var more = w.from > 0;
+  return '<div class="v10cv" id="v10cv">'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
+    + ' style="width:100%;height:' + H + 'px;display:block;touch-action:pan-y">' + out.join('') + '</svg>'
+    + '<div class="v10hint">' + (more ? '← drag right for older' : 'start of history')
+    + ' · showing ' + n + ' of ' + all.length + ' sessions</div></div>';
 }
+
+/* ── drag: horizontal only, and only once the gesture proves itself horizontal ── */
+var V10DRAG = null;
+function v10DragStart(e){
+  var t = e.touches ? e.touches[0] : e;
+  V10DRAG = { x: t.clientX, y: t.clientY, win: V10.win, w: 0, axis: null };
+}
+function v10DragMove(e){
+  if (!V10DRAG || !V10.data) return;
+  var t = e.touches ? e.touches[0] : e;
+  var dx = t.clientX - V10DRAG.x, dy = t.clientY - V10DRAG.y;
+  if (V10DRAG.axis === null){
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;      // too small to call yet
+    V10DRAG.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if (V10DRAG.axis !== 'x') return;                        // vertical: leave it to the page
+  if (e.cancelable) e.preventDefault();
+  var host = document.getElementById('v10cv');
+  var wpx = host ? host.clientWidth : 340;
+  var per = wpx / V10_WIN;                                 // px per session in the visible window
+  var shift = Math.round(dx / per);
+  var next = v10Clamp(V10DRAG.win - shift, V10.data.series.length);
+  if (next !== V10.win){ V10.win = next; renderV10(); }
+}
+function v10DragEnd(){ V10DRAG = null; }
+
+/* ══ cc#928: TRADE LOG — FUTURES / OPTIONS, OPEN pinned, closed grouped by month ═══════════
+   SPLIT CHOICE (stated): TABS, not two stacked sections. On a phone two full logs stacked means
+   scrolling past everything futures to reach the first option; a two-button switch keeps both one
+   tap away and the month grouping identical inside each, which is what the card asks for.
+   The data backs both tabs — verified before building: 45 closed FUT and 36 closed OPT trades,
+   plus 1 open of each, and every OPT row carries its strike and type. */
+var MONN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function monKey(iso){
+  if (!iso) return 'Undated';
+  var p = String(iso).split('-');
+  return p.length < 2 ? 'Undated' : (MONN[Number(p[1]) - 1] + ' ' + p[0]);
+}
+function v10SetLeg(l){ V10.leg = l; V10.sel = null; renderV10(); }
+function v10FoldMon(k){ V10.mfold[k] = !V10.mfold[k]; renderV10(); }
+
+/* tapping a row selects the trade AND slides the chart to it (card item 3c) */
+function v10Sel(id){
+  var was = V10.sel;
+  V10.sel = (was === id) ? null : id;
+  if (V10.sel != null && V10.data){
+    var t = (V10.data.trades || []).filter(function(x){ return x.id === id; })[0];
+    if (t && t.leg === 'FUT') v10ShowDate(V10.data, t.entry_d);
+  }
+  renderV10();
+}
+
 function v10Row(t){
-  /* cc#920 — one clean scannable row per trade: WHEN, WHICH WAY, entry -> exit, and the money on
-     the right where the eye lands. The second line carries the supporting detail (why it closed,
-     which basket, how long it was held) in small type so it never competes. Tapping selects the
-     trade and its markers light up on the chart above. */
-  var col = t.open ? '' : (t.win ? 'pos' : 'neg');
+  /* row anatomy per the spec: a 3px result rail, one compact line of what/where, P&L big on the
+     right with points under it, and AT MOST two supporting facts on line 2. */
+  var state = t.open ? 'op' : (t.win ? 'wn' : 'ls');
   var px2 = function(v){ return v == null ? '--' : Math.round(v).toLocaleString('en-IN'); };
-  var sub = [t.open ? 'OPEN' : (t.reason || 'EXIT'),
-             t.basket_label || '',
-             (t.days_held == null ? '' : t.days_held + 'd')].filter(Boolean).join(' · ');
-  return '<div class="v10tr' + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
-    + '<span class="a">'
-    + '<div class="d1"><span class="' + (t.side === 'BUY' ? 'pos' : 'neg') + '">' + esc(t.side) + '</span>'
-    + ' <span class="mono2">' + px2(t.entry_price) + ' → ' + px2(t.exit_price) + '</span></div>'
-    + '<div class="d2">' + esc(dlab(t.entry_d)) + (t.exit_d ? ' – ' + esc(dlab(t.exit_d)) : '')
-    + ' · ' + esc(sub) + '</div></span>'
-    + '<span><div class="p1 ' + col + '">' + (t.pnl == null ? '—' : inrShort(t.pnl)) + '</div>'
-    + (t.open && t.target != null
-        ? '<div class="p2">T ' + px2(t.target) + '</div>'
-        : (t.points == null ? '' : '<div class="p2">' + (t.points >= 0 ? '+' : '')
-            + Number(t.points).toFixed(0) + ' pts</div>'))
-    + '</span></div>';
+  var dates = dlab(t.entry_d) + (t.exit_d && t.exit_d !== t.entry_d ? '–' + dlab(t.exit_d) : '');
+  var facts = [];
+  if (t.open){ if (t.target != null) facts.push('target ' + px2(t.target)); }
+  else if (t.reason) facts.push(t.reason);
+  if (t.days_held != null) facts.push(t.days_held + 'd');
+  else if (!t.open && t.exit_d && t.entry_d && t.exit_d !== t.entry_d) facts.push('multi-day');
+  var opt = (t.leg === 'OPT' && t.opt_strike != null)
+    ? ' <span class="ostk">' + px2(t.opt_strike) + (t.opt_type ? esc(t.opt_type) : '') + '</span>' : '';
+  return '<div class="tr2 ' + state + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
+    + '<span class="rl"></span>'
+    + '<span class="mid">'
+    + '<div class="l1"><span class="dt">' + esc(dates) + '</span>'
+    + '<span class="pill ' + (t.side === 'BUY' ? 'lg' : 'sh') + '">' + esc(t.side) + '</span>' + opt
+    + '<span class="pr">' + px2(t.entry_price) + ' → ' + (t.open ? 'open' : px2(t.exit_price)) + '</span></div>'
+    + (facts.length ? '<div class="l2">' + facts.map(function(f, i){
+        return i === 0 && !t.open ? '<span class="rsn">' + esc(f) + '</span>' : '<span>' + esc(f) + '</span>';
+      }).join('') + '</div>' : '')
+    + '</span>'
+    + '<span class="rt"><div class="p1">' + (t.pnl == null ? '—' : inrShort(t.pnl)) + '</div>'
+    + (t.points == null ? '' : '<div class="p2">' + (t.points >= 0 ? '+' : '')
+        + Number(t.points).toFixed(0) + ' pts</div>') + '</span></div>';
 }
+
+function v10Log(d){
+  var leg = V10.leg || 'FUT';
+  var rows = (d.trades || []).filter(function(t){ return (t.leg || 'FUT') === leg; });
+  var bl = (d.by_leg || {});
+  var tabs = ['FUT', 'OPT'].map(function(l){
+    var b = bl[l] || {trades: 0, open: 0};
+    return '<button class="lgt' + (leg === l ? ' on' : '') + '" onclick="v10SetLeg(\'' + l + '\')">'
+      + (l === 'FUT' ? 'FUTURES' : 'OPTIONS') + ' <i>' + ((b.trades || 0) + (b.open || 0)) + '</i></button>';
+  }).join('');
+  var h = '<div class="lgtabs">' + tabs + '</div>';
+  if (!rows.length)
+    return h + '<div class="sum" style="padding:10px 2px">No '
+      + (leg === 'FUT' ? 'futures' : 'options') + ' trades for ' + esc(d.label) + '.</div>';
+
+  var open = rows.filter(function(t){ return t.open; });
+  if (open.length)
+    h += '<div class="mhd op"><span class="mn">OPEN · ' + open.length + '</span></div>'
+      + open.map(v10Row).join('');
+
+  var closed = rows.filter(function(t){ return !t.open; });
+  /* Sorted on a REAL date key, not on the order the rows happened to arrive in. The endpoint
+     returns entry_ts ASC today, so a plain reverse() looked right — but it silently depends on
+     that, and it put the months in the wrong order the moment the input was ordered differently.
+     Sorting on YYYY-MM (and the rows inside a month on their own date) cannot drift. */
+  var map = {}, key = {};
+  closed.forEach(function(t){
+    var iso = t.exit_d || t.entry_d || '';
+    var k = monKey(iso);
+    if (!map[k]){ map[k] = []; key[k] = String(iso).slice(0, 7) || '0000-00'; }
+    map[k].push(t);
+  });
+  var order = Object.keys(map).sort(function(a, b){
+    return key[a] < key[b] ? 1 : (key[a] > key[b] ? -1 : 0);      // newest month first
+  });
+  h += order.map(function(k){
+    var g = map[k].slice().sort(function(a, b){                   // newest trade first inside it
+      var x = a.exit_d || a.entry_d || '', y = b.exit_d || b.entry_d || '';
+      return x < y ? 1 : (x > y ? -1 : (b.id - a.id));
+    });
+    var net = 0, known = false;
+    g.forEach(function(t){ if (t.pnl != null){ net += t.pnl; known = true; } });
+    var fold = !!V10.mfold[k];
+    return '<div class="mhd" onclick="v10FoldMon(\'' + esc(k).replace(/'/g, "\\'") + '\')">'
+      + '<span class="mn">' + esc(k) + '</span>'
+      + '<span class="mp ' + (known ? cls(net) : '') + '">' + (known ? inrShort(net) : '--') + '</span>'
+      + '<span class="mc">' + g.length + '</span>'
+      + '<span class="mx">' + (fold ? '▾' : '▴') + '</span></div>'
+      + (fold ? '' : g.map(v10Row).join(''));
+  }).join('');
+  return h;
+}
+
 function renderV10(){
   var d = V10.data, bd = document.getElementById('v10bd');
   if (!d || !bd) return;
   var t = document.getElementById('v10ttl');
   if (t) t.textContent = d.label + ' · V10 trades';
   var st = d.stats || {};
-  var trades = (d.trades || []).slice().reverse();      // newest first in the log
   bd.innerHTML = v10Toggle()
     + '<div class="v10st"><span>' + esc(dlab(d.from || '')) + ' → ' + esc(dlab(d.to || ''))
     + '</span><span>' + (d.count || 0) + ' sessions · daily</span>'
     + '<span>' + (st.closed || 0) + ' closed · ' + (st.wins || 0) + 'W/' + (st.losses || 0) + 'L'
     + (st.open ? ' · ' + st.open + ' open' : '') + '</span>'
     + (st.net_pnl == null ? '' : '<span class="' + cls(st.net_pnl) + '">Net ' + inrShort(st.net_pnl) + '</span>')
-    + (d.outside_window ? '<span>' + d.outside_window + ' older than window</span>' : '')
     + '</div>'
     + v10Svg(d)
     + '<div class="sect" style="margin-top:10px">TRADE LOG</div>'
-    + (trades.length ? trades.map(v10Row).join('')
-                     : '<div class="sum" style="padding:8px 0">No V10 trades in this window.</div>');
+    + v10Log(d);
+  var cv = document.getElementById('v10cv');
+  if (cv){
+    cv.addEventListener('touchstart', v10DragStart, {passive: true});
+    cv.addEventListener('touchmove',  v10DragMove,  {passive: false});   // must be able to cancel
+    cv.addEventListener('touchend',   v10DragEnd,   {passive: true});
+  }
 }
 
-/* ══ cc#911: MY PORTFOLIO — expand control + in-place C·A·R·D strip ════════════════════════
-   The card used to be wrapped in <a class="card-link" href="/m/holdings">, so EVERY tap inside
-   it navigated away, including a tap on a holding. Now the card is a plain div, one explicit
-   expand control opens /m/holdings, and a row tap opens the shared strip under that row.
-
-   THE STRIP IS CONSUMED, NEVER RE-IMPLEMENTED. window.ScorrCardRow(sym) is the compact
-   table-row variant from scorr_card_strip.js (cc#789/#798). cc#789 exists because two hand-
-   written copies of the strip drifted apart, so no C/A/R/D markup is written here at all.
-
-   SCRIPT LOADING — the card asked me to add five <script src> tags after verifying each route.
-   VERIFIED, AND NO TAGS WERE ADDED, because all of them are already on the page: /m/home is in
-   PROTECTED (main.py, cc#874), and auth_gate injects _MOBILE_HEAD into the head of any protected
-   page that does not already carry the shared mobile stylesheet link — this page carries the
-   mobile_app one instead. _MOBILE_HEAD carries scorr_card_common.js, scorr_mobile_cards.js,
-   scorr_card_strip.js, results_card.js, scorr_chart_card.js, scorr_analysis_card.js and
-   scorr_cockpit_card.js, in that dependency order, each stamped with the build id (cc#792/805).
-   Adding the tags by hand would have loaded every one of them twice and duplicated the
-   already-solved cache-busting. results_card.js is not a repo-root file — it is generated and
-   served from pwa_endpoints.py (RESULTS_CARD_JS), which is why the card could not find it.
-
-   GRACEFUL DEGRADE: if ScorrCardRow is somehow missing at tap time the opened slot says so in
-   one line. Never a dead tap, never a silent no-op. */
-var PF = { open: null, data: null };
-
-function pfStrip(sym){
-  try {
-    if (typeof window.ScorrCardRow === 'function') return window.ScorrCardRow(sym);
-  } catch (e) { /* fall through to the honest message */ }
-  return '<span class="sum">Card view unavailable</span>';
-}
-function pfTap(i){
-  PF.open = (PF.open === i) ? null : i;   // one row open at a time; tapping the open row closes it
-  renderPortfolio();
-}
-function pfRow(r, i){
-  /* data-scorr-skip: cc#898's universal symbol-tap sheet steps aside here, because this row
-     already opens the same strip INLINE under itself (cc#911, founder-specified). Two
-     mechanisms firing on one tap would be worse than either. */
-  return '<div class="row pfrow" data-scorr-skip="1" role="button" tabindex="0" onclick="pfTap(' + i + ')"'
-    + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();pfTap(' + i + ');}">'
-    + '<div class="l"><div class="sym">' + esc(r.symbol) + '</div>'
-    + '<div class="sub">' + esc(r.direction) + ' '
-    + (r.qty == null ? '--' : Number(r.qty).toLocaleString('en-IN')) + '</div></div>'
-    + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
-    + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>'
-    + (PF.open === i ? '<div class="pfcard">' + pfStrip(r.symbol) + '</div>' : '');
-}
-function renderPortfolio(){
-  var el = document.getElementById('pfblock'), pf = PF.data;
-  if (!el || !pf) return;
-  el.innerHTML = '<div class="chd"><div class="t">My Portfolio</div>'
-    + '<div class="rgt">'
-    + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
-    + railHtml(pf.rail)
-    + ' <a class="h-exp" href="/m/holdings" aria-label="Open My Portfolio">⤢</a></div></div>'
-    + (pf.empty
-        ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
-        : (pf.rows || []).map(pfRow).join(''));
-}
-
-/* ══ HERO CARD 2 — INDEX RANGE + DAILY DIGEST (founder 08-Aug) ═════════════════════════════
-   Where NIFTY and BANKNIFTY sit between TODAY'S support and resistance. Every number is real:
-     level  -> the NIFTY / BANKNIFTY rows already in the home2 ticker payload (domestic_live)
-     S / R  -> /api/paper/pivots?symbol=NIFTY50,BANKNIFTY — v8_paper_pivots, the SAME endpoint
-               the web dashboard's pivot ladder reads, so the app cannot disagree with it
-   The dot is (level - S1) / (R1 - S1), clamped, so it shows position between the two levels.
-   NO INVENTED VERDICT: the reference screen carries a sentiment badge, and I am not deriving one.
-   What is stated instead is a FACT the pivot gives for free — whether price is above or below the
-   pivot point — and if any of the three levels is missing the row renders its numbers with no bar
-   at all rather than a bar drawn to a guess. */
-var PIV = null;   // symbol -> {pp,r1,s1,...} from /api/paper/pivots
-
-function idxRow(name, sym, level){
-  var pv = PIV && PIV[sym];
-  var s1 = pv ? Number(pv.s1) : null, r1 = pv ? Number(pv.r1) : null,
-      pp = pv ? Number(pv.pp) : null;
-  var pos = null;
-  if (level != null && s1 != null && r1 != null && r1 !== s1)
-    pos = Math.max(0, Math.min(1, (Number(level) - s1) / (r1 - s1)));
-  var side = (level == null || pp == null) ? ''
-    : (Number(level) >= pp ? 'above pivot' : 'below pivot');
-  return '<div class="irow"><span class="inm">' + esc(name) + '</span>'
-    + '<span class="ilv">' + px(level) + '</span>'
-    + (side ? '<span class="ipp">' + side + '</span>' : '') + '</div>'
-    + (pos == null
-        ? '<div class="isr"><span>levels pending</span></div>'
-        : '<div class="ibar"><div class="idot" style="left:' + (pos * 100).toFixed(1) + '%"></div></div>'
-          + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>');
-}
 /* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
    PCR_MOOD_MAPPING_V1, founder-locked in session_log 18024, and CONTRARIAN by decision: a LOW
    put/call ratio means the crowd is not buying protection, which reads as Fear; a HIGH one reads

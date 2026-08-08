@@ -296,23 +296,24 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
         in_win = set(p["d"] for p in series)
 
         cur.execute("""
-            SELECT id, side, entry_price, exit_price, exit_reason, pnl, points,
+            SELECT id, side, leg, opt_strike, opt_type,
+                   entry_price, exit_price, exit_reason, pnl, points,
                    (entry_ts AT TIME ZONE 'Asia/Kolkata')::date          AS ed,
                    to_char(entry_ts AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS et,
                    (exit_ts  AT TIME ZONE 'Asia/Kolkata')::date          AS xd,
                    to_char(exit_ts  AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS xt
             FROM v10_trades
-            WHERE leg = 'FUT' AND symbol = %s AND entry_ts IS NOT NULL
+            WHERE symbol = %s AND entry_ts IS NOT NULL
             ORDER BY entry_ts ASC
         """, (sym,))
         closed_rows = _rows(cur)
 
         cur.execute("""
-            SELECT id, side, entry_price, stop, target,
+            SELECT id, side, leg, opt_strike, opt_type, entry_price, stop, target,
                    (entry_ts AT TIME ZONE 'Asia/Kolkata')::date          AS ed,
                    to_char(entry_ts AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS et
             FROM v10_positions
-            WHERE status = 'OPEN' AND leg = 'FUT' AND symbol = %s
+            WHERE status = 'OPEN' AND symbol = %s
             ORDER BY entry_ts ASC
         """, (sym,))
         open_rows = _rows(cur)
@@ -330,11 +331,19 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
         pnl = f(r["pnl"])
         win = (pnl is not None and pnl >= 0)
         side = (r["side"] or "").upper()
-        t = {"id": r["id"], "side": side, "entry_d": ed, "entry_t": r["et"],
+        leg = (r["leg"] or "FUT").upper()
+        t = {"id": r["id"], "side": side, "leg": leg,
+             "opt_strike": f(r["opt_strike"]), "opt_type": r["opt_type"],
+             "entry_d": ed, "entry_t": r["et"],
              "entry_price": f(r["entry_price"]), "exit_d": xd, "exit_t": r["xt"],
              "exit_price": f(r["exit_price"]), "reason": r["exit_reason"] or "EXIT",
              "pnl": pnl, "points": f(r["points"]), "win": win, "open": False}
         trades.append(t)
+        # cc#928: PINS STAY FUT-ONLY, deliberately. An option leg's price is a PREMIUM (220), not
+        # an index level (24,500) — plotting it on the spot chart would put a marker at a price the
+        # index never traded. Options legs live in the log, where a premium is the right number.
+        if leg != "FUT":
+            continue
         if ed in in_win:
             pins.append({"d": ed, "id": r["id"], "kind": "entry", "side": side,
                          "price": f(r["entry_price"]), "t": r["et"], "win": win})
@@ -346,16 +355,34 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
     for r in open_rows:
         ed = str(r["ed"]) if r["ed"] else None
         side = (r["side"] or "").upper()
-        t = {"id": r["id"], "side": side, "entry_d": ed, "entry_t": r["et"],
+        leg = (r["leg"] or "FUT").upper()
+        t = {"id": r["id"], "side": side, "leg": leg,
+             "opt_strike": f(r["opt_strike"]), "opt_type": r["opt_type"],
+             "entry_d": ed, "entry_t": r["et"],
              "entry_price": f(r["entry_price"]), "exit_d": None, "exit_t": None,
              "exit_price": None, "reason": "OPEN", "pnl": None, "points": None,
              "win": None, "open": True, "stop": f(r["stop"]), "target": f(r["target"])}
         trades.append(t)
+        if leg != "FUT":
+            continue
         if ed in in_win:
             pins.append({"d": ed, "id": r["id"], "kind": "open", "side": side,
                          "price": f(r["entry_price"]), "t": r["et"], "win": None})
         elif ed:
             outside += 1
+
+    # per-leg totals so each log section can state its own real numbers
+    by_leg = {}
+    for t in trades:
+        b = by_leg.setdefault(t["leg"], {"trades": 0, "open": 0, "net_pnl": 0.0})
+        if t["open"]:
+            b["open"] += 1
+        else:
+            b["trades"] += 1
+            if t["pnl"] is not None:
+                b["net_pnl"] += t["pnl"]
+    for b in by_leg.values():
+        b["net_pnl"] = round(b["net_pnl"], 2)
 
     closed = [t for t in trades if not t["open"] and t["pnl"] is not None]
     net = round(sum(t["pnl"] for t in closed), 2) if closed else None
@@ -365,7 +392,7 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
         "series": series, "count": len(series),
         "from": series[0]["d"] if series else None,
         "to": series[-1]["d"] if series else None,
-        "trades": trades, "pins": pins,
+        "trades": trades, "pins": pins, "by_leg": by_leg,
         "outside_window": outside,
         "stats": {"closed": len(closed), "open": len(open_rows),
                   "wins": sum(1 for t in closed if t["win"]),
