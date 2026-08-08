@@ -179,7 +179,9 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
       return '<div class="tk"><span class="n">' + esc(x.name) + '</span>'
         + '<span class="d ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span></div>';
     }).join('');
-  var tkDur = Math.max(20, (d.ticker || []).length * 2.6);
+  // cc#901: duration halved = speed doubled. The floor halves with it (20s -> 10s) so a short
+  // tape stays proportional instead of hitting the floor and running slower than a long one.
+  var tkDur = Math.max(10, (d.ticker || []).length * 1.3);
   h += '<div class="tkr" style="--tkr-dur:' + tkDur + 's"><div class="tkr-track">'
     + tkItems + tkItems + '</div></div>';
 
