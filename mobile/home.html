@@ -7,6 +7,23 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
+   sheet (cc#893 item 3). The ticker's own styling now lives HERE, scoped to this page, so a
+   shared-CSS change can never restyle the tape again. Design restored = the original pill:
+   SYMBOL + %CHANGE only (founder: "symbol and change") — the price column is dropped; the
+   tape reads direction at a glance, exact levels live in the cards below. Marquee behaviour
+   (cc#896 batch 3: doubled track, -50% seamless loop, hold to pause) unchanged. */
+.tkr{overflow:hidden;padding:8px 0;margin:0 -12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.tkr-track{display:flex;gap:8px;width:max-content;padding:0 12px;animation:tkrMove var(--tkr-dur,40s) linear infinite}
+.tkr:active .tkr-track,.tkr:hover .tkr-track{animation-play-state:paused}
+@keyframes tkrMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
+.tk{flex:none;display:flex;align-items:baseline;gap:6px;padding:4px 9px;border-radius:8px;
+  background:var(--panel);border:1px solid var(--line)}
+.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;white-space:nowrap}
+</style>
 </head>
 <body>
 <div class="screen">
@@ -155,12 +172,11 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
 
   var h = '';
 
-  /* 0 · TICKER BAR — MOVING marquee (founder 08-Aug batch 3): the track is rendered TWICE and
-     animated -50%, so the loop is seamless; touch/hold pauses it. Duration scales with item
-     count so 18 symbols and 5 symbols move at the same reading speed. */
+  /* 0 · TICKER BAR — MOVING marquee. cc#900: each item is SYMBOL + %CHANGE only (founder:
+     previous design was better) — the price span is gone; the pill styling is scoped in this
+     page's own <style> so shared-CSS changes can never restyle the tape. */
   var tkItems = (d.ticker || []).map(function(x){
       return '<div class="tk"><span class="n">' + esc(x.name) + '</span>'
-        + '<span class="v">' + px(x.price) + '</span>'
         + '<span class="d ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span></div>';
     }).join('');
   var tkDur = Math.max(20, (d.ticker || []).length * 2.6);
