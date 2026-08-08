@@ -91,7 +91,7 @@
    *
    * newsEsc — single definition, verbatim.
    */
-  /* ── cc#878: fetchWithTimeout — THE ONE TIMEOUT, SITE-WIDE ────────────────────────────────────
+  /* ── cc#878: fetchWithTimeout — THE ONE TIMEOUT, SITE-WIDE ────────────────────────────────
      cc#869 finding 7 / P0-B: 129 of 134 fetch() call sites in the served front end had no
      deadline. A request that never returns leaves a spinner or shimmer animating forever, which
      reads as "still loading" and never as "failed" — so the founder's phone showed a loading
@@ -554,5 +554,116 @@
     document.addEventListener('DOMContentLoaded', build);
   } else {
     build();
+  }
+})();
+
+/* ── cc#917: MOBILE CARD SHEET DESIGN + UNIFORM DISMISS (founder 08-Aug, Fable) ─────────────
+   Two founder complaints on the /m/* card popup: (1) a tap OUTSIDE must close it; (2) the
+   letter cards are web modals squeezed onto a phone. Fixed here, presentation-only:
+
+   DISMISS — one rule for every layer. Each card component already owns a close(); what was
+   missing is a uniform backdrop contract. On /m/*, a click that lands on a full-screen
+   overlay element ITSELF (not on the dialog inside it) closes every known card component.
+   Escape does the same. Component logic untouched — we only CALL the close() each shared
+   file already exposes (the same set scorr_card_strip.js _closeAll uses).
+
+   DESIGN — bottom sheets. At <=767px on /m/*, every card dialog ([role="dialog"] inside a
+   fixed overlay) renders as a slide-up sheet: full width, rounded top, drag notch, 90vh cap,
+   safe-area padding, 44px close targets. Pure CSS scoped by a body class this block adds on
+   /m/* only — web pages never get the class, so /dashboard is pixel-identical. The letter
+   cards' DOM and behaviour are consumed as-is (cc#803/805 lock respected). */
+(function () {
+  if (window.__scorrCardSheet) return;
+  window.__scorrCardSheet = true;
+  if (location.pathname.indexOf('/m/') !== 0) return;
+
+  /* scope hook: CSS below only applies under body.mcards, which only /m/* gets */
+  function addClass() { try { document.body.classList.add('mcards'); } catch (e) {} }
+
+  var CSS = ''
+    /* every card dialog becomes a bottom sheet on phone */
+    + '@media(max-width:767px){'
+    + 'body.mcards .rcard-ov, body.mcards .scorr-ml-ov{align-items:flex-end!important;padding:0!important}'
+    + 'body.mcards .rcard-ov [role="dialog"], body.mcards .rcard,'
+    + 'body.mcards .scorr-ml{'
+    + '  position:relative;left:auto;top:auto;transform:none!important;'
+    + '  width:100%!important;max-width:100%!important;margin:0!important;'
+    + '  max-height:90vh!important;overflow-y:auto;-webkit-overflow-scrolling:touch;'
+    + '  border-radius:18px 18px 0 0!important;border-bottom:none!important;'
+    + '  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))!important;'
+    + '  animation:sheetUp .22s ease}'
+    /* drag notch */
+    + 'body.mcards .rcard:before, body.mcards .scorr-ml:before{content:"";display:block;'
+    + '  width:38px;height:4px;border-radius:2px;background:var(--line2,rgba(148,166,210,.35));'
+    + '  margin:2px auto 10px}'
+    /* close buttons reach thumb size */
+    + 'body.mcards .rcard-x, body.mcards .scorr-ml-x, body.mcards .symsheet-x{'
+    + '  min-width:44px;min-height:44px}'
+    /* section labels breathe a little more on phone */
+    + 'body.mcards .rcard-lbl{margin-top:20px;padding-top:14px}'
+    + '@keyframes sheetUp{from{transform:translateY(40px);opacity:.6}to{transform:none;opacity:1}}'
+    /* the symbol sheet itself (cc#898) gets the same finish */
+    + 'body.mcards .symsheet{position:fixed;inset:0;z-index:100000;display:none;'
+    + '  background:rgba(5,9,18,.55);align-items:flex-end}'
+    + 'body.mcards .symsheet.open{display:flex}'
+    + 'body.mcards .symsheet-bd{width:100%;background:var(--panel,#0E1526);'
+    + '  border:1px solid var(--line,#1E2A44);border-bottom:none;border-radius:18px 18px 0 0;'
+    + '  padding:10px 16px calc(18px + env(safe-area-inset-bottom,0px));animation:sheetUp .22s ease}'
+    + 'body.mcards .symsheet-bd:before{content:"";display:block;width:38px;height:4px;'
+    + '  border-radius:2px;background:var(--line2,rgba(148,166,210,.35));margin:0 auto 10px}'
+    + 'body.mcards .symsheet-hd{display:flex;align-items:center;justify-content:space-between;'
+    + '  margin-bottom:10px}'
+    + 'body.mcards .symsheet-hd b{font:800 16px Sora,sans-serif;letter-spacing:.01em}'
+    + 'body.mcards .symsheet-x{background:none;border:none;color:var(--dim,#5E6B8F);'
+    + '  font-size:18px;cursor:pointer}'
+    + 'body.mcards .symsheet-strip{display:flex;justify-content:center;padding:4px 0 2px}'
+    + 'body.mcards .symsheet-strip .scorr-cs-b{width:52px;height:52px;border-radius:12px;'
+    + '  font-size:17px;margin:0 5px}'
+    + '}';
+
+  function inject() {
+    addClass();
+    try {
+      var st = document.createElement('style');
+      st.setAttribute('data-scorr', 'card-sheet');
+      st.appendChild(document.createTextNode(CSS));
+      (document.head || document.documentElement).appendChild(st);
+    } catch (e) {}
+  }
+
+  /* ── uniform dismiss ── */
+  function closeAll() {
+    try { if (window.ScorrSymbolCard) window.ScorrSymbolCard.close(); } catch (e) {}
+    try { if (window.ScorrRCard && window.ScorrRCard.close) window.ScorrRCard.close(); } catch (e) {}
+    try { if (window.ScorrChartCard && window.ScorrChartCard.close) window.ScorrChartCard.close(); } catch (e) {}
+    try { if (window.ScorrAnalysisCard && window.ScorrAnalysisCard.close) window.ScorrAnalysisCard.close(); } catch (e) {}
+    try { if (window.ScorrCockpitCard && window.ScorrCockpitCard.close) window.ScorrCockpitCard.close(); } catch (e) {}
+    try { if (window.ScorrModels && window.ScorrModels.close) window.ScorrModels.close(); } catch (e) {}
+  }
+  function isBackdrop(el) {
+    /* the click landed on the overlay ELEMENT itself (not the dialog inside it):
+       fixed, spans the viewport, and hosts a dialog child */
+    try {
+      if (!el || el.nodeType !== 1 || el === document.body) return false;
+      var cs = getComputedStyle(el);
+      if (cs.position !== 'fixed') return false;
+      var r = el.getBoundingClientRect();
+      if (r.width < window.innerWidth * 0.9 || r.height < window.innerHeight * 0.9) return false;
+      return !!el.querySelector('[role="dialog"],.rcard,.scorr-ml,.symsheet-bd');
+    } catch (e) { return false; }
+  }
+  function onTap(e) {
+    if (isBackdrop(e.target)) { closeAll(); }
+  }
+
+  function boot() {
+    inject();
+    document.addEventListener('click', onTap, true);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
   }
 })();
