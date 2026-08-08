@@ -8,14 +8,23 @@
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
 <style>
-/* cc#891 — Results calendar in the shared card grammar (Claude direct push, 17783).
-   One card per day, companies inside, V8-universe rows flagged first. Coverage stated. */
+/* cc#891 — Results calendar in the shared card grammar.
+   cc#893 — DEPTH: rows whose symbol HAS a plain-words analysis (result_analysis_v2, via
+   /api/mobile/result_analysis_index) get a READ tag and expand the analysis inline on tap.
+   No dead affordances: rows without analysis get no tag and no tap. (Fable direct, 17783.) */
 .dy{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:800;
   letter-spacing:.1em;color:var(--txt)}
 .rrow{display:flex;align-items:baseline;gap:8px;padding:8px 0 0;border-top:1px solid var(--line);margin-top:8px}
 .rrow:first-of-type{border-top:0;margin-top:6px}
 .rrow .sy{font-weight:700;font-size:12.5px}
 .rrow .nm{font-size:10px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rrow.hasan{cursor:pointer}
+.an{background:var(--panel2);border:1px solid var(--line2);border-radius:11px;
+  padding:11px 12px;margin:8px 0 2px}
+.an .read{font-size:13.5px;color:var(--txt);line-height:1.68}
+.an .read p{margin-top:8px}
+.an .read p:first-child{margin-top:0}
+.an .src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:8px}
 </style>
 </head>
 <body>
@@ -32,16 +41,37 @@
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 <script>
+var HAS = {};   /* symbol -> true when analysis exists */
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function railHtml(r){ if(!r) return '';
   var s=(r.state||'CLOSED').toLowerCase();
   return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
+function rid(sym){ return 'an-'+sym.replace(/[^A-Za-z0-9]/g,''); }
 function row(c){
-  return '<div class="rrow"><span class="sy">'+esc(c.symbol)+'</span>'
+  var has = !!HAS[c.symbol];
+  return '<div class="rrow'+(has?' hasan" onclick="tapAn(\''+esc(c.symbol)+'\')"':'"')+'>'
+    + '<span class="sy">'+esc(c.symbol)+'</span>'
     + (c.in_v8?'<span class="tag bull">V8</span>':'')
+    + (has?'<span class="tag edt">READ</span>':'')
     + (c.event?'<span class="tag cat">'+esc(String(c.event).toUpperCase())+'</span>':'')
-    + '<span class="nm">'+esc(c.name||'')+'</span></div>';
+    + '<span class="nm">'+esc(c.name||'')+'</span></div>'
+    + (has?'<div id="'+rid(c.symbol)+'"></div>':'');
+}
+function tapAn(sym){
+  var host=document.getElementById(rid(sym));
+  if (!host) return;
+  if (host.innerHTML){ host.innerHTML=''; return; }
+  host.innerHTML='<div class="an"><div class="loading" style="padding:2px">Loading analysis…</div></div>';
+  fetchWithTimeout('/api/mobile/result_analysis?symbol='+encodeURIComponent(sym))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if (d.error||!d.found){ host.innerHTML='<div class="an"><div class="src">No analysis available.</div></div>'; return; }
+      host.innerHTML='<div class="an"><div class="read">'
+        + String(d.text||'').split(/\n{2,}/).map(function(p){return '<p>'+esc(p.trim())+'</p>';}).join('')
+        + '</div><div class="src">'+esc(d.quarter||'')+(d.polished_at?' · '+esc(d.polished_at):'')+'</div></div>';
+    })
+    .catch(function(e){ host.innerHTML='<div class="an"><div class="src">Could not load: '+esc(e.message)+'</div></div>'; });
 }
 function dayCard(d){
   var v8n = d.companies.filter(function(c){return c.in_v8;}).length;
@@ -51,8 +81,13 @@ function dayCard(d){
     + (v8n?'<span class="tag bull">'+v8n+' in V8</span>':'')
     + '</div>' + sorted.map(row).join('') + '</div>';
 }
-fetchWithTimeout('/api/mobile/results?days=10&limit=120').then(function(r){return r.json();}).then(function(d){
+Promise.all([
+  fetchWithTimeout('/api/mobile/results?days=10&limit=120').then(function(r){return r.json();}),
+  fetchWithTimeout('/api/mobile/result_analysis_index').then(function(r){return r.json();}).catch(function(){return null;})
+]).then(function(res){
+  var d=res[0], ix=res[1];
   if (d.error) throw new Error(d.error);
+  if (ix && ix.symbols) ix.symbols.forEach(function(s){ HAS[s]=true; });
   document.getElementById('sub').innerHTML =
     d.total_in_window+' results in the next '+d.window_days+' days '+railHtml(d.rail);
   document.getElementById('body').innerHTML = (d.days||[]).length
