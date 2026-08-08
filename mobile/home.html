@@ -145,6 +145,12 @@
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
 .pfcard{padding:4px 2px 10px}
+/* cc#929: raw news rows — headline + source + time, two lines at most, dividers not boxes. The
+   tag/category line is gone entirely, which is what buys the space back. */
+.rnr{padding:7px 0;border-bottom:1px solid var(--line)}
+.rnr:last-child{border-bottom:0}
+.rnr .h{font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB)}
+.rnr .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:3px}
 /* ── cc#919: the V10 index block was one wrapping text line ──────────────────────────────────
    It rendered as "V10: <b>Nifty Long</b>[icon] · <b>Bank Nifty No Trade</b>[icon]" in a plain
    11.5px mono block with no flex and no nowrap. Measured: ~312px of content in a 324px card at
@@ -928,6 +934,51 @@ function renderV10(){
   }
 }
 
+/* ══ cc#929: RAW LIVE NEWS — the web tab's own feed, verbatim ══════════════════════════════
+   Endpoint, params, grouping, ordering and the relative-time wording are all copied from
+   v8_dashboard.html so the phone shows the same rows as /dashboard at the same instant.
+   NO TAGS: the row is headline + source + time, nothing else — which is also exactly what the
+   web row carries (it never had category chips; the polished feed did).
+   NO OUTBOUND LINKS: raw_news rows have their own source URLs and none of them are rendered.
+   The whole card is an in-app link to /m/intel. A per-story deep anchor is NOT possible — Intel
+   renders POLISHED articles keyed to v_polished_articles, and a raw_news row has no polished
+   counterpart to anchor to — so every headline goes to plain /m/intel, as the card allows. */
+function rnAgo(ts){
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  var m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
+  var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+function loadRawNews(){
+  var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
+  if (!box) return;
+  fetchWithTimeout('/api/news/live?hours=48&per_cat=300')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      /* the web's newsList(): domestic + company merged, newest first. global is deliberately
+         left out there, so it is left out here too — mirroring means mirroring the omissions. */
+      var arr = (d.domestic || []).concat(d.company || []);
+      arr.sort(function(a, b){
+        return new Date(b.published_at || 0) - new Date(a.published_at || 0);
+      });
+      if (cnt) cnt.innerHTML = arr.length + ' raw headlines <span class="h-chev">›</span>';
+      box.innerHTML = arr.slice(0, 60).map(function(n){
+        var meta = [esc(n.source_name || ''), rnAgo(n.published_at)].filter(Boolean).join(' · ');
+        return '<div class="rnr"><div class="h">' + esc(n.headline || '') + '</div>'
+          + (meta ? '<div class="m">' + meta + '</div>' : '') + '</div>';
+      }).join('') || '<div class="sum" style="padding:8px 0">No headlines in the last 48 hours.</div>';
+    })
+    .catch(function(e){
+      if (cnt) cnt.innerHTML = 'unavailable <span class="h-chev">›</span>';
+      box.innerHTML = '<div class="sum" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
+    });
+}
+
 /* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
    PCR_MOOD_MAPPING_V1, founder-locked in session_log 18024, and CONTRARIAN by decision: a LOW
    put/call ratio means the crowd is not buying protection, which reads as Fear; a HIGH one reads
@@ -1112,18 +1163,18 @@ Promise.all([
 
   /* 4 · LIVE NEWS — scrollable; Intel has its own nav slot (founder 08-Aug).
          Results Corner card removed: covered by the Results tile in the grid. */
-  var rd = d.reading || {};
+  /* cc#929: RAW, and an exact mirror of the web V8 Live News tab. This section used to render
+     d.reading, which is built from v_polished_articles — the POLISHED feed. The web tab reads
+     /api/news/live?hours=48&per_cat=300 over raw_news. Those are different bodies of text, so the
+     two surfaces could never have matched. This now calls the SAME endpoint with the SAME params
+     and merges the SAME two groups in the SAME order as the web's newsList() — domestic + company,
+     published_at DESC — so DISPLAY_PARITY holds by construction rather than by coincidence.
+     The container is filled by loadRawNews() after paint; the card renders immediately. */
   h += '<div class="sect">LIVE NEWS</div>'
     + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Live News</div>'
-    + '<div class="rgt">' + (rd.count_24h || 0) + ' stories today <span class="h-chev">\u203a</span></div></div>'
-    + '<div class="newsbox">'
-    + ((rd.items || []).map(function(n){
-        var edt = n.category === 'AI Editorial';
-        return '<div class="news"><div class="h">' + esc(n.headline) + '</div>'
-          + '<div class="m">' + (edt ? '<span class="tag edt">EDITORIAL</span>' : esc(n.category || ''))
-          + (n.when ? ' ' + esc(n.when) : '') + '</div></div>';
-      }).join('') || '<div class="sum" style="padding:8px 0">Nothing new in the last day.</div>')
-    + '</div></div></a>';
+    + '<div class="rgt" id="rnCount">loading… <span class="h-chev">\u203a</span></div></div>'
+    + '<div class="newsbox" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'
+    + '</div></a>';
 
   /* 5 · TOOLS — 9 tiles, zero overlap with the six-slot nav (founder 08-Aug) */
   h += '<div class="sect">TOOLS</div>';
@@ -1157,6 +1208,7 @@ Promise.all([
   document.getElementById('body').appendChild(tools);
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
+  loadRawNews();       // cc#929: raw headlines, mirroring the web Live News tab
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
