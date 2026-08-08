@@ -15,13 +15,11 @@
 <style>
 /*
   cc#891 — V8 reskinned to previews/v8.html (tiered card stack, rails legend).
-  cc#894 (Fable direct, 17868) — founder's row decisions:
-    * SLOTS in the gate (from /api/v8/market_mood, the web's own source).
-    * FUNNEL line per basket (/api/v8/funnel/{basket}, lazy, counts only).
-    * TRADE LEDGER rows + DAY LOG (/api/mobile/trades).
-    * C·A·R·D strip (item 1) on every signal row and ledger row — the SAME shared components the
-      web uses, rendered via window.ScorrCardRow per rule cc#789. Full Chart/Analysis/Result/
-      Cockpit popups, zero duplication. :root bridge maps web CSS vars to the dark palette.
+  cc#894 (Fable direct, 17868) — founder's row decisions: SLOTS in gate, FUNNEL per basket,
+  TRADE LEDGER rows + DAY LOG, C·A·R·D strip on signal + ledger rows (shared web components,
+  rule cc#789). PARITY FIX 08-Aug: the ledger card reads /api/mobile/trades' fresh-era SUMMARY
+  (net of Rs.500/trade brokerage, W/L = TARGET/SL) so this card and the web Master Dashboard can
+  never disagree — the founder caught the all-time-vs-fresh drift the same day it shipped.
   Raw Data / Strategy Matrix / thresholds remain web-only by founder ruling.
 */
 :root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
@@ -100,7 +98,7 @@
 </nav>
 
 <script>
-var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null };
+var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -116,7 +114,6 @@ function railCls(r){
   return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
 }
 function strip(sym){
-  /* full web C·A·R·D popups, compact size — shared component, rule cc#789 */
   try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
   return '';
 }
@@ -197,15 +194,23 @@ function render(){
     || '<div class="empty"><b>No baskets signalled today.</b>The stack fills as signals fire.</div>';
   h += '</div>';
 
-  h += '<div class="tierlab">The book</div><div class="stack">'
+  /* fresh-era summary (web Master Dashboard formula) — falls back to the aggregate's
+     all-time ledger only while the summary is loading */
+  var sm = STATE.sm;
+  var lTrades = sm ? sm.trades : d.ledger.trades;
+  var lNet    = sm ? sm.realised : d.ledger.gross_pnl;
+  var lWL     = sm ? (sm.wins + '/' + sm.losses) : null;
+  h += '<div class="tierlab">The book · fresh era</div><div class="stack">'
     + '<a class="vc ' + rcls + '" href="/m/positions"><div class="vrow">'
     + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L · CARD on each</div></div>'
     + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
     + '<div class="chev">\u203a</div></div></a>'
     + '<div class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger(event)"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">All-time closed trades · tap for rows + day log</div></div>'
-    + '<div class="val"><div class="v ' + ((d.ledger.gross_pnl || 0) >= 0 ? 'grn' : 'redx') + '">'
-    + d.ledger.trades + '</div><div class="u">closed · ' + inr(d.ledger.gross_pnl) + '</div></div>'
+    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">'
+    + (sm ? 'Net of brokerage \u00b7 ' + (lWL ? lWL + ' target/SL \u00b7 ' : '') + 'tap for rows + day log'
+          : 'tap for rows + day log') + '</div></div>'
+    + '<div class="val"><div class="v ' + ((lNet || 0) >= 0 ? 'grn' : 'redx') + '">'
+    + lTrades + '</div><div class="u">closed · ' + inr(lNet) + '</div></div>'
     + '<div class="chev">\u203a</div></div>'
     + (STATE.ledgerOpen ? ledgerBlock() : '')
     + '</div>'
@@ -234,7 +239,6 @@ function render(){
   document.getElementById('body').innerHTML = h;
 }
 function tog(ev, i, slug){
-  /* taps on C·A·R·D buttons inside the card must open the popup, not fold the card */
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.open = (STATE.open === i ? -1 : i);
   if (STATE.open === i && STATE.funnels[slug] === undefined){
@@ -250,24 +254,19 @@ function tog(ev, i, slug){
 function togLedger(ev){
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.ledgerOpen = !STATE.ledgerOpen;
-  if (STATE.ledgerOpen && !STATE.ledger){
-    STATE.ledger = 'loading'; render();
-    fetchWithTimeout('/api/mobile/trades?limit=20&days=30')
-      .then(function(r){ return r.json(); })
-      .then(function(L){ STATE.ledger = L && !L.error ? L : null; render(); })
-      .catch(function(){ STATE.ledger = null; render(); });
-    return;
-  }
   render();
 }
 
 Promise.all([
   fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }),
-  fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; })
+  fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; }),
+  fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
-  var d = res[0], mood = res[1];
+  var d = res[0], mood = res[1], L = res[2];
   if (d.error) throw new Error(d.error);
-  STATE.d = d; render();
+  STATE.d = d;
+  if (L && !L.error){ STATE.ledger = L; STATE.sm = L.summary || null; }
+  render();
   if (mood && mood.buy_slots != null){
     document.getElementById('slots').innerHTML =
       'Slots · Buy <b>' + mood.buy_slots + '</b> · Sell <b>' + mood.sell_slots + '</b> · Total <b>'
