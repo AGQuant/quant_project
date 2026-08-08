@@ -7,19 +7,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_card_strip.js"></script>
+<script src="/scorr_chart_card.js"></script>
+<script src="/scorr_analysis_card.js"></script>
+<script src="/results_card.js"></script>
+<script src="/scorr_cockpit_card.js"></script>
 <style>
 /* cc#892 — SCREENERS (Fable direct, 17783). Reads the EXISTING web API (/api/screeners) so both
-   surfaces show identical members and values (16202). Read-only by design (cc#824, rule 3069) —
-   no Run button. A never-run screen states it plainly. Each stock card shows symbol + CMP + day%
-   plus the screen's OWN filter values, same as the web table (founder 08-Aug). Rendering is
-   deliberately defensive about key names: anything numeric the API returns for a row is shown
-   with its label; nothing is invented. */
+   surfaces show identical members and values (16202). Read-only by design (cc#824, rule 3069).
+   cc#894 item 1: the shared web C·A·R·D strip on every stock row (window.ScorrCardRow, rule
+   cc#789). :root bridge maps web card CSS vars onto the dark palette. Rendering is defensive
+   about key names; nothing is invented. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
 .kvs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .kv2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut);
   border:1px solid var(--line);border-radius:5px;padding:3px 7px}
 .kv2 b{color:var(--txt);font-weight:700}
-.srow{display:flex;align-items:baseline;gap:9px}
-.srow .sy{font-weight:800;font-size:14px;flex:1}
+.srow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.srow .sy{font-weight:800;font-size:14px;margin-right:auto}
 .srow .px2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
 .srow .dd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700}
 </style>
@@ -47,7 +52,10 @@ function num(v,dp){ if(v==null||isNaN(Number(v)))return null;
 function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
 function arr(d){ return d.screeners||d.presets||d.screens||(Array.isArray(d)?d:[]); }
 function rowsOf(d){ return d.rows||d.results||d.members||d.stocks||(Array.isArray(d)?d:[]); }
-
+function strip(sym){
+  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
+  return '';
+}
 var CORE={symbol:1,name:1,company_name:1,cmp:1,price:1,day_pct:1,day_1d:1,chg_pct:1,id:1,screen_id:1};
 function stockCard(r,labels){
   var sym=r.symbol||r.ticker||'--';
@@ -63,6 +71,7 @@ function stockCard(r,labels){
     kvs+='<div class="kv2">'+esc((labels&&labels[k])||k.replace(/_/g,' '))+' <b>'+shown+'</b></div>';
   });
   return '<div class="c"><div class="srow"><span class="sy">'+esc(sym)+'</span>'
+    + strip(sym)
     + (cmp!=null?'<span class="px2">'+num(cmp)+'</span>':'')
     + (day!=null?'<span class="dd '+cls(day)+'">'+(day>=0?'+':'')+num(day,2)+'%</span>':'')
     + '</div>'
