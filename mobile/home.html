@@ -28,6 +28,31 @@
    stays small so the header does not turn into two competing headlines. Scoped here rather than
    in the shared sheet because .trendhd renders on this page only. */
 .trendhd span:last-child{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
+/* cc#905 range pills */
+.rgs{display:flex;gap:6px;margin:6px 0 8px}
+.rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;
+  font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.rg.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+/* cc#904 full-screen Market Tape overlay */
+.tpo{position:fixed;inset:0;z-index:60;background:var(--bg,#0A0F1E);display:none;
+  flex-direction:column;overscroll-behavior:contain}
+.tpo.open{display:flex}
+.tpo-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 10px;border-bottom:1px solid var(--line)}
+.tpo-hd h2{font-size:17px;font-weight:800;flex:1}
+.tpo-x{min-width:44px;min-height:44px;font-size:20px;color:var(--mut);background:none;
+  border:0;cursor:pointer;font-family:inherit}
+.tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 24px}
+.tpr{display:flex;align-items:center;gap:9px;padding:11px 2px;border-bottom:1px solid var(--line);min-height:52px}
+.tpr .nm2{flex:1;min-width:0}
+.tpr .s1{font-size:13.5px;font-weight:800}
+.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:2px}
+.tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;text-align:right}
+.tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:800;
+  text-align:right;min-width:64px}
+.tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu,#4D7CFE);
+  font-size:15px;cursor:pointer;font-family:inherit}
+.tpchart{padding:2px 2px 12px}
 </style>
 </head>
 <body>
@@ -47,6 +72,14 @@
   <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
+
+<!-- cc#904: the full tape as a table. The marquee shows direction at a glance; this answers
+     "what exactly, and as of when". Hidden until the tape is tapped. -->
+<div class="tpo" id="tapeov">
+  <div class="tpo-hd"><h2>Market Tape</h2>
+    <button class="tpo-x" onclick="closeTape()" aria-label="Close">&#10005;</button></div>
+  <div class="tpo-bd" id="tapebd"></div>
+</div>
 
 <script>
 var TREND = { open: null };   /* which chip popup is open: 'adr' | 'pcr' | 'vix' */
@@ -83,9 +116,9 @@ function railHtml(r){
    the new endpoint returns ONE shape ({series:[{d,v}]}) so nothing is guessed, and the popup
    draws a real chart instead of text rows. */
 var TRENDS = {
-  adr: { title: 'ADR \u00b7 15 DAYS' },
-  pcr: { title: 'NIFTY PCR \u00b7 15 DAYS' },
-  vix: { title: 'INDIA VIX \u00b7 15 DAYS' }
+  adr: { title: 'ADR' },
+  pcr: { title: 'NIFTY PCR' },
+  vix: { title: 'INDIA VIX' }
 };
 function trendSvg(series, kind){
   var W = 320, H = 110, PL = 6, PR = 6, PT = 8, PB = 18;
@@ -141,35 +174,139 @@ function wireScrub(kind, series){
   svg.addEventListener('mousemove', function(e){ show(e.clientX); });
   svg.addEventListener('mouseleave', hide);
 }
+/* ── cc#904: MARKET TAPE overlay ───────────────────────────────────────────────────────────
+   Tapping the marquee opens every tape symbol as a table: name, last, change %, and the date
+   the number is actually from. The tape itself can only show a value; a five-day-old Nikkei
+   print looks exactly like this morning's until something states the date.
+
+   has_series comes from the SERVER (mobile_home2), computed from real data: /api/global/history
+   reads global_indices, and NIFTY/BANKNIFTY are not in that table, so those two rows carry no
+   chart button. The card's rule — never a dead button — is enforced where the truth is known,
+   not guessed in the template.
+
+   /api/global/history/{name} returns a FLAT LIST of global_indices rows
+   [{name,symbol,category,price,prev_close,chg_pct,quote_date}] — NOT the {series:[{d,v}]} shape
+   /api/mobile/trends uses. Verified by reading gvm_market_endpoints.py before writing this, per
+   the card. The map to trendSvg's {d,v} is done here, once. */
+var TAPE = { rows: [], open: {} };
+
+function openTape(){
+  var ov = document.getElementById('tapeov');
+  if (!ov) return;
+  renderTape();
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';   // lock the page behind the overlay
+}
+function closeTape(){
+  var ov = document.getElementById('tapeov');
+  if (ov) ov.classList.remove('open');
+  document.body.style.overflow = '';
+  TAPE.open = {};
+}
+function tapeRow(x, i){
+  var chart = x.has_series
+    ? '<button class="tpc" onclick="tapeChart(' + i + ')" aria-label="chart">' +
+      (TAPE.open[i] ? '\u2715' : '\u2197') + '</button>'
+    : '<span class="tpc" style="color:transparent">\u00b7</span>';
+  return '<div class="tpr">'
+    + '<span class="nm2"><div class="s1">' + esc(x.name) + '</div>'
+    + '<div class="s2">' + (x.live ? 'live' : esc(x.as_of || '--')) + '</div></span>'
+    + '<span class="lv">' + px(x.price) + '</span>'
+    + '<span class="cg ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span>'
+    + chart + '</div>'
+    + (TAPE.open[i] ? '<div class="tpchart" id="tpc_' + i + '"><div class="loading">Loading\u2026</div></div>' : '');
+}
+function renderTape(){
+  document.getElementById('tapebd').innerHTML = TAPE.rows.map(tapeRow).join('')
+    || '<div class="empty"><b>No tape data</b></div>';
+}
+function tapeChart(i){
+  var x = TAPE.rows[i];
+  if (!x || !x.has_series) return;
+  if (TAPE.open[i]){ TAPE.open[i] = 0; renderTape(); return; }
+  TAPE.open[i] = 1; renderTape();
+  fetchWithTimeout('/api/global/history/' + encodeURIComponent(x.name) + '?days=15')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      var host = document.getElementById('tpc_' + i);
+      if (!host || !TAPE.open[i]) return;
+      /* flat global_indices rows -> trendSvg's {d,v}. price/quote_date are the real column
+         names, read off the endpoint rather than assumed. */
+      var series = (Array.isArray(rows) ? rows : []).filter(function(r){
+        return r && r.price != null && r.quote_date;
+      }).map(function(r){ return { d: String(r.quote_date), v: Number(r.price) }; });
+      host.innerHTML = series.length > 1
+        ? trendSvg(series, 'tp' + i)
+        : '<div class="sum">Not enough history for ' + esc(x.name) + '.</div>';
+    })
+    .catch(function(e){
+      var host = document.getElementById('tpc_' + i);
+      if (host) host.innerHTML = '<div class="sum">Chart failed: ' + esc(e.message) + '</div>';
+    });
+}
+
+/* ── cc#905: range selector. 1D | 7D | 15D | 30D, default 15D, remembered per kind for the
+   session (no storage — a range that outlives the visit is one the founder forgets he set).
+   ON 1D: /api/mobile/trends clamps days to max(2, ...), and I did NOT lower that clamp — a
+   one-point "chart" is a dot, and a flat line drawn through one value would be a fabricated
+   shape. 1D therefore requests days=2 and draws the real last-two-prints line, which is exactly
+   the move the founder is asking about. The pill row states the window; the chart never pretends
+   to more resolution than the daily source has. */
+var TREND_RANGE = { adr: 15, pcr: 15, vix: 15 };
+var RANGES = [[1, '1D'], [7, '7D'], [15, '15D'], [30, '30D']];
+
+function setTrendRange(ev, kind, days){
+  if (ev) ev.stopPropagation();
+  TREND_RANGE[kind] = days;
+  drawTrend(kind);
+}
+function rangePills(kind){
+  var cur = TREND_RANGE[kind];
+  return '<div class="rgs">' + RANGES.map(function(r){
+    return '<button class="rg' + (r[0] === cur ? ' on' : '') + '"'
+      + ' onclick="setTrendRange(event,\'' + kind + '\',' + r[0] + ')">' + r[1] + '</button>';
+  }).join('') + '</div>';
+}
+
+function drawTrend(kind){
+  var el = document.getElementById('chiptrend');
+  if (!el) return;
+  var t = TRENDS[kind];
+  var want = TREND_RANGE[kind];
+  var days = want === 1 ? 2 : want;   // see the 1D note above
+  el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + kind.toUpperCase() + ' trend\u2026</div>';
+  fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=' + days)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (TREND.open !== kind) return;
+      var s = (d && d.series) || [];
+      if (s.length < 2){
+        el.innerHTML = '<div class="trendbox"><div class="trendhd"><span>' + t.title + '</span></div>'
+          + rangePills(kind)
+          + '<div class="sum" style="padding:6px 0 0">Not enough ' + kind.toUpperCase()
+          + ' history for this window.</div></div>';
+        return;
+      }
+      var last = s[s.length - 1];
+      el.innerHTML = '<div class="trendbox"><div class="trendhd"><span>' + t.title + '</span>'
+        + '<span id="trd_' + kind + '">' + esc(Number(last.v).toFixed(2)) + ' \u00b7 ' + esc(last.d.slice(5)) + '</span></div>'
+        + rangePills(kind)
+        + trendSvg(s, kind) + '</div>';
+      wireScrub(kind, s);   // rebound on every redraw — a new SVG needs a new binding
+    })
+    .catch(function(e){
+      if (TREND.open !== kind) return;
+      el.innerHTML = '<div class="sum" style="padding:6px 0 0">' + kind.toUpperCase() + ' trend failed: ' + esc(e.message) + '</div>';
+    });
+}
+
 function togTrend(ev, kind){
   if (ev) ev.stopPropagation();
   var el = document.getElementById('chiptrend');
   if (!el) return;
   if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; return; }
   TREND.open = kind;
-  var t = TRENDS[kind];
-  el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + kind.toUpperCase() + ' trend\u2026</div>';
-  // cc#903: 15-day window. /api/mobile/trends already accepts days (2-120), so this is a
-  // query-string change only — nothing server-side moves.
-  fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=15')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (TREND.open !== kind) return;
-      var s = (d && d.series) || [];
-      if (s.length < 2){
-        el.innerHTML = '<div class="sum" style="padding:6px 0 0">No ' + kind.toUpperCase() + ' series available.</div>';
-        return;
-      }
-      var last = s[s.length - 1];
-      el.innerHTML = '<div class="trendbox"><div class="trendhd"><span>' + t.title + '</span>'
-        + '<span id="trd_' + kind + '">' + esc(Number(last.v).toFixed(2)) + ' \u00b7 ' + esc(last.d.slice(5)) + '</span></div>'
-        + trendSvg(s, kind) + '</div>';
-      wireScrub(kind, s);
-    })
-    .catch(function(e){
-      if (TREND.open !== kind) return;
-      el.innerHTML = '<div class="sum" style="padding:6px 0 0">' + kind.toUpperCase() + ' trend failed: ' + esc(e.message) + '</div>';
-    });
+  drawTrend(kind);
 }
 
 fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then(function(d){
@@ -189,8 +326,11 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
   // cc#901: duration halved = speed doubled. The floor halves with it (20s -> 10s) so a short
   // tape stays proportional instead of hitting the floor and running slower than a long one.
   var tkDur = Math.max(10, (d.ticker || []).length * 1.3);
-  h += '<div class="tkr" style="--tkr-dur:' + tkDur + 's"><div class="tkr-track">'
-    + tkItems + tkItems + '</div></div>';
+  // cc#904: the tape is now a doorway. Hold-to-pause still works — a tap and a hold are
+  // different gestures, and the pause is CSS (:active), not JS, so the two cannot fight.
+  TAPE.rows = d.ticker || [];
+  h += '<div class="tkr" onclick="openTape()" style="--tkr-dur:' + tkDur + 's;cursor:pointer">'
+    + '<div class="tkr-track">' + tkItems + tkItems + '</div></div>';
 
   /* 1 · HERO — the market today; V10 index line; ADR/PCR/VIX chips open charts */
   var hero = d.hero || {};

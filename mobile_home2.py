@@ -67,6 +67,11 @@ BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 # pressure (USDINR, DXY) -> commodities (Gold, Silver, Brent, WTI, Nat Gas) -> Bitcoin last.
 # A name not on this list still renders (after the listed ones) — new feed additions are never
 # silently dropped from the tape.
+# cc#904 (founder 08-Aug): names excluded from the tape. WTI goes because Brent already covers
+# oil; the entry stays in _TICKER_NAME_ORDER below so the ordering list keeps matching the source
+# table, and one set decides what ships.
+_TICKER_SKIP = {"WTI"}
+
 _TICKER_NAME_ORDER = ["India VIX", "Dow", "Nasdaq", "S&P 500", "Nikkei", "Hang Seng",
                       "FTSE", "DAX", "USDINR", "DXY", "Gold", "Silver", "Brent", "WTI",
                       "Natural Gas", "Bitcoin"]
@@ -285,16 +290,36 @@ def mobile_home2(request: Request):
         return float(v) if v is not None else None
 
     # ── ticker: NIFTY/BANKNIFTY first (live), then the global tail in Indian-investor order ──
+    # cc#904: every row now carries as_of and has_series.
+    #   as_of      — the honest date behind the number. Domestic rows carry domestic_live's own
+    #                price_date; global rows carry the quote_date of the row that was selected.
+    #                The tape shows a value; the table has to say WHEN, or a five-day-old Nikkei
+    #                print reads as this morning's.
+    #   has_series — whether a per-name chart is actually reachable, decided HERE from real data
+    #                rather than guessed in the template. /api/global/history/{name} reads
+    #                global_indices, and NIFTY/BANKNIFTY are not in that table, so those two get
+    #                no chart icon. The card is explicit: never a dead button.
     ticker = []
     for k, v in (idx.get("indices") or {}).items():
         if isinstance(v, dict):
             ticker.append({"name": "NIFTY" if k == "NIFTY50" else "BANKNIFTY",
                            "price": v.get("close"), "chg_pct": v.get("chg_pct"),
-                           "category": "domestic"})
+                           "category": "domestic",
+                           "as_of": v.get("price_date"),
+                           "live": v.get("source") == "live_intraday",
+                           "has_series": False})
     _pos = {n: i for i, n in enumerate(_TICKER_NAME_ORDER)}
     for r in sorted(glob_rows, key=lambda r: (_pos.get(r["name"], 99), r["name"])):
+        # cc#904: WTI drops off the tape — Brent already carries oil for an Indian investor, and
+        # two crude prints spend two pills saying one thing. Dropped at the BUILD, so it leaves
+        # the payload rather than being hidden in the template.
+        if r["name"] in _TICKER_SKIP:
+            continue
         ticker.append({"name": r["name"], "price": f(r["price"]),
-                       "chg_pct": f(r["chg_pct"]), "category": r["category"]})
+                       "chg_pct": f(r["chg_pct"]), "category": r["category"],
+                       "as_of": r["quote_date"].isoformat() if r["quote_date"] else None,
+                       "live": False,
+                       "has_series": True})
 
     # hero chips straight from market_mood's own checks[] — value + pass, no invented names
     chips = []
