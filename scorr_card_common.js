@@ -325,7 +325,7 @@
   API.SCORR_BASKET_ORDER = SCORR_BASKET_ORDER;
 })();
 
-/* ── SIX-SLOT MOBILE NAV — ONE SOURCE (founder 08-Aug: "show V8 in nav, it is the most
+/* ── FIVE-SLOT MOBILE NAV (cc#897; was six) — ONE SOURCE (founder 08-Aug: "show V8 in nav, it is the most
    important model"). Appended by Fable (ROLE_CHARTER_V3, session_log 17868).
    Every /m/* template carries a five-slot .bnav in its own markup; editing thirteen files for
    every nav change is the NAV CHURN trap. So the nav is now REBUILT here, in the one script
@@ -335,18 +335,23 @@
 (function () {
   if (window.__scorrNavOwner) return;
   window.__scorrNavOwner = true;
+  /* cc#897 (founder 08-Aug): FIVE slots — Models drops out. Its children all have their own
+     doorway on the Home Tools grid now, so the sixth slot was spending permanent nav real estate
+     on a hub nobody needs to pass through. */
   var NAV = [
     { href: '/m/home',   icon: '\u25e7', label: 'Home' },
     { href: '/m/v8',     icon: '\u25b3', label: 'V8' },
     { href: '/m/gvm',    icon: '\u25c8', label: 'GVM' },
     { href: '/m/check',  icon: '\u25ce', label: 'Check' },
-    { href: '/m/intel',  icon: '\u25a4', label: 'Intel' },
-    { href: '/m/models', icon: '\u25cd', label: 'Models' }
+    { href: '/m/intel',  icon: '\u25a4', label: 'Intel' }
   ];
-  /* deeper screens highlight their parent slot */
+  /* deeper screens highlight their parent slot. cc#897: the three that pointed at /m/models were
+     REPOINTED to /m/home — a parent that is no longer a slot highlights nothing, which reads as a
+     broken nav rather than a deep screen. /m/models itself joins them for the same reason. */
   var PARENT = { '/m/positions': '/m/v8', '/m/qb': '/m/v8', '/m/results': '/m/v8',
-                 '/m/holdings': '/m/home', '/m/screeners': '/m/models',
-                 '/m/sector': '/m/models', '/m/fpc': '/m/models', '/m/digest': '/m/home' };
+                 '/m/holdings': '/m/home', '/m/screeners': '/m/home',
+                 '/m/sector': '/m/home', '/m/fpc': '/m/home', '/m/digest': '/m/home',
+                 '/m/models': '/m/home' };
   function build() {
     try {
       var nav = document.querySelector('.bnav');

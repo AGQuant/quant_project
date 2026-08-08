@@ -1252,6 +1252,460 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
   min-height:44px;text-decoration:none}
 .bn .i{display:block;font-size:16px;margin-bottom:3px;line-height:1}
 .bn.on{color:var(--blu)}
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   cc#893 item 3 — PER-SCREEN CSS, FOLDED IN FROM THE TEMPLATES
+
+   Twelve /m/* templates each carried their own <style> block. That is twelve stylesheets
+   the phone re-parses on every navigation and never caches, on a file it already fetches
+   once. Folded here, they are one cached request for the whole app.
+
+   THREE SELECTORS COLLIDED and were namespaced first, because a naive concatenation lets
+   the last definition win globally and silently restyles two screens for each clash:
+     .chev  gvm 14px / home 16px / v8 17px+flex   -> .g-chev / .h-chev / .v-chev
+     .lrow  gvm row-card / v8 different layout    -> .g-lrow / .v-lrow
+     .srow  screeners / sector                    -> .sc-srow / .se-srow
+   Every other selector was verified unique across all twelve, or identical where shared.
+   Rules are otherwise VERBATIM — this move must not change a single pixel.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── CHECK  (was inline in mobile/check.html) ─────────────────────────────── */
+/*
+  cc#890 — CHECK reskinned to previews/check.html (approved design, markup+CSS ported, live data).
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Preview design carried: search + LONG/SHORT first; the verdict is a WORD with the score beside
+  it; THE GAPS ARE THE PRODUCT — every failed rule prints as its own red-edged row; passed rules
+  collapse to one line; the check states its own age.
+  Data honesty vs the preview, stated: the live source is tc_screener_cache (fresh daily, cc#888)
+  whose verdict words are STRONG / VALID / WATCH — shown as-is (DISPLAY_PARITY 16202, same words
+  as the web scanner). It carries NO pass/watch/fail counts and no per-rule value-vs-required
+  detail, so the preview's count chips and gap explanations are NOT fabricated: a gap row shows
+  the rule name, and the chip shows the gap COUNT, which is real. Score renders without "/total"
+  because the source has no total.
+  First card ships expanded; the rest expand on tap.
+  cc#894 item 1 (17868): the shared web C·A·R·D strip on every verdict card
+  (window.ScorrCardRow, rule cc#789 — never re-implemented). Strip taps don't fold the card.
+  :root bridge maps web card CSS vars onto the dark palette.
+*/
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+.inrow{display:flex;gap:8px;margin:12px 12px 0}
+.sfld{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 13px}
+.sfld input{flex:1;min-height:46px;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:16px;font-weight:700}
+.sfld input::placeholder{color:var(--dim);font-weight:400;font-size:13px}
+.tog{display:flex;border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.tg{min-height:48px;display:flex;align-items:center;padding:0 13px;font-size:11.5px;
+  font-weight:800;color:var(--dim);cursor:pointer;background:none;border:0;font-family:inherit}
+.tg.on{background:rgba(47,212,139,.14);color:var(--grn)}
+.tg.on.sh{background:rgba(255,92,108,.12);color:var(--red)}
+.v{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 12px 19px;overflow:hidden;margin-bottom:8px;cursor:pointer}
+.v::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--amber))}
+.v1{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.vsym{font-size:16.5px;font-weight:800}
+.vside{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.1em;padding:3px 8px;border-radius:4px;border:1px solid rgba(47,212,139,.45);color:var(--grn)}
+.vside.sh{border-color:rgba(255,92,108,.45);color:var(--red)}
+.vpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:11px;font-weight:700;color:var(--mut)}
+.v2{display:flex;align-items:center;gap:11px;margin-top:11px}
+.word{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--vc,var(--amber))}
+.score{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:19px;font-weight:800}
+.counts{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.ct{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:4px 9px;border-radius:5px;border:1px solid var(--line2);color:var(--mut)}
+.ct.f{color:var(--red);border-color:rgba(255,92,108,.4)}
+.ct.p{color:var(--grn);border-color:rgba(47,212,139,.4)}
+.g{display:flex;align-items:baseline;gap:9px;background:var(--panel);
+  border:1px solid var(--line);border-left:3px solid var(--red);border-radius:0 11px 11px 0;
+  padding:9px 12px;margin:0 0 6px 6px}
+.gv{font-size:11.5px;color:var(--mut);line-height:1.5}
+.gv b{color:var(--red);font-weight:700}
+.pass1{font-size:11px;color:var(--dim);padding:2px 3px 12px 8px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+/* ── FPC  (was inline in mobile/fpc.html) ─────────────────────────────── */
+/* cc#892 — FPC (Fable direct, 17783). Client-side planning calculator: monthly SIP + one-time
+   lumpsum compounding to a horizon, and the reverse (what monthly amount reaches a goal).
+   16px inputs (iOS zoom rule). Pure arithmetic on-device — no fetch, nothing to go stale. */
+.fld{margin:0 0 11px}
+.fld label{display:block;font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:5px}
+.fld input{width:100%;min-height:48px;background:var(--panel);border:1px solid var(--line2);
+  border-radius:11px;color:var(--txt);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:16px;font-weight:700;padding:0 13px;outline:none}
+.fld input:focus{border-color:rgba(77,124,254,.55)}
+.res .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:800}
+.res .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.sp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.sp .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.sp .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;margin-top:3px}
+
+/* ── GVM  (was inline in mobile/gvm.html) ─────────────────────────────── */
+/*
+  GVM — the app's company research view (founder 08-Aug: "old app screens fine, format,
+  organise and push"). The Full report now IS the web /cio2 company page, mobile-formatted:
+  same endpoints (api/gvm/company, api/gvm/trend, api/news/company, api/trade-check/fibcheck,
+  api/sector/brief), organized into the web's own sections. Ops-metrics deliberately absent —
+  OPS_METRICS_INTERNAL_ONLY (13348). Arrays render as mini-tables (peers, financials,
+  shareholding); the trend renders as a sparkline. Fable direct push, 17783.
+*/
+.search{display:flex;align-items:center;gap:9px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 14px;margin:12px 12px 0}
+.search .ic{color:var(--dim);font-size:15px}
+.search input{flex:1;min-height:46px;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:16px}
+.search input::placeholder{color:var(--dim);font-size:13px}
+.rep{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 15px 19px;overflow:hidden;margin-bottom:10px}
+.rep::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rc,var(--grn))}
+.r1{display:flex;align-items:baseline;gap:9px}
+.rsym{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.rseg{font-size:10px;color:var(--dim)}
+.rpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:13px;font-weight:700;color:var(--mut)}
+.big{display:flex;align-items:baseline;gap:10px;margin-top:11px}
+.gvmv{font-size:36px;font-weight:800;letter-spacing:-.03em;color:var(--rc,var(--grn));
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.gvmv .of{font-size:13px;color:var(--dim);font-weight:700}
+.verd{font-size:12px;font-weight:800;color:var(--rc,var(--grn));border:1px solid var(--rc,var(--grn));
+  border-radius:6px;padding:4px 10px}
+.pil{margin-top:13px}
+.pr{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.pk{font-size:11px;font-weight:800;min-width:78px}
+.bar{flex:1;height:7px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
+.fill{height:100%;border-radius:4px;background:var(--rc,var(--grn))}
+.pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:800;
+  min-width:32px;text-align:right}
+.punch{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:11px;
+  border-top:1px solid var(--line);padding-top:11px}
+.punch b{color:var(--txt)}
+.acts{display:flex;gap:8px;margin-top:12px}
+.a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+  font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
+  border-radius:10px;text-decoration:none;background:none;font-family:inherit;cursor:pointer}
+.g-lrow{display:flex;align-items:center;gap:10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px;cursor:pointer}
+.rk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;
+  color:var(--dim);min-width:22px}
+.rs{font-size:13.5px;font-weight:800}
+.rg{font-size:9.5px;color:var(--dim);margin-top:1px}
+.sc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:14px;font-weight:800}
+.g-chev{color:var(--dim);font-size:14px}
+.fr{margin:-2px 0 10px;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px 13px}
+.frh{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;color:var(--dim);margin:12px 0 7px}
+.fr .frh:first-child{margin-top:0}
+.frr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:32px}
+.frr:first-of-type{border-top:0}
+.frr .k2{font-size:11.5px;color:var(--mut);flex:1;text-transform:capitalize}
+.frr .v2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
+.tbl{width:100%;border-collapse:collapse;font-size:10.5px}
+.tbl th{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+  letter-spacing:.06em;color:var(--dim);text-align:right;padding:4px 4px;border-bottom:1px solid var(--line2);text-transform:uppercase}
+.tbl th:first-child{text-align:left}
+.tbl td{padding:5px 4px;border-bottom:1px solid var(--line);text-align:right;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--txt)}
+.tbl td:first-child{text-align:left;font-family:'Sora';font-weight:700;color:var(--txt)}
+.spark{width:100%;height:44px;display:block}
+.prose{font-size:12.5px;color:var(--mut);line-height:1.6}
+.prose b{color:var(--txt)}
+.nrow{padding:7px 0;border-top:1px solid var(--line);font-size:12px;font-weight:600;line-height:1.4}
+.nrow:first-of-type{border-top:0}
+.nrow .w{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:2px}
+
+/* ── HOLDINGS  (was inline in mobile/holdings.html) ─────────────────────────────── */
+/* cc#892 — HOLDINGS (Fable direct, 17783). Full My Portfolio page: header totals, one card per
+   holding with entry→LTP, value, MTM, return%. cc#894 item 1: the shared web C·A·R·D strip on
+   every card (window.ScorrCardRow, rule cc#789 — never re-implemented). :root bridge maps the
+   web card CSS vars onto the dark palette. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+.tot{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px}
+.tot .b{flex:1}
+.tot .k{font-size:9px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.tot .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;margin-top:3px}
+.pc2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
+.kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
+.kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
+.hl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hl .sy{font-size:15px;font-weight:800;margin-right:auto}
+.hl .pl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
+
+/* ── HOME  (was inline in mobile/home.html) ─────────────────────────────── */
+/*
+  cc#889 — HOME rebuilt to previews/home_v2.html. cc#894 (Fable direct, 17868) shipped the chips.
+  FOUNDER COMMENTS 08-Aug batch 2 (this commit):
+  (1) TICKER BAR: NIFTY/BANKNIFTY + digest global set scroll in a top ticker strip — the 2-tile
+      index grid inside the hero is gone. Home only; other screens untouched.
+  (2) Hero carries the V10 index line: "Nifty Long · Bank Nifty No Trade" (server-computed).
+  (3) PCR/VIX values are SERVED by /api/mobile/home2 (hero.pcr/hero.vix) — the cc#894 pickers
+      guessed other endpoints' keys and rendered "--". Chip tap now opens an SVG LINE CHART
+      (website chart style) fed by /api/mobile/trends?kind=adr|pcr|vix.
+  (4) Open Book -> V8 OPEN BOOK, trio = Unrealised / Long Unrl / Short Unrl, each with % on
+      capital deployed for that side. A side with no positions renders --, never 0%.
+  (5) Results Corner card REMOVED (covered by the Results tile). Intel card renamed LIVE NEWS,
+      scrollable (10 items inside a fixed-height scroll box), still taps through to /m/intel.
+  (6) Tools = 9-tile grid, no overlap with the six-slot nav: Baskets Screeners SectorIntel
+      Results Digest FPC Dashboard AICIO PortfolioHealth (last three open the web pages —
+      founder-approved exception to the 16915 split; /health IS the client Portfolio Health
+      page, hr_endpoints.py, verified 08-Aug).
+  BATCH 3 (this commit): ticker MOVES (marquee, seamless -50% loop, hold to pause); charts get
+  FINGER SCRUB (crosshair + live value/date readout in the header); PCR/VIX chips get COLOUR
+  (PCR >=1 green else red; VIX <=14 green, >=17 red, between neutral).
+*/
+.tkr{overflow:hidden;padding:8px 0;margin:0 -12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.tkr-track{display:flex;gap:8px;width:max-content;padding:0 12px;animation:tkrMove var(--tkr-dur,40s) linear infinite}
+.tkr:active .tkr-track,.tkr:hover .tkr-track{animation-play-state:paused}
+@keyframes tkrMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
+.tk{flex:none;display:flex;align-items:baseline;gap:6px;padding:4px 9px;border-radius:8px;
+  background:var(--panel);border:1px solid var(--line)}
+.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.tk .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;white-space:nowrap}
+.hero-mood{font-size:32px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
+.v10line{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;
+  margin-top:8px;color:var(--mut)}
+.v10line b{color:var(--txt,#E9EEFB)}
+.hchips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+.hc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  padding:5px 9px;border-radius:14px;border:1px solid var(--line2);color:var(--mut);background:none;cursor:default}
+.hc.ok{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
+.hc.bad{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
+.hc.tap{cursor:pointer;text-decoration:underline dotted}
+.chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;margin-bottom:6px}
+.chd .t{font-weight:800;font-size:14px}
+.chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.h-chev{color:var(--dim);font-size:16px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);min-height:44px}
+.row:first-of-type{border-top:0}
+.row .sym{font-weight:700;font-size:13.5px}
+.row .sub{font-size:11px;color:var(--dim);margin-top:1px}
+.row .r{text-align:right}
+.row .pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px}
+.row .pc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;margin-top:1px}
+.trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.st{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 8px;text-align:center}
+.st .k{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.st .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:14px;margin-top:3px}
+.st .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;margin-top:2px}
+.news{padding:9px 0;border-top:1px solid var(--line)}
+.news:first-of-type{border-top:0}
+.news .h{font-size:13px;font-weight:600;line-height:1.4}
+.news .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;gap:8px;align-items:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.newsbox{max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:0 12px}
+.tool{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 6px;
+  text-align:center;min-height:44px;font-size:12px;font-weight:700;color:var(--mut);
+  text-decoration:none;display:block}
+.tool span{display:block;font-size:17px;margin-bottom:3px}
+a.card-link{text-decoration:none;color:inherit;display:block}
+.trendbox{margin-top:10px}
+.trendhd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;color:var(--dim);margin-bottom:6px;display:flex;justify-content:space-between}
+
+/* ── MODELS  (was inline in mobile/models.html) ─────────────────────────────── */
+/*
+  cc#890 — MODELS reskinned to previews/models.html (approved card grammar ported, live data).
+  cc#892 — the four breadth screens (Screeners, Sector, Holdings, FPC) are appended to the
+  Everything-else grid as static entries here, because _MOBILE_DESTINATIONS lives inside
+  mobile_endpoints.py which Fable cannot full-file-push safely — CC merges them into
+  _MOBILE_DESTINATIONS on its cleanup pass (cc#893 item 3) and removes the static list.
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Preview grammar carried: every model is a card with a SHAPE-CODED left rail and a badge whose
+  glyph repeats the shape (dot / ring / bar) so state never rides on colour alone (15913 rule 10).
+  REGISTRY-DERIVED, never a typed list. Everything-else grid stays per rule 2987.
+*/
+.m{position:relative;display:block;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
+  text-decoration:none;color:var(--txt);min-height:60px}
+.m::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dim)}
+.m.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.m.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.m.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.m.error::before{background:var(--red)}
+.m.off::before,.m.notrun::before{background:var(--dim)}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.m.live::before{animation:none;opacity:1}}
+.mtop{display:flex;align-items:center;gap:9px}
+.mnm{font-size:14px;font-weight:800}
+.badge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:700;
+  letter-spacing:.11em;padding:3px 7px;border-radius:4px;border:1px solid;white-space:nowrap}
+.badge.live{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
+.badge.closed{color:var(--dim);border-color:var(--line2);background:transparent}
+.badge.stale{color:var(--amber);border-color:rgba(245,185,74,.45);background:rgba(245,185,74,.12)}
+.badge.error{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
+.badge.off,.badge.notrun{color:var(--dim);border-color:var(--line2)}
+.g-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.g-ring{width:5px;height:5px;border-radius:50%;border:1.5px solid currentColor}
+.g-bar{width:6px;height:2px;background:currentColor;border-radius:1px}
+.mds{font-size:11.5px;color:var(--mut);margin-top:5px;line-height:1.45}
+.mft{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);margin-top:7px}
+.dest{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;padding:0 0 4px}
+.dest a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:11px;
+  background:var(--panel);border:1px solid var(--line);color:var(--txt);text-decoration:none;
+  font-size:12.5px;font-weight:700}
+
+/* ── OPEN BOOK  (was inline in mobile/positions.html) ─────────────────────────────── */
+/* cc#891 — Open Book in the shared card grammar. cc#894 row 31: QTY tag on every card.
+   cc#894 item 1 (Fable direct, 17868): the C·A·R·D strip joins every position card — NOT a copy:
+   the page loads the same shared files the web loads and renders via window.ScorrCardRow(sym),
+   exactly as rule cc#789 commands ("ANY new surface renders the strip ONLY via
+   ScorrCardStripHtml/Row"). Same strip, same four popups (Chart / Analysis / Result / Cockpit),
+   full web functionality by construction. The :root bridge below maps the web components'
+   CSS variables (--surface2, --cyan) onto the app's dark palette — the card files fall back to
+   LIGHT hex values when a var is missing, which would break dark theme. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+.net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+.net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
+.net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
+.pc2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
+.kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
+.kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
+.star{font-size:13px}
+/* the strip sits right of the symbol; give its buttons the app's dark chrome */
+.hl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hl .sy{font-size:15px;font-weight:800;margin-right:auto}
+.hl .pl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
+
+/* ── BASKETS  (was inline in mobile/qb.html) ─────────────────────────────── */
+/* cc#891 — Quant Baskets in the shared card grammar (Claude direct push, 17783).
+   Portfolio strip on top (total value + unrealised), then one card per basket: label, positions,
+   market value, return% — tap expands the holdings rows. Preview diffs fold into founder review. */
+.tot{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px}
+.tot .b{flex:1}
+.tot .k{font-size:9px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.tot .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;margin-top:3px}
+.bh{display:flex;align-items:center;gap:9px;cursor:pointer;min-height:44px}
+.bh .n{font-size:14px;font-weight:800;flex:1}
+.bh .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;font-weight:800;text-align:right}
+.bh .u{font-size:9px;color:var(--dim)}
+.h2{display:flex;align-items:baseline;gap:8px;padding:8px 0 0;border-top:1px solid var(--line);margin-top:9px}
+.h2 .sy{font-weight:700;font-size:12.5px;min-width:96px}
+.h2 .q{font-size:10px;color:var(--dim)}
+.h2 .p{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700}
+
+/* ── RESULTS  (was inline in mobile/results.html) ─────────────────────────────── */
+/* cc#891 — Results calendar in the shared card grammar.
+   cc#893 — DEPTH: rows whose symbol HAS a plain-words analysis (result_analysis_v2, via
+   /api/mobile/result_analysis_index) get a READ tag and expand the analysis inline on tap.
+   No dead affordances: rows without analysis get no tag and no tap. (Fable direct, 17783.) */
+.dy{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:800;
+  letter-spacing:.1em;color:var(--txt)}
+.rrow{display:flex;align-items:baseline;gap:8px;padding:8px 0 0;border-top:1px solid var(--line);margin-top:8px}
+.rrow:first-of-type{border-top:0;margin-top:6px}
+.rrow .sy{font-weight:700;font-size:12.5px}
+.rrow .nm{font-size:10px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rrow.hasan{cursor:pointer}
+.an{background:var(--panel2);border:1px solid var(--line2);border-radius:11px;
+  padding:11px 12px;margin:8px 0 2px}
+.an .read{font-size:13.5px;color:var(--txt);line-height:1.68}
+.an .read p{margin-top:8px}
+.an .read p:first-child{margin-top:0}
+.an .src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:8px}
+
+/* ── SCREENERS  (was inline in mobile/screeners.html) ─────────────────────────────── */
+/* cc#892 — SCREENERS (Fable direct, 17783). Reads the EXISTING web API (/api/screeners) so both
+   surfaces show identical members and values (16202). Read-only by design (cc#824, rule 3069).
+   cc#894 item 1: the shared web C·A·R·D strip on every stock row (window.ScorrCardRow, rule
+   cc#789). :root bridge maps web card CSS vars onto the dark palette. Rendering is defensive
+   about key names; nothing is invented. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+.kvs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.kv2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut);
+  border:1px solid var(--line);border-radius:5px;padding:3px 7px}
+.kv2 b{color:var(--txt);font-weight:700}
+.sc-srow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sc-srow .sy{font-weight:800;font-size:14px;margin-right:auto}
+.sc-srow .px2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
+.sc-srow .dd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700}
+
+/* ── SECTOR  (was inline in mobile/sector.html) ─────────────────────────────── */
+/* cc#892 — SECTOR (Fable direct, 17783). Reads the EXISTING web APIs (/api/sectors +
+   /api/sector/rotation) — one implementation, identical numbers (16202). Ratings list with
+   score bars in the GVM pillar grammar; rotation cards above when the API answers. Defensive
+   about key names; nothing invented. */
+.se-srow{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px}
+.se-srow .nm{font-size:13px;font-weight:800;flex:1;min-width:0}
+.se-srow .sub2{font-size:9.5px;color:var(--dim);margin-top:1px}
+.se-srow .bar{flex:1.2;height:6px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
+.se-srow .fill{height:100%;border-radius:4px}
+.se-srow .sc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;min-width:34px;text-align:right}
+
+/* ── V8  (was inline in mobile/v8.html) ─────────────────────────────── */
+/*
+  cc#891 — V8 reskinned to previews/v8.html (tiered card stack, rails legend).
+  cc#894 (Fable direct, 17868) — founder's row decisions: SLOTS in gate, FUNNEL per basket,
+  TRADE LEDGER rows + DAY LOG, C·A·R·D strip on signal + ledger rows (shared web components,
+  rule cc#789). PARITY FIX 08-Aug: the ledger card reads /api/mobile/trades' fresh-era SUMMARY
+  (net of Rs.500/trade brokerage, W/L = TARGET/SL) so this card and the web Master Dashboard can
+  never disagree — the founder caught the all-time-vs-fresh drift the same day it shipped.
+  Raw Data / Strategy Matrix / thresholds remain web-only by founder ruling.
+*/
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+.headx{padding:15px 14px 11px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
+.headx .t{flex:1;min-width:0}
+.headx h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.headx .s{font-size:10.5px;color:var(--dim);margin-top:3px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.gatec{font-size:9px;font-weight:800;letter-spacing:.07em;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid var(--line2);color:var(--dim)}
+.gatec.open{background:var(--grn-d);color:var(--grn);border-color:rgba(47,212,139,.4)}
+.gatec.shut{background:rgba(255,92,108,.10);color:var(--red);border-color:rgba(255,92,108,.4)}
+.slots{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:3px}
+.slots b{color:var(--mut);font-weight:700}
+.tierlab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);padding:0 15px;margin:18px 0 8px;display:flex;align-items:center;gap:9px}
+.tierlab::after{content:'';flex:1;height:1px;background:var(--line)}
+.stack{padding:0 12px}
+.vc{position:relative;display:block;width:100%;text-align:left;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;
+  overflow:hidden;font-family:inherit;color:var(--txt);cursor:pointer;min-height:60px;
+  text-decoration:none;border-width:1px}
+.vc:active{background:var(--panel2)}
+.vc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.vc.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.vc.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.vc.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.vc.ref::before{background:var(--blu);top:14px;bottom:14px;border-radius:0 3px 3px 0}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.vc.live::before{animation:none;opacity:1}}
+.vrow{display:flex;align-items:center;gap:11px;min-height:44px}
+.ttl{flex:1;min-width:0}
+.ttl .n{font-size:13.5px;font-weight:700;letter-spacing:.01em}
+.ttl .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.val{text-align:right;white-space:nowrap}
+.val .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:17px;font-weight:700;line-height:1;letter-spacing:-.01em}
+.val .u{font-size:9.5px;color:var(--dim);margin-top:4px;letter-spacing:.02em}
+.v-chev{color:var(--dim);font-size:17px;flex-shrink:0;width:10px;text-align:center;line-height:1;transition:transform .15s}
+.vc.openx .v-chev{transform:rotate(90deg)}
+.grn{color:var(--grn)}.redx{color:var(--red)}.mut{color:var(--mut)}
+.syrow{display:flex;align-items:center;gap:8px;padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;flex-wrap:wrap}
+.syrow .sy2{font-weight:700;font-size:12.5px;margin-right:auto}
+.syrow .at{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--dim)}
+.more{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);padding:8px 0 0 2px}
+.fun{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--mut);
+  padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;line-height:1.6}
+.fun b{color:var(--txt)}
+.trow{display:flex;align-items:center;gap:8px;padding:7px 0 0 2px;border-top:1px solid var(--line);margin-top:8px;font-size:11.5px;flex-wrap:wrap}
+.trow .sy2{font-weight:700;margin-right:auto}
+.trow .mono2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px}
+.legend{margin:22px 12px 0;padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.legend .h{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
+.v-lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;color:var(--mut);line-height:1.5}
+.lbar{width:3px;height:30px;border-radius:2px;flex-shrink:0;margin-top:1px}
+.v-lrow b{color:var(--txt);font-weight:700}
 """
 
 

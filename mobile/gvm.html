@@ -7,80 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/*
-  GVM — the app's company research view (founder 08-Aug: "old app screens fine, format,
-  organise and push"). The Full report now IS the web /cio2 company page, mobile-formatted:
-  same endpoints (api/gvm/company, api/gvm/trend, api/news/company, api/trade-check/fibcheck,
-  api/sector/brief), organized into the web's own sections. Ops-metrics deliberately absent —
-  OPS_METRICS_INTERNAL_ONLY (13348). Arrays render as mini-tables (peers, financials,
-  shareholding); the trend renders as a sparkline. Fable direct push, 17783.
-*/
-.search{display:flex;align-items:center;gap:9px;background:var(--panel);
-  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 14px;margin:12px 12px 0}
-.search .ic{color:var(--dim);font-size:15px}
-.search input{flex:1;min-height:46px;background:none;border:0;outline:none;color:var(--txt);
-  font-family:inherit;font-size:16px}
-.search input::placeholder{color:var(--dim);font-size:13px}
-.rep{position:relative;background:var(--panel2);border:1px solid var(--line2);
-  border-radius:15px;padding:15px 15px 15px 19px;overflow:hidden;margin-bottom:10px}
-.rep::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rc,var(--grn))}
-.r1{display:flex;align-items:baseline;gap:9px}
-.rsym{font-size:17px;font-weight:800;letter-spacing:-.01em}
-.rseg{font-size:10px;color:var(--dim)}
-.rpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:13px;font-weight:700;color:var(--mut)}
-.big{display:flex;align-items:baseline;gap:10px;margin-top:11px}
-.gvmv{font-size:36px;font-weight:800;letter-spacing:-.03em;color:var(--rc,var(--grn));
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.gvmv .of{font-size:13px;color:var(--dim);font-weight:700}
-.verd{font-size:12px;font-weight:800;color:var(--rc,var(--grn));border:1px solid var(--rc,var(--grn));
-  border-radius:6px;padding:4px 10px}
-.pil{margin-top:13px}
-.pr{display:flex;align-items:center;gap:10px;margin-bottom:9px}
-.pk{font-size:11px;font-weight:800;min-width:78px}
-.bar{flex:1;height:7px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
-.fill{height:100%;border-radius:4px;background:var(--rc,var(--grn))}
-.pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:800;
-  min-width:32px;text-align:right}
-.punch{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:11px;
-  border-top:1px solid var(--line);padding-top:11px}
-.punch b{color:var(--txt)}
-.acts{display:flex;gap:8px;margin-top:12px}
-.a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
-  font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
-  border-radius:10px;text-decoration:none;background:none;font-family:inherit;cursor:pointer}
-.lrow{display:flex;align-items:center;gap:10px;background:var(--panel);
-  border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px;cursor:pointer}
-.rk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;
-  color:var(--dim);min-width:22px}
-.rs{font-size:13.5px;font-weight:800}
-.rg{font-size:9.5px;color:var(--dim);margin-top:1px}
-.sc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:14px;font-weight:800}
-.chev{color:var(--dim);font-size:14px}
-.fr{margin:-2px 0 10px;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px 13px}
-.frh{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.13em;color:var(--dim);margin:12px 0 7px}
-.fr .frh:first-child{margin-top:0}
-.frr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:32px}
-.frr:first-of-type{border-top:0}
-.frr .k2{font-size:11.5px;color:var(--mut);flex:1;text-transform:capitalize}
-.frr .v2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
-.tbl{width:100%;border-collapse:collapse;font-size:10.5px}
-.tbl th{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
-  letter-spacing:.06em;color:var(--dim);text-align:right;padding:4px 4px;border-bottom:1px solid var(--line2);text-transform:uppercase}
-.tbl th:first-child{text-align:left}
-.tbl td{padding:5px 4px;border-bottom:1px solid var(--line);text-align:right;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--txt)}
-.tbl td:first-child{text-align:left;font-family:'Sora';font-weight:700;color:var(--txt)}
-.spark{width:100%;height:44px;display:block}
-.prose{font-size:12.5px;color:var(--mut);line-height:1.6}
-.prose b{color:var(--txt)}
-.nrow{padding:7px 0;border-top:1px solid var(--line);font-size:12px;font-weight:600;line-height:1.4}
-.nrow:first-of-type{border-top:0}
-.nrow .w{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:2px}
-</style>
 </head>
 <body>
 <div class="screen">
@@ -277,12 +203,12 @@ function render(){
   var h = '<div class="sect">THE REPORT · TAP ANY STOCK TO GET THIS</div>' + repCard(rs[sel]);
   h += '<div class="sect">' + (STATE.q ? 'MATCHES' : "TODAY'S TOP · BY GVM") + '</div>';
   h += rs.map(function(x, i){
-    return '<div class="lrow" onclick="pick(' + i + ')">'
+    return '<div class="g-lrow" onclick="pick(' + i + ')">'
       + '<span class="rk">' + (x.rank == null ? '' : esc(x.rank)) + '</span>'
       + '<div><div class="rs">' + esc(x.symbol) + '</div>'
       + '<div class="rg">' + esc(x.segment || esc(x.name || '')) + '</div></div>'
       + '<span class="sc" style="color:' + scoreCol(x.gvm) + '">' + n1(x.gvm) + '</span>'
-      + '<span class="chev">&#8250;</span></div>';
+      + '<span class="g-chev">&#8250;</span></div>';
   }).join('');
   document.getElementById('body').innerHTML = h;
 }

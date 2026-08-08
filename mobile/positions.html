@@ -12,29 +12,6 @@
 <script src="/scorr_analysis_card.js"></script>
 <script src="/results_card.js"></script>
 <script src="/scorr_cockpit_card.js"></script>
-<style>
-/* cc#891 — Open Book in the shared card grammar. cc#894 row 31: QTY tag on every card.
-   cc#894 item 1 (Fable direct, 17868): the C·A·R·D strip joins every position card — NOT a copy:
-   the page loads the same shared files the web loads and renders via window.ScorrCardRow(sym),
-   exactly as rule cc#789 commands ("ANY new surface renders the strip ONLY via
-   ScorrCardStripHtml/Row"). Same strip, same four popups (Chart / Analysis / Result / Cockpit),
-   full web functionality by construction. The :root bridge below maps the web components'
-   CSS variables (--surface2, --cyan) onto the app's dark palette — the card files fall back to
-   LIGHT hex values when a var is missing, which would break dark theme. */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
-.net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
-.net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
-.net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
-.pc2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
-.kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
-.kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
-.star{font-size:13px}
-/* the strip sits right of the symbol; give its buttons the app's dark chrome */
-.hl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.hl .sy{font-size:15px;font-weight:800;margin-right:auto}
-.hl .pl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
-</style>
 </head>
 <body>
 <div class="screen">

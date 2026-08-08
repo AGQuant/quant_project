@@ -7,82 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/*
-  cc#889 — HOME rebuilt to previews/home_v2.html. cc#894 (Fable direct, 17868) shipped the chips.
-  FOUNDER COMMENTS 08-Aug batch 2 (this commit):
-  (1) TICKER BAR: NIFTY/BANKNIFTY + digest global set scroll in a top ticker strip — the 2-tile
-      index grid inside the hero is gone. Home only; other screens untouched.
-  (2) Hero carries the V10 index line: "Nifty Long · Bank Nifty No Trade" (server-computed).
-  (3) PCR/VIX values are SERVED by /api/mobile/home2 (hero.pcr/hero.vix) — the cc#894 pickers
-      guessed other endpoints' keys and rendered "--". Chip tap now opens an SVG LINE CHART
-      (website chart style) fed by /api/mobile/trends?kind=adr|pcr|vix.
-  (4) Open Book -> V8 OPEN BOOK, trio = Unrealised / Long Unrl / Short Unrl, each with % on
-      capital deployed for that side. A side with no positions renders --, never 0%.
-  (5) Results Corner card REMOVED (covered by the Results tile). Intel card renamed LIVE NEWS,
-      scrollable (10 items inside a fixed-height scroll box), still taps through to /m/intel.
-  (6) Tools = 9-tile grid, no overlap with the six-slot nav: Baskets Screeners SectorIntel
-      Results Digest FPC Dashboard AICIO PortfolioHealth (last three open the web pages —
-      founder-approved exception to the 16915 split; /health IS the client Portfolio Health
-      page, hr_endpoints.py, verified 08-Aug).
-  BATCH 3 (this commit): ticker MOVES (marquee, seamless -50% loop, hold to pause); charts get
-  FINGER SCRUB (crosshair + live value/date readout in the header); PCR/VIX chips get COLOUR
-  (PCR >=1 green else red; VIX <=14 green, >=17 red, between neutral).
-*/
-.tkr{overflow:hidden;padding:8px 0;margin:0 -12px;border-bottom:1px solid var(--line);background:var(--panel2)}
-.tkr-track{display:flex;gap:8px;width:max-content;padding:0 12px;animation:tkrMove var(--tkr-dur,40s) linear infinite}
-.tkr:active .tkr-track,.tkr:hover .tkr-track{animation-play-state:paused}
-@keyframes tkrMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-@media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
-.tk{flex:none;display:flex;align-items:baseline;gap:6px;padding:4px 9px;border-radius:8px;
-  background:var(--panel);border:1px solid var(--line)}
-.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
-.tk .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;white-space:nowrap}
-.tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;white-space:nowrap}
-.hero-mood{font-size:32px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
-.hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
-.v10line{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;
-  margin-top:8px;color:var(--mut)}
-.v10line b{color:var(--txt,#E9EEFB)}
-.hchips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
-.hc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
-  padding:5px 9px;border-radius:14px;border:1px solid var(--line2);color:var(--mut);background:none;cursor:default}
-.hc.ok{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
-.hc.bad{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
-.hc.tap{cursor:pointer;text-decoration:underline dotted}
-.chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;margin-bottom:6px}
-.chd .t{font-weight:800;font-size:14px}
-.chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut);
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.chev{color:var(--dim);font-size:16px}
-.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);min-height:44px}
-.row:first-of-type{border-top:0}
-.row .sym{font-weight:700;font-size:13.5px}
-.row .sub{font-size:11px;color:var(--dim);margin-top:1px}
-.row .r{text-align:right}
-.row .pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px}
-.row .pc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;margin-top:1px}
-.trio{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.st{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 8px;text-align:center}
-.st .k{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
-.st .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:14px;margin-top:3px}
-.st .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;margin-top:2px}
-.news{padding:9px 0;border-top:1px solid var(--line)}
-.news:first-of-type{border-top:0}
-.news .h{font-size:13px;font-weight:600;line-height:1.4}
-.news .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;gap:8px;align-items:center;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.newsbox{max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;padding:0 12px}
-.tool{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 6px;
-  text-align:center;min-height:44px;font-size:12px;font-weight:700;color:var(--mut);
-  text-decoration:none;display:block}
-.tool span{display:block;font-size:17px;margin-bottom:3px}
-a.card-link{text-decoration:none;color:inherit;display:block}
-.trendbox{margin-top:10px}
-.trendhd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.13em;color:var(--dim);margin-bottom:6px;display:flex;justify-content:space-between}
-</style>
 </head>
 <body>
 <div class="screen">
@@ -281,7 +205,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
   }
   h += '<div class="sect">THE BOOK</div>'
     + '<a class="card-link" href="/m/positions"><div class="c"><div class="chd"><div class="t">V8 Open Book</div>'
-    + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="chev">\u203a</span></div></div>'
+    + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
     + '<div class="trio">'
     + trioCell('Unrealised', null, bk.unrealised_pct, bk.unrealised)
     + trioCell('Long Unrl', bk.long || {})
@@ -295,7 +219,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
   h += '<div class="sect">MY PORTFOLIO</div>'
     + '<a class="card-link" href="/m/holdings"><div class="c"><div class="chd"><div class="t">My Portfolio</div>'
     + '<div class="rgt">' + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
-    + railHtml(pf.rail) + ' <span class="chev">\u203a</span></div></div>'
+    + railHtml(pf.rail) + ' <span class="h-chev">\u203a</span></div></div>'
     + (pf.empty
         ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
         : (pf.rows || []).map(function(r){
@@ -311,7 +235,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
   var rd = d.reading || {};
   h += '<div class="sect">LIVE NEWS</div>'
     + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Live News</div>'
-    + '<div class="rgt">' + (rd.count_24h || 0) + ' stories today <span class="chev">\u203a</span></div></div>'
+    + '<div class="rgt">' + (rd.count_24h || 0) + ' stories today <span class="h-chev">\u203a</span></div></div>'
     + '<div class="newsbox">'
     + ((rd.items || []).map(function(n){
         var edt = n.category === 'AI Editorial';
@@ -345,7 +269,11 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     // #indexintel would therefore have opened Master silently and looked like a working link.
     + '<a class="tool" href="/dashboard#index"><span>\u25d0</span>Index Intel</a>'
     + '<a class="tool" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
-    + '<a class="tool" href="/v15"><span>\u25c9</span>V15 MF</a>';
+    + '<a class="tool" href="/v15"><span>\u25c9</span>V15 MF</a>'
+    // cc#897 second pass: 12 -> 14. Routes taken from model_registry, not guessed \u2014 V10 is /v10
+    // and V14 Intraday is /intraday there. Both open web pages, same 16915 exception as above.
+    + '<a class="tool" href="/v10"><span>\u25d1</span>V10</a>'
+    + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>';
   document.getElementById('body').appendChild(tools);
 }).catch(function(e){
   document.getElementById('body').innerHTML =

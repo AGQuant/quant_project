@@ -109,6 +109,10 @@ from preview_endpoints import router as preview_router   # cc#866 preview screen
 from mobile_endpoints import router as mobile_router     # cc#874 promoted mobile screens (/m/*)
 from v8_futures_book import router as v8_futures_book_router   # cc#885 /api/v8/futures_book
 from mobile_endpoints import wants_mobile_home                 # cc#886 mobile entry decision
+# cc#893 item 3: these two were mounted from a tail import inside preview_endpoints.py because
+# Fable cannot edit main.py. They belong here, with every other router.
+from mobile_home2 import router as mobile_home2_router         # cc#889 Home (market-first rebuild)
+from mobile_ext import router as mobile_ext_router             # cc#892 breadth + cc#893 depth
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -483,6 +487,11 @@ app.include_router(mobile_router)    # cc#874: promoted mobile screens — all l
 # cc#885: futures-basis open book. Its own file and its own route ON PURPOSE — /api/paper/status
 # is untouched, so the Equity path stays byte-identical and issues no extra query.
 app.include_router(v8_futures_book_router)
+# cc#893 item 3: relocated out of the preview_endpoints tail shim. Order matters only in that
+# these must be included after mobile_router, which owns /static/mobile_app.css and the shared
+# helpers both modules import.
+app.include_router(mobile_home2_router)
+app.include_router(mobile_ext_router)
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}

@@ -12,22 +12,6 @@
 <script src="/scorr_analysis_card.js"></script>
 <script src="/results_card.js"></script>
 <script src="/scorr_cockpit_card.js"></script>
-<style>
-/* cc#892 — SCREENERS (Fable direct, 17783). Reads the EXISTING web API (/api/screeners) so both
-   surfaces show identical members and values (16202). Read-only by design (cc#824, rule 3069).
-   cc#894 item 1: the shared web C·A·R·D strip on every stock row (window.ScorrCardRow, rule
-   cc#789). :root bridge maps web card CSS vars onto the dark palette. Rendering is defensive
-   about key names; nothing is invented. */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
-.kvs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.kv2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut);
-  border:1px solid var(--line);border-radius:5px;padding:3px 7px}
-.kv2 b{color:var(--txt);font-weight:700}
-.srow{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-.srow .sy{font-weight:800;font-size:14px;margin-right:auto}
-.srow .px2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
-.srow .dd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700}
-</style>
 </head>
 <body>
 <div class="screen">
@@ -70,7 +54,7 @@ function stockCard(r,labels){
     if (shown==null) return;
     kvs+='<div class="kv2">'+esc((labels&&labels[k])||k.replace(/_/g,' '))+' <b>'+shown+'</b></div>';
   });
-  return '<div class="c"><div class="srow"><span class="sy">'+esc(sym)+'</span>'
+  return '<div class="c"><div class="sc-srow"><span class="sy">'+esc(sym)+'</span>'
     + strip(sym)
     + (cmp!=null?'<span class="px2">'+num(cmp)+'</span>':'')
     + (day!=null?'<span class="dd '+cls(day)+'">'+(day>=0?'+':'')+num(day,2)+'%</span>':'')

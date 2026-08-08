@@ -7,25 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/* cc#891 — Results calendar in the shared card grammar.
-   cc#893 — DEPTH: rows whose symbol HAS a plain-words analysis (result_analysis_v2, via
-   /api/mobile/result_analysis_index) get a READ tag and expand the analysis inline on tap.
-   No dead affordances: rows without analysis get no tag and no tap. (Fable direct, 17783.) */
-.dy{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:800;
-  letter-spacing:.1em;color:var(--txt)}
-.rrow{display:flex;align-items:baseline;gap:8px;padding:8px 0 0;border-top:1px solid var(--line);margin-top:8px}
-.rrow:first-of-type{border-top:0;margin-top:6px}
-.rrow .sy{font-weight:700;font-size:12.5px}
-.rrow .nm{font-size:10px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rrow.hasan{cursor:pointer}
-.an{background:var(--panel2);border:1px solid var(--line2);border-radius:11px;
-  padding:11px 12px;margin:8px 0 2px}
-.an .read{font-size:13.5px;color:var(--txt);line-height:1.68}
-.an .read p{margin-top:8px}
-.an .read p:first-child{margin-top:0}
-.an .src{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:8px}
-</style>
 </head>
 <body>
 <div class="screen">

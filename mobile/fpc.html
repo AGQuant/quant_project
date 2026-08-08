@@ -7,24 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/* cc#892 — FPC (Fable direct, 17783). Client-side planning calculator: monthly SIP + one-time
-   lumpsum compounding to a horizon, and the reverse (what monthly amount reaches a goal).
-   16px inputs (iOS zoom rule). Pure arithmetic on-device — no fetch, nothing to go stale. */
-.fld{margin:0 0 11px}
-.fld label{display:block;font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;margin-bottom:5px}
-.fld input{width:100%;min-height:48px;background:var(--panel);border:1px solid var(--line2);
-  border-radius:11px;color:var(--txt);font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:16px;font-weight:700;padding:0 13px;outline:none}
-.fld input:focus{border-color:rgba(77,124,254,.55)}
-.res .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:800}
-.res .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.sp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
-.sp .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.sp .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;margin-top:3px}
-</style>
 </head>
 <body>
 <div class="screen">

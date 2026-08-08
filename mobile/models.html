@@ -7,49 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/*
-  cc#890 — MODELS reskinned to previews/models.html (approved card grammar ported, live data).
-  cc#892 — the four breadth screens (Screeners, Sector, Holdings, FPC) are appended to the
-  Everything-else grid as static entries here, because _MOBILE_DESTINATIONS lives inside
-  mobile_endpoints.py which Fable cannot full-file-push safely — CC merges them into
-  _MOBILE_DESTINATIONS on its cleanup pass (cc#893 item 3) and removes the static list.
-  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
-  Preview grammar carried: every model is a card with a SHAPE-CODED left rail and a badge whose
-  glyph repeats the shape (dot / ring / bar) so state never rides on colour alone (15913 rule 10).
-  REGISTRY-DERIVED, never a typed list. Everything-else grid stays per rule 2987.
-*/
-.m{position:relative;display:block;background:var(--panel);border:1px solid var(--line);
-  border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
-  text-decoration:none;color:var(--txt);min-height:60px}
-.m::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dim)}
-.m.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
-.m.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
-.m.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
-.m.error::before{background:var(--red)}
-.m.off::before,.m.notrun::before{background:var(--dim)}
-@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
-@media (prefers-reduced-motion:reduce){.m.live::before{animation:none;opacity:1}}
-.mtop{display:flex;align-items:center;gap:9px}
-.mnm{font-size:14px;font-weight:800}
-.badge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:700;
-  letter-spacing:.11em;padding:3px 7px;border-radius:4px;border:1px solid;white-space:nowrap}
-.badge.live{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
-.badge.closed{color:var(--dim);border-color:var(--line2);background:transparent}
-.badge.stale{color:var(--amber);border-color:rgba(245,185,74,.45);background:rgba(245,185,74,.12)}
-.badge.error{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
-.badge.off,.badge.notrun{color:var(--dim);border-color:var(--line2)}
-.g-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
-.g-ring{width:5px;height:5px;border-radius:50%;border:1.5px solid currentColor}
-.g-bar{width:6px;height:2px;background:currentColor;border-radius:1px}
-.mds{font-size:11.5px;color:var(--mut);margin-top:5px;line-height:1.45}
-.mft{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);margin-top:7px}
-.dest{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;padding:0 0 4px}
-.dest a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:11px;
-  background:var(--panel);border:1px solid var(--line);color:var(--txt);text-decoration:none;
-  font-size:12.5px;font-weight:700}
-</style>
 </head>
 <body>
 <div class="screen">

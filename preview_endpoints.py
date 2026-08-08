@@ -91,15 +91,10 @@ def preview_screen(name: str):
                             status_code=404, headers=_NO_STORE)
 
 
-# ── cc#889/cc#892 WIRING SHIM (Claude direct push, CHARTER_OVERRIDE_08AUG2026, session_log 17783) ──
-# mobile_home2.router and mobile_ext.router are included HERE, not in main.py, as a deliberate
-# exception to rule 5: main.py (112KB) and mobile_endpoints.py (70KB) can only be pushed as FULL
-# file contents through the github_push API, and retyping either whole file to add two lines is a
-# bigger correctness risk than this shim. preview_endpoints is already mounted by main.py, is
-# small enough to reproduce byte-exactly, and is mobile-adjacent. CC: when next touching main.py,
-# move these pairs there (`import mobile_home2; app.include_router(mobile_home2.router)` and the
-# same for mobile_ext) and delete this shim — the routers themselves need no change (cc#893 item 3).
-import mobile_home2                                    # noqa: E402  (deliberate tail import)
-router.include_router(mobile_home2.router)             # routes join before main.py includes us
-import mobile_ext                                      # noqa: E402  (cc#892 breadth + cc#893 depth)
-router.include_router(mobile_ext.router)
+# ── cc#893 item 3: THE WIRING SHIM IS GONE ────────────────────────────────────────────────────
+# cc#889/cc#892 mounted mobile_home2.router and mobile_ext.router from a tail import here, as a
+# stated temporary exception to rule 5 — Fable cannot edit main.py (ROLE_CHARTER) and pushes whole
+# files, so retyping 112KB of main.py to add two lines was the bigger risk. The note left behind
+# read "CC: when next touching main.py, move these pairs there and delete this shim".
+# Done. Both routers are now included in main.py beside every other router, which is where a
+# reader looks for them. This file is back to one job: serving previews/*.html.

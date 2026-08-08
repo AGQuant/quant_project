@@ -7,19 +7,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<style>
-/* cc#892 — SECTOR (Fable direct, 17783). Reads the EXISTING web APIs (/api/sectors +
-   /api/sector/rotation) — one implementation, identical numbers (16202). Ratings list with
-   score bars in the GVM pillar grammar; rotation cards above when the API answers. Defensive
-   about key names; nothing invented. */
-.srow{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
-  border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px}
-.srow .nm{font-size:13px;font-weight:800;flex:1;min-width:0}
-.srow .sub2{font-size:9.5px;color:var(--dim);margin-top:1px}
-.srow .bar{flex:1.2;height:6px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
-.srow .fill{height:100%;border-radius:4px}
-.srow .sc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;min-width:34px;text-align:right}
-</style>
 </head>
 <body>
 <div class="screen">
@@ -47,7 +34,7 @@ function row(s){
   var n=s.companies!=null?s.companies:(s.count!=null?s.count:s.n);
   var col=scoreCol(score==null?null:Number(score));
   var w=score==null?0:Math.max(0,Math.min(100,Number(score)*10));
-  return '<div class="srow"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
+  return '<div class="se-srow"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
     + (n!=null?'<div class="sub2">'+n+' companies</div>':'')+'</div>'
     + '<div class="bar"><div class="fill" style="width:'+w+'%;background:'+col+'"></div></div>'
     + '<span class="sc" style="color:'+col+'">'+n1(score)+'</span></div>';
