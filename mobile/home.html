@@ -111,6 +111,23 @@
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
 .pfcard{padding:4px 2px 10px}
+/* ── cc#919: the V10 index block was one wrapping text line ──────────────────────────────────
+   It rendered as "V10: <b>Nifty Long</b>[icon] · <b>Bank Nifty No Trade</b>[icon]" in a plain
+   11.5px mono block with no flex and no nowrap. Measured: ~312px of content in a 324px card at
+   380px, so it wrapped — and because the chart icons are inline-flex with vertical-align:middle,
+   the wrap broke the baseline and the whole thing read as two stacked blocks, which is what the
+   founder saw. One row per instrument instead: name left, state right in mono, chart icon last.
+   Fixed widths total ~90px so the name takes the rest and it cannot overflow at 380px or 360px. */
+.v10b{margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
+.v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
+.v10r{display:flex;align-items:center;gap:8px;min-height:32px}
+.v10r .nm{flex:1;min-width:0;font-size:11.5px;font-weight:700;color:var(--mut);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v10r .stt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
+  letter-spacing:.04em;white-space:nowrap;color:var(--dim)}
+.v10r .stt.long{color:var(--grn)}
+.v10r .stt.short{color:var(--red)}
 </style>
 </head>
 <body>
@@ -572,67 +589,64 @@ function v10Sel(id){
    trade filled outside the day's 5-min range (the engine's 15:30 close tick is one) still lands
    on the chart instead of being clipped off it. */
 function v10Svg(d){
+  /* cc#920 — a CLEAN LINE, not candlesticks. The founder called the candle version clumsy and he
+     is right for this job: 64 daily OHLC bars at ~5px each on a phone is texture, not information,
+     and the question this screen answers is "where did the model buy and sell". So the price is a
+     thin closing line with a soft fill, and the trades are the only other marks on it.
+     MARKERS: entry = triangle pointing UP under the line, coloured by side (BUY green, SELL red);
+     exit = triangle pointing DOWN over the line, coloured by OUTCOME (win green, loss red). Both
+     are tappable and select their trade, which highlights its row in the log below and draws that
+     trade's own labels. Everything else dims, so one trade can be read at a time without clutter. */
   var s = d.series || [], n = s.length;
   if (n < 2) return '<div class="sum">Not enough price history for this window.</div>';
-  var W = 360, H = 210, PL = 4, PR = 44, PT = 14, PB = 20;
+  var W = 360, H = 200, PL = 4, PR = 42, PT = 16, PB = 20;
   var lo = Infinity, hi = -Infinity;
-  s.forEach(function(p){ if (p.l < lo) lo = p.l; if (p.h > hi) hi = p.h; });
+  s.forEach(function(p){ if (p.c < lo) lo = p.c; if (p.c > hi) hi = p.c; });
   (d.pins || []).forEach(function(p){
     if (p.price != null){ if (p.price < lo) lo = p.price; if (p.price > hi) hi = p.price; }
   });
-  var pad = (hi - lo) * 0.06 || 1;
+  var pad = (hi - lo) * 0.08 || 1;
   lo -= pad; hi += pad;
   var rng = (hi - lo) || 1;
   var xs = function(i){ return PL + i / (n - 1) * (W - PL - PR); };
   var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
-  var cw = Math.max(1.4, (W - PL - PR) / n * 0.6);
   var idx = {};
   s.forEach(function(p, i){ idx[p.d] = i; });
 
   var out = [];
-  // horizontal grid + price scale
   for (var g = 0; g <= 3; g++){
     var gv = lo + rng * g / 3, gy = ys(gv);
     out.push('<line x1="' + PL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - PR).toFixed(1)
-      + '" y2="' + gy.toFixed(1) + '" stroke="rgba(148,166,210,.10)" stroke-width="1"/>');
+      + '" y2="' + gy.toFixed(1) + '" stroke="rgba(148,166,210,.09)" stroke-width="1"/>');
     out.push('<text x="' + (W - PR + 4) + '" y="' + (gy + 3).toFixed(1) + '" font-size="9"'
       + ' fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">'
       + Math.round(gv).toLocaleString('en-IN') + '</text>');
   }
-  // candles
-  s.forEach(function(p, i){
-    var x = xs(i), up = p.c >= p.o, col = up ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)';
-    out.push('<line x1="' + x.toFixed(1) + '" y1="' + ys(p.h).toFixed(1) + '" x2="' + x.toFixed(1)
-      + '" y2="' + ys(p.l).toFixed(1) + '" stroke="' + col + '" stroke-width="0.8"/>');
-    var y1 = ys(Math.max(p.o, p.c)), y2 = ys(Math.min(p.o, p.c));
-    out.push('<rect x="' + (x - cw / 2).toFixed(1) + '" y="' + y1.toFixed(1) + '" width="'
-      + cw.toFixed(1) + '" height="' + Math.max(0.8, y2 - y1).toFixed(1) + '" fill="' + col + '"/>');
-  });
-  // pins: entry points INTO the trade, exit points out of it. A BUY sits under the bar and an
-  // arrow points up; a SELL sits over it pointing down. Exit takes the win/loss colour, entry
-  // takes the direction colour — the same convention as the web markers.
+  var pts = s.map(function(p, i){ return xs(i).toFixed(1) + ',' + ys(p.c).toFixed(1); }).join(' ');
+  out.push('<polygon points="' + PL + ',' + (H - PB) + ' ' + pts + ' '
+    + xs(n - 1).toFixed(1) + ',' + (H - PB) + '" fill="rgba(77,124,254,.10)"/>');
+  out.push('<polyline points="' + pts + '" fill="none" stroke="var(--blu,#4D7CFE)"'
+    + ' stroke-width="1.6" stroke-linejoin="round"/>');
+
   var selPins = [];
   (d.pins || []).forEach(function(p){
     var i = idx[p.d];
     if (i === undefined) return;
-    var x = xs(i), bar = s[i], isSel = (p.id === V10.sel);
-    var below = (p.kind === 'exit') ? (p.side !== 'BUY') : (p.side === 'BUY');
-    var col = (p.kind === 'entry' || p.kind === 'open')
-      ? (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)')
-      : (p.win ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
-    var y = below ? ys(bar.l) + 5 : ys(bar.h) - 5;
-    var t = below
-      ? [[x, y], [x - 4, y + 6], [x + 4, y + 6]]        // pointing up, sitting below the bar
-      : [[x, y], [x - 4, y - 6], [x + 4, y - 6]];       // pointing down, sitting above it
+    var x = xs(i), y = ys(p.price != null ? p.price : s[i].c);
+    var isSel = (p.id === V10.sel), dim = (V10.sel != null && !isSel);
+    var entry = (p.kind !== 'exit');
+    var col = entry ? (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)')
+                    : (p.win ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+    var t = entry ? [[x, y + 4], [x - 4.5, y + 11], [x + 4.5, y + 11]]      // points up, below line
+                  : [[x, y - 4], [x - 4.5, y - 11], [x + 4.5, y - 11]];     // points down, above
     out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
-      + '" fill="' + col + '" opacity="' + (V10.sel == null || isSel ? '1' : '.28') + '"/>');
-    if (p.kind === 'open'){
-      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + ys(p.price).toFixed(1)
-        + '" r="2.6" fill="none" stroke="' + col + '" stroke-width="1.4"/>');
+      + '" fill="' + col + '" opacity="' + (dim ? '.25' : '1') + '"'
+      + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
+    if (isSel){
+      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="' + col + '"/>');
+      selPins.push({x: x, y: y, p: p, entry: entry});
     }
-    if (isSel) selPins.push({x: x, y: ys(p.price), p: p, below: below});
   });
-  // the selected trade carries its labels ON the chart, and its entry and exit are joined
   if (selPins.length === 2){
     out.push('<line x1="' + selPins[0].x.toFixed(1) + '" y1="' + selPins[0].y.toFixed(1)
       + '" x2="' + selPins[1].x.toFixed(1) + '" y2="' + selPins[1].y.toFixed(1)
@@ -640,18 +654,17 @@ function v10Svg(d){
   }
   selPins.forEach(function(q){
     var p = q.p;
-    var txt = (p.kind === 'exit')
-      ? (p.reason || 'EXIT') + (p.pnl == null ? '' : ' ' + (p.pnl >= 0 ? '+' : '−')
-          + Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))
-      : (p.side === 'BUY' ? 'BUY ' : 'SELL ') + Math.round(p.price).toLocaleString('en-IN')
-        + (p.kind === 'open' ? ' •open' : '');
-    var ty = q.below ? q.y + 22 : q.y - 16;
-    var anchor = q.x > W - PR - 70 ? 'end' : (q.x < 60 ? 'start' : 'middle');
-    out.push('<text x="' + q.x.toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anchor
+    var txt = q.entry
+      ? (p.side === 'BUY' ? 'BUY ' : 'SELL ') + Math.round(p.price).toLocaleString('en-IN')
+        + (p.kind === 'open' ? ' •open' : '')
+      : (p.reason || 'EXIT') + (p.pnl == null ? '' : ' ' + (p.pnl >= 0 ? '+' : '−')
+          + Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'));
+    var ty = q.entry ? q.y + 24 : q.y - 16;
+    var anch = q.x > W - PR - 66 ? 'end' : (q.x < 56 ? 'start' : 'middle');
+    out.push('<text x="' + q.x.toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anch
       + '" font-size="9.5" font-weight="700" fill="var(--txt,#E9EEFB)"'
       + ' font-family="IBM Plex Mono,monospace">' + esc(txt) + '</text>');
   });
-  // date axis
   out.push('<text x="' + PL + '" y="' + (H - 5) + '" font-size="9" fill="var(--dim,#5E6B8F)"'
     + ' font-family="IBM Plex Mono,monospace">' + esc(dlab(s[0].d)) + '</text>');
   out.push('<text x="' + (W - PR).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="end" font-size="9"'
@@ -660,20 +673,27 @@ function v10Svg(d){
     + ' style="width:100%;height:' + H + 'px;display:block">' + out.join('') + '</svg>';
 }
 function v10Row(t){
-  var win = t.open ? null : t.win;
-  var col = t.open ? '' : (win ? 'pos' : 'neg');
-  var lvl = t.open
-    ? ('Target ' + (t.target == null ? '--' : Math.round(t.target).toLocaleString('en-IN'))
-       + ' · SL ' + (t.stop == null ? '--' : Math.round(t.stop).toLocaleString('en-IN')))
-    : (Math.round(t.entry_price).toLocaleString('en-IN') + ' → '
-       + (t.exit_price == null ? '--' : Math.round(t.exit_price).toLocaleString('en-IN')));
+  /* cc#920 — one clean scannable row per trade: WHEN, WHICH WAY, entry -> exit, and the money on
+     the right where the eye lands. The second line carries the supporting detail (why it closed,
+     which basket, how long it was held) in small type so it never competes. Tapping selects the
+     trade and its markers light up on the chart above. */
+  var col = t.open ? '' : (t.win ? 'pos' : 'neg');
+  var px2 = function(v){ return v == null ? '--' : Math.round(v).toLocaleString('en-IN'); };
+  var sub = [t.open ? 'OPEN' : (t.reason || 'EXIT'),
+             t.basket_label || '',
+             (t.days_held == null ? '' : t.days_held + 'd')].filter(Boolean).join(' · ');
   return '<div class="v10tr' + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
-    + '<span class="a"><div class="d1"><span class="' + (t.side === 'BUY' ? 'pos' : 'neg') + '">'
-    + esc(t.side) + '</span> ' + esc(t.reason) + '</div>'
-    + '<div class="d2">' + esc(dlab(t.entry_d)) + ' ' + esc(t.entry_t || '')
-    + (t.exit_d ? '  →  ' + esc(dlab(t.exit_d)) + ' ' + esc(t.exit_t || '') : '') + '</div></span>'
+    + '<span class="a">'
+    + '<div class="d1"><span class="' + (t.side === 'BUY' ? 'pos' : 'neg') + '">' + esc(t.side) + '</span>'
+    + ' <span class="mono2">' + px2(t.entry_price) + ' → ' + px2(t.exit_price) + '</span></div>'
+    + '<div class="d2">' + esc(dlab(t.entry_d)) + (t.exit_d ? ' – ' + esc(dlab(t.exit_d)) : '')
+    + ' · ' + esc(sub) + '</div></span>'
     + '<span><div class="p1 ' + col + '">' + (t.pnl == null ? '—' : inrShort(t.pnl)) + '</div>'
-    + '<div class="p2">' + esc(lvl) + '</div></span></div>';
+    + (t.open && t.target != null
+        ? '<div class="p2">T ' + px2(t.target) + '</div>'
+        : (t.points == null ? '' : '<div class="p2">' + (t.points >= 0 ? '+' : '')
+            + Number(t.points).toFixed(0) + ' pts</div>'))
+    + '</span></div>';
 }
 function renderV10(){
   var d = V10.data, bd = document.getElementById('v10bd');
@@ -783,14 +803,21 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
   var hero = d.hero || {};
   /* cc#906: each index on the V10 line gets its own chart icon. The symbol comes from the
      server (hero.v10[].symbol), so the template never maps a display name back to a feed key. */
+  /* cc#919: one compact block, one row per instrument — never a wrapping sentence. */
+  function v10State(st){
+    var t = String(st || '').toLowerCase();
+    return t === 'long' ? 'long' : (t === 'short' ? 'short' : '');
+  }
   var v10 = (hero.v10 || []).map(function(x){
-      return '<b>' + esc(x.name) + ' ' + esc(x.state) + '</b>' + (x.symbol ? v10Icon(x.symbol) : '');
-    }).join(' \u00b7 ');
+      return '<div class="v10r"><span class="nm">' + esc(x.name) + '</span>'
+        + '<span class="stt ' + v10State(x.state) + '">' + esc(String(x.state || '--').toUpperCase()) + '</span>'
+        + (x.symbol ? v10Icon(x.symbol) : '') + '</div>';
+    }).join('');
   h += '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
     + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + esc(hero.mood || '--') + '</div>'
     + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
-    + (v10 ? '<div class="v10line">V10: ' + v10 + '</div>' : '')
+    + (v10 ? '<div class="v10b"><div class="v10k">V10 \u00b7 index model</div>' + v10 + '</div>' : '')
     + '<div class="hchips">' + (hero.chips || []).map(function(c){
         var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
         var isAdr = String(c.label).indexOf('ADR') > -1;
