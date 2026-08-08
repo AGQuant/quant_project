@@ -12,6 +12,91 @@
 <script src="/scorr_analysis_card.js"></script>
 <script src="/results_card.js"></script>
 <script src="/scorr_cockpit_card.js"></script>
+<style>
+/* cc#915 — this page keeps its own styling, per the cc#900 lesson: a shared-sheet change must
+   never be able to restyle the V8 screen out from under it. */
+
+/* 1 · MARKET MOOD */
+.mood{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:13px 13px 12px 17px;margin:0 12px 9px;position:relative;overflow:hidden}
+.mood::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line2)}
+.mood.bull::before{background:var(--grn)}
+.mood.bear::before{background:var(--red)}
+.mood.caut::before{background:var(--amber)}
+.mood .mv{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.mood .mw{font-size:11.5px;color:var(--mut);margin-top:3px;line-height:1.5}
+.mchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.mchip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:4px 8px;border-radius:7px;border:1px solid var(--line2);color:var(--mut);
+  background:var(--panel2)}
+.mchip.ok{color:var(--grn);border-color:rgba(47,212,139,.4)}
+.mchip.bad{color:var(--red);border-color:rgba(255,92,108,.4)}
+.slotbar{display:flex;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.slotbar div{flex:1;text-align:center}
+.slotbar .sk{font-size:8.5px;font-weight:800;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.slotbar .sv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;margin-top:2px}
+
+/* 2 · BOOK STAT ROW */
+.bstats{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;margin:0 12px 9px}
+.bst{min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:9px 5px;text-align:center}
+.bst .k{font-size:8px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
+.bst .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:12.5px;
+  margin-top:3px;overflow-wrap:anywhere}
+.bst .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  color:var(--dim);margin-top:2px}
+
+/* 3 · INSTRUMENT SWITCH — small, top corner */
+.insw{display:flex;gap:4px;align-items:center}
+.insw button{min-height:26px;padding:0 9px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9px;font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line2);border-radius:7px;cursor:pointer}
+.insw button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.insw button[disabled]{opacity:.38;cursor:not-allowed}
+
+/* 4 · GROUPING CONTROL */
+.grpb{display:flex;gap:6px;margin:0 12px 8px}
+.grpb button{flex:1;min-height:30px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.grpb button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.ghd{display:flex;align-items:baseline;gap:8px;margin:12px 12px 6px}
+.ghd .gn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--dim);flex:1}
+.ghd .gs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:700}
+
+/* 5 · POSITION CARD */
+.pcard{background:var(--panel);border:1px solid var(--line);border-radius:13px;
+  padding:11px 12px 10px;margin:0 12px 8px}
+.pc1{display:flex;align-items:center;gap:7px;min-height:26px}
+.pc1 .sy2{font-size:14px;font-weight:800;letter-spacing:.01em}
+.tagx{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+  letter-spacing:.08em;padding:2px 6px;border-radius:5px;border:1px solid currentColor}
+.tagx.long{color:var(--grn)}
+.tagx.short{color:var(--red)}
+.pc1 .bk{font-size:10px;color:var(--dim);margin-left:auto;text-align:right;flex:none}
+.pc2{display:flex;align-items:baseline;gap:9px;margin:7px 0 2px}
+.pc2 .pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;
+  letter-spacing:-.01em}
+.pc2 .ret{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700}
+.pc2 .day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+  margin-left:auto}
+/* the stop -> target rail. 0 = stop, 1 = target, for a long and a short alike. */
+.rail2{position:relative;height:6px;border-radius:3px;background:var(--panel2);
+  border:1px solid var(--line);margin:9px 0 5px;overflow:visible}
+.rail2 .fillx{position:absolute;top:0;bottom:0;left:0;border-radius:3px;opacity:.55}
+.rail2 .ent{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--mut);border-radius:1px}
+.rail2 .dot{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
+  border-radius:50%;border:2px solid var(--bg,#0A0F1E)}
+.lvls{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
+.lvls span:nth-child(2){margin-left:auto}
+.pc4{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;padding-top:7px;
+  border-top:1px solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9.5px;color:var(--dim)}
+.pc4 b{color:var(--mut);font-weight:700}
+.norail{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
+  margin:8px 0 4px}
+</style>
 </head>
 <body>
 <div class="screen">
@@ -19,11 +104,13 @@
     <div class="t">
       <h1>V8</h1>
       <div class="s" id="sub">loading…</div>
-      <div class="slots" id="slots"></div>
     </div>
-    <span class="gatec" id="gate">GATE --</span>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <span class="gatec" id="gate">GATE --</span>
+      <div class="insw" id="insw"></div>
+    </div>
   </div>
-  <div id="body"><div class="loading" style="padding:14px">Loading signals…</div></div>
+  <div id="body"><div class="loading" style="padding:14px">Loading V8…</div></div>
 </div>
 
 <nav class="bnav">
@@ -35,7 +122,8 @@
 </nav>
 
 <script>
-var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null };
+var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
+              mood: null, book: null, group: 'period', instrument: 'equity' };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -44,8 +132,21 @@ function pxv(v){ if (v==null||isNaN(Number(v))) return '--';
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
-  return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+  return (x < 0 ? '−' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
+/* cc#907's short scale, same rule, because a stat cell here is a quarter of a phone too */
+function inrShort(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v), sign = x < 0 ? '−' : '', a = Math.abs(x);
+  if (a >= 1e7) return sign + 'Rs.' + (a / 1e7).toFixed(2) + 'Cr';
+  if (a >= 1e5) return sign + 'Rs.' + (a / 1e5).toFixed(2) + 'L';
+  return sign + 'Rs.' + Math.round(a).toLocaleString('en-IN');
+}
+function pctv(v, dp){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v); return (x >= 0 ? '+' : '') + x.toFixed(dp == null ? 2 : dp) + '%';
+}
+function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'grn' : 'redx'); }
 function railCls(r){
   var s = (r && r.state || 'CLOSED').toUpperCase();
   return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
@@ -54,6 +155,212 @@ function strip(sym){
   try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
   return '';
 }
+function moodCls(m){
+  m = (m || '').toLowerCase();
+  if (m.indexOf('bull') > -1) return 'bull';
+  if (m.indexOf('bear') > -1) return 'bear';
+  return 'caut';
+}
+
+/* ══ 1 · MARKET MOOD + SLOTS ═══════════════════════════════════════════════════════════════
+   Built from market_mood()'s OWN keys — mood, checks[], fails, buy_slots, sell_slots,
+   total_slots, slot_note, checked_at. cc#887 caught this endpoint being read for verdict /
+   gate_open / as_of, none of which it returns, so the gate card printed three nulls for weeks.
+   Nothing here is invented: a chip exists only because checks[] carried it. */
+function moodBlock(){
+  var m = STATE.mood;
+  if (!m) return '';
+  var chips = (m.checks || []).map(function(c){
+    var k = (c.ok == null) ? '' : (c.ok ? ' ok' : ' bad');
+    var val = (c.value == null) ? '' : ' ' + (typeof c.value === 'number' ? Number(c.value).toFixed(2) : esc(c.value));
+    return '<span class="mchip' + k + '">' + esc(c.label || c.name || '') + val + '</span>';
+  }).join('');
+  var slots = (m.buy_slots == null && m.sell_slots == null && m.total_slots == null) ? ''
+    : '<div class="slotbar">'
+      + '<div><div class="sk">Buy slots</div><div class="sv grn">' + (m.buy_slots == null ? '--' : m.buy_slots) + '</div></div>'
+      + '<div><div class="sk">Sell slots</div><div class="sv redx">' + (m.sell_slots == null ? '--' : m.sell_slots) + '</div></div>'
+      + '<div><div class="sk">Total</div><div class="sv">' + (m.total_slots == null ? '--' : m.total_slots) + '</div></div>'
+      + '</div>';
+  return '<div class="mood ' + moodCls(m.mood) + '">'
+    + '<div class="mv">' + esc(m.mood || '--') + '</div>'
+    + (m.slot_note ? '<div class="mw">' + esc(m.slot_note) + '</div>' : '')
+    + (chips ? '<div class="mchips">' + chips + '</div>' : '')
+    + slots
+    + (m.checked_at ? '<div class="mw" style="margin-top:8px;font-size:10px">Checked ' + esc(String(m.checked_at)) + '</div>' : '')
+    + '</div>';
+}
+
+/* ══ 2 · BOOK STAT ROW ═════════════════════════════════════════════════════════════════════
+   Open / Unrealised / Realised / Win-Loss. Realised and W/L come from /api/mobile/trades, which
+   already computes them the web way (net of Rs.500 a trade, W/L = clean TARGET vs SL). They are
+   NOT recomputed here — one computation, one answer, so this page cannot drift from the Home
+   card or the web daylog.
+   W/L RULE (card item 3): counts AND rate, and with no closed trades BOTH render "--", never a
+   0% that reads like a real losing record. */
+function statsBlock(){
+  var b = STATE.book, sm = STATE.sm;
+  var wl = null, rate = null;
+  if (sm && (sm.wins != null || sm.losses != null)){
+    var w = sm.wins || 0, l = sm.losses || 0;
+    if (w + l > 0){ wl = w + '/' + l; rate = Math.round(w / (w + l) * 100) + '%'; }
+  }
+  function cell(k, v, p, c){
+    return '<div class="bst"><div class="k">' + k + '</div>'
+      + '<div class="v ' + (c || '') + '">' + v + '</div>'
+      + '<div class="p">' + (p || '') + '</div></div>';
+  }
+  return '<div class="bstats">'
+    + cell('Open', (b ? b.open : '--'), (b && b.deployed != null ? inrShort(b.deployed) + ' in' : ''))
+    + cell('Unrealised', (b ? inrShort(b.unrealised) : '--'),
+           (b && b.unrealised_pct != null ? pctv(b.unrealised_pct) : ''), b ? cls(b.unrealised) : '')
+    + cell('Realised', (sm ? inrShort(sm.realised) : '--'),
+           (sm ? sm.trades + ' closed' : ''), sm ? cls(sm.realised) : '')
+    + cell('Win/Loss', (wl || '--'), (rate || ''), wl ? 'grn' : '')
+    + '</div>';
+}
+
+/* ══ 3 · INSTRUMENT SWITCH ═════════════════════════════════════════════════════════════════
+   Equity is the default and, today, the only real view. The Futures button is rendered but
+   DISABLED with the reason on it, because the data carries no instrument field: v8_paper_positions
+   is (id, symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date,
+   status) and CMP is pinned to the spot bar by design (cc#367). Shipping an enabled Futures tab
+   would be an empty box pretending to be a view. */
+function inswBlock(){
+  var b = STATE.book;
+  var fa = b ? b.futures_available : false;
+  return '<button class="' + (STATE.instrument === 'equity' ? 'on' : '') + '"'
+    + ' onclick="setInstrument(\'equity\')">EQUITY</button>'
+    + '<button' + (fa ? '' : ' disabled title="' + esc(b ? b.instrument_note : 'no futures book') + '"')
+    + ' class="' + (STATE.instrument === 'futures' ? 'on' : '') + '"'
+    + (fa ? ' onclick="setInstrument(\'futures\')"' : '') + '>FUTURES</button>';
+}
+function setInstrument(x){ STATE.instrument = x; render(); }
+
+/* ══ 4 · GROUPING ══════════════════════════════════════════════════════════════════════════
+   PERIOD is the default and the buckets are cut from the real entry dates, relative to the
+   current IST week (Monday start): Today / This week / Last week / Older. An empty bucket is
+   NOT rendered — on a Saturday there is no "Today" heading over nothing.
+   BASKET and SIDE are the two category cuts, both straight off columns that exist.
+   Every group header carries its own count and summed unrealised, so a group is readable on its
+   own instead of only as a slice of the total. */
+var GROUPS = [['period','PERIOD'],['basket','BASKET'],['side','SIDE']];
+function setGroup(g){ STATE.group = g; render(); }
+
+function weekStart(d){                        // Monday 00:00 of d's week
+  var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var dow = (x.getDay() + 6) % 7;             // Mon=0 … Sun=6
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+function periodOf(p){
+  if (!p.entry_date) return 'Undated';
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var parts = p.entry_date.split('-');
+  var e = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  if (e.getTime() === today.getTime()) return 'Today';
+  var ws = weekStart(today);
+  if (e >= ws) return 'This week';
+  var lw = new Date(ws); lw.setDate(lw.getDate() - 7);
+  if (e >= lw) return 'Last week';
+  return 'Older';
+}
+var PERIOD_ORDER = ['Today','This week','Last week','Older','Undated'];
+
+function groupPositions(list){
+  var keyf = STATE.group === 'basket' ? function(p){ return p.basket_label || p.basket || '--'; }
+           : STATE.group === 'side'   ? function(p){ return p.side === 'SHORT' ? 'SHORT' : 'LONG'; }
+           : periodOf;
+  var map = {}, order = [];
+  list.forEach(function(p){
+    var k = keyf(p);
+    if (!map[k]){ map[k] = []; order.push(k); }
+    map[k].push(p);
+  });
+  if (STATE.group === 'period'){
+    order = PERIOD_ORDER.filter(function(k){ return map[k]; });   // empty buckets never render
+  } else {
+    order.sort();
+  }
+  return order.map(function(k){ return { key: k, rows: map[k] }; });
+}
+
+/* ══ 5 · POSITION CARD ═════════════════════════════════════════════════════════════════════
+   The rail is the point of this card. It draws stop -> target as one bar, fills it to where the
+   price actually is, ticks the entry, and puts the live dot on top — so "how is this trade
+   doing" is answered by shape before any number is read, and it reads identically for a long and
+   a short because the server normalises 0 = stop, 1 = target for both.
+   A position missing a target or a stop gets NO rail and says so. A drawn rail with a guessed
+   endpoint would be a picture of a number nobody has. */
+function posCard(p){
+  var col = (p.unrealised == null) ? 'var(--mut)'
+          : (p.unrealised >= 0 ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+  var rail;
+  if (p.progress == null){
+    rail = '<div class="norail">No target/stop recorded — no rail drawn.</div>';
+  } else {
+    var pctW = (p.progress * 100).toFixed(1);
+    // entry sits at its own point on the same 0=stop..1=target scale
+    var ep = null;
+    if (p.target != null && p.stop_loss != null && p.entry_price != null && p.target !== p.stop_loss){
+      var span = p.side === 'SHORT' ? (p.stop_loss - p.target) : (p.target - p.stop_loss);
+      var trav = p.side === 'SHORT' ? (p.stop_loss - p.entry_price) : (p.entry_price - p.stop_loss);
+      if (span) ep = Math.max(0, Math.min(1, trav / span)) * 100;
+    }
+    rail = '<div class="rail2">'
+      + '<div class="fillx" style="width:' + pctW + '%;background:' + col + '"></div>'
+      + (ep == null ? '' : '<div class="ent" style="left:' + ep.toFixed(1) + '%"></div>')
+      + '<div class="dot" style="left:' + pctW + '%;background:' + col + '"></div>'
+      + '</div>'
+      + '<div class="lvls"><span>SL ' + pxv(p.stop_loss) + '</span>'
+      + '<span>T ' + pxv(p.target) + '</span></div>';
+  }
+  return '<div class="pcard">'
+    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
+    + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
+    + strip(p.symbol)
+    + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
+    + '<div class="pc2"><span class="pnl ' + cls(p.unrealised) + '">' + inr(p.unrealised) + '</span>'
+    + '<span class="ret ' + cls(p.return_pct) + '">' + pctv(p.return_pct) + '</span>'
+    + '<span class="day">day ' + pctv(p.day_pct) + '</span></div>'
+    + rail
+    + '<div class="pc4">'
+    + '<span><b>' + Number(p.qty || 0).toLocaleString('en-IN') + '</b> qty</span>'
+    + '<span>entry <b>' + pxv(p.entry_price) + '</b></span>'
+    + '<span>cmp <b>' + pxv(p.cmp) + '</b></span>'
+    + '<span><b>' + inrShort(p.deployed) + '</b> in</span>'
+    + '<span>' + (p.days_held == null ? '' : p.days_held + 'd held') + '</span>'
+    + '<span>' + esc(p.entry_label || '') + '</span>'
+    + (p.cmp_at ? '<span>cmp ' + esc(p.cmp_at) + '</span>' : '')
+    + '</div></div>';
+}
+
+function bookBlock(){
+  var b = STATE.book;
+  if (b === 'loading') return '<div class="loading" style="padding:10px 14px">Loading the book…</div>';
+  if (!b) return '<div class="more" style="margin:0 12px">Open book unavailable.</div>';
+  if (STATE.instrument !== 'equity'){
+    return '<div class="more" style="margin:0 12px">' + esc(b.instrument_note) + '</div>';
+  }
+  if (!b.positions.length)
+    return '<div class="empty" style="margin:0 12px"><b>No open positions</b>The book is flat.</div>';
+
+  var h = '<div class="grpb">' + GROUPS.map(function(g){
+      return '<button class="' + (STATE.group === g[0] ? 'on' : '') + '"'
+        + ' onclick="setGroup(\'' + g[0] + '\')">' + g[1] + '</button>';
+    }).join('') + '</div>';
+
+  h += groupPositions(b.positions).map(function(grp){
+    var sum = 0, known = false;
+    grp.rows.forEach(function(p){ if (p.unrealised != null){ sum += p.unrealised; known = true; } });
+    return '<div class="ghd"><span class="gn">' + esc(grp.key) + ' · ' + grp.rows.length + '</span>'
+      + '<span class="gs ' + (known ? cls(sum) : '') + '">' + (known ? inrShort(sum) : '--') + '</span></div>'
+      + grp.rows.map(posCard).join('');
+  }).join('');
+  return h;
+}
+
+/* ── everything below is the screen as it already was: signals stack, ledger, more, legend ── */
 function funLine(slug){
   var f = STATE.funnels[slug];
   if (f === undefined) return '';
@@ -72,7 +379,7 @@ function funLine(slug){
     });
   }
   return parts.length
-    ? '<div class="fun">' + parts.join(' \u2192 ') + '</div>'
+    ? '<div class="fun">' + parts.join(' → ') + '</div>'
     : '<div class="fun">funnel shape unrecognised — flagged for mapping fix</div>';
 }
 function basketCard(b, i, rcls){
@@ -84,7 +391,7 @@ function basketCard(b, i, rcls){
     + '<div class="m">' + last + '</div></div>'
     + '<div class="val"><div class="v ' + (buy ? 'grn' : 'redx') + '">' + b.signals + '</div>'
     + '<div class="u">signal' + (b.signals === 1 ? '' : 's') + '</div></div>'
-    + '<div class="v-chev">\u203a</div></div>';
+    + '<div class="v-chev">›</div></div>';
   if (open){
     h += funLine(b.slug);
     h += (b.symbols || []).map(function(s){
@@ -105,7 +412,7 @@ function ledgerBlock(){
     return '<div class="trow"><span class="sy2">' + esc(t.symbol)
       + ' <span class="mut" style="font-size:9.5px">' + esc(t.side) + ' · ' + esc(t.basket || '') + '</span></span>'
       + strip(t.symbol)
-      + '<span class="mono2 mut">' + pxv(t.entry) + ' \u2192 ' + pxv(t.exit) + '</span>'
+      + '<span class="mono2 mut">' + pxv(t.entry) + ' → ' + pxv(t.exit) + '</span>'
       + '<span class="mono2 ' + ((t.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(t.pnl) + '</span></div>';
   }).join('');
   h += '<div class="fun" style="margin-top:12px"><b>DAY LOG</b></div>';
@@ -116,61 +423,66 @@ function ledgerBlock(){
   }).join('') || '<div class="more">no closed trades in the window</div>';
   return h;
 }
+
 function render(){
   var d = STATE.d;
   var rcls = railCls(d.rail);
-  document.getElementById('sub').textContent =
-    'Long-short futures · ' + d.universe + ' symbols';
+  document.getElementById('sub').textContent = 'Long-short · ' + d.universe + ' symbols';
   var g = d.gate || {};
   var gc = document.getElementById('gate');
   gc.textContent = g.verdict ? 'GATE · ' + g.verdict.toUpperCase() : 'GATE --';
   gc.className = 'gatec' + (g.open === true ? ' open' : g.open === false ? ' shut' : '');
+  document.getElementById('insw').innerHTML = inswBlock();
 
-  var h = '<div class="tierlab">Signals today · ' + d.signals_today + '</div><div class="stack">';
+  /* founder layout, top to bottom: mood+slots, book stats, switch (in the header), positions */
+  var h = moodBlock() + statsBlock();
+  h += '<div class="tierlab">Open positions</div>' + bookBlock();
+
+  h += '<div class="tierlab">Signals today · ' + d.signals_today + '</div><div class="stack">';
   h += (d.baskets || []).map(function(b, i){ return basketCard(b, i, rcls); }).join('')
     || '<div class="empty"><b>No baskets signalled today.</b>The stack fills as signals fire.</div>';
   h += '</div>';
 
-  /* fresh-era summary (web Master Dashboard formula) — falls back to the aggregate's
-     all-time ledger only while the summary is loading */
   var sm = STATE.sm;
   var lTrades = sm ? sm.trades : d.ledger.trades;
   var lNet    = sm ? sm.realised : d.ledger.gross_pnl;
   var lWL     = sm ? (sm.wins + '/' + sm.losses) : null;
   h += '<div class="tierlab">The book · fresh era</div><div class="stack">'
     + '<a class="vc ' + rcls + '" href="/m/positions"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L · CARD on each</div></div>'
+    + '<div class="ttl"><div class="n">Open Book · full screen</div><div class="m">Every open position · live P&amp;L · CARD on each</div></div>'
     + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
+    + '<div class="v-chev">›</div></div></a>'
     + '<div class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger(event)"><div class="vrow">'
     + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">'
-    + (sm ? 'Net of brokerage \u00b7 ' + (lWL ? lWL + ' target/SL \u00b7 ' : '') + 'tap for rows + day log'
+    + (sm ? 'Net of brokerage · ' + (lWL ? lWL + ' target/SL · ' : '') + 'tap for rows + day log'
           : 'tap for rows + day log') + '</div></div>'
     + '<div class="val"><div class="v ' + ((lNet || 0) >= 0 ? 'grn' : 'redx') + '">'
     + lTrades + '</div><div class="u">closed · ' + inr(lNet) + '</div></div>'
-    + '<div class="v-chev">\u203a</div></div>'
+    + '<div class="v-chev">›</div></div>'
     + (STATE.ledgerOpen ? ledgerBlock() : '')
-    + '</div>'
-    + '</div>';
+    + '</div></div>';
 
   h += '<div class="tierlab">More</div><div class="stack">'
     + '<a class="vc ref" href="/m/results"><div class="vrow">'
     + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
+    + '<div class="v-chev">›</div></div></a>'
     + '<a class="vc ref" href="/m/intel"><div class="vrow">'
     + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
+    + '<div class="v-chev">›</div></div></a>'
     + '</div>';
 
   h += '<div class="legend"><div class="h">Reading the rails</div>'
     + '<div class="v-lrow"><div class="lbar" style="background:#2FD48B"></div>'
-    + '<div><b>Live</b> \u2014 solid, breathing. Inside its own time window, market open.</div></div>'
+    + '<div><b>Live</b> — solid, breathing. Inside its own time window, market open.</div></div>'
     + '<div class="v-lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#F5B94A 0 9px,transparent 9px 15px)"></div>'
-    + '<div><b>Stale</b> \u2014 long dashes, still. Past its window. Always states its age.</div></div>'
+    + '<div><b>Stale</b> — long dashes, still. Past its window. Always states its age.</div></div>'
     + '<div class="v-lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#5E6B8F 0 4px,transparent 4px 10px)"></div>'
-    + '<div><b>Closed</b> \u2014 short dots. Market shut or gate closed. Not a fault.</div></div>'
+    + '<div><b>Closed</b> — short dots. Market shut or gate closed. Not a fault.</div></div>'
     + '<div class="v-lrow"><div class="lbar" style="background:#4D7CFE;height:22px;margin-top:5px"></div>'
-    + '<div><b>Reference</b> \u2014 short solid bar. Static or all-time. Can never be stale.</div></div>'
+    + '<div><b>Reference</b> — short solid bar. Static or all-time. Can never be stale.</div></div>'
+    + '<div class="v-lrow"><div class="lbar" style="background:linear-gradient(90deg,#5E6B8F,#2FD48B);height:6px;margin-top:11px"></div>'
+    + '<div><b>Position rail</b> — stop on the left, target on the right, the dot is the live price. '
+    + 'The tick is your entry. Reads the same for a long and a short.</div></div>'
     + '</div>';
 
   document.getElementById('body').innerHTML = h;
@@ -197,18 +509,16 @@ function togLedger(ev){
 Promise.all([
   fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }),
   fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; })
+  fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; }),
+  fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
-  var d = res[0], mood = res[1], L = res[2];
+  var d = res[0], mood = res[1], L = res[2], bk = res[3];
   if (d.error) throw new Error(d.error);
   STATE.d = d;
+  STATE.mood = (mood && !mood.error) ? mood : null;
   if (L && !L.error){ STATE.ledger = L; STATE.sm = L.summary || null; }
+  STATE.book = (bk && !bk.error) ? bk : null;
   render();
-  if (mood && mood.buy_slots != null){
-    document.getElementById('slots').innerHTML =
-      'Slots · Buy <b>' + mood.buy_slots + '</b> · Sell <b>' + mood.sell_slots + '</b> · Total <b>'
-      + mood.total_slots + '</b>';
-  }
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)

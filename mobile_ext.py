@@ -228,3 +228,146 @@ def m_holdings():
 @router.get("/m/fpc", response_class=HTMLResponse)
 def m_fpc():
     return _page("fpc")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#915 — THE V8 OPEN BOOK, position by position.
+#
+# WHY IT LIVES HERE: it is the ledger's sibling. /api/mobile/trades above is the CLOSED half of
+# the same book at the same web-parity scope; putting the OPEN half anywhere else would be two
+# owners for one book. Realised and win/loss are NOT recomputed here — the page reads them from
+# /api/mobile/trades, which already computes them the web way (33 trades, gross 366,112, net
+# 349,612, 13/5, verified against the web cards). One computation, one answer.
+#
+# THE EQUITY/FUTURES SWITCH — WHAT THE DATA ACTUALLY SAYS. The card asked for the split and told
+# me to verify the columns before wiring it. I did, and there is nothing to split on:
+# v8_paper_positions is (id, symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss,
+# pp, pivot_date, status) and v8_paper_trades carries no instrument field either. Neither has an
+# account, segment or instrument column. Further, the book is priced on SPOT EQUITY by design —
+# /api/paper/status pins CMP with `source <> 'fyers_fut'` precisely so a futures bar can never
+# land in the CMP column (cc#367). So the whole V8 paper book is one equity book. All 18 open
+# rows are F&O-universe symbols, but that says the symbol HAS futures, not that the position IS
+# one. A Futures tab would therefore be an empty box pretending to be a view, so this endpoint
+# states instrument='equity' and futures_available=false, and the page shows the control with
+# Futures disabled and the reason on it. Wiring it for real needs an instrument column written
+# by the engine — an engine change, not a screen change.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+_NO_FUTURES_NOTE = ("V8 paper positions carry no instrument column and CMP is pinned to the spot "
+                    "bar, so the whole book is equity. A futures leg would need the engine to "
+                    "record one.")
+
+
+@router.get("/api/mobile/v8book")
+@_json_safe
+def mobile_v8book(request: Request):
+    """cc#915 — every OPEN V8 paper position with live CMP, day move and P&L.
+
+    SAME SCOPE AS THE LEDGER AND THE HOME CARD: fresh era (entry_ts >= the cc#504 cutover) with
+    basket 's1_reclaim_obs' excluded. The three surfaces must agree — the founder taps the Home
+    Open Book card to get here, and two different numbers for one book is the drift cc#894 was
+    filed for.
+
+    CMP IS THE WEB'S OWN LATERAL, copied not re-derived: latest intraday_prices close for the
+    symbol with source <> 'fyers_fut' (cc#367 — without that filter a futures bar at the same
+    5-min stamp lands in the CMP column at a basis-off price). prev_close is the last raw_prices
+    close strictly before the CMP's OWN session (cc#373), so DAY% compares two different days
+    off-market instead of Friday against itself.
+
+    entry_ts is NAIVE IST (verified: timestamp without time zone) — read raw, never converted.
+
+    PROGRESS is computed here rather than in the template so the honesty rule lives in one place:
+    it is the fraction travelled from stop_loss to target, normalised so 0 = stop and 1 = target
+    for BOTH sides, and it is NULL whenever either level is missing or the two are equal. A
+    position with no target never gets a drawn rail."""
+    g = _guard(request)
+    if g:
+        return g
+    now = _ist_now()
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
+        _row = cur.fetchone()
+        cutover = _row[0] if _row and _row[0] else None
+        cur.execute("""
+            SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts, p.qty,
+                   p.target, p.stop_loss, p.pivot_date,
+                   COALESCE(lp.cmp, p.entry_price) AS cmp,
+                   lp.ts AS cmp_ts,
+                   pc.prev_close
+            FROM v8_paper_positions p
+            LEFT JOIN LATERAL (
+                SELECT close AS cmp, ts FROM intraday_prices
+                WHERE symbol = p.symbol AND source <> 'fyers_fut'
+                ORDER BY ts DESC LIMIT 1
+            ) lp ON true
+            LEFT JOIN LATERAL (
+                SELECT close AS prev_close FROM raw_prices
+                WHERE symbol = p.symbol
+                  AND price_date < COALESCE(lp.ts::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
+                ORDER BY price_date DESC LIMIT 1
+            ) pc ON true
+            WHERE p.status = 'OPEN'
+              AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
+              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
+            ORDER BY p.entry_ts DESC
+        """, {"cut": cutover})
+        rows = _rows(cur)
+
+    def f(v):
+        return float(v) if v is not None else None
+
+    today = now.date()
+    out, unrl_total, dep_total = [], 0.0, 0.0
+    for r in rows:
+        side = (r["side"] or "").upper()
+        entry, cmp_, qty = f(r["entry_price"]), f(r["cmp"]), (r["qty"] or 0)
+        tgt, stop, prev = f(r["target"]), f(r["stop_loss"]), f(r["prev_close"])
+        sign = -1.0 if side == "SHORT" else 1.0
+        unrl = round((cmp_ - entry) * qty * sign, 2) if (entry is not None and cmp_ is not None) else None
+        deployed = round(entry * qty, 2) if entry is not None else None
+        ret = (round((cmp_ - entry) / entry * 100.0 * sign, 2)
+               if (entry not in (None, 0) and cmp_ is not None) else None)
+        day = (round((cmp_ - prev) / prev * 100.0, 2)
+               if (prev not in (None, 0) and cmp_ is not None) else None)
+
+        # 0 = stop, 1 = target, same reading for a long and a short. None when it cannot be drawn.
+        prog = None
+        if tgt is not None and stop is not None and cmp_ is not None and tgt != stop:
+            span = (tgt - stop) if side != "SHORT" else (stop - tgt)
+            trav = (cmp_ - stop) if side != "SHORT" else (stop - cmp_)
+            if span:
+                prog = round(max(0.0, min(1.0, trav / span)), 4)
+
+        ent_ts = r["entry_ts"]
+        out.append({
+            "symbol": r["symbol"], "side": side,
+            "basket": r["basket"], "basket_label": basket_label(r["basket"]),
+            "qty": qty, "entry_price": entry, "cmp": cmp_,
+            "target": tgt, "stop_loss": stop,
+            "unrealised": unrl, "return_pct": ret, "day_pct": day,
+            "deployed": deployed, "progress": prog,
+            "entry_ts": ent_ts.strftime("%Y-%m-%d %H:%M") if ent_ts else None,
+            "entry_date": ent_ts.date().isoformat() if ent_ts else None,
+            "entry_label": ent_ts.strftime("%d %b %H:%M") if ent_ts else None,
+            "days_held": (today - ent_ts.date()).days if ent_ts else None,
+            "cmp_at": r["cmp_ts"].strftime("%d %b %H:%M") if r["cmp_ts"] else None,
+            "cmp_is_live": r["cmp_ts"] is not None,
+        })
+        if unrl is not None:
+            unrl_total += unrl
+        if deployed is not None:
+            dep_total += deployed
+
+    return {
+        "instrument": "equity",
+        "futures_available": False,
+        "instrument_note": _NO_FUTURES_NOTE,
+        "open": len(out),
+        "positions": out,
+        "unrealised": round(unrl_total, 2) if out else None,
+        "deployed": round(dep_total, 2) if out else None,
+        "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
+        "era": "fresh",
+        "rail": rail_state(now, 5, now),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }

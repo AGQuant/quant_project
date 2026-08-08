@@ -802,7 +802,10 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
       + '<div class="p ' + cls(p) + '">' + (p == null ? '--' : pct(p)) + '</div></div>';
   }
   h += '<div class="sect">THE BOOK</div>'
-    + '<a class="card-link" href="/m/positions"><div class="c"><div class="chd"><div class="t">V8 Open Book</div>'
+    /* cc#915 (a): the whole box opens /m/v8 again, not /m/positions. V8 is where the book now
+       lives in full \u2014 mood, slots, stats and the grouped position cards \u2014 and the full-screen
+       /m/positions link moved inside that page. One box, one tap target, one destination. */
+    + '<a class="card-link" href="/m/v8"><div class="c"><div class="chd"><div class="t">V8 Open Book</div>'
     + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
     + '<div class="trio">'
     + trioCell('Unrealised', null, bk.unrealised_pct, bk.unrealised)
