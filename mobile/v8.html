@@ -7,20 +7,76 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/*
+  cc#891 — V8 reskinned to previews/v8.html (design ref scorr_mobile_R3): the tiered CARD STACK
+  with the state-rail grammar and the rails LEGEND, ported with live data.
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Mobile scope per 17021: Raw Data / Strategy Matrix / tab surfaces are WEB professional depth and
+  are deliberately absent here — no dead links. The preview's Day Log card has no mobile data
+  source yet and is omitted rather than faked.
+  Live behaviour added: a basket card taps open to today's signalled SYMBOLS with times
+  (cc#888 payload); truncation is stated ("and N more"), never silent.
+*/
+.headx{padding:15px 14px 11px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
+.headx .t{flex:1;min-width:0}
+.headx h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.headx .s{font-size:10.5px;color:var(--dim);margin-top:3px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.gatec{font-size:9px;font-weight:800;letter-spacing:.07em;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid var(--line2);color:var(--dim)}
+.gatec.open{background:var(--grn-d);color:var(--grn);border-color:rgba(47,212,139,.4)}
+.gatec.shut{background:rgba(255,92,108,.10);color:var(--red);border-color:rgba(255,92,108,.4)}
+.tierlab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);padding:0 15px;margin:18px 0 8px;display:flex;align-items:center;gap:9px}
+.tierlab::after{content:'';flex:1;height:1px;background:var(--line)}
+.stack{padding:0 12px}
+.vc{position:relative;display:block;width:100%;text-align:left;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;
+  overflow:hidden;font-family:inherit;color:var(--txt);cursor:pointer;min-height:60px;
+  text-decoration:none;border-width:1px}
+.vc:active{background:var(--panel2)}
+.vc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.vc.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.vc.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.vc.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.vc.ref::before{background:var(--blu);top:14px;bottom:14px;border-radius:0 3px 3px 0}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.vc.live::before{animation:none;opacity:1}}
+.vrow{display:flex;align-items:center;gap:11px;min-height:44px}
+.ttl{flex:1;min-width:0}
+.ttl .n{font-size:13.5px;font-weight:700;letter-spacing:.01em}
+.ttl .m{font-size:10.5px;color:var(--dim);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.val{text-align:right;white-space:nowrap}
+.val .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+  font-size:17px;font-weight:700;line-height:1;letter-spacing:-.01em}
+.val .u{font-size:9.5px;color:var(--dim);margin-top:4px;letter-spacing:.02em}
+.chev{color:var(--dim);font-size:17px;flex-shrink:0;width:10px;text-align:center;line-height:1;transition:transform .15s}
+.vc.openx .chev{transform:rotate(90deg)}
+.grn{color:var(--grn)}.redx{color:var(--red)}.mut{color:var(--mut)}
+.syrow{display:flex;align-items:baseline;gap:10px;padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px}
+.syrow:first-of-type{border-top:1px solid var(--line)}
+.syrow .sy2{font-weight:700;font-size:12.5px;flex:1}
+.syrow .at{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--dim)}
+.more{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);padding:8px 0 0 2px}
+.legend{margin:22px 12px 0;padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.legend .h{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
+.lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;color:var(--mut);line-height:1.5}
+.lrow:last-child{margin-bottom:0}
+.lbar{width:3px;height:30px;border-radius:2px;flex-shrink:0;margin-top:1px}
+.lrow b{color:var(--txt);font-weight:700}
+</style>
 </head>
 <body>
-<!--
-  cc#874 — V8, PROMOTED. previews/v8.html stays frozen (item 9). 16916: "signal surface, approved".
-  RETAIL FIRST (16915/17021): what signalled today, is the gate open, how is the book. The eleven
-  tab surfaces, the filter funnels and Raw Data are professional depth and stay on the WEB
-  dashboard — the app is a lighter subset of the ONE product, not a second dashboard.
-  The mood gate REUSES v8_endpoints.market_mood(), so the app cannot show a different verdict from
-  the web (DISPLAY_PARITY 16202). Basket counts come from v8_qualified — never v8_filter_state.
--->
 <div class="screen">
-  <div class="head"><h1>V8</h1><div class="s" id="sub">loading…</div></div>
-  <div class="body" id="body"><div class="loading">Loading signals…</div></div>
+  <div class="headx">
+    <div class="t">
+      <h1>V8</h1>
+      <div class="s" id="sub">loading…</div>
+    </div>
+    <span class="gatec" id="gate">GATE --</span>
+  </div>
+  <div id="body"><div class="loading" style="padding:14px">Loading signals…</div></div>
 </div>
+
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -28,95 +84,104 @@
   <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
+
 <script>
+var STATE = { d: null, open: -1 };
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n(v, dp){
-  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
-  return Number(v).toLocaleString('en-IN',
-    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
-}
-function px(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
-}
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
   return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
-function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
-function railHtml(r){
-  if (!r) return '';
-  var s = (r.state || 'CLOSED').toLowerCase();
-  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+function railCls(r){
+  var s = (r && r.state || 'CLOSED').toUpperCase();
+  return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
 }
-function failBox(host, sub, e){
-  document.getElementById(host).innerHTML =
-    '<div class="empty"><b>Could not load</b>' + esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  if (sub) document.getElementById(sub).textContent = 'failed to load';
+function basketCard(b, i, rcls){
+  var open = STATE.open === i;
+  var buy = String(b.slug || '').indexOf('sell') !== 0;
+  var last = (b.symbols && b.symbols[0] && b.symbols[0].at) ? 'Last new signal ' + esc(b.symbols[0].at) : 'No new signals';
+  var h = '<button class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(' + i + ')">'
+    + '<div class="vrow"><div class="ttl"><div class="n">' + esc(b.label) + '</div>'
+    + '<div class="m">' + last + '</div></div>'
+    + '<div class="val"><div class="v ' + (buy ? 'grn' : 'redx') + '">' + b.signals + '</div>'
+    + '<div class="u">signal' + (b.signals === 1 ? '' : 's') + '</div></div>'
+    + '<div class="chev">\u203a</div></div>';
+  if (open){
+    h += (b.symbols || []).map(function(s){
+      return '<div class="syrow"><span class="sy2">' + esc(s.symbol) + '</span>'
+        + '<span class="at">' + esc(s.at || '') + '</span></div>';
+    }).join('');
+    if (b.truncated > 0) h += '<div class="more">and ' + b.truncated + ' more today</div>';
+    if (!(b.symbols || []).length) h += '<div class="more">no symbols recorded</div>';
+  }
+  return h + '</button>';
 }
-
-/* cc#888 item 3: basket rows expand inline to the symbols that signalled. A count answers a
-   dashboard question; a retail user wants the names and the times. Same fold pattern as the book
-   card. Session-scoped open state — a filter that outlives the visit is one the founder forgets
-   he set. */
-var VDATA = null, VOPEN = {};
-function toggleBasket(slug){ VOPEN[slug] = !VOPEN[slug]; renderV8(); }
-
-function basketRow(b){
-  var open = VOPEN[b.slug];
-  var head = '<button type="button" onclick="toggleBasket(\'' + esc(b.slug) + '\')"'
-    + ' style="display:flex;align-items:baseline;gap:10px;padding:9px 0;width:100%;min-height:44px;'
-    + 'border:0;border-top:1px solid var(--line);background:none;color:inherit;font:inherit;'
-    + 'cursor:pointer;text-align:left">'
-    + '<span style="flex:1;font-weight:700;font-size:13px">' + esc(b.label) + '</span>'
-    + '<span class="mono" style="font-size:14px;font-weight:800">' + b.signals + '</span>'
-    + '<span style="color:var(--dim);margin-left:6px">' + (open ? '\u2304' : '\u203a') + '</span>'
-    + '</button>';
-  if (!open) return head;
-  var syms = (b.symbols || []).map(function(x){
-    return '<div style="display:flex;gap:8px;align-items:baseline;padding:5px 0 5px 2px">'
-      + '<span class="mono" style="flex:1;font-size:12.5px;font-weight:700">' + esc(x.symbol) + '</span>'
-      + '<span class="mono" style="font-size:11px;color:var(--mut)">' + esc(x.at || '--') + '</span>'
-      + '</div>'; }).join('');
-  if (!syms) syms = '<div class="sum" style="padding:5px 0">No symbols recorded for this basket.</div>';
-  /* Truncation is stated, never silent — the cap is 20 per basket server-side. */
-  if (b.truncated) syms += '<div class="src">+' + b.truncated + ' more not shown</div>';
-  return head + '<div style="padding-bottom:6px">' + syms + '</div>';
-}
-
-function renderV8(){
-  var d = VDATA;
-  if (d.error) throw new Error(d.error);
-  document.getElementById('sub').innerHTML =
-    'long-short futures · ' + d.universe + ' symbols ' + railHtml(d.rail);
+function render(){
+  var d = STATE.d;
+  var rcls = railCls(d.rail);
+  document.getElementById('sub').textContent =
+    'Long-short futures · ' + d.universe + ' symbols';
   var g = d.gate || {};
-  var gateCard = '<div class="c ' + (g.open === true ? 'long' : g.open === false ? 'short' : '') + '">'
-    + '<div class="meta"><span class="tag cat">MARKET GATE</span>'
-    + '<span class="when">' + esc(g.as_of || '--') + '</span></div>'
-    + '<div class="hl">' + esc(g.verdict || '--') + '</div>'
-    + '<div class="sum">' + (g.open === true ? 'Gate is open — new entries allowed.'
-        : g.open === false ? 'Gate is shut — no new entries today.'
-        : 'Gate state unavailable.') + '</div></div>';
-  var rows = (d.baskets || []).map(basketRow).join('')
-    || '<div class="sum" style="padding:9px 0">No baskets signalled today.</div>';
-  var book = '<div class="c"><div class="meta"><span class="tag cat">PAPER BOOK</span></div>'
-    + '<div class="sum mono">' + d.open_positions + ' open · ' + d.ledger.trades
-    + ' closed all-time · gross <span class="' + cls(d.ledger.gross_pnl) + '">'
-    + inr(d.ledger.gross_pnl) + '</span></div>'
-    + '<div class="fold" onclick="location.href=\'/m/positions\'">Open the book ›</div></div>';
-  document.getElementById('body').innerHTML = gateCard
-    + '<div class="c"><div class="meta"><span class="tag cat">SIGNALS TODAY</span>'
-    + '<span class="when">' + d.signals_today + ' total \u00b7 tap a basket</span></div>'
-    + rows + '</div>' + book;
+  var gc = document.getElementById('gate');
+  gc.textContent = g.verdict ? 'GATE · ' + g.verdict.toUpperCase() : 'GATE --';
+  gc.className = 'gatec' + (g.open === true ? ' open' : g.open === false ? ' shut' : '');
+  gc.title = g.open === true ? 'Gate is open — new entries allowed.'
+           : g.open === false ? 'Gate is shut — no new entries today.'
+           : 'Gate state unavailable.';
+
+  var h = '<div class="tierlab">Signals today · ' + d.signals_today + '</div><div class="stack">';
+  h += (d.baskets || []).map(function(b, i){ return basketCard(b, i, rcls); }).join('')
+    || '<div class="empty"><b>No baskets signalled today.</b>The stack fills as signals fire.</div>';
+  h += '</div>';
+
+  h += '<div class="tierlab">The book</div><div class="stack">'
+    + '<a class="vc ' + rcls + '" href="/m/positions"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L</div></div>'
+    + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
+    + '<div class="chev">\u203a</div></div></a>'
+    + '<div class="vc ref" style="cursor:default"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">All-time closed trades</div></div>'
+    + '<div class="val"><div class="v ' + ((d.ledger.gross_pnl || 0) >= 0 ? 'grn' : 'redx') + '">'
+    + d.ledger.trades + '</div><div class="u">closed · ' + inr(d.ledger.gross_pnl) + '</div></div>'
+    + '</div></div>'
+    + '</div>';
+
+  h += '<div class="tierlab">More</div><div class="stack">'
+    + '<a class="vc ref" href="/m/results"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
+    + '<div class="chev">\u203a</div></div></a>'
+    + '<a class="vc ref" href="/m/intel"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
+    + '<div class="chev">\u203a</div></div></a>'
+    + '</div>';
+
+  h += '<div class="legend"><div class="h">Reading the rails</div>'
+    + '<div class="lrow"><div class="lbar" style="background:#2FD48B"></div>'
+    + '<div><b>Live</b> \u2014 solid, breathing. Inside its own time window, market open.</div></div>'
+    + '<div class="lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#F5B94A 0 9px,transparent 9px 15px)"></div>'
+    + '<div><b>Stale</b> \u2014 long dashes, still. Past its window. Always states its age.</div></div>'
+    + '<div class="lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#5E6B8F 0 4px,transparent 4px 10px)"></div>'
+    + '<div><b>Closed</b> \u2014 short dots. Market shut or gate closed. Not a fault.</div></div>'
+    + '<div class="lrow"><div class="lbar" style="background:#4D7CFE;height:22px;margin-top:5px"></div>'
+    + '<div><b>Reference</b> \u2014 short solid bar. Static or all-time. Can never be stale.</div></div>'
+    + '</div>';
+
+  document.getElementById('body').innerHTML = h;
 }
+function tog(i){ STATE.open = (STATE.open === i ? -1 : i); render(); }
 
 fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(function(d){
   if (d.error) throw new Error(d.error);
-  VDATA = d; renderV8();
-}).catch(function(e){ failBox('body','sub',e); });
+  STATE.d = d; render();
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  document.getElementById('sub').textContent = 'failed to load';
+});
 </script>
 </body>
 </html>
