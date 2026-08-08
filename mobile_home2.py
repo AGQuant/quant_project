@@ -23,7 +23,7 @@ FOUNDER COMMENTS 08-Aug (batch 2, this commit):
   * PCR + VIX chip values are served HERE (hero.pcr / hero.vix) from pcr_daily and
     global_indices — the cc#894 frontend guessed response keys of other endpoints and
     rendered --. Server-side values end the guessing.
-  * Live News: reading.items widened to 2 editorials + 8 shorts for the scrollable card.
+  * Live News: cc#899 — up to the LAST 100 stories (2 editorials pinned + 98 newest shorts).
   * NEW /api/mobile/trends?kind=adr|pcr|vix — uniform {series:[{d,v}]} for the chip chart
     popups. adr_daily / pcr_daily(NIFTY) / global_indices(name='India VIX', quote_date is the
     daily history axis, 1,231 rows verified 08-Aug).
@@ -262,15 +262,17 @@ def mobile_home2(request: Request):
         """)
         pf_rows = _rows(cur)
 
-        # 4 · Live News (founder 08-Aug): scrollable card — 2 editorials + 8 newest shorts, 24h
+        # 4 · Live News (founder 08-Aug, cc#899): scroll up to the LAST 100 — 2 editorials
+        #     pinned first, then 98 newest shorts (no 24h cap on the tail; older items carry
+        #     their date in the template). count_24h stays the honest 24h count.
         cur.execute("""
             (SELECT headline, category, display_time FROM v_polished_articles
-             WHERE display_time >= NOW() - INTERVAL '24 hours' AND category = 'AI Editorial'
+             WHERE category = 'AI Editorial'
              ORDER BY display_time DESC LIMIT 2)
             UNION ALL
             (SELECT headline, category, display_time FROM v_polished_articles
-             WHERE display_time >= NOW() - INTERVAL '24 hours' AND category <> 'AI Editorial'
-             ORDER BY display_time DESC LIMIT 8)
+             WHERE category <> 'AI Editorial'
+             ORDER BY display_time DESC LIMIT 98)
         """)
         reads = _rows(cur)
         cur.execute("""
@@ -406,7 +408,10 @@ def mobile_home2(request: Request):
             "items": [{
                 "headline": r["headline"],
                 "category": r["category"],
-                "when": r["display_time"].strftime("%H:%M") if r["display_time"] else None,
+                "when": (None if not r["display_time"]
+                         else r["display_time"].strftime("%H:%M")
+                         if r["display_time"].date() == now.date()
+                         else r["display_time"].strftime("%d %b %H:%M")),
             } for r in reads],
         },
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
