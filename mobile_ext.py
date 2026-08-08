@@ -9,9 +9,13 @@ What lives here and what deliberately does NOT:
   * /m/screeners, /m/sector, /m/holdings, /m/fpc page routes (templates in mobile/).
   * /api/mobile/holdings — smartgain_holdings rows (the ONLY breadth source with no existing API).
   * /api/mobile/result_analysis(+_index) — plain-words analysis from result_analysis_v2.
-  * /api/mobile/trades — cc#894 items 5+8: last-N closed trades + day-by-day P&L from
-    v8_paper_trades (columns verified 08-Aug: entry/exit price+ts, qty, pnl, return_pct, result;
-    entry_ts/exit_ts naive IST — read raw, never converted).
+  * /api/mobile/trades — cc#894 items 5+8, PARITY-FIXED 08-Aug (founder caught all-time vs web
+    fresh-book drift): defaults to the WEB MASTER DASHBOARD scope — entry_ts >=
+    app_config.v8_paper_rebuild_cutover_ts (cc#504/cc#510 era doctrine), basket 's1_reclaim_obs'
+    excluded — with a summary block computed the web way: realised NET of Rs.500/closed-trade
+    brokerage, W/L = clean result 'TARGET' vs 'SL'. Verified vs DB: 33 trades, gross 366,112,
+    net 349,612, 13/5 — identical to the web cards. ?era=all shows the full legacy book, same as
+    the web's own daylog escape hatch. entry_ts/exit_ts naive IST — read raw, never converted.
   * NO screeners/sector endpoints: templates call the EXISTING web APIs (16202 by construction).
 """
 
@@ -26,6 +30,8 @@ from mobile_endpoints import (
 
 log = logging.getLogger("scorr.mobile.ext")
 router = APIRouter()
+
+BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
 
 @router.get("/api/mobile/holdings")
@@ -123,11 +129,11 @@ def mobile_result_analysis_index(request: Request):
 
 @router.get("/api/mobile/trades")
 @_json_safe
-def mobile_trades(request: Request, limit: int = 20, days: int = 30):
-    """cc#894 items 5+8 — the ledger, two views in one call:
-    trades: last-N closed trades (symbol, side, basket, entry->exit, qty, P&L, ret%, result);
-    day_log: day-by-day P&L over the last `days` calendar days (SUM(pnl) by exit day, W/L).
-    exit_ts/entry_ts are NAIVE IST (verified) — read raw, grouped in SQL, never converted."""
+def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = "fresh"):
+    """cc#894 items 5+8 — the ledger, WEB-PARITY scope (see module header):
+    trades: last-N closed trades; day_log: day-by-day P&L; summary: the Master Dashboard cards
+    (trades, gross, brokerage, net realised, TARGET/SL wins/losses). era=fresh (default) matches
+    the web book; era=all is the full legacy history, like the web's own escape hatch."""
     g = _guard(request)
     if g:
         return g
@@ -135,28 +141,48 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30):
     days = max(1, min(days, 120))
     now = _ist_now()
     with _conn() as conn, conn.cursor() as cur:
+        cutover = None
+        if era != "all":
+            cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
+            _row = cur.fetchone()
+            cutover = _row[0] if _row and _row[0] else None
+        scope = {"cut": cutover}
         cur.execute("""
             SELECT symbol, side, basket, entry_price, exit_price, qty, pnl, return_pct,
                    result, entry_ts, exit_ts
             FROM v8_paper_trades
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND basket IS DISTINCT FROM 's1_reclaim_obs'
             ORDER BY exit_ts DESC NULLS LAST, id DESC
-            LIMIT %s
-        """, (limit,))
+            LIMIT """ + str(limit), scope)
         tr = _rows(cur)
         cur.execute("""
             SELECT exit_ts::date AS d, COUNT(*) AS n, SUM(pnl) AS pnl,
                    COUNT(*) FILTER (WHERE pnl > 0) AS wins,
                    COUNT(*) FILTER (WHERE pnl < 0) AS losses
             FROM v8_paper_trades
-            WHERE exit_ts >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - %s
+            WHERE exit_ts >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - %(days)s
+              AND (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND basket IS DISTINCT FROM 's1_reclaim_obs'
             GROUP BY exit_ts::date
             ORDER BY d DESC
-        """, (days,))
+        """, {"cut": cutover, "days": days})
         dl = _rows(cur)
+        cur.execute("""
+            SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS gross,
+                   COUNT(*) FILTER (WHERE result = 'TARGET') AS wins,
+                   COUNT(*) FILTER (WHERE result = 'SL') AS losses
+            FROM v8_paper_trades
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND basket IS DISTINCT FROM 's1_reclaim_obs'
+        """, scope)
+        sm = _rows(cur)[0]
 
     def f(v):
         return float(v) if v is not None else None
 
+    gross = f(sm["gross"]) or 0.0
+    brokerage = (sm["n"] or 0) * BROKERAGE_PER_TRADE
     return {
         "trades": [{
             "symbol": t["symbol"], "side": (t["side"] or "").upper(),
@@ -172,6 +198,14 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30):
             "n": d["n"], "pnl": f(d["pnl"]),
             "wins": d["wins"], "losses": d["losses"],
         } for d in dl],
+        "summary": {
+            "era": era if era == "all" else "fresh",
+            "trades": sm["n"],
+            "gross": round(gross, 2),
+            "brokerage": brokerage,
+            "realised": round(gross - brokerage, 2),
+            "wins": sm["wins"], "losses": sm["losses"],
+        },
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
