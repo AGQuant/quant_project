@@ -53,6 +53,46 @@
 .tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu,#4D7CFE);
   font-size:15px;cursor:pointer;font-family:inherit}
 .tpchart{padding:2px 2px 12px}
+/* cc#910: the tape table reads its direction. The tint is deliberately faint (7% alpha) — it
+   has to survive next to 15 other rows without turning the sheet into a traffic light, and the
+   coloured value + % still carry the precise reading. A row with a null change gets no tint at
+   all: unknown is not flat. */
+.tpr.up{background:rgba(47,212,139,.07)}
+.tpr.dn{background:rgba(255,92,108,.07)}
+/* ── cc#906: V10 trade-log chart ─────────────────────────────────────────────────────────── */
+.v10ic{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+  margin-left:6px;border-radius:6px;border:1px solid var(--line2);color:var(--mut);
+  background:none;cursor:pointer;vertical-align:middle;padding:0}
+.v10ic svg{display:block}
+.v10tg{display:flex;gap:6px;margin:10px 0 6px}
+.v10tg button{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10.5px;font-weight:800;letter-spacing:.05em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.v10tg button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.v10st{display:flex;gap:10px;flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10px;color:var(--dim);margin:2px 0 8px}
+.v10tr{display:flex;align-items:center;gap:9px;padding:9px 3px;border-bottom:1px solid var(--line);
+  min-height:46px;cursor:pointer}
+.v10tr.sel{background:rgba(77,124,254,.10)}
+.v10tr .a{flex:1;min-width:0}
+.v10tr .d1{font-size:12.5px;font-weight:800}
+.v10tr .d2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:2px}
+.v10tr .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:800;text-align:right}
+.v10tr .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);text-align:right;margin-top:2px}
+/* ── cc#907: the V8 Open Book trio overflowed its card on the founder's phone ────────────────
+   TWO fixes, because they solve two different halves and either alone still breaks.
+   STRUCTURE: a grid item's automatic minimum is its min-content width, so a 1fr track GROWS to
+   fit a long value and pushes .trio wider than the card, which then clips it (.c is
+   overflow:hidden). min-width:0 removes that automatic minimum, so the three tracks can never
+   total more than the card — no horizontal overflow at ANY magnitude, today's or a future one.
+   LEGIBILITY: structure alone would only shrink the box and clip the text, so the value is also
+   compacted (inrShort) and dropped to 12.5px. Measured on a 380px viewport: card content is
+   324px, so a track is (324-16)/3 = 102.7px and a cell has ~87px of room after padding; at
+   12.5px Plex Mono (~7.5px/char) that is ~11 characters. "Rs.1.43Cr" is 9. The old full-digit
+   "Rs.1,42,76,194" is 14 characters = ~118px at 14px — which is the overflow the founder saw.
+   Scoped to .trio so only this card changes; .st is shared CSS used elsewhere. */
+.trio .st{min-width:0;padding:9px 6px}
+.trio .st .v{font-size:12.5px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -81,6 +121,14 @@
   <div class="tpo-bd" id="tapebd"></div>
 </div>
 
+<!-- cc#906: the V10 trade log as a chart. 3 months of daily candles with every FUT-leg paper
+     trade pinned on the session it happened in, plus the log itself underneath. -->
+<div class="tpo" id="v10ov">
+  <div class="tpo-hd"><h2 id="v10ttl">V10 Trades</h2>
+    <button class="tpo-x" onclick="closeV10()" aria-label="Close">&#10005;</button></div>
+  <div class="tpo-bd" id="v10bd"></div>
+</div>
+
 <script>
 var TREND = { open: null };   /* which chip popup is open: 'adr' | 'pcr' | 'vix' */
 
@@ -100,6 +148,18 @@ function inr(v){
   return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
 function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
+/* cc#907 — Indian short scale for the trio cells. Rs.1,42,76,194 is 14 characters and does not
+   fit a third of a phone; Rs.1.43Cr is 9 and says the same thing at a glance. Two decimals keep
+   a lakh readable to the nearest thousand. Below 1L the full figure already fits, so it stays
+   exact. The PAYLOAD is untouched — this is display only, and /m/positions still shows every
+   rupee (the card is explicit that the book maths must not move). */
+function inrShort(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v), sign = x < 0 ? '−' : '', a = Math.abs(x);
+  if (a >= 1e7) return sign + 'Rs.' + (a / 1e7).toFixed(2) + 'Cr';
+  if (a >= 1e5) return sign + 'Rs.' + (a / 1e5).toFixed(2) + 'L';
+  return sign + 'Rs.' + Math.round(a).toLocaleString('en-IN');
+}
 function moodColor(m){
   m = (m || '').toLowerCase();
   if (m.indexOf('bullish') > -1) return 'var(--grn)';
@@ -120,6 +180,13 @@ var TRENDS = {
   pcr: { title: 'NIFTY PCR' },
   vix: { title: 'INDIA VIX' }
 };
+/* cc#908: a point label is a DATE on a daily series and a TIME on an intraday one. One helper
+   decides, so the axis, the scrub readout and the tape charts can never disagree about it.
+   'HH:MM' is passed through; 'YYYY-MM-DD' loses the year (slice(5)) as it always did. */
+function dlab(d){
+  d = String(d == null ? '' : d);
+  return /^\d{1,2}:\d{2}$/.test(d) ? d : d.slice(5);
+}
 function trendSvg(series, kind){
   var W = 320, H = 110, PL = 6, PR = 6, PT = 8, PB = 18;
   var vs = series.map(function(p){ return p.v; });
@@ -130,7 +197,7 @@ function trendSvg(series, kind){
   var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
   var pts = series.map(function(p, i){ return xs(i).toFixed(1) + ',' + ys(p.v).toFixed(1); }).join(' ');
   var area = PL + ',' + (H - PB) + ' ' + pts + ' ' + xs(n - 1).toFixed(1) + ',' + (H - PB);
-  var d0 = series[0].d.slice(5), d1 = series[n - 1].d.slice(5);
+  var d0 = dlab(series[0].d), d1 = dlab(series[n - 1].d);
   var last = series[n - 1].v;
   return '<svg id="tsvg_' + kind + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block;touch-action:none">'
     + '<polygon points="' + area + '" fill="rgba(77,124,254,.14)"/>'
@@ -154,7 +221,7 @@ function wireScrub(kind, series){
   var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
   var rng = (hi - lo) || 1, n = series.length;
   var cx = document.getElementById('tcx_' + kind), cd = document.getElementById('tcd_' + kind);
-  function latest(){ var l = series[n - 1]; if (hd) hd.textContent = Number(l.v).toFixed(2) + ' \u00b7 ' + l.d.slice(5); }
+  function latest(){ var l = series[n - 1]; if (hd) hd.textContent = Number(l.v).toFixed(2) + ' \u00b7 ' + dlab(l.d); }
   function show(clientX){
     var r = svg.getBoundingClientRect();
     var fx = (clientX - r.left) / r.width * W;
@@ -165,7 +232,7 @@ function wireScrub(kind, series){
     var Y = PT + (1 - (p.v - lo) / rng) * (H - PT - PB);
     cx.setAttribute('x1', X); cx.setAttribute('x2', X); cx.style.display = 'block';
     cd.setAttribute('cx', X); cd.setAttribute('cy', Y); cd.style.display = 'block';
-    if (hd) hd.textContent = Number(p.v).toFixed(2) + ' \u00b7 ' + p.d.slice(5);
+    if (hd) hd.textContent = Number(p.v).toFixed(2) + ' \u00b7 ' + dlab(p.d);
   }
   function hide(){ cx.style.display = 'none'; cd.style.display = 'none'; latest(); }
   svg.addEventListener('touchstart', function(e){ if (e.touches[0]) show(e.touches[0].clientX); }, {passive:true});
@@ -190,6 +257,111 @@ function wireScrub(kind, series){
    the card. The map to trendSvg's {d,v} is done here, once. */
 var TAPE = { rows: [], open: {} };
 
+/* ══ cc#910: ONE CHART RENDERER, TWO CALLERS ═══════════════════════════════════════════════
+   The chip charts (ADR/PCR/VIX) and the tape charts are now the SAME component. Shared
+   functions: trendSvg (the SVG), wireScrub (finger crosshair + readout), dlab (point label),
+   rangePills + setRange (the window selector) and renderChart (fetch -> draw -> wire). Nothing
+   is forked — a tape chart scrubs and switches ranges because it IS the chip chart, so the two
+   cannot drift apart later.
+
+   Only the DATA differs, so only the data is per-caller: CHART[key].load(days) returns a
+   promise of {series:[{d,v}], note}. The chip loader reads /api/mobile/trends; the tape loader
+   reads the global endpoints. Everything after that is common code.
+
+   RANGES ARE PER CHART, not global: a row only offers 1D when an intraday series genuinely
+   exists for it (server-supplied intraday_name, resolved from global_intraday itself). India
+   VIX and the two domestic rows have none, so they never show a 1D pill — LIVE_DATA_EVERYWHERE
+   cuts both ways, and the half that matters more is never drawing a line the data cannot back. */
+var CHART = {};
+
+function chipLoader(kind){
+  return function(days){
+    return fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=' + days)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.error) throw new Error(d.error);
+        return { series: (d && d.series) || [], note: (d && d.note) || null };
+      });
+  };
+}
+/* Tape data. Daily = /api/global/history/{name} (flat global_indices rows, price+quote_date).
+   1D = /api/global/intraday/{feed_name} (flat global_intraday rows, close+ts). Both return a
+   FLAT LIST, or {error} on failure — verified by reading gvm_market_endpoints.py, not assumed.
+   The 1D window is the endpoint's own rolling 24 HOURS, not a calendar day, so it is labelled
+   "last 24h" — for Dow or Bitcoin that is the honest description and "today" would not be. */
+function tapeLoader(x){
+  return function(days){
+    var intr = (days === 1 && !!x.intraday_name);
+    var url = intr
+      ? '/api/global/intraday/' + encodeURIComponent(x.intraday_name) + '?days=1'
+      : '/api/global/history/' + encodeURIComponent(x.name) + '?days=' + days;
+    return fetchWithTimeout(url).then(function(r){ return r.json(); }).then(function(rows){
+      if (!Array.isArray(rows)) throw new Error((rows && rows.error) || 'no data');
+      var series = intr
+        ? rows.filter(function(r){ return r && r.close != null && r.ts; })
+              .map(function(r){ return { d: String(r.ts).slice(11, 16), v: Number(r.close) }; })
+        : rows.filter(function(r){ return r && r.price != null && r.quote_date; })
+              .map(function(r){ return { d: String(r.quote_date), v: Number(r.price) }; });
+      return { series: series, note: intr ? 'Last 24h · 5-min ticks' : null };
+    });
+  };
+}
+
+var RANGES_ALL = [[1, '1D'], [7, '7D'], [15, '15D'], [30, '30D']];
+var RANGES_DAILY = [[7, '7D'], [15, '15D'], [30, '30D']];
+
+function setRange(ev, key, days){
+  if (ev) ev.stopPropagation();
+  if (!CHART[key]) return;
+  CHART[key].days = days;
+  // a chip's chosen window survives closing and reopening the popup within the visit
+  if (TREND_RANGE.hasOwnProperty(key)) TREND_RANGE[key] = days;
+  renderChart(key);
+}
+function rangePills(key){
+  var c = CHART[key];
+  return '<div class="rgs">' + c.ranges.map(function(r){
+    return '<button class="rg' + (r[0] === c.days ? ' on' : '') + '"'
+      + ' onclick="setRange(event,\'' + key + '\',' + r[0] + ')">' + r[1] + '</button>';
+  }).join('') + '</div>';
+}
+
+/* Draw (or redraw) a registered chart into its host element. */
+function renderChart(key){
+  var c = CHART[key];
+  if (!c) return;
+  var el = document.getElementById(c.host);
+  if (!el) return;
+  var head = function(right){
+    return '<div class="trendhd"><span>' + esc(c.title) + '</span>'
+      + (right ? '<span id="trd_' + key + '">' + right + '</span>' : '') + '</div>';
+  };
+  el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + esc(c.title) + '…</div>';
+  var want = c.days;
+  c.load(want).then(function(res){
+    // a slower earlier request must not overwrite a newer one, and a closed popup draws nothing
+    if (CHART[key] !== c || c.days !== want || !c.live()) return;
+    var s = res.series || [];
+    var note = res.note
+      ? '<div class="sum" style="padding:6px 0 0">' + esc(res.note) + '</div>' : '';
+    if (s.length < 2){
+      el.innerHTML = '<div class="trendbox">' + head('') + rangePills(key)
+        + '<div class="sum" style="padding:6px 0 0">Not enough history for this window.</div>'
+        + note + '</div>';
+      return;
+    }
+    var last = s[s.length - 1];
+    el.innerHTML = '<div class="trendbox">'
+      + head(esc(Number(last.v).toFixed(2)) + ' · ' + esc(dlab(last.d)))
+      + rangePills(key) + trendSvg(s, key) + note + '</div>';
+    wireScrub(key, s);   // rebound on every redraw — a new SVG needs a new binding
+  }).catch(function(e){
+    if (CHART[key] !== c || !c.live()) return;
+    el.innerHTML = '<div class="trendbox">' + head('') + rangePills(key)
+      + '<div class="sum" style="padding:6px 0 0">Chart failed: ' + esc(e.message) + '</div></div>';
+  });
+}
+
 function openTape(){
   var ov = document.getElementById('tapeov');
   if (!ov) return;
@@ -208,41 +380,41 @@ function tapeRow(x, i){
     ? '<button class="tpc" onclick="tapeChart(' + i + ')" aria-label="chart">' +
       (TAPE.open[i] ? '\u2715' : '\u2197') + '</button>'
     : '<span class="tpc" style="color:transparent">\u00b7</span>';
-  return '<div class="tpr">'
+  /* cc#910: the row carries its direction. cls() gives the value and the % the same pos/neg
+     colour, and the row takes a faint tint of the same sign. A null change gets NEITHER \u2014 an
+     unknown move is not a flat move, and tinting it green or red would state something the
+     data does not say. */
+  var sgn = (x.chg_pct == null || isNaN(Number(x.chg_pct))) ? ''
+          : (Number(x.chg_pct) >= 0 ? ' up' : ' dn');
+  return '<div class="tpr' + sgn + '">'
     + '<span class="nm2"><div class="s1">' + esc(x.name) + '</div>'
     + '<div class="s2">' + (x.live ? 'live' : esc(x.as_of || '--')) + '</div></span>'
-    + '<span class="lv">' + px(x.price) + '</span>'
+    + '<span class="lv ' + cls(x.chg_pct) + '">' + px(x.price) + '</span>'
     + '<span class="cg ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span>'
     + chart + '</div>'
-    + (TAPE.open[i] ? '<div class="tpchart" id="tpc_' + i + '"><div class="loading">Loading\u2026</div></div>' : '');
+    + (TAPE.open[i] ? '<div class="tpchart" id="tpc_' + i + '"></div>' : '');
 }
 function renderTape(){
   document.getElementById('tapebd').innerHTML = TAPE.rows.map(tapeRow).join('')
     || '<div class="empty"><b>No tape data</b></div>';
+  // re-draw any chart that is open \u2014 renderTape() rebuilds the DOM, so the hosts are new nodes
+  Object.keys(TAPE.open).forEach(function(i){ if (TAPE.open[i]) renderChart('tp' + i); });
 }
+/* cc#910: a tape chart is now a registered CHART, so it scrubs and switches range exactly like
+   the ADR/PCR chips \u2014 same renderer, same typography, no second implementation. */
 function tapeChart(i){
   var x = TAPE.rows[i];
   if (!x || !x.has_series) return;
-  if (TAPE.open[i]){ TAPE.open[i] = 0; renderTape(); return; }
-  TAPE.open[i] = 1; renderTape();
-  fetchWithTimeout('/api/global/history/' + encodeURIComponent(x.name) + '?days=15')
-    .then(function(r){ return r.json(); })
-    .then(function(rows){
-      var host = document.getElementById('tpc_' + i);
-      if (!host || !TAPE.open[i]) return;
-      /* flat global_indices rows -> trendSvg's {d,v}. price/quote_date are the real column
-         names, read off the endpoint rather than assumed. */
-      var series = (Array.isArray(rows) ? rows : []).filter(function(r){
-        return r && r.price != null && r.quote_date;
-      }).map(function(r){ return { d: String(r.quote_date), v: Number(r.price) }; });
-      host.innerHTML = series.length > 1
-        ? trendSvg(series, 'tp' + i)
-        : '<div class="sum">Not enough history for ' + esc(x.name) + '.</div>';
-    })
-    .catch(function(e){
-      var host = document.getElementById('tpc_' + i);
-      if (host) host.innerHTML = '<div class="sum">Chart failed: ' + esc(e.message) + '</div>';
-    });
+  var key = 'tp' + i;
+  if (TAPE.open[i]){ TAPE.open[i] = 0; delete CHART[key]; renderTape(); return; }
+  TAPE.open[i] = 1;
+  CHART[key] = {
+    host: 'tpc_' + i, title: x.name,
+    ranges: x.intraday_name ? RANGES_ALL : RANGES_DAILY,
+    days: 15, load: tapeLoader(x),
+    live: function(){ return !!TAPE.open[i]; }
+  };
+  renderTape();
 }
 
 /* ── cc#905: range selector. 1D | 7D | 15D | 30D, default 15D, remembered per kind for the
@@ -253,60 +425,247 @@ function tapeChart(i){
    the move the founder is asking about. The pill row states the window; the chart never pretends
    to more resolution than the daily source has. */
 var TREND_RANGE = { adr: 15, pcr: 15, vix: 15 };
-var RANGES = [[1, '1D'], [7, '7D'], [15, '15D'], [30, '30D']];
 
-function setTrendRange(ev, kind, days){
-  if (ev) ev.stopPropagation();
-  TREND_RANGE[kind] = days;
-  drawTrend(kind);
-}
-function rangePills(kind){
-  var cur = TREND_RANGE[kind];
-  return '<div class="rgs">' + RANGES.map(function(r){
-    return '<button class="rg' + (r[0] === cur ? ' on' : '') + '"'
-      + ' onclick="setTrendRange(event,\'' + kind + '\',' + r[0] + ')">' + r[1] + '</button>';
-  }).join('') + '</div>';
-}
+/* WHAT CHANGED AT cc#908. 1D used to request days=2 and draw the last two DAILY prints, because
+   a one-point line would have been a fabricated shape. It no longer has to fake anything: the
+   server now answers days=1 with the real INTRADAY series -- adr_intraday (gated on
+   universe_count >= 50, the same gate the web chart and the mood-gate use) and pcr_intraday
+   total-PCR for NIFTY, both 5-min and both live. The axis switches to HH:MM on its own, because
+   the points carry a time and dlab() reads that.
 
-function drawTrend(kind){
-  var el = document.getElementById('chiptrend');
-  if (!el) return;
-  var t = TRENDS[kind];
-  var want = TREND_RANGE[kind];
-  var days = want === 1 ? 2 : want;   // see the 1D note above
-  el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + kind.toUpperCase() + ' trend\u2026</div>';
-  fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=' + days)
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (TREND.open !== kind) return;
-      var s = (d && d.series) || [];
-      if (s.length < 2){
-        el.innerHTML = '<div class="trendbox"><div class="trendhd"><span>' + t.title + '</span></div>'
-          + rangePills(kind)
-          + '<div class="sum" style="padding:6px 0 0">Not enough ' + kind.toUpperCase()
-          + ' history for this window.</div></div>';
-        return;
-      }
-      var last = s[s.length - 1];
-      el.innerHTML = '<div class="trendbox"><div class="trendhd"><span>' + t.title + '</span>'
-        + '<span id="trd_' + kind + '">' + esc(Number(last.v).toFixed(2)) + ' \u00b7 ' + esc(last.d.slice(5)) + '</span></div>'
-        + rangePills(kind)
-        + trendSvg(s, kind) + '</div>';
-      wireScrub(kind, s);   // rebound on every redraw — a new SVG needs a new binding
-    })
-    .catch(function(e){
-      if (TREND.open !== kind) return;
-      el.innerHTML = '<div class="sum" style="padding:6px 0 0">' + kind.toUpperCase() + ' trend failed: ' + esc(e.message) + '</div>';
-    });
-}
+   VIX IS THE EXCEPTION, AND SAYS SO. There is no intraday India VIX anywhere in the platform --
+   global_intraday carries 15 names and India VIX is not one of them. Its 1D therefore returns
+   the daily line plus a note saying why, which renderChart prints under the chart. That is the
+   whole of the standing rule: use the live source wherever one exists, state the true as-of
+   wherever one does not, and never invent the missing one.
 
+   The renderer, the pills and the scrub now live above (cc#910) and are shared with the tape
+   charts. All that is left here is opening and closing the popup, and remembering the range. */
 function togTrend(ev, kind){
   if (ev) ev.stopPropagation();
   var el = document.getElementById('chiptrend');
   if (!el) return;
-  if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; return; }
+  if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; delete CHART[kind]; return; }
   TREND.open = kind;
-  drawTrend(kind);
+  CHART[kind] = {
+    host: 'chiptrend', title: TRENDS[kind].title, ranges: RANGES_ALL,
+    days: TREND_RANGE[kind], load: chipLoader(kind),
+    live: function(){ return TREND.open === kind; }
+  };
+  renderChart(kind);
+}
+
+/* ══ cc#906: V10 TRADE-LOG CHART ═══════════════════════════════════════════════════════════
+   Founder asked for the web /dashboard#index V10 view on the phone, over 3 months.
+
+   WHAT THE WEB DOES, read before building this (v8_dashboard.html loadV10Chart): Lightweight
+   Charts, 5-min candles from /api/v10/candles?days=30, markers built from /api/v10/trades and
+   /api/v10/positions, FUT legs only, each trade timestamp shifted +5.5h before snapping to a bar.
+
+   WHAT MOBILE GOT, and why it is not simply the same call with days=90:
+     * DAILY candles, not 5-min. Two reasons, both verified in the DB first. (1) The 5-min bar
+       TIME BASE CHANGES inside a 3-month window: bars up to Jun-2026 are true UTC (session runs
+       03:45-09:55), from Jul-2026 they are IST wall-clock tagged +00 (09:15-15:25). The web's
+       30-day window sits entirely inside the newer regime so its no-shift assumption holds; over
+       90 days it does not, and the older third would sit 5.5h off the newer two thirds on one
+       axis. Aggregating to the session DATE is invariant to that switch, and no date in the
+       window mixes both regimes. (2) ~4,600 5-min bars on a 360px phone is 12+ bars per pixel
+       and a ~300KB payload; 64 daily candles read cleanly.
+     * No chart library. The mobile app loads none, and the SVG the chip charts already use draws
+       candles perfectly well.
+     * PIN LABELS live in the trade log under the chart, not floating on it. 45 text markers on a
+       360px axis is illegible mush. Every trade is one row with side, entry, exit, reason and
+       P&L, coloured win/loss; tapping a row selects it and the chart draws THAT trade's own
+       entry/exit labels and connects them. The newest trade is selected on open, so labels are
+       visible immediately.
+   The server does the matching (mobile_home2.mobile_v10chart) — dates converted to IST in SQL,
+   FUT legs only, trades older than the window dropped and counted, never clamped onto a candle. */
+var V10 = { sym: 'NIFTY50', data: null, sel: null };
+
+function v10Icon(sym){
+  return '<button class="v10ic" onclick="openV10(event,\'' + sym + '\')" aria-label="V10 chart"'
+    + ' title="3-month chart with V10 trades">'
+    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2.4" stroke-linecap="round"><path d="M5 20V11M5 8V4M12 20v-4M12 13V4M19 20v-9M19 8V4"/></svg>'
+    + '</button>';
+}
+function openV10(ev, sym){
+  if (ev){ ev.stopPropagation(); ev.preventDefault(); }
+  V10.sym = sym || 'NIFTY50';
+  var ov = document.getElementById('v10ov');
+  if (ov) ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  loadV10();
+}
+function closeV10(){
+  var ov = document.getElementById('v10ov');
+  if (ov) ov.classList.remove('open');
+  document.body.style.overflow = '';
+  V10.data = null; V10.sel = null;
+}
+function setV10(sym){
+  if (V10.sym === sym) return;
+  V10.sym = sym; V10.sel = null;
+  loadV10();
+}
+function v10Toggle(){
+  return '<div class="v10tg">'
+    + ['NIFTY50', 'BANKNIFTY'].map(function(s){
+        return '<button class="' + (V10.sym === s ? 'on' : '') + '" onclick="setV10(\'' + s + '\')">'
+          + (s === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + '</button>';
+      }).join('') + '</div>';
+}
+function loadV10(){
+  var bd = document.getElementById('v10bd');
+  if (!bd) return;
+  bd.innerHTML = v10Toggle() + '<div class="loading">Loading chart…</div>';
+  var want = V10.sym;
+  fetchWithTimeout('/api/mobile/v10chart?symbol=' + encodeURIComponent(want) + '&days=92')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (V10.sym !== want) return;              // a fast double-tap must not draw the wrong index
+      if (d && d.error) throw new Error(d.error);
+      V10.data = d;
+      // newest trade selected on open, so the chart carries visible labels without a tap
+      V10.sel = (d.trades && d.trades.length) ? d.trades[d.trades.length - 1].id : null;
+      renderV10();
+    })
+    .catch(function(e){
+      if (V10.sym !== want) return;
+      document.getElementById('v10bd').innerHTML = v10Toggle()
+        + '<div class="empty"><b>Chart unavailable</b>' + esc(e.message) + '</div>';
+    });
+}
+function v10Sel(id){
+  V10.sel = (V10.sel === id) ? null : id;
+  renderV10();
+}
+/* candles + pins, hand-drawn SVG. Scale spans the candle highs/lows AND every pin price, so a
+   trade filled outside the day's 5-min range (the engine's 15:30 close tick is one) still lands
+   on the chart instead of being clipped off it. */
+function v10Svg(d){
+  var s = d.series || [], n = s.length;
+  if (n < 2) return '<div class="sum">Not enough price history for this window.</div>';
+  var W = 360, H = 210, PL = 4, PR = 44, PT = 14, PB = 20;
+  var lo = Infinity, hi = -Infinity;
+  s.forEach(function(p){ if (p.l < lo) lo = p.l; if (p.h > hi) hi = p.h; });
+  (d.pins || []).forEach(function(p){
+    if (p.price != null){ if (p.price < lo) lo = p.price; if (p.price > hi) hi = p.price; }
+  });
+  var pad = (hi - lo) * 0.06 || 1;
+  lo -= pad; hi += pad;
+  var rng = (hi - lo) || 1;
+  var xs = function(i){ return PL + i / (n - 1) * (W - PL - PR); };
+  var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
+  var cw = Math.max(1.4, (W - PL - PR) / n * 0.6);
+  var idx = {};
+  s.forEach(function(p, i){ idx[p.d] = i; });
+
+  var out = [];
+  // horizontal grid + price scale
+  for (var g = 0; g <= 3; g++){
+    var gv = lo + rng * g / 3, gy = ys(gv);
+    out.push('<line x1="' + PL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - PR).toFixed(1)
+      + '" y2="' + gy.toFixed(1) + '" stroke="rgba(148,166,210,.10)" stroke-width="1"/>');
+    out.push('<text x="' + (W - PR + 4) + '" y="' + (gy + 3).toFixed(1) + '" font-size="9"'
+      + ' fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">'
+      + Math.round(gv).toLocaleString('en-IN') + '</text>');
+  }
+  // candles
+  s.forEach(function(p, i){
+    var x = xs(i), up = p.c >= p.o, col = up ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)';
+    out.push('<line x1="' + x.toFixed(1) + '" y1="' + ys(p.h).toFixed(1) + '" x2="' + x.toFixed(1)
+      + '" y2="' + ys(p.l).toFixed(1) + '" stroke="' + col + '" stroke-width="0.8"/>');
+    var y1 = ys(Math.max(p.o, p.c)), y2 = ys(Math.min(p.o, p.c));
+    out.push('<rect x="' + (x - cw / 2).toFixed(1) + '" y="' + y1.toFixed(1) + '" width="'
+      + cw.toFixed(1) + '" height="' + Math.max(0.8, y2 - y1).toFixed(1) + '" fill="' + col + '"/>');
+  });
+  // pins: entry points INTO the trade, exit points out of it. A BUY sits under the bar and an
+  // arrow points up; a SELL sits over it pointing down. Exit takes the win/loss colour, entry
+  // takes the direction colour — the same convention as the web markers.
+  var selPins = [];
+  (d.pins || []).forEach(function(p){
+    var i = idx[p.d];
+    if (i === undefined) return;
+    var x = xs(i), bar = s[i], isSel = (p.id === V10.sel);
+    var below = (p.kind === 'exit') ? (p.side !== 'BUY') : (p.side === 'BUY');
+    var col = (p.kind === 'entry' || p.kind === 'open')
+      ? (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)')
+      : (p.win ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+    var y = below ? ys(bar.l) + 5 : ys(bar.h) - 5;
+    var t = below
+      ? [[x, y], [x - 4, y + 6], [x + 4, y + 6]]        // pointing up, sitting below the bar
+      : [[x, y], [x - 4, y - 6], [x + 4, y - 6]];       // pointing down, sitting above it
+    out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
+      + '" fill="' + col + '" opacity="' + (V10.sel == null || isSel ? '1' : '.28') + '"/>');
+    if (p.kind === 'open'){
+      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + ys(p.price).toFixed(1)
+        + '" r="2.6" fill="none" stroke="' + col + '" stroke-width="1.4"/>');
+    }
+    if (isSel) selPins.push({x: x, y: ys(p.price), p: p, below: below});
+  });
+  // the selected trade carries its labels ON the chart, and its entry and exit are joined
+  if (selPins.length === 2){
+    out.push('<line x1="' + selPins[0].x.toFixed(1) + '" y1="' + selPins[0].y.toFixed(1)
+      + '" x2="' + selPins[1].x.toFixed(1) + '" y2="' + selPins[1].y.toFixed(1)
+      + '" stroke="var(--blu,#4D7CFE)" stroke-width="1.2" stroke-dasharray="3 2"/>');
+  }
+  selPins.forEach(function(q){
+    var p = q.p;
+    var txt = (p.kind === 'exit')
+      ? (p.reason || 'EXIT') + (p.pnl == null ? '' : ' ' + (p.pnl >= 0 ? '+' : '−')
+          + Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))
+      : (p.side === 'BUY' ? 'BUY ' : 'SELL ') + Math.round(p.price).toLocaleString('en-IN')
+        + (p.kind === 'open' ? ' •open' : '');
+    var ty = q.below ? q.y + 22 : q.y - 16;
+    var anchor = q.x > W - PR - 70 ? 'end' : (q.x < 60 ? 'start' : 'middle');
+    out.push('<text x="' + q.x.toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anchor
+      + '" font-size="9.5" font-weight="700" fill="var(--txt,#E9EEFB)"'
+      + ' font-family="IBM Plex Mono,monospace">' + esc(txt) + '</text>');
+  });
+  // date axis
+  out.push('<text x="' + PL + '" y="' + (H - 5) + '" font-size="9" fill="var(--dim,#5E6B8F)"'
+    + ' font-family="IBM Plex Mono,monospace">' + esc(dlab(s[0].d)) + '</text>');
+  out.push('<text x="' + (W - PR).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="end" font-size="9"'
+    + ' fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(dlab(s[n - 1].d)) + '</text>');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
+    + ' style="width:100%;height:' + H + 'px;display:block">' + out.join('') + '</svg>';
+}
+function v10Row(t){
+  var win = t.open ? null : t.win;
+  var col = t.open ? '' : (win ? 'pos' : 'neg');
+  var lvl = t.open
+    ? ('Target ' + (t.target == null ? '--' : Math.round(t.target).toLocaleString('en-IN'))
+       + ' · SL ' + (t.stop == null ? '--' : Math.round(t.stop).toLocaleString('en-IN')))
+    : (Math.round(t.entry_price).toLocaleString('en-IN') + ' → '
+       + (t.exit_price == null ? '--' : Math.round(t.exit_price).toLocaleString('en-IN')));
+  return '<div class="v10tr' + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
+    + '<span class="a"><div class="d1"><span class="' + (t.side === 'BUY' ? 'pos' : 'neg') + '">'
+    + esc(t.side) + '</span> ' + esc(t.reason) + '</div>'
+    + '<div class="d2">' + esc(dlab(t.entry_d)) + ' ' + esc(t.entry_t || '')
+    + (t.exit_d ? '  →  ' + esc(dlab(t.exit_d)) + ' ' + esc(t.exit_t || '') : '') + '</div></span>'
+    + '<span><div class="p1 ' + col + '">' + (t.pnl == null ? '—' : inrShort(t.pnl)) + '</div>'
+    + '<div class="p2">' + esc(lvl) + '</div></span></div>';
+}
+function renderV10(){
+  var d = V10.data, bd = document.getElementById('v10bd');
+  if (!d || !bd) return;
+  var t = document.getElementById('v10ttl');
+  if (t) t.textContent = d.label + ' · V10 trades';
+  var st = d.stats || {};
+  var trades = (d.trades || []).slice().reverse();      // newest first in the log
+  bd.innerHTML = v10Toggle()
+    + '<div class="v10st"><span>' + esc(dlab(d.from || '')) + ' → ' + esc(dlab(d.to || ''))
+    + '</span><span>' + (d.count || 0) + ' sessions · daily</span>'
+    + '<span>' + (st.closed || 0) + ' closed · ' + (st.wins || 0) + 'W/' + (st.losses || 0) + 'L'
+    + (st.open ? ' · ' + st.open + ' open' : '') + '</span>'
+    + (st.net_pnl == null ? '' : '<span class="' + cls(st.net_pnl) + '">Net ' + inrShort(st.net_pnl) + '</span>')
+    + (d.outside_window ? '<span>' + d.outside_window + ' older than window</span>' : '')
+    + '</div>'
+    + v10Svg(d)
+    + '<div class="sect" style="margin-top:10px">TRADE LOG</div>'
+    + (trades.length ? trades.map(v10Row).join('')
+                     : '<div class="sum" style="padding:8px 0">No V10 trades in this window.</div>');
 }
 
 fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then(function(d){
@@ -334,7 +693,11 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
 
   /* 1 · HERO — the market today; V10 index line; ADR/PCR/VIX chips open charts */
   var hero = d.hero || {};
-  var v10 = (hero.v10 || []).map(function(x){ return '<b>' + esc(x.name) + ' ' + esc(x.state) + '</b>'; }).join(' \u00b7 ');
+  /* cc#906: each index on the V10 line gets its own chart icon. The symbol comes from the
+     server (hero.v10[].symbol), so the template never maps a display name back to a feed key. */
+  var v10 = (hero.v10 || []).map(function(x){
+      return '<b>' + esc(x.name) + ' ' + esc(x.state) + '</b>' + (x.symbol ? v10Icon(x.symbol) : '');
+    }).join(' \u00b7 ');
   h += '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
     + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + esc(hero.mood || '--') + '</div>'
@@ -365,7 +728,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     var v = (o == null) ? totVal : o.unrealised;
     var p = (o == null) ? totPct : o.pct;
     return '<div class="st"><div class="k">' + k + '</div>'
-      + '<div class="v ' + cls(v) + '">' + inr(v) + '</div>'
+      + '<div class="v ' + cls(v) + '" title="' + esc(inr(v)) + '">' + inrShort(v) + '</div>'
       + '<div class="p ' + cls(p) + '">' + (p == null ? '--' : pct(p)) + '</div></div>';
   }
   h += '<div class="sect">THE BOOK</div>'

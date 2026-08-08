@@ -76,6 +76,23 @@ _TICKER_NAME_ORDER = ["India VIX", "Dow", "Nasdaq", "S&P 500", "Nikkei", "Hang S
                       "FTSE", "DAX", "USDINR", "DXY", "Gold", "Silver", "Brent", "WTI",
                       "Natural Gas", "Bitcoin"]
 
+# cc#910 — the tape row name and the intraday row name are NOT the same string. global_indices
+# carries display names ("S&P 500", "Natural Gas", "Hang Seng"); global_intraday carries feed
+# keys (SP500, NATURAL_GAS, HANGSENG). /api/global/intraday/{name} matches on UPPER(name), so
+# those three would silently return an empty series — a 1D pill that draws nothing. Only the
+# three that genuinely differ are listed; every other name matches on upper-case alone.
+_INTRADAY_ALIAS = {"S&P 500": "SP500", "Natural Gas": "NATURAL_GAS", "Hang Seng": "HANGSENG"}
+
+
+def _intraday_name(display_name, available):
+    """Feed key for a tape name, or None when that name has no 5-min series.
+
+    `available` is the live set of names in global_intraday, so this answers from data. India VIX
+    resolves to None — it is genuinely not in the intraday feed (the same fact cc#908 states on
+    the VIX chip), so its row gets no 1D pill rather than a fabricated intraday line."""
+    key = _INTRADAY_ALIAS.get(display_name, (display_name or "").upper())
+    return key if key in available else None
+
 
 def _v10_state(cur):
     """Nifty/Bank Nifty V10 state from v10_positions OPEN FUT legs (the directional leg).
@@ -92,50 +109,271 @@ def _v10_state(cur):
         if s == "SELL":
             return "Short"
         return "No Trade"
+    # cc#906: the symbol travels with the state so the template never has to map a display name
+    # back to a feed symbol to open that index's chart.
     return [
-        {"name": "Nifty", "state": word("NIFTY50")},
-        {"name": "Bank Nifty", "state": word("BANKNIFTY")},
+        {"name": "Nifty", "symbol": "NIFTY50", "state": word("NIFTY50")},
+        {"name": "Bank Nifty", "symbol": "BANKNIFTY", "state": word("BANKNIFTY")},
     ]
+
+
+# cc#908 — LIVE-DATA-EVERYWHERE. India VIX has no intraday source: global_intraday carries 15
+# names and India VIX is not one of them (data audit 08-Aug). So VIX 1D says so rather than
+# drawing a shape it does not have. Never a fabricated intraday line.
+_VIX_NO_INTRADAY = ("India VIX has no intraday feed — it is not one of the 15 names in "
+                    "global_intraday. This is the daily close line.")
 
 
 @router.get("/api/mobile/trends")
 @_json_safe
 def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
-    """Uniform daily series for the Home chip chart popups. One shape, three sources:
+    """Uniform series for the Home chip chart popups. ONE shape, two resolutions.
+
+    DAILY (days >= 2), unchanged:
       adr -> adr_daily.adr                  (price_date)
       pcr -> pcr_daily.pcr, NIFTY           (price_date)
       vix -> global_indices.price, name='India VIX' (quote_date IS the daily history axis)
-    Returns {kind, series:[{d:'YYYY-MM-DD', v:float}], latest} oldest-first. Empty source
-    returns series:[] — the popup states 'no data', never draws a fake line."""
+
+    INTRADAY (days == 1) — cc#908, founder 08-Aug "1D should mean intraday":
+      adr -> adr_intraday.adr,      universe_count >= 50   (the SAME gate /api/v8/adr_intraday
+             and the mood-gate use — an ungated pre-open tick on a thin universe is not breadth)
+      pcr -> pcr_intraday.pcr_total, underlying = 'NIFTY'  (the total-PCR series the web
+             /api/pcr/intraday serves; ATM+-5 is a different question and stays on the web)
+      vix -> NO intraday source exists, so this falls back to the daily line and SAYS so in
+             `note`. The chart is never given a shape the data cannot support.
+
+    SESSION ANCHOR: the intraday day is MAX(ts)::date of the source table, NOT CURRENT_DATE.
+    Anchoring on today would render an empty chart every weekend and every holiday; rolling
+    forward to the last session with data is the rule-9 corollary applied to a read path. The
+    session actually shown is returned in `as_of` and stated in `note`, so a Monday-morning
+    reader is never shown Friday's curve believing it is today's.
+
+    adr_intraday.ts and pcr_intraday.ts are BOTH naive IST — read raw, never converted
+    (the cc#844 phantom-330-minute class).
+
+    Returns {kind, series:[{d,v}], latest, intraday, as_of, note} oldest-first, where `d` is
+    'YYYY-MM-DD' on a daily series and 'HH:MM' on an intraday one. Empty source returns
+    series:[] — the popup states 'no data', never draws a fake line."""
     g = _guard(request)
     if g:
         return g
     kind = (kind or "adr").lower()
-    days = max(2, min(int(days or 30), 120))
+    if kind not in ("adr", "pcr", "vix"):
+        kind = "adr"
+    want = max(1, min(int(days or 30), 120))
+    intraday = (want == 1 and kind in ("adr", "pcr"))
+    note = None
+
     with _conn() as conn, conn.cursor() as cur:
-        if kind == "pcr":
+        if intraday and kind == "adr":
             cur.execute("""
-                SELECT price_date AS d, pcr AS v FROM pcr_daily
-                WHERE underlying = 'NIFTY' AND pcr IS NOT NULL
-                ORDER BY price_date DESC LIMIT %s
-            """, (days,))
-        elif kind == "vix":
+                SELECT to_char(ts, 'HH24:MI') AS d, adr AS v, ts::date AS sd
+                FROM adr_intraday
+                WHERE adr IS NOT NULL AND universe_count >= 50
+                  AND ts::date = (SELECT MAX(ts)::date FROM adr_intraday
+                                  WHERE adr IS NOT NULL AND universe_count >= 50)
+                ORDER BY ts ASC
+            """)
+            rows = _rows(cur)
+        elif intraday:
             cur.execute("""
-                SELECT quote_date AS d, price AS v FROM global_indices
-                WHERE name = 'India VIX' AND price IS NOT NULL
-                ORDER BY quote_date DESC LIMIT %s
-            """, (days,))
+                SELECT to_char(ts, 'HH24:MI') AS d, pcr_total AS v, ts::date AS sd
+                FROM pcr_intraday
+                WHERE underlying = 'NIFTY' AND pcr_total IS NOT NULL
+                  AND ts::date = (SELECT MAX(ts)::date FROM pcr_intraday
+                                  WHERE underlying = 'NIFTY' AND pcr_total IS NOT NULL)
+                ORDER BY ts ASC
+            """)
+            rows = _rows(cur)
         else:
-            kind = "adr"
-            cur.execute("""
-                SELECT price_date AS d, adr AS v FROM adr_daily
-                WHERE adr IS NOT NULL
-                ORDER BY price_date DESC LIMIT %s
-            """, (days,))
-        rows = _rows(cur)
-    series = [{"d": str(r["d"]), "v": float(r["v"])} for r in reversed(rows)]
-    return {"kind": kind, "series": series,
+            # a one-point line is a dot, so a daily window never asks for fewer than 2 prints
+            dd = max(2, want)
+            if kind == "pcr":
+                cur.execute("""
+                    SELECT price_date AS d, pcr AS v FROM pcr_daily
+                    WHERE underlying = 'NIFTY' AND pcr IS NOT NULL
+                    ORDER BY price_date DESC LIMIT %s
+                """, (dd,))
+            elif kind == "vix":
+                cur.execute("""
+                    SELECT quote_date AS d, price AS v FROM global_indices
+                    WHERE name = 'India VIX' AND price IS NOT NULL
+                    ORDER BY quote_date DESC LIMIT %s
+                """, (dd,))
+            else:
+                cur.execute("""
+                    SELECT price_date AS d, adr AS v FROM adr_daily
+                    WHERE adr IS NOT NULL
+                    ORDER BY price_date DESC LIMIT %s
+                """, (dd,))
+            rows = list(reversed(_rows(cur)))
+            if want == 1 and kind == "vix":
+                note = _VIX_NO_INTRADAY
+
+    series = [{"d": str(r["d"]), "v": float(r["v"])} for r in rows if r["v"] is not None]
+    as_of = None
+    if intraday and rows:
+        as_of = str(rows[-1]["sd"])
+        note = "%s intraday · 5-min ticks" % as_of
+    elif series:
+        as_of = series[-1]["d"]
+    return {"kind": kind, "series": series, "intraday": intraday,
+            "as_of": as_of, "note": note,
             "latest": series[-1]["v"] if series else None}
+
+
+# ── cc#906: V10 trade-log chart ───────────────────────────────────────────────────────────────
+# Table chosen by LOOKUP, never by string-building from the query param — a user-supplied symbol
+# never reaches the SQL text.
+_V10_TABLES = {"NIFTY50": "nifty_5m_test_data", "BANKNIFTY": "banknifty_5m_test_data"}
+_V10_ALIAS = {"NIFTY": "NIFTY50", "NIFTY 50": "NIFTY50", "BANKNIFTY50": "BANKNIFTY",
+              "NIFTYBANK": "BANKNIFTY", "BNF": "BANKNIFTY"}
+
+
+@router.get("/api/mobile/v10chart")
+@_json_safe
+def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
+    """cc#906 — 3 months of index price with the V10 paper trades pinned on it.
+
+    WHY DAILY AND NOT THE WEB'S 5-MIN (the finding that decided this build, verified in the DB
+    before a line of chart code was written):
+
+      1. TIME BASE. /api/v10/candles emits the raw epoch of *_5m_test_data.ts and the web chart
+         applies no shift, which is correct for ITS 30-day window. Over 3 months it is not: the
+         bar time base CHANGED inside this window. Bars up to Jun-2026 are true UTC (a session
+         runs 03:45 -> 09:55); from Jul-2026 they are IST wall-clock tagged +00 (09:15 -> 15:25).
+         A single 90-day epoch axis would therefore shift the older third of the window by 5.5h
+         against the newer two thirds. Aggregating to the CALENDAR DATE is invariant to that
+         switch — both regimes put a session's bars on the session's own date — and no date in
+         the window mixes the two regimes (checked: zero dates carry both). So a daily series is
+         not merely lighter here, it is the only one that is correct across the whole window.
+      2. PAYLOAD AND LEGIBILITY. 3 months of 5-min bars is ~4,600 candles. On a ~360px phone
+         that is more than 12 bars per pixel — unreadable, and a ~300KB payload on mobile data.
+         64 daily candles read cleanly at ~5px each.
+
+    PINS. v10_trades / v10_positions timestamps are genuine TIMESTAMPTZ, so they are converted
+    with AT TIME ZONE 'Asia/Kolkata' IN SQL (never in Python — cc#844 class) and matched to a
+    session by date. FUT leg only: the FUT leg is the directional trade, OPT legs are hedges and
+    would double-count every pin (the same rule _v10_state already applies to the hero line).
+    Proof the conversion lands right — for the 3 most recent NIFTY FUT trades the entry price
+    falls inside its entry-day bar range: 24614.9 in [24431.4, 24645.3], 24530.8 in [24522.3,
+    24774.3], 24187.0 in [24149.6, 24253.2]. A wrong conversion would move a trade to the
+    neighbouring session and break that containment.
+
+    A trade older than the window is DROPPED and counted in `outside_window` — never clamped
+    onto the first candle, which would put a pin on a price that never happened.
+
+    TARGET/SL: v10_trades has no stop/target columns, so a CLOSED trade carries its exit_reason
+    ('TARGET' / 'SL') — which is that information — and never an invented level. OPEN positions
+    do carry stop/target, so those levels ship for them. Read-only; no writes anywhere."""
+    g = _guard(request)
+    if g:
+        return g
+    sym = (symbol or "NIFTY50").upper().strip()
+    sym = _V10_ALIAS.get(sym, sym)
+    if sym not in _V10_TABLES:
+        sym = "NIFTY50"
+    table = _V10_TABLES[sym]
+    days = max(5, min(int(days or 92), 400))
+
+    with _conn() as conn, conn.cursor() as cur:
+        # daily OHLC, built from the same 5-min bars the web chart uses (one source of truth).
+        # Window anchored to MAX(ts) — these tables are fed historically, so anchoring on NOW()
+        # would empty the chart the moment the feed is a day behind.
+        cur.execute(
+            """
+            SELECT ts::date AS d,
+                   (array_agg(open  ORDER BY ts ASC ))[1] AS o,
+                   MAX(high) AS h,
+                   MIN(low)  AS l,
+                   (array_agg(close ORDER BY ts DESC))[1] AS c
+            FROM {t}
+            WHERE ts::date > (SELECT MAX(ts)::date FROM {t}) - %s
+            GROUP BY 1 ORDER BY 1
+            """.format(t=table), (days,))
+        series = [{"d": str(r["d"]), "o": float(r["o"]), "h": float(r["h"]),
+                   "l": float(r["l"]), "c": float(r["c"])} for r in _rows(cur)]
+        in_win = set(p["d"] for p in series)
+
+        cur.execute("""
+            SELECT id, side, entry_price, exit_price, exit_reason, pnl, points,
+                   (entry_ts AT TIME ZONE 'Asia/Kolkata')::date          AS ed,
+                   to_char(entry_ts AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS et,
+                   (exit_ts  AT TIME ZONE 'Asia/Kolkata')::date          AS xd,
+                   to_char(exit_ts  AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS xt
+            FROM v10_trades
+            WHERE leg = 'FUT' AND symbol = %s AND entry_ts IS NOT NULL
+            ORDER BY entry_ts ASC
+        """, (sym,))
+        closed_rows = _rows(cur)
+
+        cur.execute("""
+            SELECT id, side, entry_price, stop, target,
+                   (entry_ts AT TIME ZONE 'Asia/Kolkata')::date          AS ed,
+                   to_char(entry_ts AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS et
+            FROM v10_positions
+            WHERE status = 'OPEN' AND leg = 'FUT' AND symbol = %s
+            ORDER BY entry_ts ASC
+        """, (sym,))
+        open_rows = _rows(cur)
+
+    def f(x):
+        return None if x is None else float(x)
+
+    trades, pins, outside = [], [], 0
+    for r in closed_rows:
+        ed = str(r["ed"]) if r["ed"] else None
+        xd = str(r["xd"]) if r["xd"] else None
+        if ed not in in_win and xd not in in_win:
+            outside += 1
+            continue
+        pnl = f(r["pnl"])
+        win = (pnl is not None and pnl >= 0)
+        side = (r["side"] or "").upper()
+        t = {"id": r["id"], "side": side, "entry_d": ed, "entry_t": r["et"],
+             "entry_price": f(r["entry_price"]), "exit_d": xd, "exit_t": r["xt"],
+             "exit_price": f(r["exit_price"]), "reason": r["exit_reason"] or "EXIT",
+             "pnl": pnl, "points": f(r["points"]), "win": win, "open": False}
+        trades.append(t)
+        if ed in in_win:
+            pins.append({"d": ed, "id": r["id"], "kind": "entry", "side": side,
+                         "price": f(r["entry_price"]), "t": r["et"], "win": win})
+        if xd in in_win:
+            pins.append({"d": xd, "id": r["id"], "kind": "exit", "side": side,
+                         "price": f(r["exit_price"]), "t": r["xt"], "win": win,
+                         "reason": r["exit_reason"] or "EXIT", "pnl": pnl})
+
+    for r in open_rows:
+        ed = str(r["ed"]) if r["ed"] else None
+        side = (r["side"] or "").upper()
+        t = {"id": r["id"], "side": side, "entry_d": ed, "entry_t": r["et"],
+             "entry_price": f(r["entry_price"]), "exit_d": None, "exit_t": None,
+             "exit_price": None, "reason": "OPEN", "pnl": None, "points": None,
+             "win": None, "open": True, "stop": f(r["stop"]), "target": f(r["target"])}
+        trades.append(t)
+        if ed in in_win:
+            pins.append({"d": ed, "id": r["id"], "kind": "open", "side": side,
+                         "price": f(r["entry_price"]), "t": r["et"], "win": None})
+        elif ed:
+            outside += 1
+
+    closed = [t for t in trades if not t["open"] and t["pnl"] is not None]
+    net = round(sum(t["pnl"] for t in closed), 2) if closed else None
+    return {
+        "symbol": sym, "label": "BANK NIFTY" if sym == "BANKNIFTY" else "NIFTY 50",
+        "table": table, "resolution": "daily",
+        "series": series, "count": len(series),
+        "from": series[0]["d"] if series else None,
+        "to": series[-1]["d"] if series else None,
+        "trades": trades, "pins": pins,
+        "outside_window": outside,
+        "stats": {"closed": len(closed), "open": len(open_rows),
+                  "wins": sum(1 for t in closed if t["win"]),
+                  "losses": sum(1 for t in closed if not t["win"]),
+                  "net_pnl": net},
+        "note": ("Daily candles built from %s 5-min bars; V10 FUT-leg trades pinned to their "
+                 "IST session. Web shows the same trades on a 30-day 5-min chart." % table),
+    }
 
 
 @router.get("/api/mobile/home2")
@@ -176,6 +414,12 @@ def mobile_home2(request: Request):
             ORDER BY name, quote_date DESC
         """)
         glob_rows = _rows(cur)
+
+        # cc#910: which tape names actually HAVE a 5-min series. Read from the table, never a
+        # hardcoded list — a name added to the intraday feed tomorrow gains its 1D pill with no
+        # code change, and a name that stops being fed loses it.
+        cur.execute("SELECT DISTINCT name FROM global_intraday")
+        intraday_names = set((r["name"] or "").upper() for r in _rows(cur))
 
         # 0b · V10 index state for the hero line
         v10 = _v10_state(cur)
@@ -319,7 +563,8 @@ def mobile_home2(request: Request):
                        "chg_pct": f(r["chg_pct"]), "category": r["category"],
                        "as_of": r["quote_date"].isoformat() if r["quote_date"] else None,
                        "live": False,
-                       "has_series": True})
+                       "has_series": True,
+                       "intraday_name": _intraday_name(r["name"], intraday_names)})
 
     # hero chips straight from market_mood's own checks[] — value + pass, no invented names
     chips = []

@@ -1713,6 +1713,28 @@ a.card-link{text-decoration:none;color:inherit;display:block}
 .v-lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;color:var(--mut);line-height:1.5}
 .lbar{width:3px;height:30px;border-radius:2px;flex-shrink:0;margin-top:1px}
 .v-lrow b{color:var(--txt);font-weight:700}
+
+/* ── cc#909: the two floating pills move into the Scorr logo (founder 08-Aug) ────────────────
+   main.py's auth_gate injects #scorr-lo (Logout) and #scorr-th (theme) into every authenticated
+   page, fixed top-right at 45% opacity. On a phone they float over the content — a ghost the
+   founder keeps half-seeing. They are HIDDEN HERE rather than excluded in main.py, because this
+   stylesheet is loaded by /m/* templates and nothing else: the web pills cannot be affected by
+   this rule even in principle, so no auth or injection logic has to be touched to be sure of it.
+   The two functions are not lost — scorr_card_common.js hangs them off a tap on the Scorr logo,
+   and that menu is the .lgm below. */
+#scorr-lo,#scorr-th{display:none!important}
+.head{position:relative}
+h1.lgt{cursor:pointer}
+h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;vertical-align:middle}
+.lgm{position:absolute;left:0;top:100%;margin-top:6px;z-index:70;min-width:180px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:6px;
+  box-shadow:0 14px 34px rgba(0,0,0,.45);display:none}
+.lgm.open{display:block}
+.lgm button{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 12px;
+  background:none;border:0;border-radius:8px;color:var(--txt);font-family:inherit;
+  font-size:13px;font-weight:700;cursor:pointer;text-align:left}
+.lgm button:active{background:var(--panel2)}
+.lgm .ic{width:16px;text-align:center;font-size:14px;color:var(--mut)}
 """
 
 

@@ -371,3 +371,77 @@
     build();
   }
 })();
+
+/* ── cc#909: LOGO MENU — the two floating pills, moved where they belong (founder 08-Aug) ─────
+   main.py's auth_gate injects #scorr-lo (Logout) and #scorr-th (theme) on every authenticated
+   page as fixed top-right pills at 45% opacity. On a phone they hover over the content. The
+   mobile stylesheet hides them on /m/* (they are untouched on web), and this block hangs the
+   same two actions off a tap on the Scorr logo.
+
+   ROUTE TAKEN: CSS hide + this handler, i.e. option (a) in the card — main.py is NOT touched,
+   so the auth gate and the web pills keep working exactly as they did.
+
+   THE THEME CONTRACT IS COPIED, NOT REINVENTED. Read from main.py's _THEME_BTN first, as the
+   card required: the key is localStorage 'scorr_theme', the values are 'light' | 'dark', the
+   default when unset is 'light', and the flip ENDS IN location.reload() — that reload is the
+   mechanism, not a nicety, because _MOBILE_HEAD applies the saved theme synchronously before
+   first paint and the older hardcoded pages only re-render on a load. Same key, same values,
+   same reload. Anything else here would desync mobile from web.
+
+   Web pages are untouched: everything below returns immediately unless the path is /m/*. */
+(function () {
+  if (window.__scorrLogoMenu) return;
+  window.__scorrLogoMenu = true;
+
+  function curTheme() {
+    try { return localStorage.getItem('scorr_theme') || 'light'; } catch (e) { return 'light'; }
+  }
+  function flipTheme() {
+    var t = curTheme() === 'light' ? 'dark' : 'light';
+    try { localStorage.setItem('scorr_theme', t); } catch (e) { /* private mode: still reload */ }
+    location.reload();
+  }
+
+  function build() {
+    try {
+      if (location.pathname.indexOf('/m/') !== 0) return;
+      var h1 = document.querySelector('.head h1');
+      if (!h1 || !h1.parentNode) return;
+
+      var dark = curTheme() === 'dark';
+      var menu = document.createElement('div');
+      menu.className = 'lgm';
+      /* the label is the ACTION, not the current state — in a menu "Light" reads as a command
+         and would flip the opposite way to what the founder taps for. The pill shows state
+         because it is a toggle; a menu row should say what it will do. */
+      menu.innerHTML =
+        '<button type="button" id="lgm-th"><span class="ic">' + (dark ? '☀' : '☾')
+        + '</span>Switch to ' + (dark ? 'light' : 'dark') + '</button>'
+        + '<button type="button" id="lgm-lo"><span class="ic">⏏</span>Log out</button>';
+      h1.classList.add('lgt');
+      h1.parentNode.appendChild(menu);
+
+      h1.addEventListener('click', function (e) {
+        e.stopPropagation();
+        menu.classList.toggle('open');
+      });
+      menu.addEventListener('click', function (e) { e.stopPropagation(); });
+      // tap anywhere else (or press Escape) closes it
+      document.addEventListener('click', function () { menu.classList.remove('open'); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') menu.classList.remove('open');
+      });
+
+      var th = document.getElementById('lgm-th');
+      if (th) th.onclick = flipTheme;
+      var lo = document.getElementById('lgm-lo');
+      if (lo) lo.onclick = function () { location.href = '/logout'; };
+    } catch (e) { /* a missing header must never break the screen under it */ }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', build);
+  } else {
+    build();
+  }
+})();
