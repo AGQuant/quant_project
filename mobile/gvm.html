@@ -8,39 +8,72 @@
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
 <style>
-.srch{margin:11px 12px 0;display:flex;gap:8px}
-.srch input{flex:1;min-height:44px;padding:0 13px;border-radius:11px;background:var(--panel);
-  border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:13.5px;outline:none}
-.srch input:focus{border-color:rgba(77,124,254,.55)}
-.score{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:700;line-height:1}
-.gvm3{display:flex;gap:7px;margin-top:9px}
-.gvm3 div{flex:1;background:var(--panel2);border-radius:9px;padding:7px 8px;text-align:center}
-.gvm3 .k{font-size:8.5px;letter-spacing:.12em;color:var(--dim);font-weight:700}
-.gvm3 .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;margin-top:2px}
+/*
+  cc#890 — GVM reskinned to previews/gvm.html (approved design, ported markup+CSS with live data).
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Preview design decisions carried verbatim: SEARCH FIRST (GVM is an answer machine); ONE open
+  report (verdict, three pillar BARS with the number at the end, punchline in plain words, price);
+  leaderboard rows print SEGMENT because a top list without context breeds bad buys.
+  Live behaviour added: tapping a leaderboard row opens ITS report in the primary slot; search
+  re-fetches /api/mobile/gvm?q= (rank derived server-side over the whole table, cc#888).
+  "Score history" from the preview is deliberately NOT shipped — no mobile surface exists for it
+  yet; a dead button is worse than a missing one (preview marked it an open call).
+*/
+.search{display:flex;align-items:center;gap:9px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 14px;margin:12px 12px 0}
+.search .ic{color:var(--dim);font-size:15px}
+.search input{flex:1;min-height:46px;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:16px}
+.search input::placeholder{color:var(--dim);font-size:13px}
+.rep{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 15px 19px;overflow:hidden;margin-bottom:10px}
+.rep::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--rc,var(--grn))}
+.r1{display:flex;align-items:baseline;gap:9px}
+.rsym{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.rseg{font-size:10px;color:var(--dim)}
+.rpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:13px;font-weight:700;color:var(--mut)}
+.big{display:flex;align-items:baseline;gap:10px;margin-top:11px}
+.gvmv{font-size:36px;font-weight:800;letter-spacing:-.03em;color:var(--rc,var(--grn));
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.gvmv .of{font-size:13px;color:var(--dim);font-weight:700}
+.verd{font-size:12px;font-weight:800;color:var(--rc,var(--grn));border:1px solid var(--rc,var(--grn));
+  border-radius:6px;padding:4px 10px}
+.pil{margin-top:13px}
+.pr{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.pk{font-size:11px;font-weight:800;min-width:78px}
+.bar{flex:1;height:7px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
+.fill{height:100%;border-radius:4px;background:var(--rc,var(--grn))}
+.pv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:800;
+  min-width:32px;text-align:right}
+.punch{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:11px;
+  border-top:1px solid var(--line);padding-top:11px}
+.punch b{color:var(--txt)}
+.acts{display:flex;gap:8px;margin-top:12px}
+.a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+  font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
+  border-radius:10px;text-decoration:none}
+.lrow{display:flex;align-items:center;gap:10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px;cursor:pointer}
+.rk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;
+  color:var(--dim);min-width:22px}
+.rs{font-size:13.5px;font-weight:800}
+.rg{font-size:9.5px;color:var(--dim);margin-top:1px}
+.sc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:14px;font-weight:800}
+.chev{color:var(--dim);font-size:14px}
 </style>
 </head>
 <body>
-<!--
-  cc#874 — GVM, PROMOTED. previews/gvm.html stays frozen (item 9).
-  16916: "score+verdict, most retail-friendly surface".
-
-  RETAIL FIRST (16915 / 17021): one score, one verdict, one plain-language line. The 60-odd
-  per-metric raw/peer/rating columns behind gvm_scores are professional depth and stay on the web
-  dashboard by design, not by neglect. Same numbers, fewer of them (DISPLAY_PARITY 16202).
-
-  gvm_score is EOD-frozen (V8 architecture, 22:00 nightly), so the rail reads CLOSED out of hours
-  rather than STALE — a nightly score is not late at lunchtime.
-  gvm_overall_label and rank are NULL in the live table today; per the contract they render '--'
-  with a title naming the gap, never a substituted value.
--->
 <div class="screen">
   <div class="head">
     <h1>GVM</h1>
-    <div class="s" id="sub">loading…</div>
+    <div class="s" id="sub">Growth · Value · Momentum · scored nightly 22:00</div>
   </div>
 
-  <div class="srch">
-    <input id="q" type="search" placeholder="Search a company or symbol" autocomplete="off">
+  <div class="search">
+    <span class="ic">&#9906;</span>
+    <input id="q" type="search" placeholder="Search any stock — RELIANCE, TCS, LODHA…" autocomplete="off">
   </div>
 
   <div class="body" id="body"><div class="loading">Loading scores…</div></div>
@@ -55,20 +88,14 @@
 </nav>
 
 <script>
+var STATE = { results: [], sel: 0 };
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n(v, dp){
-  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
-  return Number(v).toFixed(dp == null ? 2 : dp);
-}
+function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
-}
-/* A missing value that the contract knows is missing says WHY on tap, rather than pretending. */
-function gap(label){
-  return '<span title="' + esc(label) + '" style="color:var(--dim)">--</span>';
+  var x = Number(v); return 'Rs.' + (x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN'));
 }
 function scoreCol(g){
   if (g == null) return 'var(--dim)';
@@ -79,42 +106,52 @@ function railHtml(r){
   var s = (r.state || 'CLOSED').toLowerCase();
   return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
 }
-
-function card(x){
-  return '<div class="c">'
-    + '<div class="meta">'
-      + '<span class="tag cat">' + esc(x.segment || 'UNCLASSIFIED') + '</span>'
-      + (x.verdict ? '<span class="tag ' + (x.gvm >= 7.5 ? 'bull' : x.gvm >= 5 ? 'neut' : 'bear') + '">'
-          + esc(x.verdict.toUpperCase()) + '</span>' : '')
-      + '<span class="when">' + esc(x.as_of || '--') + '</span>'
+function pillarRow(k, v){
+  var w = (v == null) ? 0 : Math.max(0, Math.min(100, Number(v) * 10));
+  return '<div class="pr"><span class="pk">' + k + '</span>'
+    + '<div class="bar"><div class="fill" style="width:' + w + '%"></div></div>'
+    + '<span class="pv">' + n1(v) + '</span></div>';
+}
+function repCard(x){
+  var col = scoreCol(x.gvm);
+  return '<div class="rep" style="--rc:' + col + '">'
+    + '<div class="r1"><span class="rsym">' + esc(x.symbol) + '</span>'
+    + '<span class="rseg">' + esc(x.segment || '') + '</span>'
+    + '<span class="rpx">' + px(x.price) + '</span></div>'
+    + '<div class="big"><span class="gvmv">' + n1(x.gvm) + '<span class="of">/10</span></span>'
+    + (x.verdict ? '<span class="verd">' + esc(String(x.verdict).toUpperCase()) + '</span>' : '')
     + '</div>'
-    + '<div style="display:flex;align-items:flex-start;gap:12px">'
-      + '<div style="flex:1">'
-        + '<div class="hl">' + esc(x.symbol) + '</div>'
-        + '<div class="sum">' + esc(x.name || '--') + '</div>'
-      + '</div>'
-      + '<div style="text-align:right">'
-        + '<div class="score" style="color:' + scoreCol(x.gvm) + '">' + n(x.gvm, 2) + '</div>'
-        + '<div class="mono" style="font-size:10px;color:var(--dim);margin-top:3px">CMP ' + px(x.price) + '</div>'
-      + '</div>'
+    + '<div class="pil">'
+    + pillarRow('GROWTH', x.g) + pillarRow('VALUE', x.v) + pillarRow('MOMENTUM', x.m)
     + '</div>'
-    + '<div class="gvm3">'
-      + '<div><div class="k">GROWTH</div><div class="v">' + n(x.g, 1) + '</div></div>'
-      + '<div><div class="k">VALUE</div><div class="v">' + n(x.v, 1) + '</div></div>'
-      + '<div><div class="k">MOMENTUM</div><div class="v">' + n(x.m, 1) + '</div></div>'
-    + '</div>'
-    + (x.punchline ? '<div class="sum" style="margin-top:9px">' + esc(x.punchline) + '</div>' : '')
-    /* cc#888 item 4. Rank used to print '--' on every card because gvm_scores.rank is NULL on all
-       1,793 rows; it is now DERIVED server-side with a RANK() window over the whole universe, so
-       this is a real position out of a real total.
-       The label segment is DROPPED ENTIRELY when gvm_overall_label is NULL, rather than printed
-       as '--'. A dash with a tooltip is right when a value is expected and missing; this column is
-       simply not populated for anyone, so a permanent dash on every card is noise that teaches
-       the eye to ignore the footer. */
-    + '<div class="src">Rank ' + (x.rank == null ? gap('rank not returned') : esc(x.rank))
-      + (x.label ? ' · ' + esc(x.label) : '') + '</div>'
+    + (x.punchline
+        ? '<div class="punch"><b>What the score says:</b> ' + esc(x.punchline) + '</div>' : '')
+    + '<div class="acts"><a class="a" href="/m/check">Run Trade Check</a></div>'
+    + '<div class="src">Rank ' + (x.rank == null ? '--' : esc(x.rank))
+    + (x.as_of ? ' · scored ' + esc(x.as_of) : '') + '</div>'
     + '</div>';
 }
+function render(){
+  var rs = STATE.results;
+  if (!rs.length){
+    document.getElementById('body').innerHTML =
+      '<div class="empty"><b>Nothing found</b>No company matches your search.</div>';
+    return;
+  }
+  var sel = Math.max(0, Math.min(STATE.sel, rs.length - 1));
+  var h = '<div class="sect">THE REPORT · TAP ANY STOCK TO GET THIS</div>' + repCard(rs[sel]);
+  h += '<div class="sect">' + (STATE.q ? 'MATCHES' : "TODAY'S TOP · BY GVM") + '</div>';
+  h += rs.map(function(x, i){
+    return '<div class="lrow" onclick="pick(' + i + ')">'
+      + '<span class="rk">' + (x.rank == null ? '' : esc(x.rank)) + '</span>'
+      + '<div><div class="rs">' + esc(x.symbol) + '</div>'
+      + '<div class="rg">' + esc(x.segment || esc(x.name || '')) + '</div></div>'
+      + '<span class="sc" style="color:' + scoreCol(x.gvm) + '">' + n1(x.gvm) + '</span>'
+      + '<span class="chev">&#8250;</span></div>';
+  }).join('');
+  document.getElementById('body').innerHTML = h;
+}
+function pick(i){ STATE.sel = i; render(); window.scrollTo({top: 0, behavior: 'smooth'}); }
 
 function load(q){
   document.getElementById('body').innerHTML = '<div class="loading">Loading scores…</div>';
@@ -122,12 +159,10 @@ function load(q){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
+      STATE.results = d.results || []; STATE.sel = 0; STATE.q = d.query;
       document.getElementById('sub').innerHTML =
-        (d.query ? 'search "' + esc(d.query) + '" · ' : 'top ranked · ') + d.count + ' shown '
-        + railHtml(d.rail);
-      document.getElementById('body').innerHTML = d.count
-        ? d.results.map(card).join('')
-        : '<div class="empty"><b>Nothing found</b>No company matches "' + esc(d.query || '') + '".</div>';
+        'Growth · Value · Momentum · scored nightly 22:00 ' + railHtml(d.rail);
+      render();
     })
     .catch(function(e){
       document.getElementById('body').innerHTML =
@@ -136,12 +171,11 @@ function load(q){
       document.getElementById('sub').textContent = 'failed to load';
     });
 }
-
 var t = null;
 document.getElementById('q').addEventListener('input', function(e){
   clearTimeout(t);
   var v = e.target.value.trim();
-  t = setTimeout(function(){ load(v); }, 300);   /* debounce — one request per pause, not per key */
+  t = setTimeout(function(){ load(v); }, 300);
 });
 load('');
 </script>
