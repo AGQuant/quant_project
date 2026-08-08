@@ -1104,7 +1104,11 @@ function renderV4Dual(d, uiMode){
       // cc#452/cc#513: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
       return '<div class="v4-rrow '+rt+'">'
-        +'<span class="rl">'+r.rule
+        /* cc#934 item 5: the USER sees a clean 1..N sequence. Internal R-codes jump (R5->R7,
+           R12->R15) after years of consolidations and drops, and they are referenced by locked
+           specs, so they are never renumbered — the code travels as legacy_id and shows in the
+           tooltip. The info button still resolves on the R-code. */
+        +'<span class="rl" title="'+(r.legacy_id||r.rule)+'">'+(r.seq!=null?r.seq:r.rule)
           +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span>'
         +'<span class="rreq">'+r.label+' — '+(r.required||'—')+'</span>'
         +'<span class="ract">'+_v4Actual(r.value)+'</span>'

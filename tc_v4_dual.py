@@ -15,8 +15,11 @@ never duplicated.
 Verdict bands (cc#767 V8-ALIGNMENT, spec id=12289, locked 30-Jul-2026): the score denominator is
 DYNAMIC (propagation map id=265) — flow rules consolidated (R5+R6 -> Volume confirm, R12+R13 ->
 Derivatives confirm, R14 ATR dropped) and the freed points reallocated to per-bucket live-V8 basket
-gate imports, so each style bucket carries its own max: BUY-MOM 22, BUY-REV 20, SELL-MOM 20, SELL-REV
-19. Bands re-baseline PROPORTIONALLY off each card's own max at the founder-locked ratios STRONG 0.84x
+gate imports, so each style bucket carries its own max. cc#934: that max is now SUMMED from each
+rule's declared max rather than assumed as len(rules)+2 (which silently believed R18/R19 were the only
+2-point rules — untrue once Volume became 2 on BUY-REV). Today it computes BUY-MOM 22, BUY-REV 20,
+SELL-MOM 20, SELL-REV 19; change a rule's weight and the denominator follows on its own.
+Bands re-baseline PROPORTIONALLY off each card's own max at the founder-locked ratios STRONG 0.84x
 / VALID 0.65x (from the prior BUY 18.5-22 / 14.4-22). Per-bucket imports: BUY-MOM +dma_50[5,12]
 +w52>=75 +GVM>=7 (R7 twr bound [70,85]); BUY-REV R7->mRSI[60,90] +GVM>=6.5, R4 graded d200&d20;
 SELL-MOM R11->CMP<PP +S2-clearance>=3%; SELL-REV R4 graded 3-DMA<0, R10 mom_2d[-4,-1]+w52<50.
@@ -91,11 +94,18 @@ def _band(x, hi, mid_lo):
     return 0.0
 
 
-def _R(rid, label, credit, value, required=None):
+def _R(rid, label, credit, value, required=None, max_credit=1.0):
     """cc#513: `required` is the exact style/side-aware condition string for the 4-column rule
     table (RULE | REQUIRED | ACTUAL | POINTS). Always built from the same threshold constants the
-    credit branch above it just used -- never a hand-typed duplicate that can drift from the logic."""
-    return {"rule": rid, "label": label, "credit": round(float(credit), 2), "value": value, "required": required}
+    credit branch above it just used -- never a hand-typed duplicate that can drift from the logic.
+
+    cc#934: every rule now declares its OWN max_credit, and score_card sums them. The denominator
+    used to be `len(rules) + 2`, which silently hard-coded the belief that R18 and R19 are the only
+    2-point rules on every card. That was already fragile and cc#934 breaks it outright by making
+    Volume worth 2 on BUY-REV. Deriving the max from the rules that actually fired means the
+    denominator can never again disagree with the rulebook."""
+    return {"rule": rid, "label": label, "credit": round(float(credit), 2),
+            "max": round(float(max_credit), 2), "value": value, "required": required}
 
 
 # cc#410 (session_log id=3019) — Fib Strength Rule zones (position in swing range: 0=low, 100=high).
@@ -646,18 +656,32 @@ def _rules(d, style, side):
     # leg — a volume surge confirms conviction on either side. (Old R14 ATR ignition dropped entirely;
     # R9 5m+VWAP already answers "is it moving now".)
     vt = d.get("vol_ratio_today")
-    if BUY:
+    if BUY and not MOM:
+        # cc#934 / 18062 amendment 3: on BUY-REV the two tests score INDEPENDENTLY — a burst today
+        # and a month of accumulation are different pieces of evidence, and the old OR-with-halves
+        # let either one alone cap the rule. Both = 2, one = 1, none = 0. No half credits here; the
+        # old partial thresholds (1.1x / 0.9) are dropped on this card only.
         v1m = d.get("vol21_up_dn")
-        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
-        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
-        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
+        leg_a = (vt is not None and vt >= 1.5)
+        leg_b = (v1m is not None and v1m >= 1.1)
+        c = float(leg_a) + float(leg_b)
+        req = "today>=1.5x pace = 1 + 1M up/dn>=1.1 = 1 (independent, max 2)"
+        out.append(_R("R5", "Volume confirm", c,
+                      {"today": _r(vt), "vol1M": _r(v1m), "leg_today": leg_a, "leg_1m": leg_b},
+                      required=req, max_credit=2.0))
     else:
-        v1m = d.get("vol21_dn_up")
-        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.05))
-        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.95))
-        req = "today>=1.5x OR 1M dn/up>=1.05 (partial = 0.5)"
-    c = 1.0 if full else (0.5 if part else 0.0)
-    out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
+        if BUY:
+            v1m = d.get("vol21_up_dn")
+            full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
+            part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
+            req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
+        else:
+            v1m = d.get("vol21_dn_up")
+            full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.05))
+            part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.95))
+            req = "today>=1.5x OR 1M dn/up>=1.05 (partial = 0.5)"
+        c = 1.0 if full else (0.5 if part else 0.0)
+        out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
     # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.
@@ -850,7 +874,10 @@ def _rules(d, style, side):
             c = 1.0 if rm < 0 else (0.5 if 0 <= rm <= 1 else 0.0)
             req = "rs_mo < 0 (0 to 1 = 0.5)"
         val = {"rs_mo": _r(rm)}
-    out.append(_R("R15", "RS vs Nifty", c, val, required=req))
+    # cc#934 / 18062: R15 is DROPPED from BUY-REV — it duplicates R19, which already scores 63-day
+    # relative strength against BOTH the sector and NIFTY. It stays live on the other three cards.
+    if not (BUY and not MOM):
+        out.append(_R("R15", "RS vs Nifty", c, val, required=req))
 
     # R16 — Fib position (3M swing). cc#410/id=3019 zones; cc#513 BUY-REV widened (spring fires from
     # Decision AND Strength zones).
@@ -876,9 +903,15 @@ def _rules(d, style, side):
     # R17 — Valuation (V-pillar). cc#583: gvm_scores.v_score bands, identical for BUY + SELL (a cheap
     # name is a better long AND a safer short-cover risk; an expensive name cuts both). ADD (not replace).
     vsc = d.get("v_score")
+    _rev_buy = (BUY and not MOM)          # cc#934: BUY-REV only; the other three cards keep 7.5
     if vsc is None:
         vc = 0.0
-        vreq = "V >= 7.5 (6.0-7.5 = 0.5); no V-score -> 0"
+        vreq = ("V > 7 (6.0-7.0 = 0.5); no V-score -> 0" if _rev_buy
+                else "V >= 7.5 (6.0-7.5 = 0.5); no V-score -> 0")
+    elif _rev_buy:
+        # cc#934 / 18062: full credit strictly ABOVE 7 (founder: "keep R17, bar at 7").
+        vc = 1.0 if vsc > 7.0 else (0.5 if vsc >= 6.0 else 0.0)
+        vreq = "V > 7 (6.0-7.0 = 0.5, < 6.0 = 0)"
     else:
         vc = 1.0 if vsc >= 7.5 else (0.5 if vsc >= 6.0 else 0.0)
         vreq = "V >= 7.5 (6.0-7.5 = 0.5, < 6.0 = 0)"
@@ -887,7 +920,13 @@ def _rules(d, style, side):
     # R18 — Momentum (stock-M + mcap-weighted sector-M). cc#586 (id=6624). BUY rewards strong momentum
     # both; SELL MIRRORED around the scale-midpoint (weak momentum = short candidate).
     sm = d.get("m_score"); secm = d.get("sector_m")
-    if BUY:
+    if BUY and not MOM:
+        # cc#934 / 18062: RELAXED for reversal context. The old 7.5/7 bar was structurally
+        # contradictory on a dip card — Fable's 08-Aug read of 76 S1-touchers found average M 5.65
+        # with only 14 at M>=7.5, so the rule was near-unscoreable exactly where it is meant to help.
+        c1 = (sm is not None and sm >= 6.5); c2 = (secm is not None and secm >= 6.0)
+        r18req = "stock M>=6.5 AND sector M>=6 (one = 1)"
+    elif BUY:
         c1 = (sm is not None and sm >= 7.5); c2 = (secm is not None and secm >= 7.0)
         r18req = "stock M>=7.5 AND sector M>=7 (one = 1)"
     else:
@@ -895,7 +934,7 @@ def _rules(d, style, side):
         r18req = "stock M<=2.5 AND sector M<=3 (mirror; one = 1)"
     r18 = 2.0 if (c1 and c2) else (1.0 if (c1 or c2) else 0.0)
     out.append(_R("R18", "Momentum (stock+sector M)", r18,
-                  {"m": _r(sm), "sector_m": _r(secm)}, required=r18req))
+                  {"m": _r(sm), "sector_m": _r(secm)}, required=r18req, max_credit=2.0))
 
     # R19 — Relative Strength (63d stock return vs mcap-weighted sector + vs NIFTY50). cc#584 (id=6622).
     # SELL MIRRORED (a laggard scores high). Sector fallback: <3 clean-63d constituents -> nifty-only
@@ -917,7 +956,7 @@ def _rules(d, style, side):
         r19ev = {"ret63_pct": _r(rst * 100), "rs_nifty_pct": _r(rs_nif * 100) if rs_nif is not None else None,
                  "rs_sector_pct": _r(rs_sec * 100) if rs_sec is not None else None,
                  "sector_n": d.get("sector_n_ret")}
-    out.append(_R("R19", "Relative strength (63d)", r19, r19ev, required=r19req))
+    out.append(_R("R19", "Relative strength (63d)", r19, r19ev, required=r19req, max_credit=2.0))
 
     # R20 — GVM trend (ΔGVM 180d, graduated). cc#585 (id=6623). SELL MIRRORED (deteriorating quality =
     # good short). No 180d history -> 0.
@@ -983,11 +1022,25 @@ def score_card(d, style, side):
     cc#767 V8-ALIGNMENT: flow rules consolidated (R5+R6 -> Volume confirm, R12+R13 -> Derivatives
     confirm, R14 ATR dropped); freed points reallocated to per-bucket live-V8 basket gate imports
     (BUY-MOM dma_50/w52/GVM, BUY-REV mRSI/GVM/graded-MAs, SELL-MOM CMP<PP + S2-clearance, SELL-REV
-    graded 3-DMA + mom_2d/w52). Max is DYNAMIC = 1pt per rule + 1 extra each for R18/R19 (the only
-    2-point rules, always present) -> len(rules)+2."""
+    graded 3-DMA + mom_2d/w52).
+    cc#934: max is DERIVED — sum(rule.max) over the rules this card actually emitted. It is no
+    longer len(rules)+2, which assumed R18/R19 were the only 2-point rules."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    max_score = len(rules) + 2   # cc#767: R18 + R19 are the only 2-point rules, always present
+    # cc#934: DERIVED, never assumed. Was `len(rules) + 2`, which hard-coded "R18 and R19 are the
+    # only 2-point rules" — untrue the moment Volume became 2 on BUY-REV. Summing each rule's own
+    # declared max means the denominator cannot disagree with the rulebook, and no card's max is
+    # written down anywhere as a literal.
+    max_score = round(sum(r.get("max", 1.0) for r in rules), 2)
+    if float(max_score).is_integer():
+        max_score = int(max_score)
+    # cc#934 item 5: DISPLAY sequence 1..N in evaluation order, with no gaps. The internal R-codes
+    # jump (R5->R7, R12->R15) from years of consolidations and drops, and they are referenced by
+    # locked specs (3019, 6621-6624, 12289), so they are NEVER renumbered — they travel as
+    # legacy_id. Surfaces render `seq`; the payload keeps both.
+    for i, r in enumerate(rules, 1):
+        r["seq"] = i
+        r["legacy_id"] = r["rule"]
     strong = round(_STRONG_RATIO * max_score, 1)
     valid = round(_VALID_RATIO * max_score, 1)
     card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
@@ -1199,7 +1252,11 @@ def v4_dual_health():
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
         "gates": "cc#677 ZERO-VETO — verdict = score bands alone; alert chips only (F&O ban · result-date · GVM floor · DTE)",
         "rules": "cc#767 V8-ALIGNED: R5 Volume-confirm (R5+R6 merged) · R12 Derivatives-confirm (R12+R13 merged) · R14 dropped; per-bucket V8 imports — BUY-MOM +dma_50/w52/GVM, BUY-REV mRSI+GVM+graded MAs, SELL-MOM CMP<PP+S2-clearance, SELL-REV graded 3-DMA+mom_2d/w52",
-        "max_score": {"BUY-MOM": 22, "BUY-REV": 20, "SELL-MOM": 20, "SELL-REV": 19, "note": "DYNAMIC = len(rules)+2"},
+        # cc#934: no card's max is written down as a literal any more — it is SUMMED from each
+        # rule's own declared max at score time, so this health block can only report the formula,
+        # never a stale copy of a number that has drifted from the rulebook.
+        "max_score": {"derivation": "sum(rule.max) over the rules that card actually emits",
+                      "note": "no hardcoded per-card max exists; bands are ratio-derived from it"},
         "verdict": {"ratios": {"STRONG": "0.84 x max", "VALID": "0.65 x max"},
                     "example_BUY-MOM(max22)": {"STRONG": ">=18.5", "VALID": "14.3 to <18.5", "REJECT": "<14.3"}},
         "sides": {"BUY": "long", "SELL": "v4.1 mirror (GVM gate skipped)"},

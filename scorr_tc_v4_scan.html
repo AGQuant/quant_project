@@ -173,7 +173,8 @@ async function openM(sym){
     const gateRows=sideGates.map(g=>`<div class="rrow ${g.pass?'rg':'rr'}"><span class="rl">${g.gate}</span><span class="rreq">${g.label}</span><span class="ract">${g.value!=null?g.value:'&mdash;'}</span><span class="rc" style="color:${g.pass?'var(--grn)':'var(--red)'}">${g.pass?'&check;':'&cross;'}</span></div>`).join('');
     const ruleRows=c.rules.map(r=>{
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
-      return `<div class="rrow ${rt}"><span class="rl">${r.rule}</span><span class="rreq">${r.label} &mdash; ${r.required||'&mdash;'}</span><span class="ract">${actual(r.value)}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`;
+      /* cc#934 item 5: display seq, R-code kept in the title as legacy_id. */
+      return `<div class="rrow ${rt}"><span class="rl" title="${r.legacy_id||r.rule}">${r.seq!=null?r.seq:r.rule}</span><span class="rreq">${r.label} &mdash; ${r.required||'&mdash;'}</span><span class="ract">${actual(r.value)}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`;
     }).join('');
     return `<div class="card ${d.best&&c.style===d.best.style&&c.side===d.best.side?'win':''}">
     <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/${c.max||15} <span class="badge ${c.verdict}">${c.verdict}</span></h3>
