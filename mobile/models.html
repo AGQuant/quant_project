@@ -10,14 +10,14 @@
 <style>
 /*
   cc#890 — MODELS reskinned to previews/models.html (approved card grammar ported, live data).
+  cc#892 — the four breadth screens (Screeners, Sector, Holdings, FPC) are appended to the
+  Everything-else grid as static entries here, because _MOBILE_DESTINATIONS lives inside
+  mobile_endpoints.py which Fable cannot full-file-push safely — CC merges them into
+  _MOBILE_DESTINATIONS on its cleanup pass (cc#893 item 3) and removes the static list.
   Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
-  Preview grammar carried: every model is a card with a SHAPE-CODED left rail (live = breathing
-  solid green, closed = dotted grey, stale = dashed amber, off = solid dim) and a badge whose
+  Preview grammar carried: every model is a card with a SHAPE-CODED left rail and a badge whose
   glyph repeats the shape (dot / ring / bar) so state never rides on colour alone (15913 rule 10).
-  ERROR and NOT RUN YET extend the preview set: red rail + ring, and dim rail + ring with the
-  state IN WORDS — that state is the whole point of rule 13829.
-  REGISTRY-DERIVED, never a typed list. The "Everything else" grid stays below the tiles (rule
-  2987 — it is what keeps every wired screen reachable from a five-slot bar).
+  REGISTRY-DERIVED, never a typed list. Everything-else grid stays per rule 2987.
 */
 .m{position:relative;display:block;background:var(--panel);border:1px solid var(--line);
   border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
@@ -94,6 +94,14 @@ function tile(m){
     + '</a>';
 }
 
+/* cc#892 — the breadth screens, until CC folds them into _MOBILE_DESTINATIONS server-side. */
+var EXTRA = [
+  {href: '/m/screeners', label: 'Screeners'},
+  {href: '/m/sector',    label: 'Sector'},
+  {href: '/m/holdings',  label: 'My Portfolio'},
+  {href: '/m/fpc',       label: 'FPC Planner'}
+];
+
 fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).then(function(d){
   if (d.error) throw new Error(d.error);
   var live = (d.models || []).filter(function(m){ return m.state === 'LIVE'; }).length;
@@ -105,8 +113,12 @@ fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).the
     || '<div class="empty"><b>No models registered</b>model_registry is empty.</div>';
 
   /* rule 2987 — the app's "everything else": no wired screen is ever stranded. */
+  var dests = EXTRA.concat(d.destinations || []);
+  var seen = {};
   html += '<div class="sect">EVERYTHING ELSE</div>'
-    + '<div class="dest">' + (d.destinations || []).map(function(x){
+    + '<div class="dest">' + dests.filter(function(x){
+        if (seen[x.href]) return false; seen[x.href] = true; return true;
+      }).map(function(x){
         return '<a href="' + esc(x.href) + '">' + esc(x.label) + '</a>'; }).join('')
     + '<a href="/logout">Log out</a></div>';
 
