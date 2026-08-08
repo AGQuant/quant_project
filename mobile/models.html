@@ -51,14 +51,6 @@ function tile(m){
     + '</a>';
 }
 
-/* cc#892 — the breadth screens, until CC folds them into _MOBILE_DESTINATIONS server-side. */
-var EXTRA = [
-  {href: '/m/screeners', label: 'Screeners'},
-  {href: '/m/sector',    label: 'Sector'},
-  {href: '/m/holdings',  label: 'My Portfolio'},
-  {href: '/m/fpc',       label: 'FPC Planner'}
-];
-
 fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).then(function(d){
   if (d.error) throw new Error(d.error);
   var live = (d.models || []).filter(function(m){ return m.state === 'LIVE'; }).length;
@@ -69,11 +61,13 @@ fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).the
   var html = (d.models || []).map(tile).join('')
     || '<div class="empty"><b>No models registered</b>model_registry is empty.</div>';
 
-  /* rule 2987 — the app's "everything else": no wired screen is ever stranded. */
-  var dests = EXTRA.concat(d.destinations || []);
+  /* rule 2987 — the app's "everything else": no wired screen is ever stranded.
+     cc#893 item 3: the four breadth screens were a static EXTRA array here; they now come from
+     _MOBILE_DESTINATIONS with everything else, so this list has ONE source again. The dedupe
+     stays — it costs nothing and it means a duplicate in the registry shows once, not twice. */
   var seen = {};
   html += '<div class="sect">EVERYTHING ELSE</div>'
-    + '<div class="dest">' + dests.filter(function(x){
+    + '<div class="dest">' + (d.destinations || []).filter(function(x){
         if (seen[x.href]) return false; seen[x.href] = true; return true;
       }).map(function(x){
         return '<a href="' + esc(x.href) + '">' + esc(x.label) + '</a>'; }).join('')

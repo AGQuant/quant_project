@@ -998,6 +998,13 @@ _MOBILE_DESTINATIONS = [
     ("/m/home", "Home"), ("/m/v8", "V8"), ("/m/positions", "Open Book"),
     ("/m/qb", "Baskets"), ("/m/gvm", "GVM"), ("/m/check", "Trade Check"),
     ("/m/intel", "Intel"), ("/m/digest", "Daily Digest"), ("/m/results", "Results"),
+    # cc#893 item 3, final piece. cc#892 shipped these four as a STATIC `EXTRA` array inside
+    # mobile/models.html, with a note saying CC folds them in here and deletes the client-side
+    # list — Fable could not edit this file safely at the time. Done: the server is the one
+    # source again, so adding a screen is one line here rather than one line here AND one in a
+    # template that would drift out of step the first time someone forgot.
+    ("/m/screeners", "Screeners"), ("/m/sector", "Sector"),
+    ("/m/holdings", "My Portfolio"), ("/m/fpc", "FPC Planner"),
     ("/preview", "Previews"),
 ]
 
