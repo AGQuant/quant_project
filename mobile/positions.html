@@ -8,9 +8,8 @@
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
 <style>
-/* cc#891 — Open Book in the shared card grammar (Claude direct push, 17783). Header net P&L,
-   per-position cards: symbol + side + basket, entry→CMP, target/stop, P&L + ret%, pivot star
-   when present, NEW tag for today's entries. Exact preview diffs fold into the founder review. */
+/* cc#891 — Open Book in the shared card grammar. cc#894 row 31 (Fable direct, 17783): QTY now
+   shows as a meta tag on every card — it was in the payload all along. */
 .net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
 .net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
 .net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
@@ -55,6 +54,7 @@ function card(p){
     + '<div class="meta">'
     + '<span class="tag '+(short_?'bear':'bull')+'">'+esc(p.side)+'</span>'
     + '<span class="tag cat">'+esc(p.basket||'')+'</span>'
+    + '<span class="tag">'+(p.qty==null?'--':Number(p.qty).toLocaleString('en-IN'))+' qty</span>'
     + (p.is_new?'<span class="tag edt">NEW</span>':'')
     + starIc(p.star)
     + '<span class="when">'+esc(p.entry_ts||'')+'</span></div>'
