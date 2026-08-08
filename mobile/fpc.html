@@ -13,8 +13,8 @@
   <div class="head"><h1>Financial Planner</h1><div class="s">what your money becomes · plain compounding, no jargon</div></div>
   <div class="body">
     <div class="sect">WHAT YOU PUT IN</div>
-    <div class="fld"><label>Monthly SIP (Rs.)</label><input id="sip" type="number" inputmode="numeric" value="25000"></div>
-    <div class="fld"><label>One-time amount today (Rs.)</label><input id="lump" type="number" inputmode="numeric" value="500000"></div>
+    <div class="fld"><label>Monthly SIP (₹)</label><input id="sip" type="number" inputmode="numeric" value="25000"></div>
+    <div class="fld"><label>One-time amount today (₹)</label><input id="lump" type="number" inputmode="numeric" value="500000"></div>
     <div class="fld"><label>Years</label><input id="yrs" type="number" inputmode="numeric" value="10"></div>
     <div class="fld"><label>Expected return % per year</label><input id="ret" type="number" inputmode="decimal" value="12"></div>
 
@@ -29,7 +29,7 @@
     </div>
 
     <div class="sect">OR START FROM A GOAL</div>
-    <div class="fld"><label>Target amount (Rs.)</label><input id="goal" type="number" inputmode="numeric" value="10000000"></div>
+    <div class="fld"><label>Target amount (₹)</label><input id="goal" type="number" inputmode="numeric" value="10000000"></div>
     <div class="c ref res">
       <div class="k">Monthly SIP needed (same years &amp; return)</div>
       <div class="v" id="need">--</div>
@@ -48,7 +48,7 @@
 </nav>
 <script>
 function inr(v){ if (v==null||isNaN(v)||!isFinite(v)) return '--';
-  return 'Rs.'+Math.round(v).toLocaleString('en-IN'); }
+  return '₹'+Math.round(v).toLocaleString('en-IN'); }
 function g(id){ return Number(document.getElementById(id).value)||0; }
 function calc(){
   var sip=g('sip'), lump=g('lump'), yrs=g('yrs'), ret=g('ret'), goal=g('goal');

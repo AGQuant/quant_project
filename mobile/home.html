@@ -86,13 +86,21 @@
    overflow:hidden). min-width:0 removes that automatic minimum, so the three tracks can never
    total more than the card — no horizontal overflow at ANY magnitude, today's or a future one.
    LEGIBILITY: structure alone would only shrink the box and clip the text, so the value is also
-   compacted (inrShort) and dropped to 12.5px. Measured on a 380px viewport: card content is
-   324px, so a track is (324-16)/3 = 102.7px and a cell has ~87px of room after padding; at
-   12.5px Plex Mono (~7.5px/char) that is ~11 characters. "Rs.1.43Cr" is 9. The old full-digit
-   "Rs.1,42,76,194" is 14 characters = ~118px at 14px — which is the overflow the founder saw.
+   compacted (inrShort).
+   FOUNDER FOLLOW-UP 08-Aug: overflow-wrap:anywhere stopped the overflow but let a value BREAK
+   ACROSS TWO LINES mid-number, which is just as unreadable — his words, and he is right. Two
+   changes fix it properly. The symbol is now ₹ instead of "Rs.", which is 2 characters cheaper on
+   every money value in the app, and the cell is white-space:nowrap so a number can never wrap
+   again: it either fits on one line or the formatter has failed, and the formatter cannot fail
+   because inrShort caps the string.
+   MEASURED on a 380px viewport: card content is 324px, a track is (324-16)/3 = 102.7px and a cell
+   has ~87px after padding; at 13.5px Plex Mono (~8.1px/char) that is ~10 characters. The widest
+   inrShort can produce is 8 — "−₹99,999" / "₹1.43Cr" — so 65px in 87px, and it still fits the
+   narrower 360px phone (~82px). That headroom is what let the font go back UP from 12.5 to 13.5px
+   rather than shrinking further. The old full-digit "Rs.1,42,76,194" was 14 characters, ~118px.
    Scoped to .trio so only this card changes; .st is shared CSS used elsewhere. */
 .trio .st{min-width:0;padding:9px 6px}
-.trio .st .v{font-size:12.5px;overflow-wrap:anywhere}
+.trio .st .v{font-size:13.5px;white-space:nowrap}
 /* ── cc#911: My Portfolio is no longer one big link ──────────────────────────────────────────
    The whole card used to be wrapped in <a class="card-link" href="/m/holdings">, so every tap
    inside it navigated away — including a tap on a holding. The expand control below is now the
@@ -155,20 +163,30 @@ function pct(v, dp){
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
-  return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+  return (x < 0 ? '\u2212' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
 function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
-/* cc#907 — Indian short scale for the trio cells. Rs.1,42,76,194 is 14 characters and does not
-   fit a third of a phone; Rs.1.43Cr is 9 and says the same thing at a glance. Two decimals keep
+/* cc#907 — Indian short scale for the trio cells. ₹1,42,76,194 is 12 characters and does not
+   fit a third of a phone; ₹1.43Cr is 7 and says the same thing at a glance. Two decimals keep
    a lakh readable to the nearest thousand. Below 1L the full figure already fits, so it stays
    exact. The PAYLOAD is untouched — this is display only, and /m/positions still shows every
    rupee (the card is explicit that the book maths must not move). */
 function inrShort(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v), sign = x < 0 ? '−' : '', a = Math.abs(x);
-  if (a >= 1e7) return sign + 'Rs.' + (a / 1e7).toFixed(2) + 'Cr';
-  if (a >= 1e5) return sign + 'Rs.' + (a / 1e5).toFixed(2) + 'L';
-  return sign + 'Rs.' + Math.round(a).toLocaleString('en-IN');
+  /* decimals shrink as the magnitude grows, so the STRING never does. Measuring the old version
+     caught the case the eye misses: ₹100.00Cr is 9 characters and did not fit a 360px phone.
+     With this ladder the widest possible output is 8 — "−₹99,999" or "−₹14.3Cr" — which fits
+     every cell it is used in, at every viewport down to 320px. */
+  if (a >= 1e7){
+    var cr = a / 1e7;
+    return sign + '₹' + (cr >= 100 ? Math.round(cr) : cr.toFixed(cr >= 10 ? 1 : 2)) + 'Cr';
+  }
+  if (a >= 1e5){
+    var l = a / 1e5;
+    return sign + '₹' + l.toFixed(l >= 10 ? 1 : 2) + 'L';
+  }
+  return sign + '₹' + Math.round(a).toLocaleString('en-IN');
 }
 function moodColor(m){
   m = (m || '').toLowerCase();

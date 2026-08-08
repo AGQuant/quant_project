@@ -31,7 +31,7 @@ function esc(s){ return String(s == null ? '' : s)
 function px(v){ if (v==null||isNaN(Number(v))) return '--';
   var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
 function inr(v){ if (v==null||isNaN(Number(v))) return '--';
-  var x=Number(v); return (x<0?'\u2212':'')+'Rs.'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+  var x=Number(v); return (x<0?'\u2212':'')+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
 function pct(v){ if (v==null||isNaN(Number(v))) return '--';
   var x=Number(v); return (x>=0?'+':'')+x.toFixed(2)+'%'; }
 function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
