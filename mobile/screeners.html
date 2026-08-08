@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screeners · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#892 — SCREENERS (Fable direct, 17783). Reads the EXISTING web API (/api/screeners) so both
+   surfaces show identical members and values (16202). Read-only by design (cc#824, rule 3069) —
+   no Run button. A never-run screen states it plainly. Each stock card shows symbol + CMP + day%
+   plus the screen's OWN filter values, same as the web table (founder 08-Aug). Rendering is
+   deliberately defensive about key names: anything numeric the API returns for a row is shown
+   with its label; nothing is invented. */
+.kvs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.kv2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut);
+  border:1px solid var(--line);border-radius:5px;padding:3px 7px}
+.kv2 b{color:var(--txt);font-weight:700}
+.srow{display:flex;align-items:baseline;gap:9px}
+.srow .sy{font-weight:800;font-size:14px;flex:1}
+.srow .px2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
+.srow .dd{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="head"><h1>Screeners</h1><div class="s" id="sub">7 ready-made screens · refreshed nightly</div></div>
+  <div class="chips" id="chips"></div>
+  <div class="body" id="body"><div class="loading">Loading screens…</div></div>
+  <div class="cover" id="cover"></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+var STATE={list:[],cur:null};
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function num(v,dp){ if(v==null||isNaN(Number(v)))return null;
+  var x=Number(v); return dp==null?(Math.abs(x)>=100?Math.round(x).toLocaleString('en-IN'):x.toFixed(1)):x.toFixed(dp); }
+function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
+function arr(d){ return d.screeners||d.presets||d.screens||(Array.isArray(d)?d:[]); }
+function rowsOf(d){ return d.rows||d.results||d.members||d.stocks||(Array.isArray(d)?d:[]); }
+
+var CORE={symbol:1,name:1,company_name:1,cmp:1,price:1,day_pct:1,day_1d:1,chg_pct:1,id:1,screen_id:1};
+function stockCard(r,labels){
+  var sym=r.symbol||r.ticker||'--';
+  var cmp=r.cmp!=null?r.cmp:r.price;
+  var day=r.day_pct!=null?r.day_pct:(r.day_1d!=null?r.day_1d:r.chg_pct);
+  var kvs='';
+  Object.keys(r).forEach(function(k){
+    if (CORE[k]) return;
+    var v=r[k];
+    if (v==null||typeof v==='object') return;
+    var shown=(typeof v==='number')?num(v):(String(v).length<=14?esc(String(v)):null);
+    if (shown==null) return;
+    kvs+='<div class="kv2">'+esc((labels&&labels[k])||k.replace(/_/g,' '))+' <b>'+shown+'</b></div>';
+  });
+  return '<div class="c"><div class="srow"><span class="sy">'+esc(sym)+'</span>'
+    + (cmp!=null?'<span class="px2">'+num(cmp)+'</span>':'')
+    + (day!=null?'<span class="dd '+cls(day)+'">'+(day>=0?'+':'')+num(day,2)+'%</span>':'')
+    + '</div>'
+    + (kvs?'<div class="kvs">'+kvs+'</div>':'')
+    + '</div>';
+}
+function renderChips(){
+  document.getElementById('chips').innerHTML = STATE.list.map(function(s,i){
+    var n=s.count!=null?s.count:(s.members!=null?s.members:s.n);
+    return '<button class="chip'+(STATE.cur===i?' on':'')+'" onclick="pick('+i+')">'
+      + esc(s.name||s.title||('Screen '+(i+1)))
+      + (n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
+  }).join('');
+}
+function pick(i){
+  STATE.cur=i; renderChips();
+  var s=STATE.list[i];
+  var id=s.id!=null?s.id:s.screen_id;
+  document.getElementById('body').innerHTML='<div class="loading">Loading '+esc(s.name||'screen')+'…</div>';
+  fetchWithTimeout('/api/screeners/'+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
+    if (d.error) throw new Error(d.error);
+    var rows=rowsOf(d), labels=d.labels||d.field_labels||null;
+    var never=(rows.length===0)&&(s.last_run==null&&d.last_run==null);
+    document.getElementById('body').innerHTML = rows.length
+      ? rows.map(function(r){return stockCard(r,labels);}).join('')
+      : '<div class="empty"><b>'+(never?'Never run yet':'No stocks qualify today')+'</b>'
+        + (never?'This screen has not produced a run yet — honest empty, not an error.'
+                :'The filter found nothing in the latest run.')+'</div>';
+    document.getElementById('cover').textContent = rows.length?('showing '+rows.length+' stocks'):'';
+  }).catch(function(e){
+    document.getElementById('body').innerHTML='<div class="empty"><b>Could not load</b>'+esc(e.message)+'</div>';
+  });
+}
+fetchWithTimeout('/api/screeners').then(function(r){return r.json();}).then(function(d){
+  if (d.error) throw new Error(d.error);
+  STATE.list=arr(d);
+  if (!STATE.list.length){
+    document.getElementById('body').innerHTML='<div class="empty"><b>No screens found</b></div>'; return;
+  }
+  pick(0);
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load screeners</b>'+esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+});
+</script>
+</body>
+</html>
