@@ -507,7 +507,22 @@
     document.body.appendChild(el);
     el.addEventListener('click', function (e) {
       // backdrop tap closes; a tap inside the panel does not, unless it is the close button
-      if (e.target === el || matches(e.target, '.symsheet-x')) close();
+      if (e.target === el || matches(e.target, '.symsheet-x')) { close(); return; }
+      /* THE SHEET IS A LAUNCHER — picking a letter dismisses it.
+         This is also load-bearing after cc#917. That card restyled this sheet and raised it to
+         z-index 100000; every letter card sits far below (chart 12000, analysis 11400, cockpit
+         11000, results 99999) and all of them are position:fixed children of <body>, so they
+         share this stacking context and compare directly. ScorrCardNav's _closeAll() closes
+         R/C/A/D but not this sheet — ScorrSymbolCard did not exist when that was written — so
+         without this the card would open UNDERNEATH the sheet and the tap would look like it did
+         nothing. Closing here fixes it whatever z-index the design lands on later.
+         Bubble phase, and deferred a tick, so the button's own inline ScorrCardNav() has already
+         run before the strip leaves the DOM. Only an enabled letter is a <button>; a disabled or
+         active one is a <span> and dispatches nothing, so it must not dismiss the sheet. */
+      if (e.target && e.target.tagName === 'BUTTON'
+          && up(e.target, function (n) { return matches(n, '.scorr-card-strip'); })) {
+        setTimeout(close, 0);
+      }
     });
     return el;
   }
