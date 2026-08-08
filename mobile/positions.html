@@ -7,38 +7,26 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/* cc#891 — Open Book in the shared card grammar (Claude direct push, 17783). Header net P&L,
+   per-position cards: symbol + side + basket, entry→CMP, target/stop, P&L + ret%, pivot star
+   when present, NEW tag for today's entries. Exact preview diffs fold into the founder review. */
+.net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+.net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
+.net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
+.pc2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
+.kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
+.kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
+.star{font-size:13px}
+</style>
 </head>
 <body>
-<!--
-  cc#874 — V8 POSITIONS, PROMOTED. previews/v8_positions.html stays frozen (item 9).
-
-  Contract: 14 values — 13 SOURCED, 1 SOURCED_BUT_EMPTY (the pivot star). The star is a real
-  column on a real table that cc#856 shipped and bg_pivot_star writes every 5 minutes; it is
-  simply empty until the rule first fires. So an absent star renders as NOTHING — never a
-  spinner, never a placeholder that implies a star was expected and lost.
-
-  TRAPS observed, each already a paid-for lesson:
-   - entry_ts is NAIVE IST. It is formatted server-side and printed raw. No conversion anywhere.
-   - v8_filter_state is NOT read. Basket names come from the trades themselves.
-   - price precision: under 100 gets one decimal, above gets none (16170).
--->
 <div class="screen">
-
-  <div class="head">
-    <h1>Open Book</h1>
-    <div class="s" id="sub">loading…</div>
-  </div>
-
-  <!-- cc#880: two filter rows. Direction first, baskets under it. Both scroll horizontally in one
-       row and never wrap, matching the preview tab-row pattern. -->
-  <div class="chips" id="dirchips"></div>
-  <div class="chips" id="bkchips" style="padding-top:3px"></div>
-
-  <div class="body" id="body">
-    <div class="loading">Loading positions…</div>
-  </div>
+  <div class="head"><h1>Open Book</h1><div class="s" id="sub">loading…</div></div>
+  <div class="net" id="net" style="display:none"><span class="k">NET P&amp;L</span><span class="v" id="netv"></span><span id="netr" style="margin-left:auto"></span></div>
+  <div class="body" id="body"><div class="loading">Loading positions…</div></div>
 </div>
-
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -46,154 +34,55 @@
   <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
-
 <script>
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function px(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
+function inr(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return (x<0?'\u2212':'')+'Rs.'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function pct(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return (x>=0?'+':'')+x.toFixed(2)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
+function railHtml(r){ if(!r) return '';
+  var s=(r.state||'CLOSED').toLowerCase();
+  return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
+function starIc(c){ return c ? '<span class="star" title="pivot star">'+(String(c).toLowerCase().indexOf('red')>-1?'\u2b50':'\ud83d\udd35')+'</span>' : ''; }
 
-/* 15913 rule 6 — a missing value is '--', never 0.0. One place makes that decision. */
-function n(v, dp){
-  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
-  return Number(v).toLocaleString('en-IN',
-    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
-}
-/* 16170 price precision: under 100 shows one decimal, at or above shows none. */
-function px(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
-}
-function inr(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return (x < 0 ? '−' : '+') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
-}
-function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
-
-function railHtml(r){
-  if (!r) return '';
-  var s = (r.state || 'CLOSED').toLowerCase();
-  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>'
-       + esc(r.state) + '</span>';
-}
-
-function row(p){
-  var side = p.side === 'SHORT' ? 'short' : 'long';
-  /* The star is the SOURCED_BUT_EMPTY value. Present -> render it in its own colour. Absent ->
-     render nothing at all, because "no star today" is a real answer, not a missing one. */
-  var star = p.star
-    ? ' <span style="color:' + (p.star === 'red' ? 'var(--red)' : 'var(--blu)') + '">★</span>' : '';
-  var isNew = p.is_new ? ' <span class="tag hi">NEW</span>' : '';
-  return '<div class="c ' + side + '">'
+function card(p){
+  var short_=(p.side||'')==='SHORT';
+  return '<div class="c '+(short_?'short':'long')+'">'
     + '<div class="meta">'
-      + '<span class="tag ' + (side === 'short' ? 'bear' : 'bull') + '">' + esc(p.side) + '</span>'
-      + '<span class="tag cat">' + esc((p.basket || '').replace(/_/g, ' ').toUpperCase()) + '</span>'
-      + isNew
-      + '<span class="when">' + esc(p.entry_ts || '--') + '</span>'
-    + '</div>'
-    + '<div class="hl">' + esc(p.symbol) + star
-      + ' <span class="mono ' + cls(p.pnl) + '" style="float:right;font-size:13px">'
-      + inr(p.pnl) + '</span></div>'
-    + '<div class="sum mono">'
-      + 'Entry ' + px(p.entry) + ' · CMP ' + px(p.cmp)
-      + ' · <span class="' + cls(p.ret_pct) + '">' + (p.ret_pct == null ? '--' : n(p.ret_pct) + '%') + '</span>'
-      + '<br>Stop ' + px(p.stop) + ' · Target ' + px(p.target) + ' · ' + n(p.qty, 0) + ' qty'
-    + '</div>'
-    + '</div>';
+    + '<span class="tag '+(short_?'bear':'bull')+'">'+esc(p.side)+'</span>'
+    + '<span class="tag cat">'+esc(p.basket||'')+'</span>'
+    + (p.is_new?'<span class="tag edt">NEW</span>':'')
+    + starIc(p.star)
+    + '<span class="when">'+esc(p.entry_ts||'')+'</span></div>'
+    + '<div class="hl">'+esc(p.symbol)
+    + '<span class="mono" style="float:right;font-size:13px" class="'+cls(p.pnl)+'">'
+    + '<span class="'+cls(p.pnl)+'">'+inr(p.pnl)+'</span></span></div>'
+    + '<div class="pc2">'
+    + '<div class="kv"><div class="k">Entry \u2192 CMP</div><div class="v">'+px(p.entry)+' \u2192 '+px(p.cmp)+'</div></div>'
+    + '<div class="kv"><div class="k">Target / Stop</div><div class="v">'+px(p.target)+' / '+px(p.stop)+'</div></div>'
+    + '<div class="kv"><div class="k">Return</div><div class="v '+cls(p.ret_pct)+'">'+pct(p.ret_pct)+'</div></div>'
+    + '</div></div>';
 }
-
-/* ── cc#880 BASKET + DIRECTION FILTERS ────────────────────────────────────────────────────────
-   Filtering is client-side on the ONE payload the screen already fetches (item 6 of cc#874: one
-   call per screen). A chip tap must never be a round trip.
-
-   The basket chip LIST is derived from the DATA via scorrBasketFacets in scorr_card_common.js —
-   never a hardcoded array, so a basket with no open rows shows no chip and a retired basket still
-   holding an open position does. The direction filter is applied FIRST and the chips are faceted
-   off that set, so each count is what tapping it actually returns. */
-var DATA = null, SIDE = 'all', BASKET = 'all';
-
-function bySide(){
-  if (!DATA) return [];
-  return SIDE === 'all' ? DATA.positions
-    : DATA.positions.filter(function(p){ return (p.side || '').toUpperCase() === SIDE; });
-}
-function visible(){
-  var rows = bySide();
-  return BASKET === 'all' ? rows : rows.filter(function(p){ return (p.basket || '') === BASKET; });
-}
-function setSide(s){
-  SIDE = s;
-  /* Switching direction can leave the chosen basket with no rows — the chip would disappear while
-     its filter kept applying, and the list would read empty with nothing on screen explaining why.
-     Reset to All when the selection no longer exists. */
-  if (BASKET !== 'all' && !bySide().some(function(p){ return (p.basket || '') === BASKET; })) BASKET = 'all';
-  render();
-}
-function setBasket(b){ BASKET = b; render(); }
-
-function chip(on, label, n, fn, arg){
-  return '<button class="chip' + (on ? ' on' : '') + '" onclick="' + fn + '(\'' + esc(arg) + '\')">'
-    + esc(label) + ' <span class="n">' + n + '</span></button>';
-}
-
-function render(){
-  var d = DATA, all = d.positions || [], side = bySide(), rows = visible();
-
-  var nLong  = all.filter(function(p){ return (p.side || '').toUpperCase() === 'LONG'; }).length;
-  var nShort = all.filter(function(p){ return (p.side || '').toUpperCase() === 'SHORT'; }).length;
-  document.getElementById('dirchips').innerHTML =
-    chip(SIDE === 'all', 'All', all.length, 'setSide', 'all')
-    + chip(SIDE === 'LONG', 'Long', nLong, 'setSide', 'LONG')
-    + chip(SIDE === 'SHORT', 'Short', nShort, 'setSide', 'SHORT');
-
-  var facets = (typeof scorrBasketFacets === 'function') ? scorrBasketFacets(side) : [];
-  /* One basket in view is not a choice — the row is omitted rather than shown as furniture. */
-  document.getElementById('bkchips').innerHTML = facets.length > 1
-    ? chip(BASKET === 'all', 'All', side.length, 'setBasket', 'all')
-      + facets.map(function(f){
-          return chip(BASKET === f.slug, f.label, f.n, 'setBasket', f.slug); }).join('')
-    : '';
-
-  /* The header counts the VISIBLE set, so the number and the list can never disagree. */
-  var net = rows.reduce(function(a, p){ return a + (p.pnl == null ? 0 : Number(p.pnl)); }, 0);
-  document.getElementById('sub').innerHTML =
-    rows.length + ' open · net <span class="' + cls(net) + '">' + inr(net) + '</span> '
-    + railHtml(d.rail);
-
-  if (!all.length) {
-    /* The designed empty state — a flat book is a fact, not a failure. */
-    document.getElementById('body').innerHTML =
-      '<div class="empty"><b>No open positions</b>'
-      + 'The paper book is flat. New entries appear here as the engine takes them.</div>';
-    return;
+fetchWithTimeout('/api/mobile/v8_positions').then(function(r){return r.json();}).then(function(d){
+  if (d.error) throw new Error(d.error);
+  document.getElementById('sub').innerHTML = d.count+' open positions '+railHtml(d.rail);
+  if (d.count){
+    document.getElementById('net').style.display='flex';
+    var nv=document.getElementById('netv'); nv.textContent=inr(d.net_pnl); nv.className='v '+cls(d.net_pnl);
   }
-  if (!rows.length) {
-    /* Distinct from a flat book: the book has rows, this filter has none. Saying which is which
-       stops a filter from looking like an outage. */
-    document.getElementById('body').innerHTML =
-      '<div class="empty"><b>Nothing in this filter</b>'
-      + 'No open position matches the selected filters. Tap All to see the whole book.</div>';
-    return;
-  }
-  document.getElementById('body').innerHTML = rows.map(row).join('')
-    + (d.star_source_empty
-        ? '<div class="cover">No pivot stars today — v8_pivot_star_log is empty for this date.</div>'
-        : '');
-}
-
-fetchWithTimeout('/api/mobile/v8_positions')
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    if (d.error) throw new Error(d.error);
-    DATA = d;
-    render();
-  })
-  .catch(function(e){
-    document.getElementById('body').innerHTML =
-      '<div class="empty"><b>Could not load the book</b>' + esc(e.message)
-      + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-    document.getElementById('sub').textContent = 'failed to load';
-  });
+  document.getElementById('body').innerHTML = d.count
+    ? d.positions.map(card).join('')
+    : '<div class="empty"><b>Book is flat</b>No open positions right now.</div>';
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load</b>'+esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  document.getElementById('sub').textContent='failed to load';
+});
 </script>
 </body>
 </html>
