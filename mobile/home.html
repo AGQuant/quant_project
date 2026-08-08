@@ -979,6 +979,101 @@ function loadRawNews(){
     });
 }
 
+/* ── cc#930 RESTORE: the block below was deleted by 3ce2493 (cc#928) and is put back
+   BYTE-FOR-BYTE as it stood at 8e92cdd. cc#928 replaced a range running from v10Svg to
+   the cc#927 marker, and this block sat inside that range — so the V10 rewrite silently
+   took cc#911's My Portfolio (PF, pfStrip, pfTap, pfRow, renderPortfolio) and
+   d34a4a1's PIV + idxRow with it. Home then threw at render. ── */
+/* ══ cc#911: MY PORTFOLIO — expand control + in-place C·A·R·D strip ════════════════════════
+   The card used to be wrapped in <a class="card-link" href="/m/holdings">, so EVERY tap inside
+   it navigated away, including a tap on a holding. Now the card is a plain div, one explicit
+   expand control opens /m/holdings, and a row tap opens the shared strip under that row.
+
+   THE STRIP IS CONSUMED, NEVER RE-IMPLEMENTED. window.ScorrCardRow(sym) is the compact
+   table-row variant from scorr_card_strip.js (cc#789/#798). cc#789 exists because two hand-
+   written copies of the strip drifted apart, so no C/A/R/D markup is written here at all.
+
+   SCRIPT LOADING — the card asked me to add five <script src> tags after verifying each route.
+   VERIFIED, AND NO TAGS WERE ADDED, because all of them are already on the page: /m/home is in
+   PROTECTED (main.py, cc#874), and auth_gate injects _MOBILE_HEAD into the head of any protected
+   page that does not already carry the shared mobile stylesheet link — this page carries the
+   mobile_app one instead. _MOBILE_HEAD carries scorr_card_common.js, scorr_mobile_cards.js,
+   scorr_card_strip.js, results_card.js, scorr_chart_card.js, scorr_analysis_card.js and
+   scorr_cockpit_card.js, in that dependency order, each stamped with the build id (cc#792/805).
+   Adding the tags by hand would have loaded every one of them twice and duplicated the
+   already-solved cache-busting. results_card.js is not a repo-root file — it is generated and
+   served from pwa_endpoints.py (RESULTS_CARD_JS), which is why the card could not find it.
+
+   GRACEFUL DEGRADE: if ScorrCardRow is somehow missing at tap time the opened slot says so in
+   one line. Never a dead tap, never a silent no-op. */
+var PF = { open: null, data: null };
+
+function pfStrip(sym){
+  try {
+    if (typeof window.ScorrCardRow === 'function') return window.ScorrCardRow(sym);
+  } catch (e) { /* fall through to the honest message */ }
+  return '<span class="sum">Card view unavailable</span>';
+}
+function pfTap(i){
+  PF.open = (PF.open === i) ? null : i;   // one row open at a time; tapping the open row closes it
+  renderPortfolio();
+}
+function pfRow(r, i){
+  /* data-scorr-skip: cc#898's universal symbol-tap sheet steps aside here, because this row
+     already opens the same strip INLINE under itself (cc#911, founder-specified). Two
+     mechanisms firing on one tap would be worse than either. */
+  return '<div class="row pfrow" data-scorr-skip="1" role="button" tabindex="0" onclick="pfTap(' + i + ')"'
+    + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();pfTap(' + i + ');}">'
+    + '<div class="l"><div class="sym">' + esc(r.symbol) + '</div>'
+    + '<div class="sub">' + esc(r.direction) + ' '
+    + (r.qty == null ? '--' : Number(r.qty).toLocaleString('en-IN')) + '</div></div>'
+    + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
+    + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>'
+    + (PF.open === i ? '<div class="pfcard">' + pfStrip(r.symbol) + '</div>' : '');
+}
+function renderPortfolio(){
+  var el = document.getElementById('pfblock'), pf = PF.data;
+  if (!el || !pf) return;
+  el.innerHTML = '<div class="chd"><div class="t">My Portfolio</div>'
+    + '<div class="rgt">'
+    + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
+    + railHtml(pf.rail)
+    + ' <a class="h-exp" href="/m/holdings" aria-label="Open My Portfolio">⤢</a></div></div>'
+    + (pf.empty
+        ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
+        : (pf.rows || []).map(pfRow).join(''));
+}
+
+/* ══ HERO CARD 2 — INDEX RANGE + DAILY DIGEST (founder 08-Aug) ═════════════════════════════
+   Where NIFTY and BANKNIFTY sit between TODAY'S support and resistance. Every number is real:
+     level  -> the NIFTY / BANKNIFTY rows already in the home2 ticker payload (domestic_live)
+     S / R  -> /api/paper/pivots?symbol=NIFTY50,BANKNIFTY — v8_paper_pivots, the SAME endpoint
+               the web dashboard's pivot ladder reads, so the app cannot disagree with it
+   The dot is (level - S1) / (R1 - S1), clamped, so it shows position between the two levels.
+   NO INVENTED VERDICT: the reference screen carries a sentiment badge, and I am not deriving one.
+   What is stated instead is a FACT the pivot gives for free — whether price is above or below the
+   pivot point — and if any of the three levels is missing the row renders its numbers with no bar
+   at all rather than a bar drawn to a guess. */
+var PIV = null;   // symbol -> {pp,r1,s1,...} from /api/paper/pivots
+
+function idxRow(name, sym, level){
+  var pv = PIV && PIV[sym];
+  var s1 = pv ? Number(pv.s1) : null, r1 = pv ? Number(pv.r1) : null,
+      pp = pv ? Number(pv.pp) : null;
+  var pos = null;
+  if (level != null && s1 != null && r1 != null && r1 !== s1)
+    pos = Math.max(0, Math.min(1, (Number(level) - s1) / (r1 - s1)));
+  var side = (level == null || pp == null) ? ''
+    : (Number(level) >= pp ? 'above pivot' : 'below pivot');
+  return '<div class="irow"><span class="inm">' + esc(name) + '</span>'
+    + '<span class="ilv">' + px(level) + '</span>'
+    + (side ? '<span class="ipp">' + side + '</span>' : '') + '</div>'
+    + (pos == null
+        ? '<div class="isr"><span>levels pending</span></div>'
+        : '<div class="ibar"><div class="idot" style="left:' + (pos * 100).toFixed(1) + '%"></div></div>'
+          + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>');
+}
+
 /* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
    PCR_MOOD_MAPPING_V1, founder-locked in session_log 18024, and CONTRARIAN by decision: a LOW
    put/call ratio means the crowd is not buying protection, which reads as Fear; a HIGH one reads
