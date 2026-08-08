@@ -23,6 +23,11 @@
   background:var(--panel);border:1px solid var(--line)}
 .tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
 .tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;white-space:nowrap}
+/* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
+   value/date on the right, which updates under the finger. Only the SECOND grows; the title
+   stays small so the header does not turn into two competing headlines. Scoped here rather than
+   in the shared sheet because .trendhd renders on this page only. */
+.trendhd span:last-child{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
 </style>
 </head>
 <body>
@@ -78,9 +83,9 @@ function railHtml(r){
    the new endpoint returns ONE shape ({series:[{d,v}]}) so nothing is guessed, and the popup
    draws a real chart instead of text rows. */
 var TRENDS = {
-  adr: { title: 'ADR \u00b7 30 DAYS' },
-  pcr: { title: 'NIFTY PCR \u00b7 30 DAYS' },
-  vix: { title: 'INDIA VIX \u00b7 30 DAYS' }
+  adr: { title: 'ADR \u00b7 15 DAYS' },
+  pcr: { title: 'NIFTY PCR \u00b7 15 DAYS' },
+  vix: { title: 'INDIA VIX \u00b7 15 DAYS' }
 };
 function trendSvg(series, kind){
   var W = 320, H = 110, PL = 6, PR = 6, PT = 8, PB = 18;
@@ -100,8 +105,8 @@ function trendSvg(series, kind){
     + '<circle cx="' + xs(n - 1).toFixed(1) + '" cy="' + ys(last).toFixed(1) + '" r="2.6" fill="var(--blu,#4D7CFE)"/>'
     + '<line id="tcx_' + kind + '" x1="0" y1="' + PT + '" x2="0" y2="' + (H - PB) + '" stroke="var(--amber,#F5B94A)" stroke-width="1" stroke-dasharray="3 2" style="display:none"/>'
     + '<circle id="tcd_' + kind + '" r="3.2" fill="var(--amber,#F5B94A)" style="display:none"/>'
-    + '<text x="' + PL + '" y="' + (H - 5) + '" font-size="8.5" fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(d0) + '</text>'
-    + '<text x="' + (W - PR) + '" y="' + (H - 5) + '" text-anchor="end" font-size="8.5" fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(d1) + '</text>'
+    + '<text x="' + PL + '" y="' + (H - 5) + '" font-size="10" fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(d0) + '</text>'
+    + '<text x="' + (W - PR) + '" y="' + (H - 5) + '" text-anchor="end" font-size="10" fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(d1) + '</text>'
     + '</svg>';
 }
 /* founder 08-Aug batch 3: finger scrub — drag inside the chart moves a crosshair and the header
@@ -144,7 +149,9 @@ function togTrend(ev, kind){
   TREND.open = kind;
   var t = TRENDS[kind];
   el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + kind.toUpperCase() + ' trend\u2026</div>';
-  fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=30')
+  // cc#903: 15-day window. /api/mobile/trends already accepts days (2-120), so this is a
+  // query-string change only — nothing server-side moves.
+  fetchWithTimeout('/api/mobile/trends?kind=' + kind + '&days=15')
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (TREND.open !== kind) return;
