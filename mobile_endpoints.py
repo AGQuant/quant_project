@@ -1735,6 +1735,24 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
   font-size:13px;font-weight:700;cursor:pointer;text-align:left}
 .lgm button:active{background:var(--panel2)}
 .lgm .ic{width:16px;text-align:center;font-size:14px;color:var(--mut)}
+
+/* ── cc#898: the universal symbol-tap sheet ──────────────────────────────────────────────────
+   A bottom sheet, not a centre modal: on a phone the reachable half of the screen is the bottom
+   one, and the C/A/R/D letters are the thing being reached for. The affordance is a faint dotted
+   underline on symbol text — enough to read as tappable without turning every list into links. */
+.symsheet{position:fixed;inset:0;z-index:80;background:rgba(4,8,18,.62);display:none;
+  align-items:flex-end;overscroll-behavior:contain}
+.symsheet.open{display:flex}
+.symsheet-bd{width:100%;background:var(--panel);border-top:1px solid var(--line2);
+  border-radius:16px 16px 0 0;padding:6px 14px calc(18px + env(safe-area-inset-bottom))}
+.symsheet-hd{display:flex;align-items:center;gap:10px;min-height:46px}
+.symsheet-hd b{flex:1;font-size:15px;font-weight:800;letter-spacing:.02em}
+.symsheet-x{min-width:44px;min-height:44px;background:none;border:0;color:var(--mut);
+  font-size:17px;cursor:pointer;font-family:inherit}
+.symsheet-strip{padding:2px 0 8px}
+.sym,.sy,.sy2,.rs,.rsym,.vsym{text-decoration:underline dotted rgba(148,166,210,.35);
+  text-underline-offset:3px;cursor:pointer}
+[data-scorr-skip] .sym,[data-scorr-skip] .sy,[data-scorr-skip] .sy2{text-decoration:none}
 """
 
 

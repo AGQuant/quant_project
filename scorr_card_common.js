@@ -445,3 +445,114 @@
     build();
   }
 })();
+
+/* ── cc#898: UNIVERSAL SYMBOL TAP -> C·A·R·D SHEET (founder 08-Aug) ───────────────────────────
+   Every symbol shown anywhere in the mobile app becomes tappable and opens the shared card
+   strip. Done ONCE here, as a delegated listener, rather than by editing nine templates: a
+   screen added tomorrow inherits this with no code, and there is no second copy to drift.
+
+   HOW SYMBOLS ARE FOUND. The mobile screens do not share one symbol class — a survey of
+   mobile/*.html found .sym (home), .sy (positions/qb/holdings/results), .sy2 (v8),
+   .rs and .rsym (gvm), .vsym (check). All of them are matched, plus an explicit data-sym for
+   anything new. The symbol is data-sym when present, else the element's trimmed text, and it
+   must look like a symbol (uppercase, 1-20 chars, NSE punctuation only) — so a stray class
+   match can never open a card for a heading or a number.
+
+   THE STRIP IS CONSUMED, NEVER RE-IMPLEMENTED — window.ScorrCardStripHtml(sym) from
+   scorr_card_strip.js (cc#789/#803/#805: all four letters are locked to shared components).
+   No C/A/R/D markup is written here.
+
+   TWO EXCLUSIONS THAT MATTER:
+     1. .scorr-card-strip carries its OWN data-sym attribute. Without excluding it, tapping the
+        strip would match this listener and reopen the sheet on top of itself.
+     2. [data-scorr-skip] opts a surface out. Home's My Portfolio rows use it: cc#911 gives those
+        rows an INLINE strip under the row, which is the founder-specified behaviour there, and
+        two mechanisms firing on one tap is worse than either.
+   A handled tap calls preventDefault + stopPropagation, so a symbol sitting inside a row link
+   opens its card instead of navigating away — which is the point of the card.
+
+   Web pages are untouched: everything returns immediately unless the path is /m/*. */
+(function () {
+  if (window.__scorrSymCard) return;
+  window.__scorrSymCard = true;
+
+  var SEL = '[data-sym],.sym,.sy,.sy2,.rs,.rsym,.vsym';
+  var OK = /^[A-Z0-9][A-Z0-9&._\-]{0,19}$/;
+
+  function up(el, test) {          // closest(), without depending on it
+    while (el && el.nodeType === 1) { if (test(el)) return el; el = el.parentNode; }
+    return null;
+  }
+  function matches(el, sel) {
+    var f = el.matches || el.msMatchesSelector || el.webkitMatchesSelector;
+    try { return !!f && f.call(el, sel); } catch (e) { return false; }
+  }
+  function symOf(el) {
+    var s = el.getAttribute('data-sym');
+    if (!s) s = (el.textContent || '').trim();
+    s = s.toUpperCase();
+    return OK.test(s) ? s : null;
+  }
+
+  function sheet() {
+    var el = document.getElementById('scorr-symsheet');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'scorr-symsheet';
+    el.className = 'symsheet';
+    el.innerHTML = '<div class="symsheet-bd" role="dialog" aria-modal="true">'
+      + '<div class="symsheet-hd"><b id="scorr-symsheet-t"></b>'
+      + '<button type="button" class="symsheet-x" aria-label="Close">&#10005;</button></div>'
+      + '<div class="symsheet-strip" id="scorr-symsheet-s"></div></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      // backdrop tap closes; a tap inside the panel does not, unless it is the close button
+      if (e.target === el || matches(e.target, '.symsheet-x')) close();
+    });
+    return el;
+  }
+  function close() {
+    var el = document.getElementById('scorr-symsheet');
+    if (el) el.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function open(sym) {
+    var el = sheet();
+    document.getElementById('scorr-symsheet-t').textContent = sym;
+    var host = document.getElementById('scorr-symsheet-s');
+    var html = '';
+    try {
+      if (typeof window.ScorrCardStripHtml === 'function') html = window.ScorrCardStripHtml(sym, '');
+    } catch (e) { html = ''; }
+    // never a dead sheet: if the shared strip is missing, say so rather than opening empty
+    host.innerHTML = html || '<span class="sum">Card view unavailable</span>';
+    el.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  window.ScorrSymbolCard = { open: open, close: close };
+
+  function onTap(e) {
+    try {
+      if (location.pathname.indexOf('/m/') !== 0) return;
+      var el = up(e.target, function (n) { return matches(n, SEL); });
+      if (!el) return;
+      if (up(el, function (n) { return matches(n, '.scorr-card-strip,[data-scorr-skip]'); })) return;
+      var sym = symOf(el);
+      if (!sym) return;
+      e.preventDefault();
+      e.stopPropagation();
+      open(sym);
+    } catch (err) { /* a tap must never throw into the page */ }
+  }
+
+  function build() {
+    if (location.pathname.indexOf('/m/') !== 0) return;
+    document.addEventListener('click', onTap, true);   // capture, so a row's own handler cannot eat it
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', build);
+  } else {
+    build();
+  }
+})();

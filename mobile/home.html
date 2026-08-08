@@ -93,6 +93,16 @@
    Scoped to .trio so only this card changes; .st is shared CSS used elsewhere. */
 .trio .st{min-width:0;padding:9px 6px}
 .trio .st .v{font-size:12.5px;overflow-wrap:anywhere}
+/* ── cc#911: My Portfolio is no longer one big link ──────────────────────────────────────────
+   The whole card used to be wrapped in <a class="card-link" href="/m/holdings">, so every tap
+   inside it navigated away — including a tap on a holding. The expand control below is now the
+   ONLY thing that opens /m/holdings; a row tap opens the shared C·A·R·D strip in place.
+   44px target per framework 15913 core rule 5. */
+.h-exp{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;
+  color:var(--mut);font-size:15px;text-decoration:none}
+.pfrow{cursor:pointer}
+.pfrow:active{background:var(--panel2)}
+.pfcard{padding:4px 2px 10px}
 </style>
 </head>
 <body>
@@ -668,6 +678,66 @@ function renderV10(){
                      : '<div class="sum" style="padding:8px 0">No V10 trades in this window.</div>');
 }
 
+/* ══ cc#911: MY PORTFOLIO — expand control + in-place C·A·R·D strip ════════════════════════
+   The card used to be wrapped in <a class="card-link" href="/m/holdings">, so EVERY tap inside
+   it navigated away, including a tap on a holding. Now the card is a plain div, one explicit
+   expand control opens /m/holdings, and a row tap opens the shared strip under that row.
+
+   THE STRIP IS CONSUMED, NEVER RE-IMPLEMENTED. window.ScorrCardRow(sym) is the compact
+   table-row variant from scorr_card_strip.js (cc#789/#798). cc#789 exists because two hand-
+   written copies of the strip drifted apart, so no C/A/R/D markup is written here at all.
+
+   SCRIPT LOADING — the card asked me to add five <script src> tags after verifying each route.
+   VERIFIED, AND NO TAGS WERE ADDED, because all of them are already on the page: /m/home is in
+   PROTECTED (main.py, cc#874), and auth_gate injects _MOBILE_HEAD into </head> for any protected
+   page whose body lacks href="/static/mobile.css" — which this page does, since it links
+   mobile_app.css. _MOBILE_HEAD carries scorr_card_common.js, scorr_mobile_cards.js,
+   scorr_card_strip.js, results_card.js, scorr_chart_card.js, scorr_analysis_card.js and
+   scorr_cockpit_card.js, in that dependency order, each stamped with the build id (cc#792/805).
+   Adding the tags by hand would have loaded every one of them twice and duplicated the
+   already-solved cache-busting. results_card.js is not a repo-root file — it is generated and
+   served from pwa_endpoints.py (RESULTS_CARD_JS), which is why the card could not find it.
+
+   GRACEFUL DEGRADE: if ScorrCardRow is somehow missing at tap time the opened slot says so in
+   one line. Never a dead tap, never a silent no-op. */
+var PF = { open: null, data: null };
+
+function pfStrip(sym){
+  try {
+    if (typeof window.ScorrCardRow === 'function') return window.ScorrCardRow(sym);
+  } catch (e) { /* fall through to the honest message */ }
+  return '<span class="sum">Card view unavailable</span>';
+}
+function pfTap(i){
+  PF.open = (PF.open === i) ? null : i;   // one row open at a time; tapping the open row closes it
+  renderPortfolio();
+}
+function pfRow(r, i){
+  /* data-scorr-skip: cc#898's universal symbol-tap sheet steps aside here, because this row
+     already opens the same strip INLINE under itself (cc#911, founder-specified). Two
+     mechanisms firing on one tap would be worse than either. */
+  return '<div class="row pfrow" data-scorr-skip="1" role="button" tabindex="0" onclick="pfTap(' + i + ')"'
+    + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();pfTap(' + i + ');}">'
+    + '<div class="l"><div class="sym">' + esc(r.symbol) + '</div>'
+    + '<div class="sub">' + esc(r.direction) + ' '
+    + (r.qty == null ? '--' : Number(r.qty).toLocaleString('en-IN')) + '</div></div>'
+    + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
+    + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>'
+    + (PF.open === i ? '<div class="pfcard">' + pfStrip(r.symbol) + '</div>' : '');
+}
+function renderPortfolio(){
+  var el = document.getElementById('pfblock'), pf = PF.data;
+  if (!el || !pf) return;
+  el.innerHTML = '<div class="chd"><div class="t">My Portfolio</div>'
+    + '<div class="rgt">'
+    + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
+    + railHtml(pf.rail)
+    + ' <a class="h-exp" href="/m/holdings" aria-label="Open My Portfolio">⤢</a></div></div>'
+    + (pf.empty
+        ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
+        : (pf.rows || []).map(pfRow).join(''));
+}
+
 fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then(function(d){
   if (d.error) throw new Error(d.error);
 
@@ -742,21 +812,10 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="sum" style="margin-top:7px">% on capital deployed per side.</div>'
     + '</div></a>';
 
-  /* 3 · MY PORTFOLIO */
-  var pf = d.portfolio || {};
-  h += '<div class="sect">MY PORTFOLIO</div>'
-    + '<a class="card-link" href="/m/holdings"><div class="c"><div class="chd"><div class="t">My Portfolio</div>'
-    + '<div class="rgt">' + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
-    + railHtml(pf.rail) + ' <span class="h-chev">\u203a</span></div></div>'
-    + (pf.empty
-        ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
-        : (pf.rows || []).map(function(r){
-            return '<div class="row"><div class="l"><div class="sym">' + esc(r.symbol) + '</div>'
-              + '<div class="sub">' + esc(r.direction) + ' ' + (r.qty == null ? '--' : Number(r.qty).toLocaleString('en-IN')) + '</div></div>'
-              + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
-              + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>';
-          }).join(''))
-    + '</div></a>';
+  /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
+     redraw just this card instead of the whole page. */
+  PF.data = d.portfolio || {};
+  h += '<div class="sect">MY PORTFOLIO</div><div class="c" id="pfblock"></div>';
 
   /* 4 · LIVE NEWS — scrollable; Intel has its own nav slot (founder 08-Aug).
          Results Corner card removed: covered by the Results tile in the grid. */
@@ -803,6 +862,8 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<a class="tool" href="/v10"><span>\u25d1</span>V10</a>'
     + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>';
   document.getElementById('body').appendChild(tools);
+
+  renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
