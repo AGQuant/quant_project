@@ -103,10 +103,30 @@ function sparkline(pts){
 function section(title, inner){
   return inner ? '<div class="frh">' + esc(title) + '</div>' + inner : '';
 }
-/* the web page's own section order; anything in the payload not named here still renders after */
-var KNOWN = ['snapshot','overview','segment','segment_context','segment_ladder','peers',
-  'peer_benchmarking','growth','value','momentum','financials','quarterly','shareholding',
-  'guidance','growth_drivers','key_risks','business_model','levels','pivot','fib'];
+/* cc#895 — the section order and titles, CHECKED AGAINST THE REAL /api/gvm/company PAYLOAD.
+   The previous KNOWN list was guessed from the web page's visual sections: of its twenty names
+   only 'financials' actually exists in the response, so the ordering did nothing and every
+   section fell through to the generic pass with a machine title (PILLAR COVERAGE, OPERATIONAL
+   METRICS). These are the real keys, in the web's order, with the web's human titles. */
+var KNOWN = ['scores','benchmark','pillar_coverage','positives','negatives','ladder',
+  'content','financials','extras'];
+var TITLES = {
+  scores:          'GVM SCORES',
+  benchmark:       'PEER BENCHMARKING',
+  pillar_coverage: 'PILLAR COVERAGE',
+  positives:       "WHAT'S WORKING",
+  negatives:       "WHAT'S NOT",
+  ladder:          'SEGMENT LADDER',
+  content:         'ANALYSIS',
+  financials:      'FINANCIALS',
+  extras:          'MARKET CONTEXT'
+};
+/* NEVER rendered. operational_metrics is INTERNAL ONLY (OPS_METRICS_INTERNAL_ONLY, session_log
+   13348) and the generic "render every object key" pass was leaking it onto a retail screen.
+   The rest are plumbing flags that mean nothing to a founder reading a company view. */
+var HIDE = { operational_metrics: 1, persisted: 1, persist_error: 1, degraded: 1,
+             in_scrape_universe: 1, price_is_live: 1, is_bfsi: 1, generated_at: 1,
+             symbol: 1, score_date: 1 };
 function frBlock(){
   var f = STATE.fr;
   if (f === 'loading') return '<div class="fr"><div class="loading" style="padding:4px">Loading company view…</div></div>';
@@ -117,7 +137,7 @@ function frBlock(){
   /* 1 · overview scalars */
   var over = {};
   Object.keys(d).forEach(function(k){
-    if (d[k] != null && typeof d[k] !== 'object' && k !== 'symbol') over[k] = d[k];
+    if (d[k] != null && typeof d[k] !== 'object' && !HIDE[k]) over[k] = d[k];
   });
   out += section('SNAPSHOT', kvRows(over));
   /* 2 · score trend */
@@ -126,10 +146,10 @@ function frBlock(){
   var done = {};
   function renderKey(k){
     var v = d[k];
-    if (v == null || typeof v !== 'object' || done[k]) return '';
+    if (v == null || typeof v !== 'object' || done[k] || HIDE[k]) return '';
     done[k] = 1;
     var inner = Array.isArray(v) ? arrTable(v) : kvRows(v);
-    return section(k.replace(/_/g,' ').toUpperCase(), inner);
+    return section(TITLES[k] || k.replace(/_/g,' ').toUpperCase(), inner);
   }
   KNOWN.forEach(function(k){ out += renderKey(k); });
   Object.keys(d).forEach(function(k){ out += renderKey(k); });
@@ -148,7 +168,19 @@ function frBlock(){
     }).join(''));
   }
   /* 6 · sector brief */
-  if (f.brief) out += section('SECTOR BRIEF', '<div class="prose">' + esc(f.brief).slice(0, 1200) + '</div>');
+  if (f.brief){
+    /* Field by field with the web's own labels. esc() on the object would have printed
+       "[object Object]" — the fields are what carry the meaning. */
+    var BF = [['what_is_it','What it is'], ['business_model','Business model'],
+              ['growth_drivers','Growth drivers'], ['application_type','Applications'],
+              ['key_risks','Key risks']];
+    var bh = BF.map(function(x){
+      var v = f.brief[x[0]];
+      return v ? '<div class="frh">' + esc(x[1]) + '</div><div class="prose">'
+               + esc(String(v).slice(0, 900)) + '</div>' : '';
+    }).join('');
+    out += section('SECTOR BRIEF', bh);
+  }
   return '<div class="fr">' + (out || '<div class="empty" style="padding:8px"><b>Nothing to show</b></div>') + '</div>';
 }
 function repCard(x){
@@ -185,9 +217,16 @@ function toggleFR(sym){
     fetchWithTimeout('/api/trade-check/fibcheck?symbol=' + encodeURIComponent(sym)).then(function(r){ return r.json(); }).catch(function(){ return null; }),
     seg ? fetchWithTimeout('/api/sector/brief?segment=' + encodeURIComponent(seg)).then(function(r){ return r.json(); }).catch(function(){ return null; }) : Promise.resolve(null)
   ]).then(function(res){
-    var trend = res[1]; trend = trend && (trend.trend || trend.history || trend.series || (Array.isArray(trend) ? trend : null));
+    /* cc#895: /api/gvm/trend returns {symbol, range, gvm:[{d,gvm,g,v,m}], price:[...]}. The
+       guessed keys trend/history/series exist nowhere, so this was ALWAYS null and the sparkline
+       never drew once. sparkline() already reads p.gvm, so the array key was the whole bug. */
+    var trend = res[1]; trend = trend && (trend.gvm || (Array.isArray(trend) ? trend : null));
     var news = res[2]; news = news && (news.articles || news.items || news.results || (Array.isArray(news) ? news : null));
-    var brief = res[4]; brief = brief && (brief.brief || brief.text || brief.summary || null);
+    /* cc#895: /api/sector/brief returns an OBJECT — {segment, what_is_it, growth_drivers,
+       application_type, business_model, key_risks, generated_at, cached, constituents}. The
+       guessed keys brief/text/summary exist nowhere, so the chain yielded null and the SECTOR
+       BRIEF section silently never appeared. Kept whole and rendered field by field below. */
+    var brief = res[4] && !res[4].error ? res[4] : null;
     STATE.fr = { company: res[0] || {}, trend: trend || [], news: news || [], fib: res[3], brief: brief };
     render();
   });
