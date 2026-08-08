@@ -89,3 +89,15 @@ def preview_screen(name: str):
         log.exception("cc#866 preview read failed for %s", name)
         return HTMLResponse(f"Preview '{name}' could not be read: {type(e).__name__}",
                             status_code=404, headers=_NO_STORE)
+
+
+# ── cc#889 WIRING SHIM (Claude direct push, CHARTER_OVERRIDE_08AUG2026, session_log 17783) ──────
+# mobile_home2.router is included HERE, not in main.py, as a deliberate exception to rule 5:
+# main.py (112KB) and mobile_endpoints.py (70KB) can only be pushed as FULL file contents through
+# the github_push API, and retyping either whole file to add two lines is a bigger correctness
+# risk than this shim. preview_endpoints is already mounted by main.py, is small enough to
+# reproduce byte-exactly, and is mobile-adjacent. CC: when next touching main.py, move this pair
+# of lines there (`import mobile_home2` + `app.include_router(mobile_home2.router)`) and delete
+# this shim — the router itself needs no change.
+import mobile_home2                                    # noqa: E402  (deliberate tail import)
+router.include_router(mobile_home2.router)             # routes join before main.py includes us
