@@ -3,38 +3,84 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Check · Scorr</title>
+<title>Trade Check · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/*
+  cc#890 — CHECK reskinned to previews/check.html (approved design, markup+CSS ported, live data).
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Preview design carried: search + LONG/SHORT first; the verdict is a WORD with the score beside
+  it; THE GAPS ARE THE PRODUCT — every failed rule prints as its own red-edged row; passed rules
+  collapse to one line; the check states its own age.
+  Data honesty vs the preview, stated: the live source is tc_screener_cache (fresh daily, cc#888)
+  whose verdict words are STRONG / VALID / WATCH — shown as-is (DISPLAY_PARITY 16202, same words
+  as the web scanner). It carries NO pass/watch/fail counts and no per-rule value-vs-required
+  detail, so the preview's count chips and gap explanations are NOT fabricated: a gap row shows
+  the rule name, and the chip shows the gap COUNT, which is real. Score renders without "/total"
+  because the source has no total.
+  First card ships expanded; the rest expand on tap.
+*/
+.inrow{display:flex;gap:8px;margin:12px 12px 0}
+.sfld{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 13px}
+.sfld input{flex:1;min-height:46px;background:none;border:0;outline:none;color:var(--txt);
+  font-family:inherit;font-size:16px;font-weight:700}
+.sfld input::placeholder{color:var(--dim);font-weight:400;font-size:13px}
+.tog{display:flex;border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.tg{min-height:48px;display:flex;align-items:center;padding:0 13px;font-size:11.5px;
+  font-weight:800;color:var(--dim);cursor:pointer;background:none;border:0;font-family:inherit}
+.tg.on{background:rgba(47,212,139,.14);color:var(--grn)}
+.tg.on.sh{background:rgba(255,92,108,.12);color:var(--red)}
+.v{position:relative;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:15px;padding:15px 15px 12px 19px;overflow:hidden;margin-bottom:8px;cursor:pointer}
+.v::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--amber))}
+.v1{display:flex;align-items:baseline;gap:9px}
+.vsym{font-size:16.5px;font-weight:800}
+.vside{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:.1em;padding:3px 8px;border-radius:4px;border:1px solid rgba(47,212,139,.45);color:var(--grn)}
+.vside.sh{border-color:rgba(255,92,108,.45);color:var(--red)}
+.vpx{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:11px;font-weight:700;color:var(--mut)}
+.v2{display:flex;align-items:center;gap:11px;margin-top:11px}
+.word{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--vc,var(--amber))}
+.score{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:19px;font-weight:800}
+.counts{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.ct{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+  padding:4px 9px;border-radius:5px;border:1px solid var(--line2);color:var(--mut)}
+.ct.f{color:var(--red);border-color:rgba(255,92,108,.4)}
+.ct.p{color:var(--grn);border-color:rgba(47,212,139,.4)}
+.g{display:flex;align-items:baseline;gap:9px;background:var(--panel);
+  border:1px solid var(--line);border-left:3px solid var(--red);border-radius:0 11px 11px 0;
+  padding:9px 12px;margin:0 0 6px 6px}
+.gv{font-size:11.5px;color:var(--mut);line-height:1.5}
+.gv b{color:var(--red);font-weight:700}
+.pass1{font-size:11px;color:var(--dim);padding:2px 3px 12px 8px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+</style>
 </head>
 <body>
-<!--
-  cc#874 — CHECK, PROMOTED. previews/check.html stays frozen (item 9).
-
-  cc#888 SOURCE SWAP: this screen read tc_cache, dead since 18-Jun. bg_tc_lite writes
-  tc_screener_cache every session, so the retail "should I take this trade?" question is now
-  answered with TODAY's verdicts instead of June's.
-
-  THE STALENESS BANNER STAYS, and that is deliberate. It reads clean today, but it is rendered
-  from DATA (freshness.stale / age_days) and every card repeats its own computed_at — so the day
-  the writer dies, the screen says so instead of showing old answers as if they were current.
-  A banner that only ever appears when something is wrong is only proven by leaving it in.
--->
 <div class="screen">
-  <div class="head"><h1>Trade Check</h1><div class="s" id="sub">loading…</div></div>
-  <div style="margin:11px 12px 0;display:flex;gap:8px">
-    <input id="q" type="search" placeholder="Search a symbol" autocomplete="off"
-      style="flex:1;min-height:44px;padding:0 13px;border-radius:11px;background:var(--panel);
-      border:1px solid var(--line2);color:var(--txt);font-family:inherit;font-size:13.5px;outline:none">
+  <div class="head">
+    <h1>Trade Check</h1>
+    <div class="s" id="sub">score the trade before you take it</div>
   </div>
-  <!-- cc#888 item 2: LONG | SHORT, 44px chips, same pattern as Intel's categories. A searched
-       symbol ignores the toggle and shows both sides, because the question about one stock is
-       "is there a trade here at all". -->
-  <div class="chips" id="sidechips"></div>
+
+  <div class="inrow">
+    <div class="sfld"><span style="color:var(--dim)">&#9906;</span>
+      <input id="q" type="search" placeholder="Search a symbol" autocomplete="off"></div>
+    <div class="tog">
+      <button class="tg on" id="tgL" type="button" onclick="setSide('LONG')">LONG</button>
+      <button class="tg" id="tgS" type="button" onclick="setSide('SHORT')">SHORT</button>
+    </div>
+  </div>
+
   <div id="stale"></div>
   <div class="body" id="body"><div class="loading">Loading verdicts…</div></div>
 </div>
+
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -42,93 +88,97 @@
   <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
+
 <script>
+var STATE = { side: 'LONG', open: 0 };
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n(v, dp){
-  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '--';
-  return Number(v).toLocaleString('en-IN',
-    {minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp});
-}
+function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
 }
-function inr(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+function vColor(v){
+  v = (v || '').toUpperCase();
+  if (v.indexOf('STRONG') > -1) return 'var(--grn)';
+  if (v.indexOf('VALID') > -1) return 'var(--blu)';
+  return 'var(--amber)';
 }
-function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
 function railHtml(r){
   if (!r) return '';
   var s = (r.state || 'CLOSED').toLowerCase();
   return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
 }
-function failBox(host, sub, e){
-  document.getElementById(host).innerHTML =
-    '<div class="empty"><b>Could not load</b>' + esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  if (sub) document.getElementById(sub).textContent = 'failed to load';
-}
 
-function vClass(v){
-  v = (v || '').toUpperCase();
-  if (v.indexOf('STRONG') > -1 || v.indexOf('VALID') > -1 || v.indexOf('TAKE') > -1) return 'bull';
-  if (v.indexOf('AVOID') > -1 || v.indexOf('WEAK') > -1) return 'bear';
-  return 'neut';
+function gaps(x){
+  if (!x.not_passed) return [];
+  return String(x.not_passed).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
 }
-/* cc#888 item 2 + verify (d): the pass / fail / watch line is GONE. tc_screener_cache has no
-   such columns, and deriving counts from failed_rules would print a guess in the shape of a
-   measurement. The line is now CMP · pivot zone · verdict, all of which are real columns. */
-function card(x){
-  return '<div class="c ' + vClass(x.verdict) + '">'
-    + '<div class="meta"><span class="tag ' + vClass(x.verdict) + '">'
-      + esc((x.verdict || 'NO VERDICT').toUpperCase()) + '</span>'
-    + '<span class="tag cat">' + esc(x.side || '--') + '</span>'
-    + '<span class="when">' + esc(x.computed_at || '--') + '</span></div>'
-    + '<div class="hl">' + esc(x.symbol) + '<span class="mono" style="float:right;font-size:13px">'
-      + n(x.score, 1) + '</span></div>'
-    + '<div class="sum mono">CMP ' + px(x.cmp)
-      + (x.pivot_zone ? ' · ' + esc(x.pivot_zone) : '')
-      + ' · ' + esc(x.verdict || '--') + '</div>'
-    + (x.not_passed ? '<div class="sum">Not passed: ' + esc(x.not_passed) + '</div>' : '')
-    + '</div>';
+function card(x, i, open){
+  var gp = gaps(x);
+  var short_ = (x.side || '').toUpperCase() === 'SHORT';
+  var h = '<div class="v" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(' + i + ')">'
+    + '<div class="v1"><span class="vsym">' + esc(x.symbol) + '</span>'
+    + '<span class="vside' + (short_ ? ' sh' : '') + '">' + esc(x.side || '') + '</span>'
+    + '<span class="vpx">CMP ' + px(x.cmp)
+    + (x.computed_at ? ' · ' + esc(x.computed_at) : '') + '</span></div>'
+    + '<div class="v2"><span class="word">' + esc((x.verdict || '--').toUpperCase()) + '</span>'
+    + '<span class="score">' + n1(x.score) + '</span></div>'
+    + '<div class="counts">'
+    + (gp.length ? '<span class="ct f">' + gp.length + ' GAP' + (gp.length > 1 ? 'S' : '') + '</span>'
+                 : '<span class="ct p">NO GAPS</span>')
+    + (x.pivot_zone ? '<span class="ct">' + esc(x.pivot_zone) + '</span>' : '')
+    + '</div></div>';
+  if (open){
+    h += gp.map(function(r){
+      return '<div class="g"><span class="gv">Not passed: <b>' + esc(r) + '</b></span></div>';
+    }).join('');
+    h += gp.length
+      ? '<div class="pass1">gaps first — everything else passed</div>'
+      : '<div class="pass1">every rule passed — nothing to read</div>';
+  }
+  return h;
 }
-
-var SIDE = 'LONG';
-function setSide(s){ SIDE = s; load(document.getElementById('q').value.trim()); }
-function renderSideChips(active){
-  /* Hidden while a symbol search is running — the toggle does not apply there, and a control
-     that silently stops working is worse than one that steps aside. */
-  document.getElementById('sidechips').innerHTML = active ? '' :
-    ['LONG','SHORT'].map(function(s){
-      return '<button class="chip' + (SIDE === s ? ' on' : '') + '" onclick="setSide(\'' + s + '\')">'
-        + s.charAt(0) + s.slice(1).toLowerCase() + '</button>'; }).join('');
+function render(d){
+  var rs = d.results || [];
+  document.getElementById('sub').innerHTML =
+    d.count + ' verdicts · ' + (d.query ? 'both sides' : esc(STATE.side)) + ' ' + railHtml(d.rail);
+  var f = d.freshness || {};
+  document.getElementById('stale').innerHTML = f.stale
+    ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
+      + 'background:rgba(245,185,74,.10);border:1px solid rgba(245,185,74,.4);'
+      + 'color:var(--amber);font-size:11.5px;font-weight:700;line-height:1.5">'
+      + '&#9888; ' + esc(f.note || 'Verdicts are stale.') + '</div>'
+    : '';
+  document.getElementById('body').innerHTML = rs.length
+    ? '<div class="sect">THE VERDICT · GAPS FIRST</div>'
+      + rs.map(function(x, i){ return card(x, i, i === STATE.open); }).join('')
+    : '<div class="empty"><b>Nothing found</b>No cached verdict for "' + esc(d.query || '') + '".</div>';
+  window.__rows = rs;
+}
+function toggle(i){ STATE.open = (STATE.open === i ? -1 : i); render(window.__d); }
+function setSide(s){
+  STATE.side = s; STATE.open = 0;
+  document.getElementById('tgL').className = 'tg' + (s === 'LONG' ? ' on' : '');
+  document.getElementById('tgS').className = 'tg' + (s === 'SHORT' ? ' on sh' : '');
+  load(document.getElementById('q').value.trim());
 }
 function load(q){
   document.getElementById('body').innerHTML = '<div class="loading">Loading verdicts…</div>';
-  fetchWithTimeout('/api/mobile/check?limit=20&side=' + SIDE
-                   + (q ? '&symbol=' + encodeURIComponent(q) : ''))
-    .then(function(r){ return r.json(); }).then(function(d){
-    if (d.error) throw new Error(d.error);
-    var f = d.freshness || {};
-    renderSideChips(!!d.query);
-    document.getElementById('sub').innerHTML = d.count + ' verdicts'
-      + (d.query ? ' for ' + esc(d.query) : ' \u00b7 ' + SIDE.toLowerCase()) + ' ' + railHtml(d.rail);
-    document.getElementById('stale').innerHTML = f.stale
-      ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
-        + 'background:rgba(245,185,74,.10);border:1px solid rgba(245,185,74,.4);'
-        + 'color:var(--amber);font-size:11.5px;font-weight:700;line-height:1.5">'
-        + '⚠ ' + esc(f.note) + ' Last computed ' + esc(f.computed_at)
-        + ' (' + n(f.age_days, 0) + ' days ago).</div>'
-      : '';
-    document.getElementById('body').innerHTML = d.count
-      ? d.results.map(card).join('')
-      : '<div class="empty"><b>Nothing found</b>'
-        + (d.query ? 'No verdict for "' + esc(d.query) + '" in today\'s run.'
-                   : 'No ' + SIDE.toLowerCase() + ' verdicts in today\'s run.') + '</div>';
-  }).catch(function(e){ failBox('body','sub',e); });
+  fetchWithTimeout('/api/mobile/check?limit=12&side=' + STATE.side
+      + (q ? '&symbol=' + encodeURIComponent(q) : ''))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      window.__d = d; STATE.open = 0; render(d);
+    })
+    .catch(function(e){
+      document.getElementById('body').innerHTML =
+        '<div class="empty"><b>Could not load</b>' + esc(e.message)
+        + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+      document.getElementById('sub').textContent = 'failed to load';
+    });
 }
 var t = null;
 document.getElementById('q').addEventListener('input', function(e){
