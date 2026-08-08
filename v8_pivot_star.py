@@ -80,6 +80,29 @@ STAB_SELL = (-2.0, 1.0)     # mirrored band, sell side
 # sell side. Served from here so web and mobile cannot disagree about it (DISPLAY_PARITY 16202).
 GLYPH = {"BUY": "star", "SELL": "circle"}
 
+# ── cc#933 GREEN_STAR_ACTIVITY_V1 — founder-locked in session_log 18053 ───────────────────────
+# Same open-positions scope as V2. Fires when EITHER leg trips:
+#   (a) vol_ratio > 1.5   — latest v8_metrics, day volume vs its 21-day average
+#   (b) |OI day-over-day| > 25%  — futures_basis, last tick of the day vs last tick of the prior
+#       session. 25% is deliberately RARE: typical DoD is 1-5%, so this leg fires only on a true
+#       event or a rollover, and it is expected to be silent most days.
+#
+# READ 18053 CAREFULLY — two of its keys look contradictory and are not. `founder_amendment_08aug`
+# says there is NO side split; `founder_final_08aug` says BUY shows a star and SELL a circle. They
+# reconcile cleanly: the CONDITION has no side split (identical test both sides, no mirrored band),
+# while the GLYPH does. One condition, one meaning — unusual activity — drawn in the shape of the
+# side it sits on.
+#
+# AND THE SIDE HERE IS THE POSITION'S OWN SIDE — the opposite of cc#932. That is deliberate, not an
+# inconsistency: a pivot marker describes how the STOCK is behaving against its own levels (so
+# MAXHEALTH can carry a SHORT position and a BUY star), whereas activity has no directional reading
+# at all — volume and OI say "something is happening", not "up" or "down". So the only side it can
+# honestly take is the side you are on. DO NOT unify these two side rules later; they answer
+# different questions.
+ACTIVITY_VOL_X       = 1.5
+ACTIVITY_OI_DOD_PCT  = 25.0
+GLYPH_SIDE = {"LONG": "star", "SHORT": "circle"}
+
 # cc#932: the scope is now the OPEN PAPER BOOK. "qualified" (V1) and "universe" (the founder's
 # feasibility read) are kept so either is a one-line switch, but 18052 locks "positions".
 # Changing this changes WHICH SYMBOLS ARE EVALUATED only — never what the rule is.
@@ -276,6 +299,73 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
     return out
 
 
+def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """GREEN activity markers on the OPEN book (cc#933 / session_log 18053). PURE READ.
+
+    Kept as its own function and its own response list rather than folded into evaluate(), because
+    a symbol can legitimately carry BOTH a pivot marker and an activity marker at once. Merging
+    them into one keyed map would silently drop one of the two — the surfaces render them side by
+    side."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT ON (p.symbol) p.symbol, p.side
+            FROM v8_paper_positions p
+            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+            WHERE p.status = 'OPEN'
+              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
+            ORDER BY p.symbol, p.entry_ts DESC""")
+        pos = [(r[0], (r[1] or "").upper()) for r in cur.fetchall()]
+        if not pos:
+            return []
+        syms = [x[0] for x in pos]
+
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, vol_ratio FROM v8_metrics
+                       WHERE symbol = ANY(%s) AND score_date <= %s
+                       ORDER BY symbol, score_date DESC""", (syms, d))
+        volx = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+        # OI day-over-day: LAST tick of each session, this session vs the one before it.
+        cur.execute("""
+            WITH t AS (
+                SELECT DISTINCT ON (symbol, ts::date) symbol, ts::date AS d, oi
+                FROM futures_basis
+                WHERE symbol = ANY(%s) AND ts::date <= %s
+                ORDER BY symbol, ts::date DESC, ts DESC),
+            l AS (
+                SELECT symbol, d, oi, LAG(oi) OVER (PARTITION BY symbol ORDER BY d) AS prev_oi,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
+                FROM t)
+            SELECT symbol, CASE WHEN prev_oi > 0 THEN (oi - prev_oi) / prev_oi * 100.0 END
+            FROM l WHERE rn = 1""", (syms, d))
+        oidod = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+    out = []
+    for sym, side in pos:
+        vx, od = volx.get(sym), oidod.get(sym)
+        vol_hit = vx is not None and vx > ACTIVITY_VOL_X
+        oi_hit = od is not None and abs(od) > ACTIVITY_OI_DOD_PCT
+        if not (vol_hit or oi_hit):
+            continue
+        facts = []
+        if vol_hit:
+            facts.append(f"volume {vx:.1f}x its 21-day average")
+        if oi_hit:
+            facts.append(f"OI {od:+.0f}% day-over-day")
+        out.append({
+            "symbol": sym, "side": side,
+            "star_color": "GREEN",
+            "glyph": GLYPH_SIDE.get(side, "star"),
+            "vol_ratio": round(vx, 2) if vx is not None else None,
+            "oi_dod_pct": round(od, 2) if od is not None else None,
+            "trigger": "VOL" if vol_hit and not oi_hit else ("OI" if oi_hit and not vol_hit else "VOL+OI"),
+            # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
+            "note": " · ".join(facts),
+        })
+    return out
+
+
 def star_note(s: Dict[str, Any]) -> str:
     """Tooltip text. FACTS ONLY — no buy/sell/entry/target wording anywhere, per the card and the
     5646 reasoning. This function is the single place that copy is written, so it cannot drift."""
@@ -325,10 +415,31 @@ def run_tick(conn=None) -> Dict[str, Any]:
         # A ZERO-STAR DAY IS VALID and is logged as such rather than silently passing — 8 of the
         # founder's 22 sampled sessions had no blue star at all (ENGINE_LIVENESS_RULE 13829: an
         # explicitly logged valid-empty outcome is evidence, silence is not).
-        log.info("cc#856 pivot_star tick: %d stars evaluated, %d newly logged%s",
-                 len(stars), wrote, " (VALID ZERO-STAR TICK)" if not stars else "")
+        # cc#933: activity markers are logged in the SAME table with direction='ACTIVITY'. That
+        # value cannot collide with the BUY/SELL pivot rows under the existing
+        # UNIQUE(symbol, star_date, direction), so a symbol carrying both a pivot marker and an
+        # activity marker logs both — and no ALTER TABLE is needed (cc#351). level_value carries
+        # whichever leg fired, so the row is self-describing.
+        acts = evaluate_activity(conn, d)
+        awrote = 0
+        with conn.cursor() as cur:
+            for a in acts:
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, basket, direction, star_color,
+                       level_name, level_value, cmp_at_star, day_1d)
+                    VALUES (%s,%s,%s,%s,'ACTIVITY','GREEN',%s,%s,NULL,NULL)
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (d, ts, a["symbol"], None, a["trigger"],
+                      a["vol_ratio"] if a["trigger"] != "OI" else a["oi_dod_pct"]))
+                awrote += cur.rowcount
+        conn.commit()
+        log.info("cc#856/933 pivot_star tick: %d pivot markers (%d new), %d activity (%d new)%s",
+                 len(stars), wrote, len(acts), awrote,
+                 " (VALID ZERO-MARKER TICK)" if not stars and not acts else "")
         return {"ok": True, "date": str(d), "evaluated": len(stars), "new_rows": wrote,
-                "zero_star_tick": not stars, "scope": EVAL_SCOPE}
+                "activity": len(acts), "activity_new_rows": awrote,
+                "zero_star_tick": not stars and not acts, "scope": EVAL_SCOPE}
     except Exception as e:
         log.exception("cc#856 pivot_star tick failed")
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -366,8 +477,26 @@ def pivot_star(star_date: Optional[str] = None):
             } for r in cur.fetchall()]
             for r in rows:
                 r["note"] = star_note(r)
+            # cc#933: activity markers are a SEPARATE list, not merged into `stars`. A symbol can
+            # carry a pivot marker AND an activity marker at the same time; one keyed map would
+            # silently drop whichever came second. Purely additive — `stars` is byte-identical to
+            # what it was, so nothing downstream breaks.
+            try:
+                # honour a historical star_date rather than silently evaluating "today" —
+                # a bad date string falls back to today instead of throwing the whole endpoint.
+                _ad = None
+                if star_date:
+                    try:
+                        _ad = datetime.strptime(star_date, "%Y-%m-%d").date()
+                    except ValueError:
+                        _ad = None
+                acts = evaluate_activity(conn, _ad)
+            except Exception as e:
+                log.warning("cc#933 activity evaluation failed: %s", e)
+                acts = []
             return {
                 "star_date": d, "count": len(rows), "stars": rows,
+                "activity": acts, "activity_count": len(acts),
                 "scope": EVAL_SCOPE,
                 "rule": ("PIVOT_STAR_V2 (session_log 18052), evaluated on the OPEN paper book. "
                          "STAR (blue, buy side): touched its own S1 in the last 3 closed sessions; "
@@ -384,6 +513,14 @@ def pivot_star(star_date: Optional[str] = None):
                 "basis": ("DISPLAY MARKER + MEASUREMENT LOG ONLY. Not a qualification rule, not a "
                           "basket, not a slot; it never creates a paper entry (session_log 5646)."),
                 "near_pp_note": "near_pp is recorded for a 4-6 week review only and is never rendered.",
+                # cc#933: the legend copy lives HERE so /dashboard and /m/v8 cannot word it
+                # differently. Both surfaces render the shared snippet, which reads this.
+                "legend": [
+                    "Amber = Trade Check · filled STRONG, outline VALID",
+                    "Blue = held reversal at S1 · Red = mirror at R1",
+                    "Green = unusual activity · volume >1.5x or OI >25% day-over-day",
+                    "Shape = side · star long, circle short. Colour = meaning.",
+                ],
             }
     except Exception as e:
         log.exception("pivot_star endpoint failed")

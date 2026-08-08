@@ -1757,6 +1757,10 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 .symsheet-x{min-width:44px;min-height:44px;background:none;border:0;color:var(--mut);
   font-size:17px;cursor:pointer;font-family:inherit}
 .symsheet-strip{padding:2px 0 8px}
+/* cc#933: marker legend, quiet by design — it explains, it does not compete. */
+.mk-legend{margin:10px 12px 0;padding:9px 11px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:10px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+  line-height:1.75;color:var(--dim)}
 .sym,.sy,.sy2,.rs,.rsym,.vsym{text-decoration:underline dotted rgba(148,166,210,.35);
   text-underline-offset:3px;cursor:pointer}
 [data-scorr-skip] .sym,[data-scorr-skip] .sy,[data-scorr-skip] .sy2{text-decoration:none}

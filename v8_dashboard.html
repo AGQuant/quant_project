@@ -199,7 +199,10 @@
   .b-slotfull{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   .b-qualified{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   /* cc#856 pivot star — marker only, no interaction, no entry semantics */
+  /* cc#933 marker legend */
+  .mk-legend{margin:12px 0 2px;padding:9px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:10.5px;line-height:1.8;color:var(--dim)}
   .pv-star{margin-left:4px;font-size:11px;cursor:help;vertical-align:middle}
+  .pv-act{margin-left:3px;font-size:11px;cursor:help;vertical-align:middle}
   .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
@@ -2114,16 +2117,23 @@ function posTags(x){
   const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
   return '<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
 }
-function _tcStarHtml(v){
+function _tcStarHtml(v,side){
   if(!v)return'';
   const filled=v.verdict==='STRONG',outline=v.verdict==='VALID';
-  if(!filled&&!outline)return'';   // WATCH / FAIL / REJECT -> no star
+  if(!filled&&!outline)return'';   // WATCH / FAIL / REJECT -> no marker
   const title='TC '+Number(v.score).toFixed(1)+'/'+v.max+' '+v.verdict;
-  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">'+(filled?'★':'☆')+'</span>';
+  // cc#933: SIDE-AWARE glyph. Family rule across all three markers — SHAPE is the side (star long,
+  // circle short), COLOUR is the meaning (amber Trade Check, blue/red pivot, green activity).
+  // Fill still carries the verdict: filled STRONG, outline VALID. Scoring and the cc#728 batch are
+  // untouched; only which character is drawn changes.
+  const short=String(side||'').toUpperCase()==='SHORT';
+  const g = short ? (filled?'\u25CF':'\u25CB') : (filled?'\u2605':'\u2606');
+  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">'+g+'</span>';
 }
 function _fillTcStar(key){
   const v=_tcStarCache.get(key);
-  try{document.querySelectorAll('.tc-star[data-tckey="'+key+'"]').forEach(el=>{el.innerHTML=v?_tcStarHtml(v):'';});}catch(e){}
+  const side=String(key||'').split('|')[1]||'';   // cc#933: the key is already "SYM|SIDE"
+  try{document.querySelectorAll('.tc-star[data-tckey="'+key+'"]').forEach(el=>{el.innerHTML=v?_tcStarHtml(v,side):'';});}catch(e){}
 }
 // cc#728: ONE call to the hourly-batch endpoint (not one live TC per symbol). Throttled to at most
 // one fetch / 60s so the 60s re-render just re-paints from the cache; the batch only changes hourly.
@@ -2729,13 +2739,17 @@ function _banChip(x){return x&&x.banned?' <span class="badge" style="background:
 // set as a trade rule (9 trades / 55.6% WR, and 53 / 34.0% / -0.75 EV without the Nifty gate), so
 // NO copy here — glyph, title or aria-label — may say buy, sell, entry or target. The tooltip text
 // is built SERVER-SIDE by v8_pivot_star.star_note() so the wording cannot drift on this surface.
-let PIVOT_STARS={};
+let PIVOT_STARS={}, PIVOT_ACT={}, MK_LEGEND=null;
 async function loadPivotStars(){
   try{
     const d=await getJSON('/api/v8/pivot_star');
+    // cc#933: activity markers come back as their OWN list, because a symbol can carry a pivot
+    // marker AND an activity marker at once — one merged map would drop the second.
+    PIVOT_ACT={}; (d.activity||[]).forEach(a=>{PIVOT_ACT[a.symbol]=a;});
+    MK_LEGEND=d.legend||null;
     const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
     PIVOT_STARS=m;
-  }catch(e){ PIVOT_STARS={}; }   // a failed star fetch must never blank a signal table
+  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; }   // a failed marker fetch must never blank a signal table
 }
 function pivotStar(sym){
   const s=PIVOT_STARS[sym]; if(!s) return '';
@@ -2749,9 +2763,24 @@ function pivotStar(sym){
   return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">${isCircle?'\u25CF':'\u2605'}</span>`;
 }
 
+function pivotAct(sym){
+  const a=PIVOT_ACT[sym]; if(!a) return '';
+  // cc#933: green = unusual activity. Glyph follows the POSITION's side (star long, circle short)
+  // — unlike the blue/red pivot marker, whose side is the STOCK's behaviour. See the note in
+  // v8_pivot_star.py: they answer different questions and must not be unified.
+  const note=(a.note||'').replace(/"/g,'&quot;');
+  const g = a.glyph==='circle' ? '\u25CF' : '\u2605';
+  return `<span class="pv-act" style="color:#2fd48b" title="${note}" aria-label="${note}">${g}</span>`;
+}
+// cc#933: the legend footer. Rendered from window.ScorrMarkerLegend — the SAME snippet /m/v8
+// uses — with the copy itself coming from the engine, so neither the layout nor the wording can
+// fork between the two surfaces.
+function markerLegend(){
+  try{ return window.ScorrMarkerLegend ? window.ScorrMarkerLegend(MK_LEGEND) : ''; }catch(e){ return ''; }
+}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol}${pivotStar(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
+    <td class="sym">${x.symbol}${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -2798,7 +2827,7 @@ function renderFunnel(b){
   // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
   const desktopTable=sortTbl('bk_'+b.id,BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
   const mobileCards=bkMobile(sorted,isSell);
-  return meta+legend+desktopTable+mobileCards;
+  return meta+legend+desktopTable+mobileCards+markerLegend();
 }
 
 // cc#370: Trade log filters — Duration (calendar window) + Basket. Client-side (all closed trades

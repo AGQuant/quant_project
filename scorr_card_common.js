@@ -818,3 +818,28 @@
     boot();
   }
 })();
+
+
+/* ── cc#933: MARKER LEGEND — ONE snippet, both surfaces ───────────────────────────────────────
+   /dashboard and /m/v8 both render markers beside a symbol, and a reader needs the key. Built
+   here, in the file both surfaces already load, so the wording cannot fork (DISPLAY_PARITY
+   16202). The COPY itself is served by the engine (/api/v8/pivot_star -> legend[]), so the rule
+   text and the code that applies the rule ship together; this function only lays it out. The
+   fallback below is used when the endpoint is unreachable, and says the same thing. */
+(function () {
+  if (window.ScorrMarkerLegend) return;
+  var FALLBACK = [
+    'Amber = Trade Check · filled STRONG, outline VALID',
+    'Blue = held reversal at S1 · Red = mirror at R1',
+    'Green = unusual activity · volume >1.5x or OI >25% day-over-day',
+    'Shape = side · star long, circle short. Colour = meaning.'
+  ];
+  function esc(t){ return String(t == null ? '' : t)
+    .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  window.ScorrMarkerLegend = function (lines) {
+    var L = (lines && lines.length) ? lines : FALLBACK;
+    return '<div class="mk-legend">' + L.map(function (t) {
+      return '<div>' + esc(t) + '</div>';
+    }).join('') + '</div>';
+  };
+})();
