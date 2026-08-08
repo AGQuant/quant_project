@@ -9,14 +9,12 @@
 <script src="/scorr_card_common.js"></script>
 <style>
 /*
-  cc#889 — HOME rebuilt to previews/home_v2.html (founder 07-Aug: market-first scroll, My
-  Portfolio demoted mid-scroll, tools grid). Pushed by Claude (Fable) under
-  CHARTER_OVERRIDE_08AUG2026 (session_log 17783). Layout classes below are ported from the
-  approved preview onto the app's shared tokens (.screen vars from mobile_app.css). They live in
-  this page for now; cc#890 consolidates them into the shared MOBILE_CSS block when the next
-  screens reuse them — noted as a deliberate, temporary deviation from spec item 2.
-  ONE fetch: /api/mobile/home2. Placeholder values never render — every section is live or its
-  honest empty state.
+  cc#889 — HOME rebuilt to previews/home_v2.html. cc#894 item 7 (Fable direct, 17783) —
+  the MORNING DIGEST joins Home with full functionality: global indices, domestic, ADR + PCR
+  trends, pivots and support levels, straight from /api/digest/daily (the web digest's own
+  builder output — 16202 by construction). The ADR hero chip is now CLICKABLE and opens its
+  trend (api/daily/adr), per founder's row decisions. Digest section renders defensively and
+  lazily; a missing block renders nothing, never a stub.
 */
 .idx{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:11px 12px 3px}
 .ix{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
@@ -27,9 +25,10 @@
 .hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
 .hchips{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
 .hc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
-  padding:5px 9px;border-radius:14px;border:1px solid var(--line2);color:var(--mut)}
+  padding:5px 9px;border-radius:14px;border:1px solid var(--line2);color:var(--mut);background:none;font-family:'IBM Plex Mono',ui-monospace,monospace;cursor:default}
 .hc.ok{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
 .hc.bad{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
+.hc.tap{cursor:pointer;text-decoration:underline dotted}
 .chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;margin-bottom:6px}
 .chd .t{font-weight:800;font-size:14px}
 .chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut);
@@ -57,6 +56,13 @@
   text-decoration:none;display:block}
 .tool span{display:block;font-size:17px;margin-bottom:3px}
 a.card-link{text-decoration:none;color:inherit;display:block}
+.dgh{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;color:var(--dim);margin:11px 0 6px}
+.dgh:first-child{margin-top:0}
+.dgr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:30px}
+.dgr:first-of-type{border-top:0}
+.dgr .k2{font-size:11.5px;color:var(--mut);flex:1;text-transform:capitalize}
+.dgr .v2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;text-align:right}
 </style>
 </head>
 <body>
@@ -79,6 +85,8 @@ a.card-link{text-decoration:none;color:inherit;display:block}
 </nav>
 
 <script>
+var DG = { open: false, data: null, adr: null };
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function px(v){
@@ -94,6 +102,11 @@ function inr(v){
   var x = Number(v);
   return (x < 0 ? '\u2212' : '') + 'Rs.' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
+function fmtv(v){
+  if (v == null) return null;
+  if (typeof v === 'number') return px(v);
+  var s = String(v); return s.length <= 26 ? s : null;
+}
 function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'pos' : 'neg'); }
 function moodColor(m){
   m = (m || '').toLowerCase();
@@ -105,6 +118,82 @@ function railHtml(r){
   if (!r) return '';
   var s = (r.state || 'CLOSED').toLowerCase();
   return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+}
+/* generic digest block: object -> kv rows, array of objects -> rows keyed on first two fields */
+function dgRows(v){
+  var out = '';
+  if (Array.isArray(v)){
+    v.slice(0, 10).forEach(function(r){
+      if (typeof r !== 'object' || r == null) return;
+      var ks = Object.keys(r).filter(function(k){ return r[k] != null && typeof r[k] !== 'object'; });
+      if (!ks.length) return;
+      var label = r.name || r.symbol || r.index || r.date || r[ks[0]];
+      var vals = ks.filter(function(k){ return String(r[k]) !== String(label); }).slice(0, 3)
+        .map(function(k){ var s = fmtv(r[k]); return s == null ? null : s; })
+        .filter(Boolean).join(' · ');
+      out += '<div class="dgr"><span class="k2">' + esc(String(label)) + '</span>'
+           + '<span class="v2">' + esc(vals || '--') + '</span></div>';
+    });
+  } else if (typeof v === 'object' && v != null){
+    Object.keys(v).forEach(function(k){
+      var s = v[k];
+      if (s == null) return;
+      if (typeof s === 'object'){ return; }
+      var f = fmtv(s); if (f == null) return;
+      out += '<div class="dgr"><span class="k2">' + esc(k.replace(/_/g,' ')) + '</span>'
+           + '<span class="v2">' + esc(f) + '</span></div>';
+    });
+  }
+  return out;
+}
+function digestBlock(){
+  if (!DG.open) return '';
+  var d = DG.data;
+  if (d === 'loading') return '<div class="loading" style="padding:8px 0 2px">Loading digest…</div>';
+  if (!d || d.error) return '<div class="sum" style="padding:8px 0 2px">Digest unavailable' + (d && d.error ? ': ' + esc(d.error) : '') + '.</div>';
+  var order = ['global','global_indices','domestic','adr','pcr','pcr_trend','pivots','support','support_levels'];
+  var done = {}, out = '';
+  function blk(k){
+    if (done[k] || d[k] == null || typeof d[k] !== 'object') return;
+    done[k] = 1;
+    var rows = dgRows(d[k]);
+    if (rows) out += '<div class="dgh">' + esc(k.replace(/_/g,' ').toUpperCase()) + '</div>' + rows;
+  }
+  order.forEach(blk);
+  Object.keys(d).forEach(blk);
+  return out || '<div class="sum" style="padding:8px 0 2px">Digest came back empty.</div>';
+}
+function togDigest(){
+  DG.open = !DG.open;
+  if (DG.open && !DG.data){
+    DG.data = 'loading'; paintDigest();
+    fetchWithTimeout('/api/digest/daily').then(function(r){ return r.json(); })
+      .then(function(d){ DG.data = d; paintDigest(); })
+      .catch(function(e){ DG.data = {error: e.message}; paintDigest(); });
+    return;
+  }
+  paintDigest();
+}
+function paintDigest(){
+  var el = document.getElementById('dgbody');
+  if (el) el.innerHTML = digestBlock();
+  var ch = document.getElementById('dgchev');
+  if (ch) ch.textContent = DG.open ? '\u2304' : '\u203a';
+}
+function togAdr(ev){
+  if (ev) ev.stopPropagation();
+  var el = document.getElementById('adrtrend');
+  if (!el) return;
+  if (el.innerHTML){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ADR trend…</div>';
+  fetchWithTimeout('/api/daily/adr?days=5').then(function(r){ return r.json(); })
+    .then(function(d){
+      var list = d.adr || d.series || d.results || (Array.isArray(d) ? d : []);
+      el.innerHTML = list.length
+        ? '<div class="dgh" style="margin-top:10px">ADR · LAST 5 DAYS</div>' + dgRows(list)
+        : '<div class="sum" style="padding:6px 0 0">No ADR series returned.</div>';
+    })
+    .catch(function(e){ el.innerHTML = '<div class="sum" style="padding:6px 0 0">ADR trend failed: ' + esc(e.message) + '</div>'; });
 }
 
 fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then(function(d){
@@ -120,7 +209,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
 
   var h = '';
 
-  /* 1 · HERO — the market today */
+  /* 1 · HERO — the market today; ADR chip clickable (cc#894 item 2) */
   var hero = d.hero || {};
   h += '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
@@ -128,10 +217,12 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
     + '<div class="hchips">' + (hero.chips || []).map(function(c){
         var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
+        var isAdr = String(c.label).indexOf('ADR') > -1;
         var val = (c.value == null) ? '--'
-                : (String(c.label).indexOf('ADR') > -1 ? Number(c.value).toFixed(2) : pct(c.value));
-        return '<span class="hc' + k + '">' + esc(c.label) + ' ' + esc(val) + '</span>';
-      }).join('') + '</div></div>';
+                : (isAdr ? Number(c.value).toFixed(2) : pct(c.value));
+        return '<button class="hc' + k + (isAdr ? ' tap" onclick="togAdr(event)"' : '"') + '>'
+          + esc(c.label) + ' ' + esc(val) + '</button>';
+      }).join('') + '</div><div id="adrtrend"></div></div>';
 
   /* 2 · today's signals */
   var sg = d.signals || {};
@@ -158,12 +249,12 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="st"><div class="k">Win / Loss</div><div class="v">' + (bk.wins == null ? '--' : bk.wins + ' / ' + bk.losses) + '</div></div>'
     + '</div></div></a>';
 
-  /* 4 · MY PORTFOLIO — deliberately mid-scroll (founder 07-Aug), present, never hidden */
+  /* 4 · MY PORTFOLIO — mid-scroll by founder direction; full page at /m/holdings */
   var pf = d.portfolio || {};
   h += '<div class="sect">MY PORTFOLIO</div>'
-    + '<div class="c"><div class="chd"><div class="t">My Portfolio</div>'
+    + '<a class="card-link" href="/m/holdings"><div class="c"><div class="chd"><div class="t">My Portfolio</div>'
     + '<div class="rgt">' + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
-    + railHtml(pf.rail) + '</div></div>'
+    + railHtml(pf.rail) + ' <span class="chev">\u203a</span></div></div>'
     + (pf.empty
         ? '<div class="sum" style="padding:8px 0">' + esc(pf.message || 'No positions open.') + '</div>'
         : (pf.rows || []).map(function(r){
@@ -172,9 +263,15 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
               + '<div class="r"><div class="pv">' + px(r.ltp) + '</div>'
               + '<div class="pc ' + cls(r.mtm) + '">' + inr(r.mtm) + '</div></div></div>';
           }).join(''))
-    + '</div>';
+    + '</div></a>';
 
-  /* 5 · worth reading */
+  /* 5 · MORNING DIGEST — cc#894 item 7: full digest, collapsible, on Home */
+  h += '<div class="sect">MORNING DIGEST</div>'
+    + '<div class="c ref"><div class="chd" onclick="togDigest()" style="cursor:pointer"><div class="t">Daily Digest</div>'
+    + '<div class="rgt">global · trends · pivots <span class="chev" id="dgchev">\u203a</span></div></div>'
+    + '<div id="dgbody"></div></div>';
+
+  /* 6 · worth reading */
   var rd = d.reading || {};
   h += '<div class="sect">WORTH READING</div>'
     + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Intel</div>'
@@ -192,7 +289,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="rgt">' + (rs.today || 0) + ' report today <span class="chev">\u203a</span></div></div>'
     + '<div class="sum">Every result explained in plain words.</div></div></a>';
 
-  /* 6 · tools — Screeners / Sector / FPC tiles join here when cc#892 lands */
+  /* 7 · tools — full grid incl. cc#892 breadth screens */
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
 
@@ -202,8 +299,11 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
       '<a class="tool" href="/m/gvm"><span>\u25c8</span>GVM</a>'
     + '<a class="tool" href="/m/check"><span>\u2713</span>Check</a>'
     + '<a class="tool" href="/m/qb"><span>\u25a6</span>Baskets</a>'
+    + '<a class="tool" href="/m/screeners"><span>\u2637</span>Screeners</a>'
+    + '<a class="tool" href="/m/sector"><span>\u2b21</span>Sector</a>'
+    + '<a class="tool" href="/m/holdings"><span>\u25c9</span>Portfolio</a>'
+    + '<a class="tool" href="/m/fpc"><span>\u20b9</span>FPC</a>'
     + '<a class="tool" href="/m/digest"><span>\u2600</span>Digest</a>'
-    + '<a class="tool" href="/m/positions"><span>\u25e7</span>Open Book</a>'
     + '<a class="tool" href="/m/results"><span>\u2263</span>Results</a>';
   document.getElementById('body').appendChild(tools);
 }).catch(function(e){
