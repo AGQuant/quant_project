@@ -9,15 +9,11 @@
 <script src="/scorr_card_common.js"></script>
 <style>
 /*
-  cc#890 — GVM reskinned to previews/gvm.html (approved design, ported markup+CSS with live data).
-  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
-  Preview design decisions carried verbatim: SEARCH FIRST (GVM is an answer machine); ONE open
-  report (verdict, three pillar BARS with the number at the end, punchline in plain words, price);
-  leaderboard rows print SEGMENT because a top list without context breeds bad buys.
-  Live behaviour added: tapping a leaderboard row opens ITS report in the primary slot; search
-  re-fetches /api/mobile/gvm?q= (rank derived server-side over the whole table, cc#888).
-  "Score history" from the preview is deliberately NOT shipped — no mobile surface exists for it
-  yet; a dead button is worse than a missing one (preview marked it an open call).
+  cc#890 — GVM reskinned to previews/gvm.html (approved design, ported markup+CSS, live data).
+  cc#893 — DEPTH: "Full report ▾" fold under the pillars fetches /api/gvm/company/{symbol} —
+  the SAME endpoint the web GVM report reads (16202 by construction, no second derivation) — and
+  renders every parameter block the web shows, grouped, on demand. Values render as returned;
+  a missing value is --, never invented. Pushed by Claude (Fable), 17783.
 */
 .search{display:flex;align-items:center;gap:9px;background:var(--panel);
   border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 14px;margin:12px 12px 0}
@@ -52,7 +48,7 @@
 .acts{display:flex;gap:8px;margin-top:12px}
 .a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
   font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
-  border-radius:10px;text-decoration:none}
+  border-radius:10px;text-decoration:none;background:none;font-family:inherit;cursor:pointer}
 .lrow{display:flex;align-items:center;gap:10px;background:var(--panel);
   border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px;cursor:pointer}
 .rk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;
@@ -62,6 +58,15 @@
 .sc{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:14px;font-weight:800}
 .chev{color:var(--dim);font-size:14px}
+/* cc#893 full report */
+.fr{margin:-2px 0 10px;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:12px 13px}
+.frh{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
+  letter-spacing:.13em;color:var(--dim);margin:10px 0 7px}
+.frh:first-child{margin-top:0}
+.frr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:32px}
+.frr:first-of-type{border-top:0}
+.frr .k2{font-size:11.5px;color:var(--mut);flex:1}
+.frr .v2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
 </style>
 </head>
 <body>
@@ -88,11 +93,16 @@
 </nav>
 
 <script>
-var STATE = { results: [], sel: 0 };
+var STATE = { results: [], sel: 0, frOpen: false, frData: null, frSym: null };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
+function fmt(v){
+  if (v == null) return '--';
+  if (typeof v === 'number') return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-IN') : (Math.round(v*100)/100).toString();
+  return String(v).length <= 24 ? String(v) : null;
+}
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v); return 'Rs.' + (x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN'));
@@ -126,10 +136,61 @@ function repCard(x){
     + '</div>'
     + (x.punchline
         ? '<div class="punch"><b>What the score says:</b> ' + esc(x.punchline) + '</div>' : '')
-    + '<div class="acts"><a class="a" href="/m/check">Run Trade Check</a></div>'
+    + '<div class="acts">'
+    + '<button class="a" onclick="toggleFR(\'' + esc(x.symbol) + '\')">'
+    + (STATE.frOpen ? 'Hide full report \u25b4' : 'Full report \u25be') + '</button>'
+    + '<a class="a" href="/m/check">Run Trade Check</a></div>'
     + '<div class="src">Rank ' + (x.rank == null ? '--' : esc(x.rank))
     + (x.as_of ? ' · scored ' + esc(x.as_of) : '') + '</div>'
-    + '</div>';
+    + '</div>'
+    + (STATE.frOpen ? frBlock() : '');
+}
+/* cc#893 — render the web company report generically: every section object the API returns
+   becomes a titled block of label→value rows; scalars at the top level go into an OVERVIEW
+   block. Long text and nested arrays are skipped rather than mangled. Nothing is invented. */
+function frBlock(){
+  var d = STATE.frData;
+  if (d === 'loading') return '<div class="fr"><div class="loading" style="padding:4px">Loading full report…</div></div>';
+  if (!d || d.error) return '<div class="fr"><div class="empty" style="padding:8px"><b>Report unavailable</b>'
+    + esc((d && d.error) || 'The report API answered with nothing for this symbol.') + '</div></div>';
+  var scalars = [], blocks = '';
+  Object.keys(d).forEach(function(k){
+    var v = d[k];
+    if (v == null) return;
+    if (typeof v === 'object' && !Array.isArray(v)){
+      var rows = '';
+      Object.keys(v).forEach(function(k2){
+        var s = fmt(v[k2]);
+        if (s == null) return;
+        rows += '<div class="frr"><span class="k2">' + esc(k2.replace(/_/g,' ')) + '</span>'
+              + '<span class="v2">' + esc(s) + '</span></div>';
+      });
+      if (rows) blocks += '<div class="frh">' + esc(k.replace(/_/g,' ').toUpperCase()) + '</div>' + rows;
+    } else if (typeof v !== 'object'){
+      var s2 = fmt(v);
+      if (s2 != null && ['symbol'].indexOf(k) === -1)
+        scalars += 0; /* count only */
+    }
+  });
+  var over = '';
+  Object.keys(d).forEach(function(k){
+    var v = d[k];
+    if (v == null || typeof v === 'object') return;
+    var s = fmt(v);
+    if (s == null || k === 'symbol') return;
+    over += '<div class="frr"><span class="k2">' + esc(k.replace(/_/g,' ')) + '</span>'
+          + '<span class="v2">' + esc(s) + '</span></div>';
+  });
+  var out = (over ? '<div class="frh">OVERVIEW</div>' + over : '') + blocks;
+  return '<div class="fr">' + (out || '<div class="empty" style="padding:8px"><b>Nothing to show</b>The report came back empty.</div>') + '</div>';
+}
+function toggleFR(sym){
+  if (STATE.frOpen && STATE.frSym === sym){ STATE.frOpen = false; render(); return; }
+  STATE.frOpen = true; STATE.frSym = sym; STATE.frData = 'loading'; render();
+  fetchWithTimeout('/api/gvm/company/' + encodeURIComponent(sym))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ STATE.frData = d; render(); })
+    .catch(function(e){ STATE.frData = {error: e.message}; render(); });
 }
 function render(){
   var rs = STATE.results;
@@ -151,7 +212,8 @@ function render(){
   }).join('');
   document.getElementById('body').innerHTML = h;
 }
-function pick(i){ STATE.sel = i; render(); window.scrollTo({top: 0, behavior: 'smooth'}); }
+function pick(i){ STATE.sel = i; STATE.frOpen = false; STATE.frData = null; render();
+  window.scrollTo({top: 0, behavior: 'smooth'}); }
 
 function load(q){
   document.getElementById('body').innerHTML = '<div class="loading">Loading scores…</div>';
@@ -160,6 +222,7 @@ function load(q){
     .then(function(d){
       if (d.error) throw new Error(d.error);
       STATE.results = d.results || []; STATE.sel = 0; STATE.q = d.query;
+      STATE.frOpen = false; STATE.frData = null;
       document.getElementById('sub').innerHTML =
         'Growth · Value · Momentum · scored nightly 22:00 ' + railHtml(d.rail);
       render();
