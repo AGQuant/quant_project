@@ -59,7 +59,7 @@
   /* ── design token (was a page-scope const in v8_dashboard.html) ─────────────────────── */
   const _MONO="'IBM Plex Mono',ui-monospace,monospace";
 
-  /* ── transport + formatting ────────────────────────────────────────────────────────────────
+  /* ── transport + formatting ──────────────────────────────────────────────────────────────
    * NOT a naive copy of one variant. v8_dashboard.html carried FOUR `num` and THREE `getJSON`
    * definitions in separate inline-script scopes, and they were not all behaviourally equal. Each
    * name below is the SUPERSET of the variants it replaces — never an invented behaviour, and never
@@ -91,7 +91,7 @@
    *
    * newsEsc — single definition, verbatim.
    */
-  /* ── cc#878: fetchWithTimeout — THE ONE TIMEOUT, SITE-WIDE ────────────────────────────────
+  /* ── cc#878: fetchWithTimeout — THE ONE TIMEOUT, SITE-WIDE ────────────────────────────────────
      cc#869 finding 7 / P0-B: 129 of 134 fetch() call sites in the served front end had no
      deadline. A request that never returns leaves a spinner or shimmer animating forever, which
      reads as "still loading" and never as "failed" — so the founder's phone showed a loading
@@ -150,7 +150,7 @@
   function newsEsc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
   /* ── heat cells — shared by the Analysis trajectory/performance grids AND the cockpit
-     5-day-OI grid (verbatim, v8_dashboard.html) ─────────────────────────────────────────── */
+     5-day-OI grid (verbatim, v8_dashboard.html) ───────────────────────────────────────────── */
   function _heatBg(g){return {g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';}
   function _heatTile(text,grade,col){return `<div style="flex:1;min-width:0;background:${_heatBg(grade)};border-radius:8px;height:46px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:13px;color:${col}">${text}</div>`;}
   function _deltaGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.05)return'n';return (v>0?'g':'r')+(a<0.25?'1':a<0.6?'2':'3');}
@@ -173,23 +173,23 @@
     E=E||{}; M=M||{}; var rv=E.rvol||{};
     var rvv=(rv&&rv.rvol!=null)?rv.rvol:null;
     var rvSub = rv&&rv.insufficient?'building profile ('+(rv.sessions_used||0)+' sess)'
-              : rv&&rv.closed?('last session · '+newsEsc(rv.asof||''))
+              : rv&&rv.closed?('last session \u00b7 '+newsEsc(rv.asof||''))
               : rv&&rv.slot?('vs typical by '+newsEsc(rv.slot)+' IST'):'vs typical pace';
     var rvBadge = rv&&rv.early?'<span style="font-size:8px;font-weight:800;background:#d68a1e;color:#fff;padding:1px 4px;border-radius:4px">EARLY</span>':'';
     return '<div style="display:flex;gap:6px">'
       + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
-      + _volTile('VolX',E.volx,'last day vs 21d avg'+(E.volx_asof?(' · '+newsEsc(E.volx_asof)):''),'volx','')
+      + _volTile('VolX',E.volx,'last day vs 21d avg'+(E.volx_asof?(' \u00b7 '+newsEsc(E.volx_asof)):''),'volx','')
       + _volTile('Vol 3D/21D',E.recent3d_vol_ratio,newsEsc(M.recent3d_vol_ratio||'3d vs 21d avg'),'vol3d','')
       + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
   }
   function qaVolExplain(k){
-    var t={rvol:'RVOL = today’s cumulative volume up to this 5-min slot ÷ the 21-session average volume by the SAME time of day. 1.0× = normal pace; >1 = trading faster than usual. NULL until the profile has ≥10 sessions; first two slots badged EARLY.',
-           volx:'VolX = the latest session’s total volume ÷ its 21-day average. Whole-day relative volume.',
-           vol3d:'Vol 3D/21D = 3-day average volume ÷ 21-day average volume. Participation trend — rising vs drying up.'}[k]||'';
+    var t={rvol:'RVOL = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
+           volx:'VolX = the latest session\u2019s total volume \u00f7 its 21-day average. Whole-day relative volume.',
+           vol3d:'Vol 3D/21D = 3-day average volume \u00f7 21-day average volume. Participation trend \u2014 rising vs drying up.'}[k]||'';
     var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
   }
 
-  /* ── 30d delivery sparkline (verbatim, v8_dashboard.html) ──────────────────────────── */
+  /* ── 30d delivery sparkline (verbatim, v8_dashboard.html) ──────────────────────────────── */
   function _qaSpark(series){
     const pts=(series||[]).map(p=>p.deliv_pct).filter(v=>v!=null);
     if(pts.length<2)return '';
@@ -199,7 +199,7 @@
     return `<svg viewBox="0 0 ${w} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;margin-top:8px;display:block"><polyline points="${line}" fill="none" stroke="var(--cyan,#3aa0ff)" stroke-width="1.5"/></svg>`;
   }
 
-  /* ── publication ──────────────────────────────────────────────────────────────────────────
+  /* ── publication ────────────────────────────────────────────────────────────────────────
    * Namespace first (always authoritative), then the guarded bare globals. */
   /* ── cc#878: THE BACKSTOP — a timeout must never leave a shimmer running ───────────────────
      Twelve call sites across the app are plain `.then()` chains with no `.catch()`. Before this
@@ -323,4 +323,46 @@
   if (typeof window.SCORR_BASKET_LABELS === 'undefined') window.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
   API.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
   API.SCORR_BASKET_ORDER = SCORR_BASKET_ORDER;
+})();
+
+/* ── SIX-SLOT MOBILE NAV — ONE SOURCE (founder 08-Aug: "show V8 in nav, it is the most
+   important model"). Appended by Fable (ROLE_CHARTER_V3, session_log 17868).
+   Every /m/* template carries a five-slot .bnav in its own markup; editing thirteen files for
+   every nav change is the NAV CHURN trap. So the nav is now REBUILT here, in the one script
+   every screen already loads — this block is the single owner of the mobile nav from today.
+   Template navs remain as no-JS fallback only. Web pages are untouched: the rebuild only runs
+   when a .bnav element exists AND the path is /m/*. */
+(function () {
+  if (window.__scorrNavOwner) return;
+  window.__scorrNavOwner = true;
+  var NAV = [
+    { href: '/m/home',   icon: '\u25e7', label: 'Home' },
+    { href: '/m/v8',     icon: '\u25b3', label: 'V8' },
+    { href: '/m/gvm',    icon: '\u25c8', label: 'GVM' },
+    { href: '/m/check',  icon: '\u25ce', label: 'Check' },
+    { href: '/m/intel',  icon: '\u25a4', label: 'Intel' },
+    { href: '/m/models', icon: '\u25cd', label: 'Models' }
+  ];
+  /* deeper screens highlight their parent slot */
+  var PARENT = { '/m/positions': '/m/v8', '/m/qb': '/m/v8', '/m/results': '/m/v8',
+                 '/m/holdings': '/m/home', '/m/screeners': '/m/models',
+                 '/m/sector': '/m/models', '/m/fpc': '/m/models', '/m/digest': '/m/home' };
+  function build() {
+    try {
+      var nav = document.querySelector('.bnav');
+      if (!nav) return;
+      var p = location.pathname;
+      if (p.indexOf('/m/') !== 0) return;
+      var on = PARENT[p] || p;
+      nav.innerHTML = NAV.map(function (s) {
+        return '<a class="bn' + (s.href === on ? ' on' : '') + '" href="' + s.href + '">' +
+               '<span class="i">' + s.icon + '</span>' + s.label + '</a>';
+      }).join('');
+    } catch (e) { /* nav fallback in the template stays */ }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', build);
+  } else {
+    build();
+  }
 })();
