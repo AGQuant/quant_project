@@ -715,3 +715,106 @@
     boot();
   }
 })();
+
+/* ── cc#926: SCROLL-AWARE TOP NAV (founder 08-Aug) ────────────────────────────────────────────
+   Scrolling DOWN gives the content the nav's space; scrolling UP, or reaching the top, brings it
+   straight back. One shared listener for the whole site, because this file is the only script both
+   the web pages and the /m/* screens load.
+
+   WHAT IT ACTUALLY APPLIES TO, checked rather than assumed:
+     .scorr-cnav  the compacted top nav pwa.js builds into #scorr-nav  (position:sticky, top:0)
+     .model-nav   the canonical model nav on /dashboard                (position:sticky, top:0)
+   The /dashboard TAB ROW is not sticky (only table headers are), so it scrolls away on its own and
+   needs nothing. The /m/* page headers are not sticky either — .head is position:relative and
+   .headx has no position at all — so there is nothing on mobile to hide, and I have not made
+   anything sticky in order to then hide it.
+
+   WHAT IS DELIBERATELY EXCLUDED:
+     .bnav      the mobile bottom nav — position:fixed at the BOTTOM and must ALWAYS be visible.
+                Excluded twice over: it is not in the selector list, and the geometry guard below
+                only ever adopts an element sitting in the top quarter of the viewport, so a
+                bottom bar could not be picked up even if a selector one day matched it.
+     .navwrap   the /m/v8 grouping + filter bar (cc#922). It is sticky, but it is a control the
+                user is actively working, not a nav — hiding it mid-scroll would fight them.
+
+   MECHANICS per the card: passive listener, rAF-throttled so it does at most one write per frame,
+   an 8px delta threshold so a slow or trembling scroll cannot flicker, transform only (never
+   display:none, so nothing reflows and no layout jumps), and under prefers-reduced-motion the
+   BEHAVIOUR stays while the animation is dropped. */
+(function () {
+  if (window.__scorrScrollNav) return;
+  window.__scorrScrollNav = true;
+
+  var SEL = '.scorr-cnav,.model-nav';
+  var THRESH = 8;             // px of travel before we act at all
+  var els = [], lastY = 0, ticking = false, hidden = false;
+
+  function css() {
+    try {
+      var st = document.createElement('style');
+      st.setAttribute('data-scorr', 'scroll-nav');
+      st.appendChild(document.createTextNode(
+        '.scorr-nav-auto{transition:transform .2s ease;will-change:transform}' +
+        '.scorr-nav-auto.scorr-nav-off{transform:translateY(-100%)}' +
+        '@media(prefers-reduced-motion:reduce){.scorr-nav-auto{transition:none}}'
+      ));
+      (document.head || document.documentElement).appendChild(st);
+    } catch (e) {}
+  }
+
+  /* pwa.js builds its nav after DOMContentLoaded, so the set is refreshed rather than read once. */
+  function collect() {
+    var found = [];
+    try {
+      Array.prototype.forEach.call(document.querySelectorAll(SEL), function (el) {
+        var cs = getComputedStyle(el);
+        if (cs.position !== 'sticky' && cs.position !== 'fixed') return;
+        // geometry guard: only ever a TOP bar, so a bottom-fixed nav can never be adopted
+        var r = el.getBoundingClientRect();
+        if (r.top > window.innerHeight * 0.25) return;
+        el.classList.add('scorr-nav-auto');
+        found.push(el);
+      });
+    } catch (e) {}
+    els = found;
+    return els.length;
+  }
+
+  function apply(hide) {
+    if (hide === hidden) return;                 // one write per state change, not per frame
+    hidden = hide;
+    for (var i = 0; i < els.length; i++) {
+      els[i].classList[hide ? 'add' : 'remove']('scorr-nav-off');
+    }
+  }
+
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      ticking = false;
+      if (!els.length && !collect()) { lastY = window.pageYOffset || 0; return; }
+      var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+      var dy = y - lastY;
+      if (y <= 0) { lastY = y; apply(false); return; }          // at the top: always visible
+      if (Math.abs(dy) < THRESH) return;                        // ignore jitter, and do NOT move lastY
+      lastY = y;
+      // never hide while still inside the nav's own height — it would vanish the instant you nudge
+      apply(dy > 0 && y > (els[0] ? els[0].offsetHeight : 44));
+    });
+  }
+
+  function boot() {
+    css();
+    collect();
+    lastY = window.pageYOffset || 0;
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', function () { collect(); }, { passive: true });
+    setTimeout(collect, 600);      // pwa.js may still be building #scorr-nav at this point
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();

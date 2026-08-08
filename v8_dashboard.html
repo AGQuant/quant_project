@@ -69,8 +69,14 @@
   .slots{display:flex;gap:14px;font-size:12px;color:var(--mut)}
   .slots b{font-size:18px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
   .slots .buy b{color:var(--grn)}.slots .sell b{color:var(--red)}
+  /* cc#925: twelve tabs on ONE line. Measured against the .wrap content box (1240px cap minus
+     18px padding each side = 1204px): the twelve labels total 119 characters, so at the old
+     12.5px/13px-padding the row needed ~1177px — inside the box on paper, but close enough that
+     real glyph widths tipped it onto a second line, which is what the founder saw. At 12px with
+     10px padding it needs ~1069px, a ~135px margin. flex-wrap:wrap is deliberately KEPT as the
+     safety net: if a future tab is added it wraps rather than overflowing or clipping. */
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 0;border-bottom:1px solid var(--line);padding-bottom:0}
-  .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;padding:9px 13px;border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;position:relative;top:1px;transition:.15s}
+  .tab{font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;padding:8px 10px;border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;position:relative;top:1px;transition:.15s;white-space:nowrap}
   .tab:hover{color:var(--txt)}
   .tab.active{color:var(--txt);background:var(--panel);border-color:var(--line);box-shadow:0 -2px 0 var(--blu) inset}
   /* Live News tab (task #46) */
@@ -557,11 +563,15 @@
 .hs-glab{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim,#5E6B8F)}
 .hs-tiles{display:flex;flex-wrap:wrap;gap:5px}
 /* 44px tap floor per MOBILE_UX_STANDARD_V1 */
-.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:78px;min-height:44px;
+.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:86px;min-height:52px;
   padding:5px 9px;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
 .hs-tile:hover{transform:translateY(-1px)}
 .hs-nm{font-size:10.5px;font-weight:700;opacity:.92;white-space:nowrap}
 .hs-ch{font-size:12.5px;font-weight:800;font-family:var(--mono,ui-monospace,monospace)}
+/* cc#925: the CURRENT level on the tile itself. t.price already came from the heatstrip
+   payload (it was only being used in the tooltip), so nothing new is fetched or derived. */
+.hs-px{font-size:10px;font-weight:600;opacity:.72;font-family:var(--mono,ui-monospace,monospace)}
+.hs-head-wk{margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#1E2A44)}
 .hs-foot{margin-top:9px;font-size:10px;color:var(--dim,#5E6B8F);line-height:1.5}
 .hs-err{font-size:11.5px;color:var(--dim,#5E6B8F)}
 .hs-draw{margin:0 0 14px;padding:12px 14px;background:var(--panel,#121A33);
@@ -886,7 +896,7 @@ const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal",panel:1},{id:"buy_momentum",label:"Buy Momentum",panel:2},
   {id:"sell_reversal",label:"Sell Reversal",panel:4},{id:"sell_momentum",label:"Sell Momentum",panel:5},
 ];
-const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
+const TAB_LABELS=["Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
   "Results","Global Indices","Position News (retired cc#847)","Matrix","V9 Pairs","OH-OL"];
 // cc#294: Position News = 14 (retired cc#847) · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17
@@ -3284,7 +3294,15 @@ async function loadGlobalIndices(){
       getJSON('/api/global/heatstrip').catch(e=>({tiles:[],eod_tiles:[],error:String(e&&e.message||e)}))
     ]);
     GI_LOADED=true;
-    el.innerHTML=renderHeatStrip(hs)+renderGlobalIndices(d);
+    /* cc#925: renderGlobalIndices(d) — the three grouped tile sections (Indices, Commodities,
+       Currencies · Volatility & Crypto) that sat BELOW the strips — is no longer rendered. It
+       showed the same instruments, the same last price and the same change as the heat tiles
+       directly above it, so the panel said everything twice. The tiles now carry the current
+       level themselves, which is what the section was really adding. The function and its
+       helpers stay in the file, unreferenced and intact, exactly like the other retired
+       renderers here. `d` is still fetched because the strip's category order/labels come from
+       that same payload. */
+    el.innerHTML=renderHeatStrip(hs);
     bindHeatStrip();
   }
   // cc#281: on a poll failure keep the last-good render (and its now-stale Last-updated time) —
@@ -3324,6 +3342,7 @@ function hsTile(t,level){
       style="background:${c.bg};border:1px solid ${c.fg}44;color:${c.fg}">
       <span class="hs-nm">${escHtml(t.name||t.symbol)}</span>
       <span class="hs-ch">${hsPct(chg)}</span>
+      <span class="hs-px">${px}</span>
     </button>`;
 }
 
@@ -3343,7 +3362,7 @@ function hsGroups(tiles,level,data){
 function renderHeatStrip(d){
   HS_DATA=d;
   if(!d||d.error&&!(d.tiles||[]).length){
-    return `<div class="hs-wrap"><div class="hs-err">Heat strip unavailable${d&&d.error?': '+escHtml(d.error):''}. The indices table below is unaffected.</div></div>`;
+    return `<div class="hs-wrap"><div class="hs-err">Heat strip unavailable${d&&d.error?': '+escHtml(d.error):''}.</div></div>`;
   }
   const live=(d.tiles||[]), eod=(d.eod_tiles||[]);
   if(!live.length&&!eod.length)return'';
@@ -3360,7 +3379,7 @@ function renderHeatStrip(d){
       +'<span class="hs-sub">outside their market hours · each tile carries its own close date</span></div>';
     h+='<div class="hs-lvl hs-eod">'+hsGroups(eod,'day',d)+'</div>';
   }
-  h+='<div class="hs-head"><span class="hs-title">Week</span>'
+  h+='<div class="hs-head hs-head-wk"><span class="hs-title">Week</span>'
     +`<span class="hs-sub">rolling 5 sessions · each symbol's own calendar</span></div>`;
   h+='<div class="hs-lvl">'+hsGroups(live.concat(eod),'week',d)+'</div>';
   h+='<div class="hs-foot">India VIX inverted — up = risk-off, on both levels. Tap a tile for returns and 52-week range.</div>';   // cc#852: US VIX retired from the tape
