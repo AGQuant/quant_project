@@ -9,14 +9,17 @@
 <script src="/scorr_card_common.js"></script>
 <style>
 /*
-  cc#891 — V8 reskinned to previews/v8.html (design ref scorr_mobile_R3): the tiered CARD STACK
-  with the state-rail grammar and the rails LEGEND, ported with live data.
-  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
-  Mobile scope per 17021: Raw Data / Strategy Matrix / tab surfaces are WEB professional depth and
-  are deliberately absent here — no dead links. The preview's Day Log card has no mobile data
-  source yet and is omitted rather than faked.
-  Live behaviour added: a basket card taps open to today's signalled SYMBOLS with times
-  (cc#888 payload); truncation is stated ("and N more"), never silent.
+  cc#891 — V8 reskinned to previews/v8.html (tiered card stack, rails legend).
+  cc#894 (Fable direct, 17783) — depth per founder's row-by-row decisions:
+    * SLOTS line in the gate (Buy/Sell/Total) — read from /api/v8/market_mood, the web's own
+      source (16202), because the mobile aggregate does not carry slots and mobile_endpoints
+      stays untouched until the final maintenance pass.
+    * FUNNEL line inside each basket card — universe -> stages -> FINAL from
+      /api/v8/funnel/{basket}, fetched lazily on first expand; counts only (founder dropped the
+      stock-by-filter matrix). Response keys rendered defensively; unknowns state themselves.
+    * TRADE LEDGER expands to the last 20 closed trades, and DAY LOG renders day-by-day P&L —
+      both from /api/mobile/trades (one call).
+  Raw Data / Strategy Matrix / thresholds remain web-only by founder ruling.
 */
 .headx{padding:15px 14px 11px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
 .headx .t{flex:1;min-width:0}
@@ -25,6 +28,8 @@
 .gatec{font-size:9px;font-weight:800;letter-spacing:.07em;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid var(--line2);color:var(--dim)}
 .gatec.open{background:var(--grn-d);color:var(--grn);border-color:rgba(47,212,139,.4)}
 .gatec.shut{background:rgba(255,92,108,.10);color:var(--red);border-color:rgba(255,92,108,.4)}
+.slots{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:3px}
+.slots b{color:var(--mut);font-weight:700}
 .tierlab{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
   color:var(--dim);padding:0 15px;margin:18px 0 8px;display:flex;align-items:center;gap:9px}
 .tierlab::after{content:'';flex:1;height:1px;background:var(--line)}
@@ -53,10 +58,15 @@
 .vc.openx .chev{transform:rotate(90deg)}
 .grn{color:var(--grn)}.redx{color:var(--red)}.mut{color:var(--mut)}
 .syrow{display:flex;align-items:baseline;gap:10px;padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px}
-.syrow:first-of-type{border-top:1px solid var(--line)}
 .syrow .sy2{font-weight:700;font-size:12.5px;flex:1}
 .syrow .at{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;color:var(--dim)}
 .more{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);padding:8px 0 0 2px}
+.fun{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--mut);
+  padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;line-height:1.6}
+.fun b{color:var(--txt)}
+.trow{display:flex;align-items:baseline;gap:8px;padding:7px 0 0 2px;border-top:1px solid var(--line);margin-top:8px;font-size:11.5px}
+.trow .sy2{font-weight:700;flex:1}
+.trow .mono2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px}
 .legend{margin:22px 12px 0;padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .legend .h{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
 .lrow{display:flex;gap:11px;align-items:flex-start;margin-bottom:10px;font-size:11.5px;color:var(--mut);line-height:1.5}
@@ -71,6 +81,7 @@
     <div class="t">
       <h1>V8</h1>
       <div class="s" id="sub">loading…</div>
+      <div class="slots" id="slots"></div>
     </div>
     <span class="gatec" id="gate">GATE --</span>
   </div>
@@ -86,10 +97,12 @@
 </nav>
 
 <script>
-var STATE = { d: null, open: -1 };
+var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function px(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
 function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
@@ -99,17 +112,40 @@ function railCls(r){
   var s = (r && r.state || 'CLOSED').toUpperCase();
   return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
 }
+function funLine(slug){
+  var f = STATE.funnels[slug];
+  if (f === undefined) return '';
+  if (f === 'loading') return '<div class="fun">funnel: loading…</div>';
+  if (!f) return '<div class="fun">funnel unavailable</div>';
+  /* defensive: accept {stages:[{name,count}]} | {funnel:[...]} | flat object of numbers */
+  var parts = [];
+  var list = f.stages || f.funnel || null;
+  if (Array.isArray(list)){
+    list.forEach(function(s){
+      var n = s.count != null ? s.count : (s.n != null ? s.n : s.value);
+      if (n != null) parts.push(esc(String(s.name || s.stage || s.filter || '')) + ' <b>' + n + '</b>');
+    });
+  } else if (typeof f === 'object'){
+    Object.keys(f).forEach(function(k){
+      if (typeof f[k] === 'number') parts.push(esc(k.replace(/_/g,' ')) + ' <b>' + f[k] + '</b>');
+    });
+  }
+  return parts.length
+    ? '<div class="fun">' + parts.join(' \u2192 ') + '</div>'
+    : '<div class="fun">funnel shape unrecognised — flagged for mapping fix</div>';
+}
 function basketCard(b, i, rcls){
   var open = STATE.open === i;
   var buy = String(b.slug || '').indexOf('sell') !== 0;
   var last = (b.symbols && b.symbols[0] && b.symbols[0].at) ? 'Last new signal ' + esc(b.symbols[0].at) : 'No new signals';
-  var h = '<button class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(' + i + ')">'
+  var h = '<button class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(' + i + ',\'' + esc(b.slug) + '\')">'
     + '<div class="vrow"><div class="ttl"><div class="n">' + esc(b.label) + '</div>'
     + '<div class="m">' + last + '</div></div>'
     + '<div class="val"><div class="v ' + (buy ? 'grn' : 'redx') + '">' + b.signals + '</div>'
     + '<div class="u">signal' + (b.signals === 1 ? '' : 's') + '</div></div>'
     + '<div class="chev">\u203a</div></div>';
   if (open){
+    h += funLine(b.slug);
     h += (b.symbols || []).map(function(s){
       return '<div class="syrow"><span class="sy2">' + esc(s.symbol) + '</span>'
         + '<span class="at">' + esc(s.at || '') + '</span></div>';
@@ -118,6 +154,24 @@ function basketCard(b, i, rcls){
     if (!(b.symbols || []).length) h += '<div class="more">no symbols recorded</div>';
   }
   return h + '</button>';
+}
+function ledgerBlock(){
+  var L = STATE.ledger;
+  if (L === 'loading') return '<div class="more">loading ledger…</div>';
+  if (!L) return '';
+  var h = (L.trades || []).map(function(t){
+    return '<div class="trow"><span class="sy2">' + esc(t.symbol)
+      + ' <span class="mut" style="font-size:9.5px">' + esc(t.side) + ' · ' + esc(t.basket || '') + '</span></span>'
+      + '<span class="mono2 mut">' + px(t.entry) + ' \u2192 ' + px(t.exit) + '</span>'
+      + '<span class="mono2 ' + ((t.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(t.pnl) + '</span></div>';
+  }).join('');
+  h += '<div class="fun" style="margin-top:12px"><b>DAY LOG</b></div>';
+  h += (L.day_log || []).map(function(d){
+    return '<div class="trow"><span class="sy2">' + esc(d.label) + '</span>'
+      + '<span class="mono2 mut">' + d.n + ' trades · ' + d.wins + 'W/' + d.losses + 'L</span>'
+      + '<span class="mono2 ' + ((d.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(d.pnl) + '</span></div>';
+  }).join('') || '<div class="more">no closed trades in the window</div>';
+  return h;
 }
 function render(){
   var d = STATE.d;
@@ -128,9 +182,6 @@ function render(){
   var gc = document.getElementById('gate');
   gc.textContent = g.verdict ? 'GATE · ' + g.verdict.toUpperCase() : 'GATE --';
   gc.className = 'gatec' + (g.open === true ? ' open' : g.open === false ? ' shut' : '');
-  gc.title = g.open === true ? 'Gate is open — new entries allowed.'
-           : g.open === false ? 'Gate is shut — no new entries today.'
-           : 'Gate state unavailable.';
 
   var h = '<div class="tierlab">Signals today · ' + d.signals_today + '</div><div class="stack">';
   h += (d.baskets || []).map(function(b, i){ return basketCard(b, i, rcls); }).join('')
@@ -142,11 +193,13 @@ function render(){
     + '<div class="ttl"><div class="n">Open Book</div><div class="m">Every open position · live P&amp;L</div></div>'
     + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
     + '<div class="chev">\u203a</div></div></a>'
-    + '<div class="vc ref" style="cursor:default"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">All-time closed trades</div></div>'
+    + '<button class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger()"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">All-time closed trades · tap for rows + day log</div></div>'
     + '<div class="val"><div class="v ' + ((d.ledger.gross_pnl || 0) >= 0 ? 'grn' : 'redx') + '">'
     + d.ledger.trades + '</div><div class="u">closed · ' + inr(d.ledger.gross_pnl) + '</div></div>'
-    + '</div></div>'
+    + '<div class="chev">\u203a</div></div>'
+    + (STATE.ledgerOpen ? ledgerBlock() : '')
+    + '</button>'
     + '</div>';
 
   h += '<div class="tierlab">More</div><div class="stack">'
@@ -171,11 +224,43 @@ function render(){
 
   document.getElementById('body').innerHTML = h;
 }
-function tog(i){ STATE.open = (STATE.open === i ? -1 : i); render(); }
+function tog(i, slug){
+  STATE.open = (STATE.open === i ? -1 : i);
+  if (STATE.open === i && STATE.funnels[slug] === undefined){
+    STATE.funnels[slug] = 'loading'; render();
+    fetchWithTimeout('/api/v8/funnel/' + encodeURIComponent(slug))
+      .then(function(r){ return r.json(); })
+      .then(function(f){ STATE.funnels[slug] = f && !f.error ? f : null; render(); })
+      .catch(function(){ STATE.funnels[slug] = null; render(); });
+    return;
+  }
+  render();
+}
+function togLedger(){
+  STATE.ledgerOpen = !STATE.ledgerOpen;
+  if (STATE.ledgerOpen && !STATE.ledger){
+    STATE.ledger = 'loading'; render();
+    fetchWithTimeout('/api/mobile/trades?limit=20&days=30')
+      .then(function(r){ return r.json(); })
+      .then(function(L){ STATE.ledger = L && !L.error ? L : null; render(); })
+      .catch(function(){ STATE.ledger = null; render(); });
+    return;
+  }
+  render();
+}
 
-fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }).then(function(d){
+Promise.all([
+  fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }),
+  fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; })
+]).then(function(res){
+  var d = res[0], mood = res[1];
   if (d.error) throw new Error(d.error);
   STATE.d = d; render();
+  if (mood && mood.buy_slots != null){
+    document.getElementById('slots').innerHTML =
+      'Slots · Buy <b>' + mood.buy_slots + '</b> · Sell <b>' + mood.sell_slots + '</b> · Total <b>'
+      + mood.total_slots + '</b>';
+  }
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
