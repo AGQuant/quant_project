@@ -7,9 +7,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_card_strip.js"></script>
+<script src="/scorr_chart_card.js"></script>
+<script src="/scorr_analysis_card.js"></script>
+<script src="/results_card.js"></script>
+<script src="/scorr_cockpit_card.js"></script>
 <style>
-/* cc#891 — Open Book in the shared card grammar. cc#894 row 31 (Fable direct, 17783): QTY now
-   shows as a meta tag on every card — it was in the payload all along. */
+/* cc#891 — Open Book in the shared card grammar. cc#894 row 31: QTY tag on every card.
+   cc#894 item 1 (Fable direct, 17868): the C·A·R·D strip joins every position card — NOT a copy:
+   the page loads the same shared files the web loads and renders via window.ScorrCardRow(sym),
+   exactly as rule cc#789 commands ("ANY new surface renders the strip ONLY via
+   ScorrCardStripHtml/Row"). Same strip, same four popups (Chart / Analysis / Result / Cockpit),
+   full web functionality by construction. The :root bridge below maps the web components'
+   CSS variables (--surface2, --cyan) onto the app's dark palette — the card files fall back to
+   LIGHT hex values when a var is missing, which would break dark theme. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
 .net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
 .net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
 .net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
@@ -18,6 +30,10 @@
 .kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
 .kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
 .star{font-size:13px}
+/* the strip sits right of the symbol; give its buttons the app's dark chrome */
+.hl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hl .sy{font-size:15px;font-weight:800;margin-right:auto}
+.hl .pl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
 </style>
 </head>
 <body>
@@ -47,7 +63,11 @@ function railHtml(r){ if(!r) return '';
   var s=(r.state||'CLOSED').toLowerCase();
   return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
 function starIc(c){ return c ? '<span class="star" title="pivot star">'+(String(c).toLowerCase().indexOf('red')>-1?'\u2b50':'\ud83d\udd35')+'</span>' : ''; }
-
+function strip(sym){
+  /* full web C·A·R·D — same shared component, compact row size (cc#798) */
+  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
+  return '';
+}
 function card(p){
   var short_=(p.side||'')==='SHORT';
   return '<div class="c '+(short_?'short':'long')+'">'
@@ -58,9 +78,9 @@ function card(p){
     + (p.is_new?'<span class="tag edt">NEW</span>':'')
     + starIc(p.star)
     + '<span class="when">'+esc(p.entry_ts||'')+'</span></div>'
-    + '<div class="hl">'+esc(p.symbol)
-    + '<span class="mono" style="float:right;font-size:13px" class="'+cls(p.pnl)+'">'
-    + '<span class="'+cls(p.pnl)+'">'+inr(p.pnl)+'</span></span></div>'
+    + '<div class="hl"><span class="sy">'+esc(p.symbol)+'</span>'
+    + strip(p.symbol)
+    + '<span class="pl '+cls(p.pnl)+'">'+inr(p.pnl)+'</span></div>'
     + '<div class="pc2">'
     + '<div class="kv"><div class="k">Entry \u2192 CMP</div><div class="v">'+px(p.entry)+' \u2192 '+px(p.cmp)+'</div></div>'
     + '<div class="kv"><div class="k">Target / Stop</div><div class="v">'+px(p.target)+' / '+px(p.stop)+'</div></div>'
