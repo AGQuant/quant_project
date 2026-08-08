@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FPC · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#892 — FPC (Fable direct, 17783). Client-side planning calculator: monthly SIP + one-time
+   lumpsum compounding to a horizon, and the reverse (what monthly amount reaches a goal).
+   16px inputs (iOS zoom rule). Pure arithmetic on-device — no fetch, nothing to go stale. */
+.fld{margin:0 0 11px}
+.fld label{display:block;font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:5px}
+.fld input{width:100%;min-height:48px;background:var(--panel);border:1px solid var(--line2);
+  border-radius:11px;color:var(--txt);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:16px;font-weight:700;padding:0 13px;outline:none}
+.fld input:focus{border-color:rgba(77,124,254,.55)}
+.res .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:26px;font-weight:800}
+.res .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.sp{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.sp .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.sp .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;margin-top:3px}
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="head"><h1>Financial Planner</h1><div class="s">what your money becomes · plain compounding, no jargon</div></div>
+  <div class="body">
+    <div class="sect">WHAT YOU PUT IN</div>
+    <div class="fld"><label>Monthly SIP (Rs.)</label><input id="sip" type="number" inputmode="numeric" value="25000"></div>
+    <div class="fld"><label>One-time amount today (Rs.)</label><input id="lump" type="number" inputmode="numeric" value="500000"></div>
+    <div class="fld"><label>Years</label><input id="yrs" type="number" inputmode="numeric" value="10"></div>
+    <div class="fld"><label>Expected return % per year</label><input id="ret" type="number" inputmode="decimal" value="12"></div>
+
+    <div class="sect">WHAT IT BECOMES</div>
+    <div class="c bull res">
+      <div class="k">Value after <span id="ry">10</span> years</div>
+      <div class="v pos" id="total">--</div>
+      <div class="split">
+        <div class="sp"><div class="k">You invest</div><div class="v" id="inv">--</div></div>
+        <div class="sp"><div class="k">Growth</div><div class="v pos" id="gain">--</div></div>
+      </div>
+    </div>
+
+    <div class="sect">OR START FROM A GOAL</div>
+    <div class="fld"><label>Target amount (Rs.)</label><input id="goal" type="number" inputmode="numeric" value="10000000"></div>
+    <div class="c ref res">
+      <div class="k">Monthly SIP needed (same years &amp; return)</div>
+      <div class="v" id="need">--</div>
+    </div>
+    <div class="note" style="font-size:10.5px;color:var(--dim);line-height:1.6;margin:14px 3px 0;border-left:2px solid var(--line2);padding-left:9px">
+      Assumes the return compounds monthly and stays constant — real markets do not. A plan, not a promise.
+    </div>
+  </div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function inr(v){ if (v==null||isNaN(v)||!isFinite(v)) return '--';
+  return 'Rs.'+Math.round(v).toLocaleString('en-IN'); }
+function g(id){ return Number(document.getElementById(id).value)||0; }
+function calc(){
+  var sip=g('sip'), lump=g('lump'), yrs=g('yrs'), ret=g('ret'), goal=g('goal');
+  var n=Math.max(0,Math.round(yrs*12)), i=(ret/100)/12;
+  var fvL=lump*Math.pow(1+i,n);
+  var fvS=i>0?sip*((Math.pow(1+i,n)-1)/i)*(1+i):sip*n;
+  var total=fvL+fvS, invested=lump+sip*n;
+  document.getElementById('ry').textContent=yrs;
+  document.getElementById('total').textContent=inr(total);
+  document.getElementById('inv').textContent=inr(invested);
+  document.getElementById('gain').textContent=inr(total-invested);
+  var remain=goal-fvL;
+  var need=remain<=0?0:(i>0?remain/(((Math.pow(1+i,n)-1)/i)*(1+i)):remain/Math.max(1,n));
+  document.getElementById('need').textContent=n>0?inr(Math.max(0,need)):'--';
+}
+['sip','lump','yrs','ret','goal'].forEach(function(id){
+  document.getElementById(id).addEventListener('input',calc);
+});
+calc();
+</script>
+</body>
+</html>
