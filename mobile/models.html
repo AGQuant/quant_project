@@ -8,27 +8,50 @@
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
 <style>
-.tile{display:flex;align-items:center;gap:11px;text-decoration:none;color:inherit}
-.tile .go{color:var(--dim);font-size:17px}
-.dest{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px}
+/*
+  cc#890 — MODELS reskinned to previews/models.html (approved card grammar ported, live data).
+  Pushed by Claude (Fable), CHARTER_OVERRIDE_08AUG2026 (session_log 17783).
+  Preview grammar carried: every model is a card with a SHAPE-CODED left rail (live = breathing
+  solid green, closed = dotted grey, stale = dashed amber, off = solid dim) and a badge whose
+  glyph repeats the shape (dot / ring / bar) so state never rides on colour alone (15913 rule 10).
+  ERROR and NOT RUN YET extend the preview set: red rail + ring, and dim rail + ring with the
+  state IN WORDS — that state is the whole point of rule 13829.
+  REGISTRY-DERIVED, never a typed list. The "Everything else" grid stays below the tiles (rule
+  2987 — it is what keeps every wired screen reachable from a five-slot bar).
+*/
+.m{position:relative;display:block;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;
+  text-decoration:none;color:var(--txt);min-height:60px}
+.m::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dim)}
+.m.live::before{background:var(--grn);animation:breathe 2.6s ease-in-out infinite}
+.m.closed::before{background:repeating-linear-gradient(180deg,var(--dim) 0 4px,transparent 4px 10px)}
+.m.stale::before{background:repeating-linear-gradient(180deg,var(--amber) 0 9px,transparent 9px 15px)}
+.m.error::before{background:var(--red)}
+.m.off::before,.m.notrun::before{background:var(--dim)}
+@keyframes breathe{0%,100%{opacity:.42}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.m.live::before{animation:none;opacity:1}}
+.mtop{display:flex;align-items:center;gap:9px}
+.mnm{font-size:14px;font-weight:800}
+.badge{margin-left:auto;display:inline-flex;align-items:center;gap:5px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:700;
+  letter-spacing:.11em;padding:3px 7px;border-radius:4px;border:1px solid;white-space:nowrap}
+.badge.live{color:var(--grn);border-color:rgba(47,212,139,.45);background:var(--grn-d)}
+.badge.closed{color:var(--dim);border-color:var(--line2);background:transparent}
+.badge.stale{color:var(--amber);border-color:rgba(245,185,74,.45);background:rgba(245,185,74,.12)}
+.badge.error{color:var(--red);border-color:rgba(255,92,108,.45);background:rgba(255,92,108,.10)}
+.badge.off,.badge.notrun{color:var(--dim);border-color:var(--line2)}
+.g-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.g-ring{width:5px;height:5px;border-radius:50%;border:1.5px solid currentColor}
+.g-bar{width:6px;height:2px;background:currentColor;border-radius:1px}
+.mds{font-size:11.5px;color:var(--mut);margin-top:5px;line-height:1.45}
+.mft{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);margin-top:7px}
+.dest{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:2px;padding:0 0 4px}
 .dest a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:11px;
   background:var(--panel);border:1px solid var(--line);color:var(--txt);text-decoration:none;
   font-size:12.5px;font-weight:700}
 </style>
 </head>
 <body>
-<!--
-  cc#886 — MODELS, slot 5 of the framework five (15913). Two jobs on one screen:
-   1. the model tiles, and
-   2. the app's "everything else" list, so no wired screen is ever stranded (rule 2987).
-
-  REGISTRY-DERIVED (13829): tiles come from model_registry joined to scheduler_master. Adding a
-  model to the registry adds a tile. There is no name list in this file or in the endpoint.
-
-  THE BADGE FOLLOWS THE DATA. LIVE means the job actually ran inside its cadence this session.
-  A model that is registered but has never run reads NOT RUN YET, in words, and is never green —
-  that state is the whole point of rule 9, and it is the one a hardcoded badge would hide.
--->
 <div class="screen">
   <div class="head">
     <h1>Models</h1>
@@ -49,42 +72,39 @@
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
-/* One place decides what a state looks like. The words are the meaning; the colour only repeats
-   it, so the screen still reads correctly to anyone who cannot separate the two. */
-function stateTag(m){
-  var cls = 'neut';
-  if (m.state === 'LIVE') cls = 'bull';
-  else if (m.state === 'ERROR' || m.state === 'STALE') cls = 'bear';
-  else if (m.state === 'NOT RUN YET' || m.state === 'OFF') cls = 'caut';
-  return '<span class="tag ' + cls + '" title="' + esc(m.why) + '">' + esc(m.state) + '</span>';
+/* state -> css class + badge glyph. The glyph is the SHAPE that repeats the rail: a colour-blind
+   or glancing reader must never read a dead engine as a running one (15913 rule 10). */
+function stateBits(st){
+  if (st === 'LIVE')        return {cls: 'live',   glyph: 'g-dot'};
+  if (st === 'STALE')       return {cls: 'stale',  glyph: 'g-ring'};
+  if (st === 'ERROR')       return {cls: 'error',  glyph: 'g-ring'};
+  if (st === 'OFF')         return {cls: 'off',    glyph: 'g-bar'};
+  if (st === 'NOT RUN YET') return {cls: 'notrun', glyph: 'g-ring'};
+  return {cls: 'closed', glyph: 'g-bar'};
 }
 
 function tile(m){
-  return '<div class="c">'
-    + '<a class="tile" href="' + esc(m.href) + '">'
-      + '<span style="flex:1">'
-        + '<span class="hl">' + esc(m.name) + '</span>'
-        + '<span class="meta" style="margin-top:6px">' + stateTag(m)
-          + (m.on_mobile ? '' : '<span class="tag cat">WEB</span>')
-          + '<span class="when">' + (m.last_run ? esc(m.last_run) : 'never') + '</span></span>'
-        + (m.description ? '<span class="sum" style="display:block">' + esc(m.description) + '</span>' : '')
-      + '</span>'
-      + '<span class="go">›</span>'
-    + '</a></div>';
+  var b = stateBits(m.state);
+  return '<a class="m ' + b.cls + '" href="' + esc(m.href) + '" title="' + esc(m.why || '') + '">'
+    + '<div class="mtop"><span class="mnm">' + esc(m.name) + '</span>'
+    + (m.on_mobile ? '' : '<span class="tag cat">WEB</span>')
+    + '<span class="badge ' + b.cls + '"><span class="' + b.glyph + '"></span>' + esc(m.state) + '</span></div>'
+    + (m.description ? '<div class="mds">' + esc(m.description) + '</div>' : '')
+    + '<div class="mft">' + (m.last_run ? 'Last run ' + esc(m.last_run) : 'Never run') + '</div>'
+    + '</a>';
 }
 
 fetchWithTimeout('/api/mobile/models').then(function(r){ return r.json(); }).then(function(d){
   if (d.error) throw new Error(d.error);
   var live = (d.models || []).filter(function(m){ return m.state === 'LIVE'; }).length;
   document.getElementById('sub').textContent =
-    d.count + ' models · ' + live + ' live now'
+    d.count + ' registered · ' + (d.in_session ? live + ' live now' : 'market closed')
     + (d.internal_hidden ? ' · ' + d.internal_hidden + ' internal not shown' : '');
 
   var html = (d.models || []).map(tile).join('')
     || '<div class="empty"><b>No models registered</b>model_registry is empty.</div>';
 
-  /* Everything else. This is what stops a wired screen from being unreachable once the bottom
-     bar is only five items (rule 2987). */
+  /* rule 2987 — the app's "everything else": no wired screen is ever stranded. */
   html += '<div class="sect">EVERYTHING ELSE</div>'
     + '<div class="dest">' + (d.destinations || []).map(function(x){
         return '<a href="' + esc(x.href) + '">' + esc(x.label) + '</a>'; }).join('')
