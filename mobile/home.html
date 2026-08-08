@@ -10,16 +10,14 @@
 <style>
 /*
   cc#889 — HOME rebuilt to previews/home_v2.html. cc#894 (Fable direct, 17868):
-  item 7 — MORNING DIGEST on Home with full functionality (/api/digest/daily, collapsible).
-  item 2 — every web-clickable metric chip is clickable here too: ADR opens its 5-day trend
-  (api/daily/adr), PCR chip added + opens its trend (api/daily/pcr), VIX chip added + opens
-  India VIX history (api/global/history/India VIX — the web's own series). PCR/VIX current
-  values load async after first paint; a chip with no data yet shows -- and still opens its
-  popup, which states what came back. Home's compact signal/portfolio rows deliberately carry
-  NO card strip — each row navigates to its full screen, where the strip lives (nested
-  interactive elements inside the row links would break navigation).
+  item 2 — ADR/PCR/VIX chips all clickable with trend popups (api/daily/adr, api/daily/pcr,
+  api/global/history/India VIX).
+  FOUNDER COMMENTS 08-Aug (this commit): (1) the Daily Digest card above Intel REMOVED — the
+  digest lives once, at /m/digest via the Tools tile (the hero chips keep ADR/PCR/VIX trends on
+  Home); (2) the V8 signals box REMOVED from Home — V8 has its own nav slot; (3) the INDEX
+  POSITIONS strip moved from the page top to directly BELOW "The market today".
 */
-.idx{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:11px 12px 3px}
+.idx{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:3px 0 0}
 .ix{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-height:44px}
 .ix .n{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;font-weight:700}
 .ix .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:16px;margin-top:2px}
@@ -61,7 +59,6 @@
 a.card-link{text-decoration:none;color:inherit;display:block}
 .dgh{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
   letter-spacing:.13em;color:var(--dim);margin:11px 0 6px}
-.dgh:first-child{margin-top:0}
 .dgr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:30px}
 .dgr:first-of-type{border-top:0}
 .dgr .k2{font-size:11.5px;color:var(--mut);flex:1;text-transform:capitalize}
@@ -75,7 +72,6 @@ a.card-link{text-decoration:none;color:inherit;display:block}
     <div class="s" id="sess">loading…</div>
   </div>
 
-  <div class="idx" id="idx"></div>
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
 </div>
 
@@ -88,7 +84,6 @@ a.card-link{text-decoration:none;color:inherit;display:block}
 </nav>
 
 <script>
-var DG = { open: false, data: null };
 var TREND = { open: null };   /* which chip popup is open: 'adr' | 'pcr' | 'vix' */
 
 function esc(s){ return String(s == null ? '' : s)
@@ -137,50 +132,8 @@ function dgRows(v){
       out += '<div class="dgr"><span class="k2">' + esc(String(label)) + '</span>'
            + '<span class="v2">' + esc(vals || '--') + '</span></div>';
     });
-  } else if (typeof v === 'object' && v != null){
-    Object.keys(v).forEach(function(k){
-      var s = v[k];
-      if (s == null || typeof s === 'object') return;
-      var f = fmtv(s); if (f == null) return;
-      out += '<div class="dgr"><span class="k2">' + esc(k.replace(/_/g,' ')) + '</span>'
-           + '<span class="v2">' + esc(f) + '</span></div>';
-    });
   }
   return out;
-}
-function digestBlock(){
-  if (!DG.open) return '';
-  var d = DG.data;
-  if (d === 'loading') return '<div class="loading" style="padding:8px 0 2px">Loading digest…</div>';
-  if (!d || d.error) return '<div class="sum" style="padding:8px 0 2px">Digest unavailable' + (d && d.error ? ': ' + esc(d.error) : '') + '.</div>';
-  var order = ['global','global_indices','domestic','adr','pcr','pcr_trend','pivots','support','support_levels'];
-  var done = {}, out = '';
-  function blk(k){
-    if (done[k] || d[k] == null || typeof d[k] !== 'object') return;
-    done[k] = 1;
-    var rows = dgRows(d[k]);
-    if (rows) out += '<div class="dgh">' + esc(k.replace(/_/g,' ').toUpperCase()) + '</div>' + rows;
-  }
-  order.forEach(blk);
-  Object.keys(d).forEach(blk);
-  return out || '<div class="sum" style="padding:8px 0 2px">Digest came back empty.</div>';
-}
-function togDigest(){
-  DG.open = !DG.open;
-  if (DG.open && !DG.data){
-    DG.data = 'loading'; paintDigest();
-    fetchWithTimeout('/api/digest/daily').then(function(r){ return r.json(); })
-      .then(function(d){ DG.data = d; paintDigest(); })
-      .catch(function(e){ DG.data = {error: e.message}; paintDigest(); });
-    return;
-  }
-  paintDigest();
-}
-function paintDigest(){
-  var el = document.getElementById('dgbody');
-  if (el) el.innerHTML = digestBlock();
-  var ch = document.getElementById('dgchev');
-  if (ch) ch.textContent = DG.open ? '\u2304' : '\u203a';
 }
 /* ── cc#894 item 2: one popup engine for all three clickable chips ─────────────────────── */
 var TRENDS = {
@@ -236,15 +189,9 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
 
   document.getElementById('sess').textContent = d.session.label;
 
-  document.getElementById('idx').innerHTML = (d.indices || []).map(function(ix){
-    return '<div class="ix"><div class="n">' + esc(ix.name) + '</div>'
-      + '<div class="v">' + px(ix.close)
-      + '<span class="d ' + cls(ix.chg_pct) + '">' + pct(ix.chg_pct) + '</span></div></div>';
-  }).join('') || '';
-
   var h = '';
 
-  /* 1 · HERO — ADR/PCR/VIX all clickable (cc#894 item 2) */
+  /* 1 · HERO — the market today; ADR/PCR/VIX all clickable */
   var hero = d.hero || {};
   h += '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
@@ -260,26 +207,19 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
       }).join('')
     + '<button class="hc tap" onclick="togTrend(event,\'pcr\')">PCR <span id="pcrval">--</span></button>'
     + '<button class="hc tap" onclick="togTrend(event,\'vix\')">VIX <span id="vixval">--</span></button>'
-    + '</div><div id="chiptrend"></div></div>';
+    + '</div><div id="chiptrend"></div>'
+    /* founder 08-Aug: index positions sit directly below The market today */
+    + '<div class="idx">' + (d.indices || []).map(function(ix){
+        return '<div class="ix"><div class="n">' + esc(ix.name) + '</div>'
+          + '<div class="v">' + px(ix.close)
+          + '<span class="d ' + cls(ix.chg_pct) + '">' + pct(ix.chg_pct) + '</span></div></div>';
+      }).join('') + '</div>'
+    + '</div>';
 
-  /* 2 · today's signals — rows navigate to /m/v8 where the C·A·R·D strip lives */
-  var sg = d.signals || {};
-  h += '<div class="sect">TODAY\'S SIGNALS</div>'
-    + '<a class="card-link" href="/m/v8"><div class="c"><div class="chd"><div class="t">V8 Engine</div>'
-    + '<div class="rgt">' + (sg.today || 0) + ' signals today ' + railHtml(sg.rail) + ' <span class="chev">\u203a</span></div></div>'
-    + ((sg.top || []).map(function(s){
-        return '<div class="row"><div class="l"><div class="sym">' + esc(s.symbol) + '</div>'
-          + '<div class="sub">' + esc(s.basket) + (s.at ? ' \u00b7 ' + esc(s.at) : '') + '</div></div>'
-          + '<div class="r"><div class="pv">' + px(s.price) + '</div>'
-          + (s.since_pct == null ? ''
-             : '<div class="pc ' + cls(s.since_pct) + '">' + pct(s.since_pct) + ' since</div>')
-          + '</div></div>';
-      }).join('') || '<div class="sum" style="padding:8px 0">No signals yet today.</div>')
-    + '</div></a>';
-
-  /* 3 · the open book */
+  /* 2 · the open book (V8 signals box removed by founder — V8 lives in the nav) */
   var bk = d.book || {};
-  h += '<a class="card-link" href="/m/positions"><div class="c"><div class="chd"><div class="t">Open Book</div>'
+  h += '<div class="sect">THE BOOK</div>'
+    + '<a class="card-link" href="/m/positions"><div class="c"><div class="chd"><div class="t">Open Book</div>'
     + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="chev">\u203a</span></div></div>'
     + '<div class="trio">'
     + '<div class="st"><div class="k">Unrealised</div><div class="v ' + cls(bk.unrealised) + '">' + inr(bk.unrealised) + '</div></div>'
@@ -287,7 +227,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="st"><div class="k">Win / Loss</div><div class="v">' + (bk.wins == null ? '--' : bk.wins + ' / ' + bk.losses) + '</div></div>'
     + '</div></div></a>';
 
-  /* 4 · MY PORTFOLIO */
+  /* 3 · MY PORTFOLIO */
   var pf = d.portfolio || {};
   h += '<div class="sect">MY PORTFOLIO</div>'
     + '<a class="card-link" href="/m/holdings"><div class="c"><div class="chd"><div class="t">My Portfolio</div>'
@@ -303,13 +243,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
           }).join(''))
     + '</div></a>';
 
-  /* 5 · MORNING DIGEST */
-  h += '<div class="sect">MORNING DIGEST</div>'
-    + '<div class="c ref"><div class="chd" onclick="togDigest()" style="cursor:pointer"><div class="t">Daily Digest</div>'
-    + '<div class="rgt">global · trends · pivots <span class="chev" id="dgchev">\u203a</span></div></div>'
-    + '<div id="dgbody"></div></div>';
-
-  /* 6 · worth reading */
+  /* 4 · worth reading (single digest lives at /m/digest via Tools — founder 08-Aug) */
   var rd = d.reading || {};
   h += '<div class="sect">WORTH READING</div>'
     + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Intel</div>'
@@ -327,7 +261,7 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<div class="rgt">' + (rs.today || 0) + ' report today <span class="chev">\u203a</span></div></div>'
     + '<div class="sum">Every result explained in plain words.</div></div></a>';
 
-  /* 7 · tools */
+  /* 5 · tools */
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
 
