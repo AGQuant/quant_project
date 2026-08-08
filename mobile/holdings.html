@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Portfolio · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#892 — HOLDINGS (Fable direct, 17783). The full My Portfolio page: header totals, one card
+   per holding with entry→LTP, value, MTM, return%. Home keeps its compact card; this is the
+   depth view it links to. */
+.tot{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px}
+.tot .b{flex:1}
+.tot .k{font-size:9px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.tot .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;margin-top:3px}
+.pc2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
+.kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
+.kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="head"><h1>My Portfolio</h1><div class="s" id="sub">loading…</div></div>
+  <div class="tot" id="tot" style="display:none">
+    <div class="b"><div class="k">Value</div><div class="v" id="tv"></div></div>
+    <div class="b"><div class="k">MTM</div><div class="v" id="tm"></div></div>
+  </div>
+  <div class="body" id="body"><div class="loading">Loading holdings…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function px(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
+function inr(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return (x<0?'\u2212':'')+'Rs.'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function pct(v){ if (v==null||isNaN(Number(v))) return '--';
+  var x=Number(v); return (x>=0?'+':'')+x.toFixed(2)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
+function railHtml(r){ if(!r) return '';
+  var s=(r.state||'CLOSED').toLowerCase();
+  return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
+function card(h){
+  var short_=(h.direction||'').indexOf('S')===0;
+  return '<div class="c '+((h.mtm||0)>=0?'bull':'bear')+'">'
+    + '<div class="meta"><span class="tag '+(short_?'bear':'bull')+'">'+esc(h.direction||'LONG')+'</span>'
+    + '<span class="tag cat">'+(h.qty==null?'--':Number(h.qty).toLocaleString('en-IN'))+' qty</span>'
+    + '</div>'
+    + '<div class="hl">'+esc(h.symbol)
+    + '<span style="float:right" class="mono '+cls(h.mtm)+'">'+inr(h.mtm)+'</span></div>'
+    + '<div class="pc2">'
+    + '<div class="kv"><div class="k">Entry \u2192 LTP</div><div class="v">'+px(h.entry)+' \u2192 '+px(h.ltp)+'</div></div>'
+    + '<div class="kv"><div class="k">Value</div><div class="v">'+inr(h.value)+'</div></div>'
+    + '<div class="kv"><div class="k">Return</div><div class="v '+cls(h.ret_pct)+'">'+pct(h.ret_pct)+'</div></div>'
+    + '</div></div>';
+}
+fetchWithTimeout('/api/mobile/holdings').then(function(r){return r.json();}).then(function(d){
+  if (d.error) throw new Error(d.error);
+  document.getElementById('sub').innerHTML = d.count+' holdings '+railHtml(d.rail);
+  if (!d.empty){
+    document.getElementById('tot').style.display='flex';
+    document.getElementById('tv').textContent=inr(d.total_value);
+    var tm=document.getElementById('tm'); tm.textContent=inr(d.total_mtm);
+    tm.className='v '+cls(d.total_mtm);
+  }
+  document.getElementById('body').innerHTML = d.empty
+    ? '<div class="empty"><b>Book is flat</b>'+esc(d.message||'No positions open.')+'</div>'
+    : d.rows.map(card).join('');
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load</b>'+esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  document.getElementById('sub').textContent='failed to load';
+});
+</script>
+</body>
+</html>
