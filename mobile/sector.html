@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sector · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#892 — SECTOR (Fable direct, 17783). Reads the EXISTING web APIs (/api/sectors +
+   /api/sector/rotation) — one implementation, identical numbers (16202). Ratings list with
+   score bars in the GVM pillar grammar; rotation cards above when the API answers. Defensive
+   about key names; nothing invented. */
+.srow{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:11px 13px;margin-bottom:7px;min-height:48px}
+.srow .nm{font-size:13px;font-weight:800;flex:1;min-width:0}
+.srow .sub2{font-size:9.5px;color:var(--dim);margin-top:1px}
+.srow .bar{flex:1.2;height:6px;border-radius:4px;background:rgba(148,166,210,.14);overflow:hidden}
+.srow .fill{height:100%;border-radius:4px}
+.srow .sc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;min-width:34px;text-align:right}
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="head"><h1>Sector</h1><div class="s" id="sub">sector ratings · mcap-weighted GVM</div></div>
+  <div class="body" id="body"><div class="loading">Loading sectors…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/intel"><span class="i">▤</span>Intel</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function n1(v){ return (v==null||isNaN(Number(v)))?'--':Number(v).toFixed(1); }
+function scoreCol(g){ if(g==null)return 'var(--dim)';
+  return g>=7.5?'var(--grn)':(g>=5?'var(--amber)':'var(--red)'); }
+function arr(d){ return d.sectors||d.ratings||d.results||(Array.isArray(d)?d:[]); }
+
+function row(s){
+  var name=s.sector||s.segment||s.name||'--';
+  var score=s.gvm!=null?s.gvm:(s.gvm_score!=null?s.gvm_score:s.score);
+  var n=s.companies!=null?s.companies:(s.count!=null?s.count:s.n);
+  var col=scoreCol(score==null?null:Number(score));
+  var w=score==null?0:Math.max(0,Math.min(100,Number(score)*10));
+  return '<div class="srow"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
+    + (n!=null?'<div class="sub2">'+n+' companies</div>':'')+'</div>'
+    + '<div class="bar"><div class="fill" style="width:'+w+'%;background:'+col+'"></div></div>'
+    + '<span class="sc" style="color:'+col+'">'+n1(score)+'</span></div>';
+}
+Promise.all([
+  fetchWithTimeout('/api/sectors').then(function(r){return r.json();}),
+  fetchWithTimeout('/api/sector/rotation').then(function(r){return r.json();}).catch(function(){return null;})
+]).then(function(res){
+  var d=res[0], rot=res[1];
+  if (d && d.error) throw new Error(d.error);
+  var list=arr(d).slice();
+  list.sort(function(a,b){
+    var x=(a.gvm!=null?a.gvm:(a.gvm_score!=null?a.gvm_score:a.score))||0;
+    var y=(b.gvm!=null?b.gvm:(b.gvm_score!=null?b.gvm_score:b.score))||0;
+    return y-x;
+  });
+  var h='';
+  if (rot && !rot.error){
+    var rl=rot.rotation||rot.sectors||rot.results||[];
+    var into=rl.filter(function(x){return (x.direction||x.trend||'').toString().toLowerCase().indexOf('in')===0;}).slice(0,3);
+    var out=rl.filter(function(x){return (x.direction||x.trend||'').toString().toLowerCase().indexOf('out')===0;}).slice(0,3);
+    if (into.length||out.length){
+      h+='<div class="sect">ROTATION</div><div class="c">';
+      if (into.length) h+='<div class="meta"><span class="tag bull">MONEY IN</span></div><div class="sum">'
+        + into.map(function(x){return esc(x.sector||x.name);}).join(' · ')+'</div>';
+      if (out.length) h+='<div class="meta" style="margin-top:8px"><span class="tag bear">MONEY OUT</span></div><div class="sum">'
+        + out.map(function(x){return esc(x.sector||x.name);}).join(' · ')+'</div>';
+      h+='</div>';
+    }
+  }
+  h+='<div class="sect">RATINGS · BEST FIRST</div>';
+  h+= list.length ? list.map(row).join('')
+    : '<div class="empty"><b>No sector ratings</b>The nightly scorer has not produced ratings.</div>';
+  document.getElementById('body').innerHTML=h;
+  document.getElementById('sub').textContent=list.length+' sectors · mcap-weighted GVM';
+}).catch(function(e){
+  document.getElementById('body').innerHTML =
+    '<div class="empty"><b>Could not load</b>'+esc(e.message)
+    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+});
+</script>
+</body>
+</html>
