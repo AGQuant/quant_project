@@ -7,10 +7,17 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_card_strip.js"></script>
+<script src="/scorr_chart_card.js"></script>
+<script src="/scorr_analysis_card.js"></script>
+<script src="/results_card.js"></script>
+<script src="/scorr_cockpit_card.js"></script>
 <style>
-/* cc#892 — HOLDINGS (Fable direct, 17783). The full My Portfolio page: header totals, one card
-   per holding with entry→LTP, value, MTM, return%. Home keeps its compact card; this is the
-   depth view it links to. */
+/* cc#892 — HOLDINGS (Fable direct, 17783). Full My Portfolio page: header totals, one card per
+   holding with entry→LTP, value, MTM, return%. cc#894 item 1: the shared web C·A·R·D strip on
+   every card (window.ScorrCardRow, rule cc#789 — never re-implemented). :root bridge maps the
+   web card CSS vars onto the dark palette. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
 .tot{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px}
 .tot .b{flex:1}
 .tot .k{font-size:9px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
@@ -19,6 +26,9 @@
 .kv{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;text-align:center}
 .kv .k{font-size:8.5px;color:var(--dim);font-weight:700;letter-spacing:.08em;text-transform:uppercase}
 .kv .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700;margin-top:2px}
+.hl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hl .sy{font-size:15px;font-weight:800;margin-right:auto}
+.hl .pl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
 </style>
 </head>
 <body>
@@ -50,14 +60,19 @@ function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
 function railHtml(r){ if(!r) return '';
   var s=(r.state||'CLOSED').toLowerCase();
   return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
+function strip(sym){
+  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
+  return '';
+}
 function card(h){
   var short_=(h.direction||'').indexOf('S')===0;
   return '<div class="c '+((h.mtm||0)>=0?'bull':'bear')+'">'
     + '<div class="meta"><span class="tag '+(short_?'bear':'bull')+'">'+esc(h.direction||'LONG')+'</span>'
     + '<span class="tag cat">'+(h.qty==null?'--':Number(h.qty).toLocaleString('en-IN'))+' qty</span>'
     + '</div>'
-    + '<div class="hl">'+esc(h.symbol)
-    + '<span style="float:right" class="mono '+cls(h.mtm)+'">'+inr(h.mtm)+'</span></div>'
+    + '<div class="hl"><span class="sy">'+esc(h.symbol)+'</span>'
+    + strip(h.symbol)
+    + '<span class="pl '+cls(h.mtm)+'">'+inr(h.mtm)+'</span></div>'
     + '<div class="pc2">'
     + '<div class="kv"><div class="k">Entry \u2192 LTP</div><div class="v">'+px(h.entry)+' \u2192 '+px(h.ltp)+'</div></div>'
     + '<div class="kv"><div class="k">Value</div><div class="v">'+inr(h.value)+'</div></div>'
