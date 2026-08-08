@@ -177,7 +177,7 @@ async function openM(sym){
       return `<div class="rrow ${rt}"><span class="rl" title="${r.legacy_id||r.rule}">${r.seq!=null?r.seq:r.rule}</span><span class="rreq">${r.label} &mdash; ${r.required||'&mdash;'}</span><span class="ract">${actual(r.value)}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`;
     }).join('');
     return `<div class="card ${d.best&&c.style===d.best.style&&c.side===d.best.side?'win':''}">
-    <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/${c.max||15} <span class="badge ${c.verdict}">${c.verdict}</span></h3>
+    <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/${c.max!=null?c.max:'&mdash;'} <span class="badge ${c.verdict}">${c.verdict}</span></h3>
     <div class="rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>
     ${gateRows}${ruleRows}
   </div>`;

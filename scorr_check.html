@@ -693,7 +693,7 @@
         <tbody id="scrBody"></tbody></table>
       <div id="moversWrap" style="display:none"></div>
     </div>
-    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;18.5 / SELL STRONG&ge;17.0 (max 22 / 20, incl R16 fib + R17-R20).</div>
+    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; incl R16 fib + R17-R20.</div>
   </div>
 
   <!-- chip popup -->
@@ -1149,7 +1149,10 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?20:22))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥17.0 / VALID 12.9–17.0 / REJECT&lt;12.9':'STRONG≥18.5 / VALID 14.4–18.5 / REJECT&lt;14.4'))+'</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+/* cc#935: the max and the bands come from the card the engine returned. The old fallbacks here
+   guessed 22/20 and printed a full band sentence for a card that had not been scored — both were
+   already stale. If the payload has no card, say nothing rather than say something wrong. */
+     '/'+((d.best&&d.best.max)!=null?d.best.max:'—')+'</b>'+((d.best&&d.best.bands)?' · '+d.best.bands:'')+'</div>'
     +   (alertsHtml?'<div class="v4-alerts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">'+alertsHtml+'</div>':'')
     + '</div></div>'
     + cardsHtml
@@ -1794,19 +1797,50 @@ function _v4mr(scores){
   return '<span style="display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center">'+buy
     +(buy&&sell?'<span style="color:var(--dim);margin:0 2px">·</span>':'')+sell+'</span>';
 }
+/* cc#935 — card maxes and bands are READ from the engine, never typed here. Three footers used to
+   carry "BUY STRONG≥18.5 (max 22) / SELL STRONG≥17.0 (max 20)" as literal text; two of the four
+   numbers had already gone stale, and a screen that states the wrong denominator is worse than one
+   that states none. tcBands() fetches /health-dual once and caches; tcBandText() returns a sentence
+   built from it, and an EMPTY string until it arrives — no placeholder number is ever shown. */
+var _tcBands=null,_tcBandsReq=null;
+function tcBands(){
+  if(_tcBands)return Promise.resolve(_tcBands);
+  if(_tcBandsReq)return _tcBandsReq;
+  _tcBandsReq=fetch('/api/trade-check/v4/health-dual').then(function(r){return r.json()})
+    .then(function(j){_tcBands=(j&&j.max_score&&j.max_score.cards)||null;return _tcBands})
+    .catch(function(){return null});
+  return _tcBandsReq;
+}
+function tcBandText(){
+  var c=_tcBands;if(!c)return '';
+  function one(k){var x=c[k];return x?k+' STRONG≥'+x.strong+' (max '+x.max+')':''}
+  var parts=['BUY-MOM','BUY-REV','SELL-MOM','SELL-REV'].map(one).filter(Boolean);
+  return parts.length?parts.join(' · '):'';
+}
+function tcFootSet(base){
+  var el=document.getElementById('scrFoot');if(!el)return;
+  el.textContent=base;
+  tcBands().then(function(){var t=tcBandText();if(t)el.textContent=base+' · '+t;});
+}
+tcBands();
+
 function runScreen(){
   const panel=document.getElementById('scrResult');
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
-    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17-R20); the higher card wins with its style label. BUY STRONG≥18.5 (max 22) / SELL STRONG≥17.0 (max 20). Tap a row for the full dual scorecard.</div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px" id="v4ScanBlurb">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17-R20); the higher card wins with its style label. Tap a row for the full dual scorecard.<span id="v4ScanBands"></span></div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
     +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
     +   '<button class="chip" onclick="loadV4Scan()">&#8635; Rescan</button>'
     + '</div>'
     + '<div id="v4ScanTbl"><div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div></div>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · SELL recalibrated (id=3010) · V8 Basket join is display-only.';
+  tcFootSet('v4 dual-style engine · one pass over active futures · SELL recalibrated (id=3010) · V8 Basket join is display-only.');
+  tcBands().then(function(){
+    var t=tcBandText(),el=document.getElementById('v4ScanBands');
+    if(t&&el)el.textContent=' Bands: '+t+'.';
+  });
   panel.classList.add('show');
   panel.scrollIntoView({behavior:'smooth',block:'start'});
   loadV4Scan();
@@ -1886,7 +1920,7 @@ function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥18.5 (max 22) / SELL STRONG≥17.0 (max 20) · incl R16 fib + R17-R20.';
+  tcFootSet('v4 dual-style engine · one pass over active futures · incl R16 fib + R17-R20.');
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);

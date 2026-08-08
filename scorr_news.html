@@ -840,7 +840,8 @@ function render(){
 }
 
 // cc#725: async TC verdict badge on Stock Views cards — STRONG = filled ★, VALID = outline ☆,
-// plus a score chip (TC <score>/22). Best of LONG/SHORT via /api/trade-check/v4; cached per symbol.
+// plus a score chip (TC <score>/<max>, max read from the payload — cc#935: never written down here).
+// Best of LONG/SHORT via /api/trade-check/v4 (the v4.0 tier1/tier2 engine); cached per symbol.
 var _tcBadgeCache = {};
 function _tcBadgeHtml(v){
   if(!v)return '';

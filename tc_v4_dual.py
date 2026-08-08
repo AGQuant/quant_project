@@ -17,8 +17,10 @@ DYNAMIC (propagation map id=265) — flow rules consolidated (R5+R6 -> Volume co
 Derivatives confirm, R14 ATR dropped) and the freed points reallocated to per-bucket live-V8 basket
 gate imports, so each style bucket carries its own max. cc#934: that max is now SUMMED from each
 rule's declared max rather than assumed as len(rules)+2 (which silently believed R18/R19 were the only
-2-point rules — untrue once Volume became 2 on BUY-REV). Today it computes BUY-MOM 22, BUY-REV 20,
-SELL-MOM 20, SELL-REV 19; change a rule's weight and the denominator follows on its own.
+2-point rules — untrue once Volume became 2 on BUY-REV). cc#935: no card's max is written down here
+any more — `card_maxes()` derives all four off the live rulebook and every surface reads it from
+there, so a comment can no longer go stale against the code. Change a rule's weight and the
+denominator, the bands and every footer follow on their own.
 Bands re-baseline PROPORTIONALLY off each card's own max at the founder-locked ratios STRONG 0.84x
 / VALID 0.65x (from the prior BUY 18.5-22 / 14.4-22). Per-bucket imports: BUY-MOM +dma_50[5,12]
 +w52>=75 +GVM>=7 (R7 twr bound [70,85]); BUY-REV R7->mRSI[60,90] +GVM>=6.5, R4 graded d200&d20;
@@ -487,6 +489,20 @@ def _load_one(cur, symbol):
                    ORDER BY ts DESC LIMIT 3""", (symbol,))
     d["basis"] = [{"basis_pct": _f(r[0]), "oi_chg": _f(r[1])} for r in cur.fetchall()]
 
+    # cc#935 / 18064 — R24 Delivery confirm inputs. 3-day average vs the symbol's own trailing
+    # baseline of UP TO 21 sessions (see the R24 note for why "up to"). The bulk scanner fills the
+    # SAME four fields from the SAME window so both paths score R24 identically.
+    cur.execute("""SELECT avg(deliv_pct) FILTER (WHERE rn <= 3),  count(*) FILTER (WHERE rn <= 3),
+                          avg(deliv_pct) FILTER (WHERE rn <= 21), count(*) FILTER (WHERE rn <= 21)
+                   FROM (SELECT deliv_pct, row_number() OVER (ORDER BY d DESC) rn
+                         FROM delivery_eod
+                         WHERE UPPER(symbol)=UPPER(%s) AND deliv_pct IS NOT NULL) t""", (symbol,))
+    _dl = cur.fetchone()
+    d["deliv_3d"] = _f(_dl[0]) if _dl else None
+    d["deliv_n3"] = int(_dl[1] or 0) if _dl else 0
+    d["deliv_21d"] = _f(_dl[2]) if _dl else None
+    d["deliv_n21"] = int(_dl[3] or 0) if _dl else 0
+
     cur.execute("SELECT 1 FROM futures_universe WHERE UPPER(symbol)=UPPER(%s) AND is_active=TRUE", (symbol,))
     d["is_future"] = cur.fetchone() is not None
 
@@ -727,7 +743,11 @@ def _rules(d, style, side):
     else:
         c = 1.0 if (mo is not None and mo < 0) else 0.0
         req = "mo < 0"
-    out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}, required=req))
+    # cc#935 / 18064: R8 is DROPPED from BUY-MOM — the returns dimension is already carried four times
+    # over on that card (R7 RSI, R10 mom_2d, R18 M-score which is derived from returns, R22 52w index),
+    # so it adds no independent information. It stays live on BUY-REV and both SELL cards.
+    if not (BUY and MOM):
+        out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}, required=req))
 
     # R9 — 5-min structure + VWAP (session-anchored via last-session bars). 3010 SELL: below-VWAP is the
     #      gate for any credit — full (below-VWAP + weak structure) ->1, below-VWAP only ->0.5, else 0.
@@ -875,8 +895,9 @@ def _rules(d, style, side):
             req = "rs_mo < 0 (0 to 1 = 0.5)"
         val = {"rs_mo": _r(rm)}
     # cc#934 / 18062: R15 is DROPPED from BUY-REV — it duplicates R19, which already scores 63-day
-    # relative strength against BOTH the sector and NIFTY. It stays live on the other three cards.
-    if not (BUY and not MOM):
+    # relative strength against BOTH the sector and NIFTY. cc#935 / 18064 extends the same drop to
+    # BUY-MOM for consistency (same duplication, same R19). It stays live on both SELL cards.
+    if not BUY:
         out.append(_R("R15", "RS vs Nifty", c, val, required=req))
 
     # R16 — Fib position (3M swing). cc#410/id=3019 zones; cc#513 BUY-REV widened (spring fires from
@@ -988,6 +1009,31 @@ def _rules(d, style, side):
         # R23 — GVM quality floor >= 7 (BuyMom V3 level, stricter than BuyRev 6.5).
         c23 = (1.0 if (gvm is not None and gvm >= 7.0) else (0.5 if (gvm is not None and 6.5 <= gvm < 7.0) else 0.0))
         out.append(_R("R23", "GVM floor", c23, {"gvm": _r(gvm)}, required="GVM >= 7.0 (6.5-7.0 = 0.5)"))
+        # R24 — DELIVERY CONFIRM (cc#935, founder-locked 18064). BUY-MOM only, 1 point. Self-relative
+        # by design: the 3-day delivery average is measured against the SYMBOL'S OWN trailing baseline,
+        # so what scores is the RISE in cash conviction, not the level (a 90%-delivery utility and a
+        # 30%-delivery high-beta name are judged on the same footing). Source: delivery_eod.
+        # BASELINE WINDOW — the spec says "own 21d avg". delivery_eod only starts 20-Jul-2026, so the
+        # deepest baseline available today is 14 sessions and NO symbol has 21. Taken literally, the
+        # rule would score 0 for every symbol on every card — a new point that can never be earned.
+        # It is therefore "the trailing UP-TO-21 sessions, minimum 10", which is exactly what Fable's
+        # 08-Aug calibration measured: on the 206-symbol active futures universe this reproduces its
+        # quoted split EXACTLY (full 10, half 35 — verified against the live table, not assumed). The
+        # window includes the 3 recent sessions (excluding them gives 25/36 and does NOT match), and it
+        # widens to a true 21 on its own as history accrues — no code change needed.
+        # Thin history / no rows -> 0 with an honest note, the same pattern as a missing V-score (R17).
+        a3, a21 = d.get("deliv_3d"), d.get("deliv_21d")
+        n3, n21 = d.get("deliv_n3") or 0, d.get("deliv_n21") or 0
+        if a3 is None or a21 is None or n3 < 3 or n21 < 10 or a21 <= 0:
+            c24 = 0.0
+            r24val = {"deliv_3d": _r(a3), "deliv_base": _r(a21), "days": n21, "no_data": True}
+            r24req = "no delivery history (needs 3 recent + 10 baseline sessions) -> 0"
+        else:
+            ratio = a3 / a21
+            c24 = 1.0 if ratio >= 1.2 else (0.5 if ratio >= 1.1 else 0.0)
+            r24val = {"deliv_3d": _r(a3), "deliv_base": _r(a21), "ratio": _r(ratio), "days": n21}
+            r24req = "3d avg deliv% >= 1.2x own baseline (1.1-1.2x = 0.5)"
+        out.append(_R("R24", "Delivery confirm", c24, r24val, required=r24req))
     elif BUY and (not MOM):
         # R23 — GVM quality floor >= 6.5 (BuyRev V6.1 gate).
         c23 = (1.0 if (gvm is not None and gvm >= 6.5) else (0.5 if (gvm is not None and 6.0 <= gvm < 6.5) else 0.0))
@@ -1007,14 +1053,33 @@ _VALID_RATIO = 0.65    # cc#767: preserves the prior BUY floor  (14.4/22 = 0.655
 
 def _verdict(score, max_score):
     """cc#767: DYNAMIC denominator (score_denominator rule, propagation map id=265). After the V8-gate
-    imports + flow consolidation each style bucket carries its own max (BUY-MOM 22, BUY-REV 20, SELL-MOM
-    20, SELL-REV 19), so bands are re-baselined PROPORTIONALLY off the card's own max — preserving the
+    imports + flow consolidation each style bucket carries its OWN max (see card_maxes() — derived,
+    never listed here), so bands are re-baselined PROPORTIONALLY off the card's own max — preserving the
     founder-locked strictness ratios (STRONG 0.84x / VALID 0.65x, from the prior BUY 18.5-22 / 14.4-22)."""
     if score >= round(_STRONG_RATIO * max_score, 1):
         return "STRONG"
     if score >= round(_VALID_RATIO * max_score, 1):
         return "VALID"
     return "REJECT"
+
+
+def card_maxes():
+    """cc#935 — the four card maxes + bands, DERIVED by running the rulebook over an empty symbol.
+    Every rule is emitted regardless of data (a missing input scores 0, it never removes the rule),
+    so the sum of the declared maxes is exactly what a real symbol is scored out of. This exists so
+    that no surface has to write a max down: the footers and the health block read it from here, and
+    the moment a rule is added, dropped or reweighted every number moves with it in one place."""
+    out = {}
+    for side in ("BUY", "SELL"):
+        for style in ("MOMENTUM", "REVERSAL"):
+            rules = _rules({}, style, side)
+            mx = round(sum(r.get("max", 1.0) for r in rules), 2)
+            if float(mx).is_integer():
+                mx = int(mx)
+            out[f"{side}-{style[:3]}"] = {"max": mx, "rules": len(rules),
+                                          "strong": round(_STRONG_RATIO * mx, 1),
+                                          "valid": round(_VALID_RATIO * mx, 1)}
+    return out
 
 
 def score_card(d, style, side):
@@ -1256,9 +1321,11 @@ def v4_dual_health():
         # rule's own declared max at score time, so this health block can only report the formula,
         # never a stale copy of a number that has drifted from the rulebook.
         "max_score": {"derivation": "sum(rule.max) over the rules that card actually emits",
-                      "note": "no hardcoded per-card max exists; bands are ratio-derived from it"},
-        "verdict": {"ratios": {"STRONG": "0.84 x max", "VALID": "0.65 x max"},
-                    "example_BUY-MOM(max22)": {"STRONG": ">=18.5", "VALID": "14.3 to <18.5", "REJECT": "<14.3"}},
+                      "note": "no hardcoded per-card max exists; bands are ratio-derived from it",
+                      # cc#935: computed live off the rulebook, not typed in. The old
+                      # "example_BUY-MOM(max22)" line was a literal and had already gone stale.
+                      "cards": card_maxes()},
+        "verdict": {"ratios": {"STRONG": "0.84 x max", "VALID": "0.65 x max"}},
         "sides": {"BUY": "long", "SELL": "v4.1 mirror (GVM gate skipped)"},
         "status": "ok",
     }

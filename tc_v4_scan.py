@@ -171,6 +171,23 @@ def _load_bulk(cur):
         D[s]["event_blackout"] = s in black
         D[s]["event_date"] = black[s].isoformat() if (s in black and black[s]) else None
 
+    # cc#935 / 18064 — R24 Delivery confirm inputs, set-based. Byte-identical window to the single
+    # loader (_load_one): 3 most recent sessions vs the symbol's own trailing UP-TO-21, ranked per
+    # symbol, NULL deliv_pct excluded before ranking. Same four fields, so R24 cannot disagree
+    # between the scanner and /check.
+    cur.execute("""SELECT s,
+                          avg(deliv_pct) FILTER (WHERE rn <= 3),  count(*) FILTER (WHERE rn <= 3),
+                          avg(deliv_pct) FILTER (WHERE rn <= 21), count(*) FILTER (WHERE rn <= 21)
+                   FROM (SELECT UPPER(symbol) s, deliv_pct,
+                                row_number() OVER (PARTITION BY UPPER(symbol) ORDER BY d DESC) rn
+                         FROM delivery_eod
+                         WHERE UPPER(symbol) = ANY(%s) AND deliv_pct IS NOT NULL) t
+                   GROUP BY s""", (syms,))
+    dlv = {r[0]: (_f(r[1]), int(r[2] or 0), _f(r[3]), int(r[4] or 0)) for r in cur.fetchall()}
+    for s in syms:
+        a3, n3, a21, n21 = dlv.get(s, (None, 0, None, 0))
+        D[s].update({"deliv_3d": a3, "deliv_n3": n3, "deliv_21d": a21, "deliv_n21": n21})
+
     # R6 — time-adjusted intraday volume ratio (shared helper, per symbol, for exact parity)
     for s in syms:
         try:
