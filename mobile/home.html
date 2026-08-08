@@ -336,7 +336,16 @@ fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }).then
     + '<a class="tool" href="/m/fpc"><span>\u20b9</span>FPC</a>'
     + '<a class="tool" href="/dashboard"><span>\u26a1</span>Dashboard</a>'
     + '<a class="tool" href="/cio"><span>\u2299</span>AICIO</a>'
-    + '<a class="tool" href="/health"><span>\u2695</span>Portfolio Health</a>';
+    + '<a class="tool" href="/health"><span>\u2695</span>Portfolio Health</a>'
+    // cc#897: 9 -> 12 tiles. All three open WEB pages, the same 16915 exception the founder
+    // already approved for Dashboard / AICIO / Portfolio Health above.
+    // The Index Intel hash was VERIFIED against the dashboard's own router, not assumed: the card
+    // proposed #indexintel, but v8_dashboard.html line ~4995 reads
+    // TABS=['index','v14','tcscan','bt'] and falls back to the Master pane on any unknown hash.
+    // #indexintel would therefore have opened Master silently and looked like a working link.
+    + '<a class="tool" href="/dashboard#index"><span>\u25d0</span>Index Intel</a>'
+    + '<a class="tool" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
+    + '<a class="tool" href="/v15"><span>\u25c9</span>V15 MF</a>';
   document.getElementById('body').appendChild(tools);
 }).catch(function(e){
   document.getElementById('body').innerHTML =
