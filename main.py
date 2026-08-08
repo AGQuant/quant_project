@@ -326,6 +326,32 @@ def _find_outside_comments(hay: bytes, needle: bytes) -> int:
         return i                          # the comment closed before it -> real markup
 
 
+_INERT_SCRIPT = re.compile(rb"<script\b[^>]*>.*?</script>", re.S | re.I)
+_INERT_COMMENT = re.compile(rb"<!--.*?-->", re.S)
+
+
+def _present_in_markup(body: bytes, needle: bytes) -> bool:
+    """cc#914: is `needle` REAL MARKUP in `body`, rather than page prose or page code?
+
+    cc#821 fixed this class once, for </head>, by skipping HTML comments. It bit again today from
+    the other side: a JAVASCRIPT comment inside <script> on mobile/home.html explained the
+    injection rule and quoted the mobile.css link tag verbatim. The guard below is a bare
+    substring test, so it matched that explanation, concluded the page already had the shared
+    stylesheet, and skipped the ENTIRE _MOBILE_HEAD block — which is how every C·A·R·D component
+    silently vanished from /m/home while the page itself looked fine.
+
+    An asset-presence test must not be fooled by a document TALKING about the asset. Script
+    bodies and HTML comments are both blanked before the search, so neither prose nor code can
+    disable the shared-asset layer again.
+
+    The cheap substring test runs first and the strip only happens to CONFIRM a hit, so the
+    common case (page does not have the tag) costs exactly what it did before."""
+    if needle not in body:
+        return False
+    stripped = _INERT_COMMENT.sub(b"", _INERT_SCRIPT.sub(b"<script></script>", body))
+    return needle in stripped
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     # cc#866: PROTECTED/_PWA_INJECT_PATHS are EXACT-match sets, but /preview/{name} is dynamic —
@@ -371,7 +397,8 @@ async def auth_gate(request: Request, call_next):
             # changed nothing — a commented-out tag cannot be cache-busted.
             # Matches inside HTML comments are now skipped, so no future comment can disable the
             # entire shared-asset layer by mentioning a tag name.
-            if b'href="/static/mobile.css"' not in body:
+            # cc#914: was a bare `not in body` test — see _present_in_markup for what that cost.
+            if not _present_in_markup(body, b'href="/static/mobile.css"'):
                 _at = _find_outside_comments(body, b"</head>")
                 if _at < 0:
                     _at = _find_outside_comments(body, b"</body>")

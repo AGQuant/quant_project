@@ -1410,6 +1410,13 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
 .fr .frh:first-child{margin-top:0}
 .frr{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-top:1px solid var(--line);min-height:32px}
 .frr:first-of-type{border-top:0}
+/* cc#913: sub-heading inside a report section. The payload is two levels deep (extras alone
+   carries pivot, range52, percentile, earnings, volume, delivery, segment_ctx, tier1) and until
+   now the second level printed "[object Object]". deepRows renders each nested object under one
+   of these, lighter than .frh so a section still reads as one block. */
+.frs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--mut);padding:9px 0 3px;
+  border-top:1px solid var(--line);margin-top:4px}
 .frr .k2{font-size:11.5px;color:var(--mut);flex:1;text-transform:capitalize}
 .frr .v2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;text-align:right}
 .tbl{width:100%;border-collapse:collapse;font-size:10.5px}

@@ -689,9 +689,9 @@ function renderV10(){
 
    SCRIPT LOADING — the card asked me to add five <script src> tags after verifying each route.
    VERIFIED, AND NO TAGS WERE ADDED, because all of them are already on the page: /m/home is in
-   PROTECTED (main.py, cc#874), and auth_gate injects _MOBILE_HEAD into </head> for any protected
-   page whose body lacks href="/static/mobile.css" — which this page does, since it links
-   mobile_app.css. _MOBILE_HEAD carries scorr_card_common.js, scorr_mobile_cards.js,
+   PROTECTED (main.py, cc#874), and auth_gate injects _MOBILE_HEAD into the head of any protected
+   page that does not already carry the shared mobile stylesheet link — this page carries the
+   mobile_app one instead. _MOBILE_HEAD carries scorr_card_common.js, scorr_mobile_cards.js,
    scorr_card_strip.js, results_card.js, scorr_chart_card.js, scorr_analysis_card.js and
    scorr_cockpit_card.js, in that dependency order, each stamped with the build id (cc#792/805).
    Adding the tags by hand would have loaded every one of them twice and duplicated the

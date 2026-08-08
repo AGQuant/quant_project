@@ -30,14 +30,22 @@
 </nav>
 
 <script>
-var STATE = { results: [], sel: 0, frOpen: false, fr: null, frSym: null };
+var STATE = { results: [], sel: 0, frOpen: false, fr: null, frSym: null,
+              sectors: null, secOpen: false, secAll: false };
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
+/* cc#913 — fmt() USED TO PRINT "[object Object]". String({hi,lo}) is "[object Object]", which is
+   15 characters, so it passed the <=28 length test and was rendered as a value. Every nested
+   object in the payload printed that literal string on the founder's screen: extras.pivot,
+   extras.range52, extras.percentile, extras.earnings, extras.volume, extras.delivery,
+   extras.segment_ctx, extras.tier1 — the whole MARKET CONTEXT section. Objects are now REFUSED
+   here and unpacked by deepRows() instead, which is where they belong. */
 function fmt(v){
   if (v == null) return '--';
   if (typeof v === 'number') return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-IN') : (Math.round(v*100)/100).toString();
+  if (typeof v === 'object') return null;
   var s = String(v); return s.length <= 28 ? s : null;
 }
 function px(v){
@@ -70,6 +78,40 @@ function kvRows(obj){
          + '<span class="v2">' + esc(s) + '</span></div>';
   });
   return out;
+}
+/* cc#913 — the payload is two levels deep and only the first was ever shown. extras alone holds
+   pivot, range52, percentile, earnings, volume, delivery, segment_ctx and tier1, each an object
+   of real numbers, and all of them were collapsing to "[object Object]". deepRows walks ONE
+   level in: scalars render as rows, a nested object renders under its own sub-heading, a list of
+   objects renders as a table, a list of scalars is joined. Depth stops at one — deeper than that
+   is a data browser, not a company view. */
+function deepRows(obj){
+  var flat = '', nested = '';
+  Object.keys(obj).forEach(function(k){
+    var v = obj[k];
+    if (v == null) return;
+    var label = esc(k.replace(/_/g,' '));
+    if (Array.isArray(v)){
+      if (!v.length) return;
+      if (typeof v[0] === 'object' && v[0] !== null){
+        var t = arrTable(v);
+        if (t) nested += '<div class="frs">' + label + '</div>' + t;
+      } else {
+        flat += '<div class="frr"><span class="k2">' + label + '</span>'
+              + '<span class="v2">' + esc(v.slice(0, 8).join(', ')) + '</span></div>';
+      }
+      return;
+    }
+    if (typeof v === 'object'){
+      var inner = kvRows(v);
+      if (inner) nested += '<div class="frs">' + label + '</div>' + inner;
+      return;
+    }
+    var sc = fmt(v);
+    if (sc != null) flat += '<div class="frr"><span class="k2">' + label + '</span>'
+                          + '<span class="v2">' + esc(sc) + '</span></div>';
+  });
+  return flat + nested;   // scalars first, then the sub-blocks
 }
 function arrTable(list){
   if (!list.length || typeof list[0] !== 'object') return '';
@@ -148,7 +190,7 @@ function frBlock(){
     var v = d[k];
     if (v == null || typeof v !== 'object' || done[k] || HIDE[k]) return '';
     done[k] = 1;
-    var inner = Array.isArray(v) ? arrTable(v) : kvRows(v);
+    var inner = Array.isArray(v) ? arrTable(v) : deepRows(v);
     return section(TITLES[k] || k.replace(/_/g,' ').toUpperCase(), inner);
   }
   KNOWN.forEach(function(k){ out += renderKey(k); });
@@ -231,6 +273,54 @@ function toggleFR(sym){
     render();
   });
 }
+/* ══ cc#913: SECTOR RATINGS ═════════════════════════════════════════════════════════════════
+   The one old-app GVM surface with NO counterpart on the rebuilt screen. sector_ratings holds
+   130 rows scored the same night as the stocks (verified: 130 segments, mcap-weighted GVM 4.80
+   to 7.29), and /api/sectors with no segment argument is the web's own read of it — reused
+   exactly, so the app and the web cannot disagree about a sector score (DISPLAY_PARITY 16202).
+   Ranked by MCAP-WEIGHTED GVM, which is the column the web orders by; the simple average is
+   shown beside it because the two differ and a reader should see both rather than be handed one
+   and told it is "the" sector score. Top stock per sector is the row's own top_stock. */
+function secRow(x, i){
+  var mw = x.mcap_weighted_gvm, av = x.avg_gvm;
+  return '<div class="g-lrow">'
+    + '<span class="rk">' + (i + 1) + '</span>'
+    + '<div><div class="rs">' + esc(x.segment || '--') + '</div>'
+    + '<div class="rg">' + (x.stock_count == null ? '' : esc(x.stock_count) + ' stocks')
+    + (x.top_stock ? ' · top <b class="rsym">' + esc(x.top_stock) + '</b>' : '')
+    + (x.verdict ? ' · ' + esc(x.verdict) : '') + '</div></div>'
+    + '<span class="sc" style="color:' + scoreCol(mw) + '">' + n1(mw) + '</span>'
+    + '<span class="rg" style="min-width:34px;text-align:right">' + n1(av) + '</span>'
+    + '</div>';
+}
+function secBlock(){
+  if (STATE.sectors === 'loading') return '<div class="loading" style="padding:6px 2px">Loading sector ratings…</div>';
+  var rows = STATE.sectors;
+  if (!rows) return '';
+  if (rows.error || !rows.length)
+    return '<div class="sum" style="padding:6px 2px">Sector ratings unavailable.</div>';
+  var shown = STATE.secAll ? rows : rows.slice(0, 12);
+  return '<div class="frr"><span class="k2">sector</span>'
+    + '<span class="v2">mcap-wtd · simple</span></div>'
+    + shown.map(secRow).join('')
+    + (rows.length > shown.length
+        ? '<button class="chip" onclick="secMore()">Show all ' + rows.length + ' sectors</button>'
+        : '');
+}
+function secMore(){ STATE.secAll = true; render(); }
+function toggleSec(){
+  STATE.secOpen = !STATE.secOpen;
+  if (STATE.secOpen && STATE.sectors == null){
+    STATE.sectors = 'loading'; render();
+    fetchWithTimeout('/api/sectors')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ STATE.sectors = Array.isArray(d) ? d : (d && d.error ? d : []); render(); })
+      .catch(function(e){ STATE.sectors = {error: e.message}; render(); });
+    return;
+  }
+  render();
+}
+
 function render(){
   var rs = STATE.results;
   if (!rs.length){
@@ -249,6 +339,15 @@ function render(){
       + '<span class="sc" style="color:' + scoreCol(x.gvm) + '">' + n1(x.gvm) + '</span>'
       + '<span class="g-chev">&#8250;</span></div>';
   }).join('');
+  /* cc#913: sector ratings, the old-app surface the rebuilt screen never carried. Folded rather
+     than always-open so the stock leaderboard stays the first thing read. */
+  h += '<div class="sect">SECTORS \u00b7 GVM BY SEGMENT</div>'
+    + '<div class="c"><div class="chd"><div class="t">Sector ratings</div>'
+    + '<div class="rgt"><button class="chip" onclick="toggleSec()">'
+    + (STATE.secOpen ? 'Hide \u25b4' : 'Show \u25be') + '</button></div></div>'
+    + (STATE.secOpen ? secBlock()
+        : '<div class="sum">130 segments scored nightly, ranked by mcap-weighted GVM.</div>')
+    + '</div>';
   document.getElementById('body').innerHTML = h;
 }
 function pick(i){ STATE.sel = i; STATE.frOpen = false; STATE.fr = null; render();
