@@ -384,8 +384,18 @@ async def auth_gate(request: Request, call_next):
             # after its inline scripts have already called loadAll()/loadNews()/loadDataIntegrity().
             # Stamp that hardcoded tag with the build id here, so it can never serve a day-stale
             # cached bundle the way an unstamped max-age=86400 URL would.
-            body = body.replace(b'src="/scorr_card_common.js"',
-                                b'src="/scorr_card_common.js?v=' + _BUILD_B + b'"')
+            # cc#918: this stamped scorr_card_common.js ONLY, and five mobile templates
+            # (v8, check, holdings, positions, screeners) hardcode the other five card files with a
+            # plain src as well. Those are served max-age=86400, so a phone could hold a day-old
+            # copy — and worse than merely stale: the hardcoded tags are BLOCKING and run before the
+            # deferred injected ones, while every card file guards itself against double-init
+            # (`if (window.ScorrCardStrip) return`). A cached copy therefore WINS and the fresh
+            # injected one becomes a no-op. Stamping all six makes each hardcoded URL identical to
+            # its injected twin, so it is both cache-busted and de-duplicated to one fetch.
+            for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
+                        b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js"):
+                body = body.replace(b'src="/' + _js + b'"',
+                                    b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)
             # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
             # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal

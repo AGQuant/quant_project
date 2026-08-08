@@ -634,6 +634,34 @@
     + 'body.mcards .symsheet-strip{display:flex;justify-content:center;padding:4px 0 2px}'
     + 'body.mcards .symsheet-strip .scorr-cs-b{width:52px;height:52px;border-radius:12px;'
     + '  font-size:17px;margin:0 5px}'
+    /* ── cc#918: the three overlays cc#917 could not verify at push time ──────────────────────
+       C = #scorrChartOv / #scorrChartBoxWrap, A = #scorrAnaOv / .sa-box, D = #dcOv / .dc-sheet.
+       Selectors read out of the three files, not assumed.
+       WHY !important, verified per target rather than sprinkled: the CHART overlay and its wrap
+       are styled by INLINE cssText (position/align-items/padding on the overlay; width/max-height/
+       border-radius on the wrap), and inline beats any selector, so those genuinely need it. The
+       analysis and cockpit rules are stylesheet rules at (1,1,0) which body.mcards … out-specifies
+       at (1,2,0) — !important is kept there only so all six read the same way. */
+    + 'body.mcards #scorrChartOv, body.mcards #scorrAnaOv, body.mcards #dcOv{'
+    + '  align-items:flex-end!important;justify-content:center!important;padding:0!important}'
+    + 'body.mcards #scorrChartBoxWrap, body.mcards #scorrAnaOv .sa-box, body.mcards #dcOv .dc-sheet{'
+    + '  width:100%!important;max-width:100%!important;margin:0!important;'
+    + '  max-height:90vh!important;border-radius:18px 18px 0 0!important;'
+    + '  animation:sheetUp .22s ease}'
+    /* safe-area padding and the drag notch go ONLY on the two boxes that scroll their own content.
+       #scorrChartBoxWrap is a flex column with overflow:hidden holding a fixed-height chart — a
+       pseudo-element would eat flex height and bottom padding would clip the canvas, so it gets
+       the sheet shape without either. */
+    + 'body.mcards #scorrAnaOv .sa-box, body.mcards #dcOv .dc-sheet{'
+    + '  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))!important}'
+    + 'body.mcards #scorrAnaOv .sa-box:before, body.mcards #dcOv .dc-sheet:before{content:"";'
+    + '  display:block;width:38px;height:4px;border-radius:2px;'
+    + '  background:var(--line2,rgba(148,166,210,.35));margin:8px auto 2px}'
+    /* thumb-size close targets. #scorrAnaX carries inline width/height:28px, so it needs the
+       override; #scorrChartClose has no inline box at all and only needs the size. */
+    + 'body.mcards #scorrChartClose, body.mcards #scorrAnaX{width:44px!important;height:44px!important;'
+    + '  min-width:44px!important;min-height:44px!important;font-size:18px!important}'
+    + 'body.mcards #dcOv .back{min-height:44px;display:flex;align-items:center}'
     + '}';
 
   function inject() {
@@ -664,7 +692,12 @@
       if (cs.position !== 'fixed') return false;
       var r = el.getBoundingClientRect();
       if (r.width < window.innerWidth * 0.9 || r.height < window.innerHeight * 0.9) return false;
-      return !!el.querySelector('[role="dialog"],.rcard,.scorr-ml,.symsheet-bd');
+      /* cc#918: none of the chart/analysis/cockpit inner boxes carry role="dialog" (checked all
+         three files), so the uniform backdrop contract skipped them. Each of those components
+         does self-close on its own backdrop click, so tap-outside was never broken — but Escape
+         and closeAll() only reach them once they are recognised here, so the list is extended. */
+      return !!el.querySelector('[role="dialog"],.rcard,.scorr-ml,.symsheet-bd,'
+        + '#scorrChartBoxWrap,.sa-box,.dc-sheet');
     } catch (e) { return false; }
   }
   function onTap(e) {
