@@ -871,8 +871,12 @@ function loadV10(barsArg){
       if (V10.sym !== want) return;              // a fast double-tap must not draw the wrong index
       if (d && d.error) throw new Error(d.error);
       V10.data = d;
-      // newest trade selected on open, so the chart carries visible labels without a tap
-      V10.sel = (d.trades && d.trades.length) ? d.trades[d.trades.length - 1].id : null;
+      /* cc#972: the chart now OPENS CLEAN. cc#951 pre-selected the newest trade so the chart
+         would "carry visible labels without a tap" — that was the right call when labels were the
+         resting state. They are not any more: the rail states every event, and a pre-selection
+         would put one worded label on a chart the card says must open with no text in the price
+         area at all. Selection is now something the founder asks for, not something he arrives to. */
+      V10.sel = null;
       renderV10();
     })
     .catch(function(e){
@@ -997,7 +1001,11 @@ function v10Svg(d){
   var w = v10Window(d);
   var s = all.slice(w.from, w.to), n = s.length;
   if (n < 2) return '<div class="sum">Not enough price history for this window.</div>';
-  var W = 360, H = 200, PL = 4, PR = 42, PT = 16, PB = 20;
+  /* cc#972: PB was 20 (the date axis alone). It is now 44 — 24px of EVENT RAIL plus the same
+     20px axis, so the rail is carved out of the plot exactly as the card specifies and the date
+     labels keep their original position at H-5. Plot height goes 164 -> 140. */
+  var W = 360, H = 200, PL = 4, PR = 42, PT = 16, PB = 44;
+  var RAIL_TOP = H - PB + 2, RAIL_GY = RAIL_TOP + 7, RAIL_CY = RAIL_TOP + 19;
   var lo = Infinity, hi = -Infinity;
   s.forEach(function(p){ if (p.c < lo) lo = p.c; if (p.c > hi) hi = p.c; });
   /* cc#941: index on `day`, not `d`. In 5-min mode `d` is "YYYY-MM-DD HH:MM" and a pin carries a
@@ -1032,25 +1040,21 @@ function v10Svg(d){
   out.push('<polyline points="' + pts + '" fill="none" stroke="var(--blu,#4D7CFE)"'
     + ' stroke-width="1.6" stroke-linejoin="round"/>');
 
-  /* ══ cc#951 + cc#952 — THE CHART SAYS THE TRADE ══════════════════════════════════════════
-     Founder: instead of an arrow and a cross, the chart should read BUY 58,004 and SL HIT 57,839.
-     The renderer for exactly those strings already existed — it was gated behind selection — so
-     this promotes it to the default and shrinks the shapes to anchors.
+  /* ══ cc#972 — THE EVENTS MOVED TO A RAIL ════════════════════════════════════════════════
+     SUPERSEDES cc#951's always-on labels and DELETES its LABEL_MAX_PINS threshold entirely.
+     cc#951 gated worded labels on a pin count (12 at the cc#952 360-bar window) on the theory
+     that density was the only problem. It was not a threshold problem: at 360 bars the founder's
+     own window carries enough events that the labels become a text wall over the price line, and
+     any constant I picked would just move the wall a few pins further out.
 
-     WHY THE OLD OBJECTION NO LONGER HOLDS. The always-on-labels idea was refused once, for a
-     3-month window carrying 45 markers; a wall of text on a dense page is unreadable. That
-     objection was about DENSITY, not about labels, and it comes back the moment a panned window
-     is dense again — so the labels are gated on the pin COUNT, not switched on unconditionally.
-     cc#952 raises the first window to 360 bars (~4.8 sessions), and a week of V10 runs roughly
-     5-10 pins, so the threshold is 12: at or below it every pin is labelled by default, above it
-     the chart falls back to dots-only until a tap. Change the window and this number moves with
-     it — it is a density rule, not a magic constant.
+     RESTING STATE: the price area carries NO TEXT. Dots at the exact price points, the open
+     position's dashed level, and nothing else. Every event is stated once, in a rail under the
+     plot: a glyph at the event's true x with a 2-3 letter code beneath it, and a faint tick
+     rising toward its dot so the eye can pair them without a line cutting the chart.
+     TAP STATE: the worded cc#951 string (BUY 24,615 / TARGET HIT 24,774) and its colours come
+     back for the ONE selected trade, with the tick promoted to a full-height guide.
 
-     EXIT LABELS SHOW THE EXIT PRICE, not the P&L, per the founder's wording. The money stays in
-     the log and in the selected state; the chart answers "what happened and at what level". */
-  var LABEL_MAX_PINS = 12;                              // cc#952 (was 6 at the 90-bar window)
-  var vis = (d.pins || []).filter(function(p){ return inWin[p.d] !== undefined; });
-  var labelAll = vis.length <= LABEL_MAX_PINS;
+     So the labels were not deleted — they stopped being the resting state. */
 
   function pinCol(p){
     if (p.kind !== 'exit') return (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
@@ -1068,7 +1072,32 @@ function v10Svg(d){
     return (r === 'TARGET' ? 'TARGET HIT ' : r === 'SL' ? 'SL HIT ' : r + ' ') + px;
   }
 
-  var selPins = [], labels = [];
+  /* code + glyph per event kind. FLIP is resolved after grouping, below. */
+  function pinCode(p){
+    if (p.kind === 'open') return 'O';
+    if (p.kind !== 'exit') return (p.side === 'BUY') ? 'B' : 'S';
+    var r = String(p.reason || '').toUpperCase();
+    return (r === 'TARGET') ? 'T' : (r === 'SL') ? 'SL' : 'X';
+  }
+  function railGlyph(p, x, cy, col, op){
+    var g = '';
+    if (p.kind === 'open')
+      g = '<circle cx="' + x.toFixed(1) + '" cy="' + cy + '" r="3.4" fill="none" stroke="' + col
+        + '" stroke-width="1.4"/>';
+    else if (p.kind !== 'exit'){
+      /* entry: triangle points the way the trade is facing — up for BUY, down for SELL. */
+      var up = (p.side === 'BUY');
+      g = up
+        ? '<path d="M' + x.toFixed(1) + ' ' + (cy - 4) + 'l4 7h-8z" fill="' + col + '"/>'
+        : '<path d="M' + x.toFixed(1) + ' ' + (cy + 4) + 'l4 -7h-8z" fill="' + col + '"/>';
+    } else {
+      g = '<path d="M' + x.toFixed(1) + ' ' + (cy - 4.2) + 'l4.2 4.2l-4.2 4.2l-4.2 -4.2z" fill="'
+        + col + '"/>';
+    }
+    return '<g opacity="' + op + '">' + g + '</g>';
+  }
+
+  var selPins = [], labels = [], rail = [];
   (d.pins || []).forEach(function(p){
     var i = inWin[p.d];
     if (i === undefined) return;                    // outside the visible window
@@ -1097,8 +1126,11 @@ function v10Svg(d){
       + '" opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
 
     if (isSel) selPins.push({x: x, y: y, p: p, entry: entry});
-    if (labelAll || isSel)
-      labels.push({x: x, y: y, p: p, entry: entry, col: col, op: (isSel ? '1' : op)});
+    /* cc#972: a label ONLY for the selected trade. Nothing else writes text in the price area. */
+    if (isSel)
+      labels.push({x: x, y: y, p: p, entry: entry, col: col, op: '1'});
+    rail.push({x: x, y: y, i: i, p: p, col: col, sel: isSel, dim: dim,
+               code: pinCode(p), entry: entry});
   });
 
   /* the connector between a selected trade's entry and exit stays — it is the one thing a label
@@ -1138,6 +1170,88 @@ function v10Svg(d){
       + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"'
       + ' font-family="IBM Plex Mono,monospace">' + esc(txt) + '</text>');
   });
+  /* ══ cc#972 THE RAIL ═══════════════════════════════════════════════════════════════════════
+     FLIP FIRST. A flip signal closes one trade and opens the opposite one in the same session, so
+     two pins land on the SAME bar index. Drawing both would put a diamond and a triangle on top of
+     each other and print two codes in one place. Grouped by index: a group holding both an exit
+     and an entry is one FLIP marker, and its tap selects the ENTRY (the trade you are now in,
+     which is the one you want to read about). */
+  var byIdx = {};
+  rail.forEach(function(r){ (byIdx[r.i] = byIdx[r.i] || []).push(r); });
+  var marks = [];
+  Object.keys(byIdx).forEach(function(k){
+    var grp = byIdx[k];
+    var hasExit = grp.some(function(r){ return r.p.kind === 'exit'; });
+    var hasEntry = grp.some(function(r){ return r.p.kind !== 'exit' && r.p.kind !== 'open'; });
+    if (grp.length > 1 && hasExit && hasEntry){
+      /* merge ONLY the close+open pair. Anything else sharing the bar — an OPEN position marker,
+         a second exit — keeps its own glyph: folding it into FLIP would delete an event from the
+         rail, and the rail's whole job is that every event is stated exactly once. */
+      var ent = null, ex = null, rest = [];
+      grp.forEach(function(r){
+        if (!ex && r.p.kind === 'exit') ex = r;
+        else if (!ent && r.p.kind !== 'exit' && r.p.kind !== 'open') ent = r;
+        else rest.push(r);
+      });
+      marks.push({x: ent.x, y: ent.y, p: ent.p, col: ent.col, code: 'FLIP', flip: true,
+                  sel: (ent.sel || ex.sel), dim: (ent.dim && ex.dim), exCol: ex.col});
+      rest.forEach(function(r){ marks.push(r); });
+    } else {
+      grp.forEach(function(r){ marks.push(r); });
+    }
+  });
+  marks.sort(function(a, b){ return a.x - b.x; });
+
+  /* the tick. At rest it is a stub rising a little way toward the dot at 0.25 alpha — enough to
+     pair marker and point, not enough to draw a grid over the price line. Selected, it becomes
+     the full-height guide the card asks for. */
+  marks.forEach(function(m){
+    if (m.sel){
+      out.push('<line x1="' + m.x.toFixed(1) + '" y1="' + PT + '" x2="' + m.x.toFixed(1)
+        + '" y2="' + RAIL_TOP + '" stroke="' + m.col + '" stroke-width="1" opacity=".55"/>');
+    } else {
+      var top = Math.max(m.y + 6, RAIL_TOP - 14);   // a stub, never all the way to the dot
+      out.push('<line x1="' + m.x.toFixed(1) + '" y1="' + top.toFixed(1) + '" x2="' + m.x.toFixed(1)
+        + '" y2="' + RAIL_TOP + '" stroke="' + m.col + '" stroke-width="1" opacity="'
+        + (m.dim ? '.12' : '.25') + '"/>');
+    }
+  });
+
+  /* glyphs at their TRUE x, always. They may touch — the card allows that — because moving a
+     glyph would put the event at a time it did not happen. A flip shows both colours: the exit's
+     diamond behind, the entry's triangle in front. */
+  marks.forEach(function(m){
+    var op = m.sel ? '1' : (m.dim ? '.45' : '1');
+    if (m.flip)
+      out.push('<path d="M' + m.x.toFixed(1) + ' ' + (RAIL_GY - 4.2) + 'l4.2 4.2l-4.2 4.2l-4.2 -4.2z"'
+        + ' fill="' + m.exCol + '" opacity="' + (m.sel ? '.85' : '.5') + '"/>');
+    out.push(railGlyph(m.p, m.x, RAIL_GY, m.col, op));
+    /* the whole marker is the tap target, sized for a thumb rather than for the glyph. */
+    out.push('<rect x="' + (m.x - 11).toFixed(1) + '" y="' + RAIL_TOP + '" width="22" height="24"'
+      + ' fill="transparent" style="cursor:pointer" onclick="v10Sel(' + m.p.id + ')"/>');
+  });
+
+  /* CODES. Left to right, each one checked against the last PLACED code: nudge up to 5px to clear
+     it, and if that is not enough, drop this code and keep its glyph. Dropping beats nudging
+     further — a code shifted far enough to sit under a different glyph is worse than no code, and
+     the card explicitly prefers glyphs-only at extreme density. Codes never overprint. */
+  var lastRight = -1e9;
+  marks.forEach(function(m){
+    var half = m.code.length * 2.4 + 1.2;            // ~4.8px/char at 8px Plex Mono
+    var cx = m.x, left = cx - half;
+    if (left < lastRight){
+      var shift = lastRight - left;
+      if (shift > 5) return;                         // too tight: glyph only
+      cx += shift; left = cx - half;
+    }
+    lastRight = cx + half;
+    out.push('<text x="' + cx.toFixed(1) + '" y="' + RAIL_CY + '" text-anchor="middle"'
+      + ' font-size="8" font-weight="700" fill="' + m.col + '" opacity="'
+      + (m.sel ? '1' : (m.dim ? '.45' : '.8')) + '" style="cursor:pointer"'
+      + ' onclick="v10Sel(' + m.p.id + ')" font-family="IBM Plex Mono,monospace">'
+      + esc(m.code) + '</text>');
+  });
+
   out.push('<text x="' + PL + '" y="' + (H - 5) + '" font-size="9" fill="var(--dim,#5E6B8F)"'
     + ' font-family="IBM Plex Mono,monospace">' + esc(dlab(s[0].d)) + '</text>');
   out.push('<text x="' + (W - PR).toFixed(1) + '" y="' + (H - 5) + '" text-anchor="end" font-size="9"'
