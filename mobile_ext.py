@@ -461,6 +461,11 @@ def mobile_v8book(request: Request):
         # brokerage, wins = TARGET, losses = SL) is not repeated here — it now lives in exactly one
         # place, v8_book_canon, and this page consumes it like every other surface.
         "closed_count": len(closed),
+        # cc#976: the canon's own `trades` key ships too. closed_count is the length of the LIST
+        # this endpoint returns; `trades` is the canon's closed-trade count. They agree today, but
+        # the stat row must read the canon key so /m/v8 and Home cannot diverge if the list is ever
+        # capped or paged.
+        "trades": canon["trades"],
         "closed": closed,
         "realised": canon["realised"],
         "gross": canon["gross"],

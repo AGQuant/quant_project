@@ -38,11 +38,15 @@
 .slotbar .sv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;margin-top:2px}
 
 /* 2 · BOOK STAT ROW */
-.bstats{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;margin:0 12px 9px}
+/* cc#976: THREE tiles, not four — one per fact about the active tab. Three cells at 360px get
+   107px each instead of 79px, which is what lets "Long / Short" and "net of Rs16,500" fit. */
+.bstats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin:0 12px 9px}
+.stfade{animation:stf .15s ease}
+@keyframes stf{from{opacity:0}to{opacity:1}}
 /* below ~360px four money cells in a row stop being readable however short the string is, so they
    become 2x2 instead of being squeezed. A wrap the layout CHOOSES is fine; a number broken in
    half is not. */
-@media (max-width:359px){.bstats{grid-template-columns:1fr 1fr}}
+@media (max-width:339px){.bstats{grid-template-columns:1fr 1fr}}
 .bst{min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
   padding:9px 5px;text-align:center}
 .bst .k{font-size:9px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
@@ -317,30 +321,48 @@ function moodBlock(){
    W/L RULE (card item 3): counts AND rate, and with no closed trades BOTH render "--", never a
    0% that reads like a real losing record. */
 function statsBlock(){
-  var b = STATE.book, sm = STATE.sm;
-  var wl = null, rate = null;
-  if (sm && (sm.wins != null || sm.losses != null)){
-    var w = sm.wins || 0, l = sm.losses || 0;
-    if (w + l > 0){ wl = w + '/' + l; rate = Math.round(w / (w + l) * 100) + '%'; }
-  }
+  /* ══ cc#976 — ONE REACTIVE STAT ROW ═══════════════════════════════════════════════════════
+     Was four static tiles ABOVE the tabs mixing both books at once: OPEN and UNREALISED describe
+     the open book, REALISED and WIN/LOSS describe the closed one, and whichever tab you were on,
+     half the row was about the other. Now it is THREE tiles that describe the ACTIVE tab, and it
+     sits UNDER the tabs because that is what it is describing.
+
+     Every figure comes from the cc#970 canon payload. Nothing is computed here — not the rate,
+     not the brokerage netting, not the side split. That is the whole point of rule 13, and it is
+     also why the old W/L rate arithmetic in this function is gone rather than moved. */
+  var b = STATE.book;
+  if (!b) return '';
+  var open = STATE.page === 'open';
   function cell(k, v, p, c){
     return '<div class="bst"><div class="k">' + k + '</div>'
       + '<div class="v ' + (c || '') + '">' + v + '</div>'
       + '<div class="p">' + (p || '') + '</div></div>';
   }
-  return '<div class="bstats">'
-    + cell('Open', (b ? b.open : '--'), (b && b.deployed != null ? inrShort(b.deployed) + ' in' : ''))
-    + cell('Unrealised', (b ? inrShort(b.unrealised) : '--'),
-           (b && b.unrealised_pct != null ? pctv(b.unrealised_pct) : ''), b ? cls(b.unrealised) : '')
-    + cell('Realised', (sm ? inrShort(sm.realised) : '--'),
-           (sm ? sm.trades + ' closed' : ''), sm ? cls(sm.realised) : '')
-    /* cc#924: colour by QUALITY, not by "we have a number". It was green whenever wl was
-       truthy, so a 2W/8L record rendered green. RULE CHOSEN: colour by the win RATE, because the
-       rate is what the cell displays — >= 50% green, below red, and NEUTRAL (no colour) when
-       there are no closed trades, where "--" must not look like a loss either. */
-    + cell('Win/Loss', (wl || '--'), (rate || ''),
-           rate == null ? '' : (parseInt(rate, 10) >= 50 ? 'grn' : 'redx'))
-    + '</div>';
+  var cells;
+  if (open){
+    var L = b.long || {}, S = b.short || {};
+    var split = ((L.n || 0) + '/' + (S.n || 0));
+    cells = cell('Open', (b.open != null ? b.open : '--'),
+                 (b.deployed != null ? inrShort(b.deployed) + ' in' : ''))
+          + cell('Unrealised', inrShort(b.unrealised),
+                 (b.unrealised_pct != null ? pctv(b.unrealised_pct) : ''), cls(b.unrealised))
+          + cell('Long / Short', split, 'open per side');
+  } else {
+    /* ACCURACY prints a dash, never 0%, when nothing is decided — the cc#912 rule, and the canon
+       already returns null rather than a zero for exactly this reason. Colour follows the RATE,
+       not the mere presence of a number: a 2W/8L record must not render green. */
+    var r = b.win_rate;
+    cells = cell('Trades', (b.trades != null ? b.trades : '--'), 'closed')
+          + cell('Accuracy', (r == null ? '--' : Math.round(r) + '%'),
+                 (b.decided ? (b.wins + 'W/' + b.losses + 'L') : 'no verdicts'),
+                 r == null ? '' : (r >= 50 ? 'grn' : 'redx'))
+          + cell('Net', inrShort(b.realised),
+                 (b.brokerage ? 'net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN') : 'net'),
+                 cls(b.realised));
+  }
+  /* keyed on the page so the browser rebuilds the node on a tab change and the fade actually
+     runs; without the key it would patch text in place and never animate. */
+  return '<div class="bstats stfade" data-page="' + (open ? 'open' : 'realised') + '">' + cells + '</div>';
 }
 
 /* ══ 3 · INSTRUMENT SWITCH ═════════════════════════════════════════════════════════════════
@@ -636,32 +658,19 @@ function bookHeader(b){
      rate appears on the realised page only, because an open book has not won or lost anything
      yet, and a rate that counts unrealised P&L as a "win" would be a claim about a trade that is
      still running. A dash, never 0%, when nothing has closed. */
-  var tot = '<div class="bktot"><b class="' + cls(v) + '">' + inr(v) + '</b>'
-    + '<span>' + (_fn != null
-        ? (_fn + (open ? ' open' : ' closed') + ' · filtered')
-        : (open ? (b.open || 0) + ' open' : (b.closed_count || 0) + ' closed'))
-    + (pctv2 == null ? '' : ' · ' + pctv(pctv2))
-    /* cc#950: the realised figure is NET of brokerage and the win rate counts DECIDED trades
-       only (TARGET/SL), so the strip states both. A net number shown as if it were gross, or a
-       rate whose denominator is not the trade count beside it, is exactly the quiet mismatch the
-       founder would have to reverse-engineer. Both now equal the Home tile. */
-    /* cc#968: the win rate, the brokerage note and the Long/Short split are WHOLE-BOOK facts.
-       With a chip active the number to their left is a filtered subtotal, so printing them
-       unchanged beside it would read as the filtered subset's record — which it is not. They are
-       suppressed while filtered rather than recomputed: a per-slice win rate is a different claim
-       and the canon (cc#970) does not publish one. */
-    + ((open || _fn != null) ? ''
-        : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%')
-              + (b.decided ? ' of ' + b.decided + ' decided' : '')
-              + (b.brokerage ? ' · net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN')
-                                 + ' brokerage' : ''))
-    /* cc#961 item 4: the OVERALL rate above stays — this page keeps it. The per-side split is
-       added beneath so /m/v8 and the Home realised face tell one story about one book. Same
-       payload shape as /api/mobile/home2 rec_long/rec_short, so neither page divides for itself.
-       A side with nothing decided prints a dash, never 0%. */
-    + ((open || _fn != null) ? '' : sideSplit(b))
-    + '</span></div>';
-  return seg + tot;
+  /* cc#976 item 3 — THE BIG HEADLINE IS GONE. It printed the same unrealised/realised figure the
+     stat row prints one line below it, so the page stated its own P&L twice. What the headline
+     carried that the tiles do not is the FILTER state, so that survives as a thin line and only
+     when a chip is active: unfiltered, the tiles say it all and this renders nothing.
+     The whole-book win rate / brokerage / side-split tail that cc#968 gated is gone with it —
+     those facts now live in the REALISED tiles, where they belong to the tab that owns them. */
+  var line = '';
+  if (_fn != null){
+    var _sv = _known ? _sum : null;
+    line = '<div class="bktot"><b class="' + cls(_sv) + '">' + inr(_sv) + '</b>'
+      + '<span>' + _fn + (open ? ' open' : ' closed') + ' · filtered</span></div>';
+  }
+  return seg + statsBlock() + line;
 }
 
 function sideSplit(b){
@@ -825,7 +834,10 @@ function render(){
   document.getElementById('insw').innerHTML = inswBlock();
 
   /* founder layout, top to bottom: mood+slots, book stats, switch (in the header), positions */
-  var h = moodBlock() + statsBlock();
+  /* cc#976 item 2: statsBlock moved OUT of here. It describes the active book page, so it is
+     rendered by bookHeader() directly under the Unrealised/Realised tabs instead of floating
+     above them as a second, unrelated metrics surface. */
+  var h = moodBlock();
   /* cc#923 item 4: ONE as-of for the whole book, from the newest price stamp across positions —
      it was repeated on every card. cc#924 item 2: the futures reason is printed here, where a
      phone can actually read it, instead of in a hover title on a dead button. */
