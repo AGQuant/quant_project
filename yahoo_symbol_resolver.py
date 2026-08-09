@@ -177,45 +177,69 @@ def _probe(ticker: str, symbol: str, lookback: str):
 
 
 def resolve_symbol(symbol: str, bse: Optional[str] = None, name: Optional[str] = None,
-                   lookback: str = "5y", known: Optional[str] = None):
-    """Walk the candidate ladder for ONE symbol. Returns (ticker, rows, attempts, source).
+                   lookback: str = "5y", known: Optional[str] = None, fresh_by=None):
+    """Walk the candidate ladder for ONE symbol. Returns (ticker, rows, attempts, source, fresh).
 
-    ticker/rows are None/[] when nothing resolved — the caller then writes an exclusion row.
-    Every candidate tried is recorded in `attempts` with its bar count and failure reason, so a
-    later reader can see WHAT was tried, not just that it did not work.
+    FRESHNESS IS PART OF RESOLVING, not a detail — this is the correction that the first live run
+    forced. The first build stopped at the first candidate that returned ANY bars, and for a symbol
+    whose entire complaint is "frozen" that is the one answer guaranteed to be wrong: JBCHEPHARM.NS
+    still serves 1,228 bars, it just has nothing after 23-Jul, so the ladder declared victory on the
+    exact series that is stuck and never asked Yahoo whether the name had moved. A candidate now
+    only WINS if its newest bar is at least `fresh_by` (the newest price_date in raw_prices, i.e.
+    the last session the rest of the table has). Anything older is remembered as a fallback and the
+    ladder keeps walking.
+
+    If nothing fresh exists, the best stale candidate is still returned — with fresh=False — because
+    for a zero-row symbol five years of history ending last quarter beats nothing at all. The caller
+    records that as `stale_feed`, NOT as resolved: a series Yahoo has stopped updating is a finding
+    the founder needs to see, not a green tick.
     """
     symbol = (symbol or "").strip().upper()
     attempts = []
     tried = set()
+    best_stale = None   # (ticker, rows, source, last_date)
 
     def _try(ticker, source):
+        """Probe one candidate. Returns rows ONLY when they clear the freshness bar; otherwise the
+        candidate is banked as a possible stale fallback and we report 'not fresh enough'."""
+        nonlocal best_stale
         if not ticker or ticker in tried:
-            return None, []
+            return []
         tried.add(ticker)
         rows, reason = _probe(ticker, symbol, lookback)
-        attempts.append({"ticker": ticker, "source": source, "bars": len(rows), "reason": reason})
+        last = max((r[1] for r in rows), default=None)
+        fresh = bool(rows) and (fresh_by is None or (last is not None and last >= fresh_by))
+        attempts.append({"ticker": ticker, "source": source, "bars": len(rows),
+                         "last_date": str(last) if last else None, "fresh": fresh,
+                         "reason": reason if not rows else (None if fresh else "series_stale")})
         time.sleep(THROTTLE)
-        return (source if rows else None), rows
+        if rows and not fresh:
+            if best_stale is None or (last and best_stale[3] and last > best_stale[3]):
+                best_stale = (ticker, rows, source, last)
+            return []
+        return rows
 
     # 1 — a mapping we already learned. Re-verified, because a ticker can move twice.
     if known:
-        src, rows = _try(known, "existing_map")
+        rows = _try(known, "existing_map")
         if rows:
-            return known, rows, attempts, src
+            return known, rows, attempts, "existing_map", True
 
     # 2 — the default rule.
     nse = f"{symbol}.NS"
-    src, rows = _try(nse, "nse_suffix")
+    rows = _try(nse, "nse_suffix")
     if rows:
-        return nse, rows, attempts, src
+        return nse, rows, attempts, "nse_suffix", True
 
     # 3 — ask Yahoo. Search on the raw code first, then the company name if we have one; a code
-    #     that Yahoo has retired usually still resolves by name.
+    #     that Yahoo has retired usually still resolves by name. This is also where the NSE board
+    #     suffixes live that no append rule would ever produce: SME names are <SYM>-SM.NS, InvITs
+    #     are <SYM>-IV.NS, rights entitlements <SYM>-RR.NS. Seven of the first twelve were these.
     for q in [symbol] + ([name] if name else []):
         for cand in _search_tickers(q):
-            src, rows = _try(cand, f"search:{q}")
+            rows = _try(cand, f"search:{q}")
             if rows:
-                return cand, rows, attempts, src
+                return cand, rows, attempts, f"search:{q}", True
         time.sleep(THROTTLE)
 
     # 4 — explicit BSE numeric code, when the caller supplied one.
@@ -223,11 +247,15 @@ def resolve_symbol(symbol: str, bse: Optional[str] = None, name: Optional[str] =
         code = str(bse).split(".")[0].strip()
         if code and code.lower() not in ("none", "nan", ""):
             bo = f"{code}.BO"
-            src, rows = _try(bo, "bse_code")
+            rows = _try(bo, "bse_code")
             if rows:
-                return bo, rows, attempts, src
+                return bo, rows, attempts, "bse_code", True
 
-    return None, [], attempts, None
+    if best_stale:
+        t, rws, src, _last = best_stale
+        return t, rws, attempts, src, False
+
+    return None, [], attempts, None, False
 
 
 def resolve_and_backfill(symbols, lookback: str = "5y", specs=None) -> dict:
@@ -257,17 +285,25 @@ def resolve_and_backfill(symbols, lookback: str = "5y", specs=None) -> dict:
                        FROM gvm_scores WHERE UPPER(symbol) = ANY(%s)
                        ORDER BY UPPER(symbol), score_date DESC""", (syms,))
         names = {r[0]: r[1] for r in cur.fetchall()}
+        # The freshness bar: the newest price_date the table holds for ANY symbol — i.e. the last
+        # session the rest of the universe has priced. A candidate whose newest bar is older than
+        # that is not serving this symbol any more, whatever its history depth.
+        cur.execute("SELECT MAX(price_date) FROM raw_prices")
+        fresh_by = cur.fetchone()[0]
 
     report = []
     for sym in syms:
         sp = by_sym.get(sym, {})
-        ticker, rows, attempts, source = resolve_symbol(
+        ticker, rows, attempts, source, fresh = resolve_symbol(
             sym, bse=sp.get("bse"), name=sp.get("name") or names.get(sym),
-            lookback=lookback, known=known_map.get(sym))
+            lookback=lookback, known=known_map.get(sym), fresh_by=fresh_by)
         if rows:
             written = ydu._commit_rows({sym: rows})
             first, last = min(r[1] for r in rows), max(r[1] for r in rows)
             with _conn() as conn, conn.cursor() as cur:
+                # The map row is written either way — the nightly job still needs to know which
+                # ticker serves this symbol — but `source` carries the stale marker so nobody reads
+                # the table as a list of healthy feeds.
                 cur.execute("""INSERT INTO yahoo_symbol_map
                                  (symbol, yahoo_ticker, source, bars, first_date, last_date, resolved_at)
                                VALUES (%s,%s,%s,%s,%s,%s,NOW())
@@ -275,14 +311,21 @@ def resolve_and_backfill(symbols, lookback: str = "5y", specs=None) -> dict:
                                  yahoo_ticker=EXCLUDED.yahoo_ticker, source=EXCLUDED.source,
                                  bars=EXCLUDED.bars, first_date=EXCLUDED.first_date,
                                  last_date=EXCLUDED.last_date, resolved_at=NOW()""",
-                            (sym, ticker, source, len(rows), first, last))
+                            (sym, ticker, source if fresh else f"{source} (STALE)",
+                             len(rows), first, last))
                 # It works now, so it is no longer excluded. Leaving a stale exclusion behind
                 # would keep the nightly job skipping a symbol that has come back to life.
                 cur.execute("DELETE FROM price_feed_excluded WHERE UPPER(symbol)=%s", (sym,))
                 conn.commit()
-            report.append({"symbol": sym, "status": "resolved", "yahoo_ticker": ticker,
-                           "source": source, "bars_upserted": written,
-                           "first_date": str(first), "last_date": str(last), "attempts": attempts})
+            report.append({"symbol": sym,
+                           # A stale series is NOT a resolution. The bars are still ingested (five
+                           # years ending last quarter beats nothing for a dark symbol) but the
+                           # status says plainly that Yahoo has stopped updating this name.
+                           "status": "resolved" if fresh else "stale_feed",
+                           "yahoo_ticker": ticker, "source": source, "bars_upserted": written,
+                           "first_date": str(first), "last_date": str(last),
+                           "fresh_by": str(fresh_by) if fresh_by else None,
+                           "attempts": attempts})
         else:
             reason = (attempts[-1].get("reason") if attempts else None) or "no_candidate_resolved"
             with _conn() as conn, conn.cursor() as cur:
@@ -295,11 +338,15 @@ def resolve_and_backfill(symbols, lookback: str = "5y", specs=None) -> dict:
             report.append({"symbol": sym, "status": "excluded", "reason": reason, "attempts": attempts})
 
     resolved = [r for r in report if r["status"] == "resolved"]
+    stale = [r for r in report if r["status"] == "stale_feed"]
+    excl = [r for r in report if r["status"] == "excluded"]
     summary = {"attempted": len(syms), "resolved": len(resolved),
-               "excluded": len(report) - len(resolved),
-               "bars_upserted": sum(r.get("bars_upserted") or 0 for r in resolved),
+               "stale_feed": len(stale), "excluded": len(excl),
+               "fresh_by": str(fresh_by) if fresh_by else None,
+               "bars_upserted": sum(r.get("bars_upserted") or 0 for r in report),
                "resolved_symbols": [r["symbol"] for r in resolved],
-               "excluded_symbols": [r["symbol"] for r in report if r["status"] == "excluded"]}
+               "stale_symbols": [f"{r['symbol']}@{r['last_date']}" for r in stale],
+               "excluded_symbols": [r["symbol"] for r in excl]}
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
@@ -355,11 +402,20 @@ def price_excluded():
                            ORDER BY symbol""")
             rows = [{"symbol": r[0], "reason": r[1],
                      "checked_at": r[2].isoformat() if r[2] else None} for r in cur.fetchall()]
+            # A stale feed is the second kind of "do not trust this price". It is not in
+            # price_feed_excluded (bars DO exist), so it has to be reported here or it hides.
+            cur.execute("""SELECT symbol, yahoo_ticker, last_date FROM yahoo_symbol_map
+                           WHERE source LIKE '%%(STALE)' ORDER BY symbol""")
+            stale = [{"symbol": r[0], "yahoo_ticker": r[1],
+                      "last_date": str(r[2]) if r[2] else None} for r in cur.fetchall()]
         return {"count": len(rows), "excluded": rows,
-                "note": "no Yahoo EOD series on .NS, Yahoo search or .BO — price-dependent "
-                        "fields must show no-data for these, not a zero"}
+                "stale_count": len(stale), "stale_feeds": stale,
+                "note": "excluded = no Yahoo EOD series on .NS, Yahoo search or .BO. "
+                        "stale_feeds = a series exists but Yahoo stopped updating it on last_date. "
+                        "Price-dependent fields must show no-data for both, never a zero."}
     except Exception as e:
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "count": 0, "excluded": []}
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "count": 0, "excluded": [],
+                "stale_count": 0, "stale_feeds": []}
 
 
 @router.get("/api/feeds/symbol-map")
