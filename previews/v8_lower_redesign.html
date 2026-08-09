@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!-- PREVIEW · SAMPLE DATA ONLY · Fable first-build 09-Aug-2026
+     Replaces the /m/v8 lower section (legend box + empty signals stack + book nav cards)
+     with 3 expandable modules per founder spec. CC wiring card connects real data.
+     Data sources when wired: (1) canon daylog (cc#970 endpoint family)
+     (2) /api/v8/qualified per basket  (3) segment/universe data as on the web dashboard. -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V8 · Lower Redesign · PREVIEW</title>
+<style>
+:root{--bg:#0a0f1e;--panel:#121a2f;--panel2:#0e1526;--bd:#232c47;--tx:#e8ecf8;
+--dim:#8b96b8;--mut:#5a6485;--grn:#2fd08c;--red:#ff5d73;--blu:#6b8afd;--amb:#f5b544}
+*{margin:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--tx);font:15px/1.45 -apple-system,'Segoe UI',Roboto,sans-serif;padding:14px 12px 90px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.sec{font-size:11px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin:22px 2px 10px}
+.stamp{position:fixed;top:8px;right:10px;background:#3a2c10;color:var(--amb);font-size:10px;padding:3px 8px;border-radius:6px;letter-spacing:.08em;z-index:9}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:16px;margin-bottom:12px;overflow:hidden}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;min-height:52px;cursor:pointer}
+.hd h2{font-size:17px;font-weight:700}
+.hd .right{display:flex;align-items:center;gap:10px}
+.chev{width:20px;height:20px;color:var(--mut);transition:transform .18s;flex:none}
+.open .chev{transform:rotate(90deg)}
+.body{display:none;padding:0 16px 14px;border-top:1px solid var(--bd)}
+.open .body{display:block}
+.g{color:var(--grn)}.r{color:var(--red)}.d{color:var(--dim)}.m{color:var(--mut)}
+/* module 1 · day-wise pnl */
+.spark{display:flex;align-items:flex-end;gap:3px;height:34px;margin:4px 0 2px}
+.spark i{flex:1;border-radius:2px 2px 0 0;min-height:3px}
+.drow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);font-size:13.5px}
+.drow:last-child{border-bottom:0}
+.drow .dt{color:var(--dim)}.drow .tc{color:var(--mut);font-size:12px}
+.drow .pv{font-weight:700}
+/* module 2 · funnel */
+.pills{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none;touch-action:pan-x}
+.pills::-webkit-scrollbar{display:none}
+.pill{flex:none;border:1px solid var(--bd);background:var(--panel2);color:var(--dim);border-radius:20px;padding:8px 14px;font-size:12.5px;min-height:36px}
+.pill.on{background:#1d2a52;border-color:var(--blu);color:#cfd9ff;font-weight:600}
+.frow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.frow:last-child{border-bottom:0}
+.frow .rank{width:20px;color:var(--mut);font-size:12px;text-align:right}
+.frow .sym{font-weight:700;font-size:14px;border-bottom:1px dotted #3a4569}
+.frow .why{margin-left:auto;color:var(--dim);font-size:12px}
+.frow .sc{font-weight:700;font-size:13.5px;width:44px;text-align:right}
+.navbtn{display:flex;justify-content:center;margin-top:12px}
+.navbtn a{border:1px solid var(--blu);color:#cfd9ff;border-radius:12px;padding:10px 22px;font-size:13px;text-decoration:none;min-height:44px;display:flex;align-items:center}
+/* module 3 · segments */
+.seggrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg{background:var(--panel2);border:1px solid var(--bd);border-radius:12px;padding:10px 12px}
+.seg .nm{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg .v{font-size:15px;font-weight:700;margin-top:2px}
+.seg .n{font-size:10.5px;color:var(--mut);margin-top:1px}
+.segwide{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center}
+.segwide .v{font-size:17px}
+.note{font-size:11px;color:var(--mut);margin-top:10px}
+</style></head><body>
+<div class="stamp">PREVIEW · SAMPLE DATA</div>
+
+<div class="sec">V8 · Below positions — redesigned lower section</div>
+
+<!-- ─────────── 1 · DAY-WISE NET P&L ─────────── -->
+<div class="card open" id="c1">
+  <div class="hd" onclick="tg('c1')">
+    <h2>Day-wise Net P&L</h2>
+    <div class="right mono"><span class="g" style="font-weight:700">+₹3.50L</span><span class="m" style="font-size:12px">15 days</span>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="spark" id="spark"></div>
+    <div id="days"></div>
+    <div class="note">Wired from the canon day log — same rows as the website daylog tab.</div>
+  </div>
+</div>
+
+<!-- ─────────── 2 · FILTER FUNNEL TOP 10 ─────────── -->
+<div class="card" id="c2">
+  <div class="hd" onclick="tg('c2')">
+    <h2>Funnel · Top 10</h2>
+    <div class="right"><span class="m mono" style="font-size:12px">4 baskets</span>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="pills" id="bp"></div>
+    <div id="funnel"></div>
+    <div class="navbtn"><a href="/screeners">Open full funnel ›</a></div>
+  </div>
+</div>
+
+<!-- ─────────── 3 · SEGMENTS ─────────── -->
+<div class="card" id="c3">
+  <div class="hd" onclick="tg('c3')">
+    <h2>Segments · 209 futures</h2>
+    <div class="right"><span class="m mono" style="font-size:12px">as website</span>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="seggrid" id="segs"></div>
+    <div class="note">NIFTY headline + strongest / weakest futures segments, day move mcap-weighted — mirrors the web dashboard segment strip. Tap a segment → sector intel (wired later).</div>
+  </div>
+</div>
+
+<script>
+/* SAMPLE DATA — stamped, replaced by CC wiring */
+const DAYS=[["07 Aug",2,-6784],["06 Aug",1,12040],["05 Aug",3,-9120],["04 Aug",2,21500],["03 Aug",4,38210],
+["31 Jul",1,15890],["30 Jul",2,-4310],["29 Jul",3,27640],["28 Jul",2,9980],["25 Jul",3,44120],
+["24 Jul",1,-11230],["23 Jul",2,31470],["22 Jul",4,52360],["21 Jul",2,18760],["18 Jul",1,26940]];
+const FUNNEL={
+ "Buy Momentum":[["TRENT",9.1,"RVOL 2.4×"],["BEL",8.8,"OI +31%"],["DIXON",8.6,"VolX 1.9×"],["HAL",8.4,"3D/21D 1.7×"],["POLYCAB",8.2,"RVOL 2.0×"],["KAYNES",8.1,"OI +27%"],["CGPOWER",7.9,"VolX 1.7×"],["ZOMATO",7.8,"RVOL 1.8×"],["SIEMENS",7.7,"3D/21D 1.5×"],["ABB",7.6,"OI +25%"]],
+ "Buy Reversal":[["NMDC",7.3,"held S1"],["BANKINDIA",7.1,"held S1"],["GLENMARK",7.0,"RSI 31"],["VEDL",6.9,"held S1"],["SAIL",6.8,"RSI 29"],["PNB",6.7,"held S1"],["IOC",6.6,"RSI 33"],["ONGC",6.5,"held S1"],["GAIL",6.4,"RSI 30"],["COALINDIA",6.3,"held S1"]],
+ "Sell Momentum":[["CDSL",8.9,"RVOL 2.2×"],["INDUSTOWER",8.5,"OI +29%"],["FORTIS",8.3,"VolX 1.8×"],["MFSL",8.0,"RVOL 1.9×"],["LTF",7.8,"OI +26%"],["PAGEIND",7.7,"VolX 1.6×"],["ASTRAL",7.5,"RVOL 1.7×"],["DALBHARAT",7.4,"OI +25%"],["PIIND",7.2,"VolX 1.6×"],["UPL",7.1,"RVOL 1.6×"]],
+ "Sell Reversal":[["TATAELXSI",7.6,"mirror R1"],["LTIM",7.4,"RSI 71"],["COFORGE",7.2,"mirror R1"],["MPHASIS",7.0,"RSI 69"],["PERSISTENT",6.9,"mirror R1"],["TECHM",6.8,"RSI 68"],["WIPRO",6.6,"mirror R1"],["HCLTECH",6.5,"RSI 67"],["INFY",6.4,"mirror R1"],["TCS",6.3,"RSI 66"]]};
+const SEGS=[["NIFTY 50","-0.27%","index",0],["Defence","+2.1%","7 stocks",1],["Capital Goods","+1.6%","12 stocks",1],
+["PSU Banks","+1.2%","9 stocks",1],["Mining","+0.8%","6 stocks",1],["IT Services","-1.4%","11 stocks",0],
+["NBFC","-1.1%","13 stocks",0]];
+
+function tg(id){document.getElementById(id).classList.toggle('open')}
+function inr(v){const a=Math.abs(v);const s=a>=100000?(a/100000).toFixed(2)+'L':a.toLocaleString('en-IN');return(v<0?'−₹':'₹')+s}
+
+/* 1 · days */
+const mx=Math.max(...DAYS.map(d=>Math.abs(d[2])));
+document.getElementById('spark').innerHTML=[...DAYS].reverse().map(d=>
+ `<i style="height:${Math.max(8,Math.abs(d[2])/mx*100)}%;background:${d[2]>=0?'var(--grn)':'var(--red)'};opacity:.85"></i>`).join('');
+document.getElementById('days').innerHTML=DAYS.slice(0,7).map(d=>
+ `<div class="drow mono"><span class="dt">${d[0]}</span><span class="tc">${d[1]} trades</span>
+  <span class="pv ${d[2]>=0?'g':'r'}">${inr(d[2])}</span></div>`).join('')
+ +`<div class="drow"><span class="m" style="font-size:12px">8 more days…</span><span></span><span></span></div>`;
+
+/* 2 · funnel */
+const bp=document.getElementById('bp');
+Object.keys(FUNNEL).forEach((b,i)=>{const p=document.createElement('div');p.className='pill'+(i===0?' on':'');
+ p.textContent=b;p.onclick=()=>{bp.querySelectorAll('.pill').forEach(x=>x.classList.remove('on'));p.classList.add('on');drawF(b)};bp.appendChild(p)});
+function drawF(b){document.getElementById('funnel').innerHTML=FUNNEL[b].map((r,i)=>
+ `<div class="frow"><span class="rank mono">${i+1}</span><span class="sym">${r[0]}</span>
+  <span class="why mono">${r[2]}</span><span class="sc mono ${b.startsWith('Buy')?'g':'r'}">${r[1].toFixed(1)}</span></div>`).join('')}
+drawF("Buy Momentum");
+
+/* 3 · segments */
+document.getElementById('segs').innerHTML=SEGS.map((s,i)=>{
+ const cls=s[3]?'g':'r';
+ if(i===0)return `<div class="seg segwide"><div><div class="nm">${s[0]}</div><div class="n">${s[2]}</div></div><div class="v mono ${s[1].startsWith('+')?'g':'r'}">${s[1]}</div></div>`;
+ return `<div class="seg"><div class="nm">${s[0]}</div><div class="v mono ${cls}">${s[1]}</div><div class="n">${s[2]}</div></div>`}).join('');
+</script></body></html>
