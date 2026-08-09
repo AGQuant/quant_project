@@ -52,6 +52,21 @@
   text-align:right;min-width:64px}
 .tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu,#4D7CFE);
   font-size:15px;cursor:pointer;font-family:inherit}
+/* cc#939: sortable header. It reuses .tpr's flex geometry EXACTLY (same gap, same .nm2/.lv/.cg
+   widths, same trailing 44px slot) so a header cell can never drift out of line with the column
+   it labels. Sticky, because the founder sorts and then scrolls. Tap targets are the full cell,
+   not the glyph — 44px min-height, per MOBILE_APP_FRAMEWORK_V1. */
+.tph{display:flex;align-items:center;gap:9px;padding:6px 2px;min-height:38px;position:sticky;top:0;
+  z-index:2;background:var(--bg,#0A0F1E);border-bottom:1px solid var(--line)}
+.tph button{background:none;border:0;padding:8px 0;font-family:inherit;font-size:10.5px;
+  font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);cursor:pointer;
+  display:flex;align-items:center;gap:3px;min-height:38px}
+.tph button.on{color:var(--txt,#E8EDF7)}
+.tph .h-nm{flex:1;min-width:0}
+.tph .h-lv{justify-content:flex-end;text-align:right}
+.tph .h-cg{justify-content:flex-end;text-align:right;min-width:64px}
+.tph .h-sp{min-width:44px}
+.tph .ar{font-size:9px;opacity:.9}
 .tpchart{padding:2px 2px 12px}
 /* cc#910: the tape table reads its direction. The tint is deliberately faint (7% alpha) — it
    has to survive next to 15 other rows without turning the sheet into a traffic light, and the
@@ -380,7 +395,7 @@ function wireScrub(kind, series){
    [{name,symbol,category,price,prev_close,chg_pct,quote_date}] — NOT the {series:[{d,v}]} shape
    /api/mobile/trends uses. Verified by reading gvm_market_endpoints.py before writing this, per
    the card. The map to trendSvg's {d,v} is done here, once. */
-var TAPE = { rows: [], open: {} };
+var TAPE = { rows: [], view: [], open: {} };
 
 /* ══ cc#910: ONE CHART RENDERER, TWO CALLERS ═══════════════════════════════════════════════
    The chip charts (ADR/PCR/VIX) and the tape charts are now the SAME component. Shared
@@ -416,7 +431,9 @@ function chipLoader(kind){
    "last 24h" — for Dow or Bitcoin that is the honest description and "today" would not be. */
 function tapeLoader(x){
   return function(days){
-    var intr = (days === 1 && !!x.intraday_name);
+    /* cc#940: a row with daily_series === false (NIFTY / BANKNIFTY) has ONLY an intraday source,
+       so every window it can offer is the intraday one. Everything else keeps the old rule. */
+    var intr = (!!x.intraday_name) && (days === 1 || x.daily_series === false);
     var url = intr
       ? '/api/global/intraday/' + encodeURIComponent(x.intraday_name) + '?days=1'
       : '/api/global/history/' + encodeURIComponent(x.name) + '?days=' + days;
@@ -427,13 +444,23 @@ function tapeLoader(x){
               .map(function(r){ return { d: String(r.ts).slice(11, 16), v: Number(r.close) }; })
         : rows.filter(function(r){ return r && r.price != null && r.quote_date; })
               .map(function(r){ return { d: String(r.quote_date), v: Number(r.price) }; });
-      return { series: series, note: intr ? 'Last 24h · 5-min ticks' : null };
+      /* cc#940: the note states the SESSION and where the data actually ends, read off the rows.
+         The old text said "Last 24h" on every intraday chart — on a Sunday that was simply untrue,
+         and it gave no clue when a feed stopped early. A date the server chose, printed back. */
+      var note = null;
+      if (intr && rows.length){
+        var t0 = String(rows[0].ts || ''), t1 = String(rows[rows.length - 1].ts || '');
+        note = 'Session ' + t1.slice(0, 10) + ' · ' + t0.slice(11, 16) + '–' + t1.slice(11, 16)
+             + ' · ' + series.length + ' pts';
+      }
+      return { series: series, note: note };
     });
   };
 }
 
 var RANGES_ALL = [[1, '1D'], [7, '7D'], [15, '15D'], [30, '30D']];
 var RANGES_DAILY = [[7, '7D'], [15, '15D'], [30, '30D']];
+var RANGES_INTRADAY = [[1, '1D']];
 
 function setRange(ev, key, days){
   if (ev) ev.stopPropagation();
@@ -500,6 +527,80 @@ function closeTape(){
   document.body.style.overflow = '';
   TAPE.open = {};
 }
+/* ── cc#939: TICKER TABLE SORTING ─────────────────────────────────────────────────────────────
+   Founder: the tape opens a table, keep it, but let him glance-rank it.
+
+   TWO THINGS THAT WOULD HAVE BROKEN IF DONE THE OBVIOUS WAY.
+
+   1. TAPE.rows IS NOT REORDERED. Every open chart is keyed by its row INDEX — TAPE.open[i], the
+      host element id 'tpc_' + i, the CHART registry key 'tp' + i, and the onclick tapeChart(i).
+      Sorting the array in place would leave an open chart bound to whatever row slid into that
+      slot, so a tap on Gold could redraw Nikkei's chart underneath it. Instead TAPE.view holds
+      the ORDER (a list of original indices) and rendering walks that; every index-based key stays
+      attached to the row it was created for, and a chart can stay open across a re-sort.
+
+   2. THE NUMBERS ARE SORTED, NOT THE TEXT. The card asked to strip the rupee sign, % and commas
+      before comparing. That is the right instinct for a table built from rendered strings — but
+      this table is rendered FROM the payload, where price and chg_pct are already numbers. So it
+      sorts the data and never parses its own output back. num() still strips those characters
+      defensively, for the day a value arrives as a string.
+
+   Nulls always sort LAST, in both directions. This page already refuses to tint a null change
+   green or red because unknown is not flat (cc#910); ranking an unknown as if it were zero would
+   break the same rule at the top of the list. */
+var TAPE_SORT = { col: 'chg', dir: -1 };   // founder default: biggest movers on top
+var TAPE_COLS = [
+  { key: 'nm',  label: 'Symbol', cls: 'h-nm' },
+  { key: 'lv',  label: 'Last',   cls: 'h-lv' },
+  { key: 'chg', label: 'Chg %',  cls: 'h-cg' }
+];
+
+function tapeNum(v){
+  if (v == null) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  var n = Number(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+function tapeSortView(){
+  var col = TAPE_SORT.col, dir = TAPE_SORT.dir;
+  var order = TAPE.rows.map(function(_, i){ return i; });
+  order.sort(function(a, b){
+    var ra = TAPE.rows[a], rb = TAPE.rows[b];
+    if (col === 'nm'){
+      var cmp = String(ra.name || '').localeCompare(String(rb.name || ''));
+      return cmp * dir || (a - b);
+    }
+    var va = tapeNum(col === 'lv' ? ra.price : ra.chg_pct);
+    var vb = tapeNum(col === 'lv' ? rb.price : rb.chg_pct);
+    if (va == null && vb == null) return a - b;
+    if (va == null) return 1;      // nulls last, whichever way the arrow points
+    if (vb == null) return -1;
+    if (va === vb) return a - b;   // stable: ties keep the payload's own order
+    return (va < vb ? -1 : 1) * dir;
+  });
+  TAPE.view = order;
+}
+
+function tapeSort(col){
+  /* First tap on a new column = descending (the founder's "biggest first" default reading);
+     tapping the active column again flips it. */
+  if (TAPE_SORT.col === col) TAPE_SORT.dir = -TAPE_SORT.dir;
+  else { TAPE_SORT.col = col; TAPE_SORT.dir = -1; }
+  renderTape();
+}
+
+function tapeHead(){
+  return '<div class="tph">' + TAPE_COLS.map(function(c){
+    var on = TAPE_SORT.col === c.key;
+    return '<button class="' + c.cls + (on ? ' on' : '') + '"'
+      + ' aria-label="Sort by ' + esc(c.label) + '"'
+      + ' onclick="tapeSort(\'' + c.key + '\')">' + esc(c.label)
+      + (on ? '<span class="ar">' + (TAPE_SORT.dir < 0 ? '\u25BC' : '\u25B2') + '</span>' : '')
+      + '</button>';
+  }).join('') + '<span class="h-sp"></span></div>';
+}
+
 function tapeRow(x, i){
   var chart = x.has_series
     ? '<button class="tpc" onclick="tapeChart(' + i + ')" aria-label="chart">' +
@@ -520,8 +621,11 @@ function tapeRow(x, i){
     + (TAPE.open[i] ? '<div class="tpchart" id="tpc_' + i + '"></div>' : '');
 }
 function renderTape(){
-  document.getElementById('tapebd').innerHTML = TAPE.rows.map(tapeRow).join('')
-    || '<div class="empty"><b>No tape data</b></div>';
+  // cc#939: render through TAPE.view (an order of ORIGINAL indices), never a reordered TAPE.rows
+  tapeSortView();
+  var body = TAPE.view.map(function(i){ return tapeRow(TAPE.rows[i], i); }).join('');
+  document.getElementById('tapebd').innerHTML = TAPE.rows.length
+    ? (tapeHead() + body) : '<div class="empty"><b>No tape data</b></div>';
   // re-draw any chart that is open \u2014 renderTape() rebuilds the DOM, so the hosts are new nodes
   Object.keys(TAPE.open).forEach(function(i){ if (TAPE.open[i]) renderChart('tp' + i); });
 }
@@ -533,10 +637,13 @@ function tapeChart(i){
   var key = 'tp' + i;
   if (TAPE.open[i]){ TAPE.open[i] = 0; delete CHART[key]; renderTape(); return; }
   TAPE.open[i] = 1;
+  /* cc#940: three shapes, decided by what the row actually has — intraday only (NIFTY/BANKNIFTY,
+     one 1D pill, opens on 1D), intraday + daily (the global names), or daily only. */
+  var intradayOnly = (x.daily_series === false && !!x.intraday_name);
   CHART[key] = {
     host: 'tpc_' + i, title: x.name,
-    ranges: x.intraday_name ? RANGES_ALL : RANGES_DAILY,
-    days: 15, load: tapeLoader(x),
+    ranges: intradayOnly ? RANGES_INTRADAY : (x.intraday_name ? RANGES_ALL : RANGES_DAILY),
+    days: intradayOnly ? 1 : 15, load: tapeLoader(x),
     live: function(){ return !!TAPE.open[i]; }
   };
   renderTape();

@@ -545,7 +545,90 @@ def get_global_history(name: str, days: int = 1825):
     return api_query("SELECT name,symbol,category,price,prev_close,chg_pct,quote_date::text FROM global_indices WHERE LOWER(name)=LOWER(%s) AND quote_date>=%s ORDER BY quote_date ASC", (name, cutoff))
 
 
+# cc#940 — 1D CHART DENSITY, founder-locked 09-Aug-2026: a 1D chart carries 75-96 points, never
+# more. Full granularity stays in the DB; only the RESPONSE is sliced and downsampled.
+_ONE_DAY_POINTS = 96
+
+
+def _downsample(rows, target=_ONE_DAY_POINTS):
+    """Even stride, first and last bar always kept.
+
+    The last bar is kept unconditionally because the chart prints its value as the headline
+    number — drop it and the figure on screen stops being the latest print. An even stride is
+    used rather than time-bucket averaging so every plotted point is a REAL bar that was traded,
+    not a computed average nobody can look up.
+    """
+    n = len(rows)
+    if n <= target:
+        return rows
+    step = (n + target - 1) // target          # ceil(n/target)
+    out = rows[::step]
+    if out[-1] is not rows[-1]:
+        out.append(rows[-1])
+    return out
+
+
 @router.get("/api/global/intraday/{name}")
 def get_global_intraday(name: str, days: int = 7):
-    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
-    return api_query("SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday WHERE UPPER(name)=UPPER(%s) AND ts>=%s ORDER BY ts ASC", (name, cutoff))
+    """5-min intraday for one global name. days=1 is the 1D CHART and is handled specially.
+
+    cc#940 — TWO DEFECTS, one endpoint. The founder's report was "the 1-day chart does not open",
+    and it did not, for two independent reasons:
+
+    1. THE WINDOW WAS ANCHORED ON NOW(), NOT ON THE DATA. `days=1` meant "the last 24 hours from
+       this instant", so on a Sunday — or any time a market had been shut for a day — it returned
+       ZERO rows and the chart rendered "Not enough history". Measured 09-Aug (a Sunday): of the
+       15 names in global_intraday, 14 had exactly 0 bars in the last 24 hours. Only Bitcoin,
+       which trades around the clock, had any. The window is now anchored on the newest bar THAT
+       NAME actually has, so 1D always means "its last session" and can never come back empty
+       while history exists. That is task 4 solved by construction rather than by a weekend
+       special case.
+
+    2. NO DOWNSAMPLING. The store is a 7-day rolling window and the response was ungated: Bitcoin
+       alone returns 696 bars for 24 hours (the feed writes on every poll, not on a clean 5-minute
+       grid), and a 7-day pull is 2,700-4,000. The 1D response is now capped at 96 points, which
+       is the founder-locked density and a 7-40x payload cut. An NSE session of 5-minute bars is
+       75 points and passes through untouched.
+
+    days > 1 keeps the rolling-window behaviour, with the timezone bug fixed: global_intraday.ts
+    is `timestamp without time zone` holding NAIVE IST, and the old code compared it against a
+    tz-AWARE IST datetime, which Postgres resolves through the session timezone — a silent 5h30m
+    skew on the window edge. The cutoff is now naive, matching the column.
+    """
+    days = min(max(days, 1), 7)
+    if days == 1:
+        rows = api_query(
+            """SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday
+               WHERE UPPER(name)=UPPER(%s)
+                 AND ts >= (SELECT MAX(ts) - INTERVAL '24 hours' FROM global_intraday
+                            WHERE UPPER(name)=UPPER(%s))
+               ORDER BY ts ASC""", (name, name))
+        if isinstance(rows, list) and rows:
+            return _downsample(rows)
+        if isinstance(rows, list):
+            # Empty, not failed. global_intraday simply does not carry this name — that is the
+            # NIFTY / BANKNIFTY case, which lives in intraday_prices. api_query signals a real DB
+            # error with a dict, so an empty LIST is unambiguous here and never masks a failure.
+            return _downsample(_nse_index_intraday(name) or [])
+        return rows
+    cutoff = _ist_now().replace(tzinfo=None) - timedelta(days=days)
+    rows = api_query("SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday "
+                     "WHERE UPPER(name)=UPPER(%s) AND ts>=%s ORDER BY ts ASC", (name, cutoff))
+    return rows
+
+
+def _nse_index_intraday(symbol: str):
+    """cc#940 task 3 — NIFTY / BANKNIFTY are in the ticker list but are NOT in global_intraday, so
+    the 1D chart had no source for them at all. Their 5-min bars live in intraday_prices under
+    source='fyers_eq' (the INDEX level). The futures feed for the same names is deeper and runs
+    later in the session, but it prints the FUTURES, not the index — charting it under an index
+    label would put a number on screen that is not the number the label promises, so it is not
+    used. The session is the last date the eq feed actually has, never CURRENT_DATE.
+    """
+    return api_query(
+        """SELECT symbol, symbol AS name, ts, open, high, low, close, volume
+           FROM intraday_prices
+           WHERE symbol=%s AND source='fyers_eq' AND timeframe='5m'
+             AND ts::date = (SELECT MAX(ts)::date FROM intraday_prices
+                             WHERE symbol=%s AND source='fyers_eq' AND timeframe='5m')
+           ORDER BY ts ASC""", (symbol, symbol))
