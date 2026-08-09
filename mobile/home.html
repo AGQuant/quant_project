@@ -1816,9 +1816,13 @@ Promise.all([
       + '<div class="p">' + (r.decided ? (r.wins + '/' + r.decided) : 'no verdicts') + '</div></div>';
   }
   function bookFace2(){
+    /* cc#962: this face is the CLOSED book, and it used to carry face 1's header verbatim \u2014 same
+       title, same "N positions" \u2014 so the deck read as one card that changed its numbers. cc#950's
+       "header byte-identical" assertion is superseded on the LABEL only; geometry and styling are
+       untouched, and the count comes from the payload, never a literal. */
     return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
-      + '<div class="t">V8 Open Book</div>'
-      + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
+      + '<div class="t">V8 Closed Book</div>'
+      + '<div class="rgt">' + (bk.trades || 0) + ' trades <span class="h-chev">\u203a</span></div></div>'
       + '<div class="trio">'
       + '<div class="st"><div class="k">Realised</div>'
       +   '<div class="v ' + cls(bk.realised) + '" title="' + esc(inr(bk.realised)) + '">'
