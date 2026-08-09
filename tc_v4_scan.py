@@ -107,6 +107,18 @@ def _load_bulk(cur):
     gh180 = {r[0]: _f(r[1]) for r in cur.fetchall()}
     for s in syms:
         D[s]["gvm180"] = gh180.get(s)
+    # cc#936 / 18078 — m_score at the SAME 180-day anchor, for the SELL R18 delta-M rule. Deliberately
+    # a SEPARATE query from the gvm one above rather than one two-column read: the m_score series can
+    # have a NULL where gvm_score does not, and DISTINCT ON must pick the newest row that has the
+    # column being asked for. Same table, same anchor, same at-or-before rule as _m180 in the single
+    # loader, so the scanner and /check resolve the identical snapshot. ΔM itself is computed once, in
+    # the shared _derive — neither loader does that arithmetic.
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, m_score FROM gvm_history
+                   WHERE symbol = ANY(%s) AND m_score IS NOT NULL AND score_date <= CURRENT_DATE - 180
+                   ORDER BY symbol, score_date DESC""", (syms,))
+    mh180 = {r[0]: _f(r[1]) for r in cur.fetchall()}
+    for s in syms:
+        D[s]["m180"] = mh180.get(s)
 
     # peers: cc#717 part_3 — same shared helpers as the single-symbol loader (gvm_scores top-10-mcap
     # peers + live bulk day%, NOT the old gvm_scores⋈v8_metrics INNER JOIN that zeroed cash peers).

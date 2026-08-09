@@ -23,8 +23,9 @@ there, so a comment can no longer go stale against the code. Change a rule's wei
 denominator, the bands and every footer follow on their own.
 Bands re-baseline PROPORTIONALLY off each card's own max at the founder-locked ratios STRONG 0.84x
 / VALID 0.65x (from the prior BUY 18.5-22 / 14.4-22). Per-bucket imports: BUY-MOM +dma_50[5,12]
-+w52>=75 +GVM>=7 (R7 twr bound [70,85]); BUY-REV R7->mRSI[60,90] +GVM>=6.5, R4 graded d200&d20;
-SELL-MOM R11->CMP<PP +S2-clearance>=3%; SELL-REV R4 graded 3-DMA<0, R10 mom_2d[-4,-1]+w52<50.
++w52>=75 +GVM>=7 (R7 twr bound [70,85]); BUY-REV R7->mRSI[60,90] +GVM>=6.5, R4 graded d200&d20.
+The SELL cards no longer carry any of those V8 imports — cc#936 / 18078 rebuilt both to a minimal
+set (SELL-MOM 12 rules, SELL-REV 11); see the _rules docstring for what went and why.
 Gates (cc#677, founder-final spec id=9035): ZERO VETO. The verdict is SCORE BANDS ALONE. The old
 G1 GVM / G2 earnings / G3 futures-DTE gates AND the fo_ban check no longer reject anything — every
 risk condition is now an informational ALERT CHIP (F&O ban · result-date · GVM floor · DTE countdown).
@@ -224,6 +225,12 @@ def _derive(d):
     if day_lo is not None:
         lows5 = lows5 + [day_lo]
     d["low_5d"] = min(lows5) if lows5 else None
+    # cc#936 R10 REV-SELL: the exact mirror — 5-session HIGH, built from the same 5 daily bars plus
+    # today's live high, so "did it touch R1" is measured on the same window as "did it touch S1".
+    highs5 = [r["high"] for r in daily[-5:] if r["high"] is not None]
+    if day_hi is not None:
+        highs5 = highs5 + [day_hi]
+    d["high_5d"] = max(highs5) if highs5 else None
 
     # R15 — relative strength vs Nifty (stock return − nifty return), weekly & monthly
     wk, mo = v8.get("week_return"), v8.get("month_return")
@@ -278,6 +285,11 @@ def _derive(d):
     d["ret63"] = _ret63(d.get("daily"))
     _g0, _g180 = d.get("gvm_score"), d.get("gvm180")
     d["dgvm180"] = (_g0 - _g180) if (_g0 is not None and _g180 is not None) else None
+    # cc#936 / 18078: ΔM over 180 days for the SELL R18. Derived HERE, in the shared _derive, so the
+    # single loader and the batch scanner cannot compute it two different ways — both only have to
+    # fill m_score and m180. Sign convention: NEGATIVE = momentum has decayed = good short.
+    _m0, _m180v = d.get("m_score"), d.get("m180")
+    d["dm180"] = (_m0 - _m180v) if (_m0 is not None and _m180v is not None) else None
 
     # DTE to monthly expiry (G3)
     today = _ist().date()
@@ -345,6 +357,21 @@ def _dgvm180(cur, symbol):
     """gvm_score ~180 calendar days ago (nearest score_date on/before today-180d) from gvm_history.
     None if the symbol has no history that old (recent listing) -> R20 scores 0."""
     cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
+                   AND score_date <= CURRENT_DATE - 180 ORDER BY score_date DESC LIMIT 1""", (symbol,))
+    r = cur.fetchone()
+    return _f(r[0]) if r else None
+
+
+def _m180(cur, symbol):
+    """cc#936 / 18078 — m_score ~180 calendar days ago, for the SELL R18 delta-M rule.
+    ANCHOR AND TOLERANCE: the nearest snapshot AT OR BEFORE today-180d, exactly the rule _dgvm180
+    already uses for ΔGVM, so the two 180-day lookbacks can never drift apart. gvm_history is a
+    DAILY series back to 07-Jul-2021 (1.53M rows, m_score non-null on every one), so in practice the
+    anchor lands dead on: measured across all 206 active futures on 09-Aug-2026, 205 resolved with a
+    gap of 0 days — min 0, max 0. The at-or-before clause is a safety net for a gap in the series,
+    not a routine fallback, and it has no lower bound so a sparse symbol still gets its most recent
+    pre-anchor snapshot rather than nothing. No history that old -> None -> R18 scores 0 with a note."""
+    cur.execute("""SELECT m_score FROM gvm_history WHERE symbol=%s AND m_score IS NOT NULL
                    AND score_date <= CURRENT_DATE - 180 ORDER BY score_date DESC LIMIT 1""", (symbol,))
     r = cur.fetchone()
     return _f(r[0]) if r else None
@@ -447,6 +474,7 @@ def _load_one(cur, symbol):
     d["sector_n_ret"] = _sa["n_ret"]
     d["nifty_ret63"] = _nifty_ret63(cur)
     d["gvm180"] = _dgvm180(cur, symbol)
+    d["m180"] = _m180(cur, symbol)   # cc#936: SELL R18 delta-M anchor
 
     d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
@@ -584,13 +612,21 @@ def _alerts(d):
     return out
 
 
-# ── 15 scored rules (style + side aware) ─────────────────────────────────────────
+# ── the rulebook (style + side aware). Rule COUNT differs per card — ask card_maxes(), never count. ──
 
 def _rules(d, style, side):
-    """cc#400 (session_log id=3010): SELL side recalibrated. BUY side UNTOUCHED.
-    SELL drops R6 (vol-today) and R14 (ATR ignition) -> max 13. Killer rules relaxed to the
-    live-validated sell conditions (V5-D / SellMom-N5 / SellOB-V3). R3/R9 are session-anchored
-    by the loaders (last trading session, not CURRENT_DATE)."""
+    """cc#400 (session_log id=3010): SELL side recalibrated. R3/R9 are session-anchored by the
+    loaders (last trading session, not CURRENT_DATE).
+
+    cc#936 / 18078 — TC_SELL_CARDS_MIN_V1. Both SELL cards were rebuilt to a minimal set on one
+    principle: every rule answers a DIFFERENT question. SELL-MOM = 12 rules, SELL-REV = 11.
+    Dropped from both: R8 returns, R15 RS-vs-Nifty, R16 fib, R17 valuation, R20 ΔGVM, R21
+    S2-clearance, and the monthly-RSI leg of R7 — each one either duplicated another rule or ran on
+    a clock too slow for a short. SELL-REV also drops R4 (a trend already down contradicts fading an
+    uptrend at resistance). Two rules were rewritten rather than tuned: R3 is now a plain breadth
+    count of falling peers, and R18 is a 180-day M DELTA instead of an M level. Both SELL cards now
+    score volume as two independent 1-point legs, like BUY-REV.
+    NO CARD'S MAX IS WRITTEN DOWN HERE — see card_maxes(). Today it derives 21 / 20 / 14 / 13."""
     MOM = style == "MOMENTUM"
     BUY = side == "BUY"
     v8 = d.get("v8") or {}
@@ -607,32 +643,44 @@ def _rules(d, style, side):
         out.append(_R("R1", "Mood (any bearish)", 1.0 if f >= 1 else 0.0, f,
                       required="any mood check bearish (fails >= 1)"))
 
-    # R2 — sector (unchanged; already matches 3010)
+    # R2 — sector. cc#936 / 18078: on SELL-MOM the weekly leg is dropped — sector month already
+    # answers "is the sector falling", and the two legs moved together often enough that the rule
+    # was really one question scored twice. BUY-MOM keeps both legs, both SELL cards now read mo only.
     sw, sm = v8.get("sector_week"), v8.get("sector_month")
-    if MOM:
-        c = _both((sw or 0) > 0, (sm or 0) > 0) if BUY else _both((sw or 0) < 0, (sm or 0) < 0)
-        req = f"sector wk & mo {'> 0' if BUY else '< 0'} (one leg = 0.5)"
+    if MOM and BUY:
+        c = _both((sw or 0) > 0, (sm or 0) > 0)
+        req = "sector wk & mo > 0 (one leg = 0.5)"
     else:
         pos = (sm is not None and (sm > 0 if BUY else sm < 0))
         c = 1.0 if pos else 0.0
         req = f"sector mo {'> 0' if BUY else '< 0'}"
-    out.append(_R("R2", f"Sector {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(sw), "mo": _r(sm)}, required=req))
+    out.append(_R("R2", f"Sector {'wk&mo' if (MOM and BUY) else 'mo'}", c,
+                  {"wk": _r(sw), "mo": _r(sm)}, required=req))
 
-    # R3 — peers in same segment (<3 peers -> auto 0.5). 3010 SELL MOM uses down>0.5% for the strong tier.
-    if d.get("peer_count", 0) < 3:
+    # R3 — peers in same segment. BUY keeps the 3010 scheme (<3 peers -> auto 0.5).
+    # cc#936 / 18078 — BOTH SELL CARDS GET A NEW SCHEME, founder-set: a straight breadth count.
+    # >=3 peers falling = 1, 1-2 falling = 0.5, none = 0. Two things go away with it: the magnitude
+    # tier (peers_dn05, "down more than 0.5%") and the <3-peers AUTO-0.5, which handed free credit
+    # to any thin segment — the question is "is the whole segment selling off", and a thin segment
+    # that is not falling has answered NO, not "unknown".
+    # FALLING = peers_dn, the existing field, day change < 0 (see _peer_counts). Threshold is plain
+    # negative, not -0.5%: "falling" in the founder's wording is direction, and peers_dn05 is
+    # explicitly "falling more than half a percent". Both counts travel in the payload either way.
+    if not BUY:
+        falling = d.get("peers_dn", 0) or 0
+        c = 1.0 if falling >= 3 else (0.5 if falling >= 1 else 0.0)
+        req = ">=3 same-segment peers falling (1-2 = 0.5, none = 0; falling = day% < 0)"
+    elif d.get("peer_count", 0) < 3:
         c = 0.5
         req = "peer_count >= 3 (else auto 0.5)"
     else:
-        if BUY:
-            strong, any_dir = d.get("peers_up1", 0), d.get("peers_up", 0)
-        else:
-            strong, any_dir = d.get("peers_dn05", 0), d.get("peers_dn", 0)
+        strong, any_dir = d.get("peers_up1", 0), d.get("peers_up", 0)
         if MOM:
             c = 1.0 if strong >= 2 else (0.5 if any_dir >= 1 else 0.0)
-            req = f"{'>=2 peers up >1%' if BUY else '>=2 peers dn >0.5%'} (>=1 any-dir = 0.5)"
+            req = ">=2 peers up >1% (>=1 any-dir = 0.5)"
         else:
             c = 1.0 if any_dir >= 2 else (0.5 if any_dir >= 1 else 0.0)
-            req = f"{'>=2 peers up' if BUY else '>=2 peers dn'} (1 = 0.5)"
+            req = ">=2 peers up (1 = 0.5)"
     out.append(_R("R3", "Peers", c, {"strong": (d.get("peers_up1") if BUY else d.get("peers_dn05")),
                                      "dir": (d.get("peers_up") if BUY else d.get("peers_dn")),
                                      "n": d.get("peer_count")}, required=req))
@@ -662,40 +710,41 @@ def _rules(d, style, side):
         nb = sum(below)
         c = 1.0 if nb == 3 else (0.5 if nb == 2 else 0.0)
         req = "3 DMAs < 0 (2/3 = 0.5)"
-    out.append(_R("R4", f"MAs {'2of3' if MOM else 'graded'}", c,
-                  {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
-                  required=req))
+    # cc#936 / 18078: R4 is DROPPED from SELL-REV. A reversal short fades an UPTREND at resistance,
+    # so demanding all three DMAs already below zero contradicts the setup the card exists to find.
+    # SELL-MOM keeps it (a momentum short does want the trend already down).
+    if BUY or MOM:
+        out.append(_R("R4", f"MAs {'2of3' if MOM else 'graded'}", c,
+                      {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
+                      required=req))
 
     # R5 — cc#767 VOLUME CONFIRM: merges old R5 (1M up/dn ratio) + R6 (today time-adjusted) into ONE
     # rule tested once. today >= 1.5x OR 1M >= 1.1 -> 1pt; a partial leg (today >= 1.1x OR 1M >= 0.9) ->
     # 0.5. SELL mirror uses the down/up 1M ratio (>=1.05 full / >=0.95 partial) with the same today surge
     # leg — a volume surge confirms conviction on either side. (Old R14 ATR ignition dropped entirely;
     # R9 5m+VWAP already answers "is it moving now".)
+    # cc#936 / 18078: BOTH SELL CARDS now use the same two-independent-legs scheme cc#934 gave
+    # BUY-REV — the sell mirror reads the 1M DOWN/UP ratio and the bar moves to 1.1 (was 1.05 full /
+    # 0.95 partial under the OR-with-halves scheme). BUY-MOM is the last card still on the old OR.
     vt = d.get("vol_ratio_today")
-    if BUY and not MOM:
-        # cc#934 / 18062 amendment 3: on BUY-REV the two tests score INDEPENDENTLY — a burst today
-        # and a month of accumulation are different pieces of evidence, and the old OR-with-halves
-        # let either one alone cap the rule. Both = 2, one = 1, none = 0. No half credits here; the
-        # old partial thresholds (1.1x / 0.9) are dropped on this card only.
-        v1m = d.get("vol21_up_dn")
+    if (BUY and not MOM) or (not BUY):
+        # cc#934 / 18062 amendment 3: the two tests score INDEPENDENTLY — a burst today and a month
+        # of accumulation (distribution, on the sell side) are different pieces of evidence, and the
+        # old OR-with-halves let either one alone cap the rule. Both = 2, one = 1, none = 0. No half
+        # credits: the old partial thresholds (1.1x / 0.9 / 0.95) are gone on these three cards.
+        v1m = d.get("vol21_up_dn") if BUY else d.get("vol21_dn_up")
         leg_a = (vt is not None and vt >= 1.5)
         leg_b = (v1m is not None and v1m >= 1.1)
         c = float(leg_a) + float(leg_b)
-        req = "today>=1.5x pace = 1 + 1M up/dn>=1.1 = 1 (independent, max 2)"
+        req = f"today>=1.5x pace = 1 + 1M {'up/dn' if BUY else 'dn/up'}>=1.1 = 1 (independent, max 2)"
         out.append(_R("R5", "Volume confirm", c,
                       {"today": _r(vt), "vol1M": _r(v1m), "leg_today": leg_a, "leg_1m": leg_b},
                       required=req, max_credit=2.0))
     else:
-        if BUY:
-            v1m = d.get("vol21_up_dn")
-            full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
-            part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
-            req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
-        else:
-            v1m = d.get("vol21_dn_up")
-            full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.05))
-            part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.95))
-            req = "today>=1.5x OR 1M dn/up>=1.05 (partial = 0.5)"
+        v1m = d.get("vol21_up_dn")
+        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
+        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
+        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
         c = 1.0 if full else (0.5 if part else 0.0)
         out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
 
@@ -704,32 +753,41 @@ def _rules(d, style, side):
     # REV drops the dRSI leg entirely -> a pure weekly-heat/weekly-cool band on true_weekly_rsi.
     mr = v8.get("rsi_month")
     twr = d.get("true_weekly_rsi")
-    if MOM:
-        if BUY:
-            mr_ok = (mr is not None and mr >= 50)
-            twr_band = (1.0 if (twr is not None and 70 <= twr <= 85)
-                        else (0.5 if (twr is not None and ((60 <= twr < 70) or (85 < twr <= 90))) else 0.0))
-            c = twr_band if mr_ok else min(twr_band, 0.5)
-            req = "mRSI>=50 AND twr in [70,85] (twr [60,70)/(85,90] or mRSI<50 = 0.5 cap)"
-        else:
-            c = _both(mr is not None and mr < 40, twr is not None and twr <= 40)
-            req = "mRSI<40 AND twr<=40 (one leg = 0.5)"
+    if MOM and BUY:
+        mr_ok = (mr is not None and mr >= 50)
+        twr_band = (1.0 if (twr is not None and 70 <= twr <= 85)
+                    else (0.5 if (twr is not None and ((60 <= twr < 70) or (85 < twr <= 90))) else 0.0))
+        c = twr_band if mr_ok else min(twr_band, 0.5)
+        req = "mRSI>=50 AND twr in [70,85] (twr [60,70)/(85,90] or mRSI<50 = 0.5 cap)"
         val = {"mRSI": _r(mr), "trueWk": _r(twr)}
         label = "RSI frame"
-    elif BUY:
+    elif not BUY:
+        # cc#936 / 18078: MONTHLY RSI LEG DROPPED FROM BOTH SELL CARDS. The monthly frame moves too
+        # slowly to say anything a short trade can act on, and on SELL-MOM it was half the rule.
+        # What is left is one weekly question per card, scored binary — the leg carried no half
+        # credit of its own before (it was 0.5 of a two-leg _both), so inventing a half band here
+        # would be a new threshold nobody set.
+        if MOM:
+            c = 1.0 if (twr is not None and twr <= 40) else 0.0
+            req = "weekly RSI <= 40 (cold — the downtrend is already running)"
+            label = "RSI weekly cold"
+        else:
+            # SELL-REV FLIPS: was twr <= 45 (weekly-COOL), which described a stock already falling —
+            # the wrong picture for a card that fades an UPTREND into resistance. Now weekly-HOT.
+            c = 1.0 if (twr is not None and twr >= 70) else 0.0
+            req = "weekly RSI >= 70 (hot — overbought into the fade)"
+            label = "RSI weekly heat"
+        val = {"trueWk": _r(twr)}
+    else:
         # cc#767 BUY-REV: monthly RSI in [60,90] = 1 (V6.1 gate). Replaces the dead V5 remnant twr>=70
         # (V6.1 removed it — a true dip candidate is quality-uptrend, weekly-cool, not weekly-hot).
+        # (cc#936: the old fourth branch here was SELL-REV's weekly-cool band. Both SELL cards are
+        # handled above now, so BUY-REV is the only case that can reach this else.)
         c = (1.0 if (mr is not None and 60 <= mr <= 90)
              else (0.5 if (mr is not None and ((50 <= mr < 60) or (90 < mr <= 95))) else 0.0))
         req = "mRSI in [60,90] (50-60 or 90-95 = 0.5)"
         val = {"mRSI": _r(mr)}
         label = "RSI monthly"
-    else:
-        # SELL-REV: weekly-cool band on true weekly RSI (unchanged).
-        c = 1.0 if (twr is not None and twr <= 45) else (0.5 if (twr is not None and 45 < twr <= 50) else 0.0)
-        req = "twr <= 45 (45-50 = 0.5)"
-        val = {"trueWk": _r(twr)}
-        label = "RSI weekly heat"
     out.append(_R("R7", label, c, val, required=req))
 
     # R8 — returns. cc#513 BUY-REV: V5's own month_return cap + sanity floor replaces mo>0.
@@ -743,11 +801,13 @@ def _rules(d, style, side):
     else:
         c = 1.0 if (mo is not None and mo < 0) else 0.0
         req = "mo < 0"
-    # cc#935 / 18064: R8 is DROPPED from BUY-MOM — the returns dimension is already carried four times
-    # over on that card (R7 RSI, R10 mom_2d, R18 M-score which is derived from returns, R22 52w index),
-    # so it adds no independent information. It stays live on BUY-REV and both SELL cards.
-    if not (BUY and MOM):
-        out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}, required=req))
+    # cc#935 / 18064: R8 DROPPED from BUY-MOM — the returns dimension is already carried four times
+    # over on that card (R7 RSI, R10 mom_2d, R18 M-score which is derived from returns, R22 52w index).
+    # cc#936 / 18078: DROPPED from BOTH SELL CARDS for the same reason — R10 (mom_2d / turn-down) and
+    # R18 (ΔM over 180d) both read price change already, on two different horizons. BUY-REV is now
+    # the only card that still scores R8.
+    if BUY and not MOM:
+        out.append(_R("R8", "Returns mo", c, {"wk": _r(wk), "mo": _r(mo)}, required=req))
 
     # R9 — 5-min structure + VWAP (session-anchored via last-session bars). 3010 SELL: below-VWAP is the
     #      gate for any credit — full (below-VWAP + weak structure) ->1, below-VWAP only ->0.5, else 0.
@@ -779,9 +839,15 @@ def _rules(d, style, side):
             c = 1.0 if (m2 is not None and 0 <= m2 <= 6) else (0.5 if (m2 is not None and -1 <= m2 < 0) else 0.0)
             req = "mom_2d in [0,6] ([-1,0) = 0.5)"
         else:
-            c = _both(m2 is not None and -4 <= m2 <= -2, w52 is not None and 20 <= w52 <= 60)
-            req = "mom_2d in [-4,-2] AND w52 in [20,60] (one leg = 0.5)"
-        val = {"mom_2d": _r(m2), "w52": _r(w52)}
+            # cc#936 / 18078: SELL-MOM is the mom_2d FALL-BAND alone. The w52 leg went with the
+            # other 52-week rules — a fall band and a position-in-the-52w-range are two questions,
+            # and bundling them meant a stock could half-score for being low in its range while
+            # not actually falling. Binary, matching the one-question-one-rule principle.
+            c = 1.0 if (m2 is not None and -4 <= m2 <= -2) else 0.0
+            req = "mom_2d in [-4,-2]"
+        # SELL-MOM no longer reads w52 here, so it no longer shows it — a value printed beside a rule
+        # reads as an input to that rule. BUY-MOM keeps both (locked card, and w52 is its R22 context).
+        val = ({"mom_2d": _r(m2)} if not BUY else {"mom_2d": _r(m2), "w52": _r(w52)})
     else:
         if BUY:
             low5d, s1 = d.get("low_5d"), (d.get("pivots") or {}).get("s1")
@@ -797,14 +863,29 @@ def _rules(d, style, side):
             val = {"low_5d": _r(low5d), "s1": _r(s1)}
             req = "5d low <= S1 (within 1% of S1 = 0.5)"
         else:
-            # cc#767 SELL-REV: turn = mom_2d in [-4,-1] AND week_index_52 < 50 (V6.1 gate). Replaces the
-            # old fall-from-high band, which overlapped R9's falling-from-high leg (tested twice).
-            m2ok = (m2 is not None and -4 <= m2 <= -1)
-            w52ok = (w52 is not None and w52 < 50)
-            c = 1.0 if (m2ok and w52ok) else (0.5 if (m2ok or w52ok) else 0.0)
-            val = {"mom_2d": _r(m2), "w52": _r(w52)}
-            req = "mom_2d in [-4,-1] AND w52 < 50 (one leg = 0.5)"
-    out.append(_R("R10", "Style extra", c, val, required=req))
+            # cc#936 / 18078 — SELL-REV R10 IS NOW "TOUCHED R1", the exact mirror of BUY-REV's
+            # "touched S1": 5-session high at or above the R1 pivot = 1, within 1% of R1 = 0.5,
+            # else 0. This is the setup the card is named for — price ran into resistance — and it
+            # replaces the old mom_2d/w52 turn test, which has moved to R11 where it belongs.
+            # Same window and same tolerance as the BUY side (see high_5d in _derive).
+            high5d, r1p = d.get("high_5d"), (d.get("pivots") or {}).get("r1")
+            if high5d is not None and r1p is not None:
+                if high5d >= r1p:
+                    c = 1.0
+                elif r1p != 0 and abs(high5d - r1p) / abs(r1p) <= 0.01:
+                    c = 0.5
+                else:
+                    c = 0.0
+            else:
+                c = 0.0
+            val = {"high_5d": _r(high5d), "r1": _r(r1p)}
+            req = "5d high >= R1 (within 1% of R1 = 0.5)"
+    # cc#936: the two rebuilt SELL branches get their own labels — "Style extra" said nothing about
+    # what was being tested, and on a 11-rule card every line has to earn its row. BUY labels are
+    # deliberately untouched (any change there would show up as a diff on a locked card).
+    r10label = ("Touched R1" if (not BUY and not MOM)
+                else ("2-day fall band" if (not BUY and MOM) else "Style extra"))
+    out.append(_R("R10", r10label, c, val, required=req))
 
     # R11 — location + room. cc#513 BUY-REV: room-to-R1 removed (V5 = fixed +/-3 exits) -> V5 turn
     # conditions (mom_2d/week_return). SELL-MOM: S1-room replaced by S2-clearance (V4's own s2c gate).
@@ -819,30 +900,38 @@ def _rules(d, style, side):
         val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
         req = "above PP AND room-to-R1 >= 2% (above PP only = 0.5)"
     elif MOM and (not BUY):
-        # cc#767 SELL-MOM: R11 is now CMP < PP alone (a distinct 1pt gate); S2-clearance is split into
-        # its own imported V8-survival rule (appended below), tested once each rather than bundled.
-        c = 0.0 if d.get("above_pp") else 1.0
-        val = {"abovePP": d.get("above_pp")}
-        req = "CMP < PP"
+        # cc#936 / 18078: BELOW PP **+ ROOM TO S1** — the exact mirror of BUY-MOM. R21 S2-clearance
+        # is gone from this card, so "is there anywhere left to fall" has to be asked here or not at
+        # all; CMP < PP on its own scored a stock that had already reached its target.
+        room_next = d.get("room_s1")
+        if d.get("above_pp"):
+            c = 0.0
+        elif room_next is not None and room_next >= 2:
+            c = 1.0
+        else:
+            c = 0.5
+        val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
+        req = "CMP < PP AND room-to-S1 >= 2% (below PP only = 0.5)"
     elif (not MOM) and BUY:
         m2r, wkr = v8.get("mom_2d"), v8.get("week_return")
         n = sum(1 for x in [(m2r is not None and m2r >= -0.5), (wkr is not None and wkr >= -2)] if x)
         c = 1.0 if n == 2 else (0.5 if n == 1 else 0.0)
         val = {"mom_2d": _r(m2r), "week_return": _r(wkr)}
         req = "mom_2d >= -0.5 AND week_return >= -2 (one leg = 0.5)"
-    else:   # SELL-REV — unchanged (S1-room band)
-        room_next = d.get("room_s1")
-        if room_next is None:
-            c = 0.0
-        elif room_next >= 2:
-            c = 1.0
-        elif room_next >= 1:
-            c = 0.5
-        else:
-            c = 0.0
-        val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
-        req = "S1-room >= 2% (1-2% = 0.5)"
-    out.append(_R("R11", "Location + room", c, val, required=req))
+    else:
+        # cc#936 / 18078 — SELL-REV R11 IS NOW THE TURN-DOWN, the exact mirror of BUY-REV's turn-up:
+        # mom_2d <= +0.5 AND week_return <= +2, one leg = 0.5. It took over the test R10 used to
+        # carry, because R10 now answers "did it reach resistance" and this answers "has it started
+        # to roll over" — two questions the old card mixed into one. The S1-room band it replaces
+        # duplicated R9's falling-from-high leg on a card that has not broken down yet anyway.
+        m2r, wkr = v8.get("mom_2d"), v8.get("week_return")
+        n = sum(1 for x in [(m2r is not None and m2r <= 0.5), (wkr is not None and wkr <= 2)] if x)
+        c = 1.0 if n == 2 else (0.5 if n == 1 else 0.0)
+        val = {"mom_2d": _r(m2r), "week_return": _r(wkr)}
+        req = "mom_2d <= +0.5 AND week_return <= +2 (one leg = 0.5)"
+    r11label = ("Turn-down" if (not BUY and not MOM)
+                else ("Below PP + room to S1" if (not BUY and MOM) else "Location + room"))
+    out.append(_R("R11", r11label, c, val, required=req))
 
     # R12 — cc#767 DERIVATIVES CONFIRM: merges old R12 (OI structure) + R13 (basis) into ONE rule tested
     # once, replacing the two-way split. Two legs — (1) OI change present with the aligned price
@@ -876,29 +965,14 @@ def _rules(d, style, side):
                       {"day": _r(day), "oi_chg": _r(oic), "basis_now": _r(now), "basis_prev": _r(prev)},
                       required="OI-change present (aligned) + basis direction (one leg = 0.5)"))
 
-    # R15 — relative strength vs Nifty. cc#513 BUY-REV: rs_mo band relaxed one notch (dip candidates
-    # lag by construction).
-    rw, rm = d.get("rs_wk"), d.get("rs_mo")
-    if MOM:
-        c = _both((rw or 0) > 0, (rm or 0) > 0) if BUY else _both((rw or 0) < 0, (rm or 0) < 0)
-        val = {"rs_wk": _r(rw), "rs_mo": _r(rm)}
-        req = f"rs_wk & rs_mo {'> 0' if BUY else '< 0'} (one leg = 0.5)"
-    else:
-        if rm is None:
-            c = 0.0
-            req = "rs_mo required"
-        elif BUY:
-            c = 1.0 if rm > -1 else (0.5 if -3 <= rm <= -1 else 0.0)
-            req = "rs_mo > -1 (-3 to -1 = 0.5)"
-        else:
-            c = 1.0 if rm < 0 else (0.5 if 0 <= rm <= 1 else 0.0)
-            req = "rs_mo < 0 (0 to 1 = 0.5)"
-        val = {"rs_mo": _r(rm)}
-    # cc#934 / 18062: R15 is DROPPED from BUY-REV — it duplicates R19, which already scores 63-day
-    # relative strength against BOTH the sector and NIFTY. cc#935 / 18064 extends the same drop to
-    # BUY-MOM for consistency (same duplication, same R19). It stays live on both SELL cards.
-    if not BUY:
-        out.append(_R("R15", "RS vs Nifty", c, val, required=req))
+    # R15 — RS vs Nifty: RETIRED ON ALL FOUR CARDS, no longer scored anywhere.
+    # cc#934 / 18062 dropped it from BUY-REV, cc#935 / 18064 from BUY-MOM, cc#936 / 18078 from both
+    # SELL cards — always the same reason: R19 already scores 63-day relative strength against BOTH
+    # the sector and NIFTY, so R15 was the same question on a shorter horizon. The scoring body is
+    # gone rather than left behind an `if False`; rs_wk / rs_mo are still computed in _derive and
+    # still travel in the /detail evidence block ("rs"), so nothing that reads them lost a field.
+    # The R15 code itself is NOT reused for anything else — the locked specs that name it (3019,
+    # 6621-6624) describe a rule that no longer fires, which is the honest state.
 
     # R16 — Fib position (3M swing). cc#410/id=3019 zones; cc#513 BUY-REV widened (spring fires from
     # Decision AND Strength zones).
@@ -918,8 +992,13 @@ def _rules(d, style, side):
     else:                    # SELL-REV: 1 78.6-100 | 0 only <61.8 | else 0.5 (>100 breakout=caution)
         c = 0.0 if pos < 61.8 else (1.0 if (78.6 <= pos <= 100) else 0.5)
         req = "pos 78.6-100% (0 only < 61.8%)"
-    out.append(_R("R16", "Fib position (3M)", c,
-                  {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}, required=req))
+    # cc#936 / 18078: R16 is DROPPED from BOTH SELL CARDS. The 3M fib position is a slow, positional
+    # read that overlapped R10 on each sell card (SELL-MOM's fall band, SELL-REV's touched-R1) and
+    # auto-credited 0.5 whenever the 3M range was under 5% — free score for a stock going nowhere.
+    # Both BUY cards keep it unchanged.
+    if BUY:
+        out.append(_R("R16", "Fib position (3M)", c,
+                      {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}, required=req))
 
     # R17 — Valuation (V-pillar). cc#583: gvm_scores.v_score bands, identical for BUY + SELL (a cheap
     # name is a better long AND a safer short-cover risk; an expensive name cuts both). ADD (not replace).
@@ -936,26 +1015,45 @@ def _rules(d, style, side):
     else:
         vc = 1.0 if vsc >= 7.5 else (0.5 if vsc >= 6.0 else 0.0)
         vreq = "V >= 7.5 (6.0-7.5 = 0.5, < 6.0 = 0)"
-    out.append(_R("R17", "Valuation (V)", vc, {"v_score": _r(vsc)}, required=vreq))
+    # cc#936 / 18078: R17 is DROPPED from BOTH SELL CARDS — founder-set, and DROPPED not INVERTED.
+    # The V-pillar was added to the sells on the argument that an expensive name is a safer short,
+    # but valuation moves on a quarterly clock and a short is held for days; it was scoring the
+    # company, not the trade. Both BUY cards keep it (BUY-REV at V > 7 per cc#934, BUY-MOM at 7.5).
+    if BUY:
+        out.append(_R("R17", "Valuation (V)", vc, {"v_score": _r(vsc)}, required=vreq))
 
-    # R18 — Momentum (stock-M + mcap-weighted sector-M). cc#586 (id=6624). BUY rewards strong momentum
-    # both; SELL MIRRORED around the scale-midpoint (weak momentum = short candidate).
+    # R18 — Momentum. cc#586 (id=6624) on the BUY cards: stock-M + mcap-weighted sector-M, 2 points.
     sm = d.get("m_score"); secm = d.get("sector_m")
-    if BUY and not MOM:
-        # cc#934 / 18062: RELAXED for reversal context. The old 7.5/7 bar was structurally
-        # contradictory on a dip card — Fable's 08-Aug read of 76 S1-touchers found average M 5.65
-        # with only 14 at M>=7.5, so the rule was near-unscoreable exactly where it is meant to help.
-        c1 = (sm is not None and sm >= 6.5); c2 = (secm is not None and secm >= 6.0)
-        r18req = "stock M>=6.5 AND sector M>=6 (one = 1)"
-    elif BUY:
-        c1 = (sm is not None and sm >= 7.5); c2 = (secm is not None and secm >= 7.0)
-        r18req = "stock M>=7.5 AND sector M>=7 (one = 1)"
+    if not BUY:
+        # cc#936 / 18078 — TRANSFORMED ON BOTH SELL CARDS, founder-set: R18 is no longer a LEVEL
+        # test, it is a 180-day DELTA. The old mirror asked "is M already at or below 2.5", which is
+        # a stock the market finished selling months ago — by the time it prints, the short is late.
+        # ΔM asks the thing a short actually needs: HAS MOMENTUM DECAYED, from wherever it started.
+        # A name falling 8.0 -> 6.5 scores; a name flat at 2.4 does not.
+        # Worth 1 point, not the BUY side's 2 — it is one question now, not stock-and-sector.
+        dm = d.get("dm180")
+        if dm is None:
+            r18 = 0.0
+            r18req = "no 180d M history -> 0"
+            r18ev = {"m": _r(sm), "m_180d": _r(d.get("m180")), "no_history": True}
+        else:
+            r18 = 1.0 if dm <= -0.5 else (0.5 if dm <= 0 else 0.0)
+            r18req = "M dropped >= 0.5 over 180d (drop of 0 to 0.5 = 0.5, any rise = 0)"
+            r18ev = {"m": _r(sm), "m_180d": _r(d.get("m180")), "delta_m_180d": _r(dm)}
+        out.append(_R("R18", "Momentum decay (ΔM 180d)", r18, r18ev, required=r18req))
     else:
-        c1 = (sm is not None and sm <= 2.5); c2 = (secm is not None and secm <= 3.0)
-        r18req = "stock M<=2.5 AND sector M<=3 (mirror; one = 1)"
-    r18 = 2.0 if (c1 and c2) else (1.0 if (c1 or c2) else 0.0)
-    out.append(_R("R18", "Momentum (stock+sector M)", r18,
-                  {"m": _r(sm), "sector_m": _r(secm)}, required=r18req, max_credit=2.0))
+        if not MOM:
+            # cc#934 / 18062: RELAXED for reversal context. The old 7.5/7 bar was structurally
+            # contradictory on a dip card — Fable's 08-Aug read of 76 S1-touchers found average M
+            # 5.65 with only 14 at M>=7.5, so it was near-unscoreable exactly where it should help.
+            c1 = (sm is not None and sm >= 6.5); c2 = (secm is not None and secm >= 6.0)
+            r18req = "stock M>=6.5 AND sector M>=6 (one = 1)"
+        else:
+            c1 = (sm is not None and sm >= 7.5); c2 = (secm is not None and secm >= 7.0)
+            r18req = "stock M>=7.5 AND sector M>=7 (one = 1)"
+        r18 = 2.0 if (c1 and c2) else (1.0 if (c1 or c2) else 0.0)
+        out.append(_R("R18", "Momentum (stock+sector M)", r18,
+                      {"m": _r(sm), "sector_m": _r(secm)}, required=r18req, max_credit=2.0))
 
     # R19 — Relative Strength (63d stock return vs mcap-weighted sector + vs NIFTY50). cc#584 (id=6622).
     # SELL MIRRORED (a laggard scores high). Sector fallback: <3 clean-63d constituents -> nifty-only
@@ -990,7 +1088,11 @@ def _rules(d, style, side):
     else:
         r20 = 1.0 if dg < -0.5 else (0.5 if dg <= 0 else 0.0)
         r20req = "ΔGVM180 <-0.5=1 / -0.5-0=0.5 / >0=0 (mirror)"
-    out.append(_R("R20", "GVM trend (Δ180d)", r20, {"dgvm180": _r(dg)}, required=r20req))
+    # cc#936 / 18078: R20 is DROPPED from BOTH SELL CARDS. It is the same 180-day question the new
+    # R18 ΔM now asks, on a blended score instead of the momentum pillar — keeping both would score
+    # "has this deteriorated over six months" twice. BUY cards keep R20 unchanged.
+    if BUY:
+        out.append(_R("R20", "GVM trend (Δ180d)", r20, {"dgvm180": _r(dg)}, required=r20req))
 
     # ── cc#767 imported LIVE-V8 basket hard gates (funded by the flow consolidation: R5+R6 merged,
     # R12+R13 merged, R14 dropped). Each is scored ONCE as its own point — never a veto (cc#677
@@ -1038,11 +1140,10 @@ def _rules(d, style, side):
         # R23 — GVM quality floor >= 6.5 (BuyRev V6.1 gate).
         c23 = (1.0 if (gvm is not None and gvm >= 6.5) else (0.5 if (gvm is not None and 6.0 <= gvm < 6.5) else 0.0))
         out.append(_R("R23", "GVM floor", c23, {"gvm": _r(gvm)}, required="GVM >= 6.5 (6.0-6.5 = 0.5)"))
-    elif (not BUY) and MOM:
-        # R21 — S2-clearance (CMP-S2)/CMP >= 3% (SellMom-N5 V8 survival gate: real room below target).
-        rs2 = d.get("room_s2")
-        c21 = (1.0 if (rs2 is not None and rs2 >= 3) else (0.5 if (rs2 is not None and 2 <= rs2 < 3) else 0.0))
-        out.append(_R("R21", "S2-clearance", c21, {"room_s2": _r(rs2)}, required="S2-clearance >= 3% (2-3% = 0.5)"))
+    # cc#936 / 18078: R21 S2-clearance is DROPPED from SELL-MOM — the "is there room left to fall"
+    # question moved into R11, which now reads CMP < PP AND room-to-S1 >= 2%. Asking it at S1 and
+    # again at S2 was one question on two rails. Nothing else on the SELL side reaches this block:
+    # R21/R22/R23 are BUY-MOM's V8 gates, and R23's BUY-REV GVM floor is handled above.
 
     return out
 
@@ -1316,7 +1417,12 @@ def v4_dual_health():
         "version": VERSION, "spec_ref": SPEC_REF,
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
         "gates": "cc#677 ZERO-VETO — verdict = score bands alone; alert chips only (F&O ban · result-date · GVM floor · DTE)",
-        "rules": "cc#767 V8-ALIGNED: R5 Volume-confirm (R5+R6 merged) · R12 Derivatives-confirm (R12+R13 merged) · R14 dropped; per-bucket V8 imports — BUY-MOM +dma_50/w52/GVM, BUY-REV mRSI+GVM+graded MAs, SELL-MOM CMP<PP+S2-clearance, SELL-REV graded 3-DMA+mom_2d/w52",
+        "rules": ("cc#767 V8-ALIGNED: R5 Volume-confirm (R5+R6 merged) · R12 Derivatives-confirm "
+                  "(R12+R13 merged) · R14 dropped; per-bucket V8 imports — BUY-MOM +dma_50/w52/GVM, "
+                  "BUY-REV mRSI+GVM+graded MAs. cc#936/18078 SELL CARDS REBUILT MINIMAL: R8/R15/R16/"
+                  "R17/R20/R21 and the monthly-RSI leg dropped from both, R4 dropped from SELL-REV; "
+                  "R3 = breadth count of falling peers, R18 = ΔM over 180d (not an M level), volume "
+                  "= two independent 1-pt legs. R15 is now retired on all four cards."),
         # cc#934: no card's max is written down as a literal any more — it is SUMMED from each
         # rule's own declared max at score time, so this health block can only report the formula,
         # never a stale copy of a number that has drifted from the rulebook.
