@@ -662,6 +662,128 @@
     + 'body.mcards #scorrChartClose, body.mcards #scorrAnaX{width:44px!important;height:44px!important;'
     + '  min-width:44px!important;min-height:44px!important;font-size:18px!important}'
     + 'body.mcards #dcOv .back{min-height:44px;display:flex;align-items:center}'
+
+    /* ══════════════════════════════════════════════════════════════════════════════════════
+       cc#946 — THE CONTENT INSIDE THE FOUR LETTERS, re-laid for a phone.
+       cc#917/918 fixed the SHELLS: every letter became a bottom sheet with a drag notch and a
+       44px close. What they never touched — cc#914 item 3 deferred it here on purpose — is the
+       BODY of each card, which is still laid out at desktop scale inside a 360px sheet.
+       CONTENT PARITY IS ABSOLUTE: nothing below hides a field, drops a column or changes a
+       number. Every rule re-flows or re-scales what the web already shows, in the web's order.
+       SCOPE: every selector begins `body.mcards` and every one of them sits inside the
+       @media(max-width:767px) block this string opens with. body.mcards is added only on /m/*
+       (see addClass above), so the website is untouched by construction, not by inspection —
+       the same guarantee cc#918 relied on, and it is re-verified programmatically before push.
+       !important appears only where the target carries an INLINE style, because inline beats
+       any selector. Where the target is a stylesheet rule, it is left off.
+       ══════════════════════════════════════════════════════════════════════════════════════ */
+
+    /* ── C · chart card ──────────────────────────────────────────────────────────────────
+       The peer table is emitted with an inline `min-width:520px` inside an overflow-x:auto
+       wrapper. On a 360px sheet that is a guaranteed sideways scroll on the FIRST thing the
+       founder sees, before any deliberate choice to scroll. The min-width goes; the wrapper
+       keeps its scroller, so a genuinely wide row can still be dragged — that is the
+       "intentional table scroller" the card allows, rather than one forced on every symbol.
+       The Symbol column is left to take the slack and the numeric columns tighten, because a
+       truncated ticker is unreadable while a tight percentage is not. */
+    + 'body.mcards #scorrPeerPane table{min-width:0!important;table-layout:fixed}'
+    + 'body.mcards #scorrPeerPane th, body.mcards #scorrPeerPane td{'
+    + '  padding:7px 3px!important;font-size:10.5px!important}'
+    + 'body.mcards #scorrPeerPane th:first-child, body.mcards #scorrPeerPane td:first-child{'
+    + '  width:32%;white-space:normal;word-break:break-word}'
+    /* the CARD button column is the one that pushed the table 14px past the sheet on the first
+       measurement — measured, not guessed. Pinned narrow and the button shrunk to fit it, so the
+       row lands inside the sheet at 360px with nothing truncated. */
+    + 'body.mcards #scorrPeerPane th:last-child, body.mcards #scorrPeerPane td:last-child{'
+    + '  width:46px;padding-right:0!important}'
+    + 'body.mcards #scorrPeerPane td button{padding:4px 5px!important;font-size:9.5px!important;'
+    + '  min-height:28px!important;width:100%}'
+    /* the range/timeframe pills wrap instead of pushing the head sideways, and stay thumb-sized */
+    + 'body.mcards #scorrChartTfs, body.mcards #scorrChartTabs{flex-wrap:wrap;gap:5px;row-gap:6px}'
+    + 'body.mcards #scorrChartTfs button, body.mcards #scorrChartTabs button{'
+    + '  min-height:34px!important;padding:6px 10px!important}'
+    + 'body.mcards #scorrChartHead{flex-wrap:wrap;row-gap:8px}'
+    /* the canvas must never be wider than the sheet, whatever the library sizes it to */
+    + 'body.mcards #scorrChartBox, body.mcards #scorrChartBox canvas,'
+    + 'body.mcards #scorrChartBox > div{max-width:100%!important}'
+    + 'body.mcards #scorrChartBoxWrap{overflow-x:hidden!important}'
+    + 'body.mcards #scorrChartTitle{font-size:15px!important}'
+
+    /* ── A · analysis card ───────────────────────────────────────────────────────────────
+       The trajectory and performance grids are flex rows whose label column is an inline
+       `width:86px;min-width:86px`. At 360px, minus the sheet's 20px side padding, that leaves
+       ~210px for four value tiles — they fit, but only just, and the numerals inside them are
+       web-sized. Narrowing the label to 68px and stepping the tiles down buys back real room
+       without moving a single value to a second line. Values right-align so a column of
+       numbers reads down the edge rather than ragged. */
+    + 'body.mcards #scorrAnaOv .sa-body{padding:14px 14px 26px!important}'
+    + 'body.mcards #scorrAnaOv .sa-head{padding:14px 14px 12px!important}'
+    + 'body.mcards #scorrAnaOv .sa-body div[style*="width:86px"]{'
+    + '  width:68px!important;min-width:68px!important}'
+    + 'body.mcards #scorrAnaOv .sa-body{font-size:12px}'
+    + 'body.mcards #scorrAnaOv .sa-body table{width:100%;table-layout:fixed}'
+    + 'body.mcards #scorrAnaOv .sa-body td, body.mcards #scorrAnaOv .sa-body th{'
+    + '  font-size:11px!important;padding:6px 4px!important}'
+    + 'body.mcards #scorrAnaOv .sa-body td+td, body.mcards #scorrAnaOv .sa-body th+th{'
+    + '  text-align:right!important}'
+    /* a numeral must never break across lines — a price split over two rows is unreadable */
+    + 'body.mcards #scorrAnaOv .sa-body .mono, body.mcards #scorrAnaOv .sa-body td{'
+    + '  white-space:nowrap}'
+    + 'body.mcards #scorrAnaOv .qa-tcrow{flex-direction:column;gap:8px}'
+    + 'body.mcards #scorrAnaOv .qa-tcbtn{width:100%;min-height:44px}'
+    + 'body.mcards #scorrAnaOv #scorrAnaTitle{font-size:15px!important}'
+
+    /* ── R · results card ────────────────────────────────────────────────────────────────
+       The peer-results table is six columns — Peer, Result date, Sales YoY, PAT YoY, Margin vs
+       LY, Move % — and six columns do not fit 360px at any honest font size. Restacking it into
+       label:value rows would cost the reader the comparison it exists for, so this is the case
+       where the card's alternative is right: a compact scroller with a STICKY first column, so
+       the peer name stays anchored while the numbers slide under it. The peer name column
+       therefore also gets the panel background — without it the sticky cell would show the
+       scrolled numbers through itself. */
+    + 'body.mcards .rcard-peerres-tbl{overflow-x:auto;-webkit-overflow-scrolling:touch}'
+    + 'body.mcards .rcard-pr-table{min-width:520px;border-collapse:separate;border-spacing:0}'
+    + 'body.mcards .rcard-pr-table th, body.mcards .rcard-pr-table td{'
+    + '  font-size:11px;padding:6px 8px;white-space:nowrap}'
+    + 'body.mcards .rcard-pr-table th:first-child, body.mcards .rcard-pr-nm{'
+    + '  position:sticky;left:0;z-index:1;background:var(--panel,#0E1526);'
+    + '  max-width:104px;overflow:hidden;text-overflow:ellipsis}'
+    /* the rest of the R body is label:value rows already — they only need the phone type scale */
+    + 'body.mcards .rcard-body{padding:14px 14px 22px}'
+    + 'body.mcards .rcard-l1row, body.mcards .rcard-exp-row, body.mcards .rcard-peer-row{'
+    + '  gap:8px}'
+    + 'body.mcards .rcard-l1v, body.mcards .rcard-exp-v, body.mcards .rcard-peer-v,'
+    + 'body.mcards .rcard-fy27-v{text-align:right;white-space:nowrap}'
+    + 'body.mcards .rcard-fy27{grid-template-columns:1fr 1fr}'
+    + 'body.mcards .rcard-btn, body.mcards .rcard-detbtn, body.mcards .rcard-peerres-btn,'
+    + 'body.mcards .rcard-viewmore, body.mcards .rcard-v2-more{min-height:44px}'
+    + 'body.mcards .rcard-sym{font-size:15px}'
+
+    /* ── D · cockpit card ────────────────────────────────────────────────────────────────
+       This is the widest gap between web and phone of the four. The volume tile numeral is 40px
+       and the symbol heading 26px — sized for a centred desktop modal, not a 360px sheet — and
+       two of the three grids put a pair of boxes side by side, which at this width leaves each
+       box too narrow for the numeral inside it. The two-up grids go single-column and the type
+       scale steps down. Nothing is removed: the same tiles, in the same order, stacked. */
+    + 'body.mcards #dcOv .sec, body.mcards #dcOv .hdr{padding-left:14px;padding-right:14px}'
+    + 'body.mcards #dcOv .sym .l h1{font-size:21px}'
+    + 'body.mcards #dcOv .sym .r .px{font-size:18px}'
+    + 'body.mcards #dcOv .sym .r .chg{font-size:12px}'
+    + 'body.mcards #dcOv .volgrid{grid-template-columns:1fr;gap:8px}'
+    + 'body.mcards #dcOv .oiwrap{flex-direction:column;gap:8px}'
+    + 'body.mcards #dcOv .vtile{padding:12px}'
+    + 'body.mcards #dcOv .vtile .big{font-size:30px}'
+    + 'body.mcards #dcOv .vtile.sm .big{font-size:24px}'
+    + 'body.mcards #dcOv .vtile small{font-size:14px}'
+    + 'body.mcards #dcOv .basis .v{font-size:19px}'
+    + 'body.mcards #dcOv .quad .v{font-size:17px}'
+    /* the OI strip is a real table of numbers — keep it a table, give it a scroller only if it
+       genuinely overflows, and stop any numeral wrapping mid-value */
+    + 'body.mcards #dcOv .strip td, body.mcards #dcOv .strip th{'
+    + '  font-size:12px;padding:7px 0;white-space:nowrap}'
+    + 'body.mcards #dcOv .strip th:first-child, body.mcards #dcOv .strip td:first-child{'
+    + '  max-width:96px;overflow:hidden;text-overflow:ellipsis}'
+    + 'body.mcards #dcOv .dc-chip, body.mcards #dcOv button{min-height:44px}'
     + '}';
 
   function inject() {
