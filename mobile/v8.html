@@ -26,7 +26,7 @@
 .mood .mv{font-size:19px;font-weight:800;letter-spacing:-.01em}
 .mood .mw{font-size:11.5px;color:var(--mut);margin-top:3px;line-height:1.5}
 .mchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.mchip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;
+.mchip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
   padding:4px 8px;border-radius:7px;border:1px solid var(--line2);color:var(--mut);
   background:var(--panel2)}
 .mchip.ok{color:var(--grn);border-color:rgba(47,212,139,.4)}
@@ -34,7 +34,7 @@
 .mchip b{color:var(--txt,#E9EEFB);font-weight:800}
 .slotbar{display:flex;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
 .slotbar div{flex:1;text-align:center}
-.slotbar .sk{font-size:8.5px;font-weight:800;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.slotbar .sk{font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
 .slotbar .sv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;margin-top:2px}
 
 /* 2 · BOOK STAT ROW */
@@ -45,19 +45,35 @@
 @media (max-width:359px){.bstats{grid-template-columns:1fr 1fr}}
 .bst{min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
   padding:9px 5px;text-align:center}
-.bst .k{font-size:8px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
-/* founder 08-Aug: nowrap, never a number broken across two lines. Four cells on a 380px screen
-   leave ~72px each after padding; at 12.5px Plex Mono that is ~9 characters and inrShort's widest
-   output is 8 ("−₹99,999", "₹1.43Cr"), so it fits with room to spare. */
-.bst .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:12.5px;
-  margin-top:3px;white-space:nowrap}
-.bst .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+.bst .k{font-size:9px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
+/* founder 08-Aug: nowrap, never a number broken across two lines. cc#967 raises this to the Home
+   trio token (.trio .st .v = 13.5px), so the 08-Aug fit calculation is redone here rather than
+   left stale: at 360px the .bstats grid has 336px after the 12px margins, less 3 gaps of 7px,
+   giving 78.75px per cell and 68.75px of content after the 5px side padding. At 13.5px Plex Mono
+   (~0.6em advance) inrShort's widest 8-character output ("−₹99,999" / "₹1.43Cr") is ~65px, so it
+   still fits — verified by measurement, not by this arithmetic alone. Below 360px the rule above
+   already drops the row to 2x2 rather than squeezing. */
+.bst .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:13.5px;
+  margin-top:3px;white-space:nowrap;
+  /* cc#967 — the tiles were clipping their own numbers, and it was NOT the font size.
+     mobile_app.css owns a generic `.v` stat-card class (position:relative, background --panel2,
+     1px border, radius 15, padding 15px 15px 12px 19px, margin-bottom 8, cursor pointer). This
+     rule only out-specified it on font and margin-top, so all of that chrome applied: 34px of
+     horizontal padding plus 2px of border inside a 67px cell left ~31px for the numeral.
+     MEASURED: "Rs20,094" renders 52.7px at the OLD 12.5px and 56.9px at 13.5px — so both sizes
+     were already being cut. This is a pre-existing defect the type-scale work surfaced, the third
+     instance of the same collision (cc#964 found it on the D card, cc#966 on Home news).
+     Reset the chrome, keep the tile's own look. */
+  background:none;border:0;border-radius:0;padding:0;margin-bottom:0;min-height:0;
+  position:static;cursor:inherit;overflow:visible}
+.bst .v:before{content:none}
+.bst .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
   color:var(--dim);margin-top:2px}
 
 /* 3 · INSTRUMENT SWITCH — small, top corner */
 .insw{display:flex;gap:4px;align-items:center}
 .insw button{min-height:26px;padding:0 9px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9px;font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
+  font-size:10px;font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
   border:1px solid var(--line2);border-radius:7px;cursor:pointer}
 .insw button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .insw button[disabled]{opacity:.38;cursor:not-allowed}
@@ -65,7 +81,7 @@
 /* 4 · GROUPING CONTROL */
 .grpb{display:flex;gap:6px;margin:0 12px 8px}
 .grpb button{flex:1;min-height:30px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
+  font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
   border:1px solid var(--line2);border-radius:8px;cursor:pointer}
 .grpb button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .ghd{display:flex;align-items:baseline;gap:8px;margin:12px 12px 6px}
@@ -78,7 +94,7 @@
   padding:11px 12px 10px;margin:0 12px 8px}
 .pc1{display:flex;align-items:center;gap:7px;min-height:26px}
 .pc1 .sy2{font-size:14px;font-weight:800;letter-spacing:.01em}
-.tagx{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
+.tagx{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
   letter-spacing:.08em;padding:2px 6px;border-radius:5px;border:1px solid currentColor}
 .tagx.long{color:var(--grn)}
 .tagx.short{color:var(--red)}
@@ -87,7 +103,7 @@
 .pc2{display:flex;align-items:baseline;gap:9px;margin:7px 0 2px}
 .pc2 .pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;
   letter-spacing:-.01em}
-.pc2 .ret{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700}
+.pc2 .ret{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
 .pc2 .day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
   margin-left:auto}
 /* the stop -> target rail. 0 = stop, 1 = target, for a long and a short alike. */
@@ -106,7 +122,7 @@
 .bkpg .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;
   overflow:hidden;flex:1}
 .bkpg .seg button{flex:1;min-height:38px;background:none;border:0;color:var(--dim);
-  font-family:inherit;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+  font-family:inherit;font-size:11.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
   cursor:pointer}
 .bkpg .seg button.on{background:rgba(77,124,254,.16);color:var(--txt,#E9EEFB)}
 .bkdots{display:flex;gap:5px;flex:none}
@@ -115,7 +131,7 @@
 .bktot{display:flex;align-items:baseline;gap:8px;padding:0 14px 8px;flex-wrap:wrap}
 .bktot b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:19px;font-weight:800}
 .bktot span{font-size:10.5px;color:var(--dim)}
-.rbadge{margin:0 auto;font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:1px 5px;
+.rbadge{margin:0 auto;font-size:9px;font-weight:800;letter-spacing:.4px;padding:1px 5px;
   border-radius:4px;text-transform:uppercase}
 .rbadge.good{background:rgba(47,212,139,.16);color:#2FD48B}
 .rbadge.bad{background:rgba(255,92,108,.16);color:#FF5C6C}
@@ -123,7 +139,7 @@
 .lvls span:nth-child(2){margin-left:auto}
 .pc4{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;padding-top:7px;
   border-top:1px solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9.5px;color:var(--dim)}
+  font-size:10px;color:var(--dim)}
 .pc4 b{color:var(--mut);font-weight:700}
 .norail{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
   margin:8px 0 4px;opacity:.7}
@@ -131,10 +147,10 @@
 .navwrap{position:sticky;top:0;z-index:20;background:var(--bg,#0A0F1E);
   padding:2px 0 6px;margin-bottom:2px}
 .subr{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:0 12px 5px}
-.subk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8px;font-weight:800;
+.subk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
   letter-spacing:.12em;color:var(--dim);text-transform:uppercase;min-width:38px}
 .sub{min-height:28px;padding:0 9px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9.5px;font-weight:700;color:var(--mut);background:var(--panel);
+  font-size:10px;font-weight:700;color:var(--mut);background:var(--panel);
   border:1px solid var(--line);border-radius:14px;cursor:pointer}
 .sub i{font-style:normal;color:var(--dim);margin-left:3px}
 .sub.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.12)}
