@@ -358,6 +358,69 @@ def mobile_v8book(request: Request):
         if deployed is not None:
             dep_total += deployed
 
+    # ── cc#943 (and cc#942, the same card filed twice): THE REALISED PAGE ──────────────────────
+    # The book is one thing with two faces. Both ship on THIS payload rather than a second
+    # endpoint, so a swipe is instant and — more importantly — the two pages are guaranteed to be
+    # the same book at the same instant. A separate fetch could land the open page on one scope
+    # and the realised page on another, which is exactly the drift cc#894 was filed for.
+    #
+    # SCOPE IS IDENTICAL TO THE OPEN PAGE, and that is the whole point of putting them side by
+    # side: same fresh-era cutover, same 's1_reclaim_obs' exclusion. A realised total computed on
+    # a wider scope than the unrealised one beside it would make the pair unreadable.
+    # (Measured: the obs basket contributes 0 closed rows today, so the exclusion is currently a
+    # no-op — kept anyway, because scope parity has to hold by construction, not by luck.)
+    #
+    # SOURCE: v8_paper_trades, NOT v8_paper_positions. The positions table has no exit columns at
+    # all — checked before building — so a closed V8 trade simply does not exist there.
+    # entry_ts / exit_ts are NAIVE IST (timestamp without time zone), read raw, never converted.
+    # CONTEXT ISOLATION (rule 7): v8_paper_* only. tc_intraday_* is not touched anywhere here.
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, symbol, side, basket, entry_price, entry_ts, exit_price, exit_ts, qty,
+                   target, stop_loss, pnl, return_pct, result
+            FROM v8_paper_trades
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND basket IS DISTINCT FROM 's1_reclaim_obs'
+            ORDER BY exit_ts DESC NULLS LAST, id DESC
+        """, {"cut": cutover})
+        crows = _rows(cur)
+
+    closed, real_total, real_dep, wins = [], 0.0, 0.0, 0
+    for r in crows:
+        side = (r["side"] or "").upper()
+        entry, ex, qty = f(r["entry_price"]), f(r["exit_price"]), (r["qty"] or 0)
+        pnl = f(r["pnl"])
+        ret = f(r["return_pct"])
+        if ret is None and entry not in (None, 0) and ex is not None:
+            ret = round((ex - entry) / entry * 100.0 * (-1.0 if side == "SHORT" else 1.0), 2)
+        dep = round(entry * qty, 2) if entry is not None else None
+        ets, xts = r["entry_ts"], r["exit_ts"]
+        closed.append({
+            # id is negated so a closed row can never collide with an OPEN position's id in the
+            # template's single expanded-card key. Two pages, one key space, no cross-page ghost.
+            "id": -(r["id"] or 0), "trade_id": r["id"], "symbol": r["symbol"], "side": side,
+            "basket": r["basket"], "basket_label": basket_label(r["basket"]),
+            "qty": qty, "entry_price": entry, "exit_price": ex,
+            "target": f(r["target"]), "stop_loss": f(r["stop_loss"]),
+            # `realised` deliberately mirrors the open page's `unrealised` key so the shared card
+            # renderer reads one field name on both pages instead of branching on which page it is.
+            "realised": pnl, "return_pct": ret, "deployed": dep,
+            "result": (r["result"] or "").upper() or None,
+            "entry_ts": ets.strftime("%Y-%m-%d %H:%M") if ets else None,
+            "entry_label": ets.strftime("%d %b %H:%M") if ets else None,
+            "exit_ts": xts.strftime("%Y-%m-%d %H:%M") if xts else None,
+            "exit_date": xts.date().isoformat() if xts else None,
+            "exit_label": xts.strftime("%d %b %H:%M") if xts else None,
+            "days_held": ((xts.date() - ets.date()).days if (ets and xts) else None),
+        })
+        if pnl is not None:
+            real_total += pnl
+            if pnl > 0:
+                wins += 1
+        if dep is not None:
+            real_dep += dep
+
+    n_pnl = sum(1 for c in closed if c["realised"] is not None)
     return {
         "instrument": "equity",
         "futures_available": False,
@@ -367,7 +430,17 @@ def mobile_v8book(request: Request):
         "unrealised": round(unrl_total, 2) if out else None,
         "deployed": round(dep_total, 2) if out else None,
         "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
+        "closed_count": len(closed),
+        "closed": closed,
+        "realised": round(real_total, 2) if closed else None,
+        "realised_deployed": round(real_dep, 2) if closed else None,
+        "realised_pct": (round(real_total / real_dep * 100.0, 2) if real_dep else None),
+        "wins": wins, "losses": n_pnl - wins,
+        # A win rate with nothing closed is a DASH, not 0% — no trades is not a 0% record.
+        "win_rate": (round(100.0 * wins / n_pnl, 1) if n_pnl else None),
         "era": "fresh",
+        "scope_note": ("Both pages: fresh era (entry on/after the cc#504 cutover), "
+                       "'s1_reclaim_obs' excluded. Same scope on both, by construction."),
         "rail": rail_state(now, 5, now),
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }

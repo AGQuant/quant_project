@@ -98,6 +98,28 @@
 .rail2 .dot{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
   border-radius:50%;border:2px solid var(--bg,#0A0F1E)}
 .lvls{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
+/* ── cc#943/942: two-page book — pills, dots, result badge ────────────────────────────────
+   The pills sit exactly where the eye already is (above the first card) and the dots say which
+   of two pages you are on, because a swipe with no indicator leaves you guessing whether the
+   gesture worked. Both are also the desktop control: a tap toggle, no swipe needed there. */
+.bkpg{display:flex;align-items:center;gap:8px;padding:0 12px 8px}
+.bkpg .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;
+  overflow:hidden;flex:1}
+.bkpg .seg button{flex:1;min-height:38px;background:none;border:0;color:var(--dim);
+  font-family:inherit;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+  cursor:pointer}
+.bkpg .seg button.on{background:rgba(77,124,254,.16);color:var(--txt,#E9EEFB)}
+.bkdots{display:flex;gap:5px;flex:none}
+.bkdots i{width:6px;height:6px;border-radius:50%;background:var(--line);display:block}
+.bkdots i.on{background:var(--blu,#4D7CFE)}
+.bktot{display:flex;align-items:baseline;gap:8px;padding:0 14px 8px;flex-wrap:wrap}
+.bktot b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:19px;font-weight:800}
+.bktot span{font-size:10.5px;color:var(--dim)}
+.rbadge{margin:0 auto;font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:1px 5px;
+  border-radius:4px;text-transform:uppercase}
+.rbadge.good{background:rgba(47,212,139,.16);color:#2FD48B}
+.rbadge.bad{background:rgba(255,92,108,.16);color:#FF5C6C}
+.rbadge.neut{background:rgba(255,255,255,.07);color:var(--dim)}
 .lvls span:nth-child(2){margin-left:auto}
 .pc4{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;padding-top:7px;
   border-top:1px solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace;
@@ -156,7 +178,8 @@
 <script>
 var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
               mood: null, book: null, group: 'period', instrument: 'equity',
-              sub: {}, pop: null, fold: {}, stars: {}, act: {}, legend: null };   // cc#932: pivot markers by symbol
+              sub: {}, pop: null, fold: {}, stars: {}, act: {}, legend: null,
+              page: 'open' };   // cc#943: which face of the book is showing   // cc#932: pivot markers by symbol
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -447,11 +470,27 @@ function actMark(sym){
   return '<span class="pvm" style="color:#2fd48b" title="' + esc(a.note || '') + '">'
     + (a.glyph === 'circle' ? '\u25CF' : '\u2605') + '</span>';
 }
-function posCard(p){
-  var col = (p.unrealised == null) ? 'var(--mut)'
-          : (p.unrealised >= 0 ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+/* cc#943/942 — ONE card renderer, TWO pages. The card explicitly asks for the realised page to
+   use the SAME layout so the eye does not have to relearn it, and the way to guarantee that is a
+   single function, not a second one that starts identical and drifts. `mode` swaps only what has
+   to change: an open position shows CMP, day-move and a progress rail; a closed one shows the
+   exit price, the exit reason and no rail — a finished trade has no progress left to draw, and a
+   full or empty bar would both be a claim the data does not make. Every class name, every line
+   position and the P&L typography are shared. */
+function posCard(p, mode){
+  var realised = (mode === 'realised');
+  var val = realised ? p.realised : p.unrealised;
+  var col = (val == null) ? 'var(--mut)'
+          : (val >= 0 ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
   var rail;
-  if (p.progress == null){
+  if (realised){
+    /* Same slot as the rail, so the two pages stay the same height per card: the levels line
+       survives (it is still true — this is what the trade was aiming at) with the outcome badge. */
+    var rc = p.result === 'TARGET' ? 'good' : (p.result === 'SL' ? 'bad' : 'neut');
+    rail = '<div class="lvls"><span>SL ' + pxv(p.stop_loss) + '</span>'
+      + '<span class="rbadge ' + rc + '">' + esc(p.result || 'CLOSED') + '</span>'
+      + '<span>T ' + pxv(p.target) + '</span></div>';
+  } else if (p.progress == null){
     rail = '<div class="norail">no target/stop</div>';   // cc#923: a quiet placeholder, not a sentence
   } else {
     var pctW = (p.progress * 100).toFixed(1);
@@ -475,32 +514,90 @@ function posCard(p){
       + '<span>target <b>' + pxv(p.target) + '</b></span>'
       + '<span>stop <b>' + pxv(p.stop_loss) + '</b></span>'
       + '<span>in ' + esc(p.entry_label || '--') + '</span>'
-      + (p.cmp_at ? '<span>price ' + esc(p.cmp_at) + '</span>' : '')
+      + (realised ? '<span>out ' + esc(p.exit_label || '--') + '</span>'
+                  : (p.cmp_at ? '<span>price ' + esc(p.cmp_at) + '</span>' : ''))
       + '</div></div>'
     : '';
   return '<div class="pcard' + (open ? ' openx' : '') + '" onclick="posTap(' + p.id + ')">'
-    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>' + pivotMark(p.symbol) + actMark(p.symbol)
+    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
+    + (realised ? '' : pivotMark(p.symbol) + actMark(p.symbol))
     + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
     + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
-    + '<div class="pc2"><span class="pnl ' + cls(p.unrealised) + '">' + inr(p.unrealised) + '</span>'
+    + '<div class="pc2"><span class="pnl ' + cls(val) + '">' + inr(val) + '</span>'
     + '<span class="ret ' + cls(p.return_pct) + '">' + pctv(p.return_pct) + '</span>'
-    + '<span class="day">day ' + pctv(p.day_pct) + '</span></div>'
+    + (realised ? '<span class="day">out ' + esc(p.exit_label || '--') + '</span>'
+                : '<span class="day">day ' + pctv(p.day_pct) + '</span>')
+    + '</div>'
     + rail
     + '<div class="pc4">'
     + '<span><b>' + Number(p.qty || 0).toLocaleString('en-IN') + '</b> qty</span>'
     + '<span>entry <b>' + pxv(p.entry_price) + '</b></span>'
-    + '<span>cmp <b>' + pxv(p.cmp) + '</b></span>'
+    + '<span>' + (realised ? 'exit <b>' + pxv(p.exit_price) : 'cmp <b>' + pxv(p.cmp)) + '</b></span>'
     + '<span><b>' + (p.days_held == null ? '--' : p.days_held + 'd') + '</b> held</span>'
     + '<span class="pex">' + (open ? 'less ▴' : 'more ▾') + '</span>'
     + '</div>' + more + '</div>';
+}
+
+/* ══ cc#943 / cc#942 — ONE BOOK, TWO PAGES ════════════════════════════════════════════════════
+   These two cards are the same founder request filed twice on the same day; built once.
+   Page 1 unrealised (open positions), page 2 realised (closed trades), identical layout, reached
+   by a horizontal swipe or by tapping the segmented pills. Both pages come from ONE payload, so
+   they are guaranteed to be the same book at the same instant — a second fetch could land the
+   pages on different scopes, which is exactly the drift cc#894 was filed for. */
+function setBookPage(pg){
+  if (STATE.page === pg) return;
+  STATE.page = pg;
+  STATE.pop = null;          // an expanded card belongs to the page it was opened on
+  render();
+}
+function bookHeader(b){
+  var open = STATE.page === 'open';
+  var v = open ? b.unrealised : b.realised;
+  var pctv2 = open ? b.unrealised_pct : b.realised_pct;
+  var seg = '<div class="bkpg"><div class="seg">'
+    + '<button class="' + (open ? 'on' : '') + '" onclick="setBookPage(\'open\')">Unrealised</button>'
+    + '<button class="' + (open ? '' : 'on') + '" onclick="setBookPage(\'realised\')">Realised</button>'
+    + '</div><div class="bkdots"><i class="' + (open ? 'on' : '') + '"></i>'
+    + '<i class="' + (open ? '' : 'on') + '"></i></div></div>';
+  /* Same slot, same font on both pages — only the label and the number change (item 2). The win
+     rate appears on the realised page only, because an open book has not won or lost anything
+     yet, and a rate that counts unrealised P&L as a "win" would be a claim about a trade that is
+     still running. A dash, never 0%, when nothing has closed. */
+  var tot = '<div class="bktot"><b class="' + cls(v) + '">' + inr(v) + '</b>'
+    + '<span>' + (open ? (b.open || 0) + ' open' : (b.closed_count || 0) + ' closed')
+    + (pctv2 == null ? '' : ' · ' + pctv(pctv2))
+    + (open ? '' : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%'))
+    + '</span></div>';
+  return seg + tot;
+}
+
+function realisedBlock(b){
+  var rows = b.closed || [];
+  if (!rows.length)
+    return '<div class="empty" style="margin:0 12px"><b>Nothing closed yet</b>'
+      + 'No trades have been booked in this era.</div>';
+  /* Default sort: most recent exit first (item 4 / item 3). Sorted HERE on a real date key rather
+     than trusting arrival order — the endpoint orders by exit_ts DESC today, and relying on that
+     silently is how a list ends up in the wrong order the day the query changes. */
+  var g = rows.slice().sort(function(a, c){
+    var x = a.exit_ts || '', y = c.exit_ts || '';
+    return x < y ? 1 : (x > y ? -1 : (c.id - a.id));
+  });
+  return g.map(function(p){ return posCard(p, 'realised'); }).join('');
 }
 
 function bookBlock(){
   var b = STATE.book;
   if (b === 'loading') return '<div class="loading" style="padding:10px 14px">Loading the book…</div>';
   if (!b) return '<div class="more" style="margin:0 12px">Open book unavailable.</div>';
+
+  var hdr = bookHeader(b);
+  if (STATE.page === 'realised')
+    return '<div id="bookpg" class="bookpg">' + hdr + realisedBlock(b) + '</div>';
+
   if (!b.positions.length)
-    return '<div class="empty" style="margin:0 12px"><b>No open positions</b>The book is flat.</div>';
+    return '<div id="bookpg" class="bookpg">' + hdr
+      + '<div class="empty" style="margin:0 12px"><b>No open positions</b>The book is flat.</div></div>';
 
   var all = b.positions;
   var rows = applySub(all);
@@ -512,8 +609,9 @@ function bookBlock(){
     + subBar(all) + '</div>';
 
   if (!rows.length)
-    return h + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
-      + 'Clear a filter to see positions again.</div>';
+    return '<div id="bookpg" class="bookpg">' + hdr + h
+      + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
+      + 'Clear a filter to see positions again.</div></div>';
 
   /* cc#924 item 3: on a big book the Older bucket starts collapsed — it is history, and it
      should not push today's positions off the first screen. Threshold is the book size, not the
@@ -529,9 +627,9 @@ function bookBlock(){
       + '<span class="gn">' + esc(grp.key) + ' · ' + grp.rows.length + '</span>'
       + '<span class="gs ' + (known ? cls(sum) : '') + '">' + (known ? inrShort(sum) : '--') + '</span>'
       + '<span class="gx">' + (collapsed ? '▾' : '▴') + '</span></div>'
-      + (collapsed ? '' : grp.rows.map(posCard).join(''));
+      + (collapsed ? '' : grp.rows.map(function(p){ return posCard(p, 'open'); }).join(''));
   }).join('');
-  return h;
+  return '<div id="bookpg" class="bookpg">' + hdr + h + '</div>';
 }
 function foldGrp(k){
   var cur = STATE.fold[k];
@@ -625,7 +723,12 @@ function render(){
     var ts = bk.positions.map(function(p){ return p.cmp_at; }).filter(Boolean).sort();
     if (ts.length) asof = 'prices ' + esc(ts[ts.length - 1]);
   }
-  h += '<div class="tierlab">Open positions' + (asof ? ' <span class="tl2">· ' + asof + '</span>' : '') + '</div>'
+  /* cc#943: the label follows the page — "Open positions" over a list of closed trades would be
+     the screen contradicting itself. The as-of stamp is a LIVE-PRICE stamp, so it belongs to the
+     unrealised page only; a closed trade's price is its exit, not a quote that can go stale. */
+  var realisedPg = (STATE.page === 'realised');
+  h += '<div class="tierlab">' + (realisedPg ? 'Realised trades' : 'Open positions')
+    + ((!realisedPg && asof) ? ' <span class="tl2">· ' + asof + '</span>' : '') + '</div>'
     + (bk && !bk.futures_available
         ? '<div class="finote">' + esc(bk.instrument_note || '') + '</div>' : '')
     + bookBlock();
@@ -682,7 +785,48 @@ function render(){
     + '</div>';
 
   document.getElementById('body').innerHTML = h;
+  bindBookSwipe();
 }
+
+/* ══ cc#943 / cc#942 — HORIZONTAL SWIPE BETWEEN THE TWO PAGES ═════════════════════════════════
+   Bound after every render because render() replaces the node the listeners were on.
+
+   THE GESTURE HAS TO PROVE ITSELF HORIZONTAL FIRST, and this is not a nicety. The book is a tall
+   scrolling list; a swipe handler that claims the touch immediately would fight every attempt to
+   scroll past it. So the axis is decided once, on the first movement past a 10px threshold, and a
+   vertical decision hands the touch straight back to the page and never looks at it again — the
+   same rule the V10 chart drag already uses on Home, deliberately, so the two gestures behave
+   identically. touchmove is passive:false ONLY because a horizontal swipe must be able to cancel
+   the page's own scroll; nothing else is prevented.
+
+   A tap inside a card must still expand it, so a movement under 45px does nothing at all. */
+var BSW = null;
+function bindBookSwipe(){
+  var el = document.getElementById('bookpg');
+  if (!el) return;
+  el.addEventListener('touchstart', function(e){
+    var t = e.touches[0];
+    BSW = { x: t.clientX, y: t.clientY, axis: null };
+  }, {passive: true});
+  el.addEventListener('touchmove', function(e){
+    if (!BSW) return;
+    var t = e.touches[0], dx = t.clientX - BSW.x, dy = t.clientY - BSW.y;
+    if (BSW.axis === null){
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      BSW.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (BSW.axis === 'x' && e.cancelable) e.preventDefault();
+  }, {passive: false});
+  el.addEventListener('touchend', function(e){
+    if (!BSW || BSW.axis !== 'x'){ BSW = null; return; }
+    var t = (e.changedTouches && e.changedTouches[0]) || null;
+    var dx = t ? t.clientX - BSW.x : 0;
+    BSW = null;
+    if (Math.abs(dx) < 45) return;                       // a tap or a twitch, not a page turn
+    setBookPage(dx < 0 ? 'realised' : 'open');           // left = forward to realised, right = back
+  }, {passive: true});
+}
+
 function tog(ev, i, slug){
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.open = (STATE.open === i ? -1 : i);

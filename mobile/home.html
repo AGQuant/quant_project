@@ -885,13 +885,51 @@ function v10Svg(d){
     var x = xs(i), y = ys(p.price != null ? p.price : s[i].c);
     var isSel = (p.id === V10.sel), dim = (V10.sel != null && !isSel);
     var entry = (p.kind !== 'exit');
-    var col = entry ? (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)')
-                    : (p.win ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
-    var t = entry ? [[x, y + 4], [x - 4.5, y + 11], [x + 4.5, y + 11]]
-                  : [[x, y - 4], [x - 4.5, y - 11], [x + 4.5, y - 11]];
-    out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
-      + '" fill="' + col + '" opacity="' + (dim ? '.25' : '1') + '"'
-      + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
+    var op = dim ? '.25' : '1';
+    /* cc#945 — THREE MARKER SHAPES, each saying a different thing. Before this, entry and exit
+       were both triangles and the exit was coloured by WIN, so the chart answered "did it make
+       money" twice and never answered "why did it end". Now:
+         entry  triangle pointing the way the trade is betting — UP green for LONG, DOWN red for
+                SHORT. Direction is in the SHAPE, so it survives a colour-blind reader and a
+                greyed-out (unselected) marker.
+         exit   an X, coloured by REASON: SL red, TARGET green, anything else grey. Grey is
+                deliberate — an EOD close is not a verdict, and painting it green or red would
+                state an outcome the reason does not carry.
+         open   a dashed line at the entry price across the whole window plus a ringed dot, so a
+                live position reads as a level you are still sitting at rather than a past event. */
+    if (p.kind === 'open'){
+      var oc = (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+      out.push('<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR).toFixed(1)
+        + '" y2="' + y.toFixed(1) + '" stroke="' + oc + '" stroke-width="1" stroke-dasharray="4 3"'
+        + ' opacity="' + (dim ? '.2' : '.55') + '"/>');
+      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6" fill="none"'
+        + ' stroke="' + oc + '" stroke-width="1" opacity="' + (dim ? '.2' : '.45') + '">'
+        + '<animate attributeName="r" values="4;8;4" dur="2s" repeatCount="indefinite"/>'
+        + '<animate attributeName="opacity" values=".55;0;.55" dur="2s" repeatCount="indefinite"/>'
+        + '</circle>');
+      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.2" fill="' + oc
+        + '" opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
+      var col = oc;
+    } else if (entry){
+      var col = (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+      var up = (p.side === 'BUY');
+      var t = up ? [[x, y - 11], [x - 4.5, y - 3], [x + 4.5, y - 3]]     // apex up, under the point
+                 : [[x, y + 11], [x - 4.5, y + 3], [x + 4.5, y + 3]];    // apex down, above it
+      out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
+        + '" fill="' + col + '" opacity="' + op + '"'
+        + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
+    } else {
+      var r = String(p.reason || '').toUpperCase();
+      var col = (r === 'SL') ? 'var(--red,#FF5C6C)'
+              : (r === 'TARGET') ? 'var(--grn,#2FD48B)' : 'var(--mut,#94A6D2)';
+      var a = 4.5;
+      out.push('<g opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')">'
+        + '<line x1="' + (x - a).toFixed(1) + '" y1="' + (y - a).toFixed(1) + '" x2="' + (x + a).toFixed(1)
+        + '" y2="' + (y + a).toFixed(1) + '" stroke="' + col + '" stroke-width="1.9" stroke-linecap="round"/>'
+        + '<line x1="' + (x + a).toFixed(1) + '" y1="' + (y - a).toFixed(1) + '" x2="' + (x - a).toFixed(1)
+        + '" y2="' + (y + a).toFixed(1) + '" stroke="' + col + '" stroke-width="1.9" stroke-linecap="round"/>'
+        + '</g>');
+    }
     if (isSel){
       out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="' + col + '"/>');
       selPins.push({x: x, y: y, p: p, entry: entry});
@@ -924,8 +962,9 @@ function v10Svg(d){
   return '<div class="v10cv" id="v10cv">'
     + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
     + ' style="width:100%;height:' + H + 'px;display:block;touch-action:pan-y">' + out.join('') + '</svg>'
-    + '<div class="v10hint">' + (more ? '← drag right for older' : 'start of history')
-    + ' · showing ' + n + ' of ' + all.length + ' sessions</div></div>';
+    + '<div class="v10hint">' + (v10Bars(d) ? 'last ' + n + ' five-minute bars'
+        : (more ? '← drag right for older' : 'start of history'))
+    + ' · showing ' + n + ' of ' + all.length + (v10Bars(d) ? ' bars' : ' sessions') + '</div></div>';
 }
 
 /* ── drag: horizontal only, and only once the gesture proves itself horizontal ── */
