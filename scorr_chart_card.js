@@ -48,6 +48,9 @@
   var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
   var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
   var _full = false;                // cc#779: fullscreen state
+  var _nativeFs = false;            // cc#959: native element fullscreen was granted (Android/Chromium)
+  var _land = false;                // cc#959: CSS-rotation landscape fallback is active (iOS / lock refused)
+  var _fsBound = false;             // cc#959: fullscreenchange listeners attached once
   var GVM_COL = "#7b6bd6";          // muted violet — distinct from price/pivot/fib/VWAP palettes
   // cc#800: the GVM axis bounds live here so the pin has ONE source. The scale is conceptually
   // 0-10 and must never be derived from the data — that is the bug this fixes.
@@ -108,6 +111,13 @@
     return { pivot: true, fib: true, gvm: gvm };   // default: pivots + fib on, GVM off
   }
   function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
+  /* cc#960: ratio text. The ratios printed here are read STRAIGHT off FIB_RATIOS / FIB_ZONES above —
+     they are not the textbook ladder. Two facts a fib-literate reader needs to know about this chart:
+     the extension level is 123.6 (not 161.8), and a ZONE is a BAND between two ratios, not a single
+     level — so a zone label carries a RANGE (DECISION 38.2-61.8%), never one number. Printing "50%"
+     on DECISION would name a line that is drawn INSIDE the band, not the band. */
+  function _fibPct(r) { return String(Math.round(r * 10) / 10); }
+  function _fibZoneRange(z) { return _fibPct(z.lo) + "–" + _fibPct(z.hi) + "%"; }
   function _fibZoneKey(p) {
     if (p == null) return null;
     if (p >= 100) return "breakout"; if (p >= 78.6) return "resist"; if (p >= 61.8) return "strength";
@@ -194,7 +204,135 @@
     ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
     ov.querySelector("#scorrChartClose").addEventListener("click", close);
     ov.querySelector("#scorrChartFull").addEventListener("click", function (e) { e.stopPropagation(); _toggleFull(); });
+    /* cc#959: bound to the DOCUMENT once, not to the button — the Android back button, the system
+       swipe and Esc all leave fullscreen without the button ever being tapped. orientationchange
+       covers the fallback path, where the user physically turns the phone. */
+    if (!_fsBound) {
+      _fsBound = true;
+      document.addEventListener("fullscreenchange", _onFsChange);
+      document.addEventListener("webkitfullscreenchange", _onFsChange);
+      window.addEventListener("orientationchange", function () { if (_full) setTimeout(_refit, 120); });
+    }
     return ov;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  // cc#959 FULLSCREEN LANDSCAPE ON PHONE
+  //
+  // The maximize button already expanded the wrapper to the viewport (cc#779). On a phone held
+  // upright that still gives a TALL, NARROW chart — the opposite of what more candles needs. This
+  // adds a second step on phones only: true fullscreen + a landscape orientation lock, with a
+  // CSS-rotation fallback for the platforms that refuse.
+  //
+  // WHY the WRAPPER is the fullscreen element and not #scorrChartBox: fullscreening the box alone
+  // would take the timeframe pills, the Pivots/Fib/GVM toggles, the verdict badge and the X out of
+  // the screen with it, because in fullscreen NOTHING outside the fullscreen element is painted.
+  // The wrapper carries all of them, so every control and all state survive by construction.
+  //
+  // PLATFORM FACTS this branches on, detected at tap time — never by user-agent string:
+  //   Android Chrome / installed PWA — Element.requestFullscreen resolves, screen.orientation.lock
+  //     resolves (it only resolves at all while in fullscreen, hence lock AFTER the fs promise).
+  //   iOS Safari — no Element.requestFullscreen on iPhone, no orientation.lock anywhere. Both the
+  //     missing-API case and the rejected-promise case land on the same rotation fallback.
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+  function _phone() {
+    try {
+      if (document.body && document.body.classList.contains("mcards")) return true;   // /m/* app shell
+      // a narrow DESKTOP window is not a phone: it keeps the cc#779 behaviour untouched.
+      return window.matchMedia("(max-width:767px)").matches && window.matchMedia("(pointer:coarse)").matches;
+    } catch (e) { return false; }
+  }
+  function _unlockOrientation() {
+    try { var so = window.screen && window.screen.orientation; if (so && so.unlock) so.unlock(); } catch (e) {}
+  }
+  /* Re-render the chart AT ITS NEW PIXEL SIZE. Lightweight-charts scales its canvas from the
+     options, so without this the canvas is stretched rather than redrawn. fitContent keeps the
+     SAME loaded window of data (no refetch) and simply spreads it over the wider axis. */
+  function _refit() {
+    var box = document.getElementById("scorrChartBox");
+    if (!box || !_chart) { _renderFx(); return; }
+    try {
+      _chart.applyOptions({ width: box.clientWidth, height: box.clientHeight });
+      _chart.timeScale().fitContent();
+    } catch (e) {}
+    _renderFx();   // pivot chips + fib zone bands + cc#960 ratio tags re-place off the new geometry
+  }
+  function _goLandscape(wrap, box) {
+    var lockThen = function () {
+      var so = null;
+      try { so = window.screen && window.screen.orientation; } catch (e) {}
+      if (so && so.lock) {
+        try {
+          var lp = so.lock("landscape");
+          if (lp && lp.then) { lp.then(function () { _refit(); }, function () { _rotateFallback(wrap, box); }); return; }
+          _refit(); return;
+        } catch (e) {}
+      }
+      /* fullscreen worked but the lock does not exist (iPadOS): rotate instead, so the user still
+         gets a landscape chart rather than a fullscreen portrait one. */
+      _rotateFallback(wrap, box);
+    };
+    var req = null;
+    try { req = wrap.requestFullscreen || wrap.webkitRequestFullscreen || wrap.msRequestFullscreen; } catch (e) {}
+    if (!req) { _rotateFallback(wrap, box); return; }
+    try {
+      var p = req.call(wrap, { navigationUI: "hide" });
+      if (p && p.then) { p.then(function () { _nativeFs = true; lockThen(); }, function () { _rotateFallback(wrap, box); }); return; }
+      _nativeFs = true; lockThen();
+    } catch (e) { _rotateFallback(wrap, box); }
+  }
+  /* Fallback: no fullscreen and/or no orientation lock. Rotate the wrapper 90° so the user turns
+     the phone sideways and reads a landscape chart.
+       width:100vh  height:100vw          — the element is sized in the ROTATED axis
+       transform-origin:top left
+       transform: translateX(100vw) rotate(90deg)
+     Read right-to-left: rotate maps (x,y)→(−y,x), putting the box at x∈[−W,0] y∈[0,H]; the
+     translate pushes it back to x∈[0,W]. It fills the viewport exactly, with no scrollbar. */
+  function _rotateFallback(wrap, box) {
+    if (_land) return;
+    /* if the device is ALREADY landscape the browser has done the job — rotating now would lay the
+       chart on its side. Just refit. */
+    if (window.innerWidth > window.innerHeight) { _refit(); return; }
+    _land = true;
+    var ovEl = document.getElementById("scorrChartOv");
+    if (ovEl) { ovEl.style.padding = "0"; ovEl.style.overflow = "hidden"; }
+    wrap.style.position = "fixed"; wrap.style.top = "0"; wrap.style.left = "0";
+    wrap.style.width = "100vh"; wrap.style.height = "100vw"; wrap.style.maxHeight = "100vw";
+    wrap.style.transformOrigin = "top left";
+    wrap.style.transform = "translateX(100vw) rotate(90deg)";
+    wrap.style.zIndex = "12101";
+    box.style.height = "calc(100vw - 108px)";
+    _refit();
+  }
+  function _exitLandscape(wrap, box) {
+    if (_land) {
+      _land = false;
+      var ovEl = document.getElementById("scorrChartOv");
+      if (ovEl) ovEl.style.overflow = "";
+      wrap.style.position = ""; wrap.style.top = ""; wrap.style.left = "";
+      wrap.style.transform = ""; wrap.style.transformOrigin = ""; wrap.style.zIndex = "";
+    }
+    _unlockOrientation();
+    if (_nativeFs) {
+      _nativeFs = false;
+      try {
+        var ex = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+        if (ex && (document.fullscreenElement || document.webkitFullscreenElement)) ex.call(document);
+      } catch (e) {}
+    }
+  }
+  /* The unlock hangs off fullscreenchange, NOT off the button. The Android back button and the
+     system swipe both drop fullscreen without ever touching our button; if the unlock lived only
+     on the button the phone would stay pinned to landscape for the rest of the session. */
+  function _onFsChange() {
+    var inFs = false;
+    try { inFs = !!(document.fullscreenElement || document.webkitFullscreenElement); } catch (e) {}
+    if (!inFs && _nativeFs) {
+      _nativeFs = false;
+      _unlockOrientation();
+      if (_full) { _toggleFull(false); return; }
+    }
+    _refit();
   }
 
   // cc#779: MAXIMIZE — expand the same modal to the full viewport (desktop: browser window; mobile:
@@ -214,15 +352,16 @@
       wrap.style.borderRadius = "0";
       box.style.height = "calc(100vh - 108px)";
       if (btn) { btn.innerHTML = "&#10066;"; btn.title = "Exit fullscreen (Esc)"; }
+      if (_phone()) { _goLandscape(wrap, box); return; }   // cc#959: _refit runs on the resolved path
     } else {
+      _exitLandscape(wrap, box);   // cc#959: undo rotation / fullscreen / orientation lock first
       if (ovEl) ovEl.style.padding = "16px";
       wrap.style.width = "min(94vw,640px)"; wrap.style.maxHeight = "88vh"; wrap.style.height = "";
       wrap.style.borderRadius = "16px";
       box.style.height = "412px";
       if (btn) { btn.innerHTML = "&#9974;"; btn.title = "Maximize (Esc to exit)"; }
     }
-    try { if (_chart) _chart.applyOptions({ width: box.clientWidth, height: box.clientHeight }); } catch (e) {}
-    _renderFx();
+    _refit();
   }
 
   // cc#779: trend-strength badge next to the return %. Server-computed (one endpoint, cached per
@@ -611,7 +750,23 @@
     if (_ov.fib && _fibBand) {
       FIB_ZONES.forEach(function (z, i) {
         html += '<div class="sc-fibz" data-zi="' + i + '" style="position:absolute;left:0;right:0;display:none;background:' + _rgba(z.col, 0.09) + '">' +
-          '<span style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font:700 9px/1 -apple-system,Segoe UI,sans-serif;letter-spacing:.4px;text-transform:uppercase;font-variant:small-caps;color:' + z.col + ';white-space:nowrap;opacity:.92">' + z.key + '</span></div>';
+          /* cc#960: right:42px, not 4px — the ratio gutter below owns the last 42px. Without this the
+             50% tag is invisible BY CONSTRUCTION, not by accident: 50 is the exact midpoint of the
+             DECISION band (38.2-61.8), so its line lands on the band label's centre every single time.
+             Two columns, no fight. */
+          '<span style="position:absolute;right:42px;top:50%;transform:translateY(-50%);font:700 9px/1 -apple-system,Segoe UI,sans-serif;letter-spacing:.4px;text-transform:uppercase;font-variant:small-caps;color:' + z.col + ';white-space:nowrap;opacity:.92">' + z.key +
+          /* the ratio suffix. Dim, so the WORD stays the primary read and the number is the
+             cross-reference for a fib-literate user. Same font, .7 opacity, no colour of its own. */
+          '<span style="opacity:.7;font-weight:600;letter-spacing:.2px;margin-left:4px"> ' + _fibZoneRange(z) + '</span>' +
+          '</span></div>';
+      });
+      /* cc#960 item 2: the ratio of each dashed LINE, printed at the line's right end just inside
+         the price axis. Placed in _positionFx, because only there is priceToCoordinate valid and
+         only there do we know what the live price tag and the zone labels are already occupying. */
+      FIB_RATIOS.forEach(function (r) {
+        html += '<div class="sc-fibr" data-fr="' + r + '" style="position:absolute;right:3px;display:none;' +
+          'transform:translateY(-50%);font:600 8.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;' +
+          'letter-spacing:.2px;color:' + pal.sub + ';white-space:nowrap">' + _fibPct(r) + '%</div>';
       });
     }
     fx.innerHTML = html;
@@ -641,6 +796,31 @@
       var top = Math.max(0, Math.min(yTop, yBot)), bot = Math.min(plotH, Math.max(yTop, yBot));
       if (bot - top < 2) { el.style.display = "none"; return; }
       el.style.display = "block"; el.style.top = top + "px"; el.style.height = (bot - top) + "px";
+    });
+
+    /* cc#960: place the per-line ratio tags in their own right gutter. The live price tag WINS — it
+       is the one thing on that axis a trader reads at a glance, so a ratio that would sit on top of
+       it is DROPPED, not nudged. Zone labels are no longer a conflict (they moved to right:42px),
+       so the only other rule is that tags do not stack on each other — which matters when the scale
+       compresses and two levels land a few pixels apart. */
+    var busy = [];
+    var lastC = (_lastData && _lastData.length) ? _lastData[_lastData.length - 1].close : null;
+    if (lastC != null && isFinite(lastC)) {
+      var yc = _series.priceToCoordinate(lastC);
+      if (yc != null) busy.push([yc - 9, yc + 9]);
+    }
+    fx.querySelectorAll(".sc-fibr").forEach(function (el) {
+      var r = parseFloat(el.getAttribute("data-fr"));
+      var y = _series.priceToCoordinate(lo + rng * r / 100);
+      /* 3px, not 5: the 0% tag IS the swing low and sits on the very bottom edge of the plot. A 5px
+         margin dropped it the moment the plot got shorter (landscape), losing the one level that
+         anchors the whole ladder. fx is overflow:hidden, so the sub-pixel bleed costs nothing. */
+      if (y == null || y < 3 || y > plotH - 3) { el.style.display = "none"; return; }
+      for (var i = 0; i < busy.length; i++) {
+        if (y >= busy[i][0] && y <= busy[i][1]) { el.style.display = "none"; return; }
+      }
+      el.style.display = "block"; el.style.top = y + "px";
+      busy.push([y - 6, y + 6]);
     });
   }
 
