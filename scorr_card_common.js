@@ -686,18 +686,66 @@
        "intentional table scroller" the card allows, rather than one forced on every symbol.
        The Symbol column is left to take the slack and the numeric columns tighten, because a
        truncated ticker is unreadable while a tight percentage is not. */
-    + 'body.mcards #scorrPeerPane table{min-width:0!important;table-layout:fixed}'
-    + 'body.mcards #scorrPeerPane th, body.mcards #scorrPeerPane td{'
-    + '  padding:7px 3px!important;font-size:10.5px!important}'
-    + 'body.mcards #scorrPeerPane th:first-child, body.mcards #scorrPeerPane td:first-child{'
-    + '  width:32%;white-space:normal;word-break:break-word}'
-    /* the CARD button column is the one that pushed the table 14px past the sheet on the first
-       measurement — measured, not guessed. Pinned narrow and the button shrunk to fit it, so the
-       row lands inside the sheet at 360px with nothing truncated. */
-    + 'body.mcards #scorrPeerPane th:last-child, body.mcards #scorrPeerPane td:last-child{'
-    + '  width:46px;padding-right:0!important}'
-    + 'body.mcards #scorrPeerPane td button{padding:4px 5px!important;font-size:9.5px!important;'
-    + '  min-height:28px!important;width:100%}'
+    /* ── cc#956 + cc#957 · PEERS TAB — RESTACKED, NOT SHRUNK ────────────────────────────────
+       cc#946 tried to make seven columns fit 360px by tightening them. The founder's 09-Aug
+       screenshot shows why that was the wrong answer: MONTH and GVM collided into "MONTHGVM",
+       value pairs fused with no gap ("+10.51%+16.98%"), the Watch chip clipped under the CARD
+       button, and "South West Pinnacle Exploration Ltd" ran under the next line's percentages.
+       Seven columns do not fit; the fix is to RESTACK the row, not to pad it.
+
+       Each peer becomes TWO LINES:
+         line 1   symbol (+ THIS) on the left · GVM bold and the band chip on the right
+         line 2   D · W · M, each with a dim label above a mono value
+       cc#957 removes two things from that: the COMPANY NAME (not required, and it was the string
+       that ran under the next line) and the CARD BUTTON — tapping the row opens the peer's card.
+
+       NO JAVASCRIPT CHANGED, and that is worth stating because cc#957 asked for a data-sym
+       attribute: the peer <tr> ALREADY carries data-sym, so cc#898's delegated symbol-tap listener
+       already matches the whole row. The CARD button was in fact already dead on /m/* — cc#898
+       listens in the CAPTURE phase and calls stopPropagation, so the button's own handler never
+       ran on a phone. Hiding it removes an affordance that already did nothing rather than taking
+       a working one away, and the tap path is the same one every symbol in the app uses.
+       scorr_chart_card.js is untouched (cc#803/805 lock), desktop keeps all seven columns. */
+    + 'body.mcards #scorrPeerPane table{min-width:0!important;width:100%!important;display:block}'
+    + 'body.mcards #scorrPeerPane thead{display:none}'            /* cc#956 item 2 */
+    + 'body.mcards #scorrPeerPane tbody{display:block}'
+    + 'body.mcards #scorrPeerPane tbody tr[data-sym]{display:grid;'
+    + '  grid-template-columns:1fr auto auto;column-gap:10px;row-gap:3px;align-items:center;'
+    + '  min-height:48px;padding:8px 2px;border-bottom:1px solid var(--line,#1E2740);cursor:pointer}'
+    + 'body.mcards #scorrPeerPane tbody tr[data-sym] > td{border:0!important;padding:0!important;'
+    + '  white-space:nowrap;font-size:11px!important;display:block}'
+    /* line 1 — symbol left, GVM and band right */
+    + 'body.mcards #scorrPeerPane td:nth-child(1){grid-column:1;grid-row:1;text-align:left!important;'
+    + '  min-width:0;overflow:hidden}'
+    + 'body.mcards #scorrPeerPane td:nth-child(5){grid-column:2;grid-row:1;text-align:right!important;'
+    + '  font-size:12.5px!important}'
+    + 'body.mcards #scorrPeerPane td:nth-child(6){grid-column:3;grid-row:1;text-align:right!important}'
+    /* cc#957: the company name and the CARD button both go.
+       !important here is EARNED, not sprinkled: the `tr[data-sym] > td` rule above sets
+       display:block at (0,2,3) and out-specifies a plain `#id td:nth-child(7)` at (0,1,2), so
+       without it the CARD column stayed on screen — the first measurement caught exactly that. */
+    + 'body.mcards #scorrPeerPane td:nth-child(1) > div:nth-child(2){display:none!important}'
+    + 'body.mcards #scorrPeerPane tbody tr[data-sym] > td:nth-child(7){display:none!important}'
+    /* cc#957 item 3: the tap has to be discoverable now that the button is gone — the cc#898
+       dotted-underline convention, on the symbol text itself. */
+    + 'body.mcards #scorrPeerPane td:nth-child(1) > div:first-child{'
+    + '  font-size:13px!important;text-decoration:underline dotted;text-underline-offset:3px;'
+    + '  text-decoration-color:var(--line2,rgba(148,166,210,.45))}'
+    /* line 2 — D · W · M with labels. The 10px column-gap above is what stops two values fusing;
+       a label carries the column meaning per row, which is what lets the header row go. */
+    + 'body.mcards #scorrPeerPane td:nth-child(2){grid-column:1;grid-row:2;text-align:left!important}'
+    + 'body.mcards #scorrPeerPane td:nth-child(3){grid-column:2;grid-row:2}'
+    + 'body.mcards #scorrPeerPane td:nth-child(4){grid-column:3;grid-row:2}'
+    + 'body.mcards #scorrPeerPane td:nth-child(2):before{content:"D "}'
+    + 'body.mcards #scorrPeerPane td:nth-child(3):before{content:"W "}'
+    + 'body.mcards #scorrPeerPane td:nth-child(4):before{content:"M "}'
+    + 'body.mcards #scorrPeerPane td:nth-child(2):before,'
+    + 'body.mcards #scorrPeerPane td:nth-child(3):before,'
+    + 'body.mcards #scorrPeerPane td:nth-child(4):before{'
+    + '  font-size:8.5px;font-weight:800;letter-spacing:.06em;color:var(--dim,#5E6B8F)}'
+    /* the inline drawer row keeps working, full width under its peer */
+    + 'body.mcards #scorrPeerPane tbody tr[data-drawer]{display:block}'
+    + 'body.mcards #scorrPeerPane tr[data-drawer] > td{display:block;width:100%;border:0!important}'
     /* the range/timeframe pills wrap instead of pushing the head sideways, and stay thumb-sized */
     + 'body.mcards #scorrChartTfs, body.mcards #scorrChartTabs{flex-wrap:wrap;gap:5px;row-gap:6px}'
     + 'body.mcards #scorrChartTfs button, body.mcards #scorrChartTabs button{'
