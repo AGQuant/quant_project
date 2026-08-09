@@ -117,27 +117,51 @@
 .v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800}
 .v10sum span{display:block;font-size:9.5px;color:var(--dim);text-transform:uppercase;
   letter-spacing:.4px;margin-top:2px}
+/* cc#948 — TWO-ZONE ANATOMY, restoring what the old .tr2 row had and cc#941 lost.
+   The founder's complaint is that results no longer SCAN: cc#941 put the net P&L on line 3 on the
+   LEFT, so every card's headline number sits at a different x depending on how long the line
+   above it is. The old row had a FIXED RIGHT COLUMN, so P&Ls formed a single vertical line down
+   the log and the eye could run the column without reading anything else. That column is back:
+   .v10cb is the flexible left zone, .v10rt is a fixed, right-aligned, vertically centred column.
+   Line 1 is nowrap + truncate — never two lines at 360px (item 2). */
 .v10c{display:flex;align-items:stretch;gap:9px;padding:9px 3px;border-bottom:1px solid var(--line)}
 .v10c .rl{width:3px;border-radius:2px;flex:none;background:var(--mut)}
 .v10c.wn .rl{background:#2FD48B} .v10c.ls .rl{background:#FF5C6C} .v10c.op .rl{background:#4D7CFE}
 .v10c.sel{background:rgba(77,124,254,.10)}
-.v10cb{flex:1;min-width:0}
-.v10c .c1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.v10c .sym{font-size:12px;font-weight:800;letter-spacing:.2px}
-.v10c .rsn2{font-size:9px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:5px;
-  text-transform:uppercase}
+.v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
+.v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;
+  white-space:nowrap}
+.v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+  margin-top:2px;white-space:nowrap}
+.v10c .c1{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
+.v10c .sym{font-size:13px;font-weight:800;letter-spacing:.2px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.v10c .c1 > *{flex:none}
+.v10c .c1 .sym{flex:0 1 auto}
+.v10c .rsn2{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:5px;
+  text-transform:uppercase;white-space:nowrap}
 .v10c .rsn2.bad{background:rgba(255,92,108,.16);color:#FF5C6C}
 .v10c .rsn2.good{background:rgba(47,212,139,.16);color:#2FD48B}
 .v10c .rsn2.open{background:rgba(77,124,254,.16);color:#4D7CFE}
 .v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--dim)}
-.v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;margin-top:3px}
-.v10c .c2 i{color:var(--dim);font-style:normal;margin-left:7px;font-size:11px}
-.v10c .c3{display:flex;align-items:baseline;gap:8px;margin-top:3px;flex-wrap:wrap}
-.v10c .c3 b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;font-weight:800}
-.v10c .c3 span{font-size:10px;color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.v10c .c4{margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);font-size:10.5px;
-  color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.v10c .c4 em{font-style:normal;font-weight:700}
+.v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* cc#948 item 3: the hedge line was a 10.5px wall of text. Structured now — a HEDGE tag, the
+   contract, the premium leg, and its own P&L pushed to the right edge so it lands UNDER the net
+   column and the two numbers share one vertical rule. */
+.v10c .c4{margin-top:6px;padding-top:5px;border-top:1px dashed var(--line);
+  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.v10c .c4 .htag{font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 5px;
+  border-radius:4px;background:rgba(255,255,255,.06);color:var(--mut);flex:none}
+.v10c .c4 .hmid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v10c .c4 em{font-style:normal;font-weight:700;flex:none}
+/* item 4: nothing in the log below 9.5px */
+.mhd .mn{font-size:10.5px!important}
+.v10sum span{font-size:10px!important}
 .mhd{display:flex;align-items:center;gap:8px;padding:10px 2px 5px;margin-top:4px;
   border-bottom:1px solid var(--line);cursor:pointer}
 .mhd .mn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
@@ -753,7 +777,7 @@ function togTrend(ev, kind){
    The server does the matching (mobile_home2.mobile_v10chart) — dates converted to IST in SQL,
    FUT legs only, trades older than the window dropped and counted, never clamped onto a candle. */
 var V10 = { sym: 'NIFTY50', data: null, sel: null,
-            leg: 'FUT', win: null, mfold: {},
+            leg: 'ALL', win: null, mfold: {},
             loading: false, pageErr: null };   // cc#949: one in-flight page fetch, last error
 
 function v10Icon(sym){
@@ -1099,8 +1123,9 @@ function monKey(iso){
   var p = String(iso).split('-');
   return p.length < 2 ? 'Undated' : (MONN[Number(p[1]) - 1] + ' ' + p[0]);
 }
-/* cc#941: v10SetLeg() removed with the FUTURES/OPTIONS tabs — a paired card carries
-   both legs, so there is nothing left to switch between. */
+/* cc#948: v10SetLeg RESTORED. cc#941 removed it as dead code; it was founder-approved UI from
+   cc#920/928 that no spec asked to remove. Now switches ALL / FUT / OPT. */
+function v10SetLeg(l){ V10.leg = l; V10.sel = null; renderV10(); }
 function v10FoldMon(k){ V10.mfold[k] = !V10.mfold[k]; renderV10(); }
 
 /* tapping a row selects the trade AND slides the chart to it (card item 3c) */
@@ -1136,30 +1161,63 @@ function v10ReasonCls(r){
   if (r === 'OPEN') return 'open';
   return 'neut';                                  // EOD and anything else: grey, never coloured
 }
-function v10Card(t){
+function v10Card(t, hideHedge){
   var px2 = function(v){ return v == null ? '--' : Math.round(v).toLocaleString('en-IN'); };
   var long = t.direction === 'LONG';
-  var hedge = t.hedge;
-  var pts = (t.points == null) ? '' : ((t.points >= 0 ? '+' : '') + Number(t.points).toFixed(0) + ' pts');
-  /* net P&L is the ONLY bold number on the card, because it is the only one that is the result. */
-  var net = (t.net_r == null) ? '&mdash;'
+  var hedge = hideHedge ? null : t.hedge;
+  var net = (t.net_r == null) ? '\u2014'
           : ((t.net_r >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(t.net_r).toLocaleString('en-IN'));
+  var pts = (t.points == null) ? '' : ((t.points >= 0 ? '+' : '') + Number(t.points).toFixed(0) + ' pts');
   return '<div class="v10c ' + (t.net_r == null ? 'op' : (t.win ? 'wn' : 'ls'))
       + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
     + '<span class="rl"></span><span class="v10cb">'
     + '<div class="c1"><span class="sym">' + esc(t.symbol === 'BANKNIFTY' ? 'BANKNIFTY' : 'NIFTY') + '</span>'
       + '<span class="pill ' + (long ? 'lg' : 'sh') + '">' + (long ? 'LONG' : 'SHORT') + '</span>'
       + '<span class="rsn2 ' + v10ReasonCls(t.reason) + '">' + esc(t.reason) + '</span></div>'
-    + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price))
-      + (pts ? '<i>' + esc(pts) + '</i>' : '') + '</div>'
-    + '<div class="c3"><b class="' + cls(t.net_r) + '">' + net + '</b>'
-      + '<span>' + esc(t.entry_ist || '') + (t.exit_ist ? ' \u2192 ' + esc(t.exit_ist) : '')
-      + (t.held ? ' \u00b7 ' + esc(t.held) : '') + '</span></div>'
-    + (hedge ? '<div class="c4">hedge ' + esc(hedge.side || '') + ' ' + esc(hedge.label || '')
-        + ' \u00b7 ' + px2(hedge.entry_price) + ' \u2192 ' + px2(hedge.exit_price)
-        + ' \u00b7 <em class="' + cls(hedge.pnl) + '">' + (hedge.pnl == null ? '--' : inrShort(hedge.pnl))
+    + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price)) + '</div>'
+    + '<div class="c3">' + esc(t.entry_ist || '') + (t.exit_ist ? ' \u2192 ' + esc(t.exit_ist) : '')
+      + (t.held ? ' \u00b7 ' + esc(t.held) : '') + '</div>'
+    + (hedge ? '<div class="c4"><span class="htag">HEDGE</span>'
+        + '<span class="hmid">' + esc(hedge.label || '') + ' \u00b7 ' + esc(hedge.side || '') + ' '
+        + px2(hedge.entry_price) + ' \u2192 ' + px2(hedge.exit_price) + '</span>'
+        + '<em class="' + cls(hedge.pnl) + '">' + (hedge.pnl == null ? '--' : inrShort(hedge.pnl))
         + '</em></div>' : '')
-    + '</span></div>';
+    + '</span>'
+    /* THE RIGHT COLUMN — fixed, right-aligned, vertically centred. This is what cc#941 lost and
+       what the founder is asking back for: every card's result sits at the same x, so the log
+       scans as one vertical column of P&Ls instead of a number hiding at the end of line 3. */
+    + '<span class="v10rt"><b class="' + cls(t.net_r) + '">' + net + '</b>'
+    + (pts ? '<span>' + esc(pts) + '</span>' : '') + '</span></div>';
+}
+
+/* cc#948 item 1 — OPTION LEG CARD, premium scale, its own list.
+   An option leg is a PREMIUM (220), a futures leg an index level (58,004). The cc#941 finding
+   that those must never share a column still stands, which is exactly why OPTIONS is its own
+   view rather than a column added to the paired card. Same anatomy, same right-hand result
+   column, so the two lists read identically even though their numbers are on different scales. */
+function v10OptCard(t){
+  var px2 = function(v){ return v == null ? '--' : Number(v).toFixed(2); };
+  var buy = (t.side === 'BUY');
+  /* round the MAGNITUDE, not the signed value. Math.round(-772.5) is -772 in JS (ties go toward
+     +Infinity), so rounding first made this leg read -Rs772 here while the same number read
+     -Rs773 on the hedge sub-line of the paired card. One P&L, two figures, on one screen. */
+  var pnl = (t.pnl == null) ? '\u2014'
+          : ((t.pnl >= 0 ? '+' : '\u2212') + '\u20B9' + Math.round(Math.abs(t.pnl)).toLocaleString('en-IN'));
+  var pts = (t.points == null) ? '' : ((t.points >= 0 ? '+' : '') + Number(t.points).toFixed(1) + ' pts');
+  var title = (t.opt_strike != null ? Math.round(t.opt_strike).toLocaleString('en-IN') : '?')
+            + ' ' + esc(t.opt_type || '');
+  return '<div class="v10c ' + (t.pnl == null ? 'op' : (t.pnl >= 0 ? 'wn' : 'ls'))
+      + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
+    + '<span class="rl"></span><span class="v10cb">'
+    + '<div class="c1"><span class="sym">' + title + '</span>'
+      + '<span class="pill ' + (buy ? 'lg' : 'sh') + '">' + (buy ? 'BUY' : 'SELL') + '</span>'
+      + '<span class="rsn2 ' + v10ReasonCls(t.reason) + '">' + esc(t.reason || 'EXIT') + '</span></div>'
+    + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price))
+      + ' <span style="color:var(--dim)">premium</span></div>'
+    + '<div class="c3">' + esc(dlab(t.entry_d || '')) + (t.exit_d ? ' \u2192 ' + esc(dlab(t.exit_d)) : '')
+      + '</div></span>'
+    + '<span class="v10rt"><b class="' + cls(t.pnl) + '">' + pnl + '</b>'
+    + (pts ? '<span>' + esc(pts) + '</span>' : '') + '</span></div>';
 }
 
 function v10Log(d){
@@ -1182,14 +1240,62 @@ function v10Log(d){
   if (sm.unhedged)
     h += '<div class="sum" style="padding:2px 2px 8px">' + sm.hedged + ' hedged \u00b7 '
        + sm.unhedged + ' unhedged (pre-hedge era)</div>';
+  /* ══ cc#948 item 1 — QUICK ACCESS RESTORED ═══════════════════════════════════════════════
+     I deleted these pills and v10SetLeg() in cc#941 as "dead code". They were not dead: they were
+     founder-approved UI from cc#920/928, and NOTHING IN THE cc#941 SPEC ASKED FOR THEIR REMOVAL.
+     That is the lesson this card is filed to teach and it is written here so the next reader
+     inherits it: a spec that does not name a removal does not authorise one. Unreferenced is not
+     the same as unwanted.
+     Three views, each on ONE price scale — the cc#941 finding that an index level and a premium
+     must never share a column is what makes OPTIONS a separate view rather than an extra column:
+       ALL       paired cards, hedge sub-line shown (the cc#941 view, default)
+       FUTURES   the same paired cards with the hedge line hidden — pure index scale
+       OPTIONS   the option legs as their own cards on premium scale
+     Data is the per-leg trades[] and by_leg the payload already carries; no endpoint change. */
+  var view = V10.leg || 'ALL';
+  var legs = d.trades || [];
+  var opts = legs.filter(function(x){ return (x.leg || 'FUT') === 'OPT'; });
+  var bl = d.by_leg || {};
+  var counts = { ALL: rows.length,
+                 FUT: rows.length,
+                 OPT: opts.length };
+  h += '<div class="lgtabs">' + [['ALL','ALL'],['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
+      return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'
+        + ' onclick="v10SetLeg(\'' + v[0] + '\')">' + v[1]
+        + ' <i>' + (counts[v[0]] || 0) + '</i></button>';
+    }).join('') + '</div>';
+  /* by_leg footer for the ACTIVE view only — a total that does not belong to what is on screen
+     is worse than no total. FUT/ALL show the paired net (the trade's real result); OPTIONS shows
+     the option legs' own net, which is a different number by design. */
+  var foot = (view === 'OPT')
+    ? ((bl.OPT ? (bl.OPT.trades || 0) + ' option legs \u00b7 net ' + inrShort(bl.OPT.net_pnl) : '') )
+    : ((sm.paired_trades || 0) + ' paired trades \u00b7 net '
+       + (sm.net_r == null ? '--' : inrShort(sm.net_pnl)));
+  if (foot) h += '<div class="sum" style="padding:2px 2px 8px">' + esc(foot) + '</div>';
+
+  if (view === 'OPT'){
+    if (!opts.length)
+      return h + '<div class="sum" style="padding:10px 2px">No option legs for ' + esc(d.label) + '.</div>';
+    return h + v10Months(opts, function(x){ return x.exit_d || x.entry_d || ''; },
+                         function(x){ return x.pnl; }, v10OptCard);
+  }
+
   if (!rows.length)
     return h + '<div class="sum" style="padding:10px 2px">No trades for ' + esc(d.label) + '.</div>';
 
-  /* Month grouping kept from cc#928 — it is how the founder scans the log — but now over paired
-     trades. Sorted on a real YYYY-MM key, never on arrival order. */
+  return h + v10Months(rows, function(t){ return t.exit_date || t.entry_date || ''; },
+                       function(t){ return t.net_pnl; },
+                       function(t){ return v10Card(t, view === 'FUT'); });
+}
+
+/* Month grouping kept from cc#928 — it is how the founder scans the log. Extracted here so the
+   paired list and the option-leg list share ONE implementation: two copies would drift, and the
+   fold state, the sort and the subtotal all have to behave identically in both views.
+   Sorted on a real YYYY-MM key, never on arrival order. */
+function v10Months(items, dateOf, pnlOf, cardOf){
   var map = {}, key = {};
-  rows.forEach(function(t){
-    var iso = t.exit_date || t.entry_date || '';
+  items.forEach(function(t){
+    var iso = dateOf(t) || '';
     var k = monKey(iso);
     if (!map[k]){ map[k] = []; key[k] = String(iso).slice(0, 7) || '0000-00'; }
     map[k].push(t);
@@ -1197,22 +1303,21 @@ function v10Log(d){
   var order = Object.keys(map).sort(function(a, b){
     return key[a] < key[b] ? 1 : (key[a] > key[b] ? -1 : 0);      // newest month first
   });
-  h += order.map(function(k){
+  return order.map(function(k){
     var g = map[k].slice().sort(function(a, b){
-      var x = a.exit_date || a.entry_date || '', y = b.exit_date || b.entry_date || '';
+      var x = dateOf(a) || '', y = dateOf(b) || '';
       return x < y ? 1 : (x > y ? -1 : (b.id - a.id));
     });
     var net = 0, known = false;
-    g.forEach(function(t){ if (t.net_pnl != null){ net += t.net_pnl; known = true; } });
+    g.forEach(function(t){ var v = pnlOf(t); if (v != null){ net += v; known = true; } });
     var fold = !!V10.mfold[k];
     return '<div class="mhd" onclick="v10FoldMon(\'' + esc(k).replace(/'/g, "\\'") + '\')">'
       + '<span class="mn">' + esc(k) + '</span>'
       + '<span class="mp ' + (known ? cls(net) : '') + '">' + (known ? inrShort(net) : '--') + '</span>'
       + '<span class="mc">' + g.length + '</span>'
       + '<span class="mx">' + (fold ? '\u25BE' : '\u25B4') + '</span></div>'
-      + (fold ? '' : g.map(v10Card).join(''));
+      + (fold ? '' : g.map(cardOf).join(''));
   }).join('');
-  return h;
 }
 
 function renderV10(){
