@@ -64,6 +64,11 @@ THROTTLE = 1.0
 # Yahoo exchange codes we accept from the search API. NSI = NSE, BSE = BSE. Anything else
 # (NYQ, LSE, a currency pair) is a name collision on a foreign listing, not our symbol.
 _OK_EXCHANGES = ("NSI", "BSE")
+# How far behind the newest session a series may be and still count as live. See _try().
+FRESH_TOLERANCE_DAYS = 5
+# Series in sec_bhavdata_full that represent a tradable equity-like instrument.
+# EQ/BE/BZ = main board, SM/ST = SME board, IV/RR = InvIT / REIT / rights.
+_NSE_SERIES = ("EQ", "BE", "BZ", "SM", "ST", "IV", "RR")
 
 
 def _conn():
@@ -208,7 +213,12 @@ def resolve_symbol(symbol: str, bse: Optional[str] = None, name: Optional[str] =
         tried.add(ticker)
         rows, reason = _probe(ticker, symbol, lookback)
         last = max((r[1] for r in rows), default=None)
-        fresh = bool(rows) and (fresh_by is None or (last is not None and last >= fresh_by))
+        # FRESH_TOLERANCE_DAYS, not an exact match. A thinly-traded SME name legitimately has no
+        # print on the last session — FOCE last traded 06-Aug against a 07-Aug bar — and calling
+        # that "stale" would retire live companies. Five days clears a long weekend and still
+        # rejects a series frozen since July, which is the case this bar exists to catch.
+        fresh = bool(rows) and (fresh_by is None or
+                                (last is not None and (last - fresh_by).days >= -FRESH_TOLERANCE_DAYS))
         attempts.append({"ticker": ticker, "source": source, "bars": len(rows),
                          "last_date": str(last) if last else None, "fresh": fresh,
                          "reason": reason if not rows else (None if fresh else "series_stale")})
@@ -429,7 +439,11 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
         rows = []
         for row in _csv.DictReader(_io.StringIO(text)):
             row = {(k or "").strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
-            if row.get("SERIES", "").strip().upper() != "EQ":
+            # NOT just EQ. sec_bhavdata_full carries the SME board as series SM/ST and InvITs/REITs
+            # as IV/RR — filtering to EQ (which nse_eod_ingest does, correctly, for delivery
+            # percentages on the main board) makes every SME name look absent from the exchange and
+            # would have retired live companies as delisted. FOCE caught this on the first run.
+            if row.get("SERIES", "").strip().upper() not in _NSE_SERIES:
                 continue
             sym = (row.get("SYMBOL") or "").strip().upper()
             if sym not in syms:
@@ -460,10 +474,24 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
     # moment a fresh series reappears, so this is reversible.
     fetched_ok = sum(1 for p in per_date if not p.get("error"))
     retired = []
+    # Re-read AFTER the upserts: "did this symbol actually catch up" is the only honest test, and
+    # the first build asked the wrong one — it retired on zero hits in the run, which cleared
+    # JBCHEPHARM (24 hits, all on dates before its gap) while retiring FOCE (an SME name absent
+    # only because of the EQ filter above). Behind-the-newest-session after a heal attempt is the
+    # condition that actually means "this is not trading any more".
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT MAX(price_date) FROM raw_prices")
+        target = cur.fetchone()[0]
+        cur.execute("""SELECT UPPER(symbol), MAX(price_date) FROM raw_prices
+                       WHERE UPPER(symbol) = ANY(%s) GROUP BY 1""", (sorted(syms),))
+        after = {r[0]: r[1] for r in cur.fetchall()}
     if fetched_ok >= 10:
         for sym in sorted(syms):
-            if seen.get(sym, 0) == 0:
-                last_seen = have.get(sym)
+            behind = after.get(sym)
+            still_behind = (behind is None or target is None or
+                            (target - behind).days > FRESH_TOLERANCE_DAYS)
+            if seen.get(sym, 0) == 0 and still_behind:
+                last_seen = after.get(sym) or have.get(sym)
                 retired.append({"symbol": sym, "last_seen": str(last_seen) if last_seen else None})
                 try:
                     with _conn() as conn, conn.cursor() as cur:
@@ -473,7 +501,7 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
                                        ON CONFLICT (symbol) DO UPDATE SET
                                          reason=EXCLUDED.reason, attempts=EXCLUDED.attempts, checked_at=NOW()""",
                                     (sym,
-                                     f"absent from NSE EQ bhavcopy across {fetched_ok} sessions "
+                                     f"absent from the NSE bhavcopy across {fetched_ok} sessions "
                                      f"(last seen {last_seen}) and no fresh Yahoo series — delisted or merged",
                                      json.dumps({"nse_sessions_checked": fetched_ok,
                                                  "last_seen": str(last_seen) if last_seen else None},
