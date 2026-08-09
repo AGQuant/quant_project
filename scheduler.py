@@ -1930,6 +1930,95 @@ def _bg_yahoo_new_listings():
     finally:
         _yahoo_new_listings_running = False
 
+
+_yahoo_resolve_running = False
+_yahoo_resolve_ran_day = None
+
+
+def _bg_yahoo_symbol_resolve():
+    """cc#938 SELF-HEALING PRICE FEED. Two triggers, one body.
+
+    ON DEMAND — app_config yahoo_resolve_run='pending' (optional yahoo_resolve_symbols, a
+    comma/space list). Runs once and sets the flag to 'done'.
+
+    NIGHTLY — 20:10 IST, AFTER the 19:30 Yahoo EOD pass, so it works on that pass's own outcome.
+    Scope is derived, never a hardcoded list (ENGINE_LIVENESS_RULE 13829): every GVM-universe
+    symbol with ZERO raw_prices rows, plus every symbol whose newest row is more than 5 sessions
+    behind the newest row in the table. Those are exactly the two failure modes cc#938 found — a
+    symbol that can never bootstrap (the nightly universe is SELECT DISTINCT symbol FROM
+    raw_prices, so no rows means no fetch means no rows), and a ticker that moved.
+
+    CAPPED at 40 symbols a run. Each symbol costs up to four Yahoo calls at a 1s throttle, so an
+    uncapped sweep over a large backlog would be a long single-threaded burst at Yahoo. The cap is
+    a politeness guarantee, not a tuning knob; the backlog drains over consecutive nights and the
+    resolver is idempotent, so a symbol already resolved is re-verified cheaply and skipped.
+    Anything that resolves is written to yahoo_symbol_map and enters the nightly universe by
+    itself; anything that does not is written to price_feed_excluded with every attempt recorded.
+    """
+    global _yahoo_resolve_running, _yahoo_resolve_ran_day
+    if _yahoo_resolve_running:
+        return _SKIPPED
+    now = _ist_now()
+    today = now.date()
+    syms, armed = [], False
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='yahoo_resolve_run'")
+            r = cur.fetchone()
+            armed = bool(r and r[0] == "pending")
+            if armed:
+                cur.execute("SELECT value FROM app_config WHERE key='yahoo_resolve_symbols'")
+                r2 = cur.fetchone()
+                syms = [x.strip().upper() for x in ((r2[0] if r2 else "") or "").replace(",", " ").split() if x.strip()]
+    except Exception as e:
+        log.warning(f"yahoo_symbol_resolve flag read: {e}")
+        return _SKIPPED
+
+    nightly = (now.hour == 20 and now.minute < 10 and _yahoo_resolve_ran_day != today)
+    if not armed and not nightly:
+        return _SKIPPED
+
+    _yahoo_resolve_running = True
+    try:
+        if nightly:
+            _yahoo_resolve_ran_day = today
+        if not syms:
+            with _conn() as conn, conn.cursor() as cur:
+                # REGISTRY-DERIVED, not a name list: zero-row symbols first (they are dark), then
+                # the stalest feeds. A 5-session lag is comfortably past a long weekend, so this
+                # cannot fire on a symbol that simply did not trade on a holiday.
+                cur.execute("""
+                    WITH latest AS (SELECT MAX(price_date) d FROM raw_prices),
+                    u AS (SELECT DISTINCT UPPER(symbol) s FROM gvm_scores
+                          WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)),
+                    last_row AS (SELECT UPPER(symbol) s, MAX(price_date) d FROM raw_prices GROUP BY 1)
+                    SELECT u.s, COALESCE(l.d, DATE '1900-01-01') AS last_d
+                    FROM u LEFT JOIN last_row l ON l.s = u.s
+                    WHERE l.d IS NULL OR l.d < (SELECT d FROM latest) - 7
+                    ORDER BY last_d ASC, u.s
+                    LIMIT 40""")
+                syms = [r[0] for r in cur.fetchall()]
+        if not syms:
+            log.info("yahoo_symbol_resolve: nothing to resolve")
+        else:
+            import yahoo_symbol_resolver as ysr
+            res = ysr.resolve_and_backfill(syms, lookback="5y")
+            log.info(f"yahoo_symbol_resolve: {res.get('summary')}")
+    except Exception as e:
+        log.error(f"yahoo_symbol_resolve: {e}")
+    finally:
+        if armed:
+            try:
+                with _conn() as conn, conn.cursor() as cur:
+                    cur.execute("INSERT INTO app_config (key,value,updated_at) "
+                                "VALUES ('yahoo_resolve_run','done',NOW()) "
+                                "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+                    conn.commit()
+            except Exception as e:
+                log.warning(f"yahoo_symbol_resolve flag clear: {e}")
+        _yahoo_resolve_running = False
+
+
 def _bg_pivots():
     global _pivots_ran_today
     today = _ist_now().date()
@@ -3810,6 +3899,7 @@ async def _scheduler_loop():
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
         _spawn(_bg_yahoo_new_listings)  # cc#539: flag-gated one-shot Yahoo EOD backfill for new listings
+        _spawn(_bg_yahoo_symbol_resolve)  # cc#938: flag-gated + nightly 20:10 IST price-feed self-heal (derived scope, capped 40)
         # cc#795 RETIRED: this runner calls run_company -> run_extraction/write_extraction, i.e. the
         # LLM spend and the sector_ops_metrics write. Disarmed here AND hard-stopped inside
         # ops_metrics_pipeline, so an armed app_config flag cannot resurrect it either.
