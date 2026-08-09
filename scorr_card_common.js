@@ -709,6 +709,47 @@
     + 'body.mcards #scorrChartBoxWrap{overflow-x:hidden!important}'
     + 'body.mcards #scorrChartTitle{font-size:15px!important}'
 
+    /* ── cc#947 items 2-4 · the C sheet, from the founder's 09-Aug screenshot ────────────────
+       ITEM 2 — THE PILLS WERE STACKING VERTICALLY. #scorrChartTfs and #scorrChartTabs are laid
+       out by INLINE cssText in _buildModal, and cc#918 turned their container into a narrow
+       flex column sheet; a flex child with no explicit direction inherited the column and every
+       pill dropped onto its own line down the middle of the sheet. Forced back to a row here.
+       It SCROLLS rather than wraps: 5m/1M/3M/6M/1Y/3Y/ALL plus Pivots/Fib/GVM is ten controls,
+       and wrapping them eats three lines of the height item 4 is trying to give the chart.
+       A one-line row you can flick is the smaller cost, and the scrollbar is hidden so it reads
+       as a strip, not a scroller.
+       ITEM 3 — HEADER ON ONE LINE. The head row wraps to at most two lines at 360px: title and
+       price stay together and grow to fill, the verdict chip / fullscreen / close sit at the end.
+       ITEM 4 — THE CHART OWNS THE HEIGHT. With the head and pills compact, the box is given the
+       remaining sheet height via flex rather than a fixed pixel count, with a floor so it can
+       never be squeezed to nothing by a long header. */
+    + 'body.mcards #scorrChartTfs, body.mcards #scorrChartTabs{'
+    + '  display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;'
+    + '  align-items:center!important;overflow-x:auto;-webkit-overflow-scrolling:touch;'
+    + '  scrollbar-width:none;padding:6px 12px!important;gap:5px!important}'
+    + 'body.mcards #scorrChartTfs::-webkit-scrollbar, body.mcards #scorrChartTabs::-webkit-scrollbar{'
+    + '  display:none}'
+    + 'body.mcards #scorrChartTfs > *, body.mcards #scorrChartTabs > *{flex:0 0 auto!important}'
+    + 'body.mcards #scorrChartTfs button, body.mcards #scorrChartTabs button{'
+    + '  min-height:32px!important;padding:6px 9px!important;font-size:11px!important;'
+    + '  white-space:nowrap!important}'
+    /* header: one row, wrapping to two at most, nothing floating mid-sheet */
+    + 'body.mcards #scorrChartHead{display:flex!important;flex-direction:row!important;'
+    + '  flex-wrap:wrap!important;align-items:center!important;gap:6px!important;'
+    + '  padding:10px 12px 6px!important}'
+    + 'body.mcards #scorrChartTitle{flex:1 1 auto!important;min-width:0;white-space:nowrap;'
+    + '  overflow:hidden;text-overflow:ellipsis}'
+    + 'body.mcards #scorrChartHL{font-size:10.5px!important;white-space:nowrap}'
+    + 'body.mcards #scorrChartVerdictChip{flex:0 0 auto!important}'
+    /* the chart takes what is left of the sheet */
+    + 'body.mcards #scorrChartBoxWrap{display:flex!important;flex-direction:column!important;'
+    + '  height:90vh!important}'
+    + 'body.mcards #scorrChartBox{flex:1 1 auto!important;min-height:280px!important;'
+    + '  display:flex;flex-direction:column}'
+    + 'body.mcards #scorrChartBox > div:first-child{flex:1 1 auto!important;min-height:0}'
+    + 'body.mcards #scorrChartMsg{padding:0 12px}'
+    + 'body.mcards #scorrPeerPane{flex:1 1 auto;overflow-y:auto;min-height:0}'
+
     /* ── A · analysis card ───────────────────────────────────────────────────────────────
        The trajectory and performance grids are flex rows whose label column is an inline
        `width:86px;min-width:86px`. At 360px, minus the sheet's 20px side padding, that leaves

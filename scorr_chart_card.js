@@ -537,8 +537,16 @@
       var cached = _fibCache[_sym];
       if (cached) { drawPiv(cached); }
       else {
-        _getJSON("/api/trade-check/fibcheck?symbol=" + encodeURIComponent(_sym) + "&lookback=6m")
-          .then(function (f) { _fibCache[_sym] = f; if (_ov.pivot && _pivOk()) drawPiv(f); }).catch(function () {});
+        /* cc#947: the cache key was read at RESOLVE time, so a fib response arriving after a
+           symbol switch was filed under the NEW symbol — the same wrong-symbol class as _load,
+           one cache deep. Keyed to the symbol it was requested for. */
+        (function (fsym) {
+          _getJSON("/api/trade-check/fibcheck?symbol=" + encodeURIComponent(fsym) + "&lookback=6m")
+            .then(function (f) {
+              _fibCache[fsym] = f;
+              if (_sym === fsym && _ov.pivot && _pivOk()) drawPiv(f);
+            }).catch(function () {});
+        })(_sym);
       }
     }
     _fibBand = null;
@@ -670,10 +678,23 @@
     if (_chart) { try { _chart.remove(); } catch (e) {} _chart = null; _series = null; }
     box.innerHTML = ""; msg.textContent = "Loading…";
     var isIntraday = (TF[tf] === null);
+    /* cc#947 item 1 — THE WRONG-SYMBOL BUG. _load builds its URL from _sym at CALL time and then
+       resolves LATER, and this .then() was the ONE async path in this file with no stale-response
+       guard: the verdict fetch (line ~239), the GVM overlay (~378) and the peer pane (~782) all
+       check `_sym !== sym` before touching the DOM, and this one did not.
+       close() does not abort an in-flight request, so the founder's exact sequence — open NMDC,
+       close, open GLENMARK — leaves NMDC's response in the air. It lands after GLENMARK's, passes
+       no guard, and CREATES THE CHART with NMDC candles under a title that already says GLENMARK.
+       That is the screenshot: header GLENMARK Rs 2,296, readout NMDC · Price.
+       Reproduced with this exact interleaving before the fix and confirmed gone after.
+       Captured here, checked at every point the callback would write anything. */
+    var wantSym = _sym, wantTf = tf;
+    var stale = function () { return _sym !== wantSym || _tf !== wantTf; };
     var url = isIntraday
       ? "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=5"
       : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf];
     _getJSON(url).then(function (rows) {
+      if (stale()) return;                       // a response for a symbol/timeframe we left
       var data;
       if (isIntraday) {
         data = (rows || []).map(function (r) {
@@ -683,7 +704,9 @@
         data = (rows || []).map(function (r) { return { time: r.date, open: +r.open, high: +r.high, low: +r.low, close: +r.close }; })
           .filter(function (d) { return isFinite(d.close); });
       }
-      if (!data.length) { msg.textContent = "No " + (isIntraday ? "5-min" : tf) + " data for " + _sym + "."; _setHL([]); return; }
+      /* the empty-data message names the symbol it was FETCHED for, not whatever _sym happens to
+         be now — the same class of mistake one line down from the guard above. */
+      if (!data.length) { msg.textContent = "No " + (isIntraday ? "5-min" : tf) + " data for " + wantSym + "."; _setHL([]); return; }
       var p = _pal();
       var c = LightweightCharts.createChart(box, {
         width: box.clientWidth, height: 412,
@@ -707,7 +730,7 @@
         ? "5-min · last 5 sessions · IST (F&O feed)"
         : tf + " · daily · raw_prices (IST)";
       window.addEventListener("resize", _onResize);
-    }).catch(function () { msg.textContent = "Chart failed to load."; });
+    }).catch(function () { if (stale()) return; msg.textContent = "Chart failed to load."; });
   }
 
   function _onResize() {
