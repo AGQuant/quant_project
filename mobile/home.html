@@ -849,8 +849,18 @@ function loadV10(barsArg){
    calls preventDefault once the gesture is clearly HORIZONTAL (|dx| > |dy|). A vertical swipe
    therefore scrolls the page as normal and never gets swallowed by the chart. */
 var V10_WIN = 22;                       // ~1 trading month, daily mode
-var V10_BARWIN = 90;                    // cc#949: the 5-min viewport, one server page wide
-var V10_MAXBARS = 450;                  // cc#949 item 2 memory cap: 5 pages held at once
+/* cc#952 (founder 09-Aug) — THE FIRST SCREEN IS 360 BARS, ~4.8 sessions, about a trading week.
+   This SUPERSEDES the 90-bar first load locked in cc#941/945; this card is the record.
+   No endpoint change was needed: /api/mobile/v10chart already clamps bars at max 400, so the
+   client simply asks for more. Pan-back pages (cc#949) request 360 too, so a page is always a
+   screen and the cursor arithmetic stays uniform.
+   DENSITY, measured rather than assumed: the SVG viewBox is 360 wide with 4px/42px gutters, so
+   314 units carry the series. At 360 bars that is 0.87 units per bar — under 1px. That would
+   collapse candle bodies, which is why the card asks for a close-line fallback; this chart has
+   ALWAYS drawn a close polyline with an area fill, never candles, so no fallback is needed and
+   none was added. A polyline has no per-point minimum width — it just gets denser. */
+var V10_BARWIN = 360;                   // cc#952: the 5-min viewport, one server page wide
+var V10_MAXBARS = 1440;                 // 4 pages held at once, scaled with the window
 
 function v10Bars(d){ return (d && d.resolution === '5m'); }
 function v10Win(d){ return v10Bars(d) ? V10_BARWIN : V10_WIN; }
@@ -980,79 +990,110 @@ function v10Svg(d){
   out.push('<polyline points="' + pts + '" fill="none" stroke="var(--blu,#4D7CFE)"'
     + ' stroke-width="1.6" stroke-linejoin="round"/>');
 
-  var selPins = [];
+  /* ══ cc#951 + cc#952 — THE CHART SAYS THE TRADE ══════════════════════════════════════════
+     Founder: instead of an arrow and a cross, the chart should read BUY 58,004 and SL HIT 57,839.
+     The renderer for exactly those strings already existed — it was gated behind selection — so
+     this promotes it to the default and shrinks the shapes to anchors.
+
+     WHY THE OLD OBJECTION NO LONGER HOLDS. The always-on-labels idea was refused once, for a
+     3-month window carrying 45 markers; a wall of text on a dense page is unreadable. That
+     objection was about DENSITY, not about labels, and it comes back the moment a panned window
+     is dense again — so the labels are gated on the pin COUNT, not switched on unconditionally.
+     cc#952 raises the first window to 360 bars (~4.8 sessions), and a week of V10 runs roughly
+     5-10 pins, so the threshold is 12: at or below it every pin is labelled by default, above it
+     the chart falls back to dots-only until a tap. Change the window and this number moves with
+     it — it is a density rule, not a magic constant.
+
+     EXIT LABELS SHOW THE EXIT PRICE, not the P&L, per the founder's wording. The money stays in
+     the log and in the selected state; the chart answers "what happened and at what level". */
+  var LABEL_MAX_PINS = 12;                              // cc#952 (was 6 at the 90-bar window)
+  var vis = (d.pins || []).filter(function(p){ return inWin[p.d] !== undefined; });
+  var labelAll = vis.length <= LABEL_MAX_PINS;
+
+  function pinCol(p){
+    if (p.kind !== 'exit') return (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+    var r = String(p.reason || '').toUpperCase();
+    return (r === 'SL') ? 'var(--red,#FF5C6C)'
+         : (r === 'TARGET') ? 'var(--grn,#2FD48B)' : 'var(--mut,#94A6D2)';
+  }
+  function pinText(p){
+    var px = (p.price == null) ? '' : Math.round(p.price).toLocaleString('en-IN');
+    if (p.kind === 'open') return (p.side === 'BUY' ? 'BUY ' : 'SELL ') + px + ' \u00b7 OPEN';
+    if (p.kind !== 'exit')  return (p.side === 'BUY' ? 'BUY ' : 'SELL ') + px;
+    var r = String(p.reason || 'EXIT').toUpperCase();
+    /* TARGET and SL read as events, not codes — "TARGET HIT", "SL HIT". Any other reason is
+       printed verbatim and left grey: an EOD close is not a verdict and must not be dressed as one. */
+    return (r === 'TARGET' ? 'TARGET HIT ' : r === 'SL' ? 'SL HIT ' : r + ' ') + px;
+  }
+
+  var selPins = [], labels = [];
   (d.pins || []).forEach(function(p){
     var i = inWin[p.d];
-    if (i === undefined) return;                    // outside the visible month
+    if (i === undefined) return;                    // outside the visible window
     var x = xs(i), y = ys(p.price != null ? p.price : s[i].c);
     var isSel = (p.id === V10.sel), dim = (V10.sel != null && !isSel);
     var entry = (p.kind !== 'exit');
-    var op = dim ? '.25' : '1';
-    /* cc#945 — THREE MARKER SHAPES, each saying a different thing. Before this, entry and exit
-       were both triangles and the exit was coloured by WIN, so the chart answered "did it make
-       money" twice and never answered "why did it end". Now:
-         entry  triangle pointing the way the trade is betting — UP green for LONG, DOWN red for
-                SHORT. Direction is in the SHAPE, so it survives a colour-blind reader and a
-                greyed-out (unselected) marker.
-         exit   an X, coloured by REASON: SL red, TARGET green, anything else grey. Grey is
-                deliberate — an EOD close is not a verdict, and painting it green or red would
-                state an outcome the reason does not carry.
-         open   a dashed line at the entry price across the whole window plus a ringed dot, so a
-                live position reads as a level you are still sitting at rather than a past event. */
+    var op = dim ? '.45' : '1';                     // cc#951 item 5: dim, not nearly invisible
+    var col = pinCol(p);
+
     if (p.kind === 'open'){
-      var oc = (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
+      /* the open position keeps its dashed level line and pulse — it is a level you are still
+         sitting at, not a past event, and that reads differently from a dot (cc#945). */
       out.push('<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR).toFixed(1)
-        + '" y2="' + y.toFixed(1) + '" stroke="' + oc + '" stroke-width="1" stroke-dasharray="4 3"'
+        + '" y2="' + y.toFixed(1) + '" stroke="' + col + '" stroke-width="1" stroke-dasharray="4 3"'
         + ' opacity="' + (dim ? '.2' : '.55') + '"/>');
       out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6" fill="none"'
-        + ' stroke="' + oc + '" stroke-width="1" opacity="' + (dim ? '.2' : '.45') + '">'
+        + ' stroke="' + col + '" stroke-width="1" opacity="' + (dim ? '.2' : '.45') + '">'
         + '<animate attributeName="r" values="4;8;4" dur="2s" repeatCount="indefinite"/>'
         + '<animate attributeName="opacity" values=".55;0;.55" dur="2s" repeatCount="indefinite"/>'
         + '</circle>');
-      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.2" fill="' + oc
-        + '" opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
-      var col = oc;
-    } else if (entry){
-      var col = (p.side === 'BUY' ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
-      var up = (p.side === 'BUY');
-      var t = up ? [[x, y - 11], [x - 4.5, y - 3], [x + 4.5, y - 3]]     // apex up, under the point
-                 : [[x, y + 11], [x - 4.5, y + 3], [x + 4.5, y + 3]];    // apex down, above it
-      out.push('<polygon points="' + t.map(function(q){ return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' ')
-        + '" fill="' + col + '" opacity="' + op + '"'
-        + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
-    } else {
-      var r = String(p.reason || '').toUpperCase();
-      var col = (r === 'SL') ? 'var(--red,#FF5C6C)'
-              : (r === 'TARGET') ? 'var(--grn,#2FD48B)' : 'var(--mut,#94A6D2)';
-      var a = 4.5;
-      out.push('<g opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')">'
-        + '<line x1="' + (x - a).toFixed(1) + '" y1="' + (y - a).toFixed(1) + '" x2="' + (x + a).toFixed(1)
-        + '" y2="' + (y + a).toFixed(1) + '" stroke="' + col + '" stroke-width="1.9" stroke-linecap="round"/>'
-        + '<line x1="' + (x + a).toFixed(1) + '" y1="' + (y - a).toFixed(1) + '" x2="' + (x - a).toFixed(1)
-        + '" y2="' + (y + a).toFixed(1) + '" stroke="' + col + '" stroke-width="1.9" stroke-linecap="round"/>'
-        + '</g>');
     }
-    if (isSel){
-      out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="' + col + '"/>');
-      selPins.push({x: x, y: y, p: p, entry: entry});
-    }
+    /* cc#951 item 2: the 11px triangle and the X are gone. A 3.5px filled dot anchors the label
+       to the exact price point; the words carry the meaning now, so a second encoding of the same
+       fact in a shape is just noise competing with the text. */
+    out.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.5" fill="' + col
+      + '" opacity="' + op + '" style="cursor:pointer" onclick="v10Sel(' + p.id + ')"/>');
+
+    if (isSel) selPins.push({x: x, y: y, p: p, entry: entry});
+    if (labelAll || isSel)
+      labels.push({x: x, y: y, p: p, entry: entry, col: col, op: (isSel ? '1' : op)});
   });
+
+  /* the connector between a selected trade's entry and exit stays — it is the one thing a label
+     cannot say, because it is a relationship between two points rather than a fact about one. */
   if (selPins.length === 2){
     out.push('<line x1="' + selPins[0].x.toFixed(1) + '" y1="' + selPins[0].y.toFixed(1)
       + '" x2="' + selPins[1].x.toFixed(1) + '" y2="' + selPins[1].y.toFixed(1)
       + '" stroke="var(--blu,#4D7CFE)" stroke-width="1.2" stroke-dasharray="3 2"/>');
   }
-  selPins.forEach(function(q){
+
+  /* cc#951 item 3 — COLLISION. Entry labels sit below their point, exit labels above, which
+     separates the common case for free. What is left is two labels of the SAME kind landing on
+     top of each other, so each one is checked against those already placed: overlapping in x AND
+     within 12px in y means push it a further 12px in its own direction, and repeat. Placement is
+     left-to-right so the earlier trade keeps the position closest to its bar. */
+  var placed = [];
+  labels.sort(function(a, b){ return a.x - b.x; });
+  labels.forEach(function(q){
     var p = q.p;
-    var txt = q.entry
-      ? (p.side === 'BUY' ? 'BUY ' : 'SELL ') + Math.round(p.price).toLocaleString('en-IN')
-        + (p.kind === 'open' ? ' •open' : '')
-      : (p.reason || 'EXIT') + (p.pnl == null ? '' : ' ' + (p.pnl >= 0 ? '+' : '−')
-          + Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'));
+    var txt = pinText(p);
+    var half = txt.length * 2.6;                       // ~5.2px per char at 9.5px Plex Mono
     var ty = q.entry ? q.y + 24 : q.y - 16;
+    var dir = q.entry ? 12 : -12;
+    for (var guard = 0; guard < 6; guard++){
+      var hit = false;
+      for (var k = 0; k < placed.length; k++){
+        var o = placed[k];
+        if (Math.abs(o.ty - ty) < 12 && Math.abs(o.x - q.x) < (o.half + half)) { hit = true; break; }
+      }
+      if (!hit) break;
+      ty += dir;
+    }
+    placed.push({ x: q.x, ty: ty, half: half });
     var anch = q.x > W - PR - 66 ? 'end' : (q.x < 56 ? 'start' : 'middle');
     out.push('<text x="' + q.x.toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anch
-      + '" font-size="9.5" font-weight="700" fill="var(--txt,#E9EEFB)"'
+      + '" font-size="9.5" font-weight="700" fill="' + q.col + '" opacity="' + q.op + '"'
+      + ' style="cursor:pointer" onclick="v10Sel(' + p.id + ')"'
       + ' font-family="IBM Plex Mono,monospace">' + esc(txt) + '</text>');
   });
   out.push('<text x="' + PL + '" y="' + (H - 5) + '" font-size="9" fill="var(--dim,#5E6B8F)"'
