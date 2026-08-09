@@ -497,25 +497,28 @@ function durSince(ts){
   return h>0?`${h}h ${mins}m`:`${mins}m`;
 }
 async function loadClosed(){
-  /* V10 trade log ONLY — no V8 fallback */
+  /* cc#941: PAIRED, not per-leg. This table listed one row per LEG, so a single trade appeared
+     twice — an index-level futures row next to a premium-level option row whose side is the
+     opposite by construction, and no row anywhere carried the trade's actual result. It now reads
+     /api/v10/trades/paired, the SAME derivation the mobile cards use (v10_endpoints.paired_trades),
+     so desktop and phone cannot disagree about a net P&L (DISPLAY_PARITY 16202). Dates and the
+     holding duration are already IST from the server; nothing is shifted here. */
   let rows=[];
-  try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=500')); }catch(e){}   // cc#463 fix3: load ALL legs (was capped at 10)
-  rows = rows.filter(idxOnly);
-  D.closed = rows.map((x,i)=>{
-    const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
-    const dir=normSide(x.direction||x.side);
-    const lot=Number(x.lot_size||x.qty)||0;
-    const pnl=Number(x.pnl)||0;
-    // cc#463 fix2: P&L% must be SIGNED = pnl / (entry × lot) × 100 — the raw (exit-entry)/entry
-    // price-change % contradicted the pnl sign on SELL legs (id=42: +25.28% vs Rs -5,112).
-    const pPct=(entry&&lot)?(pnl/(entry*lot)*100):0;
-    // cc#434 fix_5: carry leg + option strike/type so each leg (FUT / OPT-write) renders with its own strike.
-    return { id:Number(x.id)||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
-             leg:(x.leg||'').toUpperCase(), str:x.opt_strike||null, opt:x.opt_type||null,
-             rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
-             dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
-             eng:'V10' };
-  }).sort((a,b)=>b.id-a.id);   // cc#463 fix3: most-recent leg first
+  try{ const r = await getJSON('/api/v10/trades/paired?limit=500'); rows = (r&&r.trades)||[];
+       D.pairedSummary = (r&&r.summary)||{}; }catch(e){ D.pairedSummary={}; }
+  D.closed = rows.filter(x=>idxOnly({symbol:x.symbol})).map((x,i)=>{
+    const entry=Number(x.entry_price)||0, ex=Number(x.exit_price)||0;
+    const lot=Number(x.lot_size)||0;
+    const net=(x.net_pnl==null)?null:Number(x.net_pnl);
+    // cc#463 fix2 kept: P&L% is SIGNED = pnl / (entry x lot) x 100. The base stays the FUTURES
+    // notional — that is the capital the trade committed; the hedge premium rides on top of it.
+    const pPct=(entry&&lot&&net!=null)?(net/(entry*lot)*100):0;
+    return { id:Number(x.id)||i, sym:x.symbol, side:x.direction, entry, exit:ex,
+             pnl:(net==null?0:net), netKnown:(net!=null), pPct,
+             hedge:x.hedge||null, held:x.held||'', pts:x.points,
+             rsn:(x.reason||'').toUpperCase()||'EXIT',
+             dt:(x.exit_ist||x.entry_ist||''), eng:'V10' };
+  });
 }
 async function loadPerf(){
   /* V10 own performance stats (replaces the old V8 qualified pull) */
@@ -737,25 +740,31 @@ function rClosed(){
   const tot=all.reduce((a,p)=>a+p.pnl,0);
   const wr=all.length?(all.filter(p=>p.pnl>0).length/all.length*100).toFixed(0):0;
   const shown=CLOSED_ALL?all:all.slice(0,15);   // cc#463 fix3: default LAST 15 (most-recent first)
-  const head=['DATE','ENG','SYMBOL','LEG','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
+  // cc#941 item 3: DATE · SYMBOL · DIR · ENTRY · EXIT · POINTS · HEDGE · NET P&L · EXIT.
+  // Rs is rounded with no decimals on P&L, as specified. The LEG column is gone with the leg rows.
+  const head=['DATE (IST)','SYMBOL','DIR','ENTRY','EXIT','POINTS','HEDGE','NET P&L','P&L%','EXIT'];
+  // Exit-reason colour follows the REASON, not the sign: SL is red and TARGET green even on the
+  // rare trade where the hedge turns a stopped-out future into a small net gain. Colouring by sign
+  // would make the badge restate the P&L column and stop saying why the trade ended.
+  const rsnClr = r => r==='SL'?DN : r==='TARGET'?UP : C.mut;
   const body = shown.length ? shown.map(p=>`<tr>
-    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.dt}</td>
-    <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
+    <td class="td-mono" style="font-size:11px;color:var(--mut)">${esc(p.dt)}${p.held?` <span style="opacity:.65">· ${esc(p.held)}</span>`:''}</td>
     <td class="td-mono" style="font-weight:800">${esc(p.sym)}</td>
-    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.leg==='OPT'?`${p.str||''} ${p.opt||''} wrt`:(p.leg||'FUT')}</td>
     <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
     <td class="td-mono">${num(p.entry)}</td>
-    <td class="td-mono">${num(p.exit)}</td>
-    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
+    <td class="td-mono">${p.exit?num(p.exit):'—'}</td>
+    <td class="td-mono" style="color:${p.pts!=null?cx(p.pts):'var(--dim)'}">${p.pts!=null?sgn(p.pts,0):'—'}</td>
+    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.hedge?`${esc(p.hedge.label||'')} ${num(p.hedge.entry_price)}→${num(p.hedge.exit_price)} <span style="color:${cx(p.hedge.pnl)}">₹${Math.round(p.hedge.pnl||0)}</span>`:'—'}</td>
+    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">${p.netKnown?'₹'+Math.round(p.pnl).toLocaleString('en-IN'):'—'}</td>
     <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
-    <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
+    <td>${bdg(p.rsn,rsnClr(p.rsn),true)}</td></tr>`).join('')
     : `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`;
   // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
-  const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="CLOSED_ALL=!CLOSED_ALL;render()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
+  const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="CLOSED_ALL=!CLOSED_ALL;render()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' trades'}</span></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})</div>
       <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
-        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
+        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized NET P&L across ${all.length} paired trades (futures + hedge)">₹${fK(tot)}</span></div></div>
     <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}
   </div>`;
 }
