@@ -81,6 +81,11 @@ _TICKER_NAME_ORDER = ["India VIX", "Dow", "Nasdaq", "S&P 500", "Nikkei", "Hang S
 # keys (SP500, NATURAL_GAS, HANGSENG). /api/global/intraday/{name} matches on UPPER(name), so
 # those three would silently return an empty series — a 1D pill that draws nothing. Only the
 # three that genuinely differ are listed; every other name matches on upper-case alone.
+# cc#949 — HARD FLOOR for the 5-minute pan-back, founder-set 09-Aug. Below this date the
+# *_5m_test_data time base changes (true UTC vs IST wall-clock tagged +00), and one intraday axis
+# must never cross it. Enforced in the SQL WHERE clause, not in the client.
+_V10_5M_FLOOR = "2026-07-01"
+
 _INTRADAY_ALIAS = {"S&P 500": "SP500", "Natural Gas": "NATURAL_GAS", "Hang Seng": "HANGSENG"}
 
 
@@ -232,7 +237,8 @@ _V10_ALIAS = {"NIFTY": "NIFTY50", "NIFTY 50": "NIFTY50", "BANKNIFTY50": "BANKNIF
 
 @router.get("/api/mobile/v10chart")
 @_json_safe
-def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, bars: int = 90):
+def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, bars: int = 90,
+                    before: str = ""):
     """cc#906 — 3 months of index price with the V10 paper trades pinned on it.
 
     WHY DAILY AND NOT THE WEB'S 5-MIN (the finding that decided this build, verified in the DB
@@ -286,11 +292,42 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
     # inside the post-Jul regime, so there is exactly one time base in the window. The daily
     # aggregation is KEPT and still served on the same endpoint for any longer window.
     # Full history stays in the DB; only the response is windowed (the cc#940 principle).
+    # cc#949 — DAILY MODE WAS UNREACHABLE, a defect I shipped in cc#941 and found here because
+    # task 3's floor handoff depends on it. The clamp read `max(20, min(int(bars or 90), 400))`
+    # and `intraday = bars > 0`, so `bars` could never be 0 and `intraday` was ALWAYS true: the
+    # daily aggregation cc#941's own comment promised was "kept for longer windows" could not be
+    # reached by any request. bars=0 is now an explicit sentinel for daily, resolved BEFORE the
+    # `or 90` default that was swallowing it.
+    _want_daily = (str(bars).strip() == "0")
+    intraday = not _want_daily
     bars = max(20, min(int(bars or 90), 400))
-    intraday = bars > 0
+
+    # ── cc#949 — PAN-BACK PAGING, and the floor that makes it safe ────────────────────────────
+    # `before` is a cursor, not an offset: the page is the `bars` newest rows STRICTLY OLDER than
+    # it. A cursor cannot drift when rows are appended between requests, which an OFFSET would.
+    #
+    # THE FLOOR IS THE WHOLE REASON THIS IS SAFE, so it is enforced in SQL and not left to the
+    # client. *_5m_test_data carries TWO TIME BASES: bars written as true UTC (a session runs
+    # 03:45-09:55) and bars written as IST wall-clock tagged +00 (09:15-15:25). Splicing them onto
+    # one continuous 5-minute axis shifts half the window by 5h30m — the cc#906 finding, and the
+    # reason cc#941 kept the long view on DAILY aggregation, which is invariant to the switch.
+    #
+    # MEASURED 09-Aug rather than taken on trust, because the card states the boundary as "pre-Jul
+    # is UTC" and the data is untidier than that. Per trading day, first bar before 08:00 = UTC
+    # regime: 246 UTC days spanning 2025-06-06..2026-06-05, and 45 IST days spanning
+    # 2025-10-21..2026-08-07. The regimes are NOT cleanly split by July — but exactly ONE IST day
+    # (2025-10-21) sits inside the UTC era, so the real switch is 2026-06-08 and everything from
+    # there on is IST. The founder-set floor of 2026-07-01 is therefore comfortably inside the
+    # single-regime zone; it is honoured as written and gives 1,288 bars = 15 pages per index.
+    # Lowering it to 2026-06-08 would add ~16 sessions and is a founder call, not mine.
+    floor_ts = _V10_5M_FLOOR
+    cursor = (before or "").strip() or None
+    older = 0                      # bars behind this page, above the floor; 0 => at the floor
 
     with _conn() as conn, conn.cursor() as cur:
         if intraday:
+            # Never serve a 5-min page that reaches below the floor: the clamp lives in the WHERE
+            # clause, so no client mistake and no crafted cursor can produce a mixed-regime axis.
             # Last N bars, anchored on MAX(ts): these tables are fed historically, so anchoring on
             # NOW() would empty the chart the moment the feed is a day behind — and on a weekend
             # it would empty it every time (the cc#940 defect, not repeated here).
@@ -298,11 +335,22 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
                 """
                 SELECT ts, open AS o, high AS h, low AS l, close AS c FROM (
                   SELECT DISTINCT ON (ts) ts, open, high, low, close FROM {t}
+                  WHERE ts >= %(floor)s
+                    AND (%(cur)s::timestamptz IS NULL OR ts < %(cur)s::timestamptz)
                   ORDER BY ts DESC, close
-                  LIMIT %s
+                  LIMIT %(n)s
                 ) x ORDER BY ts ASC
-                """.format(t=table), (bars,))
+                """.format(t=table), {"floor": floor_ts, "cur": cursor, "n": bars})
             rows5 = _rows(cur)
+            # has_more asks the DB, it does not infer from a full page — a page can be exactly
+            # `bars` long with nothing behind it, and inferring would show a pan-back that
+            # then dead-ends.
+            if rows5:
+                cur.execute(
+                    "SELECT count(*) AS n FROM (SELECT DISTINCT ts FROM {t} "
+                    "WHERE ts >= %s AND ts < %s) z".format(t=table),
+                    (floor_ts, rows5[0]["ts"]))
+                older = int((_rows(cur)[0] or {}).get("n") or 0)
             series = [{"d": r["ts"].strftime("%Y-%m-%d %H:%M"),
                        "t": r["ts"].strftime("%H:%M"), "day": r["ts"].strftime("%Y-%m-%d"),
                        "o": float(r["o"]), "h": float(r["h"]),
@@ -435,6 +483,16 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
         "symbol": sym, "label": "BANK NIFTY" if sym == "BANKNIFTY" else "NIFTY 50",
         "table": table, "resolution": "5m" if intraday else "daily",
         "bars": bars if intraday else None,
+        # cc#949 paging contract. `oldest_ts` is the cursor to send back as `before` for the next
+        # page; `has_more` is false at the floor and the client then shows the daily handoff
+        # instead of a dead pan. Both are None in daily mode, which does not page.
+        "oldest_ts": (series[0]["d"] if (intraday and series) else None),
+        "has_more": (older > 0) if intraday else None,
+        "floor_ts": _V10_5M_FLOOR if intraday else None,
+        "floor_note": ("5-min history stops at %s — older bars were written on a different time "
+                       "base (UTC vs IST-tagged) and splicing them onto one intraday axis would "
+                       "shift them 5h30m. The daily view carries the full 14 months safely."
+                       % _V10_5M_FLOOR) if intraday else None,
         "series": series, "count": len(series),
         "from": series[0]["d"] if series else None,
         "to": series[-1]["d"] if series else None,
