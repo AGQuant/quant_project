@@ -88,6 +88,15 @@
   font-size:10px;color:var(--dim);margin:2px 0 8px}
 /* ── cc#928: chart window + panned history ─────────────────────────────────────────────────── */
 .v10cv{position:relative}
+/* cc#949: the paging strip — a slim shimmer while a page is in flight, and a tappable chip for
+   the retry and the daily handoff. Both are 30px tall so a thumb can hit them without the strip
+   becoming a second toolbar under the chart. */
+.v10shim{display:inline-block;width:26px;height:6px;border-radius:3px;vertical-align:middle;
+  background:linear-gradient(90deg,var(--line) 25%,var(--line2,rgba(148,166,210,.35)) 50%,var(--line) 75%);
+  background-size:200% 100%;animation:v10sh 1.1s linear infinite;margin-right:5px}
+@keyframes v10sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.v10rty{background:none;border:1px solid var(--line);color:var(--blu,#4D7CFE);border-radius:7px;
+  padding:5px 9px;min-height:30px;font-family:inherit;font-size:9.5px;font-weight:700;cursor:pointer}
 .v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
   text-align:center;padding:3px 0 2px;opacity:.8}
 /* ── cc#928: trade log — F/O tabs, month headers, row anatomy ──────────────────────────────── */
@@ -744,7 +753,8 @@ function togTrend(ev, kind){
    The server does the matching (mobile_home2.mobile_v10chart) — dates converted to IST in SQL,
    FUT legs only, trades older than the window dropped and counted, never clamped onto a candle. */
 var V10 = { sym: 'NIFTY50', data: null, sel: null,
-            leg: 'FUT', win: null, mfold: {} };   // cc#928: F/O tab, chart window, month folds
+            leg: 'FUT', win: null, mfold: {},
+            loading: false, pageErr: null };   // cc#949: one in-flight page fetch, last error
 
 function v10Icon(sym){
   return '<button class="v10ic" onclick="openV10(event,\'' + sym + '\')" aria-label="V10 chart"'
@@ -780,12 +790,16 @@ function v10Toggle(){
           + (s === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + '</button>';
       }).join('') + '</div>';
 }
-function loadV10(){
+function loadV10(barsArg){
   var bd = document.getElementById('v10bd');
   if (!bd) return;
   bd.innerHTML = v10Toggle() + '<div class="loading">Loading chart…</div>';
   var want = V10.sym;
-  fetchWithTimeout('/api/mobile/v10chart?symbol=' + encodeURIComponent(want) + '&bars=90')
+  /* cc#949: bars=0 is the DAILY sentinel the endpoint now honours — used by the floor handoff.
+     Anything else (or nothing) is the 90-bar intraday page. */
+  var nb = (barsArg === 0) ? 0 : V10_BARWIN;
+  V10.win = null; V10.loading = false; V10.pageErr = null;
+  fetchWithTimeout('/api/mobile/v10chart?symbol=' + encodeURIComponent(want) + '&bars=' + nb)
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (V10.sym !== want) return;              // a fast double-tap must not draw the wrong index
@@ -810,32 +824,96 @@ function loadV10(){
    The drag must not fight the page: the SVG carries touch-action:pan-y, and the handler only
    calls preventDefault once the gesture is clearly HORIZONTAL (|dx| > |dy|). A vertical swipe
    therefore scrolls the page as normal and never gets swallowed by the chart. */
-var V10_WIN = 22;                       // ~1 trading month, daily mode only
-/* cc#941 task 5: in 5-min mode the server already sends exactly the window the founder asked for
-   (90 bars, ~1.2 sessions), so the chart shows ALL of it and the pan is switched off. Panning a
-   window that is already the whole series is a gesture that does nothing, which reads as broken. */
-function v10Bars(d){ return (d && d.resolution === '5m'); }
-function v10Win(d){ return v10Bars(d) ? Math.max(2, (d.series || []).length) : V10_WIN; }
+var V10_WIN = 22;                       // ~1 trading month, daily mode
+var V10_BARWIN = 90;                    // cc#949: the 5-min viewport, one server page wide
+var V10_MAXBARS = 450;                  // cc#949 item 2 memory cap: 5 pages held at once
 
+function v10Bars(d){ return (d && d.resolution === '5m'); }
+function v10Win(d){ return v10Bars(d) ? V10_BARWIN : V10_WIN; }
+
+/* ══ cc#949 — PAN BACK THROUGH HISTORY ═══════════════════════════════════════════════════════
+   cc#941 switched the pan OFF because the server sent a fixed 90 bars and there was nothing to
+   pan to. Now there is: the endpoint pages with before=<ts>, so reaching the left edge FETCHES.
+
+   The viewport stays 90 bars wide whatever is loaded, so the founder always reads the same
+   density — panning moves the window, it does not zoom out.
+
+   PREPENDING MUST NOT MOVE WHAT IS ON SCREEN. Older bars are added to the FRONT of the array, so
+   every index shifts by the number added; V10.win is advanced by exactly that count in the same
+   step, which is what keeps the visible bars still while the axis grows to the left. Getting
+   this wrong is not subtle — the chart jumps a page every time a fetch lands. */
 function v10Clamp(i, n, win){ return Math.max(0, Math.min(Math.max(0, n - win), i)); }
 function v10Window(d){
   var n = (d.series || []).length, win = v10Win(d);
-  if (v10Bars(d)){ V10.win = 0; return { from: 0, to: n }; }
-  if (V10.win == null) V10.win = Math.max(0, n - win);   // default = the most recent month
+  if (V10.win == null) V10.win = Math.max(0, n - win);   // default = the newest page
   V10.win = v10Clamp(V10.win, n, win);
   return { from: V10.win, to: Math.min(n, V10.win + win) };
 }
 /* slide the window so a given date sits inside it — used when a trade row is tapped */
 function v10ShowDate(d, iso){
-  if (v10Bars(d)) return true;              // everything is already on screen
-  var s = d.series || [];
+  var s = d.series || [], win = v10Win(d);
   for (var i = 0; i < s.length; i++){
     if ((s[i].day || s[i].d) === iso){
-      V10.win = v10Clamp(i - Math.floor(V10_WIN / 2), s.length, V10_WIN);
+      V10.win = v10Clamp(i - Math.floor(win / 2), s.length, win);
       return true;
     }
   }
   return false;
+}
+
+/* ── lazy prepend ───────────────────────────────────────────────────────────────────────────
+   One in-flight fetch at a time (V10.loading), because a fast flick fires the edge condition on
+   every frame and N overlapping fetches would prepend the same page N times. */
+function v10PageBack(){
+  var d = V10.data;
+  if (!d || !v10Bars(d) || V10.loading || d.has_more === false || !d.oldest_ts) return;
+  V10.loading = true; V10.pageErr = null;
+  renderV10();                                     // paint the left-edge shimmer immediately
+  var want = V10.sym, cursor = d.oldest_ts;
+  fetchWithTimeout('/api/mobile/v10chart?symbol=' + encodeURIComponent(want)
+      + '&bars=' + V10_BARWIN + '&before=' + encodeURIComponent(cursor))
+    .then(function(r){ return r.json(); })
+    .then(function(p){
+      /* the user may have switched symbol, or panned somewhere else entirely, mid-flight —
+         the same stale-response guard cc#947 had to add to the C card, applied up front here */
+      if (V10.sym !== want || !V10.data || V10.data.oldest_ts !== cursor) return;
+      if (!p || p.error || !p.series || !p.series.length){
+        V10.data.has_more = false; return;         // nothing older: stop offering the pan
+      }
+      var cur = V10.data;
+      var added = p.series.length;
+      cur.series = p.series.concat(cur.series);
+      cur.pins = v10MergePins(p.pins, cur.pins);
+      cur.oldest_ts = p.oldest_ts;
+      cur.has_more = !!p.has_more;
+      cur.floor_note = p.floor_note || cur.floor_note;
+      V10.win = (V10.win || 0) + added;            // hold the visible bars still
+      /* memory cap: drop from the NEWEST end, never the oldest — the founder is travelling
+         backwards, so the far side is the side they are done with. V10.win rebases with it. */
+      var over = cur.series.length - V10_MAXBARS;
+      if (over > 0){
+        cur.series = cur.series.slice(0, cur.series.length - over);
+        V10.win = v10Clamp(V10.win, cur.series.length, V10_BARWIN);
+      }
+    })
+    .catch(function(e){ V10.pageErr = (e && e.message) || 'network'; })
+    .then(function(){ V10.loading = false; renderV10(); });
+}
+/* pins are keyed by trade id + kind, so two pages that both mention one trade (an entry on one
+   page, its exit on another, or an overlap at a boundary) merge to one marker each, not two */
+function v10MergePins(a, b){
+  var seen = {}, out = [];
+  (a || []).concat(b || []).forEach(function(p){
+    var k = p.id + '|' + p.kind + '|' + (p.d || '');
+    if (seen[k]) return;
+    seen[k] = 1; out.push(p);
+  });
+  return out;
+}
+function v10Retry(){ V10.pageErr = null; v10PageBack(); }
+function v10ToDaily(){
+  V10.win = null; V10.loading = false; V10.pageErr = null;
+  loadV10(0);                                      // bars=0 -> the daily aggregation
 }
 
 function v10Svg(d){
@@ -962,9 +1040,23 @@ function v10Svg(d){
   return '<div class="v10cv" id="v10cv">'
     + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
     + ' style="width:100%;height:' + H + 'px;display:block;touch-action:pan-y">' + out.join('') + '</svg>'
-    + '<div class="v10hint">' + (v10Bars(d) ? 'last ' + n + ' five-minute bars'
-        : (more ? '← drag right for older' : 'start of history'))
-    + ' · showing ' + n + ' of ' + all.length + (v10Bars(d) ? ' bars' : ' sessions') + '</div></div>';
+    + '<div class="v10hint">' + v10HintText(d, n, all.length, more) + '</div></div>';
+}
+
+/* cc#949 item 2/3: the strip under the chart is the paging state — loading, a retry after a
+   failed fetch, or the terminal marker at the floor. It is never silently blank at the end of
+   history: a pan that stops working with no explanation reads as a bug. */
+function v10HintText(d, n, total, more){
+  if (!v10Bars(d))
+    return (more ? '← drag right for older' : 'start of history') + ' · showing ' + n + ' of ' + total + ' sessions';
+  if (V10.loading)
+    return '<span class="v10shim"></span> loading older bars…';
+  if (V10.pageErr)
+    return 'Could not load older bars · <button class="v10rty" onclick="v10Retry()">Retry</button>';
+  if (d.has_more === false && (V10.win || 0) === 0)
+    return '<button class="v10rty" onclick="v10ToDaily()">Older history in Daily view →</button>';
+  return (d.has_more === false ? 'start of 5-min history' : '← drag right for older')
+       + ' · showing ' + n + ' of ' + total + ' bars';
 }
 
 /* ── drag: horizontal only, and only once the gesture proves itself horizontal ── */
@@ -985,10 +1077,12 @@ function v10DragMove(e){
   if (e.cancelable) e.preventDefault();
   var host = document.getElementById('v10cv');
   var wpx = host ? host.clientWidth : 340;
-  if (v10Bars(V10.data)) return;                           // cc#941: nothing to pan in 5-min mode
-  var per = wpx / v10Win(V10.data);                        // px per session in the visible window
+  /* cc#949: the pan is BACK in 5-min mode — cc#941 disabled it only because the window was the
+     whole series. It now pages, so dragging right past the left edge asks for the next page. */
+  var per = wpx / v10Win(V10.data);                        // px per bar/session in the window
   var shift = Math.round(dx / per);
   var next = v10Clamp(V10DRAG.win - shift, V10.data.series.length, v10Win(V10.data));
+  if (next === 0 && shift > 0) v10PageBack();              // at the left edge and still pulling
   if (next !== V10.win){ V10.win = next; renderV10(); }
 }
 function v10DragEnd(){ V10DRAG = null; }
