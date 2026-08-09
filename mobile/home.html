@@ -241,7 +241,14 @@
 .rnr:last-child{border-bottom:0}
 .rnr .h{flex:1;min-width:0;font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.rnr .a{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+/* cc#974: RENAMED from `.a`. mobile_app.css owns a generic `.a` action-button class
+   (min-height:44px, 1px blue border, border-radius:10px, centred flex) and cc#966's `.rnr .a`
+   only ever set flex/font/colour — so every age stamp wore that button's border and its 44px
+   height. THAT is the founder's "bordered rounded box on the right"; it was never styled as a
+   box on purpose. Resetting border/radius/min-height would have worked today and broken again
+   the next time a rule lands on `.a`, so the class is namespaced instead. Fourth time this file
+   has collided with a short app class name (cc#964 .v/.m, cc#966 .m, cc#967 .v). */
+.rnr .rnage{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
   color:var(--dim);white-space:nowrap;line-height:1.4}
 /* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
    passes straight through instead of being captured by a 300px window. */
@@ -249,8 +256,11 @@
 /* ── cc#971 paging ──────────────────────────────────────────────────────────────────────────
    min-height reserves SIX rows. The last page usually holds fewer, and without this the section
    would shrink the moment you reached it — pulling the Tools grid up and moving the Next button
-   out from under the thumb that just tapped it. 6 x 59px measured row + 5 dividers ~ 354px. */
-.rnlist{min-height:354px}
+   out from under the thumb that just tapped it.
+   cc#974 re-tuned this: removing the accidental button chrome from the age stamp took its height
+   from 44px to 13px and the row from 59px to 50px, so the old 354px reservation left ~54px of
+   dead space under every page. 6 x 50px = 300px. */
+.rnlist{min-height:300px}
 .rnpg{display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding-top:8px;border-top:1px solid var(--line)}
 .rnb{min-height:44px;min-width:88px;padding:0 12px;font-family:'IBM Plex Mono',ui-monospace,monospace;
@@ -1637,7 +1647,7 @@ function rnPaint(){
   var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
   var rows = slice.map(function(n){
     return '<div class="rnr"><div class="h">' + esc(n.headline) + '</div>'
-      + '<div class="a">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
+      + '<div class="rnage">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
   }).join('');
   /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
      rendered disabled rather than hidden, so the row never changes width mid-session. */

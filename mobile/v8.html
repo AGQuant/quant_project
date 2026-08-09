@@ -152,9 +152,26 @@
    is real, so a flick still works. */
 .chipbar{display:flex;align-items:center;gap:5px;margin:0 12px 5px;overflow-x:auto;
   flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch;
-  scroll-snap-type:x proximity}
+  /* cc#975: pan-x AND pan-y. The card specified pan-x alone, but pan-x literally forbids the
+     browser from panning vertically for a gesture that starts on this element — measured: a
+     vertical flick with the thumb on the bar scrolled the page 0px. That contradicts the card's
+     own requirement that vertical page scroll be unaffected, so both axes are allowed: the bar
+     takes horizontal, the page takes vertical, and neither has to guess.
+     The cc#968 scroll-snap is GONE: proximity snapping fought short flicks near the end of the
+     strip, and a filter bar has no page boundaries worth snapping to. */
+  touch-action:pan-x pan-y}
 .chipbar::-webkit-scrollbar{display:none}
-.chipbar .sub{flex:0 0 auto;scroll-snap-align:start}
+.chipbar .sub{flex:0 0 auto}
+/* a trailing spacer, not padding-right: a scroll container's right padding is dropped at the
+   scroll end in several engines, which is exactly how a last chip ends up flush and unreadable. */
+.chipbar::after{content:'';flex:0 0 12px;height:1px}
+/* the fade sits on .navwrap, which is ALREADY position:sticky above — sticky is a containing
+   block for an absolute child, so no position override is added here. Declaring
+   .navwrap{position:relative} would have won on source order and silently un-stuck the bar. */
+.navwrap::after{content:'';position:absolute;right:0;top:0;bottom:0;width:26px;pointer-events:none;
+  opacity:0;transition:opacity .15s;
+  background:linear-gradient(to right,rgba(10,15,30,0),var(--bg,#0A0F1E))}
+.navwrap.hasmore::after{opacity:1}
 .subr{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:0 12px 5px}
 .subk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
   letter-spacing:.12em;color:var(--dim);text-transform:uppercase;min-width:38px}
@@ -880,6 +897,21 @@ function render(){
 
   document.getElementById('body').innerHTML = h;
   bindBookSwipe();
+  bindChipBar();
+}
+
+/* cc#975: the right-edge fade only appears when there IS something further right, and clears when
+   you reach the end — a fade over nothing is a hint that lies. Re-evaluated on scroll and on
+   every render, because filtering changes how many chips there are. */
+function bindChipBar(){
+  var bar = document.querySelector('.chipbar');
+  if (!bar) return;
+  var sync = function(){
+    var more = bar.scrollWidth - bar.clientWidth - bar.scrollLeft > 2;
+    bar.parentNode.classList.toggle('hasmore', more);
+  };
+  bar.addEventListener('scroll', sync, {passive: true});
+  sync();
 }
 
 /* ══ cc#943 / cc#942 — HORIZONTAL SWIPE BETWEEN THE TWO PAGES ═════════════════════════════════
@@ -899,6 +931,13 @@ function bindBookSwipe(){
   var el = document.getElementById('bookpg');
   if (!el) return;
   el.addEventListener('touchstart', function(e){
+    /* cc#975: a touch that STARTS inside a horizontal scroller is that scroller's, not the page
+       deck's. #bookpg wraps the cc#968 chip bar, so without this the swipe handler claimed every
+       horizontal drag on the chips: axis resolved to 'x', preventDefault() cancelled the browser's
+       native scroll of .chipbar, and touchend past 45px flipped Unrealised/Realised instead. The
+       bar was always scrollABLE — scrollWidth exceeded clientWidth the whole time — it was simply
+       never allowed to scroll. Nothing is wrong with the CSS; the gesture was being taken. */
+    if (e.target && e.target.closest && e.target.closest('.chipbar')){ BSW = null; return; }
     var t = e.touches[0];
     BSW = { x: t.clientX, y: t.clientY, axis: null };
   }, {passive: true});
