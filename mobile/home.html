@@ -1489,7 +1489,12 @@ function v10Log(d){
      third button bought nothing. FUTURES is the default. */
   var view = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
   var legs = d.trades || [];
-  var opts = legs.filter(function(x){ return (x.leg || 'FUT') === 'OPT'; });
+  /* cc#973: CLOSED option legs only, so the two pills count the same KIND of thing. FUTURES is
+     rows.length = the paired CLOSED trades (v10_trades); counting open legs here as well made
+     OPTIONS read 19 against FUTURES 23 on a book with one open leg of each — two numbers that
+     look comparable and are not. The open position is already stated by the OPEN stat cell and
+     by the chart's own open marker, in both views. */
+  var opts = legs.filter(function(x){ return (x.leg || 'FUT') === 'OPT' && !x.open; });
   var bl = d.by_leg || {};
   h += '<div class="lgtabs">' + [['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
       return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'

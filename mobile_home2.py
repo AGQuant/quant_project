@@ -268,8 +268,11 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
     24774.3], 24187.0 in [24149.6, 24253.2]. A wrong conversion would move a trade to the
     neighbouring session and break that containment.
 
-    A trade older than the window is DROPPED and counted in `outside_window` — never clamped
-    onto the first candle, which would put a pin on a price that never happened.
+    A trade older than the window keeps its place in `trades` and is COUNTED in `outside_window`;
+    only its PIN is withheld, never clamped onto the first candle (which would put a marker on a
+    price that never happened). cc#973 corrected this: the row used to be dropped from `trades`
+    altogether, which quietly turned the OPTIONS tab — the only consumer built from `trades` —
+    into a view of the chart window instead of the log.
 
     TARGET/SL: v10_trades has no stop/target columns, so a CLOSED trade carries its exit_reason
     ('TARGET' / 'SL') — which is that information — and never an invented level. OPEN positions
@@ -420,9 +423,15 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
     for r in closed_rows:
         ed = str(r["ed"]) if r["ed"] else None
         xd = str(r["xd"]) if r["xd"] else None
+        # cc#973: COUNT a trade outside the chart window, but do NOT DROP it. This `continue` used
+        # to skip the row entirely, so `trades` was the CHART WINDOW rather than the log — and the
+        # OPTIONS tab, which is the only consumer built from `trades`, showed 3 of NIFTY50's 18
+        # option legs. FUTURES escaped the bug purely because it reads d.paired instead, which is
+        # a separate unwindowed query: two sources for two tabs of one log, and only one of them
+        # was windowed. The pin appends below already test `in_win` individually, so the window
+        # still governs what is PLOTTED — it just no longer governs what is LISTED.
         if ed not in in_win and xd not in in_win:
             outside += 1
-            continue
         pnl = f(r["pnl"])
         win = (pnl is not None and pnl >= 0)
         side = (r["side"] or "").upper()
