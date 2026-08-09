@@ -385,7 +385,7 @@ def mobile_v8book(request: Request):
         """, {"cut": cutover})
         crows = _rows(cur)
 
-    closed, real_total, real_dep, wins = [], 0.0, 0.0, 0
+    closed, real_total, real_dep, wins, losses = [], 0.0, 0.0, 0, 0
     for r in crows:
         side = (r["side"] or "").upper()
         entry, ex, qty = f(r["entry_price"]), f(r["exit_price"]), (r["qty"] or 0)
@@ -415,12 +415,22 @@ def mobile_v8book(request: Request):
         })
         if pnl is not None:
             real_total += pnl
-            if pnl > 0:
-                wins += 1
+        # cc#950 PARITY FIX — W/L are the WEB MASTER DASHBOARD counts: result='TARGET' vs 'SL'.
+        # cc#943 (mine) counted a win as pnl > 0, which is a DIFFERENT question and gives a
+        # different answer: on the same 33 fresh-era trades, pnl>0 says 21W/12L = 63.6% while
+        # TARGET/SL says 13W/5L = 72.2%. Fifteen trades closed for some other reason — real money
+        # in the realised figure, but not a verdict, and calling them losses because they ended
+        # flat-to-down invents a record the book never had. Home already used the canonical
+        # counts, so the two surfaces were contradicting each other about one book.
+        _res = (r["result"] or "").upper()
+        if _res == "TARGET":
+            wins += 1
+        elif _res == "SL":
+            losses += 1
         if dep is not None:
             real_dep += dep
 
-    n_pnl = sum(1 for c in closed if c["realised"] is not None)
+    real_brokerage = len(closed) * BROKERAGE_PER_TRADE
     return {
         "instrument": "equity",
         "futures_available": False,
@@ -430,14 +440,23 @@ def mobile_v8book(request: Request):
         "unrealised": round(unrl_total, 2) if out else None,
         "deployed": round(dep_total, 2) if out else None,
         "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
+        # cc#950 PARITY FIX — REALISED IS NET OF BROKERAGE, matching the Home tile and the web
+        # Master Dashboard formula. cc#943 (mine) reported the GROSS sum of pnl: on the same 33
+        # trades that is Rs 3,66,112 here against Rs 3,49,612 on Home — a Rs 16,500 gap that is
+        # exactly 33 x the Rs 500/closed-trade brokerage the web doctrine deducts. Two numbers for
+        # one book on two screens is what DISPLAY_PARITY (16202) forbids. `gross` ships alongside
+        # so the deduction is visible rather than silent.
         "closed_count": len(closed),
         "closed": closed,
-        "realised": round(real_total, 2) if closed else None,
+        "realised": round(real_total - real_brokerage, 2) if closed else None,
+        "gross": round(real_total, 2) if closed else None,
+        "brokerage": real_brokerage,
         "realised_deployed": round(real_dep, 2) if closed else None,
-        "realised_pct": (round(real_total / real_dep * 100.0, 2) if real_dep else None),
-        "wins": wins, "losses": n_pnl - wins,
-        # A win rate with nothing closed is a DASH, not 0% — no trades is not a 0% record.
-        "win_rate": (round(100.0 * wins / n_pnl, 1) if n_pnl else None),
+        "realised_pct": (round((real_total - real_brokerage) / real_dep * 100.0, 2) if real_dep else None),
+        "wins": wins, "losses": losses, "decided": wins + losses,
+        # Win rate over DECIDED trades (TARGET + SL), not every close — see the note above.
+        # A rate with nothing decided is a DASH, not 0%: no verdicts is not a 0% record.
+        "win_rate": (round(100.0 * wins / (wins + losses), 1) if (wins + losses) else None),
         "era": "fresh",
         "scope_note": ("Both pages: fresh era (entry on/after the cc#504 cutover), "
                        "'s1_reclaim_obs' excluded. Same scope on both, by construction."),

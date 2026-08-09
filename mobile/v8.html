@@ -566,7 +566,14 @@ function bookHeader(b){
   var tot = '<div class="bktot"><b class="' + cls(v) + '">' + inr(v) + '</b>'
     + '<span>' + (open ? (b.open || 0) + ' open' : (b.closed_count || 0) + ' closed')
     + (pctv2 == null ? '' : ' · ' + pctv(pctv2))
-    + (open ? '' : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%'))
+    /* cc#950: the realised figure is NET of brokerage and the win rate counts DECIDED trades
+       only (TARGET/SL), so the strip states both. A net number shown as if it were gross, or a
+       rate whose denominator is not the trade count beside it, is exactly the quiet mismatch the
+       founder would have to reverse-engineer. Both now equal the Home tile. */
+    + (open ? '' : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%')
+              + (b.decided ? ' of ' + b.decided + ' decided' : '')
+              + (b.brokerage ? ' · net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN')
+                                 + ' brokerage' : ''))
     + '</span></div>';
   return seg + tot;
 }

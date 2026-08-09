@@ -1441,6 +1441,20 @@ function heroCard2(d){
     + '</div>';
 }
 /* the deck: two cards, snap-scrolled, with a dot that follows the finger */
+/* cc#950: the book deck's dot updater. Same shape as heroDots below — one function per deck
+   because each owns its own track and dot row, and the two decks are never on screen together
+   in the same scroll position. Tapping a dot scrolls the track, so the dots are a control and
+   not just an indicator (card item 2). */
+function bookDots(){
+  var tr = document.getElementById('bookTrack'), dots = document.getElementById('bookDots');
+  if (!tr || !dots) return;
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(dots.children, function(el, j){
+    el.className = (j === i ? 'on' : '');
+    el.onclick = function(){ tr.scrollTo({ left: j * tr.clientWidth, behavior: 'smooth' }); };
+  });
+}
+
 function heroDots(){
   var tr = document.getElementById('heroTrack'), dots = document.getElementById('heroDots');
   if (!tr || !dots) return;
@@ -1542,19 +1556,67 @@ Promise.all([
       + '<div class="v ' + cls(v) + '" title="' + esc(inr(v)) + '">' + inrShort(v) + '</div>'
       + '<div class="p ' + cls(p) + '">' + (p == null ? '--' : pct(p)) + '</div></div>';
   }
+  /* ══ cc#950 — THE BOOK TILE HAS A SECOND FACE ══════════════════════════════════════════════
+     cc#943 put the Open <-> Realised swipe on /m/v8; the founder wants it on the Home tile too.
+     Template-only: /api/mobile/home2 already ships realised, gross, brokerage, wins, losses and
+     trades on the same book payload, so nothing server-side changes.
+
+     THE GESTURE IS THE ONE THIS FILE ALREADY HAS, NOT A NEW ONE. The card describes the market
+     card's mechanism as an axis-locked touch handler; it is not — the market deck (cc#927) is a
+     CSS scroll-snap track with an onscroll dot updater, and that is what is reused here. It is
+     the better of the two for a tile sitting inside a scrolling page: native horizontal scroll
+     cannot swallow a vertical drag, so "vertical scroll unaffected" holds by construction rather
+     than by a threshold I would have to tune. No second handler exists to fork.
+
+     THE ANCHOR WRAPS EACH FACE, NOT THE DECK. Putting a horizontal scroller inside one <a> risks
+     a swipe ending as a navigation; giving each face its own card-link keeps the tap target and
+     the destination identical to before while the track owns the drag. */
+  function bookFace1(){
+    return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
+      + '<div class="t">V8 Open Book</div>'
+      + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
+      + '<div class="trio">'
+      + trioCell('Unrealised', null, bk.unrealised_pct, bk.unrealised)
+      + trioCell('Long Unrl', bk.long || {})
+      + trioCell('Short Unrl', bk.short || {})
+      + '</div>'
+      + '<div class="sum" style="margin-top:7px">% on capital deployed per side.</div>'
+      + '</div></a>';
+  }
+  function bookFace2(){
+    /* W/L here are the WEB MASTER DASHBOARD counts: wins = result TARGET, losses = result SL.
+       They deliberately do NOT sum to `trades` — 15 of the 33 fresh-era trades closed for some
+       other reason and are money in the realised figure but not a verdict in the record. The
+       trades cell therefore shows the full count with the W/L split beneath it, which is the
+       only way both facts stay true on one card.
+       A win rate with no decided trades prints a DASH, never 0% — no verdicts is not a 0% record. */
+    var w = bk.wins || 0, l = bk.losses || 0, dec = w + l;
+    var wr = dec ? (100 * w / dec) : null;
+    return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
+      + '<div class="t">V8 Open Book</div>'
+      + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
+      + '<div class="trio">'
+      + '<div class="st"><div class="k">Realised</div>'
+      +   '<div class="v ' + cls(bk.realised) + '" title="' + esc(inr(bk.realised)) + '">'
+      +   inrShort(bk.realised) + '</div>'
+      +   '<div class="p">net</div></div>'
+      + '<div class="st"><div class="k">Win Rate</div>'
+      +   '<div class="v">' + (wr == null ? '--' : wr.toFixed(0) + '%') + '</div>'
+      +   '<div class="p">' + (dec ? dec + ' decided' : 'no verdicts') + '</div></div>'
+      + '<div class="st"><div class="k">Trades</div>'
+      +   '<div class="v">' + (bk.trades || 0) + '</div>'
+      +   '<div class="p">' + w + 'W / ' + l + 'L</div></div>'
+      + '</div>'
+      /* brokerage is a COST, not a signed P&L — inrShort would print "+Rs16,500", which reads
+         like a gain. Formatted unsigned here. */
+      + '<div class="sum" style="margin-top:7px">Net of \u20B9'
+      + Math.round(bk.brokerage || 0).toLocaleString('en-IN') + ' brokerage.</div>'
+      + '</div></a>';
+  }
   h += '<div class="sect">THE BOOK</div>'
-    /* cc#915 (a): the whole box opens /m/v8 again, not /m/positions. V8 is where the book now
-       lives in full \u2014 mood, slots, stats and the grouped position cards \u2014 and the full-screen
-       /m/positions link moved inside that page. One box, one tap target, one destination. */
-    + '<a class="card-link" href="/m/v8"><div class="c"><div class="chd"><div class="t">V8 Open Book</div>'
-    + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
-    + '<div class="trio">'
-    + trioCell('Unrealised', null, bk.unrealised_pct, bk.unrealised)
-    + trioCell('Long Unrl', bk.long || {})
-    + trioCell('Short Unrl', bk.short || {})
-    + '</div>'
-    + '<div class="sum" style="margin-top:7px">% on capital deployed per side.</div>'
-    + '</div></a>';
+    + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
+    + bookFace1() + bookFace2()
+    + '</div><div class="dots" id="bookDots"><i class="on"></i><i></i></div></div>';
 
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
