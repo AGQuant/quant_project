@@ -256,6 +256,19 @@
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .swipe-t::-webkit-scrollbar{display:none}
 .swipe-t > .c{flex:0 0 100%;scroll-snap-align:center;margin-bottom:0}
+/* cc#955 — THE cc#950 DECK RENDERED BOTH FACES SIDE BY SIDE, and this one missing rule is why.
+   The rule above is a CHILD combinator. The market-mood deck's faces are `.c` divs sitting
+   directly in the track, so it matches them. My book faces are NOT: in cc#950 I wrapped each face
+   in its own <a class="card-link"> — deliberately, so that a horizontal swipe inside a single
+   page-wide anchor could never end as a navigation — which makes `.c` a GRANDCHILD. The width
+   rule therefore never applied, the two anchors took default flex sizing, and they shared one row
+   at half width each: two headers on screen, "UNREALI", "Rs2".
+   The intent was right and the consequence was not carried across. Anchor faces now get the same
+   geometry. Written as a SEPARATE selector rather than widening the existing one to `> *`, because
+   that would have changed the market-mood deck's snap alignment, and this card says not to touch
+   it. scroll-snap-align:start per the card; at a full-width face start and center coincide. */
+.swipe-t > a{flex:0 0 100%;max-width:100%;min-width:0;scroll-snap-align:start;display:block}
+.swipe-t > a > .c{margin-bottom:0}
 .dots{display:flex;justify-content:center;gap:6px;margin-top:7px}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:3px}
