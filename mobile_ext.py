@@ -11,7 +11,7 @@ What lives here and what deliberately does NOT:
   * /api/mobile/result_analysis(+_index) — plain-words analysis from result_analysis_v2.
   * /api/mobile/trades — cc#894 items 5+8, PARITY-FIXED 08-Aug (founder caught all-time vs web
     fresh-book drift): defaults to the WEB MASTER DASHBOARD scope — entry_ts >=
-    app_config.v8_paper_rebuild_cutover_ts (cc#504/cc#510 era doctrine), basket 's1_reclaim_obs'
+    app_config.v8_paper_rebuild_cutover_ts (cc#504/cc#510 era doctrine), retired baskets
     excluded — with a summary block computed the web way: realised NET of Rs.500/closed-trade
     brokerage, W/L = clean result 'TARGET' vs 'SL'. Verified vs DB: 33 trades, gross 366,112,
     net 349,612, 13/5 — identical to the web cards. ?era=all shows the full legacy book, same as
@@ -30,6 +30,8 @@ from mobile_endpoints import (
 
 log = logging.getLogger("scorr.mobile.ext")
 router = APIRouter()
+
+from v8_book_canon import book_canon, retired_baskets   # cc#970: the ONE book formula (rule 13)
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -146,43 +148,41 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = 
             cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
             _row = cur.fetchone()
             cutover = _row[0] if _row and _row[0] else None
-        scope = {"cut": cutover}
+        _retired, _ = retired_baskets(cur)              # cc#970: registry, not a name literal
+        scope = {"cut": cutover, "retired": _retired}
         cur.execute("""
             SELECT symbol, side, basket, entry_price, exit_price, qty, pnl, return_pct,
                    result, entry_ts, exit_ts
             FROM v8_paper_trades
             WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
-              AND basket IS DISTINCT FROM 's1_reclaim_obs'
+              AND NOT (basket = ANY(%(retired)s))
             ORDER BY exit_ts DESC NULLS LAST, id DESC
             LIMIT """ + str(limit), scope)
         tr = _rows(cur)
         cur.execute("""
+            -- cc#970: a WIN is result='TARGET' and a LOSS is result='SL', here too. This strip
+            -- counted pnl>0 / pnl<0, which is a different question and gives a different answer
+            -- (on the fresh book: 21W/12L by pnl vs 13W/5L by verdict). One definition of a win
+            -- per rule 13, or the day strip contradicts the summary printed above it.
             SELECT exit_ts::date AS d, COUNT(*) AS n, SUM(pnl) AS pnl,
-                   COUNT(*) FILTER (WHERE pnl > 0) AS wins,
-                   COUNT(*) FILTER (WHERE pnl < 0) AS losses
-            FROM v8_paper_trades
-            WHERE exit_ts >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - %(days)s
-              AND (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
-              AND basket IS DISTINCT FROM 's1_reclaim_obs'
-            GROUP BY exit_ts::date
-            ORDER BY d DESC
-        """, {"cut": cutover, "days": days})
-        dl = _rows(cur)
-        cur.execute("""
-            SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS gross,
                    COUNT(*) FILTER (WHERE result = 'TARGET') AS wins,
                    COUNT(*) FILTER (WHERE result = 'SL') AS losses
             FROM v8_paper_trades
-            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
-              AND basket IS DISTINCT FROM 's1_reclaim_obs'
-        """, scope)
-        sm = _rows(cur)[0]
+            WHERE exit_ts >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - %(days)s
+              AND (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND NOT (basket = ANY(%(retired)s))
+            GROUP BY exit_ts::date
+            ORDER BY d DESC
+        """, {"cut": cutover, "days": days, "retired": _retired})
+        dl = _rows(cur)
+        # cc#970: the summary is THE CANON. This endpoint used to run its own COUNT/SUM and do
+        # its own brokerage deduction — the trade-log-vs-master-dashboard mismatch the founder
+        # reported on 09-Aug. It computes nothing now.
+        canon = book_canon(conn, era=("all" if era == "all" else "fresh"))
 
     def f(v):
         return float(v) if v is not None else None
 
-    gross = f(sm["gross"]) or 0.0
-    brokerage = (sm["n"] or 0) * BROKERAGE_PER_TRADE
     return {
         "trades": [{
             "symbol": t["symbol"], "side": (t["side"] or "").upper(),
@@ -199,12 +199,15 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = 
             "wins": d["wins"], "losses": d["losses"],
         } for d in dl],
         "summary": {
-            "era": era if era == "all" else "fresh",
-            "trades": sm["n"],
-            "gross": round(gross, 2),
-            "brokerage": brokerage,
-            "realised": round(gross - brokerage, 2),
-            "wins": sm["wins"], "losses": sm["losses"],
+            "era": canon["era"],
+            "canon": canon["canon"],
+            "retired_baskets": canon["retired_baskets"],
+            "trades": canon["trades"],
+            "gross": canon["gross"],
+            "brokerage": canon["brokerage"],
+            "realised": canon["realised"],
+            "wins": canon["wins"], "losses": canon["losses"],
+            "decided": canon["decided"], "win_rate": canon["win_rate"],
         },
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -264,7 +267,7 @@ def mobile_v8book(request: Request):
     """cc#915 — every OPEN V8 paper position with live CMP, day move and P&L.
 
     SAME SCOPE AS THE LEDGER AND THE HOME CARD: fresh era (entry_ts >= the cc#504 cutover) with
-    basket 's1_reclaim_obs' excluded. The three surfaces must agree — the founder taps the Home
+    retired baskets excluded via the registry. The three surfaces must agree — cc#970 makes that
     Open Book card to get here, and two different numbers for one book is the drift cc#894 was
     filed for.
 
@@ -288,6 +291,7 @@ def mobile_v8book(request: Request):
         cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
         _row = cur.fetchone()
         cutover = _row[0] if _row and _row[0] else None
+        _open_retired, _ = retired_baskets(cur)         # cc#970: registry, same set as the canon
         cur.execute("""
             SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts, p.qty,
                    p.target, p.stop_loss, p.pivot_date,
@@ -308,9 +312,9 @@ def mobile_v8book(request: Request):
             ) pc ON true
             WHERE p.status = 'OPEN'
               AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
-              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
+              AND NOT (p.basket = ANY(%(retired)s))
             ORDER BY p.entry_ts DESC
-        """, {"cut": cutover})
+        """, {"cut": cutover, "retired": _open_retired})
         rows = _rows(cur)
 
     def f(v):
@@ -364,31 +368,35 @@ def mobile_v8book(request: Request):
     # the same book at the same instant. A separate fetch could land the open page on one scope
     # and the realised page on another, which is exactly the drift cc#894 was filed for.
     #
-    # SCOPE IS IDENTICAL TO THE OPEN PAGE, and that is the whole point of putting them side by
-    # side: same fresh-era cutover, same 's1_reclaim_obs' exclusion. A realised total computed on
-    # a wider scope than the unrealised one beside it would make the pair unreadable.
-    # (Measured: the obs basket contributes 0 closed rows today, so the exclusion is currently a
-    # no-op — kept anyway, because scope parity has to hold by construction, not by luck.)
+    # SCOPE IS THE CANON (cc#970, rule 13). This list still runs its own query because it needs
+    # the ROWS, not just the totals — but it runs under the SAME scope the canon uses, taking the
+    # retired set from the registry instead of naming 's1_reclaim_obs' in a string. Every SUMMARY
+    # figure below now comes from book_canon() and is not computed here at all, so the numbers on
+    # this page cannot drift from Home or the web master dashboard.
+    # (Measured 09-Aug: s1_reclaim_obs has 0 closed rows and buy_s1_bounce's 10 rows are all
+    # pre-cutover, so the registry exclusion changes no figure TODAY — it is there so that
+    # retiring the next basket is one config row and no code, per rule 9.)
     #
     # SOURCE: v8_paper_trades, NOT v8_paper_positions. The positions table has no exit columns at
     # all — checked before building — so a closed V8 trade simply does not exist there.
     # entry_ts / exit_ts are NAIVE IST (timestamp without time zone), read raw, never converted.
     # CONTEXT ISOLATION (rule 7): v8_paper_* only. tc_intraday_* is not touched anywhere here.
     with _conn() as conn, conn.cursor() as cur:
+        canon = book_canon(conn, era="fresh")           # cc#970: every summary figure, one source
+        _retired, _ = retired_baskets(cur)
         cur.execute("""
             SELECT id, symbol, side, basket, entry_price, entry_ts, exit_price, exit_ts, qty,
                    target, stop_loss, pnl, return_pct, result
             FROM v8_paper_trades
             WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
-              AND basket IS DISTINCT FROM 's1_reclaim_obs'
+              AND NOT (basket = ANY(%(retired)s))
             ORDER BY exit_ts DESC NULLS LAST, id DESC
-        """, {"cut": cutover})
+        """, {"cut": cutover, "retired": _retired})
         crows = _rows(cur)
 
-    closed, real_total, real_dep, wins, losses = [], 0.0, 0.0, 0, 0
-    # cc#961: same TARGET/SL verdicts, counted per side as well. Free — this loop already reads
-    # `side` for the return_pct sign, so the split costs two counters and no extra query.
-    wl_side = {"LONG": [0, 0], "SHORT": [0, 0]}   # side -> [wins, losses]
+    # cc#970: real_total / real_dep / the per-side counters are gone — those sums are the canon's
+    # job now. `wins`/`losses` survive ONLY as a drift check against it (see below).
+    closed, wins, losses = [], 0, 0
     for r in crows:
         side = (r["side"] or "").upper()
         entry, ex, qty = f(r["entry_price"]), f(r["exit_price"]), (r["qty"] or 0)
@@ -416,8 +424,6 @@ def mobile_v8book(request: Request):
             "exit_label": xts.strftime("%d %b %H:%M") if xts else None,
             "days_held": ((xts.date() - ets.date()).days if (ets and xts) else None),
         })
-        if pnl is not None:
-            real_total += pnl
         # cc#950 PARITY FIX — W/L are the WEB MASTER DASHBOARD counts: result='TARGET' vs 'SL'.
         # cc#943 (mine) counted a win as pnl > 0, which is a DIFFERENT question and gives a
         # different answer: on the same 33 fresh-era trades, pnl>0 says 21W/12L = 63.6% while
@@ -426,26 +432,22 @@ def mobile_v8book(request: Request):
         # flat-to-down invents a record the book never had. Home already used the canonical
         # counts, so the two surfaces were contradicting each other about one book.
         _res = (r["result"] or "").upper()
-        _sk = "SHORT" if side == "SHORT" else "LONG"   # same predicate Home uses
         if _res == "TARGET":
             wins += 1
-            wl_side[_sk][0] += 1
         elif _res == "SL":
             losses += 1
-            wl_side[_sk][1] += 1
-        if dep is not None:
-            real_dep += dep
 
-    real_brokerage = len(closed) * BROKERAGE_PER_TRADE
+    # cc#970: NO SUMMARY MATHS HERE ANY MORE. real_brokerage, the net realised, the win rate and
+    # the per-side records were all computed locally in this function; every one of them is now
+    # taken from book_canon(). The loop above still walks the rows, but only to BUILD THE LIST —
+    # its wins/losses counters are kept solely as a self-check (asserted against the canon below),
+    # not as a second source of truth.
+    _local_w, _local_l = wins, losses
+    if (_local_w, _local_l) != (canon["wins"], canon["losses"]):
+        # scope drift between the list query and the canon: say so rather than render either.
+        log.warning("V8_PNL_CANON drift on /api/mobile/v8book: list says %sW/%sL, canon says %sW/%sL",
+                    _local_w, _local_l, canon["wins"], canon["losses"])
 
-    # cc#961: per-side record, same shape and same rounding as /api/mobile/home2 `rec_long`/
-    # `rec_short`, so the two pages cannot print different numbers for the same book.
-    # decided = TARGET + SL; no decided trades => rate None => the template prints a dash.
-    def _rec(sk):
-        w, l = wl_side[sk]
-        dec = w + l
-        return {"wins": w, "losses": l, "decided": dec,
-                "rate": round(100.0 * w / dec, 1) if dec else None}
     return {
         "instrument": "equity",
         "futures_available": False,
@@ -455,30 +457,26 @@ def mobile_v8book(request: Request):
         "unrealised": round(unrl_total, 2) if out else None,
         "deployed": round(dep_total, 2) if out else None,
         "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
-        # cc#950 PARITY FIX — REALISED IS NET OF BROKERAGE, matching the Home tile and the web
-        # Master Dashboard formula. cc#943 (mine) reported the GROSS sum of pnl: on the same 33
-        # trades that is Rs 3,66,112 here against Rs 3,49,612 on Home — a Rs 16,500 gap that is
-        # exactly 33 x the Rs 500/closed-trade brokerage the web doctrine deducts. Two numbers for
-        # one book on two screens is what DISPLAY_PARITY (16202) forbids. `gross` ships alongside
-        # so the deduction is visible rather than silent.
+        # cc#970: every figure below comes from the canon. The cc#950 parity fix (realised NET of
+        # brokerage, wins = TARGET, losses = SL) is not repeated here — it now lives in exactly one
+        # place, v8_book_canon, and this page consumes it like every other surface.
         "closed_count": len(closed),
         "closed": closed,
-        "realised": round(real_total - real_brokerage, 2) if closed else None,
-        "gross": round(real_total, 2) if closed else None,
-        "brokerage": real_brokerage,
-        "realised_deployed": round(real_dep, 2) if closed else None,
-        "realised_pct": (round((real_total - real_brokerage) / real_dep * 100.0, 2) if real_dep else None),
-        "wins": wins, "losses": losses, "decided": wins + losses,
-        # Win rate over DECIDED trades (TARGET + SL), not every close — see the note above.
+        "realised": canon["realised"],
+        "gross": canon["gross"],
+        "brokerage": canon["brokerage"],
+        "realised_deployed": canon["realised_deployed"],
+        "realised_pct": canon["realised_pct"],
+        "wins": canon["wins"], "losses": canon["losses"], "decided": canon["decided"],
         # A rate with nothing decided is a DASH, not 0%: no verdicts is not a 0% record.
-        "win_rate": (round(100.0 * wins / (wins + losses), 1) if (wins + losses) else None),
-        # cc#961: the overall rate above STAYS — this page keeps it, per the card. The split is
-        # added beside it so /m/v8 and the Home realised face tell the same story.
-        "rec_long": _rec("LONG"),
-        "rec_short": _rec("SHORT"),
-        "era": "fresh",
-        "scope_note": ("Both pages: fresh era (entry on/after the cc#504 cutover), "
-                       "'s1_reclaim_obs' excluded. Same scope on both, by construction."),
+        "win_rate": canon["win_rate"],
+        "rec_long": canon["rec_long"],
+        "rec_short": canon["rec_short"],
+        "era": canon["era"],
+        "canon": canon["canon"],
+        "retired_baskets": canon["retired_baskets"],
+        "scope_note": ("Both pages: fresh era (entry on/after the cc#504 cutover), retired "
+                       "baskets excluded via the app_config registry. One formula, V8_PNL_CANON_V1."),
         "rail": rail_state(now, 5, now),
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }

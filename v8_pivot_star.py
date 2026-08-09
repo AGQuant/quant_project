@@ -50,6 +50,7 @@ from typing import Dict, Any, List, Optional
 import psycopg2
 import pytz
 from fastapi import APIRouter
+from v8_book_canon import retired_baskets   # cc#970: retired-basket registry (rule 13)
 
 log = logging.getLogger("scorr.pivot_star")
 router = APIRouter()
@@ -178,16 +179,17 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
             cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
         elif EVAL_SCOPE == "positions":
             # cc#932: the OPEN paper book. Same era scope the book itself uses everywhere else
-            # (cc#504 cutover, s1_reclaim_obs excluded), so this marks the positions the founder
+            # (cc#504 cutover, retired baskets excluded via the cc#970 registry), so this marks the ones
             # is actually looking at and cannot mark a row the book does not show.
+            _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
             cur.execute("""
                 SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
                 FROM v8_paper_positions p
                 LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
                 WHERE p.status = 'OPEN'
                   AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
-                  AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
-                ORDER BY p.symbol, p.entry_ts DESC""")
+                  AND NOT (p.basket = ANY(%(retired)s))
+                ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
         else:
             cur.execute("""SELECT DISTINCT ON (symbol) symbol, basket
                            FROM v8_qualified WHERE signal_date=%s
@@ -308,14 +310,15 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
     side."""
     d = target_date or _ist_now().date()
     with conn.cursor() as cur:
+        _retired, _ = retired_baskets(cur)       # resolved BEFORE the main query: same cursor
         cur.execute("""
             SELECT DISTINCT ON (p.symbol) p.symbol, p.side
             FROM v8_paper_positions p
             LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
             WHERE p.status = 'OPEN'
               AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
-              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
-            ORDER BY p.symbol, p.entry_ts DESC""")
+              AND NOT (p.basket = ANY(%(retired)s))
+            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
         pos = [(r[0], (r[1] or "").upper()) for r in cur.fetchall()]
         if not pos:
             return []

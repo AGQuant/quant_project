@@ -112,6 +112,7 @@ from mobile_endpoints import wants_mobile_home                 # cc#886 mobile e
 # cc#893 item 3: these two were mounted from a tail import inside preview_endpoints.py because
 # Fable cannot edit main.py. They belong here, with every other router.
 from mobile_home2 import router as mobile_home2_router         # cc#889 Home (market-first rebuild)
+from v8_book_canon import router as v8_book_canon_router     # cc#970 V8_PNL_CANON_V1 (rule 13)
 from mobile_ext import router as mobile_ext_router             # cc#892 breadth + cc#893 depth
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
@@ -529,6 +530,7 @@ app.include_router(v8_futures_book_router)
 # these must be included after mobile_router, which owns /static/mobile_app.css and the shared
 # helpers both modules import.
 app.include_router(mobile_home2_router)
+app.include_router(v8_book_canon_router)
 app.include_router(mobile_ext_router)
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
@@ -1690,6 +1692,26 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
     except Exception: pass
     with get_conn() as conn: return v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
 
+def _canon_retired():
+    """The retired-basket registry (cc#970). Wiring only — the list lives in app_config."""
+    from v8_book_canon import _conn as _c, retired_baskets
+    with _c() as _cn, _cn.cursor() as _cu:
+        names, _ = retired_baskets(_cu)
+    return names
+
+
+def _canon_summary(era):
+    """Trade Log / Master Dashboard summary, shaped as the dashboard already expects, with every
+    figure taken from v8_book_canon. No formula here (rule 13: one formula, one place)."""
+    from v8_book_canon import _conn as _c, book_canon
+    with _c() as _cn:
+        b = book_canon(_cn, era=era)
+    return {"trades": b["trades"], "wins": b["wins"], "losses": b["losses"],
+            "total_pnl": b["realised"], "gross_pnl": b["gross"], "brokerage": b["brokerage"],
+            "decided": b["decided"], "win_rate": b["win_rate"],
+            "era": b["era"], "canon": b["canon"], "retired_baskets": b["retired_baskets"]}
+
+
 @app.get("/api/paper/status")
 def paper_status():
     # cc#367: CMP must be the SPOT equity bar — the old lateral had NO source filter, so a symbol's
@@ -1729,8 +1751,9 @@ def paper_status():
               AND price_date < COALESCE(lp.ts::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
             ORDER BY price_date DESC LIMIT 1
         ) pc ON true
-        WHERE p.status = 'OPEN' AND {era_clause} ORDER BY p.entry_ts DESC
-    """, era_params)
+        WHERE p.status = 'OPEN' AND {era_clause} AND NOT (p.basket = ANY(%s))
+        ORDER BY p.entry_ts DESC
+    """, era_params + (_canon_retired(),))
     # cc#751: the Trade Log tab is the COMPLETE trade ledger (all baskets, all time) — the era filter
     # (cc#504 fresh-book) applies only to the headline paper P&L / open positions above, NOT to the
     # Trade Log. all_trades/all_summary are the un-era'd full history the Trade Log renders from, so a
@@ -1739,11 +1762,25 @@ def paper_status():
     # (era) are kept unchanged for the fresh-book headline consumers.
     return {
         "open_positions": open_positions,
-        "recent_trades": api_query(f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades WHERE {era_clause} ORDER BY closed_at DESC LIMIT 100", era_params),
-        "all_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 500"),
+        "recent_trades": api_query(
+            f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts "
+            f"FROM v8_paper_trades WHERE {era_clause} AND NOT (basket = ANY(%s)) "
+            f"ORDER BY closed_at DESC LIMIT 100", era_params + (_canon_retired(),)),
+        # cc#970 (rule 13): retired baskets vanish from every P&L display INCLUDING history, so the
+        # all-era trade list is filtered too — buy_s1_bounce's 10 rows (+67,154) used to sit in here
+        # and in all_summary below, which is why the Trade Log tab and the Master Dashboard
+        # disagreed on 09-Aug.
+        "all_trades": api_query(
+            "SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts "
+            "FROM v8_paper_trades WHERE NOT (basket = ANY(%s)) ORDER BY closed_at DESC LIMIT 500",
+            (_canon_retired(),)),
         "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
-        "summary": api_query(f"SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades WHERE {era_clause}", era_params, single=True),
-        "all_summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True),
+        # cc#970: BOTH summaries are the canon now. They used to be two hand-written aggregates
+        # here — the fresh one shipped total_pnl GROSS (no brokerage) and neither excluded a
+        # retired basket. `summary` is the canonical fresh book; `all_summary` is history, still
+        # with retired baskets removed, and carries era='all' so the tab can label it.
+        "summary": _canon_summary("fresh"),
+        "all_summary": _canon_summary("all"),
         "rebuild_cutover_ts": cutover_ts,
     }
 

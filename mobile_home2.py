@@ -59,6 +59,8 @@ log = logging.getLogger("scorr.mobile.home2")
 router = APIRouter()
 
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
+from v8_book_canon import book_canon   # cc#970: the ONE book formula (rule 13)
+
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
 # Ticker order (founder 08-Aug batch 4): EXPLICIT Indian-investor relevance, not family order.
@@ -538,10 +540,8 @@ def mobile_home2(request: Request):
     is_td = now.weekday() < 5            # holiday table read lives in /api/mobile/now; weekday is
                                          # enough for the rails here and never lies bullish
     with _conn() as conn, conn.cursor() as cur:
-        # fresh-era cutover — the same app_config key the web daylog reads (cc#510)
-        cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
-        _row = cur.fetchone()
-        cutover = _row[0] if _row and _row[0] else None
+        # cc#970: the cutover lookup that used to live here is gone with the local book maths —
+        # book_canon() resolves the era itself, and nothing else on this endpoint needs it.
 
         # 0 · ticker tail: latest global row per name (global_indices holds daily history;
         #     DISTINCT ON quote_date-desc is the honest "latest print", with its own date)
@@ -601,58 +601,12 @@ def mobile_home2(request: Request):
         """)
         sig_head = _rows(cur)[0]
 
-        # 2 · V8 open book — FRESH ERA, web Master Dashboard scope, now SPLIT PER SIDE
-        #     (founder 08-Aug: Unrealised / Long Unrealised / Short Unrealised, each as a % of
-        #     the capital deployed on that side; deployed = entry_price * qty notional).
-        cur.execute("""
-            SELECT
-                COALESCE(SUM(
-                    (COALESCE(lp.cmp, p.entry_price) - p.entry_price) * p.qty *
-                    CASE WHEN UPPER(p.side) = 'SHORT' THEN -1 ELSE 1 END
-                ), 0) AS unrealised,
-                COUNT(*) AS open_n,
-                COALESCE(SUM(
-                    (COALESCE(lp.cmp, p.entry_price) - p.entry_price) * p.qty
-                ) FILTER (WHERE UPPER(p.side) <> 'SHORT'), 0) AS unrl_long,
-                COUNT(*) FILTER (WHERE UPPER(p.side) <> 'SHORT') AS n_long,
-                COALESCE(SUM(p.entry_price * p.qty)
-                    FILTER (WHERE UPPER(p.side) <> 'SHORT'), 0) AS dep_long,
-                COALESCE(SUM(
-                    (p.entry_price - COALESCE(lp.cmp, p.entry_price)) * p.qty
-                ) FILTER (WHERE UPPER(p.side) = 'SHORT'), 0) AS unrl_short,
-                COUNT(*) FILTER (WHERE UPPER(p.side) = 'SHORT') AS n_short,
-                COALESCE(SUM(p.entry_price * p.qty)
-                    FILTER (WHERE UPPER(p.side) = 'SHORT'), 0) AS dep_short
-            FROM v8_paper_positions p
-            LEFT JOIN LATERAL (
-                SELECT close AS cmp FROM intraday_prices
-                WHERE symbol = p.symbol AND source <> 'fyers_fut'
-                ORDER BY ts DESC LIMIT 1
-            ) lp ON true
-            WHERE p.status = 'OPEN'
-              AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
-              AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
-        """, {"cut": cutover})
-        book_live = _rows(cur)[0]
-        # cc#961: the SAME query gains per-side verdict counts — FILTER clauses, not a second
-        # fetch, so the totals and the split can never drift apart. Side predicate matches the
-        # open-book query above (<> 'SHORT' is the long side). Verified against the live table:
-        # only LONG and SHORT exist in the fresh era, no NULLs, and long_n + short_n = trades.
-        cur.execute("""
-            SELECT COUNT(*) AS trades, COALESCE(SUM(pnl), 0) AS gross,
-                   COUNT(*) FILTER (WHERE result = 'TARGET') AS wins,
-                   COUNT(*) FILTER (WHERE result = 'SL') AS losses,
-                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT') AS trades_long,
-                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT' AND result = 'TARGET') AS wins_long,
-                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT' AND result = 'SL') AS losses_long,
-                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT') AS trades_short,
-                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT' AND result = 'TARGET') AS wins_short,
-                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT' AND result = 'SL') AS losses_short
-            FROM v8_paper_trades
-            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
-              AND basket IS DISTINCT FROM 's1_reclaim_obs'
-        """, {"cut": cutover})
-        led = _rows(cur)[0]
+        # 2 · V8 book — cc#970: THE CANON, not a local recomputation.
+        #     This block used to carry its own two queries (open-side split + closed ledger) with
+        #     's1_reclaim_obs' hardcoded and buy_s1_bounce never excluded. Under rule 13 there is
+        #     exactly ONE book formula and Home reads it like every other surface, so a change to
+        #     the doctrine cannot reach Home and miss /m/v8, which is the drift that caused this.
+        book = book_canon(conn, era="fresh")
 
         # 3 · my portfolio (SmartGain) — rows + aggregate. TIMESTAMPTZ converted in SQL.
         cur.execute("""
@@ -761,37 +715,9 @@ def mobile_home2(request: Request):
     t = now.time()
     market_open = bool(is_td and MARKET_OPEN <= t <= SESSION_END)
 
-    gross = f(led["gross"]) or 0.0
-    brokerage = (led["trades"] or 0) * BROKERAGE_PER_TRADE
-
-    # per-side book numbers — a side with no positions is nulls, never a fabricated 0%
-    def _side(unrl_key, dep_key, n_key):
-        n = book_live[n_key] or 0
-        if n == 0:
-            return {"n": 0, "unrealised": None, "deployed": None, "pct": None}
-        u = round(f(book_live[unrl_key]) or 0.0, 2)
-        d = round(f(book_live[dep_key]) or 0.0, 2)
-        return {"n": n, "unrealised": u, "deployed": d,
-                "pct": round(u / d * 100.0, 2) if d else None}
-    side_long = _side("unrl_long", "dep_long", "n_long")
-    side_short = _side("unrl_short", "dep_short", "n_short")
-
-    # cc#961: per-side REALISED record. decided = TARGET + SL only — the cc#950 doctrine. The
-    # 15 fresh-era trades that closed for some other reason are money in the realised figure but
-    # not a verdict, so they are in `trades` and in neither `wins` nor `losses`.
-    # The rate is computed HERE, once, so Home and any other surface read the same number rather
-    # than each dividing for themselves (DISPLAY_PARITY). No decided trades => rate is None, and
-    # the template prints a dash. A side with no verdicts has not gone 0% — it has no record.
-    def _record(w_key, l_key, n_key):
-        w = led[w_key] or 0
-        l = led[l_key] or 0
-        dec = w + l
-        return {"wins": w, "losses": l, "decided": dec, "trades": led[n_key] or 0,
-                "rate": round(100.0 * w / dec, 1) if dec else None}
-    rec_long = _record("wins_long", "losses_long", "trades_long")
-    rec_short = _record("wins_short", "losses_short", "trades_short")
-    dep_total = (side_long["deployed"] or 0.0) + (side_short["deployed"] or 0.0)
-    unrl_total = round(f(book_live["unrealised"]) or 0.0, 2)
+    # cc#970: every per-side derivation that used to live here is GONE — _side(), _record(),
+    # the brokerage deduction and the rate arithmetic all moved into v8_book_canon.book_canon().
+    # Home now consumes the figures; it does not produce them.
 
     return {
         "session": {
@@ -824,22 +750,24 @@ def mobile_home2(request: Request):
             "top": signals,
             "rail": rail_state(sig_head["newest"], 5, now, is_td),
         },
+        # cc#970: shipped verbatim from the canon — Home adds no arithmetic of its own.
+        # Keys are unchanged so the template needs no edit; they are simply no longer derived here.
         "book": {
-            "open": book_live["open_n"],
-            "unrealised": unrl_total,
-            "deployed": round(dep_total, 2) if dep_total else None,
-            "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
-            "long": side_long,
-            "short": side_short,
-            "realised": round(gross - brokerage, 2),      # NET, exactly the web card
-            "gross": round(gross, 2),
-            "brokerage": brokerage,
-            "wins": led["wins"], "losses": led["losses"], "trades": led["trades"],
-            # cc#961: realised record split by side. Kept alongside the totals above, which /m/v8
-            # still reads — the split is additive, nothing existing changed shape.
-            "rec_long": rec_long,
-            "rec_short": rec_short,
-            "era": "fresh",
+            "open": book["open"],
+            "unrealised": book["unrealised"],
+            "deployed": book["deployed"],
+            "unrealised_pct": book["unrealised_pct"],
+            "long": book["long"],
+            "short": book["short"],
+            "realised": book["realised"],
+            "gross": book["gross"],
+            "brokerage": book["brokerage"],
+            "wins": book["wins"], "losses": book["losses"], "trades": book["trades"],
+            "rec_long": book["rec_long"],
+            "rec_short": book["rec_short"],
+            "era": book["era"],
+            "canon": book["canon"],
+            "retired_baskets": book["retired_baskets"],
         },
         "portfolio": {
             "empty": pf_empty,

@@ -35,6 +35,7 @@ standard pool only, 20 total slots:
 """
 
 from fastapi import APIRouter, HTTPException, Response
+from v8_book_canon import retired_baskets   # cc#970 V8_PNL_CANON_V1 (rule 13)
 from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
@@ -2733,14 +2734,18 @@ def v8_daylog(era: str = "fresh"):
                 cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
                 row = cur.fetchone()
                 cutover_ts = row[0] if row and row[0] else None
+            # cc#970 (rule 13): retired baskets come from the app_config registry, never a name
+            # literal, and they are excluded on era='all' too — a retired basket vanishes from
+            # every P&L display including history.
+            _retired, _ = retired_baskets(cur)
             cur.execute("""
                 WITH all_dates AS (
                     SELECT DISTINCT entry_ts::date AS d FROM v8_paper_positions
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     UNION SELECT DISTINCT entry_ts::date FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     UNION SELECT DISTINCT COALESCE(closed_at::date, exit_ts::date) FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                 ),
                 opened AS (
                     SELECT entry_ts::date AS d,
@@ -2748,9 +2753,9 @@ def v8_daylog(era: str = "fresh"):
                         COUNT(*) FILTER (WHERE side='SHORT') AS short_opened,
                         COUNT(*) AS total_opened
                     FROM (SELECT entry_ts, side FROM v8_paper_positions
-                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                           UNION ALL SELECT entry_ts, side FROM v8_paper_trades
-                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs') e
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))) e
                     GROUP BY entry_ts::date
                 ),
                 closed AS (
@@ -2763,7 +2768,7 @@ def v8_daylog(era: str = "fresh"):
                         COUNT(*)*500 AS brokerage,
                         ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
                     FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND basket IS DISTINCT FROM 's1_reclaim_obs'
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     GROUP BY COALESCE(closed_at::date, exit_ts::date)
                 ),
                 cumulative AS (
@@ -2788,7 +2793,7 @@ def v8_daylog(era: str = "fresh"):
                       - SUM(closed) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS net_open,
                     ROUND((net_pnl/5000000.0*100)::numeric,2) AS return_pct
                 FROM cumulative ORDER BY d DESC
-            """, {"cut": cutover_ts})
+            """, {"cut": cutover_ts, "retired": _retired})
             cols = [d[0] for d in cur.description]
             rows = []
             for r in cur.fetchall():
