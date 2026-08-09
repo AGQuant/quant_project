@@ -232,7 +232,7 @@ _V10_ALIAS = {"NIFTY": "NIFTY50", "NIFTY 50": "NIFTY50", "BANKNIFTY50": "BANKNIF
 
 @router.get("/api/mobile/v10chart")
 @_json_safe
-def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
+def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, bars: int = 90):
     """cc#906 — 3 months of index price with the V10 paper trades pinned on it.
 
     WHY DAILY AND NOT THE WEB'S 5-MIN (the finding that decided this build, verified in the DB
@@ -275,25 +275,60 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
         sym = "NIFTY50"
     table = _V10_TABLES[sym]
     days = max(5, min(int(days or 92), 400))
+    # cc#941 task 5, founder 09-Aug: the 3-month daily window was "clumsy". The chart is now a
+    # 90-BAR ROLLING 5-MIN window — roughly all of the latest session plus the tail of the one
+    # before, which is the horizon a 5-min intraday strategy is actually judged on.
+    #
+    # THE cc#906 TIME-BASE OBJECTION DOES NOT APPLY AT THIS LENGTH, and that is why this is safe
+    # rather than a reversal. cc#906 refused 5-min bars because the bar time base CHANGED inside
+    # its 3-month window (true UTC up to Jun-2026, IST-tagged-+00 from Jul-2026), so one epoch
+    # axis would have shifted the older third by 5.5h. 90 bars is ~1.2 sessions and sits entirely
+    # inside the post-Jul regime, so there is exactly one time base in the window. The daily
+    # aggregation is KEPT and still served on the same endpoint for any longer window.
+    # Full history stays in the DB; only the response is windowed (the cc#940 principle).
+    bars = max(20, min(int(bars or 90), 400))
+    intraday = bars > 0
 
     with _conn() as conn, conn.cursor() as cur:
-        # daily OHLC, built from the same 5-min bars the web chart uses (one source of truth).
-        # Window anchored to MAX(ts) — these tables are fed historically, so anchoring on NOW()
-        # would empty the chart the moment the feed is a day behind.
-        cur.execute(
-            """
-            SELECT ts::date AS d,
-                   (array_agg(open  ORDER BY ts ASC ))[1] AS o,
-                   MAX(high) AS h,
-                   MIN(low)  AS l,
-                   (array_agg(close ORDER BY ts DESC))[1] AS c
-            FROM {t}
-            WHERE ts::date > (SELECT MAX(ts)::date FROM {t}) - %s
-            GROUP BY 1 ORDER BY 1
-            """.format(t=table), (days,))
-        series = [{"d": str(r["d"]), "o": float(r["o"]), "h": float(r["h"]),
-                   "l": float(r["l"]), "c": float(r["c"])} for r in _rows(cur)]
-        in_win = set(p["d"] for p in series)
+        if intraday:
+            # Last N bars, anchored on MAX(ts): these tables are fed historically, so anchoring on
+            # NOW() would empty the chart the moment the feed is a day behind — and on a weekend
+            # it would empty it every time (the cc#940 defect, not repeated here).
+            cur.execute(
+                """
+                SELECT ts, open AS o, high AS h, low AS l, close AS c FROM (
+                  SELECT DISTINCT ON (ts) ts, open, high, low, close FROM {t}
+                  ORDER BY ts DESC, close
+                  LIMIT %s
+                ) x ORDER BY ts ASC
+                """.format(t=table), (bars,))
+            rows5 = _rows(cur)
+            series = [{"d": r["ts"].strftime("%Y-%m-%d %H:%M"),
+                       "t": r["ts"].strftime("%H:%M"), "day": r["ts"].strftime("%Y-%m-%d"),
+                       "o": float(r["o"]), "h": float(r["h"]),
+                       "l": float(r["l"]), "c": float(r["c"])} for r in rows5]
+            # Pins snap to a SESSION here, not to a bar minute: the *_5m_test_data time base and
+            # v10_trades are two different clocks (see /api/v10/candles), and pretending to a
+            # one-minute alignment we have not proven would put a marker on the wrong candle.
+            # Date containment is the claim the data supports, so the date is what we match on.
+            in_win = set(p["day"] for p in series)
+        else:
+            # daily OHLC, built from the same 5-min bars the web chart uses (one source of truth).
+            cur.execute(
+                """
+                SELECT ts::date AS d,
+                       (array_agg(open  ORDER BY ts ASC ))[1] AS o,
+                       MAX(high) AS h,
+                       MIN(low)  AS l,
+                       (array_agg(close ORDER BY ts DESC))[1] AS c
+                FROM {t}
+                WHERE ts::date > (SELECT MAX(ts)::date FROM {t}) - %s
+                GROUP BY 1 ORDER BY 1
+                """.format(t=table), (days,))
+            series = [{"d": str(r["d"]), "day": str(r["d"]), "o": float(r["o"]),
+                       "h": float(r["h"]), "l": float(r["l"]), "c": float(r["c"])}
+                      for r in _rows(cur)]
+            in_win = set(p["day"] for p in series)
 
         cur.execute("""
             SELECT id, side, leg, opt_strike, opt_type,
@@ -320,6 +355,16 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
 
     def f(x):
         return None if x is None else float(x)
+
+    def _paired(sym_):
+        """cc#941: imported, never re-derived. If the shared helper is unavailable the chart still
+        renders — the cards simply say so — rather than the whole payload failing."""
+        try:
+            from v10_endpoints import paired_trades
+            return paired_trades(sym_, 200)
+        except Exception as e:
+            return {"error": "%s: %s" % (type(e).__name__, str(e)[:120]),
+                    "trades": [], "count": 0, "summary": {}}
 
     trades, pins, outside = [], [], 0
     for r in closed_rows:
@@ -388,18 +433,25 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92):
     net = round(sum(t["pnl"] for t in closed), 2) if closed else None
     return {
         "symbol": sym, "label": "BANK NIFTY" if sym == "BANKNIFTY" else "NIFTY 50",
-        "table": table, "resolution": "daily",
+        "table": table, "resolution": "5m" if intraday else "daily",
+        "bars": bars if intraday else None,
         "series": series, "count": len(series),
         "from": series[0]["d"] if series else None,
         "to": series[-1]["d"] if series else None,
+        # cc#941: the PAIRED log ships on the same payload, from the shared v10_endpoints helper —
+        # one derivation for the mobile cards and the desktop table (DISPLAY_PARITY 16202). The
+        # per-leg `trades` array stays for the pins, which are FUT-only by construction.
+        "paired": _paired(sym),
         "trades": trades, "pins": pins, "by_leg": by_leg,
         "outside_window": outside,
         "stats": {"closed": len(closed), "open": len(open_rows),
                   "wins": sum(1 for t in closed if t["win"]),
                   "losses": sum(1 for t in closed if not t["win"]),
                   "net_pnl": net},
-        "note": ("Daily candles built from %s 5-min bars; V10 FUT-leg trades pinned to their "
-                 "IST session. Web shows the same trades on a 30-day 5-min chart." % table),
+        "note": (("Last %d five-minute bars from %s; V10 FUT-leg trades pinned to their IST "
+                  "session." % (len(series), table)) if intraday else
+                 ("Daily candles built from %s 5-min bars; V10 FUT-leg trades pinned to their "
+                  "IST session." % table)),
     }
 
 

@@ -79,6 +79,141 @@ def v10_trades(limit: int = 200):
     return {"closed_trades": v10_st_ema.get_closed_trades(limit)}
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#941 — PAIRED TRADE LOG. ONE derivation, read by BOTH surfaces.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+def paired_trades(symbol=None, limit=200):
+    """cc#941 — v10_trades stores ONE trade as TWO rows and every surface showed them raw.
+
+    THE MESS THE FOUNDER SAW. A V10 trade is a futures position plus an option hedge, written as
+    two rows sharing (symbol, entry_ts) — e.g. ids 80 and 81. Shown as peers they read as two
+    separate trades, and worse, the two rows carry numbers on DIFFERENT SCALES: the FUT row is an
+    index level (58,004) and the OPT row is a premium (220). Side is also per-leg, so a LONG trade
+    shows a "SELL" row next to its "BUY" row and reads as a reversal. And the P&L that matters —
+    what the trade actually made — appeared nowhere, because it is the sum of the two.
+
+    WHAT PAIRING MEANS HERE. Group on (symbol, entry_ts). The FUT leg is the trade: its side is
+    the direction, its prices are the headline, its exit_reason is the outcome. The OPT leg is a
+    hedge and becomes a sub-line. NET P&L = fut.pnl + opt.pnl, and that is the only number the
+    card shows in bold, because it is the only one that is the trade's result.
+
+    VERIFIED SHAPE, not assumed: all 45 groups in the table hold exactly one FUT leg; 36 carry an
+    OPT hedge, 9 are unhedged (the early June trades, before hedging started). An unhedged group
+    renders as a card with no hedge line, never as a card with a blank one. A group that somehow
+    arrives with no FUT leg is SKIPPED and counted in `unpaired` rather than promoting a premium
+    to a headline price.
+
+    IST IN SQL, NEVER IN PYTHON. entry_ts/exit_ts are genuine TIMESTAMPTZ, so they convert with
+    AT TIME ZONE 'Asia/Kolkata' inside the query (cc#844 class — a Python-side shift on a tz-aware
+    value is the phantom-330-minute bug). Duration is computed in SQL from the same two values.
+
+    Display-layer only: nothing here writes, and v10_trades / the tick engine are untouched.
+    """
+    where, params = "", []
+    if symbol:
+        where = "WHERE symbol = %s"
+        params.append(symbol.upper())
+    sql = f"""
+        SELECT id, symbol, side, leg, opt_strike, opt_type,
+               entry_price, exit_price, exit_reason, points, pnl, lot_size,
+               entry_ts,
+               to_char(entry_ts AT TIME ZONE 'Asia/Kolkata', 'DD-Mon HH24:MI') AS entry_ist,
+               to_char(entry_ts AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')     AS entry_date,
+               to_char(exit_ts  AT TIME ZONE 'Asia/Kolkata', 'DD-Mon HH24:MI') AS exit_ist,
+               to_char(exit_ts  AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')     AS exit_date,
+               EXTRACT(EPOCH FROM (exit_ts - entry_ts))                        AS held_s
+        FROM v10_trades {where}
+        ORDER BY entry_ts DESC, leg ASC
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def f(x):
+        return None if x is None else float(x)
+
+    def dur(sec):
+        """'20h 35m'. None when the trade is still open — an unknown duration is not zero."""
+        if sec is None:
+            return None
+        m = int(sec // 60)
+        h, m = divmod(m, 60)
+        return f"{h}h {m}m" if h else f"{m}m"
+
+    groups, order = {}, []
+    for r in rows:
+        k = (r["symbol"], r["entry_ts"])
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(r)
+
+    out, unpaired = [], 0
+    for k in order:
+        legs = groups[k]
+        fut = next((x for x in legs if (x["leg"] or "FUT").upper() == "FUT"), None)
+        if fut is None:
+            unpaired += 1
+            continue
+        opt = next((x for x in legs if (x["leg"] or "").upper() == "OPT"), None)
+        fut_pnl, opt_pnl = f(fut["pnl"]), (f(opt["pnl"]) if opt else None)
+        net = None
+        if fut_pnl is not None:
+            net = fut_pnl + (opt_pnl or 0.0)
+        side = (fut["side"] or "").upper()
+        t = {
+            "id": fut["id"], "symbol": fut["symbol"],
+            # DIRECTION COMES FROM THE FUT LEG ONLY. The hedge's own side is the opposite by
+            # construction, so reading direction off any other row inverts the trade.
+            "direction": "LONG" if side == "BUY" else "SHORT",
+            "entry_price": f(fut["entry_price"]), "exit_price": f(fut["exit_price"]),
+            "points": f(fut["points"]), "lot_size": fut["lot_size"],
+            "reason": (fut["exit_reason"] or "OPEN").upper(),
+            "entry_ist": fut["entry_ist"], "exit_ist": fut["exit_ist"],
+            "entry_date": fut["entry_date"], "exit_date": fut["exit_date"],
+            "held": dur(f(fut["held_s"])),
+            "fut_pnl": fut_pnl, "opt_pnl": opt_pnl,
+            "net_pnl": net, "net_r": None if net is None else int(round(net)),
+            "win": None if net is None else (net >= 0),
+            "hedge": None if not opt else {
+                "id": opt["id"], "side": (opt["side"] or "").upper(),
+                "strike": f(opt["opt_strike"]), "type": opt["opt_type"],
+                "entry_price": f(opt["entry_price"]), "exit_price": f(opt["exit_price"]),
+                "points": f(opt["points"]), "pnl": opt_pnl,
+                "label": ("%s %s" % (int(f(opt["opt_strike"])) if opt["opt_strike"] is not None else "?",
+                                     opt["opt_type"] or "")).strip(),
+            },
+        }
+        out.append(t)
+
+    out = out[:max(1, min(int(limit or 200), 1000))]
+    closed = [t for t in out if t["net_pnl"] is not None]
+    wins = sum(1 for t in closed if t["win"])
+    total = round(sum(t["net_pnl"] for t in closed), 2) if closed else None
+    return {
+        "trades": out, "count": len(out), "unpaired": unpaired,
+        "summary": {
+            "paired_trades": len(out), "closed": len(closed),
+            "wins": wins, "losses": len(closed) - wins,
+            # Win rate on NET P&L, which is the point of pairing: a trade whose futures leg lost
+            # less than its hedge made is a win, and the per-leg view could never say that.
+            "win_rate": (round(100.0 * wins / len(closed), 1) if closed else None),
+            "net_pnl": total, "net_r": None if total is None else int(round(total)),
+            "hedged": sum(1 for t in out if t["hedge"]),
+            "unhedged": sum(1 for t in out if not t["hedge"]),
+        },
+    }
+
+
+@router.get("/trades/paired")
+def v10_trades_paired(symbol: str = "", limit: int = 200):
+    """cc#941: the paired trade log — one row per TRADE, not per leg. Both the mobile card list
+    and the desktop table read THIS, so the two can never disagree about a net P&L (16202)."""
+    return paired_trades(symbol.strip().upper() or None, limit)
+
+
 @router.get("/candles")
 def v10_candles(symbol: str = "NIFTY50", days: int = 30):
     """cc#537: read-only 5-min OHLC candles for the V10 chart overlay. NIFTY50 -> nifty_5m_test_data,
