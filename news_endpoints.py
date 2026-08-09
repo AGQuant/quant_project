@@ -48,6 +48,19 @@ def _conn():
 # /api/news/company, max_native_cards) is unaffected except that a flagged story stops appearing.
 # This is deliberately a WHERE and not a column change: CREATE OR REPLACE VIEW would refuse to run
 # at all if the column list drifted, which is a free guarantee that V5 holds.
+#
+# cc#937 — THE JOIN IS NOW A LEFT JOIN, and this is the whole point of the card. An INNER JOIN to
+# raw_news says "a polished article must have come from somebody else's article". Scorr's OWN
+# research has no raw row (raw_news_id IS NULL), so every original piece we write was invisible on
+# the Intel tab and in every endpoint reading this view — a research platform that could not
+# publish its own research. Two 09-Aug AI Editorials (polished_news 3729, 3730) proved it.
+# The three display fields already COALESCE, so a NULL raw row costs nothing: headline falls to
+# headline_clean, source_name to p.source, display_time to published_time. Only r.source_type,
+# r.symbol and r.url go NULL, and no consumer of those is a required field (checked one by one —
+# see the cc#937 result). The suppression guard is now explicitly gated on raw_news_id IS NOT NULL:
+# `ns.raw_news_id = NULL` is never true so the old clause already let NULLs through, but leaning on
+# NULL comparison semantics for a rule that decides whether a story is visible is not something the
+# next reader should have to work out. Suppression for rows that DO have a raw id is unchanged.
 _V_POLISHED_ARTICLES_DDL = """
 CREATE OR REPLACE VIEW v_polished_articles AS
 SELECT p.id AS polished_id, p.raw_news_id AS raw_news_id, r.id AS raw_id,
@@ -57,8 +70,8 @@ SELECT p.id AS polished_id, p.raw_news_id AS raw_news_id, r.id AS raw_id,
        r.source_type, r.symbol, r.url,
        COALESCE(p.published_time, p.polished_at, r.published_at) AS display_time,
        r.published_at AS raw_published_at, p.polished_at
-FROM polished_news p JOIN raw_news r ON r.id = p.raw_news_id
-WHERE""" + suppressed_exclude("p.raw_news_id")
+FROM polished_news p LEFT JOIN raw_news r ON r.id = p.raw_news_id
+WHERE p.raw_news_id IS NULL OR""" + suppressed_exclude("p.raw_news_id")
 
 
 def _ensure_polished_view():
