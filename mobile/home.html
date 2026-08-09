@@ -226,10 +226,26 @@
 .pfcard{padding:4px 2px 10px}
 /* cc#929: raw news rows — headline + source + time, two lines at most, dividers not boxes. The
    tag/category line is gone entirely, which is what buys the space back. */
-.rnr{padding:7px 0;border-bottom:1px solid var(--line)}
+/* ── cc#966: LIVE NEWS COMPACT ────────────────────────────────────────────────────────────────
+   Was: headline, then the source + age on their own row below. That second row was wearing the
+   MODELS card chrome by accident — mobile_app.css owns a GENERIC `.m` class (background --panel,
+   1px border, radius 14, padding 13/13/13/17, min-height 60px) and `.rnr .m` only out-specified
+   it on font and colour, so every meta line rendered as a 60px bordered panel. MEASURED at 360px:
+   each news row was 122px tall. That is the founder's "large bordered source box". The meta row is
+   gone entirely now, and with it the collision.
+   The age is a FLEX SIBLING aligned to flex-end, not text appended inside the clamp. Appending it
+   inside would put it at the mercy of the 2-line ellipsis: the moment a headline was long enough
+   to clamp, the timestamp would be the first thing cut. flex-end puts it on the last line and
+   guarantees it survives. */
+.rnr{display:flex;align-items:flex-end;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
 .rnr:last-child{border-bottom:0}
-.rnr .h{font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB)}
-.rnr .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:3px}
+.rnr .h{flex:1;min-width:0;font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rnr .a{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+  color:var(--dim);white-space:nowrap;line-height:1.4}
+/* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
+   passes straight through instead of being captured by a 300px window. */
+.newslist{max-height:none;overflow:visible}
 /* ── cc#919: the V10 index block was one wrapping text line ──────────────────────────────────
    It rendered as "V10: <b>Nifty Long</b>[icon] · <b>Bank Nifty No Trade</b>[icon]" in a plain
    11.5px mono block with no flex and no nowrap. Measured: ~312px of content in a 324px card at
@@ -1477,10 +1493,18 @@ function loadRawNews(){
         return new Date(b.published_at || 0) - new Date(a.published_at || 0);
       });
       if (cnt) cnt.innerHTML = arr.length + ' raw headlines <span class="h-chev">›</span>';
-      box.innerHTML = arr.slice(0, 60).map(function(n){
-        var meta = [esc(n.source_name || ''), rnAgo(n.published_at)].filter(Boolean).join(' · ');
-        return '<div class="rnr"><div class="h">' + esc(n.headline || '') + '</div>'
-          + (meta ? '<div class="m">' + meta + '</div>' : '') + '</div>';
+      /* cc#966 item 2 — never ship a blank card. The payload is clean today (checked: zero rows in
+         raw_news with a NULL or blank headline in the 48h window, and the newest row renders its
+         headline fine), so this is a guard, not the fix for a known bad row. A headline-less item
+         has nothing to show and no reason to occupy a line. */
+      var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
+      /* cc#966 item 3 — a FIXED SIX in page flow. The old list rendered 60 items into a 300px
+         overflow-y:auto window (measured 1533px of content in 300px of box), which is exactly the
+         scroll trap. The full list already lives one tap away on Intel, and the count above still
+         states the true total, so nothing is hidden — it is just not scrolled here. */
+      box.innerHTML = items.slice(0, 6).map(function(n){
+        return '<div class="rnr"><div class="h">' + esc(n.headline) + '</div>'
+          + '<div class="a">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
       }).join('') || '<div class="sum" style="padding:8px 0">No headlines in the last 48 hours.</div>';
     })
     .catch(function(e){
@@ -1860,7 +1884,7 @@ Promise.all([
   h += '<div class="sect">LIVE NEWS</div>'
     + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Live News</div>'
     + '<div class="rgt" id="rnCount">loading… <span class="h-chev">\u203a</span></div></div>'
-    + '<div class="newsbox" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'
+    + '<div class="newslist" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'
     + '</div></a>';
 
   /* 5 · TOOLS — 9 tiles, zero overlap with the six-slot nav (founder 08-Aug) */
