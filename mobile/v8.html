@@ -143,9 +143,18 @@
 .pc4 b{color:var(--mut);font-weight:700}
 .norail{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
   margin:8px 0 4px;opacity:.7}
-/* ── cc#922 navigation: grouping + subfilter, sticky over the list ─────────────────────────── */
+/* ── cc#922 navigation, cc#968 reduced to ONE chip bar ────────────────────────────────────── */
 .navwrap{position:sticky;top:0;z-index:20;background:var(--bg,#0A0F1E);
   padding:2px 0 6px;margin-bottom:2px}
+/* cc#968: one row that SCROLLS rather than wraps. Seven chips will not fit 360px, and a wrapping
+   bar changes height as chips come and go — which moves the list under the founder's thumb every
+   time he taps one. A fixed-height scroller never does. The scrollbar is hidden but the overflow
+   is real, so a flick still works. */
+.chipbar{display:flex;align-items:center;gap:5px;margin:0 12px 5px;overflow-x:auto;
+  flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  scroll-snap-type:x proximity}
+.chipbar::-webkit-scrollbar{display:none}
+.chipbar .sub{flex:0 0 auto;scroll-snap-align:start}
 .subr{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:0 12px 5px}
 .subk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
   letter-spacing:.12em;color:var(--dim);text-transform:uppercase;min-width:38px}
@@ -358,10 +367,12 @@ function setInstrument(x){ STATE.instrument = x; render(); }
 
    Client-side throughout: /api/mobile/v8book already ships every field these cuts need, so no
    endpoint changed. Sticky while the list scrolls, per the observation. */
-var GROUPS = [['period','PERIOD'],['basket','TYPE'],['side','SIDE']];
-var DIMS   = { period: 'Period', basket: 'Type', side: 'Side' };
-
-function setGroup(g){ STATE.group = g; STATE.sub = {}; render(); }
+/* cc#968: GROUPING IS NOT A USER CHOICE ANY MORE. The PERIOD/TYPE/SIDE meta-buttons put two
+   interaction models on one screen — buttons that changed how the list was SPLIT next to chips
+   that changed which rows SURVIVED — and nothing on screen said which did which. One model now:
+   CHIPS FILTER, PERIOD HEADERS GROUP. GROUPS[] and setGroup() are deleted, not hidden. */
+var DIMS   = { basket: 'Type', side: 'Side' };
+var GROUP_BY = 'period';                      // fixed, the cc#924 grouping
 function setSub(dim, val){
   STATE.sub = STATE.sub || {};
   if (STATE.sub[dim] === val) delete STATE.sub[dim]; else STATE.sub[dim] = val;
@@ -405,43 +416,54 @@ function applySub(list, ignore){
     return true;
   });
 }
-function subBar(all){
-  var dims = Object.keys(DIMS).filter(function(d){ return d !== STATE.group; });
-  var html = '';
-  dims.forEach(function(d){
-    var pool = applySub(all, d);                 // counts exclude this dimension's own filter
+/* cc#968 — ONE CHIP BAR. [All n] then the two side chips then the four type chips, in one
+   horizontally scrollable row directly under the headline.
+
+   SELECTION: one SIDE chip and one TYPE chip may be active together (Short + Sell Momentum is a
+   real question), tapping an active chip clears that dimension, and All clears everything. That
+   is applySub()'s existing behaviour — it already ANDs across dimensions and stores one value per
+   dimension — so the rule did not need new logic, only a smaller bar to drive it.
+
+   COUNTS stay FACETED, which is the one thing worth keeping from the old bar: each chip counts
+   with every OTHER dimension's filter applied but not its own, so switching Long to Short shows
+   what you will actually get and a chip never advertises a count you cannot reach. A chip that
+   would yield nothing is not rendered — no dead ends. */
+function chipBar(all){
+  var sub = STATE.sub || {};
+  var anyOn = Object.keys(sub).length > 0;
+  var h = '<button class="sub' + (anyOn ? '' : ' on') + '" onclick="clearSub()">All <i>'
+        + all.length + '</i></button>';
+  ['side', 'basket'].forEach(function(d){
+    var pool = applySub(all, d);               // faceted: this dimension's own filter excluded
     var counts = {}, order = [];
     pool.forEach(function(p){
       var k = DIMKEY[d](p);
       if (counts[k] == null){ counts[k] = 0; order.push(k); }
       counts[k]++;
     });
-    if (d === 'period') order = PERIOD_ORDER.filter(function(k){ return counts[k]; });
-    else order.sort();
-    if (order.length < 2) return;                // one option is not a choice — do not show it
-    html += '<div class="subr"><span class="subk">' + DIMS[d] + '</span>'
-      + order.map(function(k){
-          var on = (STATE.sub || {})[d] === k;
-          return '<button class="sub' + (on ? ' on' : '') + '"'
-            + ' onclick="setSub(\'' + d + '\',\'' + esc(k).replace(/'/g, "\\'") + '\')">'
-            + esc(k) + ' <i>' + counts[k] + '</i></button>';
-        }).join('') + '</div>';
+    order.sort();
+    order.forEach(function(k){
+      if (!counts[k]) return;                  // a dead end is not offered
+      var on = sub[d] === k;
+      h += '<button class="sub' + (on ? ' on' : '') + '"'
+        + ' onclick="setSub(\'' + d + '\',\'' + esc(k).replace(/'/g, "\\'") + '\')">'
+        + esc(k) + ' <i>' + counts[k] + '</i></button>';
+    });
   });
-  if (Object.keys(STATE.sub || {}).length)
-    html += '<div class="subr"><button class="sub clr" onclick="clearSub()">CLEAR FILTERS</button></div>';
-  return html;
+  return '<div class="chipbar">' + h + '</div>';
 }
 
 function groupPositions(list){
-  var keyf = DIMKEY[STATE.group] || periodOf;
+  var keyf = DIMKEY[GROUP_BY] || periodOf;
   var map = {}, order = [];
   list.forEach(function(p){
     var k = keyf(p);
     if (!map[k]){ map[k] = []; order.push(k); }
     map[k].push(p);
   });
-  if (STATE.group === 'period') order = PERIOD_ORDER.filter(function(k){ return map[k]; });
-  else order.sort();
+  /* period is the only grouping now, so the canonical period order always applies. A group the
+     filter emptied simply never appears in `map`, so it hides WITH its header by construction. */
+  order = PERIOD_ORDER.filter(function(k){ return map[k]; });
   return order.map(function(k){ return { key: k, rows: map[k] }; });
 }
 
@@ -570,6 +592,24 @@ function bookHeader(b){
   var open = STATE.page === 'open';
   var v = open ? b.unrealised : b.realised;
   var pctv2 = open ? b.unrealised_pct : b.realised_pct;
+  /* cc#968 item 2: with a chip active the headline states the FILTERED subset, because a total
+     that ignores the filter under it is the number the founder would have to mentally undo.
+     UNFILTERED the headline stays the payload's own figure — which on the realised page is the
+     cc#970 canon, NET of brokerage. A filtered realised subtotal is deliberately GROSS of
+     brokerage and labelled `sum`, not `realised`: brokerage is a whole-book cost and slicing it
+     per chip would invent a per-slice fee the book never charged. */
+  var _srcAll = open ? (b.positions || []) : (b.closed || []);
+  var _filtered = Object.keys(STATE.sub || {}).length ? applySub(_srcAll) : null;
+  var _fn = _filtered ? _filtered.length : null;
+  if (_filtered){
+    var _sum = 0, _known = false;
+    _filtered.forEach(function(p){
+      var x = open ? p.unrealised : p.realised;
+      if (x != null){ _sum += x; _known = true; }
+    });
+    v = _known ? _sum : null;
+    pctv2 = null;                       // a % of deployed for a slice is not on the payload
+  }
   var seg = '<div class="bkpg"><div class="seg">'
     + '<button class="' + (open ? 'on' : '') + '" onclick="setBookPage(\'open\')">Unrealised</button>'
     + '<button class="' + (open ? '' : 'on') + '" onclick="setBookPage(\'realised\')">Realised</button>'
@@ -580,13 +620,21 @@ function bookHeader(b){
      yet, and a rate that counts unrealised P&L as a "win" would be a claim about a trade that is
      still running. A dash, never 0%, when nothing has closed. */
   var tot = '<div class="bktot"><b class="' + cls(v) + '">' + inr(v) + '</b>'
-    + '<span>' + (open ? (b.open || 0) + ' open' : (b.closed_count || 0) + ' closed')
+    + '<span>' + (_fn != null
+        ? (_fn + (open ? ' open' : ' closed') + ' · filtered')
+        : (open ? (b.open || 0) + ' open' : (b.closed_count || 0) + ' closed'))
     + (pctv2 == null ? '' : ' · ' + pctv(pctv2))
     /* cc#950: the realised figure is NET of brokerage and the win rate counts DECIDED trades
        only (TARGET/SL), so the strip states both. A net number shown as if it were gross, or a
        rate whose denominator is not the trade count beside it, is exactly the quiet mismatch the
        founder would have to reverse-engineer. Both now equal the Home tile. */
-    + (open ? '' : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%')
+    /* cc#968: the win rate, the brokerage note and the Long/Short split are WHOLE-BOOK facts.
+       With a chip active the number to their left is a filtered subtotal, so printing them
+       unchanged beside it would read as the filtered subset's record — which it is not. They are
+       suppressed while filtered rather than recomputed: a per-slice win rate is a different claim
+       and the canon (cc#970) does not publish one. */
+    + ((open || _fn != null) ? ''
+        : ' · win rate ' + (b.win_rate == null ? '—' : b.win_rate + '%')
               + (b.decided ? ' of ' + b.decided + ' decided' : '')
               + (b.brokerage ? ' · net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN')
                                  + ' brokerage' : ''))
@@ -594,7 +642,7 @@ function bookHeader(b){
        added beneath so /m/v8 and the Home realised face tell one story about one book. Same
        payload shape as /api/mobile/home2 rec_long/rec_short, so neither page divides for itself.
        A side with nothing decided prints a dash, never 0%. */
-    + (open ? '' : sideSplit(b))
+    + ((open || _fn != null) ? '' : sideSplit(b))
     + '</span></div>';
   return seg + tot;
 }
@@ -615,10 +663,18 @@ function sideSplit(b){
 }
 
 function realisedBlock(b){
-  var rows = b.closed || [];
-  if (!rows.length)
+  var all = b.closed || [];
+  if (!all.length)
     return '<div class="empty" style="margin:0 12px"><b>Nothing closed yet</b>'
       + 'No trades have been booked in this era.</div>';
+  /* cc#968 item 4: ONE implementation, both pages. Closed trades carry the same `side` and
+     `basket_label` fields the open rows do, so chipBar()/applySub() work here unchanged — the
+     realised page did not need its own filter model, only the same one. */
+  var bar = '<div class="navwrap">' + chipBar(all) + '</div>';
+  var rows = applySub(all);
+  if (!rows.length)
+    return bar + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
+      + 'Clear a filter to see trades again.</div>';
   /* Default sort: most recent exit first (item 4 / item 3). Sorted HERE on a real date key rather
      than trusting arrival order — the endpoint orders by exit_ts DESC today, and relying on that
      silently is how a list ends up in the wrong order the day the query changes. */
@@ -626,7 +682,7 @@ function realisedBlock(b){
     var x = a.exit_ts || '', y = c.exit_ts || '';
     return x < y ? 1 : (x > y ? -1 : (c.id - a.id));
   });
-  return g.map(function(p){ return posCard(p, 'realised'); }).join('');
+  return bar + g.map(function(p){ return posCard(p, 'realised'); }).join('');
 }
 
 function bookBlock(){
@@ -644,12 +700,7 @@ function bookBlock(){
 
   var all = b.positions;
   var rows = applySub(all);
-  var h = '<div class="navwrap">'
-    + '<div class="grpb">' + GROUPS.map(function(g){
-        return '<button class="' + (STATE.group === g[0] ? 'on' : '') + '"'
-          + ' onclick="setGroup(\'' + g[0] + '\')">' + g[1] + '</button>';
-      }).join('') + '</div>'
-    + subBar(all) + '</div>';
+  var h = '<div class="navwrap">' + chipBar(all) + '</div>';
 
   if (!rows.length)
     return '<div id="bookpg" class="bookpg">' + hdr + h
