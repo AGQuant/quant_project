@@ -246,6 +246,19 @@
 /* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
    passes straight through instead of being captured by a 300px window. */
 .newslist{max-height:none;overflow:visible}
+/* ── cc#971 paging ──────────────────────────────────────────────────────────────────────────
+   min-height reserves SIX rows. The last page usually holds fewer, and without this the section
+   would shrink the moment you reached it — pulling the Tools grid up and moving the Next button
+   out from under the thumb that just tapped it. 6 x 59px measured row + 5 dividers ~ 354px. */
+.rnlist{min-height:354px}
+.rnpg{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-top:8px;border-top:1px solid var(--line)}
+.rnb{min-height:44px;min-width:88px;padding:0 12px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--mut);background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.rnb:disabled{opacity:.35;cursor:default}
+.rnp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  color:var(--dim);letter-spacing:.06em}
 /* ── cc#919: the V10 index block was one wrapping text line ──────────────────────────────────
    It rendered as "V10: <b>Nifty Long</b>[icon] · <b>Bank Nifty No Trade</b>[icon]" in a plain
    11.5px mono block with no flex and no nowrap. Measured: ~312px of content in a 324px card at
@@ -1479,6 +1492,49 @@ function rnAgo(ts){
   var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
   return Math.floor(h / 24) + 'd ago';
 }
+/* ══ cc#971 — PREV/NEXT PAGING ═══════════════════════════════════════════════════════════════
+   Six at a time, flipped in place. The inner scroller stays dead — that was cc#966's whole point,
+   and paging is the way to reach more headlines without bringing it back.
+
+   HEIGHT IS RESERVED FOR SIX ROWS. Without it the last page (which usually holds fewer than six)
+   would collapse the section and yank the Tools grid up the screen the moment you reached it —
+   the control you just tapped would move out from under your thumb. min-height on the list keeps
+   every page the same size. */
+var RN = { items: [], page: 0, per: 6 };
+
+function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
+
+function rnGo(delta){
+  var last = rnPages() - 1;
+  var next = Math.min(last, Math.max(0, RN.page + delta));
+  if (next === RN.page) return;
+  RN.page = next;
+  rnPaint();
+}
+
+function rnPaint(){
+  var box = document.getElementById('rnBox');
+  if (!box) return;
+  if (!RN.items.length){
+    box.innerHTML = '<div class="sum" style="padding:8px 0">No headlines in the last 48 hours.</div>';
+    return;
+  }
+  var pages = rnPages(), p = RN.page;
+  var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
+  var rows = slice.map(function(n){
+    return '<div class="rnr"><div class="h">' + esc(n.headline) + '</div>'
+      + '<div class="a">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
+  }).join('');
+  /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
+     rendered disabled rather than hidden, so the row never changes width mid-session. */
+  var ctl = '<div class="rnpg">'
+    + '<button class="rnb" onclick="rnGo(-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
+    + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
+    + '<button class="rnb" onclick="rnGo(1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
+    + '</div>';
+  box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
+}
+
 function loadRawNews(){
   var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
   if (!box) return;
@@ -1498,14 +1554,14 @@ function loadRawNews(){
          headline fine), so this is a guard, not the fix for a known bad row. A headline-less item
          has nothing to show and no reason to occupy a line. */
       var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
-      /* cc#966 item 3 — a FIXED SIX in page flow. The old list rendered 60 items into a 300px
-         overflow-y:auto window (measured 1533px of content in 300px of box), which is exactly the
-         scroll trap. The full list already lives one tap away on Intel, and the count above still
-         states the true total, so nothing is hidden — it is just not scrolled here. */
-      box.innerHTML = items.slice(0, 6).map(function(n){
-        return '<div class="rnr"><div class="h">' + esc(n.headline) + '</div>'
-          + '<div class="a">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
-      }).join('') || '<div class="sum" style="padding:8px 0">No headlines in the last 48 hours.</div>';
+      /* cc#971: the client ALREADY holds every headline — one fetch with per_cat=300 returns the
+         whole 48h window (84 today, which is the count printed in the header). So paging needed
+         no payload change and no per-page request: the card's item 2 asked me to raise a LIMIT in
+         mobile_home2, but this section has not read that payload since cc#929 — it reads
+         /api/news/live directly, and the depth was already here. */
+      RN.items = items;
+      RN.page = 0;
+      rnPaint();
     })
     .catch(function(e){
       if (cnt) cnt.innerHTML = 'unavailable <span class="h-chev">›</span>';
