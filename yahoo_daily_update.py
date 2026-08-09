@@ -58,8 +58,20 @@ INDICES = {
     "MIDCAPNIFTY": "^NSEMDCP50",            # Nifty Midcap 50 (proxy for Midcap Nifty)
 }
 
+# cc#938 — RESOLVED-TICKER OVERRIDES. Loaded ONCE per run (see run_async) from yahoo_symbol_map,
+# never per symbol: this is inside the async fetch path and a DB round-trip per name would turn a
+# 1,800-symbol pass into 1,800 extra queries. Empty dict = the old behaviour exactly, so a missing
+# or unreachable table degrades to append-".NS" rather than breaking the nightly run.
+_TICKER_OVERRIDES = {}
+
+
 def _to_yahoo_ticker(symbol: str) -> str:
-    return INDICES.get(symbol, symbol + ".NS")
+    # Order matters: INDICES are hand-pinned and must win; then a resolved override (a ticker that
+    # MOVED — JBCHEPHARM's class, cc#938); then the default append-".NS" rule.
+    if symbol in INDICES:
+        return INDICES[symbol]
+    ov = _TICKER_OVERRIDES.get((symbol or "").upper())
+    return ov if ov else symbol + ".NS"
 
 
 async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbol: str, sleep_s: float):
@@ -206,6 +218,23 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
             cur.execute("SELECT DISTINCT symbol FROM raw_prices ORDER BY symbol")
             symbols = [r[0] for r in cur.fetchall()]
 
+    # cc#938: load the resolved-ticker overrides once, and drop the symbols Yahoo cannot serve at
+    # all. The skip is not cosmetic — the drop log had printed the same unfixable 404s every night
+    # for weeks, which is exactly how a NEW break hides in plain sight. An excluded symbol that
+    # starts working again is un-excluded by the resolver, so this cannot strand anything.
+    global _TICKER_OVERRIDES
+    excluded = set()
+    try:
+        import yahoo_symbol_resolver as ysr
+        _TICKER_OVERRIDES = ysr.load_map()
+        excluded = ysr.load_excluded()
+    except Exception as e:
+        log.warning(f"yahoo_daily: ticker overrides unavailable, using the .NS rule only: {e}")
+    skipped_excluded = [s for s in symbols if (s or "").upper() in excluded]
+    if skipped_excluded:
+        symbols = [s for s in symbols if (s or "").upper() not in excluded]
+        log.info(f"yahoo_daily: skipping {len(skipped_excluded)} price-feed-excluded symbols")
+
     if not symbols:
         return {"updated": 0, "failed": 0, "rows": 0}
 
@@ -243,6 +272,10 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
         "failed_symbols":    failed[:20],
         "drop_count":        len(failed),
         "healed_from_prev":  heal_count,
+        # cc#938: state what was deliberately not attempted. A pass that silently shrinks its own
+        # universe reads as "everything succeeded" when it did not.
+        "ticker_overrides":  len(_TICKER_OVERRIDES),
+        "skipped_excluded":  len(skipped_excluded),
     }
     log.info(f"yahoo_daily done: {summary}")
     return summary

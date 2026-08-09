@@ -1698,9 +1698,10 @@ def _record_failure(cur, symbol, error=None):
                    RETURNING consecutive_failures""", (symbol, (error or "")[:300] if error else None))
     n = cur.fetchone()[0]
     if n >= 2:
-        _oplog(cur, "OPS_METRICS_PERSISTENT_FAILURE",
+        _oplog(cur, "RESULT_DOC_PERSISTENT_FAILURE",
                {"symbol": symbol, "consecutive_failures": n, "last_error": (error or "")[:300] if error else None,
-                "message": f"{symbol} has failed ops-metrics extraction {n} runs in a row"})
+                "message": f"{symbol} has failed investor-doc staging {n} runs in a row"},
+               category="result_pipeline")
 
 
 def _clear_failure(cur, symbol):
@@ -2249,9 +2250,9 @@ def _t1_refresh_company(cur, symbol):
     landed["docs"] = (st == "ok")
     if not fetch_ok:
         try:
-            _oplog(cur, "OPS_METRICS_T1_COMPANY_FAIL",
+            _oplog(cur, "RESULT_DOC_STAGE_FAIL",
                    {"symbol": symbol, "text_fetch_status": st, "error": r.get("error"),
-                    "fundamentals_rescraped": fh_ok}, category="ops_metrics_pull")
+                    "fundamentals_rescraped": fh_ok}, category="result_pipeline")
         except Exception:
             pass
     return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok",
@@ -2545,18 +2546,20 @@ def run_t1_refresh(conn=None):
             summary = {"due": len(pending), "docs_staged": staged, "ok_or_complete": ok, "failed": fail,
                        "fundamentals_only": fund_only, "status_histogram": hist,
                        "skipped_universe_top500": skipped_universe,   # cc#700
-                       "note": "T+1 stages concall doc-text into doc_texts for CC extraction; "
-                               "sector_ops_metrics is appended by CC (app anthropic retired 19-Jul)"}
-            _oplog(cur, "OPS_METRICS_T1_RUN", summary)
+                       "note": "cc#938: ops-metrics is RETIRED (18213) but this job is NOT — it re-scrapes "
+                               "fundamentals for Result Analysis and stages investor-doc text into "
+                               "doc_texts for Result Analysis V2. Renamed off the ops_metrics_pull "
+                               "category so a live pipeline stops reporting under a dead system name."}
+            _oplog(cur, "RESULT_T1_REFRESH_RUN", summary, category="result_pipeline")
             # cc#595 (diagnose 3): warn when reported companies were processed but NONE had doc-text
             # staged — a persistent/systemic fetch failure (screener blocked, docs unpublished), not a
             # per-company miss. Was silent before -> the freeze went unnoticed.
             if pending and staged == 0:
-                _oplog(cur, "OPS_METRICS_PERSISTENT_FAILURE",
+                _oplog(cur, "RESULT_DOC_PERSISTENT_FAILURE",
                        {"due": len(pending), "all_failed": True, "status_histogram": hist,
                         "sample": failed_syms[:15],
                         "note": "T+1 processed reported companies but staged 0 doc_texts for CC"},
-                       category="ops_metrics_pull")
+                       category="result_pipeline")
             conn.commit()
         summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         # cc#602: regenerate result_analysis for companies whose Q1FY27 fundamentals just landed via
@@ -2617,7 +2620,7 @@ def run_saturday_retry(conn=None):
         with conn.cursor() as cur:
             summary = {"scope": "calendar-dated failures only", "scoped_count": len(scoped),
                        "ok": ok, "failed": fail}
-            _oplog(cur, "OPS_METRICS_SATURDAY_RETRY", summary)
+            _oplog(cur, "RESULT_SATURDAY_RETRY", summary, category="result_pipeline")
             conn.commit()
         summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         try:  # cc#693: control-plane spine + universal failure rule
@@ -2681,7 +2684,7 @@ def run_season_sweep(conn=None, dry_run=False):
 
         with conn.cursor() as cur:
             summary = {"stale_count": len(stale), "universe": len(universe), "ok": ok, "failed": fail}
-            _oplog(cur, "OPS_METRICS_SEASON_SWEEP_DONE", summary)
+            _oplog(cur, "RESULT_SEASON_SWEEP_DONE", summary, category="result_pipeline")
             conn.commit()
         summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         return summary

@@ -125,6 +125,7 @@ from hr_report import router as hr_report_router   # cc#398 Portfolio Health Rep
 from hr_report_pdf import router as hr_report_pdf_router   # cc#652 Portfolio Health Report white-label PDF
 import yahoo_ondemand
 import yahoo_index_backfill
+from yahoo_symbol_resolver import router as yahoo_resolver_router   # cc#938: Yahoo ticker resolver + price-feed exclusion register
 import v8_paper
 import global_indices
 import v8_signal_writer
@@ -533,6 +534,7 @@ app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
 app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
+app.include_router(yahoo_resolver_router)   # cc#938: /api/admin/yahoo/resolve · /api/feeds/price-excluded · /api/feeds/symbol-map
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)

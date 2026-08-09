@@ -541,15 +541,30 @@ def _section_scheduler(cur) -> Dict:
 
     # cc#524 QUARTERLY UPDATE FRAMEWORK coverage -- T+1 (daily), Saturday scoped retry
     # (weekly), season-close sweep (quarterly: Sep/Dec/Mar/Jun 1st).
-    age, ts = _ops_age_min(cur, 'OPS_METRICS_T1_RUN', 'ops_metrics_pull')
-    checks.append(_sched_row('Ops-metrics T+1 refresh (~08:00)', age, ts, 'daily ~08:00 IST'))
+    #
+    # cc#938 — THESE THREE ARE NOT OPS-METRICS AND MUST NOT BE DELETED. The card asked to remove
+    # them because /diagnosis was flagging "a retired system" red. It was not: ops-metrics is
+    # retired (18213), but these three jobs re-scrape FUNDAMENTALS for Result Analysis and stage
+    # investor-doc text into doc_texts for Result Analysis V2 — both live. The rows were mislabelled,
+    # not obsolete, so they are RENAMED to what they actually watch. Deleting them would have
+    # removed the only monitoring on a live pipeline and made the freeze that cc#595 caught silent
+    # again. The titles moved with them (see ops_metrics_pipeline), so each check reads the new
+    # title first and falls back to the old one so the age does not go red on the day of the rename.
+    def _ops_age_either(new_title, old_title):
+        a, t = _ops_age_min(cur, new_title, 'result_pipeline')
+        if a is None:
+            a, t = _ops_age_min(cur, old_title, 'ops_metrics_pull')
+        return a, t
 
-    age, ts = _ops_age_min(cur, 'OPS_METRICS_SATURDAY_RETRY', 'ops_metrics_pull')
-    checks.append(_sched_row('Ops-metrics Saturday retry (10:00)', age, ts,
+    age, ts = _ops_age_either('RESULT_T1_REFRESH_RUN', 'OPS_METRICS_T1_RUN')
+    checks.append(_sched_row('Result T+1 fundamentals + doc staging', age, ts, 'daily ~05:40 IST'))
+
+    age, ts = _ops_age_either('RESULT_SATURDAY_RETRY', 'OPS_METRICS_SATURDAY_RETRY')
+    checks.append(_sched_row('Result Saturday retry (10:00)', age, ts,
                              'Saturdays 10:00 IST', green_h=170.0, yellow_h=200.0))
 
-    age, ts = _ops_age_min(cur, 'OPS_METRICS_SEASON_SWEEP_DONE', 'ops_metrics_pull')
-    checks.append(_sched_row('Ops-metrics season sweep', age, ts,
+    age, ts = _ops_age_either('RESULT_SEASON_SWEEP_DONE', 'OPS_METRICS_SEASON_SWEEP_DONE')
+    checks.append(_sched_row('Result season sweep', age, ts,
                              'Sep/Dec/Mar/Jun 1st 10:00 IST', green_h=2400.0, yellow_h=3120.0))
 
     return {'name': 'Scheduler', 'checks': checks, 'status': _status(checks)}

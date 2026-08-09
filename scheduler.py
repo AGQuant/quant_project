@@ -3669,8 +3669,13 @@ async def _scheduler_loop():
         #     _spawn(_bg_weekly_ops_metrics_queue)
         # if h == 22 and m == 40:
         #     _spawn(_bg_ops_metrics_coverage)     # cc#773: nightly dual coverage counter + <80% alert
-        if h == 6 and m == 25:
-            _spawn(_bg_ops_polish_detector, True)  # cc#736: DAILY 06:25 sweep -> refresh POLISH_QUEUE card (day-locked)
+        # cc#938 / 18213 RETIRED: the POLISH_QUEUE detector re-queued symbols whose doc_texts had
+        # outrun sector_ops_metrics. 18213 cancels the polish queue outright and says the detector
+        # must not re-queue, so the daily 06:25 sweep is disarmed. This is the ONE job of the five
+        # named in cc#938 that is genuinely dead — the other four feed Result Analysis, see the
+        # cc#938 note below. Nothing else reads its output: the POLISH_QUEUE cc_task is cancelled.
+        # if h == 6 and m == 25:
+        #     _spawn(_bg_ops_polish_detector, True)  # cc#736: DAILY 06:25 sweep (day-locked)
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         # cc#660: 09:25 feed-silent-at-open now handled inside feed_guardian.guardian_tick()
@@ -3809,9 +3814,25 @@ async def _scheduler_loop():
         # LLM spend and the sector_ops_metrics write. Disarmed here AND hard-stopped inside
         # ops_metrics_pipeline, so an armed app_config flag cannot resurrect it either.
         # _spawn(_bg_ops_metrics_backfill)  # cc#523/524: flag-gated, checked every tick
-        _spawn(_bg_ops_polish_detector)    # cc#736: flag-gated (ops_polish_run=run_now), checked every tick — refreshes the POLISH_QUEUE card
+        # cc#938 / 18213 RETIRED: on-demand POLISH_QUEUE refresh disarmed with the daily sweep above.
+        # An armed app_config ops_polish_run='run_now' can no longer resurrect it either.
+        # _spawn(_bg_ops_polish_detector)  # cc#736: flag-gated POLISH_QUEUE card refresh
+        #
+        # cc#938 — THE NEXT FOUR STAY. The card asked for all five to be deactivated under 18213.
+        # Four of them are NOT ops-metrics work, whatever their names say:
+        #   _bg_ops_text_fetch      stages investor-doc text into doc_texts -> Result Analysis V2
+        #                           reads doc_texts directly (results_endpoints queue/status).
+        #   _bg_ops_metrics_t1      re-scrapes all six FUNDAMENTALS sections for every company that
+        #                           just reported, and stages its concall doc. cc#692 exists because
+        #                           a silent miss here left Result Analysis stale (KARURVYSYA Q1FY27).
+        #   _bg_ops_metrics_saturday / _season_sweep  retry and sweep that same fundamentals work.
+        # Disabling them would have stopped the fundamentals refresh and the doc pipeline that feed
+        # a live, non-retired surface. What WAS wrong is that they reported under ops_metrics_pull
+        # with OPS_METRICS_* titles, so a dead system looked like it was failing daily — that is the
+        # noise the founder saw, and it is fixed by the rename in ops_metrics_pipeline, not by
+        # switching the jobs off. cc#795 (02-Aug) already drew this exact line; it still holds.
         _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
-        _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
+        _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~05:40 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
         _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
