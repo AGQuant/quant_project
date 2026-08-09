@@ -873,6 +873,45 @@
     + 'body.mcards #dcOv .strip th:first-child, body.mcards #dcOv .strip td:first-child{'
     + '  max-width:96px;overflow:hidden;text-overflow:ellipsis}'
     + 'body.mcards #dcOv .dc-chip, body.mcards #dcOv button{min-height:44px}'
+
+    /* ── cc#963/964: APP CARD CHROME LEAKING INTO THE SHEETS ────────────────────────────────
+       mobile_app.css owns two GENERIC one-letter card classes:
+         .v {background:var(--panel2);border:1px solid var(--line2);border-radius:15px;
+             padding:15px 15px 12px 19px;margin-bottom:8px;overflow:hidden;position:relative;
+             cursor:pointer}
+         .m {background:var(--panel);border:1px solid var(--line);border-radius:14px;
+             padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden;position:relative}
+       The cockpit uses .v and .m as PLAIN VALUE LINES inside its own boxes (.quad .v is the
+       verdict word, .quad .m is the OI/Px stat line). The card's own rules are id-scoped and win
+       on the properties they set — but they never set background, border, padding or margin, so
+       every one of those app declarations applied unopposed. MEASURED on the founder's SHORT
+       BUILDUP case at 360px: .quad .v rendered 47px tall for one 17px line and .quad .m 60px tall
+       for one 10px line, inflating the quadrant box to 179px against a 94px sibling. That is the
+       "excessive empty padding" in the 13:57 screenshot — it was never the cockpit's own padding.
+       Reset only what the app ADDED. margin-TOP is deliberately untouched: .quad .v and .quad .m
+       set it themselves for their internal rhythm, and this selector out-specifies them. */
+    + 'body.mcards #dcOv .v, body.mcards #dcOv .m,'
+    + 'body.mcards #scorrAnaOv .v, body.mcards #scorrAnaOv .m{'
+    + '  background:none;border:0;border-radius:0;padding:0;margin-bottom:0;min-height:0;'
+    + '  overflow:visible;position:static;cursor:inherit}'
+    /* .m is the MODELS card in the app sheet, and it paints a 3px status rail through ::before.
+       Inside a cockpit quadrant that rail is a stray coloured bar with no meaning attached. */
+    + 'body.mcards #dcOv .v:before, body.mcards #dcOv .m:before,'
+    + 'body.mcards #scorrAnaOv .v:before, body.mcards #scorrAnaOv .m:before{content:none}'
+
+    /* ── cc#964 item 1: C·A·R·D strip letters ───────────────────────────────────────────────
+       The founder's "C, A, R are invisible glyphs" was the token bug fixed by the :root bridge —
+       .scorr-cs-b sets color:var(--txt,#1c2536), --txt was out of scope on a body-level overlay,
+       so the property was invalid and the letter INHERITED the dark ambient colour. With the
+       bridge those letters now measure 13.7:1. This rule is the second half of the card: on
+       mobile the not-current letters read as the MUT token, so the active blue letter is the one
+       that stands out, and the unavailable state gets a legibility floor instead of dim x .42
+       (which composited to ~1.6:1 on the panel — a glyph you cannot see is not a disabled
+       control, it is a missing one). Mobile-scoped: the web strip is untouched. */
+    + 'body.mcards .scorr-cs-b{color:var(--mut)}'
+    + 'body.mcards .scorr-cs-on{color:#fff}'
+    + 'body.mcards .scorr-cs-off{color:var(--mut);opacity:.75;'
+    + '  background:var(--surface2);border-style:dashed}'
     + '}';
 
   function inject() {

@@ -1295,7 +1295,31 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
   (window.ScorrCardRow, rule cc#789 — never re-implemented). Strip taps don't fold the card.
   :root bridge maps web card CSS vars onto the dark palette.
 */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+/* ── cc#963/964 ROOT CAUSE: the bridge carried THREE tokens, and the cards need the whole set ──
+   The app palette is declared on `.screen,.bnav` — not on :root and not on body. Custom properties
+   inherit DOWN the tree, and every shared card overlay (#scorrAnaOv, #dcOv, #scorrChartOv, the
+   symbol sheet, the C·A·R·D strip) is appended to document.body, which is a SIBLING of .screen.
+   So none of them ever saw --panel/--txt/--dim/--mut/--line/--line2/--grn/--red/--blu/--amber.
+   Measured consequences on /m/, all three of the founder's complaints from one cause:
+     var(--panel,#fff)  -> the light FALLBACK wins            -> white sheet in a dark app
+     var(--dim)         -> invalid at computed-value time, so
+                           `color` falls back to INHERIT      -> headers/labels take the ambient
+                                                                 colour and vanish
+     var(--grn)         -> same                               -> delta values render inherited-white
+                                                                 on the pastel green/red heat fill
+     --surface2         -> WAS bridged, so it resolved dark   -> dark tiles floating on white
+   The card CSS was never wrong; it was reading tokens that were scoped out of its reach. So the
+   fix is the bridge, not a retheme of three card files — one correction serves A, D, the chart
+   card and the strip at once, and nothing downstream has to be kept in sync by hand.
+   The three ORIGINAL tokens keep their existing values (--cyan is deliberately #3aa0ff here and
+   #37D3E8 inside .screen; changing it was not asked for), so nothing that already resolved moves.
+   This file is served only to /m/* templates, so web cannot be reached from here by construction. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a;
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A}
 .inrow{display:flex;gap:8px;margin:12px 12px 0}
 .sfld{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);
   border:1px solid var(--line2);border-radius:12px;min-height:48px;padding:0 6px 0 13px}
@@ -1438,7 +1462,31 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
    holding with entry→LTP, value, MTM, return%. cc#894 item 1: the shared web C·A·R·D strip on
    every card (window.ScorrCardRow, rule cc#789 — never re-implemented). :root bridge maps the
    web card CSS vars onto the dark palette. */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+/* ── cc#963/964 ROOT CAUSE: the bridge carried THREE tokens, and the cards need the whole set ──
+   The app palette is declared on `.screen,.bnav` — not on :root and not on body. Custom properties
+   inherit DOWN the tree, and every shared card overlay (#scorrAnaOv, #dcOv, #scorrChartOv, the
+   symbol sheet, the C·A·R·D strip) is appended to document.body, which is a SIBLING of .screen.
+   So none of them ever saw --panel/--txt/--dim/--mut/--line/--line2/--grn/--red/--blu/--amber.
+   Measured consequences on /m/, all three of the founder's complaints from one cause:
+     var(--panel,#fff)  -> the light FALLBACK wins            -> white sheet in a dark app
+     var(--dim)         -> invalid at computed-value time, so
+                           `color` falls back to INHERIT      -> headers/labels take the ambient
+                                                                 colour and vanish
+     var(--grn)         -> same                               -> delta values render inherited-white
+                                                                 on the pastel green/red heat fill
+     --surface2         -> WAS bridged, so it resolved dark   -> dark tiles floating on white
+   The card CSS was never wrong; it was reading tokens that were scoped out of its reach. So the
+   fix is the bridge, not a retheme of three card files — one correction serves A, D, the chart
+   card and the strip at once, and nothing downstream has to be kept in sync by hand.
+   The three ORIGINAL tokens keep their existing values (--cyan is deliberately #3aa0ff here and
+   #37D3E8 inside .screen; changing it was not asked for), so nothing that already resolved moves.
+   This file is served only to /m/* templates, so web cannot be reached from here by construction. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a;
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A}
 .tot{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px}
 .tot .b{flex:1}
 .tot .k{font-size:9px;color:var(--dim);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
@@ -1579,7 +1627,31 @@ a.card-link{text-decoration:none;color:inherit;display:block}
    full web functionality by construction. The :root bridge below maps the web components'
    CSS variables (--surface2, --cyan) onto the app's dark palette — the card files fall back to
    LIGHT hex values when a var is missing, which would break dark theme. */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+/* ── cc#963/964 ROOT CAUSE: the bridge carried THREE tokens, and the cards need the whole set ──
+   The app palette is declared on `.screen,.bnav` — not on :root and not on body. Custom properties
+   inherit DOWN the tree, and every shared card overlay (#scorrAnaOv, #dcOv, #scorrChartOv, the
+   symbol sheet, the C·A·R·D strip) is appended to document.body, which is a SIBLING of .screen.
+   So none of them ever saw --panel/--txt/--dim/--mut/--line/--line2/--grn/--red/--blu/--amber.
+   Measured consequences on /m/, all three of the founder's complaints from one cause:
+     var(--panel,#fff)  -> the light FALLBACK wins            -> white sheet in a dark app
+     var(--dim)         -> invalid at computed-value time, so
+                           `color` falls back to INHERIT      -> headers/labels take the ambient
+                                                                 colour and vanish
+     var(--grn)         -> same                               -> delta values render inherited-white
+                                                                 on the pastel green/red heat fill
+     --surface2         -> WAS bridged, so it resolved dark   -> dark tiles floating on white
+   The card CSS was never wrong; it was reading tokens that were scoped out of its reach. So the
+   fix is the bridge, not a retheme of three card files — one correction serves A, D, the chart
+   card and the strip at once, and nothing downstream has to be kept in sync by hand.
+   The three ORIGINAL tokens keep their existing values (--cyan is deliberately #3aa0ff here and
+   #37D3E8 inside .screen; changing it was not asked for), so nothing that already resolved moves.
+   This file is served only to /m/* templates, so web cannot be reached from here by construction. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a;
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A}
 .net{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
 .net .k{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.1em}
 .net .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:24px;font-weight:800}
@@ -1635,7 +1707,31 @@ a.card-link{text-decoration:none;color:inherit;display:block}
    cc#894 item 1: the shared web C·A·R·D strip on every stock row (window.ScorrCardRow, rule
    cc#789). :root bridge maps web card CSS vars onto the dark palette. Rendering is defensive
    about key names; nothing is invented. */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+/* ── cc#963/964 ROOT CAUSE: the bridge carried THREE tokens, and the cards need the whole set ──
+   The app palette is declared on `.screen,.bnav` — not on :root and not on body. Custom properties
+   inherit DOWN the tree, and every shared card overlay (#scorrAnaOv, #dcOv, #scorrChartOv, the
+   symbol sheet, the C·A·R·D strip) is appended to document.body, which is a SIBLING of .screen.
+   So none of them ever saw --panel/--txt/--dim/--mut/--line/--line2/--grn/--red/--blu/--amber.
+   Measured consequences on /m/, all three of the founder's complaints from one cause:
+     var(--panel,#fff)  -> the light FALLBACK wins            -> white sheet in a dark app
+     var(--dim)         -> invalid at computed-value time, so
+                           `color` falls back to INHERIT      -> headers/labels take the ambient
+                                                                 colour and vanish
+     var(--grn)         -> same                               -> delta values render inherited-white
+                                                                 on the pastel green/red heat fill
+     --surface2         -> WAS bridged, so it resolved dark   -> dark tiles floating on white
+   The card CSS was never wrong; it was reading tokens that were scoped out of its reach. So the
+   fix is the bridge, not a retheme of three card files — one correction serves A, D, the chart
+   card and the strip at once, and nothing downstream has to be kept in sync by hand.
+   The three ORIGINAL tokens keep their existing values (--cyan is deliberately #3aa0ff here and
+   #37D3E8 inside .screen; changing it was not asked for), so nothing that already resolved moves.
+   This file is served only to /m/* templates, so web cannot be reached from here by construction. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a;
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A}
 .kvs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .kv2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut);
   border:1px solid var(--line);border-radius:5px;padding:3px 7px}
@@ -1668,7 +1764,31 @@ a.card-link{text-decoration:none;color:inherit;display:block}
   never disagree — the founder caught the all-time-vs-fresh drift the same day it shipped.
   Raw Data / Strategy Matrix / thresholds remain web-only by founder ruling.
 */
-:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a}
+/* ── cc#963/964 ROOT CAUSE: the bridge carried THREE tokens, and the cards need the whole set ──
+   The app palette is declared on `.screen,.bnav` — not on :root and not on body. Custom properties
+   inherit DOWN the tree, and every shared card overlay (#scorrAnaOv, #dcOv, #scorrChartOv, the
+   symbol sheet, the C·A·R·D strip) is appended to document.body, which is a SIBLING of .screen.
+   So none of them ever saw --panel/--txt/--dim/--mut/--line/--line2/--grn/--red/--blu/--amber.
+   Measured consequences on /m/, all three of the founder's complaints from one cause:
+     var(--panel,#fff)  -> the light FALLBACK wins            -> white sheet in a dark app
+     var(--dim)         -> invalid at computed-value time, so
+                           `color` falls back to INHERIT      -> headers/labels take the ambient
+                                                                 colour and vanish
+     var(--grn)         -> same                               -> delta values render inherited-white
+                                                                 on the pastel green/red heat fill
+     --surface2         -> WAS bridged, so it resolved dark   -> dark tiles floating on white
+   The card CSS was never wrong; it was reading tokens that were scoped out of its reach. So the
+   fix is the bridge, not a retheme of three card files — one correction serves A, D, the chart
+   card and the strip at once, and nothing downstream has to be kept in sync by hand.
+   The three ORIGINAL tokens keep their existing values (--cyan is deliberately #3aa0ff here and
+   #37D3E8 inside .screen; changing it was not asked for), so nothing that already resolved moves.
+   This file is served only to /m/* templates, so web cannot be reached from here by construction. */
+:root{--surface2:#1a2233;--cyan:#3aa0ff;--surface:#141b2a;
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B94A}
 .headx{padding:15px 14px 11px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
 .headx .t{flex:1;min-width:0}
 .headx h1{font-size:19px;font-weight:800;letter-spacing:-.01em}

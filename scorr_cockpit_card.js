@@ -112,7 +112,10 @@
     #dcOv .quad.bear .k{color:#f2a6b1} #dcOv .quad.neu .k{color:#e8c890}
     #dcOv .quad .v{font-size:20px;font-weight:800;color:var(--c-grn);line-height:1.05;margin-top:6px;letter-spacing:-.4px}
     #dcOv .quad.bear .v{color:var(--c-red)} #dcOv .quad.neu .v{color:var(--c-amb)}
-    #dcOv .quad .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#6fbf95;margin-top:8px}
+    /* cc#964: the label text goes neutral-dim; the NUMBERS carry the colour, per sign, from _qStat.
+       #6fbf95 was a hardcoded green with no .bear counterpart, which is how a bearish box ended up
+       with green stats on a red fill. */
+    #dcOv .quad .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--c-mut);margin-top:8px}
     #dcOv .strip{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',ui-monospace,monospace}
     #dcOv .strip th{font-size:10.5px;color:var(--c-mut);text-align:right;font-weight:500;letter-spacing:.5px;padding:0 0 8px}
     #dcOv .strip th:first-child{text-align:left}
@@ -223,6 +226,16 @@
     if(q.indexOf('unwind')>=0)return['qr','LU'];
     if(q.indexOf('short')>=0&&q.indexOf('build')>=0)return['qr','SB'];
     return null; }
+  /* cc#964 item 3: each half of the quadrant stat line is coloured by ITS OWN sign.
+     The .m line was a single element painted #6fbf95 (green) with no .bear override, so on a SHORT
+     BUILDUP box it printed green text on the red-tinted fill — measured, and the founder's
+     "green stat text on a pastel pink fill". One colour cannot be right here anyway: the whole
+     point of a buildup quadrant is that OI and price moved in OPPOSITE directions, so a single
+     tint would have to misreport one of the two numbers. Null stays neutral, never a fake sign. */
+  function _qStat(lbl,v){
+    var c = (v==null) ? 'var(--c-mut)' : (v>0 ? 'var(--c-grn)' : (v<0 ? 'var(--c-red)' : 'var(--c-mut)'));
+    return lbl+' <span style="color:'+c+';font-weight:700">'+(v==null?'--':sign(v,1)+'%')+'</span>';
+  }
   function _dcRender(sym,side,qty,entry,cmp,d){
     const E=d.energy||{},M=d.meanings||{},F=d.flow||{},V=d.verdict||{},L=d.levels||{};
     const pctw=(x,mx)=>x==null?0:Math.max(3,Math.min(100,Math.round(x/mx*100)));
@@ -243,7 +256,7 @@
         </div>
         <div class="quad ${qcls}"><div class="k">OI &times; PRICE QUADRANT</div>
           <div class="v">${qv}${q.proxy?' (PROXY)':''}</div>
-          <div class="m">${q.oi_chg_pct!=null?('OI '+sign(q.oi_chg_pct,1)+'% &middot; Px '+sign(q.price_chg_pct,1)+'%'):(M.oi_quadrant||(q.stale_since?('since '+_dcFmtDate(q.stale_since)):''))}</div>
+          <div class="m">${q.oi_chg_pct!=null?(_qStat('OI',q.oi_chg_pct)+' &middot; '+_qStat('Px',q.price_chg_pct)):(M.oi_quadrant||(q.stale_since?('since '+_dcFmtDate(q.stale_since)):''))}</div>
         </div>
       </div></div>`;
 
