@@ -511,7 +511,7 @@ async function loadClosed(){
     const lot=Number(x.lot_size)||0;
     const net=(x.net_pnl==null)?null:Number(x.net_pnl);
     // cc#463 fix2 kept: P&L% is SIGNED = pnl / (entry x lot) x 100. The base stays the FUTURES
-    // notional — that is the capital the trade committed; the hedge premium rides on top of it.
+    // notional — that is the capital the trade committed; the option leg's premium rides on top.
     const pPct=(entry&&lot&&net!=null)?(net/(entry*lot)*100):0;
     return { id:Number(x.id)||i, sym:x.symbol, side:x.direction, entry, exit:ex,
              pnl:(net==null?0:net), netKnown:(net!=null), pPct,
@@ -740,11 +740,16 @@ function rClosed(){
   const tot=all.reduce((a,p)=>a+p.pnl,0);
   const wr=all.length?(all.filter(p=>p.pnl>0).length/all.length*100).toFixed(0):0;
   const shown=CLOSED_ALL?all:all.slice(0,15);   // cc#463 fix3: default LAST 15 (most-recent first)
-  // cc#941 item 3: DATE · SYMBOL · DIR · ENTRY · EXIT · POINTS · HEDGE · NET P&L · EXIT.
+  // cc#941 item 3: DATE · SYMBOL · DIR · ENTRY · EXIT · POINTS · OPT · NET P&L · EXIT.
   // Rs is rounded with no decimals on P&L, as specified. The LEG column is gone with the leg rows.
-  const head=['DATE (IST)','SYMBOL','DIR','ENTRY','EXIT','POINTS','HEDGE','NET P&L','P&L%','EXIT'];
+  // cc#954 (founder 09-Aug): the column was headed HEDGE. It is not a hedge. Each V10 signal fires
+  // TWO trades — a futures leg expressing the view directionally and an option SELL expressing the
+  // same view as short premium. They are PEERS, and "hedge" implied a risk-offset that does not
+  // exist while making the option leg read as subordinate. Header and tooltip corrected here
+  // because this card rides along wherever the word was user-visible.
+  const head=['DATE (IST)','SYMBOL','DIR','ENTRY','EXIT','POINTS','OPT','NET P&L','P&L%','EXIT'];
   // Exit-reason colour follows the REASON, not the sign: SL is red and TARGET green even on the
-  // rare trade where the hedge turns a stopped-out future into a small net gain. Colouring by sign
+  // rare trade where the option leg turns a stopped-out future into a small net gain. By sign,
   // would make the badge restate the P&L column and stop saying why the trade ended.
   const rsnClr = r => r==='SL'?DN : r==='TARGET'?UP : C.mut;
   const body = shown.length ? shown.map(p=>`<tr>
@@ -764,7 +769,7 @@ function rClosed(){
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})</div>
       <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
-        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized NET P&L across ${all.length} paired trades (futures + hedge)">₹${fK(tot)}</span></div></div>
+        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized NET P&L across ${all.length} paired trades (futures leg + option leg)">₹${fK(tot)}</span></div></div>
     <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}
   </div>`;
 }

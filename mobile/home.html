@@ -131,7 +131,7 @@
 .v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
 .v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
 .v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;
-  white-space:nowrap}
+  white-space:nowrap}   /* cc#953 item 1: nowrap belt-and-braces behind the compaction */
 .v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
   margin-top:2px;white-space:nowrap}
 .v10c .c1{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
@@ -149,7 +149,7 @@
   overflow:hidden;text-overflow:ellipsis}
 .v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* cc#948 item 3: the hedge line was a 10.5px wall of text. Structured now — a HEDGE tag, the
+/* cc#948 item 3: the OPT line was a 10.5px wall of text. Structured now — an OPT tag, the
    contract, the premium leg, and its own P&L pushed to the right edge so it lands UNDER the net
    column and the two numbers share one vertical rule. */
 .v10c .c4{margin-top:6px;padding-top:5px;border-top:1px dashed var(--line);
@@ -777,7 +777,7 @@ function togTrend(ev, kind){
    The server does the matching (mobile_home2.mobile_v10chart) — dates converted to IST in SQL,
    FUT legs only, trades older than the window dropped and counted, never clamped onto a candle. */
 var V10 = { sym: 'NIFTY50', data: null, sel: null,
-            leg: 'ALL', win: null, mfold: {},
+            leg: 'FUT', win: null, mfold: {},
             loading: false, pageErr: null };   // cc#949: one in-flight page fetch, last error
 
 function v10Icon(sym){
@@ -1183,18 +1183,43 @@ function v10Sel(id){
 /* cc#941: v10Row() is GONE with the leg rows it rendered. Removed rather than left
    behind as an unreachable function — the next reader should not have to work out
    which of two trade renderers is live. v10Card() below is the only one. */
-/* ══ cc#941: PAIRED TRADE CARDS ═══════════════════════════════════════════════════════════════
-   The old log listed LEGS behind a FUTURES / OPTIONS tab switch — which was the honest way to show
-   the table as it is stored, but it is not how a trade is read. One V10 trade is a futures
-   position plus an option hedge written as two rows, so the log showed 45 futures rows and 36
-   option rows for 45 trades, on two different price scales, with the hedge's opposite side making
-   every LONG look like it had a SELL beside it. The number that matters — what the trade made —
-   was on neither row.
+/* ══ cc#941 + cc#954: PAIRED TRADE CARDS ══════════════════════════════════════════════════════
+   THE MODEL, corrected by the founder on 09-Aug and written here because my cc#941 comment taught
+   it wrong and cc#948 inherited the mistake. The V10 engine fires each signal TWO WAYS:
+       FUT   a directional index expression   (long view -> BUY the future)
+       OPT   a short-premium expression of the SAME view (long view -> SELL the PE)
+   The OPT leg is a PEER TRADE, not a hedge. Nothing is being protected — both legs are the engine
+   saying the same thing in two instruments, and the net is that signal's result across both.
+   The word "hedge" entered through a code comment and spread into the UI from there; it implied a
+   risk-offset that does not exist and made the OPT leg look subordinate to the FUT leg when they
+   are peers. Every user-visible string now says OPT.
 
-   One card per TRADE now. Pairing is done SERVER-side in v10_endpoints.paired_trades and read
-   from d.paired, so this template and the desktop table cannot disagree about a net P&L (16202).
-   The leg tabs are gone with the leg rows; the hedge is one grey sub-line inside its own card,
-   which is where a premium belongs. */
+   Why ONE CARD rather than two rows: the two legs are stored as two rows sharing (symbol,
+   entry_ts), and shown raw they read as two separate trades on two different price scales — an
+   index level (58,004) beside a premium (220) — with the OPT leg's opposite side making every LONG
+   look like it had a SELL next to it. The number that matters, the signal's net across both legs,
+   was on neither row.
+   Pairing is done SERVER-side in v10_endpoints.paired_trades and read from d.paired, so this
+   template and the desktop table cannot disagree about a net (16202). The OPT leg is one grey
+   sub-line inside its trade's card, which is where a premium belongs. */
+/* cc#953 item 1 — THE NET, ONE LINE, ALWAYS.
+   The right column overflowed on six-digit values: "+Rs1,26,328" is 11 characters of Plex Mono at
+   15px, wider than the column can be on a 360px card without starving the left zone.
+   Two changes, both from the card:
+     NO PLUS SIGN. The colour already carries the sign — green is a gain, red a loss — so a "+"
+     spends a character restating what the eye has already read. The MINUS is kept: a leading
+     minus is how a negative number is written, and dropping it would leave colour as the ONLY
+     carrier of the sign, which fails the moment someone cannot distinguish the two colours.
+     COMPACT PAST 5 DIGITS. At six digits or more the value renders as Rs1.26L. Below that it is
+     printed in full, because Rs99,999 is exact and fits. The widest string this can produce is
+     "-Rs99,999" (9 chars) or "-Rs12.63L" (9 chars) — measured across the range, never wider. */
+function v10Net(v){
+  if (v == null) return '\u2014';
+  var a = Math.abs(v), sign = (v < 0) ? '\u2212' : '';
+  return sign + (a >= 100000 ? '\u20B9' + (a / 100000).toFixed(2) + 'L'
+                             : '\u20B9' + Math.round(a).toLocaleString('en-IN'));
+}
+
 function v10ReasonCls(r){
   r = String(r || '').toUpperCase();
   if (r === 'SL') return 'bad';
@@ -1202,12 +1227,13 @@ function v10ReasonCls(r){
   if (r === 'OPEN') return 'open';
   return 'neut';                                  // EOD and anything else: grey, never coloured
 }
-function v10Card(t, hideHedge){
+function v10Card(t, hideOpt){
   var px2 = function(v){ return v == null ? '--' : Math.round(v).toLocaleString('en-IN'); };
   var long = t.direction === 'LONG';
-  var hedge = hideHedge ? null : t.hedge;
-  var net = (t.net_r == null) ? '\u2014'
-          : ((t.net_r >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(t.net_r).toLocaleString('en-IN'));
+  /* cc#954: the payload field is still named `hedge` (server-side rename is out of scope for a
+     template-only card and is tracked separately); the DISPLAY never uses that word. */
+  var hedge = hideOpt ? null : t.hedge;
+  var net = v10Net(t.net_r);
   var pts = (t.points == null) ? '' : ((t.points >= 0 ? '+' : '') + Number(t.points).toFixed(0) + ' pts');
   return '<div class="v10c ' + (t.net_r == null ? 'op' : (t.win ? 'wn' : 'ls'))
       + (V10.sel === t.id ? ' sel' : '') + '" onclick="v10Sel(' + t.id + ')">'
@@ -1218,7 +1244,7 @@ function v10Card(t, hideHedge){
     + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price)) + '</div>'
     + '<div class="c3">' + esc(t.entry_ist || '') + (t.exit_ist ? ' \u2192 ' + esc(t.exit_ist) : '')
       + (t.held ? ' \u00b7 ' + esc(t.held) : '') + '</div>'
-    + (hedge ? '<div class="c4"><span class="htag">HEDGE</span>'
+    + (hedge ? '<div class="c4"><span class="htag">OPT</span>'
         + '<span class="hmid">' + esc(hedge.label || '') + ' \u00b7 ' + esc(hedge.side || '') + ' '
         + px2(hedge.entry_price) + ' \u2192 ' + px2(hedge.exit_price) + '</span>'
         + '<em class="' + cls(hedge.pnl) + '">' + (hedge.pnl == null ? '--' : inrShort(hedge.pnl))
@@ -1241,9 +1267,8 @@ function v10OptCard(t){
   var buy = (t.side === 'BUY');
   /* round the MAGNITUDE, not the signed value. Math.round(-772.5) is -772 in JS (ties go toward
      +Infinity), so rounding first made this leg read -Rs772 here while the same number read
-     -Rs773 on the hedge sub-line of the paired card. One P&L, two figures, on one screen. */
-  var pnl = (t.pnl == null) ? '\u2014'
-          : ((t.pnl >= 0 ? '+' : '\u2212') + '\u20B9' + Math.round(Math.abs(t.pnl)).toLocaleString('en-IN'));
+     -Rs773 on the OPT sub-line of the paired card. One P&L, two figures, on one screen. */
+  var pnl = v10Net(t.pnl == null ? null : Math.round(t.pnl));
   var pts = (t.points == null) ? '' : ((t.points >= 0 ? '+' : '') + Number(t.points).toFixed(1) + ' pts');
   var title = (t.opt_strike != null ? Math.round(t.opt_strike).toLocaleString('en-IN') : '?')
             + ' ' + esc(t.opt_type || '');
@@ -1278,9 +1303,10 @@ function v10Log(d){
       + '</b><span>net</span></div>'
     + '<div><b>' + (d.stats && d.stats.open ? d.stats.open : 0) + '</b><span>open</span></div>'
     + '</div>';
-  if (sm.unhedged)
-    h += '<div class="sum" style="padding:2px 2px 8px">' + sm.hedged + ' hedged \u00b7 '
-       + sm.unhedged + ' unhedged (pre-hedge era)</div>';
+  /* cc#953 item 2: the "36 hedged · 9 unhedged" sub-line is REMOVED. It was mine (cc#943 pattern,
+     carried into cc#941) and the founder does not want it — and cc#954 shows the framing behind it
+     was wrong anyway: nothing was ever hedged, so nothing was ever "unhedged". The honest version
+     of that fact now lives on the OPTIONS footer, worded correctly. The four-figure strip stays. */
   /* ══ cc#948 item 1 — QUICK ACCESS RESTORED ═══════════════════════════════════════════════
      I deleted these pills and v10SetLeg() in cc#941 as "dead code". They were not dead: they were
      founder-approved UI from cc#920/928, and NOTHING IN THE cc#941 SPEC ASKED FOR THEIR REMOVAL.
@@ -1289,29 +1315,49 @@ function v10Log(d){
      the same as unwanted.
      Three views, each on ONE price scale — the cc#941 finding that an index level and a premium
      must never share a column is what makes OPTIONS a separate view rather than an extra column:
-       ALL       paired cards, hedge sub-line shown (the cc#941 view, default)
-       FUTURES   the same paired cards with the hedge line hidden — pure index scale
-       OPTIONS   the option legs as their own cards on premium scale
+       FUTURES   the paired cards, OPT sub-line hidden — pure index scale (default)
+       OPTIONS   the option trades as their own cards on premium scale
      Data is the per-leg trades[] and by_leg the payload already carries; no endpoint change. */
-  var view = V10.leg || 'ALL';
+  /* cc#953 item 3: TWO pills. ALL is gone — FUTURES already showed every trade (it is the paired
+     list with the OPT sub-line hidden), so ALL and FUTURES differed by one line of detail and the
+     third button bought nothing. FUTURES is the default. */
+  var view = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
   var legs = d.trades || [];
   var opts = legs.filter(function(x){ return (x.leg || 'FUT') === 'OPT'; });
   var bl = d.by_leg || {};
-  var counts = { ALL: rows.length,
-                 FUT: rows.length,
-                 OPT: opts.length };
-  h += '<div class="lgtabs">' + [['ALL','ALL'],['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
+  h += '<div class="lgtabs">' + [['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
       return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'
         + ' onclick="v10SetLeg(\'' + v[0] + '\')">' + v[1]
-        + ' <i>' + (counts[v[0]] || 0) + '</i></button>';
+        + ' <i>' + (v[0] === 'OPT' ? opts.length : rows.length) + '</i></button>';
     }).join('') + '</div>';
-  /* by_leg footer for the ACTIVE view only — a total that does not belong to what is on screen
-     is worse than no total. FUT/ALL show the paired net (the trade's real result); OPTIONS shows
-     the option legs' own net, which is a different number by design. */
-  var foot = (view === 'OPT')
-    ? ((bl.OPT ? (bl.OPT.trades || 0) + ' option legs \u00b7 net ' + inrShort(bl.OPT.net_pnl) : '') )
-    : ((sm.paired_trades || 0) + ' paired trades \u00b7 net '
-       + (sm.net_r == null ? '--' : inrShort(sm.net_pnl)));
+
+  /* cc#953 item 4 + cc#954 item 2 — THE HONEST COUNT, computed, never padded.
+     The two tabs CANNOT hold equal counts and must not be made to look as if they do: the option
+     leg only went live partway through the record, so the earliest signals fired futures-only.
+     Everything below is derived from d.paired — the count of trades with an OPT leg, the count
+     without, and the date the option leg first appears — so the sentence stays true as trades
+     accrue and no boundary date is hardcoded.
+     WORDING per cc#954: these signals did not "run unhedged". Nothing was ever hedged. They fired
+     FUTURES-ONLY, because the second expression of the signal did not exist yet. */
+  var withOpt = rows.filter(function(t){ return !!t.hedge; });
+  var futOnly = rows.filter(function(t){ return !t.hedge; });
+  var firstOpt = withOpt.map(function(t){ return t.entry_date || ''; })
+                        .filter(Boolean).sort()[0] || null;
+  var early = futOnly.filter(function(t){ return firstOpt && (t.entry_date || '') < firstOpt; }).length;
+  var late  = futOnly.length - early;
+  var foot;
+  if (view === 'OPT'){
+    foot = withOpt.length + ' option trade' + (withOpt.length === 1 ? '' : 's');
+    if (futOnly.length)
+      foot += ' \u00b7 ' + futOnly.length + ' signal' + (futOnly.length === 1 ? '' : 's')
+            + ' fired futures-only ('
+            + (early ? early + ' before ' + dlab(firstOpt) + ' when the option leg went live' : '')
+            + (early && late ? ', ' : '')
+            + (late ? late + ' exception' + (late === 1 ? '' : 's') : '') + ')';
+  } else {
+    foot = (sm.paired_trades || 0) + ' trades \u00b7 net '
+         + (sm.net_r == null ? '--' : inrShort(sm.net_pnl));
+  }
   if (foot) h += '<div class="sum" style="padding:2px 2px 8px">' + esc(foot) + '</div>';
 
   if (view === 'OPT'){
