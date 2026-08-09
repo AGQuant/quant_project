@@ -389,25 +389,36 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
         return {"symbols": 0, "dates": 0, "rows": 0, "note": "no symbols"}
 
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT MAX(price_date) FROM raw_prices")
-        target = cur.fetchone()[0]
+        # The dates to fetch are the sessions the REST of the table already has and at least one of
+        # these symbols does not. Deriving them from raw_prices rather than from a calendar means a
+        # holiday can never enter the list — a date nobody has is not a gap.
+        #
+        # NEWEST FIRST, and that ordering is load-bearing. The first build took the oldest gap and
+        # walked forward, which deadlocks the moment one symbol can never advance: GSPL stopped
+        # appearing in NSE's EQ file on 11-May (it is not merely un-fetched, it is no longer
+        # traded), so its gap pinned the 40-date window to May-July forever and JBCHEPHARM's
+        # actual gap — 24-Jul onward — was never reached. Newest first also matches what matters:
+        # a current close is worth more than a June one.
+        cur.execute("""
+            WITH sess AS (SELECT DISTINCT price_date d FROM raw_prices),
+            want AS (SELECT s.sym, x.d FROM unnest(%s::text[]) s(sym) CROSS JOIN sess x),
+            missing AS (
+              SELECT w.d FROM want w
+              LEFT JOIN raw_prices p ON UPPER(p.symbol)=w.sym AND p.price_date=w.d
+              WHERE p.symbol IS NULL)
+            SELECT DISTINCT d FROM missing ORDER BY d DESC LIMIT %s""",
+                    (sorted(syms), max_dates))
+        dates = sorted(r[0] for r in cur.fetchall())
         cur.execute("""SELECT UPPER(symbol), MAX(price_date) FROM raw_prices
                        WHERE UPPER(symbol) = ANY(%s) GROUP BY 1""", (sorted(syms),))
         have = {r[0]: r[1] for r in cur.fetchall()}
-        # The dates to fetch are the sessions the REST of the table already has and these symbols
-        # do not. Deriving them from raw_prices rather than from a calendar means holidays and
-        # non-trading days can never enter the list — a date nobody has is not a gap.
-        oldest = min([have.get(s) for s in syms if have.get(s)] or [target])
-        cur.execute("""SELECT DISTINCT price_date FROM raw_prices
-                       WHERE price_date > %s AND price_date <= %s
-                       ORDER BY price_date LIMIT %s""", (oldest, target, max_dates))
-        dates = [r[0] for r in cur.fetchall()]
 
     if not dates:
         return {"symbols": len(syms), "dates": 0, "rows": 0, "note": "no missing sessions"}
 
     session = nse._nse_session()
     total, per_date = 0, []
+    seen = {s: 0 for s in syms}   # per-symbol hit count across the fetched dates
     for d in dates:
         try:
             r = nse._nse_get(session, nse._delivery_url(d), referer=f"{nse._API_HOST}/all-reports")
@@ -432,6 +443,7 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
             # adjusted_close = close. NSE publishes the traded price, not a split-adjusted one, so
             # claiming an adjustment we did not compute would be a fabricated number. The CA
             # watchdog's restate path is what adjusts history, and it works off this same column.
+            seen[sym] = seen.get(sym, 0) + 1
             rows.append((sym, d, o, h, l, c, c, int(v) if v is not None else 0))
         if rows:
             with _conn() as conn, conn.cursor() as cur:
@@ -441,8 +453,39 @@ def heal_from_nse(symbols, max_dates: int = 40) -> dict:
         per_date.append({"date": str(d), "rows": len(rows)})
         time.sleep(0.6)
 
+    # A symbol absent from EVERY EQ bhavcopy we just fetched is not "waiting for a backfill" — it
+    # is not trading on NSE any more (a merger, a delisting: Cigniti went into Coforge). Say so, in
+    # the register, with the date it was last seen. Guarded on a real sample (>=10 dates) so one
+    # failed download can never retire a live name, and the resolver clears the exclusion the
+    # moment a fresh series reappears, so this is reversible.
+    fetched_ok = sum(1 for p in per_date if not p.get("error"))
+    retired = []
+    if fetched_ok >= 10:
+        for sym in sorted(syms):
+            if seen.get(sym, 0) == 0:
+                last_seen = have.get(sym)
+                retired.append({"symbol": sym, "last_seen": str(last_seen) if last_seen else None})
+                try:
+                    with _conn() as conn, conn.cursor() as cur:
+                        ensure_tables(cur)
+                        cur.execute("""INSERT INTO price_feed_excluded (symbol, reason, attempts, checked_at)
+                                       VALUES (%s,%s,%s::jsonb,NOW())
+                                       ON CONFLICT (symbol) DO UPDATE SET
+                                         reason=EXCLUDED.reason, attempts=EXCLUDED.attempts, checked_at=NOW()""",
+                                    (sym,
+                                     f"absent from NSE EQ bhavcopy across {fetched_ok} sessions "
+                                     f"(last seen {last_seen}) and no fresh Yahoo series — delisted or merged",
+                                     json.dumps({"nse_sessions_checked": fetched_ok,
+                                                 "last_seen": str(last_seen) if last_seen else None},
+                                                default=str)))
+                        conn.commit()
+                except Exception as e:
+                    log.warning(f"heal_from_nse retire {sym}: {e}")
+
     out = {"symbols": len(syms), "dates": len(dates), "rows": total,
-           "first_date": str(dates[0]), "last_date": str(dates[-1]), "per_date": per_date[-10:]}
+           "first_date": str(dates[0]), "last_date": str(dates[-1]),
+           "per_symbol_hits": {k: v for k, v in sorted(seen.items())},
+           "retired_no_nse_series": retired, "per_date": per_date[-10:]}
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
