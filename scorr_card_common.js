@@ -912,6 +912,26 @@
     + 'body.mcards .scorr-cs-on{color:#fff}'
     + 'body.mcards .scorr-cs-off{color:var(--mut);opacity:.75;'
     + '  background:var(--surface2);border-style:dashed}'
+
+    /* ── cc#965 item 1: the C card's own header failed the audit at 360px ───────────────────
+       #scorrChartHead is one nowrap flex row built for a 640px modal: title · H/L · verdict ·
+       SEVEN timeframe pills · maximize · close. On a 360px phone it wrapped to THREE rows and
+       measured: the pills took a full 334px row, and the two buttons dropped onto a third row at
+       the LEFT — the close X sat at x=38 with 278px of empty space to its right, i.e. bottom-left
+       of the header, nowhere near where a close control is looked for. The maximize button, which
+       cc#959 just made the fullscreen-landscape trigger, measured 11x15px against a 44px minimum.
+       Both buttons are pinned to the top-right corner here and given real targets; the pills keep
+       their own row. Presentation only, mobile only — the 640px web modal is untouched. */
+    /* !important on the padding only: _buildModal writes padding:12px 16px as INLINE cssText, and
+       inline beats any stylesheet rule — without this the H/L line runs straight under the two
+       pinned buttons (measured: HL ended at x=335 while the maximize button started at x=261). */
+    + 'body.mcards #scorrChartHead{position:relative;flex-wrap:wrap;padding-right:100px !important}'
+    + 'body.mcards #scorrChartTfs{flex-basis:100%;justify-content:flex-start}'
+    + 'body.mcards #scorrChartFull, body.mcards #scorrChartClose{'
+    + '  position:absolute;top:8px;width:44px;height:44px;padding:0;'
+    + '  display:inline-flex;align-items:center;justify-content:center}'
+    + 'body.mcards #scorrChartClose{right:8px}'
+    + 'body.mcards #scorrChartFull{right:54px}'
     + '}';
 
   function inject() {
@@ -954,10 +974,74 @@
     if (isBackdrop(e.target)) { closeAll(); }
   }
 
+  /* ══ cc#965 item 2/3 — HARDWARE BACK CLOSES THE SHEET, IT DOES NOT LEAVE THE PAGE ══════════
+     cc#917/918 wired backdrop-tap and Escape into closeAll() but never touched popstate, so on
+     Android the back gesture popped REAL history and navigated away with the sheet still on
+     screen. This is the one implementation for every sheet — no per-card handler, which is the
+     whole point: the cards do not agree on class names, ids or open() signatures, but they all
+     end up as a fixed full-viewport overlay hosting a dialog, and isBackdrop() above already
+     knows how to recognise exactly that. So OPENNESS IS OBSERVED, not reported: a MutationObserver
+     watches for the class/style/DOM changes the cards make when they open, and the same predicate
+     that powers tap-outside decides whether a sheet is up. A card added later is covered for free.
+
+     THE HISTORY CONTRACT — "open + close + back leaves the page exactly once":
+       open  (0 -> n sheets)  pushState a marker.            history: [page, marker]
+       close by X/backdrop/Esc (n -> 0)  the marker is still ours, so consume it with a
+                              SUPPRESSED history.back().     history: [page]
+       hardware back with a sheet open   the browser already consumed the marker, so we only
+                              closeAll() and stay put.       history: [page]
+       hardware back with nothing open   we never interfere.  normal navigation
+     _marked stops a second push while a sheet is already up (opening C then A must not stack two
+     entries); _suppress stops our own consuming back() from being read as a user press, which
+     would otherwise close-and-navigate in one gesture. */
+  var _marked = false, _suppress = false;
+  function anyOpen() {
+    try {
+      var n = document.body ? document.body.children : [];
+      for (var i = 0; i < n.length; i++) {
+        var el = n[i];
+        if (el.nodeType !== 1) continue;
+        var cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.position !== 'fixed') continue;
+        if (isBackdrop(el)) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  function syncHistory() {
+    var open = anyOpen();
+    if (open && !_marked) {
+      try { history.pushState({ scorrSheet: 1 }, '', location.href); _marked = true; } catch (e) {}
+    } else if (!open && _marked) {
+      /* the sheet closed by X / backdrop / Escape and OUR marker is still the top entry — take it
+         back off, or every open/close pair would leave a ghost the user has to press back through. */
+      _marked = false; _suppress = true;
+      try { history.back(); } catch (e) { _suppress = false; }
+    }
+  }
+  function onPop() {
+    if (_suppress) { _suppress = false; return; }   // our own consuming back(), not a user press
+    if (!_marked) return;                            // nothing of ours on the stack: let it navigate
+    _marked = false;                                 // the browser just consumed our marker
+    if (anyOpen()) closeAll();
+  }
+
   function boot() {
     inject();
     document.addEventListener('click', onTap, true);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+    /* cc#965: openness is OBSERVED. Cards signal "open" in different ways (a class on the overlay,
+       a style flip, or appending the overlay for the first time), so watch all three. */
+    try {
+      var mo = new MutationObserver(function () { syncHistory(); });
+      mo.observe(document.body, { childList: true, subtree: false, attributes: true,
+                                  attributeFilter: ['class', 'style'] });
+      /* the overlays themselves are body children, but a card may flip a class on a node INSIDE
+         its overlay; a cheap second observer on the whole tree would be wasteful, so the card
+         close/open paths are also caught by the click/keydown handlers below calling sync. */
+      document.addEventListener('click', function () { setTimeout(syncHistory, 0); }, true);
+      window.addEventListener('popstate', onPop);
+    } catch (e) {}
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

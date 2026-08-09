@@ -84,6 +84,17 @@
     #dcOv .navrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
     #dcOv .back{display:flex;align-items:center;gap:7px;color:var(--c-mut);font-size:12px;cursor:pointer;font-family:'IBM Plex Mono',ui-monospace,monospace}
     #dcOv .back .ar{font-size:15px}
+    /* cc#965 item 1: the D card was the only letter card with no X — C, A and R all carry one, and
+       a set where one member closes differently is a set you have to learn twice. The labelled
+       back-to-funnel control stays exactly as it was: it says WHERE it goes, while the X is the
+       unlabelled universal "close this sheet". Both call _dcClose; there is no in-card step
+       navigation in this component for them to disagree about. 44px on mobile comes from the
+       existing body.mcards #dcOv button rule. */
+    #dcOv .navr{display:flex;align-items:center;gap:8px}
+    #dcOv .dc-x{background:none;border:0;color:var(--c-mut);font-size:24px;line-height:1;
+      cursor:pointer;padding:0;min-width:44px;min-height:44px;font-family:inherit;
+      display:inline-flex;align-items:center;justify-content:center}
+    #dcOv .dc-x:hover{color:var(--c-tx)}
     #dcOv .ts{font-size:10.5px;color:var(--c-grn);letter-spacing:.5px;border:1px solid #17603f;background:var(--c-grnbg);border-radius:8px;padding:5px 11px}
     #dcOv .sym{display:flex;align-items:flex-end;justify-content:space-between}
     #dcOv .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1;color:var(--c-tx)}   /* cc#648 part_4: explicit bright text — parity with the price numeral (was inheriting, read dim) */
@@ -179,7 +190,10 @@
     return `<div class="hdr">
       <div class="navrow">
         <div class="back mono" onclick="_dcClose()"><span class="ar">&larr;</span> V8 FUNNEL</div>
-        <div class="ts mono">&#9727; ${clk} &middot; LIVE</div>
+        <div class="navr">
+          <div class="ts mono">&#9727; ${clk} &middot; LIVE</div>
+          <button type="button" class="dc-x" aria-label="Close" onclick="_dcClose()">&times;</button>
+        </div>
       </div>
       <div class="sym">
         <div class="l"><h1>${sym}</h1>
