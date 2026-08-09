@@ -634,10 +634,20 @@ def mobile_home2(request: Request):
               AND p.basket IS DISTINCT FROM 's1_reclaim_obs'
         """, {"cut": cutover})
         book_live = _rows(cur)[0]
+        # cc#961: the SAME query gains per-side verdict counts — FILTER clauses, not a second
+        # fetch, so the totals and the split can never drift apart. Side predicate matches the
+        # open-book query above (<> 'SHORT' is the long side). Verified against the live table:
+        # only LONG and SHORT exist in the fresh era, no NULLs, and long_n + short_n = trades.
         cur.execute("""
             SELECT COUNT(*) AS trades, COALESCE(SUM(pnl), 0) AS gross,
                    COUNT(*) FILTER (WHERE result = 'TARGET') AS wins,
-                   COUNT(*) FILTER (WHERE result = 'SL') AS losses
+                   COUNT(*) FILTER (WHERE result = 'SL') AS losses,
+                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT') AS trades_long,
+                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT' AND result = 'TARGET') AS wins_long,
+                   COUNT(*) FILTER (WHERE UPPER(side) <> 'SHORT' AND result = 'SL') AS losses_long,
+                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT') AS trades_short,
+                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT' AND result = 'TARGET') AS wins_short,
+                   COUNT(*) FILTER (WHERE UPPER(side) = 'SHORT' AND result = 'SL') AS losses_short
             FROM v8_paper_trades
             WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
               AND basket IS DISTINCT FROM 's1_reclaim_obs'
@@ -765,6 +775,21 @@ def mobile_home2(request: Request):
                 "pct": round(u / d * 100.0, 2) if d else None}
     side_long = _side("unrl_long", "dep_long", "n_long")
     side_short = _side("unrl_short", "dep_short", "n_short")
+
+    # cc#961: per-side REALISED record. decided = TARGET + SL only — the cc#950 doctrine. The
+    # 15 fresh-era trades that closed for some other reason are money in the realised figure but
+    # not a verdict, so they are in `trades` and in neither `wins` nor `losses`.
+    # The rate is computed HERE, once, so Home and any other surface read the same number rather
+    # than each dividing for themselves (DISPLAY_PARITY). No decided trades => rate is None, and
+    # the template prints a dash. A side with no verdicts has not gone 0% — it has no record.
+    def _record(w_key, l_key, n_key):
+        w = led[w_key] or 0
+        l = led[l_key] or 0
+        dec = w + l
+        return {"wins": w, "losses": l, "decided": dec, "trades": led[n_key] or 0,
+                "rate": round(100.0 * w / dec, 1) if dec else None}
+    rec_long = _record("wins_long", "losses_long", "trades_long")
+    rec_short = _record("wins_short", "losses_short", "trades_short")
     dep_total = (side_long["deployed"] or 0.0) + (side_short["deployed"] or 0.0)
     unrl_total = round(f(book_live["unrealised"]) or 0.0, 2)
 
@@ -810,6 +835,10 @@ def mobile_home2(request: Request):
             "gross": round(gross, 2),
             "brokerage": brokerage,
             "wins": led["wins"], "losses": led["losses"], "trades": led["trades"],
+            # cc#961: realised record split by side. Kept alongside the totals above, which /m/v8
+            # still reads — the split is additive, nothing existing changed shape.
+            "rec_long": rec_long,
+            "rec_short": rec_short,
             "era": "fresh",
         },
         "portfolio": {

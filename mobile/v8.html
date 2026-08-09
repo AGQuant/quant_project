@@ -574,8 +574,28 @@ function bookHeader(b){
               + (b.decided ? ' of ' + b.decided + ' decided' : '')
               + (b.brokerage ? ' · net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN')
                                  + ' brokerage' : ''))
+    /* cc#961 item 4: the OVERALL rate above stays — this page keeps it. The per-side split is
+       added beneath so /m/v8 and the Home realised face tell one story about one book. Same
+       payload shape as /api/mobile/home2 rec_long/rec_short, so neither page divides for itself.
+       A side with nothing decided prints a dash, never 0%. */
+    + (open ? '' : sideSplit(b))
     + '</span></div>';
   return seg + tot;
+}
+
+function sideSplit(b){
+  var L = b.rec_long || {}, S = b.rec_short || {};
+  if (!L.decided && !S.decided) return '';   // no verdicts either side: say nothing, invent nothing
+  function one(k, r){
+    var rt = (r.rate == null) ? null : Number(r.rate);
+    /* same founder bands as the Home face: >=60 green, 40-60 amber, <40 red; a dash is dim. */
+    var col = (rt == null) ? 'var(--mut)'
+            : (rt >= 60 ? 'var(--grn)' : (rt >= 40 ? 'var(--amber)' : 'var(--red)'));
+    return '<b style="color:' + col + ';font-weight:700">' + k + ' '
+      + (rt == null ? '—' : rt.toFixed(0) + '%') + '</b>'
+      + (r.decided ? ' <span style="opacity:.75">' + r.wins + '/' + r.decided + '</span>' : '');
+  }
+  return '<br>' + one('Long', L) + ' · ' + one('Short', S);
 }
 
 function realisedBlock(b){

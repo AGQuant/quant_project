@@ -1788,15 +1788,34 @@ Promise.all([
       + '<div class="sum" style="margin-top:7px">% on capital deployed per side.</div>'
       + '</div></a>';
   }
+  /* ══ cc#961 — THE WIN RATE IS SPLIT BY SIDE, AND THE TRADES CELL IS GONE ═════════════
+     Why the split earns a cell and the count does not: at build time the long book reads 92%
+     on 13 decided and the short book 20% on 5. One blended number (72%) hides the only thing
+     on this face you could act on — that one side is carrying the entire record. The total
+     trade count stays true but says nothing, and /m/v8 already shows it, so it gives up its cell.
+
+     W/L are the WEB MASTER DASHBOARD counts: wins = result TARGET, losses = result SL. They
+     deliberately do NOT sum to `trades` — 15 of the 33 fresh-era trades closed for some other
+     reason and are money in the realised figure but not a verdict in the record. The sub-line
+     therefore reads wins/DECIDED, never wins/trades, so its denominator is the same one the
+     rate above it was divided by. Anything else would put two different maths on one cell.
+
+     The rate itself is NOT computed here — it arrives from /api/mobile/home2 already divided,
+     so Home and every other surface read one number instead of each doing its own arithmetic.
+     A side with no decided trades prints a DASH, never 0% — no verdicts is not a 0% record. */
+  function rateCell(k, r){
+    r = r || {};
+    var rt = (r.rate == null) ? null : Number(r.rate);
+    /* founder bands: >=60 green, 40-60 amber, <40 red. A dash gets NO band — it goes neutral dim,
+       because the absence of a verdict is not a grade and tinting it would invent one. */
+    var col = (rt == null) ? 'var(--mut)'
+            : (rt >= 60 ? 'var(--grn)' : (rt >= 40 ? 'var(--amber)' : 'var(--red)'));
+    return '<div class="st"><div class="k">' + k + '</div>'
+      + '<div class="v" style="color:' + col + '">'
+      +   (rt == null ? '--' : rt.toFixed(0) + '%') + '</div>'
+      + '<div class="p">' + (r.decided ? (r.wins + '/' + r.decided) : 'no verdicts') + '</div></div>';
+  }
   function bookFace2(){
-    /* W/L here are the WEB MASTER DASHBOARD counts: wins = result TARGET, losses = result SL.
-       They deliberately do NOT sum to `trades` — 15 of the 33 fresh-era trades closed for some
-       other reason and are money in the realised figure but not a verdict in the record. The
-       trades cell therefore shows the full count with the W/L split beneath it, which is the
-       only way both facts stay true on one card.
-       A win rate with no decided trades prints a DASH, never 0% — no verdicts is not a 0% record. */
-    var w = bk.wins || 0, l = bk.losses || 0, dec = w + l;
-    var wr = dec ? (100 * w / dec) : null;
     return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
       + '<div class="t">V8 Open Book</div>'
       + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
@@ -1805,16 +1824,13 @@ Promise.all([
       +   '<div class="v ' + cls(bk.realised) + '" title="' + esc(inr(bk.realised)) + '">'
       +   inrShort(bk.realised) + '</div>'
       +   '<div class="p">net</div></div>'
-      + '<div class="st"><div class="k">Win Rate</div>'
-      +   '<div class="v">' + (wr == null ? '--' : wr.toFixed(0) + '%') + '</div>'
-      +   '<div class="p">' + (dec ? dec + ' decided' : 'no verdicts') + '</div></div>'
-      + '<div class="st"><div class="k">Trades</div>'
-      +   '<div class="v">' + (bk.trades || 0) + '</div>'
-      +   '<div class="p">' + w + 'W / ' + l + 'L</div></div>'
+      + rateCell('Win Rate Long', bk.rec_long)
+      + rateCell('Win Rate Short', bk.rec_short)
       + '</div>'
       /* brokerage is a COST, not a signed P&L — inrShort would print "+Rs16,500", which reads
-         like a gain. Formatted unsigned here. */
-      + '<div class="sum" style="margin-top:7px">Net of \u20B9'
+         like a gain. Formatted unsigned here. The sub-note now also names what the small
+         numbers under the rates are, because "12/13" alone is not self-explaining. */
+      + '<div class="sum" style="margin-top:7px">Wins / decided. Net of \u20B9'
       + Math.round(bk.brokerage || 0).toLocaleString('en-IN') + ' brokerage.</div>'
       + '</div></a>';
   }

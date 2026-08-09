@@ -386,6 +386,9 @@ def mobile_v8book(request: Request):
         crows = _rows(cur)
 
     closed, real_total, real_dep, wins, losses = [], 0.0, 0.0, 0, 0
+    # cc#961: same TARGET/SL verdicts, counted per side as well. Free — this loop already reads
+    # `side` for the return_pct sign, so the split costs two counters and no extra query.
+    wl_side = {"LONG": [0, 0], "SHORT": [0, 0]}   # side -> [wins, losses]
     for r in crows:
         side = (r["side"] or "").upper()
         entry, ex, qty = f(r["entry_price"]), f(r["exit_price"]), (r["qty"] or 0)
@@ -423,14 +426,26 @@ def mobile_v8book(request: Request):
         # flat-to-down invents a record the book never had. Home already used the canonical
         # counts, so the two surfaces were contradicting each other about one book.
         _res = (r["result"] or "").upper()
+        _sk = "SHORT" if side == "SHORT" else "LONG"   # same predicate Home uses
         if _res == "TARGET":
             wins += 1
+            wl_side[_sk][0] += 1
         elif _res == "SL":
             losses += 1
+            wl_side[_sk][1] += 1
         if dep is not None:
             real_dep += dep
 
     real_brokerage = len(closed) * BROKERAGE_PER_TRADE
+
+    # cc#961: per-side record, same shape and same rounding as /api/mobile/home2 `rec_long`/
+    # `rec_short`, so the two pages cannot print different numbers for the same book.
+    # decided = TARGET + SL; no decided trades => rate None => the template prints a dash.
+    def _rec(sk):
+        w, l = wl_side[sk]
+        dec = w + l
+        return {"wins": w, "losses": l, "decided": dec,
+                "rate": round(100.0 * w / dec, 1) if dec else None}
     return {
         "instrument": "equity",
         "futures_available": False,
@@ -457,6 +472,10 @@ def mobile_v8book(request: Request):
         # Win rate over DECIDED trades (TARGET + SL), not every close — see the note above.
         # A rate with nothing decided is a DASH, not 0%: no verdicts is not a 0% record.
         "win_rate": (round(100.0 * wins / (wins + losses), 1) if (wins + losses) else None),
+        # cc#961: the overall rate above STAYS — this page keeps it, per the card. The split is
+        # added beside it so /m/v8 and the Home realised face tell the same story.
+        "rec_long": _rec("LONG"),
+        "rec_short": _rec("SHORT"),
         "era": "fresh",
         "scope_note": ("Both pages: fresh era (entry on/after the cc#504 cutover), "
                        "'s1_reclaim_obs' excluded. Same scope on both, by construction."),
