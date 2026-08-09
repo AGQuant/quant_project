@@ -186,6 +186,7 @@
 .sub.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.12)}
 .sub.on i{color:var(--blu,#4D7CFE)}
 .sub.clr{color:var(--red);border-color:rgba(255,92,108,.4);letter-spacing:.08em}
+.tierlab{display:flex;align-items:center}
 .ghd{cursor:pointer}
 .ghd .gx{font-size:11px;color:var(--dim);min-width:14px;text-align:right}
 .tl2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
@@ -196,6 +197,79 @@
 .pcard.openx{border-color:var(--line2)}
 .pc4 .pex{margin-left:auto;color:var(--blu,#4D7CFE);font-weight:700}
 .pmore{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+
+/* ══ cc#977 — LOWER MODULES, ported from previews/v8_lower_redesign.html ═══════════════════════
+   The preview declared its own :root palette because it was a standalone file. Here the app
+   tokens are used instead (--panel/--panel2/--line/--dim/--mut/--grn/--red/--blu): the preview's
+   values are the same colours by a different name, and a second palette on the page is exactly
+   how a screen starts drifting from the rest of the app. Class names are prefixed `l` — cc#974
+   was the fourth collision with a short generic app class, and `.card`/`.hd`/`.body`/`.seg` from
+   the preview would have been the fifth. */
+.lcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin:0 12px 12px;
+  overflow:hidden}
+.lhd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
+  min-height:52px;cursor:pointer;gap:10px}
+.lhd h2{font-size:17px;font-weight:700;margin:0}
+.lright{display:flex;align-items:center;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lchev{color:var(--mut);font-size:18px;line-height:1;transition:transform .18s;flex:none;
+  display:inline-block}
+.lcard.open .lchev{transform:rotate(90deg)}
+.lbody{display:none;padding:0 16px 14px;border-top:1px solid var(--line)}
+.lcard.open .lbody{display:block}
+.lnote{font-size:11px;color:var(--mut);margin-top:10px;line-height:1.5}
+.lwarn{font-size:11px;color:var(--amber);margin-top:8px;line-height:1.5}
+.lmore{margin-top:10px;min-height:44px;width:100%;background:none;border:1px dashed var(--line2);
+  border-radius:10px;color:var(--mut);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10px;font-weight:700;letter-spacing:.06em;cursor:pointer}
+.lnav{display:flex;justify-content:center;margin-top:12px}
+.lnav a,.lnav button{border:1px solid rgba(77,124,254,.55);color:#cfd9ff;background:none;
+  border-radius:12px;padding:0 22px;min-height:44px;font-size:13px;text-decoration:none;
+  display:flex;align-items:center;font-family:inherit;cursor:pointer}
+/* module 1 */
+.lspark{display:flex;align-items:flex-end;gap:3px;height:34px;margin:10px 0 4px}
+.lspark i{flex:1;border-radius:2px 2px 0 0;min-height:3px;display:block}
+.ldrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;
+  border-bottom:1px solid var(--line);font-size:13.5px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.ldrow:last-of-type{border-bottom:0}
+.ldrow .dt{color:var(--dim)}
+.ldrow .tc{color:var(--mut);font-size:12px;margin-left:auto;margin-right:8px}
+.ldrow .pv{font-weight:700;white-space:nowrap}
+/* module 2 */
+.lpills{display:flex;gap:8px;overflow-x:auto;padding:10px 0;scrollbar-width:none;
+  touch-action:pan-x pan-y}
+.lpills::-webkit-scrollbar{display:none}
+.lpill{flex:none;border:1px solid var(--line2);background:var(--panel2);color:var(--dim);
+  border-radius:20px;padding:0 14px;min-height:36px;font-size:12.5px;cursor:pointer;
+  font-family:inherit}
+.lpill.on{background:rgba(77,124,254,.16);border-color:var(--blu);color:#cfd9ff;font-weight:600}
+.lpill i{font-style:normal;color:var(--mut);margin-left:4px}
+.lfrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.lfrow:last-of-type{border-bottom:0}
+.lfrow .rank{width:20px;color:var(--mut);font-size:12px;text-align:right;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lfrow .sym{font-weight:700;font-size:14px;border-bottom:1px dotted rgba(148,166,210,.45);
+  cursor:pointer}
+.lfrow .why{margin-left:auto;color:var(--dim);font-size:12px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lfrow .sc{font-weight:700;font-size:13.5px;width:44px;text-align:right;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+/* module 3 */
+.lseggrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.lseg{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+  cursor:pointer;min-width:0}
+.lseg .nm{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lseg .v{font-size:15px;font-weight:700;margin-top:2px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace}
+.lseg .n{font-size:10.5px;color:var(--mut);margin-top:1px}
+.lsegwide{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center}
+.lsegwide .v{font-size:17px}
+/* item 5 · the signals line, and the Open Book chevron on the positions header */
+.sigline{margin:0 12px 10px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;font-size:12px;color:var(--dim)}
+.sigline b{color:var(--txt,#E9EEFB)}
+.tlgo{margin-left:auto;color:var(--mut);text-decoration:none;font-size:16px;padding:0 6px;
+  min-height:44px;display:inline-flex;align-items:center}
 </style>
 </head>
 <body>
@@ -850,61 +924,42 @@ function render(){
      the screen contradicting itself. The as-of stamp is a LIVE-PRICE stamp, so it belongs to the
      unrealised page only; a closed trade's price is its exit, not a quote that can go stale. */
   var realisedPg = (STATE.page === 'realised');
+  /* cc#977 item 1: the Open Book nav CARD is gone, but its destination is not — the link lives
+     here as a small chevron on the section it actually describes. */
   h += '<div class="tierlab">' + (realisedPg ? 'Realised trades' : 'Open positions')
-    + ((!realisedPg && asof) ? ' <span class="tl2">· ' + asof + '</span>' : '') + '</div>'
-    + (bk && !bk.futures_available
-        ? '<div class="finote">' + esc(bk.instrument_note || '') + '</div>' : '')
+    + ((!realisedPg && asof) ? ' <span class="tl2">· ' + asof + '</span>' : '')
+    + '<a class="tlgo" href="/m/positions" aria-label="Open Book, full screen">\u203a</a></div>'
+    /* cc#977 item 1: the instrument_note dev paragraph ("V8 paper positions carry no instrument
+       column...") is GONE. It was an engineering note explaining a schema limitation, rendered as
+       if it were product copy. The FUT/EQ switch already shows the constraint by being disabled. */
     + bookBlock();
 
-  /* cc#933: same shared snippet as /dashboard (window.ScorrMarkerLegend), fed the same
-     engine-served copy — neither layout nor wording can fork. */
-  try { if (window.ScorrMarkerLegend) h += window.ScorrMarkerLegend(STATE.legend); } catch (e) {}
+  /* ══ cc#977 — THE LOWER SECTION IS THREE MODULES ═══════════════════════════════════════
+     REMOVED, per the founder: the marker-legend box ("Reading the rails"), the SIGNALS TODAY
+     stack (a whole section that was usually one empty-state card), and the Open Book / Trade
+     Ledger nav cards. None of their destinations were lost — Open Book is now the chevron on the
+     Open positions header, and the Trade Ledger opens from the Day-wise module header.
+     The "More" stack (Results, Intel) stays: those are real destinations, not book chrome. */
 
-  h += '<div class="tierlab">Signals today · ' + d.signals_today + '</div><div class="stack">';
-  h += (d.baskets || []).map(function(b, i){ return basketCard(b, i, rcls); }).join('')
-    || '<div class="empty"><b>No baskets signalled today.</b>The stack fills as signals fire.</div>';
-  h += '</div>';
+  /* item 5: signals become ONE THIN LINE. When baskets have signalled, it says so and links to
+     the funnel module below; when none have, it is a single line rather than a section with an
+     empty-state card in it. Nothing about the product is deleted — the funnel module is where
+     today's qualifiers actually live now. */
+  var sigN = d.signals_today || 0;
+  h += '<div class="sigline">' + (sigN
+        ? '<b>' + sigN + '</b> signal' + (sigN === 1 ? '' : 's') + ' today'
+          + ' <span class="m">· see Funnel below</span>'
+        : 'No baskets signalled today.') + '</div>';
 
-  var sm = STATE.sm;
-  var lTrades = sm ? sm.trades : d.ledger.trades;
-  var lNet    = sm ? sm.realised : d.ledger.gross_pnl;
-  var lWL     = sm ? (sm.wins + '/' + sm.losses) : null;
-  h += '<div class="tierlab">The book · fresh era</div><div class="stack">'
-    + '<a class="vc ' + rcls + '" href="/m/positions"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Open Book · full screen</div><div class="m">Every open position · live P&amp;L · CARD on each</div></div>'
-    + '<div class="val"><div class="v">' + d.open_positions + '</div><div class="u">open</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
-    + '<div class="vc ref' + (STATE.ledgerOpen ? ' openx' : '') + '" onclick="togLedger(event)"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Trade Ledger</div><div class="m">'
-    + (sm ? 'Net of brokerage · ' + (lWL ? lWL + ' target/SL · ' : '') + 'tap for rows + day log'
-          : 'tap for rows + day log') + '</div></div>'
-    + '<div class="val"><div class="v ' + ((lNet || 0) >= 0 ? 'grn' : 'redx') + '">'
-    + lTrades + '</div><div class="u">closed · ' + inr(lNet) + '</div></div>'
-    + '<div class="v-chev">›</div></div>'
-    + (STATE.ledgerOpen ? ledgerBlock() : '')
-    + '</div></div>';
+  h += lowerModules();
 
   h += '<div class="tierlab">More</div><div class="stack">'
     + '<a class="vc ref" href="/m/results"><div class="vrow">'
     + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
+    + '<div class="v-chev">\u203a</div></div></a>'
     + '<a class="vc ref" href="/m/intel"><div class="vrow">'
     + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
-    + '</div>';
-
-  h += '<div class="legend"><div class="h">Reading the rails</div>'
-    + '<div class="v-lrow"><div class="lbar" style="background:#2FD48B"></div>'
-    + '<div><b>Live</b> — solid, breathing. Inside its own time window, market open.</div></div>'
-    + '<div class="v-lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#F5B94A 0 9px,transparent 9px 15px)"></div>'
-    + '<div><b>Stale</b> — long dashes, still. Past its window. Always states its age.</div></div>'
-    + '<div class="v-lrow"><div class="lbar" style="background:repeating-linear-gradient(180deg,#5E6B8F 0 4px,transparent 4px 10px)"></div>'
-    + '<div><b>Closed</b> — short dots. Market shut or gate closed. Not a fault.</div></div>'
-    + '<div class="v-lrow"><div class="lbar" style="background:#4D7CFE;height:22px;margin-top:5px"></div>'
-    + '<div><b>Reference</b> — short solid bar. Static or all-time. Can never be stale.</div></div>'
-    + '<div class="v-lrow"><div class="lbar" style="background:linear-gradient(90deg,#5E6B8F,#2FD48B);height:6px;margin-top:11px"></div>'
-    + '<div><b>Position rail</b> — stop on the left, target on the right, the dot is the live price. '
-    + 'The tick is your entry. Reads the same for a long and a short.</div></div>'
+    + '<div class="v-chev">\u203a</div></div></a>'
     + '</div>';
 
   document.getElementById('body').innerHTML = h;
@@ -924,6 +979,159 @@ function bindChipBar(){
   };
   bar.addEventListener('scroll', sync, {passive: true});
   sync();
+}
+
+/* ══ cc#977 — THE THREE LOWER MODULES ═══════════════════════════════════════════════════════
+   Ported from previews/v8_lower_redesign.html (Fable first-build, ed43948) and wired to real
+   data. The preview file stays untouched as the design record.
+
+   ONE FETCH, /api/mobile/v8lower, because the three modules render together: the funnel is keyed
+   to the newest signal_date and the segments to the newest v8_metrics score_date, so three
+   separate requests could straddle a tick and let the modules disagree about "today".
+
+   EVERY P&L FIGURE IS THE CANON (rule 13). Module 1's header total is book_canon()['realised']
+   itself, not a sum of the rows it lists — so the module headline cannot drift from the stat
+   tiles above it. The payload also ships day_sum, and the module SAYS SO if the two ever differ
+   rather than quietly rendering one of them. Verified against the DB at build time: 11 day rows
+   covering all 33 fresh-era trades, summing to 349,612.45 = the canon realised, exactly. */
+var LOW = { d: null, err: null, open: { m1: true, m2: false, m3: false }, basket: null, segAll: false, dayAll: false };
+
+function loadLower(){
+  fetchWithTimeout('/api/mobile/v8lower')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d && d.error) throw new Error(d.error);
+      LOW.d = d; LOW.err = null;
+      if (!LOW.basket && d.funnel && d.funnel.length) LOW.basket = d.funnel[0].basket;
+      render();
+    })
+    .catch(function(e){ LOW.err = e.message || 'unavailable'; render(); });
+}
+function lowTg(k){ LOW.open[k] = !LOW.open[k]; render(); }
+function lowBasket(b){ LOW.basket = b; render(); }
+function lowSegAll(){ LOW.segAll = !LOW.segAll; render(); }
+function lowDayAll(){ LOW.dayAll = !LOW.dayAll; render(); }
+
+function lowCard(key, title, right, body){
+  var on = !!LOW.open[key];
+  return '<div class="lcard' + (on ? ' open' : '') + '">'
+    + '<div class="lhd" onclick="lowTg(\'' + key + '\')"><h2>' + title + '</h2>'
+    + '<div class="lright">' + right + '<span class="lchev">\u203a</span></div></div>'
+    + '<div class="lbody">' + body + '</div></div>';
+}
+
+function lowerModules(){
+  if (LOW.err)
+    return '<div class="lcard open"><div class="lhd"><h2>Lower section</h2></div>'
+      + '<div class="lbody"><div class="more">Could not load: ' + esc(LOW.err)
+      + ' <button class="v10rty" onclick="loadLower()">Retry</button></div></div></div>';
+  if (!LOW.d)
+    return '<div class="lcard open"><div class="lhd"><h2>Loading…</h2></div>'
+      + '<div class="lbody"><div class="more">Fetching day log, funnel and segments…</div></div></div>';
+  var d = LOW.d;
+  return m1(d) + m2(d) + m3(d);
+}
+
+/* ── module 1 · day-wise net P&L ───────────────────────────────────────────────────────────── */
+function m1(d){
+  var rows = d.day_rows || [];
+  var total = d.realised;
+  /* the drift line. The header states the CANON total; day_sum is the same book added up a
+     different way. They agree today (both 349,612.45). If they ever stop agreeing, the card says
+     so out loud instead of picking one — a silent mismatch is how two screens start lying. */
+  var drift = (d.day_sum != null && total != null && Math.abs(d.day_sum - total) > 0.5);
+  var shown = LOW.dayAll ? rows : rows.slice(0, 7);
+  var mx = 0;
+  rows.forEach(function(r){ mx = Math.max(mx, Math.abs(r.net || 0)); });
+  var spark = '<div class="lspark">' + rows.slice(0, 24).reverse().map(function(r){
+      var v = r.net || 0, hpx = mx ? Math.max(3, Math.round(Math.abs(v) / mx * 34)) : 3;
+      return '<i style="height:' + hpx + 'px;background:' + (v >= 0 ? 'var(--grn)' : 'var(--red)')
+           + ';opacity:.85"></i>';
+    }).join('') + '</div>';
+  var list = shown.map(function(r){
+    return '<div class="ldrow"><span class="dt">' + esc(r.label) + '</span>'
+      + '<span class="tc">' + r.n + ' trade' + (r.n === 1 ? '' : 's')
+      + (r.wins || r.losses ? ' · ' + r.wins + 'W/' + r.losses + 'L' : '') + '</span>'
+      + '<span class="pv ' + cls(r.net) + '">' + inrShort(r.net) + '</span></div>';
+  }).join('') || '<div class="more">No closed trades in this era yet.</div>';
+  var more = (rows.length > shown.length)
+    ? '<button class="lmore" onclick="lowDayAll()">' + (rows.length - shown.length)
+      + ' more day' + (rows.length - shown.length === 1 ? '' : 's') + '…</button>'
+    : (LOW.dayAll && rows.length > 7 ? '<button class="lmore" onclick="lowDayAll()">show less</button>' : '');
+  var right = '<span class="' + cls(total) + '" style="font-weight:700">' + inrShort(total) + '</span>'
+            + '<span class="m" style="font-size:12px">' + rows.length + ' day'
+            + (rows.length === 1 ? '' : 's') + '</span>';
+  var body = spark + list + more
+    + (drift ? '<div class="lwarn">Day rows sum to ' + inrShort(d.day_sum)
+               + ' against a canon total of ' + inrShort(total) + ' — reporting both.</div>' : '')
+    /* the Trade Ledger destination the nav card used to own (item 1) */
+    + '<div class="lnav"><button onclick="togLedger(event)">Trade ledger \u203a</button></div>'
+    + (STATE.ledgerOpen ? ledgerBlock() : '')
+    + '<div class="lnote">Net of \u20B9500 a closed trade · fresh era · retired baskets excluded.</div>';
+  return lowCard('m1', 'Day-wise Net P&L', right, body);
+}
+
+/* ── module 2 · funnel top 10 ──────────────────────────────────────────────────────────────── */
+function m2(d){
+  var fs = d.funnel || [];
+  if (!fs.length)
+    return lowCard('m2', 'Funnel · Top 10', '<span class="m" style="font-size:12px">0 baskets</span>',
+      '<div class="more">No qualifiers today.</div>');
+  var cur = null;
+  fs.forEach(function(f){ if (f.basket === LOW.basket) cur = f; });
+  if (!cur) cur = fs[0];
+  var pills = '<div class="lpills">' + fs.map(function(f){
+      return '<button class="lpill' + (f.basket === cur.basket ? ' on' : '') + '"'
+        + ' onclick="lowBasket(\'' + esc(f.basket) + '\')">' + esc(f.label)
+        + ' <i>' + f.n + '</i></button>';
+    }).join('') + '</div>';
+  /* ONE headline metric per row, as the web funnel shows: the qualifying SCORE, plus the price it
+     qualified at. No second metric is invented here — v8_qualified carries score and cmp, and a
+     "reason" column does not exist on it, so nothing is dressed up as one. */
+  var list = (cur.rows || []).map(function(r, i){
+    return '<div class="lfrow"><span class="rank">' + (i + 1) + '</span>'
+      + '<span class="sym" onclick="ScorrSymbolCard&&ScorrSymbolCard.open(\'' + esc(r.symbol) + '\')"'
+      + ' data-sym="' + esc(r.symbol) + '">' + esc(r.symbol) + '</span>'
+      + '<span class="why">' + (r.cmp == null ? '' : '\u20B9' + Math.round(r.cmp).toLocaleString('en-IN')) + '</span>'
+      + '<span class="sc">' + (r.score == null ? '--' : Number(r.score).toFixed(1)) + '</span></div>';
+  }).join('') || '<div class="more">No qualifiers today.</div>';
+  var right = '<span class="m mono" style="font-size:12px">' + fs.length + ' basket'
+            + (fs.length === 1 ? '' : 's') + '</span>';
+  var body = pills + list
+    + '<div class="lnav"><a href="/m/screeners">Open full funnel \u203a</a></div>'
+    + '<div class="lnote">Qualifiers for ' + esc(d.signal_date || 'the latest session')
+    + ' · score is the basket\u2019s own qualifying score.</div>';
+  return lowCard('m2', 'Funnel · Top 10', right, body);
+}
+
+/* ── module 3 · segments ───────────────────────────────────────────────────────────────────── */
+function m3(d){
+  var segs = (d.segments || []).filter(function(s){ return s.day_pct != null; });
+  if (!segs.length)
+    return lowCard('m3', 'Segments', '<span class="m" style="font-size:12px">--</span>',
+      '<div class="more">No segment data for the latest session.</div>');
+  var top = segs.slice(0, 3), bot = segs.slice(-3).reverse();
+  var shown = LOW.segAll ? segs : top.concat(bot.filter(function(b){
+      return top.every(function(t){ return t.segment !== b.segment; }); }));
+  var nf = d.nifty;
+  var head = nf
+    ? '<div class="lseg lsegwide"><div><div class="nm">NIFTY 50</div>'
+      + '<div class="n">' + (d.segment_count || segs.length) + ' futures segments</div></div>'
+      + '<div class="v ' + cls(nf.chg_pct) + '">' + (nf.chg_pct == null ? '--' : pctv(nf.chg_pct)) + '</div></div>'
+    : '';
+  var grid = '<div class="lseggrid">' + head + shown.map(function(s){
+      return '<div class="lseg" onclick="location.href=\'/m/sector\'">'
+        + '<div class="nm">' + esc(s.segment) + '</div>'
+        + '<div class="v ' + cls(s.day_pct) + '">' + pctv(s.day_pct) + '</div>'
+        + '<div class="n">' + s.n + ' stock' + (s.n === 1 ? '' : 's') + '</div></div>';
+    }).join('') + '</div>';
+  var right = '<span class="m mono" style="font-size:12px">' + segs.length + '</span>';
+  var body = grid
+    + '<button class="lmore" onclick="lowSegAll()">'
+    + (LOW.segAll ? 'show strongest / weakest only' : 'show all ' + segs.length + ' segments') + '</button>'
+    + '<div class="lnote">Day move is mcap-weighted across each segment\u2019s futures members — the '
+    + 'same derivation as the web dashboard segment strip. Tap a segment for sector intel.</div>';
+  return lowCard('m3', 'Segments \u00b7 ' + (d.segment_count || segs.length), right, body);
 }
 
 /* ══ cc#943 / cc#942 — HORIZONTAL SWIPE BETWEEN THE TWO PAGES ═════════════════════════════════
@@ -998,6 +1206,7 @@ Promise.all([
   fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; }),
   fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
+  loadLower();          // cc#977: the lower modules fetch alongside, never blocking the book
   var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4];
   // cc#932: a failed marker fetch must never blank the book — same guard the web uses.
   if (ps && ps.stars) ps.stars.forEach(function(x){ STATE.stars[x.symbol] = x; });

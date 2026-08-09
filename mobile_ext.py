@@ -213,6 +213,131 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = 
     }
 
 
+@router.get("/api/mobile/v8lower")
+@_json_safe
+def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
+    """cc#977 — the three lower modules of /m/v8 in ONE fetch.
+
+    One call, because the three modules render together and three requests would let them disagree
+    about "today" — the funnel is keyed to the newest signal_date and the segments to the newest
+    v8_metrics score_date, and a slow second request could straddle a tick.
+
+    EVERY P&L FIGURE IS THE CANON (rule 13). The day rows are the same v8_paper_trades rows the
+    website daylog reads, under the canon scope (fresh era, retired baskets from the registry),
+    with the day's net computed the canon way: SUM(pnl) minus Rs.500 per closed trade that day.
+    The header total is `book_canon(...)['realised']` itself — not a sum of the day rows — so the
+    module headline cannot drift from the tiles above it. The two AGREE by construction and the
+    payload ships both so a mismatch would be visible rather than silent.
+
+    A win is result='TARGET' and a loss is result='SL', here as everywhere else.
+    """
+    g = _guard(request)
+    if g:
+        return g
+    days = max(1, min(days, 180))
+    top = max(1, min(top, 25))
+    now = _ist_now()
+    with _conn() as conn, conn.cursor() as cur:
+        canon = book_canon(conn, era="fresh")
+        _retired, _ = retired_baskets(cur)
+        cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
+        _row = cur.fetchone()
+        cutover = _row[0] if _row and _row[0] else None
+
+        # ── 1 · day-wise net, canon scope, brokerage netted PER DAY ──────────────────────────
+        cur.execute("""
+            SELECT COALESCE(closed_at::date, exit_ts::date) AS d,
+                   COUNT(*) AS n,
+                   ROUND(SUM(pnl)::numeric, 2)                       AS gross,
+                   COUNT(*) * 500                                    AS brokerage,
+                   ROUND((SUM(pnl) - COUNT(*) * 500)::numeric, 2)    AS net,
+                   COUNT(*) FILTER (WHERE result = 'TARGET')         AS wins,
+                   COUNT(*) FILTER (WHERE result = 'SL')             AS losses
+            FROM v8_paper_trades
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND NOT (basket = ANY(%(retired)s))
+              AND COALESCE(closed_at, exit_ts) IS NOT NULL
+            GROUP BY 1 ORDER BY 1 DESC
+        """, {"cut": cutover, "retired": _retired})
+        drows = _rows(cur)
+
+        # ── 2 · funnel top-N per basket, newest signal_date ──────────────────────────────────
+        cur.execute("""
+            SELECT basket, symbol, score, cmp, signal_date
+            FROM v8_qualified
+            WHERE signal_date = (SELECT MAX(signal_date) FROM v8_qualified)
+            ORDER BY basket, score DESC NULLS LAST
+        """)
+        qrows = _rows(cur)
+
+        # ── 3 · segments: the SAME derivation the web dashboard strip uses (v8_endpoints
+        #      /segment_day) — mcap-weighted day_1d per gvm_scores.segment, anchored to the newest
+        #      v8_metrics score_date. Copied in scope, not re-invented: same tables, same weights.
+        cur.execute("""
+            WITH mem AS (
+                SELECT g.segment, m.symbol, m.day_1d::numeric AS day_1d,
+                       g.market_cap::numeric AS mcap
+                FROM v8_metrics m
+                JOIN gvm_scores g ON g.symbol = m.symbol
+                WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                  AND g.segment IS NOT NULL AND m.day_1d IS NOT NULL
+                  AND g.market_cap IS NOT NULL AND g.market_cap > 0
+            )
+            SELECT segment,
+                   ROUND(SUM(day_1d * mcap) / NULLIF(SUM(mcap), 0), 2) AS day_pct,
+                   COUNT(*) AS n
+            FROM mem GROUP BY segment
+            HAVING SUM(mcap) > 0
+            ORDER BY day_pct DESC NULLS LAST
+        """)
+        srows = _rows(cur)
+
+        cur.execute("""
+            SELECT name, close, chg_pct FROM global_indices
+            WHERE UPPER(name) IN ('NIFTY50','NIFTY 50')
+            ORDER BY quote_date DESC LIMIT 1
+        """)
+        nifty = (_rows(cur) or [None])[0]
+
+    def f(v):
+        return float(v) if v is not None else None
+
+    day_rows = [{
+        "date": r["d"].isoformat(),
+        "label": r["d"].strftime("%a %d %b"),
+        "n": r["n"], "gross": f(r["gross"]), "brokerage": r["brokerage"],
+        "net": f(r["net"]), "wins": r["wins"], "losses": r["losses"],
+    } for r in drows]
+
+    baskets = {}
+    for r in qrows:
+        baskets.setdefault(r["basket"], []).append({
+            "symbol": r["symbol"], "score": f(r["score"]), "cmp": f(r["cmp"]),
+        })
+    funnel = [{"basket": b, "label": basket_label(b), "n": len(v), "rows": v[:top]}
+              for b, v in sorted(baskets.items())]
+
+    segs = [{"segment": r["segment"], "day_pct": f(r["day_pct"]), "n": r["n"]} for r in srows]
+
+    return {
+        # the module headline reads THIS, not a sum of day_rows — one number, one source (rule 13)
+        "realised": canon["realised"],
+        "canon": canon["canon"],
+        "era": canon["era"],
+        "retired_baskets": canon["retired_baskets"],
+        "day_rows": day_rows,
+        "day_count": len(day_rows),
+        # shipped so a drift between the daily rows and the canon total is VISIBLE, not silent
+        "day_sum": round(sum((d["net"] or 0.0) for d in day_rows), 2) if day_rows else None,
+        "funnel": funnel,
+        "signal_date": (qrows[0]["signal_date"].isoformat() if qrows else None),
+        "segments": segs,
+        "segment_count": len(segs),
+        "nifty": ({"close": f(nifty["close"]), "chg_pct": f(nifty["chg_pct"])} if nifty else None),
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 @router.get("/m/screeners", response_class=HTMLResponse)
 def m_screeners():
     return _page("screeners")
