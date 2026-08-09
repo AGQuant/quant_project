@@ -2004,6 +2004,20 @@ def _bg_yahoo_symbol_resolve():
             import yahoo_symbol_resolver as ysr
             res = ysr.resolve_and_backfill(syms, lookback="5y")
             log.info(f"yahoo_symbol_resolve: {res.get('summary')}")
+            # cc#938 STEP 2 — Yahoo is not the last word. Any name the resolver could only reach
+            # as a STALE series (Yahoo still serves history but stopped updating it: JBCHEPHARM
+            # ends 23-Jul, GSPL 11-May) is healed from NSE's own sec_bhavdata_full, the file this
+            # platform already downloads nightly for delivery percentages and whose price columns
+            # it currently discards. That is the founder rule — no live feed, fall back to EOD —
+            # and NSE is the source Yahoo republishes, so it is a step closer to truth, not a
+            # workaround. Wrapped separately: a bhavcopy hiccup must not lose the resolver's work.
+            try:
+                stale = ysr.stale_symbols()
+                if stale:
+                    heal = ysr.heal_from_nse(stale, max_dates=40)
+                    log.info(f"yahoo_symbol_resolve nse_heal: {heal}")
+            except Exception as he:
+                log.error(f"yahoo_symbol_resolve nse_heal: {he}")
     except Exception as e:
         log.error(f"yahoo_symbol_resolve: {e}")
     finally:

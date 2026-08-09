@@ -359,6 +359,115 @@ def resolve_and_backfill(symbols, lookback: str = "5y", specs=None) -> dict:
     return {"summary": summary, "report": report}
 
 
+# ── NSE bhavcopy healer — the answer when Yahoo has abandoned a name ──────────────────────────
+
+def heal_from_nse(symbols, max_dates: int = 40) -> dict:
+    """cc#938 — fill raw_prices from NSE's own EOD file for symbols Yahoo has stopped serving.
+
+    THIS IS THE FOUNDER RULE TAKEN LITERALLY: "if a live feed is not available for a symbol, fall
+    back to EOD". The first resolver run proved Yahoo cannot serve four of these names under ANY
+    ticker — JBCHEPHARM's series simply ends on 23-Jul, and Yahoo search offers nothing newer. So
+    the fix is not a better Yahoo guess, it is a different source.
+
+    We already download exactly the file we need. nse_eod_ingest pulls sec_bhavdata_full every
+    night for delivery percentages and throws the price columns away; the same row carries
+    OPEN/HIGH/LOW/CLOSE for every EQ-series scrip on the exchange. NSE is also the authority Yahoo
+    is republishing, so this is a step CLOSER to source, not a workaround.
+
+    ONE FILE PER DATE, and that file serves every symbol at once — so the cost is the number of
+    missing DATES, not the number of symbols. Capped at `max_dates` a run (oldest gap first, so
+    holes fill contiguously and a re-run continues where this one stopped) because each date is a
+    separate archive download from NSE.
+    """
+    import nse_eod_ingest as nse
+    import yahoo_daily_update as ydu
+    import csv as _csv
+    import io as _io
+
+    syms = {(s or "").strip().upper() for s in symbols if (s or "").strip()}
+    if not syms:
+        return {"symbols": 0, "dates": 0, "rows": 0, "note": "no symbols"}
+
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT MAX(price_date) FROM raw_prices")
+        target = cur.fetchone()[0]
+        cur.execute("""SELECT UPPER(symbol), MAX(price_date) FROM raw_prices
+                       WHERE UPPER(symbol) = ANY(%s) GROUP BY 1""", (sorted(syms),))
+        have = {r[0]: r[1] for r in cur.fetchall()}
+        # The dates to fetch are the sessions the REST of the table already has and these symbols
+        # do not. Deriving them from raw_prices rather than from a calendar means holidays and
+        # non-trading days can never enter the list — a date nobody has is not a gap.
+        oldest = min([have.get(s) for s in syms if have.get(s)] or [target])
+        cur.execute("""SELECT DISTINCT price_date FROM raw_prices
+                       WHERE price_date > %s AND price_date <= %s
+                       ORDER BY price_date LIMIT %s""", (oldest, target, max_dates))
+        dates = [r[0] for r in cur.fetchall()]
+
+    if not dates:
+        return {"symbols": len(syms), "dates": 0, "rows": 0, "note": "no missing sessions"}
+
+    session = nse._nse_session()
+    total, per_date = 0, []
+    for d in dates:
+        try:
+            r = nse._nse_get(session, nse._delivery_url(d), referer=f"{nse._API_HOST}/all-reports")
+            text = r.content.decode("utf-8-sig", errors="replace")
+        except Exception as e:
+            per_date.append({"date": str(d), "rows": 0, "error": f"{type(e).__name__}: {str(e)[:120]}"})
+            continue
+        rows = []
+        for row in _csv.DictReader(_io.StringIO(text)):
+            row = {(k or "").strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
+            if row.get("SERIES", "").strip().upper() != "EQ":
+                continue
+            sym = (row.get("SYMBOL") or "").strip().upper()
+            if sym not in syms:
+                continue
+            c = nse._f(row.get("CLOSE_PRICE"))
+            if c is None:
+                continue
+            o, h, l = (nse._f(row.get("OPEN_PRICE")), nse._f(row.get("HIGH_PRICE")),
+                       nse._f(row.get("LOW_PRICE")))
+            v = nse._f(row.get("TTL_TRD_QNTY"))
+            # adjusted_close = close. NSE publishes the traded price, not a split-adjusted one, so
+            # claiming an adjustment we did not compute would be a fabricated number. The CA
+            # watchdog's restate path is what adjusts history, and it works off this same column.
+            rows.append((sym, d, o, h, l, c, c, int(v) if v is not None else 0))
+        if rows:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.executemany(ydu.UPSERT_SQL, rows)
+                conn.commit()
+            total += len(rows)
+        per_date.append({"date": str(d), "rows": len(rows)})
+        time.sleep(0.6)
+
+    out = {"symbols": len(syms), "dates": len(dates), "rows": total,
+           "first_date": str(dates[0]), "last_date": str(dates[-1]), "per_date": per_date[-10:]}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'yahoo_backfill', 'NSE_PRICE_HEAL', %s::jsonb)",
+                        (json.dumps({"summary": out, "symbols": sorted(syms)}, default=str),))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"heal_from_nse oplog: {e}")
+    log.info(f"heal_from_nse: {out}")
+    return out
+
+
+def stale_symbols() -> List[str]:
+    """Symbols whose Yahoo series exists but has stopped updating — the heal_from_nse work-list."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            ensure_tables(cur)
+            conn.commit()
+            cur.execute("SELECT UPPER(symbol) FROM yahoo_symbol_map WHERE source LIKE '%%(STALE)'")
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.warning(f"stale_symbols: {e}")
+        return []
+
+
 # ── routes ────────────────────────────────────────────────────────────────────────────────────
 
 def _check_admin(token):
@@ -388,6 +497,20 @@ def yahoo_resolve(symbols: str = "", lookback: str = "5y", missing: bool = False
     if not syms:
         return {"error": "pass symbols=... or missing=true"}
     return resolve_and_backfill(syms, lookback=lookback)
+
+
+@router.post("/api/admin/yahoo/heal-nse")
+def yahoo_heal_nse(symbols: str = "", max_dates: int = 40,
+                   x_admin_token: Optional[str] = Header(None)):
+    """cc#938: fill raw_prices from NSE sec_bhavdata_full for symbols Yahoo has abandoned.
+    No symbols -> every symbol currently marked (STALE) in yahoo_symbol_map."""
+    _check_admin(x_admin_token)
+    syms = [s.strip().upper() for s in (symbols or "").replace(",", " ").split() if s.strip()]
+    if not syms:
+        syms = stale_symbols()
+    if not syms:
+        return {"note": "nothing stale to heal", "symbols": 0, "dates": 0, "rows": 0}
+    return heal_from_nse(syms, max_dates=max_dates)
 
 
 @router.get("/api/feeds/price-excluded")
