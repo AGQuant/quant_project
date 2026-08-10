@@ -58,7 +58,8 @@
   <div id="scorr-nav"></div>
   <h1>Wall of Trades</h1>
   <div class="sub">
-    Every entry and every exit from every engine that keeps a trade log, newest first. This page
+    Every entry and every exit, newest first, <b>since 10 Aug 2026</b> — the four live engines:
+    <b>V8 Futures</b>, <b>Index</b>, <b>Quant Basket</b> and <b>Equity Screener</b>. This page
     computes nothing of its own — it renders <b>/api/tradewall</b>, the same endpoint the app
     reads, so the two surfaces cannot disagree about a trade.
   </div>
@@ -168,6 +169,7 @@ function render(){
   var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
   document.getElementById('meta').textContent =
     'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of) + ' events'
+    + ' · ' + (STATE.scope || 'since 10 Aug 2026')
     + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
   document.getElementById('body').innerHTML = STATE.events.length
     ? rowsHtml(STATE.events, null)
@@ -230,6 +232,7 @@ function boot(keepCounts){
         STATE.counts = d.counts || {};
         STATE.total  = d.total;
         if (d.instruments) STATE.instruments = d.instruments;
+        STATE.scope = d.scope || null;   /* cc#1000: today-onwards scope for the meta line */
       }
       STATE.asOf  = d.as_of;
       PAGE.cursor = d.next_cursor || null;

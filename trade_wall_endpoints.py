@@ -87,6 +87,22 @@ router = APIRouter()
 # The instrument classes the filter chips offer. Derived from the union below, not typed twice.
 INSTRUMENTS = ("EQUITY", "FUTURES", "OPTIONS")
 
+# cc#1000 (founder 10-Aug): the wall shows TODAY-ONWARDS only. WALL_EPOCH is a DISPLAY filter —
+# every event with ts >= this date is shown, everything older is hidden. NOTHING is deleted from any
+# source table (all read-only; the full trade history stays intact in the DB). Both the web page and
+# the mobile page inherit this through the single union below. Stated in the header as "since 10 Aug".
+WALL_EPOCH = "2026-08-10"
+
+# cc#1000: the wall is scoped to EXACTLY FOUR engine groups (founder list):
+#   V8 Futures      <- v8_paper_trades + v8_paper_positions   (FUTURES)
+#   Index           <- v10_trades, split FUTURES/OPTIONS by leg (cc#992)
+#   Quant Basket    <- quant_paper_positions                  (EQUITY)
+#   Equity Screener <- tc_intraday_trades + v14_trades        (EQUITY, the two intraday scanners merged)
+# DELIBERATELY EXCLUDED, recorded so it is a decision not an accident:
+#   options_trades  (the stock-options engine) — not on the founder's four-group list.
+#   v9_paper_trades (V9 Pairs) — not on the list either; it would be a fifth group. Empty today; when
+#                   the pairs engine goes live it needs a NEW card to re-enter the wall, by design.
+
 # ── PERCENT_SIGNS_IN_SQL (cc#992, my own P0) ─────────────────────────────────────────────────
 # NOT ONE percent character may appear anywhere inside _EVENTS_SQL — not in a string literal, and
 # NOT IN A COMMENT EITHER.
@@ -127,34 +143,34 @@ _EVENTS_SQL = """
 WITH ev AS (
   -- V8 SWING · closed: entry + exit. entry_ts/exit_ts are NAIVE IST -> read raw.
   SELECT 'v8'::text src, id, 'ENTRY'::text event, entry_ts::timestamp ts, 'min'::text prec,
-         symbol, UPPER(side) side, 'V8 Swing'::text engine, 'FUTURES'::text instrument,
+         symbol, UPPER(side) side, 'V8 Futures'::text engine, 'FUTURES'::text instrument,
          qty::numeric qty, entry_price::numeric price, NULL::numeric pnl, NULL::text result,
          basket::text note
   FROM v8_paper_trades WHERE entry_ts IS NOT NULL
   UNION ALL
   SELECT 'v8', id, 'EXIT', COALESCE(exit_ts, closed_at)::timestamp, 'min',
-         symbol, UPPER(side), 'V8 Swing', 'FUTURES',
+         symbol, UPPER(side), 'V8 Futures', 'FUTURES',
          qty::numeric, exit_price::numeric, pnl::numeric, result, basket
   FROM v8_paper_trades WHERE COALESCE(exit_ts, closed_at) IS NOT NULL
 
   -- V8 SWING · still open: ONE event, the entry. No exit is invented for a live position.
   UNION ALL
   SELECT 'v8open', id, 'ENTRY', entry_ts::timestamp, 'min',
-         symbol, UPPER(side), 'V8 Swing', 'FUTURES',
+         symbol, UPPER(side), 'V8 Futures', 'FUTURES',
          qty::numeric, entry_price::numeric, NULL, NULL, basket
   FROM v8_paper_positions WHERE status = 'OPEN' AND entry_ts IS NOT NULL
 
   -- V10 INDEX · timestamptz -> converted in SQL. Instrument comes from `leg`, per row.
   UNION ALL
   SELECT 'v10', id, 'ENTRY', (entry_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'V10 Index',
+         symbol, UPPER(side), 'Index',
          CASE WHEN UPPER(COALESCE(leg,'FUT')) = 'OPT' THEN 'OPTIONS' ELSE 'FUTURES' END,
          lot_size::numeric, entry_price::numeric, NULL, NULL,
          NULLIF(CONCAT_WS(' ', leg, opt_type, opt_strike::text), '')
   FROM v10_trades WHERE entry_ts IS NOT NULL
   UNION ALL
   SELECT 'v10', id, 'EXIT', (exit_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'V10 Index',
+         symbol, UPPER(side), 'Index',
          CASE WHEN UPPER(COALESCE(leg,'FUT')) = 'OPT' THEN 'OPTIONS' ELSE 'FUTURES' END,
          lot_size::numeric, exit_price::numeric, pnl::numeric, exit_reason,
          NULLIF(CONCAT_WS(' ', leg, opt_type, opt_strike::text), '')
@@ -165,12 +181,12 @@ WITH ev AS (
   -- net_pnl_pct rides in the note instead, labelled, so nothing reads a percent as money.
   UNION ALL
   SELECT 'v14', id, 'ENTRY', (entry_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'V14 Intraday', 'EQUITY',
+         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
          NULL, entry_px::numeric, NULL, NULL, tag
   FROM v14_trades WHERE entry_ts IS NOT NULL
   UNION ALL
   SELECT 'v14', id, 'EXIT', (exit_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'V14 Intraday', 'EQUITY',
+         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
          NULL, exit_px::numeric, NULL, exit_reason,
          NULLIF(CONCAT_WS(' · ', tag,
                 -- chr(37) is the percent sign; see PERCENT_SIGNS_IN_SQL above for why the
@@ -184,33 +200,18 @@ WITH ev AS (
   -- never be mistaken for a v8 row here.
   UNION ALL
   SELECT 'tc', id, 'ENTRY', entry_ts::timestamp, 'min',
-         symbol, UPPER(side), 'Intraday', 'EQUITY',
+         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
          qty::numeric, entry_price::numeric, NULL, NULL, NULL
   FROM tc_intraday_trades WHERE entry_ts IS NOT NULL
   UNION ALL
   SELECT 'tc', id, 'EXIT', exit_ts::timestamp, 'min',
-         symbol, UPPER(side), 'Intraday', 'EQUITY',
+         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
          qty::numeric, exit_price::numeric, pnl::numeric, result, NULL
   FROM tc_intraday_trades WHERE exit_ts IS NOT NULL
 
-  -- OPTIONS · entry_time is timestamptz (converted); it falls back to trade_date when absent.
-  -- exit_time is NULL on every row today, so the exit is a DAY-precision event off exit_date.
-  UNION ALL
-  SELECT 'opt', id, 'ENTRY',
-         COALESCE((entry_time AT TIME ZONE 'Asia/Kolkata'), trade_date::timestamp),
-         CASE WHEN entry_time IS NULL THEN 'day' ELSE 'min' END,
-         symbol, UPPER(action), 'Options', 'OPTIONS',
-         (lots * lot_size)::numeric, entry_price::numeric, NULL, NULL,
-         NULLIF(CONCAT_WS(' ', ticker, option_type, strike_price::text), '')
-  FROM options_trades WHERE COALESCE(entry_time, trade_date::timestamptz) IS NOT NULL
-  UNION ALL
-  SELECT 'opt', id, 'EXIT',
-         COALESCE((exit_time AT TIME ZONE 'Asia/Kolkata'), exit_date::timestamp),
-         CASE WHEN exit_time IS NULL THEN 'day' ELSE 'min' END,
-         symbol, UPPER(action), 'Options', 'OPTIONS',
-         (lots * lot_size)::numeric, exit_price::numeric, pnl::numeric, status,
-         NULLIF(CONCAT_WS(' ', ticker, option_type, strike_price::text), '')
-  FROM options_trades WHERE COALESCE(exit_time, exit_date::timestamptz) IS NOT NULL
+  -- cc#1000: OPTIONS (options_trades, the stock-options engine) is EXCLUDED from the wall — it is
+  -- NOT on the founder's four-group list. Read-only exclusion; the table is untouched. The OPTIONS
+  -- instrument CLASS still exists on the wall via the V10 Index option legs above.
 
   -- QUANT BASKETS · DATE columns only -> day precision, never faked up to a clock time.
   -- No side column: these baskets are long-only by construction, so LONG is stated, not blank.
@@ -225,31 +226,15 @@ WITH ev AS (
          qty::numeric, exit_price::numeric, pnl::numeric, status, basket_name
   FROM quant_paper_positions WHERE exit_date IS NOT NULL
 
-  -- V9 PAIRS · ZERO rows today (valid-empty). Present and correct so the wall lights up on its
-  -- own the day the engine writes, rather than needing a code change to notice.
-  -- A pair is TWO instruments, so one row is four events: long entry/exit + short entry/exit.
-  UNION ALL
-  SELECT 'v9L', id, 'ENTRY', rebalance_date::timestamp, 'day',
-         long_symbol, 'LONG', 'V9 Pairs', 'EQUITY',
-         long_lot::numeric, long_entry::numeric, NULL, NULL, segment
-  FROM v9_paper_trades WHERE rebalance_date IS NOT NULL AND long_symbol IS NOT NULL
-  UNION ALL
-  SELECT 'v9L', id, 'EXIT', exit_date::timestamp, 'day',
-         long_symbol, 'LONG', 'V9 Pairs', 'EQUITY',
-         long_lot::numeric, long_exit::numeric, long_pnl::numeric, NULL, segment
-  FROM v9_paper_trades WHERE exit_date IS NOT NULL AND long_symbol IS NOT NULL
-  UNION ALL
-  SELECT 'v9S', id, 'ENTRY', rebalance_date::timestamp, 'day',
-         short_symbol, 'SHORT', 'V9 Pairs', 'EQUITY',
-         short_lot::numeric, short_entry::numeric, NULL, NULL, segment
-  FROM v9_paper_trades WHERE rebalance_date IS NOT NULL AND short_symbol IS NOT NULL
-  UNION ALL
-  SELECT 'v9S', id, 'EXIT', exit_date::timestamp, 'day',
-         short_symbol, 'SHORT', 'V9 Pairs', 'EQUITY',
-         short_lot::numeric, short_exit::numeric, short_pnl::numeric, NULL, segment
-  FROM v9_paper_trades WHERE exit_date IS NOT NULL AND short_symbol IS NOT NULL
+  -- cc#1000: V9 PAIRS (v9_paper_trades) is EXCLUDED — not on the founder's four-group list, and it
+  -- would be a fifth group. Empty today; when the pairs engine goes live it re-enters via a NEW card.
 )
+-- cc#1000: TODAY-ONWARDS display filter (WALL_EPOCH). ev.ts is naive IST on every branch (the
+-- timestamptz sources are already AT TIME ZONE-converted above), so a bare ::timestamp compare is
+-- correct. This is the ONLY place the epoch is applied; every consumer (events, chip counts,
+-- by_engine) wraps this union, so all of them inherit the filter from here.
 SELECT ev.*, (src || ':' || id::text || ':' || event) AS sk FROM ev
+WHERE ev.ts >= '""" + WALL_EPOCH + """'::timestamp
 """
 
 
@@ -369,6 +354,10 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         "by_engine": totals,
         "instruments": list(INSTRUMENTS),
         "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+        # cc#1000: the wall is today-onwards only — both renderers state the scope in the header so
+        # the count is never mistaken for the all-time book. `count`/`counts` already reflect the epoch.
+        "epoch": WALL_EPOCH,
+        "scope": "since 10 Aug 2026",
     }
 
 

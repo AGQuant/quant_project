@@ -175,7 +175,8 @@ function sentinelHtml(){
 
 function render(){
   document.getElementById('sub').textContent =
-    (STATE.total == null ? '--' : STATE.total) + ' events · every entry and exit · newest first';
+    (STATE.total == null ? '--' : STATE.total) + ' events · ' + (STATE.scope || 'since 10 Aug 2026')
+    + ' · every entry and exit · newest first';
   document.getElementById('chips').innerHTML = chipsHtml();
   var body = document.getElementById('body');
   if (!STATE.events.length){
@@ -294,6 +295,7 @@ function boot(keepCounts){
         STATE.total  = d.total;
         STATE.instruments = d.instruments;
         STATE.byEngine = d.by_engine || null;
+        STATE.scope = d.scope || null;   /* cc#1000: today-onwards scope for the header */
       }
       STATE.asOf  = d.as_of;
       PAGE.cursor = d.next_cursor || null;
