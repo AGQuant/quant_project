@@ -48,7 +48,7 @@
 
 <script>
 /* One fetch for the whole screen (item 6). fetchWithTimeout is cc#878's shared helper. */
-var STATE = { data: null, cat: 'All' };
+var STATE = { data: null, cat: 'All', open: {} };   // cc#993: which cards are expanded
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -146,17 +146,36 @@ function card(a, mode){
   if (a.impact) tags += '<span class="tag hi">' + esc(a.impact) + '</span>';
   if (a.sentiment) tags += '<span class="tag ' + edge + '">' + esc(a.sentiment) + '</span>';
 
+  /* cc#993: the FULL text is rendered inside the card and simply hidden until asked for, the
+     same shape the web's toggleKb uses. Item 4 of the card: an item with no long body keeps
+     behaving exactly as before — summary only, and NO button, because a control that opens
+     nothing is a dead affordance (cc#924). */
+  var isOpen = !!STATE.open[a.id];
+  var full = a.body
+    ? '<div class="read" id="body-' + a.id + '"' + (isOpen ? '' : ' style="display:none"') + '>'
+      + String(a.body).split(/\n{2,}/).map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('')
+      + '</div>' : '';
+  function foldBtn(more){
+    return '<button class="fold" id="fold-' + a.id + '" data-more="' + esc(more) + '"'
+      + ' onclick="openFull(' + a.id + ')">' + (isOpen ? 'Collapse \u2191' : more) + '</button>';
+  }
+
   var bodyHtml = '';
   if (mode === 'open' && a.body) {
+    /* the primary editorial keeps its cc#890 preview: first three paragraphs, then the control.
+       Opening swaps the teaser for the full text rather than stacking a second copy under it. */
     var paras = String(a.body).split(/\n{2,}/).slice(0, 3)
       .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
-    bodyHtml = '<div class="read">' + paras + '</div>'
-             + '<button class="fold" onclick="openFull(' + a.id + ')">Continue reading \u2193</button>';
+    bodyHtml = (isOpen ? '' : '<div class="read">' + paras + '</div>')
+             + full + foldBtn('Continue reading \u2193');
   } else if (mode === 'folded') {
     if (a.summary) bodyHtml = '<div class="sum">' + esc(a.summary) + '</div>';
-    if (a.body) bodyHtml += '<button class="fold" onclick="openFull(' + a.id + ')">Read \u203a</button>';
+    if (a.body) bodyHtml += full + foldBtn('Read \u203a');
   } else if (a.summary) {
     bodyHtml = '<div class="sum">' + esc(a.summary) + '</div>';
+    if (a.body) bodyHtml += full + foldBtn('Read \u203a');
+  } else if (a.body) {
+    bodyHtml = full + foldBtn('Read \u203a');
   }
 
   var syms = (a.symbols || []).length
@@ -172,36 +191,65 @@ function card(a, mode){
     + '</div>';
 }
 
+/* ── cc#993 · READ MORE EXPANDS THE CARD IN PLACE ──────────────────────────────────────────
+   The founder REVERSED this card's original scope item 3 (an overlay) in favour of the website's
+   behaviour, so this mirrors scorr_news.html's toggleKb: the body already lives inside the card,
+   the button toggles it, and the label flips between reading and collapsing.
+
+   WHAT THIS REPLACES, because it was worse than "inline vs overlay" made it sound: openFull()
+   APPENDED a whole new card to the BOTTOM of the feed and smooth-scrolled to it. On a 40-item
+   feed that was merely odd. On an all-time feed of 3,565 it would fling the reader to the end of
+   everything they had loaded, and nothing brought them back.
+
+   Expanding in place preserves the scroll position by construction — the card grows under the
+   thumb and no other DOM moves. The open set lives in STATE.open so a chip switch (which does
+   rebuild #body) does not silently collapse what the reader had opened. */
 function openFull(id){
-  var a = (STATE.data.editorials || []).concat(STATE.data.feed || [])
-            .filter(function(x){ return x.id === id; })[0];
-  if (!a || !a.body) return;
-  var el = document.getElementById('full-' + id);
-  if (el) { el.scrollIntoView({behavior:'smooth'}); return; }
-  var host = document.getElementById('body');
-  var d = document.createElement('div');
-  d.id = 'full-' + id;
-  d.className = 'c ed';
-  d.innerHTML = '<div class="hl">' + esc(a.headline) + '</div><div class="read">'
-    + String(a.body).split(/\n{2,}/).map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('')
-    + '</div>';
-  host.appendChild(d);
-  d.scrollIntoView({behavior:'smooth'});
+  var open = !STATE.open[id];
+  STATE.open[id] = open;
+  var box = document.getElementById('body-' + id);
+  var btn = document.getElementById('fold-' + id);
+  if (!box || !btn) { render(); return; }      // not on screen (filtered out) — rebuild instead
+  box.style.display = open ? '' : 'none';
+  btn.innerHTML = open ? 'Collapse \u2191' : (btn.getAttribute('data-more') || 'Read \u203a');
+}
+
+/* ── cc#993 · CHIPS OVER THE LOADED SET ────────────────────────────────────────────────────
+   These used to be whole-window counts from the server. Over 48 hours that was survivable; over
+   3,565 all-time rows it is not — a chip reading "Markets 1,800" above a list of twelve is simply
+   false, because the filter only ever runs over the pages actually loaded. The count is now what
+   tapping the chip will show. The all-time TOTAL is still stated, in the header, where it is true.
+   The card believed cc#983 already counted the loaded set; it did not — it counted the window. */
+function chipsHtml(){
+  var all = (STATE.data.editorials || []).concat(STATE.data.feed || []);
+  var counts = {}, order = [];
+  all.forEach(function(a){
+    var k = a.category || 'Uncategorised';
+    if (counts[k] == null){ counts[k] = 0; order.push(k); }
+    counts[k]++;
+  });
+  order.sort(function(x, y){ return counts[y] - counts[x] || x.localeCompare(y); });
+  return [{label:'All', n: all.length}]
+    .concat(order.map(function(k){ return {label:k, n:counts[k]}; }))
+    .map(function(c){
+      return '<button class="chip' + (c.label === STATE.cat ? ' on' : '') + '" onclick="pick(\'' +
+        esc(c.label).replace(/'/g, "\\'") + '\')">' + esc(c.label) +
+        ' <span class="n">' + c.n + '</span></button>';
+    }).join('');
 }
 
 function render(){
   var d = STATE.data;
-  document.getElementById('sub').textContent =
-    'newest headline ' + (d.header.newest || '--') + ' \u00b7 ' + d.header.count
-    + ' items in the last ' + d.header.hours + 'h';
+  /* cc#993: the header stated "in the last 48h" while the query enforced 48h. The query no
+     longer does, so the claim goes with it — it now states the real span of what is on offer.
+     Never display a window the query does not apply. */
+  var hdr = 'newest headline ' + (d.header.newest || '--') + ' \u00b7 ' + d.header.count + ' items';
+  if (d.header.all_time) hdr += d.header.oldest ? ' \u00b7 all time, back to ' + d.header.oldest : ' \u00b7 all time';
+  else hdr += ' in the last ' + d.header.hours + 'h';
+  document.getElementById('sub').textContent = hdr;
 
   var total = d.header.count;
-  var chips = [{label:'All', n: total}].concat(d.chips);
-  document.getElementById('chips').innerHTML = chips.map(function(c){
-    return '<button class="chip' + (c.label === STATE.cat ? ' on' : '') + '" onclick="pick(\'' +
-      esc(c.label).replace(/'/g, "\\'") + '\')">' + esc(c.label) +
-      ' <span class="n">' + c.n + '</span></button>';
-  }).join('');
+  document.getElementById('chips').innerHTML = chipsHtml();
 
   var eds  = d.editorials || [], feed = d.feed || [];
   if (STATE.cat !== 'All') {
@@ -218,8 +266,8 @@ function render(){
   if (feed.length) html += '<div class="sect">THE FEED</div>'
                         + feed.map(function(a){ return card(a, 'feed'); }).join('');
   if (!html) html = '<div class="empty"><b>Nothing in this filter</b>'
-                  + 'No polished items in the last ' + d.header.hours + ' hours for '
-                  + esc(STATE.cat) + '.</div>';
+                  + 'Nothing loaded so far is filed under ' + esc(STATE.cat)
+                  + '. Keep scrolling \u2014 the feed goes back to the oldest story.</div>';
   document.getElementById('body').innerHTML = html + sentinelHtml();
   updateCover(eds.length + feed.length, total);
   armSentinel();
@@ -276,7 +324,7 @@ function loadMore(){
   PAGE.busy = true;
   var sent = document.getElementById('sentinel');
   if (sent) sent.textContent = 'Loading more…';
-  fetchWithTimeout('/api/mobile/intel?hours=48&limit=40&cursor=' + encodeURIComponent(PAGE.cursor))
+  fetchWithTimeout('/api/mobile/intel?limit=40&cursor=' + encodeURIComponent(PAGE.cursor))
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
@@ -295,6 +343,9 @@ function loadMore(){
       PAGE.busy = false;
       var s2 = document.getElementById('sentinel');
       if (s2) s2.outerHTML = sentinelHtml();
+      /* cc#993: the chip counts describe the LOADED set, so they have to be refreshed as pages
+         append — otherwise they would freeze at page 1 and understate every category. */
+      document.getElementById('chips').innerHTML = chipsHtml();
       updateCover(visibleCount(), (STATE.data.total != null ? STATE.data.total : d.header.count));
       armSentinel();
     })
@@ -328,7 +379,9 @@ function appendCards(newEds, newFeed){
 
 function pick(cat){ STATE.cat = cat; render(); }
 
-fetchWithTimeout('/api/mobile/intel?hours=48&limit=40')
+/* cc#993: no `hours` parameter — the endpoint's default is now the WHOLE table, newest to
+   oldest, and the keyset cursor walks it to the true oldest row. */
+fetchWithTimeout('/api/mobile/intel?limit=40')
   .then(function(r){ return r.json(); })
   .then(function(d){
     if (d.error) throw new Error(d.error);

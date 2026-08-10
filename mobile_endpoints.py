@@ -242,7 +242,7 @@ def _guard(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/intel")
 @_json_safe   # cc#887
-def mobile_intel(request: Request, hours: int = 48, limit: int = 40, cursor: str = ""):
+def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str = ""):
     """ONE call for the whole screen: header, chips and both content sections (item 6).
 
     Reads v_polished_articles, the canonical view — so cc#870's suppression is inherited for free
@@ -272,43 +272,46 @@ def mobile_intel(request: Request, hours: int = 48, limit: int = 40, cursor: str
             return {"error": "bad cursor", "editorials": [], "feed": [], "has_more": False}
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) AS n, MAX(display_time) AS newest
-                FROM v_polished_articles
-                WHERE display_time >= NOW() - (%s || ' hours')::interval
-            """, (hours,))
+            # cc#993: ONE window expression, built once, used by every query below. hours <= 0
+            # means NO CAP — the founder wants the feed to walk the whole table, newest to oldest,
+            # until it is exhausted. The parameter survives so an existing caller asking for 48
+            # still gets 48; the DEFAULT is now all-time.
+            # NOT "TRUE". A bare TRUE would let a NULL display_time through, and the keyset
+            # cursor compares `display_time < ...` — NULL fails that test, so such a row could
+            # appear once on page 1 and then be unreachable forever after. There are zero NULLs
+            # today (checked: 0 of 3,565), which is exactly when a guard is cheap to add and
+            # impossible to notice missing.
+            win = ("display_time IS NOT NULL" if hours <= 0
+                   else "display_time >= NOW() - (%s || ' hours')::interval")
+            wargs = [] if hours <= 0 else [hours]
+            cur.execute(
+                "SELECT COUNT(*) AS n, MAX(display_time) AS newest, MIN(display_time) AS oldest "
+                "FROM v_polished_articles WHERE " + win, wargs)
             head = _rows(cur)[0]
-            cur.execute("""
-                SELECT category, COUNT(*) AS n FROM v_polished_articles
-                WHERE display_time >= NOW() - (%s || ' hours')::interval
-                GROUP BY category ORDER BY n DESC
-            """, (hours,))
-            chips = _rows(cur)
+            # cc#993: the per-category counts are gone from the payload. They were WHOLE-WINDOW
+            # counts, and the client filters over the pages it has actually loaded — which was
+            # survivable over a 48-hour window and is not over 3,565 all-time rows, where a chip
+            # reading "Markets 1,800" above a list of twelve is simply false. The chips are now
+            # computed client-side from the loaded set, which is exactly what tapping one will
+            # show. The all-time total still ships, in header.count, where it is true.
             # +1 row is fetched to answer has_more without a second COUNT: if the extra row
             # comes back there is another page, and it is trimmed before shaping.
+            cols = ("SELECT polished_id, headline, summary, full_summary, category, sentiment, "
+                    "impact, mentioned_symbols, source_name, display_time "
+                    "FROM v_polished_articles WHERE " + win)
             if cur_time is None:
-                cur.execute("""
-                    SELECT polished_id, headline, summary, full_summary, category, sentiment, impact,
-                           mentioned_symbols, source_name, display_time
-                    FROM v_polished_articles
-                    WHERE display_time >= NOW() - (%s || ' hours')::interval
-                    ORDER BY display_time DESC NULLS LAST, polished_id DESC
-                    LIMIT %s
-                """, (hours, limit + 1))
+                cur.execute(cols + " ORDER BY display_time DESC NULLS LAST, polished_id DESC "
+                                   "LIMIT %s", wargs + [limit + 1])
             else:
-                # written as two comparisons rather than a row-constructor so it cannot trip on
-                # the column's exact timestamp type. display_time is never NULL inside this
-                # window — the WHERE above already excludes it — so NULLS LAST cannot bite here.
-                cur.execute("""
-                    SELECT polished_id, headline, summary, full_summary, category, sentiment, impact,
-                           mentioned_symbols, source_name, display_time
-                    FROM v_polished_articles
-                    WHERE display_time >= NOW() - (%s || ' hours')::interval
-                      AND (display_time < %s::timestamptz
-                           OR (display_time = %s::timestamptz AND polished_id < %s))
-                    ORDER BY display_time DESC NULLS LAST, polished_id DESC
-                    LIMIT %s
-                """, (hours, cur_time, cur_time, cur_id, limit + 1))
+                # cc#983, unchanged and deliberately NOT rewritten (this card says extend, not
+                # rewrite): written as two comparisons rather than a row constructor so it cannot
+                # trip on the column's exact timestamp type. `win` guarantees display_time is not
+                # NULL, so NULLS LAST cannot bite here either.
+                cur.execute(cols + " AND (display_time < %s::timestamptz"
+                                   "      OR (display_time = %s::timestamptz AND polished_id < %s))"
+                                   " ORDER BY display_time DESC NULLS LAST, polished_id DESC"
+                                   " LIMIT %s",
+                            wargs + [cur_time, cur_time, cur_id, limit + 1])
             arts = _rows(cur)
             has_more = len(arts) > limit
             arts = arts[:limit]
@@ -340,9 +343,13 @@ def mobile_intel(request: Request, hours: int = 48, limit: int = 40, cursor: str
             # fresh clock, but it can never show a fresh headline (16170).
             "newest": newest.strftime("%H:%M IST") if newest else None,
             "count": head["n"],
+            # cc#993: `hours` is 0 for the all-time feed and the client must not print a window
+            # the query no longer enforces. `oldest` is shipped so the header can state the REAL
+            # span of what it is offering instead of a number nobody applies any more.
             "hours": hours,
+            "all_time": hours <= 0,
+            "oldest": head["oldest"].strftime("%d %b %Y") if head["oldest"] else None,
         },
-        "chips": [{"label": c["category"] or "Uncategorised", "n": c["n"]} for c in chips],
         "editorials": editorials,
         "feed": feed,
         "shown": len(editorials) + len(feed),
