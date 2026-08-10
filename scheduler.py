@@ -543,13 +543,19 @@ def health_state() -> dict:
 
 def _bg_pivot_star():
     """cc#856: evaluate + log the pivot star. Named function (not a lambda) so _spawn records a
-    real job name in scheduler_master rather than '<lambda>' — SCHEDULER_MASTER_RULE 5700."""
-    try:
-        import v8_pivot_star
-        res = v8_pivot_star.run_tick()
-        log.info(f"pivot_star: {res}")
-    except Exception as e:
-        log.error(f"pivot_star: {e}")
+    real job name in scheduler_master rather than '<lambda>' — SCHEDULER_MASTER_RULE 5700.
+
+    cc#996 LOUD-FAILURE FIX: run_tick() returns {ok:false,error} instead of raising, and this
+    wrapper used to catch EVERYTHING and only log.error — so _run_recorded saw a clean return and
+    stamped scheduler_master last_status='ok' even while run_tick failed on every star for 5 days
+    (the text[]->date[] insert bug). Zero rows behind a green status is the silent-failure class the
+    FYERS learnings file calls out: a component that cannot do its job must ALARM, not idle. Now a
+    non-ok result is RE-RAISED so _run_recorded stamps last_status='error' with the real message."""
+    import v8_pivot_star
+    res = v8_pivot_star.run_tick()
+    log.info(f"pivot_star: {res}")
+    if isinstance(res, dict) and not res.get("ok"):
+        raise RuntimeError(f"pivot_star run_tick failed: {res.get('error')}")
 
 
 def _bg_signal_writer():

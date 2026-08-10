@@ -402,12 +402,20 @@ def run_tick(conn=None) -> Dict[str, Any]:
         wrote = 0
         with conn.cursor() as cur:
             for s in stars:
+                # cc#996 ROOT CAUSE: evaluate() returns touched_dates as a list of STRINGS (for the
+                # JSON API), and psycopg2 binds a Python str-list as a Postgres text[]. The column is
+                # date[], and Postgres does NOT implicitly assign text[] -> date[], so EVERY blue/red
+                # star (touched_dates is always present) raised "column ... is of type date[] but
+                # expression is of type text[]" — swallowed by run_tick's except, leaving the table
+                # empty for 5 days behind a green scheduler status. The explicit %s::date[] cast makes
+                # the text[] -> date[] conversion explicit and the insert succeeds. Activity rows have
+                # no touched_dates, which is why they were never the ones that failed.
                 cur.execute("""
                     INSERT INTO v8_pivot_star_log
                       (star_date, first_seen_ts, symbol, basket, direction, star_color,
                        level_name, level_value, pp, cmp_at_star, pct_from_level, near_pp,
                        day_1d, dma_50, touched_dates)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::date[])
                     ON CONFLICT (symbol, star_date, direction) DO NOTHING
                 """, (d, ts, s["symbol"], s["basket"], s["direction"], s["star_color"],
                       s["level_name"], s["level_value"], s["pp"], s["cmp_at_star"],
