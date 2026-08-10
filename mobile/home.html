@@ -452,7 +452,8 @@ function railHtml(r){
 var TRENDS = {
   adr: { title: 'ADR' },
   pcr: { title: 'NIFTY PCR' },
-  vix: { title: 'INDIA VIX' }
+  vix: { title: 'INDIA VIX' },
+  nifty: { title: 'NIFTY 50' }   /* cc#998: the three Home Nifty chips (Day/Week/Month) all open this one close series */
 };
 /* cc#908: a point label is a DATE on a daily series and a TIME on an intraday one. One helper
    decides, so the axis, the scrub readout and the tape charts can never disagree about it.
@@ -1976,9 +1977,14 @@ Promise.all([
     + '<div class="hchips">' + (hero.chips || []).map(function(c){
         var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
         var isAdr = String(c.label).indexOf('ADR') > -1;
+        // cc#998: the Nifty Day/Week/Month mood chips open the NIFTY50 close chart, exactly like ADR.
+        // tapKind ADDS the .tap affordance + togTrend handler; the pass/fail class `k` is untouched.
+        var isNifty = /nifty/i.test(String(c.label));
+        var tapKind = isAdr ? 'adr' : (isNifty ? 'nifty' : '');
         var val = (c.value == null) ? '--'
                 : (isAdr ? Number(c.value).toFixed(2) : pct(c.value));
-        return '<button class="hc' + k + (isAdr ? ' tap" onclick="togTrend(event,\'adr\')"' : '"') + '>'
+        return '<button class="hc' + k
+          + (tapKind ? ' tap" onclick="togTrend(event,\'' + tapKind + '\')"' : '"') + '>'
           + esc(c.label) + ' ' + esc(val) + '</button>';
       }).join('')
     /* founder 08-Aug batch 3: PCR/VIX chips carry colour. PCR >= 1.0 = puts heavy = supportive

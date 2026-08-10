@@ -166,9 +166,11 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
     if g:
         return g
     kind = (kind or "adr").lower()
-    if kind not in ("adr", "pcr", "vix"):
+    if kind not in ("adr", "pcr", "vix", "nifty"):
         kind = "adr"
     want = max(1, min(int(days or 30), 120))
+    # cc#998: nifty is a DAILY-only line — the Home Nifty Day/Week/Month chips are three deltas of the
+    # SAME NIFTY50 close series, so there is no per-chip intraday variant (unlike adr/pcr's 1D view).
     intraday = (want == 1 and kind in ("adr", "pcr"))
     note = None
 
@@ -207,6 +209,14 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
                     SELECT quote_date AS d, price AS v FROM global_indices
                     WHERE name = 'India VIX' AND price IS NOT NULL
                     ORDER BY quote_date DESC LIMIT %s
+                """, (dd,))
+            elif kind == "nifty":
+                # cc#998: NIFTY50 daily close series (raw_prices, price_date-keyed, same EOD source the
+                # digest reads). One line; the three Home chips (Day/Week/Month) all open it.
+                cur.execute("""
+                    SELECT price_date AS d, close AS v FROM raw_prices
+                    WHERE symbol = 'NIFTY50' AND close IS NOT NULL
+                    ORDER BY price_date DESC LIMIT %s
                 """, (dd,))
             else:
                 cur.execute("""
