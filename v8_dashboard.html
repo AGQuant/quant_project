@@ -2499,7 +2499,12 @@ function renderMaster(){
     totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
     winsTxt=cl.filter(x=>x.result==='TARGET').length;lossTxt=cl.filter(x=>x.result==='SL').length;
   }else if(MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
-    totalClosedPnl=Number(sum.total_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
+    // cc#999: totalClosedPnl is the GROSS shown in the sub-line, and netPnl() subtracts brokerage to
+    // get the net headline. sum.total_pnl is the canon REALISED (already net of brokerage, cc#970), so
+    // feeding it here deducted the Rs.500/trade TWICE — the card read Rs 4,30,990 when the canon net is
+    // Rs 4,52,490 (gross 4,73,990 − brokerage 21,500 ONCE). Use sum.gross_pnl so netPnl derives the
+    // true net, matching the mobile Home Closed Book (which already showed the canon net correctly).
+    totalClosedPnl=Number(sum.gross_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
     winsTxt=sum.wins??'--';lossTxt=sum.losses??'--';
   }else{
     const cl=((p&&p.recent_trades)||[])
@@ -2940,7 +2945,11 @@ function renderTradeLog(){
   // BOTH All/All and filtered (recent_trades holds every closed trade). pnl==0 = scratch -> neither.
   const bWins  =t.filter(x=>Number(x.pnl)>0).length;
   const bLosses=t.filter(x=>Number(x.pnl)<0).length;
-  const bPnl   =isAll?Number(s.total_pnl||0):t.reduce((a,x)=>a+Number(x.pnl||0),0);
+  // cc#999: bPnl is the GROSS (netPnl below derives the net, and the card prints it under "Gross").
+  // On the isAll path this read s.total_pnl — the canon REALISED, already net of brokerage (cc#970) —
+  // so netPnl deducted the Rs.500/trade a SECOND time (same slip as the Master card). Use s.gross_pnl
+  // so the isAll headline matches the recompute path (t.reduce is raw gross) and the canon net.
+  const bPnl   =isAll?Number(s.gross_pnl||0):t.reduce((a,x)=>a+Number(x.pnl||0),0);
   const bAvg   =isAll?Number(s.avg_ret||0):(t.length?t.reduce((a,x)=>a+Number(x.return_pct||0),0)/t.length:0);
   const bNet   =netPnl(bPnl,bTrades);
   // cc#372: AVG RET on a NET basis. Per-trade net return = gross return scaled by (pnl-brokerage)/pnl
