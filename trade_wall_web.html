@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wall of Trades · Scorr</title>
+<style>
+  :root{--bg:#f6f8fb;--panel:#fff;--card2:#f6f8fb;--line:#e8ecf2;--line2:#e8ecf2;
+        --txt:#1c2536;--mut:#667085;--dim:#9aa4b5;--blu:#2f6df4;--grn:#0f9d58;--red:#d0433b;}
+  :root[data-theme="dark"]{--bg:#0e1420;--panel:#141c2b;--card2:#182131;--line:#243044;--line2:#243044;
+        --txt:#e8eef7;--mut:#93a0b5;--dim:#6c7c93;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px}
+  .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
+  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:12px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
+       background:var(--panel);color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;
+       white-space:nowrap;min-height:38px;display:inline-flex;align-items:center;gap:6px}
+  .tab:hover{border-color:var(--blu)}
+  .tab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  .tab .n{font-size:10.5px;font-weight:800;opacity:.72}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
+  .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
+  thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;
+           font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);
+           border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  tbody tr:hover{background:var(--card2)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .sym{font-weight:800}
+  .pos{color:var(--grn)} .neg{color:var(--red)}
+  .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
+  /* tw- prefixed, same discipline as the mobile page */
+  .tw-ev{font-family:ui-monospace,monospace;font-size:9.5px;font-weight:800;letter-spacing:.09em;
+         padding:2px 7px;border-radius:5px}
+  .tw-in{color:var(--grn);background:rgba(15,157,88,.12)}
+  .tw-out-up{color:var(--grn);background:rgba(15,157,88,.12)}
+  .tw-out-dn{color:var(--red);background:rgba(208,67,59,.12)}
+  .tw-out-flat{color:var(--mut);background:var(--card2)}
+  .tw-tag{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut)}
+  .tw-day{font-family:ui-monospace,monospace;font-size:10px;font-weight:800;letter-spacing:.12em;
+          text-transform:uppercase;color:var(--dim);background:var(--card2)}
+  .tw-more{padding:16px;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:var(--mut)}
+  .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
+          color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
+  @media(max-width:760px){
+    .wrap{padding:12px 10px 64px}
+    thead th,tbody td{padding:7px 6px;font-size:12px}
+  }
+</style>
+
+<div class="wrap">
+  <div id="scorr-nav"></div>
+  <h1>Wall of Trades</h1>
+  <div class="sub">
+    Every entry and every exit from every engine that keeps a trade log, newest first. This page
+    computes nothing of its own — it renders <b>/api/tradewall</b>, the same endpoint the app
+    reads, so the two surfaces cannot disagree about a trade.
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="card">
+    <div class="meta" id="meta">Loading…</div>
+    <div class="scroll"><table id="tbl">
+      <thead><tr>
+        <th>Event</th><th>Time</th><th>Symbol</th><th>Side</th><th>Engine</th>
+        <th>Instrument</th><th class="num">Price</th><th class="num">Qty</th>
+        <th class="num">P&amp;L</th><th>Result</th><th>Detail</th>
+      </tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+    <div class="tw-more" id="more"></div>
+  </div>
+</div>
+
+<script src="/scorr_card_common.js"></script>
+<script>
+/* cc#991 — the WEB renderer of the Wall of Trades.
+
+   ONE COMPUTATION, TWO RENDERERS. The app screen (/m/trades) and this page both read
+   /api/tradewall. Nothing about a trade is derived here; the union, the engine labels, the
+   instrument classes and the timestamp handling all live in trade_wall_endpoints.py.
+
+   THE TWO HONESTY RULES CARRY OVER FROM THE APP PAGE:
+    * a DAY-PRECISION event (quant baskets, options exits — DATE columns with no time) prints its
+      date and the word "date only", never a fabricated 00:00 clock time;
+    * V14's P&L is a PERCENT and its table has no rupee column, so its exits leave the P&L cell
+      empty and carry the labelled "% net" in Detail. A percent in a rupee column is a false
+      number, and this table has a rupee column. */
+var STATE = { events: [], counts: {}, total: null, filter: 'ALL', instruments: ['EQUITY','FUTURES','OPTIONS'] };
+var PAGE  = { cursor: null, more: true, busy: false };
+var LIMIT = 100;
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function inr(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '';
+  var x = Number(v);
+  return (x < 0 ? '−' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function px(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return x < 100 ? x.toFixed(2) : Math.round(x).toLocaleString('en-IN');
+}
+function qty(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '';
+  return Math.round(Number(v)).toLocaleString('en-IN');
+}
+function evCls(e){
+  if (e.event === 'ENTRY') return 'tw-in';
+  if (e.pnl === null || e.pnl === undefined) return 'tw-out-flat';
+  return Number(e.pnl) > 0 ? 'tw-out-up' : (Number(e.pnl) < 0 ? 'tw-out-dn' : 'tw-out-flat');
+}
+
+function rowsHtml(list, startDay){
+  var h = '', day = startDay;
+  list.forEach(function(e){
+    if (e.day !== day){
+      day = e.day;
+      h += '<tr class="tw-day"><td colspan="11">' + esc(day || 'undated') + '</td></tr>';
+    }
+    var pnlCls = (e.pnl == null) ? '' : (Number(e.pnl) >= 0 ? 'pos' : 'neg');
+    h += '<tr>'
+      + '<td><span class="tw-ev ' + evCls(e) + '">' + esc(e.event) + '</span></td>'
+      /* when_full already reflects precision: a day event has no clock time in it */
+      + '<td class="tw-tag">' + esc(e.when_full || '--') + '</td>'
+      + '<td class="sym">' + esc(e.symbol) + '</td>'
+      + '<td>' + esc(e.side || '') + '</td>'
+      + '<td>' + esc(e.engine) + '</td>'
+      + '<td>' + esc(e.instrument) + '</td>'
+      + '<td class="num">' + px(e.price) + '</td>'
+      + '<td class="num">' + qty(e.qty) + '</td>'
+      + '<td class="num ' + pnlCls + '">' + (e.event === 'EXIT' ? inr(e.pnl) : '') + '</td>'
+      + '<td class="tw-tag">' + esc(e.result || '') + '</td>'
+      + '<td class="tw-tag">' + esc(e.note || '')
+        + (e.prec === 'day' ? (e.note ? ' · ' : '') + 'date only' : '') + '</td>'
+      + '</tr>';
+  });
+  return h;
+}
+
+function tabsHtml(){
+  var defs = [{k:'ALL', label:'All', n: STATE.total}];
+  STATE.instruments.forEach(function(k){
+    defs.push({k:k, label: k.charAt(0) + k.slice(1).toLowerCase(), n: (STATE.counts || {})[k]});
+  });
+  return defs.map(function(d){
+    /* whole-wall counts from the server, never a count of what happens to be loaded */
+    return '<button class="tab' + (d.k === STATE.filter ? ' on' : '') + '" onclick="pick(\'' + d.k + '\')">'
+      + esc(d.label) + (d.n == null ? '' : ' <span class="n">' + d.n + '</span>') + '</button>';
+  }).join('');
+}
+
+function moreHtml(){
+  if (PAGE.busy) return 'Loading…';
+  if (!PAGE.more) return 'That is the whole wall.';
+  return '<button class="tw-btn" onclick="loadMore()">Load more</button>';
+}
+
+function render(){
+  document.getElementById('tabs').innerHTML = tabsHtml();
+  var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
+  document.getElementById('meta').textContent =
+    'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of) + ' events'
+    + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
+  document.getElementById('body').innerHTML = STATE.events.length
+    ? rowsHtml(STATE.events, null)
+    : '<tr><td colspan="11" class="empty">No trade events for this filter.</td></tr>';
+  document.getElementById('more').innerHTML = moreHtml();
+}
+
+function url(cursor){
+  var u = '/api/tradewall?limit=' + LIMIT;
+  if (STATE.filter !== 'ALL') u += '&instrument=' + encodeURIComponent(STATE.filter);
+  if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
+  return u;
+}
+
+function loadMore(){
+  if (PAGE.busy || !PAGE.more || !PAGE.cursor) return;
+  PAGE.busy = true;
+  document.getElementById('more').innerHTML = moreHtml();
+  fetchWithTimeout(url(PAGE.cursor))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      PAGE.cursor = d.next_cursor || null;
+      PAGE.more   = !!(d.has_more && d.next_cursor);
+      /* de-dupe by id even though a keyset cursor should make repeats impossible — a duplicate
+         row is the one failure a reader would actually see */
+      var seen = {};
+      STATE.events.forEach(function(e){ seen[e.id] = 1; });
+      var last = STATE.events.length ? STATE.events[STATE.events.length - 1].day : null;
+      var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
+      document.getElementById('body').insertAdjacentHTML('beforeend', rowsHtml(fresh, last));
+      STATE.events = STATE.events.concat(fresh);
+      PAGE.busy = false;
+      var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
+      document.getElementById('meta').textContent =
+        'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of) + ' events';
+      document.getElementById('more').innerHTML = moreHtml();
+    })
+    .catch(function(e){
+      PAGE.busy = false;
+      document.getElementById('more').innerHTML =
+        'Could not load more · <button class="tw-btn" onclick="loadMore()">Retry</button>';
+    });
+}
+
+function pick(k){
+  if (k === STATE.filter) return;
+  STATE.filter = k; STATE.events = [];
+  PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
+  boot(true);
+}
+
+function boot(keepCounts){
+  fetchWithTimeout(url(null))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      STATE.events = d.events || [];
+      if (!keepCounts || STATE.total == null){
+        STATE.counts = d.counts || {};
+        STATE.total  = d.total;
+        if (d.instruments) STATE.instruments = d.instruments;
+      }
+      STATE.asOf  = d.as_of;
+      PAGE.cursor = d.next_cursor || null;
+      PAGE.more   = !!(d.has_more && d.next_cursor);
+      render();
+    })
+    .catch(function(e){
+      document.getElementById('meta').textContent = 'Could not load the wall — ' + e.message;
+      document.getElementById('body').innerHTML =
+        '<tr><td colspan="11" class="empty">Could not load the wall.</td></tr>';
+      document.getElementById('more').innerHTML = '';
+    });
+}
+
+boot(false);
+</script>
+</html>

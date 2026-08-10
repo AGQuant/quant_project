@@ -1122,6 +1122,13 @@ function render(){
     + '<a class="vc ref" href="/m/intel"><div class="vrow">'
     + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
     + '<div class="v-chev">\u203a</div></div></a>'
+    /* cc#991: the Wall of Trades — every entry and exit across every engine, not just V8's. It
+       belongs in More rather than in the book above, because the book on this screen is the V8
+       book and the wall deliberately is not. */
+    + '<a class="vc ref" href="/m/trades"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Wall of Trades</div>'
+    + '<div class="m">Every entry &amp; exit \u00b7 all engines</div></div>'
+    + '<div class="v-chev">\u203a</div></div></a>'
     + '</div>';
 
   document.getElementById('body').innerHTML = h;

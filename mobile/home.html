@@ -2105,7 +2105,7 @@ Promise.all([
     + '<div class="newslist" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'
     + '</div></a>';
 
-  /* 5 · TOOLS — 9 tiles, zero overlap with the six-slot nav (founder 08-Aug) */
+  /* 5 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
 
@@ -2133,7 +2133,12 @@ Promise.all([
     // cc#897 second pass: 12 -> 14. Routes taken from model_registry, not guessed \u2014 V10 is /v10
     // and V14 Intraday is /intraday there. Both open web pages, same 16915 exception as above.
     + '<a class="tool" href="/v10"><span>\u25d1</span>V10</a>'
-    + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>';
+    + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
+    // cc#991 (founder 10-Aug, grid_final amendment): APPEND the Wall of Trades tile. The grid was
+    // never capped at 12 — it already held 14 and the last row had an empty third slot — so this
+    // is the 15th tile filling that slot, not a reflow and not a displacement. It opens the APP
+    // screen /m/trades, unlike the web-page tiles above it.
+    + '<a class="tool" href="/m/trades"><span>\u2637\uFE0E</span>Wall of Trades</a>';
   document.getElementById('body').appendChild(tools);
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone

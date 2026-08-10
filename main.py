@@ -114,6 +114,7 @@ from mobile_endpoints import wants_mobile_home                 # cc#886 mobile e
 from mobile_home2 import router as mobile_home2_router         # cc#889 Home (market-first rebuild)
 from v8_book_canon import router as v8_book_canon_router     # cc#970 V8_PNL_CANON_V1 (rule 13)
 from mobile_ext import router as mobile_ext_router             # cc#892 breadth + cc#893 depth
+from trade_wall_endpoints import router as trade_wall_router    # cc#991 Wall of Trades
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -227,6 +228,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
                      "/screeners",   # cc#824
                      "/digest",      # cc#846
+                     "/trades",      # cc#991: Wall of Trades (web renderer)
                      "/adaptive"}   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
@@ -235,6 +237,7 @@ PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) 
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 PROTECTED.add("/screeners")   # cc#824: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
+PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 # cc#874: promoted mobile screens are login-gated like every other page. Added to PROTECTED
 # only — deliberately NOT to _PWA_INJECT_PATHS: pwa.js injects the DESKTOP navbar into
 # #scorr-nav, and these screens carry their own 5-slot bottom nav per 15913 (no tab rows,
@@ -243,6 +246,7 @@ PROTECTED.add("/m/intel"); PROTECTED.add("/m/positions")   # cc#874
 PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
 PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # cc#874
 PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
+PROTECTED.add("/m/trades")   # cc#991: Wall of Trades, app screen
 PROTECTED.add("/m/models")   # cc#886 slot 5
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
@@ -532,6 +536,7 @@ app.include_router(v8_futures_book_router)
 app.include_router(mobile_home2_router)
 app.include_router(v8_book_canon_router)
 app.include_router(mobile_ext_router)
+app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
@@ -1078,6 +1083,14 @@ NAV_REGISTRY = {
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
     "/m/models":     ("Models (mobile)",       "nav-mobile"),   # cc#886 bottom-nav slot 5
+    # cc#991: Wall of Trades. TWO routes, one endpoint. Neither carries a NAV-array entry, and
+    # that is the founder's own placement, not an oversight: the amendment put the web page in the
+    # V8 dashboard tab row "alongside Index Intel and TC Scanner", which is exactly the cc#853
+    # Digest precedent (a real page entered from that row, deliberately not in the site nav).
+    # The app screen is reached from the home tools grid and the /m/v8 More stack; the bottom nav
+    # stays at five items per the card's do_not_touch. Both are injected + PROTECTED above.
+    "/m/trades":     ("Wall of Trades (mobile)", "grid+more-stack"),
+    "/trades":       ("Wall of Trades (web)",    "v8-tab-row"),
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
     # accounts for every /m/ route rather than only the navigable ones.

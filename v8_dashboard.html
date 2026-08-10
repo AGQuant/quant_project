@@ -626,6 +626,12 @@
          navbar inside this one. So this is the single Digest ENTRY app-wide, styled identically to
          its siblings. -->
     <button class="v8toptab" data-pane="digest" onclick="location.href='/digest'">Digest</button>
+    <!-- cc#991 (founder 10-Aug): Wall of Trades sits in THIS row, alongside Index Intel and TC
+         Scanner, exactly as the amendment asked. It NAVIGATES rather than swapping in a pane, for
+         the same reason cc#853 gave for Digest: /trades is a full page with its own token block
+         and its own nav injection, so hosting it in a pane would nest a second navbar inside this
+         one. One entry app-wide. -->
+    <button class="v8toptab" data-pane="trades" onclick="location.href='/trades'">Wall of Trades</button>
   </div>
   <div id="pane-v8">
 
