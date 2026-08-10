@@ -579,9 +579,19 @@ def mobile_v8book(request: Request):
         "instrument_note": _NO_FUTURES_NOTE,
         "open": len(out),
         "positions": out,
-        "unrealised": round(unrl_total, 2) if out else None,
-        "deployed": round(dep_total, 2) if out else None,
-        "unrealised_pct": (round(unrl_total / dep_total * 100.0, 2) if dep_total else None),
+        # cc#979: the OPEN-book totals are the canon's too. cc#970 migrated the realised figures
+        # and left these three computing locally from the row loop — a rule-13 gap I left behind.
+        # They agree with the canon today (same scope, same arithmetic), but "agrees today" is not
+        # the contract: one formula, one place. The per-row `deployed` above stays local because
+        # it is a property of the row, not a book total.
+        "unrealised": canon["unrealised"],
+        "deployed": canon["deployed"],
+        "unrealised_pct": canon["unrealised_pct"],
+        "long": canon["long"],
+        "short": canon["short"],
+        # shipped so a divergence between the listed rows and the canon is VISIBLE, not silent
+        "rows_unrealised": round(unrl_total, 2) if out else None,
+        "rows_deployed": round(dep_total, 2) if out else None,
         # cc#970: every figure below comes from the canon. The cc#950 parity fix (realised NET of
         # brokerage, wins = TARGET, losses = SL) is not repeated here — it now lives in exactly one
         # place, v8_book_canon, and this page consumes it like every other surface.
