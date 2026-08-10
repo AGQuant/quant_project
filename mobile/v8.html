@@ -1085,15 +1085,21 @@ function m2(d){
         + ' onclick="lowBasket(\'' + esc(f.basket) + '\')">' + esc(f.label)
         + ' <i>' + f.n + '</i></button>';
     }).join('') + '</div>';
-  /* ONE headline metric per row, as the web funnel shows: the qualifying SCORE, plus the price it
-     qualified at. No second metric is invented here — v8_qualified carries score and cmp, and a
-     "reason" column does not exist on it, so nothing is dressed up as one. */
+  /* cc#985: the qualifying score is metrics->>'filter_score' out of filter_total — how many of
+     THIS basket's own filter rules the symbol passed — which is what the web funnel shows and
+     what "qualified" actually means. It is rendered as 9/10, not as a bare 9.0: the denominator
+     differs per basket (10, 9 and 8 across the three live baskets today), so a lone numerator
+     would silently compare unlike things down the column. cc#977 wrote `score` here, a column
+     that does not exist, and took the whole endpoint down — see cc#985. */
   var list = (cur.rows || []).map(function(r, i){
+    var sc = (r.score == null) ? '--'
+           : (Number(r.score) + (r.score_total ? '/' + Number(r.score_total) : ''));
     return '<div class="lfrow"><span class="rank">' + (i + 1) + '</span>'
       + '<span class="sym" onclick="ScorrSymbolCard&&ScorrSymbolCard.open(\'' + esc(r.symbol) + '\')"'
       + ' data-sym="' + esc(r.symbol) + '">' + esc(r.symbol) + '</span>'
-      + '<span class="why">' + (r.cmp == null ? '' : '\u20B9' + Math.round(r.cmp).toLocaleString('en-IN')) + '</span>'
-      + '<span class="sc">' + (r.score == null ? '--' : Number(r.score).toFixed(1)) + '</span></div>';
+      + '<span class="why">' + (r.cmp == null ? '' : '\u20B9' + Math.round(r.cmp).toLocaleString('en-IN'))
+      + (r.gvm == null ? '' : ' \u00b7 GVM ' + Number(r.gvm).toFixed(1)) + '</span>'
+      + '<span class="sc">' + sc + '</span></div>';
   }).join('') || '<div class="more">No qualifiers today.</div>';
   var right = '<span class="m mono" style="font-size:12px">' + fs.length + ' basket'
             + (fs.length === 1 ? '' : 's') + '</span>';

@@ -262,11 +262,23 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         drows = _rows(cur)
 
         # ── 2 · funnel top-N per basket, newest signal_date ──────────────────────────────────
+        # cc#985 FIX (my cc#977 regression): there is no `score` column on v8_qualified — the
+        # whole endpoint 500'd, taking all THREE lower modules down, not just the funnel.
+        # And gvm_score is NOT the right substitute either, which is why this reads filter_score:
+        # the web funnel (/api/v8/qualified/{basket}) surfaces metrics->>'filter_score' out of
+        # metrics->>'filter_total' as the QUALIFYING score — how many of that basket's own filter
+        # rules the symbol passed. gvm_score is the 0-10 GVM quality rating, a different question.
+        # Both ship: filter_score is the headline (it is what "qualified" means), gvm_score rides
+        # along because it is the other number the founder reads on a name.
         cur.execute("""
-            SELECT basket, symbol, score, cmp, signal_date
+            SELECT basket, symbol, gvm_score, cmp, signal_date,
+                   (metrics->>'filter_score')::numeric AS filter_score,
+                   (metrics->>'filter_total')::numeric AS filter_total
             FROM v8_qualified
             WHERE signal_date = (SELECT MAX(signal_date) FROM v8_qualified)
-            ORDER BY basket, score DESC NULLS LAST
+            ORDER BY basket,
+                     (metrics->>'filter_score')::numeric DESC NULLS LAST,
+                     gvm_score DESC NULLS LAST
         """)
         qrows = _rows(cur)
 
@@ -292,12 +304,23 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         """)
         srows = _rows(cur)
 
-        cur.execute("""
-            SELECT name, close, chg_pct FROM global_indices
-            WHERE UPPER(name) IN ('NIFTY50','NIFTY 50')
-            ORDER BY quote_date DESC LIMIT 1
-        """)
-        nifty = (_rows(cur) or [None])[0]
+    # cc#985 SECOND BAD COLUMN, found by auditing the rest of this endpoint rather than stopping
+    # at the reported one: global_indices has no `close` column (it is price/prev_close), AND it
+    # carries no Nifty row at all — so this card could never have rendered even once the column
+    # name was right. NIFTY50 does live in intraday_prices, but that index feed is the patchy one
+    # flagged in cc#940/952 (today: 21 bars against BANKNIFTY's 43). So this reuses
+    # domestic_live() — the same function mobile_home2 already uses for the Home ticker, which
+    # falls back to raw_prices when the live leg is thin. One source for the index level across
+    # the app, rather than a fourth private derivation.
+    nifty = None
+    try:
+        from v8_endpoints import domestic_live
+        _idx = (domestic_live() or {}).get("indices") or {}
+        _n = _idx.get("NIFTY50") or {}
+        if _n.get("close") is not None:
+            nifty = {"close": _n.get("close"), "chg_pct": _n.get("chg_pct")}
+    except Exception as e:
+        log.warning("v8lower: domestic_live unavailable (%s)", e)
 
     def f(v):
         return float(v) if v is not None else None
@@ -312,7 +335,11 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
     baskets = {}
     for r in qrows:
         baskets.setdefault(r["basket"], []).append({
-            "symbol": r["symbol"], "score": f(r["score"]), "cmp": f(r["cmp"]),
+            "symbol": r["symbol"],
+            "score": f(r["filter_score"]),          # the qualifying score (rules passed)
+            "score_total": f(r["filter_total"]),    # ...out of this basket's own rule count
+            "gvm": f(r["gvm_score"]),
+            "cmp": f(r["cmp"]),
         })
     funnel = [{"basket": b, "label": basket_label(b), "n": len(v), "rows": v[:top]}
               for b, v in sorted(baskets.items())]
@@ -333,7 +360,7 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         "signal_date": (qrows[0]["signal_date"].isoformat() if qrows else None),
         "segments": segs,
         "segment_count": len(segs),
-        "nifty": ({"close": f(nifty["close"]), "chg_pct": f(nifty["chg_pct"])} if nifty else None),
+        "nifty": nifty,
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
