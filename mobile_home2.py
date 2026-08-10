@@ -51,8 +51,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from mobile_endpoints import (
-    rail_state, basket_label, _conn, _rows, _ist_now, _guard, _json_safe, _page,
-    MARKET_OPEN, SESSION_END,
+    rail_state, feed_rail, feed_auction_ok, basket_label,
+    _conn, _rows, _ist_now, _guard, _json_safe, _page,
+    MARKET_OPEN, SESSION_END, FEED_SOURCES, FEED_AUCTION_SOURCES,
 )
 
 log = logging.getLogger("scorr.mobile.home2")
@@ -552,6 +553,14 @@ def mobile_home2(request: Request):
         # cc#970: the cutover lookup that used to live here is gone with the local book maths —
         # book_canon() resolves the era itself, and nothing else on this endpoint needs it.
 
+        # cc#984: the feed rail needs the REAL trading day, not the weekday shortcut above. A
+        # weekday holiday has no ticks by design, and calling that "Feed stale" is precisely the
+        # cc#841 false positive. nse_holidays is a list OF holidays — presence means shut.
+        # Deliberately scoped to the feed rail: the other rails keep the weekday rule they
+        # shipped with (this card's do_not_touch), and that gap is flagged in the result.
+        cur.execute("SELECT 1 FROM nse_holidays WHERE holiday_date = %s", (now.date(),))
+        is_td_feed = is_td and cur.fetchone() is None
+
         # 0 · ticker tail: latest global row per name (global_indices holds daily history;
         #     DISTINCT ON quote_date-desc is the honest "latest print", with its own date)
         cur.execute("""
@@ -645,6 +654,19 @@ def mobile_home2(request: Request):
         """)
         news_24h = cur.fetchone()[0]
 
+        # 5 · cc#984 · FEED freshness. Separate from the session clock: on 10-Aug the market was
+        #     open from 09:15 and the first tick of the day did not land until 10:40, and nothing
+        #     on this screen said so. MAX(ts) over the three live 5-min legs, TODAY only, naive
+        #     IST read raw (intraday_prices.ts is already IST — converting it is the cc#887 trap
+        #     in reverse). The auction tags join in only inside their own window.
+        _auction_ok = feed_auction_ok(now, is_td_feed)
+        cur.execute("""
+            SELECT MAX(ts) FROM intraday_prices
+            WHERE ts >= %s::date
+              AND (source = ANY(%s) OR (%s::boolean AND source = ANY(%s)))
+        """, (now.date(), list(FEED_SOURCES), _auction_ok, list(FEED_AUCTION_SOURCES)))
+        feed_last = cur.fetchone()[0]
+
     def f(v):
         return float(v) if v is not None else None
 
@@ -734,6 +756,13 @@ def mobile_home2(request: Request):
             "time": now.strftime("%H:%M"),
             "date": now.strftime("%a %d %b"),
             "label": ("Market open" if market_open else "Market closed") + " · " + now.strftime("%H:%M IST"),
+        },
+        # cc#984: the tick feed, told apart from the session clock. Computed here, server-side —
+        # the client never derives freshness from the phone's clock.
+        "feed": {
+            **feed_rail(feed_last, now, is_td_feed),
+            "last_bar": feed_last.strftime("%H:%M") if feed_last else None,
+            "sources": list(FEED_SOURCES),
         },
         "ticker": ticker,
         # retained one deploy for any cached template; the ticker replaces this grid

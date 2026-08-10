@@ -152,6 +152,60 @@ def rail_state(last_ts, cadence_min: float, now_ist: datetime, is_trading_day: b
             "why": f"last update {_ago(age)} — expected every {cadence_min:g} min"}
 
 
+# ── FEED rail (cc#984) ────────────────────────────────────────────────────────────────────────
+# The session clock and the DATA FEED are two different things. On 10-Aug the tape was dead from
+# 09:15 to 10:40 (first bar of the day landed at 10:40, verified in intraday_prices) and the app
+# said "Market open · 09:40 IST" the whole time — the outage was invisible. This tells the truth
+# about the tick feed, and it does it by EXTENDING rail_state, not by cloning it.
+FEED_SESSION_END = dt_time(15, 30)   # cash close. Deliberately EARLIER than SESSION_END (15:40):
+                                     # the fut leg's 15:30-15:40 tail is thin, and an amber badge
+                                     # in that tail would be the cc#841 false positive again.
+                                     # CLOSED beats STALE at the boundary.
+FEED_WARM_UNTIL  = dt_time(9, 25)    # first 5-min bucket + margin
+FEED_AUCTION_FROM = dt_time(15, 15)  # cc#912/980 auction window ...
+FEED_AUCTION_TO   = dt_time(15, 45)  # ... 15:15-15:35, plus the 10-min freshness lookback
+
+# The live 5-min legs. fyers_fut_rest is EXCLUDED on purpose: it is the REST-degraded fallback
+# (cc#883/884) on its own slower cadence, so counting it would report a healthy feed while the
+# websocket is down — the exact failure this badge exists to catch.
+FEED_SOURCES = ("fyers_eq", "fyers_fut", "fyers_ext")
+# Category I cash between 15:15 and 15:35 has no continuous market; its bars are re-tagged by the
+# worker (cc#855). They are still the feed breathing, so they count — but ONLY inside that window,
+# which is the same containment rule worker/fyers_feed.py's auction_ok applies. Importing that
+# rule from the worker is not possible here (the module opens a websocket at import), so the
+# window is restated, not the counting logic: it lives in one SQL predicate below.
+FEED_AUCTION_SOURCES = ("fyers_eq_auction", "auction")
+
+_FEED_LABEL = {"LIVE": "Feed live", "STALE": "Feed stale", "CLOSED": "Feed closed"}
+
+
+def feed_auction_ok(now_ist: datetime, is_trading_day: bool = True) -> bool:
+    """Does the freshness window overlap the 15:15-15:35 auction? (cc#912 containment rule.)"""
+    return bool(is_trading_day and FEED_AUCTION_FROM <= now_ist.time() <= FEED_AUCTION_TO)
+
+
+def feed_rail(last_ts, now_ist: datetime, is_trading_day: bool = True,
+              cadence_min: float = 5.0) -> dict:
+    """LIVE / STALE / CLOSED / warming, for the tick feed. Same shape as rail_state plus `label`.
+
+    Reuses rail_state for the state machine. The feed session is narrowed to 09:15-15:30 by
+    handing rail_state `in_session` as its trading-day flag — an intersection, not a second copy
+    of the clock. Two things are added on top:
+      * the WARMING grace (founder amendment 10-Aug): before 09:25 no bucket has closed yet, so
+        an empty MAX(ts) is normal, not a fault. Amber there would cry wolf every morning.
+      * a plain-language `label`, because "REFERENCE" means nothing to a reader.
+    """
+    t = now_ist.time()
+    in_session = bool(is_trading_day and MARKET_OPEN <= t <= FEED_SESSION_END)
+    if in_session and t < FEED_WARM_UNTIL and (
+            last_ts is None or getattr(last_ts, "date", lambda: None)() != now_ist.date()):
+        return {"state": "REFERENCE", "label": "Feed warming", "age_min": None,
+                "why": "session just opened · first 5-min bar due by 09:25"}
+    r = rail_state(last_ts, cadence_min, now_ist, in_session)
+    r["label"] = _FEED_LABEL.get(r["state"], "Feed " + r["state"].lower())
+    return r
+
+
 def _ago(m) -> str:
     if m is None:
         return "never"

@@ -339,13 +339,28 @@
   letter-spacing:.04em;white-space:nowrap;color:var(--dim)}
 .v10r .stt.long{color:var(--grn)}
 .v10r .stt.short{color:var(--red)}
+
+/* cc#984 · header right column: session line over the feed rail.
+   `hdr-` prefixed on purpose. This app has now collided FIVE times on short generic class names
+   (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a) because mobile_app.css owns one-letter classes;
+   a bare `.r` here would have been the sixth. The rail itself reuses .rail/.rail-* from
+   mobile_app.css — no new badge styling is invented. */
+.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none}
+.hdr-r .s{margin-top:0;white-space:nowrap}
+.hdr-r .rail{white-space:nowrap}
 </style>
 </head>
 <body>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
-    <div class="s" id="sess">loading…</div>
+    <!-- cc#984: session clock AND feed freshness, stacked right. Two different truths — the
+         market can be open while the tape is dead, which is exactly what happened on 10-Aug
+         (first tick of the day at 10:40) with nothing on this screen saying so. -->
+    <div class="hdr-r">
+      <div class="s" id="sess">loading…</div>
+      <span id="feedrail"></span>
+    </div>
   </div>
 
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
@@ -425,7 +440,10 @@ function moodColor(m){
 function railHtml(r){
   if (!r) return '';
   var s = (r.state || 'CLOSED').toLowerCase();
-  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+  /* cc#984: `label` lets a rail read in plain words ("Feed live") while `state` still drives the
+     CSS class, so the four shapes stay the four shapes. Rails without a label are unchanged. */
+  var txt = r.label || r.state;
+  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(txt) + '</span>';
 }
 /* ── chip trend popup: SVG LINE CHART (website chart style) from /api/mobile/trends ─────────
    founder 08-Aug: the cc#894 pickers guessed other endpoints' JSON keys and rendered "--";
@@ -1905,6 +1923,11 @@ Promise.all([
   if (d.error) throw new Error(d.error);
 
   document.getElementById('sess').textContent = d.session.label;
+  /* cc#984: feed freshness beside the clock. Server-computed — the client renders it, it never
+     works it out. A payload without `feed` (cached shell mid-deploy) simply shows nothing rather
+     than guessing a state. */
+  var fr = document.getElementById('feedrail');
+  if (fr) fr.innerHTML = railHtml(d.feed);
 
   var h = '';
 
