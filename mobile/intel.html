@@ -220,9 +220,110 @@ function render(){
   if (!html) html = '<div class="empty"><b>Nothing in this filter</b>'
                   + 'No polished items in the last ' + d.header.hours + ' hours for '
                   + esc(STATE.cat) + '.</div>';
-  document.getElementById('body').innerHTML = html;
-  document.getElementById('cover').textContent =
-    'showing ' + (eds.length + feed.length) + ' of ' + total;
+  document.getElementById('body').innerHTML = html + sentinelHtml();
+  updateCover(eds.length + feed.length, total);
+  armSentinel();
+}
+
+/* ══ cc#983 — INFINITE SCROLL ═══════════════════════════════════════════════════════════════
+   The screen used to fetch 40 items once and stop: the founder's cover line read "showing 2 of
+   95" with no way to reach the other 93 without leaving the page.
+
+   WHY APPEND AND NOT RE-RENDER. render() rebuilds #body from scratch, which is right for a
+   filter change and wrong for a scroll: rebuilding mid-scroll throws away the DOM under the
+   founder's thumb and the browser drops his scroll position with it. So a loaded page is
+   APPENDED — the existing cards are never touched — and only the filter path rebuilds.
+
+   WHY A KEYSET CURSOR AND NOT A PAGE NUMBER: see the endpoint. Short version, an OFFSET would
+   skip or repeat rows the moment a story is polished while you are scrolling.
+
+   PAGING IS UNFILTERED ON PURPOSE (item 3): the fetch always pulls the next slice of the FULL
+   set and the chip filter is applied client-side over everything loaded so far. Filtering
+   server-side would make the chip counts lie about a set the client only partly holds. */
+var PAGE = { cursor: null, more: true, busy: false, obs: null };
+
+function sentinelHtml(){
+  if (!PAGE.more) return '<div class="sum" id="sentinel" style="padding:18px 2px;text-align:center">'
+    + 'You are all caught up.</div>';
+  return '<div class="sum" id="sentinel" style="padding:18px 2px;text-align:center">'
+    + (PAGE.busy ? 'Loading more…' : '\u00a0') + '</div>';
+}
+function updateCover(shown, total){
+  var el = document.getElementById('cover');
+  if (el) el.textContent = 'showing ' + shown + ' of ' + total;
+}
+function visibleCount(){
+  var d = STATE.data || {};
+  var eds = d.editorials || [], feed = d.feed || [];
+  if (STATE.cat !== 'All'){
+    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
+    feed = feed.filter(function(a){ return a.category === STATE.cat; });
+  }
+  return eds.length + feed.length;
+}
+function armSentinel(){
+  if (PAGE.obs){ PAGE.obs.disconnect(); PAGE.obs = null; }
+  var el = document.getElementById('sentinel');
+  if (!el || !PAGE.more) return;
+  if (!('IntersectionObserver' in window)) return;   // no observer: the page simply stays one-shot
+  PAGE.obs = new IntersectionObserver(function(entries){
+    if (entries.some(function(e){ return e.isIntersecting; })) loadMore();
+  }, {rootMargin: '400px'});                          // start early so the wait is invisible
+  PAGE.obs.observe(el);
+}
+function loadMore(){
+  if (PAGE.busy || !PAGE.more || !PAGE.cursor) return;
+  PAGE.busy = true;
+  var sent = document.getElementById('sentinel');
+  if (sent) sent.textContent = 'Loading more…';
+  fetchWithTimeout('/api/mobile/intel?hours=48&limit=40&cursor=' + encodeURIComponent(PAGE.cursor))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      PAGE.cursor = d.next_cursor || null;
+      PAGE.more   = !!(d.has_more && d.next_cursor);
+      var d0 = STATE.data;
+      /* de-dupe by id even though the keyset cursor should make repeats impossible — a duplicate
+         card is the one failure a user would actually SEE, so it is cheap insurance. */
+      var seen = {};
+      (d0.editorials || []).concat(d0.feed || []).forEach(function(a){ seen[a.id] = 1; });
+      var newEds  = (d.editorials || []).filter(function(a){ return !seen[a.id]; });
+      var newFeed = (d.feed || []).filter(function(a){ return !seen[a.id]; });
+      d0.editorials = (d0.editorials || []).concat(newEds);
+      d0.feed       = (d0.feed || []).concat(newFeed);
+      appendCards(newEds, newFeed);
+      PAGE.busy = false;
+      var s2 = document.getElementById('sentinel');
+      if (s2) s2.outerHTML = sentinelHtml();
+      updateCover(visibleCount(), (STATE.data.total != null ? STATE.data.total : d.header.count));
+      armSentinel();
+    })
+    .catch(function(e){
+      PAGE.busy = false;
+      var s3 = document.getElementById('sentinel');
+      if (s3) s3.innerHTML = 'Could not load more \u00b7 '
+        + '<button class="chip" onclick="loadMore()">Retry</button>';
+    });
+}
+function appendCards(newEds, newFeed){
+  /* respects the active chip: a page loads the full set, but only what matches is rendered now.
+     The rest stays in STATE and appears if the founder switches back to All. */
+  var eds = newEds, feed = newFeed;
+  if (STATE.cat !== 'All'){
+    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
+    feed = feed.filter(function(a){ return a.category === STATE.cat; });
+  }
+  if (!eds.length && !feed.length) return;
+  var body = document.getElementById('body');
+  var sent = document.getElementById('sentinel');
+  var html = '';
+  /* every appended editorial is FOLDED: the one 'open' reading card is the first on the screen
+     (cc#890), and a scroll must not mint a second one. */
+  if (eds.length)  html += eds.map(function(a){ return card(a, 'folded'); }).join('');
+  if (feed.length) html += feed.map(function(a){ return card(a, 'feed'); }).join('');
+  var frag = document.createElement('div');
+  frag.innerHTML = html;
+  while (frag.firstChild) body.insertBefore(frag.firstChild, sent);
 }
 
 function pick(cat){ STATE.cat = cat; render(); }
@@ -232,6 +333,8 @@ fetchWithTimeout('/api/mobile/intel?hours=48&limit=40')
   .then(function(d){
     if (d.error) throw new Error(d.error);
     STATE.data = d;
+    PAGE.cursor = d.next_cursor || null;
+    PAGE.more   = !!(d.has_more && d.next_cursor);
     render();
   })
   .catch(function(e){

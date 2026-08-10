@@ -188,7 +188,7 @@ def _guard(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 @router.get("/api/mobile/intel")
 @_json_safe   # cc#887
-def mobile_intel(request: Request, hours: int = 48, limit: int = 40):
+def mobile_intel(request: Request, hours: int = 48, limit: int = 40, cursor: str = ""):
     """ONE call for the whole screen: header, chips and both content sections (item 6).
 
     Reads v_polished_articles, the canonical view — so cc#870's suppression is inherited for free
@@ -201,6 +201,21 @@ def mobile_intel(request: Request, hours: int = 48, limit: int = 40):
         return g
     hours = max(1, min(hours, 168))
     limit = max(1, min(limit, 100))
+    # ── cc#983: KEYSET CURSOR, not OFFSET ────────────────────────────────────────────────────
+    # The sort key is (display_time DESC, polished_id DESC). An OFFSET would silently skip or
+    # repeat rows the moment a new story is polished mid-scroll — every later page shifts by one.
+    # A keyset cursor is anchored to the last row the client actually holds, so a story arriving
+    # during a scroll cannot corrupt the page after it. Format "<iso>|<id>", opaque to the client:
+    # it only ever echoes back what the previous response handed it.
+    cur_time = cur_id = None
+    if cursor:
+        try:
+            _t, _i = str(cursor).rsplit("|", 1)
+            cur_time, cur_id = _t, int(_i)
+        except Exception:
+            # a malformed cursor must not silently serve page 1 again — that is an infinite
+            # scroll that never advances and looks like duplicate content.
+            return {"error": "bad cursor", "editorials": [], "feed": [], "has_more": False}
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -215,15 +230,34 @@ def mobile_intel(request: Request, hours: int = 48, limit: int = 40):
                 GROUP BY category ORDER BY n DESC
             """, (hours,))
             chips = _rows(cur)
-            cur.execute("""
-                SELECT polished_id, headline, summary, full_summary, category, sentiment, impact,
-                       mentioned_symbols, source_name, display_time
-                FROM v_polished_articles
-                WHERE display_time >= NOW() - (%s || ' hours')::interval
-                ORDER BY display_time DESC NULLS LAST, polished_id DESC
-                LIMIT %s
-            """, (hours, limit))
+            # +1 row is fetched to answer has_more without a second COUNT: if the extra row
+            # comes back there is another page, and it is trimmed before shaping.
+            if cur_time is None:
+                cur.execute("""
+                    SELECT polished_id, headline, summary, full_summary, category, sentiment, impact,
+                           mentioned_symbols, source_name, display_time
+                    FROM v_polished_articles
+                    WHERE display_time >= NOW() - (%s || ' hours')::interval
+                    ORDER BY display_time DESC NULLS LAST, polished_id DESC
+                    LIMIT %s
+                """, (hours, limit + 1))
+            else:
+                # written as two comparisons rather than a row-constructor so it cannot trip on
+                # the column's exact timestamp type. display_time is never NULL inside this
+                # window — the WHERE above already excludes it — so NULLS LAST cannot bite here.
+                cur.execute("""
+                    SELECT polished_id, headline, summary, full_summary, category, sentiment, impact,
+                           mentioned_symbols, source_name, display_time
+                    FROM v_polished_articles
+                    WHERE display_time >= NOW() - (%s || ' hours')::interval
+                      AND (display_time < %s::timestamptz
+                           OR (display_time = %s::timestamptz AND polished_id < %s))
+                    ORDER BY display_time DESC NULLS LAST, polished_id DESC
+                    LIMIT %s
+                """, (hours, cur_time, cur_time, cur_id, limit + 1))
             arts = _rows(cur)
+            has_more = len(arts) > limit
+            arts = arts[:limit]
     except Exception as e:
         log.exception("mobile intel failed")
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "articles": [], "count": 0}
@@ -258,6 +292,14 @@ def mobile_intel(request: Request, hours: int = 48, limit: int = 40):
         "editorials": editorials,
         "feed": feed,
         "shown": len(editorials) + len(feed),
+        # cc#983: the cursor for the NEXT page, built from the last row actually returned. None
+        # when there is nothing further, so the client stops observing instead of spinning.
+        "next_cursor": (f"{arts[-1]['display_time'].isoformat()}|{arts[-1]['polished_id']}"
+                        if (arts and has_more) else None),
+        "has_more": has_more,
+        "total": head["n"],
+        # kept for the first paint; the client recomputes it as pages append (item 5), because
+        # after a scroll this string would otherwise still claim "showing 40".
         "coverage": f"showing {len(editorials) + len(feed)} of {head['n']}",
     }
 
