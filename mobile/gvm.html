@@ -1,4 +1,25 @@
 <!doctype html>
+<!-- ══ DESIGN AUTHORITY = previews/gvm.html — do not restyle without a founder card ══════════
+     (cc#978 item 3.) That file is the immutable design record, viewable at /preview/gvm. Any
+     change to the report card's shape, accents, hierarchy or type scale needs a card that names
+     it. Shared-module constraints still apply on top: scorr_mobile_cards.js roles and the card
+     grammar in session_log 16157.
+
+     WHERE THE FINISH ACTUALLY LIVES, so the next person does not look for it here: cc#897 folded
+     this page's 12 CSS blocks into the shared sheet (mobile_app.css, served at
+     /static/mobile_app.css). The report card's tokens — .rep, .verd, .bar, .fill, .pil, .pr,
+     .punch, .acts — are defined THERE, not in this file. previews/gvm.html is standalone and
+     carries its own copy of the whole app shell inline, so a token-for-token diff against it will
+     look like total divergence when the two are in fact identical. Compare against the shared
+     sheet, not against the preview's inline <style>.
+
+     cc#978 DIFF RESULT (09-Aug, measured, no restyle applied): every shared token matches the
+     preview exactly — .rep background/border/radius/padding, the 3px accent rail, .verd, the
+     pillar bars, .punch. The three differences are deliberate improvements, not drift:
+       .a       min-height 40px -> 44px   (touch minimum, framework 15913)
+       .verd/.fill  var(--grn) -> var(--rc, var(--grn))   (tint by score band)
+       .sc      dropped its hardcoded green; the leaderboard tints per row by score
+     Plus .gvmv (the 36px score headline) and .src, which the preview never had at all. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
