@@ -2945,21 +2945,52 @@ def run(auth_code=None):
         read now genuinely means the DB/network is down, not a stale shared conn."""
         hc = None
         try:
-            cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
+            now_ist = datetime.now(IST).replace(tzinfo=None)
+            cutoff = now_ist - timedelta(minutes=minutes)
+            # ── cc#980 item 1: SESSION-AWARE COUNTING ──────────────────────────────────────────
+            # cc#855 retags Category I cash bars as fyers_eq_auction (15:15-15:30) and auction
+            # (15:30-15:35). This function only counted fyers_eq/fyers_fut/fyers_ext, so during
+            # the auction the eq leg read ZERO while bars were landing perfectly well under the
+            # auction tags. On 07-Aug a 15:28 boot ran the canary, saw that zero, called ZERO
+            # TICKS, forced a close at 15:30:11 and killed the worker for three days.
+            # The auction sources are counted TOWARD THE eq LEG, and only when the query window
+            # actually overlaps 15:15-15:35 on a trading day — outside that window an auction-
+            # tagged row is stale data and must not prop the eq count up. Reported MERGED, because
+            # every caller is asking "is the equity leg alive", and during the auction these tags
+            # ARE the equity leg. Nothing about tagging or retention changes here (do_not_touch).
+            auction_ok = False
+            try:
+                auction_ok = (is_trading_day(now_ist.date())
+                              and cutoff.time() <= EQ_AUCTION_END
+                              and now_ist.time() >= EQ_CONTINUOUS_END)
+            except Exception:
+                auction_ok = False
+            wanted = ['fyers_eq', 'fyers_fut', EXT_SOURCE]
+            if auction_ok:
+                wanted += [AUCTION_WINDOW_SOURCE, AUCTION_CLOSE_SOURCE]
             hc = get_db()
             with hc.cursor() as cur:
                 cur.execute("""
                     SELECT source, COUNT(DISTINCT symbol) FROM intraday_prices
-                    WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut',%s)
+                    WHERE timeframe='5m' AND source = ANY(%s)
                       AND ts >= %s
                     GROUP BY source
-                """, (EXT_SOURCE, cutoff))
+                """, (wanted, cutoff))
                 # cc#809: fyers_ext is REPORTED here but deliberately NOT part of the watchdog's
                 # health test below — that test stays eq/fut only. The extended leg is additive
                 # context; a healthy 1,500-symbol extended count must never be able to mask a dead
                 # F&O leg, and an extended leg that never subscribes must never trip a restart.
                 counts = {'fyers_eq': 0, 'fyers_fut': 0, EXT_SOURCE: 0}
-                counts.update({row[0]: row[1] for row in cur.fetchall()})
+                raw = {row[0]: row[1] for row in cur.fetchall()}
+                counts.update({k: v for k, v in raw.items() if k in counts})
+                if auction_ok:
+                    # merged into the eq leg, and the parts kept alongside so a log line can still
+                    # say WHY eq is non-zero during the auction rather than looking like magic.
+                    a_win = raw.get(AUCTION_WINDOW_SOURCE, 0)
+                    a_cls = raw.get(AUCTION_CLOSE_SOURCE, 0)
+                    if a_win or a_cls:
+                        counts['fyers_eq'] = counts.get('fyers_eq', 0) + a_win + a_cls
+                        counts['_auction_merged'] = a_win + a_cls
                 return counts
         except Exception as e:
             log.warning(f"_recent_symbol_counts_by_source: {e}")
@@ -3028,8 +3059,32 @@ def run(auth_code=None):
         re-subscribes the full universe. cc#759 fix3: the close is timeout-guarded (os._exit on
         hang). cc#876: the RECONNECT that follows is now deadline-guarded too."""
         _RECONNECT_CONFIRMED.clear()
+        # ── cc#980 item 3: THE RECONNECT NOBODY WAS MAKING ────────────────────────────────────
+        # The cc#876 deadline thread waited RECONNECT_DEADLINE_S for an on_connect that could
+        # never arrive: an explicit close_connection() STOPS the SDK's reconnect=True loop, so
+        # after a forced close nothing was dialling out. The deadline was therefore not a guard,
+        # it was a countdown to os._exit(1) — which is precisely how 07-Aug ended.
+        # Now the deadline thread makes the call itself, after the close has returned, so the
+        # guard has a real reconnect to confirm. A connect() that RAISES still exits(1): that is
+        # the cc#876 contract (ticking or dead-and-restarting, never silent) and it stays.
+        _closed = threading.Event()
 
         def _deadline():
+            # never dial out while the close is still in flight — that is the one ordering that
+            # could leave two sockets racing. _forced_close self-exits if it hangs, so a timeout
+            # here means the process is already on its way down.
+            _closed.wait(30)
+            try:
+                fyers_ws.connect()
+                log.info("FEED: reconnect dialled after forced close (cc#980)")
+            except Exception as e:
+                log.critical(f"FEED: reconnect connect() raised after forced close: {e} "
+                             "— os._exit(1) for a clean Railway restart (cc#876 contract).")
+                try:
+                    _log_feed_incident("feed_reconnect_connect_failed", str(e)[:200])
+                except Exception:
+                    pass
+                os._exit(1)
             if _RECONNECT_CONFIRMED.wait(RECONNECT_DEADLINE_S):
                 log.info(f"FEED: reconnect confirmed within {RECONNECT_DEADLINE_S}s (cc#876)")
                 return
@@ -3044,7 +3099,10 @@ def run(auth_code=None):
             os._exit(1)
 
         threading.Thread(target=_deadline, daemon=True).start()
-        _forced_close("watchdog/force reconnect")
+        try:
+            _forced_close("watchdog/force reconnect")
+        finally:
+            _closed.set()
 
     def _log_feed_incident(kind, detail):
         """cc_task #112: record each watchdog action to ops_log (category=alert)
@@ -3318,6 +3376,25 @@ def run(auth_code=None):
             if _attempt(trigger):
                 _sub_state['done'] = True
                 _sub_state['last_ok'] = time.monotonic()   # cc#759 fix1: idempotency anchor
+                return
+            # ── cc#980 item 2: LATE-SESSION SEQUENCE GUARD ────────────────────────────────
+            # A forced reconnect minutes before the close has negative expected value. Best case
+            # it recovers ~5 minutes of bars; worst case it is exactly what happened on 07-Aug —
+            # close_connection stopped the SDK's reconnect loop, the deadline guard fired
+            # os._exit(1) at ~15:32, Railway's restart budget was already spent, and the worker
+            # stayed dead for three days over the weekend. So from 15:10 the verdict is
+            # REPORT-ONLY: log it, record it, and let the session end on its own.
+            try:
+                _late = (is_trading_day(datetime.now(IST).date())
+                         and datetime.now(IST).time() >= dt_time(15, 10))
+            except Exception:
+                _late = False
+            if _late:
+                log.error(f"subscribe sequence ({trigger}): canary showed ZERO ticks after 15:10 — "
+                          "REPORT ONLY, no reconnect (cc#980). Session ends shortly; a reconnect "
+                          "here can only cost the worker, not save the day.")
+                _log_feed_incident("feed_canary_late_session",
+                                   f"{trigger}: zero ticks after 15:10 — report-only, no reconnect")
                 return
             log.error(f"subscribe sequence ({trigger}): canary showed ZERO ticks — forcing "
                       "reconnect and retrying once")
