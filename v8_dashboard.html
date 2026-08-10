@@ -1741,7 +1741,11 @@ let _qaTfFib=null,_qaTfSwing=null;   // cc#668: per-timeframe fib (chart overlay
 let _qa5dRange=5;   // cc#669: 5m tab session range — 1D / 5D / 20D
 let _qaOv={pivot:false,fib:false};
 try{const _o=localStorage.getItem('qa_chart_overlay')||'none';_qaOv={pivot:_o==='pivot'||_o==='both',fib:_o==='fib'||_o==='both'};}catch(e){}
-const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365,'ALL':'all'};   // null=>intraday 5m; 'all'=>full history; else /api/candles days
+// cc#990: unified with the shared ScorrChartCard row (cc#752 keeps these two in step) —
+// 1D · 1W · 1M · 3M · 1Y · ALL. 6M dropped, 1W added, and the intraday frame keeps its internal
+// '5m' key while the BUTTON reads 1D, exactly as the shared card does. Same reason: every
+// isIntraday branch below tests _QA_TF[tf]===null via that key.
+const _QA_TF={'5m':null,'1W':7,'1M':30,'3M':90,'1Y':365,'ALL':'all'};   // null=>intraday 5m; 'all'=>full history; else /api/candles days
 // cc#669: ALL user-facing chart times = IST (Asia/Kolkata), one shared formatter. Intraday bars carry
 // TRUE instants (epoch secs, IST-naive ts parsed as +05:30 upstream); daily bars are BusinessDay/date.
 // cc#673: date labels carry the YEAR (dd Mon YY / Mon YY) so multi-year windows (6M/1Y/ALL) aren't
@@ -1789,10 +1793,10 @@ function qaChart(sym){
         <b id="qaChartTitle" style="font-size:14px"></b>
         <span id="qaChartCard" style="margin-left:8px;display:inline-flex;vertical-align:middle"></span>
         <span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          <button id="qaTf_5m" class="qa-tf" onclick="qaChartLoad('5m')">5m</button>
+          <button id="qaTf_5m" class="qa-tf" onclick="qaChartLoad('5m')">1D</button>
+          <button id="qaTf_1W" class="qa-tf" onclick="qaChartLoad('1W')">1W</button>
           <button id="qaTf_1M" class="qa-tf" onclick="qaChartLoad('1M')">1M</button>
           <button id="qaTf_3M" class="qa-tf" onclick="qaChartLoad('3M')">3M</button>
-          <button id="qaTf_6M" class="qa-tf" onclick="qaChartLoad('6M')">6M</button>
           <button id="qaTf_1Y" class="qa-tf" onclick="qaChartLoad('1Y')">1Y</button>
           <button id="qaTf_ALL" class="qa-tf" onclick="qaChartLoad('ALL')" title="Full stored history (daily, weekly-downsampled beyond ~1500 bars)">ALL</button>
           <span id="qa5dRange" style="display:none;gap:3px;align-items:center">

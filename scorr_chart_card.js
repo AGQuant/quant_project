@@ -8,7 +8,7 @@
  * API:  window.ScorrChartCard.open(symbol, {theme:'light'|'dark'})
  *       theme auto-detected from the host page when omitted (light on GVM/SmartGain, dark on V8-like).
  *
- * Data:  daily 1M/3M/6M/1Y/3Y/ALL -> GET /api/candles/{sym}?days=N  (raw_prices; all stocks)
+ * Data:  daily 1W/1M/3M/1Y/ALL -> GET /api/candles/{sym}?days=N  (raw_prices; all stocks)
  *        5-min intraday      -> GET /api/intraday/{sym}?sessions=N  (fyers feed; FUTURES universe only)
  * 5m gating: probed once per symbol via a 1-session intraday call — rows => futures (5m enabled),
  *            empty => non-futures (5m greyed with "5-min available for F&O stocks" tooltip); daily default.
@@ -20,7 +20,8 @@
  * too). Fib = retracement levels off the loaded-range swing (same derivation as the V8 chart, cc#668),
  * both drawn as LightweightCharts price lines. Toggle buttons + persistence mirror the V8 card.
  *
- * cc#806: TFs are 5m/1M/3M/6M/1Y/3Y/ALL; pivots render on 5m/1M/3M/6M only (greyed beyond — rolling
+ * cc#990: TFs are 1D/1W/1M/3M/1Y/ALL (1D is the "5m" key re-labelled); pivots on 1D/1W/1M/3M only.
+ * cc#806 (superseded set, rule intact): pivots greyed beyond the short frames — rolling
  * levels lose meaning at longer scales).
  * cc#807: session VWAP + VPOC are AUTOMATIC on 5m and absent on every other timeframe — no toggle,
  * no greyed pill. Both are flat dashed LEVEL lines (grey VWAP / muted-blue VPOC) with value chips.
@@ -35,13 +36,25 @@
   // cc#806: 3Y added; ALL is now 5 years, not a 20-year sentinel. raw_prices retention IS ~5 years, so
   // the old 365*20 asked the API for history that does not exist and simply returned whatever was
   // stored — "ALL" now states the real bound instead of implying two decades.
-  var TF = { "5m": null, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 1095, "ALL": 1825 };
-  var TF_ORDER = ["5m", "1M", "3M", "6M", "1Y", "3Y", "ALL"];
+  // cc#990 (founder 10-Aug): the row is now 1D · 1W · 1M · 3M · 1Y · ALL. 6M and 3Y are gone,
+  // 1W is new, and 1D is the intraday frame RE-LABELLED.
+  //
+  // CHOICE MADE, per the card's item 3: the internal key stays "5m" and only the BUTTON LABEL
+  // becomes "1D". Every branch in this file keys off _tf === "5m" — VWAP/VPOC, the GVM grey-out,
+  // the verdict skip, the futures gating and the whole intraday load path — and so does the
+  // fullscreen refit. Renaming the key would have touched six predicates for a cosmetic change,
+  // and any one missed rename would fail silently in a different direction each time. Label-only
+  // is zero logic churn. TF_LABEL is the ONE place a key becomes a word.
+  var TF = { "5m": null, "1W": 7, "1M": 30, "3M": 90, "1Y": 365, "ALL": 1825 };
+  var TF_ORDER = ["5m", "1W", "1M", "3M", "1Y", "ALL"];
+  var TF_LABEL = { "5m": "1D" };   // internal key -> shown label; everything else shows its key
   // cc#806 FOUNDER RULE: pivots render ONLY on 5m and 1M/3M/6M. Rolling levels lose meaning at 1Y+,
   // so those pills grey out exactly like VWAP does on EOD frames. This replaces the old ALL-only
   // suppression. One predicate, used by the toggle chip, the price lines and the chip strip — so the
   // button state and what is actually drawn can never disagree.
-  var PIV_TFS = { "5m": 1, "1M": 1, "3M": 1, "6M": 1 };
+  // cc#990: re-based onto the new keys — pivots on 1D/1W/1M/3M, greyed on 1Y/ALL. Same cc#806
+  // rule (rolling levels lose meaning at long scales), expressed against the row that now exists.
+  var PIV_TFS = { "5m": 1, "1W": 1, "1M": 1, "3M": 1 };
   function _pivOk() { return !!PIV_TFS[_tf]; }
 
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
@@ -461,7 +474,7 @@
     host.innerHTML = "";
     TF_ORDER.forEach(function (k) {
       var b = document.createElement("button");
-      b.textContent = k; b.setAttribute("data-tf", k);
+      b.textContent = TF_LABEL[k] || k; b.setAttribute("data-tf", k);   // cc#990: label, not key
       var is5 = (k === "5m");
       var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => grey
       var disabled = is5 && !futOk;
@@ -469,7 +482,7 @@
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) +
         (disabled ? ";opacity:.4;cursor:not-allowed" : "");
-      if (disabled) b.title = "5-min available for F&O (futures) stocks";
+      if (disabled) b.title = "1D (5-min intraday) is available for F&O (futures) stocks";
       if (!disabled) b.onclick = function () { _load(k); };
       host.appendChild(b);
     });
@@ -487,7 +500,7 @@
       var on = _ov[o[0]] && !pivBlocked;
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) + (pivBlocked ? ";opacity:.4;cursor:not-allowed" : "");
-      b.title = pivBlocked ? "Pivots shown on 1M–6M — rolling levels lose meaning at longer scales" : o[2];
+      b.title = pivBlocked ? "Pivots shown on 1D–3M — rolling levels lose meaning at longer scales" : o[2];
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
