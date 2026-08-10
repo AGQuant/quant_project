@@ -253,7 +253,11 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
     g = _guard(request)
     if g:
         return g
-    hours = max(1, min(hours, 168))
+    # cc#997: PRESERVE THE hours=0 ALL-TIME SENTINEL. The pre-993 clamp `max(1, min(hours,168))` ran
+    # HERE, before the `hours <= 0` window branch below, so the default sentinel 0 became 1 and the
+    # whole feed was filtered to the LAST 1 HOUR (all_time flipped to false too) — Intel rendered
+    # blank in prod whenever the newest story was >1h old. Clamp only POSITIVE values; 0 stays 0.
+    hours = 0 if hours <= 0 else max(1, min(hours, 168))
     limit = max(1, min(limit, 100))
     # ── cc#983: KEYSET CURSOR, not OFFSET ────────────────────────────────────────────────────
     # The sort key is (display_time DESC, polished_id DESC). An OFFSET would silently skip or
