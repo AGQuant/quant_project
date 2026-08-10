@@ -85,6 +85,16 @@
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
+  /* cc#988: with the grid gone the fib lines are the only horizontals left, so they carry more
+     visual weight than they used to. Dropping them to 55% alpha lets the candles read first
+     without losing a level. Applied to the FIB lines only — pivots keep full strength, because a
+     pivot is a decision level and the fib ladder is context. */
+  var FIB_LINE_ALPHA = 0.55;
+  function _alpha(hex, a) {
+    var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+    if (!m) return hex;   // already rgba, or a name — leave it rather than mangle it
+    return "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + a + ")";
+  }
   // cc#750: fib ZONE bands (tint fills between consecutive fib levels). Edges are the exact fib ratios so
   // a band snaps flush to its bounding lines by construction. Consistent green->neutral->red ramp, top→bottom.
   var FIB_ZONES = [
@@ -705,7 +715,7 @@
         var rng = hi - lo;
         _fibBand = { lo: lo, rng: rng };   // cc#750: drive the tint bands off the SAME swing as the lines
         FIB_RATIOS.forEach(function (r) {
-          var col = FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad";
+          var col = _alpha(FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad", FIB_LINE_ALPHA);   // cc#988
           _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" }));
         });
       }
@@ -900,7 +910,11 @@
       var c = LightweightCharts.createChart(box, {
         width: box.clientWidth, height: 412,
         layout: { background: { color: "transparent" }, textColor: p.mut },
-        grid: { vertLines: { visible: false }, horzLines: { color: p.grid } },
+        /* cc#988: horizontal gridlines OFF (founder: "the price lines are not required"). The
+           right-hand price AXIS labels and the CMP tag are untouched — it is the lines ACROSS the
+           plot that go. vertLines were already off. p.grid is left in the palette rather than
+           ripped out: it is a token, and a future overlay may want it. */
+        grid: { vertLines: { visible: false }, horzLines: { visible: false } },
         localization: { locale: "en-IN", timeFormatter: _istCross },
         timeScale: { timeVisible: isIntraday, borderVisible: false, tickMarkFormatter: _istTick },
         rightPriceScale: { borderVisible: false },
