@@ -1062,9 +1062,9 @@ def adaptive_dashboard_page():
 # INTERNAL = deliberately not in nav (test/dev). Keep this in sync when adding a page (nav-complete
 # shipping rule: a page is not "done" until it is routed + in BOTH navs, collision-free, cache-safe).
 NAV_REGISTRY = {
-    # cc#867: temporary review-period entry. Mirrored here so the registry cannot drift from
-    # the live NAV array (rule 2987). Removing the pwa_endpoints.py line is the whole rollback.
-    "/preview":      ("Previews \u2014 review screens, temporary", "nav"),
+    # cc#995 (founder 10-Aug): Previews DE-LISTED from the nav (removed from the NAV array). The
+    # /preview route + preview_endpoints.py stay \u2014 reachable by typed URL only, like /holdings.
+    "/preview":      ("Previews \u2014 de-listed, reachable by typed URL", "typed-url"),
     # cc#874: promoted mobile screens. Mirrored here so the registry cannot drift from the live
     # NAV array (rule 2987). One entry per WIRED screen only — an unwired screen must never
     # appear in the registry, or the registry starts claiming pages that do not exist.
@@ -1082,7 +1082,7 @@ NAV_REGISTRY = {
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
-    "/m/models":     ("Models (mobile)",       "nav-mobile"),   # cc#886 bottom-nav slot 5
+    "/m/models":     ("Models — de-listed, reachable by typed URL", "typed-url"),   # cc#995: removed from nav (route + ScorrModels stay)
     # cc#991: Wall of Trades. TWO routes, one endpoint. Neither carries a NAV-array entry, and
     # that is the founder's own placement, not an oversight: the amendment put the web page in the
     # V8 dashboard tab row "alongside Index Intel and TC Scanner", which is exactly the cc#853

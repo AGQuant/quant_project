@@ -309,13 +309,9 @@ PWA_JS = """
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler'],
-    // cc#867 (founder 05-Aug): Previews. The founder uses the INSTALLED PWA, which has no address
-    // bar, so /preview/* was unreachable for him even though cc#866 shipped the route. This array
-    // renders in BOTH form factors, so this ONE line puts a Previews row in the mobile More sheet
-    // and on the desktop top-nav — no PRIMARY change, no second entry.
-    // TEMPORARY BY DESIGN: this exists for the review period only. Deleting this one line is the
-    // entire rollback; the /preview route and preview_endpoints.py stay untouched either way.
-    ['/preview', '\\u25f1', 'Previews'],
+    // cc#995 (founder 10-Aug): Previews REMOVED from the nav — no longer relevant. The /preview
+    // route and preview_endpoints.py stay untouched (de-listed only, reachable by typed URL; this
+    // is also the cc#867 rollback the note there described as "deleting this one line").
     // cc#874: promoted mobile screens. ONE source for the live nav (rule 2987) — desktop
     // top-nav and the mobile More sheet both build from this array. These are JS comments,
     // not Python: this array lives INSIDE the pwa.js string, and a '#' here is a syntax
@@ -328,8 +324,9 @@ PWA_JS = """
     ['/m/check', '\\u2713', 'Trade Check (mobile)', 'm'],
     ['/m/home', '\\u2302', 'Home (mobile)', 'm'],
     ['/m/digest', '\\u25a5', 'Daily Digest (mobile)', 'm'],
-    ['/m/results', '\\u25f7', 'Results (mobile)', 'm'],
-    ['/m/models', '\\u25cd', 'Models (mobile)', 'm']
+    ['/m/results', '\\u25f7', 'Results (mobile)', 'm']
+    // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
+    // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {
@@ -551,12 +548,11 @@ PWA_JS = """
     // cc#860 item 6: launcher button, header RIGHT. Deliberately appended AFTER the NAV map and
     // NOT added to the NAV array — item 7 requires the desktop top-nav itself to be unchanged, and
     // a NAV entry would also duplicate it into the mobile More sheet.
-    + '<button type="button" class="scorr-ml-btn" id="scorr-ml-open" '
-    + 'aria-label="Models">\u25f1 Models</button>';
-    var _mlb = document.getElementById('scorr-ml-open');
-    if (_mlb) _mlb.addEventListener('click', function () {
-      if (window.ScorrModels) window.ScorrModels.open();
-    });
+    + '';
+    // cc#995 (founder 10-Aug): the far-right "Models" launcher button is REMOVED. It was appended
+    // HERE by pwa.js, OUTSIDE the NAV array (the cc#860 append above) \u2014 so THIS was the web "Models"
+    // the founder pointed at, not a NAV-array entry. The ScorrModels overlay, /api/models/status and
+    // the /m/models route all stay untouched; only the nav button is gone.
   })();
 
   // 5) install prompt
