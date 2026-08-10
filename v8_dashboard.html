@@ -2060,6 +2060,13 @@ function setMasterBasket(b){MASTER_BASKET=b;const el=document.getElementById('pa
 // produced before this card. The futures book is a SEPARATE endpoint (/api/v8/futures_book) so
 // /api/paper/status never changes shape.
 let MASTER_BASIS='equity';
+// cc#994: the futures-book epoch. Aug contract became front-month after the Tue 28-Jul-2026 monthly
+// expiry, so a trade ENTERED on/after 29-Jul belongs to the futures era. In Futures view the Realised
+// P&L card, Win/Loss card, Trade Log tab and Day Log count ONLY entry_ts >= this date — a clean
+// futures-era book, no pre-29-Jul equity history mixed in. Mirrors v8_endpoints.FUTURES_BOOK_START.
+// ISO strings are fixed-width, so a lexicographic >= compare is a correct date-inclusive filter.
+const FUTURES_BOOK_START='2026-07-29';
+const _futEra=x=>String((x&&x.entry_ts)||'')>=FUTURES_BOOK_START;
 let FUTBOOK=null, FUTBOOK_LOADING=false;
 function setMasterBasis(b){
   MASTER_BASIS=b;
@@ -2070,6 +2077,10 @@ function setMasterBasis(b){
     loadFutBook().then(()=>{const e2=document.getElementById('panel0');if(e2)e2.innerHTML=renderMaster();});
   }
   if(el)el.innerHTML=renderMaster();
+  // cc#994: the Day Log follows the Futures/Equity view too. If its tab is open, reload it now with
+  // the new view; otherwise mark it stale so the next open re-fetches (server-side entry_ts book).
+  const dl=document.getElementById('panel8');
+  if(dl&&DAYLOG_LOADED){loadDayLog();}else{DAYLOG_LOADED=false;}
 }
 async function loadFutBook(){
   try{
@@ -2474,8 +2485,20 @@ function renderMaster(){
   // already did. Showing one basket's open rows under the whole book's realised P&L is the cc#817
   // class of error — filtered rows sitting beneath an unfiltered headline, with nothing saying so.
   // The API summary is authoritative only when BOTH filters are off; any filter recomputes.
+  // cc#994: in FUTURES view the realised book is the futures era only (entry_ts >= 29-Jul), so it is
+  // ALWAYS recomputed from recent_trades (fresh-era, a superset of the futures era — every futures
+  // trade is present) filtered by _futEra, never from the all-time `sum`. Win/Loss uses the canonical
+  // result classifier (TARGET / SL), matching the equity `sum` and the DB futures book (10 / 1), not
+  // a pnl-sign split. Equity/All view is untouched: the pre-cc#994 sum-vs-recompute path below.
   let totalClosedPnl,netClosed,winsTxt,lossTxt;
-  if(MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
+  const _futView=(MASTER_BASIS==='futures');
+  if(_futView){
+    const cl=((p&&p.recent_trades)||[]).filter(_futEra)
+      .filter(x=>MASTER_SIDE==='all'||(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase())
+      .filter(x=>MASTER_BASKET==='all'||(x.basket||'')===MASTER_BASKET);
+    totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
+    winsTxt=cl.filter(x=>x.result==='TARGET').length;lossTxt=cl.filter(x=>x.result==='SL').length;
+  }else if(MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
     totalClosedPnl=Number(sum.total_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
     winsTxt=sum.wins??'--';lossTxt=sum.losses??'--';
   }else{
@@ -2505,11 +2528,15 @@ function renderMaster(){
   // modes. In Equity mode the tag is the empty string and the markup is unchanged.
   const _fut=(MASTER_BASIS==='futures');
   const _bTag=(b)=>_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">${b}</span>`:'';
+  // cc#994: the realised book in Futures view is the futures era only — the tag says so ("EQ · since
+  // 29-Jul"). Still EQ-basis fills (v8_paper_trades has no futures price columns), never implied to be
+  // futures-priced. Equity view keeps the empty tag (markup unchanged).
+  const _reTag=_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">EQ &middot; since 29-Jul</span>`:'';
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
-    <div class="card"><div class="k">Realised P&L${_bTag('EQ')}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
-    <div class="card"><div class="k">Win / Loss${_bTag('EQ')}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
+    <div class="card"><div class="k">Realised P&L${_reTag}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
+    <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
   const tgl=(key,label,cnt)=>{
@@ -2560,7 +2587,7 @@ function renderMaster(){
     }else{
       const _gapN=(FUTBOOK.positions||[]).filter(p=>p.gap).length;
       futNote=`<div style="font-size:10px;color:var(--amber);margin-bottom:10px">${FUTBOOK.note}`
-        + ` &middot; every price on this view is a <b>fyers_fut</b> bar; Target, SL and Realised P&amp;L stay on the equity basis and are marked EQ`
+        + ` &middot; every price on this view is a <b>fyers_fut</b> bar; the Realised P&amp;L, Win/Loss, Trade Log and Day Log are the <b>futures-era book</b> (entry on/after 29-Jul-2026), still EQ-basis fills &mdash; marked <b>EQ &middot; since 29-Jul</b>, never implied to be futures-priced`
         + (_gapN?` &middot; ${_gapN} position${_gapN===1?'':'s'} shows no futures entry (no bar at its signal) — hover the row for the reason`:'')
         + `</div>`;
     }
@@ -2872,6 +2899,11 @@ function renderTradeLog(){
   // if an older API build hasn't shipped the full-history ones yet.
   const _allT=p.all_trades||p.recent_trades||[];
   let t=_allT.slice();const s=p.all_summary||p.summary||{};
+  // cc#994: Futures view is the CLEAN futures-era book — filter the ledger to entry_ts >= 29-Jul and
+  // force the recompute path below (isAll can't fall back to the all-time server summary over a
+  // filtered set, or a futures-era list would sit under an all-time headline — the cc#817 error).
+  const _tlogFut=(MASTER_BASIS==='futures');
+  if(_tlogFut)t=t.filter(_futEra);
   // cc#817: RETIRED baskets. A basket present in the ledger but absent from BASKETS is
   // retired (buy_s1_bounce, sell_overbought, and anything future that stops running). Default view
   // hides them entirely — no pill, no rows — and, critically, EXCLUDES THEM FROM THE SUMMARY.
@@ -2901,7 +2933,7 @@ function renderTradeLog(){
   // printing s.total_pnl would show live-basket rows under a P&L that silently contains the retired
   // Rs.62k era: the exact number the founder wants out of the headline. When retired baskets exist
   // and are hidden, we recompute from the visible subset instead.
-  const isAll=(TLOG_DUR==='all'&&TLOG_BASKET==='all'&&(TLOG_RETIRED||_retiredBk.length===0));
+  const isAll=(!_tlogFut&&TLOG_DUR==='all'&&TLOG_BASKET==='all'&&(TLOG_RETIRED||_retiredBk.length===0));
   const bTrades=isAll?(s.trades??t.length):t.length;
   // cc#371: classify WINS/LOSSES by gross-P&L SIGN, not the result string. result==TARGET/SL missed
   // GAP_TARGET_EXIT / GAP_SL_EXIT / MAX_HOLD / CONFLICT_EXIT rows (21+13!=42). ONE classifier for
@@ -3275,7 +3307,10 @@ async function loadDayLog(){
   const el=document.getElementById('panel8');if(!el)return;
   el.innerHTML='<div class="loading">Loading Day Log...</div>';
   try{
-    const d=await getJSON(EP.daylog);
+    // cc#994: Day Log follows the Master Futures/Equity view — futures view asks the endpoint for the
+    // entry_ts>=29-Jul book (aggregation is server-side: filtering day rows client-side would be wrong,
+    // a day's P&L sums trades by CLOSE date but eligibility is on ENTRY).
+    const d=await getJSON(EP.daylog+(MASTER_BASIS==='futures'?'?view=futures':''));
     DAYLOG_LOADED=true;
     el.innerHTML=renderDayLog(d);
   }catch(e){el.innerHTML=`<div class="err">Day Log failed: ${e.message}</div>`;}
