@@ -1633,7 +1633,17 @@ var RN = { items: [], page: 0, per: 6 };
 
 function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
 
-function rnGo(delta){
+/* cc#981: the paging controls live INSIDE the card's <a href="/m/intel"> wrapper (cc#929 made the
+   whole card a doorway to Intel, and cc#971 injected these buttons into #rnBox). So a tap on Next
+   flipped the page AND then bubbled to the anchor, which navigated away — the page turned and you
+   never saw it. The controls now swallow their own event. The anchor STAYS: a tap on a headline or
+   the header must still open Intel, which is the founder-approved doorway. Same bug class as
+   cc#329 (scorr_home) and cc#911 (My Portfolio). */
+function rnGo(ev, delta){
+  if (ev){
+    if (ev.preventDefault) ev.preventDefault();
+    if (ev.stopPropagation) ev.stopPropagation();
+  }
   var last = rnPages() - 1;
   var next = Math.min(last, Math.max(0, RN.page + delta));
   if (next === RN.page) return;
@@ -1656,10 +1666,10 @@ function rnPaint(){
   }).join('');
   /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
      rendered disabled rather than hidden, so the row never changes width mid-session. */
-  var ctl = '<div class="rnpg">'
-    + '<button class="rnb" onclick="rnGo(-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
+  var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
+    + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
     + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
-    + '<button class="rnb" onclick="rnGo(1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
+    + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
     + '</div>';
   box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
 }

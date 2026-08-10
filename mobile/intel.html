@@ -60,6 +60,81 @@ function sentClass(s){
   return 'neut';
 }
 
+/* ══ cc#982 — COPY, MIRRORING THE WEB ═══════════════════════════════════════════════════════
+   DISPLAY_PARITY (16202): the copied TEXT SHAPE is the web's, not a mobile invention.
+   scorr_news.html shareText() is HEADLINE UPPERCASED + blank line + plainText(body), and
+   plainText() is ported below character-for-character from that file — strip fenced code, inline
+   code, images, link targets (keeping the label), heading hashes, blockquote marks, bold and
+   italic wrappers, bullets to "• ", raw HTML tags, then collapse 3+ newlines. Diverging by even
+   one rule would mean the same story copies differently depending on which screen you were on.
+
+   FIELD MAP: the web reads headline_clean and (full_summary || summary); this payload carries
+   headline and (body || summary), where `body` is the long form. Same intent, this endpoint's
+   names — checked against the card renderer above rather than assumed.
+
+   Classes are namespaced `nc-` : this app has collided four times on short class names
+   (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a), and `.copy-btn` from the web would have been
+   the fifth the moment the shared sheet grows one. */
+var NC_COPY = 'Copy', NC_OK = 'Copied', NC_BAD = 'Press & hold';
+
+function ncPlain(t){
+  return String(t || "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+function ncShareText(a){
+  var head = String(a.headline || "").toUpperCase();
+  var raw  = a.body || a.summary || "";
+  return head + "\n\n" + ncPlain(raw);
+}
+function ncFallbackCopy(text){
+  try {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    var ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+/* the tap is swallowed BEFORE anything else: these buttons sit inside a card whose other controls
+   fold and expand it (cc#913's bug class — a control that also triggers its container). */
+function ncCopy(btn, ev){
+  if (ev){ if (ev.preventDefault) ev.preventDefault(); if (ev.stopPropagation) ev.stopPropagation(); }
+  var text = btn.getAttribute("data-copy") || "";
+  function done(label, cls){
+    btn.classList.remove("ok", "bad");
+    if (cls) btn.classList.add(cls);
+    btn.textContent = label;
+    setTimeout(function(){ btn.classList.remove("ok", "bad"); btn.textContent = NC_COPY; }, 1500);
+  }
+  /* clipboard API needs a secure context and is absent on some /m/ webviews, so the textarea
+     fallback is not decoration — it is the path a real user hits. If BOTH fail the button says
+     what to do instead, rather than lying with a tick or firing an alert(). */
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ done(NC_OK, "ok"); },
+      function(){ if (ncFallbackCopy(text)) done(NC_OK, "ok"); else done(NC_BAD, "bad"); });
+  } else {
+    if (ncFallbackCopy(text)) done(NC_OK, "ok"); else done(NC_BAD, "bad");
+  }
+}
+function ncCopyBtn(a){
+  var attr = esc(ncShareText(a)).replace(/\n/g, "&#10;");
+  return '<button type="button" class="nc-copy" aria-label="Copy article"'
+    + ' data-copy="' + attr + '" onclick="ncCopy(this,event)">' + NC_COPY + '</button>';
+}
+
 /* mode: 'open' = primary editorial with body; 'folded' = editorial as headline+summary+Read;
    'feed' = agency item. Preview grammar exactly. */
 function card(a, mode){
@@ -92,7 +167,8 @@ function card(a, mode){
     + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
     + '<div class="hl">' + esc(a.headline) + '</div>'
     + bodyHtml + syms
-    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' \u00b7 ' + esc(a.when_full) : '') + '</div>'
+    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' \u00b7 ' + esc(a.when_full) : '')
+    + ncCopyBtn(a) + '</div>'
     + '</div>';
 }
 

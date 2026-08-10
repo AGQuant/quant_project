@@ -1237,6 +1237,21 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
   border:1px solid currentColor}
 .rail i{width:6px;height:6px;display:inline-block}
 .rail-live{color:var(--grn)}
+/* ── cc#982 · COPY on mobile Intel cards ───────────────────────────────────────────────────────
+   These rules live HERE and not in mobile/intel.html because that template carries NO <style>
+   block at all — its CSS was folded into this sheet, the same way cc#897 folded the GVM page's.
+   (I found that the hard way: an inline block written into intel.html was a silent no-op and the
+   button rendered unstyled at 35x19px instead of the 44px the card requires.)
+   `nc-` prefix: this app has collided four times on short class names (cc#964 .v/.m, cc#966 .m,
+   cc#967 .v, cc#974 .a), and the web's own `.copy-btn` would have been the fifth. */
+.src{display:flex;align-items:center;gap:8px}
+.nc-copy{margin-left:auto;flex:none;min-height:44px;min-width:64px;padding:0 12px;
+  background:none;border:1px solid var(--line2);border-radius:10px;color:var(--mut);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.nc-copy:active{background:var(--panel2)}
+.nc-copy.ok{color:var(--grn);border-color:rgba(47,212,139,.5)}
+.nc-copy.bad{color:var(--amber);border-color:rgba(245,185,74,.5)}
 .rail-live i{border-radius:50%;background:currentColor;animation:brea 2.4s ease-in-out infinite}
 .rail-stale{color:var(--amber)}
 .rail-stale i{background:repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 5px);height:2px}
