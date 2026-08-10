@@ -212,6 +212,15 @@
       document.addEventListener("fullscreenchange", _onFsChange);
       document.addEventListener("webkitfullscreenchange", _onFsChange);
       window.addEventListener("orientationchange", function () { if (_full) setTimeout(_refit, 120); });
+      // cc#987: the peer table picks its narrow/wide layout from the MEASURED pane width, so a
+      // rotate or a resize has to re-render it or a landscape phone keeps the 360px compaction.
+      // Re-render only — no refetch, the payload is already in _peers.
+      window.addEventListener("resize", function () {
+        if (_peerResizeT) clearTimeout(_peerResizeT);
+        _peerResizeT = setTimeout(function () {
+          if (_tab === "peers" && _peers) _renderPeers();
+        }, 150);
+      });
     }
     return ov;
   }
@@ -961,10 +970,13 @@
     else if (_chart) { try { _chart.applyOptions({ width: box.clientWidth }); } catch (e) {} }
   }
 
-  function _pc(v) {
+  function _pc(v, bare) {
     if (v == null) return '<span style="opacity:.45">—</span>';
     var col = v > 0 ? "#2FD48B" : (v < 0 ? "#FF5C6C" : "#8C99BD");
-    return '<span style="color:' + col + ';font-weight:700">' + (v >= 0 ? "+" : "") + v.toFixed(2) + '%</span>';
+    // cc#987: `bare` drops the % glyph on narrow screens and the header carries the unit instead
+    // ("DAY %"). The NUMBER is never touched — no rounding, no truncation, no abbreviation.
+    return '<span style="color:' + col + ';font-weight:700">' + (v >= 0 ? "+" : "") + v.toFixed(2) +
+      (bare ? "" : "%") + '</span>';
   }
 
   function _bandChip(b) {
@@ -992,6 +1004,75 @@
       });
   }
 
+  // ── cc#987 SORTING ──────────────────────────────────────────────────────────────────────────
+  // The convention is NOT invented here: it is cc#939's tapeSort/tapeSortView from
+  // mobile/home.html, mirrored line for line so the app has ONE sort UX. First tap on a new
+  // column = descending; tapping the active column flips it; nulls go last whichever way the
+  // arrow points; ties keep the payload's own order (stable). Symbol sorts alphabetically and,
+  // mirroring cc#939's `nm` column exactly, its first tap is Z-A because dir starts at -1.
+  // Untouched (col === null) leaves the payload's GVM order alone — that ordering is the point of
+  // the view (it shows WHERE the stock sits among its peers), so sorting is opt-in, not a default.
+  var _peerSortCol = null, _peerSortDir = -1, _peerCards = {};
+  var _peerResizeT = null;
+  var _PEER_KEY = { sym: "symbol", day: "day_pct", week: "week_pct", month: "month_pct", gvm: "gvm" };
+
+  function _peerNum(v) {
+    if (v == null) return null;
+    var n = (typeof v === "number") ? v : Number(String(v).replace(/[^0-9.\-]/g, ""));
+    return isNaN(n) ? null : n;
+  }
+
+  function _peerOrder(list) {
+    var order = list.map(function (_, i) { return i; });
+    if (!_peerSortCol) return order;
+    var col = _peerSortCol, dir = _peerSortDir, k = _PEER_KEY[col];
+    order.sort(function (a, b) {
+      var ra = list[a], rb = list[b];
+      if (col === "sym") {
+        return (String(ra.symbol || "").localeCompare(String(rb.symbol || "")) * dir) || (a - b);
+      }
+      var va = _peerNum(ra[k]), vb = _peerNum(rb[k]);
+      if (va == null && vb == null) return a - b;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (va === vb) return a - b;
+      return (va < vb ? -1 : 1) * dir;
+    });
+    return order;
+  }
+
+  function _peerSortBy(col) {
+    if (_peerSortCol === col) _peerSortDir = -_peerSortDir;
+    else { _peerSortCol = col; _peerSortDir = -1; }
+    _renderPeers();
+  }
+
+  // ── cc#987 NARROW LAYOUT ────────────────────────────────────────────────────────────────────
+  // Measured, not guessed. At 360px the modal is min(94vw,640px) wide, which leaves the peer pane
+  // ~302px of usable width; the old table forced 579px inside it. The result was NOT a wrap — it
+  // was a silent horizontal cut: Month, GVM, Band and the CARD button were simply off-screen with
+  // no scrollbar, no fade, nothing to say more existed. A reader would conclude the table has
+  // three columns.
+  //
+  // The card offered two fixes and asked me to pick the one that keeps every value on one line
+  // with nothing truncated. I measured option (b), the all-in-one-strip layout, and it does not
+  // fit: symbol 76 + three change columns 132 + GVM 38 + band chip 72 + CARD 48 is ~366px against
+  // 302px available, and the only way to close that gap is to shrink the Band chip or drop a
+  // decimal off GVM — both of which the card's keep_unchanged list protects. So this is option
+  // (a), the card's own alternative: a genuinely scrollable table with a VISIBLE affordance.
+  //
+  // Three things make the scroll usable rather than merely present:
+  //   * narrow-mode compaction takes the table from 579px to roughly 400px, so at 390px only the
+  //     CARD button sits outside the fold instead of half the row;
+  //   * the Symbol column is position:sticky, so you never lose which row you are reading;
+  //   * a right-edge fade plus a "swipe for ..." hint, both of which disappear once you reach the
+  //     end — an affordance that lies about remaining content is worse than none.
+  function _peerNarrow() {
+    var pane = document.getElementById("scorrPeerPane");
+    var w = (pane && pane.clientWidth) || window.innerWidth || 400;
+    return w < 420;
+  }
+
   function _renderPeers() {
     var pane = document.getElementById("scorrPeerPane");
     var d = _peers; if (!pane || !d) return;
@@ -1002,43 +1083,139 @@
         '</div>';
       return;
     }
+    var nar = _peerNarrow();
     var head = '<div style="font-size:11px;color:' + p.mut + ';padding:2px 4px 8px">' +
       '<b style="color:' + p.txt + '">' + d.segment + '</b> · ' + d.count + ' peers · ' + d.band_rule + '</div>';
-    var th = 'padding:6px 8px;font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:' +
-      p.sub + ';border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
-    var rows = d.peers.map(function (r, i) {
-      var td = 'padding:7px 8px;font-size:12px;border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
-      // Own row pinned visually rather than reordered — the table stays in GVM order so the
-      // reader can see WHERE the stock sits among its peers, which is the point of the view.
-      var selfBg = r.is_self ? ('background:' + (p.btnOn + "1f") + ';') : '';
+
+    var pad = nar ? "5px 5px" : "6px 8px";
+    var tpad = nar ? "6px 5px" : "7px 8px";
+    var vfs = nar ? "11px" : "12px";
+    var th = 'padding:0;border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
+    var thBtn = 'display:block;width:100%;border:none;background:none;font-family:inherit;cursor:pointer;' +
+      'padding:' + pad + ';font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;' +
+      'text-align:right;white-space:nowrap;min-height:28px';
+    // The sticky Symbol column needs a FULLY OPAQUE backdrop or the scrolling numbers show
+    // through it. The own-row tint is deliberately translucent (12% of the accent), so on that row
+    // the cell is composited: the tint painted as a flat gradient LAYER over an opaque panel
+    // background-color. Painting the translucent tint alone is the bug this replaced — the Week
+    // and Month figures were legible straight through the pinned symbol.
+    // box-shadow (not border-right) draws the pinned edge without taking a pixel of layout.
+    var stick = 'position:sticky;left:0;z-index:2;box-shadow:1px 0 0 ' + p.line + ';';
+    var selfTint = p.btnOn + "1f";
+    var stickSelfBg = 'background-color:' + p.panel + ';background-image:linear-gradient(' +
+      selfTint + ',' + selfTint + ')';
+
+    function hcell(key, label, left) {
+      var on = (_peerSortCol === key);
+      var col = on ? p.txt : p.sub;
+      // scroll-snap on the header cells (cc#987): a pinned column OCCLUDES what slides under it,
+      // and a half-covered "-33.09" reads as "33.09" — a sign flip on a finance number, which is
+      // the one misread this table must not allow. Snapping makes the scroll come to rest on a
+      // column boundary instead of mid-number. `proximity`, never `mandatory`: mandatory can leave
+      // the tail past the last snap point unreachable, which would hide the CARD button.
+      return '<th style="' + th + (left ? ';text-align:left;' + stick + 'background-color:' + p.panel
+                                        : ';scroll-snap-align:start') + '">' +
+        '<button data-sortcol="' + key + '" aria-label="Sort by ' + label + '"' +
+        ' style="' + thBtn + (left ? ';text-align:left' : '') + ';color:' + col + '">' + label +
+        (on ? '<span style="margin-left:3px">' + (_peerSortDir < 0 ? "▼" : "▲") + '</span>' : '') +
+        '</button></th>';
+    }
+
+    var order = _peerOrder(d.peers);
+    var rows = order.map(function (idx) {
+      var r = d.peers[idx];
+      var td = 'padding:' + tpad + ';font-size:' + vfs + ';border-bottom:1px solid ' + p.line +
+        ';text-align:right;white-space:nowrap';
+      // Own row still pinned by TINT, never by reordering — a sorted table that also jumps its own
+      // row to the top would be lying about the ranking the reader just asked for.
+      var selfBg = r.is_self ? ('background:' + selfTint + ';') : '';
+      var symBg = r.is_self ? stickSelfBg : ('background-color:' + p.panel);
       return '<tr data-sym="' + r.symbol + '" style="' + selfBg + '">' +
-        '<td style="' + td + ';text-align:left">' +
+        '<td style="' + td + ';text-align:left;' + stick + symBg + '">' +
           '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + p.txt + '">' + r.symbol +
             (r.is_self ? ' <span style="font-size:9px;opacity:.7">THIS</span>' : '') + '</div>' +
-          '<div style="font-size:10px;color:' + p.sub + '">' + (r.company_name || "") + '</div>' +
+          '<div style="font-size:10px;color:' + p.sub + ';max-width:' + (nar ? "76px" : "200px") +
+            ';overflow:hidden;text-overflow:ellipsis">' + (r.company_name || "") + '</div>' +
         '</td>' +
-        '<td style="' + td + '">' + _pc(r.day_pct) + '</td>' +
-        '<td style="' + td + '">' + _pc(r.week_pct) + '</td>' +
-        '<td style="' + td + '">' + _pc(r.month_pct) + '</td>' +
+        '<td style="' + td + '">' + _pc(r.day_pct, nar) + '</td>' +
+        '<td style="' + td + '">' + _pc(r.week_pct, nar) + '</td>' +
+        '<td style="' + td + '">' + _pc(r.month_pct, nar) + '</td>' +
         '<td style="' + td + ';color:' + p.txt + ';font-weight:700">' + (r.gvm == null ? "—" : r.gvm.toFixed(2)) + '</td>' +
         '<td style="' + td + '">' + _bandChip(r.band) + '</td>' +
         '<td style="' + td + '"><button data-card="' + r.symbol + '" style="border:1px solid ' + p.line +
-          ';background:' + p.btn + ';color:' + p.mut + ';border-radius:7px;padding:4px 10px;min-height:30px;' +
-          'font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit">CARD</button></td>' +
+          ';background:' + p.btn + ';color:' + p.mut + ';border-radius:7px;padding:4px ' + (nar ? "7px" : "10px") +
+          ';min-height:30px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit">CARD</button></td>' +
         '</tr>' +
         '<tr data-drawer="' + r.symbol + '" style="display:none"><td colspan="7" style="padding:0"></td></tr>';
     }).join("");
+
+    // The hint sits ABOVE the table, not under it: the pane is itself vertically scrollable
+    // (max-height 436px), so a hint placed after the rows is below the fold exactly when it is
+    // needed — before the reader has scrolled anything.
     pane.innerHTML = head +
-      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px">' +
-      '<thead><tr>' +
-        '<th style="' + th + ';text-align:left">Symbol</th><th style="' + th + '">Day</th>' +
-        '<th style="' + th + '">Week</th><th style="' + th + '">Month</th>' +
-        '<th style="' + th + '">GVM</th><th style="' + th + '">Band</th><th style="' + th + '"></th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div id="scorrPeerHint" style="display:none;font-size:9.5px;color:' + p.sub + ';padding:0 4px 6px"></div>' +
+      '<div id="scorrPeerScrollWrap" style="position:relative">' +
+        '<div id="scorrPeerScroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;' +
+          'scroll-snap-type:x proximity">' +
+        '<table style="width:100%;border-collapse:collapse;min-width:' + (nar ? "380px" : "520px") + '">' +
+        '<thead><tr>' +
+          hcell("sym", "Symbol", true) + hcell("day", nar ? "Day %" : "Day") +
+          hcell("week", nar ? "Wk %" : "Week") + hcell("month", nar ? "Mo %" : "Month") +
+          hcell("gvm", "GVM") +
+          '<th style="' + th + ';scroll-snap-align:start;padding:' + pad + ';font-size:9.5px;font-weight:800;' +
+            'letter-spacing:.05em;text-transform:uppercase;color:' + p.sub + '">Band</th>' +
+          // ...and the last column snaps to END, so the far edge of the scroll is itself a rest
+          // point and the CARD button can never sit half off the fold.
+          '<th style="' + th + ';scroll-snap-align:end"></th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div id="scorrPeerFade" style="display:none;position:absolute;top:0;right:0;bottom:0;width:16px;' +
+          'pointer-events:none;background:linear-gradient(to right,transparent,' + p.panel + ')"></div>' +
+      '</div>' +
       '<div style="font-size:9.5px;color:' + p.sub + ';padding:8px 4px 0;line-height:1.5">' + d.basis + '</div>';
+
     Array.prototype.forEach.call(pane.querySelectorAll("[data-card]"), function (b) {
       b.onclick = function (e) { e.stopPropagation(); _toggleDrawer(b.getAttribute("data-card")); };
     });
+    Array.prototype.forEach.call(pane.querySelectorAll("[data-sortcol]"), function (b) {
+      b.onclick = function (e) { e.stopPropagation(); _peerSortBy(b.getAttribute("data-sortcol")); };
+    });
+
+    // The affordance tells the truth about what is left, and switches itself off at the end.
+    var sc = document.getElementById("scorrPeerScroll");
+    var fade = document.getElementById("scorrPeerFade");
+    var hint = document.getElementById("scorrPeerHint");
+    function _aff() {
+      if (!sc || !fade) return;
+      var more = sc.scrollWidth - sc.clientWidth - sc.scrollLeft;
+      fade.style.display = more > 4 ? "" : "none";
+      if (!hint) return;
+      // The hint NAMES what is off the fold, measured each time — a hardcoded list would start
+      // lying the moment a column width or a viewport changes, and a lying affordance is worse
+      // than none. Column 0 is sticky and column 6 is the CARD button, which has no header.
+      var right = sc.getBoundingClientRect().right;
+      var hidden = Array.prototype.slice.call(sc.querySelectorAll("thead th"))
+        .map(function (h, i) {
+          var t = (h.textContent || "").replace(/[▼▲]/g, "").trim();
+          return (i === 0 || h.getBoundingClientRect().right <= right + 1) ? null : (t || "Card");
+        }).filter(Boolean);
+      hint.style.display = (more > 4 && hidden.length) ? "" : "none";
+      hint.textContent = hidden.length ? ("swipe → for " + hidden.join(" · ")) : "";
+    }
+    if (sc) {
+      sc.addEventListener("scroll", _aff);
+      // The snap line has to clear the pinned column, and its width is measured, never assumed.
+      var sym0 = sc.querySelector("thead th");
+      if (sym0) sc.style.scrollPaddingLeft = Math.round(sym0.getBoundingClientRect().width) + "px";
+      _aff();
+    }
+
+    // A re-sort rebuilds the table, so an open drawer has to be put back. It is restored from the
+    // cache rather than re-fetched — the same trade card, one network call, no flicker.
+    if (_peerOpen) {
+      var keep = _peerOpen;
+      _peerOpen = null;
+      _toggleDrawer(keep);
+    }
   }
 
   // cc#845 founder-delegated decision: INLINE DRAWER, not navigation. A peer scan is an A/B
@@ -1056,9 +1233,12 @@
     _peerOpen = sym;
     row.style.display = "";
     var p = _pal();
+    // cc#987: a sort rebuilds the table and reopens this drawer. Serving it from the cache keeps
+    // that to ONE fetch per symbol per card session instead of one per sort.
+    if (_peerCards[sym]) { cell.innerHTML = _drawerHtml(sym, _peerCards[sym]); return; }
     cell.innerHTML = '<div style="padding:10px 12px;font-size:11.5px;color:' + p.mut + '">Loading ' + sym + '…</div>';
     _getJSON("/api/chart/tradecard/" + encodeURIComponent(sym))
-      .then(function (t) { if (_peerOpen === sym) cell.innerHTML = _drawerHtml(sym, t); })
+      .then(function (t) { _peerCards[sym] = t; if (_peerOpen === sym) cell.innerHTML = _drawerHtml(sym, t); })
       .catch(function () {
         if (_peerOpen !== sym) return;
         cell.innerHTML = '<div style="padding:10px 12px;font-size:11.5px;color:' + p.mut + '">' +
@@ -1119,7 +1299,9 @@
     document.getElementById("scorrChartHL").textContent = "";
     document.addEventListener("keydown", _esc);
     _tf = "3M";
-    _tab = "chart"; _peers = null; _peerOpen = null;   // cc#845: every open starts on Chart
+    _tab = "chart"; _peers = null; _peerOpen = null;
+    // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
+    _peerSortCol = null; _peerSortDir = -1; _peerCards = {};   // cc#845: every open starts on Chart
     _setTab("chart");
     _ensureLib(function (ok) {
       if (!ok) { document.getElementById("scorrChartMsg").textContent = "Chart library failed to load."; _paintChrome(); return; }
@@ -1135,7 +1317,9 @@
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
     _ilLines = []; _vwapLast = null; _vpocLast = null;   // cc#807 (price lines are owned by _series, removed with it)
     _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
-    _tab = "chart"; _peers = null; _peerOpen = null;   // cc#845
+    _tab = "chart"; _peers = null; _peerOpen = null;
+    // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
+    _peerSortCol = null; _peerSortDir = -1; _peerCards = {};   // cc#845
     if (_full) _toggleFull(false);          // cc#779: never leave the wrapper stuck full-viewport
     var vp = document.getElementById("scorrVerdictPop"); if (vp) vp.remove();   // cc#779
     var fx = document.getElementById("scorrChartFx"); if (fx && fx.parentNode) fx.parentNode.removeChild(fx);   // cc#750: rebuilt fresh on next open
