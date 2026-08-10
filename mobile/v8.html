@@ -299,6 +299,7 @@
 var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
               mood: null, book: null, group: 'period', instrument: 'equity',
               sub: {}, pop: null, fold: {}, stars: {}, act: {}, legend: null,
+              gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
               page: 'open' };   // cc#943: which face of the book is showing   // cc#932: pivot markers by symbol
 
 function esc(s){ return String(s == null ? '' : s)
@@ -834,26 +835,128 @@ function foldGrp(k){
 }
 
 /* ── everything below is the screen as it already was: signals stack, ledger, more, legend ── */
-function funLine(slug){
+/* ── cc#986 · FILTER FUNNEL ────────────────────────────────────────────────────────────────────
+   What used to be here was a shape-guesser that ended in "funnel shape unrecognised". It never
+   recognised anything because /api/v8/funnel/{basket} was answering 422 — its route decorator had
+   been stranded on the wrong function since cc#424 (fixed in v8_endpoints.py in this same commit).
+   This reads ONE mobile endpoint that serves the WEB's own funnel_detail + stock_passcount, so
+   there is no second funnel implementation and no shape to guess. */
+function funnelBlock(slug){
   var f = STATE.funnels[slug];
   if (f === undefined) return '';
   if (f === 'loading') return '<div class="fun">funnel: loading…</div>';
   if (!f) return '<div class="fun">funnel unavailable</div>';
-  var parts = [];
-  var list = f.stages || f.funnel || null;
-  if (Array.isArray(list)){
-    list.forEach(function(s){
-      var n = s.count != null ? s.count : (s.n != null ? s.n : s.value);
-      if (n != null) parts.push(esc(String(s.name || s.stage || s.filter || '')) + ' <b>' + n + '</b>');
-    });
-  } else if (typeof f === 'object'){
-    Object.keys(f).forEach(function(k){
-      if (typeof f[k] === 'number') parts.push(esc(k.replace(/_/g,' ')) + ' <b>' + f[k] + '</b>');
-    });
+
+  var h = '<div class="fn-wrap">';
+  var st = f.stages || [];
+  if (f.stages_error) {
+    h += '<div class="fun">stage counts unavailable — ' + esc(f.stages_error) + '</div>';
+  } else if (st.length) {
+    var uni = Number(f.universe) || 0;
+    h += '<div class="fn-h">Filter funnel · ' + (uni ? uni + ' in universe' : 'universe --') + '</div>'
+      + '<div class="fn-st">'
+      + st.map(function(s){
+          /* The bar is survivors as a share of the universe. With no universe there is no bar —
+             a full-width bar over an unknown denominator would be a made-up 100%. */
+          var w = (uni && s.survivors != null) ? Math.max(0, Math.min(100, s.survivors / uni * 100)) : null;
+          return '<span class="fn-g">' + esc(s.metric || s.key || '') + '</span>'
+            + '<span class="fn-p">' + (s.survivors == null ? '--' : s.survivors) + '</span>'
+            + '<span class="fn-k">' + (s.killed ? '-' + s.killed : '') + '</span>'
+            + (w == null ? '<span class="fn-bar"></span>'
+                         : '<span class="fn-bar"><i style="width:' + w.toFixed(1) + '%"></i></span>');
+        }).join('')
+      + '</div>';
+    if (f.final != null) h += '<div class="fn-sum"><b>' + f.final + '</b> clear every gate '
+      + '(strict AND)' + (f.as_of ? ' · ' + esc(f.as_of) : '') + '</div>';
   }
-  return parts.length
-    ? '<div class="fun">' + parts.join(' → ') + '</div>'
-    : '<div class="fun">funnel shape unrecognised — flagged for mapping fix</div>';
+
+  if (f.rows_error) {
+    h += '<div class="fun">pass list unavailable — ' + esc(f.rows_error) + '</div>';
+    return h + '</div>';
+  }
+  var rows = f.rows || [];
+  if (!rows.length) {
+    /* Says WHY it is empty. "None clear every gate" and "all of them are already open" are two
+       different facts and the reader should not have to guess which one this is. */
+    h += '<div class="fn-sum">' + esc(f.message || 'Nothing passing and un-opened right now.') + '</div>';
+    return h + '</div>';
+  }
+  h += '<div class="fn-h" style="padding-top:9px">Passing · not opened yet</div>';
+  rows.forEach(function(r){
+    var key = slug + '|' + r.symbol;
+    var open = STATE.gateOpen === key;
+    h += '<button class="fn-sym" onclick="togGate(event,\'' + esc(slug) + '\',\'' + esc(r.symbol) + '\')">'
+      + '<span class="fn-s">' + esc(r.symbol) + '</span>'
+      + '<span class="fn-b">' + (r.passed == null ? '' : r.passed + '/' + r.total)
+        + (r.gvm == null ? '' : ' · GVM ' + Number(r.gvm).toFixed(2)) + '</span>'
+      + '<span class="fn-x">' + (open ? '▴' : '▾') + '</span></button>';
+    if (open) h += gateBody(key, r.symbol);
+  });
+  if (f.truncated > 0) h += '<div class="more">and ' + f.truncated + ' more passing, not opened</div>';
+  return h + '</div>';
+}
+
+function gateBody(key, sym){
+  var g = STATE.gates[key];
+  if (g === undefined || g === 'loading') return '<div class="fn-body"><div class="fun">loading gates…</div></div>';
+  if (!g) return '<div class="fn-body"><div class="fun">gate detail unavailable for ' + esc(sym) + '</div></div>';
+  var rows = g.rows || [];
+  if (!rows.length) return '<div class="fn-body"><div class="fun">no gate rows returned</div></div>';
+  /* ACTUAL vs REQUIRED with a pass mark per gate, exactly as the endpoint returns them. Nothing is
+     recomputed here and nothing is filled in — a gate the engine could not evaluate shows its own
+     "--" rather than a guessed verdict. */
+  return '<div class="fn-body">'
+    + rows.map(function(r){
+        return '<div class="fn-gate">'
+          + '<span class="fn-n">' + esc(String(r.filter || '').replace(/_/g, ' ')) + '</span>'
+          + '<span class="fn-v">' + esc(String(r.actual == null ? '--' : r.actual)) + '</span>'
+          + '<span class="' + (r.pass ? 'fn-ok' : 'fn-no') + '">' + (r.pass ? '✓' : '✕') + '</span>'
+          + (r.required ? '<span class="fn-q">needs ' + esc(String(r.required)) + '</span>' : '')
+          + '</div>';
+      }).join('')
+    + '<div class="fn-sum"><b>' + (g.passed == null ? '--' : g.passed) + '</b> of '
+      + (g.total == null ? '--' : g.total) + ' gates passed'
+      + (g.cmp != null ? ' · CMP ' + Number(g.cmp).toFixed(2) : '') + '</div>'
+    + '<div class="syrow"><span class="sy2">' + esc(sym) + '</span>' + strip(sym) + '</div>'
+    + '</div>';
+}
+
+/* cc#986: ONE loader for the funnel payload, used by the lower-section module (the live surface)
+   and by the basket-card path alike, so there is a single place that knows the endpoint. */
+function ensureFunnel(slug){
+  if (!slug || STATE.funnels[slug] !== undefined) return;
+  STATE.funnels[slug] = 'loading';
+  fetchWithTimeout('/api/mobile/v8funnel?basket=' + encodeURIComponent(slug))
+    .then(function(r){ return r.json(); })
+    .then(function(f){
+      var b = (f && f.baskets && f.baskets[0]) || null;
+      STATE.funnels[slug] = (b && !f.error) ? b : null;
+      render();
+    })
+    .catch(function(){ STATE.funnels[slug] = null; render(); });
+}
+
+function togGate(ev, slug, sym){
+  /* stopPropagation, or the tap bubbles to the basket card's own onclick and collapses the whole
+     basket the instant you try to open a symbol inside it. */
+  if (ev) { ev.stopPropagation(); if (ev.preventDefault) ev.preventDefault(); }
+  var key = slug + '|' + sym;
+  if (STATE.gateOpen === key) { STATE.gateOpen = null; render(); return; }
+  STATE.gateOpen = key;
+  if (STATE.gates[key] === undefined) {
+    STATE.gates[key] = 'loading';
+    var f = STATE.funnels[slug];
+    /* The path comes from the SERVER payload. There is no generic /stock_detail/{basket} route —
+       the four are per-basket (br_/sr_/sm_/bm_) — so the map is made once, server-side, and the
+       client never guesses which prefix a basket uses. */
+    var base = (f && f.detail_path) || null;
+    if (!base) { STATE.gates[key] = null; render(); return; }
+    fetchWithTimeout(base + encodeURIComponent(sym))
+      .then(function(r){ return r.json(); })
+      .then(function(d){ STATE.gates[key] = (d && !d.detail && !d.error) ? d : null; render(); })
+      .catch(function(){ STATE.gates[key] = null; render(); });
+  }
+  render();
 }
 function basketCard(b, i, rcls){
   var open = STATE.open === i;
@@ -866,7 +969,7 @@ function basketCard(b, i, rcls){
     + '<div class="u">signal' + (b.signals === 1 ? '' : 's') + '</div></div>'
     + '<div class="v-chev">›</div></div>';
   if (open){
-    h += funLine(b.slug);
+    h += funnelBlock(b.slug);
     h += (b.symbols || []).map(function(s){
       return '<div class="syrow"><span class="sy2">' + esc(s.symbol) + '</span>'
         + strip(s.symbol)
@@ -1003,12 +1106,13 @@ function loadLower(){
       if (d && d.error) throw new Error(d.error);
       LOW.d = d; LOW.err = null;
       if (!LOW.basket && d.funnel && d.funnel.length) LOW.basket = d.funnel[0].basket;
+      ensureFunnel(LOW.basket);   // cc#986: the selected basket's filter funnel, loaded with it
       render();
     })
     .catch(function(e){ LOW.err = e.message || 'unavailable'; render(); });
 }
 function lowTg(k){ LOW.open[k] = !LOW.open[k]; render(); }
-function lowBasket(b){ LOW.basket = b; render(); }
+function lowBasket(b){ LOW.basket = b; ensureFunnel(b); render(); }
 function lowSegAll(){ LOW.segAll = !LOW.segAll; render(); }
 function lowDayAll(){ LOW.dayAll = !LOW.dayAll; render(); }
 
@@ -1103,7 +1207,11 @@ function m2(d){
   }).join('') || '<div class="more">No qualifiers today.</div>';
   var right = '<span class="m mono" style="font-size:12px">' + fs.length + ' basket'
             + (fs.length === 1 ? '' : 's') + '</span>';
+  /* cc#986: the FILTER FUNNEL for the selected basket — stage counts, then the symbols that
+     clear every gate but have no open position yet. It sits under the qualifier list because it
+     answers the next question: not "what qualified" but "what passed and has not been taken". */
   var body = pills + list
+    + funnelBlock(cur.basket)
     + '<div class="lnav"><a href="/m/screeners">Open full funnel \u203a</a></div>'
     + '<div class="lnote">Qualifiers for ' + esc(d.signal_date || 'the latest session')
     + ' · score is the basket\u2019s own qualifying score.</div>';
@@ -1190,11 +1298,7 @@ function tog(ev, i, slug){
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.open = (STATE.open === i ? -1 : i);
   if (STATE.open === i && STATE.funnels[slug] === undefined){
-    STATE.funnels[slug] = 'loading'; render();
-    fetchWithTimeout('/api/v8/funnel/' + encodeURIComponent(slug))
-      .then(function(r){ return r.json(); })
-      .then(function(f){ STATE.funnels[slug] = f && !f.error ? f : null; render(); })
-      .catch(function(){ STATE.funnels[slug] = null; render(); });
+    ensureFunnel(slug); render();
     return;
   }
   render();

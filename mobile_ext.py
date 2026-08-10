@@ -365,6 +365,114 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#986 · PER-BASKET FILTER FUNNEL for /m/v8
+#
+# ROOT CAUSE FIRST. The founder's screenshot showed the basket expand rendering nothing at all.
+# mobile/v8.html was calling /api/v8/funnel/{basket}, and that route had been bound to the WRONG
+# FUNCTION since cc#424 on 12-Jul (06932bb): the decorator was left stranded above a helper that
+# was inserted beneath it, so FastAPI read the helper's un-annotated `cur` argument as a required
+# query string and answered 422 to every call. Fixed in v8_endpoints.py in this same commit. The
+# funnel was never "unrecognised" — it was never delivered.
+#
+# ONE FUNNEL, NOT TWO (DISPLAY_PARITY 16202, and the card's first instruction). Everything here is
+# the WEB's own computation, called IN-PROCESS: funnel_detail(basket) for the stage counts and
+# stock_passcount(basket) for the per-stock gate results. No SQL of my own re-derives a gate. If a
+# gate is added to the BASKET_FILTERS registry tomorrow it appears on mobile with no code change,
+# exactly as it does on the web.
+#
+# The expand is served by the four per-basket detail endpoints the amendment named. There is NO
+# generic /stock_detail/{basket} route — the map below is explicit for that reason.
+_BASKET_DETAIL = {
+    "buy_reversal":  "br_stock_detail",
+    "sell_reversal": "sr_stock_detail",
+    "sell_momentum": "sm_stock_detail",
+    "buy_momentum":  "bm_stock_detail",
+}
+
+
+@router.get("/api/mobile/v8funnel")
+@_json_safe
+def mobile_v8_funnel(request: Request, basket: str = "", top: int = 5):
+    """Stage counts + the top N symbols that pass EVERY gate but have no open position.
+
+    `top` defaults to 5 (the card). A basket with fewer than N shows what exists and says so;
+    a basket with none says that plainly — nothing is ever padded to reach five.
+    """
+    g = _guard(request)
+    if g:
+        return g
+    top = max(1, min(top, 25))
+    from v8_endpoints import funnel_detail, stock_passcount
+
+    wanted = [b.strip().lower() for b in basket.split(",") if b.strip()] or list(_BASKET_DETAIL)
+    wanted = [b for b in wanted if b in _BASKET_DETAIL]
+    if not wanted:
+        return {"error": "unknown basket", "known": list(_BASKET_DETAIL)}
+
+    # OPEN means OPEN NOW, not "opened today". A position entered on Friday and still running has
+    # very much been converted — listing its symbol as "passed but not opened" would be false. The
+    # match is per (symbol, basket) because this is a per-basket funnel: the same name can be open
+    # in a different basket and still be an un-taken opportunity in this one.
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT basket, symbol FROM v8_paper_positions WHERE status = 'OPEN'")
+        open_pairs = set((r[0], r[1]) for r in cur.fetchall())
+
+    out = []
+    for b in wanted:
+        item = {"basket": b, "label": basket_label(b), "stages": [], "rows": [],
+                "detail_path": "/api/v8/" + _BASKET_DETAIL[b] + "/"}
+        try:
+            fd = funnel_detail(b) or {}
+            item["stages"] = [{
+                "key": s.get("key") or s.get("metric"),
+                "metric": (s.get("metric") or "").replace("_", " "),
+                "cond": (s.get("condition_min") or "") or (s.get("condition_max") or ""),
+                "survivors": s.get("survivors"),
+                "killed": s.get("killed"),
+            } for s in (fd.get("stages") or [])]
+            item["universe"] = fd.get("universe") or fd.get("total")
+            # `final` is the strict-AND count the engine itself qualified — the bottom of the
+            # funnel. It ships beside the stage rows so the reader can see the drop-off end to end.
+            item["final"] = fd.get("final")
+            item["as_of"] = str(fd.get("score_date") or "") or None
+        except Exception as e:
+            log.warning("v8funnel: funnel_detail(%s) failed (%s)", b, e)
+            item["stages_error"] = f"{type(e).__name__}: {str(e)[:160]}"
+
+        try:
+            pc = stock_passcount(b) or {}
+            stocks = pc.get("stocks") or []
+            item["filter_count"] = pc.get("filter_count")
+            # "passed every gate" is passed == total, taken from the web's own count — not a
+            # threshold I picked. stock_passcount already returns them ranked (passed desc, then
+            # gvm_score desc); that ORDER IS KEPT, so mobile ranks by what the web ranks by.
+            full = [s for s in stocks if s.get("total") and s.get("passed") == s.get("total")]
+            item["passing"] = len(full)
+            not_open = [s for s in full if (b, s.get("symbol")) not in open_pairs]
+            item["pass_not_open"] = len(not_open)
+            item["open_now"] = len(full) - len(not_open)
+            item["rows"] = [{
+                "symbol": s.get("symbol"),
+                "passed": s.get("passed"),
+                "total": s.get("total"),
+                "gvm": float(s["gvm_score"]) if s.get("gvm_score") is not None else None,
+            } for s in not_open[:top]]
+            item["truncated"] = max(0, len(not_open) - len(item["rows"]))
+            if not full:
+                item["message"] = "No symbol clears every gate right now."
+            elif not not_open:
+                item["message"] = ("All %d symbols that clear every gate are already open."
+                                   % len(full))
+        except Exception as e:
+            log.warning("v8funnel: stock_passcount(%s) failed (%s)", b, e)
+            item["rows_error"] = f"{type(e).__name__}: {str(e)[:160]}"
+        out.append(item)
+
+    return {"baskets": out, "top": top,
+            "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
 @router.get("/m/screeners", response_class=HTMLResponse)
 def m_screeners():
     return _page("screeners")

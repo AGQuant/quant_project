@@ -1397,7 +1397,14 @@ def _basket_cmp(cur):
     return {r[0]: float(r[1]) for r in cur.fetchall()}
 
 
-@router.get("/funnel/{basket}")
+# NOTE cc#986: the @router.get("/funnel/{basket}") decorator used to sit RIGHT HERE, and cc#424
+# (06932bb, 12-Jul-2026) inserted this helper directly beneath it. The decorator was left behind
+# and bound the route to the helper instead of to funnel_counts() below. FastAPI then read the
+# helper's un-annotated `cur` parameter as a REQUIRED QUERY STRING, so every call to
+# /api/v8/funnel/{basket} answered 422 and never reached the funnel at all. mobile/v8.html is the
+# only caller (the web dashboard uses /funnel_detail and /stock_passcount), which is why the
+# breakage stayed invisible for four weeks and showed up only as the founder's "see Funnel below
+# with nothing rendered". The decorator is moved back onto funnel_counts where it belongs.
 def _latest_funnel_counts(cur, basket: str):
     """cc#424: as-of funnel-count row for a basket. Off-market there is no
     score_date=CURRENT_DATE row, so serve the most recent session's precomputed counts
@@ -1413,6 +1420,7 @@ def _latest_funnel_counts(cur, basket: str):
     return (counts or {}), row[1]
 
 
+@router.get("/funnel/{basket}")
 def funnel_counts(basket: str):
     basket = basket.lower()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")

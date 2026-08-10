@@ -1943,6 +1943,41 @@ a.card-link{text-decoration:none;color:inherit;display:block}
 .fun{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--mut);
   padding:8px 0 0 2px;border-top:1px solid var(--line);margin-top:10px;line-height:1.6}
 .fun b{color:var(--txt)}
+/* ── cc#986 · per-basket FILTER FUNNEL on /m/v8 ───────────────────────────────────────────────
+   EVERY class here carries the `fn-` prefix, including the INNER ones. I first wrote the inner
+   spans as `.g/.p/.n/.v/.x` scoped under `.fn-st`/`.fn-gate`, and the render showed exactly what
+   this app has now been bitten by six times (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a): the
+   sheet's own generic rules won, and the stage names came out inside red-barred boxes with the
+   gate values in yellow-barred pills. Descendant scoping does NOT protect a short class name from
+   a rule that matches it globally. Prefix the leaves too. */
+.fn-wrap{border-top:1px solid var(--line);margin-top:10px;padding-top:9px}
+.fn-h{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:800;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--dim);padding:0 2px 7px}
+.fn-st{display:grid;grid-template-columns:minmax(0,1fr) 34px 46px;gap:3px 8px;align-items:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;padding:0 2px}
+.fn-g{color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fn-p{color:var(--txt);font-weight:700;text-align:right}
+.fn-k{color:var(--dim);text-align:right}
+.fn-bar{grid-column:1/-1;height:2px;background:var(--line);border-radius:2px;margin:0 0 4px}
+.fn-bar i{display:block;height:100%;border-radius:2px;background:var(--grn)}
+.fn-sum{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--mut);
+  padding:9px 2px 2px;line-height:1.6}
+.fn-sum b{color:var(--txt)}
+.fn-sym{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:0 2px;
+  background:none;border:none;border-top:1px solid var(--line);color:inherit;font-family:inherit;
+  text-align:left;cursor:pointer}
+.fn-s{font-weight:700;font-size:12.5px;margin-right:auto}
+.fn-b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
+.fn-x{color:var(--dim);font-size:13px}
+.fn-body{padding:2px 2px 10px}
+.fn-gate{display:grid;grid-template-columns:minmax(0,1fr) auto 16px;gap:2px 8px;align-items:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;padding:4px 0;
+  border-bottom:1px solid var(--line)}
+.fn-n{color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fn-v{color:var(--txt);text-align:right;white-space:nowrap}
+.fn-q{color:var(--dim);grid-column:1/-1;font-size:9px}
+.fn-ok{color:var(--grn);text-align:center;font-weight:800}
+.fn-no{color:var(--red);text-align:center;font-weight:800}
 .trow{display:flex;align-items:center;gap:8px;padding:7px 0 0 2px;border-top:1px solid var(--line);margin-top:8px;font-size:11.5px;flex-wrap:wrap}
 .trow .sy2{font-weight:700;margin-right:auto}
 .trow .mono2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px}
