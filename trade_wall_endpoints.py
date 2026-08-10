@@ -107,6 +107,18 @@ INSTRUMENTS = ("EQUITY", "FUTURES", "OPTIONS")
 #     identical error. That is why this note lives in a PYTHON comment outside the string and
 #     writes "<pct>" wherever it means the character.
 #
+# ── HOW TO VERIFY AN EDIT TO _EVENTS_SQL (cc#992, learned twice) ─────────────────────────────
+# EXECUTE IT. Extract this string from the file and run it against the database. Nothing else
+# catches a SQL mistake:
+#   * ast.parse validates PYTHON. A broken query is a perfectly valid Python string.
+#   * the psycopg placeholder scan validates PLACEHOLDERS. It does not parse SQL.
+#   * a FastAPI TestClient over a stubbed cursor validates the HANDLER. The stub never sends the
+#     query anywhere.
+# All three passed on a version of this file whose V14 branch read
+# "CONCAT_WS(sep, tag, THEN ... END)" — the CASE WHEN had been dropped by a bad edit, and the
+# endpoint answered 500 on every request while three green checks said it was fine. The founder
+# found it, twice in a row, because the only test that could have found it was the one not run.
+#
 # ── THE UNION ────────────────────────────────────────────────────────────────────────────────
 # Every branch emits the SAME column list so the outer query can sort and page one flat stream.
 # `sk` is the tie-break sort key: source + id + event, which is unique across the whole union, so
@@ -161,8 +173,9 @@ WITH ev AS (
          symbol, UPPER(side), 'V14 Intraday', 'EQUITY',
          NULL, exit_px::numeric, NULL, exit_reason,
          NULLIF(CONCAT_WS(' · ', tag,
-                -- cc#992 P0 FIX: chr(37) is the percent sign. See PERCENT_SIGNS_IN_SQL below —
-                -- the character itself must never appear anywhere in this string, comments too.
+                -- chr(37) is the percent sign; see PERCENT_SIGNS_IN_SQL above for why the
+                -- character itself must never appear in this string, comments included.
+                CASE WHEN net_pnl_pct IS NOT NULL
                      THEN ROUND(net_pnl_pct::numeric, 2)::text || chr(37) || ' net' END), '')
   FROM v14_trades WHERE exit_ts IS NOT NULL
 
