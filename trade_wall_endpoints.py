@@ -47,27 +47,30 @@ said, and two of its own statements turned out not to match the data:
      side is stated as LONG rather than left blank. Its statuses are 'open' (62) and 'exited_stop'
      (22) — lowercase, unlike v8's uppercase 'OPEN'.
 
-ENGINE / INSTRUMENT MAP (per the data, not per assumption):
-  v8_paper_trades + v8_paper_positions -> V8 Swing        EQUITY   (cmp pinned to spot, cc#367)
+ENGINE / INSTRUMENT MAP — cc#992 (founder 10-Aug), which SUPERSEDES cc#991's:
+  v8_paper_trades + v8_paper_positions -> V8 Swing        FUTURES  <- was EQUITY. The V8 universe
+                                                                      IS the F&O futures list; the
+                                                                      cmp being pinned to spot
+                                                                      (cc#367) is a pricing detail,
+                                                                      not the instrument traded.
   v10_trades leg='FUT'                 -> V10 Index       FUTURES
-  v10_trades leg='OPT'                 -> V10 Index       OPTIONS  <- the card's mapping was wrong
+  v10_trades leg='OPT'                 -> V10 Index       OPTIONS  (per row, from `leg`)
   v14_trades                           -> V14 Intraday    EQUITY
   tc_intraday_trades                   -> Intraday        EQUITY
   options_trades                       -> Options         OPTIONS
   quant_paper_positions                -> Quant Basket    EQUITY
   v9_paper_trades                      -> V9 Pairs        EQUITY   (empty today)
 
-EVENT COUNT ARITHMETIC (10-Aug, so the verify number is reproducible):
-  v8_paper_trades       97 closed x2  = 194
-  v8_paper_positions    21 open  x1   =  21
-  v10_trades            81 closed x2  = 162
-  v14_trades            25 closed x2  =  50
-  tc_intraday_trades    12 closed x2  =  24
-  options_trades         6 closed x2  =  12
-  quant_paper_positions 84 entries + 22 exits = 106
-  v9_paper_trades        0            =   0
-                                       -----
-                                        569
+PER-CLASS EVENT COUNTS under the cc#992 map (10-Aug 15:05 IST — this is a LIVE wall, so the
+numbers move as engines trade; they are stated with their timestamp for that reason):
+  EQUITY   180  = V14 Intraday 50 + Intraday 24 + Quant Basket 106
+  FUTURES  306  = V8 Swing 216 (118 entries + 98 exits) + V10 FUT legs 90
+  OPTIONS   84  = V10 OPT legs 72 + Options 12
+                 -----
+  TOTAL    570
+cc#991 documented 569 with V8 under EQUITY. The single-event difference is not a discrepancy in
+the union: one more V8 trade closed between the two counts, which is exactly what a live feed
+should do. The reclassification moved 216 events from EQUITY to FUTURES and changed no total.
 """
 
 import logging
@@ -84,6 +87,26 @@ router = APIRouter()
 # The instrument classes the filter chips offer. Derived from the union below, not typed twice.
 INSTRUMENTS = ("EQUITY", "FUTURES", "OPTIONS")
 
+# ── PERCENT_SIGNS_IN_SQL (cc#992, my own P0) ─────────────────────────────────────────────────
+# NOT ONE percent character may appear anywhere inside _EVENTS_SQL — not in a string literal, and
+# NOT IN A COMMENT EITHER.
+#
+# cc#991 shipped `|| '<pct> net'` to label V14's percentage P&L. psycopg scans the query text for
+# placeholders on the CLIENT, before Postgres ever sees it, and read that as a broken parameter:
+# "incomplete placeholder". Every parameterised call to this union died at the driver, so
+# /m/trades answered 500 and the page rendered no chips at all. The whole feature was dark.
+#
+# Two things I got wrong, recorded so the next person does not repeat either:
+#   * DOUBLING IT UP IS NOT THE RIGHT FIX HERE. Doubling only unescapes when parameters ARE
+#     passed. The count queries in tradewall() deliberately call execute() with none, and psycopg
+#     skips placeholder parsing on that path — so a doubled sign would survive verbatim into the
+#     text and read "1.13<pct><pct> net". chr(37) emits the character from Postgres instead, so
+#     it is correct on every path, parameterised or not.
+#   * psycopg's SCANNER DOES NOT RESPECT SQL COMMENTS. My first attempt at this very fix put the
+#     explanation in a `--` comment next to the line, spelled the sign out, and reproduced the
+#     identical error. That is why this note lives in a PYTHON comment outside the string and
+#     writes "<pct>" wherever it means the character.
+#
 # ── THE UNION ────────────────────────────────────────────────────────────────────────────────
 # Every branch emits the SAME column list so the outer query can sort and page one flat stream.
 # `sk` is the tie-break sort key: source + id + event, which is unique across the whole union, so
@@ -92,20 +115,20 @@ _EVENTS_SQL = """
 WITH ev AS (
   -- V8 SWING · closed: entry + exit. entry_ts/exit_ts are NAIVE IST -> read raw.
   SELECT 'v8'::text src, id, 'ENTRY'::text event, entry_ts::timestamp ts, 'min'::text prec,
-         symbol, UPPER(side) side, 'V8 Swing'::text engine, 'EQUITY'::text instrument,
+         symbol, UPPER(side) side, 'V8 Swing'::text engine, 'FUTURES'::text instrument,
          qty::numeric qty, entry_price::numeric price, NULL::numeric pnl, NULL::text result,
          basket::text note
   FROM v8_paper_trades WHERE entry_ts IS NOT NULL
   UNION ALL
   SELECT 'v8', id, 'EXIT', COALESCE(exit_ts, closed_at)::timestamp, 'min',
-         symbol, UPPER(side), 'V8 Swing', 'EQUITY',
+         symbol, UPPER(side), 'V8 Swing', 'FUTURES',
          qty::numeric, exit_price::numeric, pnl::numeric, result, basket
   FROM v8_paper_trades WHERE COALESCE(exit_ts, closed_at) IS NOT NULL
 
   -- V8 SWING · still open: ONE event, the entry. No exit is invented for a live position.
   UNION ALL
   SELECT 'v8open', id, 'ENTRY', entry_ts::timestamp, 'min',
-         symbol, UPPER(side), 'V8 Swing', 'EQUITY',
+         symbol, UPPER(side), 'V8 Swing', 'FUTURES',
          qty::numeric, entry_price::numeric, NULL, NULL, basket
   FROM v8_paper_positions WHERE status = 'OPEN' AND entry_ts IS NOT NULL
 
@@ -138,8 +161,9 @@ WITH ev AS (
          symbol, UPPER(side), 'V14 Intraday', 'EQUITY',
          NULL, exit_px::numeric, NULL, exit_reason,
          NULLIF(CONCAT_WS(' · ', tag,
-                CASE WHEN net_pnl_pct IS NOT NULL
-                     THEN ROUND(net_pnl_pct::numeric, 2)::text || '% net' END), '')
+                -- cc#992 P0 FIX: chr(37) is the percent sign. See PERCENT_SIGNS_IN_SQL below —
+                -- the character itself must never appear anywhere in this string, comments too.
+                     THEN ROUND(net_pnl_pct::numeric, 2)::text || chr(37) || ' net' END), '')
   FROM v14_trades WHERE exit_ts IS NOT NULL
 
   -- INTRADAY (tc) · entry_ts/exit_ts are NAIVE IST -> read raw. Context isolation (rule 7) is a
@@ -214,6 +238,15 @@ WITH ev AS (
 )
 SELECT ev.*, (src || ':' || id::text || ':' || event) AS sk FROM ev
 """
+
+
+# The guard that makes PERCENT_SIGNS_IN_SQL enforceable instead of merely written down. This
+# raises at IMPORT — so a bad edit fails the deploy loudly, at boot, instead of answering 500 to a
+# reader who then has to report it. cc#991 shipped exactly that bug and only the founder caught it.
+assert chr(37) not in _EVENTS_SQL, (
+    "trade_wall_endpoints: a percent character reached _EVENTS_SQL. psycopg reads it as a "
+    "placeholder and every parameterised call to this union will fail at the driver. Emit it with "
+    "chr(37) instead, and keep it out of SQL comments too — the scanner does not skip them.")
 
 
 def _fetch(cur, limit, cur_ts, cur_sk, instrument):
