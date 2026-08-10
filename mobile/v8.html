@@ -187,6 +187,23 @@
 .sub.on i{color:var(--blu,#4D7CFE)}
 .sub.clr{color:var(--red);border-color:rgba(255,92,108,.4);letter-spacing:.08em}
 .tierlab{display:flex;align-items:center}
+/* ── cc#989 · marker legend behind an (i) ──────────────────────────────────────────────────
+   `lg-` prefixed on EVERY class, leaves included. cc#986 proved that scoping a short name under
+   a prefixed parent is not protection — the sheet's own generic rules still win. */
+.lg-i{width:44px;height:44px;margin:-10px 0 -10px 6px;flex:none;display:inline-flex;
+  align-items:center;justify-content:center;background:none;border:none;cursor:pointer;
+  color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
+  font-weight:800;line-height:1}
+.lg-i span{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;
+  border:1px solid currentColor;border-radius:50%}
+.lg-i.lg-on{color:var(--blu,#4D7CFE)}
+.lg-panel{margin:0 12px 10px;padding:11px 13px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px}
+.lg-hd{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--dim);margin-bottom:9px}
+.lg-line{font-size:11.5px;line-height:1.65;color:var(--mut);padding:2px 0}
+.lg-line + .lg-line{border-top:1px solid var(--line);margin-top:2px;padding-top:6px}
+.lg-none{font-size:11.5px;line-height:1.6;color:var(--dim)}
 .ghd{cursor:pointer}
 .ghd .gx{font-size:11px;color:var(--dim);min-width:14px;text-align:right}
 .tl2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
@@ -300,6 +317,7 @@ var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, s
               mood: null, book: null, group: 'period', instrument: 'equity',
               sub: {}, pop: null, fold: {}, stars: {}, act: {}, legend: null,
               gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
+              legendOpen: false,           // cc#989: marker legend, on demand behind the (i)
               page: 'open' };   // cc#943: which face of the book is showing   // cc#932: pivot markers by symbol
 
 function esc(s){ return String(s == null ? '' : s)
@@ -923,6 +941,40 @@ function gateBody(key, sym){
 
 /* cc#986: ONE loader for the funnel payload, used by the lower-section module (the live surface)
    and by the basket-card path alike, so there is a single place that knows the endpoint. */
+/* cc#989 · the legend is SERVER copy, rendered verbatim. /api/v8/pivot_star ships it (the text
+   lives in v8_pivot_star.py so /dashboard and /m/v8 cannot word it differently — DISPLAY_PARITY
+   16202, cc#932/933 rule) and it already enumerates all four marker families: amber Trade Check,
+   blue/red pivot reversal, green unusual activity, and the shape-is-side rule. I checked before
+   writing anything — no server-side line needed adding, and nothing here is hand-written. */
+function legendPanel(){
+  var L = STATE.legend;
+  if (!L || !L.length)
+    return '<div class="lg-panel"><div class="lg-hd">Marker legend</div>'
+      + '<div class="lg-none">The legend could not be loaded this session. It comes from '
+      + '/api/v8/pivot_star, so the markers on screen are still real \u2014 only this reference '
+      + 'text is missing. Pull to refresh.</div></div>';
+  return '<div class="lg-panel"><div class="lg-hd">Marker legend</div>'
+    + L.map(function(x){ return '<div class="lg-line">' + esc(x) + '</div>'; }).join('')
+    + '</div>';
+}
+function togLegend(ev){
+  if (ev) ev.stopPropagation();          /* the card underneath has its own click handler */
+  STATE.legendOpen = !STATE.legendOpen;
+  render();
+}
+/* Tap anywhere outside the panel or the (i) closes it. Bound ONCE on the document, not re-bound
+   on every render — render() rewrites this subtree constantly and a per-render listener would
+   stack up one handler per paint. */
+if (!window.__lgBound){
+  window.__lgBound = true;
+  document.addEventListener('click', function(e){
+    if (!STATE.legendOpen) return;
+    var t = e.target;
+    if (t && t.closest && (t.closest('.lg-panel') || t.closest('.lg-i'))) return;
+    STATE.legendOpen = false; render();
+  });
+}
+
 function ensureFunnel(slug){
   if (!slug || STATE.funnels[slug] !== undefined) return;
   STATE.funnels[slug] = 'loading';
@@ -1029,9 +1081,16 @@ function render(){
   var realisedPg = (STATE.page === 'realised');
   /* cc#977 item 1: the Open Book nav CARD is gone, but its destination is not — the link lives
      here as a small chevron on the section it actually describes. */
+  /* cc#989: the marker legend comes back as ON-DEMAND reference, not the permanent box cc#977
+     deliberately removed. The (i) sits on the header of the section whose symbols carry the
+     markers. It is never a dead button: with no legend loaded it opens and says so (cc#924). */
   h += '<div class="tierlab">' + (realisedPg ? 'Realised trades' : 'Open positions')
     + ((!realisedPg && asof) ? ' <span class="tl2">· ' + asof + '</span>' : '')
+    + '<button class="lg-i' + (STATE.legendOpen ? ' lg-on' : '') + '" onclick="togLegend(event)"'
+    + ' aria-label="What the markers mean" aria-expanded="' + (STATE.legendOpen ? 'true' : 'false')
+    + '"><span>i</span></button>'
     + '<a class="tlgo" href="/m/positions" aria-label="Open Book, full screen">\u203a</a></div>'
+    + (STATE.legendOpen ? legendPanel() : '')
     /* cc#977 item 1: the instrument_note dev paragraph ("V8 paper positions carry no instrument
        column...") is GONE. It was an engineering note explaining a schema limitation, rendered as
        if it were product copy. The FUT/EQ switch already shows the constraint by being disabled. */
