@@ -35,7 +35,9 @@ log = logging.getLogger("segment_change")
 
 # cc#811: SPOT sources only. 'fyers_fut' must never appear here — an F&O symbol carries an eq bar
 # and a fut bar at the same ts, and the futures premium would enter the aggregate as if it were spot.
-SPOT_SOURCES = ('fyers_eq', 'fyers_ext', 'fyers_hist')
+# cc#1011: a LIST (not a tuple) because the query below binds it to `= ANY(%(spot)s)` (psycopg3 array
+# param), not the old `IN %(spot)s` — see the note on the query.
+SPOT_SOURCES = ['fyers_eq', 'fyers_ext', 'fyers_hist']
 
 # Calendar-day lookbacks for the week/month anchors. Deliberately calendar rather than trading-day
 # counts: the anchor is "the last close at or before this date", so holidays and weekends resolve to
@@ -57,7 +59,13 @@ live AS (
     SELECT DISTINCT ON (i.symbol) i.symbol, i.close, i.ts::date AS px_date
     FROM intraday_prices i
     JOIN members m ON m.symbol = i.symbol
-    WHERE i.source IN %(spot)s AND i.timeframe = '5m' AND i.close IS NOT NULL
+    -- cc#1011: `= ANY(%(spot)s)` not `IN %(spot)s`. Under psycopg3 (this codebase) a tuple param is
+    -- NOT expanded into an IN-list the way psycopg2 did, so `i.source IN %(spot)s` raised every time
+    -- this ran inside the signal-writer tick — silently, because segment_changes() swallowed it and
+    -- returned {}. That is why cc#810's wide table-write never landed (the table stayed F&O for
+    -- weeks) and why, once cc#1003 moved this call ahead of the metrics upsert, the poisoned tick
+    -- transaction wrote 0/208. `= ANY(array)` is the correct psycopg3 pattern.
+    WHERE i.source = ANY(%(spot)s) AND i.timeframe = '5m' AND i.close IS NOT NULL
     ORDER BY i.symbol, i.ts DESC
 ),
 eod AS (
@@ -139,6 +147,14 @@ def segment_changes(cur):
                         "members_total": int(ntot or n or 0)}
     except Exception as e:
         log.warning(f"segment_changes: {e}")
+        # cc#1011: a failed query leaves the connection in an ABORTED transaction. Clear it so a
+        # caller that keeps using this connection (the signal-writer tick, TC cards, GVM chips) does
+        # not then die on "current transaction is aborted". Returning {} is the fail-closed contract;
+        # leaving a poisoned connection behind was how one bad read killed a whole tick.
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
     return out
 
 

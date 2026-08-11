@@ -546,15 +546,19 @@ def _build_vol_baseline(conn, symbols: List[str], sim_ts=None) -> None:
     _VOL_BASELINE["days"] = {}
     _VOL_BASELINE["full_day"] = {}
     with conn.cursor() as cur:
+        # cc#1011: every column explicitly qualified to the intraday_prices alias `ip`, so `ts` can
+        # never resolve ambiguously if this query later grows a JOIN — the fail-closed contract for
+        # the vol baseline still holds (its except below rolls back and blanks the curve), but a bare
+        # `ts` should never be the thing that trips it.
         cur.execute("""
-            SELECT symbol, source, ts::date, ts::time, volume
-            FROM intraday_prices
-            WHERE symbol = ANY(%s) AND ts::date < %s
-              AND ts::date >= %s - INTERVAL '11 days'
-              AND source IN ('fyers_eq', 'fyers', 'yahoo')
-              AND volume IS NOT NULL
-              AND ts::time BETWEEN '09:15' AND '15:30'
-            ORDER BY symbol, source, ts
+            SELECT ip.symbol, ip.source, ip.ts::date, ip.ts::time, ip.volume
+            FROM intraday_prices ip
+            WHERE ip.symbol = ANY(%s) AND ip.ts::date < %s
+              AND ip.ts::date >= %s - INTERVAL '11 days'
+              AND ip.source IN ('fyers_eq', 'fyers', 'yahoo')
+              AND ip.volume IS NOT NULL
+              AND ip.ts::time BETWEEN '09:15' AND '15:30'
+            ORDER BY ip.symbol, ip.source, ip.ts
         """, (symbols, today, today))
         rows = cur.fetchall()
 
@@ -935,7 +939,13 @@ def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dic
     sym_seg: Dict[str, str] = {}
     try:
         import segment_change
-        with conn.cursor() as cur:
+        # cc#1011 STRUCTURAL ISOLATION: the sector fetch is OPTIONAL and now runs on its OWN
+        # short-lived connection, NEVER the tick's. segment_change's read had been aborting the tick
+        # transaction in place; once cc#1003 moved this call to just before the metrics UPSERT, that
+        # poisoned connection made the upsert fail and the whole tick write 0/208 while still stamping
+        # a healthy heartbeat (11-Aug incident). On a separate connection a sector-read failure can
+        # ONLY produce NULL sector values (gates fail closed) — it can never touch the tick's write.
+        with psycopg.connect(os.environ.get("DATABASE_URL")) as _sc, _sc.cursor() as cur:
             segs = segment_change.segment_changes(cur)
             # Key each V8 stock to its WIDE-UNIVERSE segment (gvm_scores) — the same taxonomy
             # segment_change aggregates on — so a stock and its sector benchmark share one segment.
@@ -943,9 +953,10 @@ def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dic
                            WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)""")
             sym_seg = {r[0]: r[1] for r in cur.fetchall()}
     except Exception as e:
-        log.warning(f"_add_sector_aggregates(cc#1003 wide): segment_change/segment map failed ({e}); "
-                    f"sector_* left None this tick — gates fail closed, never fall back to a stale "
-                    f"F&O value")
+        log.warning(f"_add_sector_aggregates(cc#1003/1011 wide): isolated sector fetch failed ({e}); "
+                    f"sector_* left None this tick — gates fail closed, never a stale F&O value and "
+                    f"never a poisoned tick connection")
+        segs, sym_seg = {}, {}
 
     for sym, m in computed.items():
         info = segs.get(sym_seg.get(sym)) if sym_seg.get(sym) else None
@@ -2587,7 +2598,7 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
     # INSERT+COMMIT). _upsert_metrics_batch preserves the cc#218 skip-bad-symbol guarantee via
     # a batch savepoint + per-symbol fallback on batch failure.
     _t_upsert = perf_counter()
-    _upsert_metrics_batch(conn, computed, today, sim_ts=sim_ts)
+    written = _upsert_metrics_batch(conn, computed, today, sim_ts=sim_ts)   # cc#1011: capture the count
     _upsert_ms = (perf_counter() - _t_upsert) * 1000.0
     all_metrics = list(computed.values())
 
@@ -2617,13 +2628,39 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
 
     try:
         _write_adr_intraday(conn, sim_ts=sim_ts)
-        _update_sector_aggregates_sql(conn, today)
+        # cc#1011: the separate _update_sector_aggregates_sql pass is RETIRED. _add_sector_aggregates
+        # now sets the wide segment_change values on `computed` (on an isolated connection), so the
+        # metrics UPSERT above already writes them to v8_metrics — this pass was redundant AND, by
+        # running segment_change on the tick's OWN connection, was a second way to re-poison it after
+        # the write. Table and gates now both come from the one isolated computation.
     except Exception as _ae:
-        log.error(f"signal_writer: adr/sector aggregate update failed — {_ae}", exc_info=True)
+        log.error(f"signal_writer: adr update failed — {_ae}", exc_info=True)
         try: conn.rollback()
         except Exception: pass
 
-    log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
+    # cc#1011 HEARTBEAT HONESTY: "ok" — the heartbeat, the scheduler status, and the MCP return —
+    # MUST be gated on an ACTUAL write. On 11-Aug the tick computed 208 symbols but wrote 0 (a
+    # poisoned connection failed the upsert), yet the heartbeat stamped alive and the scheduler logged
+    # ok, so the writer ran dark for an hour with every watchdog green — the exact watchdog-blindness
+    # class from the feed-incident manual. A tick that computed symbols but wrote NONE is a FAILURE:
+    # do NOT stamp the heartbeat (so run_diagnosis/the watchdog sees it stale and restarts), page
+    # loudly, and RAISE so the scheduler records last_status=error instead of ok.
+    if computed and not written:
+        try:
+            conn.rollback()   # clear any aborted state so the ops_log write itself can land
+        except Exception:
+            pass
+        log.critical(f"signal_writer: WROTE 0/{len(computed)} rows despite computing them — the "
+                     f"metrics upsert failed (poisoned txn / lock). NOT stamping heartbeat.")
+        try:
+            _ops_log(conn, "critical", "signal_writer_zero_write",
+                     {"computed": len(computed), "written": 0, "date": str(today)})
+        except Exception:
+            pass
+        raise RuntimeError(f"signal_writer wrote 0/{len(computed)} rows — write failure, not a "
+                           f"healthy tick (heartbeat withheld; see signal_writer_zero_write)")
+
+    log.info(f"signal_writer: {written}/{len(computed)} written, {no_bar} no_bar, source=live_5min")
     _write_heartbeat(conn, sim_ts=sim_ts)
     _assert_no_nontrading_metrics(conn)   # cc#211: loud on any bypassed non-trading write
 
@@ -2638,7 +2675,8 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
              f"load_intraday={_intr_ms:.0f}ms symbols={len(computed)}")
     return {
         "date":    str(today),
-        "updated": len(computed),
+        "updated": written,            # cc#1011: rows actually WRITTEN, not merely computed
+        "computed": len(computed),     # cc#1011: kept for visibility (written < computed => partial)
         "no_bar":  no_bar,
         "total":   len(symbols),
         "source":  "live_5min",
