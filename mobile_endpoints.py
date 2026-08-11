@@ -240,6 +240,11 @@ def _guard(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 # INTEL — contract: 12 values, 12 SOURCED, 0 empty, 0 unsourced. The cleanest screen in the set.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#1001 (founder 11-Aug): the default Intel feed is capped at the last 60 DAYS, lazy-loaded within
+# that window (cc#997's all-time-to-oldest-row scope is retired). Named so the header and the SQL
+# window can never disagree about the number.
+INTEL_WINDOW_DAYS = 60
+
 @router.get("/api/mobile/intel")
 @_json_safe   # cc#887
 def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str = ""):
@@ -253,10 +258,9 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
     g = _guard(request)
     if g:
         return g
-    # cc#997: PRESERVE THE hours=0 ALL-TIME SENTINEL. The pre-993 clamp `max(1, min(hours,168))` ran
-    # HERE, before the `hours <= 0` window branch below, so the default sentinel 0 became 1 and the
-    # whole feed was filtered to the LAST 1 HOUR (all_time flipped to false too) — Intel rendered
-    # blank in prod whenever the newest story was >1h old. Clamp only POSITIVE values; 0 stays 0.
+    # cc#997/cc#1001: hours<=0 is the DEFAULT feed. cc#997 preserved that sentinel (the pre-993 clamp
+    # turned 0 into 1 and filtered to the last hour); cc#1001 makes the sentinel mean "last 60 days",
+    # not all-time-to-the-oldest-row. A positive hours still honours an explicit caller (<=168h).
     hours = 0 if hours <= 0 else max(1, min(hours, 168))
     limit = max(1, min(limit, 100))
     # ── cc#983: KEYSET CURSOR, not OFFSET ────────────────────────────────────────────────────
@@ -276,22 +280,27 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             return {"error": "bad cursor", "editorials": [], "feed": [], "has_more": False}
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # cc#993: ONE window expression, built once, used by every query below. hours <= 0
-            # means NO CAP — the founder wants the feed to walk the whole table, newest to oldest,
-            # until it is exhausted. The parameter survives so an existing caller asking for 48
-            # still gets 48; the DEFAULT is now all-time.
-            # NOT "TRUE". A bare TRUE would let a NULL display_time through, and the keyset
-            # cursor compares `display_time < ...` — NULL fails that test, so such a row could
-            # appear once on page 1 and then be unreachable forever after. There are zero NULLs
-            # today (checked: 0 of 3,565), which is exactly when a guard is cheap to add and
-            # impossible to notice missing.
-            win = ("display_time IS NOT NULL" if hours <= 0
+            # cc#1001: ONE window expression, built once, used by every query below. The DEFAULT
+            # (hours<=0) is the last INTEL_WINDOW_DAYS (60), NOT all-time — the feed no longer walks
+            # back to the oldest row (cc#993's all-time scope is retired). A positive hours still
+            # honours an explicit caller. `display_time >= NOW() - INTERVAL` also excludes NULL
+            # display_time (NULL >= ... is false), so the keyset compare below is safe (the cc#993
+            # NULL guard is subsumed). INTEL_WINDOW_DAYS is an int the server controls — safe to
+            # interpolate, never a user value.
+            win = (f"display_time >= NOW() - INTERVAL '{INTEL_WINDOW_DAYS} days'" if hours <= 0
                    else "display_time >= NOW() - (%s || ' hours')::interval")
             wargs = [] if hours <= 0 else [hours]
             cur.execute(
                 "SELECT COUNT(*) AS n, MAX(display_time) AS newest, MIN(display_time) AS oldest "
                 "FROM v_polished_articles WHERE " + win, wargs)
             head = _rows(cur)[0]
+            # cc#1001: server-computed per-category counts over the FULL window (one cheap GROUP BY),
+            # so EVERY nonzero chip (incl. AI Editorial) is visible from first load with a true count —
+            # not derived from whatever pages the client has scrolled into view (cc#993's client-side
+            # counts hid AI Editorial until the reader scrolled deep enough to reach an editorial).
+            cur.execute("SELECT category, COUNT(*) AS n FROM v_polished_articles WHERE " + win
+                        + " GROUP BY category", wargs)
+            category_counts = {r["category"]: r["n"] for r in _rows(cur) if r["category"]}
             # cc#993: the per-category counts are gone from the payload. They were WHOLE-WINDOW
             # counts, and the client filters over the pages it has actually loaded — which was
             # survivable over a 48-hour window and is not over 3,565 all-time rows, where a chip
@@ -347,13 +356,17 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             # fresh clock, but it can never show a fresh headline (16170).
             "newest": newest.strftime("%H:%M IST") if newest else None,
             "count": head["n"],
-            # cc#993: `hours` is 0 for the all-time feed and the client must not print a window
-            # the query no longer enforces. `oldest` is shipped so the header can state the REAL
-            # span of what it is offering instead of a number nobody applies any more.
+            # cc#1001: the DEFAULT feed is the last 60 days — window_days states the true scope the
+            # query enforces so the header ("last 60 days") never claims a window the SQL does not
+            # apply. all_time is retired (never true now). `oldest` still ships for reference.
             "hours": hours,
-            "all_time": hours <= 0,
+            "window_days": INTEL_WINDOW_DAYS if hours <= 0 else None,
+            "all_time": False,
             "oldest": head["oldest"].strftime("%d %b %Y") if head["oldest"] else None,
         },
+        # cc#1001: server-side per-category counts over the FULL 60-day window — the template renders
+        # ALL nonzero chips (incl. AI Editorial) from this immediately, never from loaded pages.
+        "category_counts": category_counts,
         "editorials": editorials,
         "feed": feed,
         "shown": len(editorials) + len(feed),

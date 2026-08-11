@@ -214,23 +214,18 @@ function openFull(id){
   btn.innerHTML = open ? 'Collapse \u2191' : (btn.getAttribute('data-more') || 'Read \u203a');
 }
 
-/* ── cc#993 · CHIPS OVER THE LOADED SET ────────────────────────────────────────────────────
-   These used to be whole-window counts from the server. Over 48 hours that was survivable; over
-   3,565 all-time rows it is not — a chip reading "Markets 1,800" above a list of twelve is simply
-   false, because the filter only ever runs over the pages actually loaded. The count is now what
-   tapping the chip will show. The all-time TOTAL is still stated, in the header, where it is true.
-   The card believed cc#983 already counted the loaded set; it did not — it counted the window. */
+/* ── cc#1001 · CHIPS FROM THE SERVER 60-DAY COUNTS ─────────────────────────────────────────────
+   cc#993 built chips from the LOADED set, so AI Editorial (few, deep in the stream) had no chip
+   until the reader scrolled far enough to load one. The endpoint now ships category_counts over
+   the full 60-day window, so EVERY nonzero chip is visible from first load with a true count. 'All'
+   is the header total; a category with zero items in 60 days simply has no chip. */
 function chipsHtml(){
-  var all = (STATE.data.editorials || []).concat(STATE.data.feed || []);
-  var counts = {}, order = [];
-  all.forEach(function(a){
-    var k = a.category || 'Uncategorised';
-    if (counts[k] == null){ counts[k] = 0; order.push(k); }
-    counts[k]++;
-  });
-  order.sort(function(x, y){ return counts[y] - counts[x] || x.localeCompare(y); });
-  return [{label:'All', n: all.length}]
-    .concat(order.map(function(k){ return {label:k, n:counts[k]}; }))
+  var cc = STATE.data.category_counts || {};
+  var order = Object.keys(cc).filter(function(k){ return cc[k] > 0; });
+  order.sort(function(x, y){ return cc[y] - cc[x] || x.localeCompare(y); });
+  var total = (STATE.data.header && STATE.data.header.count) || 0;
+  return [{label:'All', n: total}]
+    .concat(order.map(function(k){ return {label:k, n:cc[k]}; }))
     .map(function(c){
       return '<button class="chip' + (c.label === STATE.cat ? ' on' : '') + '" onclick="pick(\'' +
         esc(c.label).replace(/'/g, "\\'") + '\')">' + esc(c.label) +
@@ -243,9 +238,11 @@ function render(){
   /* cc#993: the header stated "in the last 48h" while the query enforced 48h. The query no
      longer does, so the claim goes with it — it now states the real span of what is on offer.
      Never display a window the query does not apply. */
+  /* cc#1001: state the TRUE scope the query enforces \u2014 the last 60 days (window_days from the
+     endpoint) \u2014 never a window the SQL does not apply; an explicit hours caller shows its window. */
   var hdr = 'newest headline ' + (d.header.newest || '--') + ' \u00b7 ' + d.header.count + ' items';
-  if (d.header.all_time) hdr += d.header.oldest ? ' \u00b7 all time, back to ' + d.header.oldest : ' \u00b7 all time';
-  else hdr += ' in the last ' + d.header.hours + 'h';
+  if (d.header.window_days) hdr += ' \u00b7 last ' + d.header.window_days + ' days';
+  else if (d.header.hours) hdr += ' in the last ' + d.header.hours + 'h';
   document.getElementById('sub').textContent = hdr;
 
   var total = d.header.count;
@@ -265,9 +262,9 @@ function render(){
   }
   if (feed.length) html += '<div class="sect">THE FEED</div>'
                         + feed.map(function(a){ return card(a, 'feed'); }).join('');
-  if (!html) html = '<div class="empty"><b>Nothing in this filter</b>'
-                  + 'Nothing loaded so far is filed under ' + esc(STATE.cat)
-                  + '. Keep scrolling \u2014 the feed goes back to the oldest story.</div>';
+  if (!html) html = '<div class="empty" id="filterEmpty"><b>Nothing in this filter yet</b>'
+                  + 'Loading more stories filed under ' + esc(STATE.cat)
+                  + ' from the last ' + ((d.header && d.header.window_days) || 60) + ' days\u2026</div>';
   document.getElementById('body').innerHTML = html + sentinelHtml();
   updateCover(eds.length + feed.length, total);
   armSentinel();
@@ -292,7 +289,8 @@ var PAGE = { cursor: null, more: true, busy: false, obs: null };
 
 function sentinelHtml(){
   if (!PAGE.more) return '<div class="sum" id="sentinel" style="padding:18px 2px;text-align:center">'
-    + 'You are all caught up.</div>';
+    + 'You are all caught up — showing the last '
+    + ((STATE.data && STATE.data.header && STATE.data.header.window_days) || 60) + ' days.</div>';
   return '<div class="sum" id="sentinel" style="padding:18px 2px;text-align:center">'
     + (PAGE.busy ? 'Loading more…' : '\u00a0') + '</div>';
 }
@@ -348,6 +346,7 @@ function loadMore(){
       document.getElementById('chips').innerHTML = chipsHtml();
       updateCover(visibleCount(), (STATE.data.total != null ? STATE.data.total : d.header.count));
       armSentinel();
+      ensureFilterFilled();   // cc#1001: keep paging until the filtered category shows an item
     })
     .catch(function(e){
       PAGE.busy = false;
@@ -365,6 +364,9 @@ function appendCards(newEds, newFeed){
     feed = feed.filter(function(a){ return a.category === STATE.cat; });
   }
   if (!eds.length && !feed.length) return;
+  /* cc#1001: the auto-fill (ensureFilterFilled) may have rendered the "Nothing in this filter yet"
+     placeholder while paging toward this category's first item — remove it before the real cards land. */
+  var fe = document.getElementById('filterEmpty'); if (fe) fe.parentNode.removeChild(fe);
   var body = document.getElementById('body');
   var sent = document.getElementById('sentinel');
   var html = '';
@@ -377,7 +379,15 @@ function appendCards(newEds, newFeed){
   while (frag.firstChild) body.insertBefore(frag.firstChild, sent);
 }
 
-function pick(cat){ STATE.cat = cat; render(); }
+/* cc#1001 (item 4): if the reader filters to a category whose items are not on the loaded pages
+   yet (e.g. AI Editorial, sparse and deep), keep paging WITHIN the 60-day window until an item of
+   that category appears or the window is exhausted. The chip COUNT stays the server 60-day number;
+   only the rendered list lazy-fills. Terminates: PAGE.more goes false at the window edge, or a
+   matching item makes visibleCount() > 0. */
+function ensureFilterFilled(){
+  if (STATE.cat !== 'All' && visibleCount() === 0 && PAGE.more && !PAGE.busy) loadMore();
+}
+function pick(cat){ STATE.cat = cat; render(); ensureFilterFilled(); }
 
 /* cc#993: no `hours` parameter — the endpoint's default is now the WHOLE table, newest to
    oldest, and the keyset cursor walks it to the true oldest row. */
