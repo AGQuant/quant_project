@@ -696,9 +696,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
       + '<button id="hr-parse" style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;font-weight:600;padding:11px 20px;border:none;background:var(--blu);color:#fff;border-radius:3px;letter-spacing:.3px;cursor:pointer;align-self:flex-start;">ANALYZE →</button>'
       + '<div id="hr-parse-msg" style="font-size:13px;color:var(--muted);"></div>'
       + '<div id="hr-grid"></div></div>'
-      + '<div id="hr-saved" style="background:var(--paper);padding:0 32px 32px;max-width:820px;"></div>';
+      + '<div style="background:var(--paper);padding:0 32px 32px;max-width:820px;">'
+      + '<a href="/adaptive" style="display:inline-flex;align-items:center;gap:6px;font-family:\'IBM Plex Mono\',monospace;font-size:12px;font-weight:600;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:20px;text-decoration:none;letter-spacing:.3px;">Client portfolios &#8594;</a></div>';
     $('hr-parse').addEventListener('click', doParse);
-    loadSaved();
+    // cc#1014: the saved-portfolios shelf moved to the Adaptive Dashboard (the client-facing shelf).
+    // /health is the report builder + viewer only now — loadSaved() and its /api/health/portfolios
+    // fetch are dropped to save a call. pid deep-links (/health?pid=N) and the builder are untouched.
   }
 
   // cc#651 part_5: list saved portfolios below the upload form (name + created date + holdings count +
@@ -866,7 +869,10 @@ html,body{margin:0;padding:0;background:var(--bg);}
       body:JSON.stringify({name:($('hr-pname').value||'My Portfolio'), source:'upload', holdings:holdings})})
       .then(function(r){return r.json();}).then(function(d){
         if(d.error || !d.portfolio_id){ msg.textContent=d.error||'Save failed.'; msg.style.color='var(--red)'; return; }
-        location.href='/health?pid='+d.portfolio_id;
+        // cc#1014: success state links to BOTH the report and the Adaptive Dashboard (the client shelf),
+        // instead of an immediate redirect — the saved portfolio now lives on /adaptive, not this page.
+        msg.style.color='var(--grn)';
+        msg.innerHTML='Saved. <a href="/health?pid='+d.portfolio_id+'" style="color:var(--blu);font-weight:600;text-decoration:none;">View report &#8594;</a> &middot; <a href="/adaptive" style="color:var(--blu);font-weight:600;text-decoration:none;">Client dashboard &#8594;</a>';
       }).catch(function(e){ msg.textContent='Save failed: '+e; msg.style.color='var(--red)'; });
   }
 
