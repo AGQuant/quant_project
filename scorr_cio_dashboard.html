@@ -891,7 +891,7 @@ function BenchCell({ b, onChart }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: c.fg, lineHeight: 1.25 }}>{b.label}</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {onChart && <ChartIcon onClick={() => onChart(b)} />}
+          {onChart && b.key !== "sector_pe" && <ChartIcon onClick={() => onChart(b)} />}
           {b.is_context
             ? <span style={{ fontSize: 12, fontWeight: 800, color: vColor, fontFamily: "monospace" }}>
                 {b.verdict ? b.verdict.label : "—"}{b.rerating_pct != null ? ` · ${signFmt(b.rerating_pct,1)}%` : ""}
@@ -922,7 +922,7 @@ function MatrixRow({ b, pillar, onChart }) {
       </td>
       <td style={{ padding: "8px 10px", fontSize: 13.5, color: C.text, fontWeight: 600 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {onChart && <ChartIcon onClick={() => onChart(b)} />}{b.label}
+          {onChart && b.key !== "sector_pe" && <ChartIcon onClick={() => onChart(b)} />}{b.label}
         </span>
       </td>
       <td style={{ padding: "8px 10px", fontSize: 13.5, fontFamily: "monospace", fontWeight: 700, color: c.fg }}>
@@ -1014,6 +1014,24 @@ function PillarPopModal({ pillar, items, score, onClose }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill,minmax(${isMobile ? 150 : 180}px,1fr))`, gap: 12, padding: "20px 24px 24px" }}>
           {items.length ? items.map((b, i) => {
+            // cc#1006: Sector PE context box — headline is the SECTOR median PE (score_pe's f2
+            // benchmark), sub-line the stock's own PE + its rank within segment. Display-only
+            // (is_context, no rating) so it never enters the V composite. Band chip = the f2
+            // tier (Cheap/Fair/Rich/Expensive) via the shared verdict colour.
+            if (b.key === "sector_pe") {
+              const sc = _verdictColor(b.verdict);
+              return (
+                <div key={b.key || i}
+                  style={{ background: C.bg, border: `1px solid ${sc}80`, borderRadius: 10, padding: 12, position: "relative" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 6, paddingRight: 46, color: sc }}>{b.label}</div>
+                  {b.verdict && <div style={{ position: "absolute", top: 10, right: 10, fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: sc }}>{b.verdict.label}</div>}
+                  <div style={{ fontFamily: "monospace", fontSize: 13, marginBottom: 4, color: C.text }}>{b.sector_pe != null ? `${b.sector_pe.toFixed(2)}${b.unit || ""}` : "—"}</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 10, color: C.muted, display: "flex", justifyContent: "space-between" }}>
+                    <span>{b.stock_pe != null ? `stock ${b.stock_pe.toFixed(2)}${b.unit || ""}` : ""}</span><span>{b.rank != null ? `#${b.rank}/${b.peer_n}` : ""}</span>
+                  </div>
+                </div>
+              );
+            }
             const bc = bandColor(b);
             const exc = isExcluded(b);
             const chip = b.is_context ? (b.verdict ? b.verdict.label : "")

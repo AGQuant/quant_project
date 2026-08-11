@@ -444,6 +444,61 @@ def gvm_company_report(symbol: str):
     except Exception as e:
         log.warning(f"historical_pe benchmark failed for {sym}: {e}")
 
+    # --- 4b-2. Sector PE — context box (cc#1006), NOT scored. The segment MEDIAN PE is already
+    # score_pe's second factor (f2) inside the Valuation(PE) metric, and it is already carried on
+    # the PE row as peer_median. This promotes it to its own box in the V popup so the sector
+    # anchor is visible ("Sector PE 42.47x / stock 27.74x vs sector, #x/n"). rating=None keeps it
+    # OUT of the V composite (segment PE is factor f2, adding a box would double-count) — display
+    # only, styled like Historical PE. Band = score_pe.pe_factor(stock_pe, segment_pe) cutoffs.
+    try:
+        pe_row = next((b for b in benchmark if b.get("key") == "pe"), None)
+        if pe_row is not None:
+            seg_pe   = pe_row.get("peer_median")
+            stock_pe = pe_row.get("company")
+            if seg_pe is not None and seg_pe > 0:
+                ratio = round(stock_pe / seg_pe * 100, 1) if stock_pe is not None else None
+                # score_pe f2 inverse cutoffs (gvm_engine.score_pe.pe_factor): the band the segment
+                # factor actually contributes, surfaced as a colour without re-scoring anything.
+                if   ratio is None: band, band_score, verdict = None, None, None
+                elif ratio < 75:    band, band_score, verdict = "cheap", 10.0, {"label": "Cheap", "color": "green"}
+                elif ratio < 100:   band, band_score, verdict = "fair", 7.5, {"label": "Fair", "color": "green"}
+                elif ratio < 125:   band, band_score, verdict = "rich", 5.0, {"label": "Rich", "color": "amber"}
+                else:               band, band_score, verdict = "expensive", 2.5, {"label": "Expensive", "color": "red"}
+                sector_pe_bench = {
+                    "key":        "sector_pe",
+                    "label":      "Sector PE",
+                    "group":      "Valuation",
+                    "pillar":     "V",
+                    "unit":       "x",
+                    # cc#522 table grammar: company = the stock's own value, peer = the segment
+                    # benchmark, so the matrix/tile generic renderers stay honest (Company | Peer).
+                    # The pillar popout reads the explicit sector_pe/stock_pe below to headline the
+                    # SECTOR PE instead (that box is about the sector anchor).
+                    "company":    round(stock_pe, 2) if stock_pe is not None else None,
+                    "peer_avg":   round(seg_pe, 2),
+                    "peer_median": round(seg_pe, 2),
+                    "peer_label": "sector",
+                    "sector_pe":  round(seg_pe, 2),        # explicit: the sector median PE (score_pe f2)
+                    "stock_pe":   round(stock_pe, 2) if stock_pe is not None else None,
+                    "pe_ratio":   ratio,                   # stock_pe / segment_pe * 100
+                    "band":       band,                    # cheap | fair | rich | expensive
+                    "band_score": band_score,              # the f2 tier value (context, not composite)
+                    "verdict":    verdict,                 # band chip (label + colour) for all renderers
+                    "rating":     None,                    # context row -- NOT scored (no double-count)
+                    "is_context": True,
+                    "rank":       pe_row.get("rank"),      # stock PE rank within segment (lower=better)
+                    "peer_n":     pe_row.get("peer_n"),
+                }
+                anchor_key = ("hist_pe" if any(b.get("key") == "hist_pe" for b in benchmark)
+                              else ("fwd_pe" if any(b.get("key") == "fwd_pe" for b in benchmark) else "pe"))
+                anchor_idx = next((i for i, b in enumerate(benchmark) if b.get("key") == anchor_key), -1)
+                if anchor_idx >= 0:
+                    benchmark.insert(anchor_idx + 1, sector_pe_bench)
+                else:
+                    benchmark.append(sector_pe_bench)
+    except Exception as e:
+        log.warning(f"sector_pe box failed for {sym}: {e}")
+
     # --- 4c. PB + EV/EBITDA + PEG + Annual Upside (FY27e) — peer-benchmarked V blocks.
     # Inserted in THIS order (each _insert_after_valuation lands right after the previous one,
     # so calling them in sequence fixes the final row order per cc#507 spec item 4:
