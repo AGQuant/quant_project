@@ -376,15 +376,44 @@ def build_report(cur, pid):
     n500 = _nifty500_1y(cur)
 
     # ---- (1b) realised P&L integration (cc#654) ----------------------------------------------------
-    # invested_adjusted = holdings cost - realised gainloss; the P&L tile = current - invested_adjusted
-    # = realised + unrealised (reconciles). No hr_realised rows -> realised=0 -> behaviour unchanged.
     cur.execute("SELECT COALESCE(SUM(gainloss), 0) FROM hr_realised WHERE portfolio_id=%s", (pid,))
     realised = _f(cur.fetchone()[0]) or 0.0
     holdings_cost = total_invested
-    invested_adj = holdings_cost - realised
     unrealised = total_current - holdings_cost
-    total_pnl = total_current - invested_adj   # == realised + unrealised
-    port_money_ret = round(total_pnl / invested_adj * 100.0, 2) if invested_adj else None
+
+    # ---- (1c) cc#1013 HEADLINE BASIS (founder rule, locked 11-Aug-2026) -----------------------------
+    # When a portfolio carries a meta invested_amount, THAT is the headline Invested and headline P&L
+    # (Rs + %) = current_value + cash - invested_amount, % on invested. It is the only honest basis when
+    # per-holding buy prices are unknown: all 26 of Vishal's holdings have avg_price NULL, so the
+    # holdings-cost basis is ~0 and current/cost produced +1880.5%. Holdings cost (SUM qty*avg_price) is
+    # demoted to a secondary Holdings-cost/Unrealised line. With NO meta row: keep the holdings-cost
+    # basis ONLY if every avg_price is known; if ANY avg_price is NULL and there is no meta row, refuse
+    # to invent a % — pnl is None (em-dash + needs-invested hint downstream), never a fabricated number.
+    has_null_avg = any(_f(r[3]) is None for r in raw)
+    cur.execute("SELECT invested_amount, cash, tracking_date FROM hr_portfolio_meta WHERE portfolio_id=%s", (pid,))
+    _meta = cur.fetchone()
+    meta_invested = _f(_meta[0]) if _meta else None
+    meta_cash = (_f(_meta[1]) or 0.0) if _meta else 0.0
+    meta_track = _meta[2] if _meta else None
+    needs_invested = False
+    cash = 0.0
+    if meta_invested is not None and meta_invested > 0:
+        basis = "meta"
+        invested_adj = meta_invested
+        cash = meta_cash
+        total_pnl = total_current + cash - invested_adj
+        port_money_ret = round(total_pnl / invested_adj * 100.0, 2)
+    elif not has_null_avg:
+        basis = "holdings_cost"
+        invested_adj = holdings_cost - realised   # cc#654 invested_adjusted
+        total_pnl = total_current - invested_adj
+        port_money_ret = round(total_pnl / invested_adj * 100.0, 2) if invested_adj else None
+    else:
+        basis = "unknown_cost"                     # some avg_price NULL AND no meta -> no honest %
+        invested_adj = None
+        total_pnl = None
+        port_money_ret = None
+        needs_invested = True
 
     # ---- (1a) alpha = MONEY return vs BOTH benchmarks (cc#656) --------------------------------------
     # cc#653 used the current-value-weighted PRICE return of surviving holdings -> survivorship bias
@@ -413,8 +442,12 @@ def build_report(cur, pid):
 
     snapshot = {
         "invested": _r(invested_adj), "current": _r(total_current),
-        "pnl_abs": _r(total_pnl),
+        "cash": _r(cash), "current_total": _r(total_current + cash),   # cc#1013: value incl cash where cash>0
+        "pnl_abs": _r(total_pnl) if total_pnl is not None else None,
         "pnl_pct": port_money_ret,
+        "basis": basis,                                # cc#1013: meta | holdings_cost | unknown_cost
+        "needs_invested_amount": needs_invested,       # cc#1013: em-dash + hint when true
+        "tracking_date": str(meta_track) if meta_track else None,
         "realised_pnl": _r(realised), "unrealised_pnl": _r(unrealised), "holdings_cost": _r(holdings_cost),
         "alpha": alpha_n500, "alpha_n50": alpha_n50, "alpha_n500": alpha_n500,
         "alpha_since": alpha_since, "alpha_label": alpha_label,

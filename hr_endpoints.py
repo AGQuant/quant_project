@@ -571,6 +571,12 @@ def _health_portfolios_inner():
         # cc#654: realised gainloss per portfolio -> invested_adjusted so the shelf reconciles with the report
         cur.execute("SELECT portfolio_id, COALESCE(SUM(gainloss),0) FROM hr_realised GROUP BY portfolio_id")
         realised_map = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+        # cc#1013: portfolio-level headline basis. meta.invested_amount, when set, IS the Invested and
+        # headline P&L = current_value + cash - invested (% on invested) — the only honest basis when
+        # per-holding buy prices are unknown (all avg_price NULL -> cost ~0 -> the +1880.5% bug). See
+        # build_report / founder rule locked 11-Aug-2026.
+        cur.execute("SELECT portfolio_id, invested_amount, cash FROM hr_portfolio_meta")
+        meta_map = {r[0]: (float(r[1]) if r[1] is not None else None, float(r[2] or 0)) for r in cur.fetchall()}
         # cc#756: client_index metadata via created_by=account_id. SELECT ONLY non-secret columns —
         # password/totp_key are NEVER read here (cc#758 denylist honoured by hand-picking columns).
         ci = {}
@@ -587,7 +593,7 @@ def _health_portfolios_inner():
             ci = {}   # client_index absent (pre-migration) -> cards still render without the enrichment
     agg = {}
     for pid_, sym, qty, avg in rows:
-        a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0})
+        a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0, "null_avg": False})
         q = float(qty or 0); ap = float(avg or 0)
         if sym and str(sym).upper() == "CASH":
             a["cash"] += q            # cc#756: value = qty (avg_price=1), NO price lookup, out of equity P&L
@@ -595,23 +601,43 @@ def _health_portfolios_inner():
         if pid_ not in active_ids:
             continue                  # inactive client: name+cash only, no equity valuation / CMP
         a["n"] += 1
+        if avg is None:               # cc#1013: an unknown buy price -> the holdings-cost basis is not honest
+            a["null_avg"] = True
         a["inv"] += q * ap
         a["cur"] += q * px.get(_norm_sym(sym), px.get(sym, ap))
     out = []
     for id_, name, created_by, source, created in ports:
-        a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0})
+        a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0, "null_avg": False})
         realised = realised_map.get(id_, 0.0)
-        inv_adj = a["inv"] - realised    # cc#654: holdings cost - realised gainloss
-        curv = a["cur"]; cash = a["cash"]
-        pnl = curv - inv_adj             # == realised + unrealised (equity only; CASH excluded)
+        curv = a["cur"]; holdings_cost = a["inv"]
+        m_inv, m_cash = meta_map.get(id_, (None, 0.0))
+        cash = a["cash"] + m_cash          # CASH pseudo-holdings + portfolio-level meta cash
+        # cc#1013 basis: meta invested is the headline when set; else holdings-cost ONLY if every buy
+        # price is known; else no honest % (em-dash + needs-invested hint), never a fabricated number.
+        if m_inv is not None and m_inv > 0:
+            basis = "meta"; invested = m_inv; needs_inv = False
+            pnl = curv + cash - invested
+            pnl_pct = round(pnl / invested * 100.0, 2)
+        elif not a["null_avg"]:
+            basis = "holdings_cost"; needs_inv = False
+            invested = holdings_cost - realised   # cc#654: holdings cost - realised gainloss
+            pnl = curv - invested                 # == realised + unrealised (equity only; CASH excluded)
+            pnl_pct = round(pnl / invested * 100.0, 2) if invested else None
+        else:
+            basis = "unknown_cost"; invested = None; needs_inv = True
+            pnl = None; pnl_pct = None
         src = str(source or "")
         category = "PMS" if src.startswith("PMS") else ("NSEPAY" if src.startswith("NSEPAY") else src)
         out.append({"id": id_, "name": name, "source": source, "created_by": created_by,
                     "category": category, "active": id_ in active_ids, "created_at": str(created),
-                    "n_holdings": a["n"], "invested": round(inv_adj, 2), "current": round(curv, 2),
+                    "n_holdings": a["n"],
+                    "invested": (round(invested, 2) if invested is not None else None),
+                    "current": round(curv, 2),
                     "cash": round(cash, 2), "total_portfolio": round(curv + cash, 2),
-                    "pnl": round(pnl, 2), "pnl_pct": (round(pnl / inv_adj * 100.0, 2) if inv_adj else None),
-                    "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - a["inv"], 2),
+                    "pnl": (round(pnl, 2) if pnl is not None else None), "pnl_pct": pnl_pct,
+                    "basis": basis, "needs_invested_amount": needs_inv,
+                    "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - holdings_cost, 2),
+                    "holdings_cost": round(holdings_cost, 2),
                     "client": ci.get(created_by)})
     return {"portfolios": out}
 
@@ -623,6 +649,9 @@ class HRGenReq(BaseModel):
     holdings: Optional[List[HRHolding]] = None
     white_label: Optional[bool] = True
     alpha_start_date: Optional[str] = None   # cc#653: alpha window start (YYYY-MM-DD); null -> earliest holding entry
+    invested_amount: Optional[float] = None  # cc#1013: portfolio-level invested (headline basis)
+    cash: Optional[float] = None             # cc#1013: portfolio-level cash
+    tracking_date: Optional[str] = None      # cc#1013: tracking start (YYYY-MM-DD)
 
 
 @router.post("/api/health/generate")
@@ -669,6 +698,18 @@ def health_generate(body: HRGenReq):
         # cc#653: persist the per-portfolio alpha window start (applies to create/update/pid-only paths)
         if body.alpha_start_date and pid:
             cur.execute("UPDATE hr_portfolios SET alpha_start_date=%s WHERE id=%s", (body.alpha_start_date, pid))
+            conn.commit()
+        # cc#1013: upsert portfolio-level invested/cash/tracking meta so a portfolio can set the honest
+        # headline basis at creation. Only supplied fields are written (COALESCE keeps the rest).
+        if pid and (body.invested_amount is not None or body.cash is not None or body.tracking_date):
+            cur.execute("""INSERT INTO hr_portfolio_meta (portfolio_id, invested_amount, cash, tracking_date, updated_at)
+                           VALUES (%s,%s,%s,%s,NOW())
+                           ON CONFLICT (portfolio_id) DO UPDATE SET
+                             invested_amount = COALESCE(EXCLUDED.invested_amount, hr_portfolio_meta.invested_amount),
+                             cash            = COALESCE(EXCLUDED.cash, hr_portfolio_meta.cash),
+                             tracking_date   = COALESCE(EXCLUDED.tracking_date, hr_portfolio_meta.tracking_date),
+                             updated_at      = NOW()""",
+                        (pid, body.invested_amount, body.cash, body.tracking_date))
             conn.commit()
         priced = None
         try:

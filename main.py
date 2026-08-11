@@ -607,6 +607,13 @@ def create_tables():
         resolved BOOLEAN DEFAULT FALSE, raw_input JSONB, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_hr_holdings_portfolio ON hr_holdings(portfolio_id);
+    -- cc#1013: portfolio-level invested/cash/tracking-date meta (see migrations/hr_portfolio_meta.sql).
+    -- Headline P&L basis when per-holding buy prices are unknown; CREATE only, never ALTER hr_*.
+    CREATE TABLE IF NOT EXISTS hr_portfolio_meta (
+        portfolio_id INTEGER PRIMARY KEY REFERENCES hr_portfolios(id) ON DELETE CASCADE,
+        invested_amount NUMERIC, cash NUMERIC DEFAULT 0, tracking_date DATE,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
     -- cc#654: realised (sold) lots for a portfolio -> realised P&L in the Health Report. Populated
     -- externally (Claude web); CREATE IF NOT EXISTS here so build_report's SUM never fails on a fresh DB.
     CREATE TABLE IF NOT EXISTS hr_realised (

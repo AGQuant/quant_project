@@ -451,18 +451,35 @@ html,body{margin:0;padding:0;background:var(--bg);}
                : rt.verdict==='Average' ? ['var(--amb-t)','var(--amb)'] : ['var(--red-t)','var(--red)'];
       vb.style.background=band[0]; vb.style.color=band[1]; }
     set('hr-gvmq', 'G '+f2(rt.growth)+' · V '+f2(rt.value)+' · M '+f2(rt.momentum)+' · Q '+f2(rt.quality));
-    set('hr-invested', inr(s.invested));
+    // cc#1013: Invested is the META invested_amount when set (headline basis, founder rule); the
+    // per-holding cost is demoted below. NULL invested (unknown cost, no meta) -> em-dash, never 0.
+    set('hr-invested', s.invested!=null ? inr(s.invested) : '—');
     set('hr-current', inr(s.current));
-    var pnlEl=$('hr-pnl'); if(pnlEl){ pnlEl.textContent=inrSigned(s.pnl_abs); pnlEl.style.color=(s.pnl_abs>=0?'var(--grn)':'var(--red)'); }
-    var ppEl=$('hr-pnl-pct'); if(ppEl){ ppEl.textContent=pct(s.pnl_pct); ppEl.style.color=(s.pnl_pct>=0?'var(--grn)':'var(--red)'); }
-    // cc#654: Realised / Unrealised breakdown sub-stat (total = realised + unrealised = the P&L tile).
-    // Shown only when realised lots exist; no hr_realised rows -> hidden, report renders unchanged.
+    var pnlEl=$('hr-pnl'); if(pnlEl){
+      if(s.pnl_abs==null){ pnlEl.textContent='—'; pnlEl.style.color='var(--muted)'; }
+      else { pnlEl.textContent=inrSigned(s.pnl_abs); pnlEl.style.color=(s.pnl_abs>=0?'var(--grn)':'var(--red)'); }
+    }
+    var ppEl=$('hr-pnl-pct'); if(ppEl){
+      if(s.pnl_pct==null){ ppEl.textContent=(s.needs_invested_amount?'— needs invested amount':'—'); ppEl.style.color='var(--muted)'; }
+      else { ppEl.textContent=pct(s.pnl_pct); ppEl.style.color=(s.pnl_pct>=0?'var(--grn)':'var(--red)'); }
+    }
+    // cc#654 + cc#1013: secondary line. On the META basis the per-holding HOLDINGS COST + its unrealised
+    // (SUM qty*avg vs current) is demoted here so the founder rule holds (Ritesh: header Invested
+    // 8,65,162 / +3.8%; Holdings cost + Unrealised +6.4% secondary). Realised lots (cc#654) still shown.
     var splitEl=$('hr-pnl-split');
     if(splitEl){
+      var parts=[];
+      if(s.basis==='meta' && s.holdings_cost!=null && s.holdings_cost>0){
+        var uoc=(s.unrealised_pnl!=null && s.holdings_cost)?(s.unrealised_pnl/s.holdings_cost*100):null;
+        var uc2=(s.unrealised_pnl>=0?'var(--grn)':'var(--red)');
+        parts.push('Holdings cost <b>'+inr(s.holdings_cost)+'</b>');
+        parts.push('Unrealised <b style="color:'+uc2+'">'+inrSigned(s.unrealised_pnl)+(uoc!=null?' ('+(uoc>=0?'+':'')+uoc.toFixed(1)+'% on cost)':'')+'</b>');
+      }
       if(s.realised_pnl!=null && s.realised_pnl!==0){
-        var rc=(s.realised_pnl>=0?'var(--grn)':'var(--red)'), uc=(s.unrealised_pnl>=0?'var(--grn)':'var(--red)');
-        splitEl.innerHTML='Realised <b style="color:'+rc+'">'+inrSigned(s.realised_pnl)+'</b> &middot; Unrealised <b style="color:'+uc+'">'+inrSigned(s.unrealised_pnl)+'</b>';
-      } else { splitEl.textContent=''; }
+        var rc=(s.realised_pnl>=0?'var(--grn)':'var(--red)');
+        parts.push('Realised <b style="color:'+rc+'">'+inrSigned(s.realised_pnl)+'</b>');
+      }
+      splitEl.innerHTML=parts.join(' &middot; ');
     }
     // cc#656: dual money-return alpha — vs Nifty 50 AND vs Nifty 500, each its own +/- colour.
     function setAlpha(id,label,val){ var el=$(id); if(!el) return;
