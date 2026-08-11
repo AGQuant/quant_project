@@ -106,6 +106,22 @@
   .sec-card .sc-pct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;margin-top:6px}   /* cc#273: 1D dominant (13->16px) */
   .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
+  /* cc#1009: single sortable sector table */
+  .sectbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:4px;border:1px solid var(--line);border-radius:10px}
+  .sectbl{border-collapse:collapse;width:100%;font-size:12.5px;min-width:360px}
+  .sectbl th{padding:9px 12px;color:var(--mut);font-weight:700;font-size:11px;border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap;text-align:right}
+  .sectbl th.secth{cursor:pointer;user-select:none}
+  .sectbl th.secth:hover{color:var(--txt)}
+  .sectbl td{padding:8px 12px;border-bottom:1px solid var(--line)}
+  .sectbl tbody tr:last-child td{border-bottom:none}
+  .sectbl tbody tr:hover td{background:var(--panel)}
+  .sectbl .secnum{text-align:right;color:var(--dim);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;width:34px}
+  .sectbl .secname{text-align:left;color:var(--txt);font-weight:600;max-width:240px}
+  .sectbl .secpct{text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
+  @media(max-width:767px){
+    .sectbl td.secname,.sectbl th.secname{position:sticky;left:0;background:var(--panel);z-index:1;max-width:150px}
+    .sectbl tbody tr:hover td.secname{background:var(--panel)}
+  }
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;user-select:none}
@@ -2111,6 +2127,19 @@ function _masterBasketReconcile(){
 let OPENPOS_VIEW=(function(){try{var s=localStorage.getItem('v8_openpos_view');if(s)return s;}catch(e){}
   return (window.innerWidth<=767)?'ladder':'table';})();
 function setOpenPosView(v){OPENPOS_VIEW=v;try{localStorage.setItem('v8_openpos_view',v);}catch(e){}const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+// cc#1009: the two sector CARD grids (All Futures = 22 Scorr themes, Nifty 50 = 12 groups) collapse
+// into ONE sortable table with a right-side [All Futures | Nifty 50] toggle. Groupings, names,
+// membership and the row-click drill-down are UNCHANGED — only the presentation. Default: All
+// Futures, sorted 1D% desc. Sort keys map to the same fields the cards read (avg_day_1d / sector_week
+// / sector_month).
+let SECTOR_TAB='futures';                       // 'futures' (22 theme groups) | 'nifty50' (12 groups)
+let SECTOR_SORT={col:'day',dir:'desc'};         // col: day|week|month ; dir: desc|asc
+function setSectorTab(t){SECTOR_TAB=t;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+function setSectorSort(col){
+  if(SECTOR_SORT.col===col){SECTOR_SORT.dir=(SECTOR_SORT.dir==='desc'?'asc':'desc');}
+  else{SECTOR_SORT={col:col,dir:'desc'};}   // a new column starts desc (cc#1009 default)
+  const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();
+}
 const cache={};
 function cls(x){if(x===null||x===undefined||isNaN(x))return"";return Number(x)>=0?"pos":"neg";}
 function inr(x){if(x===null||x===undefined||isNaN(x))return"--";return"Rs."+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0});}
@@ -2396,6 +2425,31 @@ function sectorCards(sectors,title,label,clickFn){
       `</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
+}
+// cc#1009: single sortable sector table (replaces the two card grids). Same fields the cards read
+// (avg_day_1d / sector_week / sector_month), same row-click drill-down. Sort by clicking a % header
+// (desc default, re-click toggles asc); nulls sort last either way.
+function sectorTable(sectors,clickFn){
+  clickFn=clickFn||'openSectorDetail';
+  const SK={day:'avg_day_1d',week:'sector_week',month:'sector_month'};
+  const key=SK[SECTOR_SORT.col]||'avg_day_1d';
+  const dir=SECTOR_SORT.dir==='asc'?1:-1;
+  const rows=(sectors||[]).slice().sort((a,b)=>{
+    const av=a[key],bv=b[key];
+    if(av==null&&bv==null)return 0; if(av==null)return 1; if(bv==null)return -1;   // nulls last
+    return (av-bv)*dir;
+  });
+  const arrow=(col)=>SECTOR_SORT.col===col?(SECTOR_SORT.dir==='desc'?' ▾':' ▴'):'';
+  const th=(col,lbl)=>`<th class="secth" onclick="setSectorSort('${col}')" title="Sort by ${lbl}">${lbl}${arrow(col)}</th>`;
+  const pctTd=(v)=>`<td class="secpct" style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</td>`;
+  const body=(rows||[]).map((s,i)=>`<tr data-seg="${s.segment}" onclick="${clickFn}(this.dataset.seg)" style="cursor:pointer">`+
+    `<td class="secnum">${i+1}</td><td class="secname">${s.segment}</td>`+
+    pctTd(s.avg_day_1d)+pctTd(s.sector_week)+pctTd(s.sector_month)+`</tr>`).join('');
+  if(!body)return`<div class="empty" style="padding:16px;font-size:12px">No data</div>`;
+  return`<div class="sectbl-wrap"><table class="sectbl"><thead><tr>`+
+    `<th class="secnum">#</th><th class="secname" style="text-align:left">Sector</th>`+
+    th('day','1D%')+th('week','1W%')+th('month','1M%')+
+    `</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // cc_task #71: progress bar (130px). LONG: (CMP-Stop)/(Target-Stop)*100;
@@ -2755,21 +2809,34 @@ function renderMaster(){
     // open book now that pivot/activity glyphs render on the position rows.
     markerLegend()+
     viewToggle+posBody+
-    // cc#338: Sector Cards regrouped by curated futures_universe.theme (22 Scorr themes),
-    // equal-weight avg, single grid sorted 1D% desc. DISPLAY ONLY — engine still on GVM segments.
-    // Falls back to the GVM-segment Top/Bottom grid only until /api/v8/theme_sectors lands.
-    (cache.themeSectors && cache.themeSectors.sectors && cache.themeSectors.sectors.length
-      ? `<div style="margin-top:16px">${sectorCards(cache.themeSectors.sectors,'Sector Cards','Scorr themes · '+cache.themeSectors.sectors.length+' groups','openThemeDetail')}</div>`
-      : `<div class="funnelGrid" style="margin-top:16px">
-      <div>${sectorCards(top8,'Top Sectors','1D positive')}</div>
-      <div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div>
-    </div>`)+
-    // cc#319: NIFTY 50 Sectors — official NSE industries across the 50 constituents, single grid
-    // sorted 1D% desc. Populated by the /api/v8/nifty50_sectors job into cache.nifty50; renders
-    // once it lands (renderMasterPanels re-render). Card click -> openNifty50Detail holdings modal.
-    (cache.nifty50 && cache.nifty50.sectors && cache.nifty50.sectors.length
-      ? `<div style="margin-top:20px">${sectorCards(cache.nifty50.sectors,'NIFTY 50 Sectors','Scorr themes · '+cache.nifty50.sectors.length+' groups','openNifty50Detail')}</div>`
-      : "");
+    // cc#1009: the two sector CARD grids (All Futures = 22 Scorr themes via /api/v8/theme_sectors;
+    // NIFTY 50 = 12 groups via /api/v8/nifty50_sectors) become ONE sortable table with a right-side
+    // [All Futures | Nifty 50] toggle. Groupings/names/membership and the row-click drill-down
+    // (openThemeDetail / openNifty50Detail) are UNCHANGED — presentation only. Default All Futures.
+    (function(){
+      const stab=(key,label)=>{const on=SECTOR_TAB===key;
+        const s=on?'background:var(--panel2);color:var(--txt);border:1px solid var(--cyan)':'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
+        return`<button onclick="setSectorTab('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:6px 12px;border-radius:8px;transition:.15s;white-space:nowrap">${label}</button>`;};
+      const isN=SECTOR_TAB==='nifty50';
+      const themeReady=cache.themeSectors&&cache.themeSectors.sectors&&cache.themeSectors.sectors.length;
+      const niftyReady=cache.nifty50&&cache.nifty50.sectors&&cache.nifty50.sectors.length;
+      const cnt=isN?(niftyReady?cache.nifty50.sectors.length:0):(themeReady?cache.themeSectors.sectors.length:0);
+      const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">`+
+        `<div class="ptitle" style="margin:0">Sectors <span class="ct">${isN?'Nifty 50':'All Futures'}${cnt?' · '+cnt+' groups':''}</span></div>`+
+        `<div style="display:flex;gap:6px">${stab('futures','All Futures')}${stab('nifty50','Nifty 50')}</div></div>`;
+      let tbl;
+      if(isN){
+        tbl=niftyReady?sectorTable(cache.nifty50.sectors,'openNifty50Detail')
+                      :'<div class="empty" style="padding:16px;font-size:12px">Loading Nifty 50 sectors…</div>';
+      }else if(themeReady){
+        tbl=sectorTable(cache.themeSectors.sectors,'openThemeDetail');
+      }else{
+        // /api/v8/theme_sectors not landed yet — keep the pre-cc#1009 GVM-segment Top/Bottom fallback
+        // so the section is never empty; the toggle table takes over the moment it arrives.
+        tbl=`<div class="funnelGrid"><div>${sectorCards(top8,'Top Sectors','1D positive')}</div><div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div></div>`;
+      }
+      return`<div style="margin-top:16px">${header}${tbl}</div>`;
+    })();
 }
 
 // cc#379: canonical basket-table column set + row renderers, shared by ALL four baskets
