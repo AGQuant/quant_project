@@ -620,6 +620,37 @@ def gvm_company_report(symbol: str):
         log.warning(f"content fetch failed for {sym}: {e}")
         persist_error = str(e)
 
+    # --- 7a2. cc#1007: Business tab payload. overview + key_takeaway already ride in `content`
+    # above (input_raw). This adds the two remaining blocks from existing tables: SECTOR CONTEXT
+    # (sector_briefs.business_model + application_type for the stock's segment) and OWNERSHIP
+    # (screener_raw "Promoter holding" %, institutional = FII + DII %). Display-only; a NULL field
+    # renders an honest empty state client-side, never placeholder text.
+    business: Dict[str, Any] = {"segment": None, "business_model": None, "application_type": None,
+                                "promoter_pct": None, "institutional_pct": None}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT segment FROM gvm_scores WHERE symbol=%s
+                           AND score_date=(SELECT MAX(score_date) FROM gvm_scores) LIMIT 1""", (sym,))
+            _sg = cur.fetchone()
+            seg = _sg[0] if _sg else None
+            business["segment"] = seg
+            if seg:
+                cur.execute("""SELECT business_model, application_type FROM sector_briefs
+                               WHERE segment=%s ORDER BY generated_at DESC NULLS LAST LIMIT 1""", (seg,))
+                sb = cur.fetchone()
+                if sb:
+                    business["business_model"], business["application_type"] = sb[0], sb[1]
+            cur.execute('SELECT "Promoter holding", fii_holding, dii_holding '
+                        'FROM screener_raw WHERE nse_code=%s LIMIT 1', (sym,))
+            oh = cur.fetchone()
+            if oh:
+                business["promoter_pct"] = _f(oh[0])
+                _fii, _dii = _f(oh[1]), _f(oh[2])
+                if _fii is not None or _dii is not None:
+                    business["institutional_pct"] = round((_fii or 0) + (_dii or 0), 2)
+    except Exception as e:
+        log.warning(f"cc#1007 business block failed for {sym}: {e}")
+
     # --- 7b. cc#518: FINANCIALS section (screener.in-style tables), one SQL pass, own file ---
     try:
         with _conn() as conn:
@@ -693,6 +724,7 @@ def gvm_company_report(symbol: str):
         "ladder":       ladder,
         "extras":       extras,
         "content":      content,
+        "business":     business,     # cc#1007: Business tab (sector context + ownership)
         "financials":   financials,   # cc#518: screener.in-style FINANCIALS section
         "operational_metrics": operational_metrics,   # cc#541: per-sector ops KPIs (concall-extracted)
         "in_scrape_universe": in_scrape_universe,      # cc#739: gate Result Analysis + Ops Metrics tabs

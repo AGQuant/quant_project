@@ -2575,9 +2575,49 @@ function GvmReport({ r, hist }) {
 
       <SegmentRankLadder ladder={r.ladder} segment={r.segment} stockSym={r.symbol} />
 
+      {/* cc#1007: BUSINESS tab — what the company does, assembled from existing data (no new
+          generation). Sits between Levels and Results. Overview + Key Takeaway MOVED here from the
+          Results section (they are company profile, not a result); Sector Context + Ownership are new,
+          from r.business. All blocks degrade to an honest empty state, never placeholder text. Single
+          column stack, mobile-safe. */}
+      <div id="gvm-business" style={{ scrollMarginTop: 60 }}>
+        {r.content?.overview
+          ? <ContentCard title="Business Profile" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />
+          : <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 6 }}>Business Profile</div>
+              <div style={{ fontSize: 13, color: C.muted }}>No business profile available yet.</div>
+            </div>}
+        {r.content?.key_takeaway && <ContentCard title="Key Takeaway" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
+        {(r.business?.business_model || r.business?.application_type) && (
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: C.purple, marginBottom: 8 }}>Sector Context{r.business?.segment ? ` · ${r.business.segment}` : ""}</div>
+            {r.business?.business_model && (
+              <div style={{ marginBottom: r.business?.application_type ? 10 : 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 2 }}>Business model</div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.55 }}>{r.business.business_model}</div>
+              </div>)}
+            {r.business?.application_type && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 2 }}>Applications</div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.55 }}>{r.business.application_type}</div>
+              </div>)}
+          </div>)}
+        {(r.business?.promoter_pct != null || r.business?.institutional_pct != null) && (
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 20px", marginBottom: 14, display: "flex", gap: 32, flexWrap: "wrap" }}>
+            {r.business?.promoter_pct != null && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 2 }}>Promoter holding</div>
+                <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "monospace", color: C.text }}>{r.business.promoter_pct.toFixed(2)}%</div>
+              </div>)}
+            {r.business?.institutional_pct != null && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 2 }}>Institutional (FII + DII)</div>
+                <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "monospace", color: C.text }}>{r.business.institutional_pct.toFixed(2)}%</div>
+              </div>)}
+          </div>)}
+      </div>
+
       <div id="gvm-results" style={{ scrollMarginTop: 60 }}>
-        {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
-        {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
         {/* cc#831: the inline Result Analysis ContentCard is GONE. The C·A·R·D strip's R button is
             the single result surface (one-letter-one-card, cc#803/805) and carries strictly more —
             metric header, peers, vs-estimate, L2 View Detailed. The deleted block was also still
@@ -2901,6 +2941,7 @@ const GVM_NAV = [
   { id: "gvm-peers", label: "Peers" },
   { id: "gvm-news", label: "News" },
   { id: "gvm-levels", label: "Levels" },
+  { id: "gvm-business", label: "Business" },   // cc#1007: what the company does
   { id: "gvm-results", label: "Results" },
   { id: "gvm-financials", label: "Financials" },
   /* cc#783: "Ops Metrics" rail entry removed with the block it targeted — the #gvm-ops anchor no
