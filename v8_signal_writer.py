@@ -913,28 +913,48 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 
 # -- Step 6: Sector aggregates (live) -----------------------------------------
 
-def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    seg_day:   Dict[str, list] = defaultdict(list)
-    seg_week:  Dict[str, list] = defaultdict(list)
-    seg_month: Dict[str, list] = defaultdict(list)
+def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict], conn):
+    # cc#1003 (founder-approved 11-Aug-2026, session_log 19503): the sector return a V8 stock is
+    # GATED against is now the WIDE-UNIVERSE mcap-weighted sector return — the SAME shared
+    # segment_change.py computation over all ~1,795 gvm_scores members that the v8_metrics table and
+    # the TC/GVM chips already read — NOT the old unweighted simple average over the ~209 futures
+    # rows. That old basis was self-referential: 18 segments had exactly ONE futures member, so
+    # sector_week WAS that stock's own week (verified 11-Aug). The gates keep their FORM
+    # (sector_week>0, sector_week<0, band 0-6, etc.); only the benchmark they compare against widens.
+    # Setting the wide value on `computed` HERE means the qualification gates (_write_qualified, which
+    # reads these in-memory dicts) and the v8_metrics upsert both use it, so the gate and the
+    # displayed sector value can no longer disagree (the split that made the F&O value the one the
+    # gates saw while the table drifted).
+    #
+    # MINIMUM MEMBERSHIP: a segment with fewer than 3 PRICED members in the WIDE universe yields NULL
+    # sector metrics — the strict gates fail closed on NULL — rather than a thin, near-self-referential
+    # benchmark. Honest absence over a fabricated number. (Verified 11-Aug: all 55 futures-touched
+    # segments carry >=3 wide members, so this NULLs nothing today; it is the guard for the long tail.)
+    MIN_MEMBERS = 3
+    segs: Dict[str, dict] = {}
+    sym_seg: Dict[str, str] = {}
+    try:
+        import segment_change
+        with conn.cursor() as cur:
+            segs = segment_change.segment_changes(cur)
+            # Key each V8 stock to its WIDE-UNIVERSE segment (gvm_scores) — the same taxonomy
+            # segment_change aggregates on — so a stock and its sector benchmark share one segment.
+            cur.execute("""SELECT symbol, segment FROM gvm_scores
+                           WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)""")
+            sym_seg = {r[0]: r[1] for r in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"_add_sector_aggregates(cc#1003 wide): segment_change/segment map failed ({e}); "
+                    f"sector_* left None this tick — gates fail closed, never fall back to a stale "
+                    f"F&O value")
 
     for sym, m in computed.items():
-        seg = eod_metrics.get(sym, {}).get("segment")
-        if not seg:
-            continue
-        if m.get("mom_2d")       is not None: seg_day[seg].append(m["mom_2d"])
-        if m.get("week_return")  is not None: seg_week[seg].append(m["week_return"])
-        if m.get("month_return") is not None: seg_month[seg].append(m["month_return"])
-
-    day_avg   = {seg: float(np.mean(v)) for seg, v in seg_day.items()   if v}
-    week_avg  = {seg: float(np.mean(v)) for seg, v in seg_week.items()  if v}
-    month_avg = {seg: float(np.mean(v)) for seg, v in seg_month.items() if v}
-
-    for sym, m in computed.items():
-        seg = eod_metrics.get(sym, {}).get("segment")
-        m["sector_day"]   = day_avg.get(seg)
-        m["sector_week"]  = week_avg.get(seg)
-        m["sector_month"] = month_avg.get(seg)
+        info = segs.get(sym_seg.get(sym)) if sym_seg.get(sym) else None
+        if info and (info.get("members_priced") or 0) >= MIN_MEMBERS:
+            m["sector_day"]   = info.get("day")
+            m["sector_week"]  = info.get("week")
+            m["sector_month"] = info.get("month")
+        else:
+            m["sector_day"] = m["sector_week"] = m["sector_month"] = None
 
 
 # -- Step 7: Upsert v8_metrics ------------------------------------------------
@@ -1101,7 +1121,12 @@ def _update_sector_aggregates_sql(conn, target_date) -> int:
                 log.warning("_update_sector_aggregates_sql: segment_change returned nothing — "
                             "leaving previous sector_day/week/month untouched")
                 return 0
-            rows = [(v.get("day"), v.get("week"), v.get("month"), seg) for seg, v in segs.items()]
+            # cc#1003: honour the same <3-priced-member NULL rule the gates use in
+            # _add_sector_aggregates, so the table value and the gate value for a segment never
+            # disagree. (All futures-touched segments carry >=3 wide members today; this is the guard.)
+            def _wide(v, k):
+                return v.get(k) if (v.get("members_priced") or 0) >= 3 else None
+            rows = [(_wide(v, "day"), _wide(v, "week"), _wide(v, "month"), seg) for seg, v in segs.items()]
             # One statement for the whole taxonomy: join v8_metrics to its segment via gvm_scores.
             cur.executemany("""
                 UPDATE v8_metrics SET sector_day = %s, sector_week = %s, sector_month = %s
@@ -2556,7 +2581,7 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
             except Exception:
                 pass
 
-    _add_sector_aggregates(computed, eod_metrics)
+    _add_sector_aggregates(computed, eod_metrics, conn)
 
     # cc#217 P3: one batched upsert + one commit for the whole tick (was 212 sequential
     # INSERT+COMMIT). _upsert_metrics_batch preserves the cc#218 skip-bad-symbol guarantee via
