@@ -2803,11 +2803,10 @@ function renderMaster(){
     return`<button onclick="setOpenPosView('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:6px 14px;border-radius:8px;transition:.15s">${label}</button>`;};
   const viewToggle=`<div style="display:flex;gap:6px;margin-bottom:10px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>`;
   const posBody=OPENPOS_VIEW==='ladder'?openPosLadder:(openPosTable+openPosMobile);
-  return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
+    // cc#1010: marker legend is now an (i) popover in the header (was the cc#1008 always-on grey text
+    // block) — rendered coloured glyphs, identical to the row glyphs, parity with the mobile pattern.
+  return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span>${markerLegendPopover()}</div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
-    // cc#1008: the marker legend (same server snippet /m/v8 and the basket panels use) sits above the
-    // open book now that pivot/activity glyphs render on the position rows.
-    markerLegend()+
     viewToggle+posBody+
     // cc#1009: the two sector CARD grids (All Futures = 22 Scorr themes via /api/v8/theme_sectors;
     // NIFTY 50 = 12 groups via /api/v8/nifty50_sectors) become ONE sortable table with a right-side
@@ -2898,6 +2897,29 @@ function pivotAct(sym){
 function markerLegend(){
   try{ return window.ScorrMarkerLegend ? window.ScorrMarkerLegend(MK_LEGEND) : ''; }catch(e){ return ''; }
 }
+// cc#1010: OPEN POSITIONS marker legend as an (i) popover. Each row shows the REAL coloured glyph
+// (same character + colour the position rows render via pivotStar/pivotAct/_tcStarHtml), then its
+// meaning — so the legend and the rows can never drift. Click (i) to open; a document click closes it.
+function markerLegendPopover(){
+  const row=(glyph,col,txt)=>`<div style="display:flex;align-items:center;gap:9px;padding:3px 0">`+
+    `<span style="color:${col};font-size:14px;line-height:1;width:16px;text-align:center;flex-shrink:0">${glyph}</span>`+
+    `<span style="font-size:11.5px;color:var(--mut);line-height:1.35">${txt}</span></div>`;
+  const rows=
+    row('★','#f5b94a','Amber filled star — Trade Check STRONG')+
+    row('☆','#f5b94a','Amber outline star — Trade Check VALID')+
+    row('★','#4d7cfe','Blue star — held reversal at S1 (long)')+
+    row('●','#f87171','Red circle — mirror at R1 (short)')+
+    row('★','#2fd48b','Green star — unusual activity (volume >1.5x or OI >25% d/d)');
+  const footer=`<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--line2);font-size:10.5px;color:var(--dim)">Shape = side (star long, circle short) · Colour = meaning</div>`;
+  return `<span style="position:relative;display:inline-block;margin-left:7px;vertical-align:middle">`+
+    `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
+      `style="width:17px;height:17px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);font:600 10px/1 Sora,sans-serif;cursor:pointer;padding:0;vertical-align:middle">i</button>`+
+    `<div class="mk-legpop" onclick="event.stopPropagation()" style="display:none;position:absolute;top:23px;left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:275px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)">${rows}${footer}</div>`+
+  `</span>`;
+}
+// cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
+// itself stopPropagation, so their own clicks don't trigger this).
+try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
     <td class="sym">${x.symbol}${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
