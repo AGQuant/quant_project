@@ -109,6 +109,15 @@ EXT_STAGE_FLAG        = 'feed_ext_stage'   # app_config: 'off' | '<int>' | 'all'
 EXT_STAGE_DEFAULT     = 'off'         # cc#809 ships DARK. Nothing subscribes until the flag is set.
 EXT_VERIFY_WAIT_SEC   = 180           # post-subscribe settle before the extended leg is graded
 EXT_MIN_TICK_FRACTION = 0.25          # <25% of the extended leg writing bars => treat the stage as failed
+# cc#1002 (founder 11-Aug): staged RAMP of the extended equity leg toward the full ~1,800 universe,
+# with an engineered RETREAT to the last-good stage instead of all the way to 'off'. Stages are
+# ext-leg sizes; total equity ~= 209 F&O + this. Advancing a stage is ONE app_config UPDATE of
+# feed_ext_stage (no code push, no mid-market reboot); the retreat below is what makes raising it
+# safe against the incident-8 signature (20-Jul: a batch too large -> broker force-close -> 94-min
+# freeze). The retreat only fires when the CURRENT stage is ABOVE the last-good floor (an active
+# ramp) — at or below the proven baseline it keeps the cc#809 'off' behaviour, so there is no loop.
+EXT_RAMP_STAGES   = (500, 790, 1190, 1590)   # ~707 / ~1000 / ~1400 / ~1800 total equity (ext-leg sizes)
+EXT_LASTGOOD_FLAG = 'feed_ext_stage_last_good'   # app_config int: largest stage that held a full clean session
 # Tier 3 of the cc#809 retention scheme. Index 5-min bars are written by update_index_ltp() through
 # agg.on_tick(..., source='fyers_eq') — they are NOT a separate source, and re-tagging them would
 # break every consumer that reads index candles (the /api/intraday and v10 paths both filter on
@@ -871,6 +880,30 @@ def _ext_stage_limit(conn):
     except Exception:
         log.warning(f"_ext_stage_limit: unrecognised {EXT_STAGE_FLAG}={raw!r} — treating as 'off'")
         return 0
+
+
+def _ext_last_good(conn):
+    """cc#1002: the largest extended-leg stage that has held a full clean in-session grade. The
+    auto-retreat falls back to THIS instead of all the way to 'off' — a destabilised ramp drops to
+    the last size that worked, not to zero. 0 => no known-good floor yet (retreat then goes fully
+    off, the cc#809 behaviour)."""
+    try:
+        raw = _flag_get(conn, EXT_LASTGOOD_FLAG)
+        return max(0, int(str(raw).strip())) if raw not in (None, '') else 0
+    except Exception as e:
+        log.warning(f"_ext_last_good: {e}")
+        return 0
+
+
+def _set_ext_last_good(conn, stage):
+    """cc#1002: record `stage` as the new last-good floor. Only ADVANCES (never lowered here) — a
+    stage becomes 'known good' once it holds a clean grade, and a later retreat never rewrites it."""
+    try:
+        if stage and 0 < stage < 10 ** 9 and stage > _ext_last_good(conn):
+            _flag_set(conn, EXT_LASTGOOD_FLAG, str(int(stage)))
+            log.info(f"cc#1002: extended leg stage {stage} graded clean — advanced last-good floor")
+    except Exception as e:
+        log.warning(f"_set_ext_last_good({stage}): {e}")
 
 
 def get_extended_universe(conn, fno_symbols, limit):
@@ -3294,22 +3327,35 @@ def run(auth_code=None):
             log.info(f"cc#809 stage 3 report: ext={ext}/{len(ext_fyers_syms)} ({frac*100:.0f}%) "
                      f"eq={eq} fut={fut} core_ok={core_ok} ext_ok={ext_ok}")
             if core_ok and ext_ok:
+                # cc#1002: this stage held a clean in-session grade — record it as the last-good floor
+                # so a later ramp that destabilises has a size to fall back to (not all the way off).
+                _set_ext_last_good(conn, _ext_stage_limit(conn))
                 _ops_log(conn, 'feed', 'feed_ext_stage_ok', report)
                 return
             report["halted"] = True
             report["reason"] = ("core F&O leg below floor after extended subscribe"
                                 if not core_ok else
                                 f"extended leg only {frac*100:.0f}% ticking (<{EXT_MIN_TICK_FRACTION*100:.0f}%)")
-            log.error(f"cc#809 AUTO-HALT: {report['reason']} — unsubscribing extended leg and "
-                      f"setting {EXT_STAGE_FLAG}=off")
+            # cc#1002: RETREAT to the LAST-GOOD stage, not all the way to 'off' — but only when the
+            # current stage is ABOVE that floor (a genuine ramp that failed). At or below the proven
+            # baseline, keep the cc#809 'off' behaviour so a persistently-failing baseline cannot loop
+            # by re-setting itself. This is the engineered retreat path: as much the deliverable as the
+            # ramp (the incident-8 lesson — a big subscribe that force-closes must fall back cleanly).
+            _cur_stage = _ext_stage_limit(conn)
+            _lg        = _ext_last_good(conn)
+            _retreat_to = str(_lg) if (_lg > 0 and _cur_stage > _lg) else 'off'
+            report["retreat_to"] = _retreat_to
+            report["from_stage"] = (_cur_stage if _cur_stage < 10 ** 9 else 'all')
+            log.error(f"cc#1002 AUTO-RETREAT: {report['reason']} — unsubscribing extended leg and "
+                      f"setting {EXT_STAGE_FLAG}={_retreat_to} (last-good {_lg})")
             try:
                 _batched_subscribe(fyers_ws, ext_fyers_syms, action='unsub', label=f'ext-halt-{trigger}')
             except Exception as e:
-                log.warning(f"cc#809 auto-halt unsubscribe failed (flag still being set off): {e}")
+                log.warning(f"cc#1002 auto-retreat unsubscribe failed (flag still being set): {e}")
             ext_set.clear()   # stop tagging any straggler ticks as extended
-            _flag_set(conn, EXT_STAGE_FLAG, 'off')
-            _ops_log(conn, 'alert', 'feed_ext_stage_halted', report)
-            _log_feed_incident("feed_ext_halted", report["reason"])
+            _flag_set(conn, EXT_STAGE_FLAG, _retreat_to)
+            _ops_log(conn, 'alert', 'feed_stage_retreat', report)
+            _log_feed_incident("feed_stage_retreat", report["reason"])
         except Exception as e:
             log.warning(f"cc#809 _subscribe_extended({trigger}): {e}")
 
