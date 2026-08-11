@@ -8,8 +8,8 @@ thresholds (never hardcoded). GVM verdict -> action band mapping is the Scorr ta
 
 Data sources: hr_holdings, cmp_prices, raw_prices, gvm_history (latest + 30d trend), input_raw
 (segment/cap/result_analysis/fwd-growth), screener_raw (pe/yield/holding/fii), sector_ratings,
-nifty500_benchmark, earnings_calendar. NIFTY50 series lives in raw_prices; NIFTY500 1y is an
-mcap-weighted constituent proxy.
+earnings_calendar. NIFTY50 AND NIFTY500 (cc#1015: real ^CRSLDX) index series both live in
+raw_prices; the synthetic nifty500_benchmark basket is NO LONGER read here (it is QB-only).
 """
 import os
 import re
@@ -166,14 +166,17 @@ def _nifty50_1y(cur):
 
 
 def _nifty500_1y(cur):
-    """mcap-weighted 1y return across NIFTY500 constituents (screener_raw.return_1y)."""
-    cur.execute("""
-        SELECT s.return_1y, b.weight FROM nifty500_benchmark b
-        JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(b.symbol)
-        WHERE s.return_1y IS NOT NULL AND b.weight IS NOT NULL
-    """)
-    w = _wavg([(r[0], r[1]) for r in cur.fetchall()])
-    return round(w, 2) if w is not None else None
+    """cc#1015 P1 DATA HONESTY: REAL Nifty 500 index 1y return from raw_prices 'NIFTY500' (Yahoo
+    ^CRSLDX), mirroring _nifty50_1y. Replaces the nifty500_benchmark mcap-weighted proxy (current
+    constituent weights applied BACKWARDS = composition/survivorship bias). Real series absent -> None
+    (rendered 'unavailable'); the synthetic basket is NEVER read here."""
+    cur.execute("SELECT close FROM raw_prices WHERE symbol='NIFTY500' ORDER BY price_date DESC LIMIT 1")
+    now = cur.fetchone()
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY500'
+                   AND price_date <= (CURRENT_DATE - INTERVAL '365 days') ORDER BY price_date DESC LIMIT 1""")
+    then = cur.fetchone()
+    n, t = (_f(now[0]) if now else None), (_f(then[0]) if then else None)
+    return round((n - t) / t * 100, 2) if (n and t) else None
 
 
 def _price_on_or_before(cur, sym, d):
@@ -185,22 +188,21 @@ def _price_on_or_before(cur, sym, d):
 
 
 def _nifty500_return_since(cur, start_date):
-    """cc#653: mcap-weighted NIFTY500 return from start_date -> live, built from constituent raw_prices
-    (each symbol's close on/before start_date vs its latest close). Same mcap-weighted-proxy philosophy
-    as _nifty500_1y, but over an arbitrary window instead of a fixed 1y."""
-    cur.execute("""
-        WITH r AS (
-            SELECT b.weight,
-              (SELECT close FROM raw_prices rp WHERE rp.symbol=b.symbol AND price_date<=%s
-                 ORDER BY price_date DESC LIMIT 1) p0,
-              (SELECT close FROM raw_prices rp WHERE rp.symbol=b.symbol
-                 ORDER BY price_date DESC LIMIT 1) p1
-            FROM nifty500_benchmark b WHERE b.weight IS NOT NULL)
-        SELECT SUM((p1/p0-1)*weight), SUM(weight) FROM r WHERE p0>0 AND p1 IS NOT NULL""", (start_date,))
-    row = cur.fetchone()
-    if row and row[0] is not None and row[1]:
-        return round(float(row[0]) / float(row[1]) * 100.0, 2)
-    return None
+    """cc#1015 P1 DATA HONESTY: the REAL Nifty 500 index return from start_date -> live, read from
+    raw_prices 'NIFTY500' (Yahoo ^CRSLDX) — exactly like the NIFTY50 path (nearest prior trading day on
+    a holiday via price_date<=start_date). HARD GUARD: the synthetic nifty500_benchmark (current
+    constituent weights applied BACKWARDS) is NEVER read here. That composition/survivorship bias
+    reported NEGATIVE alpha for windows before its 01-Jun-2026 base_date where the real index is
+    positive (Ritesh -3.7% vs a real +2.6% since 10-Sep-2025; founder chart 11-Aug). The synthetic stays
+    confined to QB benchmarking from its base forward. Real series absent -> None => 'vs Nifty 500
+    unavailable', never a reconstructed/back-projected number (data-honesty doctrine)."""
+    cur.execute("SELECT close FROM raw_prices WHERE symbol='NIFTY500' ORDER BY price_date DESC LIMIT 1")
+    now = cur.fetchone()
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY500' AND price_date<=%s
+                   ORDER BY price_date DESC LIMIT 1""", (start_date,))
+    then = cur.fetchone()
+    n, t = (_f(now[0]) if now else None), (_f(then[0]) if then else None)
+    return round((n - t) / t * 100.0, 2) if (n and t) else None
 
 
 def _nifty50_return_since(cur, start_date):

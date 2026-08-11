@@ -48,6 +48,11 @@ INDEX_TICKERS = {
     "SENSEX":      ["^BSESN"],
     "FINNIFTY":    ["^CNXFINANCE", "NIFTY_FIN_SERVICE.NS"],
     "MIDCAPNIFTY": ["^NSEMDCP50"],
+    # cc#1015 P1 DATA HONESTY: the REAL Nifty 500 index. The Portfolio Health alpha vs Nifty 500 was
+    # computed from the synthetic nifty500_benchmark (current constituent weights applied BACKWARDS),
+    # a composition/survivorship bias that showed negative alpha where the real index gives positive.
+    # ^CRSLDX is the Nifty 500 total-return-free price index on Yahoo.
+    "NIFTY500":    ["^CRSLDX"],
 }
 
 # Excel export: (sheet title, raw_prices symbol) in display order
@@ -57,6 +62,7 @@ EXCEL_SHEETS = [
     ("FinNifty",     "FINNIFTY"),
     ("Sensex",       "SENSEX"),
     ("Midcap Nifty", "MIDCAPNIFTY"),
+    ("Nifty 500",    "NIFTY500"),   # cc#1015
 ]
 
 

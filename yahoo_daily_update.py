@@ -56,6 +56,7 @@ INDICES = {
     "SENSEX":      "^BSESN",
     "FINNIFTY":    "NIFTY_FIN_SERVICE.NS",  # ^CNXFINANCE is unreliable on Yahoo
     "MIDCAPNIFTY": "^NSEMDCP50",            # Nifty Midcap 50 (proxy for Midcap Nifty)
+    "NIFTY500":    "^CRSLDX",               # cc#1015: real Nifty 500 index (nightly freshness)
 }
 
 # cc#938 — RESOLVED-TICKER OVERRIDES. Loaded ONCE per run (see run_async) from yahoo_symbol_map,
