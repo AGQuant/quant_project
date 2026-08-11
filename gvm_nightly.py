@@ -286,35 +286,39 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         if c not in _text_cols and c not in _date_cols:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # ── cc#804 item 3: QoQ growth from the preceding-quarter ABSOLUTES in the file, not from a
-    # pre-computed chip. Verified on 20MICRONS: sales 244.72 latest vs 261.06 preceding -> -6.26%.
-    def _qoq(latest_names, prev_names, out_col):
+    # ── cc#804 item 3 / cc#1005: growth from the ABSOLUTES in the file, not from a pre-computed chip.
+    # cc#1005 (founder decision 11-Aug-2026) changes the BASIS from sequential (latest-Q vs the
+    # immediately preceding quarter) to YoY (latest-Q vs the SAME quarter a year ago), so seasonality
+    # no longer distorts the Growth pillar. The stored qoq_sales_growth / qoq_profit_growth columns
+    # keep their names (no schema change) but now hold YoY. Verified on ADANIPORTS: sales 10820.8
+    # latest vs 9126.14 year-ago -> +18.57%.
+    def _qoq(latest_names, prev_names, out_col, positive_base_only):
         lc = next((c for c in df.columns if c in latest_names), None)
         pc = next((c for c in df.columns if c in prev_names), None)
         if lc is None or pc is None:
             return False
         latest, prev = pd.to_numeric(df[lc], errors="coerce"), pd.to_numeric(df[pc], errors="coerce")
-        # Guard the sign flip: a swing THROUGH zero (loss -> profit) has no meaningful percentage,
-        # and dividing by a negative base silently inverts the direction of the move.
-        df[out_col] = np.where((prev.notna()) & (latest.notna()) & (prev > 0),
+        # Guards: missing / zero denominator -> NULL; for profit, a base <= 0 -> NULL (a % move off a
+        # loss base is meaningless and a negative base silently inverts the direction).
+        base_ok = (prev > 0) if positive_base_only else (prev != 0)
+        df[out_col] = np.where((prev.notna()) & (latest.notna()) & base_ok,
                                (latest - prev) / prev * 100.0, np.nan)
         return True
 
     # cc#804 fix (found on the first real load): the profit pair slugs to
-    # profit_after_tax_latest_quarter / profit_after_tax_preceding_quarter, NOT profit_latest_quarter.
+    # profit_after_tax_latest_quarter / profit_after_tax_preceding_year_quarter, NOT profit_latest_quarter.
     # The narrower name set never matched, so qoq_profit_growth silently kept the CSV's OWN
-    # precomputed column — which is a different basis. Measured on the 02-Aug load: 1,569 of 1,801
-    # rows carried a qoq_profit_growth contradicting the absolutes in their own row by >1pp, while
-    # qoq_sales_growth (whose names did match) was exact. Both column-name families are listed now,
+    # precomputed column — which is a different basis. Both column-name families are listed now,
     # and the loader reports qoq_*_computed so a silent miss is visible in the response instead of
-    # being discovered a season later.
+    # being discovered a season later. cc#1005: preceding-YEAR-quarter absolutes (YoY basis).
     qoq_sales_ok = _qoq({"Sales latest quarter", "sales_latest_quarter"},
-                        {"Sales preceding quarter", "sales_preceding_quarter"}, "qoq_sales_growth")
+                        {"Sales preceding year quarter", "sales_preceding_year_quarter"},
+                        "qoq_sales_growth", positive_base_only=False)
     qoq_profit_ok = _qoq({"Profit latest quarter", "profit_latest_quarter",
                           "Profit after tax latest quarter", "profit_after_tax_latest_quarter"},
-                         {"Profit preceding quarter", "profit_preceding_quarter",
-                          "Profit after tax preceding quarter", "profit_after_tax_preceding_quarter"},
-                         "qoq_profit_growth")
+                         {"Profit preceding year quarter", "profit_preceding_year_quarter",
+                          "Profit after tax preceding year quarter", "profit_after_tax_preceding_year_quarter"},
+                         "qoq_profit_growth", positive_base_only=True)
 
     # ── cc#804: slug every header to a stable identifier, then MAKE THE TABLE MATCH THE FILE.
     # This is the actual fix. The old code intersected a fixed allowlist with the CSV columns AND
@@ -596,6 +600,26 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
         df["opm_expansion"] = (df["opm_latest_q"] - df["opm_prev_year_q"]) * 100
     else:
         df["opm_expansion"] = np.nan
+
+    # cc#1005: G-pillar QoQ -> YoY (founder decision 11-Aug-2026). The stored qoq_sales_growth /
+    # qoq_profit_growth are SEQUENTIAL (latest quarter vs the immediately preceding quarter), so
+    # seasonality distorts Growth (e.g. KIRLPNU -57% seasonal Q4-heavy vs +7-10% YoY). Re-derive
+    # here on the SAME quarter-vs-year-ago pattern as opm_expansion, from screener_raw's own
+    # latest/preceding-year-quarter columns, OVERRIDING the stored sequential value so a plain
+    # `gvm_recompute` applies the new basis with no CSV re-import. Internal keys unchanged
+    # (qoq_sales_growth / qoq_profit_growth) -> no schema change, only the basis.
+    # Guards: missing/zero denominator -> NULL; profit base <= 0 -> NULL (a % move off a loss
+    # base is meaningless). NULL scores neutral (5.0) via the blank rule downstream.
+    def _yoy(latest_col, prev_col, positive_base_only):
+        if latest_col in df.columns and prev_col in df.columns:
+            lat = pd.to_numeric(df[latest_col], errors="coerce")
+            prev = pd.to_numeric(df[prev_col], errors="coerce")
+            good = prev.notna() & lat.notna() & (prev > 0 if positive_base_only else prev != 0)
+            return np.where(good, (lat / prev - 1.0) * 100.0, np.nan)
+        return np.nan
+    df["qoq_sales_growth"] = _yoy("sales_latest_quarter", "sales_preceding_year_quarter", False)
+    df["qoq_profit_growth"] = _yoy("profit_after_tax_latest_quarter",
+                                   "profit_after_tax_preceding_year_quarter", True)
 
     if "fii_holding" in df and "dii_holding" in df:
         df["inst_holding_abs"] = df["fii_holding"].fillna(0) + df["dii_holding"].fillna(0)

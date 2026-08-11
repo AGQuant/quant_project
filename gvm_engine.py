@@ -174,8 +174,8 @@ def api_sales_growth_5y(sv, pa):   return {"parameter": "Sales Growth 5Y",   "sc
 def api_sales_growth_3y(sv, pa):   return {"parameter": "Sales Growth 3Y",   "score": param_score(sv, pa)}
 def api_profit_growth_5y(sv, pa):  return {"parameter": "Profit Growth 5Y",  "score": param_score(sv, pa)}
 def api_profit_growth_3y(sv, pa):  return {"parameter": "Profit Growth 3Y",  "score": param_score(sv, pa)}
-def api_qoq_sales_growth(sv, pa):  return {"parameter": "QoQ Sales Growth",  "score": param_score(sv, pa)}
-def api_qoq_profit_growth(sv, pa): return {"parameter": "QoQ Profit Growth", "score": param_score(sv, pa)}
+def api_qoq_sales_growth(sv, pa):  return {"parameter": "YoY Sales Growth",  "score": param_score(sv, pa)}
+def api_qoq_profit_growth(sv, pa): return {"parameter": "YoY Profit Growth", "score": param_score(sv, pa)}
 def api_opm(sv, pa):               return {"parameter": "OPM",               "score": param_score(sv, pa)}
 def api_opm_expansion(sv, pa):     return {"parameter": "OPM Expansion",     "score": score_opm_expansion(sv, pa)}
 def api_fixed_asset_growth(sv, pa):return {"parameter": "Fixed Asset Growth","score": param_score(sv, pa)}
@@ -204,8 +204,8 @@ def api_g_score(s):
         "Sales Growth 3Y":    param_score(s.get("sales_growth_3y"),    s.get("peer_sales_growth_3y")),
         "Profit Growth 5Y":   param_score(s.get("profit_growth_5y"),   s.get("peer_profit_growth_5y")),
         "Profit Growth 3Y":   param_score(s.get("profit_growth_3y"),   s.get("peer_profit_growth_3y")),
-        "QoQ Sales Growth":   param_score(s.get("qoq_sales_growth"),   s.get("peer_qoq_sales_growth")),
-        "QoQ Profit Growth":  param_score(s.get("qoq_profit_growth"),  s.get("peer_qoq_profit_growth")),
+        "YoY Sales Growth":   param_score(s.get("qoq_sales_growth"),   s.get("peer_qoq_sales_growth")),
+        "YoY Profit Growth":  param_score(s.get("qoq_profit_growth"),  s.get("peer_qoq_profit_growth")),
         "OPM":                param_score(s.get("opm"),                s.get("peer_opm")),
         "OPM Expansion":      score_opm_expansion(s.get("opm_expansion"), s.get("peer_opm_expansion")),
         "Fixed Asset Growth": param_score(s.get("fixed_asset_growth"), s.get("peer_fixed_asset_growth")),

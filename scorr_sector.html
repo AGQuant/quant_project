@@ -80,7 +80,7 @@ const MEDALS = ["🥇","🥈","🥉"];
 
 function Dots({row}) {
   const sigs = [row.gvm>=6.5,(row.gvm_change||0)>0,(row.inst_change||0)>0,(row.qoq_profit||0)>10,(row.annual_upside||0)>15];
-  const labels = ["GVM≥6.5","GVMδ>0","Inst+","QoQ>10%","Upside>15%"];
+  const labels = ["GVM≥6.5","GVMδ>0","Inst+","YoY>10%","Upside>15%"];
   return (
     <span style={{display:"inline-flex",gap:3,marginLeft:6}}>
       {sigs.map((ok,i)=>(
@@ -243,7 +243,7 @@ function Detail({row, onClose}) {
     {lbl:"GVM",sub:"Quality",v:row.gvm,fmt:v=>fmt(v),good:v=>v>=6.5},
     {lbl:"GVM Δ14d",sub:"Trend",v:row.gvm_change,fmt:v=>(v>0?"+":"")+fmt(v,3),good:v=>v>0},
     {lbl:"Inst %",sub:"FII+DII median",v:row.inst_change,fmt:v=>pct(v),good:v=>v>0},
-    {lbl:"QoQ %",sub:"Profit median",v:row.qoq_profit,fmt:v=>pct(v,1),good:v=>v>10},
+    {lbl:"YoY %",sub:"Profit median",v:row.qoq_profit,fmt:v=>pct(v,1),good:v=>v>10},
     {lbl:"Upside %",sub:"PE-based",v:row.annual_upside,fmt:v=>pct(v,1),good:v=>v>15},
   ];
   return (
@@ -321,7 +321,7 @@ function RankTab({data, onSel}) {
           <Th k="m_score" lbl="M" r/>
           <Th k="gvm_change" lbl="GVMδ14d" r/>
           <Th k="inst_change" lbl="Inst%" r/>
-          <Th k="qoq_profit" lbl="QoQ%" r/>
+          <Th k="qoq_profit" lbl="YoY%" r/>
           <Th k="annual_upside" lbl="Upside%" r/>
           <Th k="verdict" lbl="Verdict"/>
           <Th k="stocks_count" lbl="Stks" r/>
