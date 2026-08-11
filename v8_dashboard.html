@@ -2136,7 +2136,12 @@ const _tcStarCache = new Map();          // "SYM|SIDE" -> {verdict, score, max, 
 function posTags(x){
   const key=(x.symbol||'')+'|'+(x.side||'');
   const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
-  return '<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
+  // cc#1008: pivot (blue/red) + activity (green) markers on the OPEN book, same maps + endpoint the
+  // basket panels and /m/v8 use — the founder's locked stars were rendering in the funnel panels but
+  // never on the open-position rows. Inline (not async like the TC star) so they paint with the row;
+  // loadPivotStars() repaints the master pane once the maps land. Order: SYMBOL · pivot · activity ·
+  // TC · NEW.
+  return pivotStar(x.symbol)+pivotAct(x.symbol)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
 }
 function _tcStarHtml(v,side){
   if(!v)return'';
@@ -2746,6 +2751,9 @@ function renderMaster(){
   const posBody=OPENPOS_VIEW==='ladder'?openPosLadder:(openPosTable+openPosMobile);
   return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
+    // cc#1008: the marker legend (same server snippet /m/v8 and the basket panels use) sits above the
+    // open book now that pivot/activity glyphs render on the position rows.
+    markerLegend()+
     viewToggle+posBody+
     // cc#338: Sector Cards regrouped by curated futures_universe.theme (22 Scorr themes),
     // equal-weight avg, single grid sorted 1D% desc. DISPLAY ONLY — engine still on GVM segments.
@@ -2792,6 +2800,9 @@ async function loadPivotStars(){
     const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
     PIVOT_STARS=m;
   }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; }   // a failed marker fetch must never blank a signal table
+  // cc#1008: the maps load async, after the open-positions pane has already painted once. Repaint it
+  // so the pivot/activity markers appear on the rows without waiting for the 5-min auto-refresh.
+  try{ if(cache&&cache.paper&&document.getElementById('panel0')) renderMasterPanels(); }catch(e){}
 }
 function pivotStar(sym){
   const s=PIVOT_STARS[sym]; if(!s) return '';

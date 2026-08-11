@@ -468,10 +468,15 @@ def pivot_star(star_date: Optional[str] = None):
     try:
         with _conn() as conn, conn.cursor() as cur:
             d = star_date or str(_ist_now().date())
+            # cc#1008: `stars` is the PIVOT list (BLUE/RED) only. GREEN activity rows live in the
+            # same table but render via the `activity` list below — leaving them in `stars` made
+            # pivotStar/pivotMark (which map star_color as BLUE?blue:red) paint every green marker
+            # RED on both surfaces (the founder's GRASIM). Filtering them here fixes both copies at
+            # the one shared source, with no frontend colour change.
             cur.execute("""
                 SELECT symbol, basket, direction, star_color, level_name, level_value,
                        pct_from_level, day_1d, near_pp, cmp_at_star, first_seen_ts, touched_dates
-                FROM v8_pivot_star_log WHERE star_date=%s
+                FROM v8_pivot_star_log WHERE star_date=%s AND star_color IN ('BLUE','RED')
                 ORDER BY star_color, symbol""", (d,))
             # cc#932: `glyph` is DERIVED from the stored direction, so it needs no new column and
             # no ALTER TABLE (MAINTENANCE_LOCK_RULE cc#351 forbids one here). Every existing field
@@ -490,20 +495,48 @@ def pivot_star(star_date: Optional[str] = None):
                 r["note"] = star_note(r)
             # cc#933: activity markers are a SEPARATE list, not merged into `stars`. A symbol can
             # carry a pivot marker AND an activity marker at the same time; one keyed map would
-            # silently drop whichever came second. Purely additive — `stars` is byte-identical to
-            # what it was, so nothing downstream breaks.
+            # silently drop whichever came second.
+            # cc#1008: read GREEN markers for DISPLAY from the LOG (persisted at first fire), NOT a
+            # live re-evaluation. run_tick() still DETECTS and WRITES green rows via
+            # evaluate_activity() (untouched, locked 18053) — but a live re-eval at render time can
+            # fade intra-day and drop a marker the log still holds, so the surface would disagree
+            # with v8_pivot_star_log. Reading the log makes what BOTH surfaces render match the table
+            # exactly (the founder's own verify + DISPLAY_PARITY 16202). Glyph follows the CURRENT
+            # open-position side (star long, circle short); note is rebuilt facts-only from the
+            # logged trigger + value, same wall as star_note (no buy/sell/entry/target wording).
+            acts = []
             try:
-                # honour a historical star_date rather than silently evaluating "today" —
-                # a bad date string falls back to today instead of throwing the whole endpoint.
-                _ad = None
-                if star_date:
-                    try:
-                        _ad = datetime.strptime(star_date, "%Y-%m-%d").date()
-                    except ValueError:
-                        _ad = None
-                acts = evaluate_activity(conn, _ad)
+                with conn.cursor() as acur:
+                    acur.execute("""
+                        SELECT g.symbol, g.level_name, g.level_value, p.side
+                        FROM v8_pivot_star_log g
+                        LEFT JOIN LATERAL (
+                            SELECT side FROM v8_paper_positions
+                            WHERE symbol = g.symbol AND status='OPEN'
+                            ORDER BY entry_ts DESC LIMIT 1
+                        ) p ON TRUE
+                        WHERE g.star_date=%s AND g.star_color='GREEN'
+                        ORDER BY g.symbol""", (d,))
+                    for sym, lname, lval, side in acur.fetchall():
+                        side_u = (side or "").upper()
+                        lv = _f(lval)
+                        trig = (lname or "").upper()
+                        facts = []
+                        if trig in ("VOL", "VOL+OI") and lv is not None:
+                            facts.append(f"volume {lv:.1f}x its 21-day average")
+                        if trig == "OI" and lv is not None:
+                            facts.append(f"OI {lv:+.0f}% day-over-day")
+                        elif trig == "VOL+OI":
+                            facts.append("OI event day-over-day")
+                        acts.append({
+                            "symbol": sym, "side": side_u or None,
+                            "star_color": "GREEN", "color": "#2fd48b",
+                            "glyph": GLYPH_SIDE.get(side_u, "star"),
+                            "level_name": lname, "level_value": lv,
+                            "note": " · ".join(facts) if facts else "unusual activity",
+                        })
             except Exception as e:
-                log.warning("cc#933 activity evaluation failed: %s", e)
+                log.warning("cc#1008 activity log-read failed: %s", e)
                 acts = []
             return {
                 "star_date": d, "count": len(rows), "stars": rows,
