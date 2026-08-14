@@ -3290,6 +3290,29 @@ def run(auth_code=None):
                 elif ext >= EXT_MIN_TICK_FRACTION * uni_ext and _EXT_RECOVERY["attempts"]:
                     log.info(f"cc#1017 extended leg recovered ({ext}/{uni_ext} ticking) — reset rebuild counter")
                     _EXT_RECOVERY["attempts"] = 0
+                # cc#1017 (completing spec item 1): the rebuild trigger above is a COLLAPSE threshold —
+                # 25%, mirroring _subscribe_extended's own drop rule. On its own it would still have
+                # let a 45%-dead leg (500/909) report a clean pass, which is the same shape of
+                # blindness as the retired floor=100, just further along the scale. So ANY shortfall
+                # against the registry-derived expected count is now reported against that count,
+                # loudly, whether or not it is big enough to rebuild.
+                #
+                # It is reported, not rebuilt, and that distinction is deliberate: some extended
+                # symbols genuinely do not print in a 15-min window (the 14-Aug backfill found
+                # QUADFUTURE-EQ with no Fyers candles at all and SAYAJIHOTL trading in bursts), so
+                # tearing the socket down for a handful of quiet illiquid names would be a self-
+                # inflicted outage. What must never happen again is a verification that says PASS
+                # while a large slice of the universe is dead — that is what this line ends.
+                elif ext < uni_ext:
+                    _short = uni_ext - ext
+                    _pct = 100.0 * _short / uni_ext
+                    _detail = (f"{label}: extended leg SHORT by {_short} of {uni_ext} "
+                               f"({_pct:.1f}%) — {ext} writing bars. Below the "
+                               f"{EXT_MIN_TICK_FRACTION:.0%} collapse threshold this rebuilds; "
+                               f"above it, quiet illiquid symbols are expected, so this is "
+                               f"reported and NOT treated as a reason to tear down the socket.")
+                    log.error(f"cc#1017 EXT SHORTFALL {_detail}")
+                    _log_feed_incident("subscribe_verify_ext_shortfall", _detail)
             log.info(f"Post-{label} verification: {msg}")
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")
