@@ -1455,6 +1455,19 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
 
     entry_ts_ist = _now_ist(sim_ts)   # cc#218
 
+    # cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766): the RECORDED fill is the futures price at
+    # this moment; the DECISION was and stays cash-based. Everything above this line is untouched —
+    # `entry` is the equity CMP and target/stop are still derived from it, so qualification and the
+    # risk levels the engine trades on are byte-identical to yesterday. Only the number written to
+    # v8_paper_positions.entry_price changes instrument. A missing fut bar records the equity price
+    # and says so loudly (see fut_fill_price) rather than skipping the entry.
+    try:
+        from fut_fill_price import fill_price as _fut_fill
+        fill_px, fill_basis = _fut_fill(conn, sym, entry_ts_ist, entry, what="entry")
+    except Exception as e:
+        log.warning(f"auto_paper {sym}: fut fill pricing unavailable ({e}) — recording EQ entry")
+        fill_px, fill_basis = entry, "eq"
+
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1462,12 +1475,12 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
                 (symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'OPEN')
                 ON CONFLICT (symbol, side, status) DO NOTHING
-            """, (sym, paper_side, basket, entry, entry_ts_ist, qty, target, stop, pp, d))
+            """, (sym, paper_side, basket, fill_px, entry_ts_ist, qty, target, stop, pp, d))
             inserted = cur.rowcount
         conn.commit()
         if inserted:
-            log.info(f"auto_paper entry: {sym} {paper_side} @ {entry} "
-                     f"entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
+            log.info(f"auto_paper entry: {sym} {paper_side} @ {fill_px} [{fill_basis}] "
+                     f"(cash {entry}) entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
                      f"target={target} sl={stop} basket={basket}")
     except Exception as e:
         log.warning(f"auto_paper insert {sym} {paper_side}: {e}")

@@ -41,6 +41,12 @@ from typing import Optional
 import psycopg
 import os
 import time
+import logging
+
+# cc#1019: this module had no logger. The futures Day Log has one condition it must say out loud
+# (a missing cutover row => an EMPTY futures book, never an unfiltered one), and a silent return
+# would be exactly the failure it is guarding against.
+log = logging.getLogger("scorr.v8_endpoints")
 
 from nse_holidays import is_trading_day
 # cc#607 Phase A: the basket filter registry is the single source of truth (declared adjacent to the
@@ -2727,11 +2733,21 @@ def v8_trades(limit: int = 200):
         raise HTTPException(500, f"v8_trades failed: {e}")
 
 
-# cc#994: the futures-book epoch. The August contract became front-month after the Tue 28-Jul-2026
-# monthly expiry (last-Tuesday regime), so any trade ENTERED on/after 29-Jul belongs to the futures
-# era. When view='futures' the Day Log (like the Master realised/win-loss cards) counts ONLY trades
-# with entry_ts >= this date — a clean futures-era book, no pre-29-Jul equity history mixed in.
-FUTURES_BOOK_START = "2026-07-29"
+# cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766) SUPERSEDES the cc#994 entry_ts >= 29-Jul epoch.
+# The futures book is no longer "trades entered after the rollover priced on the cash convention" —
+# from the 14-Aug-2026 close the fills THEMSELVES are futures-priced, so the futures realised book
+# is the trades that CLOSED on or after that moment. Eligibility moved from ENTRY to EXIT because
+# that is where the basis changed: the 19 positions open at the cutover were re-based to their
+# futures entry bars, so a trade opened on 12-Aug and closed on Monday is fut-priced at BOTH ends.
+#
+# Registry row, not a constant (rule 9): app_config.v8_fut_book_cutover_ts. If it is missing the
+# futures view falls back to showing NOTHING rather than the whole equity book relabelled — a
+# silently unfiltered book is exactly the wrong-number-that-looks-right this cutover exists to
+# prevent.
+FUT_BOOK_CUTOVER_KEY = "v8_fut_book_cutover_ts"
+# The entry-side bound for the futures view's OPENED counts: the first futures bar we hold. Derived
+# from the feed, never typed in — a position entered before it cannot be futures-priced.
+FUT_SERIES_START_SQL = "SELECT MIN(ts) FROM intraday_prices WHERE source='fyers_fut'"
 
 @router.get("/daylog")
 def v8_daylog(era: str = "fresh", view: str = "equity"):
@@ -2742,9 +2758,12 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
     not fresh-era performance) and all pre-rebuild history. History is never deleted (cc#504
     doctrine); pass ?era=all to see the full legacy+fresh book unfiltered.
 
-    cc#994: pass ?view=futures for the CLEAN futures-era book — every CTE additionally requires
-    entry_ts >= FUTURES_BOOK_START (2026-07-29), so a trade entered in the equity era but closed
-    after the rollover is excluded (eligibility is on ENTRY, not close)."""
+    cc#1019 (supersedes cc#994's ?view=futures rule): the futures book is the FUTURES-PRICED book,
+    so a CLOSED trade belongs to it when it closed on or after app_config.v8_fut_book_cutover_ts —
+    eligibility is on EXIT, not entry, because that is the leg where the basis changed. The OPENED
+    counts keep an entry-side bound instead: the first fyers_fut bar we hold, since a position
+    entered before the feed cannot be futures-priced. Both bounds come from data, neither is typed
+    in here."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cutover_ts = None
@@ -2752,8 +2771,31 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                 cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
                 row = cur.fetchone()
                 cutover_ts = row[0] if row and row[0] else None
-            # cc#994: futures-view epoch — a second, independent lower bound on entry_ts.
-            book_start = FUTURES_BOOK_START if view == "futures" else None
+            fut_view = (view == "futures")
+            exit_cut = entry_cut = None
+            if fut_view:
+                cur.execute("SELECT value FROM app_config WHERE key=%s", (FUT_BOOK_CUTOVER_KEY,))
+                row = cur.fetchone()
+                exit_cut = row[0] if row and row[0] else None
+                if not exit_cut:
+                    # No cutover row, no futures book. Returning the unfiltered book under a
+                    # FUTURES heading is the failure this whole card exists to prevent, so say so
+                    # and show nothing.
+                    log.warning("cc#1019 daylog view=futures: app_config['%s'] is missing — "
+                                "returning an EMPTY futures book rather than an unfiltered one.",
+                                FUT_BOOK_CUTOVER_KEY)
+                    return {"days": [], "summary": {"total_opened": 0, "total_closed": 0,
+                                                    "total_gross_pnl": 0.0, "total_brokerage": 0,
+                                                    "total_net_pnl": 0.0, "net_open": 0,
+                                                    "overall_return_pct": 0.0},
+                            "capital_base": 5_000_000, "era": "all" if era == "all" else "fresh",
+                            "view": "futures", "fut_cutover_ts": None,
+                            "fut_cutover_missing": True,
+                            "note": (f"The futures book cutover (app_config.{FUT_BOOK_CUTOVER_KEY}) "
+                                     "is not set, so there is no futures book to show yet.")}
+                cur.execute(FUT_SERIES_START_SQL)
+                row = cur.fetchone()
+                entry_cut = row[0] if row and row[0] else None
             # cc#970 (rule 13): retired baskets come from the app_config registry, never a name
             # literal, and they are excluded on era='all' too — a retired basket vanishes from
             # every P&L display including history.
@@ -2761,11 +2803,11 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
             cur.execute("""
                 WITH all_dates AS (
                     SELECT DISTINCT entry_ts::date AS d FROM v8_paper_positions
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(ecut)s::timestamp IS NULL OR entry_ts >= %(ecut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     UNION SELECT DISTINCT entry_ts::date FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(ecut)s::timestamp IS NULL OR entry_ts >= %(ecut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     UNION SELECT DISTINCT COALESCE(closed_at::date, exit_ts::date) FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(xcut)s::timestamp IS NULL OR COALESCE(exit_ts, closed_at) >= %(xcut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                 ),
                 opened AS (
                     SELECT entry_ts::date AS d,
@@ -2773,9 +2815,9 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                         COUNT(*) FILTER (WHERE side='SHORT') AS short_opened,
                         COUNT(*) AS total_opened
                     FROM (SELECT entry_ts, side FROM v8_paper_positions
-                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(ecut)s::timestamp IS NULL OR entry_ts >= %(ecut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                           UNION ALL SELECT entry_ts, side FROM v8_paper_trades
-                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))) e
+                          WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(ecut)s::timestamp IS NULL OR entry_ts >= %(ecut)s::timestamp) AND NOT (basket = ANY(%(retired)s))) e
                     GROUP BY entry_ts::date
                 ),
                 closed AS (
@@ -2788,7 +2830,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                         COUNT(*)*500 AS brokerage,
                         ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
                     FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(bstart)s::timestamp IS NULL OR entry_ts >= %(bstart)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(xcut)s::timestamp IS NULL OR COALESCE(exit_ts, closed_at) >= %(xcut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
                     GROUP BY COALESCE(closed_at::date, exit_ts::date)
                 ),
                 cumulative AS (
@@ -2813,7 +2855,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                       - SUM(closed) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS net_open,
                     ROUND((net_pnl/5000000.0*100)::numeric,2) AS return_pct
                 FROM cumulative ORDER BY d DESC
-            """, {"cut": cutover_ts, "retired": _retired, "bstart": book_start})
+            """, {"cut": cutover_ts, "retired": _retired, "ecut": entry_cut, "xcut": exit_cut})
             cols = [d[0] for d in cur.description]
             rows = []
             for r in cur.fetchall():
@@ -2844,7 +2886,10 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
             "era": "all" if era == "all" else "fresh",
             "rebuild_cutover_ts": str(cutover_ts) if cutover_ts else None,
             "view": "futures" if view == "futures" else "equity",   # cc#994
-            "futures_book_start": book_start,                        # cc#994: null unless view=futures
+            # cc#1019: both futures bounds, stated so the surface can label what it is showing.
+            # Null unless view=futures.
+            "fut_cutover_ts": str(exit_cut) if exit_cut else None,      # closed trades: exit_ts >= this
+            "fut_entry_start": str(entry_cut) if entry_cut else None,   # opened counts: entry_ts >= this
         }
     except Exception as e:
         raise HTTPException(500, f"v8_daylog failed: {e}")

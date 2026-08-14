@@ -506,6 +506,19 @@ def _resolve_conflict(conn, sym, want_side, basket, d, exit_close, exit_ts):
     return False
 
 
+def _fill(conn, sym, ts, eq_price):
+    """cc#1019: the price to RECORD for a paper fill — futures basis, cash fallback with a loud
+    warning. One line at each insert site so no entry path can quietly stay on the cash basis.
+    Never raises: a pricing lookup must not be the reason a fill goes unrecorded."""
+    try:
+        from fut_fill_price import fill_price
+        px, _basis = fill_price(conn, sym, ts, eq_price, what="entry")
+        return px
+    except Exception as e:
+        log.warning(f"cc#1019 {sym}: fut fill pricing unavailable ({e}) — recording EQ entry")
+        return eq_price
+
+
 def _lot(conn, sym):
     with conn.cursor() as cur:
         cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
@@ -531,8 +544,22 @@ def _log_missed(conn, d, sym, side, basket, entry, target, sl, reason):
         conn.commit()
 
 def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt, exit_px, exit_ts, result):
+    # cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766): every exit path in this file funnels through
+    # here, so this is the one place the RECORDED exit price changes instrument. The TRIGGER is
+    # already decided by the caller on the cash price — `result` arrives settled and nothing above
+    # this line is re-evaluated. The exit is priced on the same basis as the entry: a position whose
+    # entry has no futures bar (NTPC 29-Jul, INDUSINDBK 05-Aug, both pre-feed) keeps a cash exit, so
+    # its P&L never books a basis difference as profit. pnl/return are computed AFTER the swap, from
+    # the pair that is actually written.
+    try:
+        from fut_fill_price import exit_price as _fut_exit
+        exit_px, exit_basis = _fut_exit(conn, sym, ets, exit_ts, exit_px)
+    except Exception as e:
+        log.warning(f"cc#1019 {sym}: fut exit pricing unavailable ({e}) — recording EQ exit")
+        exit_basis = "eq"
     pnl = (exit_px-entry)*qty if side=="LONG" else (entry-exit_px)*qty
     ret = (exit_px/entry-1)*100 if side=="LONG" else (entry/exit_px-1)*100
+    log.info(f"cc#1019 close {sym} {side} {result}: exit {exit_px} [{exit_basis}] entry {entry}")
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO v8_paper_trades
@@ -605,6 +632,9 @@ def rebuild_cutover(conn, sim_ts=None):
 def _open_short(conn, sym, basket, entry, cur_ts, target, stop, pp, d):
     """Insert a SHORT paper position. Shared by zone-short and sell_overbought."""
     qty = _lot(conn, sym)
+    # cc#1019: record the fill on the futures basis. `target`/`stop` above are the engine's cash
+    # levels and stay exactly as the caller computed them.
+    entry = _fill(conn, sym, cur_ts, entry)
     with conn.cursor() as cur:
         cur.execute("""INSERT INTO v8_paper_positions
             (symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pp,pivot_date,status)
@@ -750,15 +780,18 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 if buy_slots is not None and long_open >= buy_slots:
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"slot_full"); continue
                 qty=_lot(conn,sym)
+                # cc#1019: RECORDED fill on the futures basis; target/stop keep the cash levels the
+                # engine decided on, and `entry` above is still the cash price every guard read.
+                _ets=_ts(cur_ts); _fillpx=_fill(conn,sym,_ets,entry)
                 with conn.cursor() as cur:
                     cur.execute("""INSERT INTO v8_paper_positions
                         (symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pp,pivot_date,status)
                         VALUES (%s,'LONG',%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
                         ON CONFLICT (symbol,side,status) DO NOTHING""",
-                        (sym,basket,entry,_ts(cur_ts),qty,round(target,2),round(stop,2),pp,d))
+                        (sym,basket,_fillpx,_ets,qty,round(target,2),round(stop,2),pp,d))
                     conn.commit()
                 long_open+=1
-                entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
+                entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":_fillpx,"target":round(target,2),"sl":round(stop,2)})
             elif side=="SHORT" and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"):

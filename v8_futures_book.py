@@ -62,6 +62,9 @@ router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 FUT_SOURCE = "fyers_fut"
+# cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766): the moment the realised book became a futures
+# book. Registry row, not a constant — the founder can move it without a deploy.
+BOOK_CUTOVER_KEY = "v8_fut_book_cutover_ts"
 # How far after the signal a futures bar may be and still count as "the futures tick of the signal
 # bar". Bars are 5-minute buckets and entry_ts is a mid-bucket timestamp, so a real match lands
 # under 5 minutes; 10 leaves room for a single skipped bucket without ever accepting the 114-minute
@@ -101,22 +104,31 @@ def v8_futures_book(request: Request):
                 return {"error": "no futures bars exist yet", "positions": [], "count": 0}
 
             # One statement for the whole book. Three LATERALs per position:
-            #   fe  the first futures bar at or after entry  -> the entry leg
+            #   fb  the last futures bar at or BEFORE entry  -> the entry leg
             #   fc  the newest futures bar                   -> CMP
             #   fp  the last futures bar of a PRIOR day      -> previous close, for day %
             # ORDER BY entry_ts DESC matches the equity book's own ordering.
+            #
+            # cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766): the entry leg is no longer DERIVED
+            # here at all. Since the 14-Aug re-base, v8_paper_positions.entry_price IS the futures
+            # price of the fill, so this view reads the book instead of re-deriving a second
+            # opinion about it — the double-conversion item 6 exists to remove. `fb` stays as the
+            # AUDIT of that: it is the same at-or-before lookup the engine's fill pricing and the
+            # re-base used, so if the stored entry does not match it, the fill was recorded on the
+            # cash basis and this view says so rather than labelling a cash price FUT. The old
+            # at-or-AFTER lookup is gone; it named a bar the fill never saw.
             cur.execute("""
                 SELECT p.symbol, p.side, p.basket, p.qty, p.entry_ts,
-                       p.entry_price AS eq_entry, p.target, p.stop_loss,
-                       fe.close AS fut_entry, fe.ts AS fut_entry_ts,
+                       p.entry_price AS stored_entry, p.target, p.stop_loss,
+                       fb.close AS fut_bar_at_entry, fb.ts AS fut_bar_ts,
                        fc.close AS fut_cmp,   fc.ts AS fut_cmp_ts,
                        fp.close AS fut_prev_close
                 FROM v8_paper_positions p
                 LEFT JOIN LATERAL (
                     SELECT close, ts FROM intraday_prices i
-                    WHERE i.symbol = p.symbol AND i.source = %s AND i.ts >= p.entry_ts
-                    ORDER BY i.ts ASC LIMIT 1
-                ) fe ON true
+                    WHERE i.symbol = p.symbol AND i.source = %s AND i.ts <= p.entry_ts
+                    ORDER BY i.ts DESC LIMIT 1
+                ) fb ON true
                 LEFT JOIN LATERAL (
                     SELECT close, ts FROM intraday_prices i
                     WHERE i.symbol = p.symbol AND i.source = %s
@@ -130,8 +142,14 @@ def v8_futures_book(request: Request):
                 ) fp ON true
                 WHERE p.status = 'OPEN'
                 ORDER BY p.entry_ts DESC
-            """, (FUT_SOURCE, FUT_SOURCE, FUT_SOURCE))
+            """, (FUT_SOURCE, FUT_SOURCE, FUT_SOURCE, FUT_SOURCE))
             pos = _rows(cur)
+            # cc#1019: the realised-book cutover, from the registry. The dashboard reads it from
+            # here so the Futures view's Realised / Win-Loss / Trade Log filter on one server-held
+            # moment instead of a date literal compiled into the page.
+            cur.execute("SELECT value FROM app_config WHERE key = %s", (BOOK_CUTOVER_KEY,))
+            _cut = cur.fetchone()
+            book_cutover = _cut[0] if _cut and _cut[0] else None
     except Exception as e:
         log.exception("v8 futures book failed")
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "positions": [], "count": 0}
@@ -151,22 +169,33 @@ def v8_futures_book(request: Request):
         qty = _f(p["qty"])
         direction = -1.0 if (p["side"] or "").upper() == "SHORT" else 1.0
         cmp_ = _f(p["fut_cmp"])
-        entry = _f(p["fut_entry"])
+        stored = _f(p["stored_entry"])
+        bar = _f(p["fut_bar_at_entry"])
+        entry = None
         gap = None
 
-        # ── the trap inside the boundary. An entry bar far from the signal is not the signal's
-        # futures tick, whatever its timestamp says.
-        if entry is not None and p["fut_entry_ts"] is not None and p["entry_ts"] is not None:
-            lag_min = (p["fut_entry_ts"] - p["entry_ts"]).total_seconds() / 60.0
-            if lag_min > ENTRY_LAG_TOLERANCE_MIN:
-                gap = (f"No futures bar at this signal — the nearest is "
-                       f"{int(lag_min)} min later ({p['fut_entry_ts'].strftime('%d %b %H:%M')}). "
-                       f"The fyers_fut feed began {series_start.strftime('%d %b %H:%M')}. "
-                       f"Showing no entry rather than a price the signal never saw.")
-                entry = None
-        elif entry is None:
-            gap = ("No futures bar exists at or after this entry for this symbol "
-                   "(halt or illiquid leg). Never substituted with the equity entry.")
+        # ── cc#1019: the entry leg is the BOOK's entry price, audited against the futures bar that
+        # existed at the fill. Three outcomes, and only the first one prints a price.
+        lag_min = None
+        if p["fut_bar_ts"] is not None and p["entry_ts"] is not None:
+            lag_min = (p["entry_ts"] - p["fut_bar_ts"]).total_seconds() / 60.0
+        if bar is None or lag_min is None or lag_min > ENTRY_LAG_TOLERANCE_MIN:
+            # No futures bar was live at this fill — a halt, an illiquid leg, or a position older
+            # than the feed. Never substituted with the cash entry.
+            gap = ("No futures bar was live at this entry"
+                   + (f" — the newest was {int(lag_min)} min stale" if lag_min is not None else "")
+                   + f". The fyers_fut feed began {series_start.strftime('%d %b %H:%M')}. "
+                     "Showing no entry rather than a price the fill never saw.")
+        elif stored is not None and round(stored, 2) == round(bar, 2):
+            # The stored entry IS the futures bar at the fill: futures-priced book entry.
+            entry = stored
+        else:
+            # A futures bar exists but the book holds a different number — the fill fell back to
+            # the cash price (the engine logs a WARNING when it does). Saying nothing here would
+            # print a cash price under a FUT heading, which is the one thing this view must not do.
+            gap = (f"This fill was recorded on the CASH basis ({stored}) — the futures bar at the "
+                   f"entry was {bar}. Showing no futures entry rather than labelling a cash price "
+                   f"FUT. See the engine's cc#1019 warning for this symbol.")
 
         pnl = ret = None
         if entry is not None and cmp_ is not None and qty is not None:
@@ -187,7 +216,10 @@ def v8_futures_book(request: Request):
             # entry_ts is naive IST — formatted, never converted.
             "entry_ts": p["entry_ts"].strftime("%d %b %H:%M") if p["entry_ts"] else None,
             "fut_entry": entry,
-            "fut_entry_ts": p["fut_entry_ts"].strftime("%d %b %H:%M") if (entry is not None and p["fut_entry_ts"]) else None,
+            "fut_entry_ts": p["fut_bar_ts"].strftime("%d %b %H:%M") if (entry is not None and p["fut_bar_ts"]) else None,
+            # cc#1019: 'book' = the stored entry_price, futures-priced and audited against the bar.
+            # 'none' = no futures entry is shown, and `gap` says which of the two reasons applies.
+            "entry_source": "book" if entry is not None else "none",
             "fut_cmp": cmp_,
             "fut_cmp_ts": p["fut_cmp_ts"].strftime("%d %b %H:%M") if p["fut_cmp_ts"] else None,
             "fut_pnl": round(pnl, 2) if pnl is not None else None,
@@ -197,10 +229,10 @@ def v8_futures_book(request: Request):
             # (cc#367: one hand-verifiable CMP/prev-close pair per row) instead of reconstructing
             # a previous close out of a rounded percentage.
             "fut_prev_close": prev,
-            # Carried through UNCHANGED and labelled EQ by the renderer: these are engine levels
-            # set on the cash price. Re-deriving them in futures terms would invent risk levels
-            # the engine never traded on.
-            "eq_entry": _f(p["eq_entry"]),
+            # The engine's CASH decision levels. cc#1019 item 7 (session_log 21769) takes them OFF
+            # the Futures tab — a futures view renders zero equity-priced values — but they stay in
+            # the payload because the Equity view and the row tooltips still read them, and because
+            # dropping a field breaks any consumer that already has it.
             "eq_target": _f(p["target"]),
             "eq_stop": _f(p["stop_loss"]),
             "gap": gap,
@@ -216,8 +248,12 @@ def v8_futures_book(request: Request):
         "series_start_date": series_date.isoformat(),
         "excluded_pre_series": len(excluded),
         "excluded": excluded,
+        # cc#1019: the realised-book cutover the Futures view filters closed trades on. Served, not
+        # compiled into the page, so moving the registry row moves every surface at once.
+        "book_cutover_ts": str(book_cutover) if book_cutover else None,
+        "book_cutover_key": BOOK_CUTOVER_KEY,
         # The exact sentence the card asks to be on screen (item 5), built from real counts.
-        "note": (f"Futures book from Aug expiry ({series_date.strftime('%d-%b')}) · "
+        "note": (f"Futures book from {series_date.strftime('%d-%b')} · "
                  f"{len(excluded)} older position{'' if len(excluded) == 1 else 's'} in Equity view"),
         "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

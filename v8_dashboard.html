@@ -2076,14 +2076,27 @@ function setMasterBasket(b){MASTER_BASKET=b;const el=document.getElementById('pa
 // produced before this card. The futures book is a SEPARATE endpoint (/api/v8/futures_book) so
 // /api/paper/status never changes shape.
 let MASTER_BASIS='equity';
-// cc#994: the futures-book epoch. Aug contract became front-month after the Tue 28-Jul-2026 monthly
-// expiry, so a trade ENTERED on/after 29-Jul belongs to the futures era. In Futures view the Realised
-// P&L card, Win/Loss card, Trade Log tab and Day Log count ONLY entry_ts >= this date — a clean
-// futures-era book, no pre-29-Jul equity history mixed in. Mirrors v8_endpoints.FUTURES_BOOK_START.
-// ISO strings are fixed-width, so a lexicographic >= compare is a correct date-inclusive filter.
-const FUTURES_BOOK_START='2026-07-29';
-const _futEra=x=>String((x&&x.entry_ts)||'')>=FUTURES_BOOK_START;
+// cc#1019 FUT_BOOK_CUTOVER_V1 (session_log 21766) SUPERSEDES cc#994's entry_ts >= 29-Jul epoch.
+// From the 14-Aug-2026 close the paper fills THEMSELVES are futures prices, so the futures realised
+// book is the trades that CLOSED on or after the cutover. Eligibility moved from ENTRY to EXIT
+// because that is the leg where the basis changed: the 19 positions open at the cutover were
+// re-based to their futures entry bars, so a trade opened on 12-Aug and closed next week is
+// futures-priced at BOTH ends and belongs in this book.
+//
+// The moment is NOT a constant here. It is served by /api/v8/futures_book from
+// app_config.v8_fut_book_cutover_ts, so moving the registry row moves this page with it. Until that
+// payload lands _futCut() is null and every futures-book figure prints a dash — an unfiltered
+// equity number wearing a FUT label is the one outcome this cutover exists to prevent.
 let FUTBOOK=null, FUTBOOK_LOADING=false;
+const _futCut=()=>(FUTBOOK&&FUTBOOK.book_cutover_ts)||null;
+// Both sides are naive IST, but the API writes "2026-08-14 15:35:00" and app_config holds
+// "2026-08-14T15:30:00". Normalising the separator first is what makes the lexicographic compare
+// correct — 'T' sorts AFTER ' ', so comparing the raw strings would drop every trade of the
+// cutover day.
+const _isoN=s=>String(s||'').replace('T',' ').slice(0,19);
+const _futBookTrade=x=>{const c=_futCut();return !!c&&!!(x&&x.exit_ts)&&_isoN(x.exit_ts)>=_isoN(c);};
+// "14-AUG" for the card tags, read off the served cutover rather than typed in.
+const _futCutLabel=()=>{const p=_parseISTNaive(_futCut());return p?String(p.day).padStart(2,'0')+'-'+MON[p.mon].toUpperCase():'';};
 function setMasterBasis(b){
   MASTER_BASIS=b;
   const el=document.getElementById('panel0');
@@ -2529,10 +2542,14 @@ function renderMaster(){
     open=open.map(x=>{
       const f=futRowFor(x.symbol);
       if(!f)return null;
+      // cc#1019 item 6: fut_entry is now the position's STORED entry_price (futures-priced since
+      // the re-base), not a second lookup layered on top of the equity entry. The old _eqEntry
+      // passenger is gone with the double conversion that needed it — there is no equity entry to
+      // carry any more, only the book's own price.
       return{...x,
         entry_price:f.fut_entry, cmp:f.fut_cmp, prev_close:f.fut_prev_close,
         unrealised_pnl:f.fut_pnl, _basis:'FUT', _futGap:f.gap,
-        _eqEntry:f.eq_entry, _futEntryTs:f.fut_entry_ts};
+        _futEntryTs:f.fut_entry_ts, _entrySrc:f.entry_source};
     }).filter(Boolean);
   }
   open=open.sort((a,b)=>(Number(b.unrealised_pnl||0))-(Number(a.unrealised_pnl||0)));
@@ -2545,15 +2562,18 @@ function renderMaster(){
   // already did. Showing one basket's open rows under the whole book's realised P&L is the cc#817
   // class of error — filtered rows sitting beneath an unfiltered headline, with nothing saying so.
   // The API summary is authoritative only when BOTH filters are off; any filter recomputes.
-  // cc#994: in FUTURES view the realised book is the futures era only (entry_ts >= 29-Jul), so it is
-  // ALWAYS recomputed from recent_trades (fresh-era, a superset of the futures era — every futures
-  // trade is present) filtered by _futEra, never from the all-time `sum`. Win/Loss uses the canonical
-  // result classifier (TARGET / SL), matching the equity `sum` and the DB futures book (10 / 1), not
-  // a pnl-sign split. Equity/All view is untouched: the pre-cc#994 sum-vs-recompute path below.
+  // cc#1019: in FUTURES view the realised book is the FUT-PRICED book — trades that closed on or
+  // after the cutover — so it is ALWAYS recomputed from recent_trades (fresh-era, a superset of it)
+  // and never read off the all-time `sum`. Win/Loss uses the canonical result classifier
+  // (TARGET / SL), matching the equity `sum`, not a pnl-sign split. With no cutover served yet the
+  // figures are dashes, not zeros: "we cannot tell you" and "nothing has closed" are different
+  // statements and must not print the same. Equity/All view is untouched below.
   let totalClosedPnl,netClosed,winsTxt,lossTxt;
   const _futView=(MASTER_BASIS==='futures');
-  if(_futView){
-    const cl=((p&&p.recent_trades)||[]).filter(_futEra)
+  if(_futView&&!_futCut()){
+    totalClosedPnl=null;netClosed=null;winsTxt='--';lossTxt='--';
+  }else if(_futView){
+    const cl=((p&&p.recent_trades)||[]).filter(_futBookTrade)
       .filter(x=>MASTER_SIDE==='all'||(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase())
       .filter(x=>MASTER_BASKET==='all'||(x.basket||'')===MASTER_BASKET);
     totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
@@ -2593,10 +2613,10 @@ function renderMaster(){
   // modes. In Equity mode the tag is the empty string and the markup is unchanged.
   const _fut=(MASTER_BASIS==='futures');
   const _bTag=(b)=>_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">${b}</span>`:'';
-  // cc#994: the realised book in Futures view is the futures era only — the tag says so ("EQ · since
-  // 29-Jul"). Still EQ-basis fills (v8_paper_trades has no futures price columns), never implied to be
-  // futures-priced. Equity view keeps the empty tag (markup unchanged).
-  const _reTag=_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">EQ &middot; since 29-Jul</span>`:'';
+  // cc#1019 item 4 + item 7: the tag was "EQ · since 29-Jul" because the fills were cash prices. They
+  // are futures prices now, so it reads "FUT · SINCE 14-AUG" — the date coming from the served
+  // cutover, not typed here. No EQ wording survives anywhere on this tab.
+  const _reTag=_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">FUT${_futCutLabel()?' &middot; SINCE '+_futCutLabel():''}</span>`:'';
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
@@ -2650,10 +2670,16 @@ function renderMaster(){
     }else if(FUTBOOK.error){
       futNote=`<div style="font-size:10px;color:var(--red);margin-bottom:10px">Futures book unavailable — ${FUTBOOK.error}. Switch back to Equity for the live cash book.</div>`;
     }else{
+      // cc#1019 item 4/7: the note said the fills were still cash prices. They are not. It now says
+      // what is true — futures-priced fills from the cutover, a realised book counted on the EXIT,
+      // and no cash values anywhere on this tab (Target and SL are hidden here; they are engine
+      // levels on the cash price and stay on the Equity view).
       const _gapN=(FUTBOOK.positions||[]).filter(p=>p.gap).length;
       futNote=`<div style="font-size:10px;color:var(--amber);margin-bottom:10px">${FUTBOOK.note}`
-        + ` &middot; every price on this view is a <b>fyers_fut</b> bar; the Realised P&amp;L, Win/Loss, Trade Log and Day Log are the <b>futures-era book</b> (entry on/after 29-Jul-2026), still EQ-basis fills &mdash; marked <b>EQ &middot; since 29-Jul</b>, never implied to be futures-priced`
-        + (_gapN?` &middot; ${_gapN} position${_gapN===1?'':'s'} shows no futures entry (no bar at its signal) — hover the row for the reason`:'')
+        + ` &middot; every price here is a <b>fyers_fut</b> bar: entries are the stored fill, now futures-priced${_futCutLabel()?` from the <b>${_futCutLabel()}</b> close`:''}`
+        + `, and the Realised P&amp;L, Win/Loss, Trade Log and Day Log count only trades that <b>closed</b> on or after it &mdash; a fresh book that starts at zero`
+        + ` &middot; Target and SL are cash levels the engine set, so they are not shown on this tab &mdash; switch to Equity for them`
+        + (_gapN?` &middot; ${_gapN} position${_gapN===1?'':'s'} shows no futures entry — hover the row for the reason`:'')
         + `</div>`;
     }
   }
@@ -2699,13 +2725,20 @@ function renderMaster(){
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
-  // cc#885 item 6 + verify 4: in Futures mode the price columns are futures prices and say so,
-  // while Target and SL keep the engine's cash levels and are marked EQ. A column that changed
-  // basis and a column that did not must not look alike.
+  // cc#885 item 6: in Futures mode the price columns are futures prices and say so.
+  // cc#1019 item 7 (FUTURES TAB PURITY, session_log 21769): the cash columns are no longer LABELLED
+  // EQ on this tab, they are GONE from it. Target and SL are engine levels set on the cash price,
+  // and Potential Left is derived from the Target, so all three are equity-priced values and a
+  // futures tab renders none. They are untouched on the Equity view. Dropping the column means
+  // dropping its <td> too — the header list and the row template must stay the same length.
   const _cEntry=_fut?"Entry FUT":"Entry", _cCmp=_fut?"CMP FUT":"CMP";
-  const _cTgt=_fut?"Target EQ":"Target", _cSl=_fut?"SL EQ":"SL";
+  const _openCols=[["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price",_cEntry],["cmp",_cCmp]]
+    .concat(_fut?[]:[["target","Target"],["stop_loss","SL"]])
+    .concat([["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"]])
+    .concat(_fut?[]:[["potential_left","Potential Left"]])
+    .concat([["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]]);
   const openPosTable=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price",_cEntry],["cmp",_cCmp],["target",_cTgt],["stop_loss",_cSl],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
+    _openCols,
     openRows,x=>`<tr>
       <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
@@ -2713,11 +2746,11 @@ function renderMaster(){
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums${x._futGap?';color:var(--dim)':''}"${x._futGap?` title="${String(x._futGap).replace(/"/g,'&quot;')}"`:''}>${x.entry_price==null?'--':num(x.entry_price)}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.cmp)}</td>
-      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${num(x.target)}</td>
-      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${num(x.stop_loss)}</td>
+      ${_fut?'':`<td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${num(x.target)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${num(x.stop_loss)}</td>`}
       <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.net_pnl_pct)}">${x.net_pnl_pct==null?'--':sign(x.net_pnl_pct,2)+'%'}</td>
-      <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>
+      ${_fut?'':`<td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>`}
       <td data-pri="2" style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${x.day_pnl_pct==null?'--':sign(x.day_pnl_pct,2)+'%'}</td>
       <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
@@ -2753,7 +2786,7 @@ function renderMaster(){
       <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
       <span style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:14px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
-    ${ladderTrack(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
+    ${_fut?`<div style="display:flex;justify-content:space-between;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut)"><span>Entry ${x.entry_price==null?'--':num(x.entry_price)}</span><span>CMP ${num(x.cmp)}</span></div>`:ladderTrack(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
   // cc#288: desktop Ladder View rebuilt to the founder's Claude Design reference (supersedes
   // cc#280's ladderRow/ladderTrack; cc#286/287 cancelled — the 210px info panel avoids the
   // Symbol/Side overlap and the bar stays flex:1 by design). Structure/mechanics kept exactly as
@@ -2809,8 +2842,16 @@ function renderMaster(){
   const vtgl=(key,label)=>{const on=OPENPOS_VIEW===key;
     const s=on?'background:var(--panel2);color:var(--txt);border:1px solid var(--cyan)':'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
     return`<button onclick="setOpenPosView('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:6px 14px;border-radius:8px;transition:.15s">${label}</button>`;};
-  const viewToggle=`<div style="display:flex;gap:6px;margin-bottom:10px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>`;
-  const posBody=OPENPOS_VIEW==='ladder'?openPosLadder:(openPosTable+openPosMobile);
+  // cc#1019 item 7: the Ladder draws its rail BETWEEN the cash SL and the cash Target, and both
+  // ends of that rail are equity-priced. There is no honest way to render it on a tab that shows
+  // zero equity values, and inventing futures risk levels the engine never traded on would be
+  // worse than losing the view. So Futures is Table-only, and the reason is on screen instead of
+  // a control that silently disappears. The mobile card drops its bar for the same reason and
+  // shows the two futures prices it does have.
+  const viewToggle=_fut
+    ? `<div style="font-size:10px;color:var(--dim);margin-bottom:10px">Table view only on Futures &mdash; the Ladder rail runs between the cash Target and SL, which this tab does not show. Switch to Equity for it.</div>`
+    : `<div style="display:flex;gap:6px;margin-bottom:10px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>`;
+  const posBody=(!_fut&&OPENPOS_VIEW==='ladder')?openPosLadder:(openPosTable+openPosMobile);
     // cc#1010: marker legend is now an (i) popover in the header (was the cc#1008 always-on grey text
     // block) — rendered coloured glyphs, identical to the row glyphs, parity with the mobile pattern.
   return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span>${markerLegendPopover()}</div>
@@ -3018,11 +3059,14 @@ function renderTradeLog(){
   // if an older API build hasn't shipped the full-history ones yet.
   const _allT=p.all_trades||p.recent_trades||[];
   let t=_allT.slice();const s=p.all_summary||p.summary||{};
-  // cc#994: Futures view is the CLEAN futures-era book — filter the ledger to entry_ts >= 29-Jul and
-  // force the recompute path below (isAll can't fall back to the all-time server summary over a
-  // filtered set, or a futures-era list would sit under an all-time headline — the cc#817 error).
+  // cc#1019: Futures view is the FUT-PRICED book — filter the ledger to trades that CLOSED on or
+  // after the cutover, and force the recompute path below (isAll can't fall back to the all-time
+  // server summary over a filtered set, or a futures list would sit under an all-time headline —
+  // the cc#817 error). With no cutover served the filter yields nothing, which is the safe end:
+  // an empty ledger says "no futures trades yet", an unfiltered one would claim equity trades were
+  // futures-priced.
   const _tlogFut=(MASTER_BASIS==='futures');
-  if(_tlogFut)t=t.filter(_futEra);
+  if(_tlogFut)t=t.filter(_futBookTrade);
   // cc#817: RETIRED baskets. A basket present in the ledger but absent from BASKETS is
   // retired (buy_s1_bounce, sell_overbought, and anything future that stops running). Default view
   // hides them entirely — no pill, no rows — and, critically, EXCLUDES THEM FROM THE SUMMARY.
@@ -3430,9 +3474,10 @@ async function loadDayLog(){
   const el=document.getElementById('panel8');if(!el)return;
   el.innerHTML='<div class="loading">Loading Day Log...</div>';
   try{
-    // cc#994: Day Log follows the Master Futures/Equity view — futures view asks the endpoint for the
-    // entry_ts>=29-Jul book (aggregation is server-side: filtering day rows client-side would be wrong,
-    // a day's P&L sums trades by CLOSE date but eligibility is on ENTRY).
+    // cc#1019: Day Log follows the Master Futures/Equity view — futures view asks the endpoint for
+    // the FUT-PRICED book (closed trades with exit_ts >= app_config.v8_fut_book_cutover_ts, opened
+    // counts bounded by the first fyers_fut bar). The aggregation stays server-side: a day's P&L
+    // sums trades by close date, so filtering assembled day rows client-side could not be right.
     const d=await getJSON(EP.daylog+(MASTER_BASIS==='futures'?'?view=futures':''));
     DAYLOG_LOADED=true;
     el.innerHTML=renderDayLog(d);
@@ -3451,7 +3496,12 @@ function renderDayLog(data){
     <div class="card"><div class="k">Net P&L</div><div class="v ${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</div></div>
     <div class="card"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div></div>
   </div>`;
-  if(!days.length)return cards+'<div class="empty">No trading data yet.</div>';
+  // cc#1019: on the Futures view, say which book this is. The cutover comes back with the payload,
+  // so the line can never drift from the filter that produced the rows.
+  const _dlNote=(data.view==='futures')
+    ? `<div style="font-size:10px;color:var(--amber);margin:2px 0 10px">Futures book${data.fut_cutover_ts?` &middot; trades that closed on or after ${fmtTs(data.fut_cutover_ts)}`:''}${data.fut_cutover_missing?` &middot; the cutover row is not set, so there is nothing to show yet`:''} &middot; futures-priced fills at both ends</div>`
+    : '';
+  if(!days.length)return cards+_dlNote+'<div class="empty">No trading data yet.</div>';
   const rowBg=r=>Number(r.net_pnl)>0?'background:rgba(47,212,139,.08)':Number(r.net_pnl)<0?'background:rgba(255,92,108,.08)':'';
   const totrow=`<tr style="font-weight:700;border-top:2px solid var(--line);background:rgba(148,166,210,.06)">
     <td style="white-space:nowrap">TOTAL</td>
@@ -3479,7 +3529,7 @@ function renderDayLog(data){
       <td class="${pnlCls(r.return_pct)}">${r.return_pct!=null?sign(r.return_pct,2)+'%':'--'}</td>
     </tr>`,
     {sortKey:'date',dir:-1,empty:"No trading data yet.",footer:totrow});
-  return cards+`<div class="ptitle">Day Log <span class="ct">${days.length} trading days</span></div>
+  return cards+_dlNote+`<div class="ptitle">Day Log <span class="ct">${days.length} trading days</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>`+table;
 }
 
