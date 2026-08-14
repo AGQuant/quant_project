@@ -375,6 +375,15 @@ def get_db():
 RECONNECT_DEADLINE_S = 120
 _RECONNECT_CONFIRMED = threading.Event()
 
+# cc#1017: EXTENDED-leg post-reconnect recovery state. 14-Aug incident: after a Fyers-side reconnect the
+# batch re-subscribe was ACKNOWLEDGED but only HONOURED for the legacy legs — the extended 909 never
+# resumed ticking, and verification (eq/fut only, fixed floors) PASSED while 43% of the universe was
+# dead for 3.5h. This counter bounds how many rebuilds the ext-recovery probe spends before it stops
+# thrashing the healthy core and escalates loudly (FYERS_INTEGRATION_LEARNINGS: loud failure over quiet
+# degradation). Reset to 0 the moment the ext leg is seen ticking again.
+_EXT_RECOVERY = {"attempts": 0}
+EXT_RECOVERY_MAX_REBUILDS = 2   # after this many rebuilds fail to restore the ext leg -> retreat + CRITICAL
+
 
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
 
@@ -3174,6 +3183,38 @@ def run(auth_code=None):
                 except Exception:
                     pass
 
+    def _ext_recover(where, eq, fut, ext, uni_ext):
+        """cc#1017: recover a dead / near-dead EXTENDED equity leg while the legacy legs are alive — the
+        14-Aug partial subscribe-dead signature (batch re-subscribe ACKNOWLEDGED but only honoured for the
+        legacy legs; the extended 909 never resumed ticking). A partial subscribe-dead socket does not
+        recover in place, so REBUILD the whole connection (on_connect re-subscribes the full universe
+        fresh) up to EXT_RECOVERY_MAX_REBUILDS times. If it still will not honour the extended subscribe,
+        RETREAT the stage and alarm CRITICAL rather than keep running 43% dark (FYERS_INTEGRATION_LEARNINGS:
+        loud failure over quiet degradation). Shared by the post-reconnect probe AND the periodic watchdog
+        so the rebuild budget is one counter, never a runaway reconnect loop."""
+        _EXT_RECOVERY["attempts"] += 1
+        n = _EXT_RECOVERY["attempts"]
+        frac = ext / float(uni_ext) if uni_ext else 0.0
+        detail = f"{where}: eq={eq} fut={fut} ext={ext}/{uni_ext} ({frac*100:.0f}%)"
+        if n <= EXT_RECOVERY_MAX_REBUILDS:
+            log.error(f"cc#1017 EXTENDED LEG DEAD — {detail}; legacy legs alive. Rebuild "
+                      f"{n}/{EXT_RECOVERY_MAX_REBUILDS} (tearing down the connection).")
+            _log_feed_incident("feed_ext_dead_rebuild", f"{detail} rebuild {n}/{EXT_RECOVERY_MAX_REBUILDS}")
+            _force_reconnect()
+        else:
+            _cur = _ext_stage_limit(conn)
+            _lg = _ext_last_good(conn)
+            _retreat = str(_lg) if (_lg > 0 and _cur > _lg) else 'off'
+            log.critical(f"cc#1017 EXTENDED LEG UNRECOVERABLE after {EXT_RECOVERY_MAX_REBUILDS} rebuilds — "
+                         f"{detail}; retreating {EXT_STAGE_FLAG}={_retreat} and alarming CRITICAL.")
+            try:
+                _flag_set(conn, EXT_STAGE_FLAG, _retreat)
+            except Exception as _fe:
+                log.warning(f"cc#1017 retreat flag set failed: {_fe}")
+            _log_feed_incident("feed_ext_unrecoverable",
+                               f"{detail} — {EXT_RECOVERY_MAX_REBUILDS} rebuilds failed; retreated to {_retreat}")
+            _EXT_RECOVERY["attempts"] = 0
+
     def _verify_subscribe_survivors(label):
         """cc#151: after ANY batched (re)subscribe — on_connect reconnect or the monthly-roll
         path — confirm futures are actually ticking and log it to ops_log, so every re-subscribe
@@ -3196,11 +3237,15 @@ def run(auth_code=None):
         try:
             counts = _recent_symbol_counts_by_source(15)
             eq, fut = counts.get('fyers_eq', -1), counts.get('fyers_fut', -1)
+            ext = counts.get(EXT_SOURCE, -1)   # cc#1017: the extended equity leg is now MEASURED, not blind
             recent = -1 if (eq < 0 or fut < 0) else eq + fut
             uni_eq, uni_fut = len(equity_fyers_syms), len(futures_fyers_syms)
+            uni_ext = len(ext_fyers_syms)      # cc#1017: registry-derived expected ext count (stage-limited)
             now = datetime.now(IST)
             in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= SESSION_END   # cc#855
-            msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut} writing bars"
+            # cc#1017: the ext leg is now IN this line. The 14-Aug blindness was that it never was — so
+            # 'eq 212/206, fut 208/208' read healthy while 909 extended symbols were dead off the same socket.
+            msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut}, ext {ext}/{uni_ext} writing bars"
             # cc#759 fix2: a ticking count that EXCEEDS its universe leg is a double-subscription / counting
             # bug, NEVER health — it must ALERT and be treated as a failure (the 224/212 tell, LEARNING 2).
             if (uni_fut > 0 and fut > uni_fut) or (uni_eq > 0 and eq > uni_eq):
@@ -3228,6 +3273,23 @@ def run(auth_code=None):
                 _log_feed_incident("subscribe_verify_offhours_fail", f"OFF-HOURS 0 bars after subscribe: {msg}")
             else:
                 log.info(f"Post-{label} verification (off-hours): {msg}")
+            # ── cc#1017 EXTENDED-LEG TICK-RESUMPTION PROBE ─────────────────────────────────────────
+            # The 14-Aug root cause: a batch re-subscribe ACK is not evidence — the extended leg never
+            # resumed ticking while the legacy legs did. This is the probe: a 120s-settled read of the
+            # fyers_ext source SPECIFICALLY. It acts only when the ext stage is ON (uni_ext>0), inside the
+            # equity session, and the LEGACY legs are healthy (a partial ext death, not a whole-feed outage
+            # the core watchdog already owns). ext_ok mirrors _subscribe_extended's own drop threshold.
+            _ext_win = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= EQ_CONTINUOUS_END
+            _legacy_ok = (uni_eq == 0 or eq >= WATCHDOG_MIN_SYMBOLS) and (uni_fut == 0 or fut >= WATCHDOG_MIN_SYMBOLS)
+            # cc#1017: gate on the stage being ON (flag>0). After a retreat sets feed_ext_stage=off the
+            # startup ext list length stays >0, so without this the recovery would loop against a leg we
+            # deliberately disabled.
+            if uni_ext > 0 and ext >= 0 and _ext_win and _ext_stage_limit(conn) > 0:
+                if ext < EXT_MIN_TICK_FRACTION * uni_ext and _legacy_ok:
+                    _ext_recover(f"post-{label} probe", eq, fut, ext, uni_ext)
+                elif ext >= EXT_MIN_TICK_FRACTION * uni_ext and _EXT_RECOVERY["attempts"]:
+                    log.info(f"cc#1017 extended leg recovered ({ext}/{uni_ext} ticking) — reset rebuild counter")
+                    _EXT_RECOVERY["attempts"] = 0
             log.info(f"Post-{label} verification: {msg}")
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")
@@ -3950,22 +4012,47 @@ def run(auth_code=None):
                     if eq < 0 or fut < 0:
                         log.warning("Watchdog check skipped — DB read failed (no false action on a bad read)")
                     else:
-                        healthy = eq >= WATCHDOG_MIN_SYMBOLS and fut >= WATCHDOG_MIN_SYMBOLS
-                        log.info(f"Feed health: eq={eq} fut={fut} (floor={WATCHDOG_MIN_SYMBOLS} each)")
-                        if healthy:
-                            watchdog_rung = 0
-                        elif watchdog_rung == 0:
-                            log.error(f"FEED WATCHDOG rung 1: eq={eq} fut={fut} below floor — forcing reconnect")
-                            _force_reconnect()
-                            _log_feed_incident("feed_watchdog_reconnect", f"eq={eq} fut={fut}")
-                            watchdog_rung = 1
+                        ext = src_counts.get(EXT_SOURCE, -1)   # cc#1017: extended leg now part of health
+                        uni_ext = len(ext_fyers_syms)          # cc#1017: registry-derived expected count
+                        core_ok = eq >= WATCHDOG_MIN_SYMBOLS and fut >= WATCHDOG_MIN_SYMBOLS
+                        # cc#1017: the extended leg is now held against feed health (reversing the cc#809
+                        # report-only exclusion — the 14-Aug incident IS a dead ext leg this watchdog was
+                        # blind to). It counts only when the stage is ON (uni_ext>0) and inside the equity
+                        # session; ext_ok mirrors _subscribe_extended's drop threshold, so genuine near-
+                        # total death (909->0) fails while staged/illiquid partial ticking does not.
+                        _ext_win = MARKET_OPEN <= now_dt.time() <= EQ_CONTINUOUS_END
+                        # cc#1017: expected only when the stage is ON (flag>0) — a retreated 'off' stage
+                        # keeps the startup list length, so gate on the live flag to avoid a retreat loop.
+                        _ext_expected = uni_ext > 0 and ext >= 0 and _ext_win and _ext_stage_limit(conn) > 0
+                        ext_ok = (not _ext_expected) or ext >= EXT_MIN_TICK_FRACTION * uni_ext
+                        log.info(f"Feed health: eq={eq}/{len(equity_fyers_syms)} "
+                                 f"fut={fut}/{len(futures_fyers_syms)} ext={ext}/{uni_ext} "
+                                 f"(core_floor={WATCHDOG_MIN_SYMBOLS}, ext_frac>={EXT_MIN_TICK_FRACTION}, "
+                                 f"core_ok={core_ok} ext_ok={ext_ok})")
+                        if not core_ok:
+                            # CORE (eq/fut) failure keeps its proven ladder: reconnect, then os._exit(1).
+                            if watchdog_rung == 0:
+                                log.error(f"FEED WATCHDOG rung 1: eq={eq} fut={fut} below floor — forcing reconnect")
+                                _force_reconnect()
+                                _log_feed_incident("feed_watchdog_reconnect", f"eq={eq} fut={fut} ext={ext}/{uni_ext}")
+                                watchdog_rung = 1
+                            else:
+                                log.critical(f"FEED WATCHDOG rung 2: eq={eq} fut={fut} still below floor "
+                                             "after reconnect — os._exit(1) for a clean Railway restart "
+                                             "(cc#501 finding_2_17jul_1550: sys.exit(1) from this housekeeping "
+                                             "thread only kills the thread, leaving a zombie process)")
+                                _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut} ext={ext}/{uni_ext}")
+                                os._exit(1)
+                        elif not ext_ok:
+                            # cc#1017: core alive, extended leg dead — rebuild (bounded) then retreat +
+                            # CRITICAL via _ext_recover. Deliberately does NOT os._exit: killing the worker
+                            # would drop the healthy options/futures/eq legs the founder protected.
+                            _ext_recover("watchdog", eq, fut, ext, uni_ext)
                         else:
-                            log.critical(f"FEED WATCHDOG rung 2: eq={eq} fut={fut} still below floor "
-                                         "after reconnect — os._exit(1) for a clean Railway restart "
-                                         "(cc#501 finding_2_17jul_1550: sys.exit(1) from this housekeeping "
-                                         "thread only kills the thread, leaving a zombie process)")
-                            _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut}")
-                            os._exit(1)
+                            watchdog_rung = 0
+                            if _EXT_RECOVERY["attempts"]:
+                                log.info(f"cc#1017 extended leg healthy ({ext}/{uni_ext}) — reset rebuild counter")
+                                _EXT_RECOVERY["attempts"] = 0
 
             # Monthly roll — once per day
             if last_roll_check != today:
