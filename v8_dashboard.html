@@ -890,7 +890,7 @@ const BROKERAGE_PER_TRADE=500;
 const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
-  segmentDay:"/api/v8/segment_day",          // cc#429: mcap-weighted futures-segment day change
+  segmentDay:"/api/v8/segment_day",          // cc#1020: mcap-weighted WIDE-universe segment day change (19621)
   adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
   paper:"/api/paper/status",
@@ -2661,8 +2661,15 @@ function renderMaster(){
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
-  // cc#429: map each position's symbol -> its V8 futures segment (from metricsAll) -> that segment's
-  // mcap-weighted DAY change (from /api/v8/segment_day, last-session anchored off-market).
+  // cc#429, corrected cc#1020: map each position's symbol -> its segment (the GROUPING still comes
+  // from metricsAll, i.e. the futures set) -> that segment's mcap-weighted DAY change from
+  // /api/v8/segment_day, last-session anchored off-market.
+  // THE VALUE IS NOT A FUTURES-ONLY NUMBER. Since cc#1003/cc#1011 the day change served by that
+  // endpoint is computed by segment_change.py across the WIDE universe — every gvm_scores member of
+  // the segment (~1800 symbols), not the 209 futures names (GVM_SECTOR_WIDE_BASIS, session_log
+  // 19621). So a position's SEC D% answers "how did this whole sector move", not "how did the
+  // futures in this sector move". The old wording here said the opposite and cost the founder a
+  // wrong answer on 14-Aug — do not restate it.
   const _segBySym={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySym[m.symbol]=m.segment;});
   const _segDay=(cache.segmentDay&&cache.segmentDay.segments)||{};
   const openRows=open.map(x=>{

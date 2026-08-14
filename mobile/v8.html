@@ -1314,8 +1314,13 @@ function m3(d){
   var body = grid
     + '<button class="lmore" onclick="lowSegAll()">'
     + (LOW.segAll ? 'show strongest / weakest only' : 'show all ' + segs.length + ' segments') + '</button>'
-    + '<div class="lnote">Day move is mcap-weighted across each segment\u2019s futures members — the '
-    + 'same derivation as the web dashboard segment strip. Tap a segment for sector intel.</div>';
+    /* cc#1020: this line used to say "each segment's futures members". It is the WIDE universe
+       — every gvm_scores member of the segment, not the 209 futures names
+       (GVM_SECTOR_WIDE_BASIS, session_log 19621). Same server derivation as the web dashboard,
+       so both surfaces say it the same way. */
+    + '<div class="lnote">Day move is mcap-weighted across every stock in the segment, not just '
+    + 'the futures names \u2014 the same derivation as the web dashboard segment strip. Tap a '
+    + 'segment for sector intel.</div>';
   return lowCard('m3', 'Segments \u00b7 ' + (d.segment_count || segs.length), right, body);
 }
 
