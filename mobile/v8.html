@@ -627,9 +627,14 @@ function pivotMark(sym){
   var s = (STATE.stars || {})[sym];
   if (!s) return '';
   var col = s.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
-  var circle = (s.glyph ? s.glyph === 'circle' : s.direction === 'SELL');
+  /* cc#1018 MARKER_GLYPH_V3 (21764) retires the sell circle: BOTH sides draw a star, the colour
+     alone carries the side. Drawn unconditionally, not read from the server `glyph` field, because
+     a phone holding a CACHED pre-V3 payload still carries glyph='circle' for SELL and the old
+     direction fallback did the same, so either read leaves a path that can still paint a sell circle.
+     No shape variation is left to carry, so there is nothing to fork on; /dashboard's pivotStar()
+     does exactly the same. */
   return '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">'
-    + (circle ? '\u25CF' : '\u2605') + '</span>';
+    + '\u2605</span>';
 }
 /* cc#933: green activity marker. Glyph follows the POSITION's side (star long, circle short) —
    unlike the blue/red pivot marker from cc#932, whose side describes the STOCK's behaviour against

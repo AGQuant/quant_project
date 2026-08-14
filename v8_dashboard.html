@@ -2156,7 +2156,8 @@ function fmtTs(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return Str
 function holdDays(ts){if(!ts)return"--";const ed=String(ts).slice(0,10);const t=new Date(Date.now()+(5*60+30)*60000);const td=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');const d1=Date.parse(ed+'T00:00:00Z'),d2=Date.parse(td+'T00:00:00Z');if(isNaN(d1)||isNaN(d2))return"--";return Math.floor((d2-d1)/86400000)+1;}
 // cc#720/cc#728: open-position tags shown right after the symbol (order: SYMBOL · star · NEW). NEW =
 // entered the current/latest trading session (holdDays===1, auto-drops next session — no manual state).
-// Star = this side passes Trade Check: STRONG -> filled ★, VALID -> outline ☆, else none. cc#728: the
+// Star = this side passes Trade Check: STRONG -> filled ★, anything else (VALID/WATCH/FAIL) -> no
+// marker at all (cc#1018 MARKER_GLYPH_V3, session_log 21764). cc#728: the
 // star now reads the LATEST HOURLY SERVER BATCH (tc_position_stars, scored 09:30-15:30 IST) via ONE
 // endpoint /api/trade-check/position-stars — NO per-symbol live TC call from the render path (the cc#720
 // per-render 15-min cache is retired: it silently aged differently per symbol). data-tckey (not id) so
@@ -2174,16 +2175,16 @@ function posTags(x){
 }
 function _tcStarHtml(v,side){
   if(!v)return'';
-  const filled=v.verdict==='STRONG',outline=v.verdict==='VALID';
-  if(!filled&&!outline)return'';   // WATCH / FAIL / REJECT -> no marker
+  // cc#1018 MARKER_GLYPH_V3 (founder-locked, session_log 21764): the amber marker is STRONG ONLY.
+  // VALID now returns nothing, exactly like WATCH / FAIL — the outline star is retired, so an amber
+  // marker on a row means one thing only.
+  if(v.verdict!=='STRONG')return'';
   const title='TC '+Number(v.score).toFixed(1)+'/'+v.max+' '+v.verdict;
-  // cc#933: SIDE-AWARE glyph. Family rule across all three markers — SHAPE is the side (star long,
-  // circle short), COLOUR is the meaning (amber Trade Check, blue/red pivot, green activity).
-  // Fill still carries the verdict: filled STRONG, outline VALID. Scoring and the cc#728 batch are
-  // untouched; only which character is drawn changes.
-  const short=String(side||'').toUpperCase()==='SHORT';
-  const g = short ? (filled?'\u25CF':'\u25CB') : (filled?'\u2605':'\u2606');
-  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">'+g+'</span>';
+  // V3 also supersedes the cc#933 side-glyph rule FOR THIS MARKER: both sides draw the same filled
+  // star U+2605, no long/short branch. Only the GREEN activity marker still changes shape by side.
+  // Scoring, the verdict itself and the cc#728 hourly batch are untouched; only the drawn character
+  // changes. `side` is kept in the signature — callers pass it and the tooltip contract may want it.
+  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">\u2605</span>';
 }
 function _fillTcStar(key){
   const v=_tcStarCache.get(key);
@@ -2874,12 +2875,14 @@ function pivotStar(sym){
   const s=PIVOT_STARS[sym]; if(!s) return '';
   const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
   const note = (s.note||'').replace(/"/g,'&quot;');
-  // cc#932 (PIVOT_STAR_V2, session_log 18052): the sell side is a CIRCLE, never a star. The glyph
-  // is taken from the SERVER's `glyph` field rather than decided here, so /dashboard and /m/v8
-  // cannot disagree about it (DISPLAY_PARITY 16202). Falls back to direction for a cached older
-  // response that predates the field.
-  const isCircle = (s.glyph ? s.glyph==='circle' : s.direction==='SELL');
-  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">${isCircle?'\u25CF':'\u2605'}</span>`;
+  // cc#1018 MARKER_GLYPH_V3 (session_log 21764) supersedes the cc#932 glyph clause: BOTH sides draw
+  // a star, the sell circle is retired. The colour already carries the side (blue S1 / red R1).
+  // Drawn unconditionally rather than read from the server `glyph` field: a browser holding a
+  // CACHED pre-V3 payload still carries glyph='circle' for SELL, and the old direction fallback did
+  // the same, so reading either one leaves a path that can still paint a sell circle. There is no
+  // shape variation left for the server to carry here, so there is nothing to fork on
+  // (DISPLAY_PARITY 16202): /m/v8's pivotMark() does exactly the same.
+  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
 }
 
 function pivotAct(sym){
@@ -2904,13 +2907,17 @@ function markerLegendPopover(){
   const row=(glyph,col,txt)=>`<div style="display:flex;align-items:center;gap:9px;padding:3px 0">`+
     `<span style="color:${col};font-size:14px;line-height:1;width:16px;text-align:center;flex-shrink:0">${glyph}</span>`+
     `<span style="font-size:11.5px;color:var(--mut);line-height:1.35">${txt}</span></div>`;
+  // cc#1018 MARKER_GLYPH_V3 (21764): the outline VALID row is GONE (VALID draws no marker now) and
+  // the red pivot row is a star, not a circle. These rows are hand-built so the popover can show the
+  // real coloured character; they are kept in step with the renderers above by hand, and the wording
+  // matches the server legend[] that the footer legend renders.
   const rows=
-    row('★','#f5b94a','Amber filled star — Trade Check STRONG')+
-    row('☆','#f5b94a','Amber outline star — Trade Check VALID')+
-    row('★','#4d7cfe','Blue star — held reversal at S1 (long)')+
-    row('●','#f87171','Red circle — mirror at R1 (short)')+
-    row('★','#2fd48b','Green star — unusual activity (volume >1.5x or OI >25% d/d)');
-  const footer=`<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--line2);font-size:10.5px;color:var(--dim)">Shape = side (star long, circle short) · Colour = meaning</div>`;
+    row('★','#f5b94a','Amber star — Trade Check STRONG (VALID shows no marker)')+
+    row('★','#4d7cfe','Blue star — held reversal at S1')+
+    row('★','#f87171','Red star — mirror at R1')+
+    row('★','#2fd48b','Green star — unusual activity (volume >1.5x or OI >25% d/d)')+
+    row('●','#2fd48b','Green circle — the same, on a SHORT position');
+  const footer=`<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--line2);font-size:10.5px;color:var(--dim)">Shape = side on the green marker only (star long, circle short) · Colour = meaning</div>`;
   return `<span style="position:relative;display:inline-block;margin-left:7px;vertical-align:middle">`+
     `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
       `style="width:17px;height:17px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);font:600 10px/1 Sora,sans-serif;cursor:pointer;padding:0;vertical-align:middle">i</button>`+

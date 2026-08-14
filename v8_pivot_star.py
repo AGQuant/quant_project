@@ -63,11 +63,11 @@ NEAR_PP_PCT    = 1.0    # recorded only, never rendered (card item 5)
 
 # ── cc#932 PIVOT_STAR_V2 — founder-locked in session_log 18052 ────────────────────────────────
 # The V1 conditions and scope are SUPERSEDED. V2, verbatim from 18052:
-#   BUY  (glyph = star, blue)
+#   BUY  (blue)
 #     1 TOUCH     in the last 3 closed sessions, session low <= THAT session's own S1
 #     2 POSITION  cmp between S1 and S1*1.02  OR  cmp > PP
 #     3 STABILITY day_1d between -1 and +2  AND  mom_2d between -1 and +2
-#   SELL (glyph = circle, red) — mirrored on R1
+#   SELL (red) — mirrored on R1
 #     1 TOUCH     session high >= that session's own R1
 #     2 POSITION  cmp between R1*0.98 and R1  OR  cmp < PP
 #     3 STABILITY day_1d between -2 and +1  AND  mom_2d between -2 and +1
@@ -77,9 +77,15 @@ NEAR_PP_PCT    = 1.0    # recorded only, never rendered (card item 5)
 STAB_BUY  = (-1.0, 2.0)     # day_1d and mom_2d must BOTH sit inside this, buy side
 STAB_SELL = (-2.0, 1.0)     # mirrored band, sell side
 
-# GLYPH IS PART OF THE SPEC, not a template choice: buy = star, sell = CIRCLE, never a star on the
-# sell side. Served from here so web and mobile cannot disagree about it (DISPLAY_PARITY 16202).
-GLYPH = {"BUY": "star", "SELL": "circle"}
+# GLYPH IS PART OF THE SPEC, not a template choice. Served from here so web and mobile cannot
+# disagree about it (DISPLAY_PARITY 16202).
+#
+# cc#1018 MARKER_GLYPH_V3 (founder-locked, session_log 21764): BOTH SIDES DRAW A STAR. This
+# SUPERSEDES the glyph clause of 18052 ("sell = circle, never a star on the sell side"). The
+# CONDITIONS above are untouched — only the shape drawn changes. Colour still carries the side
+# (blue = S1 reversal, red = R1 mirror), so the circle was doing no work the colour was not
+# already doing. The only marker whose SHAPE still varies by side is the GREEN activity one below.
+GLYPH = {"BUY": "star", "SELL": "star"}
 
 # ── cc#933 GREEN_STAR_ACTIVITY_V1 — founder-locked in session_log 18053 ───────────────────────
 # Same open-positions scope as V2. Fires when EITHER leg trips:
@@ -542,12 +548,13 @@ def pivot_star(star_date: Optional[str] = None):
                 "star_date": d, "count": len(rows), "stars": rows,
                 "activity": acts, "activity_count": len(acts),
                 "scope": EVAL_SCOPE,
-                "rule": ("PIVOT_STAR_V2 (session_log 18052), evaluated on the OPEN paper book. "
-                         "STAR (blue, buy side): touched its own S1 in the last 3 closed sessions; "
+                "rule": ("PIVOT_STAR_V2 (session_log 18052) with MARKER_GLYPH_V3 glyphs "
+                         "(session_log 21764), evaluated on the OPEN paper book. "
+                         "BLUE STAR (buy side): touched its own S1 in the last 3 closed sessions; "
                          "cmp within 2% above S1 or above PP; day_1d and mom_2d both between -1 "
-                         "and +2. CIRCLE (red, sell side): mirrored on R1 — touched R1, cmp within "
-                         "2% below R1 or below PP, day_1d and mom_2d both between -2 and +1. The "
-                         "glyph is never a star on the sell side."),
+                         "and +2. RED STAR (sell side): mirrored on R1 — touched R1, cmp within "
+                         "2% below R1 or below PP, day_1d and mom_2d both between -2 and +1. Both "
+                         "sides draw a star; the colour carries the side, not the shape."),
                 "spec_version": "V2",
                 "spec_version_note": ("v8_pivot_star_log has no free text column for a version "
                                       "stamp and ALTER TABLE is not permitted from here "
@@ -559,11 +566,15 @@ def pivot_star(star_date: Optional[str] = None):
                 "near_pp_note": "near_pp is recorded for a 4-6 week review only and is never rendered.",
                 # cc#933: the legend copy lives HERE so /dashboard and /m/v8 cannot word it
                 # differently. Both surfaces render the shared snippet, which reads this.
+                # cc#1018 MARKER_GLYPH_V3 (21764): the amber marker is STRONG-only (there is no
+                # outline VALID marker any more) and both pivot sides are stars. The shape-is-side
+                # line now says what is still true — only the green activity marker changes shape.
                 "legend": [
-                    "Amber = Trade Check · filled STRONG, outline VALID",
-                    "Blue = held reversal at S1 · Red = mirror at R1",
+                    "Amber star = Trade Check STRONG. VALID shows no marker.",
+                    "Blue star = held reversal at S1 · Red star = mirror at R1",
                     "Green = unusual activity · volume >1.5x or OI >25% day-over-day",
-                    "Shape = side · star long, circle short. Colour = meaning.",
+                    "Shape = side on the green marker only · star long, circle short. "
+                    "Colour = meaning.",
                 ],
             }
     except Exception as e:
