@@ -1486,6 +1486,42 @@ def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS, soup=
 
 TEXT_FETCH_CURSOR_KEY = "ops_text_fetch_cursor"
 TEXT_FETCH_RUN_FLAG_KEY = "ops_text_fetch_run"   # 'pending' | 'running' | 'done'
+# cc#1016: a TARGETED run list. When this key holds a JSON array (or a comma-separated string) of
+# symbols, the next armed run fetches EXACTLY those and nothing else — the same shape
+# run_fundamentals_scrape(symbols=[...]) already has on the fundamentals side. It exists because a
+# re-scrape of 27 named companies had no path that did not also walk the whole 500-name universe:
+# the universe walk is ordered and cursor-driven, so "just re-run it" would have re-fetched
+# hundreds of companies that were already current to reach the ones that were not. The key is
+# CONSUMED by the run (deleted when it finishes), so a targeted list can never silently become the
+# standing behaviour of the nightly job.
+TEXT_FETCH_SYMBOLS_KEY = "ops_text_fetch_symbols"
+
+
+def _targeted_symbols(cur):
+    """The targeted list, or None for a normal universe walk. Accepts a JSON array or a
+    comma-separated string, because a founder editing a config row by hand should not have to
+    remember which one it was (same tolerance as v8_book_canon.retired_baskets)."""
+    raw = _cfg_get(cur, TEXT_FETCH_SYMBOLS_KEY)
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    syms = None
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                syms = [str(x).strip().upper() for x in parsed if str(x).strip()]
+        except Exception:
+            syms = None
+        if not syms:
+            # A malformed array must NOT fall through to the comma splitter — that would turn
+            # "[oops" into a symbol named "[oops", scrape nothing, and report a clean run.
+            log.warning("cc#1016 %s is not parseable JSON — ignoring it and running the normal "
+                        "universe walk.", TEXT_FETCH_SYMBOLS_KEY)
+            return None
+    else:
+        syms = [p.strip().upper() for p in raw.replace("\n", ",").split(",") if p.strip()]
+    return syms or None
 
 
 def run_text_fetch_backfill(conn=None, stop_event=None):
@@ -1493,20 +1529,32 @@ def run_text_fetch_backfill(conn=None, stop_event=None):
     SAME universe builder (_build_universe, shared cache/key: it's just "which 500 companies in
     priority order", not run-state) but its OWN cursor/flag app_config keys -- the old
     ops_metrics_backfill_run/cursor stay completely untouched, this is a separate resumable job,
-    not a variant of the old one. Fetch-only: no LLM calls in the loop, ~3-4x faster per company."""
+    not a variant of the old one. Fetch-only: no LLM calls in the loop, ~3-4x faster per company.
+
+    cc#1016: if app_config.ops_text_fetch_symbols holds a list, this run is that list instead of
+    the universe walk. Targeted runs do not touch the cursor -- the standing job must resume
+    exactly where it was, not where a one-off re-scrape happened to stop."""
     own = conn is None
     conn = conn or _conn()
     try:
+        targeted = None
         with conn.cursor() as cur:
             ensure_tables(cur)
-            universe = _build_universe(cur)
-            cursor = _cfg_get(cur, TEXT_FETCH_CURSOR_KEY)
-            start_idx = (universe.index(cursor) + 1) if (cursor and cursor in universe) else 0
-            pending = universe[start_idx:]
+            targeted = _targeted_symbols(cur)
+            if targeted:
+                universe = pending = targeted
+                _oplog(cur, "OPS_TEXT_FETCH_TARGETED",
+                       {"symbols": targeted, "n": len(targeted), "key": TEXT_FETCH_SYMBOLS_KEY})
+            else:
+                universe = _build_universe(cur)
+                cursor = _cfg_get(cur, TEXT_FETCH_CURSOR_KEY)
+                start_idx = (universe.index(cursor) + 1) if (cursor and cursor in universe) else 0
+                pending = universe[start_idx:]
             conn.commit()
 
         ok = miss = err = blocked = 0
         sample_error = None
+        per_symbol = []   # cc#1016: the card asks for a per-symbol outcome, so record one
         for i, sym in enumerate(pending):
             if stop_event is not None and stop_event.is_set():
                 break
@@ -1523,9 +1571,15 @@ def run_text_fetch_backfill(conn=None, stop_event=None):
                 err += 1
                 if sample_error is None:
                     sample_error = r.get("error")
-            with conn.cursor() as cur:
-                _cfg_set(cur, TEXT_FETCH_CURSOR_KEY, sym)
-                conn.commit()
+            if not targeted:
+                # cc#1016: the cursor belongs to the standing universe walk. A targeted run must
+                # not move it, or the nightly job would resume from a symbol it never reached.
+                with conn.cursor() as cur:
+                    _cfg_set(cur, TEXT_FETCH_CURSOR_KEY, sym)
+                    conn.commit()
+            per_symbol.append({"symbol": sym, "status": r["status"],
+                               "quarters": [q.get("quarter") for q in (r.get("quarters") or [])],
+                               "error": r.get("error")})
             if (i + 1) % 25 == 0:
                 with conn.cursor() as cur:
                     _oplog(cur, "OPS_TEXT_FETCH_PROGRESS",
@@ -1538,11 +1592,21 @@ def run_text_fetch_backfill(conn=None, stop_event=None):
         with conn.cursor() as cur:
             summary = {"universe": len(universe), "processed": len(pending), "ok": ok,
                        "no_docs": miss, "fetch_blocked": blocked, "errors": err,
+                       "targeted": bool(targeted),
                        "stopped_early": bool(stop_event and stop_event.is_set())}
             _oplog(cur, "OPS_TEXT_FETCH_DONE", summary)
-            if not (stop_event and stop_event.is_set()):
+            if targeted:
+                # cc#1016: per-symbol outcomes go to the ops log so the result is auditable after
+                # the process is gone, and the list is CONSUMED so the next armed run is a normal
+                # universe walk again.
+                _oplog(cur, "OPS_TEXT_FETCH_TARGETED_RESULT",
+                       {"n": len(per_symbol), "symbols": per_symbol})
+                if not (stop_event and stop_event.is_set()):
+                    cur.execute("DELETE FROM app_config WHERE key=%s", (TEXT_FETCH_SYMBOLS_KEY,))
+            elif not (stop_event and stop_event.is_set()):
                 cur.execute("DELETE FROM app_config WHERE key=%s", (TEXT_FETCH_CURSOR_KEY,))
             conn.commit()
+        summary["per_symbol"] = per_symbol if targeted else None
         with conn.cursor() as cur:
             cur.execute("SELECT pg_total_relation_size('doc_texts')")
             sz = cur.fetchone()[0] or 0
