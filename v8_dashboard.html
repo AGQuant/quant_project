@@ -2907,7 +2907,29 @@ function renderMaster(){
 const V8_COL_MONO="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums";
 const _cD=(v,f)=>v==null?'--':f(v);                       // the dash rule, in one place
 const V8_COLS=[
-  ["symbol","Symbol",     x=>`<td class="sym"><span class="dc-link" onclick="${x._qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)}${x._inlineStrip&&window.ScorrCardRow?ScorrCardRow(x.symbol):''}${x._basketPill?'<div style="margin-top:5px;display:block">'+basketPill(x.basket)+'</div>':''}</td>`],
+  // cc#1030 — THREE FIXES IN ONE CELL, each with a diagnosis behind it.
+  //
+  // (1) MARKERS BACK ON MASTER. This cell called pivotStar+pivotAct directly, which QUIETLY DROPPED
+  //     the other half of posTags(): the `.tc-star` span the hourly Trade-Check batch hydrates, and
+  //     the NEW chip. No span, nothing for _fillTcStar to fill — so the amber star could never
+  //     appear on a master row again. My regression, introduced with the cc#1023 registry and
+  //     carried through cc#1028. posTags() is the one place that knows the full marker order
+  //     (pivot · activity · TC · NEW), so the cell calls IT rather than re-listing its parts.
+  //
+  // (2) THE STRAY "--" PILL, traced not guessed: basketPill -> scorrBasketLabel returns the literal
+  //     '--' for a falsy slug, and the /qualified payload does not SELECT q.basket, so every basket
+  //     row rendered a pill containing "--". Master rows carry basket from v8_paper_positions, which
+  //     is why only the basket tabs showed it. Fixed at the source of the data (renderFunnel now
+  //     passes the tab's own basket into the row) AND guarded here, so a row with no basket renders
+  //     nothing at all rather than a placeholder chip.
+  //
+  // (3) ONE LINE, not two. The pill was in a block <div>, which is what stacked the symbol cell into
+  //     a second row. Symbol · markers · status · pill now sit inline.
+  ["symbol","Symbol",     x=>`<td class="sym"><span class="dc-link" onclick="${x._qa}">${x.symbol}</span>${posTags(x)}${x._statusHtml||''}${x._inlineStrip&&window.ScorrCardRow?ScorrCardRow(x.symbol):''}${x.basket?' '+basketPill(x.basket):''}</td>`],
+  // cc#1030 item 1: the Status badge is the ONE permitted basket-specific addition, and it belongs
+  // INLINE in the symbol cell (above), not in a column of its own — a column would make the basket
+  // table one wider than master and break the fit test. Kept as a definition only so nothing that
+  // referenced the key breaks; no view lists it.
   ["status","Status",     x=>`<td>${x._statusHtml||''}</td>`],
   ["side","Side",         x=>`<td><span class="badge ${String(x.side||'').toUpperCase()==='SHORT'?'b-short':'b-long'}">${x.side||'--'}</span></td>`],
   ["entry_ts","Entry Time",x=>`<td style="color:var(--mut);${V8_COL_MONO};font-size:11px">${_cD(x.entry_ts,fmtTs)}</td>`],
@@ -2945,7 +2967,7 @@ function v8NormRow(x,ctx){
   const isOpen=(st==='OPEN');
   x.side=x.side||ctx.side||null;
   x._rowCls=ctx.surface==='basket'?rowClass(st):'';
-  x._basketPill=(ctx.surface==='basket');
+  if(x.basket==null&&ctx.basket)x.basket=ctx.basket;   // cc#1030: the tab's basket, never a '--' pill
   // cc#1028 item 4: the inline C·A·R·D strip is a BASKET-ONLY thing (its cc#798 home). Master rows
   // carry the click-to-popup and nothing else — the per-row button strip on every master row was
   // part of what the founder rejected. One symbol renderer, one flag, no forked cell.
@@ -3009,8 +3031,11 @@ const V8_VIEW_MASTER=["symbol","entry_ts","days","side","entry_price","cmp","tar
 // PP, R1, S1) and Since are OUT of this table; their definitions stay in the registry above and
 // they remain on screen in the Filter Funnel, the Stock Pass Count grid and the per-stock
 // breakdown modal, which is where that detail belongs.
-const V8_VIEW_BASKET=["symbol","status","entry_ts","days","side","entry_price","cmp","target",
-  "stop_loss","net_pnl","net_pnl_pct","potential_left","day_pnl_pct","sector_day"];
+// cc#1030: the basket view is now IDENTICAL to the master view — same keys, same order, same
+// renderers, same table classes. The Status badge is not a column; it rides inline in the symbol
+// cell. That is what makes the fit test pass: the basket table's column-width budget equals
+// master's, not master's plus one.
+const V8_VIEW_BASKET=V8_VIEW_MASTER;
 // A view is a list of KEYS; this resolves it against the registry once per render.
 const v8View=keys=>keys.map(k=>V8_COLS.find(c=>c[0]===k)).filter(Boolean);
 
@@ -3150,51 +3175,15 @@ function renderFunnel(b){
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
   // colour-semantics/sort everywhere, no alternate set. Engine handlers (cc#360/378/380/382) and the
   // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
-  // cc#1023 part B: enrich each row with the master position fields, ONCE per render.
-  // WHERE EACH NUMBER COMES FROM, and why it is two sources and not one:
-  //   the qualified endpoint owns the POSITION IDENTITY (entry_price, target, stop_loss, qty,
-  //   entry_ts, side) — it reads v8_paper_positions directly, and after cc#1019 that entry price is
-  //   the real fill;
-  //   cache.paper.open_positions owns the LIVE numbers (cmp, prev_close, unrealised_pnl) — the same
-  //   payload the Master rows compute from, so a basket row and a dashboard row can never disagree
-  //   about the same position.
-  // The paper map is built once here, keyed symbol|SIDE, not per row (a symbol can be open on one
-  // side while qualifying on the other, so the symbol alone is not a key).
-  const _pmap={};((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p&&p.symbol)_pmap[p.symbol+'|'+String(p.side||'').toUpperCase()]=p;});
-  // SEC D% is a STOCK attribute, not a position one, so it renders on SIGNAL rows too. Same wide-
-  // universe basis as master (segment_change.py over every gvm_scores member, GVM_SECTOR_WIDE_BASIS
-  // session_log 19621 / cc#1020) — deliberately NOT v8_qualified.sector_day, which is a different
-  // number and would put two meanings under one column header.
-  const _segBySymB={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySymB[m.symbol]=m.segment;});
-  const _segDayB=(cache.segmentDay&&cache.segmentDay.segments)||{};
-  const _side=isSell?'SHORT':'LONG';
-  sorted.forEach(x=>{
-    const _seg=_segBySymB[x.symbol]||null, _sd=_seg?_segDayB[_seg]:null;
-    x.sector_seg=_seg; x.sector_day=_sd?_sd.day_pct:null; x.sector_sd=_sd||null;
-    if((x.status||'SIGNAL')!=='OPEN'){   // a SIGNAL row is not a position: nulls, never invented values
-      x.days=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.potential_left=x.pot_pct=x.day_pnl_pct=null;
-      return;
-    }
-    const p=_pmap[x.symbol+'|'+_side]||{};
-    const qty=Number(x.qty!=null?x.qty:p.qty)||0;
-    const entry=Number(x.entry_price!=null?x.entry_price:p.entry_price);
-    const cmp=Number(p.cmp!=null?p.cmp:x.cmp);
-    x.target=x.open_target!=null?Number(x.open_target):(p.target!=null?Number(p.target):null);
-    x.stop_loss=x.open_stop!=null?Number(x.open_stop):(p.stop_loss!=null?Number(p.stop_loss):null);
-    x.days=holdDays(x.entry_ts||p.entry_ts);
-    // Same math as renderMaster, deliberately: net of one brokerage, % on entry value, potential to
-    // target side-adjusted, day P&L inverted for a short.
-    const unreal=(p.unrealised_pnl!=null)?Number(p.unrealised_pnl)
-      :((isFinite(cmp)&&isFinite(entry)&&qty)?((isSell?(entry-cmp):(cmp-entry))*qty):null);
-    x.net_pnl=(unreal==null)?null:(unreal-BROKERAGE_PER_TRADE);
-    const entryVal=entry*qty;
-    x.net_pnl_pct=(x.net_pnl!=null&&isFinite(entryVal)&&entryVal>0)?(x.net_pnl/entryVal*100):null;
-    x.potential_left=(x.target!=null&&isFinite(cmp)&&qty)?((isSell?(cmp-x.target):(x.target-cmp))*qty):null;
-    x.pot_pct=(x.target!=null&&isFinite(cmp)&&cmp)?((isSell?(cmp-x.target):(x.target-cmp))/cmp*100):null;
-    const prev=Number(p.prev_close);
-    const dayPct=(isFinite(cmp)&&isFinite(prev)&&prev>0)?((cmp/prev-1)*100):null;
-    x.day_pnl_pct=(dayPct==null)?null:(isSell?-dayPct:dayPct);
-  });
+  // cc#1030 item 1: basket rows go through the SAME normaliser the master uses. This block used to
+  // be a hand-written copy of master's maths, and copying it had already cost something real: after
+  // the cc#1028 unification the basket rows were never normalised at all, so they lost _qa (the
+  // symbol cell rendered onclick="undefined"), the status badge and side. One builder, one flag.
+  //
+  // The tab's own basket is passed in because the /qualified payload does not SELECT q.basket —
+  // that missing field is what made basketPill print a literal "--" chip on every basket row.
+  const _ctx=v8RowCtx('basket',{side:isSell?'SHORT':'LONG',basket:b.id});
+  sorted.forEach(x=>v8NormRow(x,_ctx));
   // The default sort key is null DELIBERATELY: it used to be gvm_score, and GVM is not a column
   // on this table any more — sorting by an invisible field leaves the header with no indicator
   // and no way to undo it. Null keeps the pre-sort this function already does (OPEN rows first,
