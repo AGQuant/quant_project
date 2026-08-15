@@ -2955,12 +2955,15 @@ function pivotStar(sym){
 
 function pivotAct(sym){
   const a=PIVOT_ACT[sym]; if(!a) return '';
-  // cc#933: green = unusual activity. Glyph follows the POSITION's side (star long, circle short)
-  // — unlike the blue/red pivot marker, whose side is the STOCK's behaviour. See the note in
-  // v8_pivot_star.py: they answer different questions and must not be unified.
+  // cc#1024 MARKER_GLYPH_V5 (session_log 22296): unusual activity is a LIGHTNING BOLT on both
+  // sides. This retires the cc#933 side-glyph rule for this marker and with it the last
+  // shape-by-side rule on the board — volume and OI say "something is happening here", never "up"
+  // or "down", so the one marker with no direction in it was the last one still drawing one.
+  // Drawn unconditionally, never from the served glyph field: a browser holding a cached pre-V5
+  // payload still carries glyph='circle'/'star' — the same defence cc#1018 put on pivotStar.
+  // No colour styling: it is an emoji and renders in its own.
   const note=(a.note||'').replace(/"/g,'&quot;');
-  const g = a.glyph==='circle' ? '\u25CF' : '\u2605';
-  return `<span class="pv-act" style="color:#2fd48b" title="${note}" aria-label="${note}">${g}</span>`;
+  return `<span class="pv-act" title="${note}" aria-label="${note}">\u26A1</span>`;
 }
 // cc#933: the legend footer. Rendered from window.ScorrMarkerLegend — the SAME snippet /m/v8
 // uses — with the copy itself coming from the engine, so neither the layout nor the wording can
@@ -2979,13 +2982,17 @@ function markerLegendPopover(){
   // the red pivot row is a star, not a circle. These rows are hand-built so the popover can show the
   // real coloured character; they are kept in step with the renderers above by hand, and the wording
   // matches the server legend[] that the footer legend renders.
+  // cc#1024 MARKER_GLYPH_V5 (22296): four rows, one per marker. The green-circle row is gone
+  // with the circle itself, and the activity row is a bolt with NO colour override -- it is an
+  // emoji and renders in its own.
   const rows=
-    row('★','#f5b94a','Amber star — Trade Check STRONG (VALID shows no marker)')+
-    row('★','#4d7cfe','Blue star — held reversal at S1')+
-    row('★','#f87171','Red star — mirror at R1')+
-    row('★','#2fd48b','Green star — unusual activity (volume >1.5x or OI >25% d/d)')+
-    row('●','#2fd48b','Green circle — the same, on a SHORT position');
-  const footer=`<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--line2);font-size:10.5px;color:var(--dim)">Shape = side on the green marker only (star long, circle short) · Colour = meaning</div>`;
+    row('\u2605','#f5b94a','Amber star \u2014 Trade Check STRONG (VALID shows no marker)')+
+    row('\u2605','#4d7cfe','Blue star \u2014 held reversal at S1')+
+    row('\u2605','#f87171','Red star \u2014 mirror at R1')+
+    row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d');
+  // cc#1024: the shape-by-side footer is DELETED. No marker on the board changes shape by side
+  // any more, so a footer explaining that rule would be explaining something that never happens.
+  const footer='';
   return `<span style="position:relative;display:inline-block;margin-left:7px;vertical-align:middle">`+
     `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
       `style="width:17px;height:17px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);font:600 10px/1 Sora,sans-serif;cursor:pointer;padding:0;vertical-align:middle">i</button>`+

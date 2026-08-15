@@ -1162,14 +1162,15 @@
    fallback below is used when the endpoint is unreachable, and says the same thing. */
 (function () {
   if (window.ScorrMarkerLegend) return;
-  /* cc#1018 MARKER_GLYPH_V3 (21764): kept word-for-word in step with the legend[] served by
-     v8_pivot_star.py. The server copy is the source; this only stands in when the endpoint is
-     unreachable, and it must not say something the markers on screen no longer do. */
+  /* cc#1018 (21764), updated cc#1024 MARKER_GLYPH_V5 (22296): kept word-for-word in step with the
+     legend[] served by v8_pivot_star.py. The server copy is the source; this only stands in when
+     the endpoint is unreachable, and it must not say something the markers on screen no longer do.
+     The shape-by-side line is gone because the rule is gone — no marker changes shape by side. */
   var FALLBACK = [
     'Amber star = Trade Check STRONG. VALID shows no marker.',
-    'Blue star = held reversal at S1 · Red star = mirror at R1',
-    'Green = unusual activity · volume >1.5x or OI >25% day-over-day',
-    'Shape = side on the green marker only · star long, circle short. Colour = meaning.'
+    'Blue star = held reversal at S1',
+    'Red star = mirror at R1',
+    '⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day'
   ];
   function esc(t){ return String(t == null ? '' : t)
     .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }

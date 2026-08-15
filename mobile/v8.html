@@ -636,14 +636,16 @@ function pivotMark(sym){
   return '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">'
     + '\u2605</span>';
 }
-/* cc#933: green activity marker. Glyph follows the POSITION's side (star long, circle short) —
-   unlike the blue/red pivot marker from cc#932, whose side describes the STOCK's behaviour against
-   its own pivots. Different questions, so deliberately different side rules; see v8_pivot_star.py. */
+/* cc#1024 MARKER_GLYPH_V5 (session_log 22296): unusual activity is a LIGHTNING BOLT on both
+   sides, retiring the cc#933 side-glyph rule and with it the last shape-by-side rule on the
+   board. Volume and OI say "something is happening here", never "up" or "down", so the one
+   marker with no direction in it was the last one still drawing one. Drawn unconditionally,
+   never from the served glyph field -- a phone holding a cached pre-V5 payload still carries
+   glyph='circle'/'star'. No colour styling: it is an emoji and renders in its own. */
 function actMark(sym){
   var a = (STATE.act || {})[sym];
   if (!a) return '';
-  return '<span class="pvm" style="color:#2fd48b" title="' + esc(a.note || '') + '">'
-    + (a.glyph === 'circle' ? '\u25CF' : '\u2605') + '</span>';
+  return '<span class="pvm" title="' + esc(a.note || '') + '">\u26A1</span>';
 }
 /* cc#943/942 — ONE card renderer, TWO pages. The card explicitly asks for the realised page to
    use the SAME layout so the eye does not have to relearn it, and the way to guarantee that is a

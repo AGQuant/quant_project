@@ -108,7 +108,21 @@ GLYPH = {"BUY": "star", "SELL": "star"}
 # different questions.
 ACTIVITY_VOL_X       = 1.5
 ACTIVITY_OI_DOD_PCT  = 25.0
-GLYPH_SIDE = {"LONG": "star", "SHORT": "circle"}
+
+# cc#1024 MARKER_GLYPH_V5 (founder-locked, session_log 22296): the activity marker is a LIGHTNING
+# BOLT, U+26A1, on both sides. This retires BOTH earlier forms — the circle-for-short of 18053 and
+# the green star of V4 — and with them the last shape-by-side rule on the board.
+#
+# The reasoning holds together with cc#1018: once the pivot marker stopped changing shape by side,
+# a lone green marker still doing it was the only thing keeping "shape = side" alive in a reader's
+# head, for the ONE marker whose meaning has no direction at all. Volume and OI say "something is
+# happening here", never "up" or "down". So the family is now: STAR = a level or a check was met,
+# colour says which; BOLT = a spurt. Shape carries meaning, never side.
+#
+# The bolt is drawn with NO colour styling — it is an emoji and renders in its own. The value below
+# is still keyed by side so the payload shape and every existing consumer keep working; both keys
+# simply answer the same thing now, exactly as GLYPH did after cc#1018.
+GLYPH_SIDE = {"LONG": "bolt", "SHORT": "bolt"}
 
 # cc#932: the scope is now the OPEN PAPER BOOK. "qualified" (V1) and "universe" (the founder's
 # feasibility read) are kept so either is a one-line switch, but 18052 locks "positions".
@@ -507,9 +521,10 @@ def pivot_star(star_date: Optional[str] = None):
             # evaluate_activity() (untouched, locked 18053) — but a live re-eval at render time can
             # fade intra-day and drop a marker the log still holds, so the surface would disagree
             # with v8_pivot_star_log. Reading the log makes what BOTH surfaces render match the table
-            # exactly (the founder's own verify + DISPLAY_PARITY 16202). Glyph follows the CURRENT
-            # open-position side (star long, circle short); note is rebuilt facts-only from the
-            # logged trigger + value, same wall as star_note (no buy/sell/entry/target wording).
+            # exactly (the founder's own verify + DISPLAY_PARITY 16202). cc#1024: the glyph is a
+            # lightning bolt on both sides and no longer follows the position side at all; note is
+            # rebuilt facts-only from the logged trigger + value, same wall as star_note (no
+            # buy/sell/entry/target wording).
             acts = []
             try:
                 with conn.cursor() as acur:
@@ -536,8 +551,13 @@ def pivot_star(star_date: Optional[str] = None):
                             facts.append("OI event day-over-day")
                         acts.append({
                             "symbol": sym, "side": side_u or None,
-                            "star_color": "GREEN", "color": "#2fd48b",
-                            "glyph": GLYPH_SIDE.get(side_u, "star"),
+                            # cc#1024: the bolt renders as an emoji in its own colours, so no colour
+                            # is served for it. star_color stays GREEN because it is the LOG's own
+                            # row value (v8_pivot_star_log.star_color) and this endpoint reports the
+                            # table as it is — renaming a stored value to match a glyph change would
+                            # make the payload disagree with the row it came from.
+                            "star_color": "GREEN", "color": None,
+                            "glyph": GLYPH_SIDE.get(side_u, "bolt"),
                             "level_name": lname, "level_value": lv,
                             "note": " · ".join(facts) if facts else "unusual activity",
                         })
@@ -566,15 +586,16 @@ def pivot_star(star_date: Optional[str] = None):
                 "near_pp_note": "near_pp is recorded for a 4-6 week review only and is never rendered.",
                 # cc#933: the legend copy lives HERE so /dashboard and /m/v8 cannot word it
                 # differently. Both surfaces render the shared snippet, which reads this.
-                # cc#1018 MARKER_GLYPH_V3 (21764): the amber marker is STRONG-only (there is no
-                # outline VALID marker any more) and both pivot sides are stars. The shape-is-side
-                # line now says what is still true — only the green activity marker changes shape.
+                # cc#1018 (21764) made the amber marker STRONG-only and both pivot sides stars.
+                # cc#1024 MARKER_GLYPH_V5 (22296) turns the activity marker into a lightning bolt
+                # and DELETES the shape-by-side line outright — there is no marker left whose shape
+                # depends on which way you are positioned, so a footer explaining that rule would be
+                # explaining something that no longer happens. Four rows, one per marker.
                 "legend": [
                     "Amber star = Trade Check STRONG. VALID shows no marker.",
-                    "Blue star = held reversal at S1 · Red star = mirror at R1",
-                    "Green = unusual activity · volume >1.5x or OI >25% day-over-day",
-                    "Shape = side on the green marker only · star long, circle short. "
-                    "Colour = meaning.",
+                    "Blue star = held reversal at S1",
+                    "Red star = mirror at R1",
+                    "⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day",
                 ],
             }
     except Exception as e:
