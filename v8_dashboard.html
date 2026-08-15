@@ -2905,6 +2905,14 @@ function renderMaster(){
 // baskets use the exact same set — no mirrored/alternate columns. Display-only; per-basket gates
 // are untouched.
 const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
+// cc#1023 part B: the master open-position columns, APPENDED after Since. BK_COLS itself is left
+// exactly as it was — the cc#379 canon is the first 13 columns in that order, and this card adds to
+// it rather than reopening it. Keys match the Master openPosTable keys (target, stop_loss, net_pnl,
+// net_pnl_pct, potential_left, day_pnl_pct, sector_day) so both tables sort on the same fields with
+// the same renderers. The card's two lists (9 in scope B item 7, 7 in the 15-Aug amendment) are a
+// union, not a conflict: every column named in either list is here, which is also the file's own
+// never-drop-a-column convention.
+const BK_COLS_POS=[["entry_ts","Entry Time"],["days","Days"],["side","Side"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]];
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 // cc#517 Part D: F&O ban chip -- exchange forbids fresh positions; the writer already skips new
 // entries (v8_signal_writer.py), this just makes the restriction visible on the row.
@@ -2987,9 +2995,18 @@ function markerLegendPopover(){
 // cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
 // itself stopPropagation, so their own clicks don't trigger this).
 try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
-function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
+// cc#1023 part A: the SYMBOL opens the same C·A·R·D quick-actions popup the Master rows open, so a
+// basket row behaves like a dashboard row. `isSell` comes from renderFunnel — the side is a property
+// of the BASKET, never inferred from a per-row field (a buy basket can hold a symbol that also
+// qualifies short elsewhere). Entry and qty are passed ONLY for OPEN rows; a SIGNAL row has no
+// position, so it passes null/0 rather than a number that does not exist yet.
+// cc#1023 part B: the master open-position columns are APPENDED after Since. Existing columns and
+// their order are untouched (cc#379 canon). Every appended cell prints -- on a SIGNAL row.
+function bkRow(x,isSell){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
+  const _side=isSell?'SHORT':'LONG';
+  const _qa=`openQuickActions(event,'${x.symbol}','${_side}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol}${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
+    <td class="sym"><span class="dc-link" onclick="${_qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -3001,9 +3018,21 @@ function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen
     <td class="neg">${x.s1!=null?num(x.s1,0):'--'}</td>
     <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
     <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
-    <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;}
+    <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td>
+    <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${isOpen&&x.entry_ts?fmtTs(x.entry_ts):'--'}</td>
+    <td style="text-align:center">${isOpen&&x.days!=null?x.days:'--'}</td>
+    <td><span class="badge ${isSell?'b-short':'b-long'}">${_side}</span></td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${isOpen&&x.target!=null?num(x.target):'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${isOpen&&x.stop_loss!=null?num(x.stop_loss):'--'}</td>
+    <td style="text-align:right" class="${isOpen?pnlCls(x.net_pnl):''}">${isOpen&&x.net_pnl!=null?inr(x.net_pnl):'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.net_pnl_pct):''}">${isOpen&&x.net_pnl_pct!=null?sign(x.net_pnl_pct,2)+'%':'--'}</td>
+    <td style="text-align:right" class="${isOpen?cls(x.potential_left):''}">${isOpen&&x.potential_left!=null?inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`:'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.day_pnl_pct):''}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${isOpen&&x.day_pnl_pct!=null?sign(x.day_pnl_pct,2)+'%':'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
-    return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
+    // cc#1023 part A: same quick-actions popup on the mobile card's symbol as on the desktop row.
+    const _qa=`openQuickActions(event,'${x.symbol}','${isSell?'SHORT':'LONG'}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
+    return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym dc-link" onclick="${_qa}">${x.symbol}</span>
       <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}${_banChip(x)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
       <div class="mob-chips">
         <span class="mob-chip ${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'% 1D':'1D --'}</span>
@@ -3012,6 +3041,11 @@ function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{
         <span class="mob-chip">RSIm ${x.rsi_month!=null?num(x.rsi_month,0):'--'}</span>
         <span class="mob-chip ${bkGvmCls(x)}">GVM ${x.gvm_score!=null?num(x.gvm_score,1):'--'}</span>
         ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
+        ${/* cc#1023: OPEN cards get Target, SL and Net P&L — the numbers you act on. Not all seven:
+              a phone card that carries every desktop column stops being a card. SEC D% rides on
+              every card because it is a stock attribute, not a position one. */''}
+        ${isOpen?`<span class="mob-chip" style="color:var(--grn)">TGT ${x.target!=null?num(x.target,1):'--'}</span><span class="mob-chip" style="color:var(--red)">SL ${x.stop_loss!=null?num(x.stop_loss,1):'--'}</span><span class="mob-chip ${pnlCls(x.net_pnl)}">Net ${x.net_pnl!=null?inr(x.net_pnl):'--'}</span>`:''}
+        <span class="mob-chip ${cls(x.sector_day)}">SEC ${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</span>
         <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span></div>
       <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div></div>`;}).join('')}</div>`;}
 // cc#856: stars refresh with the basket panels; failure is silent by design.
@@ -3034,7 +3068,55 @@ function renderFunnel(b){
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
   // colour-semantics/sort everywhere, no alternate set. Engine handlers (cc#360/378/380/382) and the
   // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
-  const desktopTable=sortTbl('bk_'+b.id,BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
+  // cc#1023 part B: enrich each row with the master position fields, ONCE per render.
+  // WHERE EACH NUMBER COMES FROM, and why it is two sources and not one:
+  //   the qualified endpoint owns the POSITION IDENTITY (entry_price, target, stop_loss, qty,
+  //   entry_ts, side) — it reads v8_paper_positions directly, and after cc#1019 that entry price is
+  //   the real fill;
+  //   cache.paper.open_positions owns the LIVE numbers (cmp, prev_close, unrealised_pnl) — the same
+  //   payload the Master rows compute from, so a basket row and a dashboard row can never disagree
+  //   about the same position.
+  // The paper map is built once here, keyed symbol|SIDE, not per row (a symbol can be open on one
+  // side while qualifying on the other, so the symbol alone is not a key).
+  const _pmap={};((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p&&p.symbol)_pmap[p.symbol+'|'+String(p.side||'').toUpperCase()]=p;});
+  // SEC D% is a STOCK attribute, not a position one, so it renders on SIGNAL rows too. Same wide-
+  // universe basis as master (segment_change.py over every gvm_scores member, GVM_SECTOR_WIDE_BASIS
+  // session_log 19621 / cc#1020) — deliberately NOT v8_qualified.sector_day, which is a different
+  // number and would put two meanings under one column header.
+  const _segBySymB={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySymB[m.symbol]=m.segment;});
+  const _segDayB=(cache.segmentDay&&cache.segmentDay.segments)||{};
+  const _side=isSell?'SHORT':'LONG';
+  sorted.forEach(x=>{
+    const _seg=_segBySymB[x.symbol]||null, _sd=_seg?_segDayB[_seg]:null;
+    x.sector_seg=_seg; x.sector_day=_sd?_sd.day_pct:null; x.sector_sd=_sd||null;
+    if((x.status||'SIGNAL')!=='OPEN'){   // a SIGNAL row is not a position: nulls, never invented values
+      x.days=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.potential_left=x.pot_pct=x.day_pnl_pct=null;
+      return;
+    }
+    const p=_pmap[x.symbol+'|'+_side]||{};
+    const qty=Number(x.qty!=null?x.qty:p.qty)||0;
+    const entry=Number(x.entry_price!=null?x.entry_price:p.entry_price);
+    const cmp=Number(p.cmp!=null?p.cmp:x.cmp);
+    x.target=x.open_target!=null?Number(x.open_target):(p.target!=null?Number(p.target):null);
+    x.stop_loss=x.open_stop!=null?Number(x.open_stop):(p.stop_loss!=null?Number(p.stop_loss):null);
+    x.days=holdDays(x.entry_ts||p.entry_ts);
+    // Same math as renderMaster, deliberately: net of one brokerage, % on entry value, potential to
+    // target side-adjusted, day P&L inverted for a short.
+    const unreal=(p.unrealised_pnl!=null)?Number(p.unrealised_pnl)
+      :((isFinite(cmp)&&isFinite(entry)&&qty)?((isSell?(entry-cmp):(cmp-entry))*qty):null);
+    x.net_pnl=(unreal==null)?null:(unreal-BROKERAGE_PER_TRADE);
+    const entryVal=entry*qty;
+    x.net_pnl_pct=(x.net_pnl!=null&&isFinite(entryVal)&&entryVal>0)?(x.net_pnl/entryVal*100):null;
+    x.potential_left=(x.target!=null&&isFinite(cmp)&&qty)?((isSell?(cmp-x.target):(x.target-cmp))*qty):null;
+    x.pot_pct=(x.target!=null&&isFinite(cmp)&&cmp)?((isSell?(cmp-x.target):(x.target-cmp))/cmp*100):null;
+    const prev=Number(p.prev_close);
+    const dayPct=(isFinite(cmp)&&isFinite(prev)&&prev>0)?((cmp/prev-1)*100):null;
+    x.day_pnl_pct=(dayPct==null)?null:(isSell?-dayPct:dayPct);
+  });
+  // cc#1023 item 9: 23 columns need the raw-data horizontal scroll, which also pins the symbol
+  // column left so the row never loses its label while scrolling.
+  const desktopTable=sortTbl('bk_'+b.id,BK_COLS.concat(BK_COLS_POS),sorted,x=>bkRow(x,isSell),
+    {sortKey:'gvm_score',dir:-1,empty:"No qualified names",scrollCls:'rawscroll'});
   const mobileCards=bkMobile(sorted,isSell);
   return meta+legend+desktopTable+mobileCards+markerLegend();
 }

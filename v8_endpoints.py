@@ -371,7 +371,7 @@ def _load_open_positions(basket: str) -> dict:
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty, p.entry_ts,
+                SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty, p.entry_ts, p.side,
                        COALESCE(c.cmp, p.entry_price) AS cmp,
                        CASE WHEN p.side='LONG'
                             THEN ROUND(((COALESCE(c.cmp,p.entry_price)-p.entry_price)/p.entry_price*100)::numeric,2)
@@ -506,6 +506,14 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
             s["open_pnl_pct"] = float(pos["pnl_pct"])    if pos.get("pnl_pct")     else None
             s["open_target"]  = float(pos["target"])      if pos.get("target")      else None
             s["open_stop"]    = float(pos["stop_loss"])   if pos.get("stop_loss")   else None
+            # cc#1023 scope B item 6: the basket tabs render like a Master row now, so the row must
+            # carry the position's own identity too. Read-only join, already in hand from
+            # _load_open_positions — no extra query. entry_ts is exposed on its OWN key because
+            # signal_ts above is overwritten with it (cc#253) and a column that means "when did this
+            # position start" must not depend on that overwrite still being there.
+            s["side"]     = pos.get("side")
+            s["entry_ts"] = pos.get("entry_ts")
+            s["qty"]      = int(pos["qty"]) if pos.get("qty") is not None else None
             out.append(s)
             continue
         # cc#326: traded+closed today on this side -> spent, drop entirely (day log / trades is its home)
@@ -516,6 +524,12 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         # everything surviving here qualified today but did not enter -> SIGNAL, gated
         s["status"] = "SIGNAL"
         s["signal_reason"] = _signal_reason(sym, s.get("signal_ts"), slot_full, missed, conflict_syms)
+        # cc#1023: a SIGNAL row is not a position, so these are NULL and stay null — the surface
+        # prints a dash. Set explicitly rather than left absent so every row in the payload has the
+        # same shape and no consumer has to guess whether a missing key means "no position" or
+        # "older API build".
+        s["side"] = s["entry_ts"] = s["qty"] = None
+        s["open_target"] = s["open_stop"] = None
         out.append(s)
     return out
 
