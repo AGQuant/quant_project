@@ -2728,24 +2728,34 @@ function renderMaster(){
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
-  // cc#1023 V8_UNIFIED_TABLE_SPEC_V1 (22301): the master table renders the SAME V8_COLS registry the
-  // basket tables render. Its own _openCols list and hand-built row template are gone.
-  //
-  // TWO SURFACE-ONLY RULES ARE LAYERED ON TOP, and layering is the point — neither forks the
-  // registry:
-  //   1. cc#1019 FUTURES PURITY: on the Futures basis Target and SL are cash levels the engine set,
-  //      so they are REMOVED from this tab (not relabelled). Baskets always render the equity basis
-  //      and always show them.
-  //   2. cc#885: on the Futures basis Entry and CMP are futures prices and say so in the header.
-  // Potential Left is not in the canonical set, so it no longer appears on this table; the Ladder
-  // header still carries the book total.
-  const _mCols=V8_COLS
-    .filter(c=>!(_fut&&(c[0]==='target'||c[0]==='stop_loss')))
-    .map(c=>(_fut&&c[0]==='entry_price')?[c[0],'Entry FUT',c[2]]
-           :(_fut&&c[0]==='cmp')?[c[0],'CMP FUT',c[2]]:c);
-  const _mctx=v8RowCtx('master');
-  openRows.forEach(x=>v8NormRow(x,_mctx));
-  const openPosTable=sortTbl('openpos',_mCols,openRows,x=>v8TableRow(x,_mCols),
+  // cc#885 item 6: in Futures mode the price columns are futures prices and say so.
+  // cc#1019 item 7 (FUTURES TAB PURITY, session_log 21769): the cash columns are no longer LABELLED
+  // EQ on this tab, they are GONE from it. Target and SL are engine levels set on the cash price,
+  // and Potential Left is derived from the Target, so all three are equity-priced values and a
+  // futures tab renders none. They are untouched on the Equity view. Dropping the column means
+  // dropping its <td> too — the header list and the row template must stay the same length.
+  const _cEntry=_fut?"Entry FUT":"Entry", _cCmp=_fut?"CMP FUT":"CMP";
+  const _openCols=[["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price",_cEntry],["cmp",_cCmp]]
+    .concat(_fut?[]:[["target","Target"],["stop_loss","SL"]])
+    .concat([["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"]])
+    .concat(_fut?[]:[["potential_left","Potential Left"]])
+    .concat([["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]]);
+  const openPosTable=sortTbl('openpos',
+    _openCols,
+    openRows,x=>`<tr>
+      <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>${posTags(x)}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
+      <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
+      <td style="text-align:center">${x.days}</td>
+      <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums${x._futGap?';color:var(--dim)':''}"${x._futGap?` title="${String(x._futGap).replace(/"/g,'&quot;')}"`:''}>${x.entry_price==null?'--':num(x.entry_price)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.cmp)}</td>
+      ${_fut?'':`<td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${num(x.target)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${num(x.stop_loss)}</td>`}
+      <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.net_pnl_pct)}">${x.net_pnl_pct==null?'--':sign(x.net_pnl_pct,2)+'%'}</td>
+      ${_fut?'':`<td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>`}
+      <td data-pri="2" style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${x.day_pnl_pct==null?'--':sign(x.day_pnl_pct,2)+'%'}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
   // cc#280: lean bar-only component shared by the desktop Ladder rows and the mobile cards.
   // Direction-aware (LONG: SL-left/TGT-right; SHORT: TGT-left/SL-right). Positions are price-linear
@@ -2894,109 +2904,22 @@ function renderMaster(){
 // layout. A value that is momentarily unavailable renders -- (the column is NEVER dropped). Sell
 // baskets use the exact same set — no mirrored/alternate columns. Display-only; per-basket gates
 // are untouched.
-// ── cc#1023 V8_UNIFIED_TABLE_SPEC_V1 (founder-locked, session_log 22301) ─────────────────────────
-// ONE column registry and ONE row renderer for the Master open-positions table AND all four basket
-// tables. This SUPERSEDES the per-surface lists — the old BK_COLS and the master's own _openCols —
-// and the append-approach amendment that shipped in 0336a66: appending master columns to the basket
-// table left two column sets that merely LOOKED alike, and the next edit to either would have
-// drifted them apart again. One registry cannot drift.
-//
-// THE MISSING-DATA RULE IS THE WHOLE TRICK. The two surfaces genuinely know different things: the
-// paper book has no GVM or pivots on its rows, the qualified feed has no P&L on a SIGNAL row. So a
-// column is never dropped for a surface that lacks it — it prints "--". A dash says "we do not have
-// this here", which is a true statement; a missing column says "this does not exist", which is not.
-//
-// Sort keys are the row's own normalised fields, so every column sorts on both surfaces with no
-// per-surface sort code.
-const V8_COL_MONO="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums";
-const _cD=(v,f)=>v==null?'--':f(v);                       // the dash rule, in one place
-const V8_COLS=[
-  ["symbol","Symbol",     x=>`<td class="sym"><span class="dc-link" onclick="${x._qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''}${x._basketPill?'<div style="margin-top:5px;display:block">'+basketPill(x.basket)+'</div>':''}</td>`],
-  ["status","Status",     x=>`<td>${x._statusHtml||''}</td>`],
-  ["side","Side",         x=>`<td><span class="badge ${String(x.side||'').toUpperCase()==='SHORT'?'b-short':'b-long'}">${x.side||'--'}</span></td>`],
-  ["entry_ts","Entry Time",x=>`<td style="color:var(--mut);${V8_COL_MONO};font-size:11px">${_cD(x.entry_ts,fmtTs)}</td>`],
-  ["days","Days",         x=>`<td style="text-align:center">${_cD(x.days,v=>v)}</td>`],
-  ["day_1d","1D%",        x=>`<td class="${cls(x.day_1d)}">${_cD(x.day_1d,v=>sign(v,1)+'%')}</td>`],
-  ["mom_2d","2D Mom%",    x=>`<td class="${cls(x.mom_2d)}">${_cD(x.mom_2d,v=>sign(v,1)+'%')}</td>`],
-  ["dma_50","DMA50",      x=>`<td class="${cls(x.dma_50)}">${_cD(x.dma_50,v=>num(v,0))}</td>`],
-  ["rsi_month","RSIm",    x=>`<td>${_cD(x.rsi_month,v=>num(v,0))}</td>`],
-  ["gvm_score","GVM",     x=>`<td class="${bkGvmCls(x)}">${_cD(x.gvm_score,v=>num(v,1))}</td>`],
-  ["cmp","CMP",           x=>`<td style="text-align:right;${V8_COL_MONO}">${_cD(x.cmp,v=>num(v,1))}</td>`],
-  ["pp","PP",             x=>`<td style="color:var(--mut);text-align:right;${V8_COL_MONO}">${_cD(x.pp,v=>num(v,0))}</td>`],
-  ["r1","R1",             x=>`<td class="pos" style="text-align:right;${V8_COL_MONO}">${_cD(x.r1,v=>num(v,0))}</td>`],
-  ["s1","S1",             x=>`<td class="neg" style="text-align:right;${V8_COL_MONO}">${_cD(x.s1,v=>num(v,0))}</td>`],
-  ["entry_price","Entry", x=>`<td style="text-align:right;${V8_COL_MONO}${x._futGap?';color:var(--dim)':''}"${x._futGap?` title="${String(x._futGap).replace(/"/g,'&quot;')}"`:''}>${_cD(x.entry_price,v=>num(v,1))}</td>`],
-  ["target","Target",     x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--grn)">${_cD(x.target,v=>num(v))}</td>`],
-  ["stop_loss","SL",      x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--red)">${_cD(x.stop_loss,v=>num(v))}</td>`],
-  ["net_pnl","Net P&L",   x=>`<td style="text-align:right" class="${x.net_pnl==null?'':pnlCls(x.net_pnl)}">${_cD(x.net_pnl,inr)}</td>`],
-  ["net_pnl_pct","Net P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.net_pnl_pct)}">${_cD(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>`],
-  ["day_pnl_pct","Day P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${_cD(x.day_pnl_pct,v=>sign(v,2)+'%')}</td>`],
-  ["sector_day","SEC D%", x=>`<td style="text-align:right;${V8_COL_MONO};font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${_cD(x.sector_day,v=>sign(v,2)+'%')}</td>`],
-  ["signal_ts","Since",   x=>`<td style="color:var(--dim);font-size:11px">${x.signal_ts?fmtSince(x.signal_ts):'--'}</td>`],
-];
-// One row renderer, both surfaces. `cols` is passed so a surface can HIDE a column it must not show
-// (only the master Futures view does — cc#1019 purity, layered on top of the registry, never a
-// second column list).
-function v8TableRow(x,cols){return`<tr class="${x._rowCls||''}">${(cols||V8_COLS).map(c=>c[2](x)).join('')}</tr>`;}
-// Normalise a row of either surface into the registry's shape: every canonical key present, null
-// where this surface genuinely cannot know it. Nothing is invented — a null becomes a dash.
-function v8NormRow(x,ctx){
-  const isShort=String(x.side||'').toUpperCase()==='SHORT';
-  const st=x.status||'OPEN';
-  const m=(ctx.metrics&&ctx.metrics[x.symbol])||{};
-  const seg=(m.segment!=null?m.segment:x.segment)||null, sd=seg?(ctx.segDay||{})[seg]:null;
-  const isOpen=(st==='OPEN');
-  x.side=x.side||ctx.side||null;
-  x._rowCls=ctx.surface==='basket'?rowClass(st):'';
-  x._basketPill=(ctx.surface==='basket');
-  // The status badge is a basket concept; a master row is always OPEN, so 22301 lets it stay
-  // implicit — the cell renders empty rather than repeating "OPEN" on every row.
-  x._statusHtml=(ctx.surface==='basket')?(statusBadge(st,x.signal_reason)+_banChip(x)):'';
-  x._qa=`openQuickActions(event,'${x.symbol}','${x.side||''}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
-  // Stock metrics: the basket feed carries its own; the paper book carries none, so master fills
-  // them from metricsAll and prints -- for what even that lacks (pivots, which live per basket).
-  ['day_1d','mom_2d','dma_50','rsi_month','gvm_score'].forEach(k=>{if(x[k]==null&&m[k]!=null)x[k]=m[k];});
-  ['pp','r1','s1'].forEach(k=>{if(x[k]===undefined)x[k]=null;});
-  x.sector_seg=seg; x.sector_day=sd?sd.day_pct:null; x.sector_sd=sd||null;
-  if(!isOpen){   // a SIGNAL row is not a position: dashes, never invented values
-    x.days=x.entry_ts=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.day_pnl_pct=null;
-    return x;
-  }
-  const p=(ctx.paper&&ctx.paper[x.symbol+'|'+String(x.side||'').toUpperCase()])||{};
-  const qty=Number(x.qty!=null?x.qty:p.qty)||0;
-  const entry=Number(x.entry_price!=null?x.entry_price:p.entry_price);
-  const cmp=Number(x.cmp!=null?x.cmp:p.cmp);
-  if(x.entry_ts==null)x.entry_ts=p.entry_ts||null;
-  if(x.target==null)x.target=x.open_target!=null?Number(x.open_target):(p.target!=null?Number(p.target):null);
-  if(x.stop_loss==null)x.stop_loss=x.open_stop!=null?Number(x.open_stop):(p.stop_loss!=null?Number(p.stop_loss):null);
-  if(x.days==null)x.days=x.entry_ts?holdDays(x.entry_ts):null;
-  // Master's own math, applied once here so both surfaces produce the same number for the same
-  // position: net of ONE brokerage, % on entry value, day P&L side-adjusted.
-  if(x.net_pnl==null){
-    const unreal=(x.unrealised_pnl!=null)?Number(x.unrealised_pnl)
-      :((p.unrealised_pnl!=null)?Number(p.unrealised_pnl)
-      :((isFinite(cmp)&&isFinite(entry)&&qty)?((isShort?(entry-cmp):(cmp-entry))*qty):null));
-    x.net_pnl=(unreal==null)?null:(unreal-BROKERAGE_PER_TRADE);
-  }
-  const entryVal=entry*qty;
-  if(x.net_pnl_pct==null)x.net_pnl_pct=(x.net_pnl!=null&&isFinite(entryVal)&&entryVal>0)?(x.net_pnl/entryVal*100):null;
-  if(x.day_pnl_pct==null){
-    const prev=Number(x.prev_close!=null?x.prev_close:p.prev_close);
-    const dp=(isFinite(cmp)&&isFinite(prev)&&prev>0)?((cmp/prev-1)*100):null;
-    x.day_pnl_pct=(dp==null)?null:(isShort?-dp:dp);
-  }
-  return x;
-}
-// The symbol->metrics and symbol|side->paper maps both surfaces normalise against. Built once per
-// render, never per row.
-function v8RowCtx(surface,extra){
-  const met={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)met[m.symbol]=m;});
-  const pap={};((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p&&p.symbol)pap[p.symbol+'|'+String(p.side||'').toUpperCase()]=p;});
-  return Object.assign({surface:surface,metrics:met,paper:pap,segDay:(cache.segmentDay&&cache.segmentDay.segments)||{}},extra||{});
-}
-// cc#1023 V8_UNIFIED_TABLE_SPEC_V1: BK_COLS and BK_COLS_POS are RETIRED. The append approach
-// that shipped in 0336a66 left two column sets that only looked alike; 22301 replaces both with
-// the single V8_COLS registry above, which is what makes drift impossible rather than unlikely.
+const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
+// cc#1023 part B, as amended by cc#1026: the position columns are APPENDED after Since and BK_COLS
+// itself is left exactly as it was — the cc#379 canon is the first 13 columns in that order, and
+// this extends it rather than reopening it. Keys match the master table's keys so the two sort on
+// the same fields, but the two tables are now DELIBERATELY separate lists (cc#1026 item 3): master
+// must not be reachable from future basket work.
+// cc#1026 V8_TABLE_MIRROR_V2 (session_log 22318): the appended set is the card's list exactly --
+// Entry Time, Days, Side, Target, SL, Net P&L, Net P&L %, Day P&L %, SEC D%. Two judgement calls,
+// both stated in the task result rather than made quietly:
+//   * the card also names Entry and CMP, but BK_COLS ALREADY carries both (Entry at 11, CMP at 7).
+//     Appending them again would print two Entry columns and two CMP columns side by side, so they
+//     are not repeated -- and item 3 says BK_COLS is EXTENDED, which settles it against trimming
+//     the signal block to make room.
+//   * Potential Left is NOT in the card's list, so it leaves the basket table (it was in the
+//     superseded 0336a66 set). The master table keeps it -- master is reverted and untouchable.
+const BK_COLS_POS=[["entry_ts","Entry Time"],["days","Days"],["side","Side"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]];
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 // cc#517 Part D: F&O ban chip -- exchange forbids fresh positions; the writer already skips new
 // entries (v8_signal_writer.py), this just makes the restriction visible on the row.
@@ -3086,12 +3009,39 @@ function markerLegendPopover(){
 // cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
 // itself stopPropagation, so their own clicks don't trigger this).
 try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
-// cc#1023 V8_UNIFIED_TABLE_SPEC_V1: bkRow is now a thin call into the shared renderer. The
-// per-basket column list and the hand-built <td> wall it used to carry are gone -- both
-// surfaces render V8_COLS, so a column added or reworded once appears correctly on all five
-// tables. isSell still arrives from renderFunnel: side is a property of the BASKET and is
-// never inferred from a per-row field.
-function bkRow(x,isSell){return v8TableRow(x);}
+// cc#1023 part A: the SYMBOL opens the same C·A·R·D quick-actions popup the Master rows open, so a
+// basket row behaves like a dashboard row. `isSell` comes from renderFunnel — the side is a property
+// of the BASKET, never inferred from a per-row field (a buy basket can hold a symbol that also
+// qualifies short elsewhere). Entry and qty are passed ONLY for OPEN rows; a SIGNAL row has no
+// position, so it passes null/0 rather than a number that does not exist yet.
+// cc#1023 part B: the master open-position columns are APPENDED after Since. Existing columns and
+// their order are untouched (cc#379 canon). Every appended cell prints -- on a SIGNAL row.
+function bkRow(x,isSell){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
+  const _side=isSell?'SHORT':'LONG';
+  const _qa=`openQuickActions(event,'${x.symbol}','${_side}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
+  return`<tr class="${rc}">
+    <td class="sym"><span class="dc-link" onclick="${_qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
+    <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
+    <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
+    <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
+    <td>${x.rsi_month!=null?num(x.rsi_month,0):'--'}</td>
+    <td class="${bkGvmCls(x)}">${x.gvm_score!=null?num(x.gvm_score,1):'--'}</td>
+    <td>${x.cmp!=null?num(x.cmp,1):'--'}</td>
+    <td style="color:var(--mut)">${x.pp!=null?num(x.pp,0):'--'}</td>
+    <td class="pos">${x.r1!=null?num(x.r1,0):'--'}</td>
+    <td class="neg">${x.s1!=null?num(x.s1,0):'--'}</td>
+    <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
+    <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
+    <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td>
+    <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${isOpen&&x.entry_ts?fmtTs(x.entry_ts):'--'}</td>
+    <td style="text-align:center">${isOpen&&x.days!=null?x.days:'--'}</td>
+    <td><span class="badge ${isSell?'b-short':'b-long'}">${_side}</span></td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${isOpen&&x.target!=null?num(x.target):'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${isOpen&&x.stop_loss!=null?num(x.stop_loss):'--'}</td>
+    <td style="text-align:right" class="${isOpen?pnlCls(x.net_pnl):''}">${isOpen&&x.net_pnl!=null?inr(x.net_pnl):'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.net_pnl_pct):''}">${isOpen&&x.net_pnl_pct!=null?sign(x.net_pnl_pct,2)+'%':'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.day_pnl_pct):''}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${isOpen&&x.day_pnl_pct!=null?sign(x.day_pnl_pct,2)+'%':'--'}</td>
+    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     // cc#1023 part A: same quick-actions popup on the mobile card's symbol as on the desktop row.
     const _qa=`openQuickActions(event,'${x.symbol}','${isSell?'SHORT':'LONG'}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
@@ -3131,21 +3081,54 @@ function renderFunnel(b){
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
   // colour-semantics/sort everywhere, no alternate set. Engine handlers (cc#360/378/380/382) and the
   // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
-  // cc#1023 V8_UNIFIED_TABLE_SPEC_V1 (22301): normalise every row into the shared registry shape,
-  // then render the SAME columns the master renders. The context carries the two maps built once
-  // per render -- symbol->metricsAll and symbol|SIDE->paper open_positions. A basket row knows its
-  // own stock metrics and gets its position values from the paper join; a SIGNAL row gets dashes.
-  //
-  // WHERE EACH NUMBER COMES FROM, deliberately two sources: the qualified endpoint owns the position
-  // IDENTITY (entry_price, target, stop_loss, qty, entry_ts, side -- and after cc#1019 that entry
-  // price is the real fill), while cache.paper.open_positions owns the LIVE numbers (cmp,
-  // prev_close, unrealised_pnl) that the Master computes from. Same inputs, same math, so a basket
-  // row and a dashboard row cannot disagree about the same position.
-  const _ctx=v8RowCtx('basket',{side:isSell?'SHORT':'LONG'});
-  sorted.forEach(x=>v8NormRow(x,_ctx));
-  // cc#1023 item 9: 22 columns need the raw-data horizontal scroll, which also pins Symbol left so
-  // a row never loses its label mid-scroll.
-  const desktopTable=sortTbl('bk_'+b.id,V8_COLS,sorted,x=>bkRow(x,isSell),
+  // cc#1023 part B: enrich each row with the master position fields, ONCE per render.
+  // WHERE EACH NUMBER COMES FROM, and why it is two sources and not one:
+  //   the qualified endpoint owns the POSITION IDENTITY (entry_price, target, stop_loss, qty,
+  //   entry_ts, side) — it reads v8_paper_positions directly, and after cc#1019 that entry price is
+  //   the real fill;
+  //   cache.paper.open_positions owns the LIVE numbers (cmp, prev_close, unrealised_pnl) — the same
+  //   payload the Master rows compute from, so a basket row and a dashboard row can never disagree
+  //   about the same position.
+  // The paper map is built once here, keyed symbol|SIDE, not per row (a symbol can be open on one
+  // side while qualifying on the other, so the symbol alone is not a key).
+  const _pmap={};((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p&&p.symbol)_pmap[p.symbol+'|'+String(p.side||'').toUpperCase()]=p;});
+  // SEC D% is a STOCK attribute, not a position one, so it renders on SIGNAL rows too. Same wide-
+  // universe basis as master (segment_change.py over every gvm_scores member, GVM_SECTOR_WIDE_BASIS
+  // session_log 19621 / cc#1020) — deliberately NOT v8_qualified.sector_day, which is a different
+  // number and would put two meanings under one column header.
+  const _segBySymB={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySymB[m.symbol]=m.segment;});
+  const _segDayB=(cache.segmentDay&&cache.segmentDay.segments)||{};
+  const _side=isSell?'SHORT':'LONG';
+  sorted.forEach(x=>{
+    const _seg=_segBySymB[x.symbol]||null, _sd=_seg?_segDayB[_seg]:null;
+    x.sector_seg=_seg; x.sector_day=_sd?_sd.day_pct:null; x.sector_sd=_sd||null;
+    if((x.status||'SIGNAL')!=='OPEN'){   // a SIGNAL row is not a position: nulls, never invented values
+      x.days=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.potential_left=x.pot_pct=x.day_pnl_pct=null;
+      return;
+    }
+    const p=_pmap[x.symbol+'|'+_side]||{};
+    const qty=Number(x.qty!=null?x.qty:p.qty)||0;
+    const entry=Number(x.entry_price!=null?x.entry_price:p.entry_price);
+    const cmp=Number(p.cmp!=null?p.cmp:x.cmp);
+    x.target=x.open_target!=null?Number(x.open_target):(p.target!=null?Number(p.target):null);
+    x.stop_loss=x.open_stop!=null?Number(x.open_stop):(p.stop_loss!=null?Number(p.stop_loss):null);
+    x.days=holdDays(x.entry_ts||p.entry_ts);
+    // Same math as renderMaster, deliberately: net of one brokerage, % on entry value, potential to
+    // target side-adjusted, day P&L inverted for a short.
+    const unreal=(p.unrealised_pnl!=null)?Number(p.unrealised_pnl)
+      :((isFinite(cmp)&&isFinite(entry)&&qty)?((isSell?(entry-cmp):(cmp-entry))*qty):null);
+    x.net_pnl=(unreal==null)?null:(unreal-BROKERAGE_PER_TRADE);
+    const entryVal=entry*qty;
+    x.net_pnl_pct=(x.net_pnl!=null&&isFinite(entryVal)&&entryVal>0)?(x.net_pnl/entryVal*100):null;
+    x.potential_left=(x.target!=null&&isFinite(cmp)&&qty)?((isSell?(cmp-x.target):(x.target-cmp))*qty):null;
+    x.pot_pct=(x.target!=null&&isFinite(cmp)&&cmp)?((isSell?(cmp-x.target):(x.target-cmp))/cmp*100):null;
+    const prev=Number(p.prev_close);
+    const dayPct=(isFinite(cmp)&&isFinite(prev)&&prev>0)?((cmp/prev-1)*100):null;
+    x.day_pnl_pct=(dayPct==null)?null:(isSell?-dayPct:dayPct);
+  });
+  // cc#1023 item 9: 23 columns need the raw-data horizontal scroll, which also pins the symbol
+  // column left so the row never loses its label while scrolling.
+  const desktopTable=sortTbl('bk_'+b.id,BK_COLS.concat(BK_COLS_POS),sorted,x=>bkRow(x,isSell),
     {sortKey:'gvm_score',dir:-1,empty:"No qualified names",scrollCls:'rawscroll'});
   const mobileCards=bkMobile(sorted,isSell);
   return meta+legend+desktopTable+mobileCards+markerLegend();
