@@ -119,7 +119,9 @@
   .sectbl .secname{text-align:left;color:var(--txt);font-weight:600;max-width:240px}
   .sectbl .secpct{text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
   @media(max-width:767px){
-    .sectbl td.secname,.sectbl th.secname{position:sticky;left:0;background:var(--panel);z-index:1;max-width:150px}
+    /* cc#1035 item 4: same sticky-left pattern, same edge. No translucent override here, so this
+       one never bled — the box-shadow is the shared boundary style only. */
+    .sectbl td.secname,.sectbl th.secname{position:sticky;left:0;background-color:var(--panel);z-index:1;max-width:150px;box-shadow:1px 0 0 var(--line2)}
     .sectbl tbody tr:hover td.secname{background:var(--panel)}
   }
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
@@ -132,7 +134,8 @@
      for readability; scoped to .mtbl so the dense funnel tables stay compact. */
   .mtbl td{font-size:15px}
   /* cc#383: Matrix row-label cell — left-aligned Sora, sticky on horizontal scroll. */
-  td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;color:var(--mut);position:sticky;left:0;background:var(--panel);z-index:1;white-space:normal;min-width:150px}
+  /* cc#1035 item 4: Strategy Matrix label column — same pattern, same edge, no bleed today. */
+  td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;color:var(--mut);position:sticky;left:0;background-color:var(--panel);z-index:1;white-space:normal;min-width:150px;box-shadow:1px 0 0 var(--line2)}
   /* cc#385: V9 Pairs concept chips */
   .chip-info{font-family:'Sora',sans-serif;font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;white-space:nowrap}
   .mtbl th{font-size:12.5px}
@@ -141,10 +144,25 @@
      so the wide table always scrolls horizontally (touch scroll native on mobile). */
   .scroll.rawscroll{-webkit-overflow-scrolling:touch;max-height:72vh}
   .scroll.rawscroll table{min-width:1980px}
-  .rawscroll th:first-child,.rawscroll td:first-child{position:sticky;left:0;background:var(--panel);z-index:2}
-  .rawscroll th:first-child{background:var(--panel2);z-index:3}
-  .rawscroll tbody tr:hover td:first-child{background:rgba(148,166,210,.07)}
-  .rawscroll tr.row-idx td{background:var(--bg2)}
+  /* cc#1035 — WHY THE VALUES BLED THROUGH THE SYMBOL COLUMN.
+     The sticky cell had an opaque background, but the HOVER rule below replaced it with a
+     TRANSLUCENT rgba tint. A sticky element does not stack above its neighbours by being sticky —
+     it paints where it sits, and a see-through background is a window onto whatever scrolled under
+     it. So on the row the cursor was on (the founder's ASTRAL row) the scrolled values showed
+     straight through the symbol.
+     The fix keeps every tint but never lets one BE the background: background-color stays an
+     opaque theme token, and the tint rides on top as a background-image gradient. Same colour on
+     screen, nothing to see through. All tokens, no hex, so both themes resolve on their own. */
+  .rawscroll th:first-child,.rawscroll td:first-child{position:sticky;left:0;background-color:var(--panel);z-index:2;
+    box-shadow:1px 0 0 var(--line2)}
+  /* the header symbol cell intersects BOTH scroll axes, so it sits above the sticky column (2) and
+     above the sticky header row */
+  .rawscroll th:first-child{background-color:var(--panel2);z-index:3}
+  .rawscroll tbody tr:hover td:first-child{background-image:linear-gradient(rgba(148,166,210,.07),rgba(148,166,210,.07))}
+  /* pinned index rows: opaque base of their own, tint-free, so they cannot leak either */
+  .rawscroll tr.row-idx td{background-color:var(--bg2)}
+  .rawscroll tr.row-idx td:first-child{background-color:var(--bg2)}
+  .rawscroll tr.row-idx:hover td:first-child{background-image:linear-gradient(rgba(148,166,210,.07),rgba(148,166,210,.07))}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:rgba(148,166,210,.07)}
   tr.row-open{background:rgba(47,212,139,.08)}
@@ -1152,7 +1170,7 @@ function renderMatrix(){
   return `<div class="ptitle">Strategy Matrix <span class="ct">4 baskets · filters, exits & edge</span></div>
     <div style="font-size:11px;color:var(--dim);margin:-4px 0 12px;line-height:1.55">All active baskets side-by-side. Filter &amp; exit rows mirror each basket's i-button spec; backtest rows are episode-level EOD figures; <b style="color:var(--mut)">Live WR</b> is computed from the closed paper trades (same P&amp;L-sign classifier as the Trade Log accuracy box). Tap <span class="info-btn" style="width:16px;height:16px;font-size:9px;vertical-align:middle">i</span> in any column header for the full strategy detail. — = filter not used by that basket.</div>
     <div class="scroll" style="overflow-x:auto"><table style="min-width:900px"><thead><tr>
-      <th style="text-align:left;min-width:150px;position:sticky;left:0;background:var(--panel);z-index:2">Dimension</th>${th}
+      <th style="text-align:left;min-width:150px;position:sticky;left:0;background-color:var(--panel);z-index:2;box-shadow:1px 0 0 var(--line2)">Dimension</th>${th}
     </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
