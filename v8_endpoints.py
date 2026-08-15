@@ -3194,15 +3194,39 @@ def v8_nifty50_sector_holdings(theme: str):
 # and is surfaced under a "NEW ENTRANTS" card (never silently dropped) until Claude-web themes it.
 _INDEX_EXCLUDE_SQL = "fu.symbol NOT LIKE '%%NIFTY%%' AND fu.symbol NOT LIKE '%%SENSEX%%'"
 
+# cc#1042 item 5: a group with fewer than this many PRICED members returns NULL and every surface
+# renders an em-dash. Not a drop and not a zero — a one-stock tile calling itself a sector is the
+# whole complaint this taxonomy work exists to answer, and a vanished row would misreport the group
+# set as smaller than it is. Today this suppresses ZERO themes (the smallest carries 3); it is here
+# so the rule holds by construction as the futures universe turns over.
+THEME_MIN_MEMBERS = 3
+
+
 @router.get("/theme_sectors")
 def v8_theme_sectors():
     """One card per curated Scorr theme across the active futures universe: equal-weight avg
-    1D/1W/1M + stock count, sorted 1D% desc. Same fields the frontend sectorCards() consumes."""
+    1D/1W/1M + stock count, sorted 1D% desc. Same fields the frontend sectorCards() consumes.
+
+    cc#1042 — THE MATHS IS DELIBERATELY UNCHANGED. This is the cc#338 EQUAL-WEIGHT average of
+    member v8_metrics returns, and it stays that way: it is a breadth read for a book that trades
+    one lot per name, so RELIANCE must not outvote the other eight names in Energy. cc#1040 had
+    started swapping this for a wide-universe mcap-weighted basis; session_log 22406 reversed that
+    and it was never pushed. Do not "fix" the AVG below into a weighted mean.
+
+    THE ONE GROUPING TRUTH FOR BOTH SURFACES. The web Sectors "All Futures" tab and the app
+    Segments panel both read this. The app used to group gvm_scores.segment itself and got 55
+    groups, 18 of them single-stock; it no longer groups anything (mobile_ext calls this function
+    directly, so the two surfaces cannot return different numbers).
+
+    cc#1042 items 5+6: the HAVING clause is gone. A theme under THEME_MIN_MEMBERS priced members
+    returns NULL values rather than being filtered out, and NEW ENTRANTS is always present even at
+    zero members, so an unthemed F&O arrival can never be silently dropped."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(f"""
                 SELECT COALESCE(fu.theme, 'NEW ENTRANTS') AS theme,
-                       COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL)       AS n,
+                       COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL)       AS n_priced,
+                       COUNT(*)                                           AS n_total,
                        AVG(m.day_1d)       FILTER (WHERE m.day_1d IS NOT NULL),
                        AVG(m.week_return)  FILTER (WHERE m.week_return IS NOT NULL),
                        AVG(m.month_return) FILTER (WHERE m.month_return IS NOT NULL)
@@ -3211,18 +3235,40 @@ def v8_theme_sectors():
                      AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
                 WHERE fu.is_active = TRUE AND {_INDEX_EXCLUDE_SQL}
                 GROUP BY COALESCE(fu.theme, 'NEW ENTRANTS')
-                HAVING COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL) > 0
                 ORDER BY AVG(m.day_1d) FILTER (WHERE m.day_1d IS NOT NULL) DESC NULLS LAST
             """)
-            sectors = []
-            for theme, n, d1, wk, mo in cur.fetchall():
-                sectors.append({
-                    "segment": theme, "count": int(n),
-                    "avg_day_1d": round(float(d1), 2) if d1 is not None else None,
-                    "sector_week": round(float(wk), 2) if wk is not None else None,
-                    "sector_month": round(float(mo), 2) if mo is not None else None,
-                })
-        return {"sectors": sectors, "count": len(sectors)}
+            rows = cur.fetchall()
+
+        def _r(v):
+            return round(float(v), 2) if v is not None else None
+
+        sectors, suppressed = [], 0
+        for theme, n_priced, n_total, d1, wk, mo in rows:
+            n_priced, n_total = int(n_priced), int(n_total)
+            thin = n_priced < THEME_MIN_MEMBERS
+            if thin:
+                suppressed += 1
+            sectors.append({
+                "segment": theme,
+                "count": n_priced,                      # unchanged key the web cards read
+                "avg_day_1d":   None if thin else _r(d1),
+                "sector_week":  None if thin else _r(wk),
+                "sector_month": None if thin else _r(mo),
+                # cc#1042: the denominator travels with the number (UNIVERSE_DENOMINATOR_RULE).
+                # A bare % with no membership behind it is how a one-stock tile got to call itself
+                # a sector in the first place.
+                "members_priced": n_priced, "members_total": n_total,
+                "suppressed": (f"under_min_members ({n_priced} < {THEME_MIN_MEMBERS})"
+                               if thin else None),
+            })
+        # Suppressed groups sort last instead of vanishing — still listed, just without a number.
+        sectors.sort(key=lambda s: (s["avg_day_1d"] is None, -(s["avg_day_1d"] or 0)))
+        return {
+            "sectors": sectors, "count": len(sectors),
+            "basis": "equal-weight average of member 1D/1W/1M (cc#338 — deliberately NOT mcap-weighted)",
+            "taxonomy": "futures_universe.theme (cc#1009)",
+            "min_members": THEME_MIN_MEMBERS, "suppressed_count": suppressed,
+        }
     except Exception as e:
         raise HTTPException(500, f"v8_theme_sectors failed: {e}")
 

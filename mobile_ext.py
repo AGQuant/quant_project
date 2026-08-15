@@ -282,27 +282,33 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         """)
         qrows = _rows(cur)
 
-        # ── 3 · segments: the SAME derivation the web dashboard strip uses (v8_endpoints
-        #      /segment_day) — mcap-weighted day_1d per gvm_scores.segment, anchored to the newest
-        #      v8_metrics score_date. Copied in scope, not re-invented: same tables, same weights.
-        cur.execute("""
-            WITH mem AS (
-                SELECT g.segment, m.symbol, m.day_1d::numeric AS day_1d,
-                       g.market_cap::numeric AS mcap
-                FROM v8_metrics m
-                JOIN gvm_scores g ON g.symbol = m.symbol
-                WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-                  AND g.segment IS NOT NULL AND m.day_1d IS NOT NULL
-                  AND g.market_cap IS NOT NULL AND g.market_cap > 0
-            )
-            SELECT segment,
-                   ROUND(SUM(day_1d * mcap) / NULLIF(SUM(mcap), 0), 2) AS day_pct,
-                   COUNT(*) AS n
-            FROM mem GROUP BY segment
-            HAVING SUM(mcap) > 0
-            ORDER BY day_pct DESC NULLS LAST
-        """)
-        srows = _rows(cur)
+        # ── 3 · segments — cc#1042: THE APP DOES NOT GROUP ANYTHING. ──────────────────────────
+        # It used to run its own GROUP BY on gvm_scores.segment over v8_metrics, which produced 55
+        # groups against the website's 22 — and 18 of the 55 held exactly ONE stock, so tiles like
+        # "Restaurants & QSR" and "Flexible Packaging" ranked as top sector movers off a single
+        # name's day. Two surfaces, two taxonomies, and the phone was showing the wrong one.
+        #
+        # That query is DELETED, not parameterised. The panel now calls v8_theme_sectors() — the
+        # same function behind /api/v8/theme_sectors that the web "All Futures" tab reads — so the
+        # two surfaces are not "kept in sync", they are the same code. There is no app-side
+        # grouping left that could drift. Same 22 themes, same equal-weight cc#338 maths, same
+        # 3-member guard, same sort.
+        #
+        # Called in-process rather than over HTTP to itself, which is the pattern this endpoint
+        # already uses for the NIFTY level (domestic_live, just below). It opens its own short
+        # connection, so it is deliberately invoked AFTER this block's cursor work rather than
+        # inside it — a failure there can only cost the segments card, never the ledger above it.
+
+    _ts_basis, _ts_min, srows = None, None, []
+    try:
+        from v8_endpoints import v8_theme_sectors
+        _ts = v8_theme_sectors()
+        srows = [{"segment": s["segment"], "day_pct": s["avg_day_1d"],
+                  "n": s["members_priced"], "members_total": s["members_total"],
+                  "suppressed": s["suppressed"]} for s in (_ts.get("sectors") or [])]
+        _ts_basis, _ts_min = _ts.get("basis"), _ts.get("min_members")
+    except Exception as e:
+        log.warning("v8lower: theme_sectors unavailable (%s)", e)
 
     # cc#985 SECOND BAD COLUMN, found by auditing the rest of this endpoint rather than stopping
     # at the reported one: global_indices has no `close` column (it is price/prev_close), AND it
@@ -344,7 +350,10 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
     funnel = [{"basket": b, "label": basket_label(b), "n": len(v), "rows": v[:top]}
               for b, v in sorted(baskets.items())]
 
-    segs = [{"segment": r["segment"], "day_pct": f(r["day_pct"]), "n": r["n"]} for r in srows]
+    # cc#1042: members_total and suppressed ride along so the phone can print the denominator and
+    # can tell "no reading today" apart from "flat" — a NULL rendered as 0.00% would be a lie.
+    segs = [{"segment": r["segment"], "day_pct": f(r["day_pct"]), "n": r["n"],
+             "members_total": r["members_total"], "suppressed": r["suppressed"]} for r in srows]
 
     return {
         # the module headline reads THIS, not a sum of day_rows — one number, one source (rule 13)
@@ -360,6 +369,12 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         "signal_date": (qrows[0]["signal_date"].isoformat() if qrows else None),
         "segments": segs,
         "segment_count": len(segs),
+        # cc#1042 item 1: the basis is quoted from the endpoint that computed it, never restated
+        # here. If the two ever disagreed it would mean the app had started grouping again.
+        "segment_basis": _ts_basis,
+        "segment_taxonomy": "futures_universe.theme (cc#1009)",
+        "segment_min_members": _ts_min,
+        "segment_suppressed": sum(1 for s in segs if s.get("suppressed")),
         "nifty": nifty,
         "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
     }

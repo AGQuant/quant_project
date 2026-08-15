@@ -1293,37 +1293,55 @@ function m2(d){
 
 /* ── module 3 · segments ───────────────────────────────────────────────────────────────────── */
 function m3(d){
-  var segs = (d.segments || []).filter(function(s){ return s.day_pct != null; });
-  if (!segs.length)
+  /* cc#1042: these are the 22 curated Scorr THEMES the website shows, served ready-made by
+     /m/api/v8lower, which calls the very same v8_theme_sectors() the web "All Futures" tab reads.
+     The phone does no grouping of its own any more — it used to build 55 groups off the raw
+     gvm_scores.segment column, 18 of them one stock deep.
+     A theme that failed the server's 3-member guard arrives with day_pct null: it STAYS in the
+     list and renders an em-dash, because dropping it would misreport the group set as smaller
+     than it is, and printing 0.00% would be a lie. */
+  var all  = d.segments || [];
+  var segs = all.filter(function(s){ return s.day_pct != null; });
+  var mute = all.filter(function(s){ return s.day_pct == null; });
+  if (!all.length)
     return lowCard('m3', 'Segments', '<span class="m" style="font-size:12px">--</span>',
       '<div class="more">No segment data for the latest session.</div>');
-  var top = segs.slice(0, 3), bot = segs.slice(-3).reverse();
-  var shown = LOW.segAll ? segs : top.concat(bot.filter(function(b){
-      return top.every(function(t){ return t.segment !== b.segment; }); }));
+  /* cc#1042 item 7: 22 tiles is a long scroll on a phone, so the default is the TOP 10 BY ABSOLUTE
+     move — the ten themes that actually did something today, up or down, rather than five winners
+     and five losers taken off the ends of a sorted list. Expand shows every theme, em-dashes too. */
+  var byMove = segs.slice().sort(function(a, b){ return Math.abs(b.day_pct) - Math.abs(a.day_pct); });
+  var shown  = LOW.segAll ? segs.concat(mute) : byMove.slice(0, 10);
   var nf = d.nifty;
   var head = nf
     ? '<div class="lseg lsegwide"><div><div class="nm">NIFTY 50</div>'
-      + '<div class="n">' + (d.segment_count || segs.length) + ' futures segments</div></div>'
+      + '<div class="n">' + (d.segment_count || all.length) + ' themes</div></div>'
       + '<div class="v ' + cls(nf.chg_pct) + '">' + (nf.chg_pct == null ? '--' : pctv(nf.chg_pct)) + '</div></div>'
     : '';
   var grid = '<div class="lseggrid">' + head + shown.map(function(s){
-      return '<div class="lseg" onclick="location.href=\'/m/sector\'">'
+      var tot = s.members_total || s.n;
+      return '<div class="lseg" onclick="location.href=\'/m/sector\'"'
+        + (s.suppressed ? ' title="' + esc(s.suppressed) + '"' : '') + '>'
         + '<div class="nm">' + esc(s.segment) + '</div>'
-        + '<div class="v ' + cls(s.day_pct) + '">' + pctv(s.day_pct) + '</div>'
-        + '<div class="n">' + s.n + ' stock' + (s.n === 1 ? '' : 's') + '</div></div>';
+        + '<div class="v ' + (s.day_pct == null ? '' : cls(s.day_pct)) + '">'
+        + (s.day_pct == null ? '—' : pctv(s.day_pct)) + '</div>'
+        + '<div class="n">' + s.n + (s.n === tot ? '' : '/' + tot)
+        + ' stock' + (tot === 1 ? '' : 's') + '</div></div>';
     }).join('') + '</div>';
-  var right = '<span class="m mono" style="font-size:12px">' + segs.length + '</span>';
+  var right = '<span class="m mono" style="font-size:12px">' + all.length + '</span>';
   var body = grid
     + '<button class="lmore" onclick="lowSegAll()">'
-    + (LOW.segAll ? 'show strongest / weakest only' : 'show all ' + segs.length + ' segments') + '</button>'
-    /* cc#1020: this line used to say "each segment's futures members". It is the WIDE universe
-       — every gvm_scores member of the segment, not the 209 futures names
-       (GVM_SECTOR_WIDE_BASIS, session_log 19621). Same server derivation as the web dashboard,
-       so both surfaces say it the same way. */
-    + '<div class="lnote">Day move is mcap-weighted across every stock in the segment, not just '
-    + 'the futures names \u2014 the same derivation as the web dashboard segment strip. Tap a '
-    + 'segment for sector intel.</div>';
-  return lowCard('m3', 'Segments \u00b7 ' + (d.segment_count || segs.length), right, body);
+    + (LOW.segAll ? 'show top 10 movers only' : 'show all ' + all.length + ' themes') + '</button>'
+    /* cc#1042: the note here used to claim the move covered "every stock in the segment". It did
+       not — the query behind it started FROM v8_metrics, which holds only the ~209 futures names,
+       so the label described a computation that was not running (cc#1020 moved that wording in the
+       wrong direction). The text below states exactly what runs: the cc#338 equal-weight average
+       over each theme's futures members, which is deliberate — this book trades one lot per name,
+       so the largest stock must not outvote the rest of its theme. */
+    + '<div class="lnote">The 22 Scorr themes — same groups, same numbers as the website. Day move '
+    + 'is the equal-weight average across a theme’s futures members, so one big name cannot carry '
+    + 'the theme. A theme with fewer than 3 priced members shows —, never a number. Tap for '
+    + 'sector intel.</div>';
+  return lowCard('m3', 'Segments · ' + (d.segment_count || all.length), right, body);
 }
 
 /* ══ cc#943 / cc#942 — HORIZONTAL SWIPE BETWEEN THE TWO PAGES ═════════════════════════════════

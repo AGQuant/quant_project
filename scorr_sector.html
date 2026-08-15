@@ -413,7 +413,19 @@ function ThemesSection() {
         <span style={{fontSize:22}}>🌱</span>
         <div>
           <div style={{fontSize:16,fontWeight:800,color:"var(--txt)"}}>Top 10 Emerging Investment Themes</div>
-          <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand</div>
+          {/* cc#1042 ghost sweep: the theme WRITE-UPS are frozen. sector_themes has no writer
+              anywhere in the repo — briefs have _save_brief and a batch job, themes never got one —
+              so these ten rows have read 13-Jun-2026 since the day they were hand-entered, and this
+              panel was printing them with no date at all. Undated stale content reads as current,
+              which is the one thing no surface may do. The company lists below each theme ARE live
+              (ranked off today's gvm_scores); only the write-ups are fixed, and the stamp now says
+              which is which. */}
+          <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>Cross-sector structural plays · Live GVM-ranked companies · Click any theme to expand</div>
+          {data.themes && data.themes[0] && data.themes[0].generated_at && (
+            <div style={{fontSize:10,color:"var(--mut)",marginTop:3,opacity:.85}}>
+              Theme write-ups fixed {String(data.themes[0].generated_at).slice(0,10)} · company lists live
+            </div>
+          )}
         </div>
       </div>
       <div style={{display:"grid",gap:10}}>
