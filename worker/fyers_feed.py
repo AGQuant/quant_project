@@ -685,7 +685,20 @@ _GUARDIAN_ACK_KEY   = "feed_guardian_cmd_ack"
 def _write_heartbeat(conn, boot_ts):
     """cc#660: upsert the single worker_heartbeat row (id=1). Fresh-conn fallback like _flag_set so
     a stale shared conn never silently stops the heartbeat (which would trip a false worker-silent
-    alarm)."""
+    alarm).
+
+    cc#1022 HEARTBEAT_IST_CONTRACT_V1 — THE CONTRACT, and it binds every reader:
+    BOTH columns are naive IST. last_beat is the DB clock converted to Asia/Kolkata; boot_ts is the
+    worker's own IST clock, passed in tz-stripped. Any age computation MUST compare against
+    (NOW() AT TIME ZONE 'Asia/Kolkata'), never bare NOW().
+
+    Before this card last_beat was written with bare NOW() — the Railway session is UTC, so one row
+    held two different bases: last_beat UTC-naive, boot_ts IST-naive, 5h30m apart. Nothing was
+    broken, because feed_guardian compensated by computing age in the same UTC basis (the cc#844
+    contract), but the compensation was the hazard: the next reader to do the obvious thing and
+    subtract from IST would have read every beat as 5h30m stale and fired a false WORKER SILENT.
+    Founder directive is IST everywhere (RAILWAY_MEMORY_RULES id=156), so the mixed basis is gone
+    rather than documented. WRITER FIRST, READERS SECOND — see the deploy-order gate on cc#1022."""
     for target in ("shared", "fresh"):
         hc = get_db() if target == "fresh" else conn
         try:
@@ -694,10 +707,12 @@ def _write_heartbeat(conn, boot_ts):
                     id INTEGER PRIMARY KEY DEFAULT 1,
                     last_beat TIMESTAMP, boot_ts TIMESTAMP, note TEXT,
                     CONSTRAINT worker_heartbeat_singleton CHECK (id = 1))""")
+                # cc#1022: IST, both on insert and on update. boot_ts already arrives IST.
                 cur.execute("""INSERT INTO worker_heartbeat (id, last_beat, boot_ts, note)
-                               VALUES (1, NOW(), %s, %s)
-                               ON CONFLICT (id) DO UPDATE SET last_beat=NOW(),
-                                 boot_ts=EXCLUDED.boot_ts, note=EXCLUDED.note""",
+                               VALUES (1, (NOW() AT TIME ZONE 'Asia/Kolkata'), %s, %s)
+                               ON CONFLICT (id) DO UPDATE
+                                 SET last_beat=(NOW() AT TIME ZONE 'Asia/Kolkata'),
+                                     boot_ts=EXCLUDED.boot_ts, note=EXCLUDED.note""",
                             (boot_ts, "fyers_feed"))
             hc.commit()
             return True
