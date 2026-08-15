@@ -484,10 +484,29 @@ def run_tick(conn=None) -> Dict[str, Any]:
 
 @router.get("/api/v8/pivot_star")
 def pivot_star(star_date: Optional[str] = None):
-    """Today's starred symbols. Read-only; never triggers a write."""
+    """The latest session's starred symbols. Read-only; never triggers a write.
+
+    cc#1032: the default used to be TODAY, and on a Saturday there are no rows for today — so the
+    markers vanished from the dashboard every weekend and holiday while the tables beside them still
+    showed last session's positions at last session's prices. The client wiring was never broken.
+    The default is now the last session that actually HAS rows, which is the cc#424 last-session
+    as-of doctrine the funnel already follows. An explicit star_date still overrides everything.
+    """
     try:
         with _conn() as conn, conn.cursor() as cur:
-            d = star_date or str(_ist_now().date())
+            d = star_date
+            _today = str(_ist_now().date())
+            if not d:
+                # The ceiling is the IST date, NOT Postgres CURRENT_DATE. The Railway session is
+                # UTC, so between 18:30 and midnight IST CURRENT_DATE is still yesterday — using it
+                # would hide the markers written during the session that just ended. Same class of
+                # bug as cc#844 / cc#1022; one IST comparison avoids it.
+                cur.execute("SELECT MAX(star_date) FROM v8_pivot_star_log WHERE star_date <= %s",
+                            (_today,))
+                row = cur.fetchone()
+                d = str(row[0]) if row and row[0] else _today
+            # BOTH reads below - the BLUE/RED pivot query and the GREEN activity query - use this
+            # one resolved date, so the two lists can never describe different sessions.
             # cc#1008: `stars` is the PIVOT list (BLUE/RED) only. GREEN activity rows live in the
             # same table but render via the `activity` list below — leaving them in `stars` made
             # pivotStar/pivotMark (which map star_color as BLUE?blue:red) paint every green marker
@@ -565,7 +584,10 @@ def pivot_star(star_date: Optional[str] = None):
                 log.warning("cc#1008 activity log-read failed: %s", e)
                 acts = []
             return {
-                "star_date": d, "count": len(rows), "stars": rows,
+                # cc#1032: the RESOLVED date, so every surface is honest about which session it is
+                # showing, plus an explicit flag rather than making a reader compare dates.
+                "star_date": d, "as_of_is_last_session": (d != _today),
+                "count": len(rows), "stars": rows,
                 "activity": acts, "activity_count": len(acts),
                 "scope": EVAL_SCOPE,
                 "rule": ("PIVOT_STAR_V2 (session_log 18052) with MARKER_GLYPH_V3 glyphs "
