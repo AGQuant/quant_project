@@ -881,6 +881,9 @@
      comment and silently did nothing in production. auth_gate now ignores matches inside comments,
      but do not rely on that alone. -->
 <script src="/scorr_card_common.js"></script>
+<!-- cc#1021: LADDER_VIEW_V2 render module. Parse-time (not defer) like the line above, because
+     renderMaster() runs from the inline scripts below and asks for it by name. -->
+<script src="/v8_ladder_v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 // cc#426: V9 Pairs is now the standalone /v9 page — old in-dashboard deep link redirects there.
@@ -2835,8 +2838,17 @@ function renderMaster(){
       <div><div style="font-size:10px;color:var(--dim)">POTENTIAL LEFT</div><div style="font-size:22px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--mut)">${inr(totPot)}</div></div>
     </div>
     <div style="text-align:right;font-size:10px;color:var(--dim);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${openRows.length} position${openRows.length===1?'':'s'} · sorted by Net P&L</div></div>`;
+  // cc#1021 LADDER_VIEW_V2: the row renderer moves to v8_ladder_v2.js — three zones, an entry
+  // marker and the per-row decision numbers. The formatters are PASSED IN: several of them are
+  // declared `const` at the top of this script, and a top-level const in a classic script is not
+  // on window (the cc#871 bug), so the module must never reach for them. v1 stays as the fallback
+  // for the one case that matters — the module failing to load — rather than leaving the tab blank.
+  const _LFN={num:num,inr:inr,sign:sign,cls:cls,pnlCls:pnlCls,fmtTs:fmtTs,basketPill:basketPill,posTags:posTags};
+  const _lv2=(typeof window!=='undefined')&&window.ScorrLadderV2;
   const openPosLadder=openRows.length
-    ? ladderHeader+`<div style="display:flex;flex-direction:column;gap:4px">${openRows.map(ladderRow).join('')}</div>`
+    ? (_lv2
+        ? ScorrLadderV2.header(openRows,_LFN)+`<div style="display:flex;flex-direction:column;gap:4px">${openRows.map(x=>ScorrLadderV2.row(x,_LFN)).join('')}</div>`
+        : ladderHeader+`<div style="display:flex;flex-direction:column;gap:4px">${openRows.map(ladderRow).join('')}</div>`)
     : '<div class="empty">No open positions</div>';
   // cc#274: Table View / Ladder View toggle (default Table). Both read the same openRows — no refetch.
   const vtgl=(key,label)=>{const on=OPENPOS_VIEW===key;

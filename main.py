@@ -398,8 +398,12 @@ async def auth_gate(request: Request, call_next):
             # (`if (window.ScorrCardStrip) return`). A cached copy therefore WINS and the fresh
             # injected one becomes a no-op. Stamping all six makes each hardcoded URL identical to
             # its injected twin, so it is both cache-busted and de-duplicated to one fetch.
+            # cc#1021: v8_ladder_v2.js joins the list for the same reason — v8_dashboard.html
+            # hardcodes it as a blocking tag, and an unstamped max-age=86400 URL would serve a
+            # day-stale ladder after a deploy.
             for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
-                        b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js"):
+                        b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js",
+                        b"v8_ladder_v2.js"):
                 body = body.replace(b'src="/' + _js + b'"',
                                     b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)

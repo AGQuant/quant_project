@@ -2075,6 +2075,9 @@ SCORR_CARD_COMMON_JS = _read_root_js("scorr_card_common.js")
 SCORR_MOBILE_CARDS_JS = _read_root_js("scorr_mobile_cards.js")
 SCORR_ANALYSIS_CARD_JS = _read_root_js("scorr_analysis_card.js")
 SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
+# cc#1021: the V8 dashboard's Ladder View row renderer. Served the same way as the card files —
+# repo-root .js read once at import — so the dashboard HTML stays a page, not a JS library.
+V8_LADDER_V2_JS = _read_root_js("v8_ladder_v2.js")
 
 
 @router.get("/scorr_card_common.js")
@@ -2085,6 +2088,11 @@ def pwa_scorr_card_common_js():
 @router.get("/scorr_mobile_cards.js")
 def pwa_scorr_mobile_cards_js():
     return Response(SCORR_MOBILE_CARDS_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/v8_ladder_v2.js")
+def pwa_v8_ladder_v2_js():
+    return Response(V8_LADDER_V2_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_analysis_card.js")
