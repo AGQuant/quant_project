@@ -1040,9 +1040,9 @@ const BASKET_INFO={
     sigs_5m:"192/yr",wr_5m:62.0,ev_5m:0.85,
   },
   buy_momentum:{
-    label:"Buy Momentum V3",side:"BUY",version:"V3",
-    thesis:"Strong uptrend continuation, TWO independent layers both required. 6 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. cc#502 rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler.",
-    gateType:"6 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
+    label:"Buy Momentum V4",side:"BUY",version:"V4",
+    thesis:"Strong uptrend continuation, TWO independent layers both required. 8 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, mom_2d 0-4, sector week >0, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. cc#502 rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler. cc#1038 V4 (15-Aug-2026, spec 22375) made mom_2d[0,4] and sector_week>0 HARD after V3's own 30-trade tripwire fired at 33 trades / 58% WR.",
+    gateType:"8 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
     sigs_eod:"~292/yr (1524 total 5yr)",wr_eod:60.3,ev_eod:0.62,
@@ -1361,11 +1361,15 @@ function closeInfo(){document.getElementById('infoModal').classList.remove('open
 async function openBrDetail(symbol,basket){
   // cc#378/502: generalized to all 4 dedicated-handler baskets. Rows share the
   // {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
-  // buy_momentum (isBM) is dual-layer (7 HARD gates + a separate SCORE/10) so it also renders a
+  // buy_momentum (isBM) is dual-layer (9 HARD gates + a separate SCORE/10) so it also renders a
   // second score_rows table below the main one.
   const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum', isBM=basket==='buy_momentum';
-  const lbl=isSR?' · Sell Reversal V6.1':isSM?' · Sell Momentum V4':isBM?' · Buy Momentum V3':' · Buy Reversal V5';
-  const nf=isSR?11:isSM?9:isBM?7:7;   // cc#509: sell_reversal is 11 (10 cheap gates + true_weekly_rsi)
+  // cc#1038: title comes from the registry spec label when it has loaded (BASKET_SPEC via
+  // /api/v8/filters), literal only as the cold-start fallback — V3 was still on screen here after
+  // the basket went to V4. nf is just the loading placeholder; the fetched d.total replaces it.
+  const _regL=(FILTER_REG[basket]||{}).spec_label;
+  const lbl=' · '+(_regL||(isSR?'Sell Reversal V6.1':isSM?'Sell Momentum V4':isBM?'Buy Momentum V4':'Buy Reversal V5'));
+  const nf=(FILTER_REG[basket]||{}).gates?.length||(isSR?11:isSM?9:isBM?9:7);   // cc#509: sell_reversal is 11 (10 cheap gates + true_weekly_rsi)
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';

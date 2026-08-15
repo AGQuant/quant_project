@@ -15,9 +15,10 @@ synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
     week_return>=-2, rsi_month[60,90], sector_week>0, month_return<5, day_1d>0 strict,
     gvm_score>=6.5 strict (cc#754). All cheap (cc#606 dropped the
     heavy wRSI>=70 FINAL stage). Fixed +/-3.0% exits.
-  buy_momentum   BUY_MOMENTUM_V3   (_write_buy_momentum_v3_qualified): TWO independent layers --
-    6 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
-    hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85], PLUS SCORE>=7-of-10 fixed-threshold V2 bands
+  buy_momentum   BUY_MOMENTUM_V4   (_write_buy_momentum_v3_qualified, cc#1038): TWO independent
+    layers -- 8 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
+    mom_2d[0,4] (V4), sector_week>0 (V4), hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85],
+    PLUS SCORE>=7-of-10 fixed-threshold V2 bands
     (gvm/dma_50/dma_200/rsi_month/week_return/month_return/mom_2d/sector_week/sector_month + wRSI
     reused at [60,85]). Fixed +/-3.0% exits.
   sell_reversal  SELL_REVERSAL_V6.1 (_write_sell_reversal_v61_qualified): 10 filters -- R1-touch
@@ -2137,8 +2138,10 @@ _BM_V3_STAGES = basket_stage_rows("buy_momentum")   # cc#607 Phase A: generated 
 
 def bm_funnel_detail():
     """cc#502: BUY_MOMENTUM_V3 8-stage funnel, reshaped from the handler-written v8_funnel_counts
-    row. INDEPENDENT per-filter pass counts across the universe for the 6 cheap hard gates;
-    true_weekly_rsi (stage 7, DB-heavy) is passes vs the stocks clearing all 6. NOTE: hard-gate
+    row. INDEPENDENT per-filter pass counts across the universe for the CHEAP hard gates;
+    true_weekly_rsi (the heavy FINAL stage) is passes vs the stocks clearing all of them. cc#1038
+    made that count 8 (V4 added mom_2d[0,4] + sector_week>0), so it is read off the registry and
+    never written down here again. NOTE: hard-gate
     pass is NECESSARY but not SUFFICIENT to qualify -- final qualification also requires
     SCORE>=7-of-10 V2 bands (stage 8, denominator = hard-qualified count)."""
     try:
@@ -2167,7 +2170,7 @@ def bm_funnel_detail():
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
             if key == "true_weekly_rsi":
                 stage["denominator"] = denom
-                stage["note"] = f"of {denom} stocks passing all 6 cheap hard gates"
+                stage["note"] = f"of {denom} stocks passing all {_BM_CHEAP_N} cheap hard gates"
             stages.append(stage)
         stages.append({
             # cc#514: not a passed_filters/failed_filters entry -- the funnel-row click-through
@@ -2183,7 +2186,7 @@ def bm_funnel_detail():
             "basket": "buy_momentum", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": _n_filters("buy_momentum"), "n_filters": _n_filters("buy_momentum"),
             "stage6_survivors": stage6, "hard_qualified": hard_qualified,
-            "gate_type": "HARD gates (6) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
+            "gate_type": f"HARD gates ({_BM_CHEAP_N}) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             "stages": stages, **BASKET_META.get("buy_momentum", {}),
@@ -2192,13 +2195,22 @@ def bm_funnel_detail():
         raise HTTPException(500, f"bm_funnel_detail failed: {e}")
 
 
-# cc#502: BUY_MOMENTUM_V3 pass-count cheap range gates. dma_20>0, day_1d>0, hourly_pct>0&NOT NULL
-# are strict-positive checks handled inline (mirror sr_stock_passcount's sector_week convention).
+# cc#502: BUY_MOMENTUM_V3 pass-count cheap range gates. dma_20>0, day_1d>0, sector_week>0 and
+# hourly_pct>0&NOT NULL are strict-positive checks handled inline (mirror sr_stock_passcount's
+# sector_week convention). cc#1038: mom_2d[0,4] joins the range list, sector_week>0 the inline set.
 _BM_V3_PASSCOUNT_GATES = [
     ("dma_50",        5.0,  12.0),
     ("week_index_52", 75.0, None),
     ("gvm_score",      7.0, None),
+    ("mom_2d",         0.0,   4.0),   # cc#1038 V4 g9
 ]
+
+# cc#1038: how many CHEAP gates precede the heavy wRSI stage, asked of the registry rather than
+# written down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH
+# failure cc#1025 catalogued, and it would have silently gated every stock out of the heavy stage
+# the moment V4 made it 8 (nothing would ever reach true_weekly_rsi, and the page would have shown
+# a plausible, wrong 0). Derived, it cannot drift again.
+_BM_CHEAP_N = len([f for f in BASKET_FILTERS.get("buy_momentum", []) if not f.get("heavy")])
 
 # cc#502: SCORE_BANDS mirror of _write_buy_momentum_v3_qualified's V2 bands (fixed >=7-of-10
 # threshold). true_weekly_rsi[60,85] is the 10th band, scored separately since it reuses the same
@@ -2216,9 +2228,9 @@ _BM_SCORE_BANDS = [
 ]
 
 def bm_stock_passcount():
-    """cc#502: BUY_MOMENTUM_V3 pass-count = n/7 HARD gates, cheap-first (mirror cc#364). 6 cheap
-    gates for ALL stocks; true_weekly_rsi (stage 7, heavy) only for stocks clearing the first 6.
-    A stock clearing all 7 hard gates ALSO carries a separate score/10 (SCORE_BANDS, fixed >=7
+    """cc#502 -> cc#1038: BUY_MOMENTUM_V4 pass-count = n/9 HARD gates, cheap-first (mirror cc#364).
+    8 cheap gates for ALL stocks; true_weekly_rsi (the heavy FINAL stage) only for stocks clearing
+    all 8. A stock clearing every hard gate ALSO carries a separate score/10 (SCORE_BANDS, fixed >=7
     threshold) since real qualification requires BOTH layers -- score is null for stocks that
     don't clear the hard gates. Display only -- mirrors _write_buy_momentum_v3_qualified, never
     qualifies."""
@@ -2243,11 +2255,14 @@ def bm_stock_passcount():
                 d1d = s.get("day_1d")
                 actuals["day_1d"] = d1d
                 (passed if (d1d is not None and float(d1d) > 0.0) else failed).append("day_1d")
+                sw = s.get("sector_week")                      # cc#1038 V4 g10, strict > 0
+                actuals["sector_week"] = sw
+                (passed if (sw is not None and float(sw) > 0.0) else failed).append("sector_week")
                 hp = v21_metrics.get(sym, {}).get("hourly_pct")
                 actuals["hourly_pct"] = hp
                 (passed if (hp is not None and float(hp) > 0.0) else failed).append("hourly_pct")
                 score = None
-                if len(passed) == 6:
+                if len(passed) == _BM_CHEAP_N:
                     cmp = cmp_map.get(sym)
                     twr = _true_weekly_rsi(conn, sym, cmp)
                     actuals["true_weekly_rsi"] = twr
@@ -2260,7 +2275,7 @@ def bm_stock_passcount():
                     else:
                         failed.append("true_weekly_rsi")
                 else:
-                    failed.append("true_weekly_rsi")   # skipped -- not evaluated, caps at <=6/7
+                    failed.append("true_weekly_rsi")   # skipped -- not evaluated, caps at <=_BM_CHEAP_N
                 out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("buy_momentum"),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
@@ -2278,11 +2293,11 @@ def bm_stock_passcount():
 
 @router.get("/bm_stock_detail/{symbol}")
 def bm_stock_detail(symbol: str):
-    """cc#502: per-stock breakdown for BUY_MOMENTUM_V3 -- 7 HARD gates (ACTUAL vs REQUIRED +
-    PASS/FAIL, computed LIVE for one symbol, true_weekly_rsi only after all 6 cheap gates clear)
-    PLUS a separate SCORE/10 breakdown (SCORE_BANDS, fixed >=7 threshold, wRSI band reuses the
-    same true_weekly_rsi value) once all 7 hard gates pass. Qualification requires BOTH 7/7 hard
-    gates AND score>=7. Mirrors bm_stock_passcount / _write_buy_momentum_v3_qualified exactly.
+    """cc#502 -> cc#1038: per-stock breakdown for BUY_MOMENTUM_V4 -- 9 HARD gates (ACTUAL vs
+    REQUIRED + PASS/FAIL, computed LIVE for one symbol, true_weekly_rsi only after all 8 cheap gates
+    clear) PLUS a separate SCORE/10 breakdown (SCORE_BANDS, fixed >=7 threshold, wRSI band reuses
+    the same true_weekly_rsi value) once every hard gate passes. Qualification requires BOTH all
+    hard gates AND score>=7. Mirrors bm_stock_passcount / _write_buy_momentum_v3_qualified exactly.
     Display only, never qualifies."""
     from v8_signal_writer import _true_weekly_rsi
     sym = symbol.upper()
@@ -2310,8 +2325,12 @@ def bm_stock_detail(symbol: str):
         p_w52   = _passes_filter(w52, 75.0, None)
         p_gvm   = _passes_filter(gvm, 7.0, None)
         p_d1d   = d1d is not None and d1d > 0.0
+        p_mom2d = _passes_filter(mom2d, 0.0, 4.0)          # cc#1038 V4 g9
+        p_swk   = swk is not None and swk > 0.0            # cc#1038 V4 g10, strict
         p_hp    = hp is not None and hp > 0.0
-        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_hp])   # 6 cheap gates
+        # cc#1038: the two new gates join the cheap set, so a stock failing either never reaches the
+        # heavy wRSI row — same as the handler, which is the whole point of this endpoint.
+        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_mom2d, p_swk, p_hp])
         p_twr   = cleared and (twr is not None and 70.0 <= twr <= 85.0)
 
         rows = [
@@ -2320,11 +2339,16 @@ def bm_stock_detail(symbol: str):
             {"filter": "week_index_52",   "required": ">= 75",    "actual": _fmt(w52, 1),          "pass": p_w52},
             {"filter": "gvm_score",       "required": ">= 7",     "actual": _fmt(gvm, 1),          "pass": p_gvm},
             {"filter": "day_1d",          "required": "> 0",      "actual": _fmt(d1d, 2) + "%",    "pass": p_d1d},
+            {"filter": "mom_2d",          "required": "0 to 4",   "actual": _fmt(mom2d, 2) + "%",  "pass": p_mom2d},
+            {"filter": "sector_week",     "required": "> 0",      "actual": _fmt(swk, 2) + "%",    "pass": p_swk},
             {"filter": "hourly_pct",      "required": "> 0",      "actual": _fmt(hp, 2) + "%",     "pass": p_hp},
             {"filter": "true_weekly_rsi", "required": "70 to 85", "actual": _fmt(twr, 1),          "pass": p_twr},
         ]
         if not cleared:
-            rows[6]["note"] = "engine evaluates true weekly RSI only after all 6 cheap gates pass"
+            # cc#1038: index the heavy row by identity, not by the literal 6 — inserting the two V4
+            # gates moved it, and a positional index would have quietly annotated sector_week.
+            rows[-1]["note"] = (f"engine evaluates true weekly RSI only after all "
+                                f"{_BM_CHEAP_N} cheap gates pass")
         passed = sum(1 for r in rows if r["pass"])
 
         score, score_rows = None, None
