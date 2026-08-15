@@ -2899,27 +2899,26 @@ function renderMaster(){
     })();
 }
 
-// cc#379: canonical basket-table column set + row renderers, shared by ALL four baskets
-// (renderFunnel for the 4 BASKETS; sell_overbought retired cc#502). Reference = Buy Momentum
-// layout. A value that is momentarily unavailable renders -- (the column is NEVER dropped). Sell
-// baskets use the exact same set — no mirrored/alternate columns. Display-only; per-basket gates
-// are untouched.
-const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
-// cc#1023 part B, as amended by cc#1026: the position columns are APPENDED after Since and BK_COLS
-// itself is left exactly as it was — the cc#379 canon is the first 13 columns in that order, and
-// this extends it rather than reopening it. Keys match the master table's keys so the two sort on
-// the same fields, but the two tables are now DELIBERATELY separate lists (cc#1026 item 3): master
-// must not be reachable from future basket work.
-// cc#1026 V8_TABLE_MIRROR_V2 (session_log 22318): the appended set is the card's list exactly --
-// Entry Time, Days, Side, Target, SL, Net P&L, Net P&L %, Day P&L %, SEC D%. Two judgement calls,
-// both stated in the task result rather than made quietly:
-//   * the card also names Entry and CMP, but BK_COLS ALREADY carries both (Entry at 11, CMP at 7).
-//     Appending them again would print two Entry columns and two CMP columns side by side, so they
-//     are not repeated -- and item 3 says BK_COLS is EXTENDED, which settles it against trimming
-//     the signal block to make room.
-//   * Potential Left is NOT in the card's list, so it leaves the basket table (it was in the
-//     superseded 0336a66 set). The master table keeps it -- master is reverted and untouchable.
-const BK_COLS_POS=[["entry_ts","Entry Time"],["days","Days"],["side","Side"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]];
+// ── cc#1027 V8_BASKET_MIRROR_SPEC_V2 (founder-locked, session_log 22321) ────────────────────────
+// The basket tables MIRROR the master open-positions table: same columns, same order, same
+// renderers — plus exactly two basket-only items, the Status badge beside the symbol and Since as
+// the last column.
+//
+// THE MIRROR IS ONE-WAY, and that direction is the whole correction. cc#1023 built ONE registry for
+// both surfaces, so basket work reached back and rebuilt MASTER — it grew a Status column, signal
+// metrics and a per-row card strip. The founder rejected that on sight: master must never have
+// changed. So master keeps its own render path, untouched and unreachable from here, and this list
+// is a COPY of it that the basket side maintains. A copy can go stale; a shared registry can break
+// the master table. That trade is the founder's call, and this is the side he picked.
+//
+// The signal metrics (1D%, 2D Mom%, DMA50, RSIm, GVM, PP, R1, S1) are GONE from these tables per
+// item 4 — the Filter Funnel, the Stock Pass Count and the A card carry that detail. DISPLAY ONLY:
+// every one of those fields still arrives on the row and still feeds the funnel, the sort and the
+// popup, so re-adding a column is a one-line change if the founder asks.
+const BK_COLS=[["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],
+  ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],
+  ["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],
+  ["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"],["signal_ts","Since"]];
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 // cc#517 Part D: F&O ban chip -- exchange forbids fresh positions; the writer already skips new
 // entries (v8_signal_writer.py), this just makes the restriction visible on the row.
@@ -3009,39 +3008,32 @@ function markerLegendPopover(){
 // cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
 // itself stopPropagation, so their own clicks don't trigger this).
 try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
-// cc#1023 part A: the SYMBOL opens the same C·A·R·D quick-actions popup the Master rows open, so a
-// basket row behaves like a dashboard row. `isSell` comes from renderFunnel — the side is a property
-// of the BASKET, never inferred from a per-row field (a buy basket can hold a symbol that also
-// qualifies short elsewhere). Entry and qty are passed ONLY for OPEN rows; a SIGNAL row has no
-// position, so it passes null/0 rather than a number that does not exist yet.
-// cc#1023 part B: the master open-position columns are APPENDED after Since. Existing columns and
-// their order are untouched (cc#379 canon). Every appended cell prints -- on a SIGNAL row.
+// cc#1027: bkRow mirrors the MASTER row template cell for cell. Two differences, both required by
+// the card: the Status badge sits beside the symbol (a master row is always OPEN, so master needs
+// none), and Since is the last column. The compact ScorrCardRow strip is REMOVED — the symbol click
+// IS the interaction now, exactly as on master.
+// A SIGNAL row is not a position, so every position cell prints -- and only Symbol, CMP, SEC D% and
+// Since carry values. Nothing is invented to fill a column.
 function bkRow(x,isSell){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   const _side=isSell?'SHORT':'LONG';
   const _qa=`openQuickActions(event,'${x.symbol}','${_side}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
+  const _d=(v,f)=>(isOpen&&v!=null)?f(v):'--';
+  const _mono="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums";
   return`<tr class="${rc}">
-    <td class="sym"><span class="dc-link" onclick="${_qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)}${window.ScorrCardRow?ScorrCardRow(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
-    <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
-    <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
-    <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
-    <td>${x.rsi_month!=null?num(x.rsi_month,0):'--'}</td>
-    <td class="${bkGvmCls(x)}">${x.gvm_score!=null?num(x.gvm_score,1):'--'}</td>
-    <td>${x.cmp!=null?num(x.cmp,1):'--'}</td>
-    <td style="color:var(--mut)">${x.pp!=null?num(x.pp,0):'--'}</td>
-    <td class="pos">${x.r1!=null?num(x.r1,0):'--'}</td>
-    <td class="neg">${x.s1!=null?num(x.s1,0):'--'}</td>
-    <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
-    <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
-    <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td>
-    <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${isOpen&&x.entry_ts?fmtTs(x.entry_ts):'--'}</td>
-    <td style="text-align:center">${isOpen&&x.days!=null?x.days:'--'}</td>
+    <td class="sym"><span class="dc-link" onclick="${_qa}">${x.symbol}</span>${pivotStar(x.symbol)}${pivotAct(x.symbol)} ${statusBadge(st,x.signal_reason)}${_banChip(x)}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
+    <td style="color:var(--mut);${_mono};font-size:11px">${_d(x.entry_ts,fmtTs)}</td>
+    <td style="text-align:center">${_d(x.days,v=>v)}</td>
     <td><span class="badge ${isSell?'b-short':'b-long'}">${_side}</span></td>
-    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${isOpen&&x.target!=null?num(x.target):'--'}</td>
-    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${isOpen&&x.stop_loss!=null?num(x.stop_loss):'--'}</td>
-    <td style="text-align:right" class="${isOpen?pnlCls(x.net_pnl):''}">${isOpen&&x.net_pnl!=null?inr(x.net_pnl):'--'}</td>
-    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.net_pnl_pct):''}">${isOpen&&x.net_pnl_pct!=null?sign(x.net_pnl_pct,2)+'%':'--'}</td>
-    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${isOpen?cls(x.day_pnl_pct):''}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${isOpen&&x.day_pnl_pct!=null?sign(x.day_pnl_pct,2)+'%':'--'}</td>
-    <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`;}
+    <td style="text-align:right;${_mono}">${_d(x.entry_price,v=>num(v))}</td>
+    <td style="text-align:right;${_mono}">${x.cmp==null?'--':num(x.cmp)}</td>
+    <td style="text-align:right;${_mono};color:var(--grn)">${_d(x.target,v=>num(v))}</td>
+    <td style="text-align:right;${_mono};color:var(--red)">${_d(x.stop_loss,v=>num(v))}</td>
+    <td style="text-align:right" class="${isOpen?pnlCls(x.net_pnl):''}">${_d(x.net_pnl,inr)}</td>
+    <td style="text-align:right;${_mono}" class="${isOpen?cls(x.net_pnl_pct):''}">${_d(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>
+    <td style="text-align:right" class="${isOpen?cls(x.potential_left):''}">${isOpen&&x.potential_left!=null?inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`:'--'}</td>
+    <td data-pri="2" style="text-align:right;${_mono}" class="${isOpen?cls(x.day_pnl_pct):''}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${_d(x.day_pnl_pct,v=>sign(v,2)+'%')}</td>
+    <td style="text-align:right;${_mono};font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td>
+    <td style="color:var(--dim);font-size:11px">${x.signal_ts?fmtSince(x.signal_ts):'--'}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     // cc#1023 part A: same quick-actions popup on the mobile card's symbol as on the desktop row.
     const _qa=`openQuickActions(event,'${x.symbol}','${isSell?'SHORT':'LONG'}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
@@ -3128,8 +3120,14 @@ function renderFunnel(b){
   });
   // cc#1023 item 9: 23 columns need the raw-data horizontal scroll, which also pins the symbol
   // column left so the row never loses its label while scrolling.
-  const desktopTable=sortTbl('bk_'+b.id,BK_COLS.concat(BK_COLS_POS),sorted,x=>bkRow(x,isSell),
-    {sortKey:'gvm_score',dir:-1,empty:"No qualified names",scrollCls:'rawscroll'});
+  // cc#1027: BK_COLS is the whole set now (master's columns + Since), so there is nothing to concat.
+  // The default sort key drops to null DELIBERATELY: it used to be gvm_score, and that column no
+  // longer exists on this table under item 4 — sorting by an invisible field would leave the header
+  // with no sort indicator and no way to undo it. Null keeps the pre-sort this function already
+  // does, OPEN rows first and GVM desc within each group, which is the order the funnel means. Any
+  // header click still sorts normally.
+  const desktopTable=sortTbl('bk_'+b.id,BK_COLS,sorted,x=>bkRow(x,isSell),
+    {sortKey:null,dir:-1,empty:"No qualified names",scrollCls:'rawscroll'});
   const mobileCards=bkMobile(sorted,isSell);
   return meta+legend+desktopTable+mobileCards+markerLegend();
 }
