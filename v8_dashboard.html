@@ -574,22 +574,38 @@
 .hs-head-eod{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line,rgba(148,166,210,.2))}
 .hs-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--txt,#E9EEFB)}
 .hs-sub{font-size:10.5px;color:var(--dim,#5E6B8F)}
-.hs-lvl{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.hs-lvl{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
 .hs-eod{opacity:.97}
-.hs-grp{display:flex;flex-direction:column;gap:5px;padding-right:10px;
+/* cc#1031: the groups SHARE the panel width instead of hugging their contents — flex:1 with a
+   220px basis lets each category grow into the empty space on the right and wrap when there is not
+   enough room. The grouping, the dividers and the DAY/WEEK split are unchanged; only the width
+   behaviour is. min-width:0 is what actually permits shrinking inside a flex row. */
+.hs-grp{display:flex;flex-direction:column;gap:5px;padding-right:10px;flex:1 1 220px;min-width:0;
   border-right:1px solid var(--line,rgba(148,166,210,.12))}
 .hs-grp:last-child{border-right:none;padding-right:0}
 .hs-glab{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim,#5E6B8F)}
-.hs-tiles{display:flex;flex-wrap:wrap;gap:5px}
-/* 44px tap floor per MOBILE_UX_STANDARD_V1 */
-.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:86px;min-height:52px;
-  padding:5px 9px;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
+/* cc#1031: grid, not flex — auto-fit + 1fr is what makes a tile STRETCH to fill its share rather
+   than sit at its minimum. auto-fit also wraps on its own, so the founder-locked rule from cc#842
+   still holds: the strip wraps at every width and never scrolls horizontally. */
+.hs-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px}
+/* 44px tap floor per MOBILE_UX_STANDARD_V1 — the taller tile below keeps clear of it */
+.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:64px;
+  padding:12px 14px;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
 .hs-tile:hover{transform:translateY(-1px)}
-.hs-nm{font-size:10.5px;font-weight:700;opacity:.92;white-space:nowrap}
-.hs-ch{font-size:12.5px;font-weight:800;font-family:var(--mono,ui-monospace,monospace)}
+/* cc#1031: one step up each — the change% is the headline number and now reads like one. */
+.hs-nm{font-size:15px;font-weight:600;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hs-ch{font-size:18px;font-weight:800;font-family:var(--mono,ui-monospace,monospace)}
 /* cc#925: the CURRENT level on the tile itself. t.price already came from the heatstrip
    payload (it was only being used in the tooltip), so nothing new is fetched or derived. */
-.hs-px{font-size:10px;font-weight:600;opacity:.72;font-family:var(--mono,ui-monospace,monospace)}
+.hs-px{font-size:13px;font-weight:600;opacity:.72;font-family:var(--mono,ui-monospace,monospace)}
+/* cc#1031 item 5: below ~700px the floor drops so tiles wrap 2-3 per row instead of overflowing,
+   and each category takes the full width so its grid has room to do that. Never a scrollbar. */
+@media (max-width:700px){
+  .hs-grp{flex:1 1 100%;padding-right:0;border-right:none}
+  .hs-tiles{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:5px}
+  .hs-tile{min-height:56px;padding:9px 10px}
+  .hs-nm{font-size:13px}.hs-ch{font-size:16px}.hs-px{font-size:11.5px}
+}
 .hs-head-wk{margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#1E2A44)}
 .hs-foot{margin-top:9px;font-size:10px;color:var(--dim,#5E6B8F);line-height:1.5}
 .hs-err{font-size:11.5px;color:var(--dim,#5E6B8F)}
