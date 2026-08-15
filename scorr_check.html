@@ -852,10 +852,14 @@ async function run(){
   document.getElementById('runBtn').disabled=false;
 }
 
-// cc#399: /check now runs the v4 dual-style engine. LONG -> BUY (MOM+REV), SHORT -> SELL (MOM+REV).
+// cc#399: /check runs the v4 dual-style engine.
+// cc#1033: it now asks for ALL FOUR cards — BUY-MOM, BUY-REV, SELL-MOM, SELL-REV — and shows the
+// best. It used to pass the POSITION's side, so only two of the four were ever scored: NBCC showed
+// REJECT BUY-REV 5.00/20 with a LONG badge on a stock down 6.5% in a week, because the SELL cards
+// were never computed at all. The engine was always able to do this (side=ALL is its default); the
+// caller was narrowing it. The position side now feeds the BADGE only, never the scoring.
 async function runTradeCheck(sym){
-  const v4side=(mode==='SHORT')?'SELL':'BUY';
-  const r=await fetchWithTimeout('/api/trade-check/v4/dual?symbol='+encodeURIComponent(sym)+'&side='+v4side);
+  const r=await fetchWithTimeout('/api/trade-check/v4/dual?symbol='+encodeURIComponent(sym)+'&side=ALL');
   document.getElementById('loading').classList.remove('show');
   if(!r.ok){showErr('Server error '+r.status+' — trade check failed. Try again shortly.');return;}
   let d;
@@ -1122,20 +1126,32 @@ function renderV4Dual(d, uiMode){
       +'<div class="v4-rtable"><div class="v4-rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>'
       +rules+'</div></div>';   // cc#677: gate rows removed — no gates in the rule table
   };
-  // cc#412: restore the spec-2926 display contract — ONE full card per side (higher score; tie -> MOM);
-  // the losing style collapses to a one-line summary with an inline "view" toggle.
-  const sorted=[...cards].sort((a,b)=> (b.score-a.score) || (a.style==='MOMENTUM'?-1:1));
-  const winner=sorted[0]||null, loser=sorted[1]||null;
+  // cc#412 gave ONE full card per side with the losing style collapsed. cc#1033 keeps that shape but
+  // widens it to FOUR cards and shows only the winner in full: with side=ALL there are now four, and
+  // four full scorecards is not a decision, it is a reading exercise. The other three collapse into
+  // a single strip so you can see what the best beat.
+  //
+  // The winner is the engine's own `best` — not re-derived here. That matters after the amendment:
+  // best is the highest score/max PERCENTAGE (session_log 22353), because the four cards do not
+  // share a denominator (BUY-REV is out of 20, SELL-REV out of 13), so picking by raw score quietly
+  // favours whichever card has the most points available. Re-sorting locally by score would put a
+  // different card on top than the payload calls best, and the page would contradict its own engine.
+  const _pctOf=c=>(c&&c.max)?(c.score/c.max):0;
+  const winner=(d.best||[...cards].sort((a,b)=>_pctOf(b)-_pctOf(a))[0])||null;
+  const others=cards.filter(c=>!(winner&&c.style===winner.style&&c.side===winner.side))
+                    .sort((a,b)=>_pctOf(b)-_pctOf(a));
+  // cc#1033: the best-of-four strip — every card's score/max on one line, the winner marked.
+  const stripHtml = others.length
+    ? '<div class="v4-bo4" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;font-size:11.5px;color:var(--mut)">'
+      + '<span style="font-weight:700;letter-spacing:.04em">BEST OF FOUR</span>'
+      + [winner].concat(others).map(c=>'<span'+((c===winner)?' style="color:var(--txt);font-weight:700"':'')+'>'
+          + _v4styleChip(c.label)+' '+Number(c.score).toFixed(2)+'/'+(c.max!=null?c.max:'—')
+          + ((c===winner&&d.best_pct!=null)?' ('+Math.round(d.best_pct*100)+'%)':'')+'</span>').join('<span style="color:var(--dim)">·</span>')
+      + '</div>'
+    : '';
   // cc#677: ZERO-VETO — no GATED/earnings banners; risk conditions live in the alert chip row above.
   const cardsHtml = winner
-    ? '<div class="v4-winner">'+cardHtml(winner)+'</div>'
-      + (loser
-        ? '<div class="v4-loser"><div class="v4-loser-line">'+_v4styleChip(loser.label)
-          +' <b>'+Number(loser.score).toFixed(2)+'</b><span style="color:var(--dim)">/'+(loser.max||15)+'</span> · '
-          +'<span class="v4-badge '+loser.verdict+'">'+loser.verdict+'</span>'
-          +'<button class="v4-loser-view" onclick="v4ToggleLoser(this)">view</button></div>'
-          +'<div class="v4-loser-full" style="display:none">'+cardHtml(loser)+'</div></div>'
-        : '')
+    ? '<div class="v4-winner">'+cardHtml(winner)+'</div>'+stripHtml
     : '<div class="card" style="padding:16px 18px;color:var(--red)">No scorecard could be computed (missing data).</div>';
   const bestChip = d.best_label?_v4styleChip(d.best_label):'—';
   const el=document.getElementById('v4Result');
@@ -1170,9 +1186,11 @@ async function loadDetail(sym, uiMode){
   if(box.classList.contains('show')){ box.classList.remove('show'); box.innerHTML=''; return; }  // toggle
   box.classList.add('show');
   box.innerHTML='<div class="v4-det-msg">Loading detailed structure for '+sym+'…</div>';
-  const side=(uiMode==='SHORT')?'SELL':'BUY';
+  // cc#1033: the detail follows the BEST card, not the position side — otherwise the evidence
+  // panel explains a card the user is not looking at. side=ALL now scores four and loads the
+  // evidence for the winner (the endpoint no longer coerces ALL to BUY).
   try{
-    const r=await fetchWithTimeout('/api/trade-check/v4/detail?symbol='+encodeURIComponent(sym)+'&side='+side);
+    const r=await fetchWithTimeout('/api/trade-check/v4/detail?symbol='+encodeURIComponent(sym)+'&side=ALL');
     const d=await r.json();
     if(d.error){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">'+d.error+'</div>';return;}
     renderTcDetail(box, d, uiMode);

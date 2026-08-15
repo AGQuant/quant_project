@@ -271,7 +271,12 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
                 cards.append(score_card(d, st, s))
         if not cards:
             continue
-        best = max(cards, key=lambda c: c["score"])
+        # cc#1033 (TC_BEST_OF_FOUR_V1, session_log 22353): best is the highest score/max PERCENTAGE,
+        # identical to _compute_result in tc_v4_dual.py. This is the SHARED-MODULE CONTRACT the
+        # amendment names: the scanner picks its best the same way the single-symbol check does, or
+        # the two disagree about the same stock and the parity probe below stops meaning anything.
+        # The cards themselves are still scored by the locked rulebook — only the CHOICE changes.
+        best = max(cards, key=lambda c: (c["score"] / c["max"]) if c.get("max") else 0)
         if verdict != "ALL" and best["verdict"] != verdict:
             continue
         # cc#405: failed rule ids for the best card (0-scored only; 0.5 partials excluded) + V8 basket
@@ -282,6 +287,8 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             "sector_day": seg_day.get(d.get("segment")),   # cc#455: segment mcap-weighted day % (last-tick)
             "gvm": _r(d.get("gvm_score")),                  # cc#455: for the top-10 tie-break
             "best_label": best["label"], "best_score": best["score"], "verdict": best["verdict"],
+            # cc#1033: the ratio the choice was made on, mirroring best_pct in the dual payload.
+            "best_pct": (round(best["score"] / best["max"], 4) if best.get("max") else None),
             "scores": {c["label"]: c["score"] for c in cards},
             "failed_rules": failed,
             "v8_basket": ctx.get("v8_baskets", {}).get(sym, []),

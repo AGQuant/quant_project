@@ -1230,13 +1230,23 @@ def _compute_result(d, symbol, side):
     for s in sides:
         for st in STYLES:
             cards.append(score_card(d, st, s))
-    best = max(cards, key=lambda c: c["score"], default=None)
+    # cc#1033 amendment (TC_BEST_OF_FOUR_V1, session_log 22353, founder-locked): BEST is the highest
+    # score/max PERCENTAGE, not the highest raw score. The four cards do not share a denominator —
+    # BUY-REV is out of 20 while SELL-REV is out of 13 — so a raw-score max quietly favours whichever
+    # card has the most points available, which is how NBCC showed a BUY card on a stock down 6.5%
+    # in a week. A ratio compares like with like. Scoring, rules, bands and card_maxes are untouched;
+    # only the CHOICE between already-scored cards changes.
+    def _pct(c):
+        return (c["score"] / c["max"]) if c.get("max") else 0
+    best = max(cards, key=_pct, default=None)
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
         "alerts": _alerts(d),                       # cc#677: informational chips only (never gate)
         "best": best,
         "best_label": best["label"] if best else None,
         "best_score": best["score"] if best else None,
+        # cc#1033: the ratio the choice was made on, so a surface can print it without recomputing.
+        "best_pct": (round(_pct(best), 4) if best else None),
         "best_verdict": (best["verdict"] if best else "REJECT"),   # score bands alone
         "cards": cards,
         "pivots": {k: _r(v) for k, v in d["pivots"].items()},
@@ -1367,11 +1377,13 @@ def _fib_evidence(d):
 def trade_check_v4_detail(symbol, side="BUY"):
     """cc#408: dual result + a full evidence block for the inline structure-style detail panels."""
     symbol = (symbol or "").strip().upper()
-    side = (side or "BUY").strip().upper()
-    if side == "ALL":
-        side = "BUY"
-    if side not in ("BUY", "SELL"):
-        return {"error": f"side must be BUY or SELL, got {side!r}"}
+    side = (side or "ALL").strip().upper()
+    # cc#1033 item 4: side=ALL is no longer coerced to BUY. That coercion is what made the detail
+    # panel answer a different question from the card above it — the card scored four styles and the
+    # detail silently scored two. ALL now computes all four, and the evidence block (which takes one
+    # side) is loaded for the BEST card's side, so the evidence explains the card actually shown.
+    if side not in ("BUY", "SELL", "ALL"):
+        return {"error": f"side must be BUY, SELL or ALL, got {side!r}"}
     if not symbol:
         return {"error": "symbol required"}
     try:
@@ -1382,7 +1394,11 @@ def trade_check_v4_detail(symbol, side="BUY"):
             if d["cmp"] is None:
                 return {"error": f"no CMP available for {symbol}"}
             res = _compute_result(d, symbol, side)
-            res["evidence"] = _evidence(cur, d, side)
+            ev_side = side
+            if side == "ALL":
+                ev_side = ((res.get("best") or {}).get("side")) or "BUY"
+            res["evidence"] = _evidence(cur, d, ev_side)
+            res["evidence_side"] = ev_side   # cc#1033: stated, so a reader never has to infer it
             return res
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -1406,7 +1422,7 @@ def v4_dual_get(symbol: str, side: str = "ALL"):
 
 
 @router.get("/api/trade-check/v4/detail")
-def v4_detail_get(symbol: str, side: str = "BUY"):
+def v4_detail_get(symbol: str, side: str = "ALL"):
     """cc#408: dual result + evidence block for the inline structure-style detail panels."""
     return trade_check_v4_detail(symbol, side)
 
