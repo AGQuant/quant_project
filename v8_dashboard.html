@@ -2941,7 +2941,13 @@ const V8_COLS=[
   //
   // (3) ONE LINE, not two. The pill was in a block <div>, which is what stacked the symbol cell into
   //     a second row. Symbol · markers · status · pill now sit inline.
-  ["symbol","Symbol",     x=>`<td class="sym"><span class="dc-link" onclick="${x._qa}">${x.symbol}</span>${posTags(x)}${x._statusHtml||''}${x._inlineStrip&&window.ScorrCardRow?ScorrCardRow(x.symbol):''}${x.basket?' '+basketPill(x.basket):''}</td>`],
+  // cc#1034 revokes two clauses of its own predecessor, and both were mine to carry:
+  //   * the inline C·A·R·D strip is gone from EVERY table row. cc#1028 gave it a per-view flag and
+  //     kept it on baskets; the founder wants the symbol-click popup to be the one interaction on
+  //     both surfaces, so the flag and the call are deleted rather than switched off.
+  //   * the basket pill renders on MASTER only. On a per-basket tab it repeats the tab's own name
+  //     into every row. Master's book mixes baskets, so there it earns its place.
+  ["symbol","Symbol",     x=>`<td class="sym"><span class="dc-link" onclick="${x._qa}">${x.symbol}</span>${posTags(x)}${x._statusHtml||''}${x._showPill&&x.basket?' '+basketPill(x.basket):''}</td>`],
   // cc#1030 item 1: the Status badge is the ONE permitted basket-specific addition, and it belongs
   // INLINE in the symbol cell (above), not in a column of its own — a column would make the basket
   // table one wider than master and break the fit test. Kept as a definition only so nothing that
@@ -2987,7 +2993,7 @@ function v8NormRow(x,ctx){
   // cc#1028 item 4: the inline C·A·R·D strip is a BASKET-ONLY thing (its cc#798 home). Master rows
   // carry the click-to-popup and nothing else — the per-row button strip on every master row was
   // part of what the founder rejected. One symbol renderer, one flag, no forked cell.
-  x._inlineStrip=(ctx.surface==='basket');
+  x._showPill=(ctx.surface==='master');   // cc#1034: the pill repeats the tab name on a basket tab
   // The status badge is a basket concept; a master row is always OPEN, so 22301 lets it stay
   // implicit — the cell renders empty rather than repeating "OPEN" on every row.
   x._statusHtml=(ctx.surface==='basket')?(statusBadge(st,x.signal_reason)+_banChip(x)):'';
@@ -2998,7 +3004,7 @@ function v8NormRow(x,ctx){
   ['pp','r1','s1'].forEach(k=>{if(x[k]===undefined)x[k]=null;});
   x.sector_seg=seg; x.sector_day=sd?sd.day_pct:null; x.sector_sd=sd||null;
   if(!isOpen){   // a SIGNAL row is not a position: dashes, never invented values
-    x.days=x.entry_ts=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.day_pnl_pct=null;
+    x.days=x.entry_ts=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.day_pnl_pct=x.potential_left=x.pot_pct=null;
     return x;
   }
   const p=(ctx.paper&&ctx.paper[x.symbol+'|'+String(x.side||'').toUpperCase()])||{};
@@ -3019,6 +3025,14 @@ function v8NormRow(x,ctx){
   }
   const entryVal=entry*qty;
   if(x.net_pnl_pct==null)x.net_pnl_pct=(x.net_pnl!=null&&isFinite(entryVal)&&entryVal>0)?(x.net_pnl/entryVal*100):null;
+  // cc#1034: room to target, side-adjusted — THE SAME formula renderMaster uses, moved here so both
+  // surfaces read one implementation instead of master having it and baskets printing a dash. This
+  // was the whole defect: the shared cell renders x.potential_left, and nothing ever set it on a
+  // basket row.
+  if(x.potential_left==null&&x.target!=null&&isFinite(cmp)&&qty)
+    x.potential_left=(isShort?(cmp-x.target):(x.target-cmp))*qty;
+  if(x.pot_pct==null&&x.target!=null&&isFinite(cmp)&&cmp)
+    x.pot_pct=(isShort?(cmp-x.target):(x.target-cmp))/cmp*100;
   if(x.day_pnl_pct==null){
     const prev=Number(x.prev_close!=null?x.prev_close:p.prev_close);
     const dp=(isFinite(cmp)&&isFinite(prev)&&prev>0)?((cmp/prev-1)*100):null;
@@ -3147,10 +3161,10 @@ function markerLegendPopover(){
 // cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
 // itself stopPropagation, so their own clicks don't trigger this).
 try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
-// cc#1028: bkRow is a thin call into the shared renderer over the basket VIEW. The inline C·A·R·D
-// strip lives HERE and only here (its cc#798 home): v8NormRow sets _inlineStrip for this surface,
-// so the symbol cell stays ONE renderer with a per-view flag rather than two cells that drift.
-// The click-to-popup is on BOTH surfaces and is untouched (cc#1023 scope A).
+// cc#1028, corrected by cc#1034: bkRow is a thin call into the shared renderer over the basket
+// VIEW. The inline C·A·R·D strip that used to live here is GONE from every table row — the
+// symbol-click popup is the one interaction on both surfaces — and the basket pill renders on
+// master only, because on a per-basket tab it just repeats the tab's own name.
 function bkRow(x,isSell){return v8TableRow(x,v8View(V8_VIEW_BASKET));}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     // cc#1023 part A: same quick-actions popup on the mobile card's symbol as on the desktop row.
