@@ -84,7 +84,7 @@ CATEGORY_ORDER = ["index", "volatility", "commodity", "currency", "crypto"]
 CATEGORY_LABEL = {"index": "Indices", "volatility": "Volatility", "commodity": "Commodities",
                   "currency": "Currency", "crypto": "Crypto"}
 
-# ── cc#1038 TAPE ORDER — RELEVANCE, NOT ALPHABET (founder 15-Aug-2026) ────────────────────────
+# ── cc#1039 TAPE ORDER — RELEVANCE, NOT ALPHABET (founder 15-Aug-2026) ────────────────────────
 # Tiles used to sort by NAME inside each category, which is why DAX led the strip: "DAX" simply
 # sorts before "Dow". Alphabet carries no information about which market matters, so the eye had to
 # hunt for the US block every time.
@@ -258,7 +258,7 @@ def build_strip(cur) -> Dict[str, Any]:
             "has_intraday": sym not in NO_INTRADAY_FEED,
         })
 
-    # cc#1038: category first (unchanged), then TAPE_ORDER rank, then name as the tie-break for
+    # cc#1039: category first (unchanged), then TAPE_ORDER rank, then name as the tie-break for
     # anything unranked. The name fallback is what keeps an unlisted symbol visible instead of
     # letting a missing rank decide anything.
     order = {c: i for i, c in enumerate(CATEGORY_ORDER)}
