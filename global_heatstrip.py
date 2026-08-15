@@ -84,6 +84,34 @@ CATEGORY_ORDER = ["index", "volatility", "commodity", "currency", "crypto"]
 CATEGORY_LABEL = {"index": "Indices", "volatility": "Volatility", "commodity": "Commodities",
                   "currency": "Currency", "crypto": "Crypto"}
 
+# ── cc#1038 TAPE ORDER — RELEVANCE, NOT ALPHABET (founder 15-Aug-2026) ────────────────────────
+# Tiles used to sort by NAME inside each category, which is why DAX led the strip: "DAX" simply
+# sorts before "Dow". Alphabet carries no information about which market matters, so the eye had to
+# hunt for the US block every time.
+#
+# The order below is the order an Indian desk actually reads the world in, which is time-of-day:
+#
+#   INDICES     US first — they closed overnight and they set the gap. Dow, Nasdaq, S&P 500.
+#               Then ASIA — Nikkei and Hang Seng are trading alongside NSE right now.
+#               Then EUROPE — DAX and FTSE open 12:30 IST and matter to the second half.
+#               Overnight -> now -> later. That is the whole story of the row.
+#   COMMODITIES Crude first: it is the single biggest macro input for India (import bill, CPI,
+#               the rupee). Brent is the India-relevant benchmark, WTI second. Then the metals,
+#               then Natural Gas, which moves nothing here.
+#   CURRENCY    USDINR before DXY. It is our currency; DXY is the backdrop that explains it.
+#
+# NOT a filter and NOT a whitelist. Anything absent falls to the END of its own category and then
+# sorts by name, so a symbol added to global_indices still appears — it just is not ranked yet.
+TAPE_ORDER: Dict[str, int] = {s: i for i, s in enumerate([
+    "^DJI", "^IXIC", "^GSPC",              # US   — set the gap
+    "^N225", "^HSI",                       # Asia — trading with us
+    "^GDAXI", "^FTSE",                     # Europe — opens 12:30 IST
+    "INDIAVIX",
+    "BZ=F", "CL=F", "GC=F", "SI=F", "NG=F",
+    "INR=X", "DX-Y.NYB",
+    "BTC-USD",
+])}
+
 
 def _conn():
     return psycopg2.connect(_DB)
@@ -230,8 +258,13 @@ def build_strip(cur) -> Dict[str, Any]:
             "has_intraday": sym not in NO_INTRADAY_FEED,
         })
 
+    # cc#1038: category first (unchanged), then TAPE_ORDER rank, then name as the tie-break for
+    # anything unranked. The name fallback is what keeps an unlisted symbol visible instead of
+    # letting a missing rank decide anything.
     order = {c: i for i, c in enumerate(CATEGORY_ORDER)}
-    tiles.sort(key=lambda t: (order.get(t["category"], 99), t["name"] or t["symbol"]))
+    tiles.sort(key=lambda t: (order.get(t["category"], 99),
+                              TAPE_ORDER.get(t["symbol"], 999),
+                              t["name"] or t["symbol"]))
 
     # ── cc#849: the five capabilities the retiring Global Indices tab carries ─────────────────
     cat_counts: Dict[str, int] = {}
