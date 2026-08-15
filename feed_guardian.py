@@ -146,10 +146,16 @@ def _mark_alert(state, key, now):
     state.setdefault("alerts", {})[key] = now.isoformat()
 
 
-# ── cc#844: THE HEARTBEAT AGE CONTRACT ────────────────────────────────────────────────────────────
-# worker_heartbeat.last_beat is a NAIVE `TIMESTAMP` written by the worker with Postgres NOW(), so it
-# stores UTC. This module works in IST (_ist_now). Subtracting one from the other — which is exactly
-# what both call sites did — adds a permanent, invented 5h30m to every reading.
+# ── cc#844 / cc#1022: THE HEARTBEAT AGE CONTRACT ──────────────────────────────────────────────────
+# THE CONTRACT, as of cc#1022 (15-Aug-2026): worker_heartbeat.last_beat and boot_ts are BOTH naive
+# IST. The worker writes last_beat as (NOW() AT TIME ZONE 'Asia/Kolkata') and boot_ts from its own
+# IST clock, so any age here is computed against the DB clock CONVERTED TO IST.
+#
+# WHAT IT USED TO BE, AND WHY THAT HISTORY STAYS WRITTEN DOWN: until this card last_beat was written
+# with bare Postgres NOW() on a UTC session, so one row carried two bases 5h30m apart — last_beat
+# UTC-naive, boot_ts IST-naive. This module works in IST (_ist_now), and subtracting one from the
+# other — which is exactly what both call sites did — added a permanent, invented 5h30m to every
+# reading.
 #
 # The damage was not theoretical. On 03-Aug the guardian reported the worker heartbeat as "336 min
 # old" while it was genuinely 6 minutes old, fired WORKER SILENT to Telegram, and pushed the master
@@ -159,11 +165,27 @@ def _mark_alert(state, key, now):
 # 102/154/96/65/75 rows in the 09:30-14:30 IST hours and v8_metrics was 1 minute fresh. A P0 was
 # raised and a founder's buy-shortlist was withheld on the strength of a subtraction error.
 #
-# So the age is now computed BY POSTGRES, against the DB clock, with the stored basis stated
-# explicitly. No Python-side timezone assumption can re-enter, and it needs no data migration.
+# The damage was not theoretical. On 03-Aug the guardian reported the worker heartbeat as "336 min
+# old" while it was genuinely 6 minutes old, fired WORKER SILENT to Telegram, and pushed the master
+# watchdog permanently RED. A DB audit then read that alert alongside other UTC-stored timestamps
+# (v8_metrics.computed_at, ops_log.session_ts — both naive UTC too) as if they were IST, and
+# concluded the whole app had been hung for 5.5 hours during live trading. It had not: ops_log had
+# 102/154/96/65/75 rows in the 09:30-14:30 IST hours and v8_metrics was 1 minute fresh. A P0 was
+# raised and a founder's buy-shortlist was withheld on the strength of a subtraction error.
+#
+# cc#844 fixed that by COMPENSATING here — computing the age in Postgres against the stated UTC
+# basis. Nothing was broken by it, but the compensation was itself the hazard: the next reader to do
+# the obvious thing and subtract from IST would have re-created the same phantom. cc#1022 removes
+# the mixed basis at the writer instead, so there is nothing left to compensate for. The age is
+# still computed BY POSTGRES against the DB clock, now converted to IST to match what is stored.
+# No Python-side timezone assumption can re-enter, and it needs no data migration.
+#
+# ORDERING, PERMANENTLY: this reader may only ever be as IST as the writer. Flipping it while the
+# worker still wrote UTC would have read every beat as 5h30m stale and fired a false WORKER SILENT —
+# cc#844 re-created deliberately. Step A shipped and beat first; see the cc#1022 deploy-order gate.
 def _heartbeat_age_min(cur):
     """Minutes since the worker's last heartbeat, or None if it has never written one."""
-    cur.execute("""SELECT ROUND((EXTRACT(EPOCH FROM (NOW() - last_beat AT TIME ZONE 'UTC')) / 60.0)::numeric, 1)
+    cur.execute("""SELECT ROUND((EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - last_beat)) / 60.0)::numeric, 1)
                    FROM worker_heartbeat WHERE id = 1""")
     r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else None
@@ -509,7 +531,9 @@ def offhours_liveness_tick():
                     if not _throttled(state, "worker_silent", now):
                         _telegram(f"WORKER SILENT — feed worker heartbeat {age:.0f} min old "
                                   f"(>{HEARTBEAT_STALE_MIN}). truthful-friendship appears DOWN. "
-                                  f"Last beat {(last_beat + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')} IST.")
+                                  # cc#1022: last_beat IS IST now — the manual +5:30 that converted
+                                  # the old UTC storage would double-shift the displayed time.
+                                  f"Last beat {last_beat.strftime('%d-%b %H:%M')} IST.")
                         _mark_alert(state, "worker_silent", now)
                         out["alerted"] = True
                     _oplog(cur, "worker_silent", {"age_min": round(age, 1),
