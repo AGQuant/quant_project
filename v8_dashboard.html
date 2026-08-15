@@ -3397,7 +3397,21 @@ async function loadFunnelInline(basketId,panelIdx){
   let inner='';
   if(fd&&fd.stages){
     const maxSurv=Math.max(...fd.stages.map(s=>s.survivors||0),1);
-    inner+=`<div class="ptitle" style="margin-top:4px">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} -> final ${fd.final} · ${fd.filter_count} filters</span></div>`;
+    // cc#1025 FUNNEL_TRUTH_V1: the header is rendered ENTIRELY from payload fields — universe,
+    // final and filter_count all come from the endpoint, which derives filter_count from the
+    // BASKET_FILTERS registry. Nothing about the gate count is decided here any more.
+    //
+    // stale_format is the honest branch. A stored counts row with no _universe key is a legacy row
+    // from the 15:45 EOD clobber this card removed: its zeros are wreckage, not a reading of the
+    // market. Printing "UNIVERSE 0 -> FINAL 0" under three empty bars states a falsehood with
+    // total confidence, which is exactly what the founder saw on 15-Aug. So the header says the
+    // format is stale and when it refreshes, and the bars below still render whatever the row
+    // holds — visible, but no longer labelled as today's truth.
+    inner+=`<div class="ptitle" style="margin-top:4px">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">${fd.stale_format
+      ?'LAST SESSION FORMAT STALE — REFRESHES NEXT TRADING DAY'
+      :`UNIVERSE ${fd.universe} -> FINAL ${fd.final} · ${fd.filter_count} FILTERS · ALL MUST PASS`}</span></div>`;
+    if(fd.stale_format)inner+=`<div style="font-size:10px;color:var(--amber);margin-bottom:4px">These counts were written in a retired format (no universe recorded), so they are shown but not treated as this session's numbers. The live 5-min writer refills them next trading day.</div>`;
+    if(fd.qualified_parity==='mismatch')inner+=`<div style="font-size:10px;color:var(--amber);margin-bottom:4px">Funnel final and the qualified table disagree for this basket — the engine logged the counts. Shown as-is, nothing corrected here.</div>`;
     inner+=`<div style="font-size:10px;color:var(--dim);margin-bottom:4px">Tap any row to list the passing symbols with their actual values.</div>`;
     inner+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
       const rid=`fs-${basketId}-${s.key||s.metric}`.replace(/[^a-zA-Z0-9_-]/g,'_');

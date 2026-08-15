@@ -1565,6 +1565,41 @@ def _sr_dynamic_target(cmp, s1, s2):
 # the registry+handler and it disappears from this funnel automatically. Labels carry spaces so the
 # dashboard renders them verbatim via metric.replace. (cc#606: buy_reversal V6 = 7 cheap gates,
 # day_1d>0 replaced the heavy true_weekly_rsi>=70 FINAL stage.)
+# ── cc#1025 FUNNEL_TRUTH_V1 ──────────────────────────────────────────────────────────────────────
+# How many gates a basket has, asked of the registry, every time. Every funnel_detail and
+# stock_passcount payload used to carry this as a LITERAL, and literals rot: buy_reversal said 7
+# when the registry had grown to 8 (s1_touch), sell_momentum said 9 on both its endpoints after
+# cc#854 removed true_weekly_rsi and left it at 8, and buy_momentum managed to disagree with ITSELF
+# — 8 in the funnel, 7 in the pass-count. A reader had no way to tell which number was true.
+# BASKET_FILTERS is already the single source (cc#607 Phase A); this just stops copying out of it.
+def _n_filters(basket: str) -> int:
+    return len(basket_stage_rows(basket))
+
+
+def _qualified_parity(cur, basket: str, score_qualified, score_date=None):
+    """cc#1025 item 4: does the funnel's own final count match the qualified table it claims to
+    describe? Compares _score_qualified against COUNT(*) in v8_qualified for the same basket+date.
+
+    DISPLAY-ONLY, and deliberately so: it returns a label the payload carries and logs a warning on
+    a mismatch. It never blocks or edits the response — a parity check that can break the page it is
+    checking is worse than the drift it looks for. Returns 'ok' | 'mismatch' | 'unknown'.
+    """
+    if score_qualified is None:
+        return "unknown"
+    try:
+        cur.execute("SELECT COUNT(*) FROM v8_qualified WHERE basket=%s AND signal_date=%s",
+                    (basket, score_date or date.today()))
+        n = int(cur.fetchone()[0])
+    except Exception as e:
+        log.warning("cc#1025 qualified_parity %s: count failed (%s)", basket, e)
+        return "unknown"
+    if n == int(score_qualified):
+        return "ok"
+    log.warning("cc#1025 QUALIFIED PARITY MISMATCH %s: funnel says %s, v8_qualified holds %s",
+                basket, score_qualified, n)
+    return "mismatch"
+
+
 _BR_V5_STAGES = basket_stage_rows("buy_reversal")
 
 def br_funnel_detail():
@@ -1576,7 +1611,15 @@ def br_funnel_detail():
     strict-AND of all 7. Empty stages (all 0) until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            counts, _asof = _latest_funnel_counts(cur, "buy_reversal")   # cc#424: last-session as-of
+            counts, _asof = _latest_funnel_counts(cur, "buy_reversal")
+            # cc#1025 item 3: a stored row with no _universe key is a LEGACY pre-fix EOD row —
+            # the shape the 15:45 clobber used to write. Its zeros are not a reading of the
+            # market, they are the wreckage of a bad writer, so the payload says so and the
+            # header refuses to print them as truth.
+            stale_format = "_universe" not in (counts or {})
+            # cc#1025 item 4: display-only parity against the table this funnel describes.
+            qualified_parity = _qualified_parity(cur, "buy_reversal", counts.get("_score_qualified"), _asof)
+   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
@@ -1592,9 +1635,10 @@ def br_funnel_detail():
         return {
             "basket": "buy_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final,
-            "filter_count": 7, "n_filters": 7,
-            "gate_type": "independent per-filter counts; final = strict AND of all 7",
+            "filter_count": _n_filters("buy_reversal"), "n_filters": _n_filters("buy_reversal"),
+            "gate_type": f"independent per-filter counts; final = strict AND of all {_n_filters('buy_reversal')}",
             "score_qualified": final, "pivot_pass": final,
+            "stale_format": stale_format, "qualified_parity": qualified_parity,
             "stages": stages, **BASKET_META.get("buy_reversal", {}),
         }
     except Exception as e:
@@ -1732,7 +1776,15 @@ def sr_funnel_detail():
     gate survivor count; only this display list was missing the stage."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            counts, _asof = _latest_funnel_counts(cur, "sell_reversal")   # cc#424: last-session as-of
+            counts, _asof = _latest_funnel_counts(cur, "sell_reversal")
+            # cc#1025 item 3: a stored row with no _universe key is a LEGACY pre-fix EOD row —
+            # the shape the 15:45 clobber used to write. Its zeros are not a reading of the
+            # market, they are the wreckage of a bad writer, so the payload says so and the
+            # header refuses to print them as truth.
+            stale_format = "_universe" not in (counts or {})
+            # cc#1025 item 4: display-only parity against the table this funnel describes.
+            qualified_parity = _qualified_parity(cur, "sell_reversal", counts.get("_score_qualified"), _asof)
+   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage10  = counts.get("_stage9_survivors")   # cc#514: value is correct (10 cheap gates); key name is a legacy quirk
         stage10  = int(stage10) if stage10 is not None else None
@@ -1751,10 +1803,11 @@ def sr_funnel_detail():
             stages.append(stage)
         return {
             "basket": "sell_reversal", "score_date": str(_asof or date.today()),
-            "universe": universe, "final": final, "filter_count": 11, "n_filters": 11,
+            "universe": universe, "final": final, "filter_count": _n_filters("sell_reversal"), "n_filters": _n_filters("sell_reversal"),
             "stage9_survivors": stage10,
             "gate_type": "independent per-filter counts; final = strict AND of all 11",
             "score_qualified": final, "pivot_pass": final,
+            "stale_format": stale_format, "qualified_parity": qualified_parity,
             "stages": stages, **BASKET_META.get("sell_reversal", {}),
         }
     except Exception as e:
@@ -1817,13 +1870,13 @@ def sr_stock_passcount():
                     (passed if (twr is not None and twr <= 45.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")
-                out.append({"symbol": sym, "passed": len(passed), "total": 11,
+                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("sell_reversal"),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_reversal", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 11, "stocks": out,
+                "universe": len(out), "filter_count": _n_filters("sell_reversal"), "stocks": out,
                 "v21_enabled": False, **BASKET_META.get("sell_reversal", {})}
     except Exception as e:
         raise HTTPException(500, f"sr_stock_passcount failed: {e}")
@@ -1892,7 +1945,7 @@ def sr_stock_detail(symbol: str):
             rows[-1]["note"] = "engine evaluates true weekly RSI only after all 10 cheap gates pass"
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1, "s2": s2,
-                "target": tgt, "room_pct": room, "passed": passed, "total": 11, "rows": rows,
+                "target": tgt, "room_pct": room, "passed": passed, "total": _n_filters("sell_reversal"), "rows": rows,
                 "spec": "SELL_REVERSAL_V6.1 cc#502"}
     except HTTPException:
         raise
@@ -1912,7 +1965,15 @@ def sm_funnel_detail():
     Final = strict-AND of all 9. Empty until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            counts, _asof = _latest_funnel_counts(cur, "sell_momentum")   # cc#424: last-session as-of
+            counts, _asof = _latest_funnel_counts(cur, "sell_momentum")
+            # cc#1025 item 3: a stored row with no _universe key is a LEGACY pre-fix EOD row —
+            # the shape the 15:45 clobber used to write. Its zeros are not a reading of the
+            # market, they are the wreckage of a bad writer, so the payload says so and the
+            # header refuses to print them as truth.
+            stale_format = "_universe" not in (counts or {})
+            # cc#1025 item 4: display-only parity against the table this funnel describes.
+            qualified_parity = _qualified_parity(cur, "sell_momentum", counts.get("_score_qualified"), _asof)
+   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage8   = counts.get("_stage8_survivors")
         stage8   = int(stage8) if stage8 is not None else None
@@ -1931,10 +1992,11 @@ def sm_funnel_detail():
             stages.append(stage)
         return {
             "basket": "sell_momentum", "score_date": str(_asof or date.today()),
-            "universe": universe, "final": final, "filter_count": 9, "n_filters": 9,
+            "universe": universe, "final": final, "filter_count": _n_filters("sell_momentum"), "n_filters": _n_filters("sell_momentum"),
             "stage8_survivors": stage8,
             "gate_type": "independent per-filter counts; final = strict AND of all 9",
             "score_qualified": final, "pivot_pass": final,
+            "stale_format": stale_format, "qualified_parity": qualified_parity,
             "stages": stages, **BASKET_META.get("sell_momentum", {}),
         }
     except Exception as e:
@@ -1991,13 +2053,13 @@ def sm_stock_passcount():
                     (passed if (twr is not None and twr <= 40.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")
-                out.append({"symbol": sym, "passed": len(passed), "total": 9,
+                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("sell_momentum"),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_momentum", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 9, "stocks": out,
+                "universe": len(out), "filter_count": _n_filters("sell_momentum"), "stocks": out,
                 "v21_enabled": False, **BASKET_META.get("sell_momentum", {})}
     except Exception as e:
         raise HTTPException(500, f"sm_stock_passcount failed: {e}")
@@ -2059,7 +2121,7 @@ def sm_stock_detail(symbol: str):
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s2": s2,
                 "s2_clearance_pct": round(s2c, 2) if s2c is not None else None,
-                "passed": passed, "total": 9, "rows": rows,
+                "passed": passed, "total": _n_filters("sell_momentum"), "rows": rows,
                 "spec": "SELL_MOMENTUM_V4 cc#502"}
     except HTTPException:
         raise
@@ -2082,6 +2144,14 @@ def bm_funnel_detail():
     try:
         with _conn() as conn, conn.cursor() as cur:
             counts, _asof = _latest_funnel_counts(cur, "buy_momentum")
+            # cc#1025 item 3: a stored row with no _universe key is a LEGACY pre-fix EOD row —
+            # the shape the 15:45 clobber used to write. Its zeros are not a reading of the
+            # market, they are the wreckage of a bad writer, so the payload says so and the
+            # header refuses to print them as truth.
+            stale_format = "_universe" not in (counts or {})
+            # cc#1025 item 4: display-only parity against the table this funnel describes.
+            qualified_parity = _qualified_parity(cur, "buy_momentum", counts.get("_score_qualified"), _asof)
+
         universe = int(counts.get("_universe", 0) or 0)
         stage6   = counts.get("_stage6_survivors")
         stage6   = int(stage6) if stage6 is not None else None
@@ -2111,10 +2181,11 @@ def bm_funnel_detail():
         })
         return {
             "basket": "buy_momentum", "score_date": str(_asof or date.today()),
-            "universe": universe, "final": final, "filter_count": 8, "n_filters": 8,
+            "universe": universe, "final": final, "filter_count": _n_filters("buy_momentum"), "n_filters": _n_filters("buy_momentum"),
             "stage6_survivors": stage6, "hard_qualified": hard_qualified,
             "gate_type": "HARD gates (6) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
             "score_qualified": final, "pivot_pass": final,
+            "stale_format": stale_format, "qualified_parity": qualified_parity,
             "stages": stages, **BASKET_META.get("buy_momentum", {}),
         }
     except Exception as e:
@@ -2190,7 +2261,7 @@ def bm_stock_passcount():
                         failed.append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")   # skipped -- not evaluated, caps at <=6/7
-                out.append({"symbol": sym, "passed": len(passed), "total": 7,
+                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("buy_momentum"),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "score": score, "score_total": 10,
@@ -2199,7 +2270,7 @@ def bm_stock_passcount():
         out.sort(key=lambda x: (x["passed"], x["score"] if x["score"] is not None else -1,
                                  x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_momentum", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 7, "stocks": out,
+                "universe": len(out), "filter_count": _n_filters("buy_momentum"), "stocks": out,
                 "v21_enabled": False, **BASKET_META.get("buy_momentum", {})}
     except Exception as e:
         raise HTTPException(500, f"bm_stock_passcount failed: {e}")
@@ -2275,7 +2346,7 @@ def bm_stock_detail(symbol: str):
             score_rows.append({"filter": "true_weekly_rsi (score band)", "required": "60 to 85",
                                 "actual": _fmt(twr, 1), "pass": twr_ok})
 
-        return {"symbol": sym, "cmp": cmp, "passed": passed, "total": 7, "rows": rows,
+        return {"symbol": sym, "cmp": cmp, "passed": passed, "total": _n_filters("buy_momentum"), "rows": rows,
                 "score": score, "score_total": 10, "score_rows": score_rows,
                 "score_qualified": bool(score is not None and score >= 7),
                 "spec": "BUY_MOMENTUM_V3 cc#502"}

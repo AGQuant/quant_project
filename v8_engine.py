@@ -383,26 +383,28 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
         if basket == 'sell_overbought':
             continue
 
-        universe = all_metrics[:]
-        funnel = {}
-        for metric, bounds in filters.items():
-            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
-            funnel[metric] = len(universe)
-
-        qualified_symbols = universe
-
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (basket, score_date) DO UPDATE SET
-                        counts=EXCLUDED.counts, computed_at=NOW() AT TIME ZONE 'Asia/Kolkata'   -- cc#855: IST canon
-                """, (basket, target_date, json.dumps(funnel)))
-            conn.commit()
-        except Exception as e:
-            log.warning(f"write_signals funnel {basket}: {e}")
+        # cc#1025 FUNNEL_TRUTH_V1: THE EOD FUNNEL WRITE IS GONE. This loop used to walk
+        # FILTER_CONFIG, shrink the universe cumulatively, and upsert the result into
+        # v8_funnel_counts at 15:45 — clobbering the correct row the LIVE 5-min writer had built
+        # during the session, every single day.
+        #
+        # Four things were wrong with it at once:
+        #   * CUMULATIVE, not independent. cc#364 fixed the funnel to count each gate against the
+        #     whole universe; this loop still narrowed one gate into the next, so the numbers meant
+        #     something different from the ones the dashboard was built to read.
+        #   * STALE REGISTRY. It iterated FILTER_CONFIG, which has no s1_touch leg and no _universe
+        #     key, so the row it wrote was missing fields the endpoint expects.
+        #   * IT DIED AT day_1d. The 18-Jun rule sets day_1d=None at EOD, so _passes filtered
+        #     everything out and every later stage recorded 0. The 14-Aug row is the proof:
+        #     day_1d 0, gvm_score 0, and no _universe at all.
+        #   * IT OVERWROTE. ON CONFLICT DO UPDATE, at 15:46, on top of the live row.
+        # The net effect on screen was UNIVERSE 0 -> FINAL 0 with three empty bars, off-hours,
+        # every day. The live writer in v8_signal_writer.py owns this table (one independent-count
+        # funnel per handler); the EOD engine now writes NOTHING to it.
+        qualified_symbols = [s for s in all_metrics
+                             if all(_passes(s.get(metric),
+                                            *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+                                    for metric, bounds in filters.items())]
 
         # cc#171 fix 1: the DELETE-and-rewrite here erased the intraday audit trail --
         # live-writer qual rows (with their real qualification signal_ts) were wiped at
@@ -464,31 +466,17 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             except Exception as e:
                 log.warning(f"write_signals history {basket} {sym}: {e}")
 
-    # sell_overbought funnel (cc#98): SO is skipped in the loop above because its
-    # qualification uses pivot-based OR logic (5d high vs 0.9*R1/R2) that the simple
-    # FILTER_CONFIG funnel cannot express. Reuse the canonical, locked 5-stage helper
-    # in v8_endpoints (SO signal logic unchanged -- counting only) and write the same
-    # {metric: survivors} shape the other baskets store, so the dashboard SO tab renders.
-    # Gated to same-day EOD: the helper reads current-day metrics/pivots, so writing it
-    # under a historical replay date would be inaccurate -- skip in that case.
-    if target_date == date.today():
-        try:
-            from v8_endpoints import _so_funnel_stages
-            so_stages, _so_total = _so_funnel_stages()
-            so_counts = {st["metric"]: st["survivors"] for st in so_stages}
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                    VALUES ('sell_overbought', %s, %s)
-                    ON CONFLICT (basket, score_date) DO UPDATE SET
-                        counts=EXCLUDED.counts, computed_at=NOW() AT TIME ZONE 'Asia/Kolkata'   -- cc#855: IST canon
-                """, (target_date, json.dumps(so_counts)))
-            conn.commit()
-            log.info(f"write_signals: sell_overbought funnel written {so_counts}")
-        except Exception as e:
-            log.warning(f"write_signals SO funnel: {e}")
-    else:
-        log.info(f"write_signals: skip SO funnel (target_date {target_date} != today)")
+    # cc#1025: the sell_overbought funnel write (cc#98) is DELETED. SO was retired on 17-Jul
+    # (SELL_OVERBOUGHT_KILLED_17JUL, session_log 5642) and the founder reconfirmed it on 15-Aug.
+    #
+    # WORTH KNOWING WHAT THIS BLOCK ACTUALLY WAS: it imported _so_funnel_stages from v8_endpoints,
+    # and that helper had ALREADY been deleted in the SO retirement. So since 17-Jul the block
+    # raised ImportError on every EOD run and its `except Exception` swallowed it into a log
+    # warning — it wrote nothing, and v8_funnel_counts confirms it: sell_overbought's last row is
+    # 2026-07-17. It was not a dead basket still being written; it was a daily failure nobody had
+    # to see. Removed rather than left as a caught exception with a comment on it.
+    #
+    # This file now writes NOTHING to v8_funnel_counts. The live 5-min writer is the only author.
 
     log.info(f"write_signals done: date={target_date} source={source}")
 
