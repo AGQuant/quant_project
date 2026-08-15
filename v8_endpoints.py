@@ -57,6 +57,13 @@ from nse_holidays import is_trading_day
 from v8_signal_writer import (BASKET_FILTERS, BASKET_SPEC, basket_filter_config,
                               basket_stage_rows, basket_funnel_keys)
 
+# cc#1038: how many CHEAP gates precede the heavy wRSI stage, asked of the registry rather than
+# written down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH
+# failure cc#1025 catalogued, and it would have silently gated every stock out of the heavy stage
+# the moment V4 made it 8 (nothing would ever reach true_weekly_rsi, and the page would have shown
+# a plausible, wrong 0). Derived, it cannot drift again.
+_BM_CHEAP_N = len([f for f in BASKET_FILTERS.get("buy_momentum", []) if not f.get("heavy")])
+
 router = APIRouter(prefix="/api/v8", tags=["v8"])
 
 def _conn():
@@ -1109,11 +1116,17 @@ def filter_config(basket: str):
             "score_threshold": "score >= 7 of 10 (fixed, no mood-dependent n/n-1)",
             "target": "+3.0% fixed", "target_rule": "cc#502 V3: fixed +3.0% / -3.0% (1:1), frozen at entry",
             "stop": "-3.0% fixed",
-            "hard_gates": ["dma_50 in [5,12]", "dma_20 > 0", "week_index_52 >= 75", "gvm_score >= 7",
-                           "day_1d > 0", "hourly_pct > 0 AND NOT NULL (blocks entries before ~10:15)",
-                           "FINAL heavy true_weekly_rsi in [70,85]"],
-            "gate_note": "cc#502 V3: TWO independent layers -- 6 HARD gates + FINAL heavy wRSI, "
-                         "PLUS SCORE>=7-of-10 (the 9 bands above + wRSI[60,85] reused as the 10th).",
+            # cc#1038: hard_gates was a hand-written list that still read "6 HARD gates" and omitted
+            # mom_2d/sector_week after V4 shipped — it survived the registry sweep because it is
+            # PROSE, not a count. Built from BASKET_FILTERS now, so it cannot say one thing while
+            # registry_gates (right below, same payload) says another.
+            "hard_gates": [f"{f['label']} {f.get('cond_min','')} {f.get('cond_max','')}".strip()
+                           + (" (strict)" if f.get("strict") else "")
+                           + (" [FINAL heavy stage]" if f.get("heavy") else "")
+                           for f in BASKET_FILTERS.get(basket, [])],
+            "gate_note": (f"{BASKET_SPEC.get(basket,{}).get('label',basket)}: TWO independent layers "
+                          f"-- {_BM_CHEAP_N} HARD gates + FINAL heavy wRSI, PLUS SCORE>=7-of-10 "
+                          f"(the 9 bands above + wRSI[60,85] reused as the 10th)."),
             "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
             **_registry_gates_payload(basket),
             **BASKET_META.get(basket, {})
@@ -2204,13 +2217,6 @@ _BM_V3_PASSCOUNT_GATES = [
     ("gvm_score",      7.0, None),
     ("mom_2d",         0.0,   4.0),   # cc#1038 V4 g9
 ]
-
-# cc#1038: how many CHEAP gates precede the heavy wRSI stage, asked of the registry rather than
-# written down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH
-# failure cc#1025 catalogued, and it would have silently gated every stock out of the heavy stage
-# the moment V4 made it 8 (nothing would ever reach true_weekly_rsi, and the page would have shown
-# a plausible, wrong 0). Derived, it cannot drift again.
-_BM_CHEAP_N = len([f for f in BASKET_FILTERS.get("buy_momentum", []) if not f.get("heavy")])
 
 # cc#502: SCORE_BANDS mirror of _write_buy_momentum_v3_qualified's V2 bands (fixed >=7-of-10
 # threshold). true_weekly_rsi[60,85] is the 10th band, scored separately since it reuses the same
