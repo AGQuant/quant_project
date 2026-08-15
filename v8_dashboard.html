@@ -1638,16 +1638,23 @@ const _QA_BTNS=[
 function _qaInjectStyle(){
   if(document.getElementById('qa-style'))return;
   const st=document.createElement('style');st.id='qa-style';st.textContent=`
-    #qaStrip{position:fixed;z-index:11500;display:none;gap:6px;padding:6px;align-items:center;flex-wrap:wrap;
+    /* cc#1029: strip gap/padding trimmed 6px -> 5px so the smaller buttons below do not float in
+       whitespace sized for the old 40px ones. */
+    #qaStrip{position:fixed;z-index:11500;display:none;gap:5px;padding:5px;align-items:center;flex-wrap:wrap;
       max-width:min(94vw,320px);background:var(--panel,#fff);border:1px solid var(--line,#e2e7ee);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
     #qaStrip.open{display:flex}
     /* cc#626 item_4: one-time mobile hint legend (letter -> full name), own row under the buttons */
     #qaStrip .qa-hint{flex-basis:100%;width:100%;font-family:'Sora',sans-serif;font-size:10px;color:var(--mut,#5a6b82);text-align:center;padding:2px 2px 0;line-height:1.5}
     #qaStrip .qa-hint b{color:var(--txt,#1c2536)}
-    #qaStrip .qa-sym{font-family:'Sora',sans-serif;font-weight:800;font-size:12px;color:var(--mut,#5a6b82);
+    /* cc#1029: 12px -> 11px so the symbol label does not outweigh the buttons it sits beside. */
+    #qaStrip .qa-sym{font-family:'Sora',sans-serif;font-weight:800;font-size:11px;color:var(--mut,#5a6b82);
       padding:0 4px 0 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #qaStrip button{width:40px;height:40px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
-      background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);font-weight:800;font-size:15px;cursor:pointer;
+    /* cc#1029: 40px -> 32px, font 15 -> 13, radius 9 -> 8. 32px is the FLOOR and the reason is
+       thumbs, not taste: below it a tap target on a phone starts missing. There is no mobile
+       override for #qaStrip anywhere in the repo (checked), so this one rule is the mobile size
+       too -- which is exactly why it must not shrink further. */
+    #qaStrip button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line2,#e8ecf2);
+      background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);font-weight:800;font-size:13px;cursor:pointer;
       display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s,border-color .12s}
     #qaStrip button:hover,#qaStrip button:focus{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe);outline:none}
     .qa-tf{border:1px solid var(--line2,#e8ecf2);background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);
