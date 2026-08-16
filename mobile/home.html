@@ -237,7 +237,12 @@
    inside would put it at the mercy of the 2-line ellipsis: the moment a headline was long enough
    to clamp, the timestamp would be the first thing cut. flex-end puts it on the last line and
    guarantees it survives. */
-.rnr{display:flex;align-items:flex-end;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+/* cc#1062: row padding 7px -> 12px. At 360px the headlines sat 14px apart and read as one
+   block of text rather than six separate stories. 24px of padding puts a clear band between
+   them without changing the clamp, the count per page or the payload. Row height goes 50px ->
+   60px, which is why .rnlist's reservation below moves with it — they are one measurement, and
+   cc#971/cc#974 are both notes about what happens when they drift apart. */
+.rnr{display:flex;align-items:flex-end;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
 .rnr:last-child{border-bottom:0}
 .rnr .h{flex:1;min-width:0;font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -260,7 +265,12 @@
    cc#974 re-tuned this: removing the accidental button chrome from the age stamp took its height
    from 44px to 13px and the row from 59px to 50px, so the old 354px reservation left ~54px of
    dead space under every page. 6 x 50px = 300px. */
-.rnlist{min-height:300px}
+/* cc#1062: 6 x 60px = 360px (was 6 x 50px = 300px). The reservation exists so the section does
+   not shrink on the last page and pull the Tools grid up under the thumb that just tapped Next
+   — raising the row height without raising this would have re-created exactly that. */
+.rnlist{min-height:360px;animation:rnfade .18s ease-out}
+@keyframes rnfade{from{opacity:.35}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
 .rnpg{display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding-top:8px;border-top:1px solid var(--line)}
 .rnb{min-height:44px;min-width:88px;padding:0 12px;font-family:'IBM Plex Mono',ui-monospace,monospace;
@@ -1670,6 +1680,65 @@ function rnGo(ev, delta){
   rnPaint();
 }
 
+/* ── cc#1062: swipe left = next page, swipe right = prev ────────────────────────────────────
+   Bound ONCE to #rnBox, which survives every rnPaint() (only its innerHTML is replaced), so the
+   listeners cannot be lost on a page turn or multiplied by a re-render.
+
+   THE ANGLE TEST IS WHAT PROTECTS THE SCROLL. touchmove stays passive:true — this handler never
+   calls preventDefault while the finger is moving, so a vertical flick scrolls the page exactly
+   as it does today. The horizontal/vertical decision is made once, at touchend, from the totals:
+   a gesture counts as a swipe only if it travelled >50px across AND more than twice as far
+   across as it did down. Anything else is left alone entirely.
+
+   THE CARD IS WRAPPED IN <a href="/m/intel">, which is the same trap cc#971 hit with the Next
+   button: a gesture that ends inside the anchor navigates away and the page turn is never seen.
+   So a recognised swipe swallows its own touchend AND the synthetic click that follows it, via a
+   CAPTURE-phase listener that runs before the anchor. Buttons are untouched — swipe is an
+   addition, per the card.
+
+   Paging itself goes through rnGo(), so the edges need no special case: it already clamps to
+   [0, last] and returns early when the page would not change. Page 1 right and last page left
+   are no-ops for free, and can never drift from what the buttons do. */
+var RN_SW = { x:0, y:0, armed:false, just:false };
+
+function rnBindSwipe(){
+  var box = document.getElementById('rnBox');
+  if (!box || box._rnSwipeBound) return;
+  box._rnSwipeBound = true;
+
+  box.addEventListener('touchstart', function(e){
+    if (!e.touches || e.touches.length !== 1){ RN_SW.armed = false; return; }
+    RN_SW.x = e.touches[0].clientX; RN_SW.y = e.touches[0].clientY; RN_SW.armed = true;
+  }, { passive:true });
+
+  box.addEventListener('touchmove', function(e){
+    // Multi-touch (pinch/zoom) is never a page swipe. Nothing else happens here on purpose:
+    // staying passive is what keeps vertical scrolling native.
+    if (e.touches && e.touches.length > 1) RN_SW.armed = false;
+  }, { passive:true });
+
+  box.addEventListener('touchend', function(e){
+    if (!RN_SW.armed) return;
+    RN_SW.armed = false;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - RN_SW.x, dy = t.clientY - RN_SW.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= 2 * Math.abs(dy)) return;   // not horizontal enough
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    RN_SW.just = true;
+    setTimeout(function(){ RN_SW.just = false; }, 400);   // covers the synthetic click
+    rnGo(null, dx < 0 ? 1 : -1);                          // left = next, right = prev
+  }, { passive:false });
+
+  // Capture phase: this must beat the <a class="card-link"> the whole card sits inside.
+  box.addEventListener('click', function(e){
+    if (!RN_SW.just) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+  }, true);
+}
+
 function rnPaint(){
   var box = document.getElementById('rnBox');
   if (!box) return;
@@ -1720,6 +1789,7 @@ function loadRawNews(){
       RN.items = items;
       RN.page = 0;
       rnPaint();
+      rnBindSwipe();   // cc#1062: bind once, after #rnBox has content
     })
     .catch(function(e){
       if (cnt) cnt.innerHTML = 'unavailable <span class="h-chev">›</span>';
