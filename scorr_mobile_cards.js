@@ -169,3 +169,102 @@
     esc: esc
   };
 })();
+
+/* ─── cc#1066 R5 SIGNATURE ENHANCER (Fable, 16-Aug) ─────────────────────────────────────────────
+ * WHY THIS EXISTS: theme pass 2 styled class names taken from previews/, and the live wired home
+ * uses its own markup — so the signature elements (scoreboard mood, W/L letters, fail meter)
+ * never landed (founder screenshots 18:47/19:2x). This enhancer finds those elements on the LIVE
+ * DOM by their CONTENT — which is stable across any refactor — tags them with r5-* classes, and
+ * injects the matching styles. It is class-name-proof by construction.
+ * PARITY GUARD: strictly additive. It adds classes and ONE meter element; it never removes,
+ * hides, or reorders anything.
+ */
+(function () {
+  'use strict';
+  if (window.__r5sig) return; window.__r5sig = 1;
+
+  var CSS = ''
+    + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;'
+    +   'font-size:56px!important;line-height:.95!important;letter-spacing:1px;'
+    +   'text-transform:uppercase;display:inline-block!important;'
+    +   'transform:skewX(-6deg);transform-origin:left center;animation:none!important}'
+    + '.r5-mood::after{content:"";display:block;height:6px;width:150px;margin-top:4px;'
+    +   'background:linear-gradient(90deg,currentColor,transparent);transform:skewX(-24deg);opacity:.9}'
+    + '.r5-meter{height:8px;background:#1C2740;margin:12px 0 2px;overflow:hidden;'
+    +   'clip-path:polygon(0 0,calc(100% - 8px) 0,100% 100%,0 100%)}'
+    + '.r5-meter i{display:block;height:100%;background:linear-gradient(90deg,#FF4D6D 60%,#FF8FA5);'
+    +   'transition:width .6s ease-out}'
+    + '.r5-set{font-family:"JetBrains Mono",monospace!important;font-weight:600!important;'
+    +   'border-radius:0!important;'
+    +   'clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}'
+    + '.r5-w{background:#18240E!important;border-color:#3E5A18!important}'
+    + '.r5-l{background:#241019!important;border-color:#5A2634!important}'
+    + '.r5-w::before{content:"W ";font-weight:800;color:#C8F542}'
+    + '.r5-l::before{content:"L ";font-weight:800;color:#FF8FA5}'
+    + '.r5-tab-on{color:#C8F542!important;position:relative}'
+    + '.r5-tab-on::after{content:"";position:absolute;top:-1px;left:25%;right:25%;height:3px;'
+    +   'background:#C8F542;clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
+
+  function injectCss() {
+    if (document.getElementById('r5sig-css')) return;
+    var s = document.createElement('style'); s.id = 'r5sig-css'; s.textContent = CSS;
+    document.head.appendChild(s);
+  }
+
+  var MOODS = /^(bearish|bullish|neutral|cautious|risk[- ]?on|risk[- ]?off)$/i;
+  var CHIP = /^(ADR|Nifty\s+(Day|Week|Month)|PCR|VIX)\b/i;
+
+  function nearHeat(c) {           /* computed colour → is this a fail (red-family) chip? */
+    var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
+    return m ? (+m[1] > +m[2] + 40) : false;   /* red channel clearly above green = heat */
+  }
+  function nearVolt(c) {
+    var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
+    return m ? (+m[2] > +m[1] + 20) : false;   /* green clearly above red = volt */
+  }
+
+  function enhance() {
+    injectCss();
+    var all = document.body ? document.body.querySelectorAll('div,span,p,b,strong,h1,h2,h3') : [];
+    var moodEl = null, whyEl = null;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i], t = (el.textContent || '').trim();
+      if (!moodEl && el.children.length === 0 && MOODS.test(t)) moodEl = el;
+      if (!whyEl && /(\d+)\s+of\s+(\d+)\s+checks/i.test(t) && t.length < 80) whyEl = el;
+      /* check chips: leaf-ish elements starting with a known check name and holding a number */
+      if (el.children.length <= 1 && CHIP.test(t) && t.length < 30 && !el.__r5) {
+        el.__r5 = 1; el.classList.add('r5-set');
+        var col = getComputedStyle(el).color;
+        if (nearHeat(col)) el.classList.add('r5-l');
+        else if (nearVolt(col)) el.classList.add('r5-w');
+      }
+    }
+    if (moodEl && !moodEl.__r5) { moodEl.__r5 = 1; moodEl.classList.add('r5-mood'); }
+    /* fail meter — parsed from the live "N of M checks failed" line, inserted ONCE after it */
+    if (whyEl && !whyEl.__r5m) {
+      var m = /(\d+)\s+of\s+(\d+)/.exec(whyEl.textContent);
+      if (m && +m[2] > 0) {
+        whyEl.__r5m = 1;
+        var bar = document.createElement('div'); bar.className = 'r5-meter';
+        var fill = document.createElement('i');
+        fill.style.width = Math.round(100 * (+m[1]) / (+m[2])) + '%';
+        bar.appendChild(fill);
+        whyEl.parentNode && whyEl.parentNode.insertBefore(bar, whyEl.nextSibling);
+      }
+    }
+    /* bottom-nav active tab: fixed-to-bottom container, the child marked on/active */
+    var nav = document.querySelector('.bnav, .bottomnav, [class*="tabbar"], nav[class*="bottom"]');
+    if (nav) {
+      var on = nav.querySelector('.on, .active, [aria-current]');
+      if (on && !on.classList.contains('r5-tab-on')) on.classList.add('r5-tab-on');
+    }
+  }
+
+  /* Home renders after its fetch, so run now, on load, and on DOM growth (debounced). */
+  var t = null;
+  function kick() { clearTimeout(t); t = setTimeout(enhance, 120); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', kick);
+  else kick();
+  try { new MutationObserver(kick).observe(document.documentElement, { childList: true, subtree: true }); }
+  catch (e) {}
+})();
