@@ -277,20 +277,28 @@
           var lf = leaves[iz];
           if (lf.children.length !== 0 || lf.__r5t) continue;
           var lt = (lf.textContent || '').trim();
-          if (/^[\d][\d,]{4,}$/.test(lt)) {            /* 24,366 / 57,491 */
+          if (/^[\d][\d,]{4,}$/.test(lt)) {            /* 24,366 / 57,491 — founder 23:40:
+            34px dominated; 24px confident mono, tight to its row */
             lf.__r5t = 1;
-            lf.style.cssText += ';font-size:34px!important;font-weight:800;'
+            lf.style.cssText += ';font-size:24px!important;font-weight:800;'
               + 'font-family:"JetBrains Mono",monospace;letter-spacing:0';
           } else if (/^(NIFTY\s*50|BANKNIFTY|SENSEX|FINNIFTY)$/i.test(lt)) {
             lf.__r5t = 1;
-            lf.style.cssText += ';font-size:13px;letter-spacing:2.5px;font-weight:700;'
-              + 'text-transform:uppercase;margin-top:10px;display:inline-block';
+            lf.style.cssText += ';font-size:12px;letter-spacing:2.5px;font-weight:700;'
+              + 'text-transform:uppercase;display:inline-block';
           } else if (/^PCR\s/i.test(lt) && lt.length < 30) {
             lf.__r5t = 1;
             lf.style.cssText += ';font-size:14px;font-family:"JetBrains Mono",monospace';
           } else if (/(below|above)\s+pivot/i.test(lt) && lt.length < 20) {
+            /* founder 23:40: loose grey text -> a small bordered chip, tinted by side */
             lf.__r5t = 1;
-            lf.style.cssText += ';font-size:12px;letter-spacing:1px';
+            var below = /below/i.test(lt);
+            lf.style.cssText += ';font-size:10px;letter-spacing:1.5px;text-transform:uppercase;'
+              + 'font-weight:700;padding:3px 8px;display:inline-block;vertical-align:middle;'
+              + 'border:1px solid ' + (below ? '#5A2634' : '#3E5A18') + ';'
+              + 'background:' + (below ? '#241019' : '#18240E') + ';'
+              + 'color:' + (below ? '#FF8FA5' : '#C8F542') + ';'
+              + 'clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)';
           }
         }
       }
@@ -383,19 +391,64 @@
         var tgt = elv.closest('button,a,[onclick],[role="tab"]') || elv;
         tgt.addEventListener('click', function (ev) {
           ev.preventDefault(); ev.stopPropagation();
-          /* carry the symbol currently on the report card: the biggest ALL-CAPS leaf on
-             the page (the card's symbol heading). Fallback: plain /m/gvm2 search. */
+          /* founder 23:37: RELIANCE heading has a child span (dotted underline), so the
+             leaf-only scan missed it and fell back to the search bar. Allow <=2 children and
+             blocklist the non-symbol big caps. */
+          var NOTSYM = /^(GVM|SCORR|WEAK|AVERAGE|GOOD|EXCELLENT|CLOSED|LIVE|OPEN|MATCHES|HOME|CHECK|INTEL|V8|LONG|SHORT|FLAT|CAUTION|BEARISH|BULLISH|NEUTRAL)$/;
           var sym = '', best = 0;
-          var cands = document.querySelectorAll('div,span,h1,h2,h3');
+          var cands = document.querySelectorAll('div,span,h1,h2,h3,b,strong');
           for (var z = 0; z < cands.length; z++) {
             var cz = cands[z], tz = (cz.textContent || '').trim();
-            if (cz.children.length === 0 && /^[A-Z][A-Z0-9&-]{2,14}$/.test(tz)) {
+            if (cz.children.length <= 2 && /^[A-Z][A-Z0-9&-]{2,14}$/.test(tz) && !NOTSYM.test(tz)) {
               var fs = parseFloat(getComputedStyle(cz).fontSize) || 0;
               if (fs > best && fs >= 20) { best = fs; sym = tz; }
             }
           }
           location.href = sym ? '/m/gvm2?symbol=' + encodeURIComponent(sym) : '/m/gvm2';
         }, true);
+      }
+    }
+
+    /* founder 23:37 (②): C·A·R·D button strip on the GVM report card — evenly spaced, placed
+       under the Detailed view / Run Trade Check row. Visual + spacing tonight; actions wire to
+       the desktop card-button handlers next session (noted in cc#1066) — until then each button
+       opens the fight card for the shown symbol so no tap is a dead end. */
+    if (!document.getElementById('r5-cardstrip')) {
+      var rtc = null;
+      for (var c2 = 0; c2 < all.length; c2++) {
+        if (/^run trade check$/i.test((all[c2].textContent || '').trim())) { rtc = all[c2]; break; }
+      }
+      if (rtc) {
+        var row = rtc.closest('div');
+        var host = row && row.parentElement ? row.parentElement : null;
+        if (host) {
+          var st = document.createElement('div');
+          st.id = 'r5-cardstrip';
+          st.style.cssText = 'display:flex;gap:10px;justify-content:space-between;margin-top:12px';
+          'CARD'.split('').forEach(function (L) {
+            var b = document.createElement('button');
+            b.textContent = L;
+            b.style.cssText = 'flex:1;padding:10px 0;background:#1C2740;border:1px solid #26334F;'
+              + 'color:#EAF0FA;font-family:"JetBrains Mono",monospace;font-weight:800;font-size:14px;'
+              + 'clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px);cursor:pointer';
+            b.addEventListener('click', function () {
+              var s2 = '', b2 = 0;
+              var cd = document.querySelectorAll('div,span,h1,h2,h3,b,strong');
+              var NS = /^(GVM|SCORR|WEAK|AVERAGE|GOOD|EXCELLENT|CLOSED|LIVE|OPEN|MATCHES|HOME|CHECK|INTEL|V8|LONG|SHORT|FLAT)$/;
+              for (var zz = 0; zz < cd.length; zz++) {
+                var t2 = (cd[zz].textContent || '').trim();
+                if (cd[zz].children.length <= 2 && /^[A-Z][A-Z0-9&-]{2,14}$/.test(t2) && !NS.test(t2)) {
+                  var f2 = parseFloat(getComputedStyle(cd[zz]).fontSize) || 0;
+                  if (f2 > b2 && f2 >= 20) { b2 = f2; s2 = t2; }
+                }
+              }
+              window.dispatchEvent(new CustomEvent('scorr:cardbtn', { detail: { btn: L, symbol: s2 } }));
+              if (s2) location.href = '/m/gvm2?symbol=' + encodeURIComponent(s2);
+            });
+            st.appendChild(b);
+          });
+          host.insertBefore(st, row.nextSibling);
+        }
       }
     }
 
