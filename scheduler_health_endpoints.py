@@ -69,3 +69,113 @@ def health_scheduler():
         "thresholds": {"stale_min": STALE_MIN, "dead_min": DEAD_MIN},
         **scheduler.health_state(),
     }
+
+# ---------------------------------------------------------------------------
+# cc#1049 measurement probe (Fable, 16-Aug-2026) — READ-ONLY
+# GET /api/health/memory — live RSS + module-level cache attribution so the
+# memory-trim card is fixed from evidence, not guesses. No state is mutated.
+# ---------------------------------------------------------------------------
+import sys as _sys
+import gc as _gc
+import threading as _threading
+
+
+def _obj_size_mb(obj):
+    """Best-effort size estimate in MB. DataFrames deep-measured; containers
+    sampled (first 50 items) and extrapolated; everything else shallow."""
+    try:
+        _pd = _sys.modules.get("pandas")
+        if _pd is not None:
+            if isinstance(obj, _pd.DataFrame):
+                return float(obj.memory_usage(deep=True).sum()) / 1048576.0
+            if isinstance(obj, _pd.Series):
+                return float(obj.memory_usage(deep=True)) / 1048576.0
+    except Exception:
+        pass
+    try:
+        base = _sys.getsizeof(obj)
+        if isinstance(obj, (dict, list, set, tuple)) and len(obj) > 0:
+            n = len(obj)
+            sample_n = min(n, 50)
+            sample = 0
+            if isinstance(obj, dict):
+                for k, v in list(obj.items())[:sample_n]:
+                    sample += _sys.getsizeof(k) + _sys.getsizeof(v)
+            else:
+                for it in list(obj)[:sample_n]:
+                    sample += _sys.getsizeof(it)
+            return (base + (sample / sample_n) * n) / 1048576.0
+        return base / 1048576.0
+    except Exception:
+        return 0.0
+
+
+def _proc_rss_mb():
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024.0, 1)
+    except Exception:
+        pass
+    return None
+
+
+@router.get("/api/health/memory")
+def health_memory(top: int = 30, min_mb: float = 1.0):
+    """Read-only heap census: RSS, biggest module-level globals, type counts."""
+    rss = _proc_rss_mb()
+
+    # 1) Module-level globals above min_mb — the idle-residency suspects
+    heavy = []
+    seen = set()
+    for mod_name, mod in list(_sys.modules.items()):
+        if mod is None:
+            continue
+        try:
+            g = vars(mod)
+        except Exception:
+            continue
+        for var_name, obj in list(g.items()):
+            if var_name.startswith("__"):
+                continue
+            oid = id(obj)
+            if oid in seen:
+                continue
+            if isinstance(obj, (type(_sys), type)) or callable(obj):
+                continue
+            mb = _obj_size_mb(obj)
+            if mb >= min_mb:
+                seen.add(oid)
+                try:
+                    ln = len(obj)
+                except Exception:
+                    ln = None
+                heavy.append({
+                    "module": mod_name,
+                    "name": var_name,
+                    "type": type(obj).__name__,
+                    "size_mb": round(mb, 2),
+                    "len": ln,
+                })
+    heavy.sort(key=lambda r: -r["size_mb"])
+
+    # 2) gc census — top types by instance count
+    counts = {}
+    try:
+        for o in _gc.get_objects():
+            t = type(o).__name__
+            counts[t] = counts.get(t, 0) + 1
+    except Exception:
+        pass
+    top_types = sorted(counts.items(), key=lambda kv: -kv[1])[:15]
+
+    return {
+        "rss_mb": rss,
+        "python_modules_loaded": len(_sys.modules),
+        "threads": _threading.active_count(),
+        "gc_objects_total": sum(counts.values()) if counts else None,
+        "gc_top_types": [{"type": t, "count": c} for t, c in top_types],
+        "module_globals_over_min_mb": heavy[:top],
+        "note": "sizes are estimates; DataFrames deep-measured, containers sampled",
+    }
