@@ -113,172 +113,201 @@
 </div>
 <script>
 'use strict';
-/* cc#1065 — live GVM fight card. DATA-HONESTY CONTRACT:
-   pick() probes several plausible key spellings; a value that is absent renders as an explicit
-   unavailable line or the section is omitted — NEVER a zero, NEVER an invented number. */
+/* cc#1065 v2 — keys mapped from the REAL /api/gvm/company payload (read 21:48 IST, KARURVYSYA).
+   benchmark = ARRAY of param objects; trend/percentile/tier1/pivot/volume/delivery/segment_ctx
+   under extras; financials.quarterly + shareholding for the charts. Absent -> omitted/dash, never 0. */
 var E = function(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})};
-function pick(o){ for(var i=1;i<arguments.length;i++){ var path=arguments[i].split('.'),v=o,ok=true;
-  for(var j=0;j<path.length;j++){ if(v==null||typeof v!=='object'||!(path[j] in v)){ok=false;break;} v=v[path[j]]; }
-  if(ok&&v!=null&&v!=='') return v; } return null; }
+function g(o){ var v=o; for(var i=1;i<arguments.length;i++){ if(v==null||typeof v!=='object')return null; v=v[arguments[i]]; } return (v===''?null:v); }
 function fnum(v,dp){ if(v==null||isNaN(Number(v)))return null; return Number(v).toLocaleString('en-IN',{minimumFractionDigits:dp==null?2:dp,maximumFractionDigits:dp==null?2:dp}); }
+function withUnit(v,u){ if(v==null)return '—'; var n=Number(v); var s=(u==='%'||u==='x')?(Math.abs(n)>=100?fnum(n,0):fnum(n,Math.abs(n)<10?2:1)):fnum(n,2); return s+(u||''); }
 function sect(title,inner){ return inner?'<div class="eyebrow">'+E(title)+'</div><div class="card">'+inner+'</div>':''; }
-function na(what){ return '<div class="navail">'+E(what)+' unavailable in payload — flag to Fable</div>'; }
-
-function duelRow(name, cv, mv, rank, n, color){
-  var frac = (rank&&n)? Math.max(.15,(n-rank+1)/n) : .5;
-  var cls = (rank&&n)? (rank<=3?'top':(rank>=n-2?'low':'mid')) : 'mid';
-  var bar = (rank&&n&&rank<=Math.ceil(n*0.66))?color:'var(--muted)';
-  return '<div class="mrow"><span class="name">'+E(name)+'</span><div class="duel">'
-    +'<div class="vals"><span class="num">'+E(cv==null?'—':cv)+'</span><span class="peer num">'+E(mv==null?'—':mv)+'</span></div>'
-    +'<div class="track"><i style="width:'+Math.round(frac*100)+'%;background:'+bar+'"></i></div></div>'
-    +'<span class="rk '+cls+' num">'+(rank?'#'+rank:'—')+'</span></div>';
-}
-function spark(series, color){
-  if(!series||series.length<2) return '';
-  var vs=series.map(Number).filter(function(x){return !isNaN(x)});
-  if(vs.length<2) return '';
-  var lo=Math.min.apply(null,vs), hi=Math.max.apply(null,vs); if(hi===lo){hi+=1;lo-=1;}
+function na(w){ return '<div class="navail">'+E(w)+' unavailable — flag to Fable</div>'; }
+function spark(vals,color){
+  var vs=vals.map(Number).filter(function(x){return !isNaN(x)});
+  if(vs.length<2)return '';
+  var lo=Math.min.apply(null,vs),hi=Math.max.apply(null,vs); if(hi===lo){hi+=1;lo-=1;}
   var pts=vs.map(function(v,i){return (i*200/(vs.length-1)).toFixed(0)+','+(36-(v-lo)/(hi-lo)*32).toFixed(1)}).join(' ');
   var last=pts.split(' ').pop().split(',');
   return '<svg viewBox="0 0 200 38" preserveAspectRatio="none"><polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+pts+'"/><circle cx="'+last[0]+'" cy="'+last[1]+'" r="3" fill="'+color+'"/></svg>';
 }
+var PCOLOR={G:'var(--g)',V:'var(--v)',M:'var(--m)'};
 
-function render(d, sym){
+function duelRowP(p){
+  var n=p.peer_n||12, rank=p.rank;
+  var frac=(rank&&n)?Math.max(.15,(n-rank+1)/n):.5;
+  var cls=(rank&&n)?(rank<=3?'top':(rank>=n-2?'low':'mid')):'mid';
+  var bar=(rank&&n&&rank<=Math.ceil(n*0.6))?PCOLOR[p.pillar]||'var(--g)':'var(--muted)';
+  var u=p.unit||'';
+  var cv=p.company==null?'—':withUnit(p.company,u), mv=p.peer_median==null?'—':withUnit(p.peer_median,u);
+  var beat=p.beats_peer===true;
+  return '<div class="mrow"><span class="name">'+E(p.label||p.key)+'</span><div class="duel">'
+    +'<div class="vals"><span class="num'+(beat?' up':'')+'">'+E(cv)+'</span><span class="peer num">'+E(mv)+'</span></div>'
+    +'<div class="track"><i style="width:'+Math.round(frac*100)+'%;background:'+bar+'"></i></div></div>'
+    +'<span class="rk '+cls+' num">'+(rank?'#'+rank:'—')+'</span></div>';
+}
+
+function render(d,sym){
   var h='';
-  /* HERO */
-  var name=pick(d,'name','company','company_name','header.name')||sym;
-  var seg=pick(d,'segment','header.segment','sector')||'';
-  var verdict=pick(d,'verdict','rating','header.verdict','rating_label');
-  var price=pick(d,'price','cmp','last_price','header.price');
-  var mcap=pick(d,'mcap','market_cap','mcap_cr','header.mcap');
-  var asof=pick(d,'score_date','as_of','header.score_date','date');
-  var gvm=pick(d,'scores.gvm','gvm','gvm_score','scores.total');
-  var g=pick(d,'scores.g','g','scores.growth'), v=pick(d,'scores.v','v','scores.value'), m=pick(d,'scores.m','m','scores.momentum');
-  var segrank=pick(d,'segment_rank','rank.segment','seg_rank'), segn=pick(d,'segment_count','rank.segment_of','peers_count','n_peers');
-  var urank=pick(d,'universe_rank','rank.universe'), un=pick(d,'universe_count','rank.universe_of');
-  var z=pick(d,'z','zscore','z_score','percentile_z');
-  var punch=pick(d,'punchline','header.punchline','summary_line');
-  h+='<div class="card"><div class="hero-top"><div><div class="sym">'+E(sym)+'</div><div class="cname">'+E(name)+(seg?' · '+E(seg):'')+'</div></div>'
-    +(verdict?'<div class="verdict">'+E(String(verdict).toUpperCase())+'</div>':'')+'</div>'
-    +'<div class="price-row num">'
-    +(price!=null?'<span><span class="lbl">LAST</span>₹'+fnum(price,2)+'</span>':'')
-    +(mcap!=null?'<span><span class="lbl">MCAP</span>₹'+fnum(mcap,0)+' Cr</span>':'')
-    +(asof?'<span><span class="lbl">AS OF</span>'+E(asof)+'</span>':'')+'</div>'
-    +(gvm!=null?'<div class="gvm-big"><div class="gvm-num num">'+fnum(gvm,2)+'</div><div>'
-      +((segrank&&segn)?'<span class="badge"><b>#'+segrank+'</b> OF '+segn+(seg?' · '+E(String(seg).toUpperCase()):'')+'</span><br>':'')
-      +((urank&&un)?'<span class="badge">RANK <b>'+urank+'</b> OF '+fnum(un,0)+'</span>':'')
-      +(z!=null?'<span class="badge">Z <b>'+(z>=0?'+':'')+fnum(z,2)+'</b></span>':'')+'</div></div>':na('GVM score'))
-    +((g!=null&&v!=null&&m!=null)?'<div class="pillars">'
-      +'<div class="pillar p-g"><div class="tag">GROWTH</div><div class="sc num">'+fnum(g,2)+'</div><div class="bar"><i style="width:'+Math.min(100,g*10)+'%"></i></div></div>'
-      +'<div class="pillar p-v"><div class="tag">VALUE</div><div class="sc num">'+fnum(v,2)+'</div><div class="bar"><i style="width:'+Math.min(100,v*10)+'%"></i></div></div>'
-      +'<div class="pillar p-m"><div class="tag">MOMENTUM</div><div class="sc num">'+fnum(m,2)+'</div><div class="bar"><i style="width:'+Math.min(100,m*10)+'%"></i></div></div></div>':'')
-  ;
-  var trend=pick(d,'trend','gvm_trend','trend_series','history');
-  if(Array.isArray(trend)&&trend.length){
-    var series=trend.map(function(x){return (x&&typeof x==='object')?(x.gvm!=null?x.gvm:(x.v!=null?x.v:x.score)):x});
-    var sp=spark(series,'#C8F542');
-    if(sp) h+='<div class="trend">'+sp+'<span class="lbl">GVM · '+series.length+' SESSIONS</span></div>';
+  var scores=g(d,'scores')||{};
+  if(scores.gvm==null){
+    return '<div class="card"><div class="sym">'+E(sym)+'</div>'
+      +'<div class="punch" style="margin-top:10px"><b>Not scored / symbol not found.</b> Check the symbol spelling — GVM covers 1,787 scored stocks. Try e.g. KARURVYSYA, RELIANCE, HDFCBANK.</div></div>';
   }
-  if(punch) h+='<div class="punch"><b>'+E(punch)+'</b></div>';
+  var x=g(d,'extras')||{};
+  var pct=g(x,'percentile')||{};
+  /* HERO */
+  h+='<div class="card hero"><div class="hero-top"><div>'
+    +'<div class="sym">'+E(d.symbol||sym)+'</div>'
+    +'<div class="cname">'+E(d.company_name||'')+(d.segment?' · '+E(d.segment):'')+'</div></div>'
+    +(d.verdict?'<div class="verdict">'+E(String(d.verdict).toUpperCase())+'</div>':'')+'</div>'
+    +'<div class="price-row num">'
+    +(d.price!=null?'<span><span class="lbl">'+E((d.price_label||'LAST').toUpperCase())+'</span>₹'+fnum(d.price,2)+'</span>':'')
+    +(d.market_cap!=null?'<span><span class="lbl">MCAP</span>₹'+fnum(d.market_cap,0)+' Cr</span>':'')
+    +(d.score_date?'<span><span class="lbl">SCORED</span>'+E(d.score_date)+'</span>':'')+'</div>'
+    +'<div class="gvm-big"><div class="gvm-num num">'+fnum(scores.gvm,2)+'</div><div class="gvm-meta">'
+    +((d.segment_rank&&d.segment_total)?'<span class="badge"><b>#'+d.segment_rank+'</b> OF '+d.segment_total+' · '+E(String(d.segment||'').toUpperCase())+'</span><br>':'')
+    +((pct.universe_rank&&pct.universe_total)?'<span class="badge">TOP <b>'+fnum(pct.top_pct,1)+'%</b> OF '+fnum(pct.universe_total,0)+'</span>':'')
+    +(pct.z_score!=null?'<span class="badge">Z <b>'+(pct.z_score>=0?'+':'')+fnum(pct.z_score,2)+'</b></span>':'')
+    +'</div></div>'
+    +'<div class="pillars">'
+    +'<div class="pillar p-g"><div class="tag">GROWTH</div><div class="sc num">'+fnum(scores.g,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.g*10)+'%"></i></div></div>'
+    +'<div class="pillar p-v"><div class="tag">VALUE</div><div class="sc num">'+fnum(scores.v,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.v*10)+'%"></i></div></div>'
+    +'<div class="pillar p-m"><div class="tag">MOMENTUM</div><div class="sc num">'+fnum(scores.m,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.m*10)+'%"></i></div></div></div>';
+  var trend=g(x,'trend');
+  if(Array.isArray(trend)&&trend.length>1){
+    var sp=spark(trend.map(function(r){return r.gvm}),'#C8F542');
+    if(sp)h+='<div class="trend">'+sp+'<span class="lbl">GVM · '+trend.length+' SESSIONS</span></div>';
+  }
+  if(d.punchline)h+='<div class="punch"><b>'+E(d.punchline)+'</b></div>';
   h+='</div>';
 
-  /* PILLAR PARAMETER DUELS */
-  var params=pick(d,'benchmark','parameters','benchmark_params','params');
-  var groups={G:[],V:[],M:[]};
-  if(params&&typeof params==='object'){
-    var GK={sales_5y:'Sales 5Y CAGR',sales_3y:'Sales 3Y CAGR',profit_5y:'Profit 5Y CAGR',profit_3y:'Profit 3Y CAGR',qoq_sales:'YoY Sales',qoq_profit:'YoY Profit',opm:'Operating Margin',roce:'ROCE',div_yield:'Dividend Yield',inst_abs:'Instl Holding',inst_chg:'Instl Change'};
-    var VK={pe:'PE (TTM)',fwd_pe:'Forward PE',hist_pe:'vs Own 5Y PE',sector_pe:'vs Sector PE',pb:'Price / Book',annual_upside:'FY Upside'};
-    var MK={ret_1y:'Return 1Y',ret_3y:'Return 3Y',ret_52w_idx:'52W vs Index',ret_1m:'1M Return',dma_50:'vs 50-DMA',dma_200:'vs 200-DMA',rsi_month:'RSI Monthly',vol_trend:'Volume Trend'};
-    function grab(map,arr,color){ for(var k in map){ var p=params[k]; if(!p||typeof p!=='object') continue;
-      var cv=pick(p,'company','value','company_value'), mv=pick(p,'median','peer_median','peers_median');
-      var rank=pick(p,'rank'), n=pick(p,'of','n','count')||segn;
-      if(cv==null&&mv==null) continue;
-      arr.push(duelRow(map[k], fnum(cv,typeof cv==='number'&&Math.abs(cv)<100?2:1)||cv, fnum(mv,2)||mv, rank, n, color)); } }
-    grab(GK,groups.G,'var(--g)'); grab(VK,groups.V,'var(--v)'); grab(MK,groups.M,'var(--m)');
+  /* PILLARS from benchmark ARRAY */
+  var bench=Array.isArray(d.benchmark)?d.benchmark:[];
+  var byP={G:[],V:[],M:[]}, histPe=null;
+  bench.forEach(function(p){
+    if(!p||p.excluded)return;
+    if(p.key==='hist_pe'){histPe=p;}
+    if(p.company==null&&p.peer_median==null)return;
+    (byP[p.pillar]||(byP[p.pillar]=[])).push(duelRowP(p));
+  });
+  function pcard(letter,label,score,rows,extra){
+    if(!rows.length)return sect('PILLAR '+letter,na('parameters'));
+    return '<div class="card"><div class="grp-head"><h3 class="skew" style="color:'+PCOLOR[letter]+'">'+label+' · '+fnum(score,2)+'</h3>'
+      +'<span class="pill-note">'+(letter==='V'?'LOWER = CHEAPER':letter==='M'?'PRICE IS THE PROOF':'RANK OF '+ (d.segment_total||'PEERS'))+'</span></div>'
+      +rows.join('')+(extra||'')+'</div>';
   }
-  function pillarCard(letter,label,score,rows,color,noteTxt){
-    if(!rows.length) return sect('PILLAR '+letter, na('parameters'));
-    return '<div class="card"><div class="grp-head"><h3 class="skew" style="color:'+color+'">'+label+(score!=null?' · '+fnum(score,2):'')+'</h3><span class="pill-note">'+noteTxt+'</span></div>'+rows.join('')+'</div>';
+  /* PE re-rating chart from hist_pe.pe_trend */
+  var peExtra='';
+  if(histPe&&Array.isArray(histPe.pe_trend)&&histPe.pe_trend.length>1){
+    var pes=histPe.pe_trend.map(function(r){return r.pe});
+    var med=histPe.median_pe, cur=histPe.current_pe;
+    var lo=Math.min.apply(null,pes.concat([med||pes[0]]))-.3, hi=Math.max.apply(null,pes.concat([cur||pes[0]]))+.3;
+    var Y=function(v){return (38-(v-lo)/(hi-lo)*34).toFixed(1)};
+    var pts=pes.map(function(v,i){return (i*200/(pes.length-1)).toFixed(0)+','+Y(v)}).join(' ');
+    peExtra='<div class="trend" style="margin-top:12px"><svg viewBox="0 0 200 40" preserveAspectRatio="none">'
+      +(med!=null?'<line x1="0" y1="'+Y(med)+'" x2="200" y2="'+Y(med)+'" stroke="#26334F" stroke-dasharray="3,3" stroke-width="1"/>':'')
+      +'<polyline fill="none" stroke="#4DD8FF" stroke-width="2" points="'+pts+'"/>'
+      +'<circle cx="200" cy="'+Y(pes[pes.length-1])+'" r="3" fill="#4DD8FF"/></svg>'
+      +'<span class="lbl">PE · '+pes.length+' QTRS'+(med!=null?'<br>MEDIAN '+fnum(med,1)+'x':'')
+      +(histPe.rerating_pct!=null?'<br>RE-RATING '+(histPe.rerating_pct>=0?'+':'')+fnum(histPe.rerating_pct,1)+'%':'')+'</span></div>';
   }
-  h+='<div class="eyebrow">THE PILLARS · YOU vs PEER MEDIAN</div>';
-  h+=pillarCard('G','Growth',g,groups.G,'var(--g)','RANK IN SEGMENT');
-  h+=pillarCard('V','Value',v,groups.V,'var(--v)','LOWER = CHEAPER');
-  h+=pillarCard('M','Momentum',m,groups.M,'var(--m)','PRICE IS THE PROOF');
+  h+='<div class="eyebrow">THE PILLARS · YOU vs PEER MEDIAN · RANK OF '+(d.segment_total||'PEERS')+'</div>';
+  h+=pcard('G','Growth',scores.g,byP.G||[]);
+  h+=pcard('V','Value',scores.v,byP.V||[],peExtra);
+  h+=pcard('M','Momentum',scores.m,byP.M||[]);
 
-  /* HIGHLIGHT REEL */
-  var pos=pick(d,'positives','highlights.positives')||[], neg=pick(d,'negatives','highlights.negatives')||[];
-  if(pos.length||neg.length){
-    var reel=pos.slice(0,3).map(function(x){return '<span class="set w"><b>W</b>'+E(typeof x==='string'?x:(x.label||x.text||JSON.stringify(x)).slice(0,40))+'</span>'}).join('')
-      +neg.slice(0,3).map(function(x){return '<span class="set l"><b>L</b>'+E(typeof x==='string'?x:(x.label||x.text||JSON.stringify(x)).slice(0,40))+'</span>'}).join('');
-    h+=sect('HIGHLIGHT REEL','<div class="sets">'+reel+'</div>');
+  /* HIGHLIGHT REEL from positives/negatives param arrays */
+  function reelPill(p,w){
+    var txt=E((p.label||p.key||'').toUpperCase().slice(0,22))+(p.rank?' · #'+p.rank:'');
+    return '<span class="set '+(w?'w':'l')+'"><b>'+(w?'W':'L')+'</b>'+txt+'</span>';
   }
+  var pos=(d.positives||[]).slice(0,3).map(function(p){return reelPill(p,true)});
+  var neg=(d.negatives||[]).slice(0,3).map(function(p){return reelPill(p,false)});
+  if(pos.length||neg.length)h+=sect('HIGHLIGHT REEL','<div class="sets">'+pos.join('')+neg.join('')+'</div>');
 
-  /* TAPE FORENSICS */
-  var x=pick(d,'extras')||d;
-  var volV=pick(x,'volume.verdict','volume.state'), volR=pick(x,'volume.ratio','volume.ud_ratio');
-  var delL=pick(x,'delivery.latest','delivery.pct','delivery.value'), delA=pick(x,'delivery.avg','delivery.avg_30d');
-  var t1p=pick(x,'tier1.passed','tier1.pass_count'), t1n=pick(x,'tier1.total','tier1.of')||7;
-  var t1checks=pick(x,'tier1.checks','tier1.detail');
-  var lo52=pick(x,'range52.low','range52.lo'), hi52=pick(x,'range52.high','range52.hi'), posn=pick(x,'range52.position','range52.pct');
-  var piv=pick(x,'pivot','pivots');
-  var tape='';
-  var vit='';
-  if(volV!=null||volR!=null) vit+='<div class="vital"><div class="lbl">SMART MONEY</div><div class="val '+(String(volV).match(/ACC/i)?'up':'')+'">'+E(volV||'—')+'</div>'+(volR!=null?'<div class="sub">u/d vol '+fnum(volR,2)+'x</div>':'')+'</div>';
-  if(delL!=null) vit+='<div class="vital"><div class="lbl">DELIVERY</div><div class="val num'+(delA!=null&&Number(delL)>Number(delA)?' up':'')+'">'+fnum(delL,1)+'%</div>'+(delA!=null?'<div class="sub">30d avg '+fnum(delA,1)+'%</div>':'')+'</div>';
-  if(t1p!=null) vit+='<div class="vital"><div class="lbl">TIER-1 GATE</div><div class="val num">'+t1p+'/'+t1n+'</div></div>';
-  if(vit) tape+='<div class="vitals">'+vit+'</div>';
-  if(Array.isArray(t1checks)&&t1checks.length){
-    tape+='<div class="sets" style="margin-top:14px">'+t1checks.map(function(c){
-      var lbl=E((c.label||c.name||c.check||'').toString().slice(0,26));
+  /* TAPE FORENSICS from extras */
+  var tape='',vit='';
+  var vol=g(x,'volume'),del=g(x,'delivery'),t1=g(x,'tier1'),r52=g(x,'range52'),piv=g(x,'pivot');
+  if(vol&&(vol.verdict||vol.ratio!=null))vit+='<div class="vital"><div class="lbl">SMART MONEY</div><div class="val '+(/ACC/i.test(vol.verdict||'')?'up':'dn')+'">'+E((vol.verdict||'—').slice(0,7))+'</div>'+(vol.ratio!=null?'<div class="sub">u/d vol '+fnum(vol.ratio,2)+'x</div>':'')+'</div>';
+  if(del&&del.latest!=null)vit+='<div class="vital"><div class="lbl">DELIVERY</div><div class="val num'+(del.avg!=null&&del.latest>del.avg?' up':'')+'">'+fnum(del.latest,1)+'%</div>'+(del.avg!=null?'<div class="sub">'+(del.days||30)+'d avg '+fnum(del.avg,1)+'%</div>':'')+'</div>';
+  if(t1&&t1.passed!=null)vit+='<div class="vital"><div class="lbl">TIER-1 GATE</div><div class="val num">'+t1.passed+'/'+(t1.total||7)+'</div></div>';
+  if(vit)tape+='<div class="vitals">'+vit+'</div>';
+  if(t1&&Array.isArray(t1.checks)&&t1.checks.length){
+    tape+='<div class="sets" style="margin-top:14px">'+t1.checks.map(function(c){
       var p=(c.pass===true)?'w':(c.pass===false?'l':'na');
-      var glyph=p==='w'?'W':(p==='l'?'L':'—');
-      return '<span class="set '+p+'"><b>'+glyph+'</b>'+lbl+'</span>';}).join('')+'</div>';
+      return '<span class="set '+p+'"><b>'+(p==='w'?'W':p==='l'?'L':'—')+'</b>'+E((c.name||'').slice(0,28))+'</span>';}).join('')+'</div>';
   }
-  if(lo52!=null&&hi52!=null&&price!=null){
-    var pp=posn!=null?Number(posn):Math.round(100*(price-lo52)/(hi52-lo52));
-    tape+='<div class="range" style="margin-top:14px"><div class="track"><i style="width:100%"></i><span class="dotp" style="left:'+Math.max(0,Math.min(100,pp))+'%"></span></div>'
-      +'<div class="ends"><span>52W LO ₹'+fnum(lo52,0)+'</span><span style="color:var(--chalk)">₹'+fnum(price,0)+' · '+Math.round(pp)+'%</span><span>HI ₹'+fnum(hi52,0)+'</span></div></div>';
+  if(r52&&r52.lo!=null&&r52.hi!=null&&d.price!=null){
+    var pp2=Math.round(100*(d.price-r52.lo)/((r52.hi-r52.lo)||1));
+    tape+='<div class="range" style="margin-top:14px"><div class="track"><i style="width:100%"></i><span class="dotp" style="left:'+Math.max(0,Math.min(100,pp2))+'%"></span></div>'
+      +'<div class="ends"><span>52W LO ₹'+fnum(r52.lo,0)+'</span><span style="color:var(--chalk)">₹'+fnum(d.price,0)+' · '+pp2+'% OF RANGE</span><span>HI ₹'+fnum(r52.hi,0)+'</span></div></div>';
   }
-  if(piv&&typeof piv==='object'){
-    var PP=pick(piv,'pp','PP'),S1=pick(piv,'s1','S1'),S2=pick(piv,'s2','S2'),R1=pick(piv,'r1','R1'),R2=pick(piv,'r2','R2');
-    if(PP!=null&&S2!=null&&R2!=null&&price!=null){
-      var span=R2-S2||1, dp=Math.max(0,Math.min(100,Math.round(100*(price-S2)/span)));
-      tape+='<div class="range" style="margin-top:16px"><div class="track" style="background:#0E1526"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:'+dp+'%"></span></div>'
-        +'<div class="ends num"><span>S2 '+fnum(S2,0)+' · S1 '+fnum(S1,0)+'</span><span style="color:var(--chalk)">PP '+fnum(PP,0)+'</span><span>R1 '+fnum(R1,0)+' · R2 '+fnum(R2,0)+'</span></div></div>';
-    }
+  if(piv&&piv.pp!=null&&piv.s2!=null&&piv.r2!=null&&d.price!=null){
+    var dp2=Math.max(0,Math.min(100,Math.round(100*(d.price-piv.s2)/((piv.r2-piv.s2)||1))));
+    tape+='<div class="range" style="margin-top:16px"><div class="track" style="background:#0E1526"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:'+dp2+'%"></span></div>'
+      +'<div class="ends num"><span>S2 '+fnum(piv.s2,0)+' · S1 '+fnum(piv.s1,0)+'</span><span style="color:var(--chalk)">PP '+fnum(piv.pp,0)+'</span><span>R1 '+fnum(piv.r1,0)+' · R2 '+fnum(piv.r2,0)+'</span></div></div>';
   }
-  if(tape) h+='<div class="eyebrow">TAPE FORENSICS</div><div class="card">'+tape+'</div>';
+  if(tape)h+='<div class="eyebrow">TAPE FORENSICS</div><div class="card">'+tape+'</div>';
 
   /* LADDER */
-  var peers=pick(d,'peers','ladder','peer_ladder');
-  if(Array.isArray(peers)&&peers.length){
-    var gmax=Math.max.apply(null,peers.map(function(p){return Number(pick(p,'gvm','score','gvm_score'))||0}))||10;
-    h+='<div class="eyebrow">THE LADDER'+(seg?' · '+E(String(seg).toUpperCase()):'')+'</div><div class="card">'
-      +peers.map(function(p,i){
-        var ps=pick(p,'symbol','sym','name')||'?', pg=Number(pick(p,'gvm','score','gvm_score'));
-        var self=(String(ps).toUpperCase()===sym.toUpperCase());
-        return '<div class="lrow'+(self?' self':'')+'"><span class="r num">'+(pick(p,'rank')||i+1)+'</span><span class="s">'+E(ps)+'</span>'
-          +'<div class="lbar"><i style="width:'+(isNaN(pg)?0:Math.round(pg/gmax*100))+'%"></i></div><span class="gv num">'+(isNaN(pg)?'—':fnum(pg,2))+'</span></div>';
+  var lad=Array.isArray(d.ladder)?d.ladder:[];
+  if(lad.length){
+    var gmax=Math.max.apply(null,lad.map(function(p){return Number(p.gvm)||0}))||10;
+    h+='<div class="eyebrow">THE LADDER · '+E(String(d.segment||'PEERS').toUpperCase())+' BY GVM</div><div class="card">'
+      +lad.map(function(p){
+        return '<div class="lrow'+(p.is_self?' self':'')+'"><span class="r num">'+(p.rank||'')+'</span><span class="s">'+E(p.symbol||'')+'</span>'
+          +'<div class="lbar"><i style="width:'+Math.round((Number(p.gvm)||0)/gmax*100)+'%"></i></div><span class="gv num">'+(p.gvm!=null?fnum(p.gvm,2):'—')+'</span></div>';
       }).join('')+'</div>';
   }
 
   /* ARENA */
-  var sc=pick(d,'segment_ctx','extras.segment_ctx','sector_ctx');
+  var sc=g(x,'segment_ctx');
   if(sc){
-    var srk=pick(sc,'sector_rank','rank'), sof=pick(sc,'of','sector_of','count'), sgvm=pick(sc,'sector_gvm','mcap_gvm','gvm');
-    var vs1m=pick(sc,'stock_vs_sector','vs_sector_1m','delta_1m');
     var inner='';
-    if(srk!=null) inner+='<div class="vital"><div class="lbl">SECTOR RANK</div><div class="val num">'+srk+(sof?'/'+sof:'')+'</div></div>';
-    if(sgvm!=null) inner+='<div class="vital"><div class="lbl">SECTOR GVM</div><div class="val num">'+fnum(sgvm,2)+'</div><div class="sub">mcap-weighted</div></div>';
-    if(vs1m!=null) inner+='<div class="vital"><div class="lbl">VS SECTOR 1M</div><div class="val num '+(vs1m>=0?'up':'dn')+'">'+(vs1m>=0?'+':'')+fnum(vs1m,1)+'pp</div></div>';
-    if(inner) h+=sect('THE ARENA','<div class="vitals">'+inner+'</div>');
+    if(sc.sector_rank!=null)inner+='<div class="vital"><div class="lbl">SECTOR RANK</div><div class="val num">'+sc.sector_rank+(sc.sector_total?'/'+sc.sector_total:'')+'</div></div>';
+    if(sc.mcap_wtd_gvm!=null)inner+='<div class="vital"><div class="lbl">SECTOR GVM</div><div class="val num">'+fnum(sc.mcap_wtd_gvm,2)+'</div><div class="sub">mcap-weighted</div></div>';
+    if(sc.stock_vs_sector!=null)inner+='<div class="vital"><div class="lbl">VS SECTOR 1M</div><div class="val num '+(sc.stock_vs_sector>=0?'up':'dn')+'">'+(sc.stock_vs_sector>=0?'+':'')+fnum(sc.stock_vs_sector,1)+'pp</div></div>';
+    if(inner){
+      var line=(sc.month_return_avg!=null)?'<div class="punch" style="margin-top:12px">The sector returned '+(sc.month_return_avg>=0?'+':'')+fnum(sc.month_return_avg,1)+'% this month; this stock '+(sc.stock_vs_sector>=0?'leads':'lags')+' it by '+fnum(Math.abs(sc.stock_vs_sector),1)+'pp.</div>':'';
+      h+=sect('THE ARENA · '+String(d.segment||'').toUpperCase()+' AS A SECTOR','<div class="vitals">'+inner+'</div>'+line);
+    }
   }
 
-  /* STORY */
-  var ov=pick(d,'content.overview','overview'), kt=pick(d,'content.key_takeaway','key_takeaway','takeaway');
-  if(ov||kt) h+=sect('THE STORY','<div class="story">'+(ov?E(ov)+' ':'')+(kt?'<b>The takeaway:</b> '+E(kt):'')+'</div>');
+  /* Q1 / RESULT — plain-words block from content.result_analysis */
+  var ra=g(d,'content','result_analysis');
+  if(ra)h+=sect('LATEST RESULT','<div class="story" style="white-space:pre-line;font-family:\'JetBrains Mono\',monospace;font-size:11.5px">'+E(ra)+'</div>');
 
-  h+='<div class="foot">'+(gvm!=null?'GVM '+fnum(gvm,2)+' · ':'')+(asof?'as of '+E(asof)+' · ':'')+'research only, not investment advice</div>';
+  /* FINANCIALS: quarterly Net Profit bars + shareholding lines */
+  var fq=g(d,'financials','quarterly'), fs=g(d,'financials','shareholding');
+  var finH='';
+  if(fq&&Array.isArray(fq.rows)){
+    var npRow=fq.rows.filter(function(r){return r.label==='Net Profit'})[0];
+    if(npRow&&Array.isArray(npRow.values)&&npRow.values.length){
+      var nv=npRow.values.map(Number), mx=Math.max.apply(null,nv)||1, n2=nv.length, bw=Math.max(6,Math.floor(180/n2));
+      var bars=nv.map(function(v,i){var hh=Math.max(1,(v/mx)*38); return '<rect x="'+(i*(200/n2)+1).toFixed(1)+'" y="'+(40-hh).toFixed(1)+'" width="'+bw+'" height="'+hh.toFixed(1)+'" fill="#C8F542" opacity="'+(0.45+0.55*i/(n2-1)).toFixed(2)+'"/>'}).join('');
+      finH+='<div class="grp-head"><h3 class="skew" style="color:var(--volt)">Net Profit ₹Cr</h3><span class="pill-note num">'+fnum(nv[0],0)+' → '+fnum(nv[n2-1],0)+' · '+n2+' QTRS</span></div>'
+        +'<svg viewBox="0 0 200 40" preserveAspectRatio="none" style="width:100%;height:56px">'+bars+'</svg>';
+    }
+  }
+  if(fs&&Array.isArray(fs.rows)){
+    function row(lbl){var r=fs.rows.filter(function(q){return q.label===lbl})[0];return r?r.values.map(Number):null;}
+    var fii=row('FIIs'),dii=row('DIIs'),pub=row('Public');
+    if(fii&&dii&&pub){
+      function line2(s,c){var lo=0,hi=Math.max.apply(null,[].concat(fii,dii,pub))*1.05;
+        var pts=s.map(function(v,i){return (i*200/(s.length-1)).toFixed(0)+','+(40-(v-lo)/(hi-lo)*36).toFixed(1)}).join(' ');
+        return '<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+pts+'"/>';}
+      finH+='<div class="grp-head" style="margin-top:16px"><h3 class="skew" style="font-size:14px">Who Owns It</h3>'
+        +'<span class="pill-note"><span style="color:#4DD8FF">FII '+fnum(fii[fii.length-1],1)+'</span> · <span style="color:#C8F542">DII '+fnum(dii[dii.length-1],1)+'</span> · <span style="color:#FF9F45">PUBLIC '+fnum(pub[pub.length-1],1)+'</span></span></div>'
+        +'<svg viewBox="0 0 200 40" preserveAspectRatio="none" style="width:100%;height:52px">'+line2(fii,'#4DD8FF')+line2(dii,'#C8F542')+line2(pub,'#FF9F45')+'</svg>';
+    }
+  }
+  if(finH)h+='<div class="eyebrow">FINANCIALS</div><div class="card">'+finH+'</div>';
+
+  /* STORY */
+  var ov=g(d,'content','overview'), kt=g(d,'content','key_takeaway');
+  if(ov||kt)h+=sect('THE STORY','<div class="story">'+(ov?E(ov)+' ':'')+(kt?'<b>The takeaway:</b> '+E(kt):'')+'</div>');
+
+  h+='<div class="foot">GVM '+fnum(scores.gvm,2)+(d.score_date?' · scored '+E(d.score_date):'')+' · peers n='+(d.segment_total||'—')+' · research only, not investment advice</div>';
   return h;
 }
 
