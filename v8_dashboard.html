@@ -1032,8 +1032,8 @@ const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,15];
 const BASKET_INFO={
   buy_reversal:{
     label:"Buy Reversal V6",side:"BUY",version:"V6",
-    thesis:"S1-touch bounce with a strong larger frame and a green day. A stock dipped to touch its pivot S1 support in the last 4 trading days (or today's live session low), its monthly frame is strong (RSI 60-90) and today's change has turned positive. V6 (23-Jul-2026) removes the heavy TRUE-weekly-RSI>=70 stage — structurally empty with the S1-dip in this regime — and replaces it with day_1d>0 strict, so all 7 gates are now cheap (no per-symbol heavy stage). Replaces V5/the V3 inverse-sandwich. Fixed +/-3.0% exits (1:1), frozen at entry.",
-    gateType:"strict AND -- all 7 must pass · all cheap (no heavy stage) · no regime · standard slot pool",
+    thesis:"Dip-buy at S1 support inside a healthy stock. Eight hard gates, all must pass: the low touched or broke S1 in the prior 4 sessions or today; 2-day momentum between -0.5% and +2.5%; week return at least -2%; monthly RSI between 60 and 90; the sector's week is positive; month return under +5%; the day is green; GVM at least 6.5. Exits +3.0% / -3.0%, frozen at entry, 15 sessions maximum.",
+    gateType:"8 HARD gates (strict AND) -- all cheap, no heavy stage",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry: live 5-min CMP on first qualification. Target +3.0% / stop -3.0%, both FIXED at entry (never move). Max hold 15 trading days (EOD sweep).",
     sigs_eod:"~195/yr (978 total 5yr)",wr_eod:61.6,ev_eod:0.69,
@@ -1041,7 +1041,7 @@ const BASKET_INFO={
   },
   buy_momentum:{
     label:"Buy Momentum V5",side:"BUY",version:"V5",
-    thesis:"S1 pullback inside a strong uptrend. The stock must already be good quality (50DMA 5-12% above, above the 20DMA, near its 52-week highs, GVM 7+), must have dipped to touch its S1 pivot support in the last 3 sessions or today, must be green but not running away (day change above 0 and no more than +2%), and must be trading just above the PP pivot -- between 0 and 1.5% above it. Hourly momentum must be positive. Entry only between 10:15 and 13:00. On top of that it still has to score 7 of 10 on the band set. Weekly RSI and 2-day momentum are SCORED but no longer block a trade. PAPER CANDIDATE -- reviewed at 30 closed trades, and if the win rate is under 55% it goes back to the founder. Exits are unchanged from the family: +3.0% target, -3.0% stop, both frozen at entry, 15 sessions maximum.",
+    thesis:"S1 pullback inside a strong uptrend. The stock must already be good quality (50DMA 5-12% above, above the 20DMA, near its 52-week highs, GVM 7+), must have dipped to touch its S1 pivot support in the last 3 sessions or today, must be green but not running away (day change above 0 and no more than +2%), and must be trading just above the PP pivot -- between 0 and 1.5% above it. Hourly momentum must be positive. Entry only between 10:15 and 13:00. On top of that it still has to score 7 of 10 on the band set. Weekly RSI and 2-day momentum are SCORED but no longer block a trade. PAPER CANDIDATE -- reviewed at 30 closed trades, and if the win rate is under 55% it goes back to the founder. Exits are unchanged from the family: +3.0% target, -3.0% stop, both frozen at entry, 15 sessions maximum. FRESH BOOK: V5 started on 16-Aug-2026 and its record counts only V5 trades, so it begins at zero decided trades - the win rate shown on the header pill is still the basket's historical book (V3 and V4 era) until V5 trades close.",
     gateType:"8 HARD gates (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry live CMP once both layers clear, 10:15-13:00 only; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
@@ -1051,8 +1051,8 @@ const BASKET_INFO={
 
   sell_reversal:{
     label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
-    thesis:"R1-rejection short with a weak larger frame. A stock touched (day HIGH >= R1) its pivot resistance in the last 3 trading days and is now fading -- weak day change, below its 20/50/200-DMA, weak 52-week index, weak sector, negative 2-day momentum, weak month, with real room to a dynamic S1/S2 target and a genuinely weak weekly frame (TRUE weekly RSI<=45). RAW gate: no market gate, no auto kill-switch (founder-locked, dedicated handler). Replaces V5-D (18-Jul-2026: twr tightened 40->45 stays the mirror cap, new R1-touch condition added).",
-    gateType:"strict AND -- all 10 must pass · dedicated handler, no score fallback",
+    thesis:"Short an R1 rejection in a weak stock. Ten cheap gates plus one heavy final check, all must pass: the high reached R1 in the last 3 sessions; day change between -2% and 0; below the 20, 50 and 200 DMA; 52-week index under 50; the sector's week is negative; 2-day momentum between -4% and -1%; month return at least -10%; at least 2% of room to the S1/S2 target; and finally the true weekly RSI at or below 45. Target is S1 or S2 dynamic, stop is the 1:1 mirror.",
+    gateType:"10 cheap HARD gates + FINAL heavy true weekly RSI (strict AND)",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
     sigs_eod:"~57/yr (286 total 5yr)",wr_eod:60.5,ev_eod:0.71,
@@ -1060,8 +1060,8 @@ const BASKET_INFO={
   },
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
-    thesis:"Structural downtrend caught with true 1:1 geometry. Weak monthly RSI, negative 2-day momentum, at/below the 200-DMA, weak week + sector, mid 52-week band, below the rolling pivot -- and support (S2) must sit >=3% below so it can't block the fall to the fixed 3% target, confirmed by a genuinely weak weekly frame (TRUE weekly RSI<=40). (18-Jul-2026) rename from V3-N5: wRSI tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
-    gateType:"strict AND -- all 9 must pass · dedicated handler, no score fallback",
+    thesis:"Short a structural downtrend. Eight hard gates, all must pass: monthly RSI under 40; 2-day momentum between -4% and -1%; price at or below +2% of the 200DMA; week return between -10% and -0.5%; the sector's week is negative; 52-week index between 20 and 60; price below the PP pivot; and at least 3% of room down to S2. Exits -3.0% target / +3.0% stop, frozen at entry, 15 sessions maximum.",
+    gateType:"8 HARD gates (strict AND) -- no heavy stage",
     target:"-3.0% fixed = entry x 0.97",stop:"+3.0% fixed = entry x 1.03 (true 1:1)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
     sigs_eod:"~71/yr (356 total 5yr)",wr_eod:56.7,ev_eod:0.40,
