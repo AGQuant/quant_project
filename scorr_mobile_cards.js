@@ -220,7 +220,7 @@
     document.head.appendChild(s);
   }
 
-  var MOODS = /^(bearish|bullish|neutral|cautious|risk[- ]?on|risk[- ]?off)$/i;
+  var MOODS = /^(bearish|bullish|neutral|caution|cautious|fear|greed|panic|calm|risk[- ]?on|risk[- ]?off)$/i;
   var CHIP = /^(ADR|Nifty\s+(Day|Week|Month)|PCR|VIX)\b/i;
 
   function nearHeat(c) {           /* computed colour → is this a fail (red-family) chip? */
@@ -248,19 +248,51 @@
         else if (nearVolt(col)) el.classList.add('r5-w');
       }
     }
-    if (moodEl && !moodEl.__r5) {
-      moodEl.__r5 = 1; moodEl.classList.add('r5-mood');
-      /* V8-card treatment (founder 21:5x): sentiment lives on a state RAIL, not in the word's
-         colour. Walk up to the card container and rail it heat/volt/amber by mood. */
-      var mw = (moodEl.textContent || '').toLowerCase();
-      var railC = /bear|risk[- ]?off/.test(mw) ? '#FF4D6D'
-                : /bull|risk[- ]?on/.test(mw) ? '#C8F542' : '#FF9F45';
-      var cardEl = moodEl.parentElement, hops = 0;
+    /* V8-card treatment (founder 21:5x), applied to EVERY mood word on the page (the home
+       carousel has two: the checks scoreboard and the MARKET MOOD / PCR card, founder 23:33).
+       Word in chalk, sentiment on the rail. */
+    var moodEls = [];
+    for (var i2 = 0; i2 < all.length; i2++) {
+      var e2 = all[i2];
+      if (e2.children.length === 0 && MOODS.test((e2.textContent || '').trim())) moodEls.push(e2);
+    }
+    for (var im = 0; im < moodEls.length; im++) {
+      var mEl = moodEls[im];
+      if (mEl.__r5) continue;
+      mEl.__r5 = 1; mEl.classList.add('r5-mood');
+      var mw = (mEl.textContent || '').toLowerCase();
+      var railC = /bear|risk[- ]?off|fear|panic/.test(mw) ? '#FF4D6D'
+                : /bull|risk[- ]?on|greed/.test(mw) ? '#C8F542' : '#FF9F45';
+      var cardEl = mEl.parentElement, hops = 0;
       while (cardEl && hops < 6 && cardEl.offsetHeight < 160) { cardEl = cardEl.parentElement; hops++; }
       if (cardEl && cardEl !== document.body && !cardEl.__r5rail) {
         cardEl.__r5rail = 1;
         cardEl.style.setProperty('--r5rail', railC);
         cardEl.classList.add('r5-rail');
+        /* founder 23:33: the PCR card wastes space — spacious + bigger type. Applied to any
+           mood card generically and additively: index prices go big-mono, labels get air. */
+        cardEl.style.lineHeight = '1.6';
+        var leaves = cardEl.querySelectorAll('div,span,b,strong,p');
+        for (var iz = 0; iz < leaves.length; iz++) {
+          var lf = leaves[iz];
+          if (lf.children.length !== 0 || lf.__r5t) continue;
+          var lt = (lf.textContent || '').trim();
+          if (/^[\d][\d,]{4,}$/.test(lt)) {            /* 24,366 / 57,491 */
+            lf.__r5t = 1;
+            lf.style.cssText += ';font-size:34px!important;font-weight:800;'
+              + 'font-family:"JetBrains Mono",monospace;letter-spacing:0';
+          } else if (/^(NIFTY\s*50|BANKNIFTY|SENSEX|FINNIFTY)$/i.test(lt)) {
+            lf.__r5t = 1;
+            lf.style.cssText += ';font-size:13px;letter-spacing:2.5px;font-weight:700;'
+              + 'text-transform:uppercase;margin-top:10px;display:inline-block';
+          } else if (/^PCR\s/i.test(lt) && lt.length < 30) {
+            lf.__r5t = 1;
+            lf.style.cssText += ';font-size:14px;font-family:"JetBrains Mono",monospace';
+          } else if (/(below|above)\s+pivot/i.test(lt) && lt.length < 20) {
+            lf.__r5t = 1;
+            lf.style.cssText += ';font-size:12px;letter-spacing:1px';
+          }
+        }
       }
     }
     /* fail meter — parsed from the live "N of M checks failed" line, inserted ONCE after it */
@@ -275,36 +307,43 @@
         whyEl.parentNode && whyEl.parentNode.insertBefore(bar, whyEl.nextSibling);
       }
     }
-    /* founder 22:0x: NIFTY/BANKNIFTY position row moves OUT of the scoreboard into its own
-       box above THE BOOK. Founder-ordered move — the only sanctioned exception to the additive
-       parity guard, documented here. */
+    /* founder 23:30 (supersedes 22:0x): NIFTY/BANKNIFTY leaves the scoreboard and becomes its
+       own INDEX SIGNALS card ABOVE the LIVE NEWS section — the future V10 page launchpad.
+       Full-DOM scan this time (the row's container was a tag outside the earlier tag list,
+       which is why two attempts no-oped — guard held, nothing was lost). Founder-ordered move. */
     if (!document.getElementById('r5-idxbox')) {
-      var idxRow = null, idxLen = 1e9;
-      for (var y = 0; y < all.length; y++) {
-        var ty = (all[y].textContent || '').replace(/\s+/g, ' ').trim();
+      var star = document.body ? document.body.querySelectorAll('*') : [];
+      var idxRow = null, idxLen = 1e9, newsHd = null, nLen = 1e9, bookHd2 = null, bkLen = 1e9;
+      for (var y = 0; y < star.length; y++) {
+        var ey = star[y];
+        if (ey.tagName === 'SCRIPT' || ey.tagName === 'STYLE') continue;
+        var ty = (ey.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!ty || ty.length > 160) continue;
         if (/NIFTY\s+(LONG|SHORT|FLAT)/i.test(ty) && /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(ty)
-            && ty.length < 120 && ty.length < idxLen) { idxRow = all[y]; idxLen = ty.length; }
+            && ty.length < idxLen) { idxRow = ey; idxLen = ty.length; }
+        if (/^(LIVE NEWS|THE WIRE|NEWS)/i.test(ty) && ty.length < 40 && ty.length < nLen) { newsHd = ey; nLen = ty.length; }
+        if (/^THE BOOK/i.test(ty) && ty.length < 40 && ty.length < bkLen) { bookHd2 = ey; bkLen = ty.length; }
       }
       if (idxRow) {
         var nM = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
         var bM = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
-        var bookHd = null, bLen = 1e9;
-        for (var y2 = 0; y2 < all.length; y2++) {
-          var tb = (all[y2].textContent || '').replace(/\s+/g, ' ').trim();
-          if (/^THE BOOK/i.test(tb) && tb.length < 40 && tb.length < bLen) { bookHd = all[y2]; bLen = tb.length; }
-        }
-        if (nM && bM && bookHd) {
+        var anchor = newsHd || bookHd2;   /* prefer LIVE NEWS; fall back to THE BOOK */
+        if (nM && bM && anchor) {
           idxRow.style.display = 'none';
           var box = document.createElement('div');
           box.id = 'r5-idxbox'; box.className = 'r5-idxbox';
+          box.style.cursor = 'pointer';
           function seg(name, dir) {
             var d = dir.toUpperCase();
             var cls = d === 'LONG' ? 'long' : (d === 'SHORT' ? 'short' : 'flat');
             return name + ' <b class="' + cls + '">' + d + '</b>';
           }
-          box.innerHTML = '<div class="t">INDEX POSITIONS</div>'
-            + seg('NIFTY', nM[1]) + ' &nbsp;·&nbsp; ' + seg('BANKNIFTY', bM[1]);
-          bookHd.parentNode && bookHd.parentNode.insertBefore(box, bookHd);
+          box.innerHTML = '<div class="t">INDEX SIGNALS · V10</div>'
+            + '<div style="font-size:16px;font-weight:700">' + seg('NIFTY', nM[1])
+            + ' &nbsp;·&nbsp; ' + seg('BANKNIFTY', bM[1]) + '</div>'
+            + '<div class="t" style="margin:6px 0 0">TAP FOR THE V10 VIEW — COMING SOON</div>';
+          /* click reserved for the V10 page (/m/v10) — wired once that page exists */
+          anchor.parentNode && anchor.parentNode.insertBefore(box, anchor);
         }
       }
     }
