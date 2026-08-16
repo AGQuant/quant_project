@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scorr GVM Mobile — Design Ref R1 · "Fight Card"</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --field:#0D1322; --panel:#161F33; --panel-hi:#1C2740; --edge:#26334F;
+    --chalk:#EAF0FA; --muted:#8A97B0;
+    --volt:#C8F542; --heat:#FF4D6D; --pulse:#7C5CFF; --cut:16px;
+    --g:#C8F542; --v:#4DD8FF; --m:#FF9F45; /* pillar identities */
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#070B14}
+  body{font-family:'Space Grotesk',sans-serif;color:var(--chalk);display:flex;justify-content:center;padding:24px 0}
+  .phone{width:412px;max-width:100vw;background:var(--field);position:relative;overflow:hidden;padding-bottom:30px;
+    background-image:repeating-linear-gradient(115deg, rgba(255,255,255,.014) 0 2px, transparent 2px 9px);}
+  .num{font-family:'JetBrains Mono',monospace}
+  .up{color:var(--volt)} .dn{color:var(--heat)}
+  .card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;
+    clip-path:polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);}
+  .eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;letter-spacing:2.5px;color:var(--muted)}
+  .eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+  .skew{font-family:'Archivo Black';transform:skewX(-6deg);text-transform:uppercase}
+
+  /* HERO */
+  .hero{padding:20px 16px 18px}
+  .hero-top{display:flex;justify-content:space-between;align-items:flex-start}
+  .sym{font-family:'Archivo Black';font-size:27px;transform:skewX(-6deg);letter-spacing:.5px}
+  .cname{font-size:12px;color:var(--muted);margin-top:2px}
+  .verdict{font-family:'JetBrains Mono';font-size:11px;font-weight:800;letter-spacing:1.5px;color:#0D1322;background:var(--volt);
+    padding:6px 12px;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+  .price-row{display:flex;gap:14px;margin-top:10px;font-family:'JetBrains Mono';font-size:13px}
+  .price-row .lbl{color:var(--muted);font-size:10px;letter-spacing:1px;display:block}
+  .gvm-big{display:flex;align-items:flex-end;gap:16px;margin-top:16px}
+  .gvm-num{font-family:'Archivo Black';font-size:88px;line-height:.85;transform:skewX(-6deg);color:var(--volt)}
+  .gvm-meta{padding-bottom:8px}
+  .badge{font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+    background:var(--panel-hi);padding:5px 9px;display:inline-block;margin:0 4px 5px 0;
+    clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+  .badge b{color:var(--volt)}
+  /* pillar power bars */
+  .pillars{display:flex;gap:10px;margin-top:18px}
+  .pillar{flex:1;background:var(--panel-hi);border:1px solid var(--edge);padding:10px;
+    clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
+  .pillar .tag{font-family:'Archivo Black';font-size:14px;transform:skewX(-6deg)}
+  .pillar .sc{font-family:'JetBrains Mono';font-weight:800;font-size:19px;margin:4px 0 7px}
+  .bar{height:6px;background:#0E1526;overflow:hidden;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
+  .bar i{display:block;height:100%}
+  .p-g .tag,.p-g .sc{color:var(--g)} .p-g .bar i{background:var(--g)}
+  .p-v .tag,.p-v .sc{color:var(--v)} .p-v .bar i{background:var(--v)}
+  .p-m .tag,.p-m .sc{color:var(--m)} .p-m .bar i{background:var(--m)}
+  .punch{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:14px}
+  .punch b{color:var(--chalk)}
+  /* trend */
+  .trend{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .trend svg{flex:1;height:38px}
+  .trend .lbl{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);letter-spacing:1px}
+
+  /* metric rows */
+  .grp-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+  .grp-head h3{font-family:'Archivo Black';font-size:16px;transform:skewX(-6deg);letter-spacing:.5px}
+  .grp-head .pill-note{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);letter-spacing:1px}
+  .g-c h3{color:var(--g)} .v-c h3{color:var(--v)} .m-c h3{color:var(--m)}
+  .mrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge)}
+  .mrow:first-of-type{border-top:none}
+  .mrow .name{flex:1.4;font-size:12.5px}
+  .mrow .duel{flex:1.6}
+  .duel .vals{display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:11.5px;font-weight:600}
+  .duel .vals .peer{color:var(--muted)}
+  .duel .track{height:4px;background:#0E1526;margin-top:4px;position:relative}
+  .duel .track i{position:absolute;top:0;bottom:0;left:0}
+  .rk{font-family:'JetBrains Mono';font-size:10px;font-weight:800;width:34px;text-align:right}
+  .rk.top{color:var(--volt)} .rk.low{color:var(--heat)} .rk.mid{color:var(--muted)}
+
+  /* W/L reel */
+  .sets{display:flex;flex-wrap:wrap;gap:8px}
+  .set{font-family:'JetBrains Mono';font-size:11.5px;font-weight:600;padding:8px 11px;border:1px solid;
+    clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+  .set.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+  .set.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+  .set b{margin-right:6px;font-weight:800}
+
+  /* ladder */
+  .lrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--edge);font-size:12.5px}
+  .lrow:first-of-type{border-top:none}
+  .lrow .r{font-family:'JetBrains Mono';font-size:11px;width:20px;color:var(--muted);font-weight:700}
+  .lrow .s{flex:1;font-weight:700}
+  .lrow .lbar{flex:1.4;height:5px;background:#0E1526}
+  .lrow .lbar i{display:block;height:100%;background:var(--muted)}
+  .lrow .gv{font-family:'JetBrains Mono';font-weight:800;font-size:12.5px;width:38px;text-align:right}
+  .lrow.self{background:linear-gradient(90deg,rgba(200,245,66,.08),transparent);margin:0 -16px;padding:8px 16px}
+  .lrow.self .s,.lrow.self .gv{color:var(--volt)}
+  .lrow.self .lbar i{background:var(--volt)}
+
+  /* tape */
+  .range{margin-top:6px}
+  .range .track{height:6px;background:#0E1526;position:relative;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
+  .range .track i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--heat),var(--m),var(--volt))}
+  .range .dotp{position:absolute;top:-4px;width:3px;height:14px;background:var(--chalk)}
+  .range .ends{display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:10px;color:var(--muted);margin-top:6px}
+  .vitals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+  .vital{background:var(--panel-hi);border:1px solid var(--edge);padding:9px;
+    clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+  .vital .lbl{font-size:9.5px;letter-spacing:1.2px;color:var(--muted)}
+  .vital .val{font-family:'JetBrains Mono';font-weight:800;font-size:14.5px;margin-top:4px}
+  .vital .sub{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);margin-top:2px}
+
+  .story{font-size:13px;line-height:1.55;color:var(--muted)}
+  .story b{color:var(--chalk)}
+  .q1{display:flex;gap:9px}
+  .q1 .vital{flex:1}
+  .foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 0}
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <!-- ============ HERO / FIGHT CARD ============ -->
+  <div class="card hero">
+    <div class="hero-top">
+      <div>
+        <div class="sym">KARURVYSYA</div>
+        <div class="cname">Karur Vysya Bank · Private Banks</div>
+      </div>
+      <div class="verdict">EXCELLENT</div>
+    </div>
+    <div class="price-row num">
+      <span><span class="lbl">LAST TICK</span>₹331.40</span>
+      <span><span class="lbl">MCAP</span>₹32,065 Cr</span>
+      <span><span class="lbl">AS OF</span>15 AUG</span>
+    </div>
+
+    <div class="gvm-big">
+      <div class="gvm-num num">8.65</div>
+      <div class="gvm-meta">
+        <span class="badge"><b>#1</b> OF 12 · PRIVATE BANKS</span><br>
+        <span class="badge">TOP <b>0.1%</b> OF 1,787</span>
+        <span class="badge">Z <b>+2.34</b></span>
+      </div>
+    </div>
+
+    <div class="pillars">
+      <div class="pillar p-g"><div class="tag">GROWTH</div><div class="sc num">8.75</div><div class="bar"><i style="width:87.5%"></i></div></div>
+      <div class="pillar p-v"><div class="tag">VALUE</div><div class="sc num">7.50</div><div class="bar"><i style="width:75%"></i></div></div>
+      <div class="pillar p-m"><div class="tag">MOMENTUM</div><div class="sc num">9.69</div><div class="bar"><i style="width:96.9%"></i></div></div>
+    </div>
+
+    <div class="trend">
+      <svg viewBox="0 0 200 38" preserveAspectRatio="none">
+        <polyline fill="none" stroke="#C8F542" stroke-width="2"
+          points="0,18 16,29 33,29 50,29 66,35 83,35 100,24 116,24 133,18 150,6 166,18 183,18 200,18"/>
+        <circle cx="200" cy="18" r="3" fill="#C8F542"/>
+      </svg>
+      <span class="lbl">GVM · 13 SESSIONS</span>
+    </div>
+
+    <div class="punch"><b>Buy for medium to long term</b> — Excellent growth, attractive valuation, strong momentum &amp; excellent overall GVM rating.</div>
+  </div>
+
+  <!-- ============ PILLAR G ============ -->
+  <div class="eyebrow">THE PILLARS · EVERY PARAMETER VS 12 PEERS</div>
+  <div class="card g-c">
+    <div class="grp-head"><h3 class="skew">Growth · 8.75</h3><span class="pill-note">YOU vs PEER MEDIAN · RANK</span></div>
+    <div class="mrow"><span class="name">Profit 5Y CAGR</span><div class="duel"><div class="vals"><span class="up num">47.2%</span><span class="peer num">20.0%</span></div><div class="track"><i style="width:100%;background:var(--g)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">Profit 3Y CAGR</span><div class="duel"><div class="vals"><span class="up num">31.0%</span><span class="peer num">13.8%</span></div><div class="track"><i style="width:78%;background:var(--g)"></i></div></div><span class="rk top num">#3</span></div>
+    <div class="mrow"><span class="name">YoY Profit</span><div class="duel"><div class="vals"><span class="up num">44.9%</span><span class="peer num">33.7%</span></div><div class="track"><i style="width:70%;background:var(--g)"></i></div></div><span class="rk top num">#3</span></div>
+    <div class="mrow"><span class="name">YoY Sales</span><div class="duel"><div class="vals"><span class="up num">18.7%</span><span class="peer num">8.2%</span></div><div class="track"><i style="width:89%;background:var(--g)"></i></div></div><span class="rk top num">#2</span></div>
+    <div class="mrow"><span class="name">Sales 3Y CAGR</span><div class="duel"><div class="vals"><span class="up num">19.3%</span><span class="peer num">17.8%</span></div><div class="track"><i style="width:61%;background:var(--g)"></i></div></div><span class="rk mid num">#4</span></div>
+    <div class="mrow"><span class="name">Sales 5Y CAGR</span><div class="duel"><div class="vals"><span class="num">15.2%</span><span class="peer num">15.6%</span></div><div class="track"><i style="width:50%;background:var(--muted)"></i></div></div><span class="rk low num">#8</span></div>
+    <div class="mrow"><span class="name">Operating Margin</span><div class="duel"><div class="vals"><span class="up num">67.8%</span><span class="peer num">47.7%</span></div><div class="track"><i style="width:100%;background:var(--g)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">ROCE</span><div class="duel"><div class="vals"><span class="up num">7.6%</span><span class="peer num">6.4%</span></div><div class="track"><i style="width:97%;background:var(--g)"></i></div></div><span class="rk top num">#2</span></div>
+    <div class="mrow"><span class="name">Dividend Yield</span><div class="duel"><div class="vals"><span class="up num">0.78%</span><span class="peer num">0.28%</span></div><div class="track"><i style="width:44%;background:var(--g)"></i></div></div><span class="rk mid num">#4</span></div>
+    <div class="mrow"><span class="name">Instl Holding</span><div class="duel"><div class="vals"><span class="num">59.1%</span><span class="peer num">69.5%</span></div><div class="track"><i style="width:71%;background:var(--muted)"></i></div></div><span class="rk low num">#10</span></div>
+    <div class="mrow"><span class="name">Instl Change QoQ</span><div class="duel"><div class="vals"><span class="up num">+0.63%</span><span class="peer num">+0.59%</span></div><div class="track"><i style="width:52%;background:var(--g)"></i></div></div><span class="rk mid num">#6</span></div>
+  </div>
+
+  <!-- ============ PILLAR V ============ -->
+  <div class="card v-c">
+    <div class="grp-head"><h3 class="skew">Value · 7.50</h3><span class="pill-note">LOWER = CHEAPER</span></div>
+    <div class="mrow"><span class="name">PE (TTM)</span><div class="duel"><div class="vals"><span class="up num">11.7x</span><span class="peer num">19.1x</span></div><div class="track"><i style="width:100%;background:var(--v)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">Forward PE</span><div class="duel"><div class="vals"><span class="up num">10.4x</span><span class="peer num">17.1x</span></div><div class="track"><i style="width:100%;background:var(--v)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">vs Own 5Y PE</span><div class="duel"><div class="vals"><span class="num">11.7x</span><span class="peer num">10.9x</span></div><div class="track"><i style="width:55%;background:var(--v)"></i></div></div><span class="rk mid num">+7%</span></div>
+    <div class="mrow"><span class="name">vs Sector PE</span><div class="duel"><div class="vals"><span class="up num">61%</span><span class="peer num">CHEAP</span></div><div class="track"><i style="width:92%;background:var(--v)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">Price / Book</span><div class="duel"><div class="vals"><span class="num">2.27x</span><span class="peer num">1.79x</span></div><div class="track"><i style="width:30%;background:var(--muted)"></i></div></div><span class="rk low num">#10</span></div>
+    <div class="mrow"><span class="name">FY27e Upside</span><div class="duel"><div class="vals"><span class="num">12%</span><span class="peer num">14%</span></div><div class="track"><i style="width:38%;background:var(--muted)"></i></div></div><span class="rk low num">#10</span></div>
+    <div class="trend" style="margin-top:12px">
+      <svg viewBox="0 0 200 40" preserveAspectRatio="none">
+        <line x1="0" y1="28.5" x2="200" y2="28.5" stroke="#26334F" stroke-dasharray="3,3" stroke-width="1"/>
+        <polyline fill="none" stroke="#4DD8FF" stroke-width="2" points="0,34.0 18,33.8 36,28.0 55,29.4 73,32.5 91,38.3 109,18.2 127,28.5 145,14.8 164,14.4 182,21.3 200,9.1"/>
+        <circle cx="200" cy="9.1" r="3" fill="#4DD8FF"/>
+      </svg>
+      <span class="lbl">PE · 11 QTRS<br>MEDIAN 9.7x<br>RE-RATING +7%</span>
+    </div>
+  </div>
+
+  <!-- ============ PILLAR M ============ -->
+  <div class="card m-c">
+    <div class="grp-head"><h3 class="skew">Momentum · 9.69</h3><span class="pill-note">PRICE IS THE PROOF</span></div>
+    <div class="mrow"><span class="name">Return 3Y</span><div class="duel"><div class="vals"><span class="up num">+234%</span><span class="peer num">+33%</span></div><div class="track"><i style="width:100%;background:var(--m)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">Return 1Y</span><div class="duel"><div class="vals"><span class="up num">+54.1%</span><span class="peer num">+22.6%</span></div><div class="track"><i style="width:88%;background:var(--m)"></i></div></div><span class="rk top num">#2</span></div>
+    <div class="mrow"><span class="name">52W vs Index</span><div class="duel"><div class="vals"><span class="up num">+55.9%</span><span class="peer num">+23.7%</span></div><div class="track"><i style="width:88%;background:var(--m)"></i></div></div><span class="rk top num">#2</span></div>
+    <div class="mrow"><span class="name">1M Return</span><div class="duel"><div class="vals"><span class="up num">+9.9%</span><span class="peer num">+2.3%</span></div><div class="track"><i style="width:100%;background:var(--m)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">vs 50-DMA</span><div class="duel"><div class="vals"><span class="up num">+7.0%</span><span class="peer num">+3.1%</span></div><div class="track"><i style="width:100%;background:var(--m)"></i></div></div><span class="rk top num">#1</span></div>
+    <div class="mrow"><span class="name">vs 200-DMA</span><div class="duel"><div class="vals"><span class="up num">+16.1%</span><span class="peer num">+7.9%</span></div><div class="track"><i style="width:81%;background:var(--m)"></i></div></div><span class="rk top num">#3</span></div>
+    <div class="mrow"><span class="name">RSI Monthly</span><div class="duel"><div class="vals"><span class="up num">72.4</span><span class="peer num">65.1</span></div><div class="track"><i style="width:81%;background:var(--m)"></i></div></div><span class="rk top num">#3</span></div>
+    <div class="mrow"><span class="name">Volume Trend</span><div class="duel"><div class="vals"><span class="up num">1.75x</span><span class="peer num">0.94x</span></div><div class="track"><i style="width:100%;background:var(--m)"></i></div></div><span class="rk top num">#1</span></div>
+  </div>
+
+  <!-- ============ HIGHLIGHT REEL ============ -->
+  <div class="eyebrow">HIGHLIGHT REEL</div>
+  <div class="card">
+    <div class="sets">
+      <span class="set w"><b>W</b>PROFIT 5Y #1 · 47% vs 20%</span>
+      <span class="set w"><b>W</b>CHEAPEST PE OF 12 BANKS</span>
+      <span class="set w"><b>W</b>3Y RETURN +234% · #1</span>
+      <span class="set l"><b>L</b>P/B 2.3x · RICH #10</span>
+      <span class="set l"><b>L</b>SALES 5Y LAGS PEERS #8</span>
+      <span class="set l"><b>L</b>INSTL ADD ONLY +0.63%</span>
+    </div>
+  </div>
+
+  <!-- ============ TAPE FORENSICS ============ -->
+  <div class="eyebrow">TAPE FORENSICS</div>
+  <div class="card">
+    <div class="vitals">
+      <div class="vital"><div class="lbl">SMART MONEY</div><div class="val up">ACCUM.</div><div class="sub">up/down vol 2.69x</div></div>
+      <div class="vital"><div class="lbl">DELIVERY</div><div class="val num up">65.0%</div><div class="sub">30d avg 49.9%</div></div>
+      <div class="vital"><div class="lbl">TIER-1 GATE</div><div class="val num">4/7</div><div class="sub">RSI + W/M ret fail</div></div>
+    </div>
+    <div class="range" style="margin-top:14px">
+      <div class="track"><i style="width:100%"></i><span class="dotp" style="left:86%"></span></div>
+      <div class="ends"><span>52W LO ₹202</span><span style="color:var(--chalk)">₹331 · 86% OF RANGE</span><span>HI ₹352</span></div>
+    </div>
+    <div class="sets" style="margin-top:14px">
+      <span class="set w"><b>W</b>GVM ≥ 7.0</span>
+      <span class="set w"><b>W</b>2 OF 3 MAs ABOVE</span>
+      <span class="set w"><b>W</b>DAILY RSI &lt; 80</span>
+      <span class="set w"><b>W</b>VOLUME A/D ≥ 1</span>
+      <span class="set l"><b>L</b>RSI M&amp;W ≥ 50</span>
+      <span class="set l"><b>L</b>WK &amp; MO RET &gt; 0</span>
+      <span class="set" style="border-color:var(--edge);background:var(--panel-hi);color:var(--muted)"><b>—</b>SECTOR ALIGNED</span>
+    </div>
+    <div class="range" style="margin-top:16px">
+      <div class="track" style="background:#0E1526"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:36%"></span></div>
+      <div class="ends num"><span>S2 324 · S1 328</span><span style="color:var(--chalk)">PP 334</span><span>R1 338 · R2 344</span></div>
+    </div>
+  </div>
+
+  <!-- ============ PEER LADDER ============ -->
+  <div class="eyebrow">THE LADDER · PRIVATE BANKS BY GVM</div>
+  <div class="card">
+    <div class="lrow self"><span class="r num">1</span><span class="s">KARURVYSYA</span><div class="lbar"><i style="width:86%"></i></div><span class="gv num">8.65</span></div>
+    <div class="lrow"><span class="r num">2</span><span class="s">AUBANK</span><div class="lbar"><i style="width:82%"></i></div><span class="gv num">8.23</span></div>
+    <div class="lrow"><span class="r num">3</span><span class="s">FEDERALBNK</span><div class="lbar"><i style="width:78%"></i></div><span class="gv num">7.83</span></div>
+    <div class="lrow"><span class="r num">4</span><span class="s">IDFCFIRSTB</span><div class="lbar"><i style="width:72%"></i></div><span class="gv num">7.17</span></div>
+    <div class="lrow"><span class="r num">5</span><span class="s">RBLBANK</span><div class="lbar"><i style="width:70%"></i></div><span class="gv num">7.01</span></div>
+    <div class="lrow"><span class="r num">6</span><span class="s">AXISBANK</span><div class="lbar"><i style="width:66%"></i></div><span class="gv num">6.57</span></div>
+    <div class="lrow"><span class="r num">7</span><span class="s">ICICIBANK</span><div class="lbar"><i style="width:65%"></i></div><span class="gv num">6.55</span></div>
+    <div class="lrow"><span class="r num">8</span><span class="s">INDUSINDBK</span><div class="lbar"><i style="width:64%"></i></div><span class="gv num">6.48</span></div>
+    <div class="lrow"><span class="r num">9</span><span class="s">YESBANK</span><div class="lbar"><i style="width:62%"></i></div><span class="gv num">6.29</span></div>
+    <div class="lrow"><span class="r num">10</span><span class="s">HDFCBANK</span><div class="lbar"><i style="width:60%"></i></div><span class="gv num">6.03</span></div>
+    <div class="lrow"><span class="r num">11</span><span class="s">KOTAKBANK</span><div class="lbar"><i style="width:56%"></i></div><span class="gv num">5.58</span></div>
+    <div class="lrow"><span class="r num">12</span><span class="s">BANDHANBNK</span><div class="lbar"><i style="width:55%"></i></div><span class="gv num">5.55</span></div>
+  </div>
+
+  <!-- ============ SECTOR CONTEXT ============ -->
+  <div class="eyebrow">THE ARENA · PRIVATE BANKS AS A SECTOR</div>
+  <div class="card">
+    <div class="vitals">
+      <div class="vital"><div class="lbl">SECTOR RANK</div><div class="val num">71/130</div><div class="sub">mid-table arena</div></div>
+      <div class="vital"><div class="lbl">SECTOR GVM</div><div class="val num">6.34</div><div class="sub">mcap-weighted</div></div>
+      <div class="vital"><div class="lbl">VS SECTOR 1M</div><div class="val num up">+2.3pp</div><div class="sub">stock leads it</div></div>
+    </div>
+    <div class="punch" style="margin-top:12px">Best fighter in a <b>mid-table division</b> — the stock outruns its own sector, which returned −2.5% this month while KVB made +9.9%.</div>
+  </div>
+
+  <!-- ============ Q1 SCORELINE ============ -->
+  <div class="eyebrow">Q1 FY27 SCORELINE</div>
+  <div class="card">
+    <div class="q1">
+      <div class="vital"><div class="lbl">SALES YoY</div><div class="val num up">+18.7%</div><div class="sub">sector +9.9%</div></div>
+      <div class="vital"><div class="lbl">PAT YoY</div><div class="val num up">+45.1%</div><div class="sub">sector +34.9%</div></div>
+      <div class="vital"><div class="lbl">MARGIN</div><div class="val num up">18%</div><div class="sub">vs 9% last yr</div></div>
+    </div>
+  </div>
+
+  <!-- ============ FINANCIALS ============ -->
+  <div class="eyebrow">FINANCIALS · 13 QUARTERS</div>
+  <div class="card">
+    <div class="grp-head"><h3 class="skew" style="color:var(--volt)">Net Profit ₹Cr</h3><span class="pill-note num">359 → 756 · NEVER DOWN YoY</span></div>
+    <svg viewBox="0 0 200 40" preserveAspectRatio="none" style="width:100%;height:56px"><rect x="1.0" y="22.0" width="11" height="18.0" fill="#C8F542" opacity="0.45"/><rect x="16.4" y="21.0" width="11" height="19.0" fill="#C8F542" opacity="0.50"/><rect x="31.8" y="19.3" width="11" height="20.7" fill="#C8F542" opacity="0.54"/><rect x="47.2" y="17.1" width="11" height="22.9" fill="#C8F542" opacity="0.59"/><rect x="62.6" y="16.9" width="11" height="23.1" fill="#C8F542" opacity="0.63"/><rect x="78.0" y="16.2" width="11" height="23.8" fill="#C8F542" opacity="0.68"/><rect x="93.4" y="15.1" width="11" height="24.9" fill="#C8F542" opacity="0.73"/><rect x="108.8" y="14.2" width="11" height="25.8" fill="#C8F542" opacity="0.77"/><rect x="124.2" y="13.8" width="11" height="26.2" fill="#C8F542" opacity="0.82"/><rect x="139.6" y="11.1" width="11" height="28.9" fill="#C8F542" opacity="0.86"/><rect x="155.0" y="5.3" width="11" height="34.7" fill="#C8F542" opacity="0.91"/><rect x="170.4" y="3.6" width="11" height="36.4" fill="#C8F542" opacity="0.95"/><rect x="185.8" y="2.0" width="11" height="38.0" fill="#C8F542" opacity="1.00"/></svg>
+    <div class="grp-head" style="margin-top:16px"><h3 class="skew" style="font-size:14px">Who Owns It · 12 QTRS</h3><span class="pill-note"><span style="color:#4DD8FF">FII 17.9</span> · <span style="color:#C8F542">DII 41.2</span> · <span style="color:#FF9F45">PUBLIC 38.8</span></span></div>
+    <svg viewBox="0 0 200 40" preserveAspectRatio="none" style="width:100%;height:52px"><polyline fill="none" stroke="#4DD8FF" stroke-width="2" points="0,27.0 18,28.8 36,28.9 55,29.1 73,29.1 91,29.3 109,29.1 127,28.9 145,28.6 164,27.9 182,26.1 200,27.1"/><polyline fill="none" stroke="#C8F542" stroke-width="2" points="0,16.8 18,14.7 36,13.9 55,14.3 73,13.4 91,12.3 109,12.0 127,11.6 145,11.2 164,11.1 182,11.7 200,10.3"/><polyline fill="none" stroke="#FF9F45" stroke-width="2" points="0,5.9 18,6.2 36,6.7 55,6.1 73,7.1 91,7.9 109,8.4 127,9.0 145,9.7 164,10.6 182,11.6 200,12.1"/></svg>
+    <div class="punch" style="margin-top:8px">DII stake up <b>+9pp in 3 years</b> while public sells down — institutions absorbing the float. Promoter 2.07%, professional-run.</div>
+  </div>
+
+  <!-- ============ THE STORY ============ -->
+  <div class="eyebrow">THE STORY</div>
+  <div class="card">
+    <div class="story"><b>~100-year Tamil Nadu franchise.</b> 800+ branches, South-dominant. Gold loans + MSME (textile belt: Coimbatore, Tirupur, Salem) — generations of merchant relationships. <b>The takeaway:</b> FY26 PAT ₹2,510 Cr growing 15-18%, NIM 4.0-4.3% premium to peers, GNPA best-in-class, ROE 19%. <b>Watch:</b> South concentration, smaller scale, NIM under rate cuts, promoter stake just 2.07%.</div>
+  </div>
+
+  <div class="foot">GVM 8.65 · score date 15-AUG-2026 · price last tick 14-AUG · peers n=12 · research only, not investment advice</div>
+</div>
+</body>
+</html>
