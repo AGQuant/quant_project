@@ -1040,14 +1040,15 @@ const BASKET_INFO={
     sigs_5m:"192/yr",wr_5m:62.0,ev_5m:0.85,
   },
   buy_momentum:{
-    label:"Buy Momentum V4",side:"BUY",version:"V4",
-    thesis:"Strong uptrend continuation, TWO independent layers both required. 7 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, mom_2d 0-4, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler. V4 (15-Aug-2026) made mom_2d[0,4] HARD after V3's own 30-trade tripwire fired at 33 trades / 58% WR.",
-    gateType:"7 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
+    label:"Buy Momentum V5",side:"BUY",version:"V5",
+    thesis:"S1 pullback inside a strong uptrend. The stock must already be good quality (50DMA 5-12% above, above the 20DMA, near its 52-week highs, GVM 7+), must have dipped to touch its S1 pivot support in the last 3 sessions or today, must be green but not running away (day change above 0 and no more than +2%), and must be trading just above the PP pivot -- between 0 and 1.5% above it. Hourly momentum must be positive. Entry only between 10:15 and 13:00. On top of that it still has to score 7 of 10 on the band set. Weekly RSI and 2-day momentum are SCORED but no longer block a trade. PAPER CANDIDATE -- reviewed at 30 closed trades, and if the win rate is under 55% it goes back to the founder. Exits are unchanged from the family: +3.0% target, -3.0% stop, both frozen at entry, 15 sessions maximum.",
+    gateType:"8 HARD gates (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
-    pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
-    sigs_eod:"~292/yr (1524 total 5yr)",wr_eod:60.3,ev_eod:0.62,
-    sigs_5m:"408/yr",wr_5m:61.0,ev_5m:0.74,
+    pivotEntry:"Entry live CMP once both layers clear, 10:15-13:00 only; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
+    sigs_eod:"~115/yr (full-universe 5-min sim)",wr_eod:61.7,ev_eod:0.76,
+    sigs_5m:"115/yr",wr_5m:61.7,ev_5m:0.76,
   },
+
   sell_reversal:{
     label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
     thesis:"R1-rejection short with a weak larger frame. A stock touched (day HIGH >= R1) its pivot resistance in the last 3 trading days and is now fading -- weak day change, below its 20/50/200-DMA, weak 52-week index, weak sector, negative 2-day momentum, weak month, with real room to a dynamic S1/S2 target and a genuinely weak weekly frame (TRUE weekly RSI<=45). RAW gate: no market gate, no auto kill-switch (founder-locked, dedicated handler). Replaces V5-D (18-Jul-2026: twr tightened 40->45 stays the mirror cap, new R1-touch condition added).",

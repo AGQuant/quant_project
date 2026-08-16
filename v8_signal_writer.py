@@ -2027,49 +2027,106 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
     def _dma20_gt0(s):    # dma_20 > 0 (STRICT)
         v = s.get("dma_20")
         return v is not None and float(v) > 0.0
-    # cc#1045: V4 FINAL (spec 22386) carries ONE added hard gate, mom_2d. The sector_week gate from
-    # the earlier 22375 draft was DROPPED by the founder after a standalone simulation showed the mom
-    # gate alone clears the acceptance bar; sector_week keeps its SCORE band and nothing else.
-    # FAIL CLOSED on NULL is load-bearing, not defensive tidiness: mom_2d is computed live off the
-    # 2-day base (_snapshot pins it to the clean 5-min bar) and is None whenever that base is
-    # missing. Letting NULL through would reopen exactly the hole the gate is here to close.
-    def _mom2d_band(s):   # mom_2d in [0, 4] (V4 hard gate; was score-band only)
-        v = s.get("mom_2d")
-        return v is not None and 0.0 <= float(v) <= 4.0
+    # ── cc#1051 BUY_MOMENTUM_V5 (spec 23186) ────────────────────────────────────────────────
+    # The basket keeps its NAME and its slots; only the rule set changes (founder 16-Aug: upgrade
+    # in place, do not fork a new basket). Two gates that were live this morning are GONE by
+    # design, not by accident: the cc#1045 mom_2d [0,4] gate (23186 says mom_2d is band-only) and
+    # the true_weekly_rsi [70,85] heavy stage that had gated this basket since cc#502 (23186 keeps
+    # twr as a SCORE band). In their place come the three S1-pullback legs below.
+    def _day1d_band(s):   # day_1d in (0, 2.0] — still strictly positive, now capped
+        v = s.get("day_1d")
+        return v is not None and 0.0 < float(v) <= 2.0
+
+    # PIVOTS ARE NOT RECOMPUTED HERE. `pivots` is the same rolling-5-day classic set every other
+    # basket is handed (PP=(H5+L5+C1)/3, S1=2*PP-H5), so the S1 and PP legs below read the one
+    # shared derivation rather than forking the formula — spec 23186 names that convention
+    # explicitly and the card forbids a private copy.
+    def _pp_band(s):      # live price ABOVE PP by 0 to 1.5 pct
+        cmp_, pv = s.get("_cmp"), pivots.get(s["symbol"])
+        if not cmp_ or not pv or not pv.get("pp"):
+            return False
+        off = (float(cmp_) / float(pv["pp"]) - 1) * 100.0
+        return 0.0 <= off <= 1.5
+
+    # ENTRY WINDOW 10:15-13:00 IST, hard. The hourly gate already blocks before ~10:15; the 13:00
+    # cutoff is new and is what makes this a PULLBACK basket rather than an all-day chase. Read off
+    # the tick clock so a replay honours it exactly as the live path does.
+    _tick = signal_ts_ist if not sim_ts else sim_ts
+    try:
+        _in_window = (_tick is not None and _tick.time() >= time(10, 15)
+                      and _tick.time() <= time(13, 0))
+    except Exception:
+        _in_window = True
+
+    # S1-TOUCH, 3 COMPLETED SESSIONS OR TODAY-SO-FAR. Same shape as buy_reversal's leg (batched
+    # once for the whole universe, no per-symbol subqueries) but 3 sessions per 23186, not 4.
+    _p3lo = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, low,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s) AND price_date < %s
+                )
+                SELECT symbol, MIN(low) FROM ranked WHERE rn <= 3 GROUP BY symbol
+            """, ([m["symbol"] for m in all_metrics], target_date))
+            for _sym, _lo in cur.fetchall():
+                if _lo is not None:
+                    _p3lo[_sym] = float(_lo)
+    except Exception as e:
+        log.warning(f"buy_momentum_v5 prior3_low: {e}")
+
+    def _s1_touch(s):
+        pv = pivots.get(s["symbol"])
+        if not pv or pv.get("s1") is None:
+            return False
+        s1 = float(pv["s1"])
+        p3 = _p3lo.get(s["symbol"])
+        today_lo = s.get("day_low")
+        return (p3 is not None and p3 <= s1) or (today_lo is not None and float(today_lo) <= s1)
 
     base = list(all_metrics)
+    for s in base:
+        s["_s1_touch"] = _s1_touch(s)
     funnel = {"_universe": len(base)}
     funnel["dma_50"]        = sum(1 for s in base if _passes(s.get("dma_50"), 5.0, 12.0))
     funnel["dma_20"]        = sum(1 for s in base if _dma20_gt0(s))
     funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), 75.0, None))
     funnel["gvm_score"]     = sum(1 for s in base if _passes(s.get("gvm_score"), 7.0, None))
-    funnel["day_1d"]        = sum(1 for s in base if _day1d_gt0(s))
-    funnel["mom_2d"]        = sum(1 for s in base if _mom2d_band(s))      # cc#1045 V4 FINAL: the ONE added gate
+    funnel["day_1d"]        = sum(1 for s in base if _day1d_band(s))
+    funnel["s1_touch"]      = sum(1 for s in base if s["_s1_touch"])
+    funnel["pp_band"]       = sum(1 for s in base if _pp_band(s))
     funnel["hourly_pct"]    = sum(1 for s in base if _hourly_ok(s))
+    funnel["_entry_window"] = 1 if _in_window else 0
     surv = [s for s in base
             if _passes(s.get("dma_50"), 5.0, 12.0)
             and _dma20_gt0(s)
             and _passes(s.get("week_index_52"), 75.0, None)
             and _passes(s.get("gvm_score"), 7.0, None)
-            and _day1d_gt0(s)
-            and _mom2d_band(s)
-            and _hourly_ok(s)]
-    # KEY NAME IS LEGACY, VALUE IS CURRENT. `_stage6_survivors` now holds the intersection of SEVEN
-    # cheap gates, not six. The name is kept on purpose: v8_endpoints reads this literal key for the
-    # heavy stage's denominator, and sell_reversal already carries the same quirk (`_stage9_survivors`
-    # counting ten gates, cc#514). Renaming it would silently null the true_weekly_rsi denominator on
-    # every stored row written before the deploy. The displayed wording is registry-derived instead.
-    funnel["_stage6_survivors"] = len(surv)   # denominator for the heavy true_weekly_rsi row
-    log.info(f"buy_momentum_v4: {len(surv)} after 7-condition cheap hard-gate pre-filter [cc#1045]")
+            and _day1d_band(s)
+            and s["_s1_touch"]
+            and _pp_band(s)
+            and _hourly_ok(s)] if _in_window else []
+    # KEY NAME IS LEGACY, VALUE IS CURRENT — see cc#1045. `_stage6_survivors` now holds the
+    # intersection of the EIGHT cheap gates. The name is kept because v8_endpoints reads this
+    # literal key; renaming it would null the denominator on every stored row.
+    funnel["_stage6_survivors"] = len(surv)
+    log.info(f"buy_momentum_v5: {len(surv)} after 8-gate S1-pullback filter "
+             f"(window={_in_window}) [cc#1051]")
 
-    hard_qualified = []
+    # twr is still COMPUTED — it is the 10th SCORE band — but it no longer gates anything.
+    hard_qualified = surv
     for s in surv:
         twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
         s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and 70.0 <= twr <= 85.0:        # FINAL heavy hard-gate stage
-            hard_qualified.append(s)
-    funnel["true_weekly_rsi"] = len(hard_qualified)
-    log.info(f"buy_momentum_v4: {len(hard_qualified)} pass hard gates (true_weekly_rsi in [70,85])")
+    # cc#1051: twr is no longer a GATE, so it must not appear as a funnel gate key — the cc#599
+    # registry-parity check compares these keys to BASKET_FILTERS and would flag a ghost row. The
+    # count the score stage needs (stocks clearing every hard gate) moves to a PRIVATE key, and
+    # v8_endpoints reads it with a fallback to the old name so rows stored before this deploy
+    # still render their denominator.
+    funnel["_hard_qualified"] = len(hard_qualified)
 
     # SCORE >= 7 of 10 V2 bands, FIXED threshold (no mood-dependent n/n-1). wRSI band reuses the
     # SAME true_weekly_rsi value just computed for the hard gate (spec: "use the SAME value").
@@ -2127,7 +2184,10 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
             # GRANDFATHERED: this handler only gates ENTRY, and exits (+/-3% frozen at entry,
             # 15-day max hold, gap exits) are owned by v8_paper and are byte-untouched here, so a
             # V3 position opened before the deploy runs out its V3 exit exactly as before.
-            "spec": "BUY_MOMENTUM_V4 cc#1038",
+            # cc#1051 V5 FRESH BOOK (BUY_REVERSAL_V6_FRESH_BOOK precedent, session_log 7842):
+            # V5 performance counts ONLY rows carrying this stamp. V4-stamped rows keep theirs and
+            # are never rewritten, so the two eras stay separable in the book.
+            "spec": "BUY_MOMENTUM_V5 cc#1051",
         }
         try:
             with conn.cursor() as cur:
@@ -2222,7 +2282,10 @@ BASKET_FILTERS = {
         # cc#854: the true weekly RSI row is REMOVED — 9 filters become 8. Nothing else in this
         # list changes, and the sell_reversal block above keeps ITS twr<=45 row untouched.
     ],
-    # BUY_MOMENTUM_V4 FINAL (cc#502 -> cc#1045, spec 22386) — 7 cheap HARD gates + heavy
+    # BUY_MOMENTUM_V5 (cc#1051, spec 23186) — S1-PULLBACK rule set, name and slots unchanged.
+    # mom_2d and true_weekly_rsi are SCORE BANDS ONLY now; s1_touch and pp_band are the new legs.
+    # Historical note kept so the lineage is readable — the previous shape was (cc#502 -> cc#1045,
+    # spec 22386) 7 cheap HARD gates + heavy
     # true_weekly_rsi[70,85] FINAL stage. V4 adds mom_2d [0,4] as its ONE hard gate; it was
     # score-band-only in V3 and keeps its score band as well. The sector_week hard gate drafted in
     # 22375 was DROPPED by the founder before any trading day ran under it — sector_week stays a
@@ -2234,10 +2297,10 @@ BASKET_FILTERS = {
         {"key": "dma_20",         "label": "dma 20",       "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
         {"key": "week_index_52",  "label": "52w index",    "cond_min": ">= 75", "cond_max": "",      "min": 75.0, "max": None, "type": "band"},
         {"key": "gvm_score",      "label": "gvm score",    "cond_min": ">= 7",  "cond_max": "",      "min": 7.0,  "max": None, "type": "band"},
-        {"key": "day_1d",         "label": "day change",   "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
-        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= 0",  "cond_max": "<= 4",  "min": 0.0,  "max": 4.0,  "type": "band"},
+        {"key": "day_1d",         "label": "day change",   "cond_min": "> 0",   "cond_max": "<= 2",  "min": 0.0,  "max": 2.0,  "type": "band", "strict": True},
+        {"key": "s1_touch",       "label": "S1 touch (last 3 sessions or today)", "cond_min": "<= S1", "cond_max": "", "min": None, "max": None, "type": "custom"},
+        {"key": "pp_band",        "label": "above PP by",  "cond_min": ">= 0",  "cond_max": "<= 1.5%","min": 0.0,  "max": 1.5,  "type": "custom"},
         {"key": "hourly_pct",     "label": "hourly % (from ~10:15)", "cond_min": "> 0", "cond_max": "NOT NULL", "min": 0.0, "max": None, "type": "custom"},
-        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": ">= 70","cond_max": "<= 85","min": 70.0, "max": 85.0, "type": "band", "heavy": True, "denom_key": "_stage6_survivors"},
     ],
 }
 
@@ -2246,7 +2309,7 @@ BASKET_SPEC = {
     "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
     "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
-    "buy_momentum":  {"version": "V4",   "cc": "cc#1045", "label": "Buy Momentum V4"},
+    "buy_momentum":  {"version": "V5",   "cc": "cc#1051", "label": "Buy Momentum V5"},
 }
 
 # FILTER_CONFIG-shape derivation: the v8_metrics-column ("band") subset per basket, {key: [min,max]}.

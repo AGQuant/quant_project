@@ -2239,7 +2239,9 @@ def bm_funnel_detail():
         universe = int(counts.get("_universe", 0) or 0)
         stage6   = counts.get("_stage6_survivors")
         stage6   = int(stage6) if stage6 is not None else None
-        hard_qualified = int(counts.get("true_weekly_rsi", 0) or 0)
+        # cc#1051: V5 dropped the twr hard gate, so the hard-qualified count now arrives under
+        # _hard_qualified. Fall back to the old key so pre-deploy rows still show a denominator.
+        hard_qualified = int(counts.get("_hard_qualified", counts.get("true_weekly_rsi", 0)) or 0)
         final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _BM_V3_STAGES:
@@ -2283,7 +2285,6 @@ _BM_V3_PASSCOUNT_GATES = [
     ("dma_50",        5.0,  12.0),
     ("week_index_52", 75.0, None),
     ("gvm_score",      7.0, None),
-    ("mom_2d",         0.0,   4.0),   # cc#1038 V4 g9
 ]
 
 # cc#502: SCORE_BANDS mirror of _write_buy_momentum_v3_qualified's V2 bands (fixed >=7-of-10
@@ -2395,13 +2396,14 @@ def bm_stock_detail(symbol: str):
         p_dma20 = dma20 is not None and dma20 > 0.0
         p_w52   = _passes_filter(w52, 75.0, None)
         p_gvm   = _passes_filter(gvm, 7.0, None)
-        p_d1d   = d1d is not None and d1d > 0.0
-        p_mom2d = _passes_filter(mom2d, 0.0, 4.0)          # cc#1045 V4 FINAL: the ONE added gate
+        p_d1d   = d1d is not None and 0.0 < d1d <= 2.0     # cc#1051 V5: capped at +2%
         p_hp    = hp is not None and hp > 0.0
         # cc#1045: mom_2d joins the cheap set, so a stock failing it never reaches the heavy wRSI
         # row — same as the handler, which is the whole point of this endpoint. sector_week is NOT
         # here: 22386 dropped its hard gate, and it scores below like any other band.
-        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_mom2d, p_hp])
+        # cc#1051 V5: s1_touch and pp_band are live/pivot legs this display endpoint does not
+        # recompute, so `cleared` covers the stored-column gates only and the note below says so.
+        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_hp])
         p_twr   = cleared and (twr is not None and 70.0 <= twr <= 85.0)
 
         rows = [
@@ -2409,8 +2411,7 @@ def bm_stock_detail(symbol: str):
             {"filter": "dma_20",          "required": "> 0",      "actual": _fmt(dma20, 2) + "%", "pass": p_dma20},
             {"filter": "week_index_52",   "required": ">= 75",    "actual": _fmt(w52, 1),          "pass": p_w52},
             {"filter": "gvm_score",       "required": ">= 7",     "actual": _fmt(gvm, 1),          "pass": p_gvm},
-            {"filter": "day_1d",          "required": "> 0",      "actual": _fmt(d1d, 2) + "%",    "pass": p_d1d},
-            {"filter": "mom_2d",          "required": "0 to 4",   "actual": _fmt(mom2d, 2) + "%",  "pass": p_mom2d},
+            {"filter": "day_1d",          "required": "> 0 and <= 2", "actual": _fmt(d1d, 2) + "%", "pass": p_d1d},
             {"filter": "hourly_pct",      "required": "> 0",      "actual": _fmt(hp, 2) + "%",     "pass": p_hp},
             {"filter": "true_weekly_rsi", "required": "70 to 85", "actual": _fmt(twr, 1),          "pass": p_twr},
         ]
