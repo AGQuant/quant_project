@@ -184,12 +184,12 @@
   if (window.__r5sig) return; window.__r5sig = 1;
 
   var CSS = ''
-    + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;'
+    + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;color:#EAF0FA!important;'
     +   'font-size:42px!important;line-height:.95!important;letter-spacing:1px;'
     +   'text-transform:uppercase;display:inline-block!important;'
     +   'transform:skewX(-6deg);transform-origin:left center;animation:none!important}'
     + '.r5-mood::after{content:"";display:block;height:6px;width:150px;margin-top:4px;'
-    +   'background:linear-gradient(90deg,currentColor,transparent);transform:skewX(-24deg);opacity:.9}'
+    +   'background:linear-gradient(90deg,#EAF0FA,transparent);transform:skewX(-24deg);opacity:.85}'
     + '.r5-meter{height:8px;background:#1C2740;margin:12px 0 2px;overflow:hidden;'
     +   'clip-path:polygon(0 0,calc(100% - 8px) 0,100% 100%,0 100%)}'
     + '.r5-meter i{display:block;height:100%;background:linear-gradient(90deg,#FF4D6D 60%,#FF8FA5);'
@@ -201,6 +201,8 @@
     + '.r5-l{background:#241019!important;border-color:#5A2634!important}'
     + '.r5-w::before{content:"W ";font-weight:800;color:#C8F542}'
     + '.r5-l::before{content:"L ";font-weight:800;color:#FF8FA5}'
+    + '.r5-set,.r5-set *{text-decoration:none!important;border-bottom:0!important}'
+    + '.r5-rail{border-left:4px solid var(--r5rail,#FF4D6D)!important;border-radius:0!important}'
     + '.r5-tab-on{color:#C8F542!important;position:relative}'
     + '.r5-tab-on::after{content:"";position:absolute;top:-1px;left:25%;right:25%;height:3px;'
     +   'background:#C8F542;clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
@@ -239,7 +241,21 @@
         else if (nearVolt(col)) el.classList.add('r5-w');
       }
     }
-    if (moodEl && !moodEl.__r5) { moodEl.__r5 = 1; moodEl.classList.add('r5-mood'); }
+    if (moodEl && !moodEl.__r5) {
+      moodEl.__r5 = 1; moodEl.classList.add('r5-mood');
+      /* V8-card treatment (founder 21:5x): sentiment lives on a state RAIL, not in the word's
+         colour. Walk up to the card container and rail it heat/volt/amber by mood. */
+      var mw = (moodEl.textContent || '').toLowerCase();
+      var railC = /bear|risk[- ]?off/.test(mw) ? '#FF4D6D'
+                : /bull|risk[- ]?on/.test(mw) ? '#C8F542' : '#FF9F45';
+      var cardEl = moodEl.parentElement, hops = 0;
+      while (cardEl && hops < 6 && cardEl.offsetHeight < 160) { cardEl = cardEl.parentElement; hops++; }
+      if (cardEl && cardEl !== document.body && !cardEl.__r5rail) {
+        cardEl.__r5rail = 1;
+        cardEl.style.setProperty('--r5rail', railC);
+        cardEl.classList.add('r5-rail');
+      }
+    }
     /* fail meter — parsed from the live "N of M checks failed" line, inserted ONCE after it */
     if (whyEl && !whyEl.__r5m) {
       var m = /(\d+)\s+of\s+(\d+)/.exec(whyEl.textContent);
