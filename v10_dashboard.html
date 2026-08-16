@@ -654,10 +654,20 @@ function rSignal(){
 function rIdxTape(){
   const one=(name,tapeKey,d)=>{
     const chg=d?d.chg:0, col=chg>=0?UP:DN;
+    const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;   // cc#1060 fallback
     // cc#1058: a SLOT, not the SVG — width is unknown until the element is in the document.
-    const tape=window.ScorrIndexTape
-      ? ScorrIndexTape.placeholder(tapeKey,col,46)
-      : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
+    // cc#1060: feature-detect the METHOD, never just the namespace. A cached older build of
+    // index_tape_card.js still defines window.ScorrIndexTape, so the old check passed and then
+    // threw on a function that build did not have — killing render() before it could assign
+    // innerHTML, which is what left this pane on "Loading…" in production. Degrade in steps:
+    // interactive slot -> static cc#1054 tape -> plain text. A stale asset must cost features,
+    // never the whole pane.
+    const _T=window.ScorrIndexTape;
+    const tape=(_T&&typeof _T.placeholder==='function')
+      ? _T.placeholder(tapeKey,col,46)
+      : (_T&&typeof _T.svg==='function'&&ent)
+        ? _T.svg(ent,col,{h:46,w:320})
+        : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
     // cc#1059: the header is a click target too, alongside the tape itself. No C button —
     // founder amendment 16-Aug: for an index the CHART is the affordance, so this just gives
     // the name and price the same behaviour rather than adding a control.
@@ -1065,10 +1075,13 @@ function openIdxChart(tapeKey){
 
 // cc#1058: identical mount to the V8 Index Intel pane — same module, same options object.
 function mountIdxTapes(){
-  if(!window.ScorrIndexTape || !D.idxTape) return;
-  ScorrIndexTape.mountAll(document.getElementById('app'), D.idxTape, {
+  // cc#1060: same lesson — check mountAll itself, and never let a mount failure escape into
+  // render(). The tapes are the least important thing on this pane; the pane is not.
+  const T=window.ScorrIndexTape;
+  if(!T || typeof T.mountAll!=='function' || !D.idxTape) return;
+  try{ T.mountAll(document.getElementById('app'), D.idxTape, {
     onActivate:(key)=>{ if(typeof openIdxChart==='function') openIdxChart(key); }   // cc#1059
-  });
+  }); }catch(e){ console.warn('[idxtape] mount failed',e&&e.message); }
 }
 
 /* ════════════════════════════════════════════════════════════════

@@ -404,9 +404,18 @@ async def auth_gate(request: Request, call_next):
             # cc#1021: v8_ladder_v2.js joins the list for the same reason — v8_dashboard.html
             # hardcodes it as a blocking tag, and an unstamped max-age=86400 URL would serve a
             # day-stale ladder after a deploy.
+            # cc#1060 P0: index_tape_card.js joins the list, and it is here because leaving it out
+            # broke the Index Intel tab in production. cc#1054 shipped the file with a HARDCODED
+            # blocking tag in v8_dashboard.html and v10_dashboard.html but never added it here, so
+            # the URL never changed while the response carried max-age=86400. Browsers that had
+            # loaded the page between the cc#1054 and cc#1058 deploys kept serving the OLD module,
+            # whose surface had no placeholder()/mountAll(). rIdxSpark() called placeholder() on it,
+            # threw TypeError inside the template string, and render() died BEFORE assigning
+            # #idx-app.innerHTML — so the pane sat on "Loading Index Intelligence…" forever. This is
+            # the identical failure the cc#1021 note above predicts, one file later.
             for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
                         b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js",
-                        b"v8_ladder_v2.js"):
+                        b"v8_ladder_v2.js", b"index_tape_card.js"):
                 body = body.replace(b'src="/' + _js + b'"',
                                     b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)
