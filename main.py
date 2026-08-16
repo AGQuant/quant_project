@@ -292,6 +292,18 @@ _MOBILE_HEAD = (
     # a different origin with their own cache policy, and appending ?v= to them would fingerprint
     # our build into an external request without busting anything we control.
     + b'<link rel="stylesheet" href="/static/mobile.css?v=' + _BUILD_B + b'">'
+    # cc#1064 TELEMETRY DROP. The token layer goes AFTER mobile.css deliberately: it re-points the
+    # legacy token names (--bg/--panel/--txt/--grn/--red/--blu …) at the R5 palette, and those names
+    # are what all 5,138 var() references across the app already resolve to. One link, every page,
+    # no per-page edit. It is gated :not([data-theme="light"]) inside the file, so mobile.css's light
+    # palette is untouched — Telemetry Drop IS the dark theme, not a replacement for both.
+    # Stamped, because cc#1060 was exactly the cost of shipping an unstamped max-age=86400 asset.
+    + b'<link rel="stylesheet" href="/static/scorr_theme_r5.css?v=' + _BUILD_B + b'">'
+    # R5's three faces. Third-party origin, so deliberately NOT stamped — same reasoning as the
+    # Sora link above.
+    + b'<link href="https://fonts.googleapis.com/css2?family=Archivo+Black'
+      b'&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800'
+      b'&display=swap" rel="stylesheet">'
     + b'<script src="/mobile_tables.js?v=' + _BUILD_B + b'" defer></script>'   # cc#330 P4: shared table helper
     # cc#792: every shared JS tag carries the deploy build stamp, so a push busts the browser cache
     # automatically. These are served with Cache-Control max-age=86400, so without a changing URL a
@@ -312,6 +324,20 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_analysis_card.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared Analysis modal (letter A)
     + b'<script src="/scorr_cockpit_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#805: shared Derivative Cockpit (letter D)
 )
+
+# cc#1064: the mobile app is DARK-ONLY — mobile_endpoints' mobile_app.css defines the dark tokens
+# and carries ZERO :root[data-theme="light"] overrides, so an /m/* page renders dark whatever the
+# attribute says. _MOBILE_HEAD nonetheless stamped data-theme from localStorage, defaulting to
+# 'light' (cc#348, a WEB decision). The attribute was simply describing those pages wrongly, and it
+# stayed invisible because nothing read it there — until the R5 layer, which is gated on exactly
+# that attribute and would have skipped the entire mobile app. Fixed at the stamp rather than
+# worked around in the CSS: this runs after _MOBILE_HEAD's script, so it wins.
+_MOBILE_APP_DARK = (
+    b"<script>(function(){try{"
+    b"document.documentElement.setAttribute('data-theme','dark');"
+    b"}catch(e){}})();</script>"
+)
+
 
 def _find_outside_comments(hay: bytes, needle: bytes) -> int:
     """cc#821: index of `needle` in `hay`, ignoring occurrences inside an HTML comment.
@@ -438,7 +464,10 @@ async def auth_gate(request: Request, call_next):
                 if _at < 0:
                     _at = _find_outside_comments(body, b"</body>")
                 if _at >= 0:
-                    body = body[:_at] + _MOBILE_HEAD + body[_at:]
+                    _head = _MOBILE_HEAD
+                    if path.startswith("/m/"):
+                        _head = _head + _MOBILE_APP_DARK   # cc#1064: dark-only surface, stamped honestly
+                    body = body[:_at] + _head + body[_at:]
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"

@@ -1,0 +1,167 @@
+/* scorr_theme_r5.css — cc#1064 "TELEMETRY DROP"
+   =============================================================================================
+   Spec: design_refs/scorr_mobile_R5.html at a727abb. Every value below is lifted from it; none
+   is invented.
+
+   WHY THIS FILE IS TOKENS AND NOTHING ELSE
+   The app already speaks in CSS custom properties: 5,138 var() references across 50 files, and
+   almost all of them resolve to about fifteen names (--dim 640, --mut 618, --line 405, --grn 344,
+   --txt 308, --red 301, --line2 274, --blu 223, --panel 178, --panel2 130 …). Re-pointing those
+   names at the R5 palette re-skins every one of those 5,138 sites at once, with no per-page edit.
+   That is the whole multiplier, and it is why the "sweep each page and rewrite its hexes" plan is
+   mostly unnecessary — see the honesty note in the card result.
+
+   AND IT IS WHY CONTENT PARITY IS STRUCTURAL HERE, not something to hope for.
+   The founder's 18:3x guard says the theme must not remove, hide or collapse a single element.
+   This file changes COLOURS, TYPE and CORNER GEOMETRY. It contains no display:none, no
+   visibility:hidden, no height:0, no content-erasing rule of any kind, and it edits no markup.
+   Nothing can disappear, because nothing here can make anything disappear. That is a stronger
+   guarantee than counting elements after the fact, and the count is still stated in the result.
+
+   THE LIGHT THEME IS DELIBERATELY UNTOUCHED
+   /static/mobile.css carries a real :root[data-theme="light"] palette for the WEB pages
+   (--bg:#F4F7FE, --panel:#FFFFFF …). Telemetry Drop is a DARK palette — forcing #EAF0FA chalk
+   onto a white panel would make those pages unreadable. So the map below is gated
+   :not([data-theme="light"]) at specificity (0,3,0), which beats both the pages' own :root
+   (0,1,0) and mobile.css's light block (0,2,0) without ever competing with light mode.
+
+   THE MOBILE APP NEEDED A SEPARATE FIX, in main.py, not here. /m/* pages are dark-only —
+   mobile_app.css defines the dark tokens and carries ZERO light overrides — yet _MOBILE_HEAD
+   stamped data-theme="light" on them from localStorage anyway. The attribute was simply lying
+   about those pages, and the lie would have excluded the entire mobile app from this gate. Fixed
+   at the stamp rather than worked around here.
+--------------------------------------------------------------------------------------------- */
+
+/* ── the palette, named once ──────────────────────────────────────────────────────────────── */
+:root{
+  --r5-field:#0D1322;      /* deep petrol — the page ground, deliberately NOT black */
+  --r5-panel:#161F33;
+  --r5-panel-hi:#1C2740;
+  --r5-edge:#26334F;
+  --r5-chalk:#EAF0FA;
+  --r5-muted:#8A97B0;
+  --r5-volt:#C8F542;       /* LONG / up / positive — semantic only */
+  --r5-heat:#FF4D6D;       /* SHORT / down / negative — semantic only */
+  --r5-pulse:#7C5CFF;      /* interactive only — links, active pager. Never decorative. */
+  --r5-cut:16px;           /* card corner cut */
+  --r5-cut-sm:6px;         /* pill / chip corner cut */
+  --r5-display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
+  --r5-body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
+  --r5-mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+}
+
+/* ── the map: legacy token names -> R5 palette. This is the whole re-skin. ────────────────── */
+:root:root:not([data-theme="light"]){
+  /* grounds */
+  --bg:var(--r5-field); --bg2:#111829; --bg3:#0A0F1C; --field:var(--r5-field);
+  /* surfaces */
+  --panel:var(--r5-panel); --panel2:var(--r5-panel-hi); --panel3:var(--r5-panel-hi);
+  --card:var(--r5-panel); --card2:var(--r5-panel-hi);
+  --surface:var(--r5-panel); --surface2:var(--r5-panel-hi); --well:#111829;
+  /* edges — --line is the hairline (kept translucent so dense tables stay readable),
+     --line2 and --rule are the solid edge R5 draws around cards */
+  --line:rgba(38,51,79,.62); --line2:var(--r5-edge); --rule:var(--r5-edge);
+  --edge:var(--r5-edge); --border:var(--r5-edge);
+  /* type colours */
+  --txt:var(--r5-chalk); --ink:var(--r5-chalk); --chalk:var(--r5-chalk);
+  --mut:var(--r5-muted); --muted:var(--r5-muted); --dim:#6B7893;
+  /* SEMANTIC PAIR — R5's one hard rule. --grn and --red are used across the app for up/down and
+     nothing else, so mapping them to volt/heat keeps "green means up" true while changing what
+     green IS. Every P&L figure, every day%, every advance/decline cell inherits this. */
+  --grn:var(--r5-volt); --up:var(--r5-volt); --volt:var(--r5-volt);
+  --grn-d:rgba(200,245,66,.14);
+  --red:var(--r5-heat); --dn:var(--r5-heat); --down:var(--r5-heat); --heat:var(--r5-heat);
+  --red-d:rgba(255,77,109,.13);
+  /* INTERACTIVE — --blu is the app's link/active colour, so it becomes pulse. --cyan follows it
+     rather than staying a second accent: R5 has one interactive colour, not two. */
+  --blu:var(--r5-pulse); --pulse:var(--r5-pulse); --cyan:var(--r5-pulse);
+  --amber:#F5B94A;
+  --shadow:0 18px 44px rgba(3,7,20,.55);
+  --mono:var(--r5-mono);
+}
+
+/* ── the field, with R5's 115deg grain ────────────────────────────────────────────────────── */
+:root:root:not([data-theme="light"]) body{
+  background-color:var(--r5-field);
+  background-image:repeating-linear-gradient(115deg,
+    rgba(255,255,255,.014) 0 2px, transparent 2px 9px);
+  color:var(--r5-chalk);
+  font-family:var(--r5-body);
+}
+
+/* ── type ─────────────────────────────────────────────────────────────────────────────────
+   Display = Archivo Black, uppercase, skewed -6deg. Applied to headings and the app's existing
+   title classes only — never to body copy, and never to anything holding a number. */
+:root:root:not([data-theme="light"]) h1,
+:root:root:not([data-theme="light"]) h2,
+:root:root:not([data-theme="light"]) .sect,
+:root:root:not([data-theme="light"]) .card-hd .t,
+:root:root:not([data-theme="light"]) .chd .t{
+  font-family:var(--r5-display);
+  transform:skewX(-6deg);
+  text-transform:uppercase;
+  letter-spacing:.5px;
+}
+/* transform on an inline element does nothing, so the skew needs a block box to land on. */
+:root:root:not([data-theme="light"]) .card-hd .t,
+:root:root:not([data-theme="light"]) .chd .t,
+:root:root:not([data-theme="light"]) .sect{ display:inline-block; transform-origin:left center; }
+
+/* ALL numbers in mono — R5's rule. These are the app's existing numeric classes; the app
+   already tags its figures, so this needs no markup change. */
+:root:root:not([data-theme="light"]) .num,
+:root:root:not([data-theme="light"]) .td-mono,
+:root:root:not([data-theme="light"]) .big-val,
+:root:root:not([data-theme="light"]) .mono,
+:root:root:not([data-theme="light"]) .rnage,
+:root:root:not([data-theme="light"]) .rnp{ font-family:var(--r5-mono); }
+
+/* ── geometry: one cut corner, never a uniform radius ─────────────────────────────────────
+   The cut is 16px into the TOP-RIGHT. Every card class it lands on carries >= 12px padding, so
+   the triangle falls inside the padding and clips no content — which is what keeps this
+   compatible with the parity guard. Radius is zeroed on the same elements so the two corner
+   treatments cannot fight. */
+:root:root:not([data-theme="light"]) .card,
+:root:root:not([data-theme="light"]) .c,
+:root:root:not([data-theme="light"]) .m{
+  border-radius:0;
+  clip-path:polygon(0 0, calc(100% - var(--r5-cut)) 0, 100% var(--r5-cut), 100% 100%, 0 100%);
+  border:1px solid var(--r5-edge);
+  background:var(--r5-panel);
+}
+/* pills, chips and buttons take the small cut on the opposite diagonal, exactly as R5 draws
+   .set / .pos-tag. */
+:root:root:not([data-theme="light"]) .pill,
+:root:root:not([data-theme="light"]) .chip,
+:root:root:not([data-theme="light"]) .bdg,
+:root:root:not([data-theme="light"]) .rnb,
+:root:root:not([data-theme="light"]) .tool{
+  border-radius:0;
+  clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
+}
+
+/* ── interactive = pulse, and ONLY interactive (R5 rule 5) ────────────────────────────────── */
+:root:root:not([data-theme="light"]) a{ color:var(--r5-pulse); }
+:root:root:not([data-theme="light"]) a:hover{ color:#9B82FF; }
+/* the news pager's active dot is the one decorative-looking element R5 still paints pulse,
+   because it reports WHICH page you are on — it is state, not decoration. */
+:root:root:not([data-theme="light"]) .pager i.on{ background:var(--r5-pulse); }
+
+/* ── bottom tab bar: volt active tab with the notch ───────────────────────────────────────── */
+:root:root:not([data-theme="light"]) .tabs,
+:root:root:not([data-theme="light"]) .bottomnav{
+  background:#0A101E; border-top:1px solid var(--r5-edge);
+}
+:root:root:not([data-theme="light"]) .tab.on,
+:root:root:not([data-theme="light"]) .bottomnav a.active{ color:var(--r5-volt); position:relative; }
+:root:root:not([data-theme="light"]) .tab.on::before,
+:root:root:not([data-theme="light"]) .bottomnav a.active::before{
+  content:""; position:absolute; top:-1px; left:25%; right:25%; height:3px;
+  background:var(--r5-volt);
+  clip-path:polygon(0 0, 100% 0, calc(100% - 3px) 100%, 3px 100%);
+}
+
+/* ── motion, per R5's own media query ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce){
+  :root:root:not([data-theme="light"]) *{ animation:none !important; }
+}

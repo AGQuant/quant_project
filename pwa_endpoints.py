@@ -2094,6 +2094,20 @@ def pwa_index_tape_card_js():
     return Response(INDEX_TAPE_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
+# cc#1064: the Telemetry Drop token layer. One file, injected on every page (main.py
+# _MOBILE_HEAD), build-id stamped there so a deploy busts it — the cc#1060 rule.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_theme_r5.css"), "r", encoding="utf-8") as _r5f:
+        SCORR_THEME_R5_CSS = _r5f.read()
+except Exception:
+    SCORR_THEME_R5_CSS = ""
+
+
+@router.get("/static/scorr_theme_r5.css")
+def pwa_scorr_theme_r5_css():
+    return Response(SCORR_THEME_R5_CSS, media_type="text/css", headers=_CACHE_1D)
+
+
 @router.get("/scrub_layer.js")
 def pwa_scrub_layer_js():
     return Response(SCRUB_LAYER_JS, media_type="application/javascript", headers=_CACHE_1D)
