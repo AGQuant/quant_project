@@ -76,6 +76,7 @@ import os
 import guards          # cc#217 P2: canonical trading-day gate + entry-gate + guard primitives (sim-aware)
 from time import perf_counter   # cc#217 P3: tick wall-time (distinct from datetime.time)
 from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
+from price_sources import NOT_FUT_SQL   # cc#1056: the ONE futures-source list (cc#1053 registry)
 
 log = logging.getLogger("scorr.signal_writer")
 
@@ -282,6 +283,20 @@ def _write_adr_intraday(conn, sim_ts=None):
                     FROM intraday_prices WHERE ts::date = %s AND ts <= %s
                       -- cc#855: never let the auction print be "the latest bar"
                       AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
+                      -- cc#1056: and never let a FUTURES bar be it either. `pc` below is a
+                      -- raw_prices CASH close, so an unfiltered `li` compared a futures print
+                      -- against a cash baseline for 208 of 209 F&O symbols — the futures leg is
+                      -- the latest bar of the day for almost the whole universe. Futures carry a
+                      -- basis ABOVE cash, so the error is one-directional and inflates advances.
+                      -- MEASURED over the five days that have futures data:
+                      --   10-Aug 1.0000 -> 0.8997   11-Aug 0.6859 -> 0.6580
+                      --   12-Aug 0.6851 -> 0.6064   13-Aug 1.0525 -> 0.9499
+                      --   14-Aug 0.6426 -> 0.6376
+                      -- The mood gate's adr >= 1.0 condition PASSED on 10-Aug and 13-Aug purely on
+                      -- that artefact and fails on cash. Two of five days, not a rounding error.
+                      -- Kept as its own clause rather than folded into the cc#855 list: two
+                      -- exclusions, two different reasons, each traceable to its own card.
+                      AND COALESCE(source,'') NOT IN ('fyers_fut', 'fyers_fut_rest')
                     ORDER BY symbol, ts DESC
                 ),
                 pc AS (
@@ -1187,6 +1202,20 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
                         FROM intraday_prices WHERE ts::date = %s AND ts <= %s
                           -- cc#855: never let the auction print be "the latest bar"
                           AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
+                          -- cc#1056: and never let a FUTURES bar be it either. `pc` below is a
+                          -- raw_prices CASH close, so an unfiltered `li` compared a futures print
+                          -- against a cash baseline for 208 of 209 F&O symbols — the futures leg is
+                          -- the latest bar of the day for almost the whole universe. Futures carry a
+                          -- basis ABOVE cash, so the error is one-directional and inflates advances.
+                          -- MEASURED over the five days that have futures data:
+                          --   10-Aug 1.0000 -> 0.8997   11-Aug 0.6859 -> 0.6580
+                          --   12-Aug 0.6851 -> 0.6064   13-Aug 1.0525 -> 0.9499
+                          --   14-Aug 0.6426 -> 0.6376
+                          -- The mood gate's adr >= 1.0 condition PASSED on 10-Aug and 13-Aug purely on
+                          -- that artefact and fails on cash. Two of five days, not a rounding error.
+                          -- Kept as its own clause rather than folded into the cc#855 list: two
+                          -- exclusions, two different reasons, each traceable to its own card.
+                          AND COALESCE(source,'') NOT IN ('fyers_fut', 'fyers_fut_rest')
                         ORDER BY symbol, ts DESC
                     ),
                     pc AS (
