@@ -22,6 +22,7 @@ Entry rule:
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Optional, Dict, List, Tuple
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 log = logging.getLogger("scorr.v8replay")
 
@@ -161,7 +162,9 @@ def gate_slots_for_day(conn, d: date) -> Tuple[int, int, int]:
         with conn.cursor() as cur:
             cur.execute("""
                 WITH li AS (SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                            FROM intraday_prices WHERE ts::date=%s ORDER BY symbol, ts DESC),
+                            FROM intraday_prices WHERE ts::date=%s
+                              AND """ + NOT_FUT_SQL + """
+                            ORDER BY symbol, ts DESC),
                      pc AS (SELECT DISTINCT ON (symbol) symbol, close AS pclose
                             FROM raw_prices WHERE price_date < %s ORDER BY symbol, price_date DESC)
                 SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),

@@ -61,6 +61,7 @@ router = APIRouter()
 
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
 from v8_book_canon import book_canon   # cc#970: the ONE book formula (rule 13)
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -615,7 +616,7 @@ def mobile_home2(request: Request):
             FROM v8_qualified q
             LEFT JOIN LATERAL (
                 SELECT close AS cmp FROM intraday_prices
-                WHERE symbol = q.symbol AND source <> 'fyers_fut'
+                WHERE symbol = q.symbol AND """ + NOT_FUT_SQL + """
                 ORDER BY ts DESC LIMIT 1
             ) lp ON true
             WHERE q.signal_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date

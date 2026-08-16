@@ -49,6 +49,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 import psycopg2.extras
 from fastapi import APIRouter
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 router = APIRouter()
 log = logging.getLogger("v8_book_canon")
@@ -143,7 +144,7 @@ def book_canon(conn, era: str = "fresh") -> dict:
             FROM v8_paper_positions p
             LEFT JOIN LATERAL (
                 SELECT close AS cmp FROM intraday_prices
-                WHERE symbol = p.symbol AND source <> 'fyers_fut'
+                WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """
                 ORDER BY ts DESC LIMIT 1
             ) lp ON true
             WHERE p.status = 'OPEN'

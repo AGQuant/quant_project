@@ -37,7 +37,7 @@ standard pool only, 20 total slots:
 
 from fastapi import APIRouter, HTTPException, Response
 from v8_book_canon import retired_baskets   # cc#970 V8_PNL_CANON_V1 (rule 13)
-from price_sources import not_fut           # cc#1053 INDEX_SYMBOL_CONVENTION_V1
+from price_sources import not_fut, NOT_FUT_SQL   # cc#1053 convention + cc#1056 registry
 from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
@@ -2785,7 +2785,7 @@ def ohol():
                 FROM agg a
                 JOIN openb o ON o.symbol = a.symbol
                 LEFT JOIN LATERAL (SELECT close AS cmp FROM intraday_prices
-                    WHERE symbol=a.symbol AND source<>'fyers_fut' ORDER BY ts DESC LIMIT 1) cp ON true
+                    WHERE symbol=a.symbol AND """ + NOT_FUT_SQL + """ ORDER BY ts DESC LIMIT 1) cp ON true
                 LEFT JOIN LATERAL (SELECT close AS prev_close FROM raw_prices
                     WHERE symbol=a.symbol AND price_date < (SELECT d FROM sess)
                     ORDER BY price_date DESC LIMIT 1) pc ON true

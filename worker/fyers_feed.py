@@ -78,6 +78,11 @@ if _REPO_ROOT not in sys.path:
     sys.path.append(_REPO_ROOT)
 import pytz, psycopg2, psycopg2.errors, requests
 from nse_holidays import is_trading_day   # cc#188: market-hours gate for subscribe_verify
+# cc#1056: THIRD app-shared root module. The source sets live in exactly one place so the app
+# and the worker cannot disagree about what counts as a futures bar. Adding it here also adds
+# it to railway.worker.json watchPatterns — a shared module the worker imports but does not
+# watch is a module that can change under a running worker without redeploying it.
+from price_sources import NOT_FUT_SQL, FUT_SOURCES
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
 FYERS_SECRET    = os.environ.get('FYERS_SECRET',    '')
@@ -1464,7 +1469,11 @@ class BarAggregator:
             # was keyed by sym alone — a futures tick (source='fyers_fut') would overwrite the
             # spot LTP with a basis-premium/discount price (3-4% off), and flush_cmp then wrote
             # that fut price into cmp_prices as if it were spot. Only spot ticks may set last_ltp.
-            if source != 'fyers_fut':
+            # cc#1056: widened from the single 'fyers_fut' literal to the FUT_SOURCES registry.
+            # The guard named one futures source at a time when only one existed; any later
+            # futures leg routed through on_tick would have walked straight past it and written
+            # a basis-off price into cmp_prices as spot. Membership in the registry, not a name.
+            if source not in FUT_SOURCES:
                 self.last_ltp[sym]    = ltp
                 self.last_ltp_ts[sym] = ts   # cc_task #112: mark when this genuine tick arrived
             # cc#807 follow-up: `vol` arrives as the session's CUMULATIVE total (vol_traded_today). Convert it
@@ -1569,9 +1578,14 @@ class BarAggregator:
                 # Spot = nearest non-futures intraday bar for this symbol at/before ts.
                 # (exact ts + source='fyers_eq' missed: eq feed is sparse & ts-misaligned;
                 #  bulk spot data is source='fyers'. Match nearest, exclude fyers_fut self.)
+                # cc#1056: the exclusion now covers BOTH futures sources. It was written before
+                # cc#770 added the REST fallback leg, so a fyers_fut_rest bar could satisfy the
+                # "spot" lookup — and basis = fut - spot would then be roughly zero instead of
+                # the real basis. Excluding one futures source while another exists is a filter
+                # that reads as safe and is not.
                 cur.execute("""
                     SELECT close FROM intraday_prices
-                    WHERE symbol=%s AND ts::date=%s::date AND ts<=%s AND source<>'fyers_fut'
+                    WHERE symbol=%s AND ts::date=%s::date AND ts<=%s AND """ + NOT_FUT_SQL + """
                     ORDER BY ts DESC LIMIT 1
                 """, (spot_sym, ts, ts))
                 row       = cur.fetchone()

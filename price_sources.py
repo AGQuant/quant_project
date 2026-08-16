@@ -55,6 +55,29 @@ SPOT_SOURCES = ("fyers_eq", "fyers_ext", "fyers_hist",
 INDEX_SPOT_SOURCES = ("fyers_eq", "fyers_eq_auction", "auction")
 
 
+# cc#1056: the same exclusion as a ready-made SQL fragment, BUILT FROM FUT_SOURCES so it can
+# never disagree with not_fut(). Safe to interpolate — every value here is a module constant,
+# never user input, and the list is rendered rather than typed.
+#
+# WHICH FORM TO USE. Prefer the not_fut() BIND: parameters are the habit worth keeping. Use
+# this fragment only where threading one more parameter would renumber an existing query's
+# positional arguments — several call sites splice a WHERE clause into an f-string and pass a
+# tuple assembled elsewhere (main.py's era_params is the clearest), and quietly shifting that
+# tuple to fix a source filter is how a filter fix becomes a data bug. The two forms compile
+# to identical predicates; the choice is about not disturbing the caller.
+NOT_FUT_SQL = "COALESCE(source,'') NOT IN (" + \
+    ", ".join("'%s'" % s for s in FUT_SOURCES) + ")"
+
+
+def not_fut_sql(alias=None):
+    """NOT_FUT_SQL, optionally qualified for a joined query — not_fut_sql('ip') returns
+    `COALESCE(ip.source,'') NOT IN (...)`. Needed wherever intraday_prices is aliased and a
+    bare `source` would be ambiguous."""
+    if not alias:
+        return NOT_FUT_SQL
+    return NOT_FUT_SQL.replace("COALESCE(source,'')", "COALESCE(%s.source,'')" % alias)
+
+
 def not_fut():
     """The bind value for `COALESCE(source,'') <> ALL(%s)`. A list, because psycopg
     adapts a Python list to a Postgres array and a tuple to a row constructor."""

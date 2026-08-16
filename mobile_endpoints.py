@@ -52,6 +52,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from scorr_auth import _is_authed
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 log = logging.getLogger("scorr.mobile")
 router = APIRouter()
@@ -416,7 +417,7 @@ def mobile_v8_positions(request: Request):
                 FROM v8_paper_positions p
                 LEFT JOIN LATERAL (
                     SELECT close AS cmp, ts FROM intraday_prices
-                    WHERE symbol = p.symbol AND source <> 'fyers_fut' ORDER BY ts DESC LIMIT 1
+                    WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """ ORDER BY ts DESC LIMIT 1
                 ) lp ON true
                 WHERE p.status = 'OPEN'
                 ORDER BY p.entry_ts DESC

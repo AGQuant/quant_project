@@ -56,6 +56,7 @@ from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
 from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
@@ -1771,7 +1772,7 @@ def paper_status():
         FROM v8_paper_positions p
         LEFT JOIN LATERAL (
             SELECT close AS cmp, ts FROM intraday_prices
-            WHERE symbol = p.symbol AND source <> 'fyers_fut' ORDER BY ts DESC LIMIT 1
+            WHERE symbol = p.symbol AND {NOT_FUT_SQL} ORDER BY ts DESC LIMIT 1
         ) lp ON true
         LEFT JOIN LATERAL (
             SELECT close AS prev_close FROM raw_prices

@@ -32,6 +32,7 @@ log = logging.getLogger("scorr.mobile.ext")
 router = APIRouter()
 
 from v8_book_canon import book_canon, retired_baskets   # cc#970: the ONE book formula (rule 13)
+from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -522,7 +523,7 @@ def m_fpc():
 # v8_paper_positions is (id, symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss,
 # pp, pivot_date, status) and v8_paper_trades carries no instrument field either. Neither has an
 # account, segment or instrument column. Further, the book is priced on SPOT EQUITY by design —
-# /api/paper/status pins CMP with `source <> 'fyers_fut'` precisely so a futures bar can never
+# /api/paper/status pins CMP with the price_sources.py futures exclusion (cc#1056) so a futures bar can never
 # land in the CMP column (cc#367). So the whole V8 paper book is one equity book. All 18 open
 # rows are F&O-universe symbols, but that says the symbol HAS futures, not that the position IS
 # one. A Futures tab would therefore be an empty box pretending to be a view, so this endpoint
@@ -547,8 +548,9 @@ def mobile_v8book(request: Request):
     filed for.
 
     CMP IS THE WEB'S OWN LATERAL, copied not re-derived: latest intraday_prices close for the
-    symbol with source <> 'fyers_fut' (cc#367 — without that filter a futures bar at the same
-    5-min stamp lands in the CMP column at a basis-off price). prev_close is the last raw_prices
+    symbol with the price_sources.py futures exclusion (cc#367 — without that filter a futures bar
+    at the same 5-min stamp lands in the CMP column at a basis-off price; cc#1056 widened it from
+    the bare 'fyers_fut' literal to the registry, which also covers the cc#770 REST fallback leg). prev_close is the last raw_prices
     close strictly before the CMP's OWN session (cc#373), so DAY% compares two different days
     off-market instead of Friday against itself.
 
@@ -576,7 +578,7 @@ def mobile_v8book(request: Request):
             FROM v8_paper_positions p
             LEFT JOIN LATERAL (
                 SELECT close AS cmp, ts FROM intraday_prices
-                WHERE symbol = p.symbol AND source <> 'fyers_fut'
+                WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """
                 ORDER BY ts DESC LIMIT 1
             ) lp ON true
             LEFT JOIN LATERAL (

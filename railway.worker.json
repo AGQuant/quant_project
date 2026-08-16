@@ -4,7 +4,8 @@
     "watchPatterns": [
       "worker/**",
       "fyers_backfill.py",
-      "nse_holidays.py"
+      "nse_holidays.py",
+      "price_sources.py"
     ]
   },
   "deploy": {
