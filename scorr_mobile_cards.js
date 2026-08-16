@@ -287,7 +287,18 @@
         var tgt = elv.closest('button,a,[onclick],[role="tab"]') || elv;
         tgt.addEventListener('click', function (ev) {
           ev.preventDefault(); ev.stopPropagation();
-          location.href = '/m/gvm2';
+          /* carry the symbol currently on the report card: the biggest ALL-CAPS leaf on
+             the page (the card's symbol heading). Fallback: plain /m/gvm2 search. */
+          var sym = '', best = 0;
+          var cands = document.querySelectorAll('div,span,h1,h2,h3');
+          for (var z = 0; z < cands.length; z++) {
+            var cz = cands[z], tz = (cz.textContent || '').trim();
+            if (cz.children.length === 0 && /^[A-Z][A-Z0-9&-]{2,14}$/.test(tz)) {
+              var fs = parseFloat(getComputedStyle(cz).fontSize) || 0;
+              if (fs > best && fs >= 20) { best = fs; sym = tz; }
+            }
+          }
+          location.href = sym ? '/m/gvm2?symbol=' + encodeURIComponent(sym) : '/m/gvm2';
         }, true);
       }
     }
