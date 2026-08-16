@@ -936,6 +936,11 @@
 <!-- cc#1054: the shared index 100-bar tape renderer. Parse-time for the same reason as the two
      lines above — rIdxSpark() runs from the inline scripts below and calls it by name. The V10
      dashboard loads this identical file; there is one renderer, not a copy per surface. -->
+<!-- cc#1061: scrub_layer.js FIRST — it owns the crosshair both charts below use.
+     Order is not load-bearing (both only call it at mount time) but it states the
+     dependency, the way cc#805 does for scorr_card_common.js. -->
+<script src="/scrub_layer.js"></script>
+<script src="/pcr_trend_card.js"></script>
 <script src="/index_tape_card.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
@@ -4585,20 +4590,17 @@ async function loadVix(){
   const data = Array.isArray(v.data)?v.data.map(Number):[];
   D.vix = { cur:Number(v.cur)||0, chg:Number(v.chg)||0, data, label:v.label||'India VIX' };
 }
-function mkPcr(resp){
-  const rows = rowsOf(resp).slice().reverse();
-  const last8 = rows.slice(-8);
-  const data = last8.map(r=>Number(r.pcr));
-  const cur = data.length?data[data.length-1]:0;
-  const prev = data.length>1?data[data.length-2]:cur;
-  return { cur, chg:cur-prev, data };
-}
+// cc#1061: mkPcr is GONE. It did `data = rows.map(r=>Number(r.pcr))`, and Number(null) is 0 —
+// so the moment pcr_guard started writing NULL for a destroyed leg, this would have turned the
+// correction straight back into the same fake 0.000 V it was meant to remove. Parsing now lives
+// in pcr_trend_card.js and returns null, never a number, for a missing day.
 async function loadPCR(){
   const [n,b] = await Promise.all([
     getJSON('/api/daily/pcr?underlying=NIFTY&days=8'),
     getJSON('/api/daily/pcr?underlying=BANKNIFTY&days=8'),
   ]);
-  D.pcr = { nifty:mkPcr(n), bnk:mkPcr(b) };
+  const P = window.ScorrPcrTrend;
+  D.pcr = P ? { NIFTY:P.parse(n), BANKNIFTY:P.parse(b) } : { NIFTY:null, BANKNIFTY:null };
 }
 async function loadIdx(){
   /* cc#434 fix_2: CMP + day change from /api/v8/live_metrics (LAST-TICK anchored, cc#424 — Friday
@@ -4909,21 +4911,28 @@ function rADR(){
 }
 
 function rPCR(){
-  const pc = v=>v<0.7?DN:v<0.9?UP:v<1.1?C.amber:DN;
-  const pl = v=>v<0.7?'BEARISH':v<0.9?'BULLISH':v<1.1?'NEUTRAL':'BEARISH';
-  const one=(name,d)=>{
-    const col=pc(d.cur);
-    const chart = d.data&&d.data.length ? sparkline(d.data,col,{liveLast:true,h:55,refLine:1.0}) : '<div style="font-size:8px;color:var(--dim)">no data</div>';
+  // cc#1061: every band test now runs on an EXPLICIT null check first. `null < 0.7` is true in
+  // JS — null coerces to 0 — so an unguarded band would have labelled a missing day BEARISH and
+  // painted it red, which is the same lie as plotting 0.00, just in words.
+  const pc = v=>v==null?C.mut:v<0.7?DN:v<0.9?UP:v<1.1?C.amber:DN;
+  const pl = v=>v==null?'NO DATA':v<0.7?'BEARISH':v<0.9?'BULLISH':v<1.1?'NEUTRAL':'BEARISH';
+  const one=(name,key,d)=>{
+    const cur=d?d.cur:null, col=pc(cur);
+    const chart = (d&&d.days&&d.days.length&&window.ScorrPcrTrend)
+      ? ScorrPcrTrend.placeholder(key,col,55)
+      : '<div style="font-size:8px;color:var(--dim)">no data</div>';
+    // A gap in the window is stated, not hidden — the panel should say when it is incomplete.
+    const gaps = (d&&d.gaps)?`<span style="font-size:9px;color:var(--mut)"> · ${d.gaps} day${d.gaps>1?'s':''} no data</span>`:'';
     return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(d.cur),col,true)}</div>
+        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(cur),col,true)}</div>
       <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
-        <span class="td-mono" style="font-size:20px;font-weight:900;color:${col}">${d.cur.toFixed(2)}</span>
-        <span class="td-mono" style="font-size:10px;color:${cx(d.chg)}">${sgn(d.chg,2)}</span></div>
+        <span class="td-mono" style="font-size:20px;font-weight:900;color:${col}">${cur==null?'—':cur.toFixed(2)}</span>
+        <span class="td-mono" style="font-size:10px;color:${d&&d.chg!=null?cx(d.chg):C.mut}">${d&&d.chg!=null?sgn(d.chg,2):''}</span>${gaps}</div>
       ${chart}</div>`;
   };
   return `<div class="card">
-    <div class="card-hd"><div><div class="t">PCR Trend</div><div class="s">7-day history · ● = live</div></div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${one('NIFTY',D.pcr.nifty)}${one('BANKNIFTY',D.pcr.bnk)}</div>
+    <div class="card-hd"><div><div class="t">PCR Trend</div><div class="s">7-day history · ● = live · gap = no reading</div></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${one('NIFTY','NIFTY',D.pcr&&D.pcr.NIFTY)}${one('BANKNIFTY','BANKNIFTY',D.pcr&&D.pcr.BANKNIFTY)}</div>
   </div>`;
 }
 
@@ -5323,6 +5332,12 @@ function mountIdxTapes(){
   try{ T.mountAll(document.getElementById('idx-app'), D.idxTape, {
     onActivate:(key)=>{ if(typeof openIdxChart==='function') openIdxChart(key); }   // cc#1059
   }); }catch(e){ console.warn('[idxtape] mount failed',e&&e.message); }
+  // cc#1061: the PCR lines mount the same way and through the same scrub layer.
+  const P=window.ScorrPcrTrend;
+  if(P && typeof P.mountAll==='function' && D.pcr){
+    try{ P.mountAll(document.getElementById('idx-app'), D.pcr); }
+    catch(e){ console.warn('[pcrtrend] mount failed',e&&e.message); }
+  }
 }
 function render(){
   // cc#1060: build the html FIRST, assign SECOND. Previously the assignment target was

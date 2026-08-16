@@ -170,11 +170,14 @@
            'cursor:pointer;-webkit-tap-highlight-color:transparent"></div>';
   }
 
+  /* cc#1061: the crosshair, the resize handling and the drag-vs-click contract all moved to
+     window.ScorrScrub, so the PCR trend panel gets the IDENTICAL interaction instead of a second
+     copy. What stays here is the only part that is about a price tape: the geometry, the label
+     text, and which bars belong to the current session. */
   function _mountOne(wrap, entry, opts) {
     var color = wrap.getAttribute('data-col') || '#64748b';
     var key = wrap.getAttribute('data-tape');
     var h = parseInt(wrap.getAttribute('data-h'), 10) || DEFAULT_H;
-    var g = null;
 
     /* The reference for the % column: the LAST bar of the session before the headlined one.
        Bars in the current session are measured against it. Bars in a prior session are NOT
@@ -186,112 +189,25 @@
     var ref = cut > 0 ? _num(rowsAll[cut - 1].close) : null;
     var sessionDate = entry.session_date;
 
-    var cross = document.createElement('div');
-    cross.style.cssText = 'position:absolute;top:0;width:1px;pointer-events:none;' +
-      'background:' + BREAK + ';opacity:.55;display:none';
-    var dot = document.createElement('div');
-    dot.style.cssText = 'position:absolute;width:7px;height:7px;border-radius:50%;' +
-      'pointer-events:none;display:none;background:' + color +
-      ';box-shadow:0 0 0 1.5px var(--card,#fff)';
-    var lab = document.createElement('div');
-    lab.style.cssText = 'position:absolute;top:-2px;pointer-events:none;display:none;' +
-      'white-space:nowrap;font:700 10px/1.35 Sora,system-ui,sans-serif;' +
-      'padding:3px 6px;border-radius:5px;z-index:5;' +
-      'background:var(--card,#fff);color:var(--txt,#0f172a);' +
-      'border:1px solid var(--line,#e2e8f0);box-shadow:0 2px 8px rgba(0,0,0,.14)';
-
-    function draw() {
-      var w = Math.max(MIN_W, Math.floor(wrap.clientWidth || 0));
-      wrap.innerHTML = svg(entry, color, { w: w, h: h, dim: opts.dim });
-      wrap.appendChild(cross); wrap.appendChild(dot); wrap.appendChild(lab);
-      cross.style.height = h + 'px';
-      g = _geom(entry, w, h);
-      hide();
-    }
-
-    function hide() {
-      cross.style.display = dot.style.display = lab.style.display = 'none';
-    }
-
-    function at(clientX) {
-      if (!g) return;
-      var r = wrap.getBoundingClientRect();
-      if (!r.width) return;
-      /* Map the pointer through the PLOT box, not the element box. The path spans pad ..
-         w-pad, so dividing by the full width shifts every reading toward the middle and is
-         worst at the two edges — the far-right bar resolved to the second-to-last one, which
-         on a live tape means the crosshair labels 15:25 while sitting on the 15:30 dot. The
-         `scale` term is 1 whenever the SVG is rendered at true pixel width (it is), and keeps
-         this honest if a container ever CSS-scales it. */
-      var scale = g.w / r.width;
-      var px = (clientX - r.left) * scale;
-      var frac = (px - g.pad) / Math.max(1, g.w - g.pad * 2);
-      var i = Math.round(frac * (g.vals.length - 1));
-      i = Math.max(0, Math.min(i, g.vals.length - 1));
-      var x = g.X(i), y = g.Y(g.vals[i]), row = g.rows[i];
-
-      cross.style.left = x.toFixed(1) + 'px';
-      cross.style.display = 'block';
-      dot.style.left = (x - 3.5).toFixed(1) + 'px';
-      dot.style.top = (y - 3.5).toFixed(1) + 'px';
-      dot.style.display = 'block';
-
-      var txt = _stamp(row.ts, sessionDate) + ' · ' + _fmt(row.close);
-      if (ref && i >= cut) {
-        var pc = (Number(row.close) / ref - 1) * 100;
-        txt += ' · ' + (pc >= 0 ? '+' : '') + pc.toFixed(2) + '%';
-      }
-      lab.textContent = txt;
-      lab.style.display = 'block';
-      /* Flip the label to the left of the crosshair when it would run past the right edge,
-         so it is never clipped by the card. Measured after the text is set, because the
-         width depends on the string. */
-      var lw = lab.offsetWidth || 0;
-      var left = x + 8;
-      if (left + lw > g.w - 2) left = Math.max(0, x - 8 - lw);
-      lab.style.left = left.toFixed(1) + 'px';
-    }
-
-    // ── pointer: drag scrubs, a near-stationary click activates (cc#1059 contract) ──
-    var downX = null, downY = null, moved = false;
-
-    wrap.addEventListener('pointerdown', function (e) {
-      downX = e.clientX; downY = e.clientY; moved = false;
-      at(e.clientX);
-    });
-    wrap.addEventListener('pointermove', function (e) {
-      if (downX !== null &&
-          (Math.abs(e.clientX - downX) > CLICK_SLOP || Math.abs(e.clientY - downY) > CLICK_SLOP)) {
-        moved = true;
-      }
-      // Hover scrubs on desktop without any button held; on touch there is no hover, so the
-      // same handler covers the drag because pointermove fires while the finger is down.
-      at(e.clientX);
-    });
-    wrap.addEventListener('pointerup', function (e) {
-      var wasClick = downX !== null && !moved;
-      downX = downY = null;
-      if (wasClick) {
-        hide();   // a tap must never leave a stuck crosshair behind the popup
+    return root.ScorrScrub.attach(wrap, {
+      h: h, color: color,
+      onActivate: function () {
         if (typeof opts.onActivate === 'function') opts.onActivate(key, entry);
+      },
+      build: function (w, hh) {
+        var g = _geom(entry, w, hh);
+        if (!g) return { svg: '<div style="font-size:8px;color:var(--dim,#94a3b8)">no intraday</div>', pts: [] };
+        var pts = g.rows.map(function (r, i) {
+          var txt = _stamp(r.ts, sessionDate) + ' \u00b7 ' + _fmt(r.close);
+          if (ref && i >= cut) {
+            var pc = (Number(r.close) / ref - 1) * 100;
+            txt += ' \u00b7 ' + (pc >= 0 ? '+' : '') + pc.toFixed(2) + '%';
+          }
+          return { x: g.X(i), y: g.Y(g.vals[i]), label: txt };
+        });
+        return { svg: svg(entry, color, { w: w, h: hh, dim: opts.dim }), pts: pts };
       }
     });
-    wrap.addEventListener('pointercancel', function () { downX = downY = null; hide(); });
-    wrap.addEventListener('pointerleave', function () { downX = downY = null; hide(); });
-
-    draw();
-
-    if (typeof ResizeObserver === 'function') {
-      var ro = new ResizeObserver(function () { draw(); });
-      ro.observe(wrap);
-    } else {
-      // Older engines: a debounced window resize is coarser but keeps the chart from
-      // overflowing its column, which is the failure this guards against.
-      var t = null;
-      window.addEventListener('resize', function () {
-        clearTimeout(t); t = setTimeout(draw, 120);
-      });
-    }
   }
 
   /* Fill every [data-tape] slot under `root`. Call AFTER the host page has assigned its
@@ -304,7 +220,7 @@
       var wrap = slots[i];
       var key = wrap.getAttribute('data-tape');
       var entry = payload && payload.indices ? payload.indices[key] : null;
-      if (!entry || !entry.rows || entry.rows.length < 2) {
+      if (!entry || !entry.rows || entry.rows.length < 2 || !root.ScorrScrub) {
         wrap.innerHTML = '<div style="font-size:8px;color:var(--dim,#94a3b8)">no intraday</div>';
         continue;
       }

@@ -2082,11 +2082,26 @@ V8_LADDER_V2_JS = _read_root_js("v8_ladder_v2.js")
 # dashboard load this file — a second copy of the SVG builder is exactly what cc#1034 warned
 # about, so there is only ever this one.
 INDEX_TAPE_CARD_JS = _read_root_js("index_tape_card.js")
+# cc#1061: the crosshair-scrub layer the index tape and the PCR trend both attach to, and the
+# PCR trend card itself. Both are in the main.py build-id stamp list — cc#1060 was exactly the
+# failure of shipping a hardcoded tag for a file that was not stamped.
+SCRUB_LAYER_JS = _read_root_js("scrub_layer.js")
+PCR_TREND_CARD_JS = _read_root_js("pcr_trend_card.js")
 
 
 @router.get("/index_tape_card.js")
 def pwa_index_tape_card_js():
     return Response(INDEX_TAPE_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scrub_layer.js")
+def pwa_scrub_layer_js():
+    return Response(SCRUB_LAYER_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/pcr_trend_card.js")
+def pwa_pcr_trend_card_js():
+    return Response(PCR_TREND_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_card_common.js")

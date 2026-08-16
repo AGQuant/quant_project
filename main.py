@@ -415,7 +415,10 @@ async def auth_gate(request: Request, call_next):
             # the identical failure the cc#1021 note above predicts, one file later.
             for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
                         b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js",
-                        b"v8_ladder_v2.js", b"index_tape_card.js"):
+                        b"v8_ladder_v2.js", b"index_tape_card.js",
+                        # cc#1061: added WITH their script tags, in the same commit, so the
+                        # cc#1060 failure cannot repeat for these two.
+                        b"scrub_layer.js", b"pcr_trend_card.js"):
                 body = body.replace(b'src="/' + _js + b'"',
                                     b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)

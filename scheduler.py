@@ -10,6 +10,8 @@ from typing import Optional
 import psycopg
 from psycopg.types.json import Json
 
+import pcr_guard   # cc#1061: one definition of an impossible PCR, shared by every writer
+
 log = logging.getLogger("scorr.scheduler")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -344,8 +346,8 @@ def _compute_and_store_pcr(conn=None):
                 SELECT DATE(ts), underlying,
                     SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),
                     SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),
-                    ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
-                          NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3)
+                    -- cc#1061: NULL, never an impossible number. See pcr_guard.py.
+                    CASE WHEN LEAST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END))::numeric / NULLIF(GREATEST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END)),0) < 0.01 THEN NULL ELSE ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric / NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3) END
                 FROM option_chain
                 WHERE DATE(ts) = CURRENT_DATE
                   AND underlying IN ('NIFTY','BANKNIFTY')
@@ -366,6 +368,10 @@ def _compute_and_store_pcr(conn=None):
             pcr_backfill.mark_pcr_quality(conn)   # cc#745: sanity-gate the just-computed PCR rows
         except Exception as _qe:
             log.warning(f"pcr quality mark failed: {_qe}")
+        # cc#1061: the guard writes NULL rather than an impossible number, so the absence has to
+        # be SAID out loud — a silently skipped day is how a dead put leg goes unnoticed.
+        with conn.cursor() as _c:
+            pcr_guard.warn_nulled(_c, source="_compute_and_store_pcr")
         log.info("PCR computed and stored")
         return {"ok": True}
     except Exception as e:
@@ -1171,8 +1177,8 @@ def _backfill_pcr_for_date(conn, target) -> bool:
             SELECT DATE(ts), underlying,
                 SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),
                 SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),
-                ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
-                      NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3)
+                -- cc#1061: NULL, never an impossible number. See pcr_guard.py.
+                CASE WHEN LEAST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END))::numeric / NULLIF(GREATEST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END)),0) < 0.01 THEN NULL ELSE ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric / NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3) END
             FROM option_chain
             WHERE DATE(ts) = %(t)s
               AND underlying IN ('NIFTY','BANKNIFTY')
@@ -1192,6 +1198,8 @@ def _backfill_pcr_for_date(conn, target) -> bool:
         pcr_backfill.mark_pcr_quality(conn)   # cc#745: sanity-gate the healed PCR rows
     except Exception as _qe:
         log.warning(f"pcr quality mark failed: {_qe}")
+    with conn.cursor() as _c:                       # cc#1061: name any day the guard nulled
+        pcr_guard.warn_nulled(_c, price_date=target, source="_heal_pcr_day")
     return n > 0
 
 

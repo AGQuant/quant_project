@@ -33,6 +33,8 @@ from datetime import datetime, date, timedelta
 import psycopg2
 import requests
 
+import pcr_guard   # cc#1061: one definition of an impossible PCR
+
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
 DATABASE_URL    = os.environ.get('DATABASE_URL')
 HISTORY_URL     = 'https://api-t1.fyers.in/data/history'
@@ -247,8 +249,8 @@ def _recompute_pcr_daily_for_range(conn, start: date, end: date):
                 SELECT DATE(ts), underlying,
                     SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),
                     SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),
-                    ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
-                          NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3)
+                    -- cc#1061: NULL, never an impossible number. See pcr_guard.py.
+                    CASE WHEN LEAST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END))::numeric / NULLIF(GREATEST(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END)),0) < 0.01 THEN NULL ELSE ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric / NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3) END
                 FROM option_chain
                 WHERE DATE(ts) = %s
                   AND underlying IN ('NIFTY','BANKNIFTY')
@@ -265,6 +267,8 @@ def _recompute_pcr_daily_for_range(conn, start: date, end: date):
             filled.append(str(d))
         d += timedelta(days=1)
     mark_pcr_quality(conn)   # cc#745: flag any implausible captures in the just-written range
+    with conn.cursor() as _c:                       # cc#1061: name every day the guard nulled
+        pcr_guard.warn_nulled(_c, source="_recompute_pcr_daily_for_range")
     return filled
 
 
