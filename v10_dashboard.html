@@ -658,11 +658,17 @@ function rIdxTape(){
     const tape=window.ScorrIndexTape
       ? ScorrIndexTape.placeholder(tapeKey,col,46)
       : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
+    // cc#1059: the header is a click target too, alongside the tape itself. No C button —
+    // founder amendment 16-Aug: for an index the CHART is the affordance, so this just gives
+    // the name and price the same behaviour rather than adding a control.
     return `<div style="flex:1;min-width:0">
-      <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
-      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 4px">
-        <span class="big-val" style="font-size:20px">${d&&d.cmp?num(d.cmp):'—'}</span>
-        <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
+      <div onclick="openIdxChart('${tapeKey}')" style="cursor:pointer"
+           title="Open the ${name} chart">
+        <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 4px">
+          <span class="big-val" style="font-size:20px">${d&&d.cmp?num(d.cmp):'—'}</span>
+          <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
+      </div>
       ${tape}
     </div>`;
   };
@@ -1043,6 +1049,18 @@ function render(){
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
   mountIdxTapes();   // cc#1058
+}
+
+// cc#1059: indices open the SAME popup a stock symbol opens (scorr_chart_card.js), in index
+// mode — no GVM line, no trend verdict, no peers tab, because an index has none of the three.
+// Never a second chart implementation; cc#803 settled that and this follows it.
+function openIdxChart(tapeKey){
+  const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;
+  const label=(ent&&ent.label)||tapeKey;
+  if(window.ScorrChartCard && typeof window.ScorrChartCard.open==='function'){
+    try{ window.ScorrChartCard.open(tapeKey,{index:true,label}); }
+    catch(e){ console.warn('[idxchart]',tapeKey,e&&e.message); }
+  }
 }
 
 // cc#1058: identical mount to the V8 Index Intel pane — same module, same options object.

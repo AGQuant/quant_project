@@ -60,7 +60,13 @@
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
   var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
   var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
-  var _full = false;                // cc#779: fullscreen state
+  var _index = false;               // cc#1059: INDEX MODE — NIFTY50 / BANKNIFTY open this same
+                                  // popup, but an index has no GVM score, no trend verdict and no
+                                  // peer set, so those three sections are suppressed rather than
+                                  // shown empty. Everything chart-shaped (candles, timeframes,
+                                  // pivot/fib/VWAP overlays, fullscreen) is identical. One popup,
+                                  // one mode switch — never a second implementation (cc#1034).
+var _full = false;                // cc#779: fullscreen state
   var _nativeFs = false;            // cc#959: native element fullscreen was granted (Android/Chromium)
   var _land = false;                // cc#959: CSS-rotation landscape fallback is active (iOS / lock refused)
   var _fsBound = false;             // cc#959: fullscreenchange listeners attached once
@@ -403,6 +409,7 @@
     if (!host) return;
     host.innerHTML = "";
     _verdict = null;
+    if (_index) return;                  // cc#1059: no GVM, so no trend verdict for an index
     if (_tf === "5m" || !_sym) return;   // daily-series verdict; meaningless intraday
     var sym = _sym, tf = _tf;
     _getJSON("/api/gvm/trend_verdict/" + encodeURIComponent(sym) + "?tf=" + encodeURIComponent(tf))
@@ -511,8 +518,8 @@
     // _applyIntradayLevels(). Do not reintroduce a toggle for them.
     // cc#779: GVM quality-trend toggle — third chip. The GVM series is a DAILY score, so it is
     // greyed on the 5m intraday timeframe (nothing to plot at intraday resolution).
-    (function () {
-      var b = document.createElement("button");
+    if (!_index) (function () {          // cc#1059: an index has no gvm_history — no chip at all,
+      var b = document.createElement("button");   // rather than a permanently dead one
       b.textContent = "GVM";
       var gBlocked = (_tf === "5m");
       var on = _ov.gvm && !gBlocked;
@@ -541,6 +548,7 @@
   function _applyGvm() {
     if (!_chart) return;
     if (_gvmSeries) { try { _chart.removeSeries(_gvmSeries); } catch (e) {} _gvmSeries = null; }
+    if (_index) return;                            // cc#1059: no gvm_history for an index
     if (!_ov.gvm || _tf === "5m") return;
     var days = TF[_tf] || 365;
     var sym = _sym;
@@ -968,6 +976,9 @@
     var host = document.getElementById("scorrChartTabs");
     if (!host) return;
     var p = _pal();
+    // cc#1059: an index has no peer set — /api/chart/peers compares stocks within a segment.
+    // Rendering a lone tab is noise, so index mode drops the tab row entirely.
+    if (_index) { host.innerHTML = ""; return; }
     host.innerHTML = ["chart", "peers"].map(function (k) {
       var on = (_tab === k);
       return '<button data-tab="' + k + '" style="border:1px solid ' + (on ? p.btnOn : p.line) +
@@ -1319,10 +1330,14 @@
     if (!symbol) return;
     opts = opts || {};
     _sym = String(symbol).toUpperCase();
+    // cc#1059: index mode is explicit from the caller, never sniffed from the symbol string. A
+    // guess here would silently mis-handle any future symbol that happens to look index-shaped.
+    _index = !!opts.index;
     _theme = opts.theme || _detectTheme();
     var ov = _buildModal();
     ov.style.display = "flex";
-    document.getElementById("scorrChartTitle").textContent = _sym + " · Price";
+    document.getElementById("scorrChartTitle").textContent =
+      (opts.label || _sym) + " · Price";
     document.getElementById("scorrChartHL").textContent = "";
     document.addEventListener("keydown", _esc);
     _tf = "3M";
