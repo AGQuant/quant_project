@@ -32,7 +32,7 @@
    at the stamp rather than worked around here.
 --------------------------------------------------------------------------------------------- */
 
-/* ── the palette, named once ──────────────────────────────────────────────────────────────── */
+/* ── the palette, named once ────────────────────────────────────────────────────────────────── */
 :root{
   --r5-field:#0D1322;      /* deep petrol — the page ground, deliberately NOT black */
   --r5-panel:#161F33;
@@ -89,7 +89,7 @@
   font-family:var(--r5-body);
 }
 
-/* ── type ─────────────────────────────────────────────────────────────────────────────────
+/* ── type ───────────────────────────────────────────────────────────────────────────────────
    Display = Archivo Black, uppercase, skewed -6deg. Applied to headings and the app's existing
    title classes only — never to body copy, and never to anything holding a number. */
 :root:root:not([data-theme="light"]) h1,
@@ -116,7 +116,7 @@
 :root:root:not([data-theme="light"]) .rnage,
 :root:root:not([data-theme="light"]) .rnp{ font-family:var(--r5-mono); }
 
-/* ── geometry: one cut corner, never a uniform radius ─────────────────────────────────────
+/* ── geometry: one cut corner, never a uniform radius ───────────────────────────────────────
    The cut is 16px into the TOP-RIGHT. Every card class it lands on carries >= 12px padding, so
    the triangle falls inside the padding and clips no content — which is what keeps this
    compatible with the parity guard. Radius is zeroed on the same elements so the two corner
@@ -147,7 +147,7 @@
    because it reports WHICH page you are on — it is state, not decoration. */
 :root:root:not([data-theme="light"]) .pager i.on{ background:var(--r5-pulse); }
 
-/* ── bottom tab bar: volt active tab with the notch ───────────────────────────────────────── */
+/* ── bottom tab bar: volt active tab with the notch ─────────────────────────────────────── */
 :root:root:not([data-theme="light"]) .tabs,
 :root:root:not([data-theme="light"]) .bottomnav{
   background:#0A101E; border-top:1px solid var(--r5-edge);
@@ -161,7 +161,91 @@
   clip-path:polygon(0 0, 100% 0, calc(100% - 3px) 100%, 3px 100%);
 }
 
-/* ── motion, per R5's own media query ─────────────────────────────────────────────────────── */
+/* ── motion, per R5's own media query ─────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce){
   :root:root:not([data-theme="light"]) *{ animation:none !important; }
+}
+
+/* ─── R5 SIGNATURE PASS 2 (Fable, 16-Aug 19:0x, founder screenshot review) ──────────────────
+   The token map re-coloured the app but four signature elements from design_refs/scorr_mobile_R5
+   were still reading old-theme on the live home (founder screenshot 18:47): the mood word, the
+   check pills, the pill geometry (out-specified by per-page border-radius), and the bottom nav
+   (live nav uses .bn/.bn.on). This block closes each one from the injected layer — still zero
+   markup edits, still zero hide rules, parity guard holds structurally. */
+
+/* 1 · THE MOOD WORD IS THE SCOREBOARD — huge, display face, skewed, with the swoosh. */
+:root:root:not([data-theme="light"]) .hero .mood,
+:root:root:not([data-theme="light"]) .mood{
+  font-family:var(--r5-display);
+  font-size:56px; line-height:.95; letter-spacing:1px;
+  text-transform:uppercase;
+  display:inline-block; transform:skewX(-6deg); transform-origin:left center;
+  animation:none;   /* R5: the word states, it does not blink */
+}
+:root:root:not([data-theme="light"]) .hero .mood::after,
+:root:root:not([data-theme="light"]) .mood::after{
+  content:""; display:block; height:6px; width:150px; margin-top:4px;
+  background:linear-gradient(90deg, currentColor, transparent);
+  transform:skewX(-24deg); opacity:.9;
+}
+
+/* 2 · CHECK PILLS AS W/L SET SCORES — the pass/fail letter is data the class already carries,
+   so ::before only surfaces what .g/.r mean. Adds content, hides nothing. */
+:root:root:not([data-theme="light"]) .hchips .chip{ font-family:var(--r5-mono); font-weight:600; }
+:root:root:not([data-theme="light"]) .hchips .chip.g::before{
+  content:"W"; font-weight:800; margin-right:6px; color:var(--r5-volt);
+}
+:root:root:not([data-theme="light"]) .hchips .chip.r::before{
+  content:"L"; font-weight:800; margin-right:6px; color:#FF8FA5;
+}
+:root:root:not([data-theme="light"]) .hchips .chip.g{ background:#18240E; border-color:#3E5A18; }
+:root:root:not([data-theme="light"]) .hchips .chip.r{ background:#241019; border-color:#5A2634; }
+
+/* 3 · GEOMETRY, ENFORCED — per-page styles declare border-radius at equal or higher specificity
+   (e.g. .chip{border-radius:20px}), which was why pills still rendered rounded. The cut is the
+   R5 identity, so it wins explicitly here. Same selectors as pass 1, now with the radius pinned. */
+:root:root:not([data-theme="light"]) .pill,
+:root:root:not([data-theme="light"]) .chip,
+:root:root:not([data-theme="light"]) .bdg,
+:root:root:not([data-theme="light"]) .sg-dir,
+:root:root:not([data-theme="light"]) .sg-basket,
+:root:root:not([data-theme="light"]) .badge2,
+:root:root:not([data-theme="light"]) .st,
+:root:root:not([data-theme="light"]) .ix,
+:root:root:not([data-theme="light"]) .tool{
+  border-radius:0 !important;
+  clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
+}
+:root:root:not([data-theme="light"]) .card,
+:root:root:not([data-theme="light"]) .sg-card{
+  border-radius:0 !important;
+  clip-path:polygon(0 0, calc(100% - var(--r5-cut)) 0, 100% var(--r5-cut), 100% 100%, 0 100%);
+}
+
+/* 4 · BOTTOM NAV — the live mobile nav is .bnav/.bn, not .tabs/.tab. Active = volt + notch. */
+:root:root:not([data-theme="light"]) .bnav{ background:#0A101E; border-top:1px solid var(--r5-edge); }
+:root:root:not([data-theme="light"]) .bn{ font-family:var(--r5-body); letter-spacing:1px; font-weight:700; }
+:root:root:not([data-theme="light"]) .bn.on{ color:var(--r5-volt) !important; position:relative; }
+:root:root:not([data-theme="light"]) .bn.on::before{
+  content:""; position:absolute; top:-1px; left:25%; right:25%; height:3px;
+  background:var(--r5-volt);
+  clip-path:polygon(0 0, 100% 0, calc(100% - 3px) 100%, 3px 100%);
+}
+
+/* 5 · NUMBERS — the live home's figure classes join the mono rule (screenshot showed .st .v and
+   the ticker prices still in body face). */
+:root:root:not([data-theme="light"]) .st .v,
+:root:root:not([data-theme="light"]) .ix .v,
+:root:root:not([data-theme="light"]) .row .pv,
+:root:root:not([data-theme="light"]) .row .pc,
+:root:root:not([data-theme="light"]) .sg-total,
+:root:root:not([data-theme="light"]) .sg-bk-val{ font-family:var(--r5-mono); }
+
+/* 6 · SECTION EYEBROWS get the R5 rule-off line, purely additive. */
+:root:root:not([data-theme="light"]) .sect{
+  display:flex; align-items:center; gap:10px; letter-spacing:2.5px;
+}
+:root:root:not([data-theme="light"]) .sect::after{
+  content:""; flex:1; height:1px;
+  background:linear-gradient(90deg, var(--r5-edge), transparent);
 }
