@@ -124,7 +124,7 @@ MCP_TOOLS = [
     {"name":"tc_sim_summary","description":"TC OUTCOME SIM (cc#748): open sim positions + closed stats — win-rate, avg pnl%, avg hours, exit_reason split (TARGET/STOP/TIME) — grouped by style AND direction, plus an overall closed line. STRONG-verdict entries scored via tc_resolver, +/-3% exits, 5-trading-day TIME cap.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM±5 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
-    {"name":"pcr_backfill","description":"One-time index option OI+PCR backfill (NIFTY+BANKNIFTY ATM+-10 monthly). Fetches OI via Fyers History API (oi_flag=1), upserts onto option_chain, recomputes pcr_intraday + pcr_daily. start/end=YYYY-MM-DD. Fail-loud if no OI column.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"}},"required":["start","end"]}},
+    {"name":"pcr_backfill","description":"One-time index option OI+PCR backfill (NIFTY+BANKNIFTY ATM+-10 monthly). Fetches OI via Fyers History API (oi_flag=1), upserts onto option_chain, recomputes pcr_intraday + pcr_daily. start/end=YYYY-MM-DD. Fail-loud if no OI column. cc#1057: OI on an already-populated bar is PRESERVED by default (gaps only); force_oi=true overwrites it with the coarser History series and is how the 10-14 Aug intraday OI path was lost — use only to repair a known-bad capture.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"force_oi":{"type":"boolean","description":"Overwrite existing OI (default false = preserve)"}},"required":["start","end"]}},
     {"name":"v8_replay_run","description":"V8 PAPER REPLAY: true 5-min stepped replay from start date. wipe=true clears the paper book first (DESTRUCTIVE). Walks intraday bar-by-bar, point-in-time entries/exits.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"wipe":{"type":"boolean"}},"required":["start"]}},
     {"name":"v8_replay_summary","description":"V8 PAPER REPLAY: current paper book stats — open positions + realized trade stats by basket.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"sector_brief_batch","description":"Generate AI sector briefs for all 129 segments via Claude Haiku and cache in sector_briefs table. Runs in background. refresh=true regenerates all.","inputSchema":{"type":"object","properties":{"refresh":{"type":"boolean"}},"required":[]}},
@@ -328,7 +328,9 @@ async def _call_tool(name, args):
             params = {"ts": args["ts"]} if args.get("ts") else {}
             r = await client.post(f"{BASE_URL}/api/pcr/intraday/compute", params=params, headers=h); return r.json()
         elif name == "pcr_backfill":
-            r = await client.post(f"{BASE_URL}/api/pcr/backfill", params={"start": args["start"], "end": args["end"]}, headers=h); return r.json()
+            # cc#1057: force_oi defaults to False both here and server-side — the destructive
+            # mode has to be typed, it can never be reached by omission.
+            r = await client.post(f"{BASE_URL}/api/pcr/backfill", params={"start": args["start"], "end": args["end"], "force_oi": bool(args.get("force_oi", False))}, headers=h); return r.json()
         elif name == "v8_replay_run":
             params = {"start": args["start"], "wipe": args.get("wipe", True)}
             if args.get("end"): params["end"] = args["end"]

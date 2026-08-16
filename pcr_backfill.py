@@ -120,8 +120,35 @@ def _fetch_option_history(token, sym, start, end):
     return d.get('candles', []), d
 
 
-def _upsert_oi(conn, sym, underlying, strike, otype, exp, candles):
-    """UPSERT each 5-min bar's OI onto option_chain (matches live schema)."""
+def _upsert_oi(conn, sym, underlying, strike, otype, exp, candles, force_oi=False):
+    """UPSERT each 5-min bar's OI onto option_chain (matches live schema).
+
+    cc#1057 — THE OI COLUMN NO LONGER CLOBBERS A LIVE-CAPTURED BAR BY DEFAULT.
+
+    This function used to end in a bare `oi = EXCLUDED.oi` while `ltp` and `volume` were both
+    protected with COALESCE(existing, incoming). Two columns were guarded and the third, the
+    only one this job exists to fill, was not. The result: a backfill over a window the live
+    feed had ALREADY captured replaced a real per-tick OI path with the History API's much
+    coarser one, silently and in place.
+
+    MEASURED 16-Aug-2026, and this is what settled it against the competing "the OI feed just
+    froze" explanation: 681 of 710 pcr_intraday rows across 10-14 Aug carry put/call OI totals
+    that no longer match option_chain at the SAME timestamp. If the live feed had merely
+    stalled, the two would agree — both would hold the same frozen number, because
+    pcr_intraday is computed FROM option_chain at capture time. They disagree on 96% of rows,
+    so option_chain was rewritten after those rows were derived from it. Downstream effect:
+    NIFTY 13-Aug now holds 3 distinct OI snapshots across 77 bars, 12-Aug holds 4 across 62.
+    A 5-minute series that is really a daily one, which reads on a chart as a calm market.
+
+    Consequence worth stating plainly: pcr_intraday is now the ONLY surviving record of the
+    real intraday OI path for that window. Recomputing it from option_chain would not repair
+    it — it would finish destroying it.
+
+    DEFAULT IS PRESERVE, `force_oi=True` IS THE DELIBERATE OVERWRITE. The repair capability is
+    kept, because a genuinely corrupt live OI (cc#591's zeroed put leg, cc#745's partial
+    capture) is exactly what this job should be able to fix. It just stops being the accident
+    that happens when someone backfills a window that was never actually missing.
+    """
     from pytz import timezone
     from datetime import time as _dt_time
     ist = timezone('Asia/Kolkata')
@@ -142,7 +169,8 @@ def _upsert_oi(conn, sym, underlying, strike, otype, exp, candles):
                     (symbol, underlying, strike, option_type, expiry, ltp, oi, volume, bid, ask, ts)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,NULL,%s)
                 ON CONFLICT (symbol, ts) DO UPDATE SET
-                    oi = EXCLUDED.oi,
+                    oi = """ + ("EXCLUDED.oi" if force_oi
+                                 else "COALESCE(option_chain.oi, EXCLUDED.oi)") + """,
                     ltp = COALESCE(option_chain.ltp, EXCLUDED.ltp),
                     volume = COALESCE(option_chain.volume, EXCLUDED.volume)
             """, (sym, underlying, strike, otype, exp,
@@ -240,11 +268,16 @@ def _recompute_pcr_daily_for_range(conn, start: date, end: date):
     return filled
 
 
-def run_backfill(start: str, end: str, conn=None):
+def run_backfill(start: str, end: str, conn=None, force_oi: bool = False):
     """
     Main entry. start/end = 'YYYY-MM-DD' (inclusive).
     Backfills OI for NIFTY+BANKNIFTY ATM+/-10 monthly options, then recomputes
     pcr_intraday (self-heal) + pcr_daily for the range.
+
+    force_oi (cc#1057): default False PRESERVES any OI already on the bar and fills only the
+    gaps, so backfilling a window the live feed already covered can no longer overwrite the
+    real per-tick series with the History API's coarser one. Pass True only to deliberately
+    repair a known-bad live capture.
     """
     own = conn is None
     if own:
@@ -255,7 +288,10 @@ def run_backfill(start: str, end: str, conn=None):
         ed = datetime.strptime(end, '%Y-%m-%d').date()
         exp = _current_expiry(ed)   # monthly series active across the gap window
 
-        summary = {'expiry': _expiry_code(exp), 'underlyings': {}, 'oi_guard': 'ok'}
+        summary = {'expiry': _expiry_code(exp), 'underlyings': {}, 'oi_guard': 'ok',
+                   # cc#1057: say which way the OI column was written, in the response.
+                   # A backfill that quietly replaced real data is how this was missed.
+                   'oi_mode': 'overwrite (force_oi)' if force_oi else 'preserve existing (cc#1057 default)'}
         guard_checked = False
 
         for underlying, cfg in INDEX_CFG.items():
@@ -282,7 +318,7 @@ def run_backfill(start: str, end: str, conn=None):
                         guard_checked = True
                     if candles:
                         total_rows += _upsert_oi(conn, sym, underlying, strike,
-                                                 otype, exp, candles)
+                                                 otype, exp, candles, force_oi=force_oi)
                         contracts += 1
             summary['underlyings'][underlying] = {
                 'ltp': ltp, 'strikes': len(strikes),

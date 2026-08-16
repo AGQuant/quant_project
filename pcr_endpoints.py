@@ -41,14 +41,21 @@ def pcr_intraday_compute(ts: Optional[str] = None, x_admin_token: Optional[str] 
 
 
 @router.post("/backfill")
-def pcr_backfill_run(start: str, end: str, x_admin_token: Optional[str] = Header(None)):
+def pcr_backfill_run(start: str, end: str, force_oi: bool = False,
+                     x_admin_token: Optional[str] = Header(None)):
     """
     One-time historical OI + PCR backfill for INDEX options (NIFTY+BANKNIFTY,
     ATM±10, current monthly expiry). Fetches OI via History API (oi_flag=1),
     upserts onto option_chain, then recomputes pcr_intraday + pcr_daily.
     start/end = 'YYYY-MM-DD' (inclusive). Admin-gated. Run on Railway (token IP-bound).
     Fail-loud: aborts if History API returns no OI column.
+
+    force_oi (cc#1057): default False keeps any OI the live feed already captured and fills
+    only the gaps. Pass True ONLY to deliberately repair a known-bad live capture — it
+    replaces real per-tick OI with the History API's coarser series, which is how the 10-14
+    Aug window lost its intraday OI path in the first place. The response echoes which mode
+    ran under `oi_mode`.
     """
     _check_admin(x_admin_token)
     import pcr_backfill
-    return pcr_backfill.run_backfill(start=start, end=end)
+    return pcr_backfill.run_backfill(start=start, end=end, force_oi=force_oi)
