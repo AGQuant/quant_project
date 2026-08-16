@@ -391,6 +391,50 @@
         if (/^(LIVE NEWS|THE WIRE|NEWS)/i.test(ty) && ty.length < 40 && ty.length < nLen) { newsHd = ey; nLen = ty.length; }
         if (/^THE BOOK/i.test(ty) && ty.length < 40 && ty.length < bkLen) { bookHd2 = ey; bkLen = ty.length; }
       }
+      /* 23:52 root cause: NIFTY and BANKNIFTY blocks share no small wrapper — their only common
+         ancestor is the card body (>160 chars), so a combined match was structurally impossible.
+         Match each block separately; hide both (climbing to include the adjacent mini-icon). */
+      if (!idxRow) {
+        var nBlk = null, nbL = 1e9, bBlk = null, bbL = 1e9;
+        for (var y3 = 0; y3 < star.length; y3++) {
+          var e3 = star[y3];
+          if (e3.tagName === 'SCRIPT' || e3.tagName === 'STYLE') continue;
+          var t3 = (e3.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!t3 || t3.length > 40) continue;
+          if (/^NIFTY\s+(LONG|SHORT|FLAT)/i.test(t3) && t3.length < nbL) { nBlk = e3; nbL = t3.length; }
+          if (/^BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(t3) && t3.length < bbL) { bBlk = e3; bbL = t3.length; }
+        }
+        if (nBlk && bBlk) {
+          var nM2 = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(nBlk.textContent);
+          var bM2 = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(bBlk.textContent);
+          var anchor2 = newsHd || bookHd2;
+          if (nM2 && bM2 && anchor2) {
+            [nBlk, bBlk].forEach(function (blk) {
+              var hideEl = blk, bl = (blk.textContent || '').trim().length;
+              /* climb while the parent adds only the mini icon (a few chars) */
+              while (hideEl.parentElement
+                     && (hideEl.parentElement.textContent || '').trim().length <= bl + 14
+                     && hideEl.parentElement !== document.body) {
+                hideEl = hideEl.parentElement;
+              }
+              hideEl.style.display = 'none';
+            });
+            var box2 = document.createElement('div');
+            box2.id = 'r5-idxbox'; box2.className = 'r5-idxbox';
+            box2.style.cursor = 'pointer';
+            function seg2(name, dir) {
+              var d = dir.toUpperCase();
+              var cls = d === 'LONG' ? 'long' : (d === 'SHORT' ? 'short' : 'flat');
+              return name + ' <b class="' + cls + '">' + d + '</b>';
+            }
+            box2.innerHTML = '<div class="t">INDEX SIGNALS · V10</div>'
+              + '<div style="font-size:16px;font-weight:700">' + seg2('NIFTY', nM2[1])
+              + ' &nbsp;·&nbsp; ' + seg2('BANKNIFTY', bM2[1]) + '</div>'
+              + '<div class="t" style="margin:6px 0 0">TAP FOR THE V10 VIEW — COMING SOON</div>';
+            anchor2.parentNode && anchor2.parentNode.insertBefore(box2, anchor2);
+          }
+        }
+      }
       if (idxRow) {
         var nM = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
         var bM = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
