@@ -654,9 +654,9 @@ function rSignal(){
 function rIdxTape(){
   const one=(name,tapeKey,d)=>{
     const chg=d?d.chg:0, col=chg>=0?UP:DN;
-    const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;
-    const tape=(ent&&window.ScorrIndexTape)
-      ? ScorrIndexTape.svg(ent,col,{h:46,w:320})
+    // cc#1058: a SLOT, not the SVG — width is unknown until the element is in the document.
+    const tape=window.ScorrIndexTape
+      ? ScorrIndexTape.placeholder(tapeKey,col,46)
       : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
     return `<div style="flex:1;min-width:0">
       <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
@@ -1042,6 +1042,15 @@ function render(){
     `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
+  mountIdxTapes();   // cc#1058
+}
+
+// cc#1058: identical mount to the V8 Index Intel pane — same module, same options object.
+function mountIdxTapes(){
+  if(!window.ScorrIndexTape || !D.idxTape) return;
+  ScorrIndexTape.mountAll(document.getElementById('app'), D.idxTape, {
+    onActivate:(key)=>{ if(typeof openIdxChart==='function') openIdxChart(key); }   // cc#1059
+  });
 }
 
 /* ════════════════════════════════════════════════════════════════

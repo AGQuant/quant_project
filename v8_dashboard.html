@@ -4828,9 +4828,10 @@ function rIdxSpark(){
   // move, and it is still sourced from /api/v8/live_metrics exactly as before.
   const one=(name,tapeKey,d)=>{
     const chg=d?d.chg:0, col=chg>=0?UP:DN;
-    const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;
-    const tape=(ent&&window.ScorrIndexTape)
-      ? ScorrIndexTape.svg(ent,col,{h:46,w:320})
+    // cc#1058: emit a SLOT, not the SVG. The tape's width is not knowable until the element
+    // is in the document, so mountIdxTapes() below fills these after innerHTML is assigned.
+    const tape=window.ScorrIndexTape
+      ? ScorrIndexTape.placeholder(tapeKey,col,46)
       : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
     return `<div style="flex:1;min-width:0">
       <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
@@ -5285,6 +5286,14 @@ function rStrikeOI(){
 }
 
 /* new render() for the Index Intel pane (adds pivots + strike-OI vs the V10 page) */
+// cc#1058: fill the tape slots after the pane's innerHTML lands, and re-fill on every
+// re-render — render() replaces the DOM wholesale, so the mounted listeners go with it.
+function mountIdxTapes(){
+  if(!window.ScorrIndexTape || !D.idxTape) return;
+  ScorrIndexTape.mountAll(document.getElementById('idx-app'), D.idxTape, {
+    onActivate:(key)=>{ if(typeof openIdxChart==='function') openIdxChart(key); }   // cc#1059
+  });
+}
 function render(){
   document.getElementById('idx-app').innerHTML =
     rTopBar() + rMood() +
@@ -5294,6 +5303,7 @@ function render(){
     `<div class="row" style="grid-template-columns:1fr 1fr">${rPivots()}${rStrikeOI()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
+  mountIdxTapes();   // cc#1058
 }
 
 /* extend loaders with pivots + strike OI */
