@@ -282,7 +282,8 @@
             lf.__r5t = 1;
             lf.style.cssText += ';font-size:24px!important;font-weight:800;'
               + 'font-family:"JetBrains Mono",monospace;letter-spacing:0';
-          } else if (/^(NIFTY\s*50|BANKNIFTY|SENSEX|FINNIFTY)$/i.test(lt)) {
+          } else if (/^(NIFTY\s*50|BANKNIFTY|SENSEX|FINNIFTY)$/i.test(lt)
+                     && !(lf.parentElement && /\b(LONG|SHORT|FLAT)\b/.test(lf.parentElement.textContent))) {
             lf.__r5t = 1;
             lf.style.cssText += ';font-size:12px;letter-spacing:2.5px;font-weight:700;'
               + 'text-transform:uppercase;display:inline-block';
@@ -315,6 +316,64 @@
         whyEl.parentNode && whyEl.parentNode.insertBefore(bar, whyEl.nextSibling);
       }
     }
+    /* founder 23:43 (#5): PCR | VIX tabs inside the MARKET MOOD card. The India VIX panel
+       (currently under the scoreboard card) is relocated once into the mood card, hidden behind
+       a VIX tab; PCR tab shows the card as-is. Founder-ordered move. */
+    if (!document.getElementById('r5-moodtabs')) {
+      var pcrLeaf = null, vixHd = null;
+      for (var p1 = 0; p1 < all.length; p1++) {
+        var tp = (all[p1].textContent || '').trim();
+        if (!pcrLeaf && /^PCR\s+[\d.]+/.test(tp) && tp.length < 30) pcrLeaf = all[p1];
+        if (!vixHd && /^INDIA VIX$/i.test(tp)) vixHd = all[p1];
+      }
+      var moodCard = pcrLeaf ? pcrLeaf.closest('.r5-rail') : null;
+      if (moodCard && vixHd) {
+        /* the VIX panel = smallest ancestor of the INDIA VIX heading that also contains the
+           30D range button */
+        var vixPanel = vixHd;
+        while (vixPanel && vixPanel.parentElement && !/30D/.test(vixPanel.textContent)) {
+          vixPanel = vixPanel.parentElement;
+        }
+        if (vixPanel && vixPanel !== document.body) {
+          var tabs = document.createElement('div');
+          tabs.id = 'r5-moodtabs';
+          tabs.style.cssText = 'display:flex;gap:8px;margin:10px 0';
+          function mkTab(label, on) {
+            var b = document.createElement('button');
+            b.textContent = label;
+            b.style.cssText = 'flex:1;padding:8px 0;font-family:"JetBrains Mono",monospace;'
+              + 'font-weight:800;font-size:12px;letter-spacing:2px;cursor:pointer;'
+              + 'border:1px solid #26334F;color:' + (on ? '#0D1322' : '#8A97B0') + ';'
+              + 'background:' + (on ? '#C8F542' : '#1C2740') + ';'
+              + 'clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)';
+            return b;
+          }
+          var tP = mkTab('PCR', true), tV = mkTab('VIX', false);
+          tabs.appendChild(tP); tabs.appendChild(tV);
+          /* insert tabs right after the PCR line; relocate VIX panel after them, hidden */
+          pcrLeaf.parentNode.insertBefore(tabs, pcrLeaf.nextSibling);
+          vixPanel.__r5vx = 1;
+          vixPanel.style.display = 'none';
+          tabs.parentNode.insertBefore(vixPanel, tabs.nextSibling);
+          /* everything after the vix panel inside the card = the PCR view */
+          function setTab(vix) {
+            vixPanel.style.display = vix ? '' : 'none';
+            var sib = vixPanel.nextSibling;
+            while (sib) {
+              if (sib.nodeType === 1) sib.style.display = vix ? 'none' : '';
+              sib = sib.nextSibling;
+            }
+            tP.style.background = vix ? '#1C2740' : '#C8F542';
+            tP.style.color = vix ? '#8A97B0' : '#0D1322';
+            tV.style.background = vix ? '#C8F542' : '#1C2740';
+            tV.style.color = vix ? '#0D1322' : '#8A97B0';
+          }
+          tP.addEventListener('click', function () { setTab(false); });
+          tV.addEventListener('click', function () { setTab(true); });
+        }
+      }
+    }
+
     /* founder 23:30 (supersedes 22:0x): NIFTY/BANKNIFTY leaves the scoreboard and becomes its
        own INDEX SIGNALS card ABOVE the LIVE NEWS section — the future V10 page launchpad.
        Full-DOM scan this time (the row's container was a tag outside the earlier tag list,
