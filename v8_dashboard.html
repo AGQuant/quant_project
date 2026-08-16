@@ -1105,16 +1105,26 @@ const MATRIX_SHORT={buy_reversal:"Buy Reversal",buy_momentum:"Buy Momentum",
   sell_reversal:"Sell Reversal",sell_momentum:"Sell Momentum"};
 const MATRIX_ROWS=[
   {sec:"Quality & trend"},
-  {label:"GVM score",       map:{buy_momentum:"gvm_score_score"}},
-  {label:"50-DMA distance", map:{buy_momentum:"dma_50_score"}},
+  // cc#1052: point at the GATE key, not gvm_score_score. buy_momentum gates gvm>=7 and
+  // buy_reversal gates gvm>=6.5; the score band (7-10) is a different number and belongs to the
+  // score layer, not this matrix of hard gates.
+  {label:"GVM score",       map:{buy_reversal:"gvm_score",buy_momentum:"gvm_score"}},
+  // cc#1052: gate key, not dma_50_score — the V5 gate is [5,12] while the score band is 8-25.
+  // sell_reversal also gates dma_50<0 and had no cell here.
+  {label:"50-DMA distance", map:{buy_momentum:"dma_50",sell_reversal:"dma_50"}},
   {label:"200-DMA distance",map:{buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
   {sec:"RSI & momentum"},
-  // cc#854: sell_momentum dropped from this row — its true weekly RSI filter is REMOVED (spec
-  // 15366). buy_momentum (twr 70-85) and sell_reversal (twr<=45) still carry theirs.
-  {label:"Weekly RSI (FINAL heavy)",map:{buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi"}},
+  // cc#854: sell_momentum dropped — its true weekly RSI filter is REMOVED (spec 15366).
+  // cc#1052: buy_momentum dropped too — V5 (spec 23186) keeps twr as a SCORE BAND and no longer
+  // GATES on it, so a Matrix cell here would assert a gate the engine does not run. Only
+  // sell_reversal still carries a twr hard stage (<=45).
+  {label:"Weekly RSI (FINAL heavy)",map:{sell_reversal:"true_weekly_rsi"}},
   {label:"Monthly RSI",     map:{buy_reversal:"rsi_month",buy_momentum:"rsi_month",sell_momentum:"rsi_month"}},
-  {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",sell_reversal:"mom_2d",sell_momentum:"mom_2d"}},
+  // cc#1052: buy_momentum dropped — V5 scores mom_2d but does not gate it (spec 23186).
+  {label:"2-day momentum",  map:{buy_reversal:"mom_2d",sell_reversal:"mom_2d",sell_momentum:"mom_2d"}},
   {label:"Hourly momentum", map:{buy_momentum:"hourly_pct"}},
+  // cc#1052: dma_20 is a live hard gate on both buy baskets and had no Matrix row at all.
+  {label:"20-DMA distance", map:{buy_momentum:"dma_20",sell_reversal:"dma_20"}},
   {sec:"Returns, sector & volume"},
   {label:"Week return",     map:{buy_reversal:"week_return",buy_momentum:"week_return",sell_momentum:"week_return"}},
   {label:"Month return",    map:{buy_reversal:"month_return",buy_momentum:"month_return",sell_reversal:"month_return"}},
@@ -1123,8 +1133,14 @@ const MATRIX_ROWS=[
   {label:"52-week index",   map:{buy_momentum:"week_index_52",sell_reversal:"week_index_52",sell_momentum:"week_index_52"}},
   {label:"Day change (1D)", map:{buy_reversal:"day_1d",buy_momentum:"day_1d",sell_reversal:"day_1d"}},
   {sec:"Pivot geometry"},
-  {label:"Pivot position",  map:{sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
-  {label:"Support / rejection trigger",map:{buy_reversal:"s1_touch",sell_reversal:["r1_touch","room"],sell_momentum:"s2_clearance"}},
+  // cc#1052: sell_reversal removed — its registry carries no cmp_lt_pp gate, so the cell was
+  // asserting a gate the engine never evaluates for that basket.
+  {label:"Pivot position",  map:{sell_momentum:"cmp_lt_pp"}},
+  // cc#1052: buy_momentum joins this row — V5 gates on S1 touched in the last 3 completed
+  // sessions or today (spec 23186). It was absent while the gate was live.
+  {label:"Support / rejection trigger",map:{buy_reversal:"s1_touch",buy_momentum:"s1_touch",sell_reversal:["r1_touch","room"],sell_momentum:"s2_clearance"}},
+  // cc#1052: the PP band is a V5 gate with no prior row anywhere in the Matrix.
+  {label:"Distance above PP",map:{buy_momentum:"pp_band"}},
   {sec:"Exits (frozen at entry)",exits:true},
   {label:"Target",   pull:"target"},
   {label:"Stop",     pull:"stop"},
