@@ -2078,6 +2078,15 @@ SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
 # cc#1021: the V8 dashboard's Ladder View row renderer. Served the same way as the card files —
 # repo-root .js read once at import — so the dashboard HTML stays a page, not a JS library.
 V8_LADDER_V2_JS = _read_root_js("v8_ladder_v2.js")
+# cc#1054: the ONE index-tape renderer. Both the V8 Index Intel pane and the standalone V10
+# dashboard load this file — a second copy of the SVG builder is exactly what cc#1034 warned
+# about, so there is only ever this one.
+INDEX_TAPE_CARD_JS = _read_root_js("index_tape_card.js")
+
+
+@router.get("/index_tape_card.js")
+def pwa_index_tape_card_js():
+    return Response(INDEX_TAPE_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_card_common.js")

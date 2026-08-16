@@ -55,6 +55,7 @@ from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
+from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
@@ -471,6 +472,7 @@ app.include_router(v8_replay_router)
 app.include_router(backtest_router)
 app.include_router(v8_backfill_router)
 app.include_router(v8_gapfill_router)   # cc#1048: POST /api/v8/backfill/metrics_gapfill
+app.include_router(index_tape_router)   # cc#1054: GET /api/index/tape
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)

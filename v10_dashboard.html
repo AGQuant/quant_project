@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <script src="/scorr_card_common.js"></script>
+<!-- cc#1054: the shared index 100-bar tape renderer — the SAME file the V8 Index Intel pane
+     loads. Parse-time, because rIdxTape() below calls it by name during render(). -->
+<script src="/index_tape_card.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>V10</title>
@@ -350,6 +353,7 @@ const D = {
   open:[], closed:[],
   cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
   perf:{},
+  idxTape:null,   // cc#1054: /api/index/tape payload; null until loaded, and null on failure
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -436,6 +440,14 @@ async function loadIdx(){
     const pvx = pvRows.find(r=>r.symbol===feed);
     D.idx[k] = { cmp: cmp||0, chg: chg||0, pp: pvx?Number(pvx.pp)||0:0 };
   }
+}
+// cc#1054: the rolling 100-bar cash tape, from the same endpoint and the same renderer the V8
+// Index Intel pane uses. This page previously had no day-change tape at all — the spec assumed
+// one existed here, so it is added rather than mirrored. Day% is NOT computed from this: the
+// number stays on D.idx, which loadIdx() fills from /api/v8/live_metrics exactly as before.
+async function loadIdxTape(){
+  const p = await (window.ScorrIndexTape ? ScorrIndexTape.load(100) : Promise.resolve(null));
+  D.idxTape = (p && p.status==='ok') ? p : null;
 }
 async function loadMaxPain(){
   const m = await getJSON('/api/v10/maxpain?symbol=NIFTY');
@@ -526,7 +538,7 @@ async function loadPerf(){
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf];
+  const tasks=[loadMood,loadSignals,loadIdx,loadIdxTape,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -633,6 +645,34 @@ function rSignal(){
     <div class="sig-dual">
       ${sigCol('NIFTY', D.sig.NIFTY, D.idx.NIFTY)}
       ${sigCol('BANKNIFTY', D.sig.BANKNIFTY, D.idx.BANKNIFTY)}
+    </div></div>`;
+}
+
+// cc#1054: index day-change tape. Identical renderer to the V8 Index Intel pane — one file,
+// window.ScorrIndexTape, loaded by both pages. The printed number and its colour come from
+// D.idx (loadIdx -> /api/v8/live_metrics); this card only draws the series behind them.
+function rIdxTape(){
+  const one=(name,tapeKey,d)=>{
+    const chg=d?d.chg:0, col=chg>=0?UP:DN;
+    const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;
+    const tape=(ent&&window.ScorrIndexTape)
+      ? ScorrIndexTape.svg(ent,col,{h:46,w:320})
+      : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
+    return `<div style="flex:1;min-width:0">
+      <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 4px">
+        <span class="big-val" style="font-size:20px">${d&&d.cmp?num(d.cmp):'—'}</span>
+        <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
+      ${tape}
+    </div>`;
+  };
+  const cap = (D.idxTape&&window.ScorrIndexTape) ? ScorrIndexTape.caption(D.idxTape) : '5-min intraday';
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">Index · Day Change</div>
+      <div class="s">NIFTY + BANKNIFTY · ${esc(cap)} · prior session dimmed</div></div></div>
+    <div style="display:flex;gap:16px">
+      ${one('NIFTY 50','NIFTY50',D.idx.NIFTY)}
+      ${one('BANKNIFTY','BANKNIFTY',D.idx.BANKNIFTY)}
     </div></div>`;
 }
 
@@ -998,6 +1038,7 @@ function render(){
   document.getElementById('app').innerHTML =
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
+    `<div class="row">${rIdxTape()}</div>` +   // cc#1054: shared index 100-bar tape
     `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;

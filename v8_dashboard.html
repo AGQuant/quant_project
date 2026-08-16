@@ -933,6 +933,10 @@
 <!-- cc#1021: LADDER_VIEW_V2 render module. Parse-time (not defer) like the line above, because
      renderMaster() runs from the inline scripts below and asks for it by name. -->
 <script src="/v8_ladder_v2.js"></script>
+<!-- cc#1054: the shared index 100-bar tape renderer. Parse-time for the same reason as the two
+     lines above — rIdxSpark() runs from the inline scripts below and calls it by name. The V10
+     dashboard loads this identical file; there is one renderer, not a copy per surface. -->
+<script src="/index_tape_card.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 // cc#426: V9 Pairs is now the standalone /v9 page — old in-dashboard deep link redirects there.
@@ -4511,6 +4515,7 @@ const D = {
   open:[], closed:[],
   cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
   perf:{},
+  idxTape:null,   // cc#1054: /api/index/tape payload; null until loaded, and null on failure
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -4554,14 +4559,17 @@ async function loadSignals(){
   ]);
   D.sig = { NIFTY:mapSig(n), BANKNIFTY:mapSig(b) };
 }
-// cc#681: 5-min intraday closes for the index day-change sparklines (last session; index price feed).
+// cc#1054 (was cc#681): the index tape is now a rolling 100-bar window — the full current
+// session plus the tail of the one before it — instead of the current session alone. Source
+// moved off /api/v10/candles (which reads the V10 engine's own append tables) onto
+// /api/index/tape, which reads intraday_prices under INDEX_SYMBOL_CONVENTION_V1 and returns
+// the CASH leg only. Session boundaries come back as array positions from ts::date
+// transitions, never from counting 75 bars back. D.idxTape holds the whole payload; the
+// per-index entry carries rows + breaks + session_start.
 async function loadIdxSpark(){
-  const [n,b] = await Promise.all([
-    getJSON('/api/v10/candles?symbol=NIFTY50&days=2').catch(()=>null),
-    getJSON('/api/v10/candles?symbol=BANKNIFTY&days=2').catch(()=>null),
-  ]);
-  const clo=r=>{const c=(r&&r.candles)||r||[];return (Array.isArray(c)?c:[]).map(x=>Number(x.close)).filter(v=>isFinite(v));};
-  D.idxSpark = { NIFTY:clo(n), BANKNIFTY:clo(b) };
+  const p = await (window.ScorrIndexTape ? ScorrIndexTape.load(100) : Promise.resolve(null));
+  D.idxTape = p && p.status==='ok' ? p : null;
+  D.idxSparkAsof = D.idxTape ? ScorrIndexTape.caption(D.idxTape) : '';
 }
 // cc#681: F&O ban (MWPL) list for the latest ban date (recency-guarded server-side).
 async function loadFoBan(){
@@ -4814,21 +4822,29 @@ function sigCol(sym, s, ix){
 }
 // cc#681: index day-change sparkline card (replaces the V10 Active Signals cards at the dashboard top).
 function rIdxSpark(){
-  const one=(name,feed,d)=>{
-    const chg=d?d.chg:0, col=chg>=0?UP:DN, spk=(D.idxSpark||{})[feed]||[];
+  // cc#1054: `tapeKey` is the CASH symbol in intraday_prices (NIFTY50 / BANKNIFTY per
+  // INDEX_SYMBOL_CONVENTION_V1); `d` is the untouched D.idx entry that owns the printed
+  // day-change number. Two different keys on purpose — the tape got longer, the number did not
+  // move, and it is still sourced from /api/v8/live_metrics exactly as before.
+  const one=(name,tapeKey,d)=>{
+    const chg=d?d.chg:0, col=chg>=0?UP:DN;
+    const ent=(D.idxTape&&D.idxTape.indices)?D.idxTape.indices[tapeKey]:null;
+    const tape=(ent&&window.ScorrIndexTape)
+      ? ScorrIndexTape.svg(ent,col,{h:46,w:320})
+      : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
     return `<div style="flex:1;min-width:0">
       <div style="font-size:11px;font-weight:800;color:var(--mut)">${name}</div>
       <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 4px">
         <span class="big-val" style="font-size:20px">${d&&d.cmp?num(d.cmp,1):'—'}</span>
         <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
-      ${spk.length>1?sparkline(spk,col,{h:46,liveLast:true}):'<div style="font-size:8px;color:var(--dim)">no intraday</div>'}
+      ${tape}
     </div>`;
   };
   return `<div class="card">
     <div class="card-hd"><div><div class="t">Index · Day Change</div>
-      <div class="s">NIFTY + BANKNIFTY · 5-min intraday${D.idxSparkAsof?(' · '+esc(D.idxSparkAsof)):''}</div></div></div>
+      <div class="s">NIFTY + BANKNIFTY${D.idxSparkAsof?(' · '+esc(D.idxSparkAsof)):' · 5-min intraday'} · prior session dimmed</div></div></div>
     <div style="display:flex;gap:16px">
-      ${one('NIFTY 50','NIFTY',D.idx.NIFTY)}
+      ${one('NIFTY 50','NIFTY50',D.idx.NIFTY)}
       ${one('BANKNIFTY','BANKNIFTY',D.idx.BANKNIFTY)}
     </div></div>`;
 }
