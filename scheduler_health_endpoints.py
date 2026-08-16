@@ -181,13 +181,8 @@ def health_memory(top: int = 30, min_mb: float = 1.0):
     }
 
 
-def _boot_probe_once():
-    """Run the census ~120s after boot and persist to session_log so the
-    idle baseline is queryable via run_sql (web fetch to the app is not
-    always possible from research tooling). One row per process boot."""
-    import time as _time
+def _persist_probe(label):
     import json as _json
-    _time.sleep(120)
     try:
         payload = health_memory(top=30, min_mb=1.0)
         with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
@@ -195,13 +190,27 @@ def _boot_probe_once():
                 "INSERT INTO session_log (session_date, session_ts, category, title, details) "
                 "VALUES (CURRENT_DATE, NOW(), 'memory_probe', %s, %s::jsonb)",
                 (
-                    "MEMORY_PROBE boot baseline rss_mb=%s" % payload.get("rss_mb"),
+                    "MEMORY_PROBE %s rss_mb=%s" % (label, payload.get("rss_mb")),
                     _json.dumps(payload, default=str),
                 ),
             )
             conn.commit()
     except Exception:
         pass  # probe must never affect the app
+
+
+def _boot_probe_once():
+    """Census 120s after boot (idle baseline), then every 4h (growth curve),
+    persisted to session_log(category='memory_probe') so the RSS ratchet is
+    measurable via run_sql. cc#1049 evidence: boot RSS was 256MB vs a 3-4GB
+    Railway baseline — the cost is runtime accumulation, and this loop shows
+    which windows add it."""
+    import time as _time
+    _time.sleep(120)
+    _persist_probe("boot baseline")
+    while True:
+        _time.sleep(4 * 3600)
+        _persist_probe("4h growth")
 
 
 try:
