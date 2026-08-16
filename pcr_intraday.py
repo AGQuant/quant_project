@@ -32,6 +32,8 @@ from datetime import datetime, timedelta
 
 import psycopg
 
+from price_sources import not_fut   # cc#1053 INDEX_SYMBOL_CONVENTION_V1
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Strike interval per underlying
@@ -70,7 +72,17 @@ def setup_table(conn):
 
 
 def _nearest_spot(conn, underlying, ts):
-    """Spot close at-or-before ts from intraday_prices (within 10 min)."""
+    """Spot close at-or-before ts from intraday_prices (within 10 min).
+
+    cc#1053: the source filter is LOAD-BEARING, not tidiness. BANKNIFTY's index futures
+    sit under the SAME symbol as its cash index (one symbol, legs split by source —
+    price_sources.py), so at a shared ts this query had two candidate rows and
+    `ORDER BY ts DESC` has no tiebreak between them. Measured: 14 of 366 BANKNIFTY rows
+    written since 10-Aug-2026 anchored on the FUTURES print, ~200 pts above cash, which
+    moved the ATM strike 1-3 strikes and so computed pcr_atm5 over the wrong 11-strike
+    band. NIFTY was clean at 0 of 366 only because its futures leg happens to live under
+    the separate symbol `NIFTY` while SPOT_SYMBOL points at `NIFTY50`.
+    """
     sym = SPOT_SYMBOL.get(underlying)
     if not sym:
         return None
@@ -78,8 +90,9 @@ def _nearest_spot(conn, underlying, ts):
         cur.execute("""
             SELECT close FROM intraday_prices
             WHERE symbol = %s AND ts <= %s AND ts >= %s
+              AND COALESCE(source,'') <> ALL(%s)
             ORDER BY ts DESC LIMIT 1
-        """, (sym, ts, ts - timedelta(minutes=10)))
+        """, (sym, ts, ts - timedelta(minutes=10), not_fut()))
         r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else None
 

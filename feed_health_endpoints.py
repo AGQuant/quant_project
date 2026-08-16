@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone, time as dt_time
 import psycopg
 from fastapi import APIRouter
 
+from price_sources import INDEX_SPOT_SOURCES   # cc#1053 INDEX_SYMBOL_CONVENTION_V1
+
 router = APIRouter()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -30,6 +32,12 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 GAP_THRESHOLD_MIN = 10                       # no bar in this window -> symbol is "stale"
 INDEX_SYMBOLS = ["NIFTY50", "BANKNIFTY", "INDIAVIX"]
+# cc#1053: the index feed is graded on the CASH sources ONLY. BANKNIFTY's index FUTURES
+# write under the same symbol (one symbol, legs split by source — price_sources.py), and
+# they ride a different transport: the cash index level comes off the 30s quotes poll,
+# the futures come off the WS subscribe. Ungraded, a live futures bar kept this panel
+# GREEN while the quotes poll that actually feeds NIFTY50/BANKNIFTY/INDIAVIX was dead —
+# a fault detector reporting health off a signal it is not detecting.
 # Pseudo / index contracts to exclude from the stock-futures health set.
 NON_FUTURES = INDEX_SYMBOLS + ["NIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"]
 MARKET_OPEN = dt_time(9, 15)
@@ -93,7 +101,8 @@ def feed_health():
             cur.execute("""
                 SELECT MAX(ts) FROM intraday_prices
                 WHERE symbol = ANY(%s) AND ts::date = CURRENT_DATE
-            """, (INDEX_SYMBOLS,))
+                  AND source = ANY(%s)
+            """, (INDEX_SYMBOLS, list(INDEX_SPOT_SOURCES)))
             idx_last = (cur.fetchone() or [None])[0]
 
         idx_gap = (now - idx_last).total_seconds() / 60 if idx_last else None

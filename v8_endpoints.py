@@ -37,6 +37,7 @@ standard pool only, 20 total slots:
 
 from fastapi import APIRouter, HTTPException, Response
 from v8_book_canon import retired_baskets   # cc#970 V8_PNL_CANON_V1 (rule 13)
+from price_sources import not_fut           # cc#1053 INDEX_SYMBOL_CONVENTION_V1
 from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
@@ -2824,18 +2825,31 @@ def ohol():
 
 @router.get("/domestic_live")
 def domestic_live():
+    _NOT_FUT = not_fut()   # cc#1053: cash leg only — see price_sources.py
     out = {}
     try:
         with _conn() as conn, conn.cursor() as cur:
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND price_date<CURRENT_DATE ORDER BY price_date DESC LIMIT 1", (sym,))
                 pc = cur.fetchone(); prev_close = float(pc[0]) if pc and pc[0] else None
+                # cc#1053: the CASH leg only. BANKNIFTY carries its index futures under the SAME
+                # symbol (one symbol, legs split by source — see price_sources.py), so without
+                # this filter MAX(high) came off the futures print and the closing bar was
+                # whichever leg wrote last. Measured 14-Aug-2026: this tile read BANKNIFTY at
+                # +0.06% when the real cash move was -0.25% — the SIGN was wrong — with the high
+                # overstated by 217.6 pts and the close by 176.3 pts. prev_close below comes from
+                # raw_prices, which is cash-only, so mixing a futures close into `c` compared two
+                # different instruments. NIFTY50 was clean only by luck: its futures leg happens
+                # to sit under the separate symbol `NIFTY`.
                 cur.execute("""
-                    SELECT (SELECT open FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC LIMIT 1),
+                    SELECT (SELECT open FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE
+                              AND COALESCE(source,'') <> ALL(%s) ORDER BY ts ASC LIMIT 1),
                            MAX(high), MIN(low),
-                           (SELECT close FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1)
+                           (SELECT close FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE
+                              AND COALESCE(source,'') <> ALL(%s) ORDER BY ts DESC LIMIT 1)
                     FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE
-                """, (sym, sym, sym))
+                      AND COALESCE(source,'') <> ALL(%s)
+                """, (sym, _NOT_FUT, sym, _NOT_FUT, sym, _NOT_FUT))
                 r = cur.fetchone()
                 if r and r[3] is not None and prev_close:
                     o,h,l,c = r[0],r[1],r[2],r[3]

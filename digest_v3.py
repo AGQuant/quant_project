@@ -38,6 +38,8 @@ consistent with the $0/native doctrine and with "no new fetch jobs".
 import os
 import logging
 from datetime import datetime, timedelta, timezone
+
+from price_sources import not_fut   # cc#1053 INDEX_SYMBOL_CONVENTION_V1
 from typing import Dict, Any, List, Optional
 
 import psycopg2
@@ -139,8 +141,14 @@ def _ladders(cur) -> Dict[str, Any]:
         cmp_v = _f(c[0]) if c else None
         as_of, tier = (str(c[1]) if c else None), "EOD"
         # Live CMP during the session, from the same intraday table every other surface reads.
+        # cc#1053: cash leg only. The rungs below come from v8_paper_pivots, which are cash
+        # pivots — so a BANKNIFTY futures print landing here measured the distance from a
+        # cash S1/R1 to a price ~200 pts away on a different instrument. BANKNIFTY carries
+        # both legs under one symbol (price_sources.py); NIFTY50 was safe by accident.
         cur.execute("""SELECT close, ts FROM intraday_prices
-                       WHERE symbol=%s AND close IS NOT NULL ORDER BY ts DESC LIMIT 1""", (sym,))
+                       WHERE symbol=%s AND close IS NOT NULL
+                         AND COALESCE(source,'') <> ALL(%s)
+                       ORDER BY ts DESC LIMIT 1""", (sym, not_fut()))
         iv = cur.fetchone()
         if iv and iv[0] is not None:
             cmp_v, as_of, tier = _f(iv[0]), str(iv[1]), "LIVE"
