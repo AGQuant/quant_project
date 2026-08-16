@@ -1041,8 +1041,8 @@ const BASKET_INFO={
   },
   buy_momentum:{
     label:"Buy Momentum V4",side:"BUY",version:"V4",
-    thesis:"Strong uptrend continuation, TWO independent layers both required. 8 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, mom_2d 0-4, sector week >0, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler. V4 (15-Aug-2026) made mom_2d[0,4] and sector_week>0 HARD after V3's own 30-trade tripwire fired at 33 trades / 58% WR.",
-    gateType:"8 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
+    thesis:"Strong uptrend continuation, TWO independent layers both required. 7 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, mom_2d 0-4, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler. V4 (15-Aug-2026) made mom_2d[0,4] HARD after V3's own 30-trade tripwire fired at 33 trades / 58% WR.",
+    gateType:"7 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
     sigs_eod:"~292/yr (1524 total 5yr)",wr_eod:60.3,ev_eod:0.62,

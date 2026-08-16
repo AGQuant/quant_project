@@ -16,8 +16,8 @@ synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
     gvm_score>=6.5 strict (cc#754). All cheap (cc#606 dropped the
     heavy wRSI>=70 FINAL stage). Fixed +/-3.0% exits.
   buy_momentum   BUY_MOMENTUM_V4   (_write_buy_momentum_v3_qualified, cc#1038): TWO independent
-    layers -- 8 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
-    mom_2d[0,4] (V4), sector_week>0 (V4), hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85],
+    layers -- 7 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
+    mom_2d[0,4] (the ONE V4 addition), hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85],
     PLUS SCORE>=7-of-10 fixed-threshold V2 bands
     (gvm/dma_50/dma_200/rsi_month/week_return/month_return/mom_2d/sector_week/sector_month + wRSI
     reused at [60,85]). Fixed +/-3.0% exits.
@@ -2329,9 +2329,6 @@ def bm_stock_passcount():
                 d1d = s.get("day_1d")
                 actuals["day_1d"] = d1d
                 (passed if (d1d is not None and float(d1d) > 0.0) else failed).append("day_1d")
-                sw = s.get("sector_week")                      # cc#1038 V4 g10, strict > 0
-                actuals["sector_week"] = sw
-                (passed if (sw is not None and float(sw) > 0.0) else failed).append("sector_week")
                 hp = v21_metrics.get(sym, {}).get("hourly_pct")
                 actuals["hourly_pct"] = hp
                 (passed if (hp is not None and float(hp) > 0.0) else failed).append("hourly_pct")
@@ -2399,12 +2396,12 @@ def bm_stock_detail(symbol: str):
         p_w52   = _passes_filter(w52, 75.0, None)
         p_gvm   = _passes_filter(gvm, 7.0, None)
         p_d1d   = d1d is not None and d1d > 0.0
-        p_mom2d = _passes_filter(mom2d, 0.0, 4.0)          # cc#1038 V4 g9
-        p_swk   = swk is not None and swk > 0.0            # cc#1038 V4 g10, strict
+        p_mom2d = _passes_filter(mom2d, 0.0, 4.0)          # cc#1045 V4 FINAL: the ONE added gate
         p_hp    = hp is not None and hp > 0.0
-        # cc#1038: the two new gates join the cheap set, so a stock failing either never reaches the
-        # heavy wRSI row — same as the handler, which is the whole point of this endpoint.
-        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_mom2d, p_swk, p_hp])
+        # cc#1045: mom_2d joins the cheap set, so a stock failing it never reaches the heavy wRSI
+        # row — same as the handler, which is the whole point of this endpoint. sector_week is NOT
+        # here: 22386 dropped its hard gate, and it scores below like any other band.
+        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_mom2d, p_hp])
         p_twr   = cleared and (twr is not None and 70.0 <= twr <= 85.0)
 
         rows = [
@@ -2414,7 +2411,6 @@ def bm_stock_detail(symbol: str):
             {"filter": "gvm_score",       "required": ">= 7",     "actual": _fmt(gvm, 1),          "pass": p_gvm},
             {"filter": "day_1d",          "required": "> 0",      "actual": _fmt(d1d, 2) + "%",    "pass": p_d1d},
             {"filter": "mom_2d",          "required": "0 to 4",   "actual": _fmt(mom2d, 2) + "%",  "pass": p_mom2d},
-            {"filter": "sector_week",     "required": "> 0",      "actual": _fmt(swk, 2) + "%",    "pass": p_swk},
             {"filter": "hourly_pct",      "required": "> 0",      "actual": _fmt(hp, 2) + "%",     "pass": p_hp},
             {"filter": "true_weekly_rsi", "required": "70 to 85", "actual": _fmt(twr, 1),          "pass": p_twr},
         ]

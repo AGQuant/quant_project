@@ -25,11 +25,12 @@ cc#353). Each handler runs its cheap gates first (independent per-filter funnel 
 the universe, not cumulative survivors), then the heavy true_weekly_rsi stage only on the
 strict-intersection survivors.
 
-  BUY_MOMENTUM V4 (_write_buy_momentum_v3_qualified, cc#1038 spec 22375 on V3's 5650): HARD
-    gates (dma_50 5-12, dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0, mom_2d 0-4 (V4),
-    sector_week>0 (V4), hourly_pct>0 AND NOT NULL, FINAL heavy true_weekly_rsi 70-85) AND
-    SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent n/n-1). The two V4 gates were
-    score-band-only in V3 and KEEP their score band. Exits fixed +/-3.0%, standard slot pool,
+  BUY_MOMENTUM V4 FINAL (_write_buy_momentum_v3_qualified, spec 22386 on V3's 5650): HARD
+    gates (dma_50 5-12, dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0, mom_2d 0-4 (the ONE
+    V4 addition), hourly_pct>0 AND NOT NULL, FINAL heavy true_weekly_rsi 70-85) AND
+    SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent n/n-1). mom_2d was score-band-only
+    in V3 and KEEPS its score band; the sector_week hard gate drafted in 22375 was DROPPED by the
+    founder, so sector_week is a score band only. Exits fixed +/-3.0%, standard slot pool,
     entry window 09:15-15:20 (the 14:00 cutoff was proposed and founder-REJECTED).
   BUY_REVERSAL V6.1 (_write_buy_reversal_v6_qualified, cc#606 -> cc#754, supersedes V5): 9
     CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d [-0.5, 2.5]
@@ -1997,24 +1998,24 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
 
 def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date: date,
                                      gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#502 BUY_MOMENTUM_V3 -> cc#1038 BUY_MOMENTUM_V4 (spec 22375 on 5650) — leaves the generic
+    """cc#502 BUY_MOMENTUM_V3 -> BUY_MOMENTUM_V4 FINAL (spec 22386 on 5650) — leaves the generic
     score-gate loop entirely; dedicated handler. Two independent layers, both must pass:
       HARD gates (all strict-AND): dma_50 in [5,12], dma_20 > 0, week_index_52 >= 75,
-        gvm_score >= 7, day_1d > 0, mom_2d in [0,4] (cc#1038, NEW), sector_week > 0 (cc#1038,
-        NEW), hourly_pct > 0 AND NOT NULL (existing 12-bar _load_hourly_fut -- NULL blocks, so no
-        entries before ~10:15; the v3 partial-window loader is NOT used here), FINAL heavy stage:
-        true_weekly_rsi in [70, 85].
+        gvm_score >= 7, day_1d > 0, mom_2d in [0,4] (V4, the ONE added gate), hourly_pct > 0 AND
+        NOT NULL (existing 12-bar _load_hourly_fut -- NULL blocks, so no entries before ~10:15; the
+        v3 partial-window loader is NOT used here), FINAL heavy stage: true_weekly_rsi in [70, 85].
       SCORE >= 7 of 10 V2 bands (FIXED threshold, NO mood-dependent n/n-1): gvm 7-10, dma50
         8-25, dma200 8-40, rsi_month 70-100, wRSI 60-85 (the SAME true_weekly_rsi value from the
         hard-gate heavy stage), week_return 0.5-12, month_return 2-30, mom_2d 0-6, sector_week
         0-6, sector_month 0-6.
-    cc#1038: the mom_2d and sector_week SCORE bands above are deliberately LEFT AS THEY WERE. They
+    cc#1045: the mom_2d and sector_week SCORE bands above are deliberately LEFT AS THEY WERE. They
     still contribute their point exactly as V3's overridden dma_50/wRSI bands do — the hard gate is
     a layer on top, never a replacement, so the score arithmetic is unchanged and a V3 score is
-    still comparable to a V4 score.
+    still comparable to a V4 score. sector_week is now a SCORE BAND ONLY again: 22386 dropped its
+    hard gate, so it influences the score and never blocks an entry on its own.
     NO pivot-room gate (not in evidence; exits fixed). Exits FIXED +/-3.0% via _auto_paper_entry's
     buy_momentum branch; standard BUY slot pool + all standard guards. Entry window 09:15-15:20
-    UNCHANGED — the proposed 14:00 cutoff was explicitly REJECTED by the founder (22375)."""
+    UNCHANGED — the proposed 14:00 cutoff was explicitly REJECTED by the founder (22386)."""
     basket, side = "buy_momentum", "BUY"
 
     def _hourly_ok(s):   # NULL-blocks (no entries before ~10:15); strict > 0
@@ -2026,16 +2027,15 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
     def _dma20_gt0(s):    # dma_20 > 0 (STRICT)
         v = s.get("dma_20")
         return v is not None and float(v) > 0.0
-    # cc#1038 V4 g9/g10. Both FAIL CLOSED on NULL, and that is load-bearing, not defensive tidiness:
-    # mom_2d is computed live off the 2-day base (_snapshot pins it to the clean 5-min bar) and is
-    # None whenever that base is missing, and sector_week is None for any symbol with no segment
-    # mapped. Letting NULL through would reopen exactly the hole the gate is here to close.
+    # cc#1045: V4 FINAL (spec 22386) carries ONE added hard gate, mom_2d. The sector_week gate from
+    # the earlier 22375 draft was DROPPED by the founder after a standalone simulation showed the mom
+    # gate alone clears the acceptance bar; sector_week keeps its SCORE band and nothing else.
+    # FAIL CLOSED on NULL is load-bearing, not defensive tidiness: mom_2d is computed live off the
+    # 2-day base (_snapshot pins it to the clean 5-min bar) and is None whenever that base is
+    # missing. Letting NULL through would reopen exactly the hole the gate is here to close.
     def _mom2d_band(s):   # mom_2d in [0, 4] (V4 hard gate; was score-band only)
         v = s.get("mom_2d")
         return v is not None and 0.0 <= float(v) <= 4.0
-    def _secw_gt0(s):     # sector_week > 0 STRICT (V4 hard gate; was score-band only)
-        v = s.get("sector_week")
-        return v is not None and float(v) > 0.0
 
     base = list(all_metrics)
     funnel = {"_universe": len(base)}
@@ -2044,8 +2044,7 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
     funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), 75.0, None))
     funnel["gvm_score"]     = sum(1 for s in base if _passes(s.get("gvm_score"), 7.0, None))
     funnel["day_1d"]        = sum(1 for s in base if _day1d_gt0(s))
-    funnel["mom_2d"]        = sum(1 for s in base if _mom2d_band(s))      # cc#1038 V4 g9
-    funnel["sector_week"]   = sum(1 for s in base if _secw_gt0(s))        # cc#1038 V4 g10
+    funnel["mom_2d"]        = sum(1 for s in base if _mom2d_band(s))      # cc#1045 V4 FINAL: the ONE added gate
     funnel["hourly_pct"]    = sum(1 for s in base if _hourly_ok(s))
     surv = [s for s in base
             if _passes(s.get("dma_50"), 5.0, 12.0)
@@ -2054,15 +2053,14 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
             and _passes(s.get("gvm_score"), 7.0, None)
             and _day1d_gt0(s)
             and _mom2d_band(s)
-            and _secw_gt0(s)
             and _hourly_ok(s)]
-    # KEY NAME IS LEGACY, VALUE IS CURRENT. `_stage6_survivors` now holds the intersection of EIGHT
+    # KEY NAME IS LEGACY, VALUE IS CURRENT. `_stage6_survivors` now holds the intersection of SEVEN
     # cheap gates, not six. The name is kept on purpose: v8_endpoints reads this literal key for the
     # heavy stage's denominator, and sell_reversal already carries the same quirk (`_stage9_survivors`
     # counting ten gates, cc#514). Renaming it would silently null the true_weekly_rsi denominator on
     # every stored row written before the deploy. The displayed wording is registry-derived instead.
     funnel["_stage6_survivors"] = len(surv)   # denominator for the heavy true_weekly_rsi row
-    log.info(f"buy_momentum_v4: {len(surv)} after 8-condition cheap hard-gate pre-filter [cc#1038]")
+    log.info(f"buy_momentum_v4: {len(surv)} after 7-condition cheap hard-gate pre-filter [cc#1045]")
 
     hard_qualified = []
     for s in surv:
@@ -2224,9 +2222,11 @@ BASKET_FILTERS = {
         # cc#854: the true weekly RSI row is REMOVED — 9 filters become 8. Nothing else in this
         # list changes, and the sell_reversal block above keeps ITS twr<=45 row untouched.
     ],
-    # BUY_MOMENTUM_V4 (cc#502 -> cc#1038, spec 22375) — 8 cheap HARD gates + heavy
-    # true_weekly_rsi[70,85] FINAL stage. V4 added mom_2d [0,4] and sector_week > 0 as HARD gates;
-    # both were score-band-only in V3 and both keep their score band as well.
+    # BUY_MOMENTUM_V4 FINAL (cc#502 -> cc#1045, spec 22386) — 7 cheap HARD gates + heavy
+    # true_weekly_rsi[70,85] FINAL stage. V4 adds mom_2d [0,4] as its ONE hard gate; it was
+    # score-band-only in V3 and keeps its score band as well. The sector_week hard gate drafted in
+    # 22375 was DROPPED by the founder before any trading day ran under it — sector_week stays a
+    # SCORE band (0,6) and nothing more.
     # (A separate SCORE>=7-of-10 V2-band layer also applies; it is a second layer, not a funnel gate.)
     # Order mirrors the handler's evaluation order, which is what the funnel renders.
     "buy_momentum": [
@@ -2236,7 +2236,6 @@ BASKET_FILTERS = {
         {"key": "gvm_score",      "label": "gvm score",    "cond_min": ">= 7",  "cond_max": "",      "min": 7.0,  "max": None, "type": "band"},
         {"key": "day_1d",         "label": "day change",   "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
         {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= 0",  "cond_max": "<= 4",  "min": 0.0,  "max": 4.0,  "type": "band"},
-        {"key": "sector_week",    "label": "sector week",  "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
         {"key": "hourly_pct",     "label": "hourly % (from ~10:15)", "cond_min": "> 0", "cond_max": "NOT NULL", "min": 0.0, "max": None, "type": "custom"},
         {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": ">= 70","cond_max": "<= 85","min": 70.0, "max": 85.0, "type": "band", "heavy": True, "denom_key": "_stage6_survivors"},
     ],
@@ -2247,7 +2246,7 @@ BASKET_SPEC = {
     "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
     "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
-    "buy_momentum":  {"version": "V4",   "cc": "cc#1038", "label": "Buy Momentum V4"},
+    "buy_momentum":  {"version": "V4",   "cc": "cc#1045", "label": "Buy Momentum V4"},
 }
 
 # FILTER_CONFIG-shape derivation: the v8_metrics-column ("band") subset per basket, {key: [min,max]}.
