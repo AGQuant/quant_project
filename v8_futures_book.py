@@ -142,7 +142,7 @@ def v8_futures_book(request: Request):
                 ) fp ON true
                 WHERE p.status = 'OPEN'
                 ORDER BY p.entry_ts DESC
-            """, (FUT_SOURCE, FUT_SOURCE, FUT_SOURCE, FUT_SOURCE))
+            """, (FUT_SOURCE, FUT_SOURCE, FUT_SOURCE))
             pos = _rows(cur)
             # cc#1019: the realised-book cutover, from the registry. The dashboard reads it from
             # here so the Futures view's Realised / Win-Loss / Trade Log filter on one server-held
