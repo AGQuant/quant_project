@@ -225,7 +225,7 @@
 
   function enhance() {
     injectCss();
-    var all = document.body ? document.body.querySelectorAll('div,span,p,b,strong,h1,h2,h3') : [];
+    var all = document.body ? document.body.querySelectorAll('div,span,p,b,strong,h1,h2,h3,button,a') : [];
     var moodEl = null, whyEl = null;
     for (var i = 0; i < all.length; i++) {
       var el = all[i], t = (el.textContent || '').trim();
@@ -273,9 +273,17 @@
        phase so the old handler never fires. Old company view code stays untouched in the repo. */
     for (var q = 0; q < all.length; q++) {
       var elv = all[q], tv = (elv.textContent || '').trim();
-      if (!elv.__r5cv && elv.children.length === 0 && /^company view$/i.test(tv)) {
+      /* tolerate the dropdown caret and up to 2 child nodes (icon/caret spans) */
+      if (!elv.__r5cv && elv.children.length <= 2 && /^company view[\s\u25be\u25bc\u2bc6]*$/i.test(tv)) {
         elv.__r5cv = 1;
-        elv.textContent = 'Detailed view';
+        /* rename only the text node, keep any icon children */
+        for (var w = 0; w < elv.childNodes.length; w++) {
+          var nd = elv.childNodes[w];
+          if (nd.nodeType === 3 && /company view/i.test(nd.nodeValue)) {
+            nd.nodeValue = nd.nodeValue.replace(/company view/i, 'Detailed view'); break;
+          }
+        }
+        if (/company view/i.test(elv.textContent)) elv.textContent = 'Detailed view';
         var tgt = elv.closest('button,a,[onclick],[role="tab"]') || elv;
         tgt.addEventListener('click', function (ev) {
           ev.preventDefault(); ev.stopPropagation();
