@@ -268,6 +268,22 @@
       }
     } catch (e) {}
 
+    /* cc#1065 wiring (founder 21:0x): the GVM tab's "Company view" pill becomes "Detailed view"
+       and opens the fight card at /m/gvm2. Content-matched like everything else here; capture
+       phase so the old handler never fires. Old company view code stays untouched in the repo. */
+    for (var q = 0; q < all.length; q++) {
+      var elv = all[q], tv = (elv.textContent || '').trim();
+      if (!elv.__r5cv && elv.children.length === 0 && /^company view$/i.test(tv)) {
+        elv.__r5cv = 1;
+        elv.textContent = 'Detailed view';
+        var tgt = elv.closest('button,a,[onclick],[role="tab"]') || elv;
+        tgt.addEventListener('click', function (ev) {
+          ev.preventDefault(); ev.stopPropagation();
+          location.href = '/m/gvm2';
+        }, true);
+      }
+    }
+
     /* bottom-nav active tab: fixed-to-bottom container, the child marked on/active */
     var nav = document.querySelector('.bnav, .bottomnav, [class*="tabbar"], nav[class*="bottom"]');
     if (nav) {
