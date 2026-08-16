@@ -5325,14 +5325,29 @@ function mountIdxTapes(){
   }); }catch(e){ console.warn('[idxtape] mount failed',e&&e.message); }
 }
 function render(){
-  document.getElementById('idx-app').innerHTML =
-    rTopBar() + rMood() +
+  // cc#1060: build the html FIRST, assign SECOND. Previously the assignment target was
+  // evaluated and the string built in one statement, so a throw in any r*() left #idx-app
+  // holding its original "Loading Index Intelligence…" content — the pane looked hung rather
+  // than broken, and nothing on it ever appeared. Now a failure writes a visible, honest
+  // panel instead, and the console keeps the real stack.
+  const host=document.getElementById('idx-app'); if(!host) return;
+  let html;
+  try{
+    html = rTopBar() + rMood() +
     `<div class="row r-2-16">${rIdxSpark()}${rVix()}</div>` +   // cc#681: V10 Active Signals -> index day-change sparklines
     `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
     `<div class="row" style="grid-template-columns:1fr 1.4fr">${rADR()}${rPCR()}</div>` +   // cc#549: compact max-pain card removed (strike-wise OI card covers it); ADR+PCR share the row wider
     `<div class="row" style="grid-template-columns:1fr 1fr">${rPivots()}${rStrikeOI()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
+  }catch(e){
+    console.error('[idx render]', e);
+    html = `<div class="card"><div class="card-hd"><div class="t">Index Intelligence unavailable</div></div>`
+         + `<div style="font-size:12px;color:var(--mut);line-height:1.6">This pane failed to render. `
+         + `A stale cached script is the usual cause — reload the page (Ctrl/Cmd-Shift-R once).<br>`
+         + `<span style="font-size:11px;color:var(--dim)">${esc(String(e&&e.message||e))}</span></div></div>`;
+  }
+  host.innerHTML = html;
   mountIdxTapes();   // cc#1058
 }
 
@@ -5354,8 +5369,13 @@ window.idxToggleClosed=function(){ CLOSED_ALL=!CLOSED_ALL; render(); };
 /* lazy boot on first Index-Intel tab activation */
 var _idxBooted=false;
 window.idxBoot=function(){
-  if(_idxBooted) return; _idxBooted=true;
-  loadLive().then(render).catch(e=>console.warn('[idx boot]',e));
+  // cc#1060: the latch used to be set BEFORE the await, so when render() threw, the catch
+  // logged and the pane was stuck on "Loading…" for the rest of the session — re-opening the
+  // tab could not retry because _idxBooted was already true. Latch only on success; a failed
+  // boot leaves the flag down so the next tab activation tries again.
+  if(_idxBooted) return;
+  loadLive().then(render).then(function(){ _idxBooted=true; })
+    .catch(function(e){ console.warn('[idx boot]',e); });
   setInterval(function(){ var p=document.getElementById('pane-index'); if(!p||p.style.display==='none')return;
     var el=p.querySelector('.topbar'); if(el) el.outerHTML=rTopBar(); },1000);
   setInterval(function(){ var p=document.getElementById('pane-index'); if(!p||p.style.display==='none')return;
