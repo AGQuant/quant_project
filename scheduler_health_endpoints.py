@@ -179,3 +179,33 @@ def health_memory(top: int = 30, min_mb: float = 1.0):
         "module_globals_over_min_mb": heavy[:top],
         "note": "sizes are estimates; DataFrames deep-measured, containers sampled",
     }
+
+
+def _boot_probe_once():
+    """Run the census ~120s after boot and persist to session_log so the
+    idle baseline is queryable via run_sql (web fetch to the app is not
+    always possible from research tooling). One row per process boot."""
+    import time as _time
+    import json as _json
+    _time.sleep(120)
+    try:
+        payload = health_memory(top=30, min_mb=1.0)
+        with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO session_log (session_date, session_ts, category, title, details) "
+                "VALUES (CURRENT_DATE, NOW(), 'memory_probe', %s, %s::jsonb)",
+                (
+                    "MEMORY_PROBE boot baseline rss_mb=%s" % payload.get("rss_mb"),
+                    _json.dumps(payload, default=str),
+                ),
+            )
+            conn.commit()
+    except Exception:
+        pass  # probe must never affect the app
+
+
+try:
+    _t = _threading.Thread(target=_boot_probe_once, daemon=True, name="memprobe")
+    _t.start()
+except Exception:
+    pass
