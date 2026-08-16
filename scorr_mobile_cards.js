@@ -203,8 +203,8 @@
     + '.r5-l::before{content:"L ";font-weight:800;color:#FF8FA5}'
     + '.r5-set,.r5-set *{text-decoration:none!important;border-bottom:0!important}'
     + '.r5-rail{position:relative;border-radius:0!important}'
-    + '.r5-rail::before{content:"";position:absolute;left:2px;top:10px;bottom:10px;width:6px;'
-    +   'background:var(--r5rail,#FF4D6D);transform:skewX(-8deg);border-radius:3px;z-index:2}'
+    + '.r5-rail::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:5px;'
+    +   'background:var(--r5rail,#FF4D6D);border-radius:4px;z-index:2}'
     + '.r5-idxbox{background:#161F33;border:1px solid #26334F;margin:0 14px 12px;padding:12px 16px;'
     +   'clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%);'
     +   'font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:1px}'
@@ -279,20 +279,19 @@
        box above THE BOOK. Founder-ordered move — the only sanctioned exception to the additive
        parity guard, documented here. */
     if (!document.getElementById('r5-idxbox')) {
-      var idxRow = null;
+      var idxRow = null, idxLen = 1e9;
       for (var y = 0; y < all.length; y++) {
-        var ty = (all[y].textContent || '');
+        var ty = (all[y].textContent || '').replace(/\s+/g, ' ').trim();
         if (/NIFTY\s+(LONG|SHORT|FLAT)/i.test(ty) && /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(ty)
-            && ty.replace(/\s+/g, ' ').trim().length < 60) { idxRow = all[y]; }
+            && ty.length < 120 && ty.length < idxLen) { idxRow = all[y]; idxLen = ty.length; }
       }
       if (idxRow) {
         var nM = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
         var bM = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
-        var bookHd = null;
+        var bookHd = null, bLen = 1e9;
         for (var y2 = 0; y2 < all.length; y2++) {
-          if (/^THE BOOK/i.test((all[y2].textContent || '').trim()) && all[y2].children.length <= 2) {
-            bookHd = all[y2]; break;
-          }
+          var tb = (all[y2].textContent || '').replace(/\s+/g, ' ').trim();
+          if (/^THE BOOK/i.test(tb) && tb.length < 40 && tb.length < bLen) { bookHd = all[y2]; bLen = tb.length; }
         }
         if (nM && bM && bookHd) {
           idxRow.style.display = 'none';
