@@ -14,7 +14,7 @@ Sandbox (RULING_A, DB-enforced — not a code assert):
 
 Materialization (RULING_A_ADDENDUM_D8) — each run pre-loads its inputs into harness so the
 run is byte-reproducible forever, even after the rolling intraday window churns:
-  • target-day 5-min bars           -> harness.intraday_prices
+  • target day + 15d of 5-min bars  -> harness.intraday_prices (cc#1047: bounded, was all-time)
   • prior-day EOD v8_metrics baseline-> harness.v8_metrics  (score_date < target)
   • target-day pivots               -> harness.v8_paper_pivots
   From golden_*_YYYYMMDD when archived (03-Jul), else from public (dates still in-window).
@@ -37,6 +37,12 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # cc#220 single-run advisory-lock key (session-scoped: auto-released when the walk's
 # connection closes/dies, so a zombie can never permanently wedge the harness).
 _LOCK_KEY = 7220218
+
+# cc#1047: how many days of intraday history each run materialises BEFORE its target day.
+# Sized off the driven writer's deepest intraday lookback (11 days, the volume baseline at
+# v8_signal_writer.py:560) plus margin. Named, not inline, because shrinking it silently changes
+# what the simulation can see — see the note at the copy site.
+BARS_LOOKBACK_DAYS = 15
 
 # tables the harness truncates to a clean slate before each run (write shadows)
 _SCRATCH = ["v8_qualified", "v8_paper_positions", "v8_paper_trades", "v8_paper_missed",
@@ -95,6 +101,45 @@ def _ensure_bt7_runs_cols(conn):
         cur.execute("ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok'")
         cur.execute("ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS error_detail TEXT")
     conn.commit()
+
+
+ZOMBIE_AFTER_HOURS = 2
+
+
+def _reap_zombies(conn):
+    """cc#1047 blocker B: mark abandoned runs as errored instead of leaving them 'running'.
+
+    The advisory lock already prevents a dead run from WEDGING the harness — it is
+    session-scoped and dies with the connection. What it does not do is correct the row, so a
+    killed walk sits at status='running' forever and every later reader has to guess whether it
+    is live or dead. cc1038_v4_17jul has read running/ticks=10 since 15-Aug for exactly that
+    reason, and cc1038_v4_0814 only says 'error' because its statement timeout happened to raise
+    inside the walk.
+
+    A run whose row has not been touched in ZOMBIE_AFTER_HOURS is dead by construction: the walk
+    stamps ran_at on EVERY tick (_progress above), so a live run cannot go two hours silent.
+
+    NOTE the reason detail is a bound PARAMETER and not written into the SQL text: psycopg scans
+    for %s without parsing SQL, so a %s sitting inside a quoted literal gets substituted too. That
+    happens to produce the right string here, but only by luck, and it is the kind of thing that
+    breaks the day someone edits the message. Bind it.
+    """
+    reason = (f"zombie: no tick progress for over {ZOMBIE_AFTER_HOURS}h, reaped at "
+              f"{datetime.now(IST):%Y-%m-%d %H:%M} IST")
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE harness.bt7_runs
+               SET status = 'error',
+                   error_detail = COALESCE(NULLIF(error_detail, ''), '') || %s
+             WHERE status = 'running'
+               AND ran_at < NOW() - (%s * INTERVAL '1 hour')
+            RETURNING run_label
+        """, (reason, ZOMBIE_AFTER_HOURS))
+        reaped = [r[0] for r in cur.fetchall()]
+    conn.commit()
+    if reaped:
+        log.warning("bt7 reaped %d zombie run(s): %s", len(reaped), ", ".join(reaped))
+    return reaped
 
 
 def _write_error(conn, label, target_date, ticks, detail):
@@ -162,9 +207,30 @@ def _materialize(conn, target_date):
             n = _copy_intersect(cur, "harness", "intraday_prices", "public." + gb)
             src["bars"] = f"{gb} ({n})"
         else:
+            # ── cc#1047 blocker A: BOUNDED, SARGABLE. ─────────────────────────────────────────
+            # This was `WHERE ts::date <= DATE '<target>'`, which despite the docstring above
+            # copied EVERY intraday_prices row from the beginning of time up to the target. On
+            # 14-Aug that is 4,822,186 rows against the 90s statement_timeout _conn() sets, which
+            # is exactly why the July runs passed on a smaller table and cc1038_v4_0814 died at
+            # tick 0 — materialization happens before tick 1. `ts::date` also cannot use a btree
+            # on ts, so it was a full scan feeding a 4.8M-row INSERT..SELECT. No index would have
+            # fixed that; the copy itself was unbounded.
+            #
+            # WHY 15 DAYS IS ENOUGH, and why a smaller number would silently change results: the
+            # deepest INTRADAY lookback the driven writer takes is the volume baseline at
+            # v8_signal_writer.py:560 (`ts::date >= today - INTERVAL '11 days'`); _load_hourly_fut
+            # is 12 bars of the SAME day. mom_2d's 2-day base is NOT intraday — close_2d_ago comes
+            # from the daily history loader off raw_prices, which this copy does not touch. 15 = 11
+            # needed + 4 days of margin for holiday runs. Measured on a 14-Aug target: 4.82M rows
+            # -> roughly 300k, and the predicate becomes index-usable.
+            #
+            # Founder-gated (cc#1047): approved only against a ZERO-DIFF bt7_diff versus
+            # cc502_verify_17jul_r2 before any batch launches. A non-zero diff stops the card.
+            lo = target_date - timedelta(days=BARS_LOOKBACK_DAYS)
+            hi = target_date + timedelta(days=1)
             n = _copy_intersect(cur, "harness", "intraday_prices", "public.intraday_prices",
-                                where=f"WHERE ts::date <= DATE '{target_date}'")
-            src["bars"] = f"public.intraday_prices<= {target_date} ({n})"
+                                where=f"WHERE ts >= DATE '{lo}' AND ts < DATE '{hi}'")
+            src["bars"] = f"public.intraday_prices[{lo}..{target_date}] ({n})"
         # (2) prior-day EOD v8_metrics baseline (score_date < target)
         gm = f"golden_v8_metrics_{ymd}"
         if _regclass(cur, "public." + gm):
@@ -255,6 +321,7 @@ def run_bt7(target_date, label, mode="parity"):
                 "msg": "another bt7 run is already walking — try again after it finishes"}
     try:
         _ensure_bt7_runs_cols(conn)
+        _reap_zombies(conn)
         _mark_running(conn, label, target_date)
     except Exception as e:
         try:
