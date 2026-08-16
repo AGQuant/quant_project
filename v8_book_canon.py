@@ -235,6 +235,48 @@ def book_canon(conn, era: str = "fresh") -> dict:
     return payload
 
 
+def basket_records(conn, era: str = "fresh") -> dict:
+    """cc#1043 — the per-BASKET win record, {basket: {wins, losses, decided, trades, rate}}.
+
+    Lives here, beside book_canon, for the reason this file exists at all: rule 13 says there is
+    ONE definition of a win and no surface recomputes it. The basket header pill was about to
+    become the fifth surface with its own private SQL, and the cc#1043 spec asked for wins=pnl>0 —
+    which is the exact definition cc#970 removed from the day strip because it disagreed with the
+    summary printed above it. Measured on today's ledger the two answers differ by up to 14 points
+    on one basket (buy_reversal: 80.0% by pnl, 93.8% by verdict), so this is not a rounding
+    quibble, it is two different claims on the same screen.
+
+    Same era rule and same registry exclusion as book_canon, so a basket pill and the Master
+    Dashboard can never tell the founder different stories. `rate` is None when nothing is decided;
+    surfaces print a dash, never 0%.
+    """
+    with conn.cursor() as cur:
+        retired, missing = retired_baskets(cur)
+        cutover = None if era == "all" else _cutover(cur)
+        cur.execute("""
+            SELECT basket,
+                   COUNT(*)                                     AS trades,
+                   COUNT(*) FILTER (WHERE result = 'TARGET')    AS wins,
+                   COUNT(*) FILTER (WHERE result = 'SL')        AS losses,
+                   MIN(entry_ts)::date                          AS first_entry
+            FROM v8_paper_trades
+            WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
+              AND NOT (basket = ANY(%(retired)s))
+            GROUP BY basket
+        """, {"cut": cutover, "retired": retired})
+        out = {}
+        for r in _rows(cur):
+            w, l = r["wins"] or 0, r["losses"] or 0
+            dec = w + l
+            out[r["basket"]] = {
+                "wins": w, "losses": l, "decided": dec, "trades": r["trades"] or 0,
+                "rate": round(100.0 * w / dec, 1) if dec else None,
+                "first_entry": str(r["first_entry"]) if r["first_entry"] else None,
+                "era": era, "registry_missing": missing,
+            }
+    return out
+
+
 @router.get("/api/v8/book_canon")
 def api_book_canon(era: str = "fresh"):
     """The one book endpoint. Every surface reads this; none recompute.

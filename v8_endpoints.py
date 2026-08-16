@@ -114,12 +114,80 @@ FILTER_CONFIG = {
 # retired). Remaining four are the new dedicated-handler specs (V5/V3/V6.1/V4) -- win_pct/
 # signals_per_day for the rebuilt specs are TBD pending live/BT7 evidence, left honest rather than
 # carrying forward the old (now-wrong) V3/V5-D/V3-N5 backtest numbers.
+# cc#1043: the STATIC half of the basket header — side and target, which are spec facts and do not
+# move. win_pct and signals_per_day used to live here as the literal strings "TBD (cc#502 rebuild)"
+# and "TBD", and the header pill rendered them verbatim, so the founder's screen read
+# "WIN TBD (CC#502 REBUILD)". Both are now computed live in _basket_live_meta() below; an internal
+# task number must never reach a user-visible surface.
 BASKET_META = {
-    "buy_reversal":    {"side": "BUY",  "target": "+3.0% fixed",   "win_pct": "TBD (cc#502 rebuild)", "signals_per_day": "TBD"},
-    "buy_momentum":    {"side": "BUY",  "target": "+3.0% fixed",   "win_pct": "TBD (cc#502 rebuild)", "signals_per_day": "TBD"},
-    "sell_reversal":   {"side": "SELL", "target": "S1/S2 dynamic", "win_pct": "TBD (cc#502 rebuild)", "signals_per_day": "TBD"},
-    "sell_momentum":   {"side": "SELL", "target": "-3.0% fixed",   "win_pct": "TBD (cc#502 rebuild)", "signals_per_day": "TBD"},
+    "buy_reversal":    {"side": "BUY",  "target": "+3.0% fixed"},
+    "buy_momentum":    {"side": "BUY",  "target": "+3.0% fixed"},
+    "sell_reversal":   {"side": "SELL", "target": "S1/S2 dynamic"},
+    "sell_momentum":   {"side": "SELL", "target": "-3.0% fixed"},
 }
+
+
+def _basket_live_meta(basket: str) -> dict:
+    """cc#1043: the LIVE half — win_pct, win_n and signals_per_day, read off the real ledger.
+
+    WIN DEFINITION IS RULE 13's, NOT THE ONE THE CARD SPECIFIED, and that is deliberate. cc#1043
+    item 1 asked for wins = pnl>0 / losses = pnl<0. Rule 13 (V8_PNL_CANON_V1, founder-locked,
+    session_log 18337) says a win is result='TARGET' and a loss is result='SL', rate over decided,
+    and that NO surface recomputes a win rate locally. cc#970 had already stripped the pnl>0
+    definition out of the mobile day strip for exactly this reason. The two disagree by up to 14
+    points per basket on today's ledger, so shipping the card's version would put two different
+    win rates for the same basket on the same dashboard. A P2 card does not supersede a
+    founder-locked canon without the written supersession rule 12 requires, so this reads the canon
+    and the difference is reported on the card for the founder to rule on.
+
+    Returns strings the pill can print directly, and a dash — never 0% — when nothing is decided.
+    """
+    out = {"win_pct": "--", "win_n": 0, "signals_per_day": "--",
+           "win_basis": "TARGET vs SL, decided trades, fresh era, retired baskets excluded"}
+    try:
+        from v8_book_canon import basket_records
+        with _conn() as conn:
+            rec = (basket_records(conn) or {}).get(basket)
+            if rec:
+                out["win_n"] = rec["decided"]
+                if rec["rate"] is not None:
+                    out["win_pct"] = f"{rec['rate']}%"
+            # signals/day: qualified signals for this basket over the DISTINCT signal_dates the
+            # basket has actually seen, so a basket that started late is not divided by the whole
+            # book's history. Serves "--" rather than a guess when there are no rows.
+            with conn.cursor() as cur:
+                cur.execute("""SELECT COUNT(*)::float AS n, COUNT(DISTINCT signal_date) AS d
+                               FROM v8_qualified WHERE basket = %s""", (basket,))
+                r = cur.fetchone()
+                if r and r[1]:
+                    out["signals_per_day"] = f"{round(r[0] / r[1], 1)}/day"
+    except Exception as e:
+        log.warning("cc#1043 basket live meta %s: %s", basket, e)
+    return out
+
+
+# cc#1043: BASKET_META is spread into 16 payloads, several of them on the funnel path, so a naive
+# live lookup would put two queries on every one of them. These numbers only move when a trade
+# closes, so a 60s TTL is invisible to the founder and keeps the added load at roughly one pair of
+# cheap COUNT aggregates per basket per minute. A failed read falls back to dashes, never to a
+# stale figure from another basket.
+_BM_LIVE_TTL = 60.0
+_bm_live_cache: dict = {}
+
+
+def _basket_meta(basket: str) -> dict:
+    """Static spec facts + the live ledger numbers, merged. Every payload that used to spread
+    BASKET_META.get(basket, {}) spreads this instead, so no surface can miss the scrub."""
+    static = BASKET_META.get(basket, {})
+    if not static:
+        return {}
+    hit = _bm_live_cache.get(basket)
+    if hit and (time.time() - hit[0]) < _BM_LIVE_TTL:
+        live = hit[1]
+    else:
+        live = _basket_live_meta(basket)
+        _bm_live_cache[basket] = (time.time(), live)
+    return {**static, **live}
 
 # ── cc#158 V2.1 candidate filters — hourly + w52 + fall_from_day_high ────────
 # Refinement layer over the LOCKED baskets (specs id 1263-1268). Applied as a
@@ -703,7 +771,7 @@ def market_mood():
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
                 "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": total_slots,
-                "slot_note": "standard pool only (cc#502) -- no ring-fenced pools",
+                "slot_note": "standard pool only -- no ring-fenced pools",
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
                                "unchanged": unchanged, "adr_date": adr_date,
@@ -1099,9 +1167,9 @@ def filter_config(basket: str):
             "regime": "V6", "nifty_1m_return": round(nifty_1m, 2),
             "live_gates": ["S1-touch (prior-4-day low OR today's live day_low <= S1)"],
             "entry_exit": "entry live CMP, target +3.0% fixed, stop -3.0% fixed (true 1:1)",
-            "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
-            **BASKET_META.get(basket, {})
+            **_basket_meta(basket)
         }
     if basket == "buy_momentum":
         rows = []
@@ -1114,7 +1182,7 @@ def filter_config(basket: str):
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "score_threshold": "score >= 7 of 10 (fixed, no mood-dependent n/n-1)",
-            "target": "+3.0% fixed", "target_rule": "cc#502 V3: fixed +3.0% / -3.0% (1:1), frozen at entry",
+            "target": "+3.0% fixed", "target_rule": "V3: fixed +3.0% / -3.0% (1:1), frozen at entry",
             "stop": "-3.0% fixed",
             # cc#1038: hard_gates was a hand-written list that still read "6 HARD gates" and omitted
             # mom_2d/sector_week after V4 shipped — it survived the registry sweep because it is
@@ -1127,9 +1195,9 @@ def filter_config(basket: str):
             "gate_note": (f"{BASKET_SPEC.get(basket,{}).get('label',basket)}: TWO independent layers "
                           f"-- {_BM_CHEAP_N} HARD gates + FINAL heavy wRSI, PLUS SCORE>=7-of-10 "
                           f"(the 9 bands above + wRSI[60,85] reused as the 10th)."),
-            "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
-            **BASKET_META.get(basket, {})
+            **_basket_meta(basket)
         }
     if basket == "sell_reversal":
         # cc#502 SELL_REVERSAL_V6.1. 8 v8_metrics gates + 3 live/pivot gates.
@@ -1147,10 +1215,10 @@ def filter_config(basket: str):
             "target": "S1/S2 dynamic",
             "target_formula": "S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2); no signal if <2%",
             "stop": "1:1 mirror = entry + (entry - target)",
-            "gate_note": "cc#502 V6.1: strict AND of 10, RAW -- no market gate, no auto kill-switch.",
-            "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            "gate_note": "V6.1: strict AND of 10, RAW -- no market gate, no auto kill-switch.",
+            "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
-            **BASKET_META.get(basket, {})
+            **_basket_meta(basket)
         }
     if basket == "sell_momentum":
         # cc#502 SELL_MOMENTUM_V4 (renamed from V3-N5). 6 v8_metrics gates + 3 live/pivot gates.
@@ -1167,11 +1235,11 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "-3.0% fixed", "target_formula": "entry * 0.97 (frozen at entry)",
             "stop": "+3.0% fixed = entry * 1.03 (true 1:1)",
-            "gate_note": "cc#502 V4: strict AND of 9, dedicated handler; fixed +/-3% exits (true 1:1). "
+            "gate_note": "V4: strict AND of 9, dedicated handler; fixed +/-3% exits (true 1:1). "
                          "twr tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
-            "backtest": {"note": "TBD (cc#502 rebuild, pending live/BT7 audit)"},
+            "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
-            **BASKET_META.get(basket, {})
+            **_basket_meta(basket)
         }
     rows = []
     for metric, bounds in FILTER_CONFIG[basket].items():
@@ -1179,7 +1247,7 @@ def filter_config(basket: str):
         rows.append({"metric": metric, "min": mn, "max": mx,
                      "min_display": "" if mn is None else mn,
                      "max_display": "" if mx is None else mx})
-    return {"basket": basket, "filters": rows, "count": len(rows), **BASKET_META.get(basket, {})}
+    return {"basket": basket, "filters": rows, "count": len(rows), **_basket_meta(basket)}
 
 
 # ── V10 ATM-option enrichment (task 51) ──────────────────────────────────────
@@ -1421,7 +1489,7 @@ def qualified(basket: str, response: Response, limit: int = 50):
             extra = {"target": "-3.0% fixed", "target_formula": "entry * 0.97",
                      "stop_formula": "+3.0% fixed = entry * 1.03 (true 1:1)"}
         return _enrich_qualified_result({"basket": basket, "count": len(rows), "stocks": rows,
-                "source": source_note, **BASKET_META.get(basket, {}), **extra})
+                "source": source_note, **_basket_meta(basket), **extra})
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
@@ -1653,7 +1721,7 @@ def br_funnel_detail():
             "gate_type": f"independent per-filter counts; final = strict AND of all {_n_filters('buy_reversal')}",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
-            "stages": stages, **BASKET_META.get("buy_reversal", {}),
+            "stages": stages, **_basket_meta("buy_reversal"),
         }
     except Exception as e:
         raise HTTPException(500, f"br_funnel_detail failed: {e}")
@@ -1701,7 +1769,7 @@ def br_stock_passcount():
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": len(reg), "stocks": out,
-                "v21_enabled": False, **BASKET_META.get("buy_reversal", {})}
+                "v21_enabled": False, **_basket_meta("buy_reversal")}
     except Exception as e:
         raise HTTPException(500, f"br_stock_passcount failed: {e}")
 
@@ -1764,7 +1832,7 @@ def br_stock_detail(symbol: str):
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1,
                 "passed": passed, "total": len(rows), "rows": rows,
-                "spec": "BUY_REVERSAL_V6 cc#606"}
+                "spec": "BUY_REVERSAL_V6"}
     except HTTPException:
         raise
     except Exception as e:
@@ -1822,7 +1890,7 @@ def sr_funnel_detail():
             "gate_type": "independent per-filter counts; final = strict AND of all 11",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
-            "stages": stages, **BASKET_META.get("sell_reversal", {}),
+            "stages": stages, **_basket_meta("sell_reversal"),
         }
     except Exception as e:
         raise HTTPException(500, f"sr_funnel_detail failed: {e}")
@@ -1891,7 +1959,7 @@ def sr_stock_passcount():
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_reversal"), "stocks": out,
-                "v21_enabled": False, **BASKET_META.get("sell_reversal", {})}
+                "v21_enabled": False, **_basket_meta("sell_reversal")}
     except Exception as e:
         raise HTTPException(500, f"sr_stock_passcount failed: {e}")
 
@@ -1960,7 +2028,7 @@ def sr_stock_detail(symbol: str):
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1, "s2": s2,
                 "target": tgt, "room_pct": room, "passed": passed, "total": _n_filters("sell_reversal"), "rows": rows,
-                "spec": "SELL_REVERSAL_V6.1 cc#502"}
+                "spec": "SELL_REVERSAL_V6.1"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2011,7 +2079,7 @@ def sm_funnel_detail():
             "gate_type": "independent per-filter counts; final = strict AND of all 9",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
-            "stages": stages, **BASKET_META.get("sell_momentum", {}),
+            "stages": stages, **_basket_meta("sell_momentum"),
         }
     except Exception as e:
         raise HTTPException(500, f"sm_funnel_detail failed: {e}")
@@ -2074,7 +2142,7 @@ def sm_stock_passcount():
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_momentum"), "stocks": out,
-                "v21_enabled": False, **BASKET_META.get("sell_momentum", {})}
+                "v21_enabled": False, **_basket_meta("sell_momentum")}
     except Exception as e:
         raise HTTPException(500, f"sm_stock_passcount failed: {e}")
 
@@ -2136,7 +2204,7 @@ def sm_stock_detail(symbol: str):
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s2": s2,
                 "s2_clearance_pct": round(s2c, 2) if s2c is not None else None,
                 "passed": passed, "total": _n_filters("sell_momentum"), "rows": rows,
-                "spec": "SELL_MOMENTUM_V4 cc#502"}
+                "spec": "SELL_MOMENTUM_V4"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2202,7 +2270,7 @@ def bm_funnel_detail():
             "gate_type": f"HARD gates ({_BM_CHEAP_N}) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
-            "stages": stages, **BASKET_META.get("buy_momentum", {}),
+            "stages": stages, **_basket_meta("buy_momentum"),
         }
     except Exception as e:
         raise HTTPException(500, f"bm_funnel_detail failed: {e}")
@@ -2292,7 +2360,7 @@ def bm_stock_passcount():
                                  x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("buy_momentum"), "stocks": out,
-                "v21_enabled": False, **BASKET_META.get("buy_momentum", {})}
+                "v21_enabled": False, **_basket_meta("buy_momentum")}
     except Exception as e:
         raise HTTPException(500, f"bm_stock_passcount failed: {e}")
 
@@ -2379,7 +2447,7 @@ def bm_stock_detail(symbol: str):
         return {"symbol": sym, "cmp": cmp, "passed": passed, "total": _n_filters("buy_momentum"), "rows": rows,
                 "score": score, "score_total": 10, "score_rows": score_rows,
                 "score_qualified": bool(score is not None and score >= 7),
-                "spec": "BUY_MOMENTUM_V3 cc#502"}
+                "spec": "BUY_MOMENTUM_V4"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2484,7 +2552,7 @@ def funnel_detail(basket: str):
                 "universe": total, "n_filters": n, "filter_count": n, "final": pivot_pass,
                 "score_threshold": score_threshold, "score_qualified": score_qualified,
                 "pivot_pass": pivot_pass, "stages": stages, "v21_enabled": v21_enabled,
-                **BASKET_META.get(basket, {})}
+                **_basket_meta(basket)}
     except Exception as e:
         raise HTTPException(500, f"funnel_detail failed: {e}")
 
@@ -2521,7 +2589,7 @@ def stock_passcount(basket: str):
         return {"basket": basket, "score_date": str(date.today()),
                 "universe": len(out), "filter_count": n_filters, "stocks": out,
                 "v21_enabled": v21_enabled,
-                **BASKET_META.get(basket, {})}
+                **_basket_meta(basket)}
     except Exception as e:
         raise HTTPException(500, f"stock_passcount failed: {e}")
 
@@ -3265,8 +3333,8 @@ def v8_theme_sectors():
         sectors.sort(key=lambda s: (s["avg_day_1d"] is None, -(s["avg_day_1d"] or 0)))
         return {
             "sectors": sectors, "count": len(sectors),
-            "basis": "equal-weight average of member 1D/1W/1M (cc#338 — deliberately NOT mcap-weighted)",
-            "taxonomy": "futures_universe.theme (cc#1009)",
+            "basis": "equal-weight average of member 1D/1W/1M (deliberately NOT mcap-weighted)",
+            "taxonomy": "futures_universe.theme",
             "min_members": THEME_MIN_MEMBERS, "suppressed_count": suppressed,
         }
     except Exception as e:

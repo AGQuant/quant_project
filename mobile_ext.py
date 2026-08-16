@@ -372,7 +372,7 @@ def mobile_v8_lower(request: Request, days: int = 30, top: int = 10):
         # cc#1042 item 1: the basis is quoted from the endpoint that computed it, never restated
         # here. If the two ever disagreed it would mean the app had started grouping again.
         "segment_basis": _ts_basis,
-        "segment_taxonomy": "futures_universe.theme (cc#1009)",
+        "segment_taxonomy": "futures_universe.theme",
         "segment_min_members": _ts_min,
         "segment_suppressed": sum(1 for s in segs if s.get("suppressed")),
         "nifty": nifty,
