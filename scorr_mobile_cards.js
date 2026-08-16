@@ -187,7 +187,7 @@
     + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;color:#EAF0FA!important;'
     +   'font-size:42px!important;line-height:.95!important;letter-spacing:1px;'
     +   'text-transform:uppercase;display:inline-block!important;'
-    +   'transform:skewX(-6deg);transform-origin:left center;animation:none!important}'
+    +   'transform:skewX(-6deg)!important;transform-origin:left center;animation:none!important}'
     + '.r5-mood::after{content:"";display:block;height:6px;width:150px;margin-top:4px;'
     +   'background:linear-gradient(90deg,#EAF0FA,transparent);transform:skewX(-24deg);opacity:.85}'
     + '.r5-meter{height:8px;background:#1C2740;margin:12px 0 2px;overflow:hidden;'
@@ -202,7 +202,14 @@
     + '.r5-w::before{content:"W ";font-weight:800;color:#C8F542}'
     + '.r5-l::before{content:"L ";font-weight:800;color:#FF8FA5}'
     + '.r5-set,.r5-set *{text-decoration:none!important;border-bottom:0!important}'
-    + '.r5-rail{border-left:4px solid var(--r5rail,#FF4D6D)!important;border-radius:0!important}'
+    + '.r5-rail{position:relative;border-radius:0!important}'
+    + '.r5-rail::before{content:"";position:absolute;left:2px;top:10px;bottom:10px;width:6px;'
+    +   'background:var(--r5rail,#FF4D6D);transform:skewX(-8deg);border-radius:3px;z-index:2}'
+    + '.r5-idxbox{background:#161F33;border:1px solid #26334F;margin:0 14px 12px;padding:12px 16px;'
+    +   'clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%);'
+    +   'font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:1px}'
+    + '.r5-idxbox .t{font-size:10px;letter-spacing:2px;color:#8A97B0;margin-bottom:6px;font-weight:700}'
+    + '.r5-idxbox b.long{color:#C8F542}.r5-idxbox b.short{color:#FF4D6D}.r5-idxbox b.flat{color:#FF9F45}'
     + '.r5-tab-on{color:#C8F542!important;position:relative}'
     + '.r5-tab-on::after{content:"";position:absolute;top:-1px;left:25%;right:25%;height:3px;'
     +   'background:#C8F542;clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
@@ -268,6 +275,41 @@
         whyEl.parentNode && whyEl.parentNode.insertBefore(bar, whyEl.nextSibling);
       }
     }
+    /* founder 22:0x: NIFTY/BANKNIFTY position row moves OUT of the scoreboard into its own
+       box above THE BOOK. Founder-ordered move — the only sanctioned exception to the additive
+       parity guard, documented here. */
+    if (!document.getElementById('r5-idxbox')) {
+      var idxRow = null;
+      for (var y = 0; y < all.length; y++) {
+        var ty = (all[y].textContent || '');
+        if (/NIFTY\s+(LONG|SHORT|FLAT)/i.test(ty) && /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(ty)
+            && ty.replace(/\s+/g, ' ').trim().length < 60) { idxRow = all[y]; }
+      }
+      if (idxRow) {
+        var nM = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
+        var bM = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
+        var bookHd = null;
+        for (var y2 = 0; y2 < all.length; y2++) {
+          if (/^THE BOOK/i.test((all[y2].textContent || '').trim()) && all[y2].children.length <= 2) {
+            bookHd = all[y2]; break;
+          }
+        }
+        if (nM && bM && bookHd) {
+          idxRow.style.display = 'none';
+          var box = document.createElement('div');
+          box.id = 'r5-idxbox'; box.className = 'r5-idxbox';
+          function seg(name, dir) {
+            var d = dir.toUpperCase();
+            var cls = d === 'LONG' ? 'long' : (d === 'SHORT' ? 'short' : 'flat');
+            return name + ' <b class="' + cls + '">' + d + '</b>';
+          }
+          box.innerHTML = '<div class="t">INDEX POSITIONS</div>'
+            + seg('NIFTY', nM[1]) + ' &nbsp;·&nbsp; ' + seg('BANKNIFTY', bM[1]);
+          bookHd.parentNode && bookHd.parentNode.insertBefore(box, bookHd);
+        }
+      }
+    }
+
     /* R5 grain — founder 20:4x: the mockup's 115deg diagonal grain was missing because the
        page wrapper paints flat --bg over the themed body. Apply the grain to the wrapper itself
        (first viewport-filling child), inline and additive. */
