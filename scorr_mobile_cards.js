@@ -185,7 +185,7 @@
 
   var CSS = ''
     + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;'
-    +   'font-size:56px!important;line-height:.95!important;letter-spacing:1px;'
+    +   'font-size:42px!important;line-height:.95!important;letter-spacing:1px;'
     +   'text-transform:uppercase;display:inline-block!important;'
     +   'transform:skewX(-6deg);transform-origin:left center;animation:none!important}'
     + '.r5-mood::after{content:"";display:block;height:6px;width:150px;margin-top:4px;'
@@ -252,6 +252,22 @@
         whyEl.parentNode && whyEl.parentNode.insertBefore(bar, whyEl.nextSibling);
       }
     }
+    /* R5 grain — founder 20:4x: the mockup's 115deg diagonal grain was missing because the
+       page wrapper paints flat --bg over the themed body. Apply the grain to the wrapper itself
+       (first viewport-filling child), inline and additive. */
+    try {
+      var kids = document.body ? document.body.children : [];
+      for (var k = 0; k < kids.length; k++) {
+        var el2 = kids[k];
+        if (el2.clientHeight >= window.innerHeight * 0.7 && !el2.__r5g) {
+          el2.__r5g = 1;
+          el2.style.backgroundImage =
+            'repeating-linear-gradient(115deg, rgba(255,255,255,.016) 0 2px, transparent 2px 9px)';
+          break;
+        }
+      }
+    } catch (e) {}
+
     /* bottom-nav active tab: fixed-to-bottom container, the child marked on/active */
     var nav = document.querySelector('.bnav, .bottomnav, [class*="tabbar"], nav[class*="bottom"]');
     if (nav) {
