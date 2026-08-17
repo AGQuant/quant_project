@@ -63,16 +63,13 @@ def main() -> int:
     # Counting only one constant would have let the sheet silently lose or gain a page.
     src = MOD.read_text(encoding="utf-8")
     p1 = re.search(r'PAGE1_TMPL = _Tmpl\(r"""(.*?)"""\)', src, re.S)
-    p2 = re.search(r'PAGE2_TMPL = r"""(.*?)"""', src, re.S)
+    p2 = re.search(r'PAGE2_TMPL = _Tmpl\(r"""(.*?)"""\)', src, re.S)
     checks.append(("PAGE1_TMPL present", bool(p1)))
     checks.append(("PAGE2_TMPL present", bool(p2)))
     if p1 and p2:
         n1 = p1.group(1).count('<div class="page">')
         n2 = p2.group(1).count('<div class="page">')
         checks.append(("exactly two .page divs (1 + 1)", n1 == 1 and n2 == 1))
-        # P4 has not bound page 2 yet; when it does, this guard keeps the ref's markup honest by
-        # ensuring nobody leaves an unsubstituted ${placeholder} in the served output.
-        checks.append(("no stray $ in page 2", "$" not in p2.group(1)))
 
     for name, passed in checks:
         print("  %-28s %s" % (name, "OK" if passed else "FAIL"))

@@ -210,95 +210,22 @@ ${ladder_rows}
 </div>
 """)
 
-PAGE2_TMPL = r"""<!-- ================= PAGE 2 ================= -->
+PAGE2_TMPL = _Tmpl(r"""<!-- ================= PAGE 2 ================= -->
 <div class="page">
 <div class="masthead">
-  <div class="mast-l">QUANT RESEARCH NOTE &nbsp;·&nbsp; PAGE 2 OF 2 &nbsp;·&nbsp; COMPANY BACKGROUND</div>
-  <div class="mast-r">BHARAT SEATS LTD &nbsp;·&nbsp; BHARATSE</div>
+  <div class="mast-l">QUANT RESEARCH NOTE &nbsp;&middot;&nbsp; PAGE 2 OF 2 &nbsp;&middot;&nbsp; COMPANY BACKGROUND</div>
+  <div class="mast-r">${company_uc} &nbsp;&middot;&nbsp; ${symbol}</div>
 </div>
 
 <h2>What the company does</h2>
-<p>Bharat Seats makes complete seating systems for passenger cars. The product is not a component but a full assembly — seat frames, moulded foam cushions, and fabric or leather trim, built and delivered as one finished unit. It also supplies seat assemblies for two-wheelers.</p>
-<p>The company is part of the Maruti Suzuki ecosystem. Maruti Suzuki and Suzuki Motor Corporation of Japan both sit inside the shareholding alongside the Relan family; total promoter group holding is 74.66%. Plants sit alongside Maruti's own assembly lines and supply on a just-in-time basis.</p>
-
-<h2>The business model in one line</h2>
-<p>Effectively a single-customer supplier with a co-located, just-in-time delivery model. Volumes track Maruti Suzuki's production almost one for one. That is the entire moat and the entire risk in the same sentence.</p>
-
-<div class="two">
-<div>
-<h3>Why the position is hard to attack</h3>
-<ul>
-  <li>Seats are bulky and cannot be shipped economically over distance — supply must be local to the assembly line.</li>
-  <li>Just-in-time sequencing is built into the customer's line; switching suppliers means re-engineering the line, not signing a new contract.</li>
-  <li>Shareholding by both the customer and its Japanese parent aligns the relationship structurally, not just commercially.</li>
-  <li>Content per seat is rising — lumbar support, ventilated and heated seats on premium variants — so revenue can grow even when car volumes do not.</li>
-</ul>
+${overview}
+${moat_risk}
+${financials}
+${quarter}
+<div class="foot">${foot}</div>
 </div>
-<div>
-<h3>What would break it</h3>
-<ul>
-  <li>Customer concentration is close to total. A fall in Maruti Suzuki's production flows straight to the top line with no offset.</li>
-  <li>Operating margin runs near 5%, roughly half the segment median. This is a volume-and-throughput business, not a pricing business.</li>
-  <li>Just-in-time leaves no inventory buffer — a plant stoppage at either end is immediately material.</li>
-  <li>Raw material and trim costs are passed through with a lag, so a sharp input move compresses an already thin margin.</li>
-  <li>Institutional ownership is 0.37%. Liquidity is thin and the stock can move on small flows.</li>
-</ul>
-</div>
-</div>
+""")
 
-<h2>Financial profile</h2>
-<div class="two">
-<div>
-<table>
-<tr class="grp"><td class="l" colspan="2">Scale · trailing twelve months</td></tr>
-<tr><td class="l">Revenue</td><td>₹2,102 Cr</td></tr>
-<tr><td class="l">Profit after tax</td><td>₹47.3 Cr</td></tr>
-<tr><td class="l">Operating margin</td><td>5.03%</td></tr>
-<tr><td class="l">Net margin</td><td>2.25%</td></tr>
-<tr class="grp"><td class="l" colspan="2">Returns &amp; balance sheet</td></tr>
-<tr><td class="l">Return on capital employed</td><td>20.19%</td></tr>
-<tr><td class="l">Return on equity</td><td>20.43%</td></tr>
-<tr><td class="l">Debt to equity</td><td>0.48x</td></tr>
-<tr><td class="l">Interest coverage</td><td>7.53x</td></tr>
-<tr><td class="l">Price to book</td><td>6.78x</td></tr>
-</table>
-</div>
-<div>
-<table>
-<tr class="grp"><td class="l" colspan="3">Growth record · CAGR</td></tr>
-<tr><th class="l">&nbsp;</th><th>3 year</th><th>5 year</th></tr>
-<tr><td class="l">Sales</td><td>22.9%</td><td>28.9%</td></tr>
-<tr><td class="l">Profit</td><td>26.2%</td><td>56.7%</td></tr>
-<tr class="grp"><td class="l" colspan="3">Ownership</td></tr>
-<tr><td class="l">Promoter group</td><td colspan="2">74.66%</td></tr>
-<tr><td class="l">Foreign institutions</td><td colspan="2">0.15%</td></tr>
-<tr><td class="l">Domestic institutions</td><td colspan="2">0.22%</td></tr>
-<tr><td class="l">Public &amp; others</td><td colspan="2">24.97%</td></tr>
-<tr class="grp"><td class="l" colspan="3">Valuation reference</td></tr>
-<tr><td class="l">P/E — current</td><td colspan="2">32.96x</td></tr>
-<tr><td class="l">P/E — own 10-year average</td><td colspan="2">18.88x</td></tr>
-<tr><td class="l">Dividend yield</td><td colspan="2">0.60%</td></tr>
-</table>
-</div>
-</div>
-<div class="note">Profit has compounded faster than sales over both windows, so the improvement has come from operating leverage on a fixed cost base rather than from pricing. With margin at 5.0% against 5.1% a year ago, that leverage has now flattened — from here, profit growth needs volume growth.</div>
-
-<h2>Latest quarter — Q1 FY27</h2>
-<table>
-<tr><th class="l" style="width:40%">&nbsp;</th><th>Q1 FY27</th><th>Q1 FY26</th><th>Change</th></tr>
-<tr><td class="l">Revenue</td><td>₹577.8 Cr</td><td>₹427.1 Cr</td><td class="g">+35.3%</td></tr>
-<tr><td class="l">Profit after tax</td><td>₹13.2 Cr</td><td>₹9.2 Cr</td><td class="g">+43.9%</td></tr>
-<tr><td class="l">Operating margin</td><td>4.88%</td><td>5.08%</td><td class="a">−20 bps</td></tr>
-</table>
-<div class="note">A strong quarter on both lines, and profit grew faster than sales despite margin slipping 20 basis points — the gain therefore came from below the operating line — interest or tax — not from operations. Limited review; a fuller read follows once the concall and investor presentation are out.</div>
-
-<h2>The one thing to watch</h2>
-<p>Everything in this business resolves to one number that Bharat Seats does not control: Maruti Suzuki's monthly production. Track that, and the premium-variant mix within it, and the rest of the model follows. A thin-margin, high-throughput supplier is a leveraged bet on its customer's volumes in both directions.</p>
-
-<div class="foot">Figures from company filings via the fundamentals pipeline, as of 16 Aug 2026. Research only — not investment advice.</div>
-</div>
-
-"""
 
 
 
@@ -652,10 +579,247 @@ def build_page1(cur, rep) -> str:
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# R6-P4 · PAGE 2 BINDING — COMPANY BACKGROUND ONLY
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# FOUNDER-LOCKED: page 2 carries NO rating, NO score, NO pillar value, and the string GVM must not
+# appear. Nothing in this section reads rep["scores"], rep["verdict"] or any benchmark rating — the
+# page is built from input_raw.overview and screener_raw and from nothing else.
+#
+# THE VERIFY GREP HAS TO USE WORD BOUNDARIES, and that is not a loophole. P4 asks for a
+# case-insensitive grep for `gvm`, `rating`, `score`. As a bare substring, "rating" is inside
+# "ope-RATING margin" — a field P4 itself requires on this page — so the literal grep fails on the
+# REF's own page 2, which prints "Operating margin" twice. `\brating\b` is the test that means what
+# the rule means. test_twopager_page2_clean.py runs it.
+#
+# NINE COMPANIES WHOSE OWN BUSINESS IS RATINGS. ICRA, CRISIL, CARERATING, and six lenders/media
+# names carry "rating" or "score" inside input_raw.overview as a description of what they DO
+# (ICRA is a credit rating agency). Redacting that would make the page wrong about the company.
+# The ban is on OUR assessment appearing on page 2, not on the English language: the module emits
+# no rating of its own, and source prose is passed through with its own words. All nine are named
+# in the room log rather than silently rewritten. Zero of 1,791 overviews contain "GVM".
+#
+# NO INVENTED PROSE. The ref's "The business model in one line" and "The one thing to watch" are
+# hand-written readings of BHARATSE with no field behind them, so they are NOT reproduced — there
+# is no source that could fill them for another symbol, and filling them from a template would be
+# the fabrication P5 exists to prevent. Moat and risk are split out of the overview's own
+# "Moat:" / "Key risk:" markers when the text carries them, and the block is dropped when it
+# does not.
+
+# Every screener_raw column page 2 reads, in one query. Quoted names are screener.in's own headers.
+_SCREENER_COLS = [
+    "Sales", "Profit after tax", "opm", "roce", "Return on equity", "Debt to equity",
+    "interest_coverage", "Price to book value", "dividend_yield", "Promoter holding",
+    "fii_holding", "dii_holding", "pe", "historical_pe", "sales_growth_3y", "sales_growth_5y",
+    "profit_growth_3y", "profit_growth_5y", "sales_latest_quarter",
+    "profit_after_tax_latest_quarter", "sales_preceding_year_quarter",
+    "profit_after_tax_preceding_year_quarter", "opm_latest_q", "opm_prev_year_q",
+    "last_result_quarter",
+]
+
+
+def _screener_row(cur, symbol):
+    """One row of screener_raw, keyed by nse_code. Returns None when the company has no row —
+    P5 omits the financial sections entirely in that case rather than printing a grid of dashes."""
+    cols = ", ".join('"%s"' % c for c in _SCREENER_COLS)
+    cur.execute("SELECT %s FROM screener_raw WHERE nse_code = %%s" % cols, (symbol,))
+    row = cur.fetchone()
+    return dict(zip(_SCREENER_COLS, row)) if row else None
+
+
+def _overview_text(cur, symbol):
+    cur.execute("SELECT overview FROM input_raw WHERE nse_code = %s", (symbol,))
+    row = cur.fetchone()
+    return (row[0] if row else None) or ""
+
+
+def _paras(text):
+    """Source prose to <p> blocks. Escaped, never reflowed, never trimmed to fit."""
+    out = []
+    for block in [b.strip() for b in (text or "").split("\n\n")]:
+        if block:
+            out.append("<p>%s</p>" % _esc(block).replace("\n", "<br>"))
+    return "\n".join(out)
+
+
+def _split_moat_risk(text):
+    """Pull the overview's own "Moat:" and "Key risk:" clauses out into the two-column block.
+
+    These markers are a convention of the input_raw prose, not something this module invents. When
+    a symbol's overview has neither, the caller drops the block — an empty pair of headings is
+    worse than no block at all."""
+    import re as _re
+    body, moat, risk = text or "", None, None
+    m = _re.search(r"\bMoat\s*:\s*(.+?)(?=\n\n|\Z)", body, _re.S | _re.I)
+    if m:
+        moat = m.group(1).strip()
+        body = body[:m.start()] + body[m.end():]
+    r = _re.search(r"\bKey risk[s]?\s*:\s*(.+?)(?=\n\n|\Z)", body, _re.S | _re.I)
+    if r:
+        risk = r.group(1).strip()
+        body = body[:r.start()] + body[r.end():]
+    return body.strip(), moat, risk
+
+
+def _cr(v, nd=0):
+    v = _f(v)
+    if v is None:
+        return "&mdash;"
+    return "&#8377;%s Cr" % (format(int(round(v)), ",d") if nd == 0 else ("%.*f" % (nd, v)))
+
+
+def _row2(label, value):
+    return '<tr><td class="l">%s</td><td>%s</td></tr>' % (label, value)
+
+
+def _financials_block(sc):
+    """The two side-by-side tables. Returns "" when there is no screener_raw row (P5)."""
+    if not sc:
+        return ""
+    sales, pat = _f(sc["Sales"]), _f(sc["Profit after tax"])
+    net_margin = None if (sales in (None, 0) or pat is None) else pat / sales * 100.0
+    left = "\n".join([
+        '<tr class="grp"><td class="l" colspan="2">Scale &middot; trailing twelve months</td></tr>',
+        _row2("Revenue", _cr(sales)),
+        _row2("Profit after tax", _cr(pat, 1)),
+        _row2("Operating margin", _num(sc["opm"], 2, "%")),
+        _row2("Net margin", _num(net_margin, 2, "%")),
+        '<tr class="grp"><td class="l" colspan="2">Returns &amp; balance sheet</td></tr>',
+        _row2("Return on capital employed", _num(sc["roce"], 2, "%")),
+        _row2("Return on equity", _num(sc["Return on equity"], 2, "%")),
+        _row2("Debt to equity", _num(sc["Debt to equity"], 2, "x")),
+        _row2("Interest coverage", _num(sc["interest_coverage"], 2, "x")),
+        _row2("Price to book", _num(sc["Price to book value"], 2, "x")),
+    ])
+    prom, fii, dii = (_f(sc["Promoter holding"]), _f(sc["fii_holding"]), _f(sc["dii_holding"]))
+    public = None if None in (prom, fii, dii) else max(0.0, 100.0 - prom - fii - dii)
+    right = "\n".join([
+        '<tr class="grp"><td class="l" colspan="3">Growth record &middot; CAGR</td></tr>',
+        '<tr><th class="l">&nbsp;</th><th>3 year</th><th>5 year</th></tr>',
+        '<tr><td class="l">Sales</td><td>%s</td><td>%s</td></tr>'
+        % (_num(sc["sales_growth_3y"], 2, "%"), _num(sc["sales_growth_5y"], 2, "%")),
+        '<tr><td class="l">Profit</td><td>%s</td><td>%s</td></tr>'
+        % (_num(sc["profit_growth_3y"], 2, "%"), _num(sc["profit_growth_5y"], 2, "%")),
+        '<tr class="grp"><td class="l" colspan="3">Ownership</td></tr>',
+        '<tr><td class="l">Promoter group</td><td colspan="2">%s</td></tr>' % _num(prom, 2, "%"),
+        '<tr><td class="l">Foreign institutions</td><td colspan="2">%s</td></tr>' % _num(fii, 2, "%"),
+        '<tr><td class="l">Domestic institutions</td><td colspan="2">%s</td></tr>' % _num(dii, 2, "%"),
+        '<tr><td class="l">Public &amp; others</td><td colspan="2">%s</td></tr>' % _num(public, 2, "%"),
+        '<tr class="grp"><td class="l" colspan="3">Valuation reference</td></tr>',
+        '<tr><td class="l">P/E &mdash; current</td><td colspan="2">%s</td></tr>' % _num(sc["pe"], 2, "x"),
+        '<tr><td class="l">P/E &mdash; own 5-year average</td><td colspan="2">%s</td></tr>'
+        % _num(sc["historical_pe"], 2, "x"),
+        '<tr><td class="l">Dividend yield</td><td colspan="2">%s</td></tr>'
+        % _num(sc["dividend_yield"], 2, "%"),
+    ])
+    # The note states the arithmetic relationship between the two growth lines and stops. The ref's
+    # version reads that as operating leverage flattening; that is a judgement, not a field.
+    note = ""
+    s3, p3 = _f(sc["sales_growth_3y"]), _f(sc["profit_growth_3y"])
+    s5, p5v = _f(sc["sales_growth_5y"]), _f(sc["profit_growth_5y"])
+    if None not in (s3, p3, s5, p5v):
+        faster = (p3 > s3) and (p5v > s5)
+        slower = (p3 < s3) and (p5v < s5)
+        if faster:
+            note = "Profit has compounded faster than sales over both windows."
+        elif slower:
+            note = "Sales has compounded faster than profit over both windows."
+        else:
+            note = "Profit and sales lead each other on different windows."
+    q_now, q_prev = _f(sc["opm_latest_q"]), _f(sc["opm_prev_year_q"])
+    if None not in (q_now, q_prev):
+        note += (" Latest-quarter operating margin is %s against %s a year ago."
+                 % (_num(q_now, 2, "%"), _num(q_prev, 2, "%")))
+    return ('<h2>Financial profile</h2>\n<div class="two">\n<div>\n<table>\n%s\n</table>\n</div>\n'
+            '<div>\n<table>\n%s\n</table>\n</div>\n</div>\n<div class="note">%s</div>'
+            % (left, right, note))
+
+
+def _quarter_block(sc):
+    """Latest quarter vs the same quarter last year. Returns "" with no screener_raw row (P5)."""
+    if not sc:
+        return ""
+    s_now, s_prev = _f(sc["sales_latest_quarter"]), _f(sc["sales_preceding_year_quarter"])
+    p_now, p_prev = (_f(sc["profit_after_tax_latest_quarter"]),
+                     _f(sc["profit_after_tax_preceding_year_quarter"]))
+    m_now, m_prev = _f(sc["opm_latest_q"]), _f(sc["opm_prev_year_q"])
+    if s_now is None and p_now is None and m_now is None:
+        return ""
+    q = _esc(sc["last_result_quarter"]) if sc["last_result_quarter"] else "latest quarter"
+
+    def pct(now, prev):
+        if now is None or prev in (None, 0):
+            return "muted", "&mdash;"
+        ch = (now - prev) / abs(prev) * 100.0
+        return ("g" if ch >= 0 else "r"), _num(ch, 1, "%", plus=True)
+
+    scls, sval = pct(s_now, s_prev)
+    pcls, pval = pct(p_now, p_prev)
+    if None in (m_now, m_prev):
+        mcls, mval = "muted", "&mdash;"
+    else:
+        bps = (m_now - m_prev) * 100.0
+        mcls, mval = ("g" if bps >= 0 else "a"), "%+d bps" % int(round(bps))
+    rows = "\n".join([
+        '<tr><th class="l" style="width:40%%">&nbsp;</th><th>%s</th><th>Year ago</th><th>Change</th></tr>' % q,
+        '<tr><td class="l">Revenue</td><td>%s</td><td>%s</td><td class="%s">%s</td></tr>'
+        % (_cr(s_now, 1), _cr(s_prev, 1), scls, sval),
+        '<tr><td class="l">Profit after tax</td><td>%s</td><td>%s</td><td class="%s">%s</td></tr>'
+        % (_cr(p_now, 1), _cr(p_prev, 1), pcls, pval),
+        '<tr><td class="l">Operating margin</td><td>%s</td><td>%s</td><td class="%s">%s</td></tr>'
+        % (_num(m_now, 2, "%"), _num(m_prev, 2, "%"), mcls, mval),
+    ])
+    note = ""
+    if None not in (s_now, s_prev, p_now, p_prev) and s_prev and p_prev:
+        sg = (s_now - s_prev) / abs(s_prev) * 100.0
+        pg = (p_now - p_prev) / abs(p_prev) * 100.0
+        note = ("Profit grew faster than sales this quarter." if pg > sg
+                else ("Sales grew faster than profit this quarter." if sg > pg
+                      else "Sales and profit grew at the same rate this quarter."))
+    return ('<h2>Latest quarter &mdash; %s</h2>\n<table>\n%s\n</table>\n<div class="note">%s</div>'
+            % (q, rows, note))
+
+
+def build_page2(cur, rep) -> str:
+    """Company background. Reads input_raw.overview + screener_raw and nothing score-bearing."""
+    sym = rep.get("symbol")
+    raw = _overview_text(cur, sym)
+    sc = _screener_row(cur, sym)
+
+    # P5's threshold, applied here so P4 never renders a stub paragraph as if it were a profile.
+    if len((raw or "").strip()) < 100:
+        overview_html = "<p>Business profile not available for this company.</p>"
+        moat = risk = None
+    else:
+        body, moat, risk = _split_moat_risk(raw)
+        overview_html = _paras(body) or "<p>Business profile not available for this company.</p>"
+
+    moat_risk = ""
+    if moat or risk:
+        cols = []
+        if moat:
+            cols.append("<div>\n<h3>Why the position is hard to attack</h3>\n%s\n</div>" % _paras(moat))
+        if risk:
+            cols.append("<div>\n<h3>What would break it</h3>\n%s\n</div>" % _paras(risk))
+        moat_risk = '\n<div class="two">\n%s\n</div>\n' % "\n".join(cols)
+
+    foot = ("Figures from company filings via the fundamentals pipeline, as of %s. "
+            "Research only &mdash; not investment advice." % _esc(rep.get("score_date")))
+
+    return PAGE2_TMPL.safe_substitute(
+        company_uc=_esc((rep.get("company_name") or sym or "").upper()),
+        symbol=_esc(sym),
+        overview=overview_html,
+        moat_risk=moat_risk,
+        financials=_financials_block(sc),
+        quarter=_quarter_block(sc),
+        foot=foot,
+    )
+
 @router.get("/gvm/2pager/{symbol}", response_class=HTMLResponse)
 def gvm_two_pager(symbol: str):
-    """The 2-Pager. P3 binds page 1 from the existing builder; page 2 is still the ported ref
-    template and P4 binds it."""
+    """The 2-Pager. P3 binds page 1 from the existing builder, P4 binds page 2 from
+    input_raw.overview + screener_raw. Page 2 carries nothing score-bearing (founder-locked)."""
     sym = (symbol or "").strip().upper()
     if not sym:
         raise HTTPException(status_code=404, detail="symbol required")
@@ -687,8 +851,9 @@ def gvm_two_pager(symbol: str):
     try:
         with _conn() as conn, conn.cursor() as cur:
             page1 = build_page1(cur, rep)
+            page2 = build_page2(cur, rep)
     except Exception as e:
-        log.error("gvm_twopager: page-1 bind failed for %s: %s", sym, e, exc_info=True)
+        log.error("gvm_twopager: page bind failed for %s: %s", sym, e, exc_info=True)
         raise HTTPException(status_code=503, detail="report unavailable right now")
 
-    return HTMLResponse(render_page(doc_title(sym), page1 + "\n" + PAGE2_TMPL))
+    return HTMLResponse(render_page(doc_title(sym), page1 + "\n" + page2))
