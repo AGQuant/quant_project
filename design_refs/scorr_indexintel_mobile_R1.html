@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INDEX INTEL · design ref R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:60px;
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
+ clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--volt))}
+.chip{font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:4px 9px;display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+.vitals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+.vital{background:var(--hi);border:1px solid var(--edge);padding:9px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.vital .lb{font-size:9.5px;letter-spacing:1.2px;color:var(--muted)}
+.vital .vv{font-family:'JetBrains Mono';font-weight:800;font-size:14px;margin-top:4px}
+.vital .sb{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);margin-top:2px}
+.mrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--edge);font-size:12.5px}
+.mrow:first-of-type{border-top:none}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
+.grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
+.foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
+.plink{color:var(--pulse);font-weight:700;font-size:12.5px}
+svg.sp{display:block;width:100%;height:44px}
+.tbl{width:100%;font-size:11.5px;font-family:'JetBrains Mono'}
+.tbl td{padding:6px 4px;border-top:1px solid var(--edge)}
+.tbl tr:first-child td{border-top:none}
+</style>
+</head>
+<body>
+<div class="phone">
+
+<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
+  <div><span class="skew" style="font-size:24px">INDEX INTEL</span>
+    <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">NIFTY · BANKNIFTY · the live desk</div></div>
+  <div style="text-align:right"><span class="chip l">GATE · BEARISH · 3F</span>
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:5px">09:42 IST · LIVE</div></div>
+</div>
+
+<!-- ══ SIGNALS: the position, front and centre ══ -->
+<div class="eyebrow">THE SIGNALS · V10 ST+EMA</div>
+
+<div class="card rail" style="--rc:var(--volt)">
+  <div class="grp"><h3>NIFTY <span style="color:var(--volt)">LONG</span></h3>
+    <span class="note">ST150/3·10m &nbsp; EMA3/10·30m</span></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <span class="chip w">W ST BUY</span><span class="chip w">W EMA BUY</span>
+    <span class="chip" style="color:var(--muted)">SINCE 2d 4h</span></div>
+  <div style="display:flex;align-items:baseline;gap:10px">
+    <span class="num" style="font-size:30px;font-weight:800">24,366</span>
+    <span class="num" style="color:var(--volt);font-weight:700">-0.12%</span>
+    <span style="flex:1"></span>
+    <span class="num" style="color:var(--volt);font-weight:800">uP&L +₹3,120</span></div>
+  <div class="vitals" style="margin-top:12px">
+    <div class="vital"><div class="lb">ST BAND</div><div class="vv num" style="color:var(--amber)">24,210</div><div class="sb">flip below</div></div>
+    <div class="vital"><div class="lb">STOP</div><div class="vv num" style="color:var(--heat)">24,180</div><div class="sb">-0.76%</div></div>
+    <div class="vital"><div class="lb">TARGET</div><div class="vv num" style="color:var(--volt)">24,560</div><div class="sb">+0.80%</div></div></div>
+  <div style="margin-top:10px;font-family:'JetBrains Mono';font-size:11px;color:var(--muted)">
+    FUT <b style="color:var(--chalk)">24,366</b> · OPT <b style="color:var(--chalk)">24,300 PE wrt @ 96</b> <i style="font-style:normal;opacity:.7">as of 09:40</i></div>
+</div>
+
+<div class="card rail" style="--rc:var(--volt)">
+  <div class="grp"><h3>BANKNIFTY <span style="color:var(--volt)">LONG</span></h3><span class="note">TAP → 5-MIN CHART + TRADE PINS</span></div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <span class="chip w">W ST BUY</span><span class="chip w">W EMA BUY</span>
+    <span class="chip" style="color:var(--muted)">SINCE 5h 10m</span></div>
+  <div style="display:flex;align-items:baseline;gap:10px">
+    <span class="num" style="font-size:30px;font-weight:800">57,491</span>
+    <span class="num" style="color:var(--heat);font-weight:700">-0.25%</span>
+    <span style="flex:1"></span>
+    <span class="num" style="color:var(--heat);font-weight:800">uP&L -₹840</span></div>
+  <div class="vitals" style="margin-top:12px">
+    <div class="vital"><div class="lb">ST BAND</div><div class="vv num" style="color:var(--amber)">57,120</div><div class="sb">flip below</div></div>
+    <div class="vital"><div class="lb">STOP</div><div class="vv num" style="color:var(--heat)">57,050</div><div class="sb">-0.77%</div></div>
+    <div class="vital"><div class="lb">TARGET</div><div class="vv num" style="color:var(--volt)">58,100</div><div class="sb">+1.06%</div></div></div>
+</div>
+
+<!-- ══ TAPE ══ -->
+<div class="eyebrow">THE TAPE · 5-MIN · 100 BARS</div>
+<div class="card">
+  <div style="display:flex;gap:16px">
+    <div style="flex:1"><div style="font-size:10px;color:var(--muted);letter-spacing:1.5px">NIFTY 50</div>
+      <svg class="sp" viewBox="0 0 200 44"><polyline fill="none" stroke="#C8F542" stroke-width="2" points="0,30 20,28 40,31 60,26 80,24 100,27 120,22 140,20 160,23 180,18 200,16"/><circle cx="200" cy="16" r="3" fill="#C8F542"/></svg></div>
+    <div style="flex:1"><div style="font-size:10px;color:var(--muted);letter-spacing:1.5px">BANKNIFTY</div>
+      <svg class="sp" viewBox="0 0 200 44"><polyline fill="none" stroke="#FF4D6D" stroke-width="2" points="0,18 20,20 40,17 60,22 80,25 100,23 120,27 140,26 160,29 180,28 200,31"/><circle cx="200" cy="31" r="3" fill="#FF4D6D"/></svg></div>
+  </div>
+  <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">prior session dimmed · tap a tape for the full chart with trade pins</div>
+</div>
+
+<!-- ══ VOLATILITY & FLOW ══ -->
+<div class="eyebrow">VOLATILITY &amp; FLOW</div>
+<div class="card">
+  <div class="vitals">
+    <div class="vital"><div class="lb">INDIA VIX</div><div class="vv num" style="color:var(--volt)">11.30</div><div class="sb" style="color:var(--heat)">-0.41 · CALM</div></div>
+    <div class="vital"><div class="lb">A/D · N500</div><div class="vv num" style="color:var(--heat)">0.79</div><div class="sb">198A / 251D</div></div>
+    <div class="vital"><div class="lb">MAX PAIN</div><div class="vv num" style="color:var(--aqua)">24,400</div><div class="sb" style="color:var(--heat)">+34 above spot</div></div>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:14px">
+    <div style="flex:1"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted);letter-spacing:1.5px">PCR NIFTY</span><span class="chip n" style="font-size:9px;padding:2px 6px">NEUTRAL 0.97</span></div>
+      <svg class="sp" viewBox="0 0 200 40" style="height:34px"><polyline fill="none" stroke="#FF9F45" stroke-width="2" points="0,22 33,25 66,20 99,24 132,18 165,21 200,19"/><circle cx="200" cy="19" r="3" fill="#FF9F45"/></svg></div>
+    <div style="flex:1"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted);letter-spacing:1.5px">PCR BNK</span><span class="chip w" style="font-size:9px;padding:2px 6px">BULLISH 0.84</span></div>
+      <svg class="sp" viewBox="0 0 200 40" style="height:34px"><polyline fill="none" stroke="#C8F542" stroke-width="2" points="0,26 33,24 66,27 99,22 132,25 165,20 200,17"/><circle cx="200" cy="17" r="3" fill="#C8F542"/></svg></div>
+  </div>
+  <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">7-day · gap = no reading, never a zero</div>
+</div>
+
+<!-- ══ THE BOOK ══ -->
+<div class="eyebrow">THE BOOK · V10</div>
+<div class="card">
+  <div class="grp"><h3>Open · 4</h3><span class="num" style="font-weight:800;color:var(--volt)">+₹2,280</span></div>
+  <table class="tbl">
+    <tr><td><b>NIFTY50</b> FUT</td><td><span class="chip w" style="font-size:9px;padding:1px 6px">LONG</span></td><td>24,214</td><td style="color:var(--volt);text-align:right"><b>+₹9,880</b></td></tr>
+    <tr><td><b>NIFTY50</b> 24300 PE·wrt</td><td><span class="chip w" style="font-size:9px;padding:1px 6px">LONG</span></td><td>142→96</td><td style="color:var(--volt);text-align:right"><b>+₹2,990</b></td></tr>
+    <tr><td><b>BANKNIFTY</b> FUT</td><td><span class="chip w" style="font-size:9px;padding:1px 6px">LONG</span></td><td>57,610</td><td style="color:var(--heat);text-align:right"><b>-₹3,570</b></td></tr>
+    <tr><td><b>BANKNIFTY</b> 57500 PE·wrt</td><td><span class="chip w" style="font-size:9px;padding:1px 6px">LONG</span></td><td>388→412</td><td style="color:var(--heat);text-align:right"><b>-₹720</b></td></tr>
+  </table>
+</div>
+<div class="card">
+  <div class="grp"><h3>Closed · last 5 of 62</h3>
+    <span class="note"><span class="chip w" style="font-size:9px;padding:2px 6px">WR 66%</span> <b class="num" style="color:var(--volt)">₹4.06L</b> all-time</span></div>
+  <table class="tbl">
+    <tr><td>14-Aug</td><td><b>NIFTY50</b></td><td><span style="color:var(--volt)">▲L</span></td><td>+118 pts</td><td style="text-align:right;color:var(--volt)"><b>+₹7,140</b></td><td><span class="chip w" style="font-size:9px;padding:1px 5px">TGT</span></td></tr>
+    <tr><td>13-Aug</td><td><b>BANKNIFTY</b></td><td><span style="color:var(--heat)">▼S</span></td><td>-92 pts</td><td style="text-align:right;color:var(--heat)"><b>-₹2,760</b></td><td><span class="chip l" style="font-size:9px;padding:1px 5px">SL</span></td></tr>
+    <tr><td>13-Aug</td><td><b>NIFTY50</b></td><td><span style="color:var(--volt)">▲L</span></td><td>+64 pts</td><td style="text-align:right;color:var(--volt)"><b>+₹3,890</b></td><td><span class="chip" style="font-size:9px;padding:1px 5px;color:var(--muted)">EOD</span></td></tr>
+    <tr><td>12-Aug</td><td><b>BANKNIFTY</b></td><td><span style="color:var(--volt)">▲L</span></td><td>+201 pts</td><td style="text-align:right;color:var(--volt)"><b>+₹5,940</b></td><td><span class="chip w" style="font-size:9px;padding:1px 5px">TGT</span></td></tr>
+    <tr><td>11-Aug</td><td><b>NIFTY50</b></td><td><span style="color:var(--heat)">▼S</span></td><td>-41 pts</td><td style="text-align:right;color:var(--heat)"><b>-₹2,480</b></td><td><span class="chip l" style="font-size:9px;padding:1px 5px">SL</span></td></tr>
+  </table>
+  <div style="margin-top:10px"><span class="plink">View all 62 trades →</span></div>
+</div>
+<div class="card">
+  <div class="grp"><h3>Performance</h3><span class="note">LIVE PAPER · v10_trades</span></div>
+  <div class="vitals">
+    <div class="vital"><div class="lb">TRADES</div><div class="vv num">62</div></div>
+    <div class="vital"><div class="lb">PROFIT FACTOR</div><div class="vv num" style="color:var(--volt)">1.84</div></div>
+    <div class="vital"><div class="lb">MAX DD</div><div class="vv num" style="color:var(--heat)">-312 pts</div></div>
+  </div>
+</div>
+
+<!-- ══ V10 TRADES ON CHART (founder 08:45 append — mirrors the live trades-chart surface) ══ -->
+<div class="eyebrow">THE CHART · V10 TRADES</div>
+<div class="card">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <span class="chip" style="color:var(--pulse);border-color:#3A2E6E;background:#171233;flex:1;text-align:center">NIFTY 50</span>
+    <span class="chip" style="flex:1;text-align:center;color:var(--muted)">BANK NIFTY</span></div>
+  <div class="num" style="font-size:10px;color:var(--muted)">08-07 11:15 → 08-14 15:10 · 360 bars · 5-min</div>
+  <div class="num" style="font-size:11px;margin:4px 0 8px">45 closed · 25W/20L · 2 open · <b style="color:var(--volt)">Net ₹1.36L</b></div>
+  <svg viewBox="0 0 320 110" style="display:block;width:100%;height:110px">
+    <line x1="0" y1="62" x2="320" y2="62" stroke="#C8F542" stroke-width="1" stroke-dasharray="4 3" opacity=".6"/>
+    <polyline fill="rgba(124,92,255,.12)" stroke="none" points="0,28 30,22 55,40 80,52 105,78 130,84 155,70 180,58 205,52 230,66 255,58 280,64 305,56 320,58 320,110 0,110"/>
+    <polyline fill="none" stroke="#7C5CFF" stroke-width="2" points="0,28 30,22 55,40 80,52 105,78 130,84 155,70 180,58 205,52 230,66 255,58 280,64 305,56 320,58"/>
+    <circle cx="55" cy="40" r="5" fill="#FF4D6D"/><text x="55" y="104" text-anchor="middle" fill="#FF4D6D" font-size="9" font-family="JetBrains Mono">▼FLIP</text>
+    <circle cx="130" cy="84" r="5" fill="#C8F542"/><text x="130" y="104" text-anchor="middle" fill="#C8F542" font-size="9" font-family="JetBrains Mono">◆T</text>
+    <circle cx="230" cy="66" r="5" fill="none" stroke="#C8F542" stroke-width="2"/><text x="230" y="104" text-anchor="middle" fill="#C8F542" font-size="9" font-family="JetBrains Mono">O open</text>
+  </svg>
+  <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:4px">← drag right for older · pins on the spot bar</div>
+</div>
+<div class="card">
+  <div class="grp"><h3>Trade log</h3><span class="note">FUTURES 25 · <span style="color:var(--muted)">OPTIONS 20</span></span></div>
+  <div class="vitals" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:12px">
+    <div class="vital"><div class="lb">TRADES</div><div class="vv num">25</div></div>
+    <div class="vital"><div class="lb">WIN RATE</div><div class="vv num">56%</div></div>
+    <div class="vital"><div class="lb">NET</div><div class="vv num" style="color:var(--volt)">₹1.36L</div></div>
+    <div class="vital"><div class="lb">OPEN</div><div class="vv num">2</div></div></div>
+  <div style="display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:10.5px;color:var(--muted);letter-spacing:1.5px;margin-bottom:4px">
+    <span>AUG 2026</span><span style="color:var(--volt)">₹19,442 · 4 ▾</span></div>
+  <div class="mrow" style="border-left:3px solid var(--volt);padding-left:10px">
+    <div style="flex:1"><b>NIFTY SHORT</b> <span class="chip w" style="font-size:9px;padding:1px 6px">TARGET</span>
+      <div class="num" style="font-size:11px;margin-top:2px">24,506 → 24,299</div>
+      <div class="num" style="font-size:9.5px;color:var(--muted)">11-Aug 09:20 → 12-Aug 11:05 · 25h 45m</div></div>
+    <div style="text-align:right"><b class="num" style="color:var(--volt)">₹20,494</b><div class="num" style="font-size:9.5px;color:var(--volt)">+207 pts</div></div></div>
+  <div class="mrow" style="border-left:3px solid var(--heat);padding-left:10px">
+    <div style="flex:1"><b>NIFTY LONG</b> <span class="chip l" style="font-size:9px;padding:1px 6px">SL</span>
+      <div class="num" style="font-size:11px;margin-top:2px">24,631 → 24,506</div>
+      <div class="num" style="font-size:9.5px;color:var(--muted)">06-Aug 13:55 → 11-Aug 09:20 · 115h 24m</div></div>
+    <div style="text-align:right"><b class="num" style="color:var(--heat)">-₹11,034</b><div class="num" style="font-size:9.5px;color:var(--heat)">-125 pts</div></div></div>
+</div>
+
+<!-- ══ STOCK F&O RADAR ══ -->
+<div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
+<div class="card">
+  <div class="grp"><h3>Futures Buildup</h3><span class="note">TOP MOVERS THIS SESSION</span></div>
+  <div style="display:flex;gap:14px">
+    <div style="flex:1"><div style="font-size:10px;color:var(--volt);letter-spacing:1.5px;margin-bottom:6px">▲ LONG</div>
+      <div class="mrow"><b>HAL</b><span style="flex:1"></span><span class="num" style="color:var(--volt)">+2.4%</span></div>
+      <div class="mrow"><b>BEL</b><span style="flex:1"></span><span class="num" style="color:var(--volt)">+1.9%</span></div>
+      <div class="mrow"><b>TRENT</b><span style="flex:1"></span><span class="num" style="color:var(--volt)">+1.6%</span></div></div>
+    <div style="flex:1"><div style="font-size:10px;color:var(--heat);letter-spacing:1.5px;margin-bottom:6px">▼ SHORT</div>
+      <div class="mrow"><b>UPL</b><span style="flex:1"></span><span class="num" style="color:var(--heat)">-2.1%</span></div>
+      <div class="mrow"><b>ZOMATO</b><span style="flex:1"></span><span class="num" style="color:var(--heat)">-1.7%</span></div>
+      <div class="mrow"><b>PAYTM</b><span style="flex:1"></span><span class="num" style="color:var(--heat)">-1.4%</span></div></div>
+  </div>
+</div>
+<div class="card">
+  <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±1%</span></div>
+  <div class="mrow"><b>RELIANCE</b><span class="chip n" style="font-size:9px;padding:1px 6px">BASIS +1.2%</span><span style="flex:1"></span><span class="num" style="color:var(--muted)">3m ago</span></div>
+  <div class="mrow"><b>SBIN</b><span class="chip" style="font-size:9px;padding:1px 6px;color:var(--aqua);border-color:#1E4A55;background:#0E2028">1HR -1.4%</span><span style="flex:1"></span><span class="num" style="color:var(--muted)">5m ago</span></div>
+</div>
+
+<!-- ══ ENGINE ══ -->
+<div class="eyebrow">ENGINE</div>
+<div class="card" style="padding:12px 16px">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12.5px;color:var(--muted)">V10 config · ST 150/3·10m · EMA 3/10·30m · FUT + ATM write · 09:20–15:20 · locked 16-Jun</span>
+    <span class="plink">›</span></div>
+</div>
+
+<div class="foot">INDEX INTEL · as of 09:42 IST · research only, not investment advice</div>
+</div>
+</body>
+</html>
