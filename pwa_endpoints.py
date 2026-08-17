@@ -324,6 +324,11 @@ PWA_JS = """
     ['/m/check', '\\u2713', 'Trade Check (mobile)', 'm'],
     ['/m/home', '\\u2302', 'Home (mobile)', 'm'],
     ['/m/digest', '\\u25a5', 'Daily Digest (mobile)', 'm'],
+    // APP_QA_R4 P11: /m/v10 joins the nav as a first-class app page. /m/digest was already
+    // here. Suffix kept as "(mobile)" to match every other /m/ entry in this array — the
+    // package names the label "Index Intel", and that is the label the APP shows; this array
+    // is the DESKTOP navbar, where the suffix is what distinguishes it from the web page.
+    ['/m/v10', '\\u25d0', 'Index Intel (mobile)', 'm'],
     ['/m/results', '\\u25f7', 'Results (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).

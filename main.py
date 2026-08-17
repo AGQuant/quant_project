@@ -1148,6 +1148,8 @@ NAV_REGISTRY = {
     "/m/check":      ("Trade Check (mobile)", "nav-mobile"),
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
+    # APP_QA_R4 P11: mirrors the NAV array entry added in pwa_endpoints.py (rule 2987).
+    "/m/v10":        ("Index Intel (mobile)",  "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
     "/m/models":     ("Models — de-listed, reachable by typed URL", "typed-url"),   # cc#995: removed from nav (route + ScorrModels stay)
     # cc#991: Wall of Trades. TWO routes, one endpoint. Neither carries a NAV-array entry, and
