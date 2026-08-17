@@ -248,7 +248,42 @@ def classify_cadence(cadence: str) -> dict:
         out["class"] = "daily"
     elif re.search(r"m\s*%\s*\d+", c) or "every tick" in cl:
         out["class"] = "frequent"
+    out["slots"] = _parse_slots(c)
     return out
+
+
+# ── cc#1085 R6-P9: MULTI-SLOT CADENCES ────────────────────────────────────────────────────────
+# classify_cadence used to keep the FIRST `h ==` and the FIRST `m ==` it found and throw the rest
+# away. Six active registry rows declare more than one exact-minute slot, so six jobs were being
+# reasoned about on a fraction of their schedule:
+#
+#   bg_protocol_one          15:40 ; 09:20        -> only 15:40 seen
+#   bg_oi_snapshot           09:20 or 15:35       -> only 09:20 seen
+#   bg_yahoo_daily_sync      01:00 ; 15:35        -> only 01:00 seen
+#   bg_fetch_universe_reco_news  21:10 ; 03:10    -> only 21:10 seen
+#   bg_nse_eod_ingest        18:30 ; 19:30 ; 20:30 -> only 18:30 seen
+#   bg_fetch_market_news     (market loop) ; 05:20 -> the 05:20 slot invisible
+#
+# FOR bg_protocol_one THAT WAS FATAL TO CATCH-UP, not merely imprecise. Its only visible slot is
+# 15:40, so at any moment before 15:40 expected_last_run() answered "last Friday 15:40" — which
+# always sits below today's period floor, so the catch-up sweep skipped it EVERY time it looked.
+# A job whose first slot falls late in the day could therefore never be caught up at all.
+#
+# Pairing rule: each `h ==` binds to the NEXT `m ==` after it. That reads both shapes in the
+# registry — `A; B` clauses and `(h == 9 and m == 20 or (h == 15 and m == 35))` — without needing
+# to understand the boolean structure. An `m ==` with no `h` before it is deliberately NOT a slot:
+# that is an hourly loop (`m == 25 and not _is_session_live(now)`), which has nothing to catch up.
+def _parse_slots(cadence: str):
+    """Every (hour, minute) exact-minute slot in a cadence, in clock order, de-duplicated."""
+    c = cadence or ""
+    hs = [(m.start(), int(m.group(1))) for m in re.finditer(r"\bh\s*==\s*(\d+)", c)]
+    ms = [(m.start(), int(m.group(1))) for m in re.finditer(r"\bm\s*==\s*(\d+)", c)]
+    slots = []
+    for pos, hh in hs:
+        nxt = next((mm for mpos, mm in ms if mpos > pos), None)
+        if nxt is not None and 0 <= hh <= 23 and 0 <= nxt <= 59:
+            slots.append((hh, nxt))
+    return sorted(set(slots))
 
 
 def expected_last_run(cadence: str, now=None, is_trading_day=None):
@@ -276,6 +311,15 @@ def expected_last_run(cadence: str, now=None, is_trading_day=None):
         return None
     hh = k["hh"] if k["hh"] is not None else 23
     mm = k["mm"] if k["mm"] is not None else 59
+    # cc#1085 R6-P9: a job with several slots is due at the LATEST one that has already passed,
+    # not at whichever happened to be written first. Each candidate is resolved independently and
+    # the most recent wins, so a 09:20/15:40 job reads as due-at-09:20 in the morning and
+    # due-at-15:40 in the evening instead of pointing at last week all day.
+    slots = k.get("slots") or []
+    if cls in ("daily", "weekly") and len(slots) > 1:
+        wd = k["weekday"] if cls == "weekly" else None
+        cands = [c for c in (_prev_weekday_at(now, h, m, weekday=wd) for h, m in slots) if c]
+        return max(cands) if cands else None
     if cls == "daily":
         return _prev_weekday_at(now, hh, mm)
     if cls == "weekly":
