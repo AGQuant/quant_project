@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAILY DIGEST</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+/* DAILY DIGEST — implements design_refs/scorr_digest_mobile_R1.html (b8949f6), R5.1 tokens */
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:70px;
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
+ clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--amber))}
+.chip{font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:4px 9px;display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
+.grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
+.tile{background:var(--hi);border:1px solid var(--edge);padding:8px 9px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.tile .lb{font-size:9px;letter-spacing:1px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:12.5px;margin-top:3px}
+.tile .wk{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);margin-top:2px}
+.mrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge);font-size:12.5px}
+.mrow:first-of-type{border-top:none}
+.sdot{width:7px;height:7px;border-radius:50%;flex:none}
+.plink{color:var(--pulse);font-weight:700;font-size:12.5px;text-decoration:none}
+.foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
+.ladder{display:flex;align-items:center;gap:0;margin-top:8px}
+.rung{flex:1;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
+.unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
+</style>
+</head>
+<body>
+<div class="phone">
+<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
+  <div><span class="skew" style="font-size:24px">DAILY DIGEST</span>
+    <div id="dd-date" style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">the morning read</div></div>
+  <span id="dd-state" class="chip n">—</span>
+</div>
+<div id="app"><div class="card"><div class="unavail">Building the read…</div></div></div>
+<div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
+</div>
+
+<script>
+/* One payload: /api/digest/v3 (digest_v3.py, binding spec 965 v2.3). ENGINE YESTERDAY adds one
+   read of /api/v10/trades/paired, filtered to yesterday's exits — story only, per
+   APP_SECTION_DISTRIBUTION_V1: positions live on Index Intel, the digest tells what happened. */
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const num=(v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+const sgn=(n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d);
+const cx=n=>n>=0?'var(--volt)':'var(--heat)';
+const senti=s=>{const t=String(s||'').toLowerCase();
+  return /bull|posi/.test(t)?'var(--volt)':/bear|nega/.test(t)?'var(--heat)':/caut/.test(t)?'var(--amber)':'var(--muted)';};
+
+function tile(t){
+  const d=t.day_chg_pct!=null?Number(t.day_chg_pct):null;
+  const w=t.week_chg_pct!=null?Number(t.week_chg_pct):(t.wk_chg_pct!=null?Number(t.wk_chg_pct):null);
+  return `<div class="tile"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
+    <div class="vv" style="color:${d!=null?cx(d):'var(--muted)'}">${d!=null?sgn(d)+'%':'—'}</div>
+    <div class="wk">${w!=null?'wk '+sgn(w)+'%':''}</div></div>`;
+}
+function ladder(ix){
+  const rungs=ix.rungs||[];
+  if(!rungs.length)return `<div class="unavail">${esc(ix.reason||'no pivot ladder')}</div>`;
+  const cmp=ix.cmp!=null?Number(ix.cmp):null;
+  const order=['S2','S1','PP','R1','R2'];
+  const bp=rungs.find(r=>r.label==='PP');
+  const side=(cmp!=null&&bp)?(cmp>bp.value?'above':'below'):null;
+  const sideTxt=side?`<span style="color:${side==='above'?'var(--volt)':'var(--heat)'}">${side} PP ${bp.dist_pct!=null?Math.abs(bp.dist_pct).toFixed(2)+'%':''}</span>`:'';
+  const cells=order.map(L=>{const r=rungs.find(x=>x.label===L);
+    const col=L==='PP'?'var(--amber)':(L[0]==='S'?'#5A2634':'#3E5A18');
+    return `<div class="rung" style="border-color:${col}${L==='PP'?';color:var(--amber)':''}">${L}<br><b style="color:var(--chalk)">${r?num(r.value):'—'}</b></div>`;}).join('');
+  return `<div class="grp" style="margin-top:14px"><h3>${esc(ix.symbol)}</h3>
+    <span class="note">CMP <b class="num" style="color:var(--chalk)">${cmp!=null?num(cmp):'—'}</b> · ${esc(ix.tier||'')} · ${sideTxt}</span></div>
+    <div class="ladder">${cells}</div>`;
+}
+
+async function boot(){
+  let d=null, eng=[];
+  try{ d=await (await fetch('/api/digest/v3')).json(); }catch(e){}
+  try{
+    const t=await (await fetch('/api/v10/trades/paired?limit=30')).json();
+    const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
+    const y=new Date(now); y.setDate(y.getDate()-(now.getDay()===1?3:1));   /* Monday -> Friday */
+    const ymd=`${String(y.getDate()).padStart(2,'0')}`;
+    eng=(t.trades||[]).filter(r=>String(r.exit_ist||'').slice(0,2)===ymd).slice(0,4);
+  }catch(e){}
+  if(!d||d.error||!d.sections){
+    document.getElementById('app').innerHTML=`<div class="card"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
+    return;
+  }
+  const S=d.sections, mr=d.market_read||{};
+  document.getElementById('dd-date').textContent=(d.date_ist||'')+' · the morning read';
+  const st=document.getElementById('dd-state'); st.textContent=(d.market&&d.market.label)||'—';
+
+  const tiles=(S.global_tape&&S.global_tape.tiles)||[];
+  const eodNote=S.global_tape&&S.global_tape.eod_note;
+  const lad=(S.ladders&&S.ladders.indexes)||[];
+  const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
+  const rep=S.reporting_today||{}, yr=S.yesterday_results||{};
+  const wm=(S.what_moved&&S.what_moved.items)||[], ge=(S.global_events&&S.global_events.items)||[];
+  const tally=yr.tally||{};
+
+  const bias=(mr.bias||'—').toUpperCase();
+  const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
+
+  const engRows=eng.length?eng.map(r=>{
+    const pn=r.net_pnl==null?null:Number(r.net_pnl);
+    return `<div class="mrow"><b>${esc(r.symbol)}</b>
+      <span class="chip ${pn!=null&&pn>=0?'w':'l'}" style="font-size:9px;padding:1px 6px">${esc((r.reason||'EXIT').toUpperCase())}</span>
+      <span style="flex:1"></span>
+      <span class="num" style="color:${pn!=null?cx(pn):'var(--muted)'}">${r.points!=null?sgn(Number(r.points),0)+' pts · ':''}${pn!=null?'₹'+num(pn):'—'}</span></div>`;}).join('')
+    :'<div class="unavail">No V10 exits in the last session.</div>';
+
+  const yrRows=(yr.companies||[]).slice(0,6).map(c=>{
+    const cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':c.read==='PENDING'?'n':'';
+    return `<div class="mrow"><b>${esc(c.ticker)}</b>
+      <span style="flex:1;font-size:11.5px;color:var(--muted)">${esc(c.headline||c.pending_reason||'')}</span>
+      <span class="chip ${cls}" style="font-size:9px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
+    ||'<div class="unavail">No reporters yesterday.</div>';
+
+  const newsRows=items=>items.slice(0,4).map(n=>
+    `<div class="mrow"><span class="sdot" style="background:${senti(n.sentiment)}"></span>
+     <span style="flex:1">${esc(n.headline)}</span></div>`).join('')||'<div class="unavail">No items.</div>';
+
+  document.getElementById('app').innerHTML=`
+  <div class="card rail" style="--rc:${railC};margin-top:12px">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">MARKET READ</div>
+    <span class="skew" style="font-size:36px;line-height:.95">${esc(mr.bias||'—')}</span>
+    <div style="height:6px;width:150px;background:linear-gradient(90deg,var(--chalk),transparent);transform:skewX(-24deg);margin:6px 0 10px;opacity:.85"></div>
+    <div class="num" style="font-size:12px;color:var(--muted)">${(mr.support||[]).map(esc).join(' · ')||'—'}</div>
+  </div>
+
+  <div class="eyebrow">GLOBAL TAPE${S.global_tape&&S.global_tape.tier?' · '+esc(S.global_tape.tier):''}</div>
+  <div class="card">
+    ${tiles.length?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
+    ${eodNote?`<div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">${esc(eodNote)}</div>`:''}
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · wk = 5-session change where the feed carries it</div>
+  </div>
+
+  <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
+  <div class="card">${lad.length?lad.map(ladder).join(''):'<div class="unavail">No ladder data.</div>'}
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+  </div>
+
+  <div class="eyebrow">INTERNALS</div>
+  <div class="card">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
+      <div class="tile"><div class="lb">BREADTH${itl.adr_stale?' · STALE':''}</div>
+        <div class="vv" style="color:${adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)'}">${adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—'}</div>
+        <div class="wk">${adr?adr.advances+'A / '+adr.declines+'D':''}</div></div>
+      ${pcr.slice(0,2).map(p=>`<div class="tile"><div class="lb">PCR ${esc(p.underlying)}${itl.pcr_stale?' · STALE':''}</div>
+        <div class="vv" style="color:${p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)'}">${p.pcr!=null?Number(p.pcr).toFixed(2):'—'}</div>
+        <div class="wk">${esc(p.date||'')}</div></div>`).join('')}
+    </div>
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">${esc(itl.read||'')}</div>
+  </div>
+
+  <div class="eyebrow">ENGINE YESTERDAY · V10</div>
+  <div class="card">${engRows}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Full desk → <a class="plink" href="/m/v10">INDEX INTEL</a></div>
+  </div>
+
+  <div class="eyebrow">REPORTING TODAY</div>
+  <div class="card">
+    <div class="grp"><h3>${rep.count!=null?rep.count+' companies':'—'}</h3><span class="note">TOP BY MARKET CAP</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:7px">
+      ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip">${esc(c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
+      ${rep.count>6?`<span class="chip" style="color:var(--muted)">+${rep.count-6} more</span>`:''}</div>
+  </div>
+
+  <div class="eyebrow">YESTERDAY'S RESULTS · SCORED</div>
+  <div class="card">
+    <div class="grp"><h3>Top ${(yr.companies||[]).length} of ${yr.reported_total!=null?yr.reported_total:'—'}</h3>
+      <span class="note"><b style="color:var(--volt)">${tally.bullish||0} bull</b> · <b style="color:var(--heat)">${tally.cautious||0} caut</b> · <b style="color:var(--muted)">${tally.neutral||0} neut · ${tally.pending||0} pending</b></span></div>
+    ${yrRows}
+    <div style="margin-top:8px;font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono'">${esc(yr.match_rule||'')}</div>
+  </div>
+
+  <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
+  <div class="card">${newsRows(wm)}</div>
+
+  <div class="eyebrow">GLOBAL EVENTS</div>
+  <div class="card">${newsRows(ge)}</div>
+
+  <div class="card rail" style="--rc:${railC}">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
+    <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+  </div>`;
+}
+boot();
+</script>
+</body>
+</html>
