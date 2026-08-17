@@ -337,6 +337,30 @@
    it would undo half of what the notch is doing. */
 :root:root:not([data-theme="light"]) .bn.on .i{ opacity:1; }
 
+/* ─── SPRINT 2 NAV SWEEP · APP_QA_R5 P10 ───────────────────────────────────────────────────
+   GOLD NIGHT is the only visible theme this sprint, and the migrated pages (home, gvm, check,
+   models, qb, and the three R5 pages) light their active nav tab gold. Every OTHER page carrying
+   the 5-slot nav still lights it volt, from pass-2 item 4 above — so an unmigrated screen sat
+   beside a migrated one with a different active colour, which is exactly what P10 exists to stop.
+
+   DONE HERE, IN THE ONE INJECTED LAYER, RATHER THAN AS NINE PAGE EDITS. The alternative was to
+   put the theme layer and a bridge on every remaining nav-bearing template, but that is a full
+   MIGRATION, not a polish sweep: it would turn nine screens goldnight that are not in this
+   sprint's founder review list (P7-P9 name four pages deliberately). One rule reaches every page
+   through main.py's existing injection, changes the nav and nothing else, and leaves those pages'
+   palettes exactly where the sprint left them.
+
+   The migrated pages are unaffected: their own page-scoped `.bnav .bn.on` rule sets the same gold
+   from --t-brand, so this and that agree rather than fight. Reverting next build is deleting this
+   block — pass-2 item 4 underneath is untouched and takes over again. */
+:root:root:not([data-theme="light"]) .bn.on{ color:#D4AF37 !important; text-shadow:0 0 10px rgba(212,175,55,.35); }
+:root:root:not([data-theme="light"]) .bn.on::before{ background:#D4AF37; }
+:root:root:not([data-theme="light"]) .bn{ font-size:11px; }
+:root:root:not([data-theme="light"]) .bn .i{ font-size:16px; }
+/* tools grid: 12px labels, 19px gold-glow icons, per the goldnight ref */
+:root:root:not([data-theme="light"]) .tool{ font-size:12px; }
+:root:root:not([data-theme="light"]) .tool span{ font-size:19px; color:#D4AF37; text-shadow:0 0 10px rgba(212,175,55,.35); }
+
 /* ─── TWO-COLOUR HEADING SYSTEM · cc#1074, executed as APP_QA_R4 P9 ─────────────────────────
    HEADING_COLOR_RULE_V1 (session_log 23897): exactly two heading colours app-wide — aqua
    eyebrows, chalk titles. Purple survives only on things you can tap.
