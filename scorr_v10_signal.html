@@ -1,150 +1,246 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scorr · V10 Index Signals</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INDEX INTEL</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-/* cc#1069 · /m/v10 — the V10 ST+EMA signal view, destination of the INDEX SIGNALS card (cc#1068).
-   R5 "Telemetry Drop" styling, tokens lifted from design_refs/scorr_mobile_R5.html.
-
-   EVERY FIELD BELOW EXISTS IN THE LIVE PAYLOAD. I read GET /api/v10/signal before writing a line
-   of this file, per the card's read-payload-first rule, and the response carries exactly:
-     status, symbol, as_of, price, st_dir, st_flip, st_band, flip_ts, gate_zone, signal,
-     stop, target, spec
-   Nothing else is rendered, because nothing else is served. In particular there is NO signal
-   history array — the card asks for one "if the payload provides it", and it does not, so this
-   page does not fake one. That omission is stated on the page itself rather than left as a
-   silently missing section. */
-:root{
-  --field:#0D1322; --panel:#161F33; --panel-hi:#1C2740; --edge:#26334F;
-  --chalk:#EAF0FA; --muted:#8A97B0;
-  --volt:#C8F542;   /* LONG / up */
-  --heat:#FF4D6D;   /* SHORT / down */
-  --amber:#FF9F45;  /* FLAT — a real third state, not an error */
-  --pulse:#7C5CFF;  /* interactive only */
-  --cut:16px;
-}
+/* INDEX INTEL — implements design_refs/scorr_indexintel_mobile_R1.html (bb2fde7), R5.1 tokens */
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--field);color:var(--chalk);font-family:'Space Grotesk',system-ui,sans-serif;
-  background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
-  min-height:100vh;padding:0 0 40px}
-.num{font-family:'JetBrains Mono',ui-monospace,monospace}
-.top{display:flex;justify-content:space-between;align-items:baseline;padding:18px 16px 6px}
-.logo{font-family:'Archivo Black';font-size:20px;transform:skewX(-6deg);letter-spacing:.5px}
-.logo b{color:var(--volt)}
-.back{font-family:'JetBrains Mono';font-size:11px;color:var(--pulse);text-decoration:none;letter-spacing:1px}
-.eyebrow{display:flex;align-items:center;gap:10px;margin:18px 16px 10px;font-size:11px;
-  font-weight:700;letter-spacing:2.5px;color:var(--muted)}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:70px;
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
 .eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
 .card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
-  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
-/* the state rail — 5px edge strip carrying the signal colour */
-.card::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;background:var(--rail,var(--muted))}
-.nm{font-family:'JetBrains Mono';font-size:11px;letter-spacing:2px;color:var(--muted);margin-left:10px}
-.sig{font-family:'Archivo Black';font-size:44px;line-height:1;text-transform:uppercase;
-  transform:skewX(-6deg);margin:8px 0 4px 10px;letter-spacing:1px}
-.px{display:flex;align-items:baseline;gap:10px;margin:10px 0 0 10px}
-.px .v{font-family:'JetBrains Mono';font-weight:800;font-size:22px}
-.px .a{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);letter-spacing:1px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0 0 10px}
-.kv{background:var(--panel-hi);border:1px solid var(--edge);padding:9px 10px;
-  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
-.kv .k{font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:4px}
-.kv .val{font-family:'JetBrains Mono';font-size:13px;font-weight:600}
-.spec{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);margin:12px 0 0 10px;letter-spacing:.5px}
-.note{margin:0 14px 12px;padding:12px 14px;border:1px dashed var(--edge);background:rgba(22,31,51,.5);
-  font-size:12px;line-height:1.6;color:var(--muted)}
-.note b{color:var(--chalk)}
-.loading,.err{margin:24px 16px;font-size:13px;color:var(--muted)}
-.err b{color:var(--heat)}
+ clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--muted))}
+.chip{font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:4px 9px;display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+.vitals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+.vital{background:var(--hi);border:1px solid var(--edge);padding:9px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.vital .lb{font-size:9.5px;letter-spacing:1.2px;color:var(--muted)}
+.vital .vv{font-family:'JetBrains Mono';font-weight:800;font-size:14px;margin-top:4px}
+.vital .sb{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);margin-top:2px}
+.mrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--edge);font-size:12.5px}
+.mrow:first-of-type{border-top:none}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
+.grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
+.foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
+.plink{color:var(--pulse);font-weight:700;font-size:12.5px;cursor:pointer;text-decoration:none}
+.tbl{width:100%;font-size:11.5px;font-family:'JetBrains Mono'}
+.tbl td{padding:6px 4px;border-top:1px solid var(--edge)}
+.tbl tr:first-child td{border-top:none}
+.unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
 </style>
 </head>
 <body>
-<div class="top">
-  <div class="logo">SCO<b>RR</b> <span style="font-size:11px;color:var(--muted);font-family:'Space Grotesk'">· V10</span></div>
-  <a class="back" href="/m/home">&#8249; HOME</a>
+<div class="phone">
+<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
+  <div><span class="skew" style="font-size:24px">INDEX INTEL</span>
+    <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">NIFTY · BANKNIFTY · the live desk</div></div>
+  <div style="text-align:right"><span id="gatechip" class="chip">GATE · —</span>
+    <div id="asof" style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:5px">loading…</div></div>
 </div>
-<div class="eyebrow">INDEX SIGNALS &middot; ST + EMA</div>
-<div id="app"><div class="loading">Loading V10 signals&hellip;</div></div>
+<div id="app"><div class="card"><div class="unavail">Loading the desk…</div></div></div>
+<div class="foot">INDEX INTEL · research only, not investment advice</div>
+</div>
 
 <script>
-(function () {
-  'use strict';
-  var ORDER = ['NIFTY50', 'BANKNIFTY'];
-  var LABEL = { NIFTY50: 'NIFTY 50', BANKNIFTY: 'BANK NIFTY' };
+/* Wiring follows v10_dashboard.html loaders exactly (payload-first rule, 23359). Every loader
+   behind its own try/catch; a failed feed states itself and never blanks the page. */
+const $=id=>document.getElementById(id);
+const num=(v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+const sgn=(n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d);
+const fK=n=>Math.abs(n)>=1e7?(n/1e7).toFixed(2)+'Cr':Math.abs(n)>=1e5?(n/1e5).toFixed(2)+'L':num(n);
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const cx=n=>n>=0?'var(--volt)':'var(--heat)';
+const gj=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
+const IST=()=>new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
 
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-    });
-  }
-  /* HONEST FALLBACK, the card's rule 4: a missing field says so. It never becomes 0, and never
-     borrows a neighbouring value. */
-  function val(v, suffix) {
-    if (v === null || v === undefined || v === '') return '<span style="color:var(--muted)">unavailable</span>';
-    return esc(v) + (suffix || '');
-  }
-  function nfmt(v) {
-    if (v === null || v === undefined || v === '') return null;
-    var n = Number(v);
-    return isFinite(n) ? n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null;
-  }
-  function sigColor(sig) {
-    var s = String(sig || '').toUpperCase();
-    return s === 'LONG' ? 'var(--volt)' : s === 'SHORT' ? 'var(--heat)' : 'var(--amber)';
-  }
+const D={mood:null,sig:{},lm:{},vix:null,adr:null,pcr:{},mp:null,open:[],closed:[],psum:{},perf:null,build:null,div:null,cand:{}};
 
-  function card(key, d) {
-    var name = LABEL[key] || key;
-    if (!d || d.status !== 'ok') {
-      return '<div class="card" style="--rail:var(--muted)"><div class="nm">' + esc(name) + '</div>'
-        + '<div class="sig" style="color:var(--muted)">NO DATA</div>'
-        + '<div class="spec">The engine returned no usable signal for this index.</div></div>';
-    }
-    var col = sigColor(d.signal);
-    var price = nfmt(d.price), band = nfmt(d.st_band);
-    return '<div class="card" style="--rail:' + col + '">'
-      + '<div class="nm">' + esc(name) + '</div>'
-      + '<div class="sig" style="color:' + col + '">' + esc(String(d.signal || 'FLAT').toUpperCase()) + '</div>'
-      + '<div class="px"><span class="v">' + (price === null ? '&mdash;' : price) + '</span>'
-      +   '<span class="a">AS OF ' + val(d.as_of) + '</span></div>'
-      + '<div class="grid">'
-      +   '<div class="kv"><div class="k">SUPERTREND</div><div class="val" style="color:'
-      +     (String(d.st_dir).toLowerCase() === 'up' ? 'var(--volt)' : String(d.st_dir).toLowerCase() === 'down' ? 'var(--heat)' : 'var(--chalk)')
-      +     '">' + val(d.st_dir && String(d.st_dir).toUpperCase()) + '</div></div>'
-      +   '<div class="kv"><div class="k">ST BAND</div><div class="val">' + (band === null ? val(null) : band) + '</div></div>'
-      +   '<div class="kv"><div class="k">EMA GATE</div><div class="val">' + val(d.gate_zone && String(d.gate_zone).toUpperCase()) + '</div></div>'
-      +   '<div class="kv"><div class="k">LAST FLIP</div><div class="val">' + val(d.flip_ts) + '</div></div>'
-      /* stop and target are null while FLAT — that is the engine's real state, not a gap, so they
-         render as their honest "unavailable" rather than being hidden. */
-      +   '<div class="kv"><div class="k">STOP</div><div class="val">' + (nfmt(d.stop) || val(d.stop)) + '</div></div>'
-      +   '<div class="kv"><div class="k">TARGET</div><div class="val">' + (nfmt(d.target) || val(d.target)) + '</div></div>'
-      + '</div>'
-      + '<div class="spec">' + val(d.spec) + '</div>'
-      + '</div>';
-  }
+async function loadAll(){
+  const T=[
+    async()=>{D.mood=await gj('/api/v8/market_mood')},
+    async()=>{D.sig.N=await gj('/api/v10/signal?symbol=NIFTY50').catch(()=>null);
+              D.sig.B=await gj('/api/v10/signal?symbol=BANKNIFTY').catch(()=>null)},
+    async()=>{const m=await gj('/api/v8/live_metrics');(m.rows||[]).forEach(r=>{
+              if(r.symbol==='NIFTY50')D.lm.N=r; if(r.symbol==='BANKNIFTY')D.lm.B=r;})},
+    async()=>{D.vix=await gj('/api/v10/vix')},
+    async()=>{D.adr=await gj('/api/v8/adr')},
+    async()=>{D.pcr.N=await gj('/api/daily/pcr?underlying=NIFTY&days=8').catch(()=>null);
+              D.pcr.B=await gj('/api/daily/pcr?underlying=BANKNIFTY&days=8').catch(()=>null)},
+    async()=>{D.mp=await gj('/api/v10/maxpain?symbol=NIFTY')},
+    async()=>{const p=await gj('/api/v10/positions');D.open=p.open_positions||p.rows||[]},
+    async()=>{const t=await gj('/api/v10/trades/paired?limit=200');D.closed=t.trades||[];D.psum=t.summary||{}},
+    async()=>{D.perf=await gj('/api/v10/performance')},
+    async()=>{D.build=await gj('/api/v10/buildup?limit=5')},
+    async()=>{D.div=await gj('/api/v10/divergence')},
+  ];
+  await Promise.all(T.map(f=>f().catch(e=>console.warn('[intel]',e.message))));
+}
 
-  fetch('/api/v10/signal', { credentials: 'same-origin' })
-    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(function (d) {
-      if (!d) throw new Error('empty response');
-      var html = ORDER.map(function (k) { return card(k, d[k]); }).join('');
-      /* Stated, not silently omitted: the card asked for a signal history list "if the payload
-         provides it". /api/v10/signal returns a single current snapshot per index and carries no
-         history array, so there is nothing to list and nothing was invented. */
-      html += '<div class="note">Current snapshot only. <b>/api/v10/signal</b> returns one live '
-           +  'reading per index and carries no signal-history series, so none is shown &mdash; '
-           +  'rather than a list assembled from guesses.</div>';
-      document.getElementById('app').innerHTML = html;
-    })
-    .catch(function (e) {
-      document.getElementById('app').innerHTML =
-        '<div class="err"><b>V10 signals unavailable.</b><br>' + esc(e && e.message) + '</div>';
-    });
-})();
+function pcrParse(p){ /* latest non-null = cur; nulls counted as stated gaps, never plotted as 0 */
+  const rows=(p&&(p.rows||p.data))||[]; let cur=null,gaps=0; const series=[];
+  rows.forEach(r=>{const v=(r.pcr==null?null:Number(r.pcr));
+    if(v==null){gaps++}else{series.push(v); if(cur==null)cur=v;}});
+  return {cur,gaps,series:series.slice(0,8).reverse()};
+}
+function spark(vals,color){
+  if(!vals||vals.length<2)return '<div class="unavail">no series</div>';
+  const w=200,h=34,mn=Math.min(...vals),mx=Math.max(...vals),sp=(mx-mn)||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-4-((v-mn)/sp)*(h-8)).toFixed(1)}`).join(' ');
+  const last=pts.split(' ').pop();
+  return `<svg viewBox="0 0 ${w} ${h}" style="display:block;width:100%;height:${h}px">
+    <polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}"/>
+    <circle cx="${last.split(',')[0]}" cy="${last.split(',')[1]}" r="3" fill="${color}"/></svg>`;
+}
+function pcrBand(v){return v==null?['NO DATA','']:(v<0.7?['BEARISH','l']:v<0.9?['BULLISH','w']:v<1.1?['NEUTRAL','n']:['BEARISH','l']);}
+
+function sigCard(name,key){
+  const s=D.sig[key], lm=D.lm[key]||{};
+  const cmp=lm.cmp!=null?Number(lm.cmp):null, day=lm.day_pct!=null?Number(lm.day_pct):null;
+  const ok=s&&s.status==='ok';
+  const sigw=ok?(s.signal==='BUY'?'LONG':s.signal==='SELL'?'SHORT':'FLAT'):'FLAT';
+  const rc=sigw==='LONG'?'var(--volt)':sigw==='SHORT'?'var(--heat)':'var(--amber)';
+  const st=ok?(s.st_dir==='up'?'BUY':'SELL'):null, ema=ok?(s.gate_zone==='buy'?'BUY':'SELL'):null;
+  const pos=D.open.find(p=>((p.symbol||'').toUpperCase()===(key==='N'?'NIFTY50':'BANKNIFTY'))&&!p.opt_type);
+  const state = pos?`Pos <b style="color:${pos.direction==='SHORT'?'var(--heat)':'var(--volt)'}">${esc(pos.direction)}</b> @ <b class="num">${num(pos.entry_price)}</b> · uP&L <b class="num" style="color:${cx(Number(pos.unrealised_pnl)||0)}">₹${num(pos.unrealised_pnl||0)}</b>`
+    : ok&&sigw!=='FLAT'?`Entry <b class="num">${num(s.price)}</b> · live signal, no open leg`
+    : ok?`<span style="color:var(--amber)">FLAT — awaiting aligned flip (window 09:20–15:20)</span>`
+    : `<span style="color:var(--amber)">Engine snapshot not available yet — first tick lands after the bell</span>`;
+  return `<div class="card rail" style="--rc:${rc}">
+    <div class="grp"><h3>${name} <span style="color:${rc}">${sigw}</span></h3>
+      <span class="note">ST150/3·10m · EMA3/10·30m</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      ${st?`<span class="chip ${st==='BUY'?'w':'l'}">${st==='BUY'?'W':'L'} ST ${st}</span>`:'<span class="chip">ST —</span>'}
+      ${ema?`<span class="chip ${ema==='BUY'?'w':'l'}">${ema==='BUY'?'W':'L'} EMA ${ema}</span>`:'<span class="chip">EMA —</span>'}
+      ${ok&&s.flip_ts?`<span class="chip" style="color:var(--muted)">FLIP ${esc(String(s.flip_ts).slice(5,16))}</span>`:''}</div>
+    <div style="display:flex;align-items:baseline;gap:10px">
+      <span class="num" style="font-size:30px;font-weight:800">${cmp!=null?num(cmp):'—'}</span>
+      <span class="num" style="color:${day!=null?cx(day):'var(--muted)'};font-weight:700">${day!=null?sgn(day)+'%':''}</span></div>
+    <div class="vitals" style="margin-top:12px">
+      <div class="vital"><div class="lb">ST BAND</div><div class="vv num" style="color:var(--amber)">${ok&&s.st_band?num(s.st_band):'—'}</div></div>
+      <div class="vital"><div class="lb">STOP</div><div class="vv num" style="color:var(--heat)">${ok&&s.stop?num(s.stop):'—'}</div></div>
+      <div class="vital"><div class="lb">TARGET</div><div class="vv num" style="color:var(--volt)">${ok&&s.target?num(s.target):'—'}</div></div></div>
+    <div style="margin-top:10px;font-family:'JetBrains Mono';font-size:11px;color:var(--muted)">${state}</div>
+  </div>`;
+}
+
+function render(){
+  const m=D.mood||{};
+  const gate=(m.mood||'—').toUpperCase(), fails=m.fails!=null?m.fails:'—';
+  $('gatechip').textContent=`GATE · ${gate} · ${fails}F`;
+  $('gatechip').className='chip '+(/BEAR/i.test(gate)?'l':/BULL/i.test(gate)?'w':'n');
+  $('asof').textContent=IST().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+' IST';
+
+  const vix=D.vix||{}, vc=vix.cur!=null?Number(vix.cur):null;
+  const vlab=vc==null?'—':vc<15?'CALM':vc<20?'MODERATE':'ELEVATED';
+  const adr=D.adr||{}, ar=adr.adr!=null?Number(adr.adr):null;
+  const mp=D.mp&&D.mp.status==='ok'?D.mp:null;
+  const pN=pcrParse(D.pcr.N), pB=pcrParse(D.pcr.B);
+  const [bnL,bnC]=pcrBand(pN.cur), [bbL,bbC]=pcrBand(pB.cur);
+
+  const openF=D.open, totO=openF.reduce((a,p)=>a+(Number(p.unrealised_pnl)||0),0);
+  const openRows=openF.length?openF.map(p=>{
+    const pn=Number(p.unrealised_pnl)||0;
+    return `<tr><td><b>${esc(p.symbol)}</b>${p.opt_type?` <span style="color:var(--muted);font-size:10px">${esc(p.opt_strike||'')} ${esc(p.opt_type)}·wrt</span>`:' FUT'}</td>
+      <td><span class="chip ${(p.direction==='SHORT')?'l':'w'}" style="font-size:9px;padding:1px 6px">${esc(p.direction||'')}</span></td>
+      <td class="num">${num(p.entry_price)}</td>
+      <td class="num" style="color:${cx(pn)};text-align:right"><b>₹${num(pn)}</b></td></tr>`;}).join('')
+    :`<tr><td class="unavail" colspan="4">No open positions</td></tr>`;
+
+  const cl=D.closed, shown=cl.slice(0,5);
+  const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.net_pnl)>0).length/cl.length):null;
+  const totC=cl.reduce((a,t)=>a+(Number(t.net_pnl)||0),0);
+  const clRows=shown.length?shown.map(t=>{
+    const pn=t.net_pnl==null?null:Number(t.net_pnl);
+    const rsn=(t.reason||'EXIT').toUpperCase();
+    return `<tr><td class="num" style="color:var(--muted)">${esc(String(t.exit_ist||'').slice(0,6))}</td>
+      <td><b>${esc(t.symbol)}</b></td>
+      <td style="color:${t.direction==='SHORT'?'var(--heat)':'var(--volt)'}">${t.direction==='SHORT'?'▼S':'▲L'}</td>
+      <td class="num">${t.points!=null?sgn(Number(t.points),0):'—'}</td>
+      <td class="num" style="text-align:right;color:${pn!=null?cx(pn):'var(--muted)'}"><b>${pn!=null?'₹'+num(pn):'—'}</b></td>
+      <td><span class="chip ${rsn==='SL'?'l':rsn==='TARGET'?'w':''}" style="font-size:9px;padding:1px 5px">${esc(rsn==='TARGET'?'TGT':rsn)}</span></td></tr>`;}).join('')
+    :`<tr><td class="unavail" colspan="6">No closed trades</td></tr>`;
+
+  const pf=D.perf||{};
+  const bd=D.build||{}, bl=(bd.long_buildup||[]).slice(0,3), bs=(bd.short_buildup||[]).slice(0,3);
+  const brow=r=>`<div class="mrow"><b>${esc(r.symbol)}</b><span style="flex:1"></span><span class="num" style="color:${cx(Number(r.day_1d)||0)}">${sgn(Number(r.day_1d)||0)}%</span></div>`;
+  const dv=(D.div&&D.div.rows||[]).slice(0,4);
+  const drow=r=>`<div class="mrow"><b>${esc(r.symbol)}</b><span class="chip n" style="font-size:9px;padding:1px 6px">${esc((r.signals||[]).join(' · ')||'—')}</span><span style="flex:1"></span><span class="num" style="color:var(--muted)">${r.age_min!=null?r.age_min+'m':'—'}</span></div>`;
+
+  $('app').innerHTML=`
+  <div class="eyebrow">THE SIGNALS · V10 ST+EMA</div>
+  ${sigCard('NIFTY','N')}
+  ${sigCard('BANKNIFTY','B')}
+
+  <div class="eyebrow">VOLATILITY &amp; FLOW</div>
+  <div class="card">
+    <div class="vitals">
+      <div class="vital"><div class="lb">INDIA VIX</div><div class="vv num" style="color:${vc==null?'var(--muted)':vc<15?'var(--volt)':vc<20?'var(--amber)':'var(--heat)'}">${vc!=null?vc.toFixed(2):'—'}</div><div class="sb">${vix.chg!=null?sgn(Number(vix.chg)):''} · ${vlab}</div></div>
+      <div class="vital"><div class="lb">A/D · N500</div><div class="vv num" style="color:${ar==null?'var(--muted)':ar>=1?'var(--volt)':'var(--heat)'}">${ar!=null?ar.toFixed(2):'—'}</div><div class="sb">${adr.advances!=null?adr.advances+'A / '+adr.declines+'D':''}</div></div>
+      <div class="vital"><div class="lb">MAX PAIN</div><div class="vv num" style="color:var(--aqua)">${mp?num(mp.max_pain_strike):'—'}</div><div class="sb" style="color:${mp?(mp.distance>=0?'var(--heat)':'var(--volt)'):'var(--muted)'}">${mp?sgn(Number(mp.distance),0)+' vs spot':'chain pending'}</div></div>
+    </div>
+    <div style="display:flex;gap:16px;margin-top:14px">
+      <div style="flex:1"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted);letter-spacing:1.5px">PCR NIFTY</span><span class="chip ${bnC}" style="font-size:9px;padding:2px 6px">${bnL}${pN.cur!=null?' '+pN.cur.toFixed(2):''}</span></div>${spark(pN.series,'#FF9F45')}</div>
+      <div style="flex:1"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted);letter-spacing:1.5px">PCR BNK</span><span class="chip ${bbC}" style="font-size:9px;padding:2px 6px">${bbL}${pB.cur!=null?' '+pB.cur.toFixed(2):''}</span></div>${spark(pB.series,'#C8F542')}</div>
+    </div>
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">7-day daily PCR${(pN.gaps+pB.gaps)?` · ${pN.gaps+pB.gaps} day(s) no reading — gaps stated, never zero`:''}</div>
+  </div>
+
+  <div class="eyebrow">THE BOOK · V10</div>
+  <div class="card">
+    <div class="grp"><h3>Open · ${openF.length}</h3><span class="num" style="font-weight:800;color:${cx(totO)}">₹${num(totO)}</span></div>
+    <table class="tbl">${openRows}</table>
+  </div>
+  <div class="card">
+    <div class="grp"><h3>Closed · last ${shown.length} of ${cl.length}</h3>
+      <span class="note">${wr!=null?`<span class="chip w" style="font-size:9px;padding:2px 6px">WR ${wr}%</span> `:''}<b class="num" style="color:${cx(totC)}">₹${fK(totC)}</b> all-time</span></div>
+    <table class="tbl">${clRows}</table>
+  </div>
+  <div class="card">
+    <div class="grp"><h3>Performance</h3><span class="note">LIVE PAPER · v10_trades</span></div>
+    <div class="vitals">
+      <div class="vital"><div class="lb">TRADES</div><div class="vv num">${pf.total_trades!=null?pf.total_trades:'—'}</div></div>
+      <div class="vital"><div class="lb">WIN RATE</div><div class="vv num">${pf.win_rate!=null?pf.win_rate+'%':'—'}</div></div>
+      <div class="vital"><div class="lb">PROFIT FACTOR</div><div class="vv num" style="color:${pf.profit_factor>=1?'var(--volt)':'var(--heat)'}">${pf.profit_factor!=null?Number(pf.profit_factor).toFixed(2):'—'}</div></div>
+    </div>
+  </div>
+
+  <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
+  <div class="card">
+    <div class="grp"><h3>Futures Buildup</h3><span class="note">${bd.oi_feed_pending?'PRICE DIRECTION ONLY — OI PENDING':'TOP MOVERS'}</span></div>
+    <div style="display:flex;gap:14px">
+      <div style="flex:1"><div style="font-size:10px;color:var(--volt);letter-spacing:1.5px;margin-bottom:6px">▲ LONG</div>${bl.length?bl.map(brow).join(''):'<div class="unavail">no data</div>'}</div>
+      <div style="flex:1"><div style="font-size:10px;color:var(--heat);letter-spacing:1.5px;margin-bottom:6px">▼ SHORT</div>${bs.length?bs.map(brow).join(''):'<div class="unavail">no data</div>'}</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±${D.div&&D.div.threshold!=null?D.div.threshold:1}%</span></div>
+    ${dv.length?dv.map(drow).join(''):'<div class="unavail">No divergence signals above threshold</div>'}
+  </div>
+
+  <div class="eyebrow">ENGINE</div>
+  <div class="card" style="padding:12px 16px">
+    <span style="font-size:12.5px;color:var(--muted)">V10 config · ST 150/3·10m · EMA 3/10·30m · FUT + ATM write · entry 09:20–15:20 IST · locked 16-Jun</span>
+  </div>`;
+}
+
+async function boot(){ await loadAll(); render(); }
+boot();
+setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
+  if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
 </script>
 </body>
 </html>
