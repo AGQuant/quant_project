@@ -87,6 +87,12 @@ body[data-theme]{
 .bnav .bn{font-size:11px}
 .bnav .bn .i{font-size:16px}
 .bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+/* APP_QA_R5 P3 · VIX chip chrome — FLAT, identical to a sibling chip, colour in text only.
+   The boxed treatment (tinted background + coloured border) is what made a green chip read as a
+   badge of approval. Removed for this chip in both states; the red state keeps its red TEXT. */
+.hc.vixc{background:transparent;border-color:var(--line2)}
+.hc.vixc.bad{background:transparent;border-color:var(--line2);color:var(--red)}
+
 
 /* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
    sheet (cc#893 item 3). The ticker's own styling now lives HERE, scoped to this page, so a
@@ -2199,7 +2205,16 @@ Promise.all([
        Null stays uncoloured -- with no invented band. */
     + '<button class="hc tap' + (hero.pcr == null ? '' : (Number(hero.pcr) >= 1 ? ' ok' : ' bad'))
     + '" onclick="togTrend(event,\'pcr\')">PCR ' + (hero.pcr == null ? '--' : esc(Number(hero.pcr).toFixed(2))) + '</button>'
-    + '<button class="hc tap' + (hero.vix == null ? '' : (Number(hero.vix) <= 14 ? ' ok' : (Number(hero.vix) >= 17 ? ' bad' : '')))
+    /* VIX_COLOR_RULE_V1 (cc#1081, executed as APP_QA_R5 P3). A fear gauge must never celebrate.
+       The old logic gave VIX <= 14 the `ok` class — green — so on a calm day with the gate
+       failing 4-of-4 the chip read as good news. `ok` is now unreachable on this chip in every
+       state: red when fear confirms, neutral otherwise, never green.
+       ONE LIMITATION, LOGGED AS A QUESTION IN THE ROOM RATHER THAN PAPERED OVER: the rule wants
+       red on (rising VIX AND a bearish gate) OR VIX >= 17, but this payload carries no VIX
+       CHANGE field — hero.vix is a level only. Per cc#1081 item 2 that means red on >= 17 alone,
+       and the change clause waits for a payload follow-up. A second fetch to invent the change
+       client-side is explicitly forbidden and is not done. */
+    + '<button class="hc vixc tap' + (hero.vix == null ? '' : (Number(hero.vix) >= 17 ? ' bad' : ''))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
     + '</div>'
