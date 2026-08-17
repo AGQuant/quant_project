@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPRINT 2 · GOLD NIGHT LOCKED · R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;700&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet">
+<style>
+/* SPRINT 2 VISUAL LANGUAGE — GOLD NIGHT is the ONLY visible theme this sprint (founder 12:00).
+   goldday + dark stay in scorr_themes.css, hidden; aqua returns next build. Switch control HIDDEN.
+   THE RAISED SCALE (founder: "font size below also increase"):
+     STAT VALUE 18px mono 800 (was 16) · ROW 13px (was 11-12.5) · VALUE-IN-ROW 12.5px mono
+     SUB-LABEL 10.5px/700/ls1.2 (was 9.5) · STAMP 9.5px = floor · NEWS HEADLINE 13.5px
+     TOOL LABEL 12px (was 11) · NAV LABEL 11px */
+:root{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;--muted:#8E8A7E;
+--gold:#D4AF37;--goldglow:rgba(212,175,55,.35);--golddeep:#8C7A3F;--win:#3DD68C;--loss:#FF5C6C}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--field);font-family:'Space Grotesk';color:var(--ink);max-width:480px;margin:0 auto;padding-bottom:80px;
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:18px 16px 10px;font-size:11.5px;font-weight:700;
+ letter-spacing:2.5px;color:var(--gold);text-shadow:0 0 12px var(--goldglow)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.eyebrow i{font-style:normal;font-family:'JetBrains Mono';font-size:9.5px;color:var(--golddeep);letter-spacing:1px}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 12px 12px;padding:16px;position:relative;
+ clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--gold)}
+/* ── THE BOOK · raised stats + sporty tilt ── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--hi);border:1px solid var(--edge);padding:12px 11px;
+ clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
+.stat .k{font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--golddeep)}
+.stat .v{font-family:'JetBrains Mono';font-weight:800;font-size:18px;margin-top:5px}
+.stat .s{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);margin-top:2px}
+/* ── PORTFOLIO / list rows at 13px ── */
+.row{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--edge);min-height:48px}
+.row:first-of-type{border-top:0}
+.row .sym{font-size:13px;font-weight:800;letter-spacing:.3px}
+.row .sub{font-family:'JetBrains Mono';font-size:10.5px;color:var(--muted);margin-top:2px}
+.row .fill{flex:1}
+.row .pv{font-family:'JetBrains Mono';font-size:12.5px;font-weight:700;text-align:right}
+/* ── NEWS 13.5px headlines ── */
+.nh{font-size:13.5px;line-height:1.45;padding:11px 0;border-top:1px solid var(--edge)}
+.nh:first-of-type{border-top:0}
+.nh .age{font-family:'JetBrains Mono';font-size:9.5px;color:var(--golddeep);margin-left:8px;white-space:nowrap}
+/* ── TOOLS gold icons, 12px labels ── */
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:0 12px}
+.tool{background:var(--panel);border:1px solid var(--edge);padding:14px 6px;text-align:center;font-size:12px;
+ font-weight:700;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
+.tool span{display:block;font-size:19px;color:var(--gold);margin-bottom:5px;text-shadow:0 0 10px var(--goldglow)}
+/* ── NAV gold-night: gold active, 11px labels ── */
+.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;
+ background:var(--panel);border-top:1px solid var(--edge)}
+.bn{flex:1;text-align:center;padding:10px 0 12px;font-size:11px;font-weight:700;color:var(--muted)}
+.bn span{display:block;font-size:16px;margin-bottom:2px}
+.bn.on{color:var(--gold);text-shadow:0 0 10px var(--goldglow)}
+.bn.on::before{content:"";display:block;width:26px;height:3px;background:var(--gold);margin:0 auto 4px;border-radius:2px}
+.note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);margin:6px 16px 14px;letter-spacing:.5px}
+</style>
+</head>
+<body>
+
+<div class="eyebrow">THE BOOK <i>18PX VALUES · GOLD-DEEP KEYS</i></div>
+<div class="card rail">
+  <div class="g2">
+    <div class="stat"><div class="k">V8 UNREALISED</div><div class="v num" style="color:var(--win)">+₹1.43L</div><div class="s">21 open</div></div>
+    <div class="stat"><div class="k">V10 NET · ALL-TIME</div><div class="v num" style="color:var(--win)">+₹1.39L</div><div class="s">91 legs</div></div>
+    <div class="stat"><div class="k">WIN RATE LONG</div><div class="v num" style="color:var(--win)">92%</div><div class="s">12/13</div></div>
+    <div class="stat"><div class="k">WIN RATE SHORT</div><div class="v num" style="color:var(--loss)">20%</div><div class="s">1/5</div></div>
+  </div>
+</div>
+
+<div class="eyebrow">MY PORTFOLIO <i>ROWS 13PX · 48PX TAP</i></div>
+<div class="card">
+  <div class="row"><div><div class="sym">KARURVYSYA</div><div class="sub">LONG 150</div></div><div class="fill"></div><div><div class="pv num">334</div><div class="pv num" style="color:var(--win)">+₹7,683</div></div></div>
+  <div class="row"><div><div class="sym">RRKABEL</div><div class="sub">LONG 15</div></div><div class="fill"></div><div><div class="pv num">2,813</div><div class="pv num" style="color:var(--win)">+₹14,980</div></div></div>
+</div>
+
+<div class="eyebrow">LIVE NEWS <i>HEADLINES 13.5PX</i></div>
+<div class="card">
+  <div class="nh">RBI holds rates; commentary turns data-dependent for October<span class="age">22 min</span></div>
+  <div class="nh">Auto ancillary exports post strongest month since 2024<span class="age">1h</span></div>
+</div>
+
+<div class="eyebrow">TOOLS <i>GOLD ICONS · 12PX</i></div>
+<div class="tools">
+  <div class="tool"><span>◐</span>Index Intel</div>
+  <div class="tool"><span>☀</span>Digest</div>
+  <div class="tool"><span>◈</span>GVM</div>
+</div>
+
+<div class="note">theme switch HIDDEN this sprint — goldnight forced default · goldday + dark stay in scorr_themes.css unused · aqua returns next build · P&L green/red untouched · floor 9.5px everywhere</div>
+
+<nav class="bnav">
+  <div class="bn on"><span>◧</span>Home</div>
+  <div class="bn"><span>△</span>V8</div>
+  <div class="bn"><span>◈</span>GVM</div>
+  <div class="bn"><span>◎</span>Check</div>
+  <div class="bn"><span>▤</span>Intel</div>
+</nav>
+</body>
+</html>
