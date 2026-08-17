@@ -2235,11 +2235,17 @@ function setOpenPosView(v){OPENPOS_VIEW=v;try{localStorage.setItem('v8_openpos_v
 // Futures, sorted 1D% desc. Sort keys map to the same fields the cards read (avg_day_1d / sector_week
 // / sector_month).
 let SECTOR_TAB='futures';                       // 'futures' (22 theme groups) | 'nifty50' (12 groups)
-let SECTOR_SORT={col:'day',dir:'desc'};         // col: day|week|month ; dir: desc|asc
+// cc#1089: the sort is now PER TAB, not one shared object. All Futures opens on PASS desc (the
+// star rule's whole point is "show me what is passing"), Nifty 50 keeps the cc#1009 1D% desc
+// default — it carries no star and has no PASS column to sort by. One shared object would have
+// left a 'pass' sort selected on a table with no such column the moment the founder toggled tabs.
+let SECTOR_SORT={futures:{col:'pass',dir:'desc'},nifty50:{col:'day',dir:'desc'}};
+function secSort(){return SECTOR_SORT[SECTOR_TAB]||SECTOR_SORT.futures;}
 function setSectorTab(t){SECTOR_TAB=t;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
 function setSectorSort(col){
-  if(SECTOR_SORT.col===col){SECTOR_SORT.dir=(SECTOR_SORT.dir==='desc'?'asc':'desc');}
-  else{SECTOR_SORT={col:col,dir:'desc'};}   // a new column starts desc (cc#1009 default)
+  const s=secSort();
+  if(s.col===col){s.dir=(s.dir==='desc'?'asc':'desc');}
+  else{s.col=col;s.dir='desc';}             // a new column starts desc (cc#1009 default)
   const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();
 }
 const cache={};
@@ -2532,26 +2538,69 @@ function sectorCards(sectors,title,label,clickFn){
 // cc#1009: single sortable sector table (replaces the two card grids). Same fields the cards read
 // (avg_day_1d / sector_week / sector_month), same row-click drill-down. Sort by clicking a % header
 // (desc default, re-click toggles asc); nulls sort last either way.
+// cc#1089 THEME_STAR_RULE_V1: the six green legs in the order the founder stated them, used for
+// both the tooltip and the header help. Labels read as the CONDITION, not the field name, because
+// the tooltip has to answer "why is this not starred" without a legend.
+const STAR_LEGS=[
+  ['day_positive',    'Day > 0'],
+  ['day_beats_nifty', 'Day > Nifty day'],
+  ['week_or_month',   'Week > 1% & > Nifty, OR Month > 1% & > Nifty'],
+  ['idx52',           '52W index > 70'],
+  ['gvm',             'GVM > 6'],
+  ['momentum',        'Momentum > 6.5'],
+];
+// The star tooltips are the first strings in this file to carry raw `>` and `%` inside an attribute
+// (every leg label is a comparison). Browsers parse that correctly, but anything downstream that
+// scans the markup with a regex would not, so both tooltips go through one escaper.
+const _attr=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function starCell(s){
+  // A suppressed (too-thin) group shows its returns as an em-dash, so it must not show a PASS
+  // number either — a star scored on numbers the table refuses to print is a star nobody can check.
+  if(s.pass_count==null)return`<td class="secpct" style="color:var(--dim)" title="Below the minimum member count — returns suppressed, so not scored">--</td>`;
+  const c=s.conds||{};
+  const why=STAR_LEGS.map(([k,lbl])=>(c[k]?'PASS  ':'fail  ')+lbl).join('\n');
+  const glyph=s.star==='green'?`<span style="color:var(--grn)">★</span> `
+             :s.star==='red' ?`<span style="color:var(--red)">★</span> ` : '';
+  const col=s.pass_count===6?'var(--grn)':(s.fail_count===6?'var(--red)':'var(--txt)');
+  const tip=`${s.pass_count} of 6 green conditions passed`+(s.fail_count?` · ${s.fail_count} of 6 red conditions met`:'')+`\n\n${why}`;
+  return`<td class="secpct" style="color:${col};font-weight:700" title="${_attr(tip)}">${glyph}${s.pass_count}</td>`;
+}
+// cc#1009: single sortable sector table. cc#1089 adds the star + PASS column, and only when the
+// payload actually carries pass_count — the Nifty 50 tab shares this renderer and has no star rule,
+// so it must not grow a column of dashes. Detection is on the data, not a flag passed by the caller.
 function sectorTable(sectors,clickFn){
   clickFn=clickFn||'openSectorDetail';
-  const SK={day:'avg_day_1d',week:'sector_week',month:'sector_month'};
-  const key=SK[SECTOR_SORT.col]||'avg_day_1d';
-  const dir=SECTOR_SORT.dir==='asc'?1:-1;
+  const hasStar=(sectors||[]).some(s=>s&&s.pass_count!==undefined);
+  const SS=secSort();
+  const SK={day:'avg_day_1d',week:'sector_week',month:'sector_month',pass:'pass_count'};
+  const key=(SS.col==='pass'&&!hasStar)?'avg_day_1d':(SK[SS.col]||'avg_day_1d');
+  const dir=SS.dir==='asc'?1:-1;
   const rows=(sectors||[]).slice().sort((a,b)=>{
     const av=a[key],bv=b[key];
     if(av==null&&bv==null)return 0; if(av==null)return 1; if(bv==null)return -1;   // nulls last
-    return (av-bv)*dir;
+    if(av!==bv)return (av-bv)*dir;
+    // PASS is a 0-6 integer over 22 rows, so ties are the rule and not the exception. Break them
+    // on 1D% desc rather than leaving the order to the sort's stability — otherwise "5 pass" reads
+    // as an arbitrary list when it is really a ranking.
+    if(key==='pass_count'){const x=a.avg_day_1d,y=b.avg_day_1d;
+      if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1; return y-x;}
+    return 0;
   });
-  const arrow=(col)=>SECTOR_SORT.col===col?(SECTOR_SORT.dir==='desc'?' ▾':' ▴'):'';
-  const th=(col,lbl)=>`<th class="secth" onclick="setSectorSort('${col}')" title="Sort by ${lbl}">${lbl}${arrow(col)}</th>`;
+  const arrow=(col)=>SS.col===col?(SS.dir==='desc'?' ▾':' ▴'):'';
+  const th=(col,lbl,tip)=>`<th class="secth" onclick="setSectorSort('${col}')" title="${tip||('Sort by '+lbl)}">${lbl}${arrow(col)}</th>`;
   const pctTd=(v)=>`<td class="secpct" style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</td>`;
   const body=(rows||[]).map((s,i)=>`<tr data-seg="${s.segment}" onclick="${clickFn}(this.dataset.seg)" style="cursor:pointer">`+
     `<td class="secnum">${i+1}</td><td class="secname">${s.segment}</td>`+
-    pctTd(s.avg_day_1d)+pctTd(s.sector_week)+pctTd(s.sector_month)+`</tr>`).join('');
+    pctTd(s.avg_day_1d)+pctTd(s.sector_week)+pctTd(s.sector_month)+
+    (hasStar?starCell(s):'')+`</tr>`).join('');
   if(!body)return`<div class="empty" style="padding:16px;font-size:12px">No data</div>`;
+  const passTip='THEME_STAR_RULE_V1 — how many of the six green conditions this theme passes.\n'+
+    'A green star needs all six; five is a near miss, not a weak star.\n\n'+
+    STAR_LEGS.map(([,l])=>'· '+l).join('\n')+'\n\nClick to sort.';
   return`<div class="sectbl-wrap"><table class="sectbl"><thead><tr>`+
     `<th class="secnum">#</th><th class="secname" style="text-align:left">Sector</th>`+
     th('day','1D%')+th('week','1W%')+th('month','1M%')+
+    (hasStar?th('pass','PASS',_attr(passTip)):'')+
     `</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -2955,6 +3004,18 @@ function renderMaster(){
       const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">`+
         `<div class="ptitle" style="margin:0">Sectors <span class="ct">${isN?'Nifty 50':'All Futures'}${cnt?' · '+cnt+' groups':''}</span></div>`+
         `<div style="display:flex;gap:6px">${stab('futures','All Futures')}${stab('nifty50','Nifty 50')}</div></div>`;
+      // cc#1089 scope item 4 — the honest stamp. The star's six legs are NOT the same age: four run
+      // off live v8_metrics, two off the EOD GVM freeze. Printing one freshness for both would be a
+      // fabricated liveness claim, so the subtitle names each leg's age and both source dates come
+      // from the payload rather than from the clock.
+      const _ts=cache.themeSectors||{};
+      const stamp=(!isN&&_ts.star_rule)?`<div style="font-size:10px;color:var(--dim);margin:-4px 0 10px">`+
+        `★ ${_ts.star_rule}: green star = all 6 conditions pass · PASS = how many of 6. `+
+        `1D/1W/1M and 52W index are LIVE (v8_metrics ${_ts.metrics_score_date||'--'}); `+
+        `GVM and momentum are EOD-frozen as of last close (${_ts.gvm_score_date||'--'}). `+
+        `Compared against NIFTY50 from the same row set (day ${_ts.nifty&&_ts.nifty.day!=null?sign(_ts.nifty.day,2)+'%':'--'}, `+
+        `week ${_ts.nifty&&_ts.nifty.week!=null?sign(_ts.nifty.week,2)+'%':'--'}, `+
+        `month ${_ts.nifty&&_ts.nifty.month!=null?sign(_ts.nifty.month,2)+'%':'--'}).</div>`:'';
       let tbl;
       if(isN){
         tbl=niftyReady?sectorTable(cache.nifty50.sectors,'openNifty50Detail')
@@ -2966,7 +3027,7 @@ function renderMaster(){
         // so the section is never empty; the toggle table takes over the moment it arrives.
         tbl=`<div class="funnelGrid"><div>${sectorCards(top8,'Top Sectors','1D positive')}</div><div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div></div>`;
       }
-      return`<div style="margin-top:16px">${header}${tbl}</div>`;
+      return`<div style="margin-top:16px">${header}${stamp}${tbl}</div>`;
     })();
 }
 
