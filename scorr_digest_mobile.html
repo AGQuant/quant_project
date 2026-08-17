@@ -32,9 +32,18 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
 .grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
 .tile{background:var(--hi);border:1px solid var(--edge);padding:8px 9px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
-.tile .lb{font-size:9px;letter-spacing:1px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:12.5px;margin-top:3px}
-.tile .wk{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);margin-top:2px}
+/* APP_QA_R5 P5 · ref design_refs/scorr_digest_mobile_R2.html @ c77cae9.
+   9.5px is the FLOOR — the tile label and the wk line were at 9px, which is the drift R2 names. */
+.tile .lb{font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:14px;margin-top:3px}
+.tile .wk{font-family:'JetBrains Mono';font-weight:700;font-size:12px;color:var(--muted);margin-top:1px}
+/* the DAY|WEEK switch — ref .gsw/.ghd, 52x30 chips, in-memory state, default DAY */
+.ghd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.gsw{display:flex;gap:3px;background:var(--hi);border:1px solid var(--edge);padding:2px;
+ clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.gsw button{min-width:52px;min-height:30px;border:0;background:transparent;cursor:pointer;
+ font-family:'JetBrains Mono';font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted)}
+.gsw button.on{background:var(--panel);color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .mrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge);font-size:12.5px}
 .mrow:first-of-type{border-top:none}
 .sdot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -75,12 +84,27 @@ const cx=n=>n>=0?'var(--volt)':'var(--heat)';
 const senti=s=>{const t=String(s||'').toLowerCase();
   return /bull|posi/.test(t)?'var(--volt)':/bear|nega/.test(t)?'var(--heat)':/caut/.test(t)?'var(--amber)':'var(--muted)';};
 
+/* APP_QA_R5 P5 · in-memory only, per the ref: the choice lasts the visit and is deliberately
+   NOT persisted — the digest is a morning read, and a stale WEEK selection from yesterday would
+   silently change what the founder thinks he is looking at. Default DAY. */
+var TAPE_MODE='day';
 function tile(t){
   const d=t.day_chg_pct!=null?Number(t.day_chg_pct):null;
+  /* week comes from the PAYLOAD (global_heatstrip computes close vs close 5 of the symbol's OWN
+     sessions back and nulls under 6 sessions) — never recomputed here, never defaulted to 0. */
   const w=t.week_chg_pct!=null?Number(t.week_chg_pct):(t.wk_chg_pct!=null?Number(t.wk_chg_pct):null);
+  const v=TAPE_MODE==='week'?w:d;
   return `<div class="tile"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
-    <div class="vv" style="color:${d!=null?cx(d):'var(--muted)'}">${d!=null?sgn(d)+'%':'—'}</div>
-    <div class="wk">${w!=null?'wk '+sgn(w)+'%':''}</div></div>`;
+    <div class="vv" style="color:${v!=null?cx(v):'var(--muted)'}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
+}
+/* re-renders the grid IN PLACE: same cells, same order, only the % swaps (ref). */
+function setTapeMode(m){
+  if(m===TAPE_MODE)return;
+  TAPE_MODE=m;
+  var g=document.getElementById('gtiles');
+  if(g&&window.__TILES)g.innerHTML=window.__TILES.map(tile).join('');
+  var bs=document.querySelectorAll('#gsw button');
+  for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-v')===m);
 }
 function ladder(ix){
   const rungs=ix.rungs||[];
@@ -117,6 +141,7 @@ async function boot(){
   const st=document.getElementById('dd-state'); st.textContent=(d.market&&d.market.label)||'—';
 
   const tiles=(S.global_tape&&S.global_tape.tiles)||[];
+  window.__TILES=tiles;   /* APP_QA_R5 P5: kept so the switch re-renders without a refetch */
   const eodNote=S.global_tape&&S.global_tape.eod_note;
   const lad=(S.ladders&&S.ladders.indexes)||[];
   const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
@@ -130,7 +155,7 @@ async function boot(){
   const engRows=eng.length?eng.map(r=>{
     const pn=r.net_pnl==null?null:Number(r.net_pnl);
     return `<div class="mrow"><b>${esc(r.symbol)}</b>
-      <span class="chip ${pn!=null&&pn>=0?'w':'l'}" style="font-size:9px;padding:1px 6px">${esc((r.reason||'EXIT').toUpperCase())}</span>
+      <span class="chip ${pn!=null&&pn>=0?'w':'l'}" style="font-size:9.5px;padding:1px 6px">${esc((r.reason||'EXIT').toUpperCase())}</span>
       <span style="flex:1"></span>
       <span class="num" style="color:${pn!=null?cx(pn):'var(--muted)'}">${r.points!=null?sgn(Number(r.points),0)+' pts · ':''}${pn!=null?'₹'+num(pn):'—'}</span></div>`;}).join('')
     :'<div class="unavail">No V10 exits in the last session.</div>';
@@ -139,7 +164,7 @@ async function boot(){
     const cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':c.read==='PENDING'?'n':'';
     return `<div class="mrow"><b>${esc(c.ticker)}</b>
       <span style="flex:1;font-size:11.5px;color:var(--muted)">${esc(c.headline||c.pending_reason||'')}</span>
-      <span class="chip ${cls}" style="font-size:9px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
+      <span class="chip ${cls}" style="font-size:9.5px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
     ||'<div class="unavail">No reporters yesterday.</div>';
 
   const newsRows=items=>items.slice(0,4).map(n=>
@@ -156,9 +181,11 @@ async function boot(){
 
   <div class="eyebrow">GLOBAL TAPE${S.global_tape&&S.global_tape.tier?' · '+esc(S.global_tape.tier):''}</div>
   <div class="card">
-    ${tiles.length?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
+    <div class="ghd"><span style="font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted)">CHANGE</span>
+      <div class="gsw" id="gsw"><button type="button" data-v="day" class="on" onclick="setTapeMode('day')">DAY</button><button type="button" data-v="week" onclick="setTapeMode('week')">WEEK</button></div></div>
+    ${tiles.length?`<div id="gtiles" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
     ${eodNote?`<div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">${esc(eodNote)}</div>`:''}
-    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · wk = 5-session change where the feed carries it</div>
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · WEEK = close vs close 5 sessions back, from the payload · no history shows an em-dash, never 0</div>
   </div>
 
   <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
