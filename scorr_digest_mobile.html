@@ -4,6 +4,9 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DAILY DIGEST</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- APP_QA_R4 P4: same two shared assets P3 links — one theme layer, one shell, no copies. -->
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
 <style>
 /* DAILY DIGEST — implements design_refs/scorr_digest_mobile_R1.html (b8949f6), R5.1 tokens */
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
@@ -42,12 +45,20 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
 </style>
 </head>
-<body>
+<body data-theme="dark" class="as-shell">
+<!-- APP_QA_R4 P4: stored theme applied as the first statement inside <body>, before paint. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t==='dark'||t==='goldday'||t==='goldnight'){document.body.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <div class="phone">
-<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
-  <div><span class="skew" style="font-size:24px">DAILY DIGEST</span>
-    <div id="dd-date" style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">the morning read</div></div>
-  <span id="dd-state" class="chip n">—</span>
+<!-- APP_QA_R4 P4 · SHELL VARIANT A (tool page), ref design_refs/scorr_appshell_R1.html @ a20ae0d.
+     #dd-date and #dd-state move into the shell's slot with their ids intact — the page still
+     fills them, the shell only defines where they sit (ref rule 6). Nothing below this header
+     changed and no loader was touched (rule 5). -->
+<div class="as-hdr">
+  <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
+  <div class="as-pg"><span class="t">Daily Digest</span>
+    <div class="s" id="dd-date">THE MORNING READ</div></div>
+  <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
 </div>
 <div id="app"><div class="card"><div class="unavail">Building the read…</div></div></div>
 <div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
@@ -202,5 +213,14 @@ async function boot(){
 }
 boot();
 </script>
+
+<!-- APP_QA_R4 P4 · 5-slot nav, variant A: nothing highlighted — /m/digest is a tool page. -->
+<nav class="as-nav">
+  <a class="as-bn" href="/m/home"><span>&#9703;</span>Home</a>
+  <a class="as-bn" href="/m/gvm"><span>&#9672;</span>GVM</a>
+  <a class="as-bn" href="/m/check"><span>&#9678;</span>Check</a>
+  <a class="as-bn" href="/m/intel"><span>&#9636;</span>Intel</a>
+  <a class="as-bn" href="/m/models"><span>&#9677;</span>Models</a>
+</nav>
 </body>
 </html>
