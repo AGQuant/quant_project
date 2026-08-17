@@ -3,14 +3,13 @@
 
 ## Summary
 
-**Nine of ten pushes landed. P8 failed its verify and stopped the 2-Pager chain, as §C P8 instructs.**
+**All ten pushes landed.** P8 failed on its first attempt, stopped the chain as §C P8 instructs,
+and was rebuilt against `design_refs/scorr_gvm_2pager_R2.html` after Fable's Option A ruling. The
+sheet now lands on exactly two A4 pages for every ladder shape in the database.
 
-The sheet is correct, reproduces the ref number for number, and lands on exactly two A4 pages —
-**for symbols in segments of fourteen peers or fewer.** BHARATSE sits in a thirteen-name segment,
-one row under the cliff. 1,026 of the 1,791 scored symbols do not, and for those the route
-currently renders three sheets. Detail in §P8. Nothing was shrunk to force a fit.
-
-P9 shipped anyway, per §G ("P9 is independent of the 2-Pager chain").
+The original failure is kept in full below rather than edited out — the measurement is the reason
+the ruling exists, and a results file that quietly reads as though P8 passed first time would lose
+the one finding that mattered most in this sprint.
 
 | Push | SHA | Files | Verify | Notes |
 |---|---|---|---|---|
@@ -21,8 +20,8 @@ P9 shipped anyway, per §G ("P9 is independent of the 2-Pager chain").
 | P5 | `24a5a49` | `gvm_twopager.py`, `test_twopager_empty_states.py` | Both empty states rendered | Case 2 forced; 0 of 1,791 hit it live |
 | P6 | `24a5a49` | `gvm_twopager.py` | `display:flex` screen / `none` print | Print CSS kept OUT of `REF_CSS` |
 | P7 | `24a5a49` | `scorr_cio_dashboard.html` | Button reads `2 Pager`, opens new tab | `window.print()` gone from the file |
-| P8 | — | — | **FAILED — 3 pages on 57% of symbols** | **Chain stopped. No fix applied.** |
-| P9 | `9b51ae9` | `scheduler_master.py`, `test_scheduler_multislot.py` | 6 multi-slot rows parse fully | Card's premise corrected — see §P9 |
+| P8 | `237e2a1` | `gvm_twopager.py`, `test_twopager_css_parity.py` | Six symbols, all 2 sheets | Failed first, rebuilt to R2 — see §P8 |
+| P9 | `9b51ae9` `4083a68` `c9d266a` | `scheduler_master.py`, `test_scheduler_multislot.py` | 6 multi-slot rows parse fully | Card's premise corrected — see §P9 |
 | P10 | this file | `reports/APP_QA_R6_RESULTS.md` | — | — |
 
 ---
@@ -216,6 +215,48 @@ silently, and P9/P10 were not written as though P8 passed.
 
 The window size is a product decision, not CC's.
 
+### P8 REBUILT — passed, against R2
+
+Fable's ruling: **Option A, twelve visible rows, not fourteen.** His correction, quoted because it
+is the load-bearing part: the ref was tuned to land two pages *for one symbol*, and that was called
+a property of the format. Fourteen rows leave 28px of 1039px, which one two-line company name eats.
+Twelve leaves real headroom. **A format verified on a single instance is not verified.**
+
+Built to `design_refs/scorr_gvm_2pager_R2.html` @ `f3e9a95`. R1 stays in the repo as history;
+`REF_CSS` stays byte-identical to it. R2 is a ladder-only fragment contributing exactly two rules
+(`.winlbl`, `tr.gap td`), extracted from its style block and served in their own tag. The parity
+test now checks **both** refs and asserts R2's rules did not bleed into `REF_CSS`.
+
+Rules implemented: twelve data rows; **rank 1 always kept** (a window centred on the subject can
+drop the segment leader, and "second of thirteen" means nothing without knowing who is first);
+where the window already reaches rank 1 it is simply the top twelve, contiguous; **every omitted
+range prints a visible gap row** naming how many peers and which ranks are missing; the denominator
+is always on the sheet.
+
+| Symbol | Segment | N | Self | Page-1 | Sheets | Window |
+|---|---|---|---|---|---|---|
+| BHARATSE | Auto - Body & Stampings | 13 | 2 | 1011px | **2** | ranks 1–12 |
+| NETWEB | IT - Small | 33 | 1 | 995px | **2** | ranks 1–12 |
+| HGS | IT - Small | 33 | 33 | 995px | **2** | rank 1 and ranks 23–33 |
+| AHLWEST | Hotels - Small | 19 | 1 | 977px | **2** | ranks 1–12 |
+| JAIBALAJI | Steel - Mid & Small | 26 | 21 | 977px | **2** | rank 1 and ranks 16–26 |
+| MAANALU | Aluminium & Non Ferrous | 15 | 15 | 977px | **2** | rank 1 and ranks 5–15 |
+
+Twelve data rows each, subject always present, rank 1 always present, gap rows accounting for every
+omitted rank exactly once — asserted across eleven ladder shapes, not only the six rendered.
+
+**A second bug this rebuild caught, in P3's own work.** The segment-family query matched `fam` and
+`fam - %` only, so it returned **four** Auto segments where the ref shows five: the fifth is
+`Auto OEM`, which carries no dash. P3's verification missed it because the harness fed a hardcoded
+five-row family instead of running the query. Fixed by also matching `fam %`.
+
+**Residual, measured and stated rather than left to be discovered.** The ladder is capped but page 1
+still has a variable block: the segment-family table runs 1 to 6 rows (Pharma and Engineering are
+the sixes). At 6 siblings plus a windowed ladder with two gap rows the worst case measures
+**1014px — 25px of headroom**, not the ~59px the twelve-row cap was expected to buy. It holds on
+every shape in the database today. If more margin is wanted, capping the family table is the next
+lever; that is a design call, so it is reported, not taken.
+
 ---
 
 ## P9 — the helper already existed; the parser did not
@@ -255,32 +296,85 @@ column.
 **Scope correction:** the card says "24 other jobs sit on the same exact-minute gates". The real
 number is **50** active exact-minute `scheduler_loop` jobs.
 
-**Verification deferred to 18-Aug**, per the card's own instruction.
+**Verified LIVE the same afternoon, not deferred to 18-Aug** — because fixing the parser exposed two
+deeper faults, and all three are now proven on real data:
 
-### Two things P9 could not close
+- **15:00:12 IST** — `ops_log` `SCHEDULER_CATCHUP`: `{"fired":["bg_protocol_one","bg_ca_daily_note"],"examined":88}`.
+  The catch-up sweep's **first successful dispatch in the fourteen days since it was built.**
+- **15:00:14 IST** — `CA_DAILY_NOTE` written with live content ("1 upcoming ex-date · 0 restated
+  overnight · 0 genuine-crash flags", KIRLPNU face-value split ex-date 18-Aug). That is cc#1078's
+  backfill, produced by the mechanism rather than by hand, and **honestly late** — 15:00, not 09:00,
+  with `ops_log` and `last_run_at` both carrying the true time.
+- **15:40:00 IST** — `session_log` id **24585**, `category='protocol_one'`. cc#1079's first-run
+  evidence, written by the scheduler on its own gate.
 
-- **Why `bg_ca_daily_note` missed 09:00 today is still unproven, and is not guessed at here.** Its
-  registry row is correct (active, `scheduler_loop`, `h == 9 and m == 0`, `last_run_at` 16-Aug 09:00
-  IST). Replaying the sweep's exact conditions against that row at today's clock evaluates to
-  **would-fire on every one of them**. And there is **not one `SCHEDULER_CATCHUP` row in `ops_log` in
-  the last three days**. So the sweep is either not reaching its body on the deployed build or is
-  failing inside it and being swallowed by its own outer `except`. Confirming which needs the Railway
-  scheduler log. **This deserves its own card — a catch-up sweep that has never once fired is not a
-  safety net.**
-- **The backfill run was not executed.** Egress to `scorr.in` is blocked from the CC session at the
-  proxy (403 on CONNECT) and `ca_watchdog` is not reachable through any available MCP tool. **No
-  `session_log` row was written claiming a note that was never generated.** Two clean closes: hit the
-  `ca_daily_note` endpoint once, or — if the sweep is in fact alive — the parser fix should let it
-  catch up on its own, visible as `scheduler_master.last_run_at` moving to today.
+### Why it took three fixes, and the doctrine that came out of it
 
+**part_2 (`4083a68`) — the sweep could not fail visibly.** It wrapped its body in
+`except Exception → log → return None`, and `_run_recorded` stamps `last_status='ok'` on any normal
+return. So "ok" never meant the body ran; it meant the function returned, which it does even when it
+dies on its first statement. Three days of "ok" with an empty `ops_log` is exactly what a totally
+dead sweep produces. A failure now writes its own `SCHEDULER_CATCHUP_ERROR` row with the traceback.
+
+**part_3 (`c9d266a`) — the sweep had never fired once.** Ten minutes after part_2 shipped, it said so:
+
+```
+File "/app/scheduler.py", line 175, in _bg_catchup_sweep
+    _spawn(fn)
+File "/app/scheduler.py", line 89, in _spawn
+    loop = asyncio.get_running_loop()
+RuntimeError: no running event loop        examined: 88
+```
+
+`asyncio.get_running_loop()` only answers on the event-loop thread. The sweep is dispatched **into**
+the pool, so it runs on a worker thread and raised on the first job it wanted to fire. It read all 88
+rows, evaluated every gate correctly, and fell over at dispatch — every time, since 03-Aug. **The
+answer to "how many jobs was it capable of dispatching" is zero.** Fixed by submitting straight to
+the same `_EXECUTOR` through the same `_run_recorded` wrapper when there is no loop.
+
+**cc#1079 (`73ee656`) — protocol_one crashed the same silent way.** Its clock is naive IST, but
+`scheduler_master.last_run_at` is `timestamptz`, so comparing an aware `last_run` to the naive
+due-slot raised `TypeError` on the first row — swallowed, stamped ok. A quieter twin was fixed
+alongside: `raw_news.fetched_at` is also `timestamptz`, and a naive bound against it slid the
+six-hour news window by the IST offset.
+
+**SWALLOWED_EXCEPTION_RULE_V1** (Fable, session_log): no scheduler job, sweep or reporter may wrap
+its whole body in `except Exception → log → return None`. A body-level failure must re-raise into
+`_run_recorded` so `last_status` carries `error`, or write its own loud alert row. `ok` must mean the
+body completed its work, never merely that the function returned. **Three components were dead while
+reporting healthy today, all by the same construction.**
+
+### Two findings the sentinel surfaced on its first run — reported, not fixed
+
+Both were checked before assuming, per Fable's instruction, and **neither is a calendar defect**:
+
+- **`bg_v8_eod` expected slot printed as 16-Aug 15:45, a Saturday.** The expectation calendar is
+  gate-aware; this cadence has no gate to be aware of. It is registered as `h == 15 and m == 45` with
+  **no weekday and no trading-day gate**, so an EOD engine job legitimately resolves to Saturday and
+  will read late every Monday. The defect is in the registration, not the reader.
+- **`bg_heal_intraday` three days stale.** Not stale. Its cadence is weekday-gated, Friday was its
+  last trading slot, and it ran normally today at 15:43 IST. It read late only because the report
+  executed at 15:40:00.4 — the same minute the job was due, before it had finished. A job inside its
+  own due minute should arguably not be called late; that is a third, smaller finding.
+
+### The one thing P9 could not do by hand
+
+The backfill note was never executed manually, and did not need to be. Egress to `scorr.in` is
+blocked from the CC session at the proxy (403 on CONNECT) and `ca_watchdog` is not reachable through
+any available MCP tool, so **no `session_log` row was written claiming a note that was never
+generated.** Once `c9d266a` restored the sweep, the mechanism produced the note itself at 15:00 —
+which is the better outcome, because it proves the recovery path rather than papering over it.
 ---
 
 ## Absorbed cards
 
-- **cc#1084** — P1–P8. **Not closeable:** P8 failed and the chain stopped.
-- **cc#1078** — absorbed as P9. Closed against `9b51ae9`.
-- **cc#1079** — verification-only (§F). Its 15:40 slot had not fired at the time of writing
-  (14:33 IST). Closes on the `session_log` row where `category='protocol_one'`, not before.
+- **cc#1084** — P1–P8. Closeable now that P8 passes against R2.
+- **cc#1078** — absorbed as P9. Closed against `9b51ae9`, with the backfill produced by the restored
+  sweep at 15:00 rather than by hand.
+- **cc#1079** — closed on `session_log` id **24585**, written on its own 15:40 slot with six-domain
+  content. ENGINE_LIVENESS_RULE satisfied by the row, not by the registration.
+- **cc#1091** — opened by Fable off this work and closed the same afternoon: the catch-up sweep had
+  dispatched zero jobs in fourteen days.
 
 ## Environment note
 
@@ -288,3 +382,10 @@ Live-URL verification was not possible from this session: the network proxy bloc
 `scorr.in` (403 on CONNECT), so every check above is either a DB read through the Scorr MCP server,
 execution of the shipped code against live rows, or a Chromium render of the served HTML. §H's live
 render of the route remains Fable's step.
+
+One consequence worth recording. For roughly ninety minutes, eight commits sat code-complete on
+`claude/status-1017-32m92b` while `origin/main` did not contain them, so every "pushed" line written
+in that window meant pushed-to-branch, not deployed. The working copy was on the feature branch when
+this session resumed after a context compaction — no `git checkout` was run by CC, and the branch is
+the one this session's operating instructions designate — so the most likely cause is the environment
+placing the working copy there on resume. It is stated as the likely cause, not a proven one.
