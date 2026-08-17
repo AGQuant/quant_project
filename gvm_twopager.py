@@ -30,6 +30,7 @@ wrong column and quietly introduce the bug.
 import logging
 import os
 from datetime import datetime, timedelta
+from string import Template as _Tmpl
 
 import psycopg
 from fastapi import APIRouter, HTTPException
@@ -134,123 +135,82 @@ ul { margin:3px 0 7px; padding-left:14px; } li { margin:2px 0; }
 .foot { font-size:6.5pt; margin-top:5px; color:#8B95A1; border-top:1px solid #DDE2E8; padding-top:3px; }
 """
 
-PAGE_BODY = r"""
-
+PAGE1_TMPL = _Tmpl(r"""
 <!-- ================= PAGE 1 ================= -->
 <div class="page">
 <div class="masthead">
-  <div class="mast-l">QUANT RESEARCH NOTE &nbsp;·&nbsp; PAGE 1 OF 2 &nbsp;·&nbsp; QUANT ANALYTICS</div>
-  <div class="mast-r">17 AUG 2026 &nbsp;·&nbsp; DATA AS OF 16 AUG 2026</div>
+  <div class="mast-l">QUANT RESEARCH NOTE &nbsp;&middot;&nbsp; PAGE 1 OF 2 &nbsp;&middot;&nbsp; QUANT ANALYTICS</div>
+  <div class="mast-r">${printed_on} &nbsp;&middot;&nbsp; DATA AS OF ${score_date}</div>
 </div>
 
-<h1>Bharat Seats Ltd</h1>
-<div class="sub">BHARATSE &nbsp;·&nbsp; NSE / BSE &nbsp;·&nbsp; Auto — Body &amp; Stampings &nbsp;·&nbsp; Micro cap &nbsp;·&nbsp; Mcap rank 1396</div>
+<h1>${company_name}</h1>
+<div class="sub">${symbol} &nbsp;&middot;&nbsp; NSE / BSE &nbsp;&middot;&nbsp; ${segment} &nbsp;&middot;&nbsp; ${cap_category} &nbsp;&middot;&nbsp; Mcap rank ${mcap_rank}</div>
 
 <div class="hero">
   <div class="cell rate">
     <div class="k">Overall Rating</div>
-    <div class="v">7.28 <span class="tag">GOOD</span></div>
+    <div class="v">${gvm} <span class="tag">${verdict}</span></div>
   </div>
   <div class="cell">
-    <div class="k">CMP</div>
-    <div class="v">₹248.05</div>
+    <div class="k">${price_label}</div>
+    <div class="v">${price}</div>
   </div>
   <div class="cell">
     <div class="k">Market Cap</div>
-    <div class="v">₹1,558<small> Cr</small></div>
+    <div class="v">${market_cap}</div>
   </div>
   <div class="cell">
-    <div class="k">P/E · TTM</div>
-    <div class="v">33.0<small>x</small></div>
+    <div class="k">P/E &middot; TTM</div>
+    <div class="v">${pe}</div>
   </div>
   <div class="cell">
     <div class="k">1-Year Return</div>
-    <div class="v g" style="color:#1F7A4D">+111%</div>
+    <div class="v">${ret_1y}</div>
   </div>
 </div>
 
 <div class="pillars">
-  <div class="pil"><div class="n">Growth</div><div class="s">7.14</div><div class="l">Healthy — top of segment on every growth window</div><div class="bar"><i style="width:71%"></i></div></div>
-  <div class="pil"><div class="n">Value</div><div class="s">6.25</div><div class="l">Fair — P/E above segment and above own history</div><div class="bar"><i style="width:63%"></i></div></div>
-  <div class="pil"><div class="n">Momentum</div><div class="s">8.44</div><div class="l">Strong — 2nd best in segment on relative strength</div><div class="bar"><i style="width:84%"></i></div></div>
+${pillars}
 </div>
 
-<div class="punch">Buy for a medium to long term view — healthy growth, fair valuation and strong momentum, on a good overall rating.</div>
+<div class="punch">${punchline}</div>
 
-<h2>Parameter detail — company vs segment peers</h2>
+<h2>Parameter detail &mdash; company vs segment peers</h2>
 <table>
 <tr><th class="l" style="width:38%">Parameter</th><th>Company</th><th>Segment median</th><th>Gap</th><th style="width:12%">Rating</th></tr>
-
-<tr class="grp"><td class="l" colspan="5">Growth &amp; quality</td></tr>
-<tr><td class="l">Sales growth — 5 year</td><td>28.9%</td><td>15.9%</td><td class="g">+13.0</td><td class="g">10.0</td></tr>
-<tr><td class="l">Sales growth — 3 year</td><td>22.9%</td><td>8.2%</td><td class="g">+14.7</td><td class="g">10.0</td></tr>
-<tr><td class="l">Profit growth — 5 year</td><td>56.7%</td><td>32.9%</td><td class="g">+23.7</td><td class="g">10.0</td></tr>
-<tr><td class="l">Profit growth — 3 year</td><td>26.2%</td><td>21.6%</td><td class="g">+4.6</td><td class="g">8.8</td></tr>
-<tr><td class="l">Sales growth — latest quarter YoY</td><td>35.3%</td><td>25.2%</td><td class="g">+10.1</td><td class="g">10.0</td></tr>
-<tr><td class="l">Profit growth — latest quarter YoY</td><td>43.9%</td><td>35.2%</td><td class="g">+8.7</td><td class="g">8.8</td></tr>
-<tr><td class="l">Return on capital employed</td><td>20.2%</td><td>14.8%</td><td class="g">+5.4</td><td class="g">10.0</td></tr>
-<tr><td class="l">Interest coverage</td><td>7.5x</td><td>4.1x</td><td class="g">+3.4</td><td class="g">8.8</td></tr>
-<tr><td class="l">Operating margin</td><td>5.03%</td><td>10.29%</td><td class="r">−5.26</td><td class="a">5.0</td></tr>
-
-<tr class="grp"><td class="l" colspan="5">Valuation &amp; ownership</td></tr>
-<tr><td class="l">P/E (TTM)</td><td>32.96x</td><td>24.27x</td><td class="r">+8.7</td><td class="r">2.5</td></tr>
-<tr><td class="l">Dividend yield</td><td>0.60%</td><td>0.36%</td><td class="g">+0.24</td><td class="g">7.5</td></tr>
-<tr><td class="l">Institutional holding</td><td>0.37%</td><td>2.19%</td><td class="r">−1.82</td><td class="r">2.5</td></tr>
-<tr><td class="l">Institutional holding — QoQ change</td><td>+0.01</td><td>+0.02</td><td class="muted">−0.01</td><td class="a">3.8</td></tr>
-
-<tr class="grp"><td class="l" colspan="5">Momentum</td></tr>
-<tr><td class="l">Return — 1 year</td><td>+111.5%</td><td>+45.4%</td><td class="g">+66.1</td><td class="g">10.0</td></tr>
-<tr><td class="l">52-week return vs index</td><td>+104.6%</td><td>+51.0%</td><td class="g">+53.6</td><td class="g">10.0</td></tr>
+${param_rows}
 </table>
-<div class="note">Peer figure is the median of the 13 rated companies in the segment; ratings are peer-benchmarked 0–10. P/E of 33.0x against its own 10-year average of 18.9x is the single weakest input.</div>
+<div class="note">${param_note}</div>
 
 <div class="two">
 <div>
 <h2>Price position</h2>
 <table>
-<tr><td class="l">52-week high</td><td>₹263.18</td></tr>
-<tr><td class="l">52-week low</td><td>₹121.51</td></tr>
-<tr><td class="l">Distance from 52w high</td><td class="a">−5.7%</td></tr>
-<tr><td class="l">Avg daily volume · 30d</td><td>4.80 lakh</td></tr>
+${price_rows}
 </table>
-<div class="note">Trading in the top decile of its own 52-week range. Momentum is earned, not extrapolated — but entry at 5.7% off the high carries no cushion.</div>
+<div class="note">${price_note}</div>
 </div>
 <div>
 <h2>Where the segment sits</h2>
 <table>
-<tr><th class="l">Auto segment</th><th>Cos</th><th>Median rating</th></tr>
-<tr><td class="l">Auto — Wiring &amp; Electricals</td><td>14</td><td>7.02</td></tr>
-<tr class="me"><td class="l">Auto — Body &amp; Stampings</td><td>13</td><td>6.56</td></tr>
-<tr><td class="l">Auto — Drivetrain &amp; Precision</td><td>18</td><td>6.47</td></tr>
-<tr><td class="l">Auto — Engines &amp; Thermal</td><td>23</td><td>6.40</td></tr>
-<tr><td class="l">Auto OEM</td><td>20</td><td>6.37</td></tr>
+<tr><th class="l">${family} segment</th><th>Cos</th><th>Avg rating</th></tr>
+${family_rows}
 </table>
-<div class="note">Body &amp; Stampings ranks 2nd of the five auto segments. The band is narrow — read it as an ordering of preference, not a quality gap.</div>
+<div class="note">${family_note}</div>
 </div>
 </div>
 
-<h2>Segment ladder — Auto · Body &amp; Stampings</h2>
+<h2>Segment ladder &mdash; ${segment}</h2>
 <table>
-<tr><th style="width:6%">#</th><th class="l" style="width:34%">Company</th><th>Mcap (₹ Cr)</th><th>CMP (₹)</th><th>Growth</th><th>Value</th><th>Momentum</th><th>Rating</th><th class="l" style="width:11%">Verdict</th></tr>
-<tr><td>1</td><td class="l">Minda Corporation</td><td>17,215</td><td>720.05</td><td>7.23</td><td>6.25</td><td>9.06</td><td>7.51</td><td class="l g">Good</td></tr>
-<tr class="me"><td>2</td><td class="l">Bharat Seats</td><td>1,558</td><td>248.05</td><td>7.14</td><td>6.25</td><td>8.44</td><td>7.28</td><td class="l g">Good</td></tr>
-<tr><td>3</td><td class="l">Munjal Auto Industries</td><td>1,205</td><td>120.53</td><td>5.54</td><td>6.25</td><td>10.00</td><td>7.26</td><td class="l g">Good</td></tr>
-<tr><td>4</td><td class="l">Talbros Automotive</td><td>2,590</td><td>419.50</td><td>7.41</td><td>5.62</td><td>8.28</td><td>7.10</td><td class="l g">Good</td></tr>
-<tr><td>5</td><td class="l">Steel Strips Wheels</td><td>4,921</td><td>312.90</td><td>6.61</td><td>5.62</td><td>8.91</td><td>7.05</td><td class="l g">Good</td></tr>
-<tr><td>6</td><td class="l">Belrise Industries</td><td>24,696</td><td>255.35</td><td>6.79</td><td>5.62</td><td>8.44</td><td>6.95</td><td class="l a">Average</td></tr>
-<tr><td>7</td><td class="l">Wheels India</td><td>3,508</td><td>1,435.60</td><td>6.70</td><td>6.88</td><td>6.88</td><td>6.82</td><td class="l a">Average</td></tr>
-<tr><td>8</td><td class="l">Munjal Showa</td><td>553</td><td>138.21</td><td>5.18</td><td>7.50</td><td>7.50</td><td>6.73</td><td class="l a">Average</td></tr>
-<tr><td>9</td><td class="l">Jay Bharat Maruti</td><td>1,384</td><td>127.86</td><td>5.54</td><td>7.50</td><td>5.94</td><td>6.33</td><td class="l a">Average</td></tr>
-<tr><td>10</td><td class="l">Automotive Stampings</td><td>792</td><td>499.10</td><td>6.34</td><td>6.25</td><td>4.69</td><td>5.76</td><td class="l r">Weak</td></tr>
-<tr><td>11</td><td class="l">Alicon Castalloy</td><td>1,181</td><td>719.60</td><td>5.62</td><td>6.25</td><td>5.00</td><td>5.62</td><td class="l r">Weak</td></tr>
-<tr><td>12</td><td class="l">Harsha Engineers Intl.</td><td>3,753</td><td>412.25</td><td>6.07</td><td>6.25</td><td>4.22</td><td>5.51</td><td class="l r">Weak</td></tr>
-<tr><td>13</td><td class="l">JBM Auto</td><td>14,732</td><td>622.95</td><td>6.61</td><td>6.25</td><td>3.28</td><td>5.38</td><td class="l r">Weak</td></tr>
+<tr><th style="width:6%">#</th><th class="l" style="width:34%">Company</th><th>Mcap (&#8377; Cr)</th><th>CMP (&#8377;)</th><th>Growth</th><th>Value</th><th>Momentum</th><th>Rating</th><th class="l" style="width:11%">Verdict</th></tr>
+${ladder_rows}
 </table>
-<div class="note">Second of thirteen, and the only top-three name with growth above 7 and momentum above 8 — Munjal Auto's rank rests almost entirely on momentum. What separates this ladder is momentum, not growth: growth spans 5.2–7.4, momentum spans 3.3–10.0. Data as of 16 Aug 2026 · research only, not investment advice.</div>
+<div class="note">${ladder_note}</div>
 
 </div>
+""")
 
-<!-- ================= PAGE 2 ================= -->
+PAGE2_TMPL = r"""<!-- ================= PAGE 2 ================= -->
 <div class="page">
 <div class="masthead">
   <div class="mast-l">QUANT RESEARCH NOTE &nbsp;·&nbsp; PAGE 2 OF 2 &nbsp;·&nbsp; COMPANY BACKGROUND</div>
@@ -341,6 +301,7 @@ PAGE_BODY = r"""
 """
 
 
+
 def render_page(title: str, body_html: str) -> str:
     """The full document: ref CSS + ref markup. One place assembles the sheet, so nothing can
     serve the template with a different head than the one the parity test checks."""
@@ -357,10 +318,344 @@ _NOT_FOUND = (
 )
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# R6-P3 · PAGE 1 BINDING
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# EVERY NUMBER ON PAGE 1 COMES FROM THE EXISTING BUILDER, called in-process. gvm_company_report()
+# is imported and invoked directly rather than fetched over HTTP: the sheet and the /cio2 card
+# must be one computation consumed twice, and an HTTP hop to ourselves would only add a way for
+# the two to disagree. Nothing here re-implements any scoring.
+#
+# TWO PLACES THIS BINDING DELIBERATELY DEPARTS FROM THE REF, both because the ref's static copy
+# says something the data does not support. Both are logged to the room, neither is silent:
+#
+#   1. THE LADDER'S MARKET CAP COLUMN. report §E warns that gvm_scores.market_cap is stale and
+#      says nothing user-facing is wrong today because the live page reads screener_raw. That is
+#      true of the HEADER only. `ladder[].market_cap` in the /api/gvm/company payload is built
+#      from gvm_scores (gvm_page_extras.py step 9), so the live card already prints BHARATSE at
+#      1,157 Cr in its own ladder while its header reads 1,558 Cr — the same company, the same
+#      page, two numbers. The ref's ladder prints 1,558 and its peer mcaps reconcile to
+#      screener_raw exactly (BELRISE 24,696 · MINDACORP 17,215 · SSWL 4,921), so the ref is
+#      screener-based and the payload's ladder column is the stale one. This module therefore
+#      re-reads mcap for the ladder symbols from screener_raw and never touches the payload's
+#      column. Fixing the GVM page itself is out of scope (§D: payload shape is read-only).
+#
+#   2. "MEDIAN RATING" IN THE SEGMENT-FAMILY TABLE. The card's prose says median gvm_score; the
+#      ref's numbers are the simple AVERAGE (7.02 / 6.56 / 6.47 / 6.40 / 6.37 reproduce exactly
+#      as AVG, while the medians are 7.19 / 6.82 / 6.95 / 6.41 / 6.43 and reorder the table).
+#      The ref is the binding artefact, so the average is what is computed — and the column
+#      header is relabelled "Avg rating" rather than left saying median over a mean.
+#
+# PROSE. The ref's <div class="note"> lines are company-specific commentary written by hand for
+# BHARATSE. Reproducing that sentence structure for an arbitrary symbol would invent readings the
+# data does not carry, which is precisely what P5 forbids. So the notes are rebuilt from the
+# numbers alone: each states what the figures are, and stops. A shorter, true note beats a
+# fluent, invented one.
+
+def _f(v):
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _esc(s) -> str:
+    return ("" if s is None else str(s)).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _seg_disp(seg) -> str:
+    """The ref types segment names with an em dash; the DB stores ' - '. Typography only."""
+    return _esc(seg).replace(" - ", " &mdash; ") if seg else "&mdash;"
+
+
+def _num(v, nd=2, suffix="", plus=False):
+    v = _f(v)
+    if v is None:
+        return "&mdash;"
+    s = ("%+.*f" if plus else "%.*f") % (nd, v)
+    return s + suffix
+
+
+def _inr_cr(v):
+    v = _f(v)
+    return "&mdash;" if v is None else "&#8377;%s<small> Cr</small>" % format(int(round(v)), ",d")
+
+
+def _rating_cls(r):
+    r = _f(r)
+    if r is None:
+        return "muted"
+    return "g" if r >= 7.5 else ("a" if r >= 3.75 else "r")
+
+
+def _verdict_cls(v):
+    v = (v or "").strip().lower()
+    return "g" if v == "good" else ("r" if v == "weak" else "a")
+
+
+# The ref's page-1 parameter table, in the ref's order and grouping, keyed to the benchmark rows
+# the existing builder already returns. Labels are the ref's — they read better than the API's and
+# they are accurate; the VALUES behind them are all bound.
+PARAM_GROUPS = [
+    ("Growth &amp; quality", [
+        ("sales_5y",     "Sales growth &mdash; 5 year"),
+        ("sales_3y",     "Sales growth &mdash; 3 year"),
+        ("profit_5y",    "Profit growth &mdash; 5 year"),
+        ("profit_3y",    "Profit growth &mdash; 3 year"),
+        ("qoq_sales",    "Sales growth &mdash; latest quarter YoY"),
+        ("qoq_profit",   "Profit growth &mdash; latest quarter YoY"),
+        ("roce",         "Return on capital employed"),
+        ("int_cov",      "Interest coverage"),
+        ("opm",          "Operating margin"),
+    ]),
+    ("Valuation &amp; ownership", [
+        ("pe",           "P/E (TTM)"),
+        ("div_yield",    "Dividend yield"),
+        ("inst_abs",     "Institutional holding"),
+        ("inst_chg",     "Institutional holding &mdash; QoQ change"),
+    ]),
+    ("Momentum", [
+        ("ret_1y",       "Return &mdash; 1 year"),
+        ("ret_52w_idx",  "52-week return vs index"),
+    ]),
+]
+
+
+def _bench_map(rep):
+    out = {}
+    for b in (rep.get("benchmark") or []):
+        if b.get("key"):
+            out[b["key"]] = b
+    return out
+
+
+def _param_rows(bm):
+    """One <tr> per ref row. A parameter with no company value prints an em-dash row rather than
+    vanishing — a missing line in a fixed table reads as "not applicable", which is a claim."""
+    out = []
+    for group, keys in PARAM_GROUPS:
+        out.append('<tr class="grp"><td class="l" colspan="5">%s</td></tr>' % group)
+        for key, label in keys:
+            b = bm.get(key) or {}
+            unit = b.get("unit") or ""
+            comp, peer, rating = _f(b.get("company")), _f(b.get("peer_median")), _f(b.get("rating"))
+            if peer is None:
+                peer = _f(b.get("peer_avg"))
+            gap = None if (comp is None or peer is None) else comp - peer
+            # Direction is not the sign: a lower P/E is a better gap. `beats_peer` already encodes
+            # each metric's direction inside the builder, so the colour is read from it, never
+            # re-derived here where it would get P/E and margins backwards.
+            gcls = "muted" if gap is None else ("g" if b.get("beats_peer") else "r")
+            out.append(
+                '<tr><td class="l">%s</td><td>%s</td><td>%s</td><td class="%s">%s</td>'
+                '<td class="%s">%s</td></tr>' % (
+                    label, _num(comp, 2, unit), _num(peer, 2, unit),
+                    gcls, _num(gap, 2, "", plus=True),
+                    _rating_cls(rating), _num(rating, 1)))
+    return "\n".join(out)
+
+
+def _pillars(rep, ladder):
+    """Growth / Value / Momentum with the score, the bar, and — in place of the ref's hand-written
+    verdict line — the pillar's RANK inside the segment, computed from the ladder the builder
+    already returns. A rank is a fact; "top of segment on every growth window" is a reading."""
+    scores = rep.get("scores") or {}
+    sym = rep.get("symbol")
+    out = []
+    for name, skey, lkey in (("Growth", "g", "g"), ("Value", "v", "v"), ("Momentum", "m", "m")):
+        val = _f(scores.get(skey))
+        vals = [(r.get("symbol"), _f(r.get(lkey))) for r in ladder if _f(r.get(lkey)) is not None]
+        vals.sort(key=lambda x: -x[1])
+        rank = next((i + 1 for i, (s, _) in enumerate(vals) if s == sym), None)
+        line = ("Rank %d of %d in segment" % (rank, len(vals))) if rank else "Not ranked in segment"
+        pct = 0 if val is None else max(0, min(100, int(round(val * 10))))
+        out.append('  <div class="pil"><div class="n">%s</div><div class="s">%s</div>'
+                   '<div class="l">%s</div><div class="bar"><i style="width:%d%%"></i></div></div>'
+                   % (name, _num(val, 2), line, pct))
+    return "\n".join(out)
+
+
+def _price_rows(rep, price):
+    ex = rep.get("extras") or {}
+    r52 = ex.get("range52") or {}
+    hi, lo = _f(r52.get("hi")), _f(r52.get("lo"))
+    price = _f(price)
+    dist = None if (hi is None or price is None or hi == 0) else (price - hi) / hi * 100.0
+    bars = (ex.get("volume") or {}).get("bars") or []
+    vols = [_f(b.get("v")) for b in bars if _f(b.get("v")) is not None]
+    avg_vol = (sum(vols) / len(vols)) if vols else None
+    rows = [
+        ('52-week high', "&#8377;%s" % _num(hi, 2)),
+        ('52-week low', "&#8377;%s" % _num(lo, 2)),
+        ('Distance from 52w high', _num(dist, 1, "%", plus=True)),
+        ('Avg daily volume &middot; %dd' % len(vols) if vols else 'Avg daily volume',
+         "&mdash;" if avg_vol is None else "%.2f lakh" % (avg_vol / 100000.0)),
+    ]
+    cls = "" if dist is None else (' class="a"' if dist > -10 else ' class="muted"')
+    out = []
+    for n, (label, value) in enumerate(rows):
+        c = cls if n == 2 else ""
+        out.append('<tr><td class="l">%s</td><td%s>%s</td></tr>' % (label, c, value))
+    return "\n".join(out), hi, lo, dist, avg_vol, len(vols)
+
+
+def _family_rows(cur, segment, score_date):
+    """Sibling segments sharing the family prefix before the dash, at the latest score_date.
+
+    AVG, not median — see the header note: the binding ref's numbers are averages. The subject's
+    own segment carries class="me" so it is highlighted the way the ref highlights it."""
+    fam = (segment or "").split(" - ")[0].strip()
+    if not fam:
+        return "", fam, [], None
+    cur.execute(
+        """SELECT segment, COUNT(*) AS n, AVG(gvm_score) AS avg_gvm
+             FROM gvm_scores
+            WHERE score_date = %s AND (segment = %s OR segment LIKE %s)
+            GROUP BY segment
+            ORDER BY AVG(gvm_score) DESC NULLS LAST""",
+        (score_date, fam, fam + " - %"))
+    rows = cur.fetchall()
+    out = []
+    for seg, n, avg in rows:
+        me = ' class="me"' if seg == segment else ""
+        out.append('<tr%s><td class="l">%s</td><td>%d</td><td>%s</td></tr>'
+                   % (me, _seg_disp(seg), int(n), _num(avg, 2)))
+    rank = next((i + 1 for i, r in enumerate(rows) if r[0] == segment), None)
+    return "\n".join(out), fam, rows, rank
+
+
+def _screener_quotes(cur, symbols):
+    """Price AND market cap for the ladder, both from screener_raw — the pair that reconciles.
+
+    NEVER the payload's `ladder[].market_cap` (gvm_scores-derived and stale), and the payload
+    carries no per-peer price at all, so screener_raw is the only source that can fill the CMP
+    column for twelve of the thirteen rows. It reproduces the ref's ladder exactly on both
+    columns for all 13 Auto - Body & Stampings names.
+
+    ONE PRICE SOURCE FOR THE WHOLE SHEET. The subject's hero CMP is taken from here too, not from
+    the report payload's resolved price, because a sheet whose header says one number and whose
+    own ladder row says another is the exact defect this module already avoids on market cap.
+    For BHARATSE today that is 248.05 (also the 14-Aug daily close, and the ref's figure) against
+    the payload's 245.70 "Last Tick"; the divergence is logged to the room, not papered over.
+
+    screener_raw keys on nse_code — it has no `symbol` column."""
+    if not symbols:
+        return {}
+    cur.execute("SELECT nse_code, price, market_cap FROM screener_raw WHERE nse_code = ANY(%s)",
+                (list(symbols),))
+    return {s: {"price": _f(p), "market_cap": _f(m)} for s, p, m in cur.fetchall()}
+
+
+def _ladder_rows(rep, ladder, quotes):
+    out = []
+    for i, r in enumerate(ladder, 1):
+        me = ' class="me"' if r.get("is_self") else ""
+        q = quotes.get(r.get("symbol")) or {}
+        mc, px = q.get("market_cap"), q.get("price")
+        out.append(
+            '<tr%s><td>%d</td><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+            '<td>%s</td><td>%s</td><td class="l %s">%s</td></tr>' % (
+                me, i, _esc(r.get("company_name") or r.get("symbol")),
+                "&mdash;" if mc is None else format(int(round(mc)), ",d"),
+                _num(px, 2), _num(r.get("g"), 2), _num(r.get("v"), 2), _num(r.get("m"), 2),
+                _num(r.get("gvm"), 2),
+                _verdict_cls(r.get("verdict")), _esc(r.get("verdict") or "&mdash;")))
+    return "\n".join(out)
+
+
+def build_page1(cur, rep) -> str:
+    """Assemble page 1 from the report payload plus the two reads the payload cannot supply
+    honestly (screener_raw mcap for the ladder, and the segment-family averages)."""
+    bm = _bench_map(rep)
+    ladder = rep.get("ladder") or []
+    segment = rep.get("segment")
+    score_date = rep.get("score_date")
+
+    quotes = _screener_quotes(cur, [r.get("symbol") for r in ladder if r.get("symbol")])
+    # ONE price for the whole sheet — see _screener_quotes. Falls back to the payload's resolved
+    # price only if the symbol is absent from screener_raw, so the hero is never blank.
+    px = (quotes.get(rep.get("symbol")) or {}).get("price")
+    if px is None:
+        px = _f(rep.get("price"))
+    fam_rows, fam, fam_data, fam_rank = _family_rows(cur, segment, score_date)
+    price_rows, hi, lo, dist, avg_vol, vol_n = _price_rows(rep, px)
+
+    peer_n = rep.get("peer_count") or rep.get("segment_total")
+    pe_b = bm.get("pe") or {}
+    hist = (pe_b.get("extra_marker") or {})
+    # The ref's note says "10-year average" while the source field is the OWN 5-YEAR average
+    # (extra_marker label "own 5y avg", 18.88). The label is taken from the data, not the ref.
+    hist_txt = ""
+    if _f(hist.get("value")) is not None:
+        hist_txt = (" P/E of %s against its %s of %s."
+                    % (_num(pe_b.get("company"), 1, "x"), _esc(hist.get("label") or "own average"),
+                       _num(hist.get("value"), 1, "x")))
+    param_note = ("Peer figure is the median of the %s rated companies in the segment; ratings are "
+                  "peer-benchmarked 0&ndash;10.%s" % (peer_n if peer_n else "&mdash;", hist_txt))
+
+    price_note = ""
+    if hi is not None and lo is not None and px is not None:
+        span = hi - lo
+        pos = None if span <= 0 else (px - lo) / span * 100.0
+        price_note = ("Trading %s of its 52-week range%s."
+                      % (_num(pos, 0, "%") if pos is not None else "&mdash;",
+                         "" if dist is None else ", %s from the high" % _num(abs(dist), 1, "%")))
+    if avg_vol is not None:
+        price_note += " Volume is the mean of the last %d sessions." % vol_n
+
+    fam_note = ""
+    if fam_data and fam_rank:
+        fam_note = ("%s ranks %d of the %d %s segments by average rating."
+                    % (_seg_disp(segment), fam_rank, len(fam_data), _esc(fam)))
+
+    self_row = next((r for r in ladder if r.get("is_self")), None)
+    ladder_note = ""
+    if ladder:
+        ladder_note = ("%s of %s in the segment by overall rating."
+                       % (self_row.get("rank") if self_row and self_row.get("rank") else "&mdash;",
+                          len(ladder)))
+        gs = [_f(r.get("g")) for r in ladder if _f(r.get("g")) is not None]
+        ms = [_f(r.get("m")) for r in ladder if _f(r.get("m")) is not None]
+        if gs and ms:
+            ladder_note += (" Growth spans %s&ndash;%s, momentum spans %s&ndash;%s across the ladder."
+                            % (_num(min(gs), 2), _num(max(gs), 2), _num(min(ms), 2), _num(max(ms), 2)))
+        ladder_note += (" CMP and market cap from screener_raw &mdash; the pair that reconciles."
+                        " Data as of %s &middot; research only, not investment advice."
+                        % _esc(score_date))
+
+    return PAGE1_TMPL.safe_substitute(
+        printed_on=_ist_today().strftime("%d %b %Y").upper(),
+        score_date=_esc(score_date),
+        company_name=_esc(rep.get("company_name") or rep.get("symbol")),
+        symbol=_esc(rep.get("symbol")),
+        segment=_seg_disp(segment),
+        cap_category=_esc((rep.get("cap_category") or "").title() + " cap").strip() or "&mdash;",
+        mcap_rank=_esc(rep.get("mcap_rank")) if rep.get("mcap_rank") is not None else "&mdash;",
+        gvm=_num((rep.get("scores") or {}).get("gvm"), 2),
+        verdict=_esc((rep.get("verdict") or "").upper()) or "&mdash;",
+        price_label="CMP",
+        price="&#8377;%s" % _num(px, 2),
+        market_cap=_inr_cr(rep.get("market_cap")),
+        pe="%s<small>x</small>" % _num(pe_b.get("company"), 1),
+        ret_1y=_num((bm.get("ret_1y") or {}).get("company"), 1, "%", plus=True),
+        pillars=_pillars(rep, ladder),
+        punchline=_esc(rep.get("punchline") or ""),
+        param_rows=_param_rows(bm),
+        param_note=param_note,
+        price_rows=price_rows,
+        price_note=price_note,
+        family=_esc(fam),
+        family_rows=fam_rows,
+        family_note=fam_note,
+        ladder_rows=_ladder_rows(rep, ladder, quotes),
+        ladder_note=ladder_note,
+    )
+
+
 @router.get("/gvm/2pager/{symbol}", response_class=HTMLResponse)
 def gvm_two_pager(symbol: str):
-    """The 2-Pager. P1 ships the skeleton — route, 404 and the PDF-filename title; P2 ports the
-    locked template from design_refs/scorr_gvm_2pager_R1.html and P3/P4 bind the data."""
+    """The 2-Pager. P3 binds page 1 from the existing builder; page 2 is still the ported ref
+    template and P4 binds it."""
     sym = (symbol or "").strip().upper()
     if not sym:
         raise HTTPException(status_code=404, detail="symbol required")
@@ -378,10 +673,22 @@ def gvm_two_pager(symbol: str):
     if not known:
         return HTMLResponse(_NOT_FOUND % sym, status_code=404)
 
-    title = doc_title(sym)
-    return HTMLResponse(
-        "<!doctype html><html><head><meta charset='utf-8'><title>%s</title></head>"
-        "<body style=\"font-family:Helvetica,Arial,sans-serif;padding:40px;color:#12161C\">"
-        "<p style='color:#6B7683'>Quant note for <b>%s</b> — template lands in R6-P2.</p>"
-        "</body></html>" % (title, sym)
-    )
+    # The existing builder, in-process. Imported here rather than at module scope so an import
+    # cycle in the report stack can never take down app start-up over a print route.
+    try:
+        from gvm_report_endpoints import gvm_company_report
+        rep = gvm_company_report(sym)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("gvm_twopager: report build failed for %s: %s", sym, e, exc_info=True)
+        raise HTTPException(status_code=503, detail="report unavailable right now")
+
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            page1 = build_page1(cur, rep)
+    except Exception as e:
+        log.error("gvm_twopager: page-1 bind failed for %s: %s", sym, e, exc_info=True)
+        raise HTTPException(status_code=503, detail="report unavailable right now")
+
+    return HTMLResponse(render_page(doc_title(sym), page1 + "\n" + PAGE2_TMPL))

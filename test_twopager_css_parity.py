@@ -57,10 +57,22 @@ def main() -> int:
         ("page-break-after on .page", ".page { page-break-after: always; }" in b),
         ("last page does not break", ".page:last-child { page-break-after: auto; }" in b),
     ]
-    body = re.search(r'PAGE_BODY = r"""(.*?)"""', MOD.read_text(encoding="utf-8"), re.S)
-    checks.append(("PAGE_BODY ported", bool(body)))
-    if body:
-        checks.append(("exactly two .page divs", body.group(1).count('<div class="page">') == 2))
+    # R6-P3 split the single PAGE_BODY into PAGE1_TMPL (bound, ${placeholders}) and PAGE2_TMPL
+    # (still the verbatim ref markup until P4 binds it). The two-page contract is what this test
+    # exists to protect, so it is now asserted ACROSS the pair — one page each, two in total.
+    # Counting only one constant would have let the sheet silently lose or gain a page.
+    src = MOD.read_text(encoding="utf-8")
+    p1 = re.search(r'PAGE1_TMPL = _Tmpl\(r"""(.*?)"""\)', src, re.S)
+    p2 = re.search(r'PAGE2_TMPL = r"""(.*?)"""', src, re.S)
+    checks.append(("PAGE1_TMPL present", bool(p1)))
+    checks.append(("PAGE2_TMPL present", bool(p2)))
+    if p1 and p2:
+        n1 = p1.group(1).count('<div class="page">')
+        n2 = p2.group(1).count('<div class="page">')
+        checks.append(("exactly two .page divs (1 + 1)", n1 == 1 and n2 == 1))
+        # P4 has not bound page 2 yet; when it does, this guard keeps the ref's markup honest by
+        # ensuring nobody leaves an unsubstituted ${placeholder} in the served output.
+        checks.append(("no stray $ in page 2", "$" not in p2.group(1)))
 
     for name, passed in checks:
         print("  %-28s %s" % (name, "OK" if passed else "FAIL"))
