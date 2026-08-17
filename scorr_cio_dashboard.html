@@ -2325,12 +2325,12 @@ function GvmReport({ r, hist }) {
       {chartRow && <PeerLadderModal b={chartRow} sym={r.symbol} onClose={() => setChartRow(null)} />}
       {pillarPop && <PillarPopModal pillar={pillarPop} items={benchByPillar[pillarPop] || []} score={pillarScore(pillarPop)} onClose={() => setPillarPop(null)} />}
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <button onClick={() => window.print()}
+        <button onClick={() => window.open(`/gvm/2pager/${r.symbol}`, "_blank", "noopener")}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
             background: "#121A33", border: `1px solid ${C.border}`, borderRadius: 7,
             fontSize: 13, fontWeight: 700, color: C.muted, cursor: "pointer",
             boxShadow: "0 1px 4px rgba(25,40,70,0.06)" }}>
-          ↓ Download PDF
+          ↓ 2 Pager
         </button>
       </div>
 

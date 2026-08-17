@@ -229,11 +229,55 @@ ${quarter}
 
 
 
-def render_page(title: str, body_html: str) -> str:
-    """The full document: ref CSS + ref markup. One place assembles the sheet, so nothing can
-    serve the template with a different head than the one the parity test checks."""
+# ── R6-P6 · auto-print, and the manual way back to it ─────────────────────────────────────────
+# THIS LIVES IN ITS OWN <style>, NOT IN REF_CSS. REF_CSS is asserted byte-identical to the ref's
+# block, and the ref has no print bar; folding these rules in would break that parity for a
+# cosmetic reason. Two style tags cost nothing and keep the tuned sheet exactly as it was tuned.
+#
+# The bar is position:fixed so it never enters the document flow — even before the print media
+# query hides it, it cannot push content down and nudge the sheet onto a third page.
+PRINT_CSS = """
+.no-print{position:fixed;top:0;left:0;right:0;z-index:99;display:flex;align-items:center;
+  justify-content:space-between;gap:12px;padding:8px 14px;background:#12161C;color:#fff;
+  font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:12px}
+.no-print button{font:inherit;font-weight:600;cursor:pointer;padding:6px 14px;border-radius:6px;
+  border:0;background:#fff;color:#12161C}
+.no-print .np-t{opacity:.75}
+@media print{ .no-print{display:none !important} }
+"""
+
+# `?print=0` suppresses the auto-dialog. It exists so the sheet can be opened for reading or
+# rendered by a checker without a dialog firing; the button is still there, so the manual path is
+# never removed. Nothing about the printed output changes either way.
+PRINT_BAR = """
+<div class="no-print">
+  <span class="np-t">Two-page quant note &middot; use Save as PDF</span>
+  <button onclick="window.print()">Print / Save PDF</button>
+</div>
+<script>
+// Fire once fonts have settled — printing before the webfont swaps can reflow the sheet mid-render,
+// and this document's whole contract is where the content falls on the page. document.fonts is
+// guarded because a browser without it should still print rather than silently do nothing.
+(function(){
+  if (new URLSearchParams(location.search).get('print') === '0') return;
+  var go = function(){ setTimeout(function(){ window.print(); }, 120); };
+  if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
+    document.fonts.ready.then(go);
+  } else {
+    window.addEventListener('load', go);
+  }
+})();
+</script>
+"""
+
+
+def render_page(title: str, body_html: str, print_bar: bool = True) -> str:
+    """The full document: ref CSS + ref markup, plus the P6 print bar in its own style block.
+    One place assembles the sheet, so nothing can serve the template with a different head than
+    the one the parity test checks."""
     return ("<!DOCTYPE html>\n<html><head><meta charset='utf-8'><title>" + title + "</title>\n"
-            "<style>" + REF_CSS + "</style>\n</head>\n<body>" + body_html + "</body></html>")
+            "<style>" + REF_CSS + "</style>\n<style>" + PRINT_CSS + "</style>\n</head>\n<body>"
+            + (PRINT_BAR if print_bar else "") + body_html + "</body></html>")
 
 
 _NOT_FOUND = (
