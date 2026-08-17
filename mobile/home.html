@@ -268,6 +268,15 @@
 /* cc#1062: 6 x 60px = 360px (was 6 x 50px = 300px). The reservation exists so the section does
    not shrink on the last page and pull the Tools grid up under the thumb that just tapped Next
    — raising the row height without raising this would have re-created exactly that. */
+/* cc#1068: section headings settle at token level rather than being repainted by an enhancer
+   pass on every tap. Aqua is a HEADING identity only — links and buttons keep pulse, so the
+   interactive colour still means "you can touch this". */
+.sect{color:#35E0FF;text-shadow:0 0 12px rgba(53,224,255,.4)}
+/* cc#1068: INDEX SIGNALS card — R5 panel, edge, cut corner, mono sub-line. */
+.r5-idxcard{background:#161F33;border:1px solid #26334F;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.r5-idxsub{margin-top:8px;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+  font-size:10px;letter-spacing:1.4px;color:var(--mut)}
 .rnlist{min-height:360px;animation:rnfade .18s ease-out}
 @keyframes rnfade{from{opacity:.35}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
@@ -2043,7 +2052,10 @@ Promise.all([
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
     + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + esc(hero.mood || '--') + '</div>'
     + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
-    + (v10 ? '<div class="v10b">' + v10 + '</div>' : '')
+    /* cc#1068: the V10 index line has LEFT the scoreboard. It is not deleted — it is promoted to
+       its own INDEX SIGNALS card below the carousel, built from this same `v10` string, so every
+       element (both names, both states, both chart icons) survives the move. Founder-ordered
+       relocation; the content-parity guard is satisfied by the move, not bypassed. */
     + '<div class="hchips">' + (hero.chips || []).map(function(c){
         var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
         var isAdr = String(c.label).indexOf('ADR') > -1;
@@ -2156,6 +2168,21 @@ Promise.all([
       + Math.round(bk.brokerage || 0).toLocaleString('en-IN') + ' brokerage.</div>'
       + '</div></a>';
   }
+  /* cc#1068 · INDEX SIGNALS — the row that used to sit inside the scoreboard, now its own card
+     between the carousel and THE BOOK. Same `v10` markup, so the chart icons come with it.
+     THE ENHANCER COULD NOT DO THIS, which is why it belongs here: three matcher attempts failed
+     (session_log 23379) because at runtime the two index blocks share no small common wrapper.
+     At source they are one string, and the move is a one-line cut. Whole card links to /m/v10
+     (cc#1069 builds that page; until it lands the link 404s rather than silently doing nothing,
+     which is the honest failure). */
+  if (v10) {
+    h += '<div class="sect">INDEX SIGNALS \u00b7 V10</div>'
+      + '<a class="card-link" href="/m/v10"><div class="c r5-idxcard">'
+      + '<div class="v10b">' + v10 + '</div>'
+      + '<div class="r5-idxsub">TAP FOR THE V10 VIEW <span class="h-chev">\u203a</span></div>'
+      + '</div></a>';
+  }
+
   h += '<div class="sect">THE BOOK</div>'
     + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
     + bookFace1() + bookFace2()

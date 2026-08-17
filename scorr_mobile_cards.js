@@ -208,11 +208,9 @@
     + '.r5-rail{position:relative;border-radius:0!important}'
     + '.r5-rail::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:5px;'
     +   'background:var(--r5rail,#FF4D6D);border-radius:4px;z-index:2}'
-    + '.r5-idxbox{background:#161F33;border:1px solid #26334F;margin:0 14px 12px;padding:12px 16px;'
-    +   'clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%);'
-    +   'font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:1px}'
-    + '.r5-idxbox .t{font-size:10px;letter-spacing:2px;color:#8A97B0;margin-bottom:6px;font-weight:700}'
-    + '.r5-idxbox b.long{color:#C8F542}.r5-idxbox b.short{color:#FF4D6D}.r5-idxbox b.flat{color:#FF9F45}'
+    /* cc#1068: .r5-idxbox styling removed with its mover — nothing can create that element any
+       more, so the rules were dead weight shipped to every page. The card now carries its own
+       .r5-idxcard styling in mobile/home.html, next to the markup it styles. */
     + '.r5-tab-on{color:#C8F542!important;position:relative}'
     + '.r5-tab-on::after{content:"";position:absolute;top:-1px;left:25%;right:25%;height:3px;'
     +   'background:#C8F542;clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
@@ -378,91 +376,12 @@
       }
     }
 
-    /* founder 23:30 (supersedes 22:0x): NIFTY/BANKNIFTY leaves the scoreboard and becomes its
-       own INDEX SIGNALS card ABOVE the LIVE NEWS section — the future V10 page launchpad.
-       Full-DOM scan this time (the row's container was a tag outside the earlier tag list,
-       which is why two attempts no-oped — guard held, nothing was lost). Founder-ordered move. */
-    window.__r5try2 = (window.__r5try2 || 0) + 1;
-    if (!document.getElementById('r5-idxbox') && window.__r5try2 <= 8) {
-      var star = document.body ? document.body.querySelectorAll('*') : [];
-      var idxRow = null, idxLen = 1e9, newsHd = null, nLen = 1e9, bookHd2 = null, bkLen = 1e9;
-      for (var y = 0; y < star.length; y++) {
-        var ey = star[y];
-        if (ey.tagName === 'SCRIPT' || ey.tagName === 'STYLE') continue;
-        var ty = (ey.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!ty || ty.length > 160) continue;
-        if (/NIFTY\s+(LONG|SHORT|FLAT)/i.test(ty) && /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(ty)
-            && ty.length < idxLen) { idxRow = ey; idxLen = ty.length; }
-        if (/^(LIVE NEWS|THE WIRE|NEWS)/i.test(ty) && ty.length < 40 && ty.length < nLen) { newsHd = ey; nLen = ty.length; }
-        if (/^THE BOOK/i.test(ty) && ty.length < 40 && ty.length < bkLen) { bookHd2 = ey; bkLen = ty.length; }
-      }
-      /* 23:52 root cause: NIFTY and BANKNIFTY blocks share no small wrapper — their only common
-         ancestor is the card body (>160 chars), so a combined match was structurally impossible.
-         Match each block separately; hide both (climbing to include the adjacent mini-icon). */
-      if (!idxRow) {
-        var nBlk = null, nbL = 1e9, bBlk = null, bbL = 1e9;
-        for (var y3 = 0; y3 < star.length; y3++) {
-          var e3 = star[y3];
-          if (e3.tagName === 'SCRIPT' || e3.tagName === 'STYLE') continue;
-          var t3 = (e3.textContent || '').replace(/\s+/g, ' ').trim();
-          if (!t3 || t3.length > 40) continue;
-          if (/^NIFTY\s+(LONG|SHORT|FLAT)/i.test(t3) && t3.length < nbL) { nBlk = e3; nbL = t3.length; }
-          if (/^BANKNIFTY\s+(LONG|SHORT|FLAT)/i.test(t3) && t3.length < bbL) { bBlk = e3; bbL = t3.length; }
-        }
-        if (nBlk && bBlk) {
-          var nM2 = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(nBlk.textContent);
-          var bM2 = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(bBlk.textContent);
-          var anchor2 = newsHd || bookHd2;
-          if (nM2 && bM2 && anchor2) {
-            [nBlk, bBlk].forEach(function (blk) {
-              var hideEl = blk, bl = (blk.textContent || '').trim().length;
-              /* climb while the parent adds only the mini icon (a few chars) */
-              while (hideEl.parentElement
-                     && (hideEl.parentElement.textContent || '').trim().length <= bl + 14
-                     && hideEl.parentElement !== document.body) {
-                hideEl = hideEl.parentElement;
-              }
-              hideEl.style.display = 'none';
-            });
-            var box2 = document.createElement('div');
-            box2.id = 'r5-idxbox'; box2.className = 'r5-idxbox';
-            box2.style.cursor = 'pointer';
-            function seg2(name, dir) {
-              var d = dir.toUpperCase();
-              var cls = d === 'LONG' ? 'long' : (d === 'SHORT' ? 'short' : 'flat');
-              return name + ' <b class="' + cls + '">' + d + '</b>';
-            }
-            box2.innerHTML = '<div class="t">INDEX SIGNALS · V10</div>'
-              + '<div style="font-size:16px;font-weight:700">' + seg2('NIFTY', nM2[1])
-              + ' &nbsp;·&nbsp; ' + seg2('BANKNIFTY', bM2[1]) + '</div>'
-              + '<div class="t" style="margin:6px 0 0">TAP FOR THE V10 VIEW — COMING SOON</div>';
-            anchor2.parentNode && anchor2.parentNode.insertBefore(box2, anchor2);
-          }
-        }
-      }
-      if (idxRow) {
-        var nM = /NIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
-        var bM = /BANKNIFTY\s+(LONG|SHORT|FLAT)/i.exec(idxRow.textContent);
-        var anchor = newsHd || bookHd2;   /* prefer LIVE NEWS; fall back to THE BOOK */
-        if (nM && bM && anchor) {
-          idxRow.style.display = 'none';
-          var box = document.createElement('div');
-          box.id = 'r5-idxbox'; box.className = 'r5-idxbox';
-          box.style.cursor = 'pointer';
-          function seg(name, dir) {
-            var d = dir.toUpperCase();
-            var cls = d === 'LONG' ? 'long' : (d === 'SHORT' ? 'short' : 'flat');
-            return name + ' <b class="' + cls + '">' + d + '</b>';
-          }
-          box.innerHTML = '<div class="t">INDEX SIGNALS · V10</div>'
-            + '<div style="font-size:16px;font-weight:700">' + seg('NIFTY', nM[1])
-            + ' &nbsp;·&nbsp; ' + seg('BANKNIFTY', bM[1]) + '</div>'
-            + '<div class="t" style="margin:6px 0 0">TAP FOR THE V10 VIEW — COMING SOON</div>';
-          /* click reserved for the V10 page (/m/v10) — wired once that page exists */
-          anchor.parentNode && anchor.parentNode.insertBefore(box, anchor);
-        }
-      }
-    }
+    /* cc#1068: the INDEX SIGNALS mover lived here and is now built at SOURCE, in
+       mobile/home.html, as a real card between the carousel and THE BOOK. Three matcher
+       attempts failed from this layer (session_log 23379) because at runtime the two index
+       blocks share no small common wrapper — their only common ancestor is the whole card
+       body. At source they are one string and the move is a one-line cut, which is the
+       lesson: structural work belongs in the template, not in a DOM scan. */
 
     /* R5 grain — founder 20:4x: the mockup's 115deg diagonal grain was missing because the
        page wrapper paints flat --bg over the themed body. Apply the grain to the wrapper itself
@@ -561,27 +480,11 @@
       }
     }
 
-    /* founder 05:57 (#1, morning batch): AQUA NEON headings — sporty over corporate. Any
-       purple(pulse)-coloured, bold, uppercase heading leaf flips to #35E0FF with a soft glow.
-       Links and buttons keep pulse (interactive identity unchanged). Cheap pre-filters before
-       any getComputedStyle call; per-element guard. */
-    for (var aq = 0; aq < all.length; aq++) {
-      var ah = all[aq];
-      if (ah.__r5aq || ah.children.length > 1) continue;
-      var at = (ah.textContent || '').trim();
-      if (!at || at.length > 40 || at !== at.toUpperCase() || !/[A-Z]/.test(at)) continue;
-      if (ah.tagName === 'A' || ah.tagName === 'BUTTON' || (ah.closest && ah.closest('a,button'))) continue;
-      var acs = getComputedStyle(ah);
-      var am = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(acs.color || '');
-      if (!am) continue;
-      var r = +am[1], g = +am[2], b = +am[3];
-      /* pulse family: blue-purple — blue clearly dominant, red mid, green low */
-      if (b > 180 && r > 80 && r < 190 && g < 140 && parseFloat(acs.fontSize) >= 14
-          && (+acs.fontWeight >= 600 || /bold/i.test(acs.fontWeight))) {
-        ah.__r5aq = 1;
-        ah.style.cssText += ';color:#35E0FF!important;text-shadow:0 0 12px rgba(53,224,255,.4)';
-      } else { ah.__r5aq = 1; }
-    }
+    /* cc#1068: the AQUA HEADING pass lived here and is now a template rule. mobile/home.html
+       sets .sect{color:#35E0FF} directly, so headings are aqua at first paint instead of being
+       repainted by a full-DOM getComputedStyle sweep on every tap. Links and buttons keep
+       pulse, unchanged. Removed rather than left dormant — a matcher that no longer matches
+       anything is a cost with no benefit. */
 
     /* bottom-nav active tab: fixed-to-bottom container, the child marked on/active */
     var nav = document.querySelector('.bnav, .bottomnav, [class*="tabbar"], nav[class*="bottom"]');
