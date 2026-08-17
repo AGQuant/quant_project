@@ -48,6 +48,10 @@
                               Read the Daily Digest, GO), and from volt, which is where you ARE.
                               Same hex cc#1068 gave the .sect eyebrows, named here so the aqua
                               identity has one definition instead of a hex per surface. */
+  --r5-amber:#FF9F45;      /* cc#1073 — NEUTRAL / CAUTION, the value THEME_TOKENS_R51_V1 locks
+                              (session_log 23878). The map below carried #F5B94A, the legacy
+                              amber, which predates the lock; every other token in this file is
+                              already the 23878 value, so amber was the one drifting. */
   --r5-cut:16px;           /* card corner cut */
   --r5-cut-sm:6px;         /* pill / chip corner cut */
   --r5-display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
@@ -80,9 +84,44 @@
   /* INTERACTIVE — --blu is the app's link/active colour, so it becomes pulse. --cyan follows it
      rather than staying a second accent: R5 has one interactive colour, not two. */
   --blu:var(--r5-pulse); --pulse:var(--r5-pulse); --cyan:var(--r5-pulse);
-  --amber:#F5B94A;
+  --amber:var(--r5-amber);
   --shadow:0 18px 44px rgba(3,7,20,.55);
   --mono:var(--r5-mono);
+
+  /* ── cc#1073 · the canonical names themselves ────────────────────────────────────────────
+     THE R51 TOKEN NAMES HAD NO DEFINITION. This block re-pointed 38 LEGACY names but never
+     declared `--aqua` or `--panel-hi`, so a page writing `var(--aqua)` — the name 23878 locks
+     for every heading, the tools grid and the inactive nav — got nothing at all and fell back
+     to inherited colour. cc#1068 worked around exactly this by hardcoding #35E0FF into
+     mobile/home.html, which is the per-page duplication rule 2 exists to prevent. Declared
+     here, that workaround becomes unnecessary rather than necessary. */
+  --aqua:var(--r5-aqua); --panel-hi:var(--r5-panel-hi);
+
+  /* ── cc#1073 · legacy names the map had missed ───────────────────────────────────────────
+     From the THEME_SCAN_R51.md coverage list: 85 legacy `var(--*)` names are used across the
+     app and were not re-pointed, so on a themed page each fell back to whatever that page's own
+     :root said — which is precisely how one surface stays on the old palette while every other
+     one moves. These 21 are the ones that could be resolved WITHOUT a founder ruling: every
+     declared value outside a light block is OPAQUE and every one classifies to the same token.
+     274 var() use-sites, no page edited.
+
+     TWO FILTERS KEPT THE REST OUT, and they matter more than the 21 that got in:
+       · TINTS WAIT. --border2 is rgba(148,166,210,.24), --amber-d is rgba(245,185,74,.14),
+         --grn-b, --red-b, --cyan-d, --bull-soft and a dozen more are the same. Re-pointing a
+         24% hairline to an opaque token turns a faint line into a solid bar — a regression
+         wearing the costume of a standardisation. The tint scale is DECIDE-0 and unruled.
+       · CYAN WAITS. --cy and --accent are cyan; whether the cyan family becomes aqua or stays
+         interactive is DECIDE-2, and this file's own `--cyan:var(--r5-pulse)` line above is the
+         thing being questioned. Answering it here would be deciding it. */
+  --blue:var(--r5-pulse); --purp:var(--r5-pulse); --violet:var(--r5-pulse);
+  --bull:var(--r5-volt); --green:var(--r5-volt);
+  --bear:var(--r5-heat); --rd:var(--r5-heat);
+  --amb:var(--r5-amber); --am:var(--r5-amber); --gold:var(--r5-amber);
+  --text:var(--r5-chalk); --tx:var(--r5-chalk);
+  --text2:var(--r5-muted); --tx2:var(--r5-muted); --tx3:var(--r5-muted);
+  --grey:var(--r5-muted); --tag-fg:var(--r5-muted);
+  --mast:var(--r5-field); --on-accent:var(--r5-field);
+  --raise:var(--r5-panel-hi);
 }
 
 /* ── the field, with R5's 115deg grain ────────────────────────────────────────────────────── */
@@ -297,3 +336,22 @@
 /* the active tab's icon comes back to full strength — it inherits volt from .bn.on, and dimming
    it would undo half of what the notch is doing. */
 :root:root:not([data-theme="light"]) .bn.on .i{ opacity:1; }
+
+/* ─── AQUA GLOW + SECTION EYEBROWS · cc#1073 ────────────────────────────────────────────────
+   23878 does not define aqua as a flat colour. It defines it as "#35E0FF … + glow text-shadow
+   0 0 12px rgba(53,224,255,.4)" — the glow is part of the token, not a decoration on top of it.
+   So it is declared once, as a class anything can take, and applied to the one element the same
+   entry names: section headings.
+
+   `.sect` IS the app's section heading, on every screen. cc#1068 already made it aqua-with-glow
+   — by writing the hex into mobile/home.html, which themes exactly one page and is the per-page
+   duplication rule 2 exists to stop. Here it lands for every `.sect` in the app at once, from
+   the layer that is already injected everywhere. The home page's own rule now agrees with this
+   one rather than being the only thing holding it up; it is left in place deliberately, since
+   removing it would open a gap on that page for no gain. Colour and shadow only — the flex/gap
+   line item 6 above sets is untouched, and nothing here can hide anything. */
+:root:root:not([data-theme="light"]) .r5-glow,
+:root:root:not([data-theme="light"]) .sect{
+  color:var(--r5-aqua);
+  text-shadow:0 0 12px rgba(53, 224, 255, .4);
+}
