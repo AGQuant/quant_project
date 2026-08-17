@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIGEST R2 · WEEK SWITCH + TYPE SCALE</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;700&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet">
+<style>
+/* DIGEST R2 — patches R1 (b8949f6) on two founder comments. This ref covers ONLY the two
+   changes; everything else on /m/digest stays R1. */
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;--muted:#8A97B0;
+--brand:#35E0FF;--glow:rgba(53,224,255,.4);--win:#C8F542;--loss:#FF4D6D;--label:#FF9F45}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--field);font-family:'Space Grotesk';color:var(--ink);max-width:480px;margin:0 auto;padding:14px 0 30px}
+.num{font-family:'JetBrains Mono',monospace}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:18px 16px 9px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--brand);text-shadow:0 0 12px var(--glow)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 12px 12px;padding:14px;
+ clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+/* ── CHANGE 1: the DAY|WEEK switch ─────────────────────────────────────────────────────────
+   Two-state chip toggle sitting in the section header, right side. State persists for the
+   visit only (in-memory), default DAY. Grid re-renders in place — same cells, same order,
+   only the % column swaps. WEEK values come from the PAYLOAD (digest_v3 computes close vs
+   close 5 trading sessions back per index — global_indices has NO week column, R4 data pass);
+   a row with insufficient history renders an em-dash, never 0, never blank. */
+.gsw{display:flex;gap:3px;background:var(--hi);border:1px solid var(--edge);padding:2px;
+ clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.gsw button{min-width:52px;min-height:30px;border:0;background:transparent;cursor:pointer;
+ font-family:'JetBrains Mono';font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted)}
+.gsw button.on{background:var(--panel);color:var(--brand);text-shadow:0 0 8px var(--glow)}
+.ghd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ghd .t{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gc{background:var(--hi);border:1px solid var(--edge);padding:9px 10px;
+ clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.gc .n{font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted)}
+.gc .v{font-family:'JetBrains Mono';font-weight:800;font-size:14px;margin-top:3px}
+.gc .p{font-family:'JetBrains Mono';font-weight:700;font-size:12px;margin-top:1px}
+/* ── CHANGE 2: THE TYPE SCALE, lower sections ──────────────────────────────────────────────
+   R1 let the lower sections (ADR/PCR trend, pivots, ENGINE YESTERDAY, notes) drift to 9px and
+   8.5px — below readable on device. The scale is now FIXED and named; nothing on this page
+   renders below 9.5px, and 9.5px is reserved for stamps only:
+
+     SECTION TITLE   15px Archivo skew          (unchanged)
+     ROW / BODY      12.5px Grotesk             (was 11px in trend + engine rows)
+     VALUE           12px JetBrains 700         (was 10.5px)
+     SUB-LABEL       10.5px, letter-spacing 1.2 (was 9px)
+     STAMP / AS-OF    9.5px mono — the FLOOR    (was 8.5px)
+
+   Contrast pairs with the day-log heuristic: nothing below 11px in --muted; sub-labels at
+   10.5px carry weight 700 to compensate. */
+.row{display:flex;align-items:baseline;gap:8px;padding:7px 0;border-top:1px solid var(--edge);font-size:12.5px}
+.row:first-of-type{border-top:0}
+.row .k{color:var(--muted);font-weight:700;font-size:10.5px;letter-spacing:1.2px;min-width:92px}
+.row .v{font-family:'JetBrains Mono';font-weight:700;font-size:12px}
+.row .fill{flex:1}
+.stamp{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin-top:8px}
+</style>
+</head>
+<body>
+
+<div class="eyebrow">CHANGE 1 · GLOBAL TAPE — DAY | WEEK SWITCH</div>
+<div class="card">
+  <div class="ghd"><span class="t">Global Tape</span>
+    <div class="gsw" id="gsw"><button data-v="day" class="on">DAY</button><button data-v="week">WEEK</button></div></div>
+  <div class="grid" id="grid"></div>
+  <div class="stamp">as of 17-08 · WEEK = close vs close 5 sessions back, from payload · no history = — never 0</div>
+</div>
+
+<div class="eyebrow">CHANGE 2 · LOWER SECTIONS AT THE FIXED SCALE</div>
+<div class="card">
+  <div class="ghd"><span class="t">Engine Yesterday</span></div>
+  <div class="row"><span class="k">CLOSED</span><span class="v">3 trades</span><span class="fill"></span><span class="v" style="color:var(--win)">+₹8,410</span></div>
+  <div class="row"><span class="k">BEST</span><span class="v">BANKNIFTY SHORT</span><span class="fill"></span><span class="v" style="color:var(--win)">+₹6,120</span></div>
+  <div class="row"><span class="k">WORST</span><span class="v">NIFTY LONG</span><span class="fill"></span><span class="v" style="color:var(--loss)">−₹1,270</span></div>
+  <div class="stamp">rows 12.5px · values 12px mono · labels 10.5px/700 · stamps 9.5px — THE FLOOR, nothing below it</div>
+</div>
+
+<script>
+/* sample data stamped SAMPLE — live page reads /api/digest/v3; wk null renders a dash */
+var G=[{n:'DOW',d:-0.04,w:1.2},{n:'NASDAQ',d:0.31,w:2.1},{n:'NIKKEI',d:0.88,w:null},
+{n:'HANG SENG',d:-0.52,w:-1.4},{n:'GOLD',d:0.40,w:0.9},{n:'BTC',d:-1.10,w:3.8}];
+var V='day';
+function pct(x){return x==null?'—':(x>=0?'+':'')+x.toFixed(2)+'%'}
+function col(x){return x==null?'var(--muted)':(x>=0?'var(--win)':'var(--loss)')}
+function paint(){document.getElementById('grid').innerHTML=G.map(function(g){
+  var x=V==='day'?g.d:g.w;
+  return '<div class="gc"><div class="n">'+g.n+'</div><div class="v num">'+ (V==='day'?'today':'1 week') +'</div><div class="p num" style="color:'+col(x)+'">'+pct(x)+'</div></div>';}).join('');}
+document.getElementById('gsw').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;
+V=b.dataset.v;document.querySelectorAll('#gsw button').forEach(function(x){x.classList.toggle('on',x===b)});paint();});
+paint();
+</script>
+</body>
+</html>
