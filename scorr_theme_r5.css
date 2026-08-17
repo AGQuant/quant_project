@@ -398,3 +398,87 @@
   color:var(--r5-aqua);
   text-shadow:0 0 12px rgba(53, 224, 255, .4);
 }
+
+/* ══ cc#1090 SPRINT 4 · P1 · THE CARD DEPTH SYSTEM ═══════════════════════════════════════════
+   Two shells, one system, declared ONCE in the shared sheet that main.py already injects
+   everywhere. Never per-page card CSS — Sprint 2 P10 proved that pattern and cc#1068 is the
+   counter-example it was proving against (one page themed by hand, which is the duplication
+   rule 2 exists to stop).
+
+   NO PAGE ADOPTS THESE YET. P1 defines the vocabulary; P2 onwards is where surfaces take it.
+   Ported from the locked refs, not retyped:
+     .slab / :active / .dense / .dense:active / .well   scorr_card_slab_R1    @ 1261fe9
+     .pressed / .well-up                                scorr_card_pressed_R1 @ 1221452
+
+   THE SPLIT. .slab RISES — for things a tap takes you somewhere from — and it has a 5px press.
+   .pressed SINKS — for containers and hero blocks that hold other content — and it has NO press
+   state, because a well is not a button. Depth encodes AFFORDANCE, not decoration: if everything
+   rises nothing reads as tappable; if everything sinks the screen is a sheet of holes. One
+   question decides it — does tapping it go somewhere? A pressed block that later needs to be
+   tappable does not gain a press state, it BECOMES a slab.
+
+   NESTING INVERTS, AND STOPS AT TWO. Slab inners sink (.well); pressed inners rise (.well-up).
+   Never slab-in-slab, never pressed-in-pressed — a raised block inside a raised block is mud.
+
+   ── WHY EVERY TOKEN CARRIES A LITERAL FALLBACK, and it is not belt-and-braces ────────────────
+   The refs are authored in GOLD NIGHT tokens. The live /m pages run the navy/cyan palette, which
+   has --panel and --line but NO --gold-lo and NO --sunk. And CSS does not degrade politely here:
+   if ONE var() in a box-shadow list is undefined the WHOLE declaration is invalid at
+   computed-value time and the property falls back to `none`. Measured in Chromium, not assumed:
+
+       given  :root{--panel:#17171B;--line:#2A2A31}   — i.e. the live theme, no --gold-lo
+       then   box-shadow:0 5px 0 0 var(--gold-lo), ...        computes to:  none   (SHELL IS FLAT)
+       but    box-shadow:0 5px 0 0 var(--gold-lo,#7A6320),... computes to:  rgb(122,99,32) 0 5px 0 0 ...
+
+   So without fallbacks the ledge does not merely come out the wrong colour — it disappears
+   entirely, on every page that has not been moved to Gold Night, and the shell reads as a plain
+   flat rectangle while every diff and every grep says it is applied. The fallbacks are the ref's
+   OWN literals, so a Gold Night page uses the token and any other page still gets the shell the
+   founder approved. This is the cc#1073 `var(--token, #original)` pattern, unchanged.
+
+   NO TOKEN VALUE MOVES. This block adds classes and reads tokens. It does not redefine one. */
+.slab{
+  background:var(--panel, #17171B);
+  border:1.5px solid var(--line, #2A2A31);
+  border-radius:13px;
+  padding:13px 15px;
+  box-shadow:0 5px 0 0 var(--gold-lo, #7A6320), 0 5px 0 1.5px var(--line, #2A2A31);
+  transition:transform .07s ease, box-shadow .07s ease;
+}
+.slab:active{
+  transform:translateY(5px);
+  box-shadow:0 0 0 0 var(--gold-lo, #7A6320), 0 0 0 1.5px var(--line, #2A2A31);
+}
+/* One modifier, not a second variant. Fifteen full ledges down a screen stop reading as depth
+   and start reading as stripes, so any list of 8+ rows takes .dense. */
+.slab.dense{
+  border-radius:11px; padding:10px 13px;
+  box-shadow:0 3px 0 0 var(--gold-lo, #7A6320), 0 3px 0 1.5px var(--line, #2A2A31);
+}
+.slab.dense:active{
+  transform:translateY(3px);
+  box-shadow:0 0 0 0 var(--gold-lo, #7A6320), 0 0 0 1.5px var(--line, #2A2A31);
+}
+/* Slab inners SINK. */
+.well{
+  background:var(--sunk, #0E0E11);
+  border:1px solid var(--line, #2A2A31);
+  border-radius:8px;
+  box-shadow:0 2px 0 0 #000;
+}
+.pressed{
+  background:var(--sunk, #0C0C0F);
+  border:1px solid #000;
+  border-radius:12px;
+  padding:14px 16px;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),
+             inset 0 -1px 0 rgba(255,255,255,.10),
+             0 1px 0 rgba(255,255,255,.05);
+}
+/* NO .pressed:active. Deliberate, and load-bearing — see the split above. */
+/* Pressed inners RISE. */
+.well-up{
+  background:var(--well, #131316);
+  border-radius:7px;
+  box-shadow:0 1px 0 rgba(255,255,255,.07), 0 -1px 0 #000;
+}
