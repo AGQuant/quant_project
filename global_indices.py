@@ -464,6 +464,22 @@ GLOBAL_INTRADAY_INDEX_TICKERS = [
     ("^GDAXI", "DAX"),
     ("^FTSE",  "FTSE"),
     ("^HSI",   "HANGSENG"),
+    # cc#1067 (founder 16-Aug): India VIX joins the 5-min feed so the home VIX card's 1D tab has a
+    # real intraday line instead of falling back to a daily-close series.
+    #
+    # IT IS HERE, NOT IN GLOBAL_INTRADAY_TICKERS, because it is an EQUITY INDEX: ^INDIAVIX only
+    # prints during NSE 09:15-15:30 IST, which sits entirely inside this list's 06:00-01:40 window.
+    # Putting it on the 24x7 commodity list would poll a closed exchange ~19 hours a day for
+    # nothing. Outside its session it writes no bar, ages out, and the tile honestly flips to
+    # PREV CLOSE — the same behaviour Nikkei and Hang Seng already have.
+    #
+    # THE THIRD ELEMENT IS LOAD-BEARING. The daily path fetches ^INDIAVIX but STORES it as
+    # INDIAVIX (see GLOBAL_TICKERS: ("^INDIAVIX", "India VIX", "volatility", "INDIAVIX")), while
+    # this list previously stored the fetch symbol verbatim. Adding a bare ("^INDIAVIX", ...) would
+    # have written symbol='^INDIAVIX' into global_intraday, which joins NOTHING — the overlay
+    # matches the daily symbol, and the comment above this list says exactly that. The optional
+    # store-symbol keeps the two in step instead of silently forking them.
+    ("^INDIAVIX", "India VIX", "INDIAVIX"),
 ]
 
 
@@ -504,7 +520,12 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
     if _index_window_open(now_ist):
         tickers += GLOBAL_INTRADAY_INDEX_TICKERS
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        for symbol, name in tickers:
+        for _tk in tickers:
+            # cc#1067: entries are (fetch_symbol, name) or (fetch_symbol, name, store_symbol).
+            # store_symbol defaults to fetch_symbol, so every existing 2-tuple behaves exactly as
+            # before and only names that differ between the daily and intraday tables carry a third.
+            symbol, name = _tk[0], _tk[1]
+            store_sym = _tk[2] if len(_tk) > 2 else symbol
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                    f"{urllib.parse.quote(symbol)}?interval=5m&range={range_str}")
             try:
@@ -525,7 +546,7 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
                         continue
                     dt = datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)
                     rows.append((
-                        symbol, name, dt,
+                        store_sym, name, dt,   # cc#1067: store symbol, not the Yahoo fetch symbol
                         opens[i]  if i < len(opens)  else None,
                         highs[i]  if i < len(highs)  else None,
                         lows[i]   if i < len(lows)   else None,
