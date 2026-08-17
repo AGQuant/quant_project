@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_home_news_R1 · /m/home LIVE NEWS card, founder QA 17-Aug-2026 15:33
+     Three changes, from the founder's screenshot of the live card:
+       1. RAW / POLISH switch tabs on the card. POLISH is the default — polished cards are
+          the product; raw is the firehose behind it. Counts shown on each tab.
+       2. A detail chevron on EVERY headline row. The whole row is the tap target (44px
+          min), the chevron just announces it.
+       3. Tap opens a BOTTOM SHEET on the same page. NEVER navigate to Intel from a
+          headline. The "185 raw headlines ›" header link may still go to Intel — that is
+          an explicit go-to-the-page action; a headline tap is a peek, not a journey.
+     MOTION MODEL FIT (APP_MOTION_MODEL_V1, 24490): tap = deep, and the sheet is the
+     lightest form of deep — same page, dismiss and you are exactly where you were.
+     Sheet body scrolls y INTERNALLY with the page behind locked (body scroll lock);
+     that is a modal context, not a nested page scroller, so the no-nested-vertical rule
+     is not violated.
+     DEPTH: the sheet is a PRESSED container (scorr_card_pressed_R1) — it holds content,
+     it does not navigate, so it sinks and has no press state. Its close affordances are
+     the drag handle, the backdrop, and swipe-down.
+     CONTENT: polish mode binds polished_news (headline, source, published_time, full
+     polished body, sentiment/impact chips). Raw mode binds raw_news (headline, source,
+     fetched time; body = raw summary if stored, else headline + honest "raw feed item —
+     polished version not yet available"). NEVER a fabricated body. Ladder of honesty
+     over fullness.
+-->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--field:#0A0A0C;--panel:#14141A;--sunk:#0E0E11;--chalk:#F5F2EA;--mute:#8A8A93;
+--line:#26262D;--gold:#D4AF37;--goldhi:#F0D67A;--volt:#C8F542;--heat:#FF4D6D;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--chalk);font-family:'Archivo',system-ui,sans-serif;padding:16px;max-width:420px;margin:auto}
+.eye{font-size:9px;color:#35E0FF;letter-spacing:.2em;font-weight:800;margin-bottom:8px}
+.card{background:var(--panel);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%);padding:16px 14px}
+.hd{display:flex;align-items:center;margin-bottom:12px}
+.hd b{font-family:'Archivo Black',sans-serif;font-size:15px;font-style:italic}
+.hd a{margin-left:auto;font-family:monospace;font-size:10.5px;color:var(--mute);text-decoration:none}
+/* 1 · the switch */
+.tabs{display:flex;background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:3px;margin-bottom:10px}
+.tab{flex:1;text-align:center;padding:7px 0;border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.12em;color:var(--mute)}
+.tab.on{background:var(--gold);color:#151204}
+.tab small{font-family:monospace;font-weight:700;opacity:.75;margin-left:4px;font-size:9px}
+/* 2 · rows, whole row tappable, chevron announces */
+.row{display:flex;align-items:center;gap:10px;padding:11px 2px;border-bottom:1px solid #1D1D23;min-height:44px}
+.row:last-of-type{border-bottom:none}
+.row .h{font-size:12.5px;line-height:1.45;flex:1}
+.row .t{font-family:monospace;font-size:9px;color:var(--mute);white-space:nowrap}
+.row .c{color:var(--gold);font-size:13px;flex-shrink:0}
+/* 3 · the bottom sheet — PRESSED container, in-page, no navigation */
+.veil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
+ background:var(--sunk);border-top:1px solid #000;border-radius:18px 18px 0 0;
+ box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),0 -1px 0 rgba(255,255,255,.06);
+ animation:up .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes up{from{transform:translateY(100%)}}
+.grab{width:38px;height:4px;border-radius:2px;background:#3A3A42;margin:9px auto 6px;flex-shrink:0}
+.sb{overflow-y:auto;padding:4px 18px 26px;-webkit-overflow-scrolling:touch}
+.sh{font-family:'Archivo Black',sans-serif;font-size:15px;line-height:1.35;margin-bottom:7px}
+.sm{display:flex;gap:8px;align-items:center;font-family:monospace;font-size:9.5px;color:var(--mute);margin-bottom:11px;flex-wrap:wrap}
+.chip{font-size:8px;font-weight:800;letter-spacing:.1em;padding:2px 7px;border-radius:3px}
+.chip.up{background:rgba(200,245,66,.14);color:var(--volt);border:1px solid rgba(200,245,66,.3)}
+.chip.hi{background:rgba(255,77,109,.12);color:var(--heat);border:1px solid rgba(255,77,109,.3)}
+.bd{font-size:12.5px;line-height:1.66;color:#D9D6CC}
+.bd p{margin-bottom:9px}
+</style></head><body>
+
+<div class="eye">LIVE NEWS</div>
+<div class="card">
+  <div class="hd"><b>LIVE NEWS</b><a>185 raw headlines ›</a></div>
+  <div class="tabs">
+    <div class="tab on">POLISH<small>42</small></div>
+    <div class="tab">RAW<small>185</small></div>
+  </div>
+  <div class="row"><div class="h">Reliance shares briefly slip below ₹1,300 amid volatility</div><div class="t">1h</div><div class="c">⌄</div></div>
+  <div class="row"><div class="h">Lupin gets USFDA nod for generic tablets</div><div class="t">1h</div><div class="c">⌄</div></div>
+  <div class="row"><div class="h">Global Markets: 5 big triggers to watch this week</div><div class="t">1h</div><div class="c">⌄</div></div>
+</div>
+
+<!-- sheet, shown open -->
+<div class="veil"></div>
+<div class="sheet">
+  <div class="grab"></div>
+  <div class="sb">
+    <div class="sh">Lupin gets USFDA nod for generic tablets to treat excessive daytime sleepiness</div>
+    <div class="sm"><span>Moneycontrol</span><span>·</span><span>1h ago</span>
+      <span class="chip up">BULLISH</span><span class="chip hi">HIGH IMPACT</span></div>
+    <div class="bd">
+      <p>{full polished body — rendered from polished_news, markdown-safe, exactly the article the Intel page would show}</p>
+      <p>{second paragraph…}</p>
+    </div>
+  </div>
+</div>
+
+</body></html>
