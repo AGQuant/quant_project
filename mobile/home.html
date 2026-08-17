@@ -2209,12 +2209,16 @@ Promise.all([
        The old logic gave VIX <= 14 the `ok` class — green — so on a calm day with the gate
        failing 4-of-4 the chip read as good news. `ok` is now unreachable on this chip in every
        state: red when fear confirms, neutral otherwise, never green.
-       ONE LIMITATION, LOGGED AS A QUESTION IN THE ROOM RATHER THAN PAPERED OVER: the rule wants
-       red on (rising VIX AND a bearish gate) OR VIX >= 17, but this payload carries no VIX
-       CHANGE field — hero.vix is a level only. Per cc#1081 item 2 that means red on >= 17 alone,
-       and the change clause waits for a payload follow-up. A second fetch to invent the change
-       client-side is explicitly forbidden and is not done. */
-    + '<button class="hc vixc tap' + (hero.vix == null ? '' : (Number(hero.vix) >= 17 ? ' bad' : ''))
+       cc#1083 COMPLETED THE RULE. P3 shipped red-on->=17 only, because the payload carried no VIX
+       change field and inventing one client-side was forbidden. mobile_home2 now serves vix_chg
+       and vix_prev_close (live intraday level vs the last close of the PREVIOUS trading session,
+       derived from the bar dates so weekends and holidays skip themselves), so the confirming-fear
+       half is live: red when the VIX is RISING and the gate is failing, or whenever it is >= 17.
+       Still never green in any branch. vix_chg null (no previous session) simply means the rising
+       clause cannot fire — it never counts as a rise. */
+    + '<button class="hc vixc tap' + (hero.vix == null ? '' : (
+        (Number(hero.vix) >= 17 || (hero.vix_chg != null && Number(hero.vix_chg) > 0
+          && hero.fails != null && Number(hero.fails) > 0)) ? ' bad' : ''))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
     + '</div>'

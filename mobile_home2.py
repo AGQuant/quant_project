@@ -602,12 +602,53 @@ def mobile_home2(request: Request):
         _p = cur.fetchone()
         pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
         pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
-        cur.execute("""
-            SELECT price, chg_pct FROM global_indices WHERE name='India VIX' AND price IS NOT NULL
-            ORDER BY quote_date DESC LIMIT 1
-        """)
-        _v = cur.fetchone()
-        vix_latest = float(_v[0]) if _v and _v[0] is not None else None
+        # ── cc#1083 · India VIX: LIVE level + previous-session close + the change ──────────────
+        # WHY THIS MOVED OFF global_indices. That table's India VIX row is a DAILY close and it
+        # lags: read 17-Aug 12:11 IST, its newest quote_date was 14-Aug at 11.305, so the hero
+        # chip was serving a three-day-old level as the live one. global_intraday has carried
+        # India VIX 5-min bars since cc#1067 (72 bars today), so the live leg comes from there.
+        #
+        # THE PREVIOUS SESSION IS DERIVED FROM THE BARS THEMSELVES, not from a calendar. Taking
+        # the two most recent DISTINCT bar dates skips weekends and holidays by construction —
+        # there are simply no bars on a day the market did not trade — which is stronger than
+        # "yesterday" and needs no holiday table lookup. cc#1083 asks not to assume yesterday;
+        # this cannot, because it never computes a date at all.
+        #
+        # NULL-HONEST: if either side is missing, vix_chg is None. Never 0 for missing — a flat
+        # VIX and an unknown VIX are different facts, and the chip rule turns on which it is.
+        vix_latest = vix_prev_close = vix_chg = None
+        try:
+            cur.execute("""
+                WITH b AS (
+                    SELECT ts::date AS d, close, ts FROM global_intraday
+                    WHERE symbol = 'INDIAVIX' AND close IS NOT NULL
+                ),
+                d2 AS (SELECT DISTINCT d FROM b ORDER BY d DESC LIMIT 2)
+                SELECT DISTINCT ON (b.d) b.d, b.close
+                FROM b JOIN d2 ON d2.d = b.d
+                ORDER BY b.d DESC, b.ts DESC
+            """)
+            _rows = cur.fetchall()
+            if _rows:
+                vix_latest = float(_rows[0][1]) if _rows[0][1] is not None else None
+            if len(_rows) > 1 and _rows[1][1] is not None:
+                vix_prev_close = float(_rows[1][1])
+            if vix_latest is not None and vix_prev_close is not None:
+                vix_chg = round(vix_latest - vix_prev_close, 4)
+        except Exception as e:
+            log.warning("cc#1083 India VIX intraday unavailable, falling back to daily: %s", e)
+            try:
+                cur.connection.rollback()
+            except Exception:
+                pass
+        if vix_latest is None:
+            # Degradation path only — the daily close, which is what this used to serve outright.
+            cur.execute("""
+                SELECT price FROM global_indices WHERE name='India VIX' AND price IS NOT NULL
+                ORDER BY quote_date DESC LIMIT 1
+            """)
+            _v = cur.fetchone()
+            vix_latest = float(_v[0]) if _v and _v[0] is not None else None
 
         # 1 · today's signals, newest 3, with the live price beside the signal price
         cur.execute("""
@@ -791,6 +832,11 @@ def mobile_home2(request: Request):
             "pcr": pcr_latest,
             "pcr_date": pcr_date,
             "vix": vix_latest,
+            # cc#1083: completes VIX_COLOR_RULE_V1's confirming-fear half. Both sides are exposed,
+            # not just the delta, so the chip (and anyone reading the payload) can see what the
+            # change was measured against rather than trusting a bare number.
+            "vix_prev_close": vix_prev_close,
+            "vix_chg": vix_chg,
             "v10": v10,
             "as_of": (mood or {}).get("checked_at"),
         },
