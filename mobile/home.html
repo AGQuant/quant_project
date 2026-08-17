@@ -2315,12 +2315,17 @@ Promise.all([
     // proposed #indexintel, but v8_dashboard.html line ~4995 reads
     // TABS=['index','v14','tcscan','bt'] and falls back to the Master pane on any unknown hash.
     // #indexintel would therefore have opened Master silently and looked like a working link.
-    + '<a class="tool" href="/dashboard#index"><span>\u25d0</span>Index Intel</a>'
+    /* APP_QA_R4 P8 (F4): the app tile comes first and owns the name; the web page is kept
+       but marked as the web one, so two tiles never claim the same label. */
+    + '<a class="tool" href="/m/v10"><span>\u25d0</span>Index Intel</a>'
+    + '<a class="tool" href="/dashboard#index"><span>\u25d0</span>Index Intel \u00b7 Web</a>'
     + '<a class="tool" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
     + '<a class="tool" href="/v15"><span>\u25c9</span>V15 MF</a>'
     // cc#897 second pass: 12 -> 14. Routes taken from model_registry, not guessed \u2014 V10 is /v10
     // and V14 Intraday is /intraday there. Both open web pages, same 16915 exception as above.
-    + '<a class="tool" href="/v10"><span>\u25d1</span>V10</a>'
+    /* APP_QA_R4 P8: the old /v10 web tile is the same destination as the web Index Intel
+       tile above in user terms, so it keeps its own route but stops being called "V10". */
+    + '<a class="tool" href="/v10"><span>\u25d1</span>V10 Desk \u00b7 Web</a>'
     + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
     // cc#991 (founder 10-Aug, grid_final amendment): APPEND the Wall of Trades tile. The grid was
     // never capped at 12 — it already held 14 and the last row had an empty third slot — so this
