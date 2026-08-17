@@ -344,6 +344,54 @@ body[data-theme]{
 /* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
    passes straight through instead of being captured by a 300px window. */
 .newslist{max-height:none;overflow:visible}
+/* ══ cc#1092 LIVE NEWS — RAW/POLISH tabs + in-page bottom sheet ═══════════════════════════════
+   Founder QA 17-Aug 15:33, built to design_refs/scorr_home_news_R1.html @ ec9df19.
+   POLISH is the default tab: the polished cards are the product, raw is the firehose behind it.
+   Each tab carries its own live count so the denominator is on screen, not implied. */
+.nwtabs{display:flex;background:var(--t-sunk,#0E0E11);border:1px solid var(--line);border-radius:9px;
+  padding:3px;margin:2px 0 10px}
+.nwtab{flex:1;text-align:center;padding:7px 0;border-radius:7px;font-size:10.5px;font-weight:800;
+  letter-spacing:.12em;color:var(--dim);background:none;border:0;font-family:inherit;cursor:pointer}
+.nwtab.on{background:var(--gold,#D4AF37);color:#151204}
+.nwtab small{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
+  margin-left:4px;font-size:9px}
+/* The WHOLE row is the tap target (44px floor, Apple/Android minimum). The chevron only
+   ANNOUNCES that the row opens something — it is not the hit area. A 13px glyph as the only
+   target is the thing that makes a phone feel broken. */
+.nwrow{display:flex;align-items:center;gap:10px;padding:11px 2px;min-height:44px;
+  border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;
+  font-family:inherit;color:inherit;cursor:pointer}
+.nwrow:last-of-type{border-bottom:0}
+.nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB)}
+.nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
+  white-space:nowrap}
+.nwrow .c{color:var(--gold,#D4AF37);font-size:13px;flex-shrink:0}
+/* THE SHEET IS A PRESSED CONTAINER (scorr_card_pressed_R1 @ 1221452): it SINKS and it has NO
+   press state, because a well is not a button. Depth encodes affordance — the rows above rise
+   and are tappable, this holds content and is not. */
+.nwveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
+.nwsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
+  z-index:81;background:var(--t-sunk,#0E0E11);border-top:1px solid #000;border-radius:18px 18px 0 0;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),
+             0 -1px 0 rgba(255,255,255,.06);
+  animation:nwup .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes nwup{from{transform:translateY(100%)}}
+.nwgrab{width:38px;height:4px;border-radius:2px;background:#3A3A42;margin:9px auto 6px;flex-shrink:0}
+/* The sheet body is the ONLY vertical scroller on screen while it is open — the page behind is
+   locked — so APP_MOTION_MODEL_V1's no-nested-vertical-scroll rule is not violated. A modal
+   owns the gesture; it does not compete for it. */
+.nwsb{overflow-y:auto;padding:4px 18px 26px;-webkit-overflow-scrolling:touch}
+.nwsh{font-size:15px;line-height:1.35;font-weight:800;margin-bottom:7px;color:var(--txt,#E9EEFB)}
+.nwsm{display:flex;gap:8px;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9.5px;color:var(--dim);margin-bottom:11px;flex-wrap:wrap}
+.nwchip{font-size:8px;font-weight:800;letter-spacing:.1em;padding:2px 7px;border-radius:3px}
+.nwchip.up{background:rgba(200,245,66,.14);color:var(--grn,#C8F542);border:1px solid rgba(200,245,66,.3)}
+.nwchip.dn{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:1px solid rgba(255,77,109,.3)}
+.nwchip.hi{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:1px solid rgba(255,77,109,.3)}
+.nwchip.nt{background:rgba(255,255,255,.06);color:var(--dim);border:1px solid var(--line)}
+.nwbd{font-size:12.5px;line-height:1.66;color:#D9D6CC}
+.nwbd p{margin:0 0 9px}
+.nwnone{font-size:12px;line-height:1.6;color:var(--dim);font-style:italic}
 /* ── cc#971 paging ──────────────────────────────────────────────────────────────────────────
    min-height reserves SIX rows. The last page usually holds fewer, and without this the section
    would shrink the moment you reached it — pulling the Tools grid up and moving the Next button
@@ -1798,7 +1846,21 @@ function rnAgo(ts){
    would collapse the section and yank the Tools grid up the screen the moment you reached it —
    the control you just tapped would move out from under your thumb. min-height on the list keeps
    every page the same size. */
-var RN = { items: [], page: 0, per: 6 };
+var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
+
+/* ── cc#1092: the two feeds, and which endpoints they are ────────────────────────────────────
+   Both already existed; the card asked me to check before inventing one, and neither was missing.
+     RAW    -> /api/news/live?hours=48&per_cat=300   (raw_news, the same call the web tab makes)
+     POLISH -> /api/news/polished?category=all&limit=100  (v_polished_articles, the same body the
+               Intel page renders, so a peek and the full page cannot disagree)
+   No new endpoint was added. */
+function nwSetMode(m){
+  if (RN.mode === m) return;
+  RN.mode = m;
+  RN.items = (m === 'polish') ? RN.polish : RN.raw;
+  RN.page = 0;
+  rnPaint();
+}
 
 function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
 
@@ -1882,15 +1944,25 @@ function rnBindSwipe(){
 function rnPaint(){
   var box = document.getElementById('rnBox');
   if (!box) return;
+  /* cc#1092: tabs are painted BEFORE the empty guard. Painting them after the early return meant
+     an empty tab rendered no switch at all — POLISH with zero articles would have stranded the
+     reader on a blank card with no way back to RAW. The switch must outlive its own contents. */
+  nwPaintTabs();
   if (!RN.items.length){
-    box.innerHTML = '<div class="sum" style="padding:8px 0">No headlines in the last 48 hours.</div>';
+    box.innerHTML = '<div class="sum" style="padding:8px 0">No '
+      + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.</div>';
     return;
   }
   var pages = rnPages(), p = RN.page;
   var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
-  var rows = slice.map(function(n){
-    return '<div class="rnr"><div class="h">' + esc(n.headline) + '</div>'
-      + '<div class="rnage">' + esc(rnAgo(n.published_at) || '') + '</div></div>';
+  /* cc#1092: whole row is a <button> — a real 44px tap target with keyboard focus for free,
+     rather than a div with an onclick that a screen reader cannot see. The chevron announces. */
+  var rows = slice.map(function(n, i){
+    var idx = p * RN.per + i;
+    return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
+      + '<span class="h">' + esc(n.headline) + '</span>'
+      + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
+      + '<span class="c">\u2304</span></button>';
   }).join('');
   /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
      rendered disabled rather than hidden, so the row never changes width mid-session. */
@@ -1900,6 +1972,19 @@ function rnPaint(){
     + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
     + '</div>';
   box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
+  nwPaintTabs();
+}
+
+function nwPaintTabs(){
+  var el = document.getElementById('nwTabs');
+  if (!el) return;
+  function tab(mode, label, n){
+    return '<button type="button" class="nwtab' + (RN.mode === mode ? ' on' : '') + '"'
+      + ' onclick="nwSetMode(\'' + mode + '\')">' + label
+      + '<small>' + n + '</small></button>';
+  }
+  el.innerHTML = '<div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
+    + tab('raw', 'RAW', RN.raw.length) + '</div>';
 }
 
 function loadRawNews(){
@@ -1926,8 +2011,10 @@ function loadRawNews(){
          no payload change and no per-page request: the card's item 2 asked me to raise a LIMIT in
          mobile_home2, but this section has not read that payload since cc#929 — it reads
          /api/news/live directly, and the depth was already here. */
-      RN.items = items;
-      RN.page = 0;
+      RN.raw = items;
+      /* cc#1092: POLISH is the default tab, so the raw fetch no longer decides what is on screen.
+         It fills its own bucket and paints only if polish has not already claimed the view. */
+      if (RN.mode === 'raw' || !RN.polish.length){ RN.items = items; RN.page = 0; }
       rnPaint();
       rnBindSwipe();   // cc#1062: bind once, after #rnBox has content
     })
@@ -1935,7 +2022,139 @@ function loadRawNews(){
       if (cnt) cnt.innerHTML = 'unavailable <span class="h-chev">›</span>';
       box.innerHTML = '<div class="sum" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
     });
+  /* The polished feed, fetched alongside. It is a SEPARATE promise on purpose: if polish fails the
+     raw firehose must still render, and vice versa. One card, two independent sources, neither
+     able to blank the other. */
+  fetchWithTimeout('/api/news/polished?category=all&limit=100')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      /* SAME WINDOW OR THE COUNTS LIE. Raw is fetched as hours=48; the polished endpoint has no
+         hours param, it returns the newest `limit` ever. Left alone the tabs would have read
+         "POLISH 100 · RAW 234" — two numbers over two different periods sitting side by side as
+         if they were comparable. Both tabs are now the last 48 hours, so the pair means something
+         (today: 30 polished against 234 raw). UNIVERSE_DENOMINATOR_RULE, same as the theme cards. */
+      var cutoff = Date.now() - 48 * 3600 * 1000;
+      RN.polish = (d.articles || [])
+        .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
+        .filter(function(a){
+          var t = new Date(a.published_time || 0).getTime();
+          return isFinite(t) && t >= cutoff;
+        })
+        .map(function(a){
+          return { headline: a.headline_clean, published_at: a.published_time,
+                   source: a.source, sentiment: a.sentiment, impact: a.impact,
+                   body: a.full_summary || a.summary || '', polished: true };
+        });
+      if (RN.mode === 'polish'){ RN.items = RN.polish; RN.page = 0; }
+      rnPaint();
+      rnBindSwipe();
+    })
+    .catch(function(){
+      /* Polish unavailable is not an error the user needs a banner for — the tab simply reads 0
+         and RAW still works. Never a fabricated count. */
+      RN.polish = [];
+      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.items = RN.raw; RN.page = 0; }
+      rnPaint();
+    });
 }
+
+/* ══ cc#1092 · THE BOTTOM SHEET — a peek, never a navigation ══════════════════════════════════
+   Founder ruling: tapping a headline must NOT leave Home. The sheet opens in place over the card.
+   Close is any of: drag handle, backdrop tap, swipe down, Escape. Body scroll is locked behind it
+   so the page cannot creep while the sheet scrolls.
+
+   CONTENT HONESTY, which is the part that matters more than the animation: polish rows bind the
+   SAME polished body the Intel page renders. A raw row usually has no stored body, and when it
+   does not it says so in one plain line. Nothing here composes a summary, and no text is inserted
+   with innerHTML before being escaped. */
+var NW = { open: false, y: 0, scrollY: 0 };
+
+function nwMd(txt){
+  /* escape FIRST, format second — the only safe order. Paragraphs on blank lines, **bold**, and
+     nothing else: no links, no images, no raw HTML passthrough. */
+  var safe = esc(String(txt == null ? '' : txt));
+  return safe.split(/\n\s*\n/).map(function(para){
+    var t = para.trim();
+    if (!t) return '';
+    return '<p>' + t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function nwChip(v, kind){
+  if (!v) return '';
+  var t = String(v).toUpperCase();
+  var cls = kind === 'impact'
+    ? (t === 'HIGH' ? 'hi' : 'nt')
+    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
+  return '<span class="nwchip ' + cls + '">' + esc(kind === 'impact' ? t + ' IMPACT' : t) + '</span>';
+}
+
+function nwOpen(idx){
+  var n = RN.items[idx];
+  if (!n) return;
+  nwClose();
+  NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+
+  var meta = '<span>' + esc(n.source || 'source unknown') + '</span>';
+  var ago = rnAgo(n.published_at);
+  if (ago) meta += '<span>\u00b7</span><span>' + esc(ago) + '</span>';
+  meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
+
+  var body = String(n.body || '').trim()
+    ? '<div class="nwbd">' + nwMd(n.body) + '</div>'
+    /* The honest line. A raw feed item has a headline and a source and nothing else, and the one
+       thing this must never do is write a plausible-sounding body for it. */
+    : '<div class="nwnone">raw feed item \u2014 polished version not yet available.</div>';
+
+  var veil = document.createElement('div');
+  veil.className = 'nwveil';
+  veil.onclick = nwClose;
+
+  var sheet = document.createElement('div');
+  sheet.className = 'nwsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="nwgrab" onclick="nwClose()"></div>'
+    + '<div class="nwsb"><div class="nwsh">' + esc(n.headline) + '</div>'
+    + '<div class="nwsm">' + meta + '</div>' + body + '</div>';
+
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  NW.open = true;
+  nwBindSheet(sheet);
+}
+
+function nwClose(){
+  var v = document.querySelector('.nwveil'), s = document.querySelector('.nwsheet');
+  if (v) v.remove();
+  if (s) s.remove();
+  if (NW.open){
+    document.body.style.overflow = '';
+    window.scrollTo(0, NW.scrollY);   // the lock must not lose the reader's place
+    NW.open = false;
+  }
+}
+
+function nwBindSheet(sheet){
+  /* Swipe DOWN closes, and only from a gesture that started at the top of the body — otherwise a
+     downward flick while reading paragraph nine would dismiss the article mid-sentence. */
+  var sb = sheet.querySelector('.nwsb');
+  sheet.addEventListener('touchstart', function(e){
+    NW.y = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
+  }, { passive: true });
+  sheet.addEventListener('touchend', function(e){
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t || !sb) return;
+    if (sb.scrollTop > 4) return;                 // still reading — not a dismiss
+    if (t.clientY - NW.y > 60) nwClose();
+  }, { passive: true });
+}
+
+document.addEventListener('keydown', function(e){
+  if (NW.open && (e.key === 'Escape' || e.keyCode === 27)) nwClose();
+});
 
 /* ── cc#930 RESTORE: the block below was deleted by 3ce2493 (cc#928) and is put back
    BYTE-FOR-BYTE as it stood at 8e92cdd. cc#928 replaced a range running from v10Svg to
@@ -2350,11 +2569,17 @@ Promise.all([
      and merges the SAME two groups in the SAME order as the web's newsList() — domestic + company,
      published_at DESC — so DISPLAY_PARITY holds by construction rather than by coincidence.
      The container is filled by loadRawNews() after paint; the card renders immediately. */
+  /* cc#1092: the card is NO LONGER one big <a href="/m/intel">. Founder ruling: a headline tap
+     opens a peek in place and must never navigate. Only the HEADER count keeps its link —
+     "go to the page" is a different intent from "show me this one", and conflating them is what
+     made every headline a trapdoor. The wrapper anchor also used to swallow taps, which is why
+     cc#971 and cc#1062 both had to fight it; removing it retires that whole class of bug. */
   h += '<div class="sect">LIVE NEWS</div>'
-    + '<a class="card-link" href="/m/intel"><div class="c"><div class="chd"><div class="t">Live News</div>'
-    + '<div class="rgt" id="rnCount">loading… <span class="h-chev">\u203a</span></div></div>'
+    + '<div class="c"><div class="chd"><div class="t">Live News</div>'
+    + '<a class="rgt" id="rnCount" href="/m/intel">loading… <span class="h-chev">\u203a</span></a></div>'
+    + '<div id="nwTabs"></div>'
     + '<div class="newslist" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'
-    + '</div></a>';
+    + '</div>';
 
   /* 5 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   h += '<div class="sect">TOOLS</div>';
