@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAILY DIGEST · design ref R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:60px;
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
+ clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--amber))}
+.chip{font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:4px 9px;display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
+.grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
+.tile{background:var(--hi);border:1px solid var(--edge);padding:8px 9px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.tile .lb{font-size:9px;letter-spacing:1px;color:var(--muted)}
+.tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:12.5px;margin-top:3px}
+.mrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge);font-size:12.5px}
+.mrow:first-of-type{border-top:none}
+.sdot{width:7px;height:7px;border-radius:50%;flex:none}
+.plink{color:var(--pulse);font-weight:700;font-size:12.5px}
+.foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
+.ladder{display:flex;align-items:center;gap:0;margin-top:8px}
+.rung{flex:1;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="phone">
+
+<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
+  <div><span class="skew" style="font-size:24px">DAILY DIGEST</span>
+    <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">17 AUG 2026 · the morning read</div></div>
+  <span class="chip n">PRE-OPEN · 0h 33m</span>
+</div>
+
+<!-- ══ MARKET READ HERO ══ -->
+<div class="card rail" style="--rc:var(--amber);margin-top:12px">
+  <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">MARKET READ</div>
+  <span class="skew" style="font-size:38px;line-height:.95">CAUTIOUS</span>
+  <div style="height:6px;width:150px;background:linear-gradient(90deg,var(--chalk),transparent);transform:skewX(-24deg);margin:6px 0 10px;opacity:.85"></div>
+  <div class="num" style="font-size:12px;color:var(--muted)">global tape <b style="color:var(--chalk)">8/16 higher</b> · breadth <b style="color:var(--heat)">0.77</b> · every claim tied to a number below</div>
+</div>
+
+<!-- ══ 01 GLOBAL TAPE ══ -->
+<div class="eyebrow">GLOBAL TAPE · DAY</div>
+<div class="card">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+    <div class="tile"><div class="lb">GIFT N</div><div class="vv" style="color:var(--volt)">+0.21%</div></div>
+    <div class="tile"><div class="lb">NIKKEI</div><div class="vv" style="color:var(--volt)">+0.84%</div></div>
+    <div class="tile"><div class="lb">HANG SENG</div><div class="vv" style="color:var(--heat)">-0.52%</div></div>
+    <div class="tile"><div class="lb">KOSPI</div><div class="vv" style="color:var(--volt)">+0.33%</div></div>
+    <div class="tile"><div class="lb">S&amp;P FUT</div><div class="vv" style="color:var(--heat)">-0.18%</div></div>
+    <div class="tile"><div class="lb">GOLD</div><div class="vv" style="color:var(--volt)">+0.40%</div></div>
+    <div class="tile"><div class="lb">BRENT</div><div class="vv" style="color:var(--heat)">-0.61%</div></div>
+    <div class="tile"><div class="lb">USDINR</div><div class="vv" style="color:var(--muted)">87.44</div></div>
+  </div>
+  <div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">No tick yet for S&amp;P 500, DOW — last CLOSE with its own date. A market outside its hours is CLOSED, not stale.</div>
+</div>
+
+<div class="eyebrow">GLOBAL TAPE · WEEK</div>
+<div class="card">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+    <div class="tile"><div class="lb">GIFT N</div><div class="vv" style="color:var(--heat)">-0.9%</div></div>
+    <div class="tile"><div class="lb">NIKKEI</div><div class="vv" style="color:var(--volt)">+2.1%</div></div>
+    <div class="tile"><div class="lb">HANG SENG</div><div class="vv" style="color:var(--volt)">+1.4%</div></div>
+    <div class="tile"><div class="lb">KOSPI</div><div class="vv" style="color:var(--volt)">+0.8%</div></div>
+    <div class="tile"><div class="lb">S&amp;P 500</div><div class="vv" style="color:var(--heat)">-1.2%</div></div>
+    <div class="tile"><div class="lb">GOLD</div><div class="vv" style="color:var(--volt)">+1.9%</div></div>
+    <div class="tile"><div class="lb">BRENT</div><div class="vv" style="color:var(--heat)">-2.4%</div></div>
+    <div class="tile"><div class="lb">USDINR</div><div class="vv" style="color:var(--heat)">+0.3%</div></div>
+  </div>
+  <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">the week behind the day — same tiles, 5-session change</div>
+</div>
+
+<!-- ══ 02 TODAY'S MAP (reference levels — the plan, not the position) ══ -->
+<div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
+<div class="card">
+  <div class="grp"><h3>NIFTY 50</h3><span class="note">CMP <b class="num" style="color:var(--chalk)">24,366</b> · LIVE · <span style="color:var(--heat)">below PP 0.31%</span></span></div>
+  <div class="ladder">
+    <div class="rung" style="border-color:#5A2634">S2<br><b style="color:var(--chalk)">24,102</b></div>
+    <div class="rung" style="border-color:#5A2634">S1<br><b style="color:var(--chalk)">24,214</b></div>
+    <div class="rung" style="border-color:var(--amber);color:var(--amber)">PP<br><b style="color:var(--chalk)">24,442</b></div>
+    <div class="rung" style="border-color:#3E5A18">R1<br><b style="color:var(--chalk)">24,569</b></div>
+    <div class="rung" style="border-color:#3E5A18">R2<br><b style="color:var(--chalk)">24,731</b></div>
+  </div>
+  <div class="grp" style="margin-top:16px"><h3>BANKNIFTY</h3><span class="note">CMP <b class="num" style="color:var(--chalk)">57,491</b> · LIVE · <span style="color:var(--heat)">below PP 0.42%</span></span></div>
+  <div class="ladder">
+    <div class="rung" style="border-color:#5A2634">S2<br><b style="color:var(--chalk)">56,810</b></div>
+    <div class="rung" style="border-color:#5A2634">S1<br><b style="color:var(--chalk)">57,155</b></div>
+    <div class="rung" style="border-color:var(--amber);color:var(--amber)">PP<br><b style="color:var(--chalk)">57,733</b></div>
+    <div class="rung" style="border-color:#3E5A18">R1<br><b style="color:var(--chalk)">58,090</b></div>
+    <div class="rung" style="border-color:#3E5A18">R2<br><b style="color:var(--chalk)">58,455</b></div>
+  </div>
+</div>
+
+<!-- ══ 03 INTERNALS ══ -->
+<div class="eyebrow">INTERNALS</div>
+<div class="card">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
+    <div class="tile"><div class="lb">BREADTH</div><div class="vv" style="color:var(--heat)">0.79</div><div style="font-size:9px;color:var(--muted)" class="num">198A / 251D</div></div>
+    <div class="tile"><div class="lb">PCR NIFTY</div><div class="vv" style="color:var(--amber)">0.97</div><div style="font-size:9px;color:var(--muted)" class="num">call writers edge</div></div>
+    <div class="tile"><div class="lb">PCR BNK</div><div class="vv" style="color:var(--volt)">0.84</div><div style="font-size:9px;color:var(--muted)" class="num">of 14-Aug</div></div>
+  </div>
+  <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">10-day PCR trend + quality notes carried · stale &gt;2 sessions is flagged, never bare</div>
+</div>
+
+<!-- ══ ENGINE YESTERDAY (from V10 side — the story only) ══ -->
+<div class="eyebrow">ENGINE YESTERDAY · V10</div>
+<div class="card">
+  <div class="mrow"><b>NIFTY</b><span class="chip w" style="font-size:9px;padding:1px 6px">HELD LONG</span><span style="flex:1"></span><span class="num" style="color:var(--volt)">+118 pts · ₹7,140 · TGT</span></div>
+  <div class="mrow"><b>BANKNIFTY</b><span class="chip l" style="font-size:9px;padding:1px 6px">FLIPPED</span><span style="flex:1"></span><span class="num" style="color:var(--heat)">-92 pts · ₹-2,760 · SL</span></div>
+  <div style="margin-top:10px;font-size:12px;color:var(--muted)">NIFTY long is 3 sessions old — longest hold since 28-Jul. <span class="plink">Full desk → INDEX INTEL</span></div>
+</div>
+
+<!-- ══ 04 REPORTING TODAY ══ -->
+<div class="eyebrow">REPORTING TODAY</div>
+<div class="card">
+  <div class="grp"><h3>14 companies</h3><span class="note">TOP BY MARKET CAP</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:7px">
+    <span class="chip">DIVISLAB</span><span class="chip">MUTHOOTFIN</span><span class="chip">GLAND</span>
+    <span class="chip">RVNL</span><span class="chip">IRCTC</span><span class="chip" style="color:var(--muted)">+9 more</span></div>
+</div>
+
+<!-- ══ 07 YESTERDAY'S RESULTS · SCORED ══ -->
+<div class="eyebrow">YESTERDAY'S RESULTS · SCORED</div>
+<div class="card">
+  <div class="grp"><h3>Top 10 of 41</h3>
+    <span class="note"><b style="color:var(--volt)">4 bull</b> · <b style="color:var(--heat)">2 caut</b> · <b style="color:var(--muted)">1 neut · 3 pending</b></span></div>
+  <div class="mrow"><b>HAL</b><span style="flex:1;font-size:11.5px;color:var(--muted)">Q1 profit rises 22% on defence orders</span><span class="chip w" style="font-size:9px;padding:1px 6px">BULLISH</span></div>
+  <div class="mrow"><b>UPL</b><span style="flex:1;font-size:11.5px;color:var(--muted)">Q1 loss widens as agchem prices fall</span><span class="chip l" style="font-size:9px;padding:1px 6px">CAUTIOUS</span></div>
+  <div class="mrow"><b>GLENMARK</b><span style="flex:1;font-size:11.5px;color:var(--muted)">Reported — summary not yet on the desk</span><span class="chip n" style="font-size:9px;padding:1px 6px">PENDING</span></div>
+  <div style="margin-top:8px;font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono'">match = symbol + result-shaped headline + &lt;20h · all three, or the row says PENDING</div>
+</div>
+
+<!-- ══ 05 WHAT MOVED ══ -->
+<div class="eyebrow">WHAT MOVED · DOMESTIC</div>
+<div class="card">
+  <div class="mrow"><span class="sdot" style="background:var(--volt)"></span><span style="flex:1">RBI holds rates; commentary leans dovish into H2</span></div>
+  <div class="mrow"><span class="sdot" style="background:var(--heat)"></span><span style="flex:1">FII selling extends to a sixth straight session</span></div>
+  <div class="mrow"><span class="sdot" style="background:var(--amber)"></span><span style="flex:1">GST council defers rate rationalisation decision</span></div>
+  <div style="margin-top:8px"><span class="plink">All domestic news →</span></div>
+</div>
+
+<!-- ══ 06 GLOBAL EVENTS ══ -->
+<div class="eyebrow">GLOBAL EVENTS</div>
+<div class="card">
+  <div class="mrow"><span class="sdot" style="background:var(--heat)"></span><span style="flex:1">US CPI prints hot; September cut odds slip</span></div>
+  <div class="mrow"><span class="sdot" style="background:var(--volt)"></span><span style="flex:1">China announces targeted stimulus for property</span></div>
+  <div style="margin-top:8px"><span class="plink">All global news →</span></div>
+</div>
+
+<!-- ══ 08 CLOSING READ ══ -->
+<div class="card rail" style="--rc:var(--amber)">
+  <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
+  <div style="font-size:13px;line-height:1.55">Bias <b style="color:var(--amber)">Cautious</b> — breadth under 0.8 with a split global tape. Levels above are the day's map; the live desk owns the positions. <span class="plink">INDEX INTEL →</span></div>
+</div>
+
+<div class="foot">DAILY DIGEST · generated 08:42 IST · every claim tied to a number shown above · research only</div>
+</div>
+</body>
+</html>
