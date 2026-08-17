@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_card_slab_R1  ·  THE APP CARD SHELL, LOCKED
+     Founder picked RAISED SLAB from the four-variant bevel study, 17-Aug-2026.
+     Losing variants (chalk emboss / jersey panel / pressed well) are NOT kept here —
+     one shell, one family. The study itself is history, not a menu to re-open.
+
+     WHAT THIS IS: depth only. No token VALUE changes. GOLD NIGHT tokens
+     (THEME_TOKENS_R51_V1 / Sprint 2) are consumed as they stand — this ref adds
+     edge, ledge and press, nothing else.
+
+     THE THREE PROPERTIES THAT MAKE IT A SLAB
+       1. A HARD gold ledge under the card: box-shadow 0 5px 0 0 var(--gold-lo).
+          ZERO BLUR. A blurred shadow is a different language and reads cheap on
+          a black field; the whole effect is that the edge is a solid object.
+       2. A 1.5px border in --line so the top face has an edge of its own, plus a
+          matching 1.5px offset ring so the ledge lines up with the border, not the fill.
+       3. PRESS: translateY(5px) and the ledge collapses to 0. The card physically
+          lands. 70ms, ease. This is the cheapest satisfying interaction in the app
+          and it is the reason this variant won.
+
+     DENSITY RULE (see the second block below). On lists of 8+ rows the ledge drops
+     from 5px to 3px and the press to 3px. SAME shell class, one modifier — not a
+     different variant. A full 5px ledge repeated fifteen times down a screen stops
+     reading as depth and starts reading as stripes.
+
+     P&L IS UNTOUCHED. No bevel, ledge, border or press ever changes a money colour.
+     Green and red mean profit and loss and nothing else. Every green in the app is
+     also frozen pending the founder ruling (session_log 24214).
+
+     SHIPS AS ONE CLASS in the shared sheet, reached through main.py's existing
+     injection — the Sprint 2 P10 pattern. Never per-page card CSS.
+-->
+<html><head><meta charset="utf-8"><title>Scorr · card slab R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@500;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+--field:#0A0A0C; --panel:#17171B; --sunk:#0E0E11;
+--chalk:#F5F2EA; --mute:#8A8A93; --line:#2A2A31;
+--gold:#D4AF37; --gold-hi:#F0D67A; --gold-lo:#7A6320;
+--up:#3DD68C; --down:#FF4D6D;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--chalk);font-family:'Archivo',sans-serif;padding:22px 16px 40px;display:flex;flex-direction:column;align-items:center}
+.w{width:390px;max-width:100%}
+.hd{border-bottom:2px solid var(--gold);padding-bottom:8px;margin-bottom:14px}
+.hd h1{font-family:'Archivo Black';font-size:15px;letter-spacing:-.2px}
+.hd .s{font-size:9.5px;color:var(--mute);letter-spacing:.13em;text-transform:uppercase;margin-top:2px}
+.sec{font-size:9.5px;color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-weight:800;margin:22px 0 9px}
+
+/* ══════════ THE SHELL ══════════ */
+.slab{
+  background:var(--panel);
+  border:1.5px solid var(--line);
+  border-radius:13px;
+  padding:13px 15px;
+  box-shadow:0 5px 0 0 var(--gold-lo), 0 5px 0 1.5px var(--line);
+  transition:transform .07s ease, box-shadow .07s ease;
+}
+.slab:active{
+  transform:translateY(5px);
+  box-shadow:0 0 0 0 var(--gold-lo), 0 0 0 1.5px var(--line);
+}
+/* density modifier — lists of 8+ rows */
+.slab.dense{
+  border-radius:11px; padding:10px 13px;
+  box-shadow:0 3px 0 0 var(--gold-lo), 0 3px 0 1.5px var(--line);
+}
+.slab.dense:active{ transform:translateY(3px); box-shadow:0 0 0 0 var(--gold-lo), 0 0 0 1.5px var(--line); }
+/* inner wells sit BELOW the top face — a slab on a slab is mud */
+.well{ background:var(--sunk); border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 0 0 #000; }
+
+/* ══════════ card content (illustrative) ══════════ */
+.stack{display:flex;flex-direction:column;gap:12px}
+.stack.dz{gap:9px}
+.r1{display:flex;align-items:center;gap:10px}
+.tick{font-family:'Archivo Black';font-size:15.5px;letter-spacing:-.2px;color:var(--gold-hi)}
+.seg{font-size:9px;color:var(--mute);letter-spacing:.09em;text-transform:uppercase;margin-top:1px}
+.sc{font-family:'JetBrains Mono';font-weight:800;font-size:25px;line-height:1;margin-left:auto;color:var(--gold)}
+.vd{font-family:'Archivo Black';font-size:8px;letter-spacing:.11em;padding:3px 7px;border-radius:3px;background:var(--up);color:#04150C}
+.vd.avg{background:var(--gold);color:#221B04}
+.vd.wk{background:var(--down);color:#2A0710}
+.pills{display:flex;gap:6px;margin-top:11px}
+.pl{flex:1;padding:7px 6px;text-align:center}
+.pk{font-size:8px;color:var(--mute);letter-spacing:.14em;font-weight:800}
+.pv{font-family:'JetBrains Mono';font-weight:800;font-size:14.5px;margin-top:2px;color:var(--chalk)}
+.ft{display:flex;gap:13px;margin-top:10px;font-family:'JetBrains Mono';font-size:10px;color:var(--mute)}
+.ft b{color:var(--chalk);font-weight:700}
+.up{color:var(--up)!important}.dn{color:var(--down)!important}
+.dz .tick{font-size:13px}.dz .sc{font-size:19px}.dz .r1{gap:8px}
+.note{font-size:10.5px;color:var(--mute);line-height:1.5;margin-top:9px}
+</style></head><body><div class="w">
+
+<div class="hd"><h1>CARD SHELL · RAISED SLAB</h1>
+<div class="s">scorr_card_slab_R1 · locked 17 aug 2026 · gold night</div></div>
+
+<div class="sec">Standard · tappable cards</div>
+<div class="stack">
+
+  <div class="slab">
+    <div class="r1"><div><div class="tick">MINDACORP</div><div class="seg">Minda Corporation</div></div>
+      <div class="sc">7.51</div><div class="vd">GOOD</div></div>
+    <div class="pills">
+      <div class="pl well"><div class="pk">G</div><div class="pv">7.23</div></div>
+      <div class="pl well"><div class="pk">V</div><div class="pv">6.25</div></div>
+      <div class="pl well"><div class="pk">M</div><div class="pv up">9.06</div></div></div>
+    <div class="ft"><span>CMP <b>720.05</b></span><span>MCap <b>17,215</b></span><span>#1 of 13</span></div>
+  </div>
+
+  <div class="slab">
+    <div class="r1"><div><div class="tick">BHARATSE</div><div class="seg">Bharat Seats</div></div>
+      <div class="sc">7.28</div><div class="vd">GOOD</div></div>
+    <div class="pills">
+      <div class="pl well"><div class="pk">G</div><div class="pv">7.14</div></div>
+      <div class="pl well"><div class="pk">V</div><div class="pv">6.25</div></div>
+      <div class="pl well"><div class="pk">M</div><div class="pv up">8.44</div></div></div>
+    <div class="ft"><span>CMP <b>248.05</b></span><span>1Y <b class="up">+111%</b></span><span>#2 of 13</span></div>
+  </div>
+
+  <div class="slab">
+    <div class="r1"><div><div class="tick">JBMA</div><div class="seg">JBM Auto</div></div>
+      <div class="sc">5.38</div><div class="vd wk">WEAK</div></div>
+    <div class="pills">
+      <div class="pl well"><div class="pk">G</div><div class="pv">6.61</div></div>
+      <div class="pl well"><div class="pk">V</div><div class="pv">6.25</div></div>
+      <div class="pl well"><div class="pk">M</div><div class="pv dn">3.28</div></div></div>
+    <div class="ft"><span>CMP <b>622.95</b></span><span>MCap <b>14,732</b></span><span>#13 of 13</span></div>
+  </div>
+
+</div>
+<div class="note">5px gold ledge, no blur. Tap and the card drops the full 5px onto it — the ledge goes to zero and the face lands. 70ms.</div>
+
+<div class="sec">Dense · lists of 8+ rows</div>
+<div class="stack dz">
+  <div class="slab dense"><div class="r1"><div><div class="tick">TALBROAUTO</div><div class="seg">Talbros Automotive</div></div><div class="sc">7.10</div><div class="vd">GOOD</div></div></div>
+  <div class="slab dense"><div class="r1"><div><div class="tick">SSWL</div><div class="seg">Steel Strips Wheels</div></div><div class="sc">7.05</div><div class="vd">GOOD</div></div></div>
+  <div class="slab dense"><div class="r1"><div><div class="tick">WHEELS</div><div class="seg">Wheels India</div></div><div class="sc">6.82</div><div class="vd avg">AVERAGE</div></div></div>
+  <div class="slab dense"><div class="r1"><div><div class="tick">MUNJALSHOW</div><div class="seg">Munjal Showa</div></div><div class="sc">6.73</div><div class="vd avg">AVERAGE</div></div></div>
+  <div class="slab dense"><div class="r1"><div><div class="tick">ALICON</div><div class="seg">Alicon Castalloy</div></div><div class="sc">5.62</div><div class="vd wk">WEAK</div></div></div>
+</div>
+<div class="note">Ledge 5px to 3px, press 5px to 3px. Same class plus one modifier — not a second variant. Fifteen full ledges down a screen stop reading as depth and start reading as stripes.</div>
+
+<div class="sec">Rules that travel with the shell</div>
+<div class="note">
+Never nest a slab inside a slab — inner blocks use <b style="color:var(--chalk)">.well</b>, which sits below the top face. A raised block inside a raised block is mud.<br><br>
+The ledge is <b style="color:var(--chalk)">--gold-lo</b>, never full gold. Full gold at 5px competes with the score for attention and turns every card into a headline.<br><br>
+No blur anywhere in the shell. The moment the ledge softens it stops being an edge and becomes a drop shadow.<br><br>
+P&amp;L colours are untouched by the shell. Green and red mean profit and loss and nothing else.
+</div>
+
+</div></body></html>
