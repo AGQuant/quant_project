@@ -43,6 +43,11 @@
   --r5-volt:#C8F542;       /* LONG / up / positive — semantic only */
   --r5-heat:#FF4D6D;       /* SHORT / down / negative — semantic only */
   --r5-pulse:#7C5CFF;      /* interactive only — links, active pager. Never decorative. */
+  --r5-aqua:#35E0FF;       /* cc#1071 — WAYFINDING. Where you can go: tool tiles, inactive nav.
+                              Distinct from pulse, which stays on things you DO (Run Trade Check,
+                              Read the Daily Digest, GO), and from volt, which is where you ARE.
+                              Same hex cc#1068 gave the .sect eyebrows, named here so the aqua
+                              identity has one definition instead of a hex per surface. */
   --r5-cut:16px;           /* card corner cut */
   --r5-cut-sm:6px;         /* pill / chip corner cut */
   --r5-display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
@@ -249,3 +254,46 @@
   content:""; flex:1; height:1px;
   background:linear-gradient(90deg, var(--r5-edge), transparent);
 }
+
+/* ─── AQUA NAV + TOOLS GRID · cc#1071 (founder 06:24 screenshot) ─────────────────────────────
+   THREE COLOURS, THREE MEANINGS, and that is the whole change:
+     volt  #C8F542  where you ARE      — the active tab, with its notch. Untouched below.
+     aqua  #35E0FF  where you can GO   — tool tiles, inactive nav tabs. New here.
+     pulse #7C5CFF  what you can DO    — Run Trade Check, Read the Daily Digest, GO.
+
+   WHY THEY WERE PURPLE, since the cause matters more than the fix: nothing painted them. Rule 5
+   above says `a{color:var(--r5-pulse)}`, and both surfaces are made of <a> elements — the 15 tool
+   tiles and every .bn tab — so the one interactive rule swallowed the whole navigation. Its
+   specificity (0,3,1) also beat mobile_app.css's own .tool/.bn colours (0,1,0), which is why the
+   base sheet's greys never showed. The rules below are (0,4,0) and (0,4,1) and take those two
+   surfaces back out of it, leaving rule 5 doing what it was written for.
+
+   WHERE THIS LANDS, stated because the card named a different file. The card asked for the
+   pwa_endpoints.py NAV array, "the one nav source, rule 2". That array IS the one source — for
+   the DESKTOP navbar pwa.js injects into #scorr-nav. It does not reach here: /m/* paths are
+   deliberately kept out of _PWA_INJECT_PATHS (main.py, cc#874) precisely so the app keeps its own
+   five-slot bottom nav, and that nav's markup is hardcoded in all 15 mobile templates with no
+   array behind it. Editing the NAV array would have changed nothing on the screen in the
+   screenshot. THIS file is the one place that already governs those tabs — pass 2 item 4 above
+   sets .bn/.bn.on — and it is injected into every page by main.py _MOBILE_HEAD, build-id stamped,
+   so one edit still lands everywhere and nothing is written per page. Same correction pass 2 made
+   when it found the live nav was .bnav/.bn rather than the .tabs/.tab pass 1 had guessed.
+   (pwa_endpoints.py also carries a `.dt .bnav` block; its own cc#345 comment marks .dt unused, so
+   it is a design template, not the live bar. Left alone.)
+
+   COLOUR ONLY. No display, no visibility, no height, no markup — the cc#1064 parity guard holds
+   for the same structural reason it holds for the rest of this file. */
+
+/* 7 · TOOLS GRID — label and icon. The icon sits a shade back so the label leads. */
+:root:root:not([data-theme="light"]) .tool{ color:var(--r5-aqua); }
+:root:root:not([data-theme="light"]) .tool span{ color:var(--r5-aqua); opacity:.85; }
+
+/* 8 · BOTTOM NAV, INACTIVE — aqua label, icon at 85% for hierarchy (the card allows this).
+   THE ACTIVE TAB IS NOT TOUCHED. Pass 2 item 4 keeps .bn.on volt with the notch, and it wins
+   twice over: (0,5,0) against this rule's (0,4,0), and it carries !important on top. The active
+   tab stays instantly readable against an aqua row, which is the point of the split. */
+:root:root:not([data-theme="light"]) .bn{ color:var(--r5-aqua); }
+:root:root:not([data-theme="light"]) .bn .i{ opacity:.85; }
+/* the active tab's icon comes back to full strength — it inherits volt from .bn.on, and dimming
+   it would undo half of what the notch is doing. */
+:root:root:not([data-theme="light"]) .bn.on .i{ opacity:1; }
