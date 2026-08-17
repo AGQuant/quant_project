@@ -6,6 +6,9 @@
 <title>Scorr · GVM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- APP_QA_R4 P5: the same two shared assets P3/P4 link. -->
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
 <style>
   :root{--field:#0D1322;--panel:#161F33;--panel-hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
     --volt:#C8F542;--heat:#FF4D6D;--pulse:#7C5CFF;--cut:16px;--g:#C8F542;--v:#4DD8FF;--m:#FF9F45}
@@ -102,8 +105,22 @@
     font-family:'Space Grotesk';clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 </style>
 </head>
-<body>
+<body data-theme="dark" class="as-shell">
+<!-- APP_QA_R4 P5: stored theme applied as the first statement inside <body>, before paint. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t==='dark'||t==='goldday'||t==='goldnight'){document.body.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <div class="phone">
+<!-- APP_QA_R4 P5 · SHELL VARIANT B (section page), ref design_refs/scorr_appshell_R1.html @ a20ae0d.
+     gvm2 IS a section, so the GVM tab lights volt (ref rule 3) — unlike the two tool pages. The
+     status slot is left empty here rather than invented: the score lives inside the card the page
+     builds, and the shell defines the slot without deciding what fills it (ref rule 6). Rule 5
+     holds — the search bar, loader and #page are exactly as they were. -->
+<div class="as-hdr">
+  <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
+  <div class="as-pg"><span class="t">GVM &middot; Fight Card</span>
+    <div class="s">PEER-BENCHMARKED</div></div>
+  <div class="as-slot"></div>
+</div>
   <div class="searchbar">
     <input id="symin" placeholder="SYMBOL e.g. KARURVYSYA" autocomplete="off" spellcheck="false">
     <button onclick="go()">GO</button>
@@ -333,5 +350,14 @@ document.getElementById('symin').addEventListener('keydown',function(e){if(e.key
     .catch(function(e){ document.getElementById('load').textContent='COULD NOT LOAD: '+e; });
 })();
 </script>
+
+<!-- APP_QA_R4 P5 · 5-slot nav, variant B: GVM tab volt (ref rule 3). -->
+<nav class="as-nav">
+  <a class="as-bn" href="/m/home"><span>&#9703;</span>Home</a>
+  <a class="as-bn on" href="/m/gvm"><span>&#9672;</span>GVM</a>
+  <a class="as-bn" href="/m/check"><span>&#9678;</span>Check</a>
+  <a class="as-bn" href="/m/intel"><span>&#9636;</span>Intel</a>
+  <a class="as-bn" href="/m/models"><span>&#9677;</span>Models</a>
+</nav>
 </body>
 </html>

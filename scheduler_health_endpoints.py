@@ -222,21 +222,8 @@ except Exception:
 
 # ---------------------------------------------------------------------------
 # cc#1065 GVM FIGHT CARD route (Fable, 16-Aug-2026)
-# GET /m/gvm2 — serves the live mobile GVM fight card (scorr_gvm_fightcard.html),
-# which fetches /api/gvm/company/{symbol} client-side. Hosted here temporarily
-# because this router is small and proven-mounted; relocate to a gvm router in
-# the next cleanup card. Read-only file serve; no state.
+# GET /m/gvm2 MOVED OUT (APP_QA_R4 P5). It was parked here because this router was "small and
+# proven-mounted", with a note to relocate it in the next cleanup card — this is that card. The
+# route now lives in v10_page_endpoints.py, the mobile page router, alongside /m/v10. A page
+# route inside a health router is the kind of thing nobody finds again.
 # ---------------------------------------------------------------------------
-from fastapi.responses import HTMLResponse, PlainTextResponse
-
-_FIGHTCARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "scorr_gvm_fightcard.html")
-
-
-@router.get("/m/gvm2")
-def gvm_fightcard():
-    try:
-        with open(_FIGHTCARD_FILE, encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except Exception as e:
-        return PlainTextResponse("fight card unavailable: %s" % e, status_code=500)

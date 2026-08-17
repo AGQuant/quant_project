@@ -49,6 +49,27 @@ def _serve(path: str, what: str) -> HTMLResponse:
         )
 
 
+_GVM2_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scorr_gvm_fightcard.html")
+
+
+@router.get("/m/gvm2", response_class=HTMLResponse)
+def m_gvm2_fightcard():
+    """The GVM fight card. RELOCATED HERE by APP_QA_R4 P5 from scheduler_health_endpoints.py,
+    where it had been parked because that router was "small and proven-mounted" with a note to
+    move it in the next cleanup card. This module's own header called that out as the thing not
+    to repeat, so the route now sits with /m/v10 in the mobile page router. Same read-per-request
+    behaviour as /m/v10 — a deploy serves the new file immediately."""
+    try:
+        with open(_GVM2_PAGE, encoding="utf-8") as f:
+            return HTMLResponse(f.read())
+    except FileNotFoundError:
+        return HTMLResponse(
+            "<h3 style='font-family:sans-serif'>Fight card unavailable</h3>"
+            "<p style='font-family:sans-serif'>scorr_gvm_fightcard.html is missing from the deploy.</p>",
+            status_code=500,
+        )
+
+
 @router.get("/m/v10", response_class=HTMLResponse)
 def m_v10_signal():
     """INDEX INTEL — the live desk (V10 renamed in the app)."""
