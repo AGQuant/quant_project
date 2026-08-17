@@ -561,6 +561,28 @@
       }
     }
 
+    /* founder 05:57 (#1, morning batch): AQUA NEON headings — sporty over corporate. Any
+       purple(pulse)-coloured, bold, uppercase heading leaf flips to #35E0FF with a soft glow.
+       Links and buttons keep pulse (interactive identity unchanged). Cheap pre-filters before
+       any getComputedStyle call; per-element guard. */
+    for (var aq = 0; aq < all.length; aq++) {
+      var ah = all[aq];
+      if (ah.__r5aq || ah.children.length > 1) continue;
+      var at = (ah.textContent || '').trim();
+      if (!at || at.length > 40 || at !== at.toUpperCase() || !/[A-Z]/.test(at)) continue;
+      if (ah.tagName === 'A' || ah.tagName === 'BUTTON' || (ah.closest && ah.closest('a,button'))) continue;
+      var acs = getComputedStyle(ah);
+      var am = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(acs.color || '');
+      if (!am) continue;
+      var r = +am[1], g = +am[2], b = +am[3];
+      /* pulse family: blue-purple — blue clearly dominant, red mid, green low */
+      if (b > 180 && r > 80 && r < 190 && g < 140 && parseFloat(acs.fontSize) >= 14
+          && (+acs.fontWeight >= 600 || /bold/i.test(acs.fontWeight))) {
+        ah.__r5aq = 1;
+        ah.style.cssText += ';color:#35E0FF!important;text-shadow:0 0 12px rgba(53,224,255,.4)';
+      } else { ah.__r5aq = 1; }
+    }
+
     /* bottom-nav active tab: fixed-to-bottom container, the child marked on/active */
     var nav = document.querySelector('.bnav, .bottomnav, [class*="tabbar"], nav[class*="bottom"]');
     if (nav) {
