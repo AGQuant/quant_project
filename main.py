@@ -57,6 +57,7 @@ from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
 from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
 from v10_page_endpoints import router as v10_page_router   # cc#1069 GET /m/v10
+from mobile_cards_endpoints import router as mobile_cards_router   # cc#1090 P0: GET /m/cards
 from gvm_twopager import router as gvm_twopager_router   # cc#1085 R6-P1: GET /gvm/2pager/{symbol}
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 from nse_holidays import is_trading_day, is_nse_holiday
@@ -526,6 +527,7 @@ app.include_router(v8_backfill_router)
 app.include_router(v8_gapfill_router)   # cc#1048: POST /api/v8/backfill/metrics_gapfill
 app.include_router(index_tape_router)   # cc#1054: GET /api/index/tape
 app.include_router(v10_page_router)     # cc#1069: GET /m/v10 (mobile V10 signal view)
+app.include_router(mobile_cards_router)  # cc#1090 P0: card depth prototype (own router, wiring only)
 app.include_router(gvm_twopager_router)   # cc#1085 R6-P1: GVM 2-Pager print route (own router, wiring only)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)

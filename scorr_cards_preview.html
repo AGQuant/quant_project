@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Card Depth · Scorr</title>
+<style>
+/* ══ cc#1090 P0 · THE SHELLS, PORTED VERBATIM FROM THE LOCKED REFS ═══════════════════════════
+   .slab + .slab:active + .slab.dense + .slab.dense:active + .well
+       design_refs/scorr_card_slab_R1.html    @ 1261fe9
+   .pressed + .well-up
+       design_refs/scorr_card_pressed_R1.html @ 1221452
+   Both blocks are copied, not retyped, and NOT tuned. This page exists to let the founder judge
+   the shells as they are locked; a preview that quietly adjusts a padding is not a preview.
+
+   THE SPLIT, which is the whole system: .slab RISES and is for tappable things and has a 5px
+   press. .pressed SINKS and is for containers that hold other content and has NO press state,
+   because a well is not a button. One question decides which: does tapping it go somewhere?
+   Nesting inverts between them — slab inners sink (.well), pressed inners rise (.well-up) — and
+   there are two levels of depth, never three. */
+:root{
+--field:#0A0A0C; --panel:#17171B; --sunk:#0C0C0F; --well:#131316;
+--chalk:#F5F2EA; --mute:#8A8A93; --line:#2A2A31;
+--gold:#D4AF37; --gold-hi:#F0D67A; --gold-lo:#7A6320;
+--up:#3DD68C; --down:#FF4D6D;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--chalk);
+  font-family:'Archivo',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  padding:16px 14px 60px;max-width:460px;margin:auto;font-size:13px}
+
+/* ── slab, from scorr_card_slab_R1 @ 1261fe9 ── */
+.slab{
+  background:var(--panel);
+  border:1.5px solid var(--line);
+  border-radius:13px;
+  padding:13px 15px;
+  box-shadow:0 5px 0 0 var(--gold-lo), 0 5px 0 1.5px var(--line);
+  transition:transform .07s ease, box-shadow .07s ease;
+}
+.slab:active{
+  transform:translateY(5px);
+  box-shadow:0 0 0 0 var(--gold-lo), 0 0 0 1.5px var(--line);
+}
+.slab.dense{
+  border-radius:11px; padding:10px 13px;
+  box-shadow:0 3px 0 0 var(--gold-lo), 0 3px 0 1.5px var(--line);
+}
+.slab.dense:active{ transform:translateY(3px); box-shadow:0 0 0 0 var(--gold-lo), 0 0 0 1.5px var(--line); }
+.well{ background:var(--sunk); border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 0 0 #000; }
+
+/* ── pressed, from scorr_card_pressed_R1 @ 1221452 ── */
+.pressed{
+  background:var(--sunk);
+  border:1px solid #000;
+  border-radius:12px;
+  padding:14px 16px;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),
+             inset 0 -1px 0 rgba(255,255,255,.10),
+             0 1px 0 rgba(255,255,255,.05);
+}
+/* NO :active. A well is not a button. */
+.well-up{
+  background:var(--well);
+  border-radius:7px;
+  box-shadow:0 1px 0 rgba(255,255,255,.07), 0 -1px 0 #000;
+}
+
+/* ── slant, from design_refs/scorr_motion_R1 @ c5818a3 — THE OPEN DECIDE ──────────────────────
+   Rendered here as ONE deck card so the founder can choose slant-app-wide vs deck-cards-only on
+   glass. It is deliberately NOT applied to anything else on this page and nothing else in the app
+   adopts it until he rules. Composition per the ref: slant is GEOMETRY, slab is DEPTH — a deck
+   card is slant + a 3px press, reduced because a clipped card has less edge to land on. */
+.deck{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:3px 0 12px;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.deck::-webkit-scrollbar{display:none}
+.deck>.card{scroll-snap-align:center;flex:0 0 268px;position:relative}
+.slant{
+  position:relative;background:var(--panel);padding:14px 16px 13px 20px;overflow:hidden;
+  clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,18px 100%,0 calc(100% - 18px));
+  border-top:1px solid rgba(255,255,255,.13);
+  box-shadow:inset 0 -3px 9px rgba(0,0,0,.62);
+  transition:transform .07s ease;
+}
+.slant:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold)}
+.slant:after{content:"";position:absolute;right:-34px;top:-26px;width:110px;height:150px;
+  background:repeating-linear-gradient(-58deg,rgba(212,175,55,.09) 0 6px,transparent 6px 15px)}
+.slant:active{transform:translateY(3px)}
+.slant.long:before{background:var(--up)} .slant.short:before{background:var(--down)}
+
+/* ── page furniture (NOT part of the system — labels so the founder knows what he is feeling) ── */
+.eye{font-size:9px;color:var(--gold);letter-spacing:.2em;font-weight:800;margin:22px 0 8px}
+.eye:first-of-type{margin-top:4px}
+h1{font-size:17px;font-weight:800;letter-spacing:-.2px;margin-bottom:2px}
+.sub{font-size:11px;color:var(--mute);line-height:1.5;margin-bottom:14px}
+.note{font-size:10.5px;color:var(--mute);line-height:1.55;margin:7px 2px 0}
+.stack{display:flex;flex-direction:column;gap:14px}
+.ttl{font-size:13.5px;font-weight:800;letter-spacing:-.1px}
+.meta{font-size:10px;color:var(--mute);font-family:ui-monospace,monospace;margin-top:3px}
+.rowline{display:flex;align-items:center;gap:9px;padding:8px 10px;margin-top:8px}
+.rowline .n{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rowline .v{font-family:ui-monospace,monospace;font-size:12px;font-weight:700}
+.g{color:var(--up)} .r{color:var(--down)} .gold{color:var(--gold)}
+.big{font-family:ui-monospace,monospace;font-size:26px;font-weight:800;letter-spacing:-1px}
+.load{font-size:11.5px;color:var(--mute);padding:10px 2px}
+.err{font-size:11.5px;color:var(--down);padding:10px 2px;line-height:1.5}
+</style></head><body>
+
+<h1>Card depth</h1>
+<div class="sub">Two shells, one system. Press each one and see which reads as tappable.
+Real GVM ladder data, live from the API — nothing on this page is a mock-up.</div>
+
+<div class="eye">1 · SLAB — RISES, TAPPABLE, 5PX PRESS</div>
+<div class="stack" id="slabs"><div class="load">Loading live ladder…</div></div>
+<div class="note">Press and hold. The card should land — 5px down, gold ledge gone, 70&#8239;ms.
+If it does not feel like a button, this variant has failed and I need to know.</div>
+
+<div class="eye">2 · SLAB · DENSE — FOR LISTS OF 8+ ROWS</div>
+<div class="stack" id="dense"><div class="load">Loading…</div></div>
+<div class="note">Same class, one modifier — not a second variant. Fifteen full ledges down a
+screen stop reading as depth and start reading as stripes, so long lists get the 3px ledge.</div>
+
+<div class="eye">3 · PRESSED — SINKS, HOLDS CONTENT, NO PRESS</div>
+<div class="pressed" id="hero"><div class="load">Loading…</div></div>
+<div class="note">Try pressing it. Nothing should happen, and that is the point: a container that
+reacts to touch promises navigation it does not have. Inner blocks RISE here (.well-up), the
+inverse of a slab, whose inners sink.</div>
+
+<div class="eye">4 · SLANT DECK CARD — NOT YET RULED</div>
+<div class="deck" id="deck"><div class="load">Loading…</div></div>
+<div class="note">Swipe sideways. This is the open question: does slant geometry go app-wide, or
+stay on deck cards only? Nothing else in the app uses it until you say. Slant is geometry, slab is
+depth — a deck card is both, with the press reduced to 3px because a clipped corner has less edge
+to land on.</div>
+
+<div class="eye">REFS</div>
+<div class="note" style="margin-top:0">slab <b>scorr_card_slab_R1</b> @ 1261fe9 &middot;
+pressed <b>scorr_card_pressed_R1</b> @ 1221452 &middot; slant <b>scorr_motion_R1</b> @ c5818a3.
+CSS copied from the refs, not retyped and not tuned.</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function num(v,d){var n=Number(v);return isFinite(n)?n.toFixed(d==null?2:d):'—';}
+function inr(v){var n=Number(v);return isFinite(n)?'₹'+n.toLocaleString('en-IN',
+  {maximumFractionDigits:0}):'—';}
+function vcls(v){v=String(v||'').toLowerCase();
+  return v==='good'||v==='excellent'?'g':(v==='weak'?'r':'gold');}
+
+/* ONE fetch, the EXISTING endpoint. No new route, no payload change — this page is a consumer.
+   BHARATSE is the default because it is the symbol both 2-Pager refs were built on, so the
+   numbers here can be checked against a sheet the founder has already seen. ?sym= overrides. */
+var SYM = (new URLSearchParams(location.search).get('sym') || 'BHARATSE').toUpperCase();
+
+fetch('/api/gvm/company/' + encodeURIComponent(SYM))
+  .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(function(d){
+    var lad = (d.ladder || []).slice();
+    if (!lad.length) throw new Error('no ladder rows for ' + SYM);
+    var self = lad.filter(function(x){ return x.is_self; })[0] || lad[0];
+
+    /* 1 · SLAB — three tappable cards, the shape a real content card takes. */
+    document.getElementById('slabs').innerHTML = lad.slice(0,3).map(function(r){
+      return '<div class="slab">'
+        + '<div class="ttl">' + esc(r.company_name || r.symbol) + '</div>'
+        + '<div class="meta">' + esc(r.symbol) + ' · rank ' + esc(r.rank)
+        + ' of ' + lad.length + '</div>'
+        + '<div class="well rowline"><span class="n">Rating</span>'
+        + '<span class="v ' + vcls(r.verdict) + '">' + num(r.gvm) + '</span></div>'
+        + '<div class="well rowline"><span class="n">Growth · Value · Momentum</span>'
+        + '<span class="v">' + num(r.g) + ' · ' + num(r.v) + ' · ' + num(r.m) + '</span></div>'
+        + '</div>';
+    }).join('');
+
+    /* 2 · DENSE — the whole ladder, which is exactly the 8+ row case .dense exists for. */
+    document.getElementById('dense').innerHTML = lad.map(function(r){
+      return '<div class="slab dense" style="display:flex;align-items:center;gap:10px">'
+        + '<span class="v" style="color:var(--mute);width:18px">' + esc(r.rank) + '</span>'
+        + '<span class="n" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
+        + 'white-space:nowrap">' + esc(r.company_name || r.symbol) + '</span>'
+        + '<span class="v ' + vcls(r.verdict) + '">' + num(r.gvm) + '</span></div>';
+    }).join('');
+
+    /* 3 · PRESSED — a hero block. It holds content, so it sinks and never presses. */
+    document.getElementById('hero').innerHTML =
+      '<div style="font-size:10px;color:var(--mute);letter-spacing:.14em;font-weight:800">'
+      + esc(d.symbol) + ' · ' + esc(d.segment || '') + '</div>'
+      + '<div class="big gold" style="margin:6px 0 2px">' + num((d.scores||{}).gvm) + '</div>'
+      + '<div class="meta" style="margin-bottom:10px">' + esc(d.verdict || '')
+      + ' · ' + inr(d.market_cap) + ' Cr</div>'
+      + '<div class="well-up rowline"><span class="n">Growth</span><span class="v">'
+      + num((d.scores||{}).g) + '</span></div>'
+      + '<div class="well-up rowline"><span class="n">Value</span><span class="v">'
+      + num((d.scores||{}).v) + '</span></div>'
+      + '<div class="well-up rowline"><span class="n">Momentum</span><span class="v">'
+      + num((d.scores||{}).m) + '</span></div>';
+
+    /* 4 · SLANT — deck cards, swiped sideways. The rail carries direction before a number is
+       readable: volt for the leaders, heat for the tail. */
+    document.getElementById('deck').innerHTML = lad.slice(0,5).map(function(r,i){
+      var dir = (Number(r.gvm) >= Number(self.gvm)) ? 'long' : 'short';
+      return '<div class="card"><div class="slant ' + dir + '">'
+        + '<div class="meta">' + esc(r.symbol) + '</div>'
+        + '<div class="ttl" style="margin:3px 0 8px">' + esc(r.company_name || r.symbol) + '</div>'
+        + '<div style="display:flex;gap:14px">'
+        + '<div><div class="meta">RATING</div><div class="v ' + vcls(r.verdict)
+        + '" style="font-family:ui-monospace,monospace;font-size:17px;font-weight:800">'
+        + num(r.gvm) + '</div></div>'
+        + '<div><div class="meta">G / V / M</div><div class="v" style="font-size:13px">'
+        + num(r.g,1) + ' / ' + num(r.v,1) + ' / ' + num(r.m,1) + '</div></div>'
+        + '</div></div></div>';
+    }).join('');
+  })
+  .catch(function(e){
+    /* An honest failure, in every slot. A shell preview that renders empty boxes tells the
+       founder the shells are broken when it is the data that did not arrive. */
+    var msg = '<div class="err">Live ladder unavailable for ' + esc(SYM) + ' — '
+      + esc(e.message) + '.<br>The shells above are unstyled without it; reload, or try '
+      + '<b>/m/cards?sym=RELIANCE</b>.</div>';
+    ['slabs','dense','hero','deck'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.innerHTML = msg;
+    });
+  });
+</script>
+</body></html>
