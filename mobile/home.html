@@ -126,7 +126,7 @@
    Line 1 is nowrap + truncate — never two lines at 360px (item 2). */
 .v10c{display:flex;align-items:stretch;gap:9px;padding:9px 3px;border-bottom:1px solid var(--line)}
 .v10c .rl{width:3px;border-radius:2px;flex:none;background:var(--mut)}
-.v10c.wn .rl{background:#2FD48B} .v10c.ls .rl{background:#FF5C6C} .v10c.op .rl{background:#4D7CFE}
+.v10c.wn .rl{background:var(--volt, #2FD48B)} .v10c.ls .rl{background:var(--heat, #FF5C6C)} .v10c.op .rl{background:var(--pulse, #4D7CFE)}
 .v10c.sel{background:rgba(77,124,254,.10)}
 .v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
 .v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
@@ -141,9 +141,9 @@
 .v10c .c1 .sym{flex:0 1 auto}
 .v10c .rsn2{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:5px;
   text-transform:uppercase;white-space:nowrap}
-.v10c .rsn2.bad{background:rgba(255,92,108,.16);color:#FF5C6C}
-.v10c .rsn2.good{background:rgba(47,212,139,.16);color:#2FD48B}
-.v10c .rsn2.open{background:rgba(77,124,254,.16);color:#4D7CFE}
+.v10c .rsn2.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
+.v10c .rsn2.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
+.v10c .rsn2.open{background:rgba(77,124,254,.16);color:var(--pulse, #4D7CFE)}
 .v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--dim)}
 .v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}

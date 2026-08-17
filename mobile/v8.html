@@ -137,8 +137,8 @@
 .bktot span{font-size:10.5px;color:var(--dim)}
 .rbadge{margin:0 auto;font-size:9px;font-weight:800;letter-spacing:.4px;padding:1px 5px;
   border-radius:4px;text-transform:uppercase}
-.rbadge.good{background:rgba(47,212,139,.16);color:#2FD48B}
-.rbadge.bad{background:rgba(255,92,108,.16);color:#FF5C6C}
+.rbadge.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
+.rbadge.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
 .rbadge.neut{background:rgba(255,255,255,.07);color:var(--dim)}
 .lvls span:nth-child(2){margin-left:auto}
 .pc4{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;padding-top:7px;
@@ -239,7 +239,7 @@
   border-radius:10px;color:var(--mut);font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:10px;font-weight:700;letter-spacing:.06em;cursor:pointer}
 .lnav{display:flex;justify-content:center;margin-top:12px}
-.lnav a,.lnav button{border:1px solid rgba(77,124,254,.55);color:#cfd9ff;background:none;
+.lnav a,.lnav button{border:1px solid rgba(77,124,254,.55);color:var(--pulse, #cfd9ff);background:none;
   border-radius:12px;padding:0 22px;min-height:44px;font-size:13px;text-decoration:none;
   display:flex;align-items:center;font-family:inherit;cursor:pointer}
 /* module 1 */
@@ -259,7 +259,7 @@
 .lpill{flex:none;border:1px solid var(--line2);background:var(--panel2);color:var(--dim);
   border-radius:20px;padding:0 14px;min-height:36px;font-size:12.5px;cursor:pointer;
   font-family:inherit}
-.lpill.on{background:rgba(77,124,254,.16);border-color:var(--blu);color:#cfd9ff;font-weight:600}
+.lpill.on{background:rgba(77,124,254,.16);border-color:var(--blu);color:var(--pulse, #cfd9ff);font-weight:600}
 .lpill i{font-style:normal;color:var(--mut);margin-left:4px}
 .lfrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
 .lfrow:last-of-type{border-bottom:0}
