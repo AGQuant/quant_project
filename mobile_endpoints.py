@@ -995,9 +995,12 @@ def mobile_digest(request: Request):
             "rail": {"state": "REFERENCE", "why": "daily brief, built once per morning"}}
 
 
-@router.get("/m/digest", response_class=HTMLResponse)
-def m_digest():
-    return _page("digest")
+# APP_QA_R4 P6 — /m/digest MOVED OUT. This route served mobile/digest.html and was already
+# SHADOWED: main.py includes v10_page_router (line ~527) before mobile_router (~589), and FastAPI
+# matches in registration order, so v10_page_endpoints.py has been serving /m/digest since Fable
+# added it. Removing the dead twin changes nothing today — it is deleted so the route has exactly
+# ONE owner in the codebase, and so a future change to include order cannot silently hand the URL
+# back to the old page. mobile/digest.html is left in the repo, unreferenced by any route.
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
