@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_card_pressed_R1  ·  SECOND LOCKED SHELL
+     Founder 17-Aug-2026: slab picked first, pressed added alongside it. Two shells now
+     ship, not one. Pairs with design_refs/scorr_card_slab_R1.html @ 1261fe9.
+
+     THE SPLIT — this is the whole reason two shells exist and not two themes:
+       .slab    = the card RISES. Tappable things. It has a press, so it invites the tap.
+       .pressed = the card SINKS. Containers and hero blocks that hold other content.
+                  It has no press, because a well is not a button.
+     Depth encodes AFFORDANCE, not decoration. If everything rises, nothing reads as
+     tappable; if everything sinks, the screen is a sheet of holes.
+
+     THE THREE PROPERTIES OF THE WELL
+       1. Inner shadow from the TOP: inset 0 3px 9px rgba(0,0,0,.9). The light source
+          stays where the slab put it — above — so the two shells agree about the world.
+       2. A 1px light lip on the INNER BOTTOM edge: inset 0 -1px 0 rgba(255,255,255,.10),
+          plus a 1px light line OUTSIDE the top. That pair is what sells the recess.
+       3. Contents RISE out of it. Pills and readouts inside a well use .well-up, a small
+          raised tile. Inverted from the slab, where inner blocks sink.
+
+     NO PRESS STATE. Deliberate. A container that reacts to touch promises navigation it
+     does not have. If a pressed block ever needs to be tappable, it becomes a slab.
+
+     P&L IS UNTOUCHED, same as the slab. Green and red mean profit and loss and nothing
+     else, and every green stays frozen pending the founder ruling (session_log 24214).
+-->
+<html><head><meta charset="utf-8"><title>Scorr · card pressed R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@500;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+--field:#0A0A0C; --panel:#17171B; --sunk:#0C0C0F; --well:#131316;
+--chalk:#F5F2EA; --mute:#8A8A93; --line:#2A2A31;
+--gold:#D4AF37; --gold-hi:#F0D67A; --gold-lo:#7A6320;
+--up:#3DD68C; --down:#FF4D6D;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--chalk);font-family:'Archivo',sans-serif;padding:22px 16px 40px;display:flex;flex-direction:column;align-items:center}
+.w{width:390px;max-width:100%}
+.hd{border-bottom:2px solid var(--gold);padding-bottom:8px;margin-bottom:14px}
+.hd h1{font-family:'Archivo Black';font-size:15px;letter-spacing:-.2px}
+.hd .s{font-size:9.5px;color:var(--mute);letter-spacing:.13em;text-transform:uppercase;margin-top:2px}
+.sec{font-size:9.5px;color:var(--gold);letter-spacing:.16em;text-transform:uppercase;font-weight:800;margin:22px 0 9px}
+
+/* ══════════ SHELL 2 · PRESSED WELL ══════════ */
+.pressed{
+  background:var(--sunk);
+  border:1px solid #000;
+  border-radius:12px;
+  padding:14px 16px;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),
+             inset 0 -1px 0 rgba(255,255,255,.10),
+             0 1px 0 rgba(255,255,255,.05);
+}
+/* contents RISE out of a well — inverted from the slab, where inner blocks sink */
+.well-up{
+  background:var(--well);
+  border-radius:7px;
+  box-shadow:0 1px 0 rgba(255,255,255,.07), 0 -1px 0 #000;
+}
+/* NO :active. A well is not a button. */
+
+/* ══════════ SHELL 1 · SLAB (for the side-by-side only, canonical file is slab_R1) ══════════ */
+.slab{
+  background:var(--panel); border:1.5px solid var(--line); border-radius:13px; padding:13px 15px;
+  box-shadow:0 5px 0 0 var(--gold-lo), 0 5px 0 1.5px var(--line);
+  transition:transform .07s ease, box-shadow .07s ease;
+}
+.slab:active{ transform:translateY(5px); box-shadow:0 0 0 0 var(--gold-lo), 0 0 0 1.5px var(--line); }
+.slab .pl{ background:var(--sunk); border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 0 0 #000; }
+
+/* ══════════ content ══════════ */
+.stack{display:flex;flex-direction:column;gap:14px}
+.r1{display:flex;align-items:center;gap:10px}
+.tick{font-family:'Archivo Black';font-size:15.5px;letter-spacing:-.2px;color:var(--gold-hi)}
+.seg{font-size:9px;color:var(--mute);letter-spacing:.09em;text-transform:uppercase;margin-top:1px}
+.sc{font-family:'JetBrains Mono';font-weight:800;font-size:25px;line-height:1;margin-left:auto;color:var(--gold-hi)}
+.slab .sc{color:var(--gold)}
+.vd{font-family:'Archivo Black';font-size:8px;letter-spacing:.11em;padding:3px 7px;border-radius:3px;background:var(--up);color:#04150C}
+.pills{display:flex;gap:6px;margin-top:11px}
+.pl{flex:1;padding:7px 6px;text-align:center}
+.pk{font-size:8px;color:var(--mute);letter-spacing:.14em;font-weight:800}
+.pv{font-family:'JetBrains Mono';font-weight:800;font-size:14.5px;margin-top:2px;color:var(--chalk)}
+.ft{display:flex;gap:13px;margin-top:10px;font-family:'JetBrains Mono';font-size:10px;color:var(--mute)}
+.ft b{color:var(--chalk);font-weight:700}
+.up{color:var(--up)!important}
+.note{font-size:10.5px;color:var(--mute);line-height:1.5;margin-top:9px}
+.tagrow{display:flex;gap:6px;margin-bottom:8px}
+.tg{font-family:'Archivo Black';font-size:8px;letter-spacing:.1em;padding:3px 8px;border-radius:3px;background:#1D1D22;color:var(--mute)}
+.tg.on{background:var(--gold);color:#0A0A0C}
+</style></head><body><div class="w">
+
+<div class="hd"><h1>CARD SHELL 2 · PRESSED WELL</h1>
+<div class="s">scorr_card_pressed_R1 · locked 17 aug 2026 · pairs with slab_R1</div></div>
+
+<div class="sec">Pressed · containers and hero blocks</div>
+<div class="tagrow"><span class="tg on">NO PRESS STATE</span><span class="tg">CONTENTS RISE</span></div>
+<div class="stack">
+
+  <div class="pressed">
+    <div class="r1"><div><div class="tick">BHARATSE</div><div class="seg">Bharat Seats · hero block</div></div>
+      <div class="sc">7.28</div><div class="vd">GOOD</div></div>
+    <div class="pills">
+      <div class="pl well-up"><div class="pk">G</div><div class="pv">7.14</div></div>
+      <div class="pl well-up"><div class="pk">V</div><div class="pv">6.25</div></div>
+      <div class="pl well-up"><div class="pk">M</div><div class="pv up">8.44</div></div></div>
+    <div class="ft"><span>CMP <b>248.05</b></span><span>1Y <b class="up">+111%</b></span><span>#2 of 13</span></div>
+  </div>
+
+</div>
+<div class="note">The block recesses and the G/V/M pills rise out of it. Depth is inverted from the slab, and the light still comes from above — the two shells agree about where the world is lit from, which is what stops them looking like two different apps.</div>
+
+<div class="sec">Side by side · the rule</div>
+<div class="stack">
+
+  <div class="slab">
+    <div class="r1"><div><div class="tick">MINDACORP</div><div class="seg">slab · tap me, I go somewhere</div></div>
+      <div class="sc">7.51</div><div class="vd">GOOD</div></div>
+    <div class="pills">
+      <div class="pl"><div class="pk">G</div><div class="pv">7.23</div></div>
+      <div class="pl"><div class="pk">V</div><div class="pv">6.25</div></div>
+      <div class="pl"><div class="pk">M</div><div class="pv up">9.06</div></div></div>
+  </div>
+
+  <div class="pressed">
+    <div class="r1"><div><div class="tick">SEGMENT</div><div class="seg">pressed · I hold things, I do not navigate</div></div>
+      <div class="sc">6.56</div></div>
+    <div class="pills">
+      <div class="pl well-up"><div class="pk">COS</div><div class="pv">13</div></div>
+      <div class="pl well-up"><div class="pk">RANK</div><div class="pv">2/5</div></div>
+      <div class="pl well-up"><div class="pk">1Y</div><div class="pv up">+45%</div></div></div>
+  </div>
+
+</div>
+
+<div class="sec">The rule that decides which</div>
+<div class="note">
+<b style="color:var(--chalk)">Does tapping it go somewhere?</b> Slab. It rises, and it presses 5px when touched.<br><br>
+<b style="color:var(--chalk)">Does it hold other content?</b> Pressed. It sinks, its contents rise, and it has no press state — because a container that reacts to touch promises navigation it does not have.<br><br>
+Depth encodes AFFORDANCE, not decoration. If everything rises, nothing reads as tappable. If everything sinks, the screen is a sheet of holes.<br><br>
+A pressed block that later needs to be tappable does not gain a press state — it becomes a slab.<br><br>
+Never nest a slab inside a slab, and never nest a pressed inside a pressed. Slab inners sink (<b style="color:var(--chalk)">.well</b>), pressed inners rise (<b style="color:var(--chalk)">.well-up</b>). Two levels of depth, no more.<br><br>
+P&amp;L colours are untouched by either shell.
+</div>
+
+</div></body></html>
