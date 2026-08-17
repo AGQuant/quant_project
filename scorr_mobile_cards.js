@@ -178,6 +178,9 @@
  * injects the matching styles. It is class-name-proof by construction.
  * PARITY GUARD: strictly additive. It adds classes and ONE meter element; it never removes,
  * hides, or reorders anything.
+ * PERF (17-Aug 05:58 founder report, Fable regression owned): structural movers carry attempt
+ * budgets — after 8 observer kicks without completing they stop scanning permanently, so pages
+ * they don't apply to (V8) never pay a per-tap full-DOM scan again. Debounce 400ms.
  */
 (function () {
   'use strict';
@@ -319,7 +322,8 @@
     /* founder 23:43 (#5): PCR | VIX tabs inside the MARKET MOOD card. The India VIX panel
        (currently under the scoreboard card) is relocated once into the mood card, hidden behind
        a VIX tab; PCR tab shows the card as-is. Founder-ordered move. */
-    if (!document.getElementById('r5-moodtabs')) {
+    window.__r5try1 = (window.__r5try1 || 0) + 1;
+    if (!document.getElementById('r5-moodtabs') && window.__r5try1 <= 8) {
       var pcrLeaf = null, vixHd = null;
       for (var p1 = 0; p1 < all.length; p1++) {
         var tp = (all[p1].textContent || '').trim();
@@ -378,7 +382,8 @@
        own INDEX SIGNALS card ABOVE the LIVE NEWS section — the future V10 page launchpad.
        Full-DOM scan this time (the row's container was a tag outside the earlier tag list,
        which is why two attempts no-oped — guard held, nothing was lost). Founder-ordered move. */
-    if (!document.getElementById('r5-idxbox')) {
+    window.__r5try2 = (window.__r5try2 || 0) + 1;
+    if (!document.getElementById('r5-idxbox') && window.__r5try2 <= 8) {
       var star = document.body ? document.body.querySelectorAll('*') : [];
       var idxRow = null, idxLen = 1e9, newsHd = null, nLen = 1e9, bookHd2 = null, bkLen = 1e9;
       for (var y = 0; y < star.length; y++) {
@@ -516,7 +521,8 @@
        under the Detailed view / Run Trade Check row. Visual + spacing tonight; actions wire to
        the desktop card-button handlers next session (noted in cc#1066) — until then each button
        opens the fight card for the shown symbol so no tap is a dead end. */
-    if (!document.getElementById('r5-cardstrip')) {
+    window.__r5try3 = (window.__r5try3 || 0) + 1;
+    if (!document.getElementById('r5-cardstrip') && window.__r5try3 <= 8) {
       var rtc = null;
       for (var c2 = 0; c2 < all.length; c2++) {
         if (/^run trade check$/i.test((all[c2].textContent || '').trim())) { rtc = all[c2]; break; }
@@ -565,7 +571,7 @@
 
   /* Home renders after its fetch, so run now, on load, and on DOM growth (debounced). */
   var t = null;
-  function kick() { clearTimeout(t); t = setTimeout(enhance, 120); }
+  function kick() { clearTimeout(t); t = setTimeout(enhance, 400); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', kick);
   else kick();
   try { new MutationObserver(kick).observe(document.documentElement, { childList: true, subtree: true }); }
