@@ -51,6 +51,35 @@ def _now_ist():
     return datetime.now(IST).replace(tzinfo=None)
 
 
+# ── cc#1079 first-run fix: the two columns that are NOT naive IST ─────────────────────────────
+# The module's clock is naive IST because that is what this database's `ts` columns hold. TWO of
+# the columns this reporter reads are the exception — they are `timestamp with time zone`:
+#
+#   scheduler_master.last_run_at   (compared against a naive due-slot -> TypeError)
+#   raw_news.fetched_at            (compared against a naive bound -> silently off by 5:30)
+#
+# The first one is why this node had never written a row. psycopg hands back an AWARE datetime,
+# _scheduler_health compared it to the naive slot from last_due(), and Python refuses to order
+# aware against naive. It raised on the first job row with a last_run_at — i.e. immediately — and
+# _bg_protocol_one's own `except` swallowed it, so the scheduler recorded status 'ok' for a run
+# that produced nothing. Verified on the first real dispatch, 15:00 IST 17-Aug: the job fired,
+# stamped ok, and session_log stayed empty.
+#
+# The second is quieter and worse in its way: no exception, just a news window measured from the
+# wrong instant whenever the DB session TZ is not IST. It is fixed here rather than left as a
+# rounding error nobody would ever notice.
+def _naive_ist(dt):
+    """Any datetime -> naive IST. Aware values are converted, naive ones are trusted as IST."""
+    if dt is None or dt.tzinfo is None:
+        return dt
+    return dt.astimezone(IST).replace(tzinfo=None)
+
+
+def _aware_ist(dt):
+    """Naive-IST -> aware, for binding against a `timestamp with time zone` column."""
+    return dt if dt is None or dt.tzinfo is not None else dt.replace(tzinfo=IST)
+
+
 def _mkt_open(now=None):
     """Is the NSE session running right now? Feed staleness only means something during it."""
     now = now or _now_ist()
@@ -151,6 +180,9 @@ def _scheduler_health(cur, now):
     # 10 minutes of grace: a job spawned at its slot writes last_run_at when it FINISHES.
     grace = timedelta(minutes=10)
     for name, cad, _active, last_run, status, err in rows:
+        # last_run_at is timestamptz; every other clock in this module is naive IST. Normalise
+        # HERE, at the boundary, so the comparison below cannot raise and cannot drift.
+        last_run = _naive_ist(last_run)
         if status == "error":
             errored.append((name, (err or "")[:80]))
         due = last_due(cad, now)
@@ -213,8 +245,10 @@ def _feeds(cur, now):
                    % (p[0].strftime("%H:%M"), p[1], p[2], " — FLAT, cc#1057 regression" if flat else ""))
         colours.append("RED" if flat else "GREEN")
 
+    # fetched_at is timestamptz — bind an AWARE bound or Postgres reads the naive value in the
+    # session timezone and the window silently slides by the IST offset.
     cur.execute("""SELECT count(*) FROM raw_news WHERE fetched_at >= %s""",
-                (now - timedelta(hours=NEWS_WINDOW_H),))
+                (_aware_ist(now - timedelta(hours=NEWS_WINDOW_H)),))
     n = (cur.fetchone() or [0])[0]
     out.append("news: %d raw/%dh" % (n, NEWS_WINDOW_H))
     colours.append("GREEN" if n > 0 else "AMBER")

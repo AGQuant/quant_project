@@ -1444,7 +1444,22 @@ def _bg_protocol_one():
             sid, payload = protocol_one.build_protocol_one(conn)
         log.info("protocol_one: session_log id=%s | %s", sid, payload.get("VERDICT"))
     except Exception as e:
-        log.error(f"protocol_one: {e}")
+        # cc#1085 R6-P9 part_4: this `except` is the reason the node looked healthy while writing
+        # nothing. It swallowed a TypeError, returned normally, and _run_recorded stamped
+        # last_status='ok' — a reporter that reports its own success by not crashing. The failure
+        # now leaves a row behind. It still does not re-raise; a broken reporter must not take the
+        # scheduler with it.
+        log.error("protocol_one: %s", e, exc_info=True)
+        try:
+            import traceback
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'alert', 'PROTOCOL_ONE_ERROR', %s::jsonb)""",
+                            (json.dumps({"cc": 1079, "error": str(e),
+                                         "trace": traceback.format_exc()[-1500:]}),))
+                conn.commit()
+        except Exception as e2:
+            log.error("protocol_one error-oplog also failed: %s", e2)
 
 
 def _bg_master_watchdog_note():
