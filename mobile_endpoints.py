@@ -1552,6 +1552,16 @@ html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
   border-top:1px solid var(--line);padding-top:11px}
 .punch b{color:var(--txt)}
 .acts{display:flex;gap:8px;margin-top:12px}
+/* cc#1070: C·A·R·D strip row under the actions. LAYOUT ONLY — the buttons style themselves
+   from scorr_card_strip.js (cc#789 single source), so the mobile strip and the web strip
+   cannot drift apart the way two hand-written copies did before that card. */
+.cardstrip{margin-top:10px;display:flex}
+.cardstrip .scorr-card-strip{display:flex;gap:8px;width:100%}
+/* the shared file sizes its buttons 32x32 for the web tables it was written for. On a phone that
+   is under the 44px touch minimum the framework (session_log 15913) sets, and that this same
+   sheet already applies to .a — so the strip is stretched to the row width and clamped to 44px
+   high HERE, in the mobile sheet, rather than by editing the shared file for one surface. */
+.cardstrip .scorr-cs-b{flex:1;text-align:center;min-height:44px}
 .a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
   font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
   border-radius:10px;text-decoration:none;background:none;font-family:inherit;cursor:pointer}

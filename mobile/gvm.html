@@ -246,6 +246,9 @@ function frBlock(){
   }
   return '<div class="fr">' + (out || '<div class="empty" style="padding:8px"><b>Nothing to show</b></div>') + '</div>';
 }
+/* cc#1070: the strip sits under the actions row, full width, evenly spaced. Only layout is set
+   here — the buttons' own look comes from scorr_card_strip.js so the mobile and web strips cannot
+   drift apart. */
 function repCard(x){
   var col = scoreCol(x.gvm);
   return '<div class="rep" style="--rc:' + col + '">'
@@ -264,6 +267,18 @@ function repCard(x){
     + '<button class="a" onclick="toggleFR(\'' + esc(x.symbol) + '\')">'
     + (STATE.frOpen ? 'Hide company view \u25b4' : 'Company view \u25be') + '</button>'
     + '<a class="a" href="/m/check">Run Trade Check</a></div>'
+    /* cc#1070 · C·A·R·D — the REAL strip, not a lookalike. scorr_card_strip.js is the single
+       source (cc#789) and its own header says never to re-implement it, so this CONSUMES
+       window.ScorrCardStripHtml: the markup, the availability gating (D futures-only, R only when
+       a result exists) and the ScorrCardNav dispatch all come from that one file. The letters mean
+       what they mean everywhere else on the platform — C Chart, A Analysis, R Result, D Cockpit —
+       and each opens the same in-page modal the web dashboard opens.
+       THE SYMBOL COMES FROM PAGE STATE, x.symbol, the record this very function is rendering. The
+       enhancer stub it replaces scraped the largest all-caps DOM leaf >=20px to guess it, which is
+       exactly what the card forbids and would mis-target the moment a heading changed size.
+       Guarded: if the shared file did not load, the strip is simply absent — never a dead button. */
+    + (window.ScorrCardStripHtml ? '<div class="cardstrip">'
+        + window.ScorrCardStripHtml(x.symbol, '') + '</div>' : '')
     + '<div class="src">Rank ' + (x.rank == null ? '--' : esc(x.rank))
     + (x.as_of ? ' · scored ' + esc(x.as_of) : '') + '</div>'
     + '</div>'

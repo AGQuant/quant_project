@@ -436,49 +436,12 @@
       }
     }
 
-    /* founder 23:37 (②): C·A·R·D button strip on the GVM report card — evenly spaced, placed
-       under the Detailed view / Run Trade Check row. Visual + spacing tonight; actions wire to
-       the desktop card-button handlers next session (noted in cc#1066) — until then each button
-       opens the fight card for the shown symbol so no tap is a dead end. */
-    window.__r5try3 = (window.__r5try3 || 0) + 1;
-    if (!document.getElementById('r5-cardstrip') && window.__r5try3 <= 8) {
-      var rtc = null;
-      for (var c2 = 0; c2 < all.length; c2++) {
-        if (/^run trade check$/i.test((all[c2].textContent || '').trim())) { rtc = all[c2]; break; }
-      }
-      if (rtc) {
-        var row = rtc.closest('div');
-        var host = row && row.parentElement ? row.parentElement : null;
-        if (host) {
-          var st = document.createElement('div');
-          st.id = 'r5-cardstrip';
-          st.style.cssText = 'display:flex;gap:10px;justify-content:space-between;margin-top:12px';
-          'CARD'.split('').forEach(function (L) {
-            var b = document.createElement('button');
-            b.textContent = L;
-            b.style.cssText = 'flex:1;padding:10px 0;background:#1C2740;border:1px solid #26334F;'
-              + 'color:#EAF0FA;font-family:"JetBrains Mono",monospace;font-weight:800;font-size:14px;'
-              + 'clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px);cursor:pointer';
-            b.addEventListener('click', function () {
-              var s2 = '', b2 = 0;
-              var cd = document.querySelectorAll('div,span,h1,h2,h3,b,strong');
-              var NS = /^(GVM|SCORR|WEAK|AVERAGE|GOOD|EXCELLENT|CLOSED|LIVE|OPEN|MATCHES|HOME|CHECK|INTEL|V8|LONG|SHORT|FLAT)$/;
-              for (var zz = 0; zz < cd.length; zz++) {
-                var t2 = (cd[zz].textContent || '').trim();
-                if (cd[zz].children.length <= 2 && /^[A-Z][A-Z0-9&-]{2,14}$/.test(t2) && !NS.test(t2)) {
-                  var f2 = parseFloat(getComputedStyle(cd[zz]).fontSize) || 0;
-                  if (f2 > b2 && f2 >= 20) { b2 = f2; s2 = t2; }
-                }
-              }
-              window.dispatchEvent(new CustomEvent('scorr:cardbtn', { detail: { btn: L, symbol: s2 } }));
-              if (s2) location.href = '/m/gvm2?symbol=' + encodeURIComponent(s2);
-            });
-            st.appendChild(b);
-          });
-          host.insertBefore(st, row.nextSibling);
-        }
-      }
-    }
+    /* cc#1070: the C·A·R·D stub lived here and is now the REAL strip, rendered in
+       mobile/gvm.html from window.ScorrCardStripHtml — the cc#789 single source, whose own
+       header says never to re-implement it. The stub was visual-only: every letter fell back
+       to opening the fight card, and it GUESSED the symbol by scraping the largest all-caps
+       DOM leaf >=20px. The template has x.symbol in hand, so both problems disappear with the
+       block. */
 
     /* cc#1068: the AQUA HEADING pass lived here and is now a template rule. mobile/home.html
        sets .sect{color:#35E0FF} directly, so headings are aqua at first paint instead of being
