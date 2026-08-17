@@ -27,13 +27,62 @@
 <title>GVM · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<style>
+/* ══ APP_QA_R5 P7 · /m/gvm MIGRATION ═══════════════════════════════════════════════════════
+   Refs: scorr_sprint2_goldnight_R1 @ cd75e2c (scale) + scorr_appshell_R1 @ a20ae0d (shell).
+
+   THE .screen SCOPE ISSUE IS PRESENT HERE — checked first, as P7 asks. This page renders inside
+   <div class="screen">, and mobile_app.css declares the palette on `.screen,.bnav`, so tokens set
+   on body are shadowed for everything inside it. Same bridge as home P2, same reason; without it
+   the goldnight default below would repaint the header strip and nothing else.
+
+   NO LEGACY PALETTE HEX TO REMOVE: grepped before touching anything — this page carries zero
+   hardcoded colours (cc#897 folded its CSS into the shared sheet). The only #-matches in the file
+   are card references like cc#913, not colours. So P7's "zero legacy hex in the migrated
+   sections" verify is satisfied by the page as it already stood, not by edits here. */
+body[data-theme]{
+  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
+  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
+  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
+}
+.screen,.bnav{
+  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+  --line:var(--t-edge); --line2:var(--t-edge);
+  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
+  --grn:var(--t-win); --red:var(--t-loss);
+  --blu:var(--t-accent); --cyan:var(--t-brand);
+}
+/* raised scale, goldnight ref — 9.5px floor, page-scoped so no other screen shifts */
+.g-lrow .rs{font-size:13px}
+.g-lrow .rg{font-size:10.5px;font-weight:700;letter-spacing:1.2px}
+.g-lrow{min-height:48px}
+.punch{font-size:12.5px}
+.verd{font-size:12px}
+.src{font-size:9.5px}
+.bnav .bn{font-size:11px}
+.bnav .bn .i{font-size:16px}
+.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+</style>
 <script src="/scorr_card_common.js"></script>
 </head>
-<body>
+<body data-theme="goldnight">
+<!-- APP_QA_R5 P7: goldnight forced before first paint; stored key read and KEPT, same as P1. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){/* preserved, not applied while the sprint gate stands */}}catch(e){}
+document.body.setAttribute('data-theme','goldnight');})();</script>
 <div class="screen">
-  <div class="head">
-    <h1>GVM</h1>
-    <div class="s" id="sub">Growth · Value · Momentum · scored nightly 22:00</div>
+  <!-- APP_QA_R5 P7 · SHELL VARIANT B. The 5-slot nav with GVM lit was ALREADY here, so the only
+       missing shell element was appshell rule 1: the wordmark, first, at a 44px target, tapping
+       to /m/home. #sub keeps its id — the loader writes the rail into it. -->
+  <div class="head" style="display:flex;align-items:center;gap:12px">
+    <a href="/m/home" aria-label="Scorr home" style="min-width:44px;min-height:44px;display:flex;
+       align-items:center;text-decoration:none;color:var(--txt);font-weight:800;font-size:17px;
+       letter-spacing:-.4px">SC<span style="color:var(--grn)">O</span>RR</a>
+    <div style="flex:1;min-width:0">
+      <h1>GVM</h1>
+      <div class="s" id="sub">Growth · Value · Momentum · scored nightly 22:00</div>
+    </div>
   </div>
   <div class="search">
     <span class="ic">&#9906;</span>
