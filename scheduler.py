@@ -131,6 +131,14 @@ def _bg_catchup_sweep():
         return _SKIPPED
     _catchup_last_sweep = now
     fired = []
+    examined = 0
+    # cc#1085 R6-P9 part_2: this sweep used to be UNOBSERVABLE. Its outer `except` logged and
+    # returned None, so _run_recorded stamped last_status='ok' whether the body had completed or
+    # died on its first statement — a catch-up net that reports "ok" while broken is worse than no
+    # net, because it is the thing you check when a job goes missing. Three additions, all
+    # read-only with respect to dispatch: a failure now writes its own ops_log row, an empty
+    # registry read is logged loudly, and the counts travel with the fired list so a sweep that
+    # examined N jobs and matched none can be told apart from one that never looked.
     try:
         import scheduler_master as sm
         with _conn() as conn, conn.cursor() as cur:
@@ -138,6 +146,10 @@ def _bg_catchup_sweep():
                            FROM scheduler_master
                            WHERE active AND category='scheduler_loop'""")
             rows = cur.fetchall()
+        examined = len(rows)
+        if not rows:
+            log.warning("catchup: registry read returned ZERO active scheduler_loop rows — "
+                        "the sweep cannot fire anything; this is a defect, not a quiet day")
         for job_name, cadence, last_run, added in rows:
             k = sm.classify_cadence(cadence or "")
             if k["class"] not in _CATCHUP_CLASSES:
@@ -167,12 +179,28 @@ def _bg_catchup_sweep():
                 with _conn() as conn, conn.cursor() as cur:
                     cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                                    VALUES (CURRENT_DATE, NOW(), 'alert', 'SCHEDULER_CATCHUP', %s::jsonb)""",
-                                (json.dumps({"cc": 841, "fired": fired, "at": now.isoformat()}),))
+                                (json.dumps({"cc": 841, "fired": fired, "examined": examined,
+                                             "at": now.isoformat()}),))
                     conn.commit()
             except Exception as e:
                 log.warning("catchup oplog: %s", e)
     except Exception as e:
-        log.error(f"_bg_catchup_sweep: {e}")
+        # A swallowed exception here is how a dead sweep passed for a healthy one. It still does
+        # not re-raise — a failing sweep must not take down the tick loop — but it can no longer
+        # fail silently: the traceback lands in ops_log where a query can find it, and `examined`
+        # says how far it got before dying.
+        log.error("_bg_catchup_sweep: %s", e, exc_info=True)
+        try:
+            import traceback
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'alert', 'SCHEDULER_CATCHUP_ERROR', %s::jsonb)""",
+                            (json.dumps({"cc": 1085, "error": str(e), "examined": examined,
+                                         "at": now.isoformat(),
+                                         "trace": traceback.format_exc()[-1500:]}),))
+                conn.commit()
+        except Exception as e2:
+            log.error("catchup error-oplog also failed: %s", e2)
     return None
 
 
