@@ -1386,6 +1386,20 @@ def _bg_ca_daily_note():
         log.error(f"ca_daily_note: {e}")
 
 
+def _bg_protocol_one():
+    """cc#1079 node N1 SENTINEL: twice-daily platform health 1-pager -> session_log.
+
+    Writes ONE row and nothing else — no alerting, no repair, no other table. A health reporter
+    that starts fixing things stops being a reporter, and that boundary is the card's own."""
+    try:
+        import protocol_one
+        with _conn() as conn:
+            sid, payload = protocol_one.build_protocol_one(conn)
+        log.info("protocol_one: session_log id=%s | %s", sid, payload.get("VERDICT"))
+    except Exception as e:
+        log.error(f"protocol_one: {e}")
+
+
 def _bg_master_watchdog_note():
     """cc#658 part_5: 09:05 IST — consolidated master watchdog note (written every day)."""
     try:
@@ -3770,6 +3784,13 @@ async def _scheduler_loop():
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:
             _spawn(_bg_master_watchdog_note)  # cc#658 part_5: 09:05 consolidated master watchdog note
+        # cc#1079 node N1 SENTINEL: 09:20 (after the morning notes land, so it can see them) and
+        # 15:40 (after the close, before the EOD chain). Trading days only — a health 1-pager for
+        # a market that never opened reports nothing and would bury the ones that matter.
+        if _is_trading_day(today) and h == 9 and m == 20:
+            _spawn(_bg_protocol_one)
+        if _is_trading_day(today) and h == 15 and m == 40:
+            _spawn(_bg_protocol_one)
         if h == 5 and m == 15:
             _spawn(_bg_ca_sweep_daily)        # cc#659: DAILY (incl weekends) sharded full-universe CA scrape
         if now.weekday() == 6 and h == 5 and m == 30:
