@@ -1,0 +1,163 @@
+<!-- Pushed verbatim from Fable's R1 build 17-Aug — see /mnt outputs copy shared with founder. -->
+<!-- SPRINT 1 P1 · HOME 3-THEME REF · one token layer, data-theme switch, no markup forks -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCORR HOME · 3 THEMES · R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;
+ --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
+ --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(90deg,#EAF0FA,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#E5DFD2;--ink:#1A1A1E;
+ --muted:#8A8578;--brand:#A67C00;--brandglow:rgba(166,124,0,.25);--accent:#A67C00;--label:#A67C00;
+ --win:#1F9D61;--loss:#D93B4F;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px)}
+body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;
+ --muted:#8E8A7E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--accent:#D4AF37;--label:#8C7A3F;
+ --win:#3DD68C;--loss:#FF5C6C;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--field);font-family:'Space Grotesk',sans-serif;color:var(--ink);
+ background-image:var(--texture);transition:background .25s,color .25s;max-width:480px;margin:0 auto;padding-bottom:78px}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px;position:sticky;top:0;
+ background:var(--field);z-index:10}
+.brand{font-family:'Archivo Black';font-size:20px;letter-spacing:-.5px}
+.brand i{font-style:normal;color:var(--win)}
+.tswitch{display:flex;gap:4px;background:var(--panel);border:1px solid var(--edge);padding:3px;
+ clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:13px;
+ font-family:'JetBrains Mono';font-weight:800;color:var(--muted)}
+.tswitch button.on{background:var(--hi);color:var(--brand);text-shadow:0 0 10px var(--brandglow)}
+.tape{display:flex;gap:8px;overflow-x:auto;padding:6px 16px 10px;scrollbar-width:none}
+.tape::-webkit-scrollbar{display:none}
+.tk{flex:none;font-family:'JetBrains Mono';font-size:10px;font-weight:700;padding:4px 9px;
+ background:var(--panel);border:1px solid var(--edge);border-radius:8px;color:var(--muted)}
+.tk b{font-weight:800}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:16px 16px 9px;font-size:11px;font-weight:700;
+ letter-spacing:2.5px;color:var(--brand);text-shadow:0 0 12px var(--brandglow)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 12px 12px;padding:16px;position:relative;
+ clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--label))}
+.chip{font-family:'JetBrains Mono';font-size:10px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:3px 8px;display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.chip.up{color:var(--win)}.chip.dn{color:var(--loss)}
+.irow{display:flex;align-items:baseline;gap:10px;margin:12px 0 4px}
+.irow .inm{font-size:11px;font-weight:800;letter-spacing:2px;color:var(--label);min-width:96px}
+.irow .ilv{font-family:'JetBrains Mono';font-weight:800;font-size:23px}
+.bar{position:relative;height:4px;border-radius:2px;background:var(--hi);border:1px solid var(--edge);margin:5px 0 3px}
+.bar i{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;
+ background:var(--label);border:2px solid var(--panel)}
+.sr{display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:9px;color:var(--muted)}
+.digl{display:inline-block;margin-top:12px;font-size:12.5px;font-weight:700;color:var(--accent);
+ border-bottom:1px solid var(--brandglow);cursor:pointer}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--hi);border:1px solid var(--edge);padding:10px;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.stat .k{font-size:9.5px;letter-spacing:1.2px;color:var(--muted)}
+.stat .v{font-family:'JetBrains Mono';font-weight:800;font-size:16px;margin-top:4px}
+.tools{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin:0 12px}
+.tool{background:var(--panel);border:1px solid var(--edge);padding:13px 6px;text-align:center;font-size:11px;
+ font-weight:700;color:var(--ink);clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%);cursor:pointer}
+.tool span{display:block;font-size:17px;color:var(--brand);margin-bottom:4px;text-shadow:0 0 10px var(--brandglow)}
+.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;
+ background:var(--panel);border-top:1px solid var(--edge);z-index:20}
+.bn{flex:1;text-align:center;padding:9px 0 11px;font-size:10.5px;font-weight:700;color:var(--muted);cursor:pointer}
+.bn span{display:block;font-size:15px;margin-bottom:2px}
+.bn.on{color:var(--win)}
+.bn.on::before{content:"";display:block;width:26px;height:3px;background:var(--win);margin:0 auto 4px;border-radius:2px}
+.foot{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);margin:8px 16px 14px;letter-spacing:.5px}
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="hdr">
+  <div class="brand">SC<i>O</i>RR</div>
+  <div class="tswitch" id="tsw">
+    <button data-t="dark" class="on" title="Dark · Telemetry">◆</button>
+    <button data-t="goldday" title="Gold Day · white-golden">◇</button>
+    <button data-t="goldnight" title="Gold Night · black-gold">◈</button>
+  </div>
+</div>
+
+<div class="tape">
+  <div class="tk">NIFTY <b style="color:var(--loss)">-0.12%</b></div>
+  <div class="tk">BANKNIFTY <b style="color:var(--loss)">-0.25%</b></div>
+  <div class="tk">GOLD <b style="color:var(--win)">+0.40%</b></div>
+  <div class="tk">USDINR <b>87.44</b></div>
+  <div class="tk">DXY <b style="color:var(--loss)">-0.04%</b></div>
+  <div class="tk">VIX <b style="color:var(--win)">11.71</b></div>
+</div>
+
+<div class="card rail" style="--rc:var(--label)">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <span style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:700">MARKET MOOD · PCR</span>
+    <span class="num" style="font-size:9.5px;color:var(--muted)">08-17 · LIVE</span></div>
+  <span class="skew" style="font-size:38px;line-height:1.05">CAUTION</span>
+  <div style="height:5px;width:150px;background:var(--railgrad);transform:skewX(-24deg);margin:5px 0 6px;opacity:.9"></div>
+  <div class="num" style="font-size:11px;color:var(--muted)">PCR 0.97 · 08-14</div>
+  <div class="irow"><span class="inm">NIFTY 50</span><span class="ilv num">24,366</span>
+    <span class="chip dn">BELOW PIVOT</span></div>
+  <div class="bar"><i style="left:34%"></i></div>
+  <div class="sr"><span>S 24,214</span><span>R 24,569</span></div>
+  <div class="irow"><span class="inm">BANKNIFTY</span><span class="ilv num">57,491</span>
+    <span class="chip dn">BELOW PIVOT</span></div>
+  <div class="bar"><i style="left:46%"></i></div>
+  <div class="sr"><span>S 57,094</span><span>R 57,952</span></div>
+  <span class="digl">Read the Daily Digest →</span>
+</div>
+
+<div class="eyebrow">INDEX INTEL</div>
+<div class="card">
+  <div style="display:flex;gap:14px;align-items:center">
+    <div style="flex:1"><span class="inm" style="font-size:11px;font-weight:800;letter-spacing:2px;color:var(--label)">NIFTY</span>
+      <span class="num" style="font-weight:800;color:var(--win)"> LONG</span></div>
+    <div style="flex:1"><span class="inm" style="font-size:11px;font-weight:800;letter-spacing:2px;color:var(--label)">BANKNIFTY</span>
+      <span class="num" style="font-weight:800;color:var(--win)"> LONG</span></div>
+    <span style="color:var(--accent);font-weight:800">›</span></div>
+  <div class="num" style="font-size:9.5px;letter-spacing:1.5px;color:var(--muted);margin-top:8px">TAP FOR INDEX INTEL · ST+EMA LIVE</div>
+</div>
+
+<div class="eyebrow">THE BOOK</div>
+<div class="card">
+  <div class="g2">
+    <div class="stat"><div class="k">V8 UNREALISED</div><div class="v num" style="color:var(--win)">+₹1.43L</div></div>
+    <div class="stat"><div class="k">V10 NET · ALL-TIME</div><div class="v num" style="color:var(--win)">+₹4.06L</div></div>
+    <div class="stat"><div class="k">WIN RATE LONG</div><div class="v num" style="color:var(--win)">92%</div></div>
+    <div class="stat"><div class="k">WIN RATE SHORT</div><div class="v num" style="color:var(--loss)">20%</div></div>
+  </div>
+</div>
+
+<div class="eyebrow">TOOLS</div>
+<div class="tools">
+  <div class="tool"><span>◐</span>Index Intel</div>
+  <div class="tool"><span>☀</span>Digest</div>
+  <div class="tool"><span>▦</span>Baskets</div>
+  <div class="tool"><span>≣</span>Results</div>
+  <div class="tool"><span>⬡</span>Sectors</div>
+  <div class="tool"><span>⌁</span>Screeners</div>
+</div>
+
+<div class="foot">theme = one token layer · data-theme switch · zero markup forks · P&L green/red in all three · money truth never re-skins</div>
+
+<nav class="bnav">
+  <div class="bn on"><span>◧</span>Home</div>
+  <div class="bn"><span>◈</span>GVM</div>
+  <div class="bn"><span>◎</span>Check</div>
+  <div class="bn"><span>▤</span>Intel</div>
+  <div class="bn"><span>◍</span>Models</div>
+</nav>
+
+<script>
+document.getElementById('tsw').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  document.body.dataset.theme=b.dataset.t;
+  document.querySelectorAll('#tsw button').forEach(x=>x.classList.toggle('on',x===b));
+});
+</script>
+</body>
+</html>
