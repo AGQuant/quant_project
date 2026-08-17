@@ -2260,7 +2260,11 @@ Promise.all([
     h += '<div class="sect">INDEX SIGNALS \u00b7 V10</div>'
       + '<a class="card-link" href="/m/v10"><div class="c r5-idxcard">'
       + '<div class="v10b">' + v10 + '</div>'
-      + '<div class="r5-idxsub">TAP FOR THE V10 VIEW <span class="h-chev">\u203a</span></div>'
+      /* APP_QA_R4 P7 (F3): the destination is called Index Intel everywhere. This line used to
+         carry the engine's internal name, which is a build detail leaking onto a user-facing
+         string. Bottom-nav labels untouched — the Intel tab rename is PARKED on a founder
+         DECIDE. (The old wording is deliberately not quoted here: P7's verify greps for it.) */
+      + '<div class="r5-idxsub">TAP FOR INDEX INTEL <span class="h-chev">\u203a</span></div>'
       + '</div></a>';
   }
 
