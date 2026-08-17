@@ -53,6 +53,41 @@ body[data-theme]{
 .tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:13px;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--mut);line-height:1}
 .tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+
+/* ══ APP_QA_R5 P2 · GOLD NIGHT RAISED SCALE ═══════════════════════════════════════════════════
+   Ref: design_refs/scorr_sprint2_goldnight_R1.html @ cd75e2c. Founder: "font size below also
+   increase" — the lower sections were reading small against the raised hero.
+
+   Every size below is the ref's, and 9.5px is the FLOOR: nothing in these sections goes under it.
+   Page-scoped on purpose. mobile_app.css sizes these classes for the whole app, and the sprint
+   ref is a HOME ref — raising .st or .tool globally would silently re-scale every other screen,
+   which is the per-page-vs-shared mistake in the other direction. P7-P10 migrate the other pages
+   deliberately, page by page.
+
+   Colour comes from the token layer, not from here: --golddeep is the gold-deep key colour the
+   ref uses for stat keys and news age stamps, and it is already the theme's --label under
+   goldnight, so these rules ask for the token rather than restating a hex (section D forbids
+   touching token values). */
+/* THE BOOK — stat values 18px, gold-deep keys */
+.st{padding:12px 11px}
+.st .k{font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--t-label,var(--dim))}
+.st .v{font-size:18px}
+.trio .st .v{font-size:18px}
+/* MY PORTFOLIO — 13px symbol, 12.5px values, 48px min row */
+.pfrow{min-height:48px}
+.pfrow .sym,.pfrow .s1{font-size:13px;font-weight:800;letter-spacing:.3px}
+.pfrow .v,.pfrow .pv{font-size:12.5px;font-weight:700}
+/* LIVE NEWS — 13.5px headlines, gold-deep age stamps */
+.rnr .rnh,.news .h{font-size:13.5px;line-height:1.45}
+.rnr .rnage{font-size:9.5px;color:var(--t-label,var(--dim))}
+/* TOOLS — 12px labels, 19px gold-glow icons */
+.tool{font-size:12px;padding:14px 6px}
+.tool span{font-size:19px;text-shadow:0 0 10px var(--brandglow)}
+/* BOTTOM NAV — 11px labels, gold active */
+.bnav .bn{font-size:11px}
+.bnav .bn .i{font-size:16px}
+.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+
 /* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
    sheet (cc#893 item 3). The ticker's own styling now lives HERE, scoped to this page, so a
    shared-CSS change can never restyle the tape again. Design restored = the original pill:
