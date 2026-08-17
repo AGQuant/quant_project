@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_motion_R1  ·  THE APP'S MOTION MODEL
+     Founder direction 17-Aug-2026: native experience from day one, research made fun,
+     retail empowered. Slant cards liked from the live V8 screen. Cards carry key metrics
+     AND a table, user swipes across them, taps through for the full page.
+
+     THE ONE RULE — ONE AXIS, ONE JOB:
+       VERTICAL   = move between SECTIONS. The page scrolls down. Positions, then ladder,
+                    then whatever follows. This is "where am I".
+       HORIZONTAL = move between CARDS OF THE SAME THING. The deck swipes sideways.
+                    Position 1 of 8, peer 2 of 13. This is "which one".
+       TAP        = go DEEP. The full page for that one thing.
+     Breaking this is what makes a hybrid app feel wrong: the moment a horizontal swipe
+     changes SECTION, the user loses the thread of where they are, because the axis that
+     told them "which one" suddenly means "where". Never let one axis do both jobs.
+
+     NO NESTED VERTICAL SCROLL, EVER. A deck scrolls x only. A vertical scroller inside a
+     vertical scroller is the single most common reason an app "feels like a website" —
+     the inner one eats the gesture and the page stops responding to a flick.
+
+     GEOMETRY = SLANT (founder pick, from the live V8 hero): clipped top-right and
+     bottom-left corners, a 4px colour rail down the spine, faint diagonal rake in the
+     corner. The rail CARRIES STATE — volt for long, heat for short, gold for neutral —
+     so direction is readable before a single number is.
+
+     DEPTH = the slab press (scorr_card_slab_R1 @ 1261fe9), reduced to 3px because a
+     clipped card has less edge to land on. The card still physically answers the tap.
+
+     CARDS CARRY THE TABLE. Key metrics are ON the card, not behind it. "View detailed"
+     is for the full page, not for the four numbers a user actually wants at a glance.
+     A card that only teases and makes you tap for everything is a menu, not a card.
+
+     SNAP + DOTS: scroll-snap-type x mandatory, snap-align center, one dot per card with
+     the active dot widened to a bar. The dots are the only honest count of how many
+     cards a deck holds before you swipe it.
+
+     P&L green/red untouched. Every green frozen pending the founder ruling (24214).
+-->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Scorr · motion model R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@500;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+--field:#0A0A0C;--panel:#17171B;--sunk:#0E0E11;--well:#131316;
+--chalk:#F5F2EA;--mute:#8A8A93;--line:#2A2A31;
+--gold:#D4AF37;--goldhi:#F0D67A;--goldlo:#7A6320;
+--up:#3DD68C;--down:#FF4D6D;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#000;font-family:'Archivo',sans-serif;display:flex;flex-direction:column;align-items:center;padding:14px 8px 30px}
+.note{font-size:11px;color:#6E6E77;max-width:390px;line-height:1.5;margin:12px 4px 0}
+.note b{color:#B9B9C2;font-weight:700}
+
+.phone{width:390px;max-width:100%;height:760px;background:var(--field);border-radius:26px;overflow:hidden;
+ border:1px solid var(--line);box-shadow:0 0 0 6px #0F0F12;display:flex;flex-direction:column;position:relative}
+.stat{height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;
+ font-family:'JetBrains Mono';font-size:9.5px;color:var(--mute);flex-shrink:0}
+.top{padding:4px 16px 10px;display:flex;align-items:baseline;gap:8px;flex-shrink:0}
+.top .mk{font-family:'Archivo Black';font-size:15px;color:var(--gold)}
+.top .sb{font-size:9px;color:var(--mute);letter-spacing:.13em;text-transform:uppercase;margin-left:auto}
+
+/* ══ VERTICAL = the page. sections stack, page scrolls down. ══ */
+.page{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+.sec{padding:14px 0 4px}
+.sechd{display:flex;align-items:baseline;gap:8px;padding:0 16px 9px}
+.eye{font-size:9px;color:var(--gold);letter-spacing:.17em;text-transform:uppercase;font-weight:800}
+.cnt{font-family:'JetBrains Mono';font-size:9.5px;color:var(--mute);margin-left:auto}
+
+/* ══ HORIZONTAL = the deck. variants of ONE thing, swipe sideways. NEVER scrolls y. ══ */
+.deck{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:3px 16px 12px;
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.deck::-webkit-scrollbar{display:none}
+.card{scroll-snap-align:center;flex:0 0 300px;position:relative}
+
+/* SLANT geometry + SLAB depth */
+.slant{
+  position:relative;background:var(--panel);padding:14px 16px 13px 20px;overflow:hidden;
+  clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,18px 100%,0 calc(100% - 18px));
+  border-top:1px solid rgba(255,255,255,.13);
+  box-shadow:inset 0 -3px 9px rgba(0,0,0,.62);
+  transition:transform .07s ease;
+}
+.slant:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold)}
+.slant:after{content:"";position:absolute;right:-34px;top:-26px;width:110px;height:150px;
+  background:repeating-linear-gradient(-58deg,rgba(212,175,55,.09) 0 6px,transparent 6px 15px)}
+.slant:active{transform:translateY(3px)}
+.slant.long:before{background:var(--up)} .slant.short:before{background:var(--down)}
+.in{position:relative;z-index:1}
+
+.r1{display:flex;align-items:center;gap:9px}
+.tk{font-family:'Archivo Black';font-size:16px;letter-spacing:-.3px;color:var(--goldhi)}
+.sg{font-size:8.5px;color:var(--mute);letter-spacing:.1em;text-transform:uppercase;margin-top:1px}
+.sc{font-family:'JetBrains Mono';font-weight:800;font-size:26px;line-height:1;margin-left:auto;color:var(--gold);text-shadow:0 2px 0 #000}
+.bd{font-family:'Archivo Black';font-size:7.5px;letter-spacing:.12em;padding:3px 7px;border-radius:3px;background:var(--up);color:#04150C}
+.bd.s{background:var(--down);color:#2A0710}
+.bd.a{background:var(--gold);color:#221B04}
+
+.pills{display:flex;gap:5px;margin-top:11px}
+.pl{flex:1;padding:6px 4px;text-align:center;background:rgba(255,255,255,.035);
+ border-left:2px solid var(--goldlo);border-radius:0 6px 6px 0}
+.pk{font-size:7.5px;color:var(--mute);letter-spacing:.15em;font-weight:800}
+.pv{font-family:'JetBrains Mono';font-weight:800;font-size:14px;margin-top:1px;color:var(--chalk)}
+
+/* the TABLE inside the card — key metrics, not a link to them */
+.tbl{margin-top:11px;border-top:1px solid rgba(255,255,255,.07);padding-top:8px}
+.tr{display:flex;justify-content:space-between;padding:2.5px 0;font-family:'JetBrains Mono';font-size:10px}
+.tr span:first-child{color:var(--mute);font-family:'Archivo';font-weight:700;font-size:9.5px;letter-spacing:.05em}
+.tr b{color:var(--chalk);font-weight:700}
+.up{color:var(--up)!important}.dn{color:var(--down)!important}
+
+.more{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:8px;
+ border-top:1px solid rgba(255,255,255,.07);font-size:9.5px;font-weight:800;letter-spacing:.11em;
+ text-transform:uppercase;color:var(--gold)}
+.more i{font-style:normal;font-size:12px}
+
+.dots{display:flex;gap:5px;justify-content:center;padding:0 0 6px}
+.dot{width:5px;height:5px;border-radius:50%;background:#2E2E36}
+.dot.on{background:var(--gold);width:16px;border-radius:3px}
+
+.bn{display:flex;border-top:1px solid #1D1D22;background:#0D0D10;flex-shrink:0}
+.nv{flex:1;padding:8px 0 10px;text-align:center;font-size:9px;color:#6E6E77;font-weight:700}
+.nv.on{color:var(--gold)}
+.nv i{display:block;font-size:13px;margin-bottom:2px;font-style:normal}
+.hint{position:absolute;left:0;right:0;bottom:52px;text-align:center;font-size:9px;color:#5A5A63;
+ letter-spacing:.1em;text-transform:uppercase;pointer-events:none}
+</style></head><body>
+
+<div class="phone">
+ <div class="stat"><span>2:24</span><span>4G ▮▮▮ 1%</span></div>
+ <div class="top"><span class="mk">SCORR</span><span class="sb">V8 · long-short</span></div>
+
+ <div class="page">
+
+  <div class="sec">
+   <div class="sechd"><span class="eye">Open positions</span><span class="cnt">8 long · swipe →</span></div>
+   <div class="deck" data-deck="1">
+
+    <div class="card"><div class="slant long"><div class="in">
+      <div class="r1"><div><div class="tk">TITAN</div><div class="sg">Buy Momentum · 14 Aug</div></div>
+        <div class="sc up">+2.1%</div><div class="bd">LONG</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">QTY</div><div class="pv">180</div></div>
+        <div class="pl"><div class="pk">ENTRY</div><div class="pv">3,412</div></div>
+        <div class="pl"><div class="pk">CMP</div><div class="pv">3,484</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>Unrealised</span><b class="up">+₹12,960</b></div>
+        <div class="tr"><span>Exposure</span><b>₹6.14L</b></div>
+        <div class="tr"><span>Days held</span><b>3</b></div>
+        <div class="tr"><span>Stop</span><b>3,344</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+    <div class="card"><div class="slant short"><div class="in">
+      <div class="r1"><div><div class="tk">VBL</div><div class="sg">Sell Momentum · 12 Aug</div></div>
+        <div class="sc dn">−1.4%</div><div class="bd s">SHORT</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">QTY</div><div class="pv">640</div></div>
+        <div class="pl"><div class="pk">ENTRY</div><div class="pv">431</div></div>
+        <div class="pl"><div class="pk">CMP</div><div class="pv">437</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>Unrealised</span><b class="dn">−₹3,840</b></div>
+        <div class="tr"><span>Exposure</span><b>₹2.79L</b></div>
+        <div class="tr"><span>Days held</span><b>5</b></div>
+        <div class="tr"><span>Stop</span><b>449</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+    <div class="card"><div class="slant long"><div class="in">
+      <div class="r1"><div><div class="tk">MOTHERSON</div><div class="sg">Buy Reversal · 13 Aug</div></div>
+        <div class="sc up">+3.8%</div><div class="bd">LONG</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">QTY</div><div class="pv">2,400</div></div>
+        <div class="pl"><div class="pk">ENTRY</div><div class="pv">163</div></div>
+        <div class="pl"><div class="pk">CMP</div><div class="pv">169</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>Unrealised</span><b class="up">+₹14,400</b></div>
+        <div class="tr"><span>Exposure</span><b>₹4.06L</b></div>
+        <div class="tr"><span>Days held</span><b>4</b></div>
+        <div class="tr"><span>Stop</span><b>159</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+   </div>
+   <div class="dots" data-dots="1"><span class="dot on"></span><span class="dot"></span><span class="dot"></span></div>
+  </div>
+
+  <div class="sec">
+   <div class="sechd"><span class="eye">Segment ladder</span><span class="cnt">13 names · swipe →</span></div>
+   <div class="deck" data-deck="2">
+
+    <div class="card"><div class="slant"><div class="in">
+      <div class="r1"><div><div class="tk">MINDACORP</div><div class="sg">Auto · Body &amp; Stampings</div></div>
+        <div class="sc">7.51</div><div class="bd">GOOD</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">G</div><div class="pv">7.23</div></div>
+        <div class="pl"><div class="pk">V</div><div class="pv">6.25</div></div>
+        <div class="pl"><div class="pk">M</div><div class="pv up">9.06</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>CMP</span><b>720.05</b></div>
+        <div class="tr"><span>Market cap</span><b>₹17,215 Cr</b></div>
+        <div class="tr"><span>Rank</span><b>#1 of 13</b></div>
+        <div class="tr"><span>Verdict</span><b>Good</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+    <div class="card"><div class="slant"><div class="in">
+      <div class="r1"><div><div class="tk">BHARATSE</div><div class="sg">Auto · Body &amp; Stampings</div></div>
+        <div class="sc">7.28</div><div class="bd">GOOD</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">G</div><div class="pv">7.14</div></div>
+        <div class="pl"><div class="pk">V</div><div class="pv">6.25</div></div>
+        <div class="pl"><div class="pk">M</div><div class="pv up">8.44</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>CMP</span><b>248.05</b></div>
+        <div class="tr"><span>Market cap</span><b>₹1,558 Cr</b></div>
+        <div class="tr"><span>P/E</span><b>33.0x</b></div>
+        <div class="tr"><span>1Y return</span><b class="up">+111%</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+    <div class="card"><div class="slant"><div class="in">
+      <div class="r1"><div><div class="tk">JBMA</div><div class="sg">Auto · Body &amp; Stampings</div></div>
+        <div class="sc">5.38</div><div class="bd s">WEAK</div></div>
+      <div class="pills">
+        <div class="pl"><div class="pk">G</div><div class="pv">6.61</div></div>
+        <div class="pl"><div class="pk">V</div><div class="pv">6.25</div></div>
+        <div class="pl"><div class="pk">M</div><div class="pv dn">3.28</div></div></div>
+      <div class="tbl">
+        <div class="tr"><span>CMP</span><b>622.95</b></div>
+        <div class="tr"><span>Market cap</span><b>₹14,732 Cr</b></div>
+        <div class="tr"><span>Rank</span><b>#13 of 13</b></div>
+        <div class="tr"><span>Verdict</span><b>Weak</b></div></div>
+      <div class="more"><span>View detailed</span><i>→</i></div>
+    </div></div></div>
+
+   </div>
+   <div class="dots" data-dots="2"><span class="dot on"></span><span class="dot"></span><span class="dot"></span></div>
+  </div>
+
+  <div style="height:26px"></div>
+ </div>
+
+ <div class="hint">↕ sections · ↔ cards · tap for detail</div>
+ <div class="bn">
+  <div class="nv"><i>◧</i>Home</div><div class="nv on"><i>△</i>V8</div>
+  <div class="nv"><i>◈</i>GVM</div><div class="nv"><i>◉</i>Check</div><div class="nv"><i>▤</i>Intel</div>
+ </div>
+</div>
+
+<div class="note"><b>Vertical</b> moves between sections. <b>Horizontal</b> moves between cards of the same thing. <b>Tap</b> goes deep. One axis, one job.</div>
+
+<script>
+document.querySelectorAll('.deck').forEach(function(d){
+  var dots=document.querySelector('.dots[data-dots="'+d.dataset.deck+'"]').children;
+  d.addEventListener('scroll',function(){
+    var i=Math.round(d.scrollLeft/(d.children[0].offsetWidth+11));
+    for(var k=0;k<dots.length;k++)dots[k].className='dot'+(k===i?' on':'');
+  },{passive:true});
+});
+</script>
+</body></html>
