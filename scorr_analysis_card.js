@@ -51,7 +51,7 @@
     + 'white-space:nowrap;transition:background .12s,color .12s,border-color .12s}'
     + '.qa-tcbtn:hover{border-color:var(--blu,#4d7cfe)}'
     + '.qa-tcbtn.trade.on{background:var(--grn,#0a9e63);color:#fff;border-color:var(--grn,#0a9e63)}'
-    + '.qa-tcbtn.invest.on{background:#7c3aed;color:#fff;border-color:#7c3aed}'
+    + '.qa-tcbtn.invest.on{background:var(--pulse, #7c3aed);color:#fff;border-color:var(--pulse, #7c3aed)}'
     + '@media(max-width:560px){.qa-tcrow{flex-direction:column}}'
     + '#scorrAnaOv{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11400;align-items:center;justify-content:center}'
     + '#scorrAnaOv.open{display:flex}'
@@ -114,7 +114,7 @@
   /* ── trajectory grid (verbatim, v8_dashboard.html) ──────────────────────────────────── */
   function _trajValTile(v){return _heatTile(v==null?'--':Number(v).toFixed(2),'n','var(--txt)');}   // Now column: neutral tint
   function _trajDeltaTile(v,bf){const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
-    const t=(v==null?'--':(v>0?'+':'')+v.toFixed(2))+((bf&&v!=null)?'<span style="color:#F5B94A;font-size:9px;vertical-align:top">*</span>':'');
+    const t=(v==null?'--':(v>0?'+':'')+v.toFixed(2))+((bf&&v!=null)?'<span style="color:var(--amber, #F5B94A);font-size:9px;vertical-align:top">*</span>':'');
     return _heatTile(t,_deltaGrade(v),col);}
   function trajHtml(t){
     if(!t)return'';

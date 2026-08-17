@@ -175,7 +175,7 @@
     var rvSub = rv&&rv.insufficient?'building profile ('+(rv.sessions_used||0)+' sess)'
               : rv&&rv.closed?('last session \u00b7 '+newsEsc(rv.asof||''))
               : rv&&rv.slot?('vs typical by '+newsEsc(rv.slot)+' IST'):'vs typical pace';
-    var rvBadge = rv&&rv.early?'<span style="font-size:8px;font-weight:800;background:#d68a1e;color:#fff;padding:1px 4px;border-radius:4px">EARLY</span>':'';
+    var rvBadge = rv&&rv.early?'<span style="font-size:8px;font-weight:800;background:var(--amber, #d68a1e);color:#fff;padding:1px 4px;border-radius:4px">EARLY</span>':'';
     return '<div style="display:flex;gap:6px">'
       + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
       + _volTile('VolX',E.volx,'last day vs 21d avg'+(E.volx_asof?(' \u00b7 '+newsEsc(E.volx_asof)):''),'volx','')

@@ -95,7 +95,7 @@
       cursor:pointer;padding:0;min-width:44px;min-height:44px;font-family:inherit;
       display:inline-flex;align-items:center;justify-content:center}
     #dcOv .dc-x:hover{color:var(--c-tx)}
-    #dcOv .ts{font-size:10.5px;color:var(--c-grn);letter-spacing:.5px;border:1px solid #17603f;background:var(--c-grnbg);border-radius:8px;padding:5px 11px}
+    #dcOv .ts{font-size:10.5px;color:var(--c-grn);letter-spacing:.5px;border:1px solid var(--volt, #17603f);background:var(--c-grnbg);border-radius:8px;padding:5px 11px}
     #dcOv .sym{display:flex;align-items:flex-end;justify-content:space-between}
     #dcOv .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1;color:var(--c-tx)}   /* cc#648 part_4: explicit bright text — parity with the price numeral (was inheriting, read dim) */
     #dcOv .sym .l .tag{margin-top:6px;display:inline-block;font-size:10px;color:var(--c-mut);border:1px solid var(--c-bd);border-radius:5px;padding:2px 7px;letter-spacing:.5px}
@@ -111,16 +111,16 @@
     #dcOv .vtile .big{font-size:40px;font-weight:800;letter-spacing:-1px;line-height:1;margin-top:6px}
     #dcOv .vtile .big.on{color:var(--c-grn)} #dcOv .vtile small{font-size:18px;font-weight:600;color:var(--c-mut)}
     #dcOv .vtile .sub{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--c-mut);margin-top:6px}
-    #dcOv .vbar{height:5px;border-radius:3px;background:#132038;margin-top:11px;overflow:hidden}
-    #dcOv .vbar i{display:block;height:100%;background:linear-gradient(90deg,#1c9c63,var(--c-grn))}
+    #dcOv .vbar{height:5px;border-radius:3px;background:var(--panel, #132038);margin-top:11px;overflow:hidden}
+    #dcOv .vbar i{display:block;height:100%;background:linear-gradient(90deg,var(--volt, #1c9c63),var(--c-grn))}
     #dcOv .vtile.sm .big{font-size:30px}
     #dcOv .oiwrap{display:flex;align-items:stretch;gap:12px}
     #dcOv .oibox{flex:1;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:12px;padding:14px}
     #dcOv .oibox .d{font-size:11px;margin-top:4px}
-    #dcOv .quad{flex:1.05;border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:center;background:var(--c-grnbg);border:1px solid #17603f}
-    #dcOv .quad.bear{background:var(--c-redbg);border-color:#5e2230} #dcOv .quad.neu{background:var(--c-ambbg);border-color:#5a4620}
-    #dcOv .quad .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#8fe6bb;letter-spacing:1px}
-    #dcOv .quad.bear .k{color:#f2a6b1} #dcOv .quad.neu .k{color:#e8c890}
+    #dcOv .quad{flex:1.05;border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:center;background:var(--c-grnbg);border:1px solid var(--volt, #17603f)}
+    #dcOv .quad.bear{background:var(--c-redbg);border-color:var(--heat, #5e2230)} #dcOv .quad.neu{background:var(--c-ambbg);border-color:var(--amber, #5a4620)}
+    #dcOv .quad .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--volt, #8fe6bb);letter-spacing:1px}
+    #dcOv .quad.bear .k{color:var(--heat, #f2a6b1)} #dcOv .quad.neu .k{color:var(--amber, #e8c890)}
     #dcOv .quad .v{font-size:20px;font-weight:800;color:var(--c-grn);line-height:1.05;margin-top:6px;letter-spacing:-.4px}
     #dcOv .quad.bear .v{color:var(--c-red)} #dcOv .quad.neu .v{color:var(--c-amb)}
     /* cc#964: the label text goes neutral-dim; the NUMBERS carry the colour, per sign, from _qStat.
@@ -137,15 +137,15 @@
     #dcOv .qd.qg{background:var(--c-grnbg);color:var(--c-grn)} #dcOv .qd.qr{background:var(--c-redbg);color:var(--c-red)}
     /* cc#624 item_4: LEVELS section-header verdict chip */
     #dcOv .lvv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:.5px;margin-left:auto}
-    #dcOv .lvv.grn{background:var(--c-grnbg);color:var(--c-grn);border:1px solid #17603f}
-    #dcOv .lvv.amb{background:var(--c-ambbg);color:var(--c-amb);border:1px solid #5a4620}
-    #dcOv .lvv.red{background:var(--c-redbg);color:var(--c-red);border:1px solid #5e2230}
+    #dcOv .lvv.grn{background:var(--c-grnbg);color:var(--c-grn);border:1px solid var(--volt, #17603f)}
+    #dcOv .lvv.amb{background:var(--c-ambbg);color:var(--c-amb);border:1px solid var(--amber, #5a4620)}
+    #dcOv .lvv.red{background:var(--c-redbg);color:var(--c-red);border:1px solid var(--heat, #5e2230)}
     #dcOv .basis{display:flex;align-items:center;gap:14px;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:12px;padding:13px 15px}
     #dcOv .basis .v{font-size:24px;font-weight:800;letter-spacing:-.5px}
     #dcOv .basis .col{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--c-mut)}
     #dcOv .basis .col b{color:var(--c-tx);font-weight:600}
-    #dcOv .chip{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;padding:5px 11px;border-radius:20px;background:var(--c-grnbg);color:var(--c-grn);border:1px solid #17603f;letter-spacing:.5px}
-    #dcOv .chip.dn{background:var(--c-redbg);color:var(--c-red);border-color:#5e2230} #dcOv .chip.neu{background:var(--c-ambbg);color:var(--c-amb);border-color:#5a4620}
+    #dcOv .chip{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;padding:5px 11px;border-radius:20px;background:var(--c-grnbg);color:var(--c-grn);border:1px solid var(--volt, #17603f);letter-spacing:.5px}
+    #dcOv .chip.dn{background:var(--c-redbg);color:var(--c-red);border-color:var(--heat, #5e2230)} #dcOv .chip.neu{background:var(--c-ambbg);color:var(--c-amb);border-color:var(--amber, #5a4620)}
     #dcOv .lv{display:grid;grid-template-columns:1fr 1fr;gap:9px}
     #dcOv .lvc{background:var(--c-panel);border:1px solid var(--c-bd);border-radius:11px;padding:11px 12px}
     #dcOv .lvc .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--c-mut);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}

@@ -1286,7 +1286,7 @@ var _full = false;                // cc#779: fullscreen state
 
   function _fullLink(sym) {
     return '<a href="/check?symbol=' + encodeURIComponent(sym) + '" target="_blank" rel="noopener" ' +
-      'style="color:#4d7cfe;font-weight:700;text-decoration:none">Open full Trade Check →</a>';
+      'style="color:var(--pulse, #4d7cfe);font-weight:700;text-decoration:none">Open full Trade Check →</a>';
   }
 
   function _drawerHtml(sym, t) {
