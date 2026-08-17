@@ -45,6 +45,9 @@ body[data-theme]{
   --blu:var(--t-accent); --cyan:var(--t-brand);
 }
 /* the switch — ref .tswitch, 34x30 buttons, right of the wordmark */
+/* APP_QA_R5 P1: the switch is HIDDEN, not removed. Markup and JS stay in place so the return
+   next build is deleting this one declaration rather than rebuilding the control. */
+.tswitch{display:none !important}
 .tswitch{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line2);padding:3px;
   clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:13px;
@@ -411,15 +414,21 @@ body[data-theme]{
 .hdr-r .rail{white-space:nowrap}
 </style>
 </head>
-<body data-theme="dark">
-<!-- APP_QA_R4 P2: the stored theme is applied HERE, as the first thing inside <body>, not in a
-     DOMContentLoaded handler. body does not exist while <head> is parsing, so this is the
-     earliest point the attribute can be set — before the browser paints, which is what keeps the
-     gold themes from flashing dark on every load. Guarded and whitelisted: an unknown or
-     corrupted localStorage value falls through to the dark default rather than removing the
-     attribute and leaving the page with no tokens at all. -->
+<body data-theme="goldnight">
+<!-- APP_QA_R5 P1 · GOLD NIGHT IS THE ONLY VISIBLE THEME THIS SPRINT (founder ruling 12:00).
+     The default attribute above is goldnight, and the block below FORCES it: a device that chose
+     dark or goldday in Sprint 1 still lands on goldnight today.
+
+     THE STORED KEY IS READ AND DELIBERATELY NOT DELETED, as P1 requires. Wiping it would destroy
+     the founder's Sprint-1 choice, and the switch returns next build — so the preference is kept
+     intact and simply not honoured while the sprint gate is on. Lifting the gate is deleting one
+     line, and every device gets its old choice back.
+
+     Kept as the R4 parse-time pattern: first statement inside <body>, before first paint. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t==='dark'||t==='goldday'||t==='goldnight'){document.body.setAttribute('data-theme',t);}}catch(e){}})();</script>
+/* read for continuity, ignored while the sprint gate stands — see the note above */
+if(t){/* preserved, not applied */}}catch(e){}
+document.body.setAttribute('data-theme','goldnight');})();</script>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
