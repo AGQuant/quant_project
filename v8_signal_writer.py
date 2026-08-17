@@ -2329,7 +2329,13 @@ BASKET_FILTERS = {
         {"key": "day_1d",         "label": "day change",   "cond_min": "> 0",   "cond_max": "<= 2",  "min": 0.0,  "max": 2.0,  "type": "band", "strict": True},
         {"key": "s1_touch",       "label": "S1 touch (last 3 sessions or today)", "cond_min": "<= S1", "cond_max": "", "min": None, "max": None, "type": "custom"},
         {"key": "pp_band",        "label": "above PP by",  "cond_min": ">= 0",  "cond_max": "<= 1.5%","min": 0.0,  "max": 1.5,  "type": "custom"},
-        {"key": "hourly_pct",     "label": "hourly % (from ~10:15)", "cond_min": "> 0", "cond_max": "NOT NULL", "min": 0.0, "max": None, "type": "custom"},
+        # cc#1076: the label said "from ~10:15", which read as an ANCHOR — a baseline fixed at
+        # 10:15 that the price is compared against all day. It never was. _load_hourly_fut has
+        # always computed close(rn=1) vs close(rn=13), a ROLLING 60 minutes, and the label was
+        # describing the moment the value first EXISTS rather than what it measures. That reading
+        # is what made a 0-pass funnel at 10:10 look like a broken gate instead of a window that
+        # had not opened yet. Wording now states the measure, not the clock.
+        {"key": "hourly_pct",     "label": "hourly % (rolling 60m)", "cond_min": "> 0", "cond_max": "NOT NULL", "min": 0.0, "max": None, "type": "custom"},
     ],
 }
 
