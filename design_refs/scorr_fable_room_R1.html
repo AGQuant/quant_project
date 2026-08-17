@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_fable_room_R1
+     The Fable Room viewer — /room. Read-only window onto cc_task_logs, the table
+     CC_COMMS_LOOP_V1 (session_log 24138) calls "the meeting room". Founder observes
+     the CC <-> Fable working loop live instead of asking for a status report.
+
+     Built by Fable 17-Aug-2026 from the REAL cc#1085 exchange (log ids 2668-2675).
+     Every message below is verbatim-shortened from an actual row.
+
+     DATA: SELECT id, task_id, actor, level, message, ts FROM cc_task_logs
+           JOIN cc_tasks ON cc_tasks.id = cc_task_logs.task_id
+     Newest task first; within a task, oldest message first (a conversation reads down).
+     READ-ONLY. The page never writes to cc_task_logs — the room is written by
+     CC and Fable, never by a browser.
+
+     KIND is DERIVED from the message prefix, not stored:
+       QUESTION: -> question | STOPPED: -> stopped | RECO: -> reco
+       ^P\d+ \| <sha> -> push | CLAIMED -> claim | else -> note
+     If a prefix convention changes, this mapping is the single place to fix.
+
+     LANES: claude_code left, fable right, founder/scheduler centre.
+     Palette = cio2 dark tokens. Numbers/SHAs in mono.
+-->
+<html><head><meta charset="utf-8"><title>Fable Room</title>
+<style>
+:root{--bg:#0A0F1E;--card:#121A33;--bd:rgba(148,166,210,.14);--grid:rgba(148,166,210,.10);
+--txt:#E9EEFB;--mut:#8C99BD;--acc:#4D7CFE;--gold:#F5B94A;--grn:#2FD48B;--red:#FF5C6C;--pur:#9B7CFF;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:14px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px}
+.head{display:flex;align-items:center;gap:12px;padding:16px 0 12px;border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--bg);z-index:5}
+.head h1{font-size:17px;font-weight:800;margin:0}
+.head .sub{font-size:12.5px;color:var(--mut)}
+.pulse{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35);border-radius:12px;padding:3px 10px}
+.filters{display:flex;gap:6px;padding:12px 0;flex-wrap:wrap}
+.f{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--bd);background:transparent;color:var(--mut)}
+.f.on{border-color:var(--acc);background:rgba(77,124,254,.12);color:var(--acc)}
+.tk{margin:22px 0 10px;display:flex;align-items:center;gap:10px}
+.tk .id{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:800;color:var(--acc)}
+.tk .ttl{font-size:12.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk .st{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:5px;padding:2px 7px;flex-shrink:0}
+.st.run{color:var(--gold);background:rgba(245,185,74,.14);border:1px solid rgba(245,185,74,.35)}
+.st.done{color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35)}
+.msg{display:flex;flex-direction:column;margin:10px 0}
+.msg.fable{align-items:flex-end}
+.meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mut);margin-bottom:4px}
+.who{font-weight:800;letter-spacing:.04em}
+.who.cc{color:var(--mut)} .who.fb{color:var(--acc)}
+.bub{max-width:76%;border-radius:12px;padding:11px 15px;border:1px solid var(--bd);background:var(--card);line-height:1.55;font-size:13px;color:var(--mut)}
+.msg.fable .bub{background:rgba(77,124,254,.10);border-color:rgba(77,124,254,.30)}
+.bub b{display:block;font-size:13px;font-weight:800;color:var(--txt);margin-bottom:4px}
+.kind{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:1px 6px}
+.k-question,.k-stopped{color:var(--gold);background:rgba(245,185,74,.16)}
+.k-reco{color:var(--acc);background:rgba(77,124,254,.16)}
+.k-push{color:var(--grn);background:rgba(47,212,139,.16)}
+.k-claim,.k-note{color:var(--mut);background:rgba(148,166,210,.12)}
+.sha{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--grn)}
+.gap{text-align:center;font-size:11px;color:var(--mut);margin:8px 0}
+.empty{color:var(--mut);font-size:13px;padding:40px 0;text-align:center}
+</style></head><body>
+<div class="wrap">
+
+<div class="head">
+  <div>
+    <h1>Fable Room</h1>
+    <div class="sub">cc_task_logs · the meeting room · CC_COMMS_LOOP_V1</div>
+  </div>
+  <div class="pulse">CC RUNNING · 13:20 IST</div>
+</div>
+
+<div class="filters">
+  <button class="f on">All</button>
+  <button class="f">Questions &amp; stops</button>
+  <button class="f">Rulings</button>
+  <button class="f">Pushes</button>
+  <button class="f">Open cards</button>
+</div>
+
+<div class="tk">
+  <span class="id">cc#1085</span>
+  <span class="ttl">EXECUTE reports/APP_QA_R6.md — Sprint 3, 10 ordered pushes</span>
+  <span class="st run">in progress</span>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:00</span><span>#2668</span><span class="kind k-claim">claimed</span></div>
+  <div class="bub"><b>Claimed</b>Read APP_QA_R6 in full plus both binding refs. Noted and will hold: page 2 carries no rating, no score, no pillar value and the string GVM must not appear. Market cap binds from screener_raw, never gvm_scores. The ref is tuned to land exactly two A4 pages so it is ported verbatim, not restyled. Starting P1.</div>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:01</span><span>#2669</span><span class="kind k-push">push</span><span class="sha">564ef83</span></div>
+  <div class="bub"><b>P1 · route skeleton</b>Own router, one include_router line in main.py. A DB failure deliberately returns 503 rather than 404, because answering "not found" when the database is down sends someone hunting a ticker problem they do not have. Note: an edit briefly attached the cc#1069 comment to the wrong import line; caught and restored before commit.</div>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:05</span><span>#2670</span><span class="kind k-push">push</span><span class="sha">8879d24</span></div>
+  <div class="bub"><b>P2 · template ported</b>Verify shipped as a test, not a claim: test_twopager_css_parity.py re-extracts the CSS from the ref and asserts equality, then names the load-bearing properties individually so a future failure says which property broke. Ref 3215 bytes, module 3215 bytes, parity ok.</div>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:09</span><span>#2671</span><span class="kind k-note">finding</span></div>
+  <div class="bub"><b>Section E is sharper than written</b>The builder top-level market_cap is correct, but ladder[].market_cap for BHARATSE reads 1157.0 — the stale column is inside the ladder array too. Anything binding mcap from the ladder inherits the stale value.</div>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:09</span><span>#2672</span><span class="kind k-question">question</span></div>
+  <div class="bub"><b>P3 blocked — CMP does not reconcile</b>The report says 248.05, the live builder returns price 245.70 labelled "Last Tick". Two different fields. I have not bound either and have not hardcoded anything. Confirm and P3 lands immediately.</div>
+</div>
+
+<div class="msg fable">
+  <div class="meta"><span class="kind k-reco">ruling</span><span>#2673</span><span>13:15</span><span class="who fb">fable</span></div>
+  <div class="bub"><b>Print 248.05 — your stop was right</b>Measured both before ruling rather than defending my own card. 245.70 is the last 5-min bar; the tape stops at 15:25 and never sees the auction. Three sources agree on 248.05. The real argument is internal consistency: pe, mcap and the 52w distance are all derived off 248.05, so the other number would contradict the sheet by 0.95%.</div>
+</div>
+
+<div class="msg cc">
+  <div class="meta"><span class="who cc">claude code</span><span>13:18</span><span>#2674</span><span class="kind k-claim">accepted</span></div>
+  <div class="bub"><b>P3 unblocked</b>Taking the ruling and the ref-compatible addition: when the price is not live the hero key reads CLOSE not CMP, and the masthead carries the real price date. Key text only, so the two-page fit is untouched. Not expanding P3 with the builder last-tick issue.</div>
+</div>
+
+<div class="msg fable">
+  <div class="meta"><span class="kind k-reco">ruling</span><span>#2675</span><span>13:20</span><span class="who fb">fable</span></div>
+  <div class="bub"><b>Good catch — and it goes further</b>Your fix protects the hero cell, which is one row. The ladder table has its own mcap column for all 13 peers. Measured: MINDACORP 15,064 vs 17,215 at an identical price. My gap, owned — section E named the column but my verify list only checked the subject row, so a fully stale ladder would have passed every check I wrote.</div>
+</div>
+
+<div class="gap">— older tasks load on scroll —</div>
+
+</div>
+</body></html>
