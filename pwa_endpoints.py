@@ -2108,6 +2108,22 @@ def pwa_scorr_theme_r5_css():
     return Response(SCORR_THEME_R5_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
+# APP_QA_R4 P1: the three-theme token layer (dark / goldday / goldnight), byte-faithful to
+# design_refs/scorr_home_themes_R1.html @ 80da8c6. Served the same way scorr_theme_r5.css is —
+# file at repo root, read once at import, exposed under the /static/ URL namespace. P1 ships the
+# asset only; no page links it until P2.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_themes.css"), "r", encoding="utf-8") as _thf:
+        SCORR_THEMES_CSS = _thf.read()
+except Exception:
+    SCORR_THEMES_CSS = ""
+
+
+@router.get("/static/scorr_themes.css")
+def pwa_scorr_themes_css():
+    return Response(SCORR_THEMES_CSS, media_type="text/css", headers=_CACHE_1D)
+
+
 @router.get("/scrub_layer.js")
 def pwa_scrub_layer_js():
     return Response(SCRUB_LAYER_JS, media_type="application/javascript", headers=_CACHE_1D)

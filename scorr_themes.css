@@ -1,0 +1,44 @@
+/* scorr_themes.css — APP_QA_R4 P1 · the three-theme token layer
+   =============================================================================================
+   Source of truth: design_refs/scorr_home_themes_R1.html @ 80da8c6. The three token blocks below
+   are BYTE-FAITHFUL to that ref — same names, same values, same order. Nothing is added, dropped
+   or "improved" here; if a value looks wrong, the ref is the thing to change, then this file.
+
+   WHERE THIS FILE LIVES, since P1 asks which pattern was used: repo ROOT, served at
+   /static/scorr_themes.css by a route in pwa_endpoints.py. That is the existing convention —
+   scorr_theme_r5.css does exactly this (pwa_endpoints.py, cc#1064). There is no static/ directory
+   in the repo; the /static/ prefix is a URL namespace, not a folder. The URL is build-id stamped
+   by whoever links it, so a deploy busts the 1-day cache (the cc#1060 lesson).
+
+   THE MAPPING RULES, named here so a later reader does not have to infer them from hexes:
+
+   · P&L NEVER RE-SKINS. --win and --loss are money truth. They stay green and red in all three
+     themes — they change SHADE to suit the ground (volt #C8F542 on the dark field, a deeper
+     #1F9D61 on white so it reads on paper, #3DD68C on black-gold) but never HUE and never role.
+     A profit is green in every theme or the theme is wrong.
+   · --label IS THE INDEX-NAME COLOUR. NIFTY / BANKNIFTY name labels, per LABEL_AMBER_V1
+     (cc#1075). Amber on dark; under goldday/goldnight the layer supersedes it with the theme's
+     own label tone. Direction and state words keep --win/--loss, never --label.
+   · --brand IS STRUCTURE + GLOW. Section eyebrows, tool icons, the active switch — paired with
+     --brandglow for the text-shadow. Aqua on dark (THEME_TOKENS_R51_V1), gold on both gold
+     themes. Structure, never decoration.
+   · --accent IS INTERACTIVE ONLY. Links and tappable affordances. Pulse on dark; the golds fold
+     it into the brand gold, because those palettes carry one accent, not two.
+   · --field / --panel / --hi / --edge are the surface ramp, --ink / --muted the text pair.
+
+   NO PAGE CONSUMES THIS YET — P1 ships the asset alone, P2 wires home to it. Adding it changes
+   nothing on any live screen until a page links it AND sets body[data-theme].
+--------------------------------------------------------------------------------------------- */
+
+body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;
+ --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
+ --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(90deg,#EAF0FA,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#E5DFD2;--ink:#1A1A1E;
+ --muted:#8A8578;--brand:#A67C00;--brandglow:rgba(166,124,0,.25);--accent:#A67C00;--label:#A67C00;
+ --win:#1F9D61;--loss:#D93B4F;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px)}
+body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;
+ --muted:#8E8A7E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--accent:#D4AF37;--label:#8C7A3F;
+ --win:#3DD68C;--loss:#FF5C6C;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
