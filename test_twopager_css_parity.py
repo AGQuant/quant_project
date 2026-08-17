@@ -71,6 +71,22 @@ def main() -> int:
         n2 = p2.group(1).count('<div class="page">')
         checks.append(("exactly two .page divs (1 + 1)", n1 == 1 and n2 == 1))
 
+    # R6-P8 rebuild: R2 is a LADDER-ONLY fragment, so it does not replace R1's sheet CSS — it adds
+    # exactly two rules. Same bar, second ref: the served rules must be byte-identical to R2's.
+    r2 = ROOT / "design_refs" / "scorr_gvm_2pager_R2.html"
+    if r2.exists():
+        r2css = re.search(r"<style>(.*?)</style>", r2.read_text(encoding="utf-8"), re.S).group(1)
+        served = re.search(r'R2_LADDER_CSS = r"""(.*?)"""', src, re.S)
+        checks.append(("R2_LADDER_CSS present", bool(served)))
+        if served:
+            for rule in (".winlbl", "tr.gap td"):
+                want = re.search(re.escape(rule) + r"\s*\{[^}]*\}", r2css)
+                checks.append(("%s byte-identical to R2" % rule,
+                               bool(want) and want.group(0) in served.group(1)))
+            # R1's sheet CSS must not have absorbed R2's rules — two refs, two blocks, no bleed.
+            checks.append(("R2 rules stayed OUT of REF_CSS",
+                           ".winlbl" not in b and "tr.gap" not in b))
+
     for name, passed in checks:
         print("  %-28s %s" % (name, "OK" if passed else "FAIL"))
         ok = ok and passed

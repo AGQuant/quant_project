@@ -135,6 +135,16 @@ ul { margin:3px 0 7px; padding-left:14px; } li { margin:2px 0; }
 .foot { font-size:6.5pt; margin-top:5px; color:#8B95A1; border-top:1px solid #DDE2E8; padding-top:3px; }
 """
 
+# ── R6-P8 rebuild · design_refs/scorr_gvm_2pager_R2.html @ f3e9a95 ────────────────────────────
+# R2 is a LADDER-ONLY fragment, not a second full sheet, so REF_CSS stays byte-identical to R1 and
+# the parity test is untouched. R2 contributes exactly TWO new rules, extracted from its <style>
+# rather than retyped, and served in their own block. test_twopager_css_parity.py checks these
+# against R2 the same way it checks REF_CSS against R1 — two refs, two assertions, no drift.
+R2_LADDER_CSS = r"""
+.winlbl { font-size:6.6pt; color:#6B7683; letter-spacing:.08em; text-transform:uppercase; margin:2px 0 3px; }
+tr.gap td { background:#F4F6F9; color:#6B7683; font-size:6.6pt; letter-spacing:.06em; text-align:center; padding:2.5px 5px; font-style:italic; }
+"""
+
 PAGE1_TMPL = _Tmpl(r"""
 <!-- ================= PAGE 1 ================= -->
 <div class="page">
@@ -201,6 +211,7 @@ ${family_rows}
 </div>
 
 <h2>Segment ladder &mdash; ${segment}</h2>
+${ladder_label}
 <table>
 <tr><th style="width:6%">#</th><th class="l" style="width:34%">Company</th><th>Mcap (&#8377; Cr)</th><th>CMP (&#8377;)</th><th>Growth</th><th>Value</th><th>Momentum</th><th>Rating</th><th class="l" style="width:11%">Verdict</th></tr>
 ${ladder_rows}
@@ -276,7 +287,8 @@ def render_page(title: str, body_html: str, print_bar: bool = True) -> str:
     One place assembles the sheet, so nothing can serve the template with a different head than
     the one the parity test checks."""
     return ("<!DOCTYPE html>\n<html><head><meta charset='utf-8'><title>" + title + "</title>\n"
-            "<style>" + REF_CSS + "</style>\n<style>" + PRINT_CSS + "</style>\n</head>\n<body>"
+            "<style>" + REF_CSS + "</style>\n<style>" + R2_LADDER_CSS + "</style>\n"
+            "<style>" + PRINT_CSS + "</style>\n</head>\n<body>"
             + (PRINT_BAR if print_bar else "") + body_html + "</body></html>")
 
 
@@ -478,13 +490,20 @@ def _family_rows(cur, segment, score_date):
     fam = (segment or "").split(" - ")[0].strip()
     if not fam:
         return "", fam, [], None
+    # THE FAMILY IS NOT ALWAYS DASHED. "Auto - Body & Stampings" has four dashed siblings, but the
+    # fifth member of the family is "Auto OEM" — no dash. Matching only `fam` and `fam - %` returned
+    # four rows where the binding ref shows five, and my own P3 verification missed it because the
+    # harness fed a hardcoded five-row family instead of this query. Caught by re-deriving the
+    # family sizes from the DB during the P8 rebuild. `fam %` picks up the space-separated form
+    # without reaching anything else — it cannot match "Autoline", only "Auto <something>".
     cur.execute(
         """SELECT segment, COUNT(*) AS n, AVG(gvm_score) AS avg_gvm
              FROM gvm_scores
-            WHERE score_date = %s AND (segment = %s OR segment LIKE %s)
+            WHERE score_date = %s
+              AND (segment = %s OR segment LIKE %s OR segment LIKE %s)
             GROUP BY segment
             ORDER BY AVG(gvm_score) DESC NULLS LAST""",
-        (score_date, fam, fam + " - %"))
+        (score_date, fam, fam + " - %", fam + " %"))
     rows = cur.fetchall()
     out = []
     for seg, n, avg in rows:
@@ -517,21 +536,99 @@ def _screener_quotes(cur, symbols):
     return {s: {"price": _f(p), "market_cap": _f(m)} for s, p, m in cur.fetchall()}
 
 
+LADDER_VISIBLE = 12          # R2, founder-ruled via Fable: twelve DATA rows, never fourteen
+LADDER_WINDOW = LADDER_VISIBLE - 1   # eleven centred on the subject, plus rank 1 pinned above
+
+
+def _ladder_window(ladder):
+    """Which ladder rows to print, and where the cuts are.
+
+    Returns (rows, cut_above, cut_below, label) where each cut is (n_peers, first_rank, last_rank)
+    or None. rows are (display_rank, row) pairs.
+
+    THE NUMBER IS TWELVE, NOT FOURTEEN, and that is the whole point of the ruling. Fourteen data
+    rows measure 1011px against 1039px of printable A4 — twenty-eight pixels of headroom, which one
+    two-line company name eats. The cliff was measured on BHARATSE-shaped content and the next
+    symbol is not BHARATSE-shaped. Twelve lands near 980px and leaves real room. A sheet called a
+    2-Pager has to be one for 1,791 of 1,791 symbols, not for the ones that happen to fit.
+
+    RANK 1 IS ALWAYS KEPT. A window centred on the subject can drop the segment leader, and
+    "second of thirteen" means nothing without knowing who is first. So the twelve are rank 1 plus
+    an eleven-row window centred on the subject — unless that window already reaches rank 1, in
+    which case it is simply the top twelve, contiguous.
+
+    THE CUTS ARE PRINTED. A ladder that skips ranks silently is a lie about position, so every
+    omitted range becomes a visible gap row naming how many peers and which ranks went missing.
+    """
+    total = len(ladder)
+    idx = {id(r): i for i, r in enumerate(ladder)}
+    if total <= LADDER_VISIBLE:
+        return [(i + 1, r) for i, r in enumerate(ladder)], None, None, None
+
+    self_i = next((i for i, r in enumerate(ladder) if r.get("is_self")), 0)
+    start = self_i - (LADDER_WINDOW // 2)
+    end = start + LADDER_WINDOW - 1
+    if end > total - 1:                       # subject near the bottom — slide the window up
+        end, start = total - 1, total - LADDER_WINDOW
+    if start <= 0:
+        # The window already reaches the leader, so there is nothing to pin: twelve contiguous.
+        rows = [(i + 1, r) for i, r in enumerate(ladder[:LADDER_VISIBLE])]
+        below = (total - LADDER_VISIBLE, LADDER_VISIBLE + 1, total)
+        label = "showing %d of %d peers &nbsp;&middot;&nbsp; ranks 1&ndash;%d" % (
+            LADDER_VISIBLE, total, LADDER_VISIBLE)
+        return rows, None, below, label
+
+    rows = [(1, ladder[0])] + [(i + 1, ladder[i]) for i in range(start, end + 1)]
+    above = (start - 1, 2, start)                      # ranks 2 .. start, inclusive
+    below = (total - 1 - end, end + 2, total) if end < total - 1 else None
+    label = "showing %d of %d peers &nbsp;&middot;&nbsp; rank 1 and ranks %d&ndash;%d" % (
+        LADDER_VISIBLE, total, start + 1, end + 1)
+    return rows, above, below, label
+
+
+def _gap_row(cut):
+    n, lo, hi = cut
+    span = "rank %d" % lo if lo == hi else "ranks %d&ndash;%d" % (lo, hi)
+    return ('<tr class="gap"><td colspan="9">&ctdot; &nbsp;%d peer%s, %s</td></tr>'
+            % (n, "" if n == 1 else "s", span))
+
+
+def _ladder_label(ladder):
+    """The denominator, always visible when rows are cut (UNIVERSE_DENOMINATOR_RULE). A ladder
+    that shows twelve of thirty-three without saying so misreports the segment as smaller."""
+    _rows, _a, _b, label = _ladder_window(ladder)
+    return '<div class="winlbl">%s</div>' % label if label else ""
+
+
 def _ladder_rows(rep, ladder, quotes):
+    rows, above, below, _label = _ladder_window(ladder)
     out = []
-    for i, r in enumerate(ladder, 1):
-        me = ' class="me"' if r.get("is_self") else ""
-        q = quotes.get(r.get("symbol")) or {}
-        mc, px = q.get("market_cap"), q.get("price")
-        out.append(
-            '<tr%s><td>%d</td><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+    if above:
+        # The pinned leader prints first, then the cut, then the window.
+        rank, r = rows[0]
+        out.append(_ladder_tr(rank, r, quotes))
+        out.append(_gap_row(above))
+        rest = rows[1:]
+    else:
+        rest = rows
+    for rank, r in rest:
+        out.append(_ladder_tr(rank, r, quotes))
+    if below:
+        out.append(_gap_row(below))
+    return "\n".join(out)
+
+
+def _ladder_tr(rank, r, quotes):
+    me = ' class="me"' if r.get("is_self") else ""
+    q = quotes.get(r.get("symbol")) or {}
+    mc, px = q.get("market_cap"), q.get("price")
+    return ('<tr%s><td>%d</td><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
             '<td>%s</td><td>%s</td><td class="l %s">%s</td></tr>' % (
-                me, i, _esc(r.get("company_name") or r.get("symbol")),
+                me, rank, _esc(r.get("company_name") or r.get("symbol")),
                 "&mdash;" if mc is None else format(int(round(mc)), ",d"),
                 _num(px, 2), _num(r.get("g"), 2), _num(r.get("v"), 2), _num(r.get("m"), 2),
                 _num(r.get("gvm"), 2),
                 _verdict_cls(r.get("verdict")), _esc(r.get("verdict") or "&mdash;")))
-    return "\n".join(out)
 
 
 def build_page1(cur, rep) -> str:
@@ -618,6 +715,7 @@ def build_page1(cur, rep) -> str:
         family=_esc(fam),
         family_rows=fam_rows,
         family_note=fam_note,
+        ladder_label=_ladder_label(ladder),
         ladder_rows=_ladder_rows(rep, ladder, quotes),
         ladder_note=ladder_note,
     )
