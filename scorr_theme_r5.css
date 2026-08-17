@@ -482,3 +482,46 @@
   border-radius:7px;
   box-shadow:0 1px 0 rgba(255,255,255,.07), 0 -1px 0 #000;
 }
+
+/* ══ cc#1090 SPRINT 4 · P11 · THE FLOATING LOGOUT + THEME PILLS ══════════════════════════════
+   Founder QA of the screen recording: the Logout and Dark chips float over Digest content
+   mid-scroll, sitting on the first news card.
+
+   WHERE THEY COME FROM. main.py injects #scorr-lo and #scorr-th as fixed pills at top:64px and
+   top:102px, right:14px, z-index:9999. Those offsets are correct and deliberate on the WEB —
+   cc#433 put them there to clear a 46px sticky navbar. The app screens have no such navbar, so
+   on a phone 64px and 102px are not "below the chrome", they are "on top of the second card".
+   The rule was right for the surface it was written for and was never re-read for this one.
+
+   FIXED HERE, NOT IN main.py. This sheet is already injected on every page (main.py links it),
+   so the guard reaches the same surfaces the pills do without turning main.py into a place that
+   holds logic — rule 4. It also keeps the web behaviour untouched: everything below is inside a
+   max-width query, so desktop keeps cc#433's geometry exactly.
+
+   TWO GUARDS, and the z-index one fixes a bug the founder had not hit yet.
+
+   1 · Z-INDEX. At 9999 these pills sit ABOVE every overlay in the app: the news bottom sheet
+       (81), the mobile list overlay (95), even the More sheet's backdrop (9999, a tie the pills
+       win by document order). So a Logout chip renders on top of an open article. Dropped to 70:
+       still above page content (5-60), now beneath every modal layer. A control that floats over
+       a modal is a mis-tap waiting to happen.
+
+   2 · OFFSET. On phones both pills move into the header band instead of the content column.
+       They stay reachable and stay out of the scroll. They are NOT hidden: /m/models is the only
+       app screen carrying its own Log out, so hiding these everywhere would strand the action on
+       every other screen — that is rule 2987's failure mode and it is not a trade worth making
+       for a cosmetic win. If the founder would rather they disappear on /m/* entirely, that is a
+       one-line change from here and it is his call, not mine. */
+/* THE SELECTOR IS DOUBLED ON PURPOSE. main.py injects these pills with their own <style> block
+   INSIDE THE BODY, so it comes after this sheet's <link> in document order and wins every tie at
+   equal specificity. A single #scorr-lo here computes to the same (1,0,0) and loses — measured:
+   the first version of this guard was a complete no-op and Chromium reported the pills still at
+   top:64px z-index:9999 on a 390px viewport. Doubling the id lifts it to (2,0,0) and settles it
+   regardless of order. Same trick this file already uses for :root:root — not !important, which
+   would then have to be out-shouted by the next person. */
+@media (max-width: 767px) {
+  #scorr-lo#scorr-lo { top: 6px; right: 10px; z-index: 70; }
+  #scorr-th#scorr-th { top: 40px; right: 10px; z-index: 70; }
+  /* The pills sit on chrome now, so they no longer need to fade to stay out of the way — but the
+     idle transparency is kept, because on a narrow header they still overlap a title's tail. */
+}
