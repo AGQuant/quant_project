@@ -216,7 +216,7 @@
 
 <!-- cc#537: full-screen candlestick overlay (sibling of #app so render()'s innerHTML rewrite
      never wipes it). TradingView Lightweight Charts (MIT, open-source lib -- NOT the widget). -->
-<div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:#0A0F1E;flex-direction:column">
+<div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--field, #0A0F1E);flex-direction:column">
   <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">
     <div id="v10ChartTitle" style="font-size:15px;font-weight:800;color:var(--txt)">NIFTY 50 · 5min · V10 trades</div>
     <div style="display:flex;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:8px;padding:3px">

@@ -49,8 +49,8 @@
     cursor:default;letter-spacing:.02em;white-space:nowrap}
   .feed-badge .fb-dot{width:8px;height:8px;border-radius:50%;background:var(--mut);flex-shrink:0;transition:.2s}
   .feed-badge.fb-green .fb-dot{background:var(--grn);box-shadow:0 0 0 3px rgba(15,169,104,.16)}
-  .feed-badge.fb-yellow{color:#d97706;border-color:#d97706}
-  .feed-badge.fb-yellow .fb-dot{background:#d97706}
+  .feed-badge.fb-yellow{color:var(--amber, #d97706);border-color:var(--amber, #d97706)}
+  .feed-badge.fb-yellow .fb-dot{background:var(--amber, #d97706)}
   .feed-badge.fb-red{color:var(--red);border-color:var(--red);background:rgba(226,55,68,.07)}
   .feed-badge.fb-red .fb-dot{background:var(--red);box-shadow:0 0 0 3px rgba(226,55,68,.16)}
   .feed-badge .fb-txt:empty{display:none}
@@ -237,7 +237,7 @@
   .mk-legend{margin:12px 0 2px;padding:9px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:10.5px;line-height:1.8;color:var(--dim)}
   .pv-star{margin-left:4px;font-size:11px;cursor:help;vertical-align:middle}
   .pv-act{margin-left:3px;font-size:11px;cursor:help;vertical-align:middle}
-  .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
+  .sig-reason{font-size:9px;font-weight:600;color:var(--muted, #94a3b8);margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
   .score-hi{color:var(--grn)}.score-mid{color:var(--amber)}.score-lo{color:var(--red)}
@@ -271,9 +271,9 @@
   .model-nav::-webkit-scrollbar{display:none}
   .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
     border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-    color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-  .mnav-item:hover{color:#1c2536}
-  .mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+    color:var(--muted, #5a6781);font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:var(--chalk, #1c2536)}
+  .mnav-item.active{border-bottom-color:var(--pulse, #2563eb);color:var(--pulse, #2563eb)}
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:var(--line2);flex-shrink:0;margin:0 4px}
   /* Info Modal */
@@ -670,7 +670,7 @@
       <!-- cc#760: data-integrity alert icon (replaces the full-width banner). Hidden at zero flags. -->
       <span id="diAlert" title="Data integrity" onclick="toggleDiPop(event)" style="display:none;position:relative;cursor:pointer;align-items:center;justify-content:center;padding:0 3px">
         <span id="diAlertIcon" style="font-size:16px;line-height:1">&#9888;</span>
-        <span id="diAlertBadge" style="position:absolute;top:-5px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:#d92d3c;color:#fff;font-size:9px;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box"></span>
+        <span id="diAlertBadge" style="position:absolute;top:-5px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--heat, #d92d3c);color:#fff;font-size:9px;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box"></span>
       </span>
       <a class="btn" href="/v13" title="Filter registry — every platform metric" style="text-decoration:none">&#9636; V13</a>
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
@@ -703,7 +703,7 @@
   <!-- cc#238 (V8_EOD_NO_REQUALIFICATION_V1): frozen-status banner. Shows when IST >= 15:30 on a
        trading day (or anytime market is closed), so a post-close signal never reads as live. -->
   <div id="frozenBanner" style="display:none;margin:0 0 12px;padding:10px 14px;border-radius:10px;
-       background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.45);color:#b45309;
+       background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.45);color:var(--amber, #b45309);
        font-size:12px;font-weight:700;text-align:center;letter-spacing:.02em">
     &#128274; Market Closed &mdash; Final as of 15:30 IST &middot; figures frozen until 09:15 next trading day
   </div>
@@ -807,7 +807,7 @@
   </div>
   <div id="pane-index" style="display:none">
     <div id="idx-app"><div class="loading">Loading Index Intelligence…</div></div>
-  <div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:#0A0F1E;flex-direction:column">
+  <div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--field, #0A0F1E);flex-direction:column">
     <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">
       <div id="v10ChartTitle" style="font-size:15px;font-weight:800;color:var(--txt)">NIFTY 50 · 5min · V10 trades</div>
       <div style="display:flex;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:8px;padding:3px">
@@ -4372,7 +4372,7 @@ function renderDiPop(){
     + line('Genuine-crash flags', b.genuine_crash_flags, '#d92d3c', x=>`${esc(x.symbol)}${x.drop_pct!=null?' ('+Number(x.drop_pct).toFixed(1)+'%)':''}`)
     + line('Restated overnight', b.restated_overnight, '#d92d3c', x=>esc(x.symbol))
     + line('Upcoming ex-dates', b.upcoming_ex_dates, '#d9820e', x=>`${esc(x.symbol)}${x.ex_date?' · '+esc(x.ex_date):''}`)
-    + ((DI_DATA.master_headline&&DI_DATA.red)?`<div style="padding:7px 0;border-top:1px solid var(--line);color:#d92d3c;font-size:11px">${esc(DI_DATA.master_headline)}</div>`:'');
+    + ((DI_DATA.master_headline&&DI_DATA.red)?`<div style="padding:7px 0;border-top:1px solid var(--line);color:var(--heat, #d92d3c);font-size:11px">${esc(DI_DATA.master_headline)}</div>`:'');
 }
 function toggleDiPop(ev){ if(ev)ev.stopPropagation(); const pop=document.getElementById('diPop'); if(!pop)return; pop.style.display=pop.style.display==='none'?'block':'none'; }
 document.addEventListener('click',function(e){
@@ -4872,8 +4872,8 @@ function rFoBan(){
   const f=D.foBan||{}, syms=f.symbols||[], asof=f.date||'';
   const head = syms.length ? `F&O Ban · ${syms.length} Today` : 'F&O Ban';
   const body = syms.length
-    ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid #f2b8bf;background:#fde8ea;color:#c0392b;font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
-    : '<span style="font:700 12px/1 Sora,sans-serif;color:#0a7d47;background:#e7f7ee;border:1px solid #b6e6cd;padding:6px 12px;border-radius:7px">NO BANS</span>';
+    ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid var(--heat, #f2b8bf);background:#fde8ea;color:var(--heat, #c0392b);font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
+    : '<span style="font:700 12px/1 Sora,sans-serif;color:var(--volt, #0a7d47);background:#e7f7ee;border:1px solid var(--volt, #b6e6cd);padding:6px 12px;border-radius:7px">NO BANS</span>';
   return `<div class="card">
     <div class="card-hd"><div><div class="t">${head}</div>
       <div class="s">MWPL · barred from fresh F&O positions${asof?(' · '+esc(asof)):''}</div></div></div>

@@ -85,10 +85,10 @@
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
     cursor:pointer;letter-spacing:.2px;transition:.15s;box-shadow:0 2px 8px rgba(37,99,235,.25)}
-  .run-btn:hover{background:#1d52d5;box-shadow:0 4px 14px rgba(37,99,235,.32)}
+  .run-btn:hover{background:var(--pulse, #1d52d5);box-shadow:0 4px 14px rgba(37,99,235,.32)}
   .run-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
   .run-btn.invest-mode{background:var(--purp);box-shadow:0 2px 8px rgba(124,58,237,.25)}
-  .run-btn.invest-mode:hover{background:#6d28d9;box-shadow:0 4px 14px rgba(124,58,237,.32)}
+  .run-btn.invest-mode:hover{background:var(--pulse, #6d28d9);box-shadow:0 4px 14px rgba(124,58,237,.32)}
 
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:13px;
     border-top:1px solid var(--line)}
@@ -132,7 +132,7 @@
   .verdict-card{border-radius:11px;padding:16px 18px;margin-bottom:0;border:1.5px solid}
   .verdict-card.pass{background:var(--grn-d);border-color:var(--grn-b)}
   .verdict-card.strong{background:var(--grn-d);border-color:var(--grn-b)}
-  .verdict-card.valid{background:var(--cyan-d);border-color:#a5d8e8}
+  .verdict-card.valid{background:var(--cyan-d);border-color:var(--aqua, #a5d8e8)}
   .verdict-card.weak{background:var(--amber-d);border-color:var(--amber-b)}
   .verdict-card.watch{background:var(--amber-d);border-color:var(--amber-b)}
   .verdict-card.reject{background:var(--red-d);border-color:var(--red-b)}
@@ -208,14 +208,14 @@
   .inv-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px}
   .inv-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;letter-spacing:.3px}
   .inv-badge.STRONG-BUY{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
-  .inv-badge.ACCUMULATE{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
+  .inv-badge.ACCUMULATE{background:var(--cyan-d);color:var(--cyan);border:1px solid var(--aqua, #a5d8e8)}
   .inv-badge.WATCH{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
   .inv-badge.AVOID{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
   .inv-cap{font-size:10.5px;color:var(--mut);background:var(--panel2);
     border:1px solid var(--line2);padding:2px 8px;border-radius:5px}
   .inv-score-card{border-radius:11px;padding:18px 20px;border:2px solid;margin-bottom:0}
   .inv-score-card.strong-buy{background:var(--grn-d);border-color:var(--grn-b)}
-  .inv-score-card.accumulate{background:var(--cyan-d);border-color:#a5d8e8}
+  .inv-score-card.accumulate{background:var(--cyan-d);border-color:var(--aqua, #a5d8e8)}
   .inv-score-card.watch{background:var(--amber-d);border-color:var(--amber-b)}
   .inv-score-card.avoid{background:var(--red-d);border-color:var(--red-b)}
   .inv-verdict-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
@@ -238,11 +238,11 @@
   .inv-score-card.avoid .inv-bar-fill{background:var(--red)}
   /* cc#588 — v3.0 gate+conviction verdicts */
   .inv-badge.strong-invest{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
-  .inv-badge.invest{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
+  .inv-badge.invest{background:var(--cyan-d);color:var(--cyan);border:1px solid var(--aqua, #a5d8e8)}
   .inv-badge.watch{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
   .inv-badge.avoid{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
   .inv-score-card.strong-invest{background:var(--grn-d);border-color:var(--grn-b)}
-  .inv-score-card.invest{background:var(--cyan-d);border-color:#a5d8e8}
+  .inv-score-card.invest{background:var(--cyan-d);border-color:var(--aqua, #a5d8e8)}
   .inv-score-card.strong-invest .inv-verdict-label{color:var(--grn)}
   .inv-score-card.invest .inv-verdict-label{color:var(--cyan)}
   .inv-score-card.strong-invest .inv-score-pill{color:var(--grn)}

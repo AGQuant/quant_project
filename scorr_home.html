@@ -91,7 +91,7 @@
      sub-row per position. cc#161: distinct amber state when pricing is
      withheld (unavailable), not a blank/wrong CMP. */
   .sg-avgcmp{font-size:11px;color:var(--dim);font-family:monospace}
-  .sg-unavail{font-size:11px;font-weight:700;color:#b45309}
+  .sg-unavail{font-size:11px;font-weight:700;color:var(--amber, #b45309)}
 
   /* Sub-row: qty · value · %gain */
   .sg-sub{display:flex;align-items:center;gap:10px;margin-top:3px;font-size:11px;color:var(--mut)}
@@ -553,7 +553,7 @@ async function loadSG(_retry) {
     // cc#771 fix_4: when the endpoint served a degraded/stored figure (replay desync), badge it STALE
     // rather than passing it off as live — the number still renders, never "Could not load".
     const staleBadge = (d.stale || d.degraded)
-      ? ' <span style="font-size:10px;font-weight:700;color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45);border-radius:5px;padding:1px 5px;vertical-align:middle" title="'
+      ? ' <span style="font-size:10px;font-weight:700;color:var(--amber, #c98a12);background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45);border-radius:5px;padding:1px 5px;vertical-align:middle" title="'
         + (d.degraded || 'stale') + ' — showing last-known figure">STALE</span>'
       : '';
     tv.innerHTML = (net >= 0 ? "+" : "") + "₹" + f2(net) + staleBadge;

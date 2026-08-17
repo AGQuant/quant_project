@@ -10,7 +10,7 @@
   :root{--field:#0D1322;--panel:#161F33;--panel-hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
     --volt:#C8F542;--heat:#FF4D6D;--pulse:#7C5CFF;--cut:16px;--g:#C8F542;--v:#4DD8FF;--m:#FF9F45}
   *{margin:0;padding:0;box-sizing:border-box}
-  html,body{background:#070B14}
+  html,body{background:var(--field, #070B14)}
   body{font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
   .phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:80px;
     background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
@@ -39,7 +39,7 @@
     clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)}
   .pillar .tag{font-family:'Archivo Black';font-size:13px;transform:skewX(-6deg)}
   .pillar .sc{font-family:'JetBrains Mono';font-weight:800;font-size:18px;margin:4px 0 7px}
-  .bar{height:6px;background:#0E1526;overflow:hidden;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
+  .bar{height:6px;background:var(--panel, #0E1526);overflow:hidden;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
   .bar i{display:block;height:100%}
   .p-g .tag,.p-g .sc{color:var(--g)}.p-g .bar i{background:var(--g)}
   .p-v .tag,.p-v .sc{color:var(--v)}.p-v .bar i{background:var(--v)}
@@ -55,29 +55,29 @@
   .mrow .duel{flex:1.6}
   .duel .vals{display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:11.5px;font-weight:600}
   .duel .vals .peer{color:var(--muted)}
-  .duel .track{height:4px;background:#0E1526;margin-top:4px;position:relative}
+  .duel .track{height:4px;background:var(--panel, #0E1526);margin-top:4px;position:relative}
   .duel .track i{position:absolute;top:0;bottom:0;left:0}
   .rk{font-family:'JetBrains Mono';font-size:10px;font-weight:800;min-width:34px;text-align:right}
   .rk.top{color:var(--volt)}.rk.low{color:var(--heat)}.rk.mid{color:var(--muted)}
   .sets{display:flex;flex-wrap:wrap;gap:8px}
   .set{font-family:'JetBrains Mono';font-size:11px;font-weight:600;padding:8px 11px;border:1px solid;
     clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
-  .set.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
-  .set.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+  .set.w{border-color:var(--volt, #3E5A18);background:#18240E;color:var(--volt)}
+  .set.l{border-color:#5A2634;background:var(--field, #241019);color:var(--heat, #FF8FA5)}
   .set.na{border-color:var(--edge);background:var(--panel-hi);color:var(--muted)}
   .set b{margin-right:6px;font-weight:800}
   .lrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--edge);font-size:12.5px}
   .lrow:first-of-type{border-top:none}
   .lrow .r{font-family:'JetBrains Mono';font-size:11px;width:22px;color:var(--muted);font-weight:700}
   .lrow .s{flex:1;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .lrow .lbar{flex:1.2;height:5px;background:#0E1526}
+  .lrow .lbar{flex:1.2;height:5px;background:var(--panel, #0E1526)}
   .lrow .lbar i{display:block;height:100%;background:var(--muted)}
   .lrow .gv{font-family:'JetBrains Mono';font-weight:800;font-size:12.5px;width:40px;text-align:right}
   .lrow.self{background:linear-gradient(90deg,rgba(200,245,66,.08),transparent);margin:0 -16px;padding:8px 16px}
   .lrow.self .s,.lrow.self .gv{color:var(--volt)}
   .lrow.self .lbar i{background:var(--volt)}
   .range{margin-top:6px}
-  .range .track{height:6px;background:#0E1526;position:relative;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
+  .range .track{height:6px;background:var(--panel, #0E1526);position:relative;clip-path:polygon(0 0,calc(100% - 5px) 0,100% 100%,0 100%)}
   .range .track i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--heat),var(--m),var(--volt))}
   .range .dotp{position:absolute;top:-4px;width:3px;height:14px;background:var(--chalk)}
   .range .ends{display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:10px;color:var(--muted);margin-top:6px}
@@ -244,7 +244,7 @@ function render(d,sym){
   }
   if(piv&&piv.pp!=null&&piv.s2!=null&&piv.r2!=null&&d.price!=null){
     var dp2=Math.max(0,Math.min(100,Math.round(100*(d.price-piv.s2)/((piv.r2-piv.s2)||1))));
-    tape+='<div class="range" style="margin-top:16px"><div class="track" style="background:#0E1526"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:'+dp2+'%"></span></div>'
+    tape+='<div class="range" style="margin-top:16px"><div class="track" style="background:var(--panel, #0E1526)"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:'+dp2+'%"></span></div>'
       +'<div class="ends num"><span>S2 '+fnum(piv.s2,0)+' · S1 '+fnum(piv.s1,0)+'</span><span style="color:var(--chalk)">PP '+fnum(piv.pp,0)+'</span><span>R1 '+fnum(piv.r1,0)+' · R2 '+fnum(piv.r2,0)+'</span></div></div>';
   }
   if(tape)h+='<div class="eyebrow">TAPE FORENSICS</div><div class="card">'+tape+'</div>';

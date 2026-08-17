@@ -273,7 +273,7 @@ function renderResults(res){
     card('XIRR',sc(s.xirr_pct,'%'))+card('Accuracy',s.accuracy_pct==null?'--':s.accuracy_pct+'%')+
     card('Trades',s.total_trades)+card('Win/Loss',s.win_trades+' / '+s.loss_trades)+'</div>';
   html+='<div class="chartwrap">'+svgChart(res.equity_series||[],res.benchmark_series||[])+
-    '<div class="legend"><span><span class="sw" style="background:#4D7CFE"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
+    '<div class="legend"><span><span class="sw" style="background:var(--pulse, #4D7CFE)"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
   // yearly split
   if(res.yearly&&res.yearly.length){html+='<h2 style="font-size:13px;margin:14px 0 4px">Yearly split</h2><div class="scroll"><table><thead><tr><th>Year</th><th>Return</th></tr></thead><tbody>'+
     res.yearly.map(y=>'<tr><td>'+y.year+'</td><td>'+sc(y.return_pct,'%')+'</td></tr>').join('')+'</tbody></table></div>';}
