@@ -56,6 +56,7 @@ from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
 from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
+from v10_page_endpoints import router as v10_page_router   # cc#1069 GET /m/v10
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -250,6 +251,7 @@ PROTECTED.add("/m/qb"); PROTECTED.add("/m/gvm")            # cc#874
 PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # cc#874
 PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
 PROTECTED.add("/m/trades")   # cc#991: Wall of Trades, app screen
+PROTECTED.add("/m/v10")      # cc#1069: V10 signal view — gated like every other /m/ screen
 PROTECTED.add("/m/models")   # cc#886 slot 5
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
@@ -515,6 +517,7 @@ app.include_router(backtest_router)
 app.include_router(v8_backfill_router)
 app.include_router(v8_gapfill_router)   # cc#1048: POST /api/v8/backfill/metrics_gapfill
 app.include_router(index_tape_router)   # cc#1054: GET /api/index/tape
+app.include_router(v10_page_router)     # cc#1069: GET /m/v10 (mobile V10 signal view)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)

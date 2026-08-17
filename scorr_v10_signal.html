@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scorr · V10 Index Signals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+/* cc#1069 · /m/v10 — the V10 ST+EMA signal view, destination of the INDEX SIGNALS card (cc#1068).
+   R5 "Telemetry Drop" styling, tokens lifted from design_refs/scorr_mobile_R5.html.
+
+   EVERY FIELD BELOW EXISTS IN THE LIVE PAYLOAD. I read GET /api/v10/signal before writing a line
+   of this file, per the card's read-payload-first rule, and the response carries exactly:
+     status, symbol, as_of, price, st_dir, st_flip, st_band, flip_ts, gate_zone, signal,
+     stop, target, spec
+   Nothing else is rendered, because nothing else is served. In particular there is NO signal
+   history array — the card asks for one "if the payload provides it", and it does not, so this
+   page does not fake one. That omission is stated on the page itself rather than left as a
+   silently missing section. */
+:root{
+  --field:#0D1322; --panel:#161F33; --panel-hi:#1C2740; --edge:#26334F;
+  --chalk:#EAF0FA; --muted:#8A97B0;
+  --volt:#C8F542;   /* LONG / up */
+  --heat:#FF4D6D;   /* SHORT / down */
+  --amber:#FF9F45;  /* FLAT — a real third state, not an error */
+  --pulse:#7C5CFF;  /* interactive only */
+  --cut:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--field);color:var(--chalk);font-family:'Space Grotesk',system-ui,sans-serif;
+  background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+  min-height:100vh;padding:0 0 40px}
+.num{font-family:'JetBrains Mono',ui-monospace,monospace}
+.top{display:flex;justify-content:space-between;align-items:baseline;padding:18px 16px 6px}
+.logo{font-family:'Archivo Black';font-size:20px;transform:skewX(-6deg);letter-spacing:.5px}
+.logo b{color:var(--volt)}
+.back{font-family:'JetBrains Mono';font-size:11px;color:var(--pulse);text-decoration:none;letter-spacing:1px}
+.eyebrow{display:flex;align-items:center;gap:10px;margin:18px 16px 10px;font-size:11px;
+  font-weight:700;letter-spacing:2.5px;color:var(--muted)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
+  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+/* the state rail — 5px edge strip carrying the signal colour */
+.card::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;background:var(--rail,var(--muted))}
+.nm{font-family:'JetBrains Mono';font-size:11px;letter-spacing:2px;color:var(--muted);margin-left:10px}
+.sig{font-family:'Archivo Black';font-size:44px;line-height:1;text-transform:uppercase;
+  transform:skewX(-6deg);margin:8px 0 4px 10px;letter-spacing:1px}
+.px{display:flex;align-items:baseline;gap:10px;margin:10px 0 0 10px}
+.px .v{font-family:'JetBrains Mono';font-weight:800;font-size:22px}
+.px .a{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);letter-spacing:1px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0 0 10px}
+.kv{background:var(--panel-hi);border:1px solid var(--edge);padding:9px 10px;
+  clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+.kv .k{font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-bottom:4px}
+.kv .val{font-family:'JetBrains Mono';font-size:13px;font-weight:600}
+.spec{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);margin:12px 0 0 10px;letter-spacing:.5px}
+.note{margin:0 14px 12px;padding:12px 14px;border:1px dashed var(--edge);background:rgba(22,31,51,.5);
+  font-size:12px;line-height:1.6;color:var(--muted)}
+.note b{color:var(--chalk)}
+.loading,.err{margin:24px 16px;font-size:13px;color:var(--muted)}
+.err b{color:var(--heat)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">SCO<b>RR</b> <span style="font-size:11px;color:var(--muted);font-family:'Space Grotesk'">· V10</span></div>
+  <a class="back" href="/m/home">&#8249; HOME</a>
+</div>
+<div class="eyebrow">INDEX SIGNALS &middot; ST + EMA</div>
+<div id="app"><div class="loading">Loading V10 signals&hellip;</div></div>
+
+<script>
+(function () {
+  'use strict';
+  var ORDER = ['NIFTY50', 'BANKNIFTY'];
+  var LABEL = { NIFTY50: 'NIFTY 50', BANKNIFTY: 'BANK NIFTY' };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  /* HONEST FALLBACK, the card's rule 4: a missing field says so. It never becomes 0, and never
+     borrows a neighbouring value. */
+  function val(v, suffix) {
+    if (v === null || v === undefined || v === '') return '<span style="color:var(--muted)">unavailable</span>';
+    return esc(v) + (suffix || '');
+  }
+  function nfmt(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null;
+  }
+  function sigColor(sig) {
+    var s = String(sig || '').toUpperCase();
+    return s === 'LONG' ? 'var(--volt)' : s === 'SHORT' ? 'var(--heat)' : 'var(--amber)';
+  }
+
+  function card(key, d) {
+    var name = LABEL[key] || key;
+    if (!d || d.status !== 'ok') {
+      return '<div class="card" style="--rail:var(--muted)"><div class="nm">' + esc(name) + '</div>'
+        + '<div class="sig" style="color:var(--muted)">NO DATA</div>'
+        + '<div class="spec">The engine returned no usable signal for this index.</div></div>';
+    }
+    var col = sigColor(d.signal);
+    var price = nfmt(d.price), band = nfmt(d.st_band);
+    return '<div class="card" style="--rail:' + col + '">'
+      + '<div class="nm">' + esc(name) + '</div>'
+      + '<div class="sig" style="color:' + col + '">' + esc(String(d.signal || 'FLAT').toUpperCase()) + '</div>'
+      + '<div class="px"><span class="v">' + (price === null ? '&mdash;' : price) + '</span>'
+      +   '<span class="a">AS OF ' + val(d.as_of) + '</span></div>'
+      + '<div class="grid">'
+      +   '<div class="kv"><div class="k">SUPERTREND</div><div class="val" style="color:'
+      +     (String(d.st_dir).toLowerCase() === 'up' ? 'var(--volt)' : String(d.st_dir).toLowerCase() === 'down' ? 'var(--heat)' : 'var(--chalk)')
+      +     '">' + val(d.st_dir && String(d.st_dir).toUpperCase()) + '</div></div>'
+      +   '<div class="kv"><div class="k">ST BAND</div><div class="val">' + (band === null ? val(null) : band) + '</div></div>'
+      +   '<div class="kv"><div class="k">EMA GATE</div><div class="val">' + val(d.gate_zone && String(d.gate_zone).toUpperCase()) + '</div></div>'
+      +   '<div class="kv"><div class="k">LAST FLIP</div><div class="val">' + val(d.flip_ts) + '</div></div>'
+      /* stop and target are null while FLAT — that is the engine's real state, not a gap, so they
+         render as their honest "unavailable" rather than being hidden. */
+      +   '<div class="kv"><div class="k">STOP</div><div class="val">' + (nfmt(d.stop) || val(d.stop)) + '</div></div>'
+      +   '<div class="kv"><div class="k">TARGET</div><div class="val">' + (nfmt(d.target) || val(d.target)) + '</div></div>'
+      + '</div>'
+      + '<div class="spec">' + val(d.spec) + '</div>'
+      + '</div>';
+  }
+
+  fetch('/api/v10/signal', { credentials: 'same-origin' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (d) {
+      if (!d) throw new Error('empty response');
+      var html = ORDER.map(function (k) { return card(k, d[k]); }).join('');
+      /* Stated, not silently omitted: the card asked for a signal history list "if the payload
+         provides it". /api/v10/signal returns a single current snapshot per index and carries no
+         history array, so there is nothing to list and nothing was invented. */
+      html += '<div class="note">Current snapshot only. <b>/api/v10/signal</b> returns one live '
+           +  'reading per index and carries no signal-history series, so none is shown &mdash; '
+           +  'rather than a list assembled from guesses.</div>';
+      document.getElementById('app').innerHTML = html;
+    })
+    .catch(function (e) {
+      document.getElementById('app').innerHTML =
+        '<div class="err"><b>V10 signals unavailable.</b><br>' + esc(e && e.message) + '</div>';
+    });
+})();
+</script>
+</body>
+</html>
