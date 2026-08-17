@@ -184,10 +184,10 @@ def _revoke_token(token: str):
 
 def _login_page(error: bool = False, rate_limited: bool = False) -> str:
     if rate_limited:
-        err = ('<p style="color:#dd3a4a;font-size:13px;margin-bottom:16px;font-weight:600;">'
+        err = ('<p style="color:var(--heat, #dd3a4a);font-size:13px;margin-bottom:16px;font-weight:600;">'
                "Too many attempts, wait 10 minutes.</p>")
     elif error:
-        err = ('<p style="color:#dd3a4a;font-size:13px;margin-bottom:16px;font-weight:600;">'
+        err = ('<p style="color:var(--heat, #dd3a4a);font-size:13px;margin-bottom:16px;font-weight:600;">'
                "Incorrect password. Try again.</p>")
     else:
         err = ""
@@ -202,23 +202,23 @@ def _login_page(error: bool = False, rate_limited: bool = False) -> str:
 <title>V8 Dashboard · Login</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;}}
-body{{background:#0f1623;min-height:100vh;display:flex;align-items:center;
+body{{background:var(--field, #0f1623);min-height:100vh;display:flex;align-items:center;
      justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;}}
-.card{{background:#1c2536;border:1px solid #2a3548;border-radius:16px;
+.card{{background:#1c2536;border:1px solid var(--edge, #2a3548);border-radius:16px;
        padding:44px 48px;width:100%;max-width:380px;text-align:center;
        box-shadow:0 24px 64px rgba(0,0,0,0.5);}}
 .logo{{font-size:26px;font-weight:900;letter-spacing:-.01em;color:#fff;margin-bottom:6px;}}
-.logo span{{color:#b45309;}}
-.sub{{font-size:10.5px;color:#5a6781;letter-spacing:.12em;text-transform:uppercase;margin-bottom:36px;}}
+.logo span{{color:var(--amber, #b45309);}}
+.sub{{font-size:10.5px;color:var(--muted, #5a6781);letter-spacing:.12em;text-transform:uppercase;margin-bottom:36px;}}
 input[type=password]{{width:100%;padding:13px 16px;border-radius:10px;
-  border:1.5px solid #2a3548;background:#0f1623;color:#fff;font-size:15px;
+  border:1.5px solid var(--edge, #2a3548);background:var(--field, #0f1623);color:#fff;font-size:15px;
   outline:none;margin-bottom:12px;transition:border .18s;}}
-input[type=password]:focus{{border-color:#b45309;}}
+input[type=password]:focus{{border-color:var(--amber, #b45309);}}
 input[type=password]::placeholder{{color:#3d4f6b;}}
 button{{width:100%;padding:13px;border-radius:10px;border:none;
-  background:#b45309;color:#fff;font-size:15px;font-weight:700;
+  background:var(--amber, #b45309);color:#fff;font-size:15px;font-weight:700;
   cursor:pointer;transition:background .15s;letter-spacing:.03em;}}
-button:hover{{background:#9a4507;}}
+button:hover{{background:var(--amber, #9a4507);}}
 .foot{{font-size:10px;color:#3d4f6b;margin-top:28px;letter-spacing:.06em;}}
 </style>
 </head>
@@ -283,7 +283,7 @@ async def login_post(request: Request):
         html = (
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             f"<meta http-equiv='refresh' content='0;url={safe_next}'>"
-            "</head><body style='background:#0f1623'>"
+            "</head><body style='background:var(--field, #0f1623)'>"
             f"<script>window.location.replace({_js_str(safe_next)});</script>"
             "</body></html>"
         )

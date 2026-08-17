@@ -1281,7 +1281,7 @@ def mobile_now():
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 MOBILE_CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{background:#0A0F1E;color:#E9EEFB;font-family:'Sora',sans-serif;
+html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-family:'Sora',sans-serif;
   -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
 .screen,.bnav{
   --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
