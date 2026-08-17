@@ -41,6 +41,8 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .tbl td{padding:6px 4px;border-top:1px solid var(--edge)}
 .tbl tr:first-child td{border-top:none}
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
+/* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
+.idxnm{color:var(--amber)}
 </style>
 </head>
 <body>
@@ -120,7 +122,7 @@ function sigCard(name,key){
     : ok?`<span style="color:var(--amber)">FLAT — awaiting aligned flip (window 09:20–15:20)</span>`
     : `<span style="color:var(--amber)">Engine snapshot not available yet — first tick lands after the bell</span>`;
   return `<div class="card rail" style="--rc:${rc}">
-    <div class="grp"><h3>${name} <span style="color:${rc}">${sigw}</span></h3>
+    <div class="grp"><h3><span class="idxnm">${name}</span> <span style="color:${rc}">${sigw}</span></h3>
       <span class="note">ST150/3·10m · EMA3/10·30m</span></div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       ${st?`<span class="chip ${st==='BUY'?'w':'l'}">${st==='BUY'?'W':'L'} ST ${st}</span>`:'<span class="chip">ST —</span>'}
