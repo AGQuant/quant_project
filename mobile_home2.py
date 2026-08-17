@@ -628,11 +628,18 @@ def mobile_home2(request: Request):
                 FROM b JOIN d2 ON d2.d = b.d
                 ORDER BY b.d DESC, b.ts DESC
             """)
-            _rows = cur.fetchall()
-            if _rows:
-                vix_latest = float(_rows[0][1]) if _rows[0][1] is not None else None
-            if len(_rows) > 1 and _rows[1][1] is not None:
-                vix_prev_close = float(_rows[1][1])
+            # NAMED vix_rows, NOT _rows. cc#1083 called this local `_rows` and took /m/home
+            # down: `_rows` is the SHARED helper imported at the top of this module, and a local
+            # assignment anywhere in a function makes the name local for the WHOLE function — so
+            # the two earlier `_rows(cur)` calls in this same function (the global tape and the
+            # intraday-names lookup, ~50 lines above) started raising UnboundLocalError before
+            # execution ever reached the VIX block. Python scoping is function-wide, not
+            # line-ordered, which is why the bug appeared upstream of the line that caused it.
+            vix_rows = cur.fetchall()
+            if vix_rows:
+                vix_latest = float(vix_rows[0][1]) if vix_rows[0][1] is not None else None
+            if len(vix_rows) > 1 and vix_rows[1][1] is not None:
+                vix_prev_close = float(vix_rows[1][1])
             if vix_latest is not None and vix_prev_close is not None:
                 vix_chg = round(vix_latest - vix_prev_close, 4)
         except Exception as e:
