@@ -6,11 +6,45 @@
 <title>Quant Baskets · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<style>
+/* ══ APP_QA_R5 P9 · /m/qb MIGRATION ═══════════════════════════════════════════════
+   Refs: scorr_sprint2_goldnight_R1 @ cd75e2c (scale) + scorr_appshell_R1 @ a20ae0d (shell).
+   The .screen scope issue is present here too (checked, same as P7): mobile_app.css declares the
+   palette on `.screen,.bnav`, so body tokens are shadowed for page content without this bridge.
+   No legacy palette hex on this page — cc#897 folded its CSS into the shared sheet. */
+body[data-theme]{
+  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
+  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
+  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
+}
+.screen,.bnav{
+  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+  --line:var(--t-edge); --line2:var(--t-edge);
+  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
+  --grn:var(--t-win); --red:var(--t-loss);
+  --blu:var(--t-accent); --cyan:var(--t-brand);
+}
+/* raised scale, goldnight ref — 9.5px floor, page-scoped */
+.bnav .bn{font-size:11px}
+.bnav .bn .i{font-size:16px}
+.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+.tool{font-size:12px}
+.tool span{font-size:19px;text-shadow:0 0 10px var(--brandglow)}
+</style>
 <script src="/scorr_card_common.js"></script>
 </head>
-<body>
+<body data-theme="goldnight">
+<!-- APP_QA_R5 P9: goldnight forced before first paint; stored key read and KEPT. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){/* preserved, not applied while the sprint gate stands */}}catch(e){}
+document.body.setAttribute('data-theme','goldnight');})();</script>
 <div class="screen">
-  <div class="head"><h1>Quant Baskets</h1><div class="s" id="sub">loading…</div></div>
+  <div class="head" style="display:flex;align-items:center;gap:12px">
+    <a href="/m/home" aria-label="Scorr home" style="min-width:44px;min-height:44px;display:flex;
+       align-items:center;text-decoration:none;color:var(--txt);font-weight:800;font-size:17px;
+       letter-spacing:-.4px">SC<span style="color:var(--grn)">O</span>RR</a>
+    <div style="flex:1;min-width:0"><h1>Quant Baskets</h1><div class="s" id="sub">loading…</div></div></div>
   <div class="tot" id="tot" style="display:none">
     <div class="b"><div class="k">Market value</div><div class="v" id="tv"></div></div>
     <div class="b"><div class="k">Unrealised</div><div class="v" id="tu"></div></div>
