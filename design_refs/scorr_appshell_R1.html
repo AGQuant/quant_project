@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCORR APP SHELL · R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;700&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* APP SHELL R1 — binding for APP_QA_R4 pushes P3/P4/P5.
+   The shell = (1) top header: wordmark (44px tap -> /m/home) + page identity + page-right slot,
+   (2) 5-slot bottom nav (tool pages: nothing highlighted; section pages: own tab volt),
+   (3) tokens ONLY from the shared layer (scorr_themes.css) — shell obeys the theme switch. */
+body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;
+ --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--label:#FF9F45;--win:#C8F542;--loss:#FF4D6D}
+body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#E5DFD2;--ink:#1A1A1E;
+ --muted:#8A8578;--brand:#A67C00;--brandglow:rgba(166,124,0,.25);--label:#A67C00;--win:#1F9D61;--loss:#D93B4F}
+body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;
+ --muted:#8E8A7E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--label:#8C7A3F;--win:#3DD68C;--loss:#FF5C6C}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--field);font-family:'Space Grotesk';color:var(--ink);max-width:480px;margin:0 auto;
+ padding-bottom:76px;transition:background .25s}
+.num{font-family:'JetBrains Mono',monospace}
+.demo{font-family:'JetBrains Mono';font-size:10px;letter-spacing:2px;color:var(--brand);margin:18px 16px 8px;
+ text-shadow:0 0 12px var(--brandglow)}
+/* ── THE SHELL HEADER ── */
+.shl{display:flex;align-items:center;gap:12px;padding:12px 14px;position:sticky;top:0;background:var(--field);z-index:10}
+.shl .wm{font-family:'Archivo Black';font-size:17px;letter-spacing:-.4px;min-width:44px;min-height:44px;
+ display:flex;align-items:center;cursor:pointer;text-decoration:none;color:var(--ink)}
+.shl .wm i{font-style:normal;color:var(--win)}
+.shl .pg{flex:1;min-width:0}
+.shl .pg .t{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);display:inline-block;text-transform:uppercase}
+.shl .pg .s{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:1px}
+.shl .slot{flex:none;text-align:right}
+.chip{font-family:'JetBrains Mono';font-size:9.5px;font-weight:700;letter-spacing:1px;border:1px solid var(--edge);
+ background:var(--hi);padding:3px 8px;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+/* back-chevron variant (deep sub-pages that are NOT nav/tool destinations) */
+.bk{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;
+ color:var(--brand);cursor:pointer}
+/* ── BOTTOM NAV ── */
+.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;
+ background:var(--panel);border-top:1px solid var(--edge);z-index:20}
+.bn{flex:1;text-align:center;padding:9px 0 11px;font-size:10.5px;font-weight:700;color:var(--muted);cursor:pointer}
+.bn span{display:block;font-size:15px;margin-bottom:2px}
+.bn.on{color:var(--win)}
+.bn.on::before{content:"";display:block;width:26px;height:3px;background:var(--win);margin:0 auto 4px;border-radius:2px}
+.card{background:var(--panel);border:1px solid var(--edge);margin:0 12px 12px;padding:14px;
+ clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%);font-size:12px;color:var(--muted)}
+.tsw{position:fixed;top:8px;right:8px;z-index:50;display:flex;gap:3px;background:var(--panel);
+ border:1px solid var(--edge);padding:3px;border-radius:8px}
+.tsw button{width:30px;height:26px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-weight:800}
+.tsw button.on{color:var(--brand)}
+</style>
+</head>
+<body data-theme="dark">
+<div class="tsw" id="tsw"><button data-t="dark" class="on">◆</button><button data-t="goldday">◇</button><button data-t="goldnight">◈</button></div>
+
+<div class="demo">VARIANT A · TOOL PAGE (INDEX INTEL, DIGEST) — wordmark + title + status slot · nav present, nothing highlighted</div>
+<div class="shl">
+  <a class="wm">SC<i>O</i>RR</a>
+  <div class="pg"><span class="t">Index Intel</span>
+    <div class="s">NIFTY · BANKNIFTY · THE LIVE DESK</div></div>
+  <div class="slot"><span class="chip" style="color:var(--loss)">GATE · BEARISH</span>
+    <div class="num" style="font-size:9px;color:var(--muted);margin-top:4px">10:42 IST · LIVE</div></div>
+</div>
+<div class="card">page content begins here — shell adds NOTHING below this line; loaders and cards untouched (R4 §C P3/P4 verify)</div>
+
+<div class="demo">VARIANT B · SECTION PAGE (GVM FIGHT CARD) — own tab highlighted in nav</div>
+<div class="shl">
+  <a class="wm">SC<i>O</i>RR</a>
+  <div class="pg"><span class="t">GVM · Fight Card</span>
+    <div class="s">KARURVYSYA · PEER-BENCHMARKED</div></div>
+  <div class="slot"><span class="chip" style="color:var(--win)">GVM 8.2</span></div>
+</div>
+<div class="card">gvm2 uses this variant — GVM tab lights below (see nav)</div>
+
+<div class="demo">VARIANT C · DEEP SUB-PAGE — back chevron replaces wordmark (history-back), wordmark moves to title row not shown twice</div>
+<div class="shl">
+  <span class="bk">‹</span>
+  <div class="pg"><span class="t">All Trades</span>
+    <div class="s">V10 · 62 CLOSED</div></div>
+  <div class="slot"></div>
+</div>
+<div class="card">use ONLY where a page has one clear parent (e.g. view-all lists). The three R4 pages use A/B, not C.</div>
+
+<div class="demo">RULES</div>
+<div class="card" style="color:var(--ink);line-height:1.7">
+1 · wordmark tap → /m/home, 44px target, always first element (variants A/B)<br>
+2 · tool pages (v10, digest): no nav tab highlighted — they are doorways, not sections<br>
+3 · gvm2: GVM tab volt<br>
+4 · shell consumes shared tokens only — switch themes above to prove it<br>
+5 · shell wraps, never replaces: zero changes below the header line, zero to loaders<br>
+6 · status slot is the page's own (gate chip / score / empty) — shell defines the slot, page fills it
+</div>
+
+<nav class="bnav">
+  <div class="bn"><span>◧</span>Home</div>
+  <div class="bn on"><span>◈</span>GVM</div>
+  <div class="bn"><span>◎</span>Check</div>
+  <div class="bn"><span>▤</span>Intel</div>
+  <div class="bn"><span>◍</span>Models</div>
+</nav>
+
+<script>
+document.getElementById('tsw').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+document.body.dataset.theme=b.dataset.t;
+document.querySelectorAll('#tsw button').forEach(x=>x.classList.toggle('on',x===b));});
+</script>
+</body>
+</html>
