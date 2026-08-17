@@ -85,8 +85,27 @@ def _run_recorded(fn, args):
 
 def _spawn(fn, *args):
     """Dispatch a blocking job on the dedicated scheduler pool (never the shared
-    default executor) and keep a reference so the task isn't GC'd mid-flight."""
-    loop = asyncio.get_running_loop()
+    default executor) and keep a reference so the task isn't GC'd mid-flight.
+
+    cc#1085 R6-P9 part_3 — THE OFF-LOOP PATH. asyncio.get_running_loop() only answers on the
+    event-loop thread. The tick loop calls _spawn from there, so it always worked; but a job that
+    is ITSELF running in the pool and then calls _spawn is on a worker thread with no loop, and
+    got `RuntimeError: no running event loop`.
+
+    That is not hypothetical — it is why the cc#841 catch-up sweep never once fired since it was
+    built on 03-Aug. The sweep is dispatched INTO the pool by the tick loop, reads the registry
+    correctly (88 rows), correctly identifies the jobs that missed their slot, and then dies on
+    the first _spawn of the first eligible job. Its own outer `except` swallowed the RuntimeError
+    and it recorded last_status='ok' every time, so the safety net read healthy while being
+    completely inert. Traceback captured live at 14:50 IST 17-Aug via R6-P9 part_2's error row.
+
+    The fallback submits straight to the same _EXECUTOR through the same _run_recorded wrapper —
+    same pool, same recording, same semantics — it just does not need a loop to get there.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _EXECUTOR.submit(_run_recorded, fn, args)
     t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, _run_recorded, fn, args))
     _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
     return t
