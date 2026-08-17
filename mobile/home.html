@@ -6,8 +6,50 @@
 <title>Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
 <script src="/scorr_card_common.js"></script>
 <style>
+/* ══ APP_QA_R4 P2 · HOME CONSUMES THE THREE-THEME TOKEN LAYER ═══════════════════════════════
+   Ref: design_refs/scorr_home_themes_R1.html @ 80da8c6. Tokens come from
+   /static/scorr_themes.css, declared on body[data-theme]. The switch sits in the header.
+
+   WHY THE BRIDGE BELOW EXISTS — measured, not assumed. mobile_app.css declares the app palette
+   on `.screen,.bnav`, deliberately (framework 15913: "never bare :root"). A custom property set
+   on a NEARER ancestor wins, so anything declared on <body> or :root is shadowed for every
+   element inside .screen. Probed in Chromium on the live sheets: at :root --panel is #161F33 and
+   --grn is #C8F542, while inside .screen those same names still read #121A33 and #2FD48B. That
+   is why the R5 layer never reached the app's content (the cc#1066 symptom), and it is why a
+   switch on <body> alone would have moved nothing but the header. The bridge re-declares the
+   legacy names ON .screen/.bnav, sourced from the theme layer, so one switch re-skins the page.
+
+   The alias step is not decoration: `.screen{--panel:var(--panel)}` is self-referential and CSS
+   drops it. Aliasing on body first gives .screen a different name to read from.
+
+   ON P2's "dark byte-identical" LINE, stated rather than quietly chosen: it cannot hold together
+   with "map to the new vars", because the ref's dark values and home's current in-scope values
+   are different (--grn #2FD48B vs --win #C8F542, --panel #121A33 vs #161F33). Built to the REF,
+   which is the R5 palette every other surface already shows; the exact deltas are listed in the
+   cc#1077 result. The token SET is the ref's too — it has one --muted and one --edge, so --mut
+   and --dim converge, as do --line and --line2. That is the ref's hierarchy, not a flattening
+   introduced here. */
+body[data-theme]{
+  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
+  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
+  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
+}
+.screen,.bnav{
+  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+  --line:var(--t-edge); --line2:var(--t-edge);
+  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
+  --grn:var(--t-win); --red:var(--t-loss);
+  --blu:var(--t-accent); --cyan:var(--t-brand);
+}
+/* the switch — ref .tswitch, 34x30 buttons, right of the wordmark */
+.tswitch{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line2);padding:3px;
+  clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:13px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--mut);line-height:1}
+.tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
 /* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
    sheet (cc#893 item 3). The ticker's own styling now lives HERE, scoped to this page, so a
    shared-CSS change can never restyle the tape again. Design restored = the original pill:
@@ -369,10 +411,23 @@
 .hdr-r .rail{white-space:nowrap}
 </style>
 </head>
-<body>
+<body data-theme="dark">
+<!-- APP_QA_R4 P2: the stored theme is applied HERE, as the first thing inside <body>, not in a
+     DOMContentLoaded handler. body does not exist while <head> is parsing, so this is the
+     earliest point the attribute can be set — before the browser paints, which is what keeps the
+     gold themes from flashing dark on every load. Guarded and whitelisted: an unknown or
+     corrupted localStorage value falls through to the dark default rather than removing the
+     attribute and leaving the page with no tokens at all. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t==='dark'||t==='goldday'||t==='goldnight'){document.body.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
+    <div class="tswitch" id="tsw" role="group" aria-label="Theme">
+      <button type="button" data-t="dark" title="Dark · Telemetry" aria-label="Dark theme">&#9670;</button>
+      <button type="button" data-t="goldday" title="Gold Day · white-golden" aria-label="Gold day theme">&#9671;</button>
+      <button type="button" data-t="goldnight" title="Gold Night · black-gold" aria-label="Gold night theme">&#9672;</button>
+    </div>
     <!-- cc#984: session clock AND feed freshness, stacked right. Two different truths — the
          market can be open while the tape is dead, which is exactly what happened on 10-Aug
          (first tick of the day at 10:40) with nothing on this screen saying so. -->
@@ -384,6 +439,32 @@
 
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
 </div>
+
+<script>
+/* APP_QA_R4 P2 · theme switch. Marks the active button from whatever the parse-time script
+   above already applied, so the pressed state and the page can never disagree on reload. */
+(function () {
+  var sw = document.getElementById('tsw');
+  if (!sw) return;
+  function mark() {
+    var cur = document.body.getAttribute('data-theme') || 'dark';
+    var bs = sw.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) {
+      var on = bs[i].getAttribute('data-t') === cur;
+      bs[i].classList.toggle('on', on);
+      bs[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+  sw.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    document.body.setAttribute('data-theme', b.getAttribute('data-t'));
+    try { localStorage.setItem('scorr_theme', b.getAttribute('data-t')); } catch (err) {}
+    mark();
+  });
+  mark();
+})();
+</script>
 
 <nav class="bnav">
   <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
