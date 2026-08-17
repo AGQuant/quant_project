@@ -3280,6 +3280,78 @@ _INDEX_EXCLUDE_SQL = "fu.symbol NOT LIKE '%%NIFTY%%' AND fu.symbol NOT LIKE '%%S
 # so the rule holds by construction as the futures universe turns over.
 THEME_MIN_MEMBERS = 3
 
+# ── cc#1089 THEME_STAR_RULE_V1 (founder 17-Aug-2026, live-tested by Fable before speccing) ────────
+# A theme earns a GREEN star only when ALL SIX legs pass, a RED star only when all six mirror legs
+# fire. Six-of-six is the point: five-of-six is a near miss, not a weak star, so pass_count travels
+# with the star and the table sorts on it. Two legs are absolute (day > 0, 52w index > 70) and two
+# are relative to NIFTY50 — and the Nifty side is read from the SAME v8_metrics row set at the same
+# score_date, never a second source and never a constant (scope item 5). A hardcoded "Nifty was
+# -0.10 today" is the exact thing that turns a live rule into a lie the next morning.
+#
+# THE TWO LEGS ARE NOT THE SAME AGE. day/week/month/idx52 come off v8_metrics, which the 5-min
+# signal writer keeps live; gvm_score and m_score are EOD-frozen (22:00 GVM nightly). The payload
+# therefore carries BOTH score_dates and a quality stamp, and the table prints it. Implying that a
+# star is fully live when a third of it is last night's close would be a fabricated freshness claim.
+#
+# MOMENTUM: v8_metrics has no momentum column, so C6/R6 read AVG(gvm_scores.m_score) over the theme
+# members. A NULL m_score member is excluded from the MOMENTUM average only — never coerced to 0,
+# which would drag a good theme under the gate with a data hole. Coverage travels in the payload.
+THEME_STAR_RULE = "THEME_STAR_RULE_V1"
+STAR_IDX52_GREEN, STAR_IDX52_RED = 70.0, 30.0
+STAR_GVM_GREEN,   STAR_GVM_RED   = 6.0, 6.0
+STAR_MOM_GREEN,   STAR_MOM_RED   = 6.5, 5.0
+STAR_WM_GREEN,    STAR_WM_RED    = 1.0, -1.0     # week/month absolute leg in C3 / R3
+
+
+def _theme_star(t, nifty):
+    """The six green and six red legs for one theme. Returns (star, pass_count, fail_count, conds).
+
+    `t` and `nifty` are dicts of already-averaged values; any of them may be None. Every comparison
+    guards None explicitly rather than leaning on Python's ordering, because a missing metric must
+    read as "leg not passed", not as an exception and not as a silent zero.
+    """
+    def gt(v, x):
+        return v is not None and float(v) > x
+
+    def lt(v, x):
+        return v is not None and float(v) < x
+
+    nd, nw, nm = nifty.get("day"), nifty.get("week"), nifty.get("month")
+    day, wk, mo = t.get("day"), t.get("week"), t.get("month")
+    idx, gvm, mom = t.get("idx52"), t.get("gvm"), t.get("mom")
+
+    green = {
+        "day_positive": gt(day, 0.0),
+        "day_beats_nifty": (day is not None and nd is not None and float(day) > float(nd)),
+        "week_or_month": (
+            (gt(wk, STAR_WM_GREEN) and wk is not None and nw is not None and float(wk) > float(nw))
+            or (gt(mo, STAR_WM_GREEN) and mo is not None and nm is not None and float(mo) > float(nm))
+        ),
+        "idx52": gt(idx, STAR_IDX52_GREEN),
+        "gvm": gt(gvm, STAR_GVM_GREEN),
+        "momentum": gt(mom, STAR_MOM_GREEN),
+    }
+    red = {
+        "day_negative": lt(day, 0.0),
+        "day_below_nifty": (day is not None and nd is not None and float(day) < float(nd)),
+        "week_or_month": (
+            (lt(wk, STAR_WM_RED) and wk is not None and nw is not None and float(wk) < float(nw))
+            or (lt(mo, STAR_WM_RED) and mo is not None and nm is not None and float(mo) < float(nm))
+        ),
+        "idx52": lt(idx, STAR_IDX52_RED),
+        "gvm": lt(gvm, STAR_GVM_RED),
+        "momentum": lt(mom, STAR_MOM_RED),
+    }
+    pass_count, fail_count = sum(green.values()), sum(red.values())
+    # Green is checked first and the two can never both be six — every red leg is the strict
+    # negation of its green twin — so the order is documentation, not a tiebreak.
+    star = "green" if pass_count == 6 else ("red" if fail_count == 6 else None)
+    # conds is FLAT on the green legs (`conds.idx52` is the shape the card's verify line names), with
+    # the red legs nested under `conds.red` so a tap can show why a red star did or did not fire.
+    conds = dict(green)
+    conds["red"] = red
+    return star, pass_count, fail_count, conds
+
 
 @router.get("/theme_sectors")
 def v8_theme_sectors():
@@ -3299,35 +3371,58 @@ def v8_theme_sectors():
 
     cc#1042 items 5+6: the HAVING clause is gone. A theme under THEME_MIN_MEMBERS priced members
     returns NULL values rather than being filtered out, and NEW ENTRANTS is always present even at
-    zero members, so an unthemed F&O arrival can never be silently dropped."""
+    zero members, so an unthemed F&O arrival can never be silently dropped.
+
+    cc#1089 THEME_STAR_RULE_V1: the same rows now also carry star / pass_count / fail_count / conds.
+    The averages the star reads are the SAME averages the table prints — the star is not a second
+    computation of the theme, it is a reading of the one already on screen."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # gvm_scores carries its own score_date (EOD 22:00) which can trail v8_metrics by a day;
+            # both are resolved separately and both are reported, rather than assuming they match.
+            cur.execute("SELECT MAX(score_date) FROM v8_metrics")
+            m_date = cur.fetchone()[0]
+            cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+            g_date = cur.fetchone()[0]
             cur.execute(f"""
                 SELECT COALESCE(fu.theme, 'NEW ENTRANTS') AS theme,
                        COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL)       AS n_priced,
                        COUNT(*)                                           AS n_total,
                        AVG(m.day_1d)       FILTER (WHERE m.day_1d IS NOT NULL),
                        AVG(m.week_return)  FILTER (WHERE m.week_return IS NOT NULL),
-                       AVG(m.month_return) FILTER (WHERE m.month_return IS NOT NULL)
+                       AVG(m.month_return) FILTER (WHERE m.month_return IS NOT NULL),
+                       AVG(m.week_index_52),
+                       AVG(m.gvm_score),
+                       AVG(g.m_score),
+                       COUNT(g.m_score)                                   AS mom_n
                 FROM futures_universe fu
-                LEFT JOIN v8_metrics m ON m.symbol = fu.symbol
-                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                LEFT JOIN v8_metrics m ON m.symbol = fu.symbol AND m.score_date = %s
+                LEFT JOIN gvm_scores g ON g.symbol = fu.symbol AND g.score_date = %s
                 WHERE fu.is_active = TRUE AND {_INDEX_EXCLUDE_SQL}
                 GROUP BY COALESCE(fu.theme, 'NEW ENTRANTS')
                 ORDER BY AVG(m.day_1d) FILTER (WHERE m.day_1d IS NOT NULL) DESC NULLS LAST
-            """)
+            """, (m_date, g_date))
             rows = cur.fetchall()
+            # Scope item 5: the Nifty comparison comes off the SAME row set at the SAME score_date.
+            cur.execute("""SELECT day_1d, week_return, month_return FROM v8_metrics
+                           WHERE symbol = 'NIFTY50' AND score_date = %s""", (m_date,))
+            nrow = cur.fetchone()
 
-        def _r(v):
-            return round(float(v), 2) if v is not None else None
+        def _r(v, nd=2):
+            return round(float(v), nd) if v is not None else None
 
-        sectors, suppressed = [], 0
-        for theme, n_priced, n_total, d1, wk, mo in rows:
-            n_priced, n_total = int(n_priced), int(n_total)
+        nifty = {"day": _r(nrow[0]) if nrow else None,
+                 "week": _r(nrow[1]) if nrow else None,
+                 "month": _r(nrow[2]) if nrow else None}
+
+        sectors, suppressed, mom_missing = [], 0, 0
+        for theme, n_priced, n_total, d1, wk, mo, idx, gvm, mom, mom_n in rows:
+            n_priced, n_total, mom_n = int(n_priced), int(n_total), int(mom_n)
             thin = n_priced < THEME_MIN_MEMBERS
             if thin:
                 suppressed += 1
-            sectors.append({
+            mom_missing += (n_total - mom_n)
+            row = {
                 "segment": theme,
                 "count": n_priced,                      # unchanged key the web cards read
                 "avg_day_1d":   None if thin else _r(d1),
@@ -3339,7 +3434,26 @@ def v8_theme_sectors():
                 "members_priced": n_priced, "members_total": n_total,
                 "suppressed": (f"under_min_members ({n_priced} < {THEME_MIN_MEMBERS})"
                                if thin else None),
-            })
+                # cc#1089: the three star inputs the table does not already print.
+                "idx52": None if thin else _r(idx),
+                "gvm_avg": None if thin else _r(gvm),
+                "momentum": None if thin else _r(mom),
+                "momentum_members": mom_n,
+            }
+            if thin:
+                # A suppressed group shows an em-dash for its returns, so it cannot be starred on
+                # numbers that are deliberately withheld. Null star, null counts — not a zero.
+                row.update({"star": None, "pass_count": None, "fail_count": None, "conds": None})
+            else:
+                # Deliberately fed the ROUNDED values the table prints, not the raw averages: a
+                # star computed on 0.0013 beside a cell reading 0.00% is a star the founder cannot
+                # check by eye, and every one of these six legs has to be checkable by eye.
+                star, pc, fc, conds = _theme_star(
+                    {"day": row["avg_day_1d"], "week": row["sector_week"],
+                     "month": row["sector_month"], "idx52": row["idx52"],
+                     "gvm": row["gvm_avg"], "mom": row["momentum"]}, nifty)
+                row.update({"star": star, "pass_count": pc, "fail_count": fc, "conds": conds})
+            sectors.append(row)
         # Suppressed groups sort last instead of vanishing — still listed, just without a number.
         sectors.sort(key=lambda s: (s["avg_day_1d"] is None, -(s["avg_day_1d"] or 0)))
         return {
@@ -3347,6 +3461,29 @@ def v8_theme_sectors():
             "basis": "equal-weight average of member 1D/1W/1M (deliberately NOT mcap-weighted)",
             "taxonomy": "futures_universe.theme",
             "min_members": THEME_MIN_MEMBERS, "suppressed_count": suppressed,
+            # cc#1089 — the star's provenance travels with the star.
+            "star_rule": THEME_STAR_RULE,
+            "star_counts": {
+                "green": sum(1 for s in sectors if s["star"] == "green"),
+                "red": sum(1 for s in sectors if s["star"] == "red"),
+            },
+            "nifty": dict(nifty, symbol="NIFTY50", score_date=str(m_date) if m_date else None),
+            "metrics_score_date": str(m_date) if m_date else None,
+            "gvm_score_date": str(g_date) if g_date else None,
+            "quality_stamp": ("day/week/month/52w index are LIVE from v8_metrics; GVM and momentum "
+                              "are EOD-frozen as of last close (gvm_scores %s)"
+                              % (g_date if g_date else "unavailable")),
+            "momentum_source": "avg(gvm_scores.m_score) over theme members; NULL members excluded "
+                               "from the momentum average only, never counted as 0",
+            "momentum_missing_members": mom_missing,
+            "thresholds": {
+                "green": {"day": 0.0, "vs_nifty_day": "strictly greater",
+                          "week_or_month": STAR_WM_GREEN, "idx52": STAR_IDX52_GREEN,
+                          "gvm": STAR_GVM_GREEN, "momentum": STAR_MOM_GREEN},
+                "red": {"day": 0.0, "vs_nifty_day": "strictly less",
+                        "week_or_month": STAR_WM_RED, "idx52": STAR_IDX52_RED,
+                        "gvm": STAR_GVM_RED, "momentum": STAR_MOM_RED},
+            },
         }
     except Exception as e:
         raise HTTPException(500, f"v8_theme_sectors failed: {e}")
