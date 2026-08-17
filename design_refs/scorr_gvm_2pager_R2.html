@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<!-- DESIGN REF: scorr_gvm_2pager_R2  ·  supersedes R1 for the LADDER ONLY
+     R1 (@81784e3) was built on BHARATSE, a 13-name segment — one row under a cliff
+     nobody had measured. CC's P8 sweep found it: the sheet holds a FOURTEEN-row ladder
+     (1011px) and breaks at fifteen; each peer costs ~15.7px; 52 of 130 segments carry
+     15+ names, covering 1,026 of 1,791 symbols. A format verified on one instance is
+     not verified. R1 stays in the repo as history; every other block of R1 is unchanged.
+
+     THE WINDOWED LADDER — ruling on cc#1085 P8, Fable 17-Aug-2026:
+       · TWELVE visible data rows, not fourteen. Fourteen leaves 28px of 1039px and the
+         next symbol will not be BHARATSE-shaped (two-line names, longer notes eat it).
+         Twelve lands ~980px and keeps ~59px of real headroom. 2 pages for 1,791/1,791.
+       · ALWAYS KEEP RANK 1. "Second of thirteen" means nothing without who is first.
+         The twelve = rank 1 + an 11-row window centred on the subject. When the window
+         already contains rank 1, it is simply twelve contiguous rows.
+       · THE GAP IS VISIBLE. When rank 1 is not adjacent to the window, print an explicit
+         break row (⋯ N peers, ranks X–Y). A ladder that skips ranks silently lies about
+         position. Same for peers cut below the window.
+       · LABEL HONESTLY above the table: "showing 12 of <total> peers · rank 1 and
+         ranks X–Y". Denominator always visible (UNIVERSE_DENOMINATOR_RULE pattern).
+       · Segments with ≤12 names render exactly as R1 — the window is a no-op.
+     Below, the ladder is shown in WINDOWED form for a large segment (IT - Small, 33
+     names, the biggest in the universe) with the subject mid-table. Structure is what
+     binds; the row values are illustrative placeholders marked {…}.
+
+     EVERYTHING ELSE — masthead, hero (CLOSE key when not live), pillars, parameter
+     table, price position, segment sits, page 2 and its hard no-GVM rule — IS R1,
+     UNCHANGED, and binds exactly as cc_tasks 1084 + reports/APP_QA_R6.md specify.
+-->
+<html><head><meta charset="utf-8">
+<style>
+@page { size: A4; margin: 12mm 12mm 10mm 12mm; }
+body { font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; color:#12161C; margin:0; font-size:8.3pt; line-height:1.28; }
+h2 { font-size:7.4pt; letter-spacing:.16em; text-transform:uppercase; margin:8px 0 3px; padding-bottom:3px; border-bottom:1px solid #12161C; }
+.winlbl { font-size:6.6pt; color:#6B7683; letter-spacing:.08em; text-transform:uppercase; margin:2px 0 3px; }
+table { width:100%; border-collapse:collapse; font-size:7.1pt; }
+th { text-align:right; font-size:6.4pt; letter-spacing:.1em; text-transform:uppercase; color:#6B7683; padding:3px 5px; border-bottom:1px solid #C9D0D8; font-weight:600;}
+th.l, td.l { text-align:left; }
+td { padding:1.35px 5px; border-bottom:1px solid #EEF1F5; text-align:right; }
+tr.me td { background:#FFF6DA; font-weight:700; }
+tr.gap td { background:#F4F6F9; color:#6B7683; font-size:6.6pt; letter-spacing:.06em; text-align:center; padding:2.5px 5px; font-style:italic; }
+.g { color:#1F7A4D; font-weight:700; } .r { color:#C22B3E; font-weight:700; } .a { color:#B07A00; font-weight:700; }
+.note { font-size:7pt; color:#6B7683; margin-top:5px; line-height:1.4; }
+</style></head><body>
+
+<h2>Segment ladder — IT · Small</h2>
+<div class="winlbl">showing 12 of 33 peers &nbsp;·&nbsp; rank 1 and ranks 14–24</div>
+<table>
+<tr><th style="width:6%">#</th><th class="l" style="width:34%">Company</th><th>Mcap (₹ Cr)</th><th>CMP (₹)</th><th>Growth</th><th>Value</th><th>Momentum</th><th>Rating</th><th class="l" style="width:11%">Verdict</th></tr>
+<tr><td>1</td><td class="l">{segment leader}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l g">Good</td></tr>
+<tr class="gap"><td colspan="9">⋯ &nbsp;12 peers, ranks 2–13</td></tr>
+<tr><td>14</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>15</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>16</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>17</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>18</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr class="me"><td>19</td><td class="l">{SUBJECT COMPANY}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>20</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l a">Average</td></tr>
+<tr><td>21</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l r">Weak</td></tr>
+<tr><td>22</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l r">Weak</td></tr>
+<tr><td>23</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l r">Weak</td></tr>
+<tr><td>24</td><td class="l">{peer}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td>{…}</td><td class="l r">Weak</td></tr>
+<tr class="gap"><td colspan="9">⋯ &nbsp;9 peers, ranks 25–33</td></tr>
+</table>
+<div class="note">12 data rows + 2 gap rows ≈ 219px — inside the 14-row cliff with headroom. Rank 1 always present; both cut ranges named. Segments with ≤12 names render the full ladder, no window, no gap rows. Data as of {score_date} · research only, not investment advice.</div>
+
+</body></html>
