@@ -337,6 +337,25 @@
    it would undo half of what the notch is doing. */
 :root:root:not([data-theme="light"]) .bn.on .i{ opacity:1; }
 
+/* ─── TWO-COLOUR HEADING SYSTEM · cc#1074, executed as APP_QA_R4 P9 ─────────────────────────
+   HEADING_COLOR_RULE_V1 (session_log 23897): exactly two heading colours app-wide — aqua
+   eyebrows, chalk titles. Purple survives only on things you can tap.
+
+   WHAT WAS ACTUALLY PAINTING TITLES PURPLE, measured rather than assumed. Nothing set a purple
+   title anywhere. Rule 5 of this file paints every <a> pulse, and the app wraps whole cards in
+   `<a class="card-link">` — so a title INSIDE a linked card inherited pulse while the identical
+   title in an unlinked card rendered light. Probed in Chromium on the live sheets: `.chd .t`
+   inside a card-link computed rgb(124,92,255), the same element standalone computed
+   rgb(233,238,251). One rule, two colours, depending only on whether a parent happened to be a
+   link — which is exactly the inconsistency 23897 names.
+
+   Fixed at the shared level rather than per page, as cc#1074 item 4 asks: these are the app's
+   card-title classes, so every mobile and web surface picks this up at once with no page edit.
+   Size, weight and the skew set above are untouched — colour only. The chevrons and `>` links
+   keep pulse because they are not titles and are not matched here. */
+:root:root:not([data-theme="light"]) .card-hd .t,
+:root:root:not([data-theme="light"]) .chd .t{ color:var(--r5-chalk); }
+
 /* ─── AQUA GLOW + SECTION EYEBROWS · cc#1073 ────────────────────────────────────────────────
    23878 does not define aqua as a flat colour. It defines it as "#35E0FF … + glow text-shadow
    0 0 12px rgba(53,224,255,.4)" — the glow is part of the token, not a decoration on top of it.
