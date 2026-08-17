@@ -4,6 +4,10 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>INDEX INTEL</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- APP_QA_R4 P3: the shared theme layer + app shell. Both are shared assets, not copies —
+     P4 and P5 link the same two files. -->
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
 <style>
 /* INDEX INTEL — implements design_refs/scorr_indexintel_mobile_R1.html (bb2fde7), R5.1 tokens */
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
@@ -45,12 +49,22 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .idxnm{color:var(--amber)}
 </style>
 </head>
-<body>
+<body data-theme="dark" class="as-shell">
+<!-- APP_QA_R4 P3: stored theme applied as the first thing inside <body> — the earliest point the
+     attribute can be set, so a gold theme never flashes dark. Same guard as home. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t==='dark'||t==='goldday'||t==='goldnight'){document.body.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <div class="phone">
-<div style="padding:16px 18px 4px;display:flex;justify-content:space-between;align-items:flex-start">
-  <div><span class="skew" style="font-size:24px">INDEX INTEL</span>
-    <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px">NIFTY · BANKNIFTY · the live desk</div></div>
-  <div style="text-align:right"><span id="gatechip" class="chip">GATE · —</span>
+<!-- APP_QA_R4 P3 · SHELL VARIANT A (tool page). Ref: design_refs/scorr_appshell_R1.html @ a20ae0d.
+     Wordmark first at a 44px target tapping to /m/home, then the page identity, then the page's
+     OWN status slot — #gatechip and #asof are carried across untouched, ids and all, because the
+     slot is the shell's and the content is the page's (ref rule 6). Rule 5 holds: nothing below
+     this header changed, and no loader was touched. -->
+<div class="as-hdr">
+  <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
+  <div class="as-pg"><span class="t">Index Intel</span>
+    <div class="s">NIFTY · BANKNIFTY · THE LIVE DESK</div></div>
+  <div class="as-slot"><span id="gatechip" class="chip">GATE · —</span>
     <div id="asof" style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:5px">loading…</div></div>
 </div>
 <div id="app"><div class="card"><div class="unavail">Loading the desk…</div></div></div>
@@ -244,5 +258,15 @@ boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
 </script>
+
+<!-- APP_QA_R4 P3 · 5-slot bottom nav, ref variant A: NOTHING highlighted. /m/v10 is a tool page,
+     a doorway rather than a section, so no tab claims it (ref rule 2). -->
+<nav class="as-nav">
+  <a class="as-bn" href="/m/home"><span>&#9703;</span>Home</a>
+  <a class="as-bn" href="/m/gvm"><span>&#9672;</span>GVM</a>
+  <a class="as-bn" href="/m/check"><span>&#9678;</span>Check</a>
+  <a class="as-bn" href="/m/intel"><span>&#9636;</span>Intel</a>
+  <a class="as-bn" href="/m/models"><span>&#9677;</span>Models</a>
+</nav>
 </body>
 </html>

@@ -1,0 +1,56 @@
+/* scorr_appshell.css — APP_QA_R4 P3/P4/P5 · the shared app shell
+   =============================================================================================
+   Source of truth: design_refs/scorr_appshell_R1.html @ a20ae0d. Every measurement, weight and
+   colour below is taken from that ref. The shell is (1) a top header — wordmark (44px tap ->
+   /m/home) + page identity + a page-owned status slot, (2) the 5-slot bottom nav, (3) tokens
+   ONLY from the shared layer, so the shell obeys the theme switch.
+
+   ONE DELIBERATE DEVIATION FROM THE REF, and the reason it is not optional. The ref names its
+   classes .shl / .bnav / .bn. On a live /m/ page those last two COLLIDE: main.py injects
+   /static/mobile.css into every protected page, that sheet already defines .bnav and .bn, and
+   the injection lands at </head> — AFTER the page's own <link> tags. On equal specificity the
+   later sheet wins, so a ref-named nav would silently take the web sheet's styling instead of
+   the ref's. Every class here is therefore prefixed `as-`. The VISUAL spec is byte-faithful to
+   the ref; only the names differ, and they differ so the ref actually renders.
+
+   RULE 5 IS THE ONE TO REMEMBER: the shell WRAPS, never replaces. It adds a header and a nav and
+   changes nothing below the header line — no loader, no card, no data path.
+--------------------------------------------------------------------------------------------- */
+
+/* ── token bridge ────────────────────────────────────────────────────────────────────────────
+   The three shell pages were built on R5 names (--chalk/--volt/--heat/--pulse/--panel-hi) while
+   the theme layer speaks the ref's names (--ink/--win/--loss/--accent/--hi). Declared on BODY,
+   which sits below :root, so these win over each page's own :root block for everything inside
+   the document — the same nearer-ancestor rule that makes the layer work at all. Without this
+   the pages would keep their frozen dark palette and ignore the switch entirely. */
+body[data-theme]{
+  --chalk:var(--ink); --volt:var(--win); --heat:var(--loss);
+  --pulse:var(--accent); --amber:var(--label); --panel-hi:var(--hi);
+}
+
+/* ── the shell header ── */
+.as-hdr{display:flex;align-items:center;gap:12px;padding:12px 14px;position:sticky;top:0;
+  background:var(--field);z-index:10}
+.as-hdr .as-wm{font-family:'Archivo Black','Space Grotesk',system-ui,sans-serif;font-size:17px;
+  letter-spacing:-.4px;min-width:44px;min-height:44px;display:flex;align-items:center;
+  cursor:pointer;text-decoration:none;color:var(--ink)}
+.as-hdr .as-wm i{font-style:normal;color:var(--win)}
+.as-hdr .as-pg{flex:1;min-width:0}
+.as-hdr .as-pg .t{font-family:'Archivo Black','Space Grotesk',system-ui,sans-serif;font-size:15px;
+  transform:skewX(-6deg);display:inline-block;text-transform:uppercase}
+.as-hdr .as-pg .s{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;
+  color:var(--muted);letter-spacing:1px;margin-top:1px}
+.as-hdr .as-slot{flex:none;text-align:right}
+
+/* ── bottom nav ── */
+.as-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;
+  display:flex;background:var(--panel);border-top:1px solid var(--edge);z-index:20}
+.as-bn{flex:1;text-align:center;padding:9px 0 11px;font-size:10.5px;font-weight:700;
+  color:var(--muted);cursor:pointer;text-decoration:none}
+.as-bn span{display:block;font-size:15px;margin-bottom:2px}
+.as-bn.on{color:var(--win)}
+.as-bn.on::before{content:"";display:block;width:26px;height:3px;background:var(--win);
+  margin:0 auto 4px;border-radius:2px}
+
+/* the nav is fixed, so the page needs room under it — the ref's own body carries 76px. */
+body.as-shell{padding-bottom:76px}

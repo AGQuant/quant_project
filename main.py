@@ -453,8 +453,9 @@ async def auth_gate(request: Request, call_next):
             # and the loop above only rewrites src= attributes. /static/scorr_themes.css is
             # served max-age=86400, so without a stamp a returning phone could hold yesterday's
             # palette for a full day — the cc#1060 failure exactly, one asset later.
-            body = body.replace(b'href="/static/scorr_themes.css"',
-                                b'href="/static/scorr_themes.css?v=' + _BUILD_B + b'"')
+            for _css in (b"scorr_themes.css", b"scorr_appshell.css"):
+                body = body.replace(b'href="/static/' + _css + b'"',
+                                    b'href="/static/' + _css + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)
             # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
             # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal

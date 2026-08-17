@@ -2124,6 +2124,21 @@ def pwa_scorr_themes_css():
     return Response(SCORR_THEMES_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
+# APP_QA_R4 P3/P4/P5: the shared app shell (header + 5-slot nav), byte-faithful to
+# design_refs/scorr_appshell_R1.html @ a20ae0d. Shared rather than copied into three pages —
+# three hand-maintained copies is the drift cc#789 exists to prevent.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_appshell.css"), "r", encoding="utf-8") as _asf:
+        SCORR_APPSHELL_CSS = _asf.read()
+except Exception:
+    SCORR_APPSHELL_CSS = ""
+
+
+@router.get("/static/scorr_appshell.css")
+def pwa_scorr_appshell_css():
+    return Response(SCORR_APPSHELL_CSS, media_type="text/css", headers=_CACHE_1D)
+
+
 @router.get("/scrub_layer.js")
 def pwa_scrub_layer_js():
     return Response(SCRUB_LAYER_JS, media_type="application/javascript", headers=_CACHE_1D)
