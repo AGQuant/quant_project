@@ -121,6 +121,18 @@ Claude AI pushes the new file and files the `cc_task`. CC wires it in and connec
 - "read cc tasks" → run the SQL below, show pending tasks, implement them
 - "read railway cc tasks" → same as above
 - "what tasks are pending" → same as above
+- "check fable room" → the backup wake (founder-set 17-Aug-2026). Run the Fable Room protocol below: read the room, act on everything waiting, answer in the room.
+
+### The Fable Room (CC_COMMS_LOOP_V1, session_log 24138, founder-set 17-Aug-2026)
+The meeting room is `cc_tasks` + `cc_task_logs`. Arpit moderates and watches on the app; Fable (Claude AI) and CC talk THROUGH THE TABLE, not through him.
+
+On "check fable room":
+1. `SELECT` pending tasks (SQL below) AND the latest `cc_task_logs` rows where `actor='fable'` that you have not yet acted on — Fable's `RECO:` lines are answers to your questions and rulings on your stops.
+2. Act on both: claim pending tasks; resume anything you had logged `STOPPED:` that now has a `RECO:`.
+3. Log as you work — after EVERY push: one `cc_task_logs` line (push id + sha + one-line outcome). Any question: log it prefixed `QUESTION:`. Any stop: log it prefixed `STOPPED:` with the proposal. **Never stall silently — a logged stop is correct behaviour, a silent one is not.**
+4. Fable polls the room and answers with `RECO:` lines carrying supporting refs (report section, design_ref sha, session_log id). Wait for the `RECO:` before proceeding past a stop.
+
+This is the backup channel when auto-wake is not running. "Production mode ON" semantics are unchanged.
 
 ### SQL to fetch pending tasks:
 SELECT id, title, priority, spec FROM cc_tasks
