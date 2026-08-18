@@ -153,7 +153,26 @@ html,body{margin:0;padding:0;background:var(--bg);}
   // calling .json() on it threw "SyntaxError: Unexpected token I, Internal S..." straight into the
   // shelf — a parse exception where a readable error card belongs. Same shape as getJSON() in
   // scorr_card_common.js: read the body as text, surface the server's own message.
-  fetchWithTimeout('/api/health/portfolios').then(function(r){
+  /* ── THE SHELF WAS STUCK ON "Loading client reports…" — founder report, 18-Aug ──────────────
+     ROOT CAUSE, reproduced in Chromium rather than guessed. fetchWithTimeout lives in
+     scorr_card_common.js (cc#878, "THE ONE TIMEOUT, SITE-WIDE"), and main.py injects that file
+     with DEFER. A deferred script runs after the document is parsed; this inline script runs
+     DURING parsing, even sitting at the end of <body>. So at the moment this line executed the
+     name did not exist yet:
+         ReferenceError: fetchWithTimeout is not defined
+     The exception killed the IIFE before the fetch was ever made, which is why the page showed
+     the initial placeholder for ever and never reached its own error card — the .catch() below
+     can only catch a promise that was created. Checked afterwards in devtools the name IS there,
+     which is exactly what made this hard to see.
+     Why the mobile screens never hit it: mobile/gvm.html and its siblings load
+     scorr_card_common.js themselves with a plain, non-deferred tag. Only pages relying on the
+     injected copy are exposed.
+     THE FIX IS ORDERING, NOT A NEW TRANSPORT. Boot on DOMContentLoaded, which fires AFTER every
+     deferred script has run, and if the shared helper is somehow still absent fall back to plain
+     fetch rather than dying — a shelf with no timeout guard still beats a shelf that never
+     loads. */
+  function boot(){
+  (window.fetchWithTimeout || fetch)('/api/health/portfolios').then(function(r){
     return r.text().then(function(t){
       var d=null; try{ d=JSON.parse(t); }catch(e){}
       if(!r.ok && !d) throw new Error('server returned '+r.status+' — '+(t||'no body').slice(0,140));
@@ -178,6 +197,9 @@ html,body{margin:0;padding:0;background:var(--bg);}
       +'<div style="font-size:12.5px;margin-top:8px;"><a href="/adaptive">Retry</a> · '
       +'<a href="/health">Health tab</a></div></div>';
   });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
 </script>
 </body>
