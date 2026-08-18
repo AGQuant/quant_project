@@ -517,6 +517,26 @@
 :root:root:not([data-theme="light"]) .slab{ border-radius:13px !important; }
 :root:root:not([data-theme="light"]) .slab.dense{ border-radius:11px !important; }
 
+/* ── .pressed NEEDS THE SAME GUARD, and this answers Fable's RECO 2747 item 4 with a measurement.
+   MEASURED, on a goldnight page, before writing a line of this rule:
+     .pressed alone      bg 12,12,15   border 1px #000    radius 12   clip none      CORRECT
+     .c .pressed         bg 22,31,51   border 38,51,79    radius 0    clip polygon   WRONG
+     .m .pressed         bg 22,31,51   border 38,51,79    radius 0    clip polygon   WRONG
+     .card .pressed      bg 22,31,51   border 38,51,79    radius 0    clip polygon   WRONG
+   The inset shadows survive in every case, so the block still reads faintly sunk — which is worse
+   than a clean break, because it looks deliberate. It is the same half-adoption defect the slab
+   face had, wearing different clothes, exactly as he predicted.
+   NOTHING IS BROKEN TODAY: the only .pressed in the repo is scorr_cards_preview.html line 122,
+   standing alone with no .c/.m/.card beside it. This is a trap armed for the first page that
+   combines them, not a live bug — stated plainly so the negative result is on the record rather
+   than assumed. Values are pressed_R1's own, not new ones. */
+:root:root:not([data-theme="light"]) .pressed{
+  clip-path:none;
+  border-radius:12px !important;
+  background:var(--sunk, #0C0C0F);
+  border:1px solid #000;
+}
+
 .slab{
   background:var(--panel, #17171B);
   border:1.5px solid var(--line, #2A2A31);
