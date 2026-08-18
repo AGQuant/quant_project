@@ -141,14 +141,20 @@ html,body{margin:0;padding:0;background:var(--bg);}
   function renderTable(ps){
     if(!ps.length){ listEl.innerHTML='<div class="empty">No matching clients.</div>'; return; }
     var rows=sortRows(ps);
-    var cols=[['client','Client','left'],['asof','As of','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right']];
+    /* cc#1098: the visible header becomes "From" — it is a tracking start, not a freshness stamp.
+       The sort KEY stays the literal 'asof' on purpose: sortRows() switches on it, and renaming
+       the key would silently break the column sort while looking like a copy edit. */
+    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right']];
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
     var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'" style="text-align:'+c[2]+';padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
           pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)'));
       return '<tr onclick="location.href=\'/health?pid='+p.id+'&wl=1\'" style="cursor:pointer;border-bottom:1px solid var(--rule,#eef1f5);">'
         + '<td style="padding:10px 12px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
-        + '<td style="padding:10px 12px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(asOf(p))+'</td>'
+        /* cc#1098: same guard as the cards — an em-dash when there is no tracking_date, never
+           created_at wearing a "From" label. dmy() already returns an em-dash for null, so the
+           guard is startDate() supplying null rather than a fallback date. */
+        + '<td style="padding:10px 12px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
         + '<td style="padding:10px 12px;text-align:right;">'+(p.n_holdings||0)+'</td>'
         + '<td style="padding:10px 12px;text-align:right;">'+inr(p.invested)+'</td>'
         + '<td style="padding:10px 12px;text-align:right;">'+inr(p.current)+'</td>'
