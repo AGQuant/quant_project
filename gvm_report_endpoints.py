@@ -91,6 +91,12 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
         "peers":      p.get("peers", []),          # cc#507: peer-ladder chart data
         "extra_marker": p.get("extra_marker"),     # cc#507: e.g. PE row's "own 5y avg" line
         "beats_peer": p.get("beats_peer"),
+        # cc#1095 P3: how much of the scored universe this metric's source actually covers, so a
+        # dashed row can say WHY it is dashed. THIS TRANSFORM IS AN EXPLICIT WHITELIST — the field
+        # was already on the row build_company_report produced and it was being dropped here,
+        # silently, which is the same shape of defect the whole sprint is closing. Measured before
+        # adding it: 27 benchmark rows in the live payload, 0 carrying source_coverage.
+        "source_coverage": p.get("source_coverage"),
     }
 
 
