@@ -2470,7 +2470,7 @@ Promise.all([
      a swipe ending as a navigation; giving each face its own card-link keeps the tap target and
      the destination identical to before while the track owns the drag. */
   function bookFace1(){
-    return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
+    return '<a class="card-link" href="/m/v8"><div class="c slab"><div class="chd">'
       + '<div class="t">V8 Open Book</div>'
       + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
       + '<div class="trio">'
@@ -2513,7 +2513,7 @@ Promise.all([
        title, same "N positions" \u2014 so the deck read as one card that changed its numbers. cc#950's
        "header byte-identical" assertion is superseded on the LABEL only; geometry and styling are
        untouched, and the count comes from the payload, never a literal. */
-    return '<a class="card-link" href="/m/v8"><div class="c"><div class="chd">'
+    return '<a class="card-link" href="/m/v8"><div class="c slab"><div class="chd">'
       + '<div class="t">V8 Closed Book</div>'
       + '<div class="rgt">' + (bk.trades || 0) + ' trades <span class="h-chev">\u203a</span></div></div>'
       + '<div class="trio">'
@@ -2558,7 +2558,7 @@ Promise.all([
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
   PF.data = d.portfolio || {};
-  h += '<div class="sect">MY PORTFOLIO</div><div class="c" id="pfblock"></div>';
+  h += '<div class="sect">MY PORTFOLIO</div><div class="c slab" id="pfblock"></div>';
 
   /* 4 · LIVE NEWS — scrollable; Intel has its own nav slot (founder 08-Aug).
          Results Corner card removed: covered by the Results tile in the grid. */
@@ -2575,7 +2575,7 @@ Promise.all([
      made every headline a trapdoor. The wrapper anchor also used to swallow taps, which is why
      cc#971 and cc#1062 both had to fight it; removing it retires that whole class of bug. */
   h += '<div class="sect">LIVE NEWS</div>'
-    + '<div class="c"><div class="chd"><div class="t">Live News</div>'
+    + '<div class="c slab"><div class="chd"><div class="t">Live News</div>'
     + '<a class="rgt" id="rnCount" href="/m/intel">loading… <span class="h-chev">\u203a</span></a></div>'
     + '<div id="nwTabs"></div>'
     + '<div class="newslist" id="rnBox"><div class="loading" style="padding:6px 0">Loading headlines…</div></div>'

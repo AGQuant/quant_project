@@ -490,7 +490,21 @@
    DROPPING .c WAS NOT AN OPTION, recorded so nobody tries it later as a tidier route: THE BOOK's
    two faces live in the swipe carousel and .swipe-t > .c carries flex:0 0 100% and
    scroll-snap-align, so removing .c breaks the carousel. The override is the only clean route. */
-:root:root:not([data-theme="light"]) .slab{ clip-path:none; border-radius:13px; }
+:root:root:not([data-theme="light"]) .slab{
+  clip-path:none;
+  border-radius:13px;
+  /* BACKGROUND AND BORDER ARE HERE TOO, and this goes one step past the literal line in RECO 2740.
+     That line was clip-path + radius, derived from my report, which was only ever about the ledge
+     being clipped — neither of us had checked the face. Measured after pushing it: on a .c slab
+     card the background still computed rgb(22,31,51) and the border rgb(38,51,79), both navy, both
+     from .c at (0,4,0). The result was the OLD card with a gold ledge bolted underneath, which is
+     not "the raised slab is the card language" — it is a hybrid, and on GOLD NIGHT the face is
+     supposed to be #17171B under ruling B. So the override carries the face as well. Logged as a
+     deliberate extension of the ruling rather than done quietly; pull it back to two lines if the
+     founder wants the navy face kept. */
+  background:var(--panel, #17171B);
+  border:1.5px solid var(--line, #2A2A31);
+}
 
 .slab{
   background:var(--panel, #17171B);
