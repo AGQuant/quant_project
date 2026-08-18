@@ -4003,7 +4003,16 @@ async def _scheduler_loop():
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 32:
             _spawn(_bg_tc_scanner_eod)   # cc#464: EOD sweep, just before close-of-session jobs
         if now.weekday() < 5 and h == 15 and m == 40: _spawn(_bg_heal_intraday)  # cc#238 Branch B: heal session gaps before EOD
-        if h == 15 and m == 45: _spawn(_bg_v8_eod)
+        # cc#1093 P1: gated on a TRADING day, not just a clock. Without this the job's expected
+        # slot legitimately resolved to a Saturday, so the sentinel read v8_eod as late every
+        # Monday (session_log 24585) — the registry was accurate and the DISPATCH was the defect.
+        # Same condition as _bg_tc_scanner_eod four lines up, deliberately: two EOD jobs either
+        # side of the close should not disagree about what a trading day is. _is_trading_day is
+        # nse_holidays-backed, so a holiday is handled by the same source the rest of the app uses.
+        # The job's own _eod_ran_today guard is untouched — this narrows WHEN it is offered a run,
+        # never whether it can run twice.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 45:
+            _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
