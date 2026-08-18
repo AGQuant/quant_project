@@ -60,7 +60,10 @@ PARAMS = [
     ("qoq_sales",  "YoY Sales Growth",       "Trackrecord", "qoq_sales_growth",       True,  "qoq_sales",  "%"),
     ("qoq_profit", "YoY Profit Growth",      "Trackrecord", "qoq_profit_growth",      True,  "qoq_profit", "%"),
     ("opm",        "Operating Margin",       "Trackrecord", "opm",                    True,  "opm",        "%"),
-    ("opm_exp",    "OPM Expansion",          "Trackrecord", "Operating profit growth",True,  "opm_exp",    "%"),
+    # cc#1094: source repointed to the computed opm_expansion above, and the unit corrected to bps —
+    # the number was always going to be basis points once it had a value, and labelling 798 as "%"
+    # would have been a second defect sitting behind the first.
+    ("opm_exp",    "OPM Expansion",          "Trackrecord", "opm_expansion",          True,  "opm_exp",    "bps"),
     ("pe",         "Valuation (PE)",         "Valuation",   "pe",                     False, "pe",         "x"),
     ("div_yield",  "Dividend Yield",         "Reliability", "dividend_yield",         True,  "div_yield",  "%"),
     ("roce",       "Return on Capital (ROCE)","Reliability","roce",                   True,  "roce",       "%"),
@@ -94,6 +97,24 @@ _COMPUTED_COLS = {
                             'ELSE COALESCE(s."fii_holding",0)+COALESCE(s."dii_holding",0) END'),
     "inst_holding_change": ('CASE WHEN s."fii_change" IS NULL AND s."dii_change" IS NULL THEN NULL '
                             'ELSE COALESCE(s."fii_change",0)+COALESCE(s."dii_change",0) END'),
+    # cc#1094: OPM Expansion had no usable source. The PARAMS row pointed at
+    # screener_raw."Operating profit growth", which the current Screener export populates for 0 of
+    # 1816 rows — so raw was None for EVERY symbol, peer_count was 0 (the #-/0 on the page), rating
+    # was None, and the cc#828 part_3 rule correctly excluded the metric. Trackrecord has therefore
+    # been averaging 7 of 8 metrics across the whole universe, not 8.
+    #
+    # This computes the SAME quantity the nightly engine already computes and scores:
+    # gvm_nightly._load_merged_df does (opm_latest_q - opm_prev_year_q) * 100. The *100 is a
+    # percentage-points-to-BASIS-POINTS conversion, NOT a scaling bug, and score_opm_expansion's
+    # bands (>100 / >50 / >=0) are bps bands — >100bps = >1pp. Founder confirmed that 18-Aug.
+    # Nothing in gvm_nightly.py or the bands is touched here.
+    #
+    # OR, NOT AND, and the difference matters. The two institutional rows above use AND because a
+    # missing FII with a present DII is still a real net figure. An expansion is a DIFFERENCE: with
+    # either quarter missing there is no expansion to report, and COALESCE-ing the gap to 0 would
+    # invent a flat margin. That also matches the nightly, where NaN - x is NaN.
+    "opm_expansion":       ('CASE WHEN s."opm_latest_q" IS NULL OR s."opm_prev_year_q" IS NULL THEN NULL '
+                            'ELSE (s."opm_latest_q" - s."opm_prev_year_q") * 100 END'),
 }
 
 # 5 additional M metrics sourced from momentum_scores (not screener_raw)
