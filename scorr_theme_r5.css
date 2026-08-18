@@ -459,15 +459,38 @@
 .slab, .pressed{
   --field:#0A0A0C;
   --panel:#17171B;
-  --sunk:#0C0C0F;
   --well:#131316;
   --chalk:#F5F2EA;
   --mute:#8A8A93;
   --line:#2A2A31;
   --gold:#D4AF37;
-  --gold-hi:#F0D67A;
-  --gold-lo:#7A6320;
+  /* --gold-lo, --gold-hi and --sunk are NOT declared here any more. Founder ruling 2 put them in
+     the GOLD NIGHT block in scorr_themes.css, so the shell now reads the THEME for those three —
+     which is the point of the ruling: one source, so a future palette change cannot move the
+     theme and leave the shell behind. The other four names in that ruling already resolved on a
+     goldnight page and would have been an OVERRIDE, not an add, so they stay declared here and
+     the STOP is logged. */
 }
+
+/* ── FOUNDER RULING 1 of 2 (Fable RECO 2740, Arpit 18-Aug ~19:50): SLAB WINS OVER THE CUT ─────
+   scorr_theme_r5.css gives .card/.c/.m a clip-path cut corner at specificity (0,4,0). A clip-path
+   CLIPS THE BOX-SHADOW, and the slab ledge is painted 5px BELOW the border box — outside the clip
+   polygon — so on a .c card the ledge was not dimmed, it was ERASED. Measured on a magenta page
+   before the ruling: class="c slab" read 255,0,255 two pixels below the card (page showing
+   through); class="slab" read 122,99,32. Adopting the shell would have shipped a diff that said
+   "home adopted the card system" and changed nothing on screen.
+
+   The two card languages cannot coexist — one clips the other away by construction — so this is a
+   CHOICE, not a bug fix, and the founder made it: he picked RAISED SLAB out of the four-variant
+   bevel study and this honours that on the surfaces that adopt it.
+
+   SCOPE: this reaches cards that TAKE the shell, and nothing else. It is not a licence to strip
+   the cut from surfaces that have not adopted .slab, and it must not swallow cc#1073.
+
+   DROPPING .c WAS NOT AN OPTION, recorded so nobody tries it later as a tidier route: THE BOOK's
+   two faces live in the swipe carousel and .swipe-t > .c carries flex:0 0 100% and
+   scroll-snap-align, so removing .c breaks the carousel. The override is the only clean route. */
+:root:root:not([data-theme="light"]) .slab{ clip-path:none; border-radius:13px; }
 
 .slab{
   background:var(--panel, #17171B);

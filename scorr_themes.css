@@ -41,4 +41,16 @@ body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#
 body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;
  --muted:#8E8A7E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--accent:#D4AF37;--label:#8C7A3F;
  --win:#3DD68C;--loss:#FF5C6C;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
- --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+  /* cc#1095 / founder ruling 2 of 2 (Fable RECO 2741, Arpit 18-Aug ~19:52): the three
+     shell tokens that were genuinely ABSENT on a goldnight page. ADD ONLY — the other four
+     names in that ruling (--gold, --well, --line, --chalk) already resolve here from
+     scorr_theme_r5.css, so adding them would OVERRIDE rather than add. Fable's own
+     condition says that is a STOP, and it is logged as one. None of the 13 tokens above
+     is touched.
+     Values read from the locked refs, not retyped from memory: --gold-lo and --gold-hi are
+     identical in scorr_card_slab_R1 @ 1261fe9 and scorr_card_pressed_R1 @ 1221452. --sunk
+     DIFFERS between them (slab #0E0E11, pressed #0C0C0F); the ruling names #0C0C0F, so that
+     is what is written, and the divergence is logged rather than silently resolved. */
+  --gold-lo:#7A6320;--gold-hi:#F0D67A;--sunk:#0C0C0F
+}
