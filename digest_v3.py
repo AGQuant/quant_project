@@ -218,6 +218,45 @@ def _internals(cur) -> Dict[str, Any]:
             "read": ("; ".join(bits) if bits else "No breadth or options data available.")}
 
 
+# ── cc#1096 R7-D3 · A BARE BSE CODE IS NOT A COMPANY ──────────────────────────────────────────
+# Founder recording, frame 3:12: REPORTING TODAY read 540027 · 521137 · TVVISION · ANNAPURNA ·
+# BAGFILMS. Frame 3:20: YESTERDAY'S RESULTS carried 512379, 531515, 539175 among real tickers.
+#
+# THE RESOLUTION PATH, since the card asks for it by name: earnings_calendar.ticker is rendered
+# straight to screen. That column holds a BSE scrip code for BSE-only companies, and the payload
+# LEFT JOINs screener_raw on nse_code, which cannot match one — so the join fails silently, the
+# market cap comes back NULL, and the raw code reaches the chip.
+#
+# I CHECKED WHETHER THEY COULD BE RESOLVED PROPERLY FIRST, because a real symbol always beats a
+# name. screener_raw carries a "BSE Code" column, so the mapping looked possible. Measured:
+#   earnings_calendar rows                                   2,470
+#   rows whose ticker is all digits                            163
+#   of those 163, resolvable to an nse_code via "BSE Code"       0
+# Zero, because screener_raw IS the NSE-listed universe (1,816 rows) and these companies are not
+# on the NSE at all. There is no NSE symbol to resolve to, and inventing one is forbidden.
+#
+# SO THE NAME IT IS, and the evidence supports it without a gap: company_name is populated on
+# 2,470 of 2,470 rows — zero nulls. Every BSE-only reporter therefore has something honest to
+# show. The ticker is KEPT in the payload untouched, because the news match in
+# _yesterday_results keys on it against mentioned_symbols and that must not change.
+_BSE_CODE_RE = None
+
+
+def _label(ticker: str, company: str):
+    """(display_label, is_symbol) — never a bare numeric code where a ticker belongs."""
+    global _BSE_CODE_RE
+    if _BSE_CODE_RE is None:
+        import re as _re
+        _BSE_CODE_RE = _re.compile(r"^\d+$")
+    t = (ticker or "").strip()
+    if t and not _BSE_CODE_RE.match(t):
+        return t, True
+    name = (company or "").strip()
+    # If a numeric code somehow arrives with no name, show the code rather than an em-dash — the
+    # reader can at least look it up, and a blank would hide that a company reported at all.
+    return (name or t or "—"), False
+
+
 # ── 04 REPORTING TODAY / 05 WHAT MOVED / 06 GLOBAL EVENTS ─────────────────────────────────────
 def _reporting_today(cur) -> Dict[str, Any]:
     cur.execute("""SELECT UPPER(e.ticker), e.company_name, s.market_cap
@@ -225,7 +264,11 @@ def _reporting_today(cur) -> Dict[str, Any]:
                    LEFT JOIN screener_raw s ON s.nse_code = UPPER(e.ticker)
                    WHERE e.ex_date = CURRENT_DATE
                    ORDER BY s.market_cap DESC NULLS LAST LIMIT 25""")
-    rows = [{"ticker": r[0], "company": r[1], "market_cap": _f(r[2])} for r in cur.fetchall()]
+    rows = []
+    for r in cur.fetchall():
+        lbl, is_sym = _label(r[0], r[1])
+        rows.append({"ticker": r[0], "company": r[1], "market_cap": _f(r[2]),
+                     "label": lbl, "is_symbol": is_sym})
     return {"companies": rows, "count": len(rows), "tier": "STATIC",
             "read": (f"{len(rows)} companies report today."
                      if rows else "No scheduled reporters today.")}
@@ -256,7 +299,11 @@ def _yesterday_results(cur) -> Dict[str, Any]:
                    LEFT JOIN screener_raw s ON s.nse_code = UPPER(e.ticker)
                    WHERE e.ex_date = CURRENT_DATE - 1
                    ORDER BY s.market_cap DESC NULLS LAST LIMIT 10""", ())
-    top = [{"ticker": r[0], "company": r[1], "market_cap": _f(r[2])} for r in cur.fetchall()]
+    top = []
+    for r in cur.fetchall():
+        lbl, is_sym = _label(r[0], r[1])
+        top.append({"ticker": r[0], "company": r[1], "market_cap": _f(r[2]),
+                    "label": lbl, "is_symbol": is_sym})
     cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date = CURRENT_DATE - 1")
     total = cur.fetchone()[0]
 

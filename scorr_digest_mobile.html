@@ -192,7 +192,9 @@ async function boot(){
 
   const yrRows=(yr.companies||[]).slice(0,6).map(c=>{
     const cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':c.read==='PENDING'?'n':'';
-    return `<div class="mrow"><b>${esc(c.ticker)}</b>
+    /* cc#1096 D3: same resolution as the chips above — a numeric BSE code is shown as the
+       company name, because there is no NSE symbol to resolve it to. */
+    return `<div class="mrow"><b>${esc(c.label||c.ticker)}</b>
       <span style="flex:1;font-size:11.5px;color:var(--muted)">${esc(c.headline||c.pending_reason||'')}</span>
       <span class="chip ${cls}" style="font-size:9.5px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
     ||'<div class="unavail">No reporters yesterday.</div>';
@@ -245,7 +247,11 @@ async function boot(){
   <div class="card slab">
     <div class="grp"><h3>${rep.count!=null?rep.count+' companies':'—'}</h3><span class="note">TOP BY MARKET CAP</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:7px">
-      ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip">${esc(c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
+      ${/* cc#1096 D3: label, never the raw ticker. The payload resolves a BSE-only reporter to its
+             company name server-side (digest_v3._label) and marks it is_symbol:false, so a bare
+             scrip code can no longer reach a chip. Falls back to the ticker only if an older
+             payload has no label at all. */''}
+      ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip"${c.is_symbol===false?' title="BSE-listed, no NSE symbol"':''}>${esc(c.label||c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
       ${rep.count>6?`<span class="chip" style="color:var(--muted)">+${rep.count-6} more</span>`:''}</div>
   </div>
 
