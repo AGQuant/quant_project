@@ -100,7 +100,15 @@ section{margin-top:26px}
 /* ── HEAT STRIP · compact horizontal colour-box run (R3) ── */
 .striprow{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
 .striprow:last-child{border-bottom:none}
-.slab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
+/* RENAMED FROM .slab BY cc#1090 P8, and it was a live defect, not tidying. Sprint 4 P1 put a
+   .slab CLASS in the shared sheet scorr_theme_r5.css, which main.py injects into /digest as well
+   as the app. This page's own .slab was a 52px DAY/WEEK label in the heat strip and the two names
+   collided. Measured before renaming: the label computed background 23,23,27, radius 13px,
+   padding 13/15 and a 5px gold ledge inside a 52px box — 30px of the 52 eaten by padding. The web
+   digest is explicitly OUT of Sprint 4's scope, so the shell reaching it is the bug. Renaming the
+   local class is the smallest fix that keeps the shell where it belongs; the shared class is not
+   narrowed, because a page could always adopt it deliberately later. */
+.striplab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
   font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
   border-right:1px solid var(--line);background:var(--panel2)}
 .tiles{display:flex;flex:1;flex-wrap:wrap}
@@ -211,7 +219,7 @@ section{margin-top:26px}
 @media(max-width:860px){
   .two,.three{grid-template-columns:1fr}
   h1{font-size:23px} .clockbox{width:100%;justify-content:flex-start;margin:8px 0 0}
-  .slab{width:42px} .hbody{font-size:14.5px} .tile{min-width:56px}
+  .striplab{width:42px} .hbody{font-size:14.5px} .tile{min-width:56px}
 }
 
 /* ── cc#849 ADDITIONS (not in the static R3 reference) ──────────────── */
@@ -406,7 +414,7 @@ var LIVE_DOT_MAX_MIN = 15;   /* the tab's own threshold for the live dot */
 
 /* ── cc#853 HEAT STRIP · R3 COMPACT HORIZONTAL COLOUR-BOX RUN ─────────────────────
    Ported from design_refs/scorr_digest_v3_R3.html. The R2-era wrapped pill groups are gone:
-   one continuous horizontal run per LEVEL (a DAY row and a WEEK row), each prefixed by a .slab
+   one continuous horizontal run per LEVEL (a DAY row and a WEEK row), each prefixed by a .striplab
    label, tiles flush against each other with no pill chrome, and a thin .gap divider between
    category groups instead of separate stacked blocks. Colour intensity carries magnitude via
    R3's band classes; the sign colour on the number is separate from the box tint.
@@ -488,9 +496,9 @@ function secTape(s){
   }
   /* EOD symbols ride the SAME run as the live ones (R3 shows all 17 in one strip); their own
      as-of and PREV CLOSE state are carried in the tile title and the amber note below. */
-  h += '<div class="striprow"><div class="slab">DAY</div><div class="tiles">'+
+  h += '<div class="striprow"><div class="striplab">DAY</div><div class="tiles">'+
        tapeRun(all,s.category_order,'day')+'</div></div>';
-  h += '<div class="striprow"><div class="slab">WEEK</div><div class="tiles">'+
+  h += '<div class="striprow"><div class="striplab">WEEK</div><div class="tiles">'+
        tapeRun(all,s.category_order,'week')+'</div></div>';
   if(s.eod_note) h += '<div class="eodnote">◷ '+esc(s.eod_note)+'</div>';
   if(s.disclosure) h += '<div class="eodnote">'+esc(s.disclosure)+'</div>';
