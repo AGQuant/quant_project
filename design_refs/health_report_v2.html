@@ -1,0 +1,261 @@
+<!--
+DESIGN REF: health_report_v2 — CANONICAL client Portfolio Health Report layout.
+Spec: session_log 25708 CLIENT_HEALTH_REPORT_DESIGN_FRAMEWORK_V3.
+Visual reference PDF: Komal_Dhawan_Portfolio_Health_Report_v2.pdf (Claude project folder) — LOOK AT IT, do not build from its text.
+Render: wkhtmltopdf --enable-local-file-access --page-size A4 --margin-top 10mm --margin-bottom 8mm --margin-left 9mm --margin-right 9mm in.html out.pdf
+3 pages. Fill target 80pct+ per page; measured on this build 94/92/82.
+White-label: never the words Scorr or GVM. Say Rating / Portfolio Analytics.
+Data shown is Komal Dhawan, portfolio_id 181, 18-Aug-2026 — swap the data, keep the structure.
+-->
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@page{size:A4;margin:9mm 8mm}
+*{box-sizing:border-box}
+body{font-family:"DejaVu Sans",Arial,sans-serif;color:#161f2d;font-size:10.6pt;margin:0;line-height:1.4}
+.hero{background:#07111f;color:#fff;border-radius:9px;padding:28px 28px;position:relative;margin-bottom:18px}
+.hero .kick{font-size:8.6pt;letter-spacing:2.4px;color:#8c96a8;font-weight:bold}
+.hero h1{font-size:31pt;margin:9px 0 7px 0;letter-spacing:-.5px;line-height:1}
+.hero .sub{font-size:10.2pt;color:#8c96a8}
+.hero .rt{position:absolute;right:22px;top:19px;text-align:right}
+.hero .rt .lb{font-size:8.6pt;letter-spacing:2.4px;color:#8c96a8;font-weight:bold}
+.hero .rt .nm{font-size:43pt;font-weight:bold;line-height:1;letter-spacing:-1.5px;margin-top:4px}
+.pill{display:inline-block;background:#4ed8a0;color:#07111f;font-size:9.4pt;font-weight:bold;
+ padding:3px 13px;border-radius:5px;letter-spacing:.8px;margin-top:6px}
+.card{border:1px solid #e4e6e9;border-radius:9px;padding:18px 20px}
+.row{display:flex;gap:14px;margin-bottom:11px}
+.row>div{flex:1}
+.strip{border:1px solid #e4e6e9;border-radius:9px;display:flex;margin-bottom:18px}
+.strip>div{flex:1;padding:20px 22px;border-right:1px solid #e4e6e9}
+.strip>div:last-child{border-right:none}
+.lbl{font-size:8.8pt;letter-spacing:1.6px;color:#8c96a8;font-weight:bold;text-transform:uppercase}
+.val{font-size:19pt;font-weight:bold;margin-top:6px;letter-spacing:-.4px}
+.sub2{font-size:9.8pt;font-weight:bold;color:#0b6e42;margin-top:3px}
+.pos{color:#0b6e42;font-weight:bold} .neg{color:#b52432;font-weight:bold}
+.g{color:#0b6e42;font-weight:bold} .a{color:#a1440d;font-weight:bold} .r{color:#b52432;font-weight:bold}
+table{width:100%;border-collapse:collapse}
+td,th{text-align:right;padding:5px 4px;font-size:10.1pt}
+td.l,th.l{text-align:left}
+.kv td{padding:5.4px 0;border-bottom:none}
+.kv td:first-child{color:#404b5c}
+.rule{border-top:1px solid #ebecee;margin:7px 0}
+.note{font-size:9.2pt;color:#5f6a7a;line-height:1.6;margin-top:12px}
+.note b{color:#161f2d}
+.trk{background:#ebeced;border-radius:4px;height:7px;flex:1;margin:0 11px}
+.trk i{display:block;height:100%;border-radius:4px}
+.pbar{display:flex;align-items:center;margin:10.5px 0}
+.pbar span:first-child{width:96px;color:#404b5c;font-size:10.1pt}
+.pbar b{width:46px;text-align:right;font-size:11.2pt}
+h2{font-size:15.5pt;margin:0 0 3px 0}
+.lede{font-size:10pt;color:#5f6a7a;margin-bottom:10px}
+.stack{display:flex;height:23px;border-radius:4px;overflow:hidden;margin-bottom:4px}
+.stack i{color:#fff;font-size:8.2pt;font-weight:bold;line-height:19px;padding-left:6px;
+ overflow:hidden;white-space:nowrap;font-style:normal}
+.slist td{border-bottom:1px solid #eef0f2;padding:7.4px 2px}
+.sname{font-weight:bold;font-size:10.2pt} .spct{font-size:10.2pt}
+thead.hd th{color:#8c96a8;font-size:8.6pt;letter-spacing:1.3px;text-transform:uppercase;
+ padding:13px 4px;border-bottom:1px solid #e4e6e9;font-weight:bold}
+tbody.bd td{border-bottom:1px solid #eef0f2;padding:5.2px 4px}
+.sym{font-weight:bold} .seg{color:#5f6a7a;font-size:9.4pt}
+.amt{color:#404b5c}
+.hdr2{font-size:9.4pt;letter-spacing:1.6px;font-weight:bold;text-transform:uppercase;margin-bottom:9px}
+.dark{background:#07111f;color:#fff;border-radius:9px;padding:26px 26px}
+.dark .hdr2{color:#8c96a8}
+.dark p{margin:0;font-size:10.4pt;line-height:1.95}
+.dark .fin{color:#5c6675;font-size:8.8pt;margin-top:16px}
+.wl td{border-bottom:1px solid #eef0f2;padding:15px 4px;vertical-align:top;font-size:10pt;line-height:1.6}
+.wl .iss{color:#5f6a7a}
+.pb{page-break-before:always}
+</style></head><body>
+
+<div class="hero">
+<div class="kick">PORTFOLIO HEALTH REPORT &nbsp;·&nbsp; 18 AUG 2026 &nbsp;·&nbsp; AS OF LIVE</div>
+<h1>Komal Dhawan</h1>
+<div class="sub">25 holdings &nbsp;·&nbsp; NSE/BSE &nbsp;·&nbsp; Portfolio Analytics</div>
+<div class="rt"><div class="lb">OVERALL RATING</div><div class="nm">7.62</div><div class="pill">GOOD</div></div>
+</div>
+
+<div class="strip">
+<div><div class="lbl">Invested</div><div class="val">₹8,15,710</div></div>
+<div><div class="lbl">Current Value</div><div class="val">₹8,23,882</div></div>
+<div><div class="lbl">Net P&amp;L</div><div class="val pos">+₹8,172</div><div class="sub2">+1.0% on invested</div></div>
+</div>
+
+<div class="row">
+<div><div class="card">
+<div class="hdr2" style="color:#8c96a8">ALPHA · SINCE 25 FEB 2026</div>
+<div class="pbar"><span>Portfolio</span><span class="trk"><i style="width:17%;background:#1847df"></i></span><b class="pos">+1.0%</b></div>
+<div class="pbar"><span>Nifty 50</span><span class="trk"><i style="width:87%;background:#b52432"></i></span><b class="neg">−5.2%</b></div>
+<div style="margin-top:14px"><span style="font-size:17pt;font-weight:bold;letter-spacing:-.4px">Alpha</span>
+<span style="font-size:17pt;font-weight:bold;color:#0b6e42;letter-spacing:-.4px"> +6.2%</span>
+<span style="font-size:9pt;color:#5f6a7a"> vs Nifty 50</span></div>
+<div class="note">The market fell 5.2% over these six months. The portfolio made +1.0%.
+<b>That gap is real stock selection, not a market tailwind.</b></div>
+</div></div>
+<div><div class="card">
+<div class="hdr2" style="color:#8c96a8">QUALITY · RATING BANDS</div>
+<div class="stack" style="height:7px"><i style="width:29.1%;background:#0b6e42"></i><i style="width:48.7%;background:#1a9070"></i><i style="width:22.3%;background:#a1440d"></i></div>
+<table class="kv"><tbody>
+<tr><td class="l">Excellent (8+)</td><td class="g">29.1%</td></tr>
+<tr><td class="l">Good (7–8)</td><td class="g">48.7%</td></tr>
+<tr><td class="l">Average (6–7)</td><td class="a">22.3%</td></tr>
+<tr><td class="l">Weak (below 6)</td><td class="r">0%</td></tr>
+</tbody></table>
+<div class="note">Weighted-average rating <b>7.62 — a genuinely good-quality book. Zero capital in weak names.</b></div>
+</div></div>
+</div>
+
+<div class="row">
+<div><div class="card">
+<div class="hdr2" style="color:#8c96a8">NET P&amp;L · REALISED VS UNREALISED</div>
+<table class="kv"><tbody>
+<tr><td class="l">Amount invested</td><td><b>₹8,15,710</b></td></tr>
+<tr><td class="l">Holdings cost</td><td><b>₹7,65,720</b></td></tr>
+<tr><td class="l">Holdings market value</td><td><b>₹8,19,753</b></td></tr>
+<tr><td class="l">Cash balance</td><td><b>₹4,129</b></td></tr>
+</tbody></table>
+<div class="rule"></div>
+<table class="kv"><tbody>
+<tr><td class="l">Current value (holdings + cash)</td><td><b>₹8,23,882</b></td></tr>
+<tr><td class="l">Unrealised P&amp;L on holdings</td><td class="pos">+₹54,033 (+7.1%)</td></tr>
+<tr><td class="l">Realised losses &amp; charges</td><td class="neg">−₹45,861</td></tr>
+</tbody></table>
+<div class="rule"></div>
+<table class="kv"><tbody>
+<tr><td class="l"><b>Net P&amp;L on invested</b></td><td class="pos">+₹8,172 (+1.0%)</td></tr>
+</tbody></table>
+<div class="note">Open positions are up 7.1% on cost; closed trades and charges cost about ₹45,900.
+<b>The +1.0% headline already absorbs that.</b></div>
+</div></div>
+<div><div class="card">
+<div class="hdr2" style="color:#8c96a8">RATING PARAMETERS</div>
+<div class="pbar"><span>Growth</span><span class="trk"><i style="width:79.4%;background:#0b6e42"></i></span><b>7.94</b></div>
+<div class="pbar"><span>Value</span><span class="trk"><i style="width:74.2%;background:#1a9070"></i></span><b>7.42</b></div>
+<div class="pbar"><span>Momentum</span><span class="trk"><i style="width:74.9%;background:#1847df"></i></span><b>7.49</b></div>
+<div class="pbar"><span>Quality mix</span><span class="trk"><i style="width:76.2%;background:#5340c2"></i></span><b>7.62</b></div>
+<div class="note">All three legs sit above 7.4 — <b>a balanced book with no obviously weak side.</b>
+Growth is the strongest leg at 7.9. The book earns its return from quality rather than from one hot trade.</div>
+</div></div>
+</div>
+
+<h2 style="margin-top:20px">Portfolio Composition</h2>
+<div class="lede">How the money is spread — by sector, by company size, and by rating quality.</div>
+
+<div class="card" style="margin-bottom:10px">
+<div class="hdr2" style="color:#8c96a8">SECTOR SPLIT · TOP 5 HOLD 38.0% · TOP 10 HOLD 64.8%</div>
+<div class="stack"><i style="width:25.53%;background:#0b6e42">Private 10%</i><i style="width:25.53%;background:#1f2937">Auto 10%</i><i style="width:18.42%;background:#1847df">Broadcasting 7%</i><i style="width:15.53%;background:#a1440d">Mining 6%</i><i style="width:15.00%;background:#5340c2">MSME 6%</i></div>
+<div class="stack"><i style="width:9.03%;background:#0b6e42">CDMO 6%</i><i style="width:8.87%;background:#1a9070">Internet 6%</i><i style="width:8.71%;background:#b52432">Cables 5%</i><i style="width:8.55%;background:#1f2937">Renewable 5%</i><i style="width:8.06%;background:#1847df">Entertainment 5%</i><i style="width:56.77%;background:#0b6e42">Others 35%</i></div>
+<table class="slist"><tbody><tr><td class="l sname">Private Banks</td><td class="spct">9.7%</td></tr>
+<tr><td class="l sname">Auto - Wiring & Electricals</td><td class="spct">9.7%</td></tr>
+<tr><td class="l sname">Broadcasting & OTT</td><td class="spct">7.0%</td></tr>
+<tr><td class="l sname">Mining</td><td class="spct">5.9%</td></tr>
+<tr><td class="l sname">MSME Finance - Mid</td><td class="spct">5.7%</td></tr></tbody></table>
+<div class="note">No sector above 10% — <b>clean diversification, no concentration risk.</b></div>
+</div>
+
+<div class="pb"></div>
+<div class="row">
+<div><div class="card">
+<div class="hdr2" style="color:#8c96a8">COMPANY SIZE SPLIT</div>
+<div class="stack" style="height:7px"><i style="width:8.6%;background:#1847df"></i><i style="width:30.1%;background:#a1440d"></i><i style="width:57.0%;background:#b9bec6"></i><i style="width:4.3%;background:#e0e2e6"></i></div>
+<table class="kv"><tbody>
+<tr><td class="l">Large cap</td><td><b>8.6%</b></td></tr>
+<tr><td class="l">Mid cap</td><td><b>30.1%</b></td></tr>
+<tr><td class="l">Small cap</td><td><b>57.0%</b></td></tr>
+<tr><td class="l">Micro cap</td><td><b>4.3%</b></td></tr>
+</tbody></table>
+<div class="note"><b style="color:#a1440d">Aggressive tilt</b> — largecap only 8.6%, with 61% in small and micro.
+Expect bigger swings than the index, both ways.</div>
+</div></div>
+<div><div class="card">
+<div class="hdr2" style="color:#0b6e42">TOP GAINERS</div>
+<table><tbody class="bd"><tr><td class="l sym">RRKABEL</td><td class="pos">+47.5%</td><td class="amt">₹14,340</td></tr>
+<tr><td class="l sym">MOTHERSON</td><td class="pos">+25.9%</td><td class="amt">₹8,968</td></tr>
+<tr><td class="l sym">SAILIFE</td><td class="pos">+24.1%</td><td class="amt">₹8,941</td></tr>
+<tr><td class="l sym">KARURVYSYA</td><td class="pos">+17.6%</td><td class="amt">₹6,785</td></tr>
+<tr><td class="l sym">CARTRADE</td><td class="pos">+13.2%</td><td class="amt">₹5,220</td></tr></tbody></table>
+<div class="hdr2" style="color:#b52432;margin-top:13px">TOP LOSERS</div>
+<table><tbody class="bd"><tr><td class="l sym">SURYODAY</td><td class="neg">−8.8%</td><td class="amt neg">(₹1,643)</td></tr>
+<tr><td class="l sym">KRISHNADEF</td><td class="neg">−6.0%</td><td class="amt neg">(₹1,147)</td></tr>
+<tr><td class="l sym">STAR</td><td class="neg">−3.0%</td><td class="amt neg">(₹951)</td></tr>
+<tr><td class="l sym">VEDL</td><td class="neg">−3.7%</td><td class="amt neg">(₹820)</td></tr>
+<tr><td class="l sym">WAAREEENER</td><td class="neg">−1.3%</td><td class="amt neg">(₹567)</td></tr></tbody></table>
+</div></div>
+</div>
+
+<h2 style="margin-top:16px">Holdings — Full Detail</h2>
+<div class="lede">All 25 positions with weight, profit and rating. Winners vs losers: <b>13 : 12.</b></div>
+<div class="card" style="padding:2px 16px 10px 16px">
+<table>
+<thead class="hd"><tr><th class="l">Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>Rating</th><th class="l">Segment</th></tr></thead>
+<tbody class="bd"><tr><td class="l sym">TIPSMUSIC</td><td>656</td><td>88</td><td>7.0%</td><td class="neg">−0.9%</td><td class="g">8.26</td><td class="l seg">Broadcasting & OTT</td></tr>
+<tr><td class="l sym">SAILIFE</td><td>1,440</td><td>32</td><td>5.6%</td><td class="pos">+24.1%</td><td class="g">7.99</td><td class="l seg">CDMO & Contract Mfg</td></tr>
+<tr><td class="l sym">KARURVYSYA</td><td>334</td><td>136</td><td>5.5%</td><td class="pos">+17.6%</td><td class="g">8.39</td><td class="l seg">Private Banks</td></tr>
+<tr><td class="l sym">CARTRADE</td><td>2,803</td><td>16</td><td>5.5%</td><td class="pos">+13.2%</td><td class="g">8.17</td><td class="l seg">Internet & Digital Small</td></tr>
+<tr><td class="l sym">RRKABEL</td><td>2,785</td><td>16</td><td>5.4%</td><td class="pos">+47.5%</td><td class="g">7.67</td><td class="l seg">Electrical Cables</td></tr>
+<tr><td class="l sym">MOTHERSON</td><td>170</td><td>256</td><td>5.3%</td><td class="pos">+25.9%</td><td class="g">7.87</td><td class="l seg">Auto - Wiring & Electricals</td></tr>
+<tr><td class="l sym">WAAREEENER</td><td>2,709</td><td>16</td><td>5.3%</td><td class="neg">−1.3%</td><td class="a">6.38</td><td class="l seg">Renewable Energy - Mid</td></tr>
+<tr><td class="l sym">AFFLE</td><td>1,711</td><td>24</td><td>5.0%</td><td class="pos">+14.1%</td><td class="g">7.74</td><td class="l seg">Entertainment, Content & Digital</td></tr>
+<tr><td class="l sym">HINDCOPPER</td><td>566</td><td>72</td><td>5.0%</td><td class="pos">+2.9%</td><td class="g">7.62</td><td class="l seg">Aluminium & Non Ferrous</td></tr>
+<tr><td class="l sym">FIEMIND</td><td>2,219</td><td>16</td><td>4.3%</td><td class="neg">−0.9%</td><td class="g">7.69</td><td class="l seg">Auto - Wiring & Electricals</td></tr>
+<tr><td class="l sym">AUBANK</td><td>1,076</td><td>32</td><td>4.2%</td><td class="pos">+2.5%</td><td class="g">8.23</td><td class="l seg">Private Banks</td></tr>
+<tr><td class="l sym">STAR</td><td>949</td><td>32</td><td>3.7%</td><td class="neg">−3.0%</td><td class="a">6.45</td><td class="l seg">Pharma - Mid Formulations</td></tr>
+<tr><td class="l sym">IPCALAB</td><td>1,882</td><td>16</td><td>3.7%</td><td class="pos">+13.8%</td><td class="g">7.69</td><td class="l seg">Pharma - Formulations</td></tr>
+<tr><td class="l sym">ANANTRAJ</td><td>627</td><td>48</td><td>3.7%</td><td class="pos">+6.8%</td><td class="g">8.06</td><td class="l seg">Realty - Mid</td></tr>
+<tr><td class="l sym">YATHARTH</td><td>854</td><td>32</td><td>3.3%</td><td class="pos">+1.6%</td><td class="g">7.62</td><td class="l seg">Hospitals - Mid & Small</td></tr>
+<tr><td class="l sym">CGCL</td><td>226</td><td>120</td><td>3.3%</td><td class="neg">−1.5%</td><td class="g">7.58</td><td class="l seg">MSME Finance - Mid</td></tr>
+<tr><td class="l sym">NMDC</td><td>84</td><td>320</td><td>3.3%</td><td class="neg">−1.3%</td><td class="a">6.71</td><td class="l seg">Mining</td></tr>
+<tr><td class="l sym">ADANIPORTS</td><td>1,682</td><td>16</td><td>3.3%</td><td class="pos">+13.3%</td><td class="g">7.87</td><td class="l seg">Logistics - Large & Mid</td></tr>
+<tr><td class="l sym">ABCAPITAL</td><td>402</td><td>64</td><td>3.1%</td><td class="neg">−0.8%</td><td class="g">8.07</td><td class="l seg">Life Insurance</td></tr>
+<tr><td class="l sym">PREMIERENE</td><td>1,015</td><td>24</td><td>3.0%</td><td class="neg">−1.4%</td><td class="a">6.96</td><td class="l seg">Power - Mid</td></tr>
+<tr><td class="l sym">VEDL</td><td>264</td><td>80</td><td>2.6%</td><td class="neg">−3.7%</td><td class="a">6.01</td><td class="l seg">Mining</td></tr>
+<tr><td class="l sym">MASFIN</td><td>303</td><td>64</td><td>2.4%</td><td class="neg">−2.8%</td><td class="a">6.70</td><td class="l seg">MSME Finance - Mid</td></tr>
+<tr><td class="l sym">KRISHNADEF</td><td>1,125</td><td>16</td><td>2.2%</td><td class="neg">−6.0%</td><td class="g">7.67</td><td class="l seg">Defence - Small</td></tr>
+<tr><td class="l sym">GPPL</td><td>160</td><td>112</td><td>2.2%</td><td class="pos">+8.5%</td><td class="g">7.75</td><td class="l seg">Logistics - Small</td></tr>
+<tr><td class="l sym">SURYODAY</td><td>152</td><td>112</td><td>2.1%</td><td class="neg">−8.8%</td><td class="a">6.86</td><td class="l seg">Small Finance Banks</td></tr></tbody></table>
+<div class="note" style="margin-top:8px">Rating colour: green 7+, amber 5–7, red below 5. Prices as at 18 Aug 2026 close.</div>
+</div>
+
+<div class="pb"></div>
+<h2>Review List &amp; Takeaways</h2>
+<div class="lede">What is working, what needs a decision, and the one discipline worth adopting.</div>
+
+<div class="card" style="margin-bottom:11px">
+<div class="hdr2" style="color:#0b6e42">WHAT IS WORKING — HOLD</div>
+<div style="font-size:10.4pt;line-height:1.95">
+<b>RRKABEL (+47%), MOTHERSON (+26%), SAILIFE (+24%)</b> are the engines — all three still rate 7.6+
+with momentum above 8.9. Winners that are still winning. <b>KARURVYSYA (+18%)</b> carries the best
+rating in the book (8.39) and the strongest momentum at 9.53. CARTRADE, AFFLE, IPCALAB and
+ADANIPORTS add double-digit gains on Good ratings. Nothing in this group needs action.
+</div></div>
+
+<div class="card" style="margin-bottom:16px;padding:18px 20px">
+<div class="hdr2" style="color:#b52432">WATCH LIST — REVIEW</div>
+<table><thead class="hd"><tr><th class="l">Stock</th><th class="l">Issue</th><th class="l">Suggested review</th></tr></thead>
+<tbody class="wl">
+<tr><td class="l"><b>WAAREEENER</b><br><span class="iss">−1.3% · 5.3% wt</span></td><td class="l iss">Weakest momentum in the book (3.44) on the seventh-largest position</td><td class="l">Weight and trend mismatch — the strongest trim case here</td></tr>
+<tr><td class="l"><b>VEDL</b><br><span class="iss">−3.7% · 2.6% wt</span></td><td class="l iss">Lowest rating in the book (6.01), momentum 3.75</td><td class="l">Exit candidate; rating and trend point the same way</td></tr>
+<tr><td class="l"><b>SURYODAY</b><br><span class="iss">−8.8% · 2.1% wt</span></td><td class="l iss">Biggest percentage detractor; micro cap, thin liquidity</td><td class="l">Decide: hold with patience, or release the capital</td></tr>
+<tr><td class="l"><b>STAR</b><br><span class="iss">−3.0% · 3.7% wt</span></td><td class="l iss">Rating 6.45 on a mid-sized position</td><td class="l">Watch its next quarterly result before deciding</td></tr>
+<tr><td class="l"><b>MASFIN / PREMIERENE</b><br><span class="iss">5.4% combined</span></td><td class="l iss">Both carry momentum below 4.6</td><td class="l">Add conviction or tidy up the tail</td></tr>
+</tbody></table></div>
+
+<div class="card" style="margin-bottom:16px;padding:18px 20px;page-break-inside:avoid">
+<div class="hdr2" style="color:#8c96a8">THE PATTERN WORTH SEEING</div>
+<div style="font-size:10.4pt;line-height:1.95">
+Every holding gaining more than 13% shares one signature: <b>a momentum reading above 7.1.</b>
+Every holding losing more than 2.5% sits below 5.8. The growth side is fine on both lists — the
+losses are a <b>timing problem, not a stock-selection problem.</b> A simple monthly discipline —
+review anything with momentum below 5 — would have caught WAAREEENER, VEDL, MASFIN and
+PREMIERENE early.
+</div></div>
+
+<div class="dark">
+<div class="hdr2">EXPERT TAKE</div>
+<p>Overall quality is strong at 7.62 with zero capital in weak names — <b>no structural intervention
+needed.</b> The live book is up 7.1% on cost; what holds the headline to +1.0% is ₹45,900 of realised
+losses and charges already taken. Three surgical reviews: right-size WAAREEENER, resolve VEDL, and
+decide on the sub-3% tail. Then adopt one rule: <b>any holding with momentum below 5 goes to
+monthly review.</b></p>
+<div class="fin">Generated 18 Aug 2026 · Data as of report date · Research only, not investment advice.</div>
+</div>
+
+</body></html>
