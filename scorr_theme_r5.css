@@ -437,6 +437,38 @@
    founder approved. This is the cc#1073 `var(--token, #original)` pattern, unchanged.
 
    NO TOKEN VALUE MOVES. This block adds classes and reads tokens. It does not redefine one. */
+/* ── B RULING (Fable RECO 2729, founder 18-Aug): THE TOKENS TRAVEL WITH THE SHELL ────────────
+   B says the pages that adopt a shell move to GOLD NIGHT and the shell lands on the palette it
+   was authored for. The tokens are therefore declared ON THE SHELL CLASSES, not at :root.
+
+   THAT SCOPING IS THE WHOLE POINT, and it is condition 1 of the ruling: B is NOT an app-wide
+   repaint. cc#1073 APP-WIDE COLOUR STANDARDISATION is a separate blocked card and this must not
+   quietly absorb it. Declaring these at :root would repaint every page in the app whether it
+   adopted a shell or not. Declared here, a page changes colour exactly when it takes a shell and
+   not one moment before — the sweep and the adoption are the same act.
+
+   Values are the two locked refs' own :root blocks (slab_R1 @ 1261fe9, pressed_R1 @ 1221452).
+   The var(--token, #literal) fallbacks below are KEPT even though these declarations make them
+   redundant here: a page that sets its own --panel closer to the element still wins, which is the
+   depth-only behaviour, and the fallback is what stops the ledge vanishing if a token is ever
+   removed. Belt and braces on the one property whose absence is invisible.
+
+   MONEY COLOURS ARE NOT IN THIS LIST AND MUST NEVER BE. --up / --down / --grn / --red carry
+   profit and loss. Condition 2 of the ruling is that a palette move may not shift them, so they
+   are absent by design, not by oversight. */
+.slab, .pressed{
+  --field:#0A0A0C;
+  --panel:#17171B;
+  --sunk:#0C0C0F;
+  --well:#131316;
+  --chalk:#F5F2EA;
+  --mute:#8A8A93;
+  --line:#2A2A31;
+  --gold:#D4AF37;
+  --gold-hi:#F0D67A;
+  --gold-lo:#7A6320;
+}
+
 .slab{
   background:var(--panel, #17171B);
   border:1.5px solid var(--line, #2A2A31);
