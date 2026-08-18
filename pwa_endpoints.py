@@ -309,6 +309,11 @@ PWA_JS = """
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler'],
+    // cc#1086 (founder 17-Aug): the Fable Room — /room, the read-only window onto cc_task_logs.
+    // ONE entry, added ONCE: this array renders as both the desktop top bar and the mobile More
+    // sheet, so a single line reaches both. NAV-COMPLETE (rule 2987) requires it — the room is a
+    // real page, not a tab. Mirrored in main.py NAV_REGISTRY.
+    ['/room', '\\u25a6', 'Fable Room'],
     // cc#995 (founder 10-Aug): Previews REMOVED from the nav — no longer relevant. The /preview
     // route and preview_endpoints.py stay untouched (de-listed only, reachable by typed URL; this
     // is also the cc#867 rollback the note there described as "deleting this one line").

@@ -134,6 +134,7 @@ from hr_report_pdf import router as hr_report_pdf_router   # cc#652 Portfolio He
 import yahoo_ondemand
 import yahoo_index_backfill
 from yahoo_symbol_resolver import router as yahoo_resolver_router   # cc#938: Yahoo ticker resolver + price-feed exclusion register
+from room_endpoints import router as room_router   # cc#1086: /room + /api/room/feed (read-only Fable Room viewer)
 import v8_paper
 import global_indices
 import v8_signal_writer
@@ -235,7 +236,8 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/screeners",   # cc#824
                      "/digest",      # cc#846
                      "/trades",      # cc#991: Wall of Trades (web renderer)
-                     "/adaptive"}   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
+                     "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
+                     "/room"}       # cc#1086: Fable Room viewer
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
@@ -244,6 +246,9 @@ PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 PROTECTED.add("/screeners")   # cc#824: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
+# cc#1086: the room carries internal engineering discussion and unreleased spec detail. Gated for
+# that reason, not by habit — a logged-out request must reach login, never the thread.
+PROTECTED.add("/room")
 # cc#874: promoted mobile screens are login-gated like every other page. Added to PROTECTED
 # only — deliberately NOT to _PWA_INJECT_PATHS: pwa.js injects the DESKTOP navbar into
 # #scorr-nav, and these screens carry their own 5-slot bottom nav per 15913 (no tab rows,
@@ -606,6 +611,7 @@ app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#84
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
 app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
 app.include_router(yahoo_resolver_router)   # cc#938: /api/admin/yahoo/resolve · /api/feeds/price-excluded · /api/feeds/symbol-map
+app.include_router(room_router)   # cc#1086: /room + /api/room/feed
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -1168,6 +1174,8 @@ NAV_REGISTRY = {
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
     # accounts for every /m/ route rather than only the navigable ones.
     "/m/login":      ("Login (mobile)",        "typed-url"),
+    # cc#1086: mirrors the NAV array entry in pwa_endpoints.py (rule 2987).
+    "/room":         ("Fable Room",           "nav"),
     "/":             ("Home",                 "nav"),
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),

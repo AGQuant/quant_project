@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<!-- THE FABLE ROOM — /room · cc#1086
+     Implements design_refs/scorr_fable_room_R1.html @ e3bcf8e. The ref was built by Fable from the
+     REAL cc#1085 exchange (log ids 2668-2675), so its palette, lanes, kind pills and spacing are
+     ported rather than reinterpreted; the data is live where the ref was hardcoded.
+
+     READ-ONLY. This page issues one GET and never a POST. The room is written by CC and Fable.
+
+     KIND, LANE and SHA are all derived SERVER-side in room_endpoints.py, deliberately. Deriving
+     them again here would be a second authority on what counts as a question, and the two would
+     drift the first time a prefix convention changed. -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fable Room · Scorr</title>
+<style>
+:root{--bg:#0A0F1E;--card:#121A33;--bd:rgba(148,166,210,.14);
+--txt:#E9EEFB;--mut:#8C99BD;--acc:#4D7CFE;--gold:#F5B94A;--grn:#2FD48B;--red:#FF5C6C;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:14px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px}
+.head{display:flex;align-items:center;gap:12px;padding:16px 0 12px;border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--bg);z-index:5}
+.head h1{font-size:17px;font-weight:800;margin:0}
+.head .sub{font-size:12.5px;color:var(--mut)}
+.pulse{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35);border-radius:12px;padding:3px 10px}
+.pulse.off{color:var(--mut);background:rgba(148,166,210,.12);border-color:var(--bd)}
+.filters{display:flex;gap:6px;padding:12px 0;flex-wrap:wrap}
+.f{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--bd);background:transparent;color:var(--mut);font-family:inherit}
+.f.on{border-color:var(--acc);background:rgba(77,124,254,.12);color:var(--acc)}
+.f .n{font-family:ui-monospace,Menlo,monospace;font-size:11px;opacity:.75;margin-left:5px}
+.tk{margin:22px 0 10px;display:flex;align-items:center;gap:10px}
+.tk .id{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:800;color:var(--acc);flex-shrink:0}
+.tk .ttl{font-size:12.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk .st{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:5px;padding:2px 7px;flex-shrink:0;margin-left:auto}
+.st.run{color:var(--gold);background:rgba(245,185,74,.14);border:1px solid rgba(245,185,74,.35)}
+.st.done{color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35)}
+.st.wait{color:var(--mut);background:rgba(148,166,210,.12);border:1px solid var(--bd)}
+.st.stop{color:var(--red);background:rgba(255,92,108,.14);border:1px solid rgba(255,92,108,.35)}
+.msg{display:flex;flex-direction:column;margin:10px 0}
+.msg.fable{align-items:flex-end}
+.msg.other{align-items:center}
+.meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mut);margin-bottom:4px;flex-wrap:wrap}
+.who{font-weight:800;letter-spacing:.04em}
+.who.cc{color:var(--mut)} .who.fb{color:var(--acc)} .who.ot{color:var(--mut);opacity:.8}
+.bub{max-width:76%;border-radius:12px;padding:11px 15px;border:1px solid var(--bd);background:var(--card);line-height:1.55;font-size:13px;color:var(--mut);white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.fable .bub{background:rgba(77,124,254,.10);border-color:rgba(77,124,254,.30)}
+.msg.other .bub{max-width:70%;opacity:.85;font-size:12.5px}
+.kind{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:1px 6px}
+.k-question,.k-stopped{color:var(--gold);background:rgba(245,185,74,.16)}
+.k-reco{color:var(--acc);background:rgba(77,124,254,.16)}
+.k-push{color:var(--grn);background:rgba(47,212,139,.16)}
+.k-claim,.k-note{color:var(--mut);background:rgba(148,166,210,.12)}
+.sha{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--grn);text-decoration:none;border-bottom:1px dotted rgba(47,212,139,.5)}
+.sha:hover{color:#5BE3A6}
+.new{animation:flash 2.2s ease-out 1}
+@keyframes flash{0%{box-shadow:0 0 0 2px rgba(77,124,254,.55)}100%{box-shadow:0 0 0 2px rgba(77,124,254,0)}}
+.gap{text-align:center;font-size:11px;color:var(--mut);margin:8px 0}
+.empty{color:var(--mut);font-size:13px;padding:40px 0;text-align:center}
+.err{color:var(--red);font-size:13px;padding:40px 0;text-align:center;line-height:1.6}
+@media(max-width:640px){.wrap{padding:0 14px 60px}.bub{max-width:88%}.msg.other .bub{max-width:88%}}
+</style></head><body>
+<div class="wrap">
+
+<div class="head">
+  <div>
+    <h1>Fable Room</h1>
+    <div class="sub">cc_task_logs · the meeting room · CC_COMMS_LOOP_V1</div>
+  </div>
+  <div class="pulse off" id="pulse">connecting…</div>
+</div>
+
+<div class="filters" id="filters"></div>
+<div id="body"><div class="empty">Opening the room…</div></div>
+<div class="gap" id="foot"></div>
+
+</div>
+<script>
+/* One GET, no POST anywhere in this file. See the header comment. */
+var STATE = { threads: [], filter: 'all', seen: {}, first: true, repo: '' };
+
+var FILTERS = [
+  ['all',    'All',                function(){ return true; }],
+  ['qs',     'Questions & stops',  function(m){ return m.kind === 'question' || m.kind === 'stopped'; }],
+  ['reco',   'Rulings',            function(m){ return m.kind === 'reco'; }],
+  ['push',   'Pushes',             function(m){ return m.kind === 'push'; }],
+  ['open',   'Open cards',         null]     /* task-level, handled in render */
+];
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* IST, and stated as IST. The founder reads this on a phone that may be anywhere; a bare "13:20"
+   that silently meant the device's timezone would misreport when a push landed. */
+function hhmm(iso){
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit',
+                                         timeZone: 'Asia/Kolkata' });
+}
+function dmy(iso){
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short',
+                                         timeZone: 'Asia/Kolkata' });
+}
+
+function statusClass(s){
+  s = String(s || '').toLowerCase();
+  if (s === 'done')        return 'done';
+  if (s === 'in_progress') return 'run';
+  if (s === 'blocked' || s === 'suspended') return 'stop';
+  return 'wait';
+}
+
+/* The message head is the first line, and it leads the bubble in bold — the ref's <b> line. The
+   prefix itself is stripped from the head because the kind pill already says QUESTION or STOPPED,
+   and printing both makes the founder read the same word twice. */
+function splitMessage(m){
+  var text = String(m.message || '');
+  var body = text.replace(/^\s*(STOPPED|QUESTION|RECO)\s*:\s*/i, '');
+  var cut = body.search(/(?:\.\s|—\s|\n)/);
+  if (cut < 0 || cut > 120) cut = Math.min(body.length, 120);
+  var headTxt = body.slice(0, cut).trim();
+  var rest = body.slice(cut).replace(/^[.—\s]+/, '').trim();
+  return { head: headTxt, rest: rest };
+}
+
+function whoLabel(m){
+  var a = String(m.actor || '').toLowerCase();
+  if (m.lane === 'cc')    return 'claude code';
+  if (m.lane === 'fable') return 'fable';
+  return a || 'system';
+}
+
+function msgHtml(m){
+  var parts = splitMessage(m);
+  var isNew = STATE.seen[m.id] === undefined && !STATE.first;
+  var whoCls = m.lane === 'cc' ? 'cc' : (m.lane === 'fable' ? 'fb' : 'ot');
+  var who = '<span class="who ' + whoCls + '">' + esc(whoLabel(m)) + '</span>';
+  var kind = '<span class="kind k-' + esc(m.kind) + '">' + esc(m.kind) + '</span>';
+  var sha = m.sha
+    ? '<a class="sha" target="_blank" rel="noopener" href="'
+      + esc(STATE.repo) + '/commit/' + esc(m.sha) + '">' + esc(m.sha) + '</a>'
+    : '';
+  var stamp = '<span>' + esc(hhmm(m.ts)) + '</span><span>#' + esc(m.id) + '</span>';
+  /* fable's lane reads right-to-left in the ref: pill, id, time, then the name against the edge. */
+  var meta = m.lane === 'fable'
+    ? '<div class="meta">' + kind + '<span>#' + esc(m.id) + '</span><span>' + esc(hhmm(m.ts)) + '</span>' + who + '</div>'
+    : '<div class="meta">' + who + stamp + kind + sha + '</div>';
+  return '<div class="msg ' + esc(m.lane === 'fable' ? 'fable' : (m.lane === 'cc' ? 'cc' : 'other'))
+    + (isNew ? ' new' : '') + '">'
+    + meta
+    + '<div class="bub">' + (parts.head ? '<b>' + esc(parts.head) + '</b>' : '')
+    + esc(parts.rest) + '</div></div>';
+}
+
+function render(){
+  var host = document.getElementById('body');
+  var f = FILTERS.filter(function(x){ return x[0] === STATE.filter; })[0];
+  var openOnly = STATE.filter === 'open';
+  var test = (f && f[2]) || function(){ return true; };
+
+  var html = '', shown = 0;
+  STATE.threads.forEach(function(t){
+    if (openOnly && String(t.status || '').toLowerCase() === 'done') return;
+    var msgs = openOnly ? t.messages : t.messages.filter(test);
+    if (!msgs.length && STATE.filter !== 'all' && !openOnly) return;
+    shown++;
+    html += '<div class="tk"><span class="id">cc#' + esc(t.task_id) + '</span>'
+      + '<span class="ttl">' + esc(t.title || '') + '</span>'
+      + '<span class="st ' + statusClass(t.status) + '">'
+      + esc(String(t.status || 'unknown').replace('_', ' ')) + '</span></div>';
+    /* A task with no messages keeps its header and says so — the absence is information, and
+       hiding the card would make an unstarted card look like a card that does not exist. */
+    html += msgs.length
+      ? msgs.map(msgHtml).join('')
+      : '<div class="gap">no messages yet</div>';
+  });
+
+  host.innerHTML = shown
+    ? html
+    : '<div class="empty">Nothing matches this filter in the loaded window.</div>';
+
+  STATE.threads.forEach(function(t){
+    t.messages.forEach(function(m){ STATE.seen[m.id] = 1; });
+  });
+  STATE.first = false;
+}
+
+function renderFilters(){
+  var counts = { all: 0, qs: 0, reco: 0, push: 0, open: 0 };
+  STATE.threads.forEach(function(t){
+    if (String(t.status || '').toLowerCase() !== 'done') counts.open++;
+    t.messages.forEach(function(m){
+      counts.all++;
+      if (m.kind === 'question' || m.kind === 'stopped') counts.qs++;
+      if (m.kind === 'reco') counts.reco++;
+      if (m.kind === 'push') counts.push++;
+    });
+  });
+  document.getElementById('filters').innerHTML = FILTERS.map(function(x){
+    return '<button class="f' + (STATE.filter === x[0] ? ' on' : '') + '" data-k="' + x[0] + '">'
+      + esc(x[1]) + '<span class="n">' + counts[x[0]] + '</span></button>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#filters .f'), function(b){
+    b.addEventListener('click', function(){
+      STATE.filter = b.getAttribute('data-k');
+      renderFilters(); render();
+    });
+  });
+}
+
+function load(){
+  fetch('/api/room/feed?tasks=10', { headers: { 'Accept': 'application/json' } })
+    .then(function(r){
+      return r.text().then(function(t){
+        var d = null; try { d = JSON.parse(t); } catch(e){}
+        if (!r.ok || !d || d.error) {
+          throw new Error((d && d.error) || ('server returned ' + r.status));
+        }
+        return d;
+      });
+    })
+    .then(function(d){
+      STATE.threads = d.threads || [];
+      STATE.repo = d.repo_url || '';
+      var pulse = document.getElementById('pulse');
+      pulse.className = 'pulse';
+      pulse.textContent = 'LIVE · ' + hhmm(new Date().toISOString()) + ' IST';
+      document.getElementById('foot').textContent =
+        d.task_count + ' tasks · ' + d.message_count + ' messages · read-only';
+      renderFilters();
+      render();
+    })
+    .catch(function(e){
+      /* NEVER render a cached or partial room as if it were current. */
+      var pulse = document.getElementById('pulse');
+      pulse.className = 'pulse off';
+      pulse.textContent = 'unreachable';
+      document.getElementById('body').innerHTML =
+        '<div class="err"><b>The room is unreachable.</b><br>' + esc(e.message)
+        + '<br><span style="color:var(--mut)">Nothing is shown rather than something stale — '
+        + 'a meeting room that lies about what the team is doing is worse than a blank one.</span></div>';
+      document.getElementById('foot').textContent = '';
+    });
+}
+
+/* 30s, paused while the tab is hidden. A room nobody is looking at does not need polling, and a
+   phone in a pocket should not be refetching all night. */
+var timer = null;
+function start(){ if (!timer) timer = setInterval(load, 30000); }
+function stop(){ if (timer) { clearInterval(timer); timer = null; } }
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) { stop(); } else { load(); start(); }
+});
+load();
+start();
+</script>
+</body></html>
