@@ -2588,15 +2588,15 @@ Promise.all([
   var tools = document.createElement('div');
   tools.className = 'tools';
   tools.innerHTML =
-      '<a class="tool" href="/m/qb"><span>\u25a6</span>Baskets</a>'
-    + '<a class="tool" href="/m/screeners"><span>\u2637</span>Screeners</a>'
-    + '<a class="tool" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
-    + '<a class="tool" href="/m/results"><span>\u2263</span>Results</a>'
-    + '<a class="tool" href="/m/digest"><span>\u2600</span>Digest</a>'
-    + '<a class="tool" href="/m/fpc"><span>\u20b9</span>FPC</a>'
-    + '<a class="tool" href="/dashboard"><span>\u26a1</span>Dashboard</a>'
-    + '<a class="tool" href="/cio"><span>\u2299</span>AICIO</a>'
-    + '<a class="tool" href="/health"><span>\u2695</span>Portfolio Health</a>'
+      '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
+    + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
+    + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
+    + '<a class="tool slab dense" href="/m/results"><span>\u2263</span>Results</a>'
+    + '<a class="tool slab dense" href="/m/digest"><span>\u2600</span>Digest</a>'
+    + '<a class="tool slab dense" href="/m/fpc"><span>\u20b9</span>FPC</a>'
+    + '<a class="tool slab dense" href="/dashboard"><span>\u26a1</span>Dashboard</a>'
+    + '<a class="tool slab dense" href="/cio"><span>\u2299</span>AICIO</a>'
+    + '<a class="tool slab dense" href="/health"><span>\u2695</span>Portfolio Health</a>'
     // cc#897: 9 -> 12 tiles. All three open WEB pages, the same 16915 exception the founder
     // already approved for Dashboard / AICIO / Portfolio Health above.
     // The Index Intel hash was VERIFIED against the dashboard's own router, not assumed: the card
@@ -2605,21 +2605,21 @@ Promise.all([
     // #indexintel would therefore have opened Master silently and looked like a working link.
     /* APP_QA_R4 P8 (F4): the app tile comes first and owns the name; the web page is kept
        but marked as the web one, so two tiles never claim the same label. */
-    + '<a class="tool" href="/m/v10"><span>\u25d0</span>Index Intel</a>'
-    + '<a class="tool" href="/dashboard#index"><span>\u25d0</span>Index Intel \u00b7 Web</a>'
-    + '<a class="tool" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
-    + '<a class="tool" href="/v15"><span>\u25c9</span>V15 MF</a>'
+    + '<a class="tool slab dense" href="/m/v10"><span>\u25d0</span>Index Intel</a>'
+    + '<a class="tool slab dense" href="/dashboard#index"><span>\u25d0</span>Index Intel \u00b7 Web</a>'
+    + '<a class="tool slab dense" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
+    + '<a class="tool slab dense" href="/v15"><span>\u25c9</span>V15 MF</a>'
     // cc#897 second pass: 12 -> 14. Routes taken from model_registry, not guessed \u2014 V10 is /v10
     // and V14 Intraday is /intraday there. Both open web pages, same 16915 exception as above.
     /* APP_QA_R4 P8: the old /v10 web tile is the same destination as the web Index Intel
        tile above in user terms, so it keeps its own route but stops being called "V10". */
-    + '<a class="tool" href="/v10"><span>\u25d1</span>V10 Desk \u00b7 Web</a>'
-    + '<a class="tool" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
+    + '<a class="tool slab dense" href="/v10"><span>\u25d1</span>V10 Desk \u00b7 Web</a>'
+    + '<a class="tool slab dense" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
     // cc#991 (founder 10-Aug, grid_final amendment): APPEND the Wall of Trades tile. The grid was
     // never capped at 12 — it already held 14 and the last row had an empty third slot — so this
     // is the 15th tile filling that slot, not a reflow and not a displacement. It opens the APP
     // screen /m/trades, unlike the web-page tiles above it.
-    + '<a class="tool" href="/m/trades"><span>\u2637\uFE0E</span>Wall of Trades</a>';
+    + '<a class="tool slab dense" href="/m/trades"><span>\u2637\uFE0E</span>Wall of Trades</a>';
   document.getElementById('body').appendChild(tools);
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone

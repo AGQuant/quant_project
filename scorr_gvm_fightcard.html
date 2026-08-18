@@ -196,9 +196,9 @@ function render(d,sym){
     +(pct.z_score!=null?'<span class="badge">Z <b>'+(pct.z_score>=0?'+':'')+fnum(pct.z_score,2)+'</b></span>':'')
     +'</div></div>'
     +'<div class="pillars">'
-    +'<div class="pillar p-g"><div class="tag">GROWTH</div><div class="sc num">'+fnum(scores.g,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.g*10)+'%"></i></div></div>'
-    +'<div class="pillar p-v"><div class="tag">VALUE</div><div class="sc num">'+fnum(scores.v,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.v*10)+'%"></i></div></div>'
-    +'<div class="pillar p-m"><div class="tag">MOMENTUM</div><div class="sc num">'+fnum(scores.m,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.m*10)+'%"></i></div></div></div>';
+    +'<div class="pillar well p-g"><div class="tag">GROWTH</div><div class="sc num">'+fnum(scores.g,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.g*10)+'%"></i></div></div>'
+    +'<div class="pillar well p-v"><div class="tag">VALUE</div><div class="sc num">'+fnum(scores.v,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.v*10)+'%"></i></div></div>'
+    +'<div class="pillar well p-m"><div class="tag">MOMENTUM</div><div class="sc num">'+fnum(scores.m,2)+'</div><div class="bar"><i style="width:'+Math.min(100,scores.m*10)+'%"></i></div></div></div>';
   var trend=g(x,'trend');
   if(Array.isArray(trend)&&trend.length>1){
     var sp=spark(trend.map(function(r){return r.gvm}),'#C8F542');
@@ -254,9 +254,9 @@ function render(d,sym){
   /* TAPE FORENSICS from extras */
   var tape='',vit='';
   var vol=g(x,'volume'),del=g(x,'delivery'),t1=g(x,'tier1'),r52=g(x,'range52'),piv=g(x,'pivot');
-  if(vol&&(vol.verdict||vol.ratio!=null))vit+='<div class="vital"><div class="lbl">SMART MONEY</div><div class="val '+(/ACC/i.test(vol.verdict||'')?'up':'dn')+'">'+E((vol.verdict||'—').slice(0,7))+'</div>'+(vol.ratio!=null?'<div class="sub">u/d vol '+fnum(vol.ratio,2)+'x</div>':'')+'</div>';
-  if(del&&del.latest!=null)vit+='<div class="vital"><div class="lbl">DELIVERY</div><div class="val num'+(del.avg!=null&&del.latest>del.avg?' up':'')+'">'+fnum(del.latest,1)+'%</div>'+(del.avg!=null?'<div class="sub">'+(del.days||30)+'d avg '+fnum(del.avg,1)+'%</div>':'')+'</div>';
-  if(t1&&t1.passed!=null)vit+='<div class="vital"><div class="lbl">TIER-1 GATE</div><div class="val num">'+t1.passed+'/'+(t1.total||7)+'</div></div>';
+  if(vol&&(vol.verdict||vol.ratio!=null))vit+='<div class="vital well"><div class="lbl">SMART MONEY</div><div class="val '+(/ACC/i.test(vol.verdict||'')?'up':'dn')+'">'+E((vol.verdict||'—').slice(0,7))+'</div>'+(vol.ratio!=null?'<div class="sub">u/d vol '+fnum(vol.ratio,2)+'x</div>':'')+'</div>';
+  if(del&&del.latest!=null)vit+='<div class="vital well"><div class="lbl">DELIVERY</div><div class="val num'+(del.avg!=null&&del.latest>del.avg?' up':'')+'">'+fnum(del.latest,1)+'%</div>'+(del.avg!=null?'<div class="sub">'+(del.days||30)+'d avg '+fnum(del.avg,1)+'%</div>':'')+'</div>';
+  if(t1&&t1.passed!=null)vit+='<div class="vital well"><div class="lbl">TIER-1 GATE</div><div class="val num">'+t1.passed+'/'+(t1.total||7)+'</div></div>';
   if(vit)tape+='<div class="vitals">'+vit+'</div>';
   if(t1&&Array.isArray(t1.checks)&&t1.checks.length){
     tape+='<div class="sets" style="margin-top:14px">'+t1.checks.map(function(c){
@@ -290,9 +290,9 @@ function render(d,sym){
   var sc=g(x,'segment_ctx');
   if(sc){
     var inner='';
-    if(sc.sector_rank!=null)inner+='<div class="vital"><div class="lbl">SECTOR RANK</div><div class="val num">'+sc.sector_rank+(sc.sector_total?'/'+sc.sector_total:'')+'</div></div>';
-    if(sc.mcap_wtd_gvm!=null)inner+='<div class="vital"><div class="lbl">SECTOR GVM</div><div class="val num">'+fnum(sc.mcap_wtd_gvm,2)+'</div><div class="sub">mcap-weighted</div></div>';
-    if(sc.stock_vs_sector!=null)inner+='<div class="vital"><div class="lbl">VS SECTOR 1M</div><div class="val num '+(sc.stock_vs_sector>=0?'up':'dn')+'">'+(sc.stock_vs_sector>=0?'+':'')+fnum(sc.stock_vs_sector,1)+'pp</div></div>';
+    if(sc.sector_rank!=null)inner+='<div class="vital well"><div class="lbl">SECTOR RANK</div><div class="val num">'+sc.sector_rank+(sc.sector_total?'/'+sc.sector_total:'')+'</div></div>';
+    if(sc.mcap_wtd_gvm!=null)inner+='<div class="vital well"><div class="lbl">SECTOR GVM</div><div class="val num">'+fnum(sc.mcap_wtd_gvm,2)+'</div><div class="sub">mcap-weighted</div></div>';
+    if(sc.stock_vs_sector!=null)inner+='<div class="vital well"><div class="lbl">VS SECTOR 1M</div><div class="val num '+(sc.stock_vs_sector>=0?'up':'dn')+'">'+(sc.stock_vs_sector>=0?'+':'')+fnum(sc.stock_vs_sector,1)+'pp</div></div>';
     if(inner){
       var line=(sc.month_return_avg!=null)?'<div class="punch" style="margin-top:12px">The sector returned '+(sc.month_return_avg>=0?'+':'')+fnum(sc.month_return_avg,1)+'% this month; this stock '+(sc.stock_vs_sector>=0?'leads':'lags')+' it by '+fnum(Math.abs(sc.stock_vs_sector),1)+'pp.</div>':'';
       h+=sect('THE ARENA · '+String(d.segment||'').toUpperCase()+' AS A SECTOR','<div class="vitals">'+inner+'</div>'+line);

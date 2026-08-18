@@ -546,6 +546,14 @@
   border-radius:8px;
   box-shadow:0 2px 0 0 #000;
 }
+/* THE INNER NEEDS THE SAME CUT RELEASE THE SLAB GOT, for the same reason and by the same ruling.
+   P6 lands .well on blocks that carry their own clip-path — the digest .tile, the fight card
+   .pillar and .vital all cut a corner — and a clip-path erases the well's 2px sunk shadow exactly
+   as it erased the slab's ledge. Ruling 1 decided that on a surface that adopts the shell, the
+   shell is the card language; the inner is part of the shell, so it follows. Stated as an
+   extension of the ruling rather than done quietly: the cut stays on every block that has NOT
+   adopted, because this rule reaches .well and nothing else. */
+:root:root:not([data-theme="light"]) .well{ clip-path:none; }
 .pressed{
   background:var(--sunk, #0C0C0F);
   border:1px solid #000;

@@ -20,15 +20,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
  letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
 .eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
-/* cc#1090 P4 · TEN OF THE TWELVE .card BLOCKS TAKE .slab. Two do NOT, and that is the card's own
-   line: "digest tape blocks stay flat; only the content cards take the shell." The two flat ones
-   are GLOBAL TAPE and INTERNALS — both are grids of .tile readouts rather than something you read
-   a sentence from, and raising a block whose whole content is already raised tiles is the mud the
-   nesting rule warns about. They are also exactly what P6 owns (raised tiles .slab, inner readouts
-   .well), so leaving them here would be deciding P6 early.
-   This rule is left standing: the ruling-1 override at (0,3,0) takes the cut off the ten that
-   adopted and leaves it on the two that did not — which is the point of overriding rather than
-   deleting. */
+/* cc#1090 P4 then P6 · ALL TWELVE .card BLOCKS NOW TAKE .slab, and it took both pushes to get
+   there honestly. P4 adopted ten and left GLOBAL TAPE and INTERNALS flat, because "tape blocks
+   stay flat" and because raising a block whose whole content is already raised tiles is the mud
+   the nesting rule warns about. P6 is the push that owns exactly that pair — raised tiles .slab,
+   inner readouts .well — so the two blocks raise HERE and their .tile children sink to .well at
+   the same time. Neither half works alone: a slab full of raised tiles is the violation, and a
+   well inside a flat card is a hole in nothing.
+   This rule is left standing rather than deleted: the ruling-1 override at (0,3,0) takes the cut
+   off what adopted and leaves it on anything that has not. */
 .card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
 .rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--amber))}
@@ -104,7 +104,7 @@ function tile(t){
      sessions back and nulls under 6 sessions) — never recomputed here, never defaulted to 0. */
   const w=t.week_chg_pct!=null?Number(t.week_chg_pct):(t.wk_chg_pct!=null?Number(t.wk_chg_pct):null);
   const v=TAPE_MODE==='week'?w:d;
-  return `<div class="tile"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
+  return `<div class="tile well"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
     <div class="vv" style="color:${v!=null?cx(v):'var(--muted)'}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
 }
 /* re-renders the grid IN PLACE: same cells, same order, only the % swaps (ref). */
@@ -190,7 +190,7 @@ async function boot(){
   </div>
 
   <div class="eyebrow">GLOBAL TAPE${S.global_tape&&S.global_tape.tier?' · '+esc(S.global_tape.tier):''}</div>
-  <div class="card">
+  <div class="card slab">
     <div class="ghd"><span style="font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted)">CHANGE</span>
       <div class="gsw" id="gsw"><button type="button" data-v="day" class="on" onclick="setTapeMode('day')">DAY</button><button type="button" data-v="week" onclick="setTapeMode('week')">WEEK</button></div></div>
     ${tiles.length?`<div id="gtiles" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
@@ -204,12 +204,12 @@ async function boot(){
   </div>
 
   <div class="eyebrow">INTERNALS</div>
-  <div class="card">
+  <div class="card slab">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
-      <div class="tile"><div class="lb">BREADTH${itl.adr_stale?' · STALE':''}</div>
+      <div class="tile well"><div class="lb">BREADTH${itl.adr_stale?' · STALE':''}</div>
         <div class="vv" style="color:${adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)'}">${adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—'}</div>
         <div class="wk">${adr?adr.advances+'A / '+adr.declines+'D':''}</div></div>
-      ${pcr.slice(0,2).map(p=>`<div class="tile"><div class="lb">PCR ${esc(p.underlying)}${itl.pcr_stale?' · STALE':''}</div>
+      ${pcr.slice(0,2).map(p=>`<div class="tile well"><div class="lb">PCR ${esc(p.underlying)}${itl.pcr_stale?' · STALE':''}</div>
         <div class="vv" style="color:${p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)'}">${p.pcr!=null?Number(p.pcr).toFixed(2):'—'}</div>
         <div class="wk">${esc(p.date||'')}</div></div>`).join('')}
     </div>
