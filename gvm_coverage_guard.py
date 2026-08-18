@@ -160,6 +160,31 @@ def coverage(conn=None):
             conn.close()
 
 
+# cc#1095 P3 — one cached map per scored date, keyed by gvm_scores' own MAX(score_date).
+# WHY A CACHE AT ALL: coverage() runs one COUNT query per metric — seventeen of them. That is fine
+# for a nightly guard and absurd on every company-page load. The key is the score_date rather than
+# a clock TTL, so the map cannot outlive the universe it describes: the night GVM recomputes, the
+# date moves and the next reader rebuilds it. A TTL would have a window where the page quotes
+# coverage for a universe that no longer exists, which is the same shape of wrongness this sprint
+# is closing.
+_MAP_CACHE = {"score_date": None, "map": None}
+
+
+def coverage_map(conn):
+    """{metric_key: {filled, universe, pct, fallback_used}} for the current scored universe."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        sd = cur.fetchone()[0]
+    if _MAP_CACHE["score_date"] == sd and _MAP_CACHE["map"] is not None:
+        return _MAP_CACHE["map"]
+    rep = coverage(conn)
+    m = {r["metric"]: {"filled": r["resolved_filled"], "universe": r["universe"],
+                       "pct": r["pct"], "fallback_used": r["fallback_used"]}
+         for r in rep["metrics"] if r["error"] is None}
+    _MAP_CACHE["score_date"], _MAP_CACHE["map"] = sd, m
+    return m
+
+
 def alert(conn=None):
     """cc#1095 P2 — write ONE ops_log row per run, and return what it wrote.
 

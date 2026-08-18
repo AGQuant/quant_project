@@ -402,6 +402,34 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
             e["rank"] = i + 1
         seg_rank = next((e["rank"] for e in ladder if e["symbol"] == symbol), None)
 
+        # ── cc#1095 P3 · SOURCE COVERAGE ON EVERY BENCHMARK ROW ───────────────────────────────
+        # A dashed row can now say WHY it is dashed. Before this, "OPM Expansion —, rank #-/0"
+        # looked identical whether the company had nothing to report or the COLUMN was empty for
+        # the entire universe — and cc#1094 was the second case, unnoticed until a founder
+        # screenshot. source_coverage is the difference between "this company has no value" and
+        # "nobody has a value".
+        #
+        # STAMPED IN ONE PLACE, deliberately. There are two row builders above (PARAMS and the
+        # _M_EXTRA technicals block) and stamping inside each would be two places to forget. Every
+        # row lands in params_out, so every row gets the field or none does.
+        #
+        # PAYLOAD ONLY. Nothing here feeds rating, rank, pillar arithmetic or the exclusion rule —
+        # `rated` below is computed from p["rating"], which this does not touch. A guard that could
+        # move a score would be a worse problem than the one it reports.
+        #
+        # FAILURE IS SILENT BY DESIGN, and this is the one place that is right: the coverage map is
+        # a diagnostic. If it cannot be read the report must still render, so the field is simply
+        # absent rather than the page 500ing on a footnote.
+        try:
+            import gvm_coverage_guard
+            _cov = gvm_coverage_guard.coverage_map(conn)
+            for p in params_out:
+                c = _cov.get(p["key"])
+                if c:
+                    p["source_coverage"] = c
+        except Exception as _ce:
+            log.warning("cc#1095 P3: source_coverage unavailable (%s)", _ce)
+
         # Positives / negatives (top-3 strongest & weakest rated params)
         rated = [p for p in params_out if p["rating"] is not None]
         positives = sorted(rated, key=lambda x: x["rating"], reverse=True)[:4]
