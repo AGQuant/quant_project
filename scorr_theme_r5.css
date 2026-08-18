@@ -505,6 +505,17 @@
   background:var(--panel, #17171B);
   border:1.5px solid var(--line, #2A2A31);
 }
+/* THE RADIUS NEEDS !important AND ONLY THE RADIUS. Found by measuring P3, not by reading:
+   section 3 of this sheet already carries `.card, .sg-card{ border-radius:0 !important }`, so on
+   /m/gvm2 the seven adopted cards came out with the ledge and the face correct but SQUARE, while
+   the /m/gvm slabs were 13px. One card language cannot have two corner treatments — the founder
+   picked one shell. An !important beats an !important only at equal weight, so the override is
+   restated here at (0,3,0) with the flag, and .dense restates its 11px for the same reason: at
+   (0,2,0) plain it would lose to the very declaration this line is overriding. Nothing else in the
+   shell takes a flag; if a later rule needs one, that is a sign the shell is being fought, not a
+   licence to spread them. */
+:root:root:not([data-theme="light"]) .slab{ border-radius:13px !important; }
+:root:root:not([data-theme="light"]) .slab.dense{ border-radius:11px !important; }
 
 .slab{
   background:var(--panel, #17171B);

@@ -300,7 +300,11 @@ function frBlock(){
    drift apart. */
 function repCard(x){
   var col = scoreCol(x.gvm);
-  return '<div class="rep" style="--rc:' + col + '">'
+  /* cc#1090 P3: the report card TAKES THE SHELL. This is the densest surface in the app and the
+     card names it as the hardest test of whether the ledge crowds the score — so the ledge lands
+     here rather than on something quieter. --rc stays exactly as it was: the 3px verdict rail and
+     the score colour are the money/score language, and the shell is depth only. */
+  return '<div class="rep slab" style="--rc:' + col + '">'
     + '<div class="r1"><span class="rsym">' + esc(x.symbol) + '</span>'
     + '<span class="rseg">' + esc(x.segment || '') + '</span>'
     + '<span class="rpx">' + px(x.price) + '</span></div>'
@@ -417,7 +421,10 @@ function render(){
   var h = '<div class="sect">THE REPORT · TAP ANY STOCK TO GET THIS</div>' + repCard(rs[sel]);
   h += '<div class="sect">' + (STATE.q ? 'MATCHES' : "TODAY'S TOP · BY GVM") + '</div>';
   h += rs.map(function(x, i){
-    return '<div class="g-lrow" onclick="pick(' + i + ')">'
+    /* cc#1090 P3: leaderboard rows are the app's clearest SLAB case — tapping one goes somewhere
+       (pick(i) swaps the report card above). 25 rows by default, so .dense: fifteen full 5px
+       ledges down a screen stop reading as depth and start reading as stripes. */
+    return '<div class="g-lrow slab dense" onclick="pick(' + i + ')">'
       + '<span class="rk">' + (x.rank == null ? '' : esc(x.rank)) + '</span>'
       + '<div><div class="rs">' + esc(x.symbol) + '</div>'
       + '<div class="rg">' + esc(x.segment || esc(x.name || '')) + '</div></div>'
@@ -427,7 +434,10 @@ function render(){
   /* cc#913: sector ratings, the old-app surface the rebuilt screen never carried. Folded rather
      than always-open so the stock leaderboard stays the first thing read. */
   h += '<div class="sect">SECTORS \u00b7 GVM BY SEGMENT</div>'
-    + '<div class="c"><div class="chd"><div class="t">Sector ratings</div>'
+    /* cc#1090 P3: the sector card takes the shell; the sector ROWS inside it deliberately do NOT.
+       secRow() renders .g-lrow and this card holds 130 of them — slab inside slab is the one
+       nesting the card forbids outright, and P8 greps for exactly this. The rows stay flat. */
+    + '<div class="c slab"><div class="chd"><div class="t">Sector ratings</div>'
     + '<div class="rgt"><button class="chip" onclick="toggleSec()">'
     + (STATE.secOpen ? 'Hide \u25b4' : 'Show \u25be') + '</button></div></div>'
     + (STATE.secOpen ? secBlock()

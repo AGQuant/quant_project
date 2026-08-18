@@ -19,6 +19,14 @@
     background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
   .num{font-family:'JetBrains Mono',monospace}
   .up{color:var(--volt)}.dn{color:var(--heat)}
+  /* cc#1090 P3 · THE SEVEN .card BLOCKS NOW CARRY .slab. This rule is LEFT AS IT STANDS on
+     purpose. The shell's ruling-1 override — :root:root:not([data-theme="light"]) .slab, (0,3,0) —
+     beats this (0,1,0) rule whatever the source order, so it takes the clip-path off, squares the
+     radius to 13px and repaints the face. Deleting the cut here instead would strip it from any
+     future block that does NOT take the shell, and the ruling was explicit that it is not a
+     licence to do that. The margins survive: .slab sets no margin, so 0 14px 12px still applies.
+     Padding does move, 16px -> 13px 15px, which is the shell's own face and now matches every
+     other slab in the app. */
   .card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;
     clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
   .eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;letter-spacing:2.5px;color:var(--muted)}
@@ -138,7 +146,7 @@ var E = function(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){re
 function g(o){ var v=o; for(var i=1;i<arguments.length;i++){ if(v==null||typeof v!=='object')return null; v=v[arguments[i]]; } return (v===''?null:v); }
 function fnum(v,dp){ if(v==null||isNaN(Number(v)))return null; return Number(v).toLocaleString('en-IN',{minimumFractionDigits:dp==null?2:dp,maximumFractionDigits:dp==null?2:dp}); }
 function withUnit(v,u){ if(v==null)return '—'; var n=Number(v); var s=(u==='%'||u==='x')?(Math.abs(n)>=100?fnum(n,0):fnum(n,Math.abs(n)<10?2:1)):fnum(n,2); return s+(u||''); }
-function sect(title,inner){ return inner?'<div class="eyebrow">'+E(title)+'</div><div class="card">'+inner+'</div>':''; }
+function sect(title,inner){ return inner?'<div class="eyebrow">'+E(title)+'</div><div class="card slab">'+inner+'</div>':''; }
 function na(w){ return '<div class="navail">'+E(w)+' unavailable — flag to Fable</div>'; }
 function spark(vals,color){
   var vs=vals.map(Number).filter(function(x){return !isNaN(x)});
@@ -168,13 +176,13 @@ function render(d,sym){
   var h='';
   var scores=g(d,'scores')||{};
   if(scores.gvm==null){
-    return '<div class="card"><div class="sym">'+E(sym)+'</div>'
+    return '<div class="card slab"><div class="sym">'+E(sym)+'</div>'
       +'<div class="punch" style="margin-top:10px"><b>Not scored / symbol not found.</b> Check the symbol spelling — GVM covers 1,787 scored stocks. Try e.g. KARURVYSYA, RELIANCE, HDFCBANK.</div></div>';
   }
   var x=g(d,'extras')||{};
   var pct=g(x,'percentile')||{};
   /* HERO */
-  h+='<div class="card hero"><div class="hero-top"><div>'
+  h+='<div class="card slab hero"><div class="hero-top"><div>'
     +'<div class="sym">'+E(d.symbol||sym)+'</div>'
     +'<div class="cname">'+E(d.company_name||'')+(d.segment?' · '+E(d.segment):'')+'</div></div>'
     +(d.verdict?'<div class="verdict">'+E(String(d.verdict).toUpperCase())+'</div>':'')+'</div>'
@@ -210,7 +218,7 @@ function render(d,sym){
   });
   function pcard(letter,label,score,rows,extra){
     if(!rows.length)return sect('PILLAR '+letter,na('parameters'));
-    return '<div class="card"><div class="grp-head"><h3 class="skew" style="color:'+PCOLOR[letter]+'">'+label+' · '+fnum(score,2)+'</h3>'
+    return '<div class="card slab"><div class="grp-head"><h3 class="skew" style="color:'+PCOLOR[letter]+'">'+label+' · '+fnum(score,2)+'</h3>'
       +'<span class="pill-note">'+(letter==='V'?'LOWER = CHEAPER':letter==='M'?'PRICE IS THE PROOF':'RANK OF '+ (d.segment_total||'PEERS'))+'</span></div>'
       +rows.join('')+(extra||'')+'</div>';
   }
@@ -265,13 +273,13 @@ function render(d,sym){
     tape+='<div class="range" style="margin-top:16px"><div class="track" style="background:var(--panel, #0E1526)"><i style="width:100%;background:linear-gradient(90deg,var(--heat) 0 20%,transparent 20% 80%,var(--volt) 80% 100%)"></i><span class="dotp" style="left:'+dp2+'%"></span></div>'
       +'<div class="ends num"><span>S2 '+fnum(piv.s2,0)+' · S1 '+fnum(piv.s1,0)+'</span><span style="color:var(--chalk)">PP '+fnum(piv.pp,0)+'</span><span>R1 '+fnum(piv.r1,0)+' · R2 '+fnum(piv.r2,0)+'</span></div></div>';
   }
-  if(tape)h+='<div class="eyebrow">TAPE FORENSICS</div><div class="card">'+tape+'</div>';
+  if(tape)h+='<div class="eyebrow">TAPE FORENSICS</div><div class="card slab">'+tape+'</div>';
 
   /* LADDER */
   var lad=Array.isArray(d.ladder)?d.ladder:[];
   if(lad.length){
     var gmax=Math.max.apply(null,lad.map(function(p){return Number(p.gvm)||0}))||10;
-    h+='<div class="eyebrow">THE LADDER · '+E(String(d.segment||'PEERS').toUpperCase())+' BY GVM</div><div class="card">'
+    h+='<div class="eyebrow">THE LADDER · '+E(String(d.segment||'PEERS').toUpperCase())+' BY GVM</div><div class="card slab">'
       +lad.map(function(p){
         return '<div class="lrow'+(p.is_self?' self':'')+'"><span class="r num">'+(p.rank||'')+'</span><span class="s">'+E(p.symbol||'')+'</span>'
           +'<div class="lbar"><i style="width:'+Math.round((Number(p.gvm)||0)/gmax*100)+'%"></i></div><span class="gv num">'+(p.gvm!=null?fnum(p.gvm,2):'—')+'</span></div>';
@@ -319,7 +327,7 @@ function render(d,sym){
         +'<svg viewBox="0 0 200 40" preserveAspectRatio="none" style="width:100%;height:52px">'+line2(fii,'#4DD8FF')+line2(dii,'#C8F542')+line2(pub,'#FF9F45')+'</svg>';
     }
   }
-  if(finH)h+='<div class="eyebrow">FINANCIALS</div><div class="card">'+finH+'</div>';
+  if(finH)h+='<div class="eyebrow">FINANCIALS</div><div class="card slab">'+finH+'</div>';
 
   /* STORY */
   var ov=g(d,'content','overview'), kt=g(d,'content','key_takeaway');
