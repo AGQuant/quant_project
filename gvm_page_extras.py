@@ -466,12 +466,25 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"ladder rsi_month (universe_technicals) failed: {e}")
 
             # ── 9. Pull G/V/M components + mcap per ladder ────────────────
+            # cc#1093 P4 — THE MCAP COMES FROM screener_raw NOW, NOT FROM gvm_scores.
+            # The two columns are different SOURCES, not a fresh copy and a stale one:
+            # gvm_scores.market_cap is written by gvm_nightly from input_raw and matches it on
+            # 1,791 of 1,791 scored rows, while matching screener_raw on ZERO. 1,282 rows differ
+            # by more than 5%, averaging 12.5% and reaching 160%. The page header and the 2-Pager
+            # both read screener_raw, so the live GVM card printed two different market caps for
+            # the same company on one screen — BHARATSE header 1,558 against its own ladder row
+            # 1,157.
+            # BINDING ONLY. gvm_scores.market_cap is left exactly as it is, because it is also the
+            # WEIGHT behind the mcap-weighted sector ratings; repointing that is a decision about
+            # which table is the truth for a weight, and it is logged for Fable rather than taken
+            # here. This fixes what is DISPLAYED and moves no rating.
             try:
                 cur.execute("""
-                    SELECT symbol, g_score, v_score, m_score, market_cap
-                    FROM gvm_scores
-                    WHERE symbol = ANY(%s)
-                      AND score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                    SELECT g.symbol, g.g_score, g.v_score, g.m_score, s.market_cap
+                    FROM gvm_scores g
+                    LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+                    WHERE g.symbol = ANY(%s)
+                      AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
                 """, (syms,))
                 for s, g, v, m_s, mcap in cur.fetchall():
                     ladder_extra.setdefault(s, {})
