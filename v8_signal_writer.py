@@ -38,10 +38,11 @@ strict-intersection survivors.
     day_1d>0 strict, gvm_score>=6.5 strict (cc#754 quality gate).
     V5's heavy true_weekly_rsi>=70 stage REMOVED from this basket only. Entry all-day live CMP,
     no CMP>PP/room/hourly gate. Exits fixed +3%/-3% frozen, max hold 15 trading days, standard pool.
-  SELL_REVERSAL V6.1 (_write_sell_reversal_v61_qualified, replaces V5-D): 10 conditions --
+  SELL_REVERSAL V7 (_write_sell_reversal_v61_qualified, cc#1099 spec 25834): 10 conditions --
     R1-touch last 3 days (per-day pair vs that day's pivot), day_1d [-2,0], dma_20/50/200<0,
-    week_index_52<50, sector_week<0 strict, mom_2d [-4,-1], month_return>=-10, FINAL heavy
-    true_weekly_rsi<=45. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror, RAW (no market
+    rsi_month<=35, sector_week<=-0.5, sector_month<=-2.0, mom_2d [-4,-1], month_return>=-10.
+    NO heavy final stage. REGIME-GATED by sector_month, so the basket is silent unless a segment
+    is down 2% on the month. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror, RAW (no market
     gate, no kill-switch), standard SELL slot pool.
   SELL_MOMENTUM V4_N5I (_write_sell_momentum_v4_qualified): 8 conditions, ALL CHEAP (cc#854,
     spec 15366) -- mRSI<40 strict, mom_2d [-4,-1], dma_200<=+2, week_return [-10,-0.5],
@@ -1711,8 +1712,8 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
 
 def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_date: date,
                                        gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#502 SELL_REVERSAL_V6.1 — replaces V5-D. Dedicated strict-AND of 10 conditions, RAW —
-    NO market gate, NO auto kill-switch (founder-locked pattern retained from V5-D):
+    """cc#1099 SELL_REVERSAL_V7 — SECTOR-REGIME GATED. Replaces V6.1 (cc#502). Strict-AND of 10
+    conditions, RAW — NO market gate, NO auto kill-switch (founder-locked pattern kept from V5-D):
       (1) R1-touch last 3 days: any of days d-1,d-2,d-3 had that SAME day's raw_prices HIGH
           >= that SAME day's r1 (per-day pair from v8_paper_pivots history; BOOL_OR over the 3;
           excludes today per backtest convention)
@@ -1720,11 +1721,33 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
       (3) dma_20 < 0
       (4) dma_50 < 0
       (5) dma_200 < 0
-      (6) week_index_52 < 50
-      (7) sector_week < 0 strict
-      (8) mom_2d in [-4, -1]
-      (9) month_return >= -10
-      (10) FINAL heavy stage: true_weekly_rsi <= 45 (TRUE calendar weekly, cc#353)
+      (6) rsi_month <= 35           NEW in V7
+      (7) sector_week <= -0.5       TIGHTENED in V7 (was < 0 strict)
+      (8) sector_month <= -2.0      NEW in V7 — the regime gate
+      (9) mom_2d in [-4, -1]
+      (10) month_return >= -10
+    Plus the room gate (target >= 2% below entry), unchanged.
+
+    WHAT CHANGED FROM V6.1, and it is exactly five things (founder-locked 18-Aug-2026,
+    SELL_REVERSAL_SPEC_V7_SECTOR_REGIME_LOCKED_18AUG, session_log 25834, under
+    BASKET_EDIT_AUTHORITY_RULE 5680):
+        ADD    rsi_month <= 35
+        ADD    sector_month <= -2.0
+        CHANGE sector_week < 0  ->  <= -0.5
+        DROP   week_index_52 < 50
+        DROP   true_weekly_rsi <= 45      (the heavy FINAL stage is gone; V7 is all-cheap)
+    Gate count is 10 before and 10 after: two dropped, two added, one tightened.
+
+    THIS BASKET IS NOW REGIME-GATED AND WILL BE SILENT FOR WEEKS. sector_month <= -2.0 asks for a
+    segment that is DOWN 2% on the month; in a rising or flat tape no segment qualifies and the
+    basket produces nothing. Zero signals is the design working, not a fault, and nothing here may
+    be loosened to manufacture one.
+
+    A NULL sector_month FAILS. It is NULL for the six index symbols and for any segment with too
+    few priced members, and the replay behind this spec used COALESCE(sector_month,0) <= -2.0 —
+    which excludes NULLs. That is reproduced EXPLICITLY below rather than left as a side effect of
+    a comparison, because a None slipping through a float() comparison is exactly how a gate
+    silently stops gating.
     Target = S1 if (cmp-S1)/cmp>=2% else S2 (never beyond S2), else NO signal; Stop = 1:1 mirror
     above entry (unchanged from V5-D). Entry = _auto_paper_entry with the handler-computed FROZEN
     levels, standard SELL slot pool + all standard guards."""
@@ -1751,7 +1774,7 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
             """, (target_date, syms))
             r1_touch = {r[0] for r in cur.fetchall()}
     except Exception as e:
-        log.warning(f"sell_reversal_v61 r1_touch: {e}")
+        log.warning(f"sell_reversal_v7 r1_touch: {e}")
 
     base = []
     for s in all_metrics:
@@ -1778,9 +1801,13 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
         s["_r1_touch"] = s["symbol"] in r1_touch
         base.append(s)
 
-    def _sw_lt0(s):   # sector_week < 0 (STRICT)
+    def _sw_le(s):    # (7) sector_week <= -0.5  — V7 tightened from "< 0 strict"
         v = s.get("sector_week")
-        return v is not None and float(v) < 0.0
+        return v is not None and float(v) <= -0.5
+
+    def _sm_le(s):    # (8) sector_month <= -2.0 — V7 regime gate. NULL FAILS, stated explicitly.
+        v = s.get("sector_month")
+        return v is not None and float(v) <= -2.0
 
     # cc#364-style INDEPENDENT per-filter pass counts across `base`. true_weekly_rsi (heavy) is
     # counted only over the strict-intersection of the 9 cheap gates below (incl. the room gate).
@@ -1790,8 +1817,9 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
     funnel["dma_20"]        = sum(1 for s in base if _passes(s.get("dma_20"), None, 0.0))         # (3)
     funnel["dma_50"]        = sum(1 for s in base if _passes(s.get("dma_50"), None, 0.0))         # (4)
     funnel["dma_200"]       = sum(1 for s in base if _passes(s.get("dma_200"), None, 0.0))        # (5)
-    funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), None, 50.0)) # (6)
-    funnel["sector_week"]   = sum(1 for s in base if _sw_lt0(s))                                  # (7)
+    funnel["rsi_month"]     = sum(1 for s in base if _passes(s.get("rsi_month"), None, 35.0))     # (6)
+    funnel["sector_week"]   = sum(1 for s in base if _sw_le(s))                                   # (7)
+    funnel["sector_month"]  = sum(1 for s in base if _sm_le(s))                                   # (8)
     funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -1.0))        # (8)
     funnel["month_return"]  = sum(1 for s in base if _passes(s.get("month_return"), -10.0, None)) # (9)
     funnel["room"]          = sum(1 for s in base if s["_sr_room_ok"])
@@ -1801,23 +1829,20 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
             and _passes(s.get("dma_20"), None, 0.0)
             and _passes(s.get("dma_50"), None, 0.0)
             and _passes(s.get("dma_200"), None, 0.0)
-            and _passes(s.get("week_index_52"), None, 50.0)
-            and _sw_lt0(s)
+            and _passes(s.get("rsi_month"), None, 35.0)
+            and _sw_le(s)
+            and _sm_le(s)
             and _passes(s.get("mom_2d"), -4.0, -1.0)
             and _passes(s.get("month_return"), -10.0, None)
             and s["_sr_room_ok"]]
-    funnel["_stage9_survivors"] = len(surv)   # denominator for the stage-10 true_weekly_rsi row
-    log.info(f"sell_reversal_v61: {len(surv)} after 9-condition cheap pre-filter")
-
-    qualified = []
-    for s in surv:
-        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
-        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr <= 45.0:               # (10)
-            qualified.append(s)
-    funnel["true_weekly_rsi"] = len(qualified)
+    # V7 HAS NO HEAVY FINAL STAGE. true_weekly_rsi <= 45 was the stage-10 gate and it is DROPPED,
+    # so the cheap strict-AND above is the whole rule set and its survivors ARE the qualified set.
+    # _stage9_survivors is kept as a key so the funnel table's shape does not change under readers
+    # that already chart it; there is simply no stage after it now.
+    funnel["_stage9_survivors"] = len(surv)
+    qualified = surv
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"sell_reversal_v61: {len(qualified)} qualified (true_weekly_rsi<=45) [cc#502]")
+    log.info(f"sell_reversal_v7: {len(qualified)} qualified (10-condition strict AND) [cc#1099]")
 
     try:
         with conn.cursor() as cur:
@@ -1829,7 +1854,7 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
-        log.warning(f"sell_reversal_v61 funnel: {e}")
+        log.warning(f"sell_reversal_v7 funnel: {e}")
 
     for s in qualified:
         sym   = s["symbol"]
@@ -1837,22 +1862,29 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
         entry = round(cmp, 2)
         tgt   = round(s["_sr_target"], 2)
         stop  = round(entry + (entry - tgt), 2)   # 1:1 mirror ABOVE entry (SELL)
+        # cc#1099 FRESH BOOK: every row written from here carries SELL_REVERSAL_V7. V6.1-stamped
+        # rows are never rewritten — performance counts only V7 trades from 19-Aug forward, the
+        # same convention as BUY_REVERSAL_V6_FRESH_BOOK (session_log 7842).
+        # week_index_52 and true_weekly_rsi are still RECORDED even though they no longer gate:
+        # they cost nothing to store and a later review of why a V7 trade was taken is better off
+        # with them than without. Recorded, not applied — the gate list above is the authority.
         snap = {
-            "true_weekly_rsi": s.get("_true_weekly_rsi"),
+            "rsi_month":       s.get("rsi_month"),
+            "sector_month":    s.get("sector_month"),
             "r1_touch":        s.get("_r1_touch"),
             "day_1d":          s.get("day_1d"),
             "dma_20":          s.get("dma_20"),
             "dma_50":          s.get("dma_50"),
             "dma_200":         s.get("dma_200"),
-            "week_index_52":   s.get("week_index_52"),
             "sector_week":     s.get("sector_week"),
             "mom_2d":          s.get("mom_2d"),
             "month_return":    s.get("month_return"),
+            "week_index_52":   s.get("week_index_52"),   # recorded, no longer a gate in V7
             "room_pct":        s.get("_sr_room_pct"),
             "target":          tgt,
             "stop":            stop,
             "filter_score": 10, "filter_total": 10,
-            "spec": "SELL_REVERSAL_V6.1 cc#502",
+            "spec": "SELL_REVERSAL_V7 cc#1099",
         }
         try:
             with conn.cursor() as cur:
@@ -1880,7 +1912,7 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
             _auto_paper_entry(conn, sym, basket, side, cmp, pivots.get(sym),
                               target_date, gate_fails, sim_ts=sim_ts, target=tgt, stop=stop)
         except Exception as e:
-            log.warning(f"sell_reversal_v61 insert {sym}: {e}")
+            log.warning(f"sell_reversal_v7 insert {sym}: {e}")
 
 
 def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date: date,
@@ -2284,19 +2316,22 @@ BASKET_FILTERS = {
         {"key": "day_1d",       "label": "day 1d",       "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
         {"key": "gvm_score",    "label": "gvm score",    "cond_min": ">= 6.5",  "cond_max": "",     "min": 6.5,   "max": None,  "type": "band", "strict": True},
     ],
-    # SELL_REVERSAL_V6.1 (cc#502) — 10 cheap conditions + heavy true_weekly_rsi<=45 FINAL stage.
+    # SELL_REVERSAL_V7 (cc#1099, spec 25834) — 10 cheap conditions, NO heavy FINAL stage.
+    # Five changes from V6.1 and no others: rsi_month and sector_month ADDED, sector_week TIGHTENED
+    # to <= -0.5, week_index_52 and true_weekly_rsi DROPPED. The row order below follows the
+    # handler's own numbering so the funnel card reads in the order the gates are applied.
     "sell_reversal": [
-        {"key": "r1_touch",       "label": "R1 touch (last 3 days)", "cond_min": "",       "cond_max": "",      "min": None,   "max": None, "type": "custom"},
-        {"key": "day_1d",         "label": "day change",   "cond_min": ">= -2",  "cond_max": "<= 0",  "min": -2.0,  "max": 0.0,  "type": "band"},
-        {"key": "dma_20",         "label": "dma 20",       "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
-        {"key": "dma_50",         "label": "dma 50",       "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
-        {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
-        {"key": "week_index_52",  "label": "52w index",    "cond_min": "",       "cond_max": "< 50",  "min": None,  "max": 50.0, "type": "band", "strict": True},
-        {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
-        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1", "min": -4.0,  "max": -1.0, "type": "band"},
-        {"key": "month_return",   "label": "month return", "cond_min": ">= -10", "cond_max": "",      "min": -10.0, "max": None, "type": "band"},
-        {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",      "min": None,  "max": None, "type": "custom"},
-        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 45", "min": None,  "max": 45.0, "type": "band", "heavy": True, "denom_key": "_stage9_survivors"},
+        {"key": "r1_touch",       "label": "R1 touch (last 3 days)", "cond_min": "",       "cond_max": "",       "min": None,   "max": None, "type": "custom"},
+        {"key": "day_1d",         "label": "day change",   "cond_min": ">= -2",  "cond_max": "<= 0",   "min": -2.0,  "max": 0.0,  "type": "band"},
+        {"key": "dma_20",         "label": "dma 20",       "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_50",         "label": "dma 50",       "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "<= 35",  "min": None,  "max": 35.0, "type": "band"},
+        {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "<= -0.5","min": None,  "max": -0.5, "type": "band"},
+        {"key": "sector_month",   "label": "sector month", "cond_min": "",       "cond_max": "<= -2.0","min": None,  "max": -2.0, "type": "band"},
+        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1",  "min": -4.0,  "max": -1.0, "type": "band"},
+        {"key": "month_return",   "label": "month return", "cond_min": ">= -10", "cond_max": "",       "min": -10.0, "max": None, "type": "band"},
+        {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
     ],
     # SELL_MOMENTUM_V4_N5I (cc#854, spec 15366) — 8 cheap gates, NO heavy FINAL stage.
     "sell_momentum": [
@@ -2342,7 +2377,7 @@ BASKET_FILTERS = {
 # Header-pill spec label per basket (dashboard reads this via /api/v8/filters).
 BASKET_SPEC = {
     "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
-    "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
+    "sell_reversal": {"version": "V7", "cc": "cc#1099", "label": "Sell Reversal V7"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
     "buy_momentum":  {"version": "V5",   "cc": "cc#1051", "label": "Buy Momentum V5"},
 }
