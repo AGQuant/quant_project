@@ -57,7 +57,9 @@ function tapAn(sym){
 function dayCard(d){
   var v8n = d.companies.filter(function(c){return c.in_v8;}).length;
   var sorted = d.companies.slice().sort(function(a,b){ return (b.in_v8?1:0)-(a.in_v8?1:0); });
-  return '<div class="c ref"><div class="meta"><span class="dy">'+esc(d.label).toUpperCase()+'</span>'
+  /* cc#1090 P7 dense sweep: the page asks for days=10, so ten day cards. The .rrow company
+     rows INSIDE this card stay flat — slab-in-slab is the violation P8 greps for. */
+  return '<div class="c ref slab dense"><div class="meta"><span class="dy">'+esc(d.label).toUpperCase()+'</span>'
     + '<span class="tag cat">'+d.n+' companies</span>'
     + (v8n?'<span class="tag bull">'+v8n+' in V8</span>':'')
     + '</div>' + sorted.map(row).join('') + '</div>';

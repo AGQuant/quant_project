@@ -47,7 +47,8 @@ function strip(sym){
 }
 function card(p){
   var short_=(p.side||'')==='SHORT';
-  return '<div class="c '+(short_?'short':'long')+'">'
+  /* cc#1090 P7 dense sweep: 21 open V8 paper positions today, past the 8-row line. */
+  return '<div class="c slab dense '+(short_?'short':'long')+'">'
     + '<div class="meta">'
     + '<span class="tag '+(short_?'bear':'bull')+'">'+esc(p.side)+'</span>'
     + '<span class="tag cat">'+esc(p.basket||'')+'</span>'

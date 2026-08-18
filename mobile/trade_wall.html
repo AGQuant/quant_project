@@ -115,7 +115,8 @@ function evClass(e){
 
 function card(e){
   var sideCls = (e.side === 'SHORT' || e.side === 'SELL') ? 'tw-short' : 'tw-long';
-  var h = '<div class="tw-card">'
+  /* cc#1090 P7 dense sweep: the wall pages 40 events at a time and scrolls on. */
+  var h = '<div class="tw-card slab dense">'
     + '<div class="tw-top">'
       + '<span class="tw-ev ' + evClass(e) + '">' + esc(e.event) + '</span>'
       + '<span class="tw-sym">' + esc(e.symbol) + '</span>'

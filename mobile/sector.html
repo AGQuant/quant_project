@@ -34,7 +34,8 @@ function row(s){
   var n=s.companies!=null?s.companies:(s.count!=null?s.count:s.n);
   var col=scoreCol(score==null?null:Number(score));
   var w=score==null?0:Math.max(0,Math.min(100,Number(score)*10));
-  return '<div class="se-srow"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
+  /* cc#1090 P7 dense sweep: sector_ratings holds 130 rows, all rendered. */
+  return '<div class="se-srow slab dense"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
     + (n!=null?'<div class="sub2">'+n+' companies</div>':'')+'</div>'
     + '<div class="bar"><div class="fill" style="width:'+w+'%;background:'+col+'"></div></div>'
     + '<span class="sc" style="color:'+col+'">'+n1(score)+'</span></div>';

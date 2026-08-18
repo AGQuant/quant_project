@@ -54,7 +54,9 @@ function stockCard(r,labels){
     if (shown==null) return;
     kvs+='<div class="kv2">'+esc((labels&&labels[k])||k.replace(/_/g,' '))+' <b>'+shown+'</b></div>';
   });
-  return '<div class="c"><div class="sc-srow"><span class="sy">'+esc(sym)+'</span>'
+  /* cc#1090 P7 dense sweep: v13_screen_results holds 3 to 152 rows per screen, five of the
+     seven screens over the 8-row line. */
+  return '<div class="c slab dense"><div class="sc-srow"><span class="sy">'+esc(sym)+'</span>'
     + strip(sym)
     + (cmp!=null?'<span class="px2">'+num(cmp)+'</span>':'')
     + (day!=null?'<span class="dd '+cls(day)+'">'+(day>=0?'+':'')+num(day,2)+'%</span>':'')
