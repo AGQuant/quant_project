@@ -1824,6 +1824,33 @@ def _bg_gvm():
                                         duration_ms=int((time.time() - _sc_t0) * 1000))
         except Exception as _re:
             log.warning(f"record_run(screeners_eod) failed: {_re}")
+
+        # cc#1095 P2 — THE COVERAGE GUARD, CHAINED FOR THE SAME REASON screeners_eod IS CHAINED.
+        # The card asks for "daily AFTER the GVM recompute". A fixed wall-clock slot would race the
+        # very job it depends on and, on a night GVM ran late, would measure yesterday's scored
+        # universe while reporting today's date — which is precisely the class of silent wrongness
+        # this sprint exists to end. Chained, it cannot measure a universe that has not been
+        # rebuilt yet.
+        # RECORDED EXPLICITLY, because a chained job never passes through _spawn and record_run
+        # would never fire for it — cc#841 part_2's lesson, and the registry would otherwise show
+        # "never run" for a job running every night.
+        # A guard failure must NEVER mark the GVM run bad: it measures, it does not produce.
+        _cg_t0 = time.time()
+        _cg_status, _cg_err, _cg_msg = "ok", None, None
+        try:
+            import gvm_coverage_guard
+            with _conn() as cgconn:
+                _cg_msg = (gvm_coverage_guard.alert(cgconn) or {}).get("message")
+            log.info("cc#1095 coverage guard: %s", _cg_msg)
+        except Exception as e:
+            _cg_status, _cg_err = "error", str(e)[:400]
+            log.error(f"cc#1095 gvm_coverage_guard: {e}")
+        try:
+            import scheduler_master
+            scheduler_master.record_run("gvm_coverage_guard", _cg_status, error=_cg_err,
+                                        duration_ms=int((time.time() - _cg_t0) * 1000))
+        except Exception as _re:
+            log.warning(f"record_run(gvm_coverage_guard) failed: {_re}")
     except Exception as e: log.error(f"gvm: {e}")
 
 def _bg_gvm_backfill():

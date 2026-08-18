@@ -34,6 +34,7 @@ screener_raw. A metric is only blind for companies that are actually being score
 Run standalone:  python3 gvm_coverage_guard.py
 """
 
+import json as _json
 import logging
 import os
 
@@ -159,6 +160,58 @@ def coverage(conn=None):
             conn.close()
 
 
+def alert(conn=None):
+    """cc#1095 P2 — write ONE ops_log row per run, and return what it wrote.
+
+    THE ROW GOES IN EVERY RUN, not only on a finding. A guard that writes only when it is unhappy
+    is indistinguishable from a guard that is not running, which is the exact failure this whole
+    sprint exists to end: cc#1094 was a metric that had been blind since the day it was added and
+    nothing anywhere said so. A row saying "17 metrics, 1 under 50%, 2 between 50 and 90" is the
+    evidence that the check happened; silence would not be.
+
+    Category and title are fixed by the card: category='alert', title='GVM_METRIC_COVERAGE'. The
+    details payload carries the counts plus the offending metric list, so a reader never has to
+    re-run the query to know what tripped.
+    """
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        rep = coverage(conn)
+        thin = [{"metric": r["metric"], "label": r["label"], "source": r["source"],
+                 "pct": r["pct"], "resolved": r["resolved_filled"], "universe": r["universe"]}
+                for r in rep["alert"]]
+        warn = [{"metric": r["metric"], "label": r["label"], "source": r["source"],
+                 "pct": r["pct"], "resolved": r["resolved_filled"], "universe": r["universe"]}
+                for r in rep["warn"]]
+        unread = [{"metric": r["metric"], "source": r["source"], "error": r["error"]}
+                  for r in rep["unreadable"]]
+        # An unreadable metric is LOUDER than a thin one — a source column that cannot be read at
+        # all is a schema problem, not a data problem — so it is counted into the headline.
+        n_bad = len(thin) + len(unread)
+        msg = ("%d scored metrics · %d under %g%% · %d between %g and %g%% · %d unreadable"
+               % (len(rep["metrics"]), len(thin), ALERT_PCT, len(warn), ALERT_PCT, WARN_PCT,
+                  len(unread)))
+        details = {
+            "message": msg,
+            "universe": rep["universe"],
+            "metrics_checked": len(rep["metrics"]),
+            "alert_pct": ALERT_PCT, "warn_pct": WARN_PCT,
+            "under_alert": thin, "warn_band": warn, "unreadable": unread,
+            "clean": n_bad == 0,
+        }
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)",
+                ("GVM_METRIC_COVERAGE", _json.dumps(details)))
+        conn.commit()
+        (log.error if n_bad else log.info)("GVM_METRIC_COVERAGE: %s", msg)
+        return details
+    finally:
+        if own:
+            conn.close()
+
+
 def _fmt(rep):
     w = max(len(r["metric"]) for r in rep["metrics"])
     out = ["scored universe: %d symbols" % rep["universe"], ""]
@@ -180,4 +233,10 @@ def _fmt(rep):
 
 
 if __name__ == "__main__":
-    print(_fmt(coverage()))
+    import sys
+    if "--alert" in sys.argv:
+        # cc#1095 P2: the same call the scheduler makes, so a hand run and the nightly run cannot
+        # diverge. Prints what it wrote so a first-run check needs no second query.
+        print(_json.dumps(alert(), indent=2, default=str))
+    else:
+        print(_fmt(coverage()))
