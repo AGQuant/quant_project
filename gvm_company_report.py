@@ -427,7 +427,14 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 c = _cov.get(p["key"])
                 if c:
                     p["source_coverage"] = c
+            _cov_err = None
         except Exception as _ce:
+            # NOT SILENT. The first deploy of P3 stamped nothing and the payload gave no reason —
+            # a swallowed exception behind a log line I cannot read from here is the same
+            # "looks fine, is blind" failure this sprint exists to end (SWALLOWED_EXCEPTION_RULE).
+            # The reason now travels WITH the payload, so the next reader sees the cause instead of
+            # an absent field. The report still renders: a diagnostic must never take the page down.
+            _cov_err = "%s: %s" % (type(_ce).__name__, str(_ce)[:200])
             log.warning("cc#1095 P3: source_coverage unavailable (%s)", _ce)
 
         # Positives / negatives (top-3 strongest & weakest rated params)
@@ -469,6 +476,8 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         "pillar_coverage": pillar_coverage,      # cc#828 part_3: {score_key:{scored,total,excluded}}
         "native_fallback_used": native_used,     # cc#828 part_2: {screener_col: n_peers_backfilled}
         "parameters": params_out,
+        # cc#1095 P3: null when the coverage map resolved, a reason string when it did not.
+        "source_coverage_error": _cov_err,
         "segment_ladder": ladder,
         "positives": positives,
         "negatives": negatives,

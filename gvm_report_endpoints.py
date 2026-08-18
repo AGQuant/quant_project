@@ -721,6 +721,9 @@ def gvm_company_report(symbol: str):
             "m":   base.get("m_score"),
         },
         "benchmark":    benchmark,
+        # cc#1095 P3: why source_coverage is absent, when it is. Carried out to the payload
+        # rather than left in a server log nobody can read from the outside.
+        "source_coverage_error": base.get("source_coverage_error"),
         # cc#828 part_3: {track_score|val_score|outlook_score|reliability_score|tech_score:
         #   {scored, total, excluded}} — the denominator behind each pillar average, so the popout
         # can print "M over 3/5 metrics" instead of implying every metric was measured.
