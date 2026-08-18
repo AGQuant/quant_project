@@ -1355,10 +1355,29 @@ def _bg_tc_screener_precompute():
         log.info(f"tc_screener_precompute: {res.get('rows') if isinstance(res, dict) else res} rows")
     except Exception as e: log.error(f"tc_screener_precompute: {e}")
 
+# cc#1095 P5 — a day this far below the previous one is not SHRINKING, it is still ARRIVING.
+# 0.5 is deliberately generous: a real coverage collapse worth alerting on has never approached
+# halving, and the false alarms it must kill were at 4.5% (83 of 1,825). Anything between the two
+# is still caught by the >10 rule below.
+_SHRINK_INCOMPLETE_FRACTION = 0.5
+
+
 def _check_universe_shrink(conn):
     """Task #35: after the nightly EOD load, alert if raw_prices symbol coverage
     dropped sharply vs the prior trading day — catches silent partial loads (the
-    17-Jun 1717→1676 drop went unnoticed). Threshold: >10 symbols."""
+    17-Jun 1717→1676 drop went unnoticed). Threshold: >10 symbols.
+
+    cc#1095 P5 — IT MUST NOT COMPARE A DAY THAT IS STILL INGESTING. The check took the two most
+    recent price_dates whatever state they were in, so on 17-Aug it read 1,825 → 83 and raised a
+    1,742-symbol alarm (cc_task_logs 2724) against a day that finished at 1,819. An alert that
+    cries wolf at 1,742 is worse than no alert: the next real one is read as noise.
+
+    The gate is a floor on the newer day rather than an ingest-completion marker, because no such
+    marker exists in this schema and inventing a table for one check would be the heavier fix. A
+    day under half the previous day's coverage is recorded as INCOMPLETE — visibly, in ops_log, not
+    silently — and no shrink alert fires. A real shrink, 1,819 → 1,779 (cc_task_logs 2725, 2.2%),
+    still clears the gate and still alerts, which is the behaviour worth keeping.
+    """
     try:
         with conn.cursor() as cur:
             cur.execute("""SELECT price_date, COUNT(DISTINCT symbol)
@@ -1368,6 +1387,17 @@ def _check_universe_shrink(conn):
         if len(rows) < 2:
             return
         (today_d, today_n), (prev_d, prev_n) = rows[0], rows[1]
+        # THE GATE. Recorded either way — an incomplete day is a finding, and this sprint exists
+        # because things that were merely absent read as things that were fine.
+        if prev_n and today_n < prev_n * _SHRINK_INCOMPLETE_FRACTION:
+            _log_alert("universe_shrink_incomplete",
+                       f"raw_prices {today_d} holds {today_n} symbols against {prev_n} on "
+                       f"{prev_d} ({today_n * 100.0 / prev_n:.1f}%) — treated as STILL INGESTING, "
+                       f"not as a shrink. No shrink alert raised; the comparison needs two "
+                       f"complete days.")
+            log.warning("universe_shrink: %s incomplete (%s vs %s) — skipped",
+                        today_d, today_n, prev_n)
+            return
         drop = prev_n - today_n
         if drop <= 10:
             return
