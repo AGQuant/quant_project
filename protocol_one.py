@@ -189,6 +189,20 @@ def _scheduler_health(cur, now):
         if due is None:
             unscheduled += 1
             continue
+        # cc#1093 P2 — A JOB INSIDE ITS OWN DUE MINUTE IS NOT LATE. Protocol One ran at 15:40:00.4
+        # and flagged bg_heal_intraday, whose slot is 15:40: last_due had just returned today
+        # 15:40, four tenths of a second earlier, so the job was being judged for missing a slot it
+        # had not yet been offered. It is due NOW, not overdue.
+        #
+        # The existing `grace` does the opposite job — it forgives a run that FINISHED slightly
+        # before its due time — so it could never cover this. This is the other end of the same
+        # window and it is exactly the card's wording: grace is its own due minute.
+        #
+        # Deliberately the minute and not more. A wider window (say the full 10 minutes) would also
+        # hide a job that genuinely missed its slot for nine of them, and that is a judgement about
+        # how long a slot may quietly slip — a decision, not a bug fix. Logged for Fable instead.
+        if due.replace(second=0, microsecond=0) == now.replace(second=0, microsecond=0):
+            continue
         if last_run is None or last_run < due - grace:
             late.append((name, str(due), str(last_run) if last_run else "never"))
     colour = "RED" if errored else ("AMBER" if late else "GREEN")
