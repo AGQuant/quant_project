@@ -182,7 +182,12 @@ function card(a, mode){
     ? '<div class="syms">' + a.symbols.slice(0, 6).map(function(s){
         return '<span class="sy">' + esc(s) + '</span>'; }).join('') + '</div>' : '';
 
-  return '<div class="c ' + (isEd ? 'ed ' : '') + edge + '">'
+  /* cc#1090 P4: the news card takes the shell, and takes .dense with it. This feed runs 40 items
+     — the exact case the modifier exists for, since fifteen full 5px ledges down a screen stop
+     reading as depth and start reading as stripes. The card stays tappable (Read > expands it in
+     place), so it is a slab and not a pressed block. The .ed and edge modifier classes are
+     untouched: they carry the 3px sentiment rail, which is the money language, not the shell. */
+  return '<div class="c slab dense ' + (isEd ? 'ed ' : '') + edge + '">'
     + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
     + '<div class="hl">' + esc(a.headline) + '</div>'
     + bodyHtml + syms

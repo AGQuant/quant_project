@@ -20,6 +20,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .eyebrow{display:flex;align-items:center;gap:10px;margin:20px 18px 10px;font-size:11px;font-weight:700;
  letter-spacing:2.5px;color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
 .eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+/* cc#1090 P4 · TEN OF THE TWELVE .card BLOCKS TAKE .slab. Two do NOT, and that is the card's own
+   line: "digest tape blocks stay flat; only the content cards take the shell." The two flat ones
+   are GLOBAL TAPE and INTERNALS — both are grids of .tile readouts rather than something you read
+   a sentence from, and raising a block whose whole content is already raised tiles is the mud the
+   nesting rule warns about. They are also exactly what P6 owns (raised tiles .slab, inner readouts
+   .well), so leaving them here would be deciding P6 early.
+   This rule is left standing: the ruling-1 override at (0,3,0) takes the cut off the ten that
+   adopted and leaves it on the two that did not — which is the point of overriding rather than
+   deleting. */
 .card{background:var(--panel);border:1px solid var(--edge);margin:0 14px 12px;padding:16px;position:relative;
  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
 .rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:4px;background:var(--rc,var(--amber))}
@@ -70,7 +79,7 @@ document.body.setAttribute('data-theme','goldnight');})();</script>
     <div class="s" id="dd-date">THE MORNING READ</div></div>
   <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
 </div>
-<div id="app"><div class="card"><div class="unavail">Building the read…</div></div></div>
+<div id="app"><div class="card slab"><div class="unavail">Building the read…</div></div></div>
 <div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
 </div>
 
@@ -134,7 +143,7 @@ async function boot(){
     eng=(t.trades||[]).filter(r=>String(r.exit_ist||'').slice(0,2)===ymd).slice(0,4);
   }catch(e){}
   if(!d||d.error||!d.sections){
-    document.getElementById('app').innerHTML=`<div class="card"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
+    document.getElementById('app').innerHTML=`<div class="card slab"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
     return;
   }
   const S=d.sections, mr=d.market_read||{};
@@ -173,7 +182,7 @@ async function boot(){
      <span style="flex:1">${esc(n.headline)}</span></div>`).join('')||'<div class="unavail">No items.</div>';
 
   document.getElementById('app').innerHTML=`
-  <div class="card rail" style="--rc:${railC};margin-top:12px">
+  <div class="card slab rail" style="--rc:${railC};margin-top:12px">
     <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">MARKET READ</div>
     <span class="skew" style="font-size:36px;line-height:.95">${esc(mr.bias||'—')}</span>
     <div style="height:6px;width:150px;background:linear-gradient(90deg,var(--chalk),transparent);transform:skewX(-24deg);margin:6px 0 10px;opacity:.85"></div>
@@ -190,7 +199,7 @@ async function boot(){
   </div>
 
   <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
-  <div class="card">${lad.length?lad.map(ladder).join(''):'<div class="unavail">No ladder data.</div>'}
+  <div class="card slab">${lad.length?lad.map(ladder).join(''):'<div class="unavail">No ladder data.</div>'}
     <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>
 
@@ -208,12 +217,12 @@ async function boot(){
   </div>
 
   <div class="eyebrow">ENGINE YESTERDAY · V10</div>
-  <div class="card">${engRows}
+  <div class="card slab">${engRows}
     <div style="margin-top:10px;font-size:12px;color:var(--muted)">Full desk → <a class="plink" href="/m/v10">INDEX INTEL</a></div>
   </div>
 
   <div class="eyebrow">REPORTING TODAY</div>
-  <div class="card">
+  <div class="card slab">
     <div class="grp"><h3>${rep.count!=null?rep.count+' companies':'—'}</h3><span class="note">TOP BY MARKET CAP</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:7px">
       ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip">${esc(c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
@@ -221,7 +230,7 @@ async function boot(){
   </div>
 
   <div class="eyebrow">YESTERDAY'S RESULTS · SCORED</div>
-  <div class="card">
+  <div class="card slab">
     <div class="grp"><h3>Top ${(yr.companies||[]).length} of ${yr.reported_total!=null?yr.reported_total:'—'}</h3>
       <span class="note"><b style="color:var(--volt)">${tally.bullish||0} bull</b> · <b style="color:var(--heat)">${tally.cautious||0} caut</b> · <b style="color:var(--muted)">${tally.neutral||0} neut · ${tally.pending||0} pending</b></span></div>
     ${yrRows}
@@ -229,12 +238,12 @@ async function boot(){
   </div>
 
   <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
-  <div class="card">${newsRows(wm)}</div>
+  <div class="card slab">${newsRows(wm)}</div>
 
   <div class="eyebrow">GLOBAL EVENTS</div>
-  <div class="card">${newsRows(ge)}</div>
+  <div class="card slab">${newsRows(ge)}</div>
 
-  <div class="card rail" style="--rc:${railC}">
+  <div class="card slab rail" style="--rc:${railC}">
     <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
