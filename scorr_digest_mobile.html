@@ -58,8 +58,28 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .sdot{width:7px;height:7px;border-radius:50%;flex:none}
 .plink{color:var(--pulse);font-weight:700;font-size:12.5px;text-decoration:none}
 .foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
-.ladder{display:flex;align-items:center;gap:0;margin-top:8px}
-.rung{flex:1;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
+/* cc#1096 R7-D2 · THE PIVOT ROW COULD NOT HOLD ITS COLUMNS. Founder frame 1:44: BANKNIFTY read
+   56,69757,09457,55557,952 as one string, with the last value clipped mid-digit at the card edge.
+
+   WHAT WAS ACTUALLY WRONG, and it is three things stacked, not one:
+     gap:0        there was NO column separation at all. Five numbers sat shoulder to shoulder and
+                  the only thing keeping them apart was slack inside each cell — luck, not layout.
+     flex:1 with the default min-width:auto means a cell can never shrink below its own text, so
+                  the moment a value is wider than its share the row grows past the card instead
+                  of the columns giving way.
+     nothing capped the overflow, so the spill landed under .card's clip-path and lost digits.
+   At default text scale on a 360px viewport the values measure 28px in a 60px cell and it looks
+   fine, which is why this survived review. It is one text-width step from breaking, and Chrome
+   for Android's text scaling is exactly that step.
+
+   THE FIX IS THE GRID, so the columns are declared instead of emergent: five equal tracks, a real
+   6px gutter, min-width:0 so tracks share fairly, and overflow-x:auto so that if the content
+   genuinely cannot fit, the row SCROLLS rather than hiding a digit. Nothing here touches a pivot
+   value or the maths behind it — the numbers are rendered exactly as before. */
+.ladder{display:grid;grid-template-columns:repeat(5,minmax(max-content,1fr));gap:6px;align-items:start;
+ margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.rung{min-width:0;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
+.rung b{display:block;white-space:nowrap;margin-top:2px}
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
 </style>
 </head>
