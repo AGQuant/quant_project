@@ -357,6 +357,42 @@
 :root:root:not([data-theme="light"]) .bn.on::before{ background:#D4AF37; }
 :root:root:not([data-theme="light"]) .bn{ font-size:11px; }
 :root:root:not([data-theme="light"]) .bn .i{ font-size:16px; }
+
+/* ─── cc#1096 R7-D1 · THE OTHER NAV. THERE ARE TWO, AND ONLY ONE WAS EVER FIXED ─────────────
+   Founder recording, frame 1:36: the Daily Digest's bottom nav renders PURPLE while Home renders
+   aqua with a gold active marker. Reproduced at the founder's 720px width before writing a line:
+     Home    .bnav/.bn      Home gold 212,175,55 · other four aqua 53,224,255
+     Digest  .as-nav/.as-bn all five purple 124,92,255
+   Purple is #7C5CFF = --r5-pulse, and cc#1074 took it out of headings in favour of aqua.
+
+   THE CAUSE IS cc#1071'S OWN CAUSE, MISSED ONCE MORE. That block, forty lines above, explains it
+   exactly: nothing paints these purple — rule 5 says `a{color:var(--r5-pulse)}` at (0,3,1) and a
+   nav tab is an <a>, so the one interactive rule swallows the whole navigation. cc#1071 took
+   `.bn` and `.tool` back out of it at (0,4,0). It did not know about `.as-bn`, because the app
+   has TWO nav implementations, not one:
+     .bnav / .bn      16 templates under mobile/
+     .as-nav / .as-bn scorr_digest_mobile.html · scorr_gvm_fightcard.html · scorr_v10_signal.html
+   The appshell nav was never added to the exception, so on those three pages rule 5 still wins.
+   Same shape as that block's own note about pass 1 guessing .tabs/.tab.
+
+   THE SLOT HALF OF THE DEFECT IS NOT REPRODUCIBLE AT HEAD, and the evidence says why. Both navs
+   carry the identical five slots — Home · GVM · Check · Intel · Models, verified in the rendered
+   DOM. A V8 slot DID exist in mobile/home.html and was replaced by Models in commit 2a2c1fe
+   (cc#886, 07-Aug-2026 10:20 UTC). The recorded Home frame shows a nav that no file in the repo
+   has produced since that commit, so that half is a stale page on the device, not a live defect.
+   Logged for Fable rather than fixed here, because a cache is not a CSS problem.
+
+   COLOUR ONLY, and it mirrors .bn line for line rather than inventing a treatment. */
+/* the BAR too, not only the labels. Measured before: .bnav computed #0A101E from section 4 above
+   while .as-nav computed rgb(19,19,22) from its own var(--panel) — close enough to miss in a
+   screenshot and wrong enough that the two navs are not the same object. Section 4 already fixes
+   the value for .bnav, so this points at the same literal rather than a second token. */
+:root:root:not([data-theme="light"]) .as-nav{ background:#0A101E; }
+:root:root:not([data-theme="light"]) .as-bn{ color:var(--r5-aqua); font-size:11px; }
+:root:root:not([data-theme="light"]) .as-bn span{ opacity:.85; font-size:16px; }
+:root:root:not([data-theme="light"]) .as-bn.on{ color:#D4AF37 !important; text-shadow:0 0 10px rgba(212,175,55,.35); }
+:root:root:not([data-theme="light"]) .as-bn.on span{ opacity:1; }
+:root:root:not([data-theme="light"]) .as-bn.on::before{ background:#D4AF37; }
 /* tools grid: 12px labels, 19px gold-glow icons, per the goldnight ref */
 :root:root:not([data-theme="light"]) .tool{ font-size:12px; }
 :root:root:not([data-theme="light"]) .tool span{ font-size:19px; color:#D4AF37; text-shadow:0 0 10px rgba(212,175,55,.35); }
