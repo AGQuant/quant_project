@@ -82,7 +82,10 @@ function holding(h){
 }
 function card(b,i){
   var open=STATE.open===i;
-  var h='<div class="c'+((b.unrealised||0)>=0?' bull':' bear')+'">'
+  /* cc#1090 P5: the basket card takes the shell. Tappable — tog(i) opens its holdings inside the
+     card — so slab, not pressed. NOT dense: six baskets carry open positions today, well under the
+     8-row line. bull/bear stay: that rail is the P&L language and the shell never touches it. */
+  var h='<div class="c slab'+((b.unrealised||0)>=0?' bull':' bear')+'">'
     + '<div class="bh" onclick="tog('+i+')">'
     + '<span class="n">'+esc(b.label)+'<div class="meta" style="margin:3px 0 0">'
     + '<span class="tag cat">'+b.positions+' stocks</span>'

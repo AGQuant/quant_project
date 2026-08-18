@@ -108,7 +108,10 @@ function gaps(x){
 function card(x, i, open){
   var gp = gaps(x);
   var short_ = (x.side || '').toUpperCase() === 'SHORT';
-  var h = '<div class="v" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(event,' + i + ')">'
+  /* cc#1090 P5: the verdict card takes the shell, dense. It is tappable — toggle() opens the gap
+     list — and the endpoint serves up to 50 rows with 20 as the default, so it is past the 8-row
+     line the modifier exists for. --vc is untouched: the verdict rail is the score language. */
+  var h = '<div class="v slab dense" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(event,' + i + ')">'
     + '<div class="v1"><span class="vsym">' + esc(x.symbol) + '</span>'
     + '<span class="vside' + (short_ ? ' sh' : '') + '">' + esc(x.side || '') + '</span>'
     + strip(x.symbol)

@@ -76,7 +76,11 @@ function stateBits(st){
 
 function tile(m){
   var b = stateBits(m.state);
-  return '<a class="m ' + b.cls + '" href="' + esc(m.href) + '" title="' + esc(m.why || '') + '">'
+  /* cc#1090 P5: the model tile takes the shell. It is an <a> — tapping it goes somewhere, which is
+     the whole decision rule for slab. NOT dense: model_registry holds 8 rows, 6 of them public, so
+     this list never reaches the 8-row line. The state classes (live/stale/error/off/notrun) and
+     the shape glyph are untouched — those carry whether an engine is breathing. */
+  return '<a class="m slab ' + b.cls + '" href="' + esc(m.href) + '" title="' + esc(m.why || '') + '">'
     + '<div class="mtop"><span class="mnm">' + esc(m.name) + '</span>'
     + (m.on_mobile ? '' : '<span class="tag cat">WEB</span>')
     + '<span class="badge ' + b.cls + '"><span class="' + b.glyph + '"></span>' + esc(m.state) + '</span></div>'
