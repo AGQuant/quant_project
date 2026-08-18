@@ -95,6 +95,14 @@ html,body{margin:0;padding:0;background:var(--bg);}
   var ALL=[], VIEW='cards', SORT={key:'pnl_pct',dir:-1};
   function clientName(p){ return (p.client&&p.client.name)||p.name||('Portfolio '+p.id); }
   function asOf(p){ return (p.client&&p.client.tracking_date)||p.created_at; }
+  /* cc#1098 — THE TRACKING START DATE, AND ONLY THAT. asOf() above falls back to created_at when
+     tracking_date is NULL, which is fine for a freshness stamp and WRONG under a "from" label: it
+     would print the moment the portfolio row was created as if it were the day the client's money
+     started being tracked. Portfolio 181 has a NULL tracking_date today, so this is a live path,
+     not a hypothetical. No fallback here, deliberately — a missing start date is shown by SAYING
+     NOTHING, never by substituting a different date that happens to be available.
+     asOf() is left exactly as it is; the table view still uses it. */
+  function startDate(p){ return (p.client && p.client.tracking_date) || null; }
   function filtered(){ var q=(searchEl.value||'').trim().toLowerCase();
     return q?ALL.filter(function(p){ return clientName(p).toLowerCase().indexOf(q)>-1; }):ALL.slice(); }
   function setView(v){ VIEW=v; try{ sessionStorage.setItem('adx_view',v); }catch(e){}
@@ -107,7 +115,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var cards=ps.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)'));
       return '<a class="card" href="/health?pid='+p.id+'&wl=1">'
         + '<div class="nm">'+esc(clientName(p))+'</div>'
-        + '<div class="meta">as of '+dmy(asOf(p))+' · '+(p.n_holdings||0)+' holdings</div>'
+        /* cc#1098: client id · tracking start · holdings, on ONE line. The "from" segment is
+           dropped entirely when there is no tracking_date, so the line reads "#181 · 25 holdings"
+           rather than carrying an empty or invented date. Same .meta class, same font size. */
+        + '<div class="meta">#'+esc(p.id)
+          + (startDate(p) ? ' · from '+dmy(startDate(p)) : '')
+          + ' · '+(p.n_holdings||0)+' holdings</div>'
         + '<div class="strip">'
         +   '<div class="b"><div class="l">Invested</div><div class="v">'+inr(p.invested)+'</div></div>'
         +   '<div class="b"><div class="l">Current</div><div class="v">'+inr(p.current)+'</div></div>'
