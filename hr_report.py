@@ -139,13 +139,23 @@ def _load_screener(cur, syms):
 
 
 def _load_input(cur, syms):
+    # cc#1104: market_cap is GONE from this SELECT. It was the second reader of
+    # input_raw.market_cap in the codebase and the only one outside gvm_nightly — found by reading
+    # rather than by grep, because the column name and the table name sit on different lines.
+    # It was also DEAD: the "mcap" key it produced is never consumed anywhere in this module.
+    # Removing it is what lets the column be dropped at all; leaving it would have turned a planned
+    # ALTER TABLE into a broken HR report.
+    # (_load_screener above still selects screener_raw.market_cap into an equally unused "mcap" key.
+    # That one is harmless — it reads the surviving source — so it is named here rather than tidied
+    # away inside a card about which table owns the number.)
+    # cap_category and mcap_rank STAY. They are stored band columns this card does not move.
     cur.execute("""SELECT nse_code, company_name, gvm_segment, cap_category, mcap_rank,
-                          result_analysis, fy27_growth, market_cap,
+                          result_analysis, fy27_growth,
                           (last_result_analysis_updated >= (CURRENT_DATE - INTERVAL '45 days')) AS ra_fresh
                    FROM input_raw WHERE nse_code = ANY(%s)""", (syms,))
     return {r[0]: {"company_name": r[1], "segment": r[2], "cap": r[3], "mcap_rank": r[4],
-                   "result_analysis": r[5], "fy27_growth": _f(r[6]), "mcap": _f(r[7]),
-                   "ra_fresh": bool(r[8])}
+                   "result_analysis": r[5], "fy27_growth": _f(r[6]),
+                   "ra_fresh": bool(r[7])}
             for r in cur.fetchall()}
 
 
