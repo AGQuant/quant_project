@@ -54,3 +54,42 @@ body[data-theme]{
 
 /* the nav is fixed, so the page needs room under it — the ref's own body carries 76px. */
 body.as-shell{padding-bottom:76px}
+
+/* ══ cc#1113/cc#1112 — THE SHELL'S OWN CHROME ═══════════════════════════════════════════════
+   main.py's auth_gate injects #scorr-lo (Logout) and #scorr-th (theme) into every authenticated
+   page, fixed top-right at 45% opacity. mobile_endpoints.py MOBILE_CSS hides both on the /m/*
+   templates and replaces them with a tap on the wordmark (cc#909). The three as-shell pages —
+   /m/digest, /m/v10 and /m/gvm2 — load THIS sheet and scorr_themes.css and never mobile_app.css,
+   so they got neither half: the pills floated over the header's own state chip (founder
+   screenshot 19-Aug 20:19 IST, Logout and Dark sitting on top of the CLOSED chip).
+
+   The pills are hidden here AND the replacement is built by scorr_appshell.js, in the same push.
+   Hiding them alone would have made Logout unreachable on all three screens — .as-wm is a plain
+   <a href="/m/home">, and scorr_card_common.js's .lgm menu cannot help: none of the three loads
+   it, and its build() requires a `.head h1` these pages do not have. Verified before touching
+   anything, because a dead end is worse than an ugly pill. */
+#scorr-lo,#scorr-th{display:none!important}
+
+/* the wordmark becomes the menu handle, so it needs a positioning context and a hint of one */
+.as-hdr .as-wm{position:relative}
+.as-hdr .as-wm.as-has-menu::after{content:"\25BE";font-size:9px;margin-left:5px;
+  color:var(--muted);vertical-align:middle}
+.as-menu{position:absolute;left:0;top:100%;margin-top:6px;z-index:70;min-width:180px;display:none;
+  background:var(--panel);border:1px solid var(--edge);border-radius:10px;overflow:hidden;
+  box-shadow:0 12px 28px rgba(0,0,0,.45)}
+.as-menu.open{display:block}
+.as-menu button{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 12px;
+  background:none;border:0;color:var(--chalk);font:600 13px/1 'Space Grotesk',system-ui,sans-serif;
+  text-align:left;cursor:pointer}
+.as-menu button:active{background:var(--panel2,var(--edge))}
+.as-menu .ic{width:16px;text-align:center;font-size:14px;color:var(--muted)}
+
+/* ── back control ──
+   The shell had no way back at all: the wordmark goes to /m/home and the bottom nav does not
+   track history, so arriving here from a link deep in the app was a one-way trip. 44px tap
+   target, and it never renders as a dead control — see scorr_appshell.js for when it appears. */
+.as-hdr .as-back{flex:none;width:32px;height:32px;margin-left:-4px;display:none;
+  align-items:center;justify-content:center;background:none;border:0;padding:0;cursor:pointer;
+  color:var(--muted);font-size:19px;line-height:1}
+.as-hdr .as-back.on{display:inline-flex}
+.as-hdr .as-back:active{color:var(--chalk)}

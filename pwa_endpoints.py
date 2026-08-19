@@ -2169,6 +2169,21 @@ def pwa_scorr_appshell_css():
     return Response(SCORR_APPSHELL_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
+# cc#1112: the shell's behaviour, alongside the shell's CSS. Read from disk the same way, so the
+# three as-shell pages (and any future one) get the wordmark menu and the back control by adding
+# one tag rather than by carrying a fourth copy of the logic.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_appshell.js"), "r", encoding="utf-8") as _asj:
+        SCORR_APPSHELL_JS = _asj.read()
+except Exception:
+    SCORR_APPSHELL_JS = ""
+
+
+@router.get("/static/scorr_appshell.js")
+def pwa_scorr_appshell_js():
+    return Response(SCORR_APPSHELL_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
 @router.get("/scrub_layer.js")
 def pwa_scrub_layer_js():
     return Response(SCRUB_LAYER_JS, media_type="application/javascript", headers=_CACHE_1D)
