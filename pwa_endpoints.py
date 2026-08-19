@@ -96,15 +96,26 @@ MANIFEST = {
 }
 
 # ── service worker (cache shell for offline /app; API always network-only) ──
-# !! RULE (cc#178): ANY change to PWA_JS or SW_JS content REQUIRES bumping CACHE
-#    (scorr-pwa-vN -> vN+1) in the SAME commit. The activate handler deletes every
-#    cache != CACHE, so a bump is what forces installed clients (phone + desktop)
-#    to drop stale shell assets on their next visit. Skipping the bump = installed
-#    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
-#    label to V13 but did not bump, so v2 clients never saw it).
+# cc#178's rule ("bump scorr-pwa-vN by hand in the same commit") is RETIRED — cc#792 derives the
+# served cache name from the deploy stamp in pwa_service_worker() below, so every deploy bumps it
+# automatically and no one has to remember. The constant here is only the fallback spelling; the
+# substitution is a pattern (cc#1113), so editing the number cannot break it either way.
 SW_JS = """
-const CACHE = 'scorr-pwa-v13';  // cc#464: /intraday nav label renamed Intraday->TC Scanner (id=2987 same-slot; cc#178 bump)
-const SHELL = ['/', '/pwa.js', '/static/manifest.json',
+const CACHE = 'scorr-pwa-v14';  // cc#1113: '/' dropped from SHELL — see below (cc#178 bump)
+// cc#1113 — '/' IS NOT PRECACHED, AND THIS IS THE WHOLE BUG.
+// The founder opened the app on his phone and got scorr_home.html, the DESKTOP page, with the
+// mobile bottom nav injected on top of it. The / route does redirect phones to /m/home; that was
+// never broken. What broke is that this list used to contain '/', so on every install the SW
+// called cache.addAll(['/', ...]). An addAll fetch is issued BY THE SERVICE WORKER, so it carries
+// Sec-Fetch-Mode: cors and Sec-Fetch-Dest: empty — not 'navigate'. wants_mobile_home() correctly
+// refuses to redirect a non-navigation, so the server answered with the desktop page and the SW
+// pinned it under '/'. The navigate handler below then fell back to caches.match('/') on ANY
+// failed navigation, which is how a phone with a flaky connection lands on the desktop home.
+// Verified by exercising wants_mobile_home() against real header sets: it returns YES for a phone
+// tab, a phone PWA launch and even an old webview sending no Sec-Fetch headers at all, and NO for
+// exactly one shape — an SW-initiated fetch. Precaching the front door was pinning the one
+// response a phone must never be served.
+const SHELL = ['/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -126,9 +137,13 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
   // Live data is never cached — always go to network.
   if (url.pathname.startsWith('/api/')) return;
-  // Navigations: network-first, fall back to cached /app shell when offline.
+  // Navigations: network-first. cc#1113 — the offline fallback was caches.match('/'), which
+  // served the precached DESKTOP home for a failed navigation to ANY url, on any device. It now
+  // falls back to a cached copy of the page actually requested, or to nothing at all. A browser
+  // offline notice is the honest answer; the wrong page dressed in the right nav is not, and it
+  // is what the founder photographed.
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('/')));
+    e.respondWith(fetch(req).catch(() => caches.match(req)));
     return;
   }
   // cc#178: /pwa.js is NETWORK-FIRST (not cache-first). It changes often — nav
@@ -1184,7 +1199,7 @@ def pwa_nav_toggle_js():
 
 # cc#792: the deploy build stamp. Railway exposes the commit SHA; fall back to APP_VERSION, then to a
 # process-start token so a bare local run still gets a unique value rather than a constant.
-import os as _os_build, time as _time_build
+import os as _os_build, time as _time_build, re as _re_build
 BUILD_ID = (_os_build.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:8]
             or _os_build.getenv("APP_VERSION", "")
             or str(int(_time_build.time())))
@@ -1202,7 +1217,12 @@ def pwa_service_worker():
     every cache != CACHE, so a changing name is exactly what forces installed clients to drop stale
     shell assets on their next visit."""
     h = dict(_NOCACHE); h["Service-Worker-Allowed"] = "/"
-    js = SW_JS.replace("scorr-pwa-v13", "scorr-pwa-" + BUILD_ID)
+    # cc#1113: this was a literal replace of the string "scorr-pwa-v13". The cc#178 comment above
+    # SW_JS still tells a reader to bump that constant on any SW change — and doing so silently
+    # breaks THIS line, because the literal stops matching and every client is then pinned to the
+    # hand-written name for good, which is precisely the staleness cc#792 removed. A pattern
+    # cannot fall out of step with the constant, so the coupling is gone rather than commented.
+    js = _re_build.sub(r"scorr-pwa-v\d+", "scorr-pwa-" + BUILD_ID, SW_JS)
     return Response(js, media_type="application/javascript", headers=h)
 
 
