@@ -365,7 +365,23 @@ body[data-theme]{
 .nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB)}
 .nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
   white-space:nowrap}
-.nwrow .c{color:var(--gold,#D4AF37);font-size:13px;flex-shrink:0}
+/* cc#1120 · WHY IT LOOKED LIKE A BOX, which is not what the card assumed and is worth recording.
+   The chevron span was class="c" — and .c in mobile_app.css is THE CARD CLASS: background panel,
+   1px border, 14px radius, 13px padding, 9px bottom margin, plus a ::before left rail. A one-glyph
+   span was inheriting an entire card. The page rule below set only colour and size, so it never
+   undid any of it. That is the "empty chevron in a box" in the founder's screenshot: not a
+   designed ornament at all, a class-name collision. It also inflated the row from its 44px
+   minimum to 76px.
+   The chevron now has its own name and cannot collide. */
+.nwrow .nwchev{color:var(--gold,#D4AF37);font-size:13px;flex-shrink:0;
+  background:none;border:0;border-radius:0;padding:0;margin:0}
+.nwrow .nwchev::before{content:none}
+/* cc#1120: the category chip occupies the chevron's slot. flex-shrink:0 and nowrap so it can
+   never be squeezed into two lines or push the headline into wrapping; the headline keeps flex:1
+   and gives up nothing, because the chip is narrower than the box it replaces. */
+.nwrow .nwcat{flex-shrink:0;white-space:nowrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:8.5px;font-weight:800;letter-spacing:.1em;padding:3px 6px;border-radius:5px;
+  color:var(--gold,#D4AF37);border:1px solid var(--line2);background:var(--panel2)}
 /* THE SHEET IS A PRESSED CONTAINER (scorr_card_pressed_R1 @ 1221452): it SINKS and it has NO
    press state, because a well is not a button. Depth encodes affordance — the rows above rise
    and are tappable, this holds content and is not. */
@@ -1976,6 +1992,15 @@ function rnBindSwipe(){
   }, true);
 }
 
+/* cc#1120: the five labels are the ONLY values polished_news.category holds — verified against
+   the live table: Domestic 2198, Global 1017, AI Editorial 535, IPO 238, Stock Views 5. Nothing is
+   invented here and nothing is mapped to a category the data does not contain. The short forms
+   exist because "AI Editorial" and "Stock Views" do not fit a 48px row beside a timestamp at
+   360px; anything unrecognised falls through to its own text rather than to a guess. */
+var RN_CAT_SHORT = {'AI Editorial':'AI', 'Domestic':'IND', 'Global':'GLB',
+                    'IPO':'IPO', 'Stock Views':'VIEW'};
+function rnCatShort(c){ return RN_CAT_SHORT[c] || String(c || ''); }
+
 function rnPaint(){
   var box = document.getElementById('rnBox');
   if (!box) return;
@@ -1994,10 +2019,23 @@ function rnPaint(){
      rather than a div with an onclick that a screen reader cannot see. The chevron announces. */
   var rows = slice.map(function(n, i){
     var idx = p * RN.per + i;
+    /* cc#1120 · THE CHEVRON BOX BECOMES THE CATEGORY.
+       It was a bare U+2304 in a clipped box — a permanent per-row ornament carrying no
+       information, on a row that already had a category the mapping was discarding. The tag takes
+       the SAME SLOT at the same size, so the row geometry is unchanged and the headline keeps
+       exactly the width it had.
+       RAW rows keep the chevron. Raw headlines are unprocessed and carry no category; inventing
+       one would be a fabricated label, and an empty tag would be worse than the ornament.
+       TAPPABILITY is not lost with the chevron: .nwrow is a real <button> with cursor:pointer and
+       a focus ring, and the tag itself reads as a control-sized chip. A row that looks like a row
+       and behaves like a button is the same affordance the RAW rows have always had. */
+    var tag = n.polished && n.category
+      ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>'
+      : '<span class="nwchev">\u2304</span>';
     return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
       + '<span class="h">' + esc(n.headline) + '</span>'
       + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
-      + '<span class="c">\u2304</span></button>';
+      + tag + '</button>';
   }).join('');
   /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
      rendered disabled rather than hidden, so the row never changes width mid-session. */
@@ -2077,8 +2115,12 @@ function loadRawNews(){
           return isFinite(t) && t >= cutoff;
         })
         .map(function(a){
+          /* cc#1120: category was the one field the row already had and threw away — the
+             endpoint has always sent it (news_endpoints.py selects it straight from
+             v_polished_articles) and this mapping simply did not read it. */
           return { headline: a.headline_clean, published_at: a.published_time,
                    source: a.source, sentiment: a.sentiment, impact: a.impact,
+                   category: a.category || '',
                    body: a.full_summary || a.summary || '', polished: true };
         });
       if (RN.mode === 'polish'){ RN.items = RN.polish; RN.page = 0; }
