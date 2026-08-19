@@ -364,6 +364,71 @@ def _passes_filter(value, mn, mx) -> bool:
     return True
 
 
+# ── cc#1107 · ONE LOOP OVER THE REGISTRY, FOR EVERY PASS COUNT ───────────────────────────────
+# Founder ruling 19-Aug: the funnel, the Stock Pass Count and the i-button must show the ACTUAL
+# gates, consistently, on all four baskets. A gate that is EVALUATED must have a row; a gate that is
+# NOT evaluated must have NO row; there is no third state.
+#
+# WHAT WAS ACTUALLY WRONG, measured before changing anything — and it is NOT where the card looked.
+# The WRITER had not drifted: every one of the four baskets stores a count for exactly its registry
+# gates (buy_reversal 8/8, buy_momentum 8/8, sell_momentum 8/8, sell_reversal 12/12, same key sets).
+# The drift was entirely in the PASS-COUNT endpoints, which kept hand-written gate tables:
+#   bm_stock_passcount evaluated SIX of eight (s1_touch and pp_band were never computed) and then
+#     APPENDED a true_weekly_rsi that is in no registry. Because six can never equal the eight it
+#     compared against, that ghost was pushed onto `failed` for EVERY stock — which is exactly the
+#     "true weekly rsi is the failing filter on card after card" the founder saw. The gate does not
+#     run and does not cut; the display invented its failure.
+#   sm_stock_passcount carried the same ghost (cc#854 retired true_weekly_rsi from that basket on
+#     04-Aug) and a stale mom_2d band of [-4,-2] where cc#854 restored [-4,-1].
+# br_stock_passcount was already registry-driven (cc#607 Phase A) and was the only one that could
+# not drift. This makes the other three the same shape, so the class is gone rather than the case.
+def _registry_passcount(basket: str, rows, custom):
+    """Evaluate EVERY registry gate for every stock, and nothing else.
+
+    `custom` maps each custom-leg key to fn(stock_dict) -> (passed: bool, actual). A registry key
+    with no band bounds and no handler RAISES: silently skipping it would recreate the exact defect
+    this function exists to remove, and a loud failure on deploy is cheaper than a funnel that has
+    been quietly one gate short for a month.
+    """
+    reg = BASKET_FILTERS.get(basket, [])
+    out = []
+    for s in rows:
+        passed, failed, actuals = [], [], {}
+        for f in reg:
+            key = f["key"]
+            if key in custom:
+                ok, actual = custom[key](s)
+            elif f.get("type") == "band":
+                actual = s.get(key)
+                ok = _passes_registry_band(actual, f)
+            else:
+                raise HTTPException(500, f"cc#1107: registry gate {basket}.{key} has no evaluator "
+                                         f"in the pass-count — it would be silently omitted")
+            actuals[key] = actual
+            (passed if ok else failed).append(key)
+        out.append({"symbol": s["symbol"], "passed": len(passed), "total": len(reg),
+                    "passed_filters": passed, "failed_filters": failed,
+                    "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                    "v21_pass": None, "actuals": actuals})
+    out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1),
+             reverse=True)
+    return out
+
+
+def _registry_selfcheck(basket: str, stored_keys=None) -> dict:
+    """cc#1107 item 3: does the stored funnel row carry a count for every registry gate?
+
+    Rendered, not just logged. A funnel that silently omits a stage is worse than one that admits
+    it is short — the reader of a silent one has no way to tell a retired gate from a forgotten one.
+    """
+    reg = {f["key"] for f in BASKET_FILTERS.get(basket, [])}
+    stored = {k for k in (stored_keys or set()) if not k.startswith("_")}
+    missing, ghost = sorted(reg - stored), sorted(stored - reg)
+    return {"registry_gates": len(reg), "stored_gate_keys": len(stored),
+            "missing_from_writer": missing, "ghost_in_writer": ghost,
+            "ok": not missing and not ghost}
+
+
 def _passes_registry_band(value, f) -> bool:
     """cc#607: evaluate a BASKET_FILTERS band gate honouring the registry's `strict` flag exactly as
     the handler does — a strict min gate is > (e.g. sector_week>0, day_1d>0), a strict max gate is <
@@ -1625,6 +1690,24 @@ def _basket_prior4_low(cur, symbols):
     return {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
 
 
+def _basket_prior3_low(cur, symbols):
+    """cc#1107: BUY_MOMENTUM V5 S1-touch leg 1 — MIN(prior-3-trading-day low) per symbol.
+
+    THREE days, not four. buy_reversal uses four (above) and buy_momentum uses three (spec 23186,
+    and _write_buy_momentum_v3_qualified's own query uses rn <= 3). The two windows are genuinely
+    different, so this is a separate helper rather than a parameter with a default that somebody
+    later gets wrong for one basket without noticing.
+    """
+    cur.execute("""
+        WITH ranked AS (
+            SELECT symbol, low, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+            FROM raw_prices WHERE symbol = ANY(%s) AND price_date < CURRENT_DATE
+        )
+        SELECT symbol, MIN(low) FROM ranked WHERE rn <= 3 GROUP BY symbol
+    """, (symbols,))
+    return {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
+
+
 def _basket_r1_touch_3d(cur, symbols):
     """cc#502 SELL_REVERSAL_V6.1 R1-touch: symbols where ANY of the last 3 trading days had that
     day's raw_prices HIGH >= that SAME day's v8_paper_pivots r1, mirrors
@@ -1741,6 +1824,7 @@ def br_funnel_detail():
             # one held in the same row. Checking a value the reader never sees cannot tell them
             # whether what they are looking at is true.
             final = _funnel_final(counts)
+            gate_selfcheck = _registry_selfcheck("buy_reversal", (counts or {}).keys())
             qualified_parity, qualified_table_count = _qualified_parity(cur, "buy_reversal", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
@@ -1763,6 +1847,10 @@ def br_funnel_detail():
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
             "qualified_table_count": qualified_table_count,
+            # cc#1107 item 3: does the stored row carry a count for every registry gate? Rendered,
+            # not merely logged — a funnel that is silently one stage short cannot be told apart
+            # from one whose gate was legitimately retired.
+            "gate_selfcheck": gate_selfcheck,
             "stages": stages, **_basket_meta("buy_reversal"),
         }
     except Exception as e:
@@ -1908,6 +1996,7 @@ def sr_funnel_detail():
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
             final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            gate_selfcheck = _registry_selfcheck("sell_reversal", (counts or {}).keys())
             qualified_parity, qualified_table_count = _qualified_parity(cur, "sell_reversal", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
@@ -1934,33 +2023,29 @@ def sr_funnel_detail():
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
             "qualified_table_count": qualified_table_count,
+            # cc#1107 item 3: does the stored row carry a count for every registry gate? Rendered,
+            # not merely logged — a funnel that is silently one stage short cannot be told apart
+            # from one whose gate was legitimately retired.
+            "gate_selfcheck": gate_selfcheck,
             "stages": stages, **_basket_meta("sell_reversal"),
         }
     except Exception as e:
         raise HTTPException(500, f"sr_funnel_detail failed: {e}")
 
 
-# cc#502: SELL_REVERSAL_V6.1 pass-count cheap daily-metric gates. sector_week<0 (strict),
-# R1-touch, room-to-S1/S2, true_weekly_rsi are handled inline in sr_stock_passcount.
-_SR_V61_PASSCOUNT_GATES = [
-    ("day_1d",       -2.0,  0.0),
-    ("dma_20",        None, 0.0),
-    ("dma_50",        None, 0.0),
-    ("dma_200",       None, 0.0),
-    ("week_index_52", None, 30.0),    # cc#1100 V7-B: tightened from < 50
-    ("rsi_month",     None, 30.0),    # cc#1100 V7-B: new gate
-    ("mom_2d",        -4.0, -1.0),
-    ("month_return",  -10.0, None),
-]
+# cc#1107: the three hand-written *_PASSCOUNT_GATES tables are DELETED. They were the second
+# copy of a gate set the registry already owned, and a second copy is what drifted -- sell_momentum
+# kept mom_2d [-4,-2] after cc#854 restored [-4,-1], and buy_momentum listed six of eight.
+# _registry_passcount reads BASKET_FILTERS directly now, so there is nothing left to fall behind.
+
 
 def sr_stock_passcount():
-    """cc#1100: SELL_REVERSAL_V7-B pass-count = n/12, and every one of the 12 is CHEAP.
+    """cc#1107: SELL_REVERSAL V7-B pass-count, GENERATED from BASKET_FILTERS. n/12, all cheap.
 
-    There is no heavy stage any more, so the cc#509 off-by-one that this function used to guard
-    against cannot recur here — the `len(passed) == N` trigger it lived in is gone with the stage.
-    Off-market / missing pivot or CMP: the room check NULL-passes, but fall_from_r1 does NOT — a
-    missing R1 fails that gate, exactly as the handler treats it. Display only — mirrors the
-    handler, never qualifies."""
+    cc#1100 brought this to the right twelve gates by hand; cc#1107 makes it registry-driven so it
+    cannot drift away from them again. Off-market / missing pivot or CMP: the room check NULL-passes,
+    but fall_from_r1 does NOT — a missing R1 fails that gate, exactly as the handler treats it.
+    Display only, never qualifies."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
@@ -1968,41 +2053,35 @@ def sr_stock_passcount():
             cmp_map  = _basket_cmp(cur)
             syms     = [r["symbol"] for r in all_rows]
             r1_touch = _basket_r1_touch_3d(cur, syms)
-            out = []
-            for s in all_rows:
-                sym = s["symbol"]
-                passed, failed = [], []
-                actuals = {}
-                for metric, mn, mx in _SR_V61_PASSCOUNT_GATES:
-                    actuals[metric] = s.get(metric)
-                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
-                sw = s.get("sector_week")
-                actuals["sector_week"] = sw
-                (passed if (sw is not None and float(sw) <= -0.5) else failed).append("sector_week")
-                actuals["r1_touch"] = sym in r1_touch
-                (passed if sym in r1_touch else failed).append("r1_touch")
-                cmp = cmp_map.get(sym)
-                pv  = pivots.get(sym)
-                s1  = pv.get("s1") if pv else None
-                s2  = pv.get("s2") if pv else None
-                r1  = pv.get("r1") if pv else None
-                # cc#1100 V7-B: fall from R1, on the same live CMP the handler enters at. Missing
-                # or non-positive R1 FAILS rather than dividing — the handler behaves the same way.
-                fall = ((r1 - cmp) / r1 * 100.0) if (r1 and r1 > 0 and cmp) else None
-                actuals["fall_from_r1"] = round(fall, 3) if fall is not None else None
-                (passed if (fall is not None and fall >= 3.0) else failed).append("fall_from_r1")
-                tgt, room = _sr_dynamic_target(cmp, s1, s2)
-                actuals["room"] = room
-                room_ok = (cmp is None or s1 is None) or (tgt is not None)
-                (passed if room_ok else failed).append("room")
-                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("sell_reversal"),
-                            "passed_filters": passed, "failed_filters": failed,
-                            "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "v21_pass": None, "actuals": actuals})
-        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+
+            def _r1t(s):
+                return s["symbol"] in r1_touch, s["symbol"] in r1_touch
+
+            def _fall(s):
+                pv = pivots.get(s["symbol"]); r1 = pv.get("r1") if pv else None
+                c = cmp_map.get(s["symbol"])
+                if not r1 or r1 <= 0 or c is None:
+                    return False, None
+                pct = (r1 - c) / r1 * 100.0
+                return pct >= 3.0, round(pct, 3)
+
+            def _room(s):
+                pv = pivots.get(s["symbol"])
+                s1 = pv.get("s1") if pv else None
+                s2 = pv.get("s2") if pv else None
+                c = cmp_map.get(s["symbol"])
+                tgt, room = _sr_dynamic_target(c, s1, s2)
+                if c is None or s1 is None:
+                    return True, room          # NULL-passes off-market, as before
+                return tgt is not None, room
+
+            out = _registry_passcount("sell_reversal", all_rows,
+                                      {"r1_touch": _r1t, "fall_from_r1": _fall, "room": _room})
         return {"basket": "sell_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_reversal"), "stocks": out,
                 "v21_enabled": False, **_basket_meta("sell_reversal")}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"sr_stock_passcount failed: {e}")
 
@@ -2097,6 +2176,7 @@ def sm_funnel_detail():
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
             final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            gate_selfcheck = _registry_selfcheck("sell_momentum", (counts or {}).keys())
             qualified_parity, qualified_table_count = _qualified_parity(cur, "sell_momentum", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
@@ -2123,70 +2203,58 @@ def sm_funnel_detail():
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
             "qualified_table_count": qualified_table_count,
+            # cc#1107 item 3: does the stored row carry a count for every registry gate? Rendered,
+            # not merely logged — a funnel that is silently one stage short cannot be told apart
+            # from one whose gate was legitimately retired.
+            "gate_selfcheck": gate_selfcheck,
             "stages": stages, **_basket_meta("sell_momentum"),
         }
     except Exception as e:
         raise HTTPException(500, f"sm_funnel_detail failed: {e}")
 
 
-# cc#502: SELL_MOMENTUM_V4 pass-count cheap v8_metrics gates via _passes_filter (inclusive).
-# rsi_month<40 + sector_week<0 (strict), CMP<PP, S2-clearance, true_weekly_rsi handled inline.
-_SM_V3_PASSCOUNT_GATES = [
-    ("mom_2d",        -4.0,  -2.0),
-    ("dma_200",       None,   2.0),
-    ("week_return",   -10.0, -0.5),
-    ("week_index_52",  20.0,  60.0),
-]
+# cc#1107: the three hand-written *_PASSCOUNT_GATES tables are DELETED. They were the second
+# copy of a gate set the registry already owned, and a second copy is what drifted -- sell_momentum
+# kept mom_2d [-4,-2] after cc#854 restored [-4,-1], and buy_momentum listed six of eight.
+# _registry_passcount reads BASKET_FILTERS directly now, so there is nothing left to fall behind.
+
 
 def sm_stock_passcount():
-    """cc#380: sell_momentum V3-N5 pass-count = n/9 (spec id=2901), cheap-first (mirror cc#364).
-    8 cheap gates for ALL stocks; true_weekly_rsi (stage 9, heavy) only for stocks clearing the first 8.
-    Off-market / missing pivot|CMP: the CMP<PP + S2-clearance checks NULL-pass. Display only."""
-    from v8_signal_writer import _true_weekly_rsi
+    """cc#1107: SELL_MOMENTUM pass-count, GENERATED from BASKET_FILTERS. n/8, every gate evaluated.
+
+    Two drifts fixed, both display-only. It appended a true_weekly_rsi that cc#854 RETIRED from this
+    basket on 04-Aug, so a gate the engine stopped running was still being failed on screen. And its
+    mom_2d band read [-4,-2] where cc#854 restored the spec [-4,-1] — the registry and the handler
+    were right, this list was a stale copy. Off-market / missing pivot or CMP: the CMP<PP and
+    S2-clearance checks NULL-pass, unchanged. Display only, never qualifies."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
             pivots   = _basket_pivots(cur)
             cmp_map  = _basket_cmp(cur)
-            out = []
-            for s in all_rows:
-                sym = s["symbol"]
-                passed, failed = [], []
-                actuals = {}
-                for metric, mn, mx in _SM_V3_PASSCOUNT_GATES:
-                    actuals[metric] = s.get(metric)
-                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
-                rm = s.get("rsi_month")
-                actuals["rsi_month"] = rm
-                (passed if (rm is not None and float(rm) < 40.0) else failed).append("rsi_month")
-                sw = s.get("sector_week")
-                actuals["sector_week"] = sw
-                (passed if (sw is not None and float(sw) < 0.0) else failed).append("sector_week")
-                cmp = cmp_map.get(sym)
-                pv  = pivots.get(sym)
-                pp  = pv.get("pp") if pv else None
-                s2  = pv.get("s2") if pv else None
-                cmp_ok = (cmp is None or pp is None) or (cmp < pp)
-                s2c = ((cmp - s2) / cmp * 100.0) if (cmp and s2 is not None) else None
-                s2c_ok = (cmp is None or s2 is None) or (s2c is not None and s2c >= 3.0)
-                actuals["cmp_lt_pp"] = cmp
-                actuals["s2_clearance"] = s2c
-                (passed if cmp_ok else failed).append("cmp_lt_pp")
-                (passed if s2c_ok else failed).append("s2_clearance")
-                if len(passed) == 8:
-                    twr = _true_weekly_rsi(conn, sym, cmp)
-                    actuals["true_weekly_rsi"] = twr
-                    (passed if (twr is not None and twr <= 40.0) else failed).append("true_weekly_rsi")
-                else:
-                    failed.append("true_weekly_rsi")
-                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("sell_momentum"),
-                            "passed_filters": passed, "failed_filters": failed,
-                            "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "v21_pass": None, "actuals": actuals})
-        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+
+            def _cmp_lt_pp(s):
+                pv = pivots.get(s["symbol"]); pp = pv.get("pp") if pv else None
+                c = cmp_map.get(s["symbol"])
+                if c is None or pp is None:
+                    return True, None          # NULL-passes off-market, as before
+                return c < pp, round(c - pp, 2)
+
+            def _s2c(s):
+                pv = pivots.get(s["symbol"]); s2 = pv.get("s2") if pv else None
+                c = cmp_map.get(s["symbol"])
+                if c is None or s2 is None or c <= 0:
+                    return True, None
+                pct = (c - s2) / c * 100.0
+                return pct >= 3.0, round(pct, 2)
+
+            out = _registry_passcount("sell_momentum", all_rows,
+                                      {"cmp_lt_pp": _cmp_lt_pp, "s2_clearance": _s2c})
         return {"basket": "sell_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_momentum"), "stocks": out,
                 "v21_enabled": False, **_basket_meta("sell_momentum")}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"sm_stock_passcount failed: {e}")
 
@@ -2279,6 +2347,7 @@ def bm_funnel_detail():
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
             final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            gate_selfcheck = _registry_selfcheck("buy_momentum", (counts or {}).keys())
             qualified_parity, qualified_table_count = _qualified_parity(cur, "buy_momentum", final, _asof)
 
         universe = int(counts.get("_universe", 0) or 0)
@@ -2325,20 +2394,21 @@ def bm_funnel_detail():
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
             "qualified_table_count": qualified_table_count,
+            # cc#1107 item 3: does the stored row carry a count for every registry gate? Rendered,
+            # not merely logged — a funnel that is silently one stage short cannot be told apart
+            # from one whose gate was legitimately retired.
+            "gate_selfcheck": gate_selfcheck,
             "stages": stages, **_basket_meta("buy_momentum"),
         }
     except Exception as e:
         raise HTTPException(500, f"bm_funnel_detail failed: {e}")
 
 
-# cc#502: BUY_MOMENTUM_V3 pass-count cheap range gates. dma_20>0, day_1d>0, sector_week>0 and
-# hourly_pct>0&NOT NULL are strict-positive checks handled inline (mirror sr_stock_passcount's
-# sector_week convention). cc#1038: mom_2d[0,4] joins the range list, sector_week>0 the inline set.
-_BM_V3_PASSCOUNT_GATES = [
-    ("dma_50",        5.0,  12.0),
-    ("week_index_52", 75.0, None),
-    ("gvm_score",      7.0, None),
-]
+# cc#1107: the three hand-written *_PASSCOUNT_GATES tables are DELETED. They were the second
+# copy of a gate set the registry already owned, and a second copy is what drifted -- sell_momentum
+# kept mom_2d [-4,-2] after cc#854 restored [-4,-1], and buy_momentum listed six of eight.
+# _registry_passcount reads BASKET_FILTERS directly now, so there is nothing left to fall behind.
+
 
 # cc#502: SCORE_BANDS mirror of _write_buy_momentum_v3_qualified's V2 bands (fixed >=7-of-10
 # threshold). true_weekly_rsi[60,85] is the 10th band, scored separately since it reuses the same
@@ -2356,62 +2426,68 @@ _BM_SCORE_BANDS = [
 ]
 
 def bm_stock_passcount():
-    """cc#502 -> cc#1038: BUY_MOMENTUM_V4 pass-count = n/9 HARD gates, cheap-first (mirror cc#364).
-    8 cheap gates for ALL stocks; true_weekly_rsi (the heavy FINAL stage) only for stocks clearing
-    all 8. A stock clearing every hard gate ALSO carries a separate score/10 (SCORE_BANDS, fixed >=7
-    threshold) since real qualification requires BOTH layers -- score is null for stocks that
-    don't clear the hard gates. Display only -- mirrors _write_buy_momentum_v3_qualified, never
-    qualifies."""
+    """cc#1107: BUY_MOMENTUM pass-count, GENERATED from BASKET_FILTERS. n/8, every gate evaluated.
+
+    It used to evaluate SIX of the eight and then append a true_weekly_rsi that is in no registry.
+    Because six could never equal the eight it compared against, that ghost landed on `failed` for
+    EVERY stock — the "true weekly rsi is the failing filter on card after card" the founder saw on
+    19-Aug. cc#1051 retired twr as a buy_momentum GATE; it is a SCORE band now, and the score
+    breakdown below is where it belongs. The two gates that were genuinely missing, s1_touch and
+    pp_band, are live/pivot legs this endpoint simply never computed — they are computed now.
+
+    The score layer is a SEPARATE question from the gate layer and is kept separate: score is null
+    for a stock that has not cleared every hard gate, exactly as the handler does it."""
     from v8_signal_writer import _true_weekly_rsi
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
             cmp_map  = _basket_cmp(cur)
             syms     = [r["symbol"] for r in all_rows]
-            v21_metrics = _load_v21_live_metrics(conn, syms)
-            out = []
-            for s in all_rows:
-                sym = s["symbol"]
-                passed, failed = [], []
-                actuals = {}
-                for metric, mn, mx in _BM_V3_PASSCOUNT_GATES:
-                    actuals[metric] = s.get(metric)
-                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
-                d20 = s.get("dma_20")
-                actuals["dma_20"] = d20
-                (passed if (d20 is not None and float(d20) > 0.0) else failed).append("dma_20")
-                d1d = s.get("day_1d")
-                actuals["day_1d"] = d1d
-                (passed if (d1d is not None and float(d1d) > 0.0) else failed).append("day_1d")
-                hp = v21_metrics.get(sym, {}).get("hourly_pct")
-                actuals["hourly_pct"] = hp
-                (passed if (hp is not None and float(hp) > 0.0) else failed).append("hourly_pct")
-                score = None
-                if len(passed) == _BM_CHEAP_N:
-                    cmp = cmp_map.get(sym)
-                    twr = _true_weekly_rsi(conn, sym, cmp)
-                    actuals["true_weekly_rsi"] = twr
-                    if twr is not None and 70.0 <= twr <= 85.0:
-                        passed.append("true_weekly_rsi")
-                        score = sum(1 for metric, mn, mx in _BM_SCORE_BANDS
-                                    if _passes_filter(s.get(metric), mn, mx))
-                        if 60.0 <= twr <= 85.0:
-                            score += 1
-                    else:
-                        failed.append("true_weekly_rsi")
-                else:
-                    failed.append("true_weekly_rsi")   # skipped -- not evaluated, caps at <=_BM_CHEAP_N
-                out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("buy_momentum"),
-                            "passed_filters": passed, "failed_filters": failed,
-                            "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "score": score, "score_total": 10,
-                            "score_qualified": bool(score is not None and score >= 7),
-                            "v21_pass": None, "actuals": actuals})
-        out.sort(key=lambda x: (x["passed"], x["score"] if x["score"] is not None else -1,
-                                 x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+            prior3_low = _basket_prior3_low(cur, syms)
+            today_low  = _basket_day_low_today(cur)
+            v21 = _load_v21_live_metrics(conn, syms)
+
+            def _s1(s):
+                pv = pivots.get(s["symbol"]); s1 = pv.get("s1") if pv else None
+                p3 = prior3_low.get(s["symbol"]); tlo = today_low.get(s["symbol"])
+                ok = s1 is not None and ((p3 is not None and p3 <= s1) or (tlo is not None and tlo <= s1))
+                return ok, (p3 if p3 is not None else tlo)
+
+            def _pp(s):
+                pv = pivots.get(s["symbol"]); pp = pv.get("pp") if pv else None
+                cmp_ = cmp_map.get(s["symbol"])
+                if not pp or not cmp_ or pp <= 0:
+                    return False, None
+                dist = (cmp_ - pp) / pp * 100.0
+                return (0.0 <= dist <= 1.5), round(dist, 2)
+
+            def _hp(s):
+                v = v21.get(s["symbol"], {}).get("hourly_pct")
+                return (v is not None and float(v) > 0.0), v
+
+            out = _registry_passcount("buy_momentum", all_rows,
+                                      {"s1_touch": _s1, "pp_band": _pp, "hourly_pct": _hp})
+
+            # SCORE layer, second and separate. Only a stock clearing every hard gate is scored,
+            # mirroring the handler — a score on a stock the engine never scored would be fiction.
+            for x in out:
+                x["score"], x["score_total"], x["score_qualified"] = None, 10, False
+                if x["passed"] != x["total"]:
+                    continue
+                row = next(r for r in all_rows if r["symbol"] == x["symbol"])
+                twr = _true_weekly_rsi(conn, x["symbol"], cmp_map.get(x["symbol"]))
+                x["actuals"]["true_weekly_rsi (score band)"] = twr
+                sc = sum(1 for m, mn, mx in _BM_SCORE_BANDS if _passes_filter(row.get(m), mn, mx))
+                if twr is not None and 60.0 <= twr <= 85.0:
+                    sc += 1
+                x["score"] = sc
+                x["score_qualified"] = sc >= 7
         return {"basket": "buy_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("buy_momentum"), "stocks": out,
                 "v21_enabled": False, **_basket_meta("buy_momentum")}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"bm_stock_passcount failed: {e}")
 
