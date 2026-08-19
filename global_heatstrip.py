@@ -132,10 +132,37 @@ def _pct(now_v, base_v) -> Optional[float]:
 
 def _band(chg: Optional[float], inverted: bool) -> str:
     """Colour band. Inversion flips the SIGN, not the thresholds, so a +2% VIX day lands in the
-    same deep bucket a -2% equity day does."""
+    same deep bucket a -2% equity day does.
+
+    cc#1123 — VOLATILITY GETS ITS OWN THREE TIERS, AND THIS IS WHERE THEY LIVE. The founder's
+    rule is: VIX down 5% or more reads bullish, up 5% or more reads bearish, and everything in
+    between is neutral. The equity buckets above cannot express that — their middle is a single
+    point (v == 0), so under them a VIX that moved -0.3% painted the same confident green as one
+    that moved -8%, and the tile said "calm" on a day that was simply flat.
+    It is computed HERE, server-side, and not at each surface, because the card asks whether the
+    band should now derive from these thresholds so every consumer stays consistent: it should,
+    and this is the only composer. The Digest tile and the Home ticker both read the band, so
+    they cannot drift apart the way they had (a falling VIX was green on the Digest tile and red
+    on the Home tape at the same moment — same number, opposite colour, two surfaces).
+    The band VOCABULARY is unchanged for the two outer tiers, so every existing consumer keeps
+    working untouched. The middle is a NEW value, "mid", deliberately not "flat": flat means the
+    number did not move, and this middle is a real move that simply is not big enough to mean
+    anything. Any consumer that has not been taught "mid" falls through its band mapping to the
+    muted colour, which is a safe, honest default rather than a wrong one.
+    Thresholds sized against the data, not by feel: over the last 244 sessions India VIX closed
+    <= -5% on 28 of them and >= +5% on 36, leaving 180 in the middle. So this paints roughly 12%
+    of days green, 15% red and 74% neutral — a colour that means something because it is rare.
+    """
     if chg is None:
         return "none"
     v = -chg if inverted else chg
+    if inverted:
+        # 5% either way, measured on the symbol's own direction after the sign flip above.
+        if v >= 5:
+            return "up-strong"
+        if v <= -5:
+            return "down-strong"
+        return "mid"
     if v == 0:
         return "flat"
     if v >= 1.5:

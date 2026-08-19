@@ -62,6 +62,9 @@ router = APIRouter()
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
 from v8_book_canon import book_canon   # cc#970: the ONE book formula (rule 13)
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
+# cc#1123: the tape's colour band comes from the SAME function the Digest tile's does. Imported
+# rather than reimplemented so the VIX thresholds live in exactly one place (card task 4).
+from global_heatstrip import _band as _hs_band, INVERTED as _HS_INVERTED
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -574,8 +577,12 @@ def mobile_home2(request: Request):
 
         # 0 · ticker tail: latest global row per name (global_indices holds daily history;
         #     DISTINCT ON quote_date-desc is the honest "latest print", with its own date)
+        # cc#1123: `symbol` joins the SELECT so the tape can ask global_heatstrip which symbols are
+        # inverted. Without it the tape had no way to know India VIX is a volatility gauge, which
+        # is exactly how it ended up painting a CALMING market red while the Digest tile painted
+        # the same number green.
         cur.execute("""
-            SELECT DISTINCT ON (name) name, price, chg_pct, category, quote_date
+            SELECT DISTINCT ON (name) name, symbol, price, chg_pct, category, quote_date
             FROM global_indices
             ORDER BY name, quote_date DESC
         """)
@@ -616,7 +623,7 @@ def mobile_home2(request: Request):
         #
         # NULL-HONEST: if either side is missing, vix_chg is None. Never 0 for missing — a flat
         # VIX and an unknown VIX are different facts, and the chip rule turns on which it is.
-        vix_latest = vix_prev_close = vix_chg = None
+        vix_latest = vix_prev_close = vix_chg = vix_chg_pct = None
         try:
             cur.execute("""
                 WITH b AS (
@@ -642,6 +649,13 @@ def mobile_home2(request: Request):
                 vix_prev_close = float(vix_rows[1][1])
             if vix_latest is not None and vix_prev_close is not None:
                 vix_chg = round(vix_latest - vix_prev_close, 4)
+                # cc#1123: the same move as a PERCENT, because the founder's rule is stated in
+                # percent (down 5%+ / up 5%+) and vix_chg is points. Derived from the two values
+                # already fetched above — no second query, no new source, and null-honest for the
+                # same reason vix_chg is: a missing previous close means the rule cannot fire, it
+                # does not mean zero.
+                if vix_prev_close:
+                    vix_chg_pct = round((vix_latest / vix_prev_close - 1.0) * 100.0, 2)
         except Exception as e:
             log.warning("cc#1083 India VIX intraday unavailable, falling back to daily: %s", e)
             try:
@@ -650,12 +664,19 @@ def mobile_home2(request: Request):
                 pass
         if vix_latest is None:
             # Degradation path only — the daily close, which is what this used to serve outright.
+            # cc#1123: chg_pct comes along on this path too. It is the same symbol's own daily
+            # close-to-close move — exactly what the Digest tile and the tape colour from — so on
+            # a day the intraday feed is unavailable the chip degrades to the same figure the rest
+            # of the app is using, instead of losing its colour rule entirely.
             cur.execute("""
-                SELECT price FROM global_indices WHERE name='India VIX' AND price IS NOT NULL
+                SELECT price, chg_pct FROM global_indices
+                WHERE name='India VIX' AND price IS NOT NULL
                 ORDER BY quote_date DESC LIMIT 1
             """)
             _v = cur.fetchone()
             vix_latest = float(_v[0]) if _v and _v[0] is not None else None
+            if vix_chg_pct is None and _v and _v[1] is not None:
+                vix_chg_pct = round(float(_v[1]), 2)
 
         # 1 · today's signals, newest 3, with the live price beside the signal price
         cur.execute("""
@@ -764,8 +785,15 @@ def mobile_home2(request: Request):
         # the payload rather than being hidden in the template.
         if r["name"] in _TICKER_SKIP:
             continue
+        # cc#1123: the tape carries the SAME band the Digest tile reads, from the same composer
+        # (global_heatstrip._band). India VIX sits FIRST on this tape, so the surface most likely
+        # to be glanced at was the one telling the opposite story: chg_pct is negative on a calming
+        # day, the template coloured by raw sign, and the first pill on the Home screen went red
+        # while the Digest called the same move green. The template now prefers this band and only
+        # falls back to the sign when a row ships none.
         ticker.append({"name": r["name"], "price": f(r["price"]),
                        "chg_pct": f(r["chg_pct"]), "category": r["category"],
+                       "band": _hs_band(f(r["chg_pct"]), r["symbol"] in _HS_INVERTED),
                        "as_of": r["quote_date"].isoformat() if r["quote_date"] else None,
                        "live": False,
                        "has_series": True,
@@ -844,6 +872,7 @@ def mobile_home2(request: Request):
             # change was measured against rather than trusting a bare number.
             "vix_prev_close": vix_prev_close,
             "vix_chg": vix_chg,
+            "vix_chg_pct": vix_chg_pct,   # cc#1123: the same move in percent, for the tier rule
             "v10": v10,
             "as_of": (mood or {}).get("checked_at"),
         },

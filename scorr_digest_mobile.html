@@ -173,9 +173,15 @@ function tile(t){
      applied (global_heatstrip sets inverted:true on INDIAVIX), so the band is read, never
      recomputed here — one composer, same rule as the week number above. Sign is the fallback
      only when a tile ships no band. */
+  /* cc#1123: "mid" is the volatility middle tier — a VIX move smaller than 5% either way. It is
+     amber, matching the --amber this page already uses (#FF9F45, the same value as the NIFTY name
+     on the Home hero's index line), so neutral reads as neutral rather than as a muted non-answer.
+     Everything else about this mapping is unchanged, and the thresholds themselves are NOT decided
+     here — global_heatstrip._band() is the single composer, per cc#1123 task 4. */
   const band=TAPE_MODE==='week'?t.week_band:t.day_band;
   const col=v==null?'var(--muted)'
-           :(band?(String(band).indexOf('up')===0?'var(--volt)':(String(band).indexOf('down')===0?'var(--heat)':'var(--muted)'))
+           :(band?(String(band)==='mid'?'var(--amber)'
+                  :(String(band).indexOf('up')===0?'var(--volt)':(String(band).indexOf('down')===0?'var(--heat)':'var(--muted)')))
                  :cx(v));
   return `<div class="tile well"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
     <div class="vv" style="color:${col}">${v!=null?sgn(v)+'%':'—'}</div></div>`;

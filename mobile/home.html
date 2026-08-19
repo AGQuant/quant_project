@@ -92,6 +92,12 @@ body[data-theme]{
    badge of approval. Removed for this chip in both states; the red state keeps its red TEXT. */
 .hc.vixc{background:transparent;border-color:var(--line2)}
 .hc.vixc.bad{background:transparent;border-color:var(--line2);color:var(--red)}
+/* cc#1123: the middle tier — VIX moved less than 5% either way. Same #FF9F45 as the tape's .neu
+   and the Digest's --amber, so one number is one colour across all three surfaces. The chip stays
+   FLAT (transparent, same border as its siblings) because APP_QA_R5 P3 removed the boxed
+   treatment here on purpose: a tinted, bordered VIX chip read as a badge of approval. Colour in
+   the text only, exactly as the red state does. */
+.hc.vixc.vixmid{background:transparent;border-color:var(--line2);color:#FF9F45}
 
 
 /* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
@@ -109,6 +115,13 @@ body[data-theme]{
   background:var(--panel);border:1px solid var(--line)}
 .tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
 .tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;white-space:nowrap}
+/* cc#1123: volatility's neutral tier on the tape. #FF9F45 is not a new amber — it is the exact
+   value this page already gives the index NAME on the hero's V10 line (.v10i .nm below) and the
+   exact value --amber holds on the Digest, so the neutral VIX reads the same on both screens.
+   Written page-scoped rather than as a shared .neu in mobile.css: .pos/.neg are shared because
+   every surface means the same thing by them, and a bare .neu is a common enough name that
+   putting it in the shared sheet is how cc#1108 happened. */
+.tk .d.neu{color:#FF9F45}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
    value/date on the right, which updates under the finger. Only the SECOND grows; the title
    stays small so the header does not turn into two competing headlines. Scoped here rather than
@@ -2472,9 +2485,23 @@ Promise.all([
   /* 0 · TICKER BAR — MOVING marquee. cc#900: each item is SYMBOL + %CHANGE only (founder:
      previous design was better) — the price span is gone; the pill styling is scoped in this
      page's own <style> so shared-CSS changes can never restyle the tape. */
+  /* cc#1123: the tape colours from the SERVER's band when the row carries one, and only falls
+     back to cls() — the raw sign — when it does not. This is the fix for a real contradiction:
+     India VIX sits first on this tape, its chg_pct is negative on a calming day, and cls() painted
+     that red while the Digest tile, reading the same number through its band, painted it green.
+     Same figure, two surfaces, opposite meanings. The thresholds are not decided here; the band
+     is computed once in global_heatstrip._band(). "mid" is volatility's neutral tier. */
+  function tkCls(x){
+    var b = x && x.band;
+    if (!b || b === 'none') return cls(x.chg_pct);
+    if (b === 'mid') return 'neu';
+    if (b.indexOf('up') === 0) return 'pos';
+    if (b.indexOf('down') === 0) return 'neg';
+    return cls(x.chg_pct);
+  }
   var tkItems = (d.ticker || []).map(function(x){
       return '<div class="tk"><span class="n">' + esc(x.name) + '</span>'
-        + '<span class="d ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span></div>';
+        + '<span class="d ' + tkCls(x) + '">' + pct(x.chg_pct) + '</span></div>';
     }).join('');
   // cc#901: duration halved = speed doubled. The floor halves with it (20s -> 10s) so a short
   // tape stays proportional instead of hitting the floor and running slower than a long one.
@@ -2543,9 +2570,28 @@ Promise.all([
        half is live: red when the VIX is RISING and the gate is failing, or whenever it is >= 17.
        Still never green in any branch. vix_chg null (no previous session) simply means the rising
        clause cannot fire — it never counts as a rise. */
+    /* cc#1123 — TWO OF THE THREE TIERS SHIP HERE, AND THE THIRD IS DELIBERATELY NOT SHIPPED.
+       The founder's rule is down 5%+ green, up 5%+ red, in between amber. Red and amber are live
+       below. GREEN IS HELD, and the reason is on the record rather than in my head: cc#1081 and
+       cc#1083 locked VIX_COLOR_RULE_V1 on this exact chip — "`ok` is now unreachable on this chip
+       in every state ... never green in any branch" — because this chip sits in a row of PASS/FAIL
+       check chips, where green does not read as "volatility fell", it reads as "this check
+       passed". That was the original defect: on a calm day with the gate failing 4-of-4, a green
+       VIX chip told the founder the market was fine. A change-based green at 5% is a better rule
+       than the level-based green that caused it, but it lands in the same row and inherits the
+       same reading, so reversing a locked rule is not mine to do quietly. CLAUDE.md rule 12 wants
+       the supersession written to session_log BEFORE it is acted on. Logged as a STOPPED: for
+       Fable with this note; the moment it is recorded, green here is one clause.
+       Nothing is lost meanwhile: the Digest tile and the Home tape both carry the full three
+       tiers today, so a VIX down 6% IS green on this screen — on the tape, one row above.
+       The old level rule (>= 17) stays as an OR, unchanged: an absolutely high VIX is red whatever
+       today's move was, and cc#1123 did not ask for that to go. */
     + '<button class="hc vixc tap' + (hero.vix == null ? '' : (
-        (Number(hero.vix) >= 17 || (hero.vix_chg != null && Number(hero.vix_chg) > 0
-          && hero.fails != null && Number(hero.fails) > 0)) ? ' bad' : ''))
+        (Number(hero.vix) >= 17
+          || (hero.vix_chg_pct != null && Number(hero.vix_chg_pct) >= 5)
+          || (hero.vix_chg != null && Number(hero.vix_chg) > 0
+              && hero.fails != null && Number(hero.fails) > 0)) ? ' bad'
+        : (hero.vix_chg_pct != null ? ' vixmid' : '')))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
     + '</div>'
