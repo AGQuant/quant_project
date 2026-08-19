@@ -478,7 +478,7 @@ function inswBlock(){
       + ' onclick="setInstrument(\'' + x + '\')">' + x.toUpperCase() + '</button>';
   }).join('');
 }
-function setInstrument(x){ STATE.instrument = x; render(); }
+function setInstrument(x){ STATE.instrument = x; renderHead(); renderBook(); }   /* cc#1110 */
 
 /* ══ 4 · NAVIGATION — GROUPING x SUBFILTER (cc#922) ════════════════════════════════════════
    The founder's words: navigation is poor, and the three cuts need a subfilter layer that a
@@ -508,9 +508,9 @@ var GROUP_BY = 'period';                      // fixed, the cc#924 grouping
 function setSub(dim, val){
   STATE.sub = STATE.sub || {};
   if (STATE.sub[dim] === val) delete STATE.sub[dim]; else STATE.sub[dim] = val;
-  render();
+  renderBook();   /* cc#1110 */
 }
-function clearSub(){ STATE.sub = {}; render(); }
+function clearSub(){ STATE.sub = {}; renderBook(); }   /* cc#1110 */
 
 function weekStart(d){                        // Monday 00:00 of d's week
   var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -616,7 +616,7 @@ function groupPositions(list){
    opposite of what is wanted. */
 function posTap(id){
   STATE.pop = (STATE.pop === id) ? null : id;
-  render();
+  renderBook();   /* cc#1110 */
 }
 /* cc#932 PIVOT_STAR_V2 marker (session_log 18052). SAME ENDPOINT as /dashboard —
    /api/v8/pivot_star — and the SAME server-supplied glyph and note, so the two surfaces cannot
@@ -725,7 +725,7 @@ function setBookPage(pg){
   if (STATE.page === pg) return;
   STATE.page = pg;
   STATE.pop = null;          // an expanded card belongs to the page it was opened on
-  render();
+  renderBook();   /* cc#1110 */
 }
 function bookHeader(b){
   var open = STATE.page === 'open';
@@ -856,7 +856,7 @@ function foldGrp(k){
   var bulky = (STATE.book && STATE.book.positions.length > 12);
   if (cur == null) cur = (bulky && k === 'Older');
   STATE.fold[k] = !cur;
-  render();
+  renderBook();   /* cc#1110 */
 }
 
 /* ── everything below is the screen as it already was: signals stack, ledger, more, legend ── */
@@ -967,7 +967,7 @@ function legendPanel(){
 function togLegend(ev){
   if (ev) ev.stopPropagation();          /* the card underneath has its own click handler */
   STATE.legendOpen = !STATE.legendOpen;
-  render();
+  renderLegend();   /* cc#1110: the panel node only — never the page under it */
 }
 /* Tap anywhere outside the panel or the (i) closes it. Bound ONCE on the document, not re-bound
    on every render — render() rewrites this subtree constantly and a per-render listener would
@@ -978,7 +978,7 @@ if (!window.__lgBound){
     if (!STATE.legendOpen) return;
     var t = e.target;
     if (t && t.closest && (t.closest('.lg-panel') || t.closest('.lg-i'))) return;
-    STATE.legendOpen = false; render();
+    STATE.legendOpen = false; renderLegend();   /* cc#1110 */
   });
 }
 
@@ -990,9 +990,9 @@ function ensureFunnel(slug){
     .then(function(f){
       var b = (f && f.baskets && f.baskets[0]) || null;
       STATE.funnels[slug] = (b && !f.error) ? b : null;
-      render();
+      renderLower();   /* cc#1110 */
     })
-    .catch(function(){ STATE.funnels[slug] = null; render(); });
+    .catch(function(){ STATE.funnels[slug] = null; renderLower(); });
 }
 
 function togGate(ev, slug, sym){
@@ -1000,7 +1000,7 @@ function togGate(ev, slug, sym){
      basket the instant you try to open a symbol inside it. */
   if (ev) { ev.stopPropagation(); if (ev.preventDefault) ev.preventDefault(); }
   var key = slug + '|' + sym;
-  if (STATE.gateOpen === key) { STATE.gateOpen = null; render(); return; }
+  if (STATE.gateOpen === key) { STATE.gateOpen = null; renderLower(); return; }   /* cc#1110 */
   STATE.gateOpen = key;
   if (STATE.gates[key] === undefined) {
     STATE.gates[key] = 'loading';
@@ -1009,13 +1009,13 @@ function togGate(ev, slug, sym){
        the four are per-basket (br_/sr_/sm_/bm_) — so the map is made once, server-side, and the
        client never guesses which prefix a basket uses. */
     var base = (f && f.detail_path) || null;
-    if (!base) { STATE.gates[key] = null; render(); return; }
+    if (!base) { STATE.gates[key] = null; renderLower(); return; }   /* cc#1110 */
     fetchWithTimeout(base + encodeURIComponent(sym))
       .then(function(r){ return r.json(); })
-      .then(function(d){ STATE.gates[key] = (d && !d.detail && !d.error) ? d : null; render(); })
-      .catch(function(){ STATE.gates[key] = null; render(); });
+      .then(function(d){ STATE.gates[key] = (d && !d.detail && !d.error) ? d : null; renderLower(); })
+      .catch(function(){ STATE.gates[key] = null; renderLower(); });
   }
-  render();
+  renderLower();   /* cc#1110 */
 }
 function basketCard(b, i, rcls){
   var open = STATE.open === i;
@@ -1059,21 +1059,110 @@ function ledgerBlock(){
   return h;
 }
 
-function render(){
-  var d = STATE.d;
-  var rcls = railCls(d.rail);
+/* ══ cc#1110 — SCOPED RENDER ══════════════════════════════════════════════════════════════════
+   render() used to write document.getElementById('body').innerHTML for the WHOLE page, and every
+   one of ~15 handlers called it: expanding a position, folding a group, switching a filter chip,
+   opening a funnel symbol, toggling the legend, and a document-level click-away listener. So a tap
+   on one card rebuilt every card on the screen. That is the shake the founder reported — the
+   browser drops and re-lays-out the entire subtree, the scroll anchor goes with it, and any CSS
+   entry animation on any section replays.
+
+   The page is now five containers created ONCE, each re-rendered on its own:
+     #sec-mood   mood + slots
+     #sec-book   the book: tier label, legend slot, positions/trades
+     #sec-sig    the one-line signal count
+     #sec-lower  the three lower modules (funnel, day-wise, segments)
+     #sec-more   the static More stack — painted at boot and never again
+   A handler now touches only the section it belongs to. render() itself stays as the boot paint
+   and as the one call that repaints everything, so nothing depends on remembering to add a new
+   section to it. */
+function shell(){
+  var b = document.getElementById('body');
+  if (document.getElementById('sec-book')) return;      /* already built — never rebuild it */
+  b.innerHTML = '<div id="sec-mood"></div><div id="sec-book"></div><div id="sec-sig"></div>'
+              + '<div id="sec-lower"></div><div id="sec-more"></div>';
+}
+function put(id, html){
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+function renderHead(){
+  var d = STATE.d; if (!d) return;
   document.getElementById('sub').textContent = 'Long-short · ' + d.universe + ' symbols';
   var g = d.gate || {};
   var gc = document.getElementById('gate');
   gc.textContent = g.verdict ? 'GATE · ' + g.verdict.toUpperCase() : 'GATE --';
   gc.className = 'gatec' + (g.open === true ? ' open' : g.open === false ? ' shut' : '');
   document.getElementById('insw').innerHTML = inswBlock();
+}
+function renderMood(){ if (STATE.d) put('sec-mood', moodBlock()); }
+function renderBook(){
+  if (!STATE.d) return;
+  put('sec-book', bookSection());
+  bindBookSwipe();      /* both listeners sat on nodes this section just replaced */
+  bindChipBar();
+}
+function renderSig(){
+  var d = STATE.d; if (!d) return;
+  var sigN = d.signals_today || 0;
+  put('sec-sig', '<div class="sigline">' + (sigN
+        ? '<b>' + sigN + '</b> signal' + (sigN === 1 ? '' : 's') + ' today'
+          + ' <span class="m">· see Funnel below</span>'
+        : 'No baskets signalled today.') + '</div>');
+}
+function renderLower(){ if (STATE.d) put('sec-lower', lowerModules()); }
+function renderMore(){
+  put('sec-more', '<div class="tierlab">More</div><div class="stack">'
+    + '<a class="vc ref" href="/m/results"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
+    + '<div class="v-chev">›</div></div></a>'
+    + '<a class="vc ref" href="/m/intel"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
+    + '<div class="v-chev">›</div></div></a>'
+    /* cc#991: the Wall of Trades — every entry and exit across every engine, not just V8's. It
+       belongs in More rather than in the book above, because the book on this screen is the V8
+       book and the wall deliberately is not. */
+    + '<a class="vc ref" href="/m/trades"><div class="vrow">'
+    + '<div class="ttl"><div class="n">Wall of Trades</div>'
+    + '<div class="m">Every entry &amp; exit · all engines</div></div>'
+    + '<div class="v-chev">›</div></div></a>'
+    + '</div>');
+}
+/* cc#1110 item 3: the legend is inserted and removed as its own node. It used to toggle a flag and
+   repaint the page, which is how an (i) button came to repaint the book under it. */
+function renderLegend(){
+  var slot = document.getElementById('lg-slot');
+  if (slot) slot.innerHTML = STATE.legendOpen ? legendPanel() : '';
+  var btn = document.querySelector('.lg-i');
+  if (btn){
+    btn.className = 'lg-i' + (STATE.legendOpen ? ' lg-on' : '');
+    btn.setAttribute('aria-expanded', STATE.legendOpen ? 'true' : 'false');
+  }
+}
+
+function render(){
+  /* cc#1110 item 5: a failed /api/mobile/v8 leaves STATE.d null while the lower-module fetch is
+     still in flight; when it resolved it called render() and died on d.rail, taking every handler
+     on the page with it. The guard is the whole fix — the error box stays, and nothing throws. */
+  if (!STATE.d) return;
+  shell();
+  renderHead();
+  renderMood();
+  renderBook();
+  renderSig();
+  renderLower();
+  renderMore();
+}
+
+function bookSection(){
+  var d = STATE.d;
+  var rcls = railCls(d.rail);
 
   /* founder layout, top to bottom: mood+slots, book stats, switch (in the header), positions */
   /* cc#976 item 2: statsBlock moved OUT of here. It describes the active book page, so it is
      rendered by bookHeader() directly under the Unrealised/Realised tabs instead of floating
      above them as a second, unrelated metrics surface. */
-  var h = moodBlock();
+  var h = '';
   /* cc#923 item 4: ONE as-of for the whole book, from the newest price stamp across positions —
      it was repeated on every card. cc#924 item 2: the futures reason is printed here, where a
      phone can actually read it, instead of in a hover title on a dead button. */
@@ -1097,50 +1186,15 @@ function render(){
     + ' aria-label="What the markers mean" aria-expanded="' + (STATE.legendOpen ? 'true' : 'false')
     + '"><span>i</span></button>'
     + '<a class="tlgo" href="/m/positions" aria-label="Open Book, full screen">\u203a</a></div>'
-    + (STATE.legendOpen ? legendPanel() : '')
+    /* cc#1110 item 3: a stable slot the legend is inserted into and removed from, so opening it
+       never repaints the book below. */
+    + '<div id="lg-slot">' + (STATE.legendOpen ? legendPanel() : '') + '</div>'
     /* cc#977 item 1: the instrument_note dev paragraph ("V8 paper positions carry no instrument
        column...") is GONE. It was an engineering note explaining a schema limitation, rendered as
        if it were product copy. The FUT/EQ switch already shows the constraint by being disabled. */
     + bookBlock();
 
-  /* ══ cc#977 — THE LOWER SECTION IS THREE MODULES ═══════════════════════════════════════
-     REMOVED, per the founder: the marker-legend box ("Reading the rails"), the SIGNALS TODAY
-     stack (a whole section that was usually one empty-state card), and the Open Book / Trade
-     Ledger nav cards. None of their destinations were lost — Open Book is now the chevron on the
-     Open positions header, and the Trade Ledger opens from the Day-wise module header.
-     The "More" stack (Results, Intel) stays: those are real destinations, not book chrome. */
-
-  /* item 5: signals become ONE THIN LINE. When baskets have signalled, it says so and links to
-     the funnel module below; when none have, it is a single line rather than a section with an
-     empty-state card in it. Nothing about the product is deleted — the funnel module is where
-     today's qualifiers actually live now. */
-  var sigN = d.signals_today || 0;
-  h += '<div class="sigline">' + (sigN
-        ? '<b>' + sigN + '</b> signal' + (sigN === 1 ? '' : 's') + ' today'
-          + ' <span class="m">· see Funnel below</span>'
-        : 'No baskets signalled today.') + '</div>';
-
-  h += lowerModules();
-
-  h += '<div class="tierlab">More</div><div class="stack">'
-    + '<a class="vc ref" href="/m/results"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
-    + '<a class="vc ref" href="/m/intel"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
-    /* cc#991: the Wall of Trades — every entry and exit across every engine, not just V8's. It
-       belongs in More rather than in the book above, because the book on this screen is the V8
-       book and the wall deliberately is not. */
-    + '<a class="vc ref" href="/m/trades"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Wall of Trades</div>'
-    + '<div class="m">Every entry &amp; exit \u00b7 all engines</div></div>'
-    + '<div class="v-chev">\u203a</div></div></a>'
-    + '</div>';
-
-  document.getElementById('body').innerHTML = h;
-  bindBookSwipe();
-  bindChipBar();
+  return h;
 }
 
 /* cc#975: the right-edge fade only appears when there IS something further right, and clears when
@@ -1180,14 +1234,14 @@ function loadLower(){
       LOW.d = d; LOW.err = null;
       if (!LOW.basket && d.funnel && d.funnel.length) LOW.basket = d.funnel[0].basket;
       ensureFunnel(LOW.basket);   // cc#986: the selected basket's filter funnel, loaded with it
-      render();
+      renderLower();   /* cc#1110 */
     })
-    .catch(function(e){ LOW.err = e.message || 'unavailable'; render(); });
+    .catch(function(e){ LOW.err = e.message || 'unavailable'; renderLower(); });   /* cc#1110 */
 }
-function lowTg(k){ LOW.open[k] = !LOW.open[k]; render(); }
-function lowBasket(b){ LOW.basket = b; ensureFunnel(b); render(); }
-function lowSegAll(){ LOW.segAll = !LOW.segAll; render(); }
-function lowDayAll(){ LOW.dayAll = !LOW.dayAll; render(); }
+function lowTg(k){ LOW.open[k] = !LOW.open[k]; renderLower(); }   /* cc#1110 */
+function lowBasket(b){ LOW.basket = b; ensureFunnel(b); renderLower(); }   /* cc#1110 */
+function lowSegAll(){ LOW.segAll = !LOW.segAll; renderLower(); }   /* cc#1110 */
+function lowDayAll(){ LOW.dayAll = !LOW.dayAll; renderLower(); }   /* cc#1110 */
 
 function lowCard(key, title, right, body){
   var on = !!LOW.open[key];
@@ -1380,9 +1434,15 @@ function bindBookSwipe(){
   el.addEventListener('touchmove', function(e){
     if (!BSW) return;
     var t = e.touches[0], dx = t.clientX - BSW.x, dy = t.clientY - BSW.y;
+    /* cc#1110 item 4: the axis was claimed at 10px on a bare |dx| > |dy|, so a thumb scrolling a
+       tall book at a slight angle resolved to 'x' within a few pixels, preventDefault() killed the
+       native scroll for the rest of the gesture, and the list stuck then snapped. The claim now
+       needs 24px of travel AND horizontal dominance of 1.5x — a diagonal scroll stays vertical,
+       and a deliberate page swipe still resolves well inside the 45px commit threshold. Once the
+       axis is 'y' nothing is ever prevented, which was already true and stays true. */
     if (BSW.axis === null){
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-      BSW.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
+      BSW.axis = (Math.abs(dx) > Math.abs(dy) * 1.5) ? 'x' : 'y';
     }
     if (BSW.axis === 'x' && e.cancelable) e.preventDefault();
   }, {passive: false});
@@ -1400,15 +1460,15 @@ function tog(ev, i, slug){
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.open = (STATE.open === i ? -1 : i);
   if (STATE.open === i && STATE.funnels[slug] === undefined){
-    ensureFunnel(slug); render();
+    ensureFunnel(slug); renderLower();   /* cc#1110 */
     return;
   }
-  render();
+  renderLower();   /* cc#1110 */
 }
 function togLedger(ev){
   if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
   STATE.ledgerOpen = !STATE.ledgerOpen;
-  render();
+  renderLower();   /* cc#1110 */
 }
 
 Promise.all([
@@ -1418,7 +1478,6 @@ Promise.all([
   fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; }),
   fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
-  loadLower();          // cc#977: the lower modules fetch alongside, never blocking the book
   var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4];
   // cc#932: a failed marker fetch must never blank the book — same guard the web uses.
   if (ps && ps.stars) ps.stars.forEach(function(x){ STATE.stars[x.symbol] = x; });
@@ -1432,6 +1491,14 @@ Promise.all([
   if (L && !L.error){ STATE.ledger = L; STATE.sm = L.summary || null; }
   STATE.book = (bk && !bk.error) ? bk : null;
   render();
+  /* cc#1110 item 5: loadLower() used to be the FIRST line of this callback, above the d.error
+     throw. On a failed /api/mobile/v8 it still fired, and when its fetch resolved it called
+     render() with STATE.d null — a TypeError on d.rail that killed every handler on the page,
+     leaving the error box sitting over a screen where nothing worked. It now starts only after
+     the payload is known good, and render() guards on STATE.d as well, so neither half can
+     reintroduce it alone. The lower modules still fetch alongside and still never block the
+     book — the call is after the paint, not after an await. */
+  loadLower();
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
