@@ -33,7 +33,9 @@ NO brokerage is ever applied to this account (cc#237 confirmed 06-Jul-2026): rea
 guarantees the cascade always RUNS and always WRITES.
 """
 
+import logging
 import os
+import re
 from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -44,6 +46,8 @@ from fastapi import APIRouter, Body, HTTPException
 from smartgain_daily_m2m import (
     _apply_fill, _fresh_books, _load_inception, _monday, _ist_today, DEFAULT_ACCOUNT,
 )
+
+log = logging.getLogger("scorr.smartgain")
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -70,6 +74,93 @@ def _as_date(v) -> date:
     return date.fromisoformat(str(v)[:10])
 
 
+# ── cc#1105 · ONE SPELLING PER CONTRACT ──────────────────────────────────────────────────────
+# smartgain_orders.expiry held the SAME August contract two ways: ISO 2026-08-25 (62 orders) and
+# broker-style 25AUG2026 (24 orders). Two strings, one contract, and FIFO nets by (symbol, expiry) —
+# so a position opened under one spelling and closed under the other stayed open on BOTH legs
+# forever. Five genuinely FLAT positions showed as ten open ones and every weekly realised figure
+# inherited the error.
+#
+# ISO IS CANONICAL, and I agree with the recommendation rather than just accepting it: it sorts
+# correctly as text, it cannot be misread (25AUG2026 vs AUG252026 is a guess), it is what the July
+# rows and the majority of August rows already use, and it is the only form that compares correctly
+# against a DATE column if this ever becomes one.
+#
+# THE RULE LIVES HERE, ONCE. The write path and the one-shot normalisation both call this function,
+# so the migration cannot fix the data in a way the loader then re-breaks. A migration written as
+# its own SQL string would have been a second rule, and a second rule is how the split happened.
+_MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+           "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+
+# DDMMMYYYY / DDMMMYY, with optional separators: 25AUG2026, 25-AUG-2026, 25 Aug 26.
+_BROKER_EXPIRY = re.compile(r"^(\d{1,2})[-\s]?([A-Z]{3})[-\s]?(\d{2}|\d{4})$")
+_ISO_EXPIRY = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def canon_expiry(v, context: str = "") -> Optional[str]:
+    """Return the expiry as ISO YYYY-MM-DD, or None if there is none.
+
+    Deliberately NOT a silent coercion. cc#1105 scope item 6 is explicit that coercing quietly is
+    unacceptable, and it is right: a loader that fixes a wrong format without saying so hides the
+    fact that an upstream feed changed shape, and the next surprise arrives with no history behind
+    it. So a broker-style value is converted AND logged at WARNING with the batch context, and a
+    value this cannot parse RAISES rather than being written through — an unparseable expiry would
+    become a third spelling and re-open the exact defect this closes.
+    """
+    if v is None:
+        return None
+    s = str(v).strip().upper()
+    if not s:
+        return None
+    if _ISO_EXPIRY.match(s):
+        return s
+    m = _BROKER_EXPIRY.match(s)
+    if m:
+        dd, mon, yy = m.group(1), m.group(2), m.group(3)
+        if mon in _MONTHS:
+            year = int(yy) if len(yy) == 4 else 2000 + int(yy)
+            iso = f"{year:04d}-{_MONTHS[mon]:02d}-{int(dd):02d}"
+            log.warning("cc#1105 expiry coerced to ISO: %r -> %r%s", str(v), iso,
+                        f" [{context}]" if context else "")
+            return iso
+    raise ValueError(
+        f"unrecognised expiry {v!r}{' in ' + context if context else ''} — expected ISO "
+        f"YYYY-MM-DD or broker DDMMMYYYY. Refusing to store a third spelling (cc#1105)."
+    )
+
+
+def normalise_stored_expiries(cur, account: str) -> Dict[str, Any]:
+    """Rewrite every non-canonical stored expiry to ISO, using the SAME rule as the write path.
+
+    Reads the DISTINCT values and maps each one, rather than issuing a known two-value swap: a
+    hard-coded `25AUG2026 -> 2026-08-25` would silently miss a September contract the first day one
+    appeared, which is precisely how this defect would come back wearing a different month.
+
+    smartgain_m2m carries the same column and is normalised in the same pass. The archive table is
+    NOT touched — it is a historical snapshot of what was captured and must stay that way.
+    """
+    changed: List[Dict[str, Any]] = []
+    for table, where in (("smartgain_orders", "account = %s"), ("smartgain_m2m", "account = %s")):
+        try:
+            cur.execute(f"SELECT DISTINCT expiry FROM {table} WHERE {where}", (account,))
+            values = [r[0] for r in cur.fetchall()]
+        except Exception as e:
+            log.warning("cc#1105 normalise: cannot read %s.expiry (%s) — skipped", table, e)
+            continue
+        for raw in values:
+            if raw is None:
+                continue
+            iso = canon_expiry(raw, context=f"{table} stored value")
+            if iso is not None and iso != str(raw):
+                cur.execute(f"UPDATE {table} SET expiry = %s WHERE {where} AND expiry = %s",
+                            (iso, account, raw))
+                changed.append({"table": table, "from": str(raw), "to": iso,
+                                "rows": int(cur.rowcount)})
+    if changed:
+        log.warning("cc#1105 normalised stored expiries: %s", changed)
+    return {"expiry_rewrites": changed}
+
+
 def _norm_rows(batch_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Normalise incoming fills. Required keys: symbol, side, qty, price. Optional:
     trade_date, order_ts (defaulted from each other), instrument, expiry, order_id."""
@@ -88,7 +179,11 @@ def _norm_rows(batch_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "symbol": str(r["symbol"]).upper(), "side": side,
             "qty": int(r["qty"]), "price": float(r["price"]),
             "instrument": r.get("instrument", "FUT"),
-            "expiry": r.get("expiry"), "order_id": r.get("order_id"),
+            # cc#1105: the ONE place an incoming expiry becomes canonical. It used to pass straight
+            # through untouched while symbol was uppercased and side was validated right beside it —
+            # which is how one contract acquired two spellings.
+            "expiry": canon_expiry(r.get("expiry"), context=f"incoming fill {r.get('symbol')}"),
+            "order_id": r.get("order_id"),
         })
     out.sort(key=lambda x: (x["order_ts"], x["symbol"]))
     return out
@@ -389,8 +484,16 @@ def backfill_all_batches(account: str = DEFAULT_ACCOUNT) -> Dict[str, Any]:
     """Re-run the corrected cascade over EVERY batch since inception, in chronological order
     (cc#237 part 4). cc#309: now self-healing — each reconcile delete-and-rebuilds the journal
     from the single full-inception replay, so any accumulated phantom/drift is removed (no
-    manual DELETE needed) and matches_journal_sum converges to TRUE. Safe to run repeatedly."""
+    manual DELETE needed) and matches_journal_sum converges to TRUE. Safe to run repeatedly.
+
+    cc#1105: expiries are normalised to ISO FIRST, in the same run. FIFO nets by (symbol, expiry),
+    so replaying a cascade over a book that spells one contract two ways produces a correct answer
+    to the wrong question. Normalising here rather than in a one-off script means it is idempotent,
+    it is re-applied if a stale row ever reappears, and it uses the same canon_expiry the loader
+    uses — the fix cannot drift from the guard that keeps it."""
     with _conn() as conn, conn.cursor() as cur:
+        norm = normalise_stored_expiries(cur, account)
+        conn.commit()
         cur.execute("""SELECT batch_id, MIN(order_ts) FROM smartgain_orders
                        WHERE account=%s AND status=%s GROUP BY batch_id ORDER BY MIN(order_ts)""",
                     (account, ORDER_STATUS))
@@ -405,7 +508,7 @@ def backfill_all_batches(account: str = DEFAULT_ACCOUNT) -> Dict[str, Any]:
                      "expiry": r[4], "side": r[5], "qty": r[6], "price": r[7], "order_id": r[8]}
                     for r in cur.fetchall()]
         per_batch.append(reconcile_smartgain_batch(account, rows, bid))
-    return {"account": account, "batches_processed": len(batches), "results": per_batch}
+    return {"account": account, "batches_processed": len(batches), "results": per_batch, **norm}
 
 
 # ── HTTP triggers (Claude web ingests on receipt of the EOD orderbook) ──────────────────────
