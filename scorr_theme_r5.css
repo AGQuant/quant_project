@@ -217,17 +217,27 @@
    (live nav uses .bn/.bn.on). This block closes each one from the injected layer — still zero
    markup edits, still zero hide rules, parity guard holds structurally. */
 
-/* 1 · THE MOOD WORD IS THE SCOREBOARD — huge, display face, skewed, with the swoosh. */
-:root:root:not([data-theme="light"]) .hero .mood,
-:root:root:not([data-theme="light"]) .mood{
+/* 1 · THE MOOD WORD IS THE SCOREBOARD — huge, display face, skewed, with the swoosh.
+   cc#1108: the selector was `.hero .mood, .mood` and it never once matched the thing it was
+   drawn for. The live mobile home renders the mood WORD as `.hero-mood`
+   (mobile_endpoints.py:1683, font-size 32px) — there is no `.hero .mood` anywhere in the repo.
+   What the bare `.mood` DID match is three CONTAINERS that happen to share the name:
+     · #pane-index .mood   — the V8 Index Intel gate strip, a flex row
+     · .mood               — the V8 master dashboard gate block (v8_dashboard.html:715)
+     · .mood               — the /m/v8 mood CARD (mobile/v8.html:401), whose word is .mv
+   None declares font-size, so 56px won on all three and the strips rendered as enormous
+   uppercase display text with a 150px swoosh bar under them. Measured on /dashboard's Index
+   pane: .mood computed font-size 16px -> 56px. That is the founder's "enormous washed-out
+   text over the sparklines". Pointing the rule at .hero-mood restores all three surfaces AND
+   gives R5 its intended target for the first time. */
+:root:root:not([data-theme="light"]) .hero-mood{
   font-family:var(--r5-display);
   font-size:56px; line-height:.95; letter-spacing:1px;
   text-transform:uppercase;
   display:inline-block; transform:skewX(-6deg); transform-origin:left center;
   animation:none;   /* R5: the word states, it does not blink */
 }
-:root:root:not([data-theme="light"]) .hero .mood::after,
-:root:root:not([data-theme="light"]) .mood::after{
+:root:root:not([data-theme="light"]) .hero-mood::after{
   content:""; display:block; height:6px; width:150px; margin-top:4px;
   background:linear-gradient(90deg, currentColor, transparent);
   transform:skewX(-24deg); opacity:.9;
