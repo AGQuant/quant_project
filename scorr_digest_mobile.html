@@ -129,9 +129,10 @@ document.body.setAttribute('data-theme','goldnight');})();</script>
 </div>
 
 <script>
-/* One payload: /api/digest/v3 (digest_v3.py, binding spec 965 v2.3). ENGINE YESTERDAY adds one
-   read of /api/v10/trades/paired, filtered to yesterday's exits — story only, per
-   APP_SECTION_DISTRIBUTION_V1: positions live on Index Intel, the digest tells what happened. */
+/* ONE payload: /api/digest/v3 (digest_v3.py, binding spec 965 v2.3). cc#1114 removed the second
+   read (/api/v10/trades/paired, for ENGINE YESTERDAY) along with the section it fed, so this page
+   now makes exactly one request. APP_SECTION_DISTRIBUTION_V1 still holds: positions live on Index
+   Intel, the digest tells what happened. */
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const num=(v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
 const sgn=(n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d);
@@ -207,22 +208,14 @@ function bindLadders(){
 }
 
 async function boot(){
-  let d=null, eng=[];
+  let d=null;
   try{ d=await (await fetch('/api/digest/v3')).json(); }catch(e){}
-  /* cc#1109 ENGINE YESTERDAY. This used to match String(exit_ist).slice(0,2) against a
-     day-of-month computed on the PHONE from weekday arithmetic (Monday -> minus 3, else minus 1).
-     Three ways that was wrong: it is blind to holidays, it matches the same day-number of ANY
-     month, and it breaks outright the day exit_ist changes format. The basis now comes from the
-     SERVER — d.prev_trading_date, which walks weekends AND the nse_holidays table — and the
-     match is exact equality against the row's own ISO exit_date. If the payload carries no
-     basis, the list stays EMPTY rather than showing trades from an unknown session. */
-  try{
-    const basis=d&&d.prev_trading_date;
-    if(basis){
-      const t=await (await fetch('/api/v10/trades/paired?limit=30')).json();
-      eng=(t.trades||[]).filter(r=>r.exit_date===basis).slice(0,4);
-    }
-  }catch(e){}
+  /* cc#1114: the ENGINE YESTERDAY · V10 section is GONE by founder decision — on a day with no
+     exits it was a one-line empty state and a link to a page the closing paragraph already links
+     to. The /api/v10/trades/paired fetch went with it rather than being left running for a
+     section that no longer renders; nothing else on this page read its result. The cc#1109 fix
+     that put this filter on the server's prev_trading_date is not lost — the basis still ships in
+     the payload and /m/v8 is where the book lives. */
   if(!d||d.error||!d.sections){
     document.getElementById('app').innerHTML=`<div class="card slab"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
     return;
@@ -247,14 +240,6 @@ async function boot(){
 
   const bias=(mr.bias||'—').toUpperCase();
   const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
-
-  const engRows=eng.length?eng.map(r=>{
-    const pn=r.net_pnl==null?null:Number(r.net_pnl);
-    return `<div class="mrow"><b>${esc(r.symbol)}</b>
-      <span class="chip ${pn!=null&&pn>=0?'w':'l'}" style="font-size:9.5px;padding:1px 6px">${esc((r.reason||'EXIT').toUpperCase())}</span>
-      <span style="flex:1"></span>
-      <span class="num" style="color:${pn!=null?cx(pn):'var(--muted)'}">${r.points!=null?sgn(Number(r.points),0)+' pts · ':''}${pn!=null?'₹'+num(pn):'—'}</span></div>`;}).join('')
-    :'<div class="unavail">No V10 exits in the last session.</div>';
 
   const yrRows=(yr.companies||[]).slice(0,6).map(c=>{
     const cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':c.read==='PENDING'?'n':'';
@@ -302,11 +287,6 @@ async function boot(){
         <div class="wk">${esc(p.date||'')}</div></div>`).join('')}
     </div>
     <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">${esc(itl.read||'')}</div>
-  </div>
-
-  <div class="eyebrow">ENGINE YESTERDAY · V10</div>
-  <div class="card slab">${engRows}
-    <div style="margin-top:10px;font-size:12px;color:var(--muted)">Full desk → <a class="plink" href="/m/v10">INDEX INTEL</a></div>
   </div>
 
   <div class="eyebrow">REPORTING TODAY</div>
