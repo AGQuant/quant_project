@@ -460,8 +460,39 @@ body[data-theme]{
    stays a chip on card 1 only — it already opens a real chart with 1D/7D/15D/30D ranges and a
    scrub readout, which is strictly more than a static sparkline would add here. */
 .swipe{margin-bottom:9px}
-.swipe-t{display:flex;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;
+/* cc#1122 item 4 — THE EMPTY BLOCK UNDER THE CHECK CHIPS. It is not padding and it is not a
+   min-height, so neither of the two fixes the card proposes is the right one. The deck is a flex
+   row at the default align-items:stretch, and card 2 (MARKET MOOD / PCR: header, mood, two index
+   rows, the Digest link) is genuinely the taller face. Stretch made card 1 grow to match it, so
+   the hero's BORDER sat far below its last chip with nothing in between — the card looked
+   unfinished because it literally ended nowhere near its content.
+   align-items:flex-start lets each face end where its own content ends. This does NOT make the
+   deck jump when you swipe: both faces are children of the same flex row, so the TRACK is still
+   as tall as the tallest of them and the page below never shifts. The gap simply moves out of
+   the hero card and into the track, where there is no border to make it read as unfinished.
+   No content was invented to fill the space, because there was none to add. */
+.swipe-t{display:flex;align-items:flex-start;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
+/* cc#1122 item 3 — the mood word is UPPERCASE and large by decision now, not by accident.
+   PAGE-SCOPED ON PURPOSE. mobile.css sets .hero-mood at 32px for every /m/* page; this rule
+   lives in home.html's own <style> so it reaches the Home hero and nothing else. That is the
+   whole lesson of cc#1108: the same look shipped through a shared selector landed on surfaces
+   nobody was designing for. scorr_mobile_cards.js now skips .hero-mood for the same reason.
+   SIZE AND CASE ONLY. The font stays Space Grotesk (cc#1116/cc#1117's fix stands) and the colour
+   is still moodColor()'s inline style, untouched.
+   WHY clamp AND NOT A FLAT 56px. I measured the longest word MOODS can emit — CAUTIOUS — at both
+   48px and 56px on 360px and 390px viewports, and both fitted on one line. But that measurement
+   ran against a FALLBACK sans, not Space Grotesk: document.fonts came back empty here because
+   fonts.googleapis.com is not reachable from this environment, and fonts.check() returns true on
+   a fallback, so it cannot be trusted either. At 56px the fallback already used 288px of a 298px
+   box — 3% of headroom — and a real face even slightly wider than the fallback overflows. I am
+   not going to state a fit I could not actually measure. clamp(40px,13vw,52px) removes the guess:
+   the word scales with the screen instead of being a fixed number tuned to one phone, lands near
+   47px on a 360px phone with roughly 19% of headroom against the fallback metrics, and reaches
+   52px on a large phone — close to the 56px scale the founder responded to, without betting the
+   layout on a font I cannot see. If he wants it bigger still on his device, raise the 52px cap;
+   that is one number and it is safe to move once someone can look at the real screen. */
+.hero-mood{font-size:clamp(40px,13vw,52px);text-transform:uppercase;line-height:1.02}
 .swipe-t::-webkit-scrollbar{display:none}
 .swipe-t > .c{flex:0 0 100%;scroll-snap-align:center;margin-bottom:0}
 /* cc#955 — THE cc#950 DECK RENDERED BOTH FACES SIDE BY SIDE, and this one missing rule is why.

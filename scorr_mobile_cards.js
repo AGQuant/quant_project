@@ -200,10 +200,23 @@
     + '.r5-set{font-family:"JetBrains Mono",monospace!important;font-weight:600!important;'
     +   'border-radius:0!important;'
     +   'clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}'
-    + '.r5-w{background:#18240E!important;border-color:var(--volt, #3E5A18)!important}'
-    + '.r5-l{background:var(--field, #241019)!important;border-color:#5A2634!important}'
-    + '.r5-w::before{content:"W ";font-weight:800;color:#C8F542}'
-    + '.r5-l::before{content:"L ";font-weight:800;color:var(--heat, #FF8FA5)}'
+    /* cc#1122 — THE L IS FROM HERE. This is the answer to the question cc#1116 asked and got
+       wrong. Four rules used to live on this line: .r5-w / .r5-l repainted a matched chip as a
+       set-score pill, and .r5-w::before / .r5-l::before prefixed it with a literal "W " or "L ".
+       enhance() below tagged any element matching CHIP (ADR | Nifty Day/Week/Month | PCR | VIX)
+       and then chose the class from the element's COMPUTED COLOUR — red-family got .r5-l. On
+       /m/home every failing check chip is .hc.bad, whose colour is var(--red), so ADR, Nifty Day,
+       Nifty Week, Nifty Month and PCR each rendered "L ADR 0.37" and so on, while VIX — the one
+       chip with no state class and therefore no red — was left alone. That is the founder's
+       screenshot exactly, down to which chip is spared.
+       Why every grep missed it: the rule lives in a JS-injected stylesheet as content:"L " with a
+       TRAILING SPACE, in a .js file. A search for content:"L" across .css files cannot see it, and
+       that is why cc#1116 concluded the repo held only one candidate and withdrew the wrong rule.
+       It is deleted rather than re-scoped because a W/L set score is a scoreboard idea and these
+       are market check chips — "L ADR 0.37" was never meaningful, on any surface. The chips keep
+       their own .hc.ok / .hc.bad colour, border and background from mobile.css, which already say
+       pass and fail without a letter. .r5-set (mono, clipped corner) stays: it is typography, it
+       injects nothing, and it was not part of the defect. */
     + '.r5-set,.r5-set *{text-decoration:none!important;border-bottom:0!important}'
     + '.r5-rail{position:relative;border-radius:0!important}'
     + '.r5-rail::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:5px;'
@@ -224,14 +237,11 @@
   var MOODS = /^(bearish|bullish|neutral|caution|cautious|fear|greed|panic|calm|risk[- ]?on|risk[- ]?off)$/i;
   var CHIP = /^(ADR|Nifty\s+(Day|Week|Month)|PCR|VIX)\b/i;
 
-  function nearHeat(c) {           /* computed colour → is this a fail (red-family) chip? */
-    var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
-    return m ? (+m[1] > +m[2] + 40) : false;   /* red channel clearly above green = heat */
-  }
-  function nearVolt(c) {
-    var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || '');
-    return m ? (+m[2] > +m[1] + 20) : false;   /* green clearly above red = volt */
-  }
+  /* cc#1122: nearHeat() and nearVolt() are removed with the W/L classes — they existed only to
+     pick between them, and grep confirms these were their sole call sites. Reading a chip's
+     rendered colour back out of getComputedStyle to re-derive a pass/fail the markup already
+     states was the fragile step in the first place: it made a styling change anywhere upstream
+     able to flip a letter on the chip. */
 
   function enhance() {
     injectCss();
@@ -242,19 +252,28 @@
       if (!moodEl && el.children.length === 0 && MOODS.test(t)) moodEl = el;
       if (!whyEl && /(\d+)\s+of\s+(\d+)\s+checks/i.test(t) && t.length < 80) whyEl = el;
       /* check chips: leaf-ish elements starting with a known check name and holding a number */
+      /* cc#1122: the colour probe and the two classes it chose are gone with the W/L rules above.
+         The chip's own pass/fail styling is already correct, so there is nothing left to decide —
+         a matched chip gets the .r5-set typography and nothing else. */
       if (el.children.length <= 1 && CHIP.test(t) && t.length < 30 && !el.__r5) {
         el.__r5 = 1; el.classList.add('r5-set');
-        var col = getComputedStyle(el).color;
-        if (nearHeat(col)) el.classList.add('r5-l');
-        else if (nearVolt(col)) el.classList.add('r5-w');
       }
     }
     /* V8-card treatment (founder 21:5x), applied to EVERY mood word on the page (the home
        carousel has two: the checks scoreboard and the MARKET MOOD / PCR card, founder 23:33).
        Word in chalk, sentiment on the rail. */
+    /* cc#1122 item 3: a page that styles its OWN mood word is left alone. .hero-mood is
+       mobile/home.html's element and that page now sets its size and case in its own scope, as
+       the card requires. Without this guard the two fight and the shared file wins on
+       !important — and worse, it wins INTERMITTENTLY: cc#1118's sweep wraps each letter in a
+       .mlt span, so on the first paint .hero-mood has children and never matches the leaf test
+       below, but a later in-page re-render emits the plain word, matches, and the mood word
+       silently jumps from the page's size to this file's 42px. Same cross-page collision
+       mechanism as cc#1108, one file over. */
     var moodEls = [];
     for (var i2 = 0; i2 < all.length; i2++) {
       var e2 = all[i2];
+      if (e2.classList && e2.classList.contains('hero-mood')) continue;
       if (e2.children.length === 0 && MOODS.test((e2.textContent || '').trim())) moodEls.push(e2);
     }
     for (var im = 0; im < moodEls.length; im++) {

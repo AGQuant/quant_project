@@ -96,12 +96,29 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    value or the maths behind it — the numbers are rendered exactly as before. */
 /* cc#1111 item 2: the wrap exists ONLY to carry the edge fade. .ladder is the scroller and an
    ::after on it would scroll away with the content instead of sitting at the clipped edge. */
+/* cc#1124: the fade DID ship in cc#1111 (b254a91) — it was there and it did nothing, for two
+   reasons that had to be fixed together.
+   ONE, it faded to the wrong colour. The gradient ended at var(--bg), the PAGE background, but the
+   ladder sits inside a .card whose surface is var(--panel). Fading a panel toward the page colour
+   is a smear, not an edge — over the card it was very close to invisible, which is exactly what
+   the founder reported: clipped flush, no cue. It now ends at var(--panel), the surface it is
+   actually drawn on.
+   TWO, and this is the real fix, the ladder should not need to scroll at all. The tracks were
+   minmax(max-content,1fr): the MINIMUM of every track was its own content width, so five columns
+   each demanded their full number and the grid overflowed by construction on any phone — the
+   min-width:0 on .rung could never help, because the floor was on the TRACK, not the item.
+   minmax(0,1fr) makes five EQUAL tracks that share whatever the card gives them (founder-approved
+   revision: cells fill the width evenly rather than each holding out for a fixed minimum). On a
+   360px phone that is ~61px a column against ~54px of "24,712.55" at 10px mono, so all five fit
+   and there is nothing to scroll. The scroller and the fade both stay as the FALLBACK for a
+   narrower screen or a longer number. No pivot value, no dist_pct maths and no column order is
+   touched here — this is width and colour only. */
 .ladwrap{position:relative}
 .ladwrap::after{content:'';position:absolute;right:0;top:0;bottom:0;width:26px;pointer-events:none;
  opacity:0;transition:opacity .15s;
- background:linear-gradient(to right,rgba(10,15,30,0),var(--bg,#0A0F1E))}
+ background:linear-gradient(to right,rgba(0,0,0,0),var(--panel))}
 .ladwrap.hasmore::after{opacity:1}
-.ladder{display:grid;grid-template-columns:repeat(5,minmax(max-content,1fr));gap:6px;align-items:start;
+.ladder{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:start;
  margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .rung{min-width:0;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
 .rung b{display:block;white-space:nowrap;margin-top:2px}
