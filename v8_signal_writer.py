@@ -1431,15 +1431,23 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     # cc#714: the s1_reclaim_obs observation basket is RING-FENCED — its dedicated 2-concurrent cap
     # is enforced by the handler, and it is EXCLUDED from the standard slot pools both ways (never
     # consumes a standard slot; standard baskets never count it toward theirs).
-    if basket != S1REC_BASKET:
+    # cc#1100: the exemption is now a SET rather than one name. sell_reversal_v7b is a RECORD-ONLY
+    # shadow and must never consume a live slot, so it joins s1_reclaim_obs in the ring-fence — both
+    # ways, exactly as the cc#714 comment above describes: an exempt basket takes no standard slot,
+    # and the standard pool never counts an exempt position toward its own cap.
+    # BEHAVIOUR FOR EVERY EXISTING BASKET IS UNCHANGED. buy_reversal, sell_reversal (V6.1),
+    # buy_momentum and sell_momentum all still enter this branch and still count exactly the same
+    # rows: adding a name to the exempt set only removes rows that a shadow basket creates, and
+    # before this push no such rows exist. Proven by test_v7b_slot_neutrality.py.
+    if basket not in _SLOT_EXEMPT_BASKETS:
       try:
         buy_slots, sell_slots = _mood_slots(gate_fails)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT side, COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN' AND basket IS DISTINCT FROM %s
+                WHERE status='OPEN' AND basket <> ALL(%s)
                 GROUP BY side
-            """, (S1REC_BASKET,))   # cc#502: single standard pool; cc#714: observation excluded.
+            """, (list(_SLOT_EXEMPT_BASKETS),))   # cc#502: single standard pool; cc#714 + cc#1100: exempt excluded.
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)
@@ -1883,6 +1891,204 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
             log.warning(f"sell_reversal_v61 insert {sym}: {e}")
 
 
+def _write_sell_reversal_v7b_shadow(conn, all_metrics: List[dict], target_date: date,
+                                    gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
+    """cc#1100 SELL_REVERSAL_V7-B — RECORD-ONLY SHADOW. Spec session_log 26363 filters_v7b.
+
+    NOT A LIVE BASKET. It records quals and simulated entries under its own tag and is ring-fenced
+    out of the slot pools (see _SLOT_EXEMPT_BASKETS). V6.1 keeps trading exactly as it does today;
+    this handler shares no state with it and does not read or write its rows.
+
+    THE TWELVE GATES:
+      (1)  R1-touch last 3 days      unchanged from V6.1
+      (2)  day_1d in [-2, 0]         the V6.1 BAND, deliberately — see the note below
+      (3)  dma_20 < 0
+      (4)  dma_50 < 0
+      (5)  dma_200 < 0
+      (6)  week_index_52 < 30        RESTORED and tightened (V6.1 had < 50; V7 had dropped it)
+      (7)  sector_week <= -0.5
+      (8)  rsi_month <= 30           TIGHTENED from V7's 35
+      (9)  mom_2d in [-4, -1]
+      (10) month_return >= -10
+      (11) fall from R1 >= 3%        NEW — the founder's own filter
+      (12) room to S1/S2 >= 2%
+
+    WHAT V7-B CHANGED FROM V7, and why it is not cosmetic. sector_month <= -2 is GONE: it behaved
+    as a regime SWITCH rather than a stock filter, producing zero qualifying rows in Sep/Oct/Nov
+    2025 and May 2026 because sectors were rising 3.3-7.8% on the month. V7 got 87 trades across
+    only 5 months with 48% of them in March 2026. V7-B gets 144 entries, 60.1%, 11 active months,
+    29% March — 2.4 points worse ex-March, for 57 more trades and 6 more months. The fall-from-R1
+    leg is what makes the looser sector gate survivable; it appears in 9 of the top 10 sweep rows.
+
+    THE DAY-CHANGE BAND IS THE V6.1 -2..0 BAND, NOT the negative-only version the simulation used.
+    Removing the lower bound lets crash-day entries in, and that removal was a simulation artifact
+    rather than a finding. Stated here because it is the one place the sim and the spec disagree.
+
+    FALL FROM R1 is (R1 - entry) / R1 * 100 >= 3, evaluated on the ENTRY BAR price — the same live
+    5-min CMP the entry is taken at — not on the prior close and not on the day open. R1 is the
+    same rolling pivot filter (1) uses.
+    """
+    basket, side = SELLREV_V7B_BASKET, "SELL"
+
+    # (1) R1-touch, identical query to V6.1's. Duplicated rather than shared: this handler must not
+    # be able to change anything V6.1 depends on, and a shared helper is a shared failure mode.
+    syms = [x["symbol"] for x in all_metrics]
+    r1_touch = set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH days AS (
+                    SELECT DISTINCT price_date AS d FROM raw_prices
+                    WHERE price_date < %s
+                    ORDER BY d DESC LIMIT 3
+                )
+                SELECT DISTINCT rp.symbol
+                FROM raw_prices rp
+                JOIN v8_paper_pivots pv ON pv.symbol = rp.symbol AND pv.pivot_date = rp.price_date
+                WHERE rp.price_date IN (SELECT d FROM days) AND rp.symbol = ANY(%s)
+                  AND pv.r1 IS NOT NULL AND rp.high >= pv.r1
+            """, (target_date, syms))
+            r1_touch = {r[0] for r in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"sell_reversal_v7b r1_touch: {e}")
+
+    base = []
+    for x in all_metrics:
+        cmp = x.get("_cmp")
+        pv = pivots.get(x["symbol"])
+        if not cmp or not pv:
+            continue
+        s1, s2, r1 = pv.get("s1"), pv.get("s2"), pv.get("r1")
+        if s1 is None:
+            continue
+        room_s1 = round((cmp - s1) / cmp * 100.0, 3)
+        room_s2 = round((cmp - s2) / cmp * 100.0, 3) if s2 is not None else None
+        if room_s1 >= 2.0:
+            tgt, room = s1, room_s1
+        elif room_s2 is not None and room_s2 >= 2.0:
+            tgt, room = s2, room_s2
+        else:
+            tgt, room = None, None
+        # (11) fall from R1, on the entry-bar price. A missing or non-positive R1 FAILS the gate
+        # rather than dividing — a shadow that silently admits rows on bad pivot data would teach
+        # us the wrong thing about the strategy, which is the only thing it exists to do.
+        fall = ((r1 - cmp) / r1 * 100.0) if (r1 and r1 > 0) else None
+        x["_v7b_target"] = tgt
+        x["_v7b_room_pct"] = room
+        x["_v7b_room_ok"] = tgt is not None
+        x["_v7b_r1"] = r1
+        x["_v7b_fall_r1"] = round(fall, 3) if fall is not None else None
+        x["_v7b_r1_touch"] = x["symbol"] in r1_touch
+        base.append(x)
+
+    def _sw_le(x):
+        v = x.get("sector_week")
+        return v is not None and float(v) <= -0.5
+
+    def _fall_ok(x):
+        v = x.get("_v7b_fall_r1")
+        return v is not None and v >= 3.0
+
+    funnel = {"_universe": len(base)}
+    funnel["r1_touch"]      = sum(1 for x in base if x["_v7b_r1_touch"])
+    funnel["day_1d"]        = sum(1 for x in base if _passes(x.get("day_1d"), -2.0, 0.0))
+    funnel["dma_20"]        = sum(1 for x in base if _passes(x.get("dma_20"), None, 0.0))
+    funnel["dma_50"]        = sum(1 for x in base if _passes(x.get("dma_50"), None, 0.0))
+    funnel["dma_200"]       = sum(1 for x in base if _passes(x.get("dma_200"), None, 0.0))
+    funnel["week_index_52"] = sum(1 for x in base if _passes(x.get("week_index_52"), None, 30.0))
+    funnel["sector_week"]   = sum(1 for x in base if _sw_le(x))
+    funnel["rsi_month"]     = sum(1 for x in base if _passes(x.get("rsi_month"), None, 30.0))
+    funnel["mom_2d"]        = sum(1 for x in base if _passes(x.get("mom_2d"), -4.0, -1.0))
+    funnel["month_return"]  = sum(1 for x in base if _passes(x.get("month_return"), -10.0, None))
+    funnel["fall_from_r1"]  = sum(1 for x in base if _fall_ok(x))
+    funnel["room"]          = sum(1 for x in base if x["_v7b_room_ok"])
+
+    qualified = [x for x in base
+                 if x["_v7b_r1_touch"]
+                 and _passes(x.get("day_1d"), -2.0, 0.0)
+                 and _passes(x.get("dma_20"), None, 0.0)
+                 and _passes(x.get("dma_50"), None, 0.0)
+                 and _passes(x.get("dma_200"), None, 0.0)
+                 and _passes(x.get("week_index_52"), None, 30.0)
+                 and _sw_le(x)
+                 and _passes(x.get("rsi_month"), None, 30.0)
+                 and _passes(x.get("mom_2d"), -4.0, -1.0)
+                 and _passes(x.get("month_return"), -10.0, None)
+                 and _fall_ok(x)
+                 and x["_v7b_room_ok"]]
+    funnel["_score_qualified"] = len(qualified)
+    # A zero-qualification day is a NORMAL outcome for this rule set and is logged as one. It is
+    # never a reason to loosen a gate.
+    log.info(f"sell_reversal_v7b [SHADOW]: {len(qualified)} qualified of {len(base)} (12-gate strict AND)")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
+            """, (basket, target_date, json.dumps(funnel)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"sell_reversal_v7b funnel: {e}")
+
+    for x in qualified:
+        sym = x["symbol"]
+        cmp = x.get("_cmp")
+        entry = round(cmp, 2)
+        tgt = round(x["_v7b_target"], 2)
+        stop = round(entry + (entry - tgt), 2)     # 1:1 mirror ABOVE entry (SELL), same as V6.1
+        snap = {
+            "shadow": True,
+            "r1_touch":      x.get("_v7b_r1_touch"),
+            "day_1d":        x.get("day_1d"),
+            "dma_20":        x.get("dma_20"),
+            "dma_50":        x.get("dma_50"),
+            "dma_200":       x.get("dma_200"),
+            "week_index_52": x.get("week_index_52"),
+            "sector_week":   x.get("sector_week"),
+            "rsi_month":     x.get("rsi_month"),
+            "mom_2d":        x.get("mom_2d"),
+            "month_return":  x.get("month_return"),
+            "r1":            x.get("_v7b_r1"),
+            "fall_from_r1":  x.get("_v7b_fall_r1"),
+            "room_pct":      x.get("_v7b_room_pct"),
+            "target":        tgt,
+            "stop":          stop,
+            "filter_score": 12, "filter_total": 12,
+            "spec": "SELL_REVERSAL_V7B_SHADOW cc#1100",
+        }
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_qualified
+                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
+                     mom_2d, week_return, month_return, dma_200, dma_50,
+                     rsi_month, rsi_weekly, sector_week, sector_day,
+                     month_index, week_index_52, daily_rsi,
+                     metrics, source)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
+                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING
+                """, (
+                    sym, basket, target_date, signal_ts_ist,
+                    x.get("gvm_score"), cmp,
+                    x.get("mom_2d"), x.get("week_return"), x.get("month_return"),
+                    x.get("dma_200"), x.get("dma_50"),
+                    x.get("rsi_month"), x.get("rsi_weekly"),
+                    x.get("sector_week"), x.get("sector_day"),
+                    x.get("month_index"), x.get("week_index_52"),
+                    x.get("daily_rsi"), json.dumps(snap),
+                ))
+            conn.commit()
+            # Simulated entry into the paper book under the shadow tag. The slot ring-fence lives
+            # in _auto_paper_entry, so this cannot take a live slot however it is called.
+            _auto_paper_entry(conn, sym, basket, side, cmp, pivots.get(sym),
+                              target_date, gate_fails, sim_ts=sim_ts, target=tgt, stop=stop)
+        except Exception as e:
+            log.warning(f"sell_reversal_v7b insert {sym}: {e}")
+
+
 def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date: date,
                                       gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
     """cc#854 SELL_MOMENTUM_V4_N5I (was cc#502 V4). Dedicated strict-AND handler — sell_momentum
@@ -2298,6 +2504,23 @@ BASKET_FILTERS = {
         {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",      "min": None,  "max": None, "type": "custom"},
         {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 45", "min": None,  "max": 45.0, "type": "band", "heavy": True, "denom_key": "_stage9_survivors"},
     ],
+    # SELL_REVERSAL_V7B (cc#1100, spec 26363 filters_v7b) — RECORD-ONLY SHADOW, 12 gates, no heavy
+    # stage. Listed here so the funnel card and the i-button generate from the registry like every
+    # other basket; being a shadow changes what it DOES, not how it is described.
+    "sell_reversal_v7b": [
+        {"key": "r1_touch",       "label": "R1 touch (last 3 days)", "cond_min": "",       "cond_max": "",       "min": None,   "max": None, "type": "custom"},
+        {"key": "day_1d",         "label": "day change",   "cond_min": ">= -2",  "cond_max": "<= 0",   "min": -2.0,  "max": 0.0,  "type": "band"},
+        {"key": "dma_20",         "label": "dma 20",       "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_50",         "label": "dma 50",       "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "week_index_52",  "label": "52w index",    "cond_min": "",       "cond_max": "< 30",   "min": None,  "max": 30.0, "type": "band", "strict": True},
+        {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "<= -0.5","min": None,  "max": -0.5, "type": "band"},
+        {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "<= 30",  "min": None,  "max": 30.0, "type": "band"},
+        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1",  "min": -4.0,  "max": -1.0, "type": "band"},
+        {"key": "month_return",   "label": "month return", "cond_min": ">= -10", "cond_max": "",       "min": -10.0, "max": None, "type": "band"},
+        {"key": "fall_from_r1",   "label": "fall from R1", "cond_min": ">= 3%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
+        {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
+    ],
     # SELL_MOMENTUM_V4_N5I (cc#854, spec 15366) — 8 cheap gates, NO heavy FINAL stage.
     "sell_momentum": [
         {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "< 40",   "min": None,  "max": 40.0, "type": "band", "strict": True},
@@ -2345,6 +2568,7 @@ BASKET_SPEC = {
     "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
     "buy_momentum":  {"version": "V5",   "cc": "cc#1051", "label": "Buy Momentum V5"},
+    "sell_reversal_v7b": {"version": "V7-B", "cc": "cc#1100", "label": "Sell Reversal V7-B · SHADOW"},
 }
 
 # FILTER_CONFIG-shape derivation: the v8_metrics-column ("band") subset per basket, {key: [min,max]}.
@@ -2377,6 +2601,26 @@ S1REC_BASKET = "s1_reclaim_obs"
 S1REC_MAX_CONCURRENT = 2
 S1REC_SUNSET_TRADING_DAYS = 10
 S1REC_TIMEOUT_CAL_DAYS = 21   # enforced in v8_paper.run_paper_exits (basket-scoped)
+
+# ── cc#1100 · SELL_REVERSAL_V7-B, A RECORD-ONLY SHADOW ────────────────────────────────────────
+# Founder instruction 18-Aug ~21:30, spec session_log 26363 filters_v7b, amended from V7 at ~01:20
+# after a 270-combination sweep. It writes quals and simulated entries/exits to the paper book with
+# its own basket tag, and it NEVER consumes a live slot, never appears in slot allocation, and
+# never reaches the live order path.
+#
+# WHY A SHADOW AND NOT A LIVE BASKET, kept here because the reason is the whole point: the evidence
+# is a replay gated on PRIOR-DAY EOD metrics, while this writer evaluates all 19 metrics EVERY 5
+# MINUTES. Those are different strategies. That mismatch is what killed V5-D, whose evidence used
+# Cutler RSI while live used Wilder, and BACKTESTING_FRAMEWORK_V1 (7990) requires live confirmation
+# before implementation. A shadow buys that confirmation with zero capital at risk.
+#
+# V6.1 REMAINS THE LIVE SELL_REVERSAL SPEC (session_log 5626) and is NOT superseded. Nothing in
+# this block touches it.
+SELLREV_V7B_BASKET = "sell_reversal_v7b"
+
+# Baskets that are ring-fenced OUT of the standard slot pools, both ways. Read by
+# _auto_paper_entry. A name here takes no standard slot and is never counted toward one.
+_SLOT_EXEMPT_BASKETS = {S1REC_BASKET, SELLREV_V7B_BASKET}
 
 
 def _s1rec_enabled(conn) -> bool:
@@ -2562,6 +2806,10 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
         (_write_sell_momentum_v4_qualified,  "sell_momentum_v4"),
         (_write_buy_momentum_v3_qualified,   "buy_momentum_v3"),
         (_write_s1_reclaim_obs_qualified,    "s1_reclaim_obs"),   # cc#714: ring-fenced observation (enable-gated)
+        # cc#1100: the V7-B SHADOW runs LAST, deliberately. _write_qualified isolates each handler
+        # in its own try/except, but ordering still decides who gets the tick's remaining time and
+        # whose txn rolls back first — a record-only basket must never be ahead of a live one.
+        (_write_sell_reversal_v7b_shadow,    "sell_reversal_v7b"),
     ):
         try:
             _handler(conn, all_metrics, target_date,

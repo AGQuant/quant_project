@@ -1067,6 +1067,21 @@ const BASKET_INFO={
     sigs_eod:"~57/yr (286 total 5yr)",wr_eod:60.5,ev_eod:0.71,
     sigs_5m:"159/yr",wr_5m:71.7,ev_5m:1.55,
   },
+  // cc#1100: the V7-B SHADOW. Listed beside the live baskets because it is a real basket in the
+  // writer, and labelled a shadow in every field a reader can see because it is not a live one.
+  sell_reversal_v7b:{
+    label:"Sell Reversal V7-B · SHADOW",side:"SELL",version:"V7-B",
+    thesis:"A SHADOW under observation — it records signals and outcomes and takes no money. Short an R1 rejection that has already fallen away from R1, in a weak stock. Twelve hard gates, all must pass: the high reached R1 in the last 3 sessions; the day is down between 0 and 2%; price is below the 20, 50 and 200 DMA; the 52-week index is under 30; the sector is down at least 0.5% on the week; monthly RSI is 30 or lower; 2-day momentum is between -4% and -1%; month return is no worse than -10%; price has fallen at least 3% from R1; and there is at least 2% of room down to the S1/S2 target.",
+    regime:"THIS IS NOT A LIVE BASKET. It never takes a slot, never uses capital, and does not replace Sell Reversal V6.1 — V6.1 remains the live spec and trades exactly as it did. V7-B exists to earn live confirmation before anyone considers trading it.",
+    evidence:"12-month replay: 144 entries, 60.1% win rate. Excluding March 2026 it is 55.4%, and 29% of the backtest trades came from that single month. The replay was gated on prior-day EOD metrics while the live writer re-evaluates every 5 minutes — different strategies, which is why this ships as a shadow rather than as a change. It is also the winner of a 270-combination search on one year, and four of its eleven active months carry fewer than five trades each.",
+    reviewGate:"Reviewed weekly until December 2026. The March-dependence figure stays on this card until a non-bear quarter has 30+ decided trades.",
+    gateType:"12 HARD gates (strict AND) -- record-only, no slots",
+    target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
+    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
+    freshBook:"Shadow book from 19-Aug-2026. Its trades are recorded separately and are never mixed into the live V8 book.",
+    sigs_eod:"shadow — not traded",wr_eod:60.1,ev_eod:null,
+    sigs_5m:"144 entries / 12 months",wr_5m:60.1,ev_5m:null,
+  },
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
     thesis:"Short a structural downtrend. Eight hard gates, all must pass: monthly RSI under 40; 2-day momentum between -4% and -1%; price at or below +2% of the 200DMA; week return between -10% and -0.5%; the sector's week is negative; 52-week index between 20 and 60; price below the PP pivot; and at least 3% of room down to S2. Exits -3.0% target / +3.0% stop, frozen at entry, 15 sessions maximum.",
@@ -1346,7 +1361,18 @@ function openInfo(basket){
       </div>
     </div>
     <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
+    ${info.evidence?`<div style="font-size:11.5px;color:var(--txt);line-height:1.6;margin-top:8px">${info.evidence}</div>`:''}
+    ${info.reviewGate?`<div style="font-size:10.5px;color:var(--amber);margin-top:6px">${info.reviewGate}</div>`:''}
+    ${info.freshBook?`<div style="font-size:10.5px;color:var(--dim);margin-top:4px">${info.freshBook}</div>`:''}
   </div>`;
+  // cc#1100: a basket that is NOT live says so directly under the thesis, before the filter list,
+  // because a reader who stops after two sections must still learn it takes no money. Rendered
+  // only for a basket that declares the field, so nothing else gains a blank box.
+  if(info.regime){
+    html+=`<div class="msec"><div class="msec-title" style="color:var(--amber)">Read this first</div>
+      <div style="font-size:13px;color:var(--txt);line-height:1.65">${info.regime}</div>
+    </div>`;
+  }
   // cc#618 Section C: filter rows GENERATED from the registry (FILTER_REG), never a hardcoded list.
   const gateRows=(reg&&reg.gates)?reg.gates.map(g=>`<div class="frow">
       <span class="fm">${String(g.label||g.key).replace(/_/g,' ')}</span>
