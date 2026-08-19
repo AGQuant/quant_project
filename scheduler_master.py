@@ -167,6 +167,17 @@ _WORKER_JOBS = [
 _CHAINED_JOBS = [
     {"job_name": "screeners_eod", "cadence_human": "nightly, chained immediately after gvm_recompute",
      "module": "screeners_eod.py", "function": "run_all", "service": "app", "category": "chained"},
+    # cc#1095 P2 — AND THIS LIST IS WHY THE ROW KEPT DEACTIVATING ITSELF. A chained job is invisible
+    # to enumerate_scheduler_jobs(), which reads the tick-loop dispatch; the ONLY way the audit
+    # knows a chained job exists is this list. gvm_coverage_guard was registered in the DB and not
+    # here, so audit_registry() classified it as "vanished from code" and auto-retired it with
+    # active=FALSE under the cc#759 rule — correctly, by its own logic. It ran fine at 01:32 and
+    # was marked inactive at 05:05 the same night, which is the worst possible shape: a job that
+    # works while the registry says it is retired. ENGINE_LIVENESS_RULE 13829 cares about exactly
+    # this, so the fix belongs in code, not in another manual UPDATE that the next audit undoes.
+    {"job_name": "gvm_coverage_guard",
+     "cadence_human": "nightly, chained immediately after gvm_recompute (and after screeners_eod)",
+     "module": "gvm_coverage_guard.py", "function": "alert", "service": "app", "category": "chained"},
 ]
 
 
