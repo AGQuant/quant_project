@@ -1567,6 +1567,78 @@ def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) 
         return None
 
 
+# ── cc#1101 · THE FUNNEL ROW IS A SESSION, NOT A TICK ────────────────────────────────────────
+# Every handler used to run its own copy of the same upsert: one row per (basket, score_date),
+# ON CONFLICT DO UPDATE, on EVERY 5-min tick. That makes the whole row point-in-time — it reports
+# whatever was true at the LAST tick of the day. But v8_qualified is a CUMULATIVE day record, so
+# the two could never agree except by luck, and on 7 of 8 basket-days measured (17 + 18-Aug) the
+# funnel under-reported the table. buy_momentum was the worst case because V5 also gates entries
+# to 10:15-13:00: after 13:00 its survivor set is empty BY CONSTRUCTION, so every remaining tick
+# rewrote the aggregates to 0 and the 15:15 tick was the one the page served. The funnel then said
+# the basket produced nothing on a day it signalled OFSS at 10:25.
+#
+# The per-gate counts are LEFT point-in-time on purpose — "how many stocks clear dma_50 right now"
+# is a reading of the market and is honest at any tick. It is only the three AGGREGATE keys, the
+# ones that answer "what did this basket produce TODAY", that have to be day-scoped:
+#
+#   _score_qualified / _hard_qualified / _stage6_survivors / _stage8_survivors / _stage9_survivors
+#       -> day HIGH-WATERMARK. A later tick can raise them, never erase them.
+#   _qualified_today
+#       -> read straight from v8_qualified, the table the funnel's final row claims to describe.
+#          One number, one source (the cc#1025 FUNNEL_TRUTH principle), so parity is true by
+#          construction instead of by coincidence.
+#
+# HONEST LIMIT, stated rather than hidden: the funnel is written BEFORE this tick's qualifier rows
+# are inserted, so _qualified_today lags by at most one 5-min tick during the session. It is exact
+# from the next tick onward, and the last tick of the day always runs after every qualifier, so the
+# stored end-of-day value is exact — which is the value every off-market reader sees.
+_FUNNEL_DAY_PEAK_KEYS = ("_stage6_survivors", "_stage8_survivors", "_stage9_survivors",
+                         "_hard_qualified", "_score_qualified")
+
+
+def _merge_day_peaks(funnel: dict, prior: dict) -> dict:
+    """Raise this tick's aggregates to the day's high-watermark. Pure, so it can be tested.
+
+    Only keys the caller actually produced are touched — a basket with no heavy stage never gains a
+    `_stage8_survivors` of 0 it did not compute. A stored value that is not a number is left exactly
+    as it is rather than being coerced to 0, because a legacy row is evidence of what the old writer
+    did and overwriting it would destroy that.
+    """
+    for k in _FUNNEL_DAY_PEAK_KEYS:
+        if k in funnel:
+            try:
+                funnel[k] = max(int(funnel[k] or 0), int((prior or {}).get(k) or 0))
+            except (TypeError, ValueError):
+                pass
+    return funnel
+
+
+def _upsert_funnel_counts(conn, basket: str, target_date: date, funnel: dict) -> None:
+    """The ONE place a funnel row is written. Mutates `funnel` in place, then upserts it.
+
+    Failure is logged and swallowed, exactly as the five inline copies did: a funnel row is a
+    display artifact and must never be able to stop a tick from placing trades.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket=%s AND score_date=%s",
+                        (basket, target_date))
+            row = cur.fetchone()
+            _merge_day_peaks(funnel, row[0] if row and isinstance(row[0], dict) else {})
+            cur.execute("SELECT COUNT(DISTINCT symbol) FROM v8_qualified "
+                        "WHERE basket=%s AND signal_date=%s", (basket, target_date))
+            funnel["_qualified_today"] = int(cur.fetchone()[0] or 0)
+            cur.execute("""
+                INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
+            """, (basket, target_date, json.dumps(funnel)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"{basket} funnel: {e}")
+
+
 def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date: date,
                                      gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
     """cc#606 BUY_REVERSAL_V6 -> cc#754 V6.1 (session_log 7828 + 29-Jul directive). Dedicated
@@ -1663,17 +1735,7 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
     funnel["_score_qualified"] = len(qualified)
     log.info(f"buy_reversal_v61: {len(surv)} after 6 cheap gates -> {len(qualified)} qualified (day_1d>0 + gvm>=6.5) [cc#754]")
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
-            """, (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"buy_reversal_v6 funnel: {e}")
+    _upsert_funnel_counts(conn, basket, target_date, funnel)
 
     for s in qualified:
         sym  = s["symbol"]
@@ -1827,17 +1889,7 @@ def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_dat
     funnel["_score_qualified"] = len(qualified)
     log.info(f"sell_reversal_v61: {len(qualified)} qualified (true_weekly_rsi<=45) [cc#502]")
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
-            """, (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"sell_reversal_v61 funnel: {e}")
+    _upsert_funnel_counts(conn, basket, target_date, funnel)
 
     for s in qualified:
         sym   = s["symbol"]
@@ -2021,17 +2073,7 @@ def _write_sell_reversal_v7b_shadow(conn, all_metrics: List[dict], target_date: 
     # never a reason to loosen a gate.
     log.info(f"sell_reversal_v7b [SHADOW]: {len(qualified)} qualified of {len(base)} (12-gate strict AND)")
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
-            """, (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"sell_reversal_v7b funnel: {e}")
+    _upsert_funnel_counts(conn, basket, target_date, funnel)
 
     for x in qualified:
         sym = x["symbol"]
@@ -2172,17 +2214,7 @@ def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date
     funnel["_score_qualified"] = len(qualified)
     log.info(f"sell_momentum_v4: {len(qualified)} qualified (8 filters, cc#854 N5I) ")
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
-            """, (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"sell_momentum_v4 funnel: {e}")
+    _upsert_funnel_counts(conn, basket, target_date, funnel)
 
     for s in qualified:
         sym = s["symbol"]
@@ -2388,17 +2420,7 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
     funnel["_score_qualified"] = len(qualified)
     log.info(f"buy_momentum_v4: {len(qualified)} qualified (score>=7/10) [cc#1038]")
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts = EXCLUDED.counts, computed_at = NOW() AT TIME ZONE 'Asia/Kolkata'
-            """, (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"buy_momentum_v3 funnel: {e}")
+    _upsert_funnel_counts(conn, basket, target_date, funnel)
 
     for s in qualified:
         sym  = s["symbol"]

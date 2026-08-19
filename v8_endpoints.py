@@ -1661,26 +1661,47 @@ def _n_filters(basket: str) -> int:
 
 def _qualified_parity(cur, basket: str, score_qualified, score_date=None):
     """cc#1025 item 4: does the funnel's own final count match the qualified table it claims to
-    describe? Compares _score_qualified against COUNT(*) in v8_qualified for the same basket+date.
+    describe? Compares the funnel's FINAL against COUNT(DISTINCT symbol) in v8_qualified for the
+    same basket+date.
 
     DISPLAY-ONLY, and deliberately so: it returns a label the payload carries and logs a warning on
     a mismatch. It never blocks or edits the response — a parity check that can break the page it is
-    checking is worse than the drift it looks for. Returns 'ok' | 'mismatch' | 'unknown'.
+    checking is worse than the drift it looks for.
+
+    cc#1101 changes two things. It counts DISTINCT symbols, because a basket that re-qualifies the
+    same stock at three ticks produced one signal, not three, and COUNT(*) was quietly inflating the
+    table side of its own comparison. And it now returns the TABLE COUNT alongside the label, so the
+    page can print both numbers instead of a vague "these disagree" — a reader who is told there is
+    a mismatch and not told by how much cannot act on it.
+
+    Returns (label, table_count) where label is 'ok' | 'mismatch' | 'unknown' and table_count is
+    None when the count could not be taken.
     """
     if score_qualified is None:
-        return "unknown"
+        return "unknown", None
     try:
-        cur.execute("SELECT COUNT(*) FROM v8_qualified WHERE basket=%s AND signal_date=%s",
-                    (basket, score_date or date.today()))
+        cur.execute("SELECT COUNT(DISTINCT symbol) FROM v8_qualified "
+                    "WHERE basket=%s AND signal_date=%s", (basket, score_date or date.today()))
         n = int(cur.fetchone()[0])
     except Exception as e:
         log.warning("cc#1025 qualified_parity %s: count failed (%s)", basket, e)
-        return "unknown"
+        return "unknown", None
     if n == int(score_qualified):
-        return "ok"
+        return "ok", n
     log.warning("cc#1025 QUALIFIED PARITY MISMATCH %s: funnel says %s, v8_qualified holds %s",
                 basket, score_qualified, n)
-    return "mismatch"
+    return "mismatch", n
+
+
+# cc#1101: the funnel's FINAL row answers "what did this basket produce today", so it reads the
+# day-scoped key the writer now stores (_qualified_today, taken straight from v8_qualified) and
+# falls back to the old point-in-time key for rows written before that deploy. Kept as one function
+# because four handlers ask the same question and a fifth will be added the day a basket is.
+def _funnel_final(counts: dict) -> int:
+    v = (counts or {}).get("_qualified_today")
+    if v is None:
+        v = (counts or {}).get("_score_qualified", 0)
+    return int(v or 0)
 
 
 _BR_V5_STAGES = basket_stage_rows("buy_reversal")
@@ -1700,11 +1721,13 @@ def br_funnel_detail():
             # market, they are the wreckage of a bad writer, so the payload says so and the
             # header refuses to print them as truth.
             stale_format = "_universe" not in (counts or {})
-            # cc#1025 item 4: display-only parity against the table this funnel describes.
-            qualified_parity = _qualified_parity(cur, "buy_reversal", counts.get("_score_qualified"), _asof)
+            # cc#1025 item 4 + cc#1101: parity checks the number the page PRINTS, not a different
+            # one held in the same row. Checking a value the reader never sees cannot tell them
+            # whether what they are looking at is true.
+            final = _funnel_final(counts)
+            qualified_parity, qualified_table_count = _qualified_parity(cur, "buy_reversal", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
-        final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _BR_V5_STAGES:
             passes = int(counts.get(key, 0) or 0)
@@ -1722,6 +1745,8 @@ def br_funnel_detail():
             "gate_type": f"independent per-filter counts; final = strict AND of all {_n_filters('buy_reversal')}",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
+            # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
+            "qualified_table_count": qualified_table_count,
             "stages": stages, **_basket_meta("buy_reversal"),
         }
     except Exception as e:
@@ -1866,12 +1891,12 @@ def sr_funnel_detail():
             # header refuses to print them as truth.
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
-            qualified_parity = _qualified_parity(cur, "sell_reversal", counts.get("_score_qualified"), _asof)
+            final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            qualified_parity, qualified_table_count = _qualified_parity(cur, "sell_reversal", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage10  = counts.get("_stage9_survivors")   # cc#514: value is correct (10 cheap gates); key name is a legacy quirk
         stage10  = int(stage10) if stage10 is not None else None
-        final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _SR_V61_STAGES:
             passes = int(counts.get(key, 0) or 0)
@@ -1891,6 +1916,8 @@ def sr_funnel_detail():
             "gate_type": "independent per-filter counts; final = strict AND of all 11",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
+            # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
+            "qualified_table_count": qualified_table_count,
             "stages": stages, **_basket_meta("sell_reversal"),
         }
     except Exception as e:
@@ -2055,12 +2082,12 @@ def sm_funnel_detail():
             # header refuses to print them as truth.
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
-            qualified_parity = _qualified_parity(cur, "sell_momentum", counts.get("_score_qualified"), _asof)
+            final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            qualified_parity, qualified_table_count = _qualified_parity(cur, "sell_momentum", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage8   = counts.get("_stage8_survivors")
         stage8   = int(stage8) if stage8 is not None else None
-        final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _SM_V3_STAGES:
             passes = int(counts.get(key, 0) or 0)
@@ -2080,6 +2107,8 @@ def sm_funnel_detail():
             "gate_type": "independent per-filter counts; final = strict AND of all 9",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
+            # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
+            "qualified_table_count": qualified_table_count,
             "stages": stages, **_basket_meta("sell_momentum"),
         }
     except Exception as e:
@@ -2235,7 +2264,8 @@ def bm_funnel_detail():
             # header refuses to print them as truth.
             stale_format = "_universe" not in (counts or {})
             # cc#1025 item 4: display-only parity against the table this funnel describes.
-            qualified_parity = _qualified_parity(cur, "buy_momentum", counts.get("_score_qualified"), _asof)
+            final = _funnel_final(counts)   # cc#1101: parity checks the printed number
+            qualified_parity, qualified_table_count = _qualified_parity(cur, "buy_momentum", final, _asof)
 
         universe = int(counts.get("_universe", 0) or 0)
         stage6   = counts.get("_stage6_survivors")
@@ -2243,7 +2273,12 @@ def bm_funnel_detail():
         # cc#1051: V5 dropped the twr hard gate, so the hard-qualified count now arrives under
         # _hard_qualified. Fall back to the old key so pre-deploy rows still show a denominator.
         hard_qualified = int(counts.get("_hard_qualified", counts.get("true_weekly_rsi", 0)) or 0)
-        final    = int(counts.get("_score_qualified", 0) or 0)
+        # cc#1101: `final` is now the DAY's qualifier count while `hard_qualified` is the day's PEAK
+        # per-tick survivor count, so on a day where different stocks cleared at different ticks the
+        # final can legitimately exceed the peak. The score-band row's denominator therefore has to
+        # be at least `final` — a "1 of 0 passed, 100%+" row is nonsense the reader would rightly
+        # distrust, and clamping it is not hiding anything: both numbers are still printed above.
+        score_denom = max(hard_qualified, final)
         stages = []
         for key, label, cmin, cmax in _BM_V3_STAGES:
             passes = int(counts.get(key, 0) or 0)
@@ -2260,11 +2295,12 @@ def bm_funnel_detail():
             # cc#514: not a passed_filters/failed_filters entry -- the funnel-row click-through
             # special-cases this key to list stocks by score_qualified/score instead.
             "metric": "score >= 7 of 10 (V2 bands)", "key": "_score_band", "condition_min": "fixed threshold", "condition_max": "",
-            "passes": final, "fails": max(hard_qualified - final, 0),
-            "survivors": final, "killed": max(hard_qualified - final, 0),
-            "pass_pct": round(final / hard_qualified * 100, 1) if hard_qualified else 0,
-            "denominator": hard_qualified,
-            "note": f"of {hard_qualified} stocks passing all HARD gates (incl. wRSI[70,85])",
+            "passes": final, "fails": max(score_denom - final, 0),
+            "survivors": final, "killed": max(score_denom - final, 0),
+            "pass_pct": round(final / score_denom * 100, 1) if score_denom else 0,
+            "denominator": score_denom,
+            "note": f"of {score_denom} stocks passing all HARD gates (incl. wRSI[70,85]) at the "
+                    f"day's peak tick; the {final} shown is the day's total qualifiers",
         })
         return {
             "basket": "buy_momentum", "score_date": str(_asof or date.today()),
@@ -2273,6 +2309,8 @@ def bm_funnel_detail():
             "gate_type": f"HARD gates ({_BM_CHEAP_N}) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
+            # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
+            "qualified_table_count": qualified_table_count,
             "stages": stages, **_basket_meta("buy_momentum"),
         }
     except Exception as e:

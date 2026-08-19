@@ -3641,7 +3641,10 @@ async function loadFunnelInline(basketId,panelIdx){
       ?'LAST SESSION FORMAT STALE — REFRESHES NEXT TRADING DAY'
       :`UNIVERSE ${fd.universe} -> FINAL ${fd.final} · ${fd.filter_count} FILTERS · ALL MUST PASS`}</span></div>`;
     if(fd.stale_format)inner+=`<div style="font-size:10px;color:var(--amber);margin-bottom:4px">These counts were written in a retired format (no universe recorded), so they are shown but not treated as this session's numbers. The live 5-min writer refills them next trading day.</div>`;
-    if(fd.qualified_parity==='mismatch')inner+=`<div style="font-size:10px;color:var(--amber);margin-bottom:4px">Funnel final and the qualified table disagree for this basket — the engine logged the counts. Shown as-is, nothing corrected here.</div>`;
+    // cc#1101 item 4: a mismatch is only useful if the reader is told BY HOW MUCH. "These disagree"
+    // is not something anyone can act on; "funnel 0, table 1" is. Both numbers come from the
+    // payload, and nothing is corrected here — the funnel still shows what the engine wrote.
+    if(fd.qualified_parity==='mismatch')inner+=`<div style="font-size:10px;color:var(--amber);margin-bottom:4px">Funnel final says <b>${fd.final}</b>, the qualified table holds <b>${fd.qualified_table_count==null?'?':fd.qualified_table_count}</b> for ${fd.score_date}. Shown as-is, nothing corrected here.</div>`;
     inner+=`<div style="font-size:10px;color:var(--dim);margin-bottom:4px">Tap any row to list the passing symbols with their actual values.</div>`;
     inner+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
       const rid=`fs-${basketId}-${s.key||s.metric}`.replace(/[^a-zA-Z0-9_-]/g,'_');
