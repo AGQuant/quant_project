@@ -37,6 +37,9 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
 .l{border-color:#5A2634;background:#241019;color:#FF8FA5}
 .n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+/* cc#1109: CLOSED is not a warning. The state chip was permanently amber, which read as
+   "something needs attention" on every evening and all weekend. */
+.mu{border-color:var(--edge);background:var(--hi);color:var(--muted)}
 .grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
 .grp h3{font-family:'Archivo Black';font-size:15px;transform:skewX(-6deg);color:var(--chalk)}
 .grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:1px;text-align:right}
@@ -124,8 +127,18 @@ function tile(t){
      sessions back and nulls under 6 sessions) — never recomputed here, never defaulted to 0. */
   const w=t.week_chg_pct!=null?Number(t.week_chg_pct):(t.wk_chg_pct!=null?Number(t.wk_chg_pct):null);
   const v=TAPE_MODE==='week'?w:d;
+  /* cc#1109 INVERTED TILES. Colour used to be the sign of the number, which is wrong for any
+     symbol whose direction is inverted — INDIA VIX falls when the market calms, and a falling
+     VIX was painting red. The payload ALREADY carries day_band / week_band with the inversion
+     applied (global_heatstrip sets inverted:true on INDIAVIX), so the band is read, never
+     recomputed here — one composer, same rule as the week number above. Sign is the fallback
+     only when a tile ships no band. */
+  const band=TAPE_MODE==='week'?t.week_band:t.day_band;
+  const col=v==null?'var(--muted)'
+           :(band?(String(band).indexOf('up')===0?'var(--volt)':(String(band).indexOf('down')===0?'var(--heat)':'var(--muted)'))
+                 :cx(v));
   return `<div class="tile well"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
-    <div class="vv" style="color:${v!=null?cx(v):'var(--muted)'}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
+    <div class="vv" style="color:${col}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
 }
 /* re-renders the grid IN PLACE: same cells, same order, only the % swaps (ref). */
 function setTapeMode(m){
@@ -155,12 +168,19 @@ function ladder(ix){
 async function boot(){
   let d=null, eng=[];
   try{ d=await (await fetch('/api/digest/v3')).json(); }catch(e){}
+  /* cc#1109 ENGINE YESTERDAY. This used to match String(exit_ist).slice(0,2) against a
+     day-of-month computed on the PHONE from weekday arithmetic (Monday -> minus 3, else minus 1).
+     Three ways that was wrong: it is blind to holidays, it matches the same day-number of ANY
+     month, and it breaks outright the day exit_ist changes format. The basis now comes from the
+     SERVER — d.prev_trading_date, which walks weekends AND the nse_holidays table — and the
+     match is exact equality against the row's own ISO exit_date. If the payload carries no
+     basis, the list stays EMPTY rather than showing trades from an unknown session. */
   try{
-    const t=await (await fetch('/api/v10/trades/paired?limit=30')).json();
-    const now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
-    const y=new Date(now); y.setDate(y.getDate()-(now.getDay()===1?3:1));   /* Monday -> Friday */
-    const ymd=`${String(y.getDate()).padStart(2,'0')}`;
-    eng=(t.trades||[]).filter(r=>String(r.exit_ist||'').slice(0,2)===ymd).slice(0,4);
+    const basis=d&&d.prev_trading_date;
+    if(basis){
+      const t=await (await fetch('/api/v10/trades/paired?limit=30')).json();
+      eng=(t.trades||[]).filter(r=>r.exit_date===basis).slice(0,4);
+    }
   }catch(e){}
   if(!d||d.error||!d.sections){
     document.getElementById('app').innerHTML=`<div class="card slab"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
@@ -168,7 +188,12 @@ async function boot(){
   }
   const S=d.sections, mr=d.market_read||{};
   document.getElementById('dd-date').textContent=(d.date_ist||'')+' · the morning read';
+  /* cc#1109: the chip follows market.state instead of sitting on a static amber. OPEN reads as
+     live, CLOSED reads as quiet, PRE-OPEN and CAS keep the amber that means "not yet / not any
+     more". The label text is unchanged. */
   const st=document.getElementById('dd-state'); st.textContent=(d.market&&d.market.label)||'—';
+  const mst=(d.market&&d.market.state)||'';
+  st.className='chip '+(mst==='OPEN'?'w':(mst==='CLOSED'?'mu':(mst?'n':'n')));
 
   const tiles=(S.global_tape&&S.global_tape.tiles)||[];
   window.__TILES=tiles;   /* APP_QA_R5 P5: kept so the switch re-renders without a refetch */
