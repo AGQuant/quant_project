@@ -1059,17 +1059,13 @@ const BASKET_INFO={
   },
 
   sell_reversal:{
-    label:"Sell Reversal V7",side:"SELL",version:"V7",
-    thesis:"Short an R1 rejection in a weak stock, but only when its whole sector is falling. Ten hard gates, all must pass: the high reached R1 in the last 3 sessions; the day is down between 0 and 2%; price is below the 20, 50 and 200 DMA; monthly RSI is 35 or lower; the sector is down at least 0.5% on the week; the sector is down at least 2% on the MONTH; 2-day momentum is between -4% and -1%; month return is no worse than -10%; and there is at least 2% of room down to the S1/S2 target. Target is S1 or S2 dynamic, stop is the 1:1 mirror above entry.",
-    regime:"REGIME-GATED. The sector-month gate means this basket stays SILENT for weeks at a time — in a rising or flat market no sector is down 2% on the month and nothing qualifies. No signals is the design working, not a fault.",
-    evidence:"12-month replay: 87 trades, 60.9% win rate. Excluding March 2026 it is 57.8% — 42 of the 87 trades fell in that one month, so both numbers are shown rather than the flattering one. The replay was EOD-gated with 5-min execution, not a true per-bar run. Treat it as direction, not proof.",
-    reviewGate:"Under review until 20 decided trades. Judge it then, not before.",
-    gateType:"10 HARD gates (strict AND) -- all cheap, no heavy stage",
+    label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
+    thesis:"Short an R1 rejection in a weak stock. Ten cheap gates plus one heavy final check, all must pass: the high reached R1 in the last 3 sessions; day change between -2% and 0; below the 20, 50 and 200 DMA; 52-week index under 50; the sector's week is negative; 2-day momentum between -4% and -1%; month return at least -10%; at least 2% of room to the S1/S2 target; and finally the true weekly RSI at or below 45. Target is S1 or S2 dynamic, stop is the 1:1 mirror.",
+    gateType:"10 cheap HARD gates + FINAL heavy true weekly RSI (strict AND)",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    freshBook:"Fresh book from 19-Aug-2026. Only V7-stamped trades count; V6.1 history is not carried forward.",
-    sigs_eod:"regime-gated, no steady rate",wr_eod:60.9,ev_eod:null,
-    sigs_5m:"87 trades / 12 months",wr_5m:60.9,ev_5m:null,
+    sigs_eod:"~57/yr (286 total 5yr)",wr_eod:60.5,ev_eod:0.71,
+    sigs_5m:"159/yr",wr_5m:71.7,ev_5m:1.55,
   },
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
@@ -1321,16 +1317,12 @@ function openInfo(basket){
   const version=(reg&&reg.version)||info.version;
   document.getElementById('mTitle').textContent=label;
   document.getElementById('mSub').textContent=`${info.side} · 5-min ${info.wr_5m}% WR (${info.sigs_5m}) · 5yr EOD ${info.wr_eod}% WR (${info.sigs_eod})`;
-  // cc#1099: a basket may legitimately have NO per-trade EV figure — V7's replay reports a win
-  // rate and a trade count, not an EV. Printing "+null%" would invent a number where there is
-  // none, so the absent case renders an em-dash and says nothing.
-  const evTxt = v => (v === null || v === undefined || v === '') ? '—' : `+${v}%`;
   document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
 
   let html='';
   html+=`<div class="stat-pills">
     <span class="sp sp-g">5-min WR ${info.wr_5m}%</span>
-    <span class="sp sp-b">5-min EV ${evTxt(info.ev_5m)}${info.ev_5m==null?'':'/trade'}</span>
+    <span class="sp sp-b">5-min EV +${info.ev_5m}%/trade</span>
     <span class="sp sp-a">${info.sigs_5m} sigs</span>
     <span class="sp ${sc?'sp-g':'sp-r'}">${info.side}</span>
     <span class="sp sp-c">${version}</span>
@@ -1342,26 +1334,15 @@ function openInfo(basket){
     <div style="display:flex;gap:10px">
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">5-YR EOD</div>
-        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR${info.ev_eod==null?'':' &middot; +'+info.ev_eod+'% EV'}</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR &middot; +${info.ev_eod}% EV</div>
       </div>
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">1-YR 5-MIN (live-parity)</div>
-        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR${info.ev_5m==null?'':' &middot; +'+info.ev_5m+'% EV'}</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR &middot; +${info.ev_5m}% EV</div>
       </div>
     </div>
     <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
-    ${info.evidence?`<div style="font-size:11.5px;color:var(--txt);line-height:1.6;margin-top:8px">${info.evidence}</div>`:''}
-    ${info.reviewGate?`<div style="font-size:10.5px;color:var(--amber);margin-top:6px">${info.reviewGate}</div>`:''}
-    ${info.freshBook?`<div style="font-size:10.5px;color:var(--dim);margin-top:4px">${info.freshBook}</div>`:''}
   </div>`;
-  // cc#1099: the regime warning sits directly under the thesis-and-evidence pair, before the
-  // filter list, because a reader who stops after two sections must still learn that silence is
-  // expected. Rendered only for a basket that declares one, so nothing else gains a blank box.
-  if(info.regime){
-    html+=`<div class="msec"><div class="msec-title" style="color:var(--amber)">When this basket is silent</div>
-      <div style="font-size:13px;color:var(--txt);line-height:1.65">${info.regime}</div>
-    </div>`;
-  }
   // cc#618 Section C: filter rows GENERATED from the registry (FILTER_REG), never a hardcoded list.
   const gateRows=(reg&&reg.gates)?reg.gates.map(g=>`<div class="frow">
       <span class="fm">${String(g.label||g.key).replace(/_/g,' ')}</span>
