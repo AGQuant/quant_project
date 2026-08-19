@@ -245,17 +245,28 @@
    deliberately with the founder — not a rule inherited from a preview whose markup the app never
    used. */
 
-/* 2 · CHECK PILLS AS W/L SET SCORES — the pass/fail letter is data the class already carries,
-   so ::before only surfaces what .g/.r mean. Adds content, hides nothing. */
-:root:root:not([data-theme="light"]) .hchips .chip{ font-family:var(--r5-mono); font-weight:600; }
-:root:root:not([data-theme="light"]) .hchips .chip.g::before{
-  content:"W"; font-weight:800; margin-right:6px; color:var(--r5-volt);
-}
-:root:root:not([data-theme="light"]) .hchips .chip.r::before{
-  content:"L"; font-weight:800; margin-right:6px; color:#FF8FA5;
-}
-:root:root:not([data-theme="light"]) .hchips .chip.g{ background:#18240E; border-color:#3E5A18; }
-:root:root:not([data-theme="light"]) .hchips .chip.r{ background:#241019; border-color:#5A2634; }
+/* 2 · CHECK PILLS AS W/L SET SCORES — WITHDRAWN (cc#1116), for the same reason as the mood word
+   directly above: the block was written against previews/home_v2.html and matches nothing the app
+   actually renders.
+
+   It targeted `.hchips .chip.g` and `.hchips .chip.r`, injecting a literal W or L through ::before
+   and repainting the pill. `.hchips` exists in exactly two places: previews/home_v2.html, which
+   renders `<span class="chip r">` and is a mockup, and mobile/home.html, which renders
+   `<button class="hc bad">`. Different class entirely, so the rule has never once fired on a live
+   screen. (`.chip r` does exist live on /health, but never inside .hchips, so that page was never
+   in scope either.)
+
+   IT GOES BECAUSE OF WHAT THE FOUNDER REPORTED. His 20:39 screenshot showed a literal L on every
+   failed check chip, and this is the ONLY rule in the entire repository that can emit that
+   character — grep for content:"L" returns these lines and nothing else. I could not reproduce it
+   against the live markup and I am not going to claim I found the path. What I can do is remove
+   the only mechanism capable of producing it, which costs nothing: four dead rules that style a
+   markup shape the app does not use, and whose failure mode is stray letters appearing on data
+   chips. A rule that can only ever surprise someone is not worth keeping for a mockup's sake.
+
+   If the W/L set-score treatment is wanted on the real check pills, it belongs on `.hc.ok` and
+   `.hc.bad` and is a deliberate design decision — not an inherited selector that happens to
+   collide. */
 
 /* 3 · GEOMETRY, ENFORCED — per-page styles declare border-radius at equal or higher specificity
    (e.g. .chip{border-radius:20px}), which was why pills still rendered rounded. The cut is the
