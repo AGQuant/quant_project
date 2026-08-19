@@ -293,18 +293,42 @@ _BULL = r"(rises|jumps|surges|beats|narrows|record|expands|grows|up \d)"
 _BEAR = r"(falls|drops|slumps|misses|widens|declines|loss|down \d)"
 
 
-def _yesterday_results(cur) -> Dict[str, Any]:
+def _prev_trading_date(cur, ref=None):
+    """cc#1109: the previous TRADING day, not CURRENT_DATE - 1.
+
+    `CURRENT_DATE - 1` scores Sunday every Monday and scores a holiday on the day after one —
+    both return an empty earnings set that reads as "nothing reported" rather than "no session".
+    Walk back from `ref` (IST today by default) over weekends and over notified NSE closures.
+    The holiday set comes from the nse_holidays TABLE, so a calendar update needs no deploy;
+    weekends are pure date arithmetic and need no lookup at all.
+
+    Bounded at 10 steps. The longest real NSE gap is a Diwali/weekend cluster of about four
+    days, so 10 is slack, not a guess — and a bound means a bad calendar row can never spin.
+    """
+    d = ref or _ist_now().date()
+    for _ in range(10):
+        d = d - timedelta(days=1)
+        if d.weekday() >= 5:                      # Sat/Sun
+            continue
+        cur.execute("SELECT 1 FROM nse_holidays WHERE holiday_date = %s LIMIT 1", (d,))
+        if cur.fetchone():
+            continue
+        return d
+    return (ref or _ist_now().date()) - timedelta(days=1)
+
+
+def _yesterday_results(cur, basis) -> Dict[str, Any]:
     cur.execute("""SELECT UPPER(e.ticker), e.company_name, s.market_cap
                    FROM earnings_calendar e
                    LEFT JOIN screener_raw s ON s.nse_code = UPPER(e.ticker)
-                   WHERE e.ex_date = CURRENT_DATE - 1
-                   ORDER BY s.market_cap DESC NULLS LAST LIMIT 10""", ())
+                   WHERE e.ex_date = %s
+                   ORDER BY s.market_cap DESC NULLS LAST LIMIT 10""", (basis,))
     top = []
     for r in cur.fetchall():
         lbl, is_sym = _label(r[0], r[1])
         top.append({"ticker": r[0], "company": r[1], "market_cap": _f(r[2]),
                     "label": lbl, "is_symbol": is_sym})
-    cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date = CURRENT_DATE - 1")
+    cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date = %s", (basis,))
     total = cur.fetchone()[0]
 
     out, tally = [], {"bullish": 0, "cautious": 0, "neutral": 0, "pending": 0}
@@ -337,6 +361,9 @@ def _yesterday_results(cur) -> Dict[str, Any]:
     l2 = cur.fetchone()[0]
     return {"companies": out, "reported_total": total, "tally": tally, "l2_count": l2,
             "tier": "STATIC",
+            # cc#1109: the page states which session this scored, so an empty Monday reads as
+            # "Friday had none" and never as "today had none".
+            "basis_date": basis.isoformat(),
             "match_rule": ("ticker in mentioned_symbols AND result-shaped headline AND published "
                            f"within {RESULT_WINDOW_HOURS}h — all three, or the row shows PENDING"),
             "read": (f"{tally['bullish']} bullish · {tally['cautious']} cautious · "
@@ -345,11 +372,13 @@ def _yesterday_results(cur) -> Dict[str, Any]:
 
 def build_digest(cur) -> Dict[str, Any]:
     now = _ist_now()
+    prev_trading = _prev_trading_date(cur, now.date())   # cc#1109: one basis, used everywhere
     tape = _global_tape(cur)
     lad = _ladders(cur)
     internals = _internals(cur)
 
-    # 965 §10 MARKET READ — composed only from numbers already shown above, no new data.
+    # 965 §10 MARKET READ. The SUPPORT numbers are still composed only from what is already on
+    # the page — that half of the framework is unchanged.
     bias_bits = []
     tiles = tape.get("tiles") or []
     if tiles:
@@ -357,11 +386,31 @@ def build_digest(cur) -> Dict[str, Any]:
         bias_bits.append(f"global tape {ups}/{len(tiles)} higher")
     if internals.get("adr") and internals["adr"].get("adr") is not None:
         bias_bits.append(f"breadth {internals['adr']['adr']:.2f}")
-    bias = "Range"
-    if internals.get("adr") and (internals["adr"].get("adr") or 0) > 1.2:
-        bias = "Bullish continuation"
-    elif internals.get("adr") and 0 < (internals["adr"].get("adr") or 0) < 0.8:
-        bias = "Cautious"
+
+    # cc#1109 VERDICT UNIFICATION — founder R7 defect 4. The bias WORD is now SOURCED, not
+    # composed here. This module used to derive its own word from ADR alone while Home read
+    # v8_endpoints.market_mood(); two composers produce two words for the same minute by
+    # construction, and no amount of tuning either one fixes that. 965's MARKET_READ rule is
+    # amended by this card: support numbers stay local, the word comes from the one composer.
+    bias, bias_source, bias_note = None, "market_mood", None
+    try:
+        from v8_endpoints import market_mood as _market_mood
+        bias = (_market_mood() or {}).get("mood") or None
+    except Exception as e:                       # noqa: BLE001 — any failure falls back, none raises
+        log.warning("cc#1109 market_mood unavailable, falling back to local ADR rule: %s", e)
+        bias = None
+    if not bias:
+        # The fallback is the OLD rule, kept verbatim, and it says so on the page. A silent
+        # fallback would put the two words back out of step with nothing on screen to show it.
+        adr = (internals.get("adr") or {}).get("adr") or 0
+        bias = "Range"
+        if adr > 1.2:
+            bias = "Bullish continuation"
+        elif 0 < adr < 0.8:
+            bias = "Cautious"
+        bias_source = "digest_local_adr_fallback"
+        bias_note = ("Market mood unavailable — this word is composed locally from breadth "
+                     "alone and may differ from Home.")
 
     return {
         "generated_at": now.isoformat(),
@@ -374,12 +423,16 @@ def build_digest(cur) -> Dict[str, Any]:
             "reporting_today": _reporting_today(cur),
             "what_moved": {"items": _news(cur, "Domestic"), "tier": "LIVE"},
             "global_events": {"items": _news(cur, "Global"), "tier": "LIVE"},
-            "yesterday_results": _yesterday_results(cur),
+            "yesterday_results": _yesterday_results(cur, prev_trading),
         },
+        "prev_trading_date": prev_trading.isoformat(),   # cc#1109: for the page's date filters
         "market_read": {
             "bias": bias,
+            "bias_source": bias_source,
             "support": bias_bits,
-            "note": "Composed only from the numbers shown above (965 MARKET_READ_FRAMEWORK).",
+            "note": bias_note or ("Bias word from the shared market mood; support numbers "
+                                  "composed only from what is shown above "
+                                  "(965 MARKET_READ_FRAMEWORK, amended by cc#1109)."),
         },
         "spec": "cc#846 V3 · binding content spec session_log 965 v2.3",
     }
