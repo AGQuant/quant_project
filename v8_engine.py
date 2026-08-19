@@ -532,31 +532,35 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
 
-    # Pass 2: sector_week + sector_month -- EOD peer avg by segment
-    # sector_week  = avg week_return  of peers in same segment
-    # sector_month = avg month_return of peers in same segment
-    # NOTE: These are also computed live by v8_signal_writer._update_sector_aggregates_sql.
-    # The EOD values here serve as initial baseline; COALESCE in store_metrics ensures
-    # signal_writer's live values take priority once set.
-    from collections import defaultdict
-    seg_week:  dict = defaultdict(list)
-    seg_month: dict = defaultdict(list)
-    for m in all_metrics:
-        seg = m.get("_segment")
-        if not seg:
-            continue
-        wk = m.get("week_return")
-        mo = m.get("month_return")
-        if wk  is not None: seg_week[seg].append(wk)
-        if mo  is not None: seg_month[seg].append(mo)
+    # Pass 2: sector_week + sector_month -- EOD peer average by FUTURES THEME.
+    #
+    # cc#1102 (founder ruling 19-Aug-2026). This used to group by m["_segment"], the GVM segment.
+    # It is a SECOND write path onto the same three columns as the live writer, and it runs at
+    # 15:45 — so leaving it on the old taxonomy would have quietly restored GVM-segment values over
+    # the theme values every evening, and the next morning's gates would have read them. That is the
+    # kind of half-migration that produces a bug nobody can reproduce during market hours.
+    #
+    # It goes through theme_change.aggregate, the SAME function the live writer and the display
+    # endpoints use, so there is one grouping rule with three data sources and never three rules.
+    # The equal weighting is unchanged — this pass was already an unweighted mean over the futures
+    # symbol set; only the TAXONOMY moves, from GVM segment to futures theme.
+    try:
+        import theme_change
+        with conn.cursor() as _tc:
+            theme_map = theme_change.theme_of(_tc)
+        themes = theme_change.aggregate(
+            theme_map,
+            {m["symbol"]: {"day_1d": m.get("day_1d"), "week_return": m.get("week_return"),
+                           "month_return": m.get("month_return")} for m in all_metrics})
+    except Exception as e:
+        log.warning(f"v8_engine sector themes failed ({e}); sector_* left None — gates fail closed")
+        theme_map, themes = {}, {}
 
-    seg_week_avg  = {seg: float(np.mean(v)) for seg, v in seg_week.items()  if v}
-    seg_month_avg = {seg: float(np.mean(v)) for seg, v in seg_month.items() if v}
-
     for m in all_metrics:
-        seg = m.get("_segment")
-        m["sector_week"]  = seg_week_avg.get(seg)
-        m["sector_month"] = seg_month_avg.get(seg)
+        info = themes.get(theme_map.get(m["symbol"])) if theme_map.get(m["symbol"]) else None
+        ok = bool(info) and not info.get("thin")
+        m["sector_week"]  = info.get("week") if ok else None
+        m["sector_month"] = info.get("month") if ok else None
         m["sector_day"]   = None   # set live by v8_signal_writer every 5-min
 
     # Pass 3: store all metrics (with sector values)

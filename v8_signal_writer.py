@@ -54,14 +54,17 @@ total (was 24; the 4 freed slots are NOT redistributed):
     Strong Bullish: 15B / 5S  | Bullish:  14B / 6S
     Neutral:        12B / 8S  | Bearish:   8B / 13S
 
-Sector aggregates (18-Jun-2026; REDEFINED by cc#810 02-Aug-2026):
-  sector_day / sector_week / sector_month are the segment's MCAP-WEIGHTED change across ALL
-  members of its gvm_scores.segment — SUM(mcap_i * chg_i) / SUM(mcap_i), weights from
-  screener_raw.market_cap, members priced live (5-min spot tick) where a feed exists and EOD
-  otherwise. Computed ONCE in segment_change.py and written here after every tick.
-  Was, until cc#810: an unweighted AVG of v8_metrics peers — i.e. of the ~209 FUTURES symbols
-  only, which made a 16-member segment report the move of the 2 F&O names in it.
-  EOD engine can no longer overwrite (COALESCE protection in v8_engine.store_metrics).
+Sector aggregates (REDEFINED by cc#1102, founder ruling 19-Aug-2026):
+  sector_day / sector_week / sector_month are the EQUAL-WEIGHT average across the ACTIVE FUTURES
+  members of the symbol's futures_universe.theme. Computed ONCE, in theme_change.py, which the
+  live writer, the EOD engine and every display surface all call — one grouping, three data
+  sources, never three rules.
+  Was, until cc#1102: the MCAP-WEIGHTED change across all ~1,795 members of the gvm_scores.segment
+  (cc#810/cc#1003). That described a universe V8 cannot trade and let the largest name speak for a
+  book that buys ONE LOT PER NAME. Before cc#810 it was an unweighted AVG over futures peers, which
+  made a 16-member segment report the move of the 2 F&O names in it.
+  A theme with fewer than 3 priced members yields NULL on all three, and NULL FAILS every sector
+  gate closed — the gates read `v is not None and <comparison>`.
 """
 
 import logging
@@ -936,54 +939,61 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 # -- Step 6: Sector aggregates (live) -----------------------------------------
 
 def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict], conn):
-    # cc#1003 (founder-approved 11-Aug-2026, session_log 19503): the sector return a V8 stock is
-    # GATED against is now the WIDE-UNIVERSE mcap-weighted sector return — the SAME shared
-    # segment_change.py computation over all ~1,795 gvm_scores members that the v8_metrics table and
-    # the TC/GVM chips already read — NOT the old unweighted simple average over the ~209 futures
-    # rows. That old basis was self-referential: 18 segments had exactly ONE futures member, so
-    # sector_week WAS that stock's own week (verified 11-Aug). The gates keep their FORM
-    # (sector_week>0, sector_week<0, band 0-6, etc.); only the benchmark they compare against widens.
-    # Setting the wide value on `computed` HERE means the qualification gates (_write_qualified, which
-    # reads these in-memory dicts) and the v8_metrics upsert both use it, so the gate and the
-    # displayed sector value can no longer disagree (the split that made the F&O value the one the
-    # gates saw while the table drifted).
-    #
-    # MINIMUM MEMBERSHIP: a segment with fewer than 3 PRICED members in the WIDE universe yields NULL
-    # sector metrics — the strict gates fail closed on NULL — rather than a thin, near-self-referential
-    # benchmark. Honest absence over a fabricated number. (Verified 11-Aug: all 55 futures-touched
-    # segments carry >=3 wide members, so this NULLs nothing today; it is the guard for the long tail.)
-    MIN_MEMBERS = 3
-    segs: Dict[str, dict] = {}
-    sym_seg: Dict[str, str] = {}
-    try:
-        import segment_change
-        # cc#1011 STRUCTURAL ISOLATION: the sector fetch is OPTIONAL and now runs on its OWN
-        # short-lived connection, NEVER the tick's. segment_change's read had been aborting the tick
-        # transaction in place; once cc#1003 moved this call to just before the metrics UPSERT, that
-        # poisoned connection made the upsert fail and the whole tick write 0/208 while still stamping
-        # a healthy heartbeat (11-Aug incident). On a separate connection a sector-read failure can
-        # ONLY produce NULL sector values (gates fail closed) — it can never touch the tick's write.
-        with psycopg.connect(os.environ.get("DATABASE_URL")) as _sc, _sc.cursor() as cur:
-            segs = segment_change.segment_changes(cur)
-            # Key each V8 stock to its WIDE-UNIVERSE segment (gvm_scores) — the same taxonomy
-            # segment_change aggregates on — so a stock and its sector benchmark share one segment.
-            cur.execute("""SELECT symbol, segment FROM gvm_scores
-                           WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)""")
-            sym_seg = {r[0]: r[1] for r in cur.fetchall()}
-    except Exception as e:
-        log.warning(f"_add_sector_aggregates(cc#1003/1011 wide): isolated sector fetch failed ({e}); "
-                    f"sector_* left None this tick — gates fail closed, never a stale F&O value and "
-                    f"never a poisoned tick connection")
-        segs, sym_seg = {}, {}
+    """Set sector_day / sector_week / sector_month on every symbol in `computed`, from the FUTURES
+    THEME the symbol belongs to — equal-weight across that theme's ACTIVE futures members.
 
+    cc#1102 (founder ruling 19-Aug-2026). THIS REPLACES THE cc#1003 GVM-SEGMENT BASIS. The old value
+    was the mcap-weighted change across ALL ~1,795 gvm_scores members of a GVM segment. Two things
+    were wrong with it for THIS book. The universe was wrong: it included microcaps V8 can never
+    trade, so the sector described a market the basket does not operate in. And the weighting was
+    wrong: V8 trades ONE LOT PER NAME, so a mcap weight lets the biggest name in the segment speak
+    for the basket's experience. Equal weight over the futures members is what a one-lot-per-name
+    book actually feels.
+
+    THE COMPUTATION IS NOT HERE. It is theme_change.aggregate, the one function the display surfaces
+    also go through — cc#1042 exists because two surfaces grouped the same data differently and
+    disagreed in public, and a gate disagreeing with its own table would be that failure with money
+    attached. This function only chooses the DATA SOURCE: `computed`, the live values this tick is
+    about to upsert. That is deliberate — the table and the gate then hold the same number by
+    construction, which was the point of cc#1003 and is preserved here.
+
+    WHAT cc#1003 AND cc#1011 ESTABLISHED AND THIS KEEPS. The theme read runs on its OWN short-lived
+    connection, never the tick's: on 11-Aug a sector read aborted the tick transaction in place and
+    the metrics upsert then wrote 0 of 208 while the heartbeat still stamped healthy. On a separate
+    connection a failure here can ONLY produce NULL sector values. And NULL FAILS every sector gate
+    closed — each is written `v is not None and <comparison>` — so a missing sector never admits a
+    trade on a number nobody measured.
+
+    THIN THEMES: fewer than theme_change.THEME_MIN_MEMBERS priced members yields None on all three
+    fields. Honest absence over a fabricated average. `eod_metrics` is no longer read here — the
+    theme average is taken over the same live values being written, so a stale EOD fallback would
+    mix two sessions inside one average.
+    """
+    theme_map: Dict[str, str] = {}
+    themes: Dict[str, dict] = {}
+    try:
+        import theme_change
+        with psycopg.connect(os.environ.get("DATABASE_URL")) as _sc, _sc.cursor() as cur:
+            theme_map = theme_change.theme_of(cur)
+        themes = theme_change.aggregate(theme_map, computed)
+    except Exception as e:
+        log.warning(f"_add_sector_aggregates(cc#1102 theme): isolated theme fetch failed ({e}); "
+                    f"sector_* left None this tick — gates fail closed, never a stale value and "
+                    f"never a poisoned tick connection")
+        theme_map, themes = {}, {}
+
+    n_null = 0
     for sym, m in computed.items():
-        info = segs.get(sym_seg.get(sym)) if sym_seg.get(sym) else None
-        if info and (info.get("members_priced") or 0) >= MIN_MEMBERS:
+        info = themes.get(theme_map.get(sym)) if theme_map.get(sym) else None
+        if info and not info.get("thin"):
             m["sector_day"]   = info.get("day")
             m["sector_week"]  = info.get("week")
             m["sector_month"] = info.get("month")
         else:
             m["sector_day"] = m["sector_week"] = m["sector_month"] = None
+            n_null += 1
+    log.info(f"_add_sector_aggregates: {len(themes)} futures themes, equal-weight; "
+             f"{n_null} of {len(computed)} symbols carry NULL sector values [cc#1102]")
 
 
 # -- Step 7: Upsert v8_metrics ------------------------------------------------
@@ -1114,64 +1124,13 @@ def _upsert_metrics_batch(conn, computed: dict, target_date: date, sim_ts=None) 
                 pass
             log.warning(f"upsert_metrics {sym}: {e2}")
     return ok
+# -- Step 7b: RETIRED ---------------------------------------------------------
+# cc#1011 retired the separate _update_sector_aggregates_sql pass (its work moved into
+# _add_sector_aggregates, on an isolated connection). cc#1102 DELETES the dead body rather than
+# leaving it parked: it still grouped by gvm_scores.segment, so anything that ever called it again
+# would have silently written the OLD taxonomy over the new one. A retired function that still
+# knows how to do the wrong thing is a landmine, not documentation.
 
-
-# -- Step 7b: Bulk sector aggregates SQL update (18-Jun-2026) ------------------
-
-def _update_sector_aggregates_sql(conn, target_date) -> int:
-    """
-    Write sector_day, sector_week, sector_month onto every v8_metrics row after each
-    signal_writer tick, from the ONE shared computation in segment_change.py.
-
-    cc#810 (02-Aug-2026) replaced the maths here. Taxonomy is gvm_scores.segment; the value is the
-    MCAP-WEIGHTED change across ALL segment members (SUM(mcap_i*chg_i)/SUM(mcap_i), weights from
-    screener_raw.market_cap), priced live where a feed exists and EOD otherwise. Was: an unweighted
-    AVG over v8_metrics rows, i.e. over the ~209 futures symbols only.
-    Added 18-Jun-2026; rewritten cc#810.
-    """
-    # cc#810 SEGMENT UNIFICATION (founder 02-Aug-2026). The old body of this function averaged
-    # v8_metrics rows within a segment — and v8_metrics holds ONLY the ~209 futures symbols, so
-    # "the sector" meant "the handful of F&O names in it". Measured on the 31-Jul session for Pipes
-    # & Tubes (16 members): the old F&O-only simple average said -2.74%, an equal-weight average of
-    # the full membership said +0.08%, and the mcap-weighted full membership says -1.64%. Three
-    # stories, one segment, one day. It was also an unweighted mean, which is wrong in its own right
-    # here: APLAPOLLO alone is 31.6% of the segment's market cap.
-    #
-    # The computation now lives in segment_change.py so the writer, TC cards and the GVM chips
-    # cannot drift apart (the cc#803 lesson). This function keeps its name, signature and return
-    # contract — it is still the thing the tick loop calls — but it now WRITES a number it no longer
-    # OWNS. If the shared module fails, we leave the previous values in place rather than writing a
-    # half-computed sector; a stale-but-consistent aggregate beats a wrong fresh one.
-    try:
-        import segment_change
-        with conn.cursor() as cur:
-            segs = segment_change.segment_changes(cur)
-            if not segs:
-                log.warning("_update_sector_aggregates_sql: segment_change returned nothing — "
-                            "leaving previous sector_day/week/month untouched")
-                return 0
-            # cc#1003: honour the same <3-priced-member NULL rule the gates use in
-            # _add_sector_aggregates, so the table value and the gate value for a segment never
-            # disagree. (All futures-touched segments carry >=3 wide members today; this is the guard.)
-            def _wide(v, k):
-                return v.get(k) if (v.get("members_priced") or 0) >= 3 else None
-            rows = [(_wide(v, "day"), _wide(v, "week"), _wide(v, "month"), seg) for seg, v in segs.items()]
-            # One statement for the whole taxonomy: join v8_metrics to its segment via gvm_scores.
-            cur.executemany("""
-                UPDATE v8_metrics SET sector_day = %s, sector_week = %s, sector_month = %s
-                FROM gvm_scores g
-                WHERE g.symbol = v8_metrics.symbol
-                  AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-                  AND g.segment = %s
-                  AND v8_metrics.score_date = """ + "%s", [r + (target_date,) for r in rows])
-            updated = cur.rowcount
-        conn.commit()
-        log.info(f"_update_sector_aggregates_sql: {len(segs)} segments -> sector_day/week/month "
-                 f"for {target_date} (cc#810 mcap-weighted, full membership)")
-        return updated
-    except Exception as e:
-        log.warning(f"_update_sector_aggregates_sql: {e}")
-        return 0
 
 
 # -- Market gate --------------------------------------------------------------
@@ -2873,11 +2832,11 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
 
     try:
         _write_adr_intraday(conn, sim_ts=sim_ts)
-        # cc#1011: the separate _update_sector_aggregates_sql pass is RETIRED. _add_sector_aggregates
-        # now sets the wide segment_change values on `computed` (on an isolated connection), so the
-        # metrics UPSERT above already writes them to v8_metrics — this pass was redundant AND, by
-        # running segment_change on the tick's OWN connection, was a second way to re-poison it after
-        # the write. Table and gates now both come from the one isolated computation.
+        # cc#1011: the separate sector pass is RETIRED, and cc#1102 deleted its body.
+        # _add_sector_aggregates sets the theme values on `computed` (on an isolated connection), so
+        # the metrics UPSERT above already writes them to v8_metrics — the second pass was redundant
+        # AND, by running on the tick's OWN connection, was a way to re-poison it after the write.
+        # Table and gates now both come from the one isolated computation.
     except Exception as _ae:
         log.error(f"signal_writer: adr update failed — {_ae}", exc_info=True)
         try: conn.rollback()

@@ -893,9 +893,15 @@ def metrics_all():
                    -- metrics dropped (cc#232).
                    m.month_index, m.ma9_vs_ma21,
                    m.sector_week, m.sector_month,
-                   g.segment, g.verdict
+                   g.segment, g.verdict,
+                   -- cc#1102: the FUTURES THEME rides along, because sector_week/sector_month on
+                   -- this very row are now theme figures. Serving them beside only the GVM segment
+                   -- invited exactly the mislabelling this card exists to remove.
+                   CASE WHEN fu.symbol IS NULL THEN NULL
+                        ELSE COALESCE(fu.theme, 'NEW ENTRANTS') END AS theme
             FROM v8_metrics m
             LEFT JOIN gvm_scores g ON g.symbol = m.symbol
+            LEFT JOIN futures_universe fu ON fu.symbol = m.symbol AND fu.is_active = TRUE
             WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
             -- cc#298: g.verdict (Excellent/Good/Average/Weak) joins alongside the existing
             -- m.gvm_score (verified equal to g.gvm_score) for the sector-detail GVM column.
@@ -1015,41 +1021,50 @@ def metrics_all():
 
 @router.get("/segment_day")
 def segment_day():
-    """cc#429: mcap-weighted DAY change per V8 futures segment (gvm_scores.segment taxonomy — same as
-    SEC WK%/SEC MO% in Raw Data), derived from member v8_metrics.day_1d weighted by gvm_scores.market_cap.
-    Anchored to MAX(score_date) so off-market it serves the last session's finals (cc#424 convention).
-    Returns {segment: {day_pct, n, top_mover, top_day}} for the Open Positions 'Sector Day %' column."""
-    # cc#432 fix_1: root cause of the "--" everywhere — the cc#429 version called _f() (a helper that
-    # only exists as a NESTED function elsewhere, not at module scope) -> NameError -> 500 -> the
-    # dashboard job cached null -> every row rendered "--". Use a local float converter instead.
-    def _num(v):
-        try:
-            return float(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
+    """DAY change per FUTURES THEME, equal-weight across the theme's active futures members.
+
+    cc#1102 (founder ruling 19-Aug-2026). This served a MCAP-WEIGHTED day change over the whole
+    gvm_scores.segment. The Open Positions "Sector Day %" column read it while the basket that
+    opened those positions was gated on a different sector number entirely — two sector figures for
+    one book. Both now come from theme_change, so the column a trader reads beside a position is
+    the same sector the engine used to take it.
+
+    KEYED BY THEME NOW, not by GVM segment. Callers that look a row up by a position's GVM segment
+    will miss — that is intended and visible, not silent: the payload carries `taxonomy` so a
+    surface can say which grouping it is showing rather than mislabelling one as the other.
+
+    Anchored to MAX(score_date) so off-market it serves the last session's finals (cc#424).
+    """
     try:
+        import theme_change
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                WITH mem AS (
-                    SELECT g.segment, m.symbol, m.day_1d::numeric AS day_1d, g.market_cap::numeric AS mcap
-                    FROM v8_metrics m
-                    JOIN gvm_scores g ON g.symbol = m.symbol
-                    WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-                      AND g.segment IS NOT NULL AND m.day_1d IS NOT NULL
-                      AND g.market_cap IS NOT NULL AND g.market_cap > 0
-                )
-                SELECT segment,
-                       ROUND(SUM(day_1d * mcap) / NULLIF(SUM(mcap), 0), 2) AS day_pct,
-                       COUNT(*) AS n,
-                       (array_agg(symbol ORDER BY day_1d DESC))[1] AS top_mover,
-                       ROUND(MAX(day_1d), 2) AS top_day
-                FROM mem GROUP BY segment
-            """)
-            out = {}
-            for seg, day_pct, n, top_mover, top_day in cur.fetchall():
-                out[seg] = {"day_pct": _num(day_pct), "n": int(n),
-                            "top_mover": top_mover, "top_day": _num(top_day)}
-        return {"segments": out}
+            cur.execute("SELECT MAX(score_date) FROM v8_metrics")
+            row = cur.fetchone()
+            asof = row[0] if row else None
+            themes = theme_change.theme_changes(cur, asof)
+            # The top mover is read from the SAME member set the average is taken over, so a card
+            # can never name a leader that is not in its own denominator.
+            tmap = theme_change.theme_of(cur)
+            cur.execute("""SELECT symbol, day_1d FROM v8_metrics
+                            WHERE score_date = %s AND day_1d IS NOT NULL""", (asof,))
+            best = {}
+            for sym, d1 in cur.fetchall():
+                th = tmap.get(sym)
+                if th is None:
+                    continue
+                d1 = float(d1)
+                if th not in best or d1 > best[th][1]:
+                    best[th] = (sym, d1)
+        out = {}
+        for theme, info in themes.items():
+            top = best.get(theme)
+            out[theme] = {"day_pct": info.get("day"), "n": info.get("members_priced"),
+                          "n_total": info.get("members_total"), "thin": info.get("thin"),
+                          "label": theme_change.theme_label(info),
+                          "top_mover": top[0] if top else None,
+                          "top_day": round(top[1], 2) if top else None}
+        return {"segments": out, "taxonomy": "futures_theme", "score_date": str(asof) if asof else None,
+                "weighting": "equal", "min_members": theme_change.THEME_MIN_MEMBERS}
     except Exception as e:
         raise HTTPException(500, f"segment_day failed: {e}")
 

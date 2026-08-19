@@ -951,7 +951,7 @@ const BROKERAGE_PER_TRADE=500;
 const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
-  segmentDay:"/api/v8/segment_day",          // cc#1020: mcap-weighted WIDE-universe segment day change (19621)
+  segmentDay:"/api/v8/segment_day",          // cc#1102: futures-theme equal-weight day change
   adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
   paper:"/api/paper/status",
@@ -2844,16 +2844,15 @@ function renderMaster(){
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
-  // cc#429, corrected cc#1020: map each position's symbol -> its segment (the GROUPING still comes
-  // from metricsAll, i.e. the futures set) -> that segment's mcap-weighted DAY change from
+  // cc#1102: map each position's symbol -> its FUTURES THEME -> that theme's DAY change from
   // /api/v8/segment_day, last-session anchored off-market.
-  // THE VALUE IS NOT A FUTURES-ONLY NUMBER. Since cc#1003/cc#1011 the day change served by that
-  // endpoint is computed by segment_change.py across the WIDE universe — every gvm_scores member of
-  // the segment (~1800 symbols), not the 209 futures names (GVM_SECTOR_WIDE_BASIS, session_log
-  // 19621). So a position's SEC D% answers "how did this whole sector move", not "how did the
-  // futures in this sector move". The old wording here said the opposite and cost the founder a
-  // wrong answer on 14-Aug — do not restate it.
-  const _segBySym={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySym[m.symbol]=m.segment;});
+  // THE VALUE IS NOW A FUTURES-ONLY NUMBER, AND THAT IS THE POINT. Founder ruled 19-Aug that every
+  // sector figure this book shows or trades on is the equal-weight average across the ACTIVE
+  // FUTURES members of the theme. So SEC D% answers "how did the futures in this theme move" —
+  // which is the same number the basket was gated on when it opened the position. Until cc#1102
+  // this column showed a mcap-weighted move over ~1,800 gvm_scores members while the engine gated
+  // on something else entirely; two sector figures for one book. Do not restore that.
+  const _segBySym={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySym[m.symbol]=m.theme;});
   const _segDay=(cache.segmentDay&&cache.segmentDay.segments)||{};
   const openRows=open.map(x=>{
     const isShort=(x.side||'').toUpperCase()==='SHORT';
@@ -3115,7 +3114,7 @@ const V8_COLS=[
   ["potential_left","Potential Left",x=>`<td style="text-align:right" class="${cls(x.potential_left)}">${x.potential_left==null?'--':inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`}</td>`],
   ["net_pnl_pct","Net P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.net_pnl_pct)}">${_cD(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>`],
   ["day_pnl_pct","Day P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${_cD(x.day_pnl_pct,v=>sign(v,2)+'%')}</td>`],
-  ["sector_day","SEC D%", x=>`<td style="text-align:right;${V8_COL_MONO};font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${_cD(x.sector_day,v=>sign(v,2)+'%')}</td>`],
+  ["sector_day","SEC D%", x=>`<td style="text-align:right;${V8_COL_MONO};font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_sd.label||x.sector_seg||'').replace(/"/g,'&quot;')} · day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} of ${x.sector_sd.n_total} priced)"`:''}>${_cD(x.sector_day,v=>sign(v,2)+'%')}</td>`],
   ["signal_ts","Since",   x=>`<td style="color:var(--dim);font-size:11px">${x.signal_ts?fmtSince(x.signal_ts):'--'}</td>`],
 ];
 // One row renderer, both surfaces. `cols` is passed so a surface can HIDE a column it must not show
@@ -3128,7 +3127,9 @@ function v8NormRow(x,ctx){
   const isShort=String(x.side||'').toUpperCase()==='SHORT';
   const st=x.status||'OPEN';
   const m=(ctx.metrics&&ctx.metrics[x.symbol])||{};
-  const seg=(m.segment!=null?m.segment:x.segment)||null, sd=seg?(ctx.segDay||{})[seg]:null;
+  // cc#1102: SEC D% is keyed by the FUTURES THEME now, not the GVM segment — the segment_day
+  // payload is themed, so looking it up by segment would return nothing and render a dash.
+  const seg=(m.theme!=null?m.theme:x.theme)||null, sd=seg?(ctx.segDay||{})[seg]:null;
   const isOpen=(st==='OPEN');
   x.side=x.side||ctx.side||null;
   x._rowCls=ctx.surface==='basket'?rowClass(st):'';
