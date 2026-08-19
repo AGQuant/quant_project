@@ -1317,12 +1317,16 @@ function openInfo(basket){
   const version=(reg&&reg.version)||info.version;
   document.getElementById('mTitle').textContent=label;
   document.getElementById('mSub').textContent=`${info.side} · 5-min ${info.wr_5m}% WR (${info.sigs_5m}) · 5yr EOD ${info.wr_eod}% WR (${info.sigs_eod})`;
+  // cc#1099 (kept when that card was reverted — this defect is independent of the V7 question):
+  // a basket may legitimately have NO per-trade EV figure, and the template printed "+null%",
+  // inventing a number where there is none. An absent EV now renders an em-dash and says nothing.
+  const evTxt = v => (v === null || v === undefined || v === '') ? '—' : `+${v}%`;
   document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
 
   let html='';
   html+=`<div class="stat-pills">
     <span class="sp sp-g">5-min WR ${info.wr_5m}%</span>
-    <span class="sp sp-b">5-min EV +${info.ev_5m}%/trade</span>
+    <span class="sp sp-b">5-min EV ${evTxt(info.ev_5m)}${info.ev_5m==null?'':'/trade'}</span>
     <span class="sp sp-a">${info.sigs_5m} sigs</span>
     <span class="sp ${sc?'sp-g':'sp-r'}">${info.side}</span>
     <span class="sp sp-c">${version}</span>
@@ -1334,11 +1338,11 @@ function openInfo(basket){
     <div style="display:flex;gap:10px">
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">5-YR EOD</div>
-        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR &middot; +${info.ev_eod}% EV</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR${info.ev_eod==null?'':' &middot; +'+info.ev_eod+'% EV'}</div>
       </div>
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">1-YR 5-MIN (live-parity)</div>
-        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR &middot; +${info.ev_5m}% EV</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR${info.ev_5m==null?'':' &middot; +'+info.ev_5m+'% EV'}</div>
       </div>
     </div>
     <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
