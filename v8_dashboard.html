@@ -1059,28 +1059,17 @@ const BASKET_INFO={
   },
 
   sell_reversal:{
-    label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
-    thesis:"Short an R1 rejection in a weak stock. Ten cheap gates plus one heavy final check, all must pass: the high reached R1 in the last 3 sessions; day change between -2% and 0; below the 20, 50 and 200 DMA; 52-week index under 50; the sector's week is negative; 2-day momentum between -4% and -1%; month return at least -10%; at least 2% of room to the S1/S2 target; and finally the true weekly RSI at or below 45. Target is S1 or S2 dynamic, stop is the 1:1 mirror.",
-    gateType:"10 cheap HARD gates + FINAL heavy true weekly RSI (strict AND)",
-    target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
-    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    sigs_eod:"~57/yr (286 total 5yr)",wr_eod:60.5,ev_eod:0.71,
-    sigs_5m:"159/yr",wr_5m:71.7,ev_5m:1.55,
-  },
-  // cc#1100: the V7-B SHADOW. Listed beside the live baskets because it is a real basket in the
-  // writer, and labelled a shadow in every field a reader can see because it is not a live one.
-  sell_reversal_v7b:{
-    label:"Sell Reversal V7-B · SHADOW",side:"SELL",version:"V7-B",
-    thesis:"A SHADOW under observation — it records signals and outcomes and takes no money. THE SETUP: the price rallied up to R1 resistance in the last three sessions, was rejected there, and has already given back at least 3% from R1 before we short it. That failed bounce IS the reversal — the stock's position in its 52-week range is context for which failed bounces to take, not what makes it a reversal. The remaining gates pick the weak names to take it in: the day is down between 0 and 2%; price is below the 20, 50 and 200 DMA; the 52-week index is under 30; the sector is down at least 0.5% on the week; monthly RSI is 30 or lower; 2-day momentum is between -4% and -1%; month return is no worse than -10%; and there is at least 2% of room down to the S1/S2 target. Twelve gates, all must pass.",
-    regime:"THIS IS NOT A LIVE BASKET. It never takes a slot, never uses capital, and does not replace Sell Reversal V6.1 — V6.1 remains the live spec and trades exactly as it did. V7-B exists to earn live confirmation before anyone considers trading it.",
-    evidence:"12-month replay: 144 entries, 60.1% win rate. Excluding March 2026 it is 55.4%, and 29% of the backtest trades came from that single month — so the whole 5-point headline edge comes from one bear month. A mid-range alternative scored 55.3% ex-March, effectively identical, which means the deep-oversold selection is evidenced only in a falling market. The replay was gated on prior-day EOD metrics while the live writer re-evaluates every 5 minutes — different strategies, which is why this ships as a shadow rather than as a change. It is also the winner of a 270-combination search on one year, and four of its eleven active months carry fewer than five trades each.",
+    label:"Sell Reversal V7-B",side:"SELL",version:"V7-B",
+    thesis:"THE SETUP: the price rallied up to R1 resistance in the last three sessions, was rejected there, and has already given back at least 3% from R1 by the time we short it. That failed bounce IS the reversal — the stock's position in its 52-week range is context for which failed bounces to take, not what makes it a reversal. The remaining gates pick the weak names to take it in: the day is down between 0 and 2%; price is below the 20, 50 and 200 DMA; the 52-week index is under 30; monthly RSI is 30 or lower; the sector is down at least 0.5% on the week; 2-day momentum is between -4% and -1%; month return is no worse than -10%; and there is at least 2% of room down to the S1/S2 target. Twelve gates, all must pass. Target is S1 or S2 dynamic, stop is the 1:1 mirror, max hold 15 sessions.",
+    regime:"V7-B REPLACED V6.1 on this basket on 19-Aug-2026 by founder ruling. Same basket, same slots, same book. Two gates left V6.1 and both on purpose: the true weekly RSI check is gone — it was not just inert, it was LEAKING, with four live trades entered at stored weekly RSI 49.4, 57.0, 70.4 and 74.0 against a limit of 45. And the 52-week index tightened from under 50 to under 30. Positions already open when V7-B went live keep their own entry, target and stop and exit on the rules they were opened under; V7-B governs new entries only.",
+    evidence:"12-month replay: 144 entries, 60.1% win rate. Excluding March 2026 it is 55.4%, and 29% of the backtest trades came from that single month — so the whole 5-point headline edge comes from one bear month. A mid-range alternative scored 55.3% ex-March, effectively identical, which means the deep-oversold selection is evidenced only in a falling market. The replay was gated on prior-day EOD metrics while the live writer re-evaluates every 5 minutes — different strategies, and closing that gap is a BT7 parity run still owed. It is also the winner of a 270-combination search on one year, and four of its eleven active months carry fewer than five trades each.",
     reviewGate:"Reviewed weekly until December 2026. The March-dependence figure stays on this card until a non-bear quarter has 30+ decided trades.",
-    gateType:"12 HARD gates (strict AND) -- record-only, no slots",
+    gateType:"12 HARD gates (strict AND) -- all cheap, no heavy stage",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    freshBook:"Shadow book from 19-Aug-2026. Its trades are recorded separately and are never mixed into the live V8 book.",
-    sigs_eod:"shadow — not traded",wr_eod:60.1,ev_eod:null,
-    sigs_5m:"144 entries / 12 months",wr_5m:60.1,ev_5m:null,
+    freshBook:"V7-B trades start 19-Aug-2026. Win rates below still carry the V6.1-era book until V7-B trades close, so read them as history, not as this spec's record.",
+    sigs_eod:"~57/yr (286 total 5yr, V6.1 era)",wr_eod:60.5,ev_eod:0.71,
+    sigs_5m:"144 entries / 12 months (V7-B replay)",wr_5m:60.1,ev_5m:null,
   },
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
@@ -1424,7 +1413,7 @@ async function openBrDetail(symbol,basket){
   // /api/v8/filters), literal only as the cold-start fallback — V3 was still on screen here after
   // the basket went to V4. nf is just the loading placeholder; the fetched d.total replaces it.
   const _regL=(FILTER_REG[basket]||{}).spec_label;
-  const lbl=' · '+(_regL||(isSR?'Sell Reversal V6.1':isSM?'Sell Momentum V4':isBM?'Buy Momentum V4':'Buy Reversal V5'));
+  const lbl=' · '+(_regL||(isSR?'Sell Reversal V7-B':isSM?'Sell Momentum V4':isBM?'Buy Momentum V4':'Buy Reversal V5'));
   const nf=(FILTER_REG[basket]||{}).gates?.length||(isSR?11:isSM?9:isBM?9:7);   // cc#509: sell_reversal is 11 (10 cheap gates + true_weekly_rsi)
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;

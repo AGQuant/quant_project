@@ -1201,22 +1201,23 @@ def filter_config(basket: str):
             **_basket_meta(basket)
         }
     if basket == "sell_reversal":
-        # cc#502 SELL_REVERSAL_V6.1. 8 v8_metrics gates + 3 live/pivot gates.
+        # cc#1100 SELL_REVERSAL_V7-B (founder ruled LIVE 19-Aug). 9 v8_metrics gates + 3 live/pivot
+        # gates. No heavy stage: the true weekly RSI gate is GONE, and it was leaking before it went.
         rows = []
         for metric, bounds in FILTER_CONFIG["sell_reversal"].items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             rows.append({"metric": metric, "min": mn, "max": mx,
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx})
-        rows += [{"metric": "r1_touch",        "condition": "day session HIGH >= R1 in the last 3 days"},
-                 {"metric": "room",             "condition": "target (S1 or S2) >= 2% from entry"},
-                 {"metric": "true_weekly_rsi",  "condition": "<= 45 (TRUE calendar weekly, FINAL heavy stage)"}]
+        rows += [{"metric": "r1_touch",     "condition": "day session HIGH >= R1 in the last 3 days"},
+                 {"metric": "fall_from_r1", "condition": ">= 3% below that R1 at entry: (R1 - entry) / R1"},
+                 {"metric": "room",         "condition": "target (S1 or S2) >= 2% from entry"}]
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "S1/S2 dynamic",
             "target_formula": "S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2); no signal if <2%",
             "stop": "1:1 mirror = entry + (entry - target)",
-            "gate_note": "V6.1: strict AND of 10, RAW -- no market gate, no auto kill-switch.",
+            "gate_note": "V7-B: strict AND of 12, all cheap, RAW -- no market gate, no auto kill-switch.",
             "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
             **_basket_meta(basket)
@@ -1871,7 +1872,7 @@ def br_stock_detail(symbol: str):
 _SR_V61_STAGES = basket_stage_rows("sell_reversal")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def sr_funnel_detail():
-    """cc#502/514: 11-stage funnel for SELL_REVERSAL_V6.1, reshaped from the handler-written
+    """cc#1100: 12-stage funnel for SELL_REVERSAL_V7-B, reshaped from the handler-written
     v8_funnel_counts row. INDEPENDENT per-filter pass counts across the universe (buy_momentum
     convention); true_weekly_rsi (stage 11) is passes vs the stocks clearing all 10 cheap gates.
     Final = strict-AND of all 11. Empty until the first live tick writes.
@@ -1913,7 +1914,7 @@ def sr_funnel_detail():
             "basket": "sell_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": _n_filters("sell_reversal"), "n_filters": _n_filters("sell_reversal"),
             "stage9_survivors": stage10,
-            "gate_type": "independent per-filter counts; final = strict AND of all 11",
+            "gate_type": "independent per-filter counts; final = strict AND of all 12",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
@@ -1931,21 +1932,20 @@ _SR_V61_PASSCOUNT_GATES = [
     ("dma_20",        None, 0.0),
     ("dma_50",        None, 0.0),
     ("dma_200",       None, 0.0),
-    ("week_index_52", None, 50.0),
+    ("week_index_52", None, 30.0),    # cc#1100 V7-B: tightened from < 50
+    ("rsi_month",     None, 30.0),    # cc#1100 V7-B: new gate
     ("mom_2d",        -4.0, -1.0),
     ("month_return",  -10.0, None),
 ]
 
 def sr_stock_passcount():
-    """cc#502/509: SELL_REVERSAL_V6.1 pass-count = n/11 (10 cheap gates -- 7 metric gates +
-    sector_week + r1_touch + room -- plus the true_weekly_rsi heavy stage). 10 cheap gates for
-    ALL stocks; true_weekly_rsi (stage 11, heavy) only for stocks clearing all 10. cc#509 fix:
-    the heavy-stage trigger was `len(passed)==9`, an off-by-one against these 10 cheap labels --
-    a stock failing exactly one cheap gate still got true_weekly_rsi evaluated and could display
-    max/max with a failed gate listed (FORCEMOT); a true full qualifier also capped at the same
-    max, indistinguishable from a one-gate-short near miss. Off-market / missing pivot|CMP: the
-    room check NULL-passes. Display only — mirrors the handler, never qualifies."""
-    from v8_signal_writer import _true_weekly_rsi
+    """cc#1100: SELL_REVERSAL_V7-B pass-count = n/12, and every one of the 12 is CHEAP.
+
+    There is no heavy stage any more, so the cc#509 off-by-one that this function used to guard
+    against cannot recur here — the `len(passed) == N` trigger it lived in is gone with the stage.
+    Off-market / missing pivot or CMP: the room check NULL-passes, but fall_from_r1 does NOT — a
+    missing R1 fails that gate, exactly as the handler treats it. Display only — mirrors the
+    handler, never qualifies."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
@@ -1963,23 +1963,23 @@ def sr_stock_passcount():
                     (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
                 sw = s.get("sector_week")
                 actuals["sector_week"] = sw
-                (passed if (sw is not None and float(sw) < 0.0) else failed).append("sector_week")
+                (passed if (sw is not None and float(sw) <= -0.5) else failed).append("sector_week")
                 actuals["r1_touch"] = sym in r1_touch
                 (passed if sym in r1_touch else failed).append("r1_touch")
                 cmp = cmp_map.get(sym)
                 pv  = pivots.get(sym)
                 s1  = pv.get("s1") if pv else None
                 s2  = pv.get("s2") if pv else None
+                r1  = pv.get("r1") if pv else None
+                # cc#1100 V7-B: fall from R1, on the same live CMP the handler enters at. Missing
+                # or non-positive R1 FAILS rather than dividing — the handler behaves the same way.
+                fall = ((r1 - cmp) / r1 * 100.0) if (r1 and r1 > 0 and cmp) else None
+                actuals["fall_from_r1"] = round(fall, 3) if fall is not None else None
+                (passed if (fall is not None and fall >= 3.0) else failed).append("fall_from_r1")
                 tgt, room = _sr_dynamic_target(cmp, s1, s2)
                 actuals["room"] = room
                 room_ok = (cmp is None or s1 is None) or (tgt is not None)
                 (passed if room_ok else failed).append("room")
-                if len(passed) == 10:   # cc#509: was ==9, off-by-one against these 10 cheap labels
-                    twr = _true_weekly_rsi(conn, sym, cmp)
-                    actuals["true_weekly_rsi"] = twr
-                    (passed if (twr is not None and twr <= 45.0) else failed).append("true_weekly_rsi")
-                else:
-                    failed.append("true_weekly_rsi")
                 out.append({"symbol": sym, "passed": len(passed), "total": _n_filters("sell_reversal"),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
@@ -1994,32 +1994,31 @@ def sr_stock_passcount():
 
 @router.get("/sr_stock_detail/{symbol}")
 def sr_stock_detail(symbol: str):
-    """cc#502/509: per-stock 11-filter breakdown for SELL_REVERSAL_V6.1 (10 cheap gates + the
-    true_weekly_rsi heavy stage) — ACTUAL vs REQUIRED + PASS/FAIL. Mirrors sr_stock_passcount /
-    _write_sell_reversal_v61_qualified so the green-row count equals n/11 and the card and modal
-    always agree. true_weekly_rsi always computed here (one stock) so the row is never blank."""
-    from v8_signal_writer import _true_weekly_rsi
+    """cc#1100: per-stock 12-filter breakdown for SELL_REVERSAL_V7-B — ACTUAL vs REQUIRED +
+    PASS/FAIL. Mirrors sr_stock_passcount / _write_sell_reversal_v7b_qualified so the green-row
+    count equals n/12 and the card and the modal always agree. Every gate is cheap, so every row
+    is always computed and none is ever blank."""
     sym = symbol.upper()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""SELECT day_1d, dma_20, dma_50, dma_200, week_index_52, sector_week,
-                mom_2d, month_return FROM v8_metrics
+                mom_2d, month_return, rsi_month FROM v8_metrics
                 WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)""", (sym,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(404, f"No v8_metrics for {sym}")
-            d1d, dma20, dma50, dma200, w52, swk, mom2d, mret = [float(x) if x is not None else None for x in row]
-            cur.execute("""SELECT pp, s1, s2 FROM v8_paper_pivots WHERE symbol=%s
+            d1d, dma20, dma50, dma200, w52, swk, mom2d, mret, rmon = [float(x) if x is not None else None for x in row]
+            cur.execute("""SELECT pp, s1, s2, r1 FROM v8_paper_pivots WHERE symbol=%s
                 AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
             pv = cur.fetchone()
             pp = float(pv[0]) if pv and pv[0] is not None else None
             s1 = float(pv[1]) if pv and pv[1] is not None else None
             s2 = float(pv[2]) if pv and pv[2] is not None else None
+            r1 = float(pv[3]) if pv and pv[3] is not None else None
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
             cr = cur.fetchone()
             cmp = float(cr[0]) if cr else None
             r1_ok = sym in _basket_r1_touch_3d(cur, [sym])
-            twr = _true_weekly_rsi(conn, sym, cmp)
 
         def _fmt(v, d):
             return "--" if v is None else f"{v:.{d}f}"
@@ -2029,13 +2028,14 @@ def sr_stock_detail(symbol: str):
         p_d20  = _passes_filter(dma20, None, 0.0)
         p_d50  = _passes_filter(dma50, None, 0.0)
         p_d200 = _passes_filter(dma200, None, 0.0)
-        p_w52  = _passes_filter(w52, None, 50.0)
-        p_sw   = swk is not None and swk < 0.0
+        p_w52  = _passes_filter(w52, None, 30.0)
+        p_rmon = _passes_filter(rmon, None, 30.0)
+        p_sw   = swk is not None and swk <= -0.5
+        fall   = ((r1 - cmp) / r1 * 100.0) if (r1 and r1 > 0 and cmp) else None
+        p_fall = fall is not None and fall >= 3.0
         p_mom  = _passes_filter(mom2d, -4.0, -1.0)
         p_mret = _passes_filter(mret, -10.0, None)
         p_room = (cmp is None or s1 is None) or (tgt is not None)
-        cleared = all([r1_ok, p_d1d, p_d20, p_d50, p_d200, p_w52, p_sw, p_mom, p_mret, p_room])   # 10 cheap gates
-        p_twr  = cleared and (twr is not None and twr <= 45.0)
 
         tgt_lbl = "S1" if (tgt is not None and s1 is not None and abs(tgt - s1) < 1e-6) else ("S2" if tgt is not None else "--")
         rows = [
@@ -2044,19 +2044,18 @@ def sr_stock_detail(symbol: str):
             {"filter": "dma_20",          "required": "< 0",       "actual": _fmt(dma20, 2) + "%", "pass": p_d20},
             {"filter": "dma_50",          "required": "< 0",       "actual": _fmt(dma50, 2) + "%", "pass": p_d50},
             {"filter": "dma_200",         "required": "< 0",       "actual": _fmt(dma200, 2) + "%","pass": p_d200},
-            {"filter": "week_index_52",   "required": "< 50",      "actual": _fmt(w52, 1),         "pass": p_w52},
-            {"filter": "sector_week",     "required": "< 0",       "actual": _fmt(swk, 2),         "pass": p_sw},
+            {"filter": "week_index_52",   "required": "< 30",      "actual": _fmt(w52, 1),         "pass": p_w52},
+            {"filter": "rsi_month",       "required": "<= 30",     "actual": _fmt(rmon, 1),        "pass": p_rmon},
+            {"filter": "sector_week",     "required": "<= -0.5",   "actual": _fmt(swk, 2),         "pass": p_sw},
+            {"filter": "fall_from_r1",    "required": ">= 3%",     "actual": _fmt(fall, 2) + "%",  "pass": p_fall},
             {"filter": "mom_2d",          "required": "-4 to -1",  "actual": _fmt(mom2d, 2) + "%", "pass": p_mom},
             {"filter": "month_return",    "required": ">= -10",    "actual": _fmt(mret, 2) + "%",  "pass": p_mret},
             {"filter": "room",            "required": ">= 2%",     "actual": (f"{_fmt(room, 2)}% -> {tgt_lbl}" if room is not None else "--"), "pass": p_room},
-            {"filter": "true_weekly_rsi", "required": "<= 45",     "actual": _fmt(twr, 1),         "pass": p_twr},
         ]
-        if not cleared:
-            rows[-1]["note"] = "engine evaluates true weekly RSI only after all 10 cheap gates pass"
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1, "s2": s2,
                 "target": tgt, "room_pct": room, "passed": passed, "total": _n_filters("sell_reversal"), "rows": rows,
-                "spec": "SELL_REVERSAL_V6.1"}
+                "spec": "SELL_REVERSAL_V7B"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2494,7 +2493,7 @@ def bm_stock_detail(symbol: str):
 def funnel_detail(basket: str):
     basket = basket.lower()
     if basket == "buy_reversal":    return br_funnel_detail()   # cc#502 V5
-    if basket == "sell_reversal":   return sr_funnel_detail()   # cc#502 V6.1
+    if basket == "sell_reversal":   return sr_funnel_detail()   # cc#1100 V7-B
     if basket == "sell_momentum":   return sm_funnel_detail()   # cc#502 V4
     if basket == "buy_momentum":    return bm_funnel_detail()   # cc#502 V3 (NEW dedicated handler)
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
@@ -2597,7 +2596,7 @@ def funnel_detail(basket: str):
 def stock_passcount(basket: str):
     basket = basket.lower()
     if basket == "buy_reversal":    return br_stock_passcount()   # cc#502 V5
-    if basket == "sell_reversal":   return sr_stock_passcount()   # cc#502 V6.1
+    if basket == "sell_reversal":   return sr_stock_passcount()   # cc#1100 V7-B
     if basket == "sell_momentum":   return sm_stock_passcount()   # cc#502 V4
     if basket == "buy_momentum":    return bm_stock_passcount()   # cc#502 V3 (NEW dedicated handler)
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")

@@ -33,8 +33,7 @@ ENDPOINTS = "v8_endpoints.py"
 
 HANDLERS = [
     "_write_buy_reversal_v6_qualified",
-    "_write_sell_reversal_v61_qualified",
-    "_write_sell_reversal_v7b_shadow",
+    "_write_sell_reversal_v7b_qualified",
     "_write_sell_momentum_v4_qualified",
     # the name is legacy (the spec is V5 since cc#1051); the function is the buy_momentum handler
     "_write_buy_momentum_v3_qualified",
