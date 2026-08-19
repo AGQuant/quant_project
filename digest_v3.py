@@ -453,3 +453,108 @@ def digest_v3():
     except Exception as e:
         log.exception("digest_v3 failed")
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "sections": {}}
+
+
+# ── cc#1121 · INTERNALS intraday series ───────────────────────────────────────────────────────
+# Served SEPARATELY from /api/digest/v3 on purpose. Four series of 200 points is ~800 points, and
+# the digest payload is fetched on every open of the page — the cards fetch this only when the
+# section renders, so the first paint does not pay for a chart nobody has swiped to yet.
+#
+# COLUMN CHOICE, RECONCILED AGAINST THE BIG NUMBER. pcr_daily.pcr is total put OI over total call
+# OI across the whole chain (scheduler.py / pcr_backfill.py both build it that way), so the
+# intraday column that matches it is pcr_total, NOT pcr_atm5. Checked against live rows before
+# wiring: NIFTY daily 0.678 vs last intraday pcr_total 0.679; pcr_atm5 for the same moment is
+# 0.844, which would have put a chart on screen that disagreed with the number printed above it.
+#
+# BREADTH charts advances MINUS declines. The ADR card already charts the adr ratio, and charting
+# advances alone next to it would be two pictures of one thing; net A-D is the reading the ratio
+# cannot show — how WIDE the day was, not just which side won. Both columns are stored, so this is
+# presentation of existing values, not a new computation (the card's do_not_touch stands).
+_SERIES_SQL = {
+    "adr": """SELECT ts, adr::float FROM adr_intraday
+              WHERE adr IS NOT NULL ORDER BY ts DESC LIMIT %s""",
+    "breadth": """SELECT ts, (advances - declines)::float FROM adr_intraday
+                  WHERE advances IS NOT NULL AND declines IS NOT NULL ORDER BY ts DESC LIMIT %s""",
+    "pcr_nifty": """SELECT ts, pcr_total::float FROM pcr_intraday
+                    WHERE underlying='NIFTY' AND pcr_total IS NOT NULL ORDER BY ts DESC LIMIT %s""",
+    "pcr_banknifty": """SELECT ts, pcr_total::float FROM pcr_intraday
+                        WHERE underlying='BANKNIFTY' AND pcr_total IS NOT NULL
+                        ORDER BY ts DESC LIMIT %s""",
+}
+_SERIES_META = [
+    ("adr",           "ADR",            2),
+    ("breadth",       "BREADTH A-D",    0),
+    ("pcr_nifty",     "PCR NIFTY",      2),
+    ("pcr_banknifty", "PCR BANKNIFTY",  2),
+]
+_SESSION_OPEN_MIN = 9 * 60 + 15      # 09:15 IST
+_SESSION_MIN = 375                   # 09:15 -> 15:30
+
+
+def _trading_dates(cur, d_from, d_to) -> List[str]:
+    """Every trading date in the span: weekdays minus the nse_holidays table.
+
+    THE AXIS IS BUILT FROM THIS, NOT FROM THE DATES THAT HAPPEN TO HAVE ROWS. That is the whole
+    point. NIFTY PCR has ZERO rows for 18-Aug while BANKNIFTY has 71 — plot by index, or by only
+    the dates present, and 17-Aug is drawn touching 19-Aug and a missing session reads as a
+    continuous market. Enumerating the calendar instead gives that session its own empty slot, so
+    a hole in the feed looks like a hole.
+    """
+    cur.execute("SELECT holiday_date FROM nse_holidays WHERE holiday_date BETWEEN %s AND %s",
+                (d_from, d_to))
+    hol = {r[0] for r in cur.fetchall()}
+    out, d = [], d_from
+    while d <= d_to:
+        if d.weekday() < 5 and d not in hol:
+            out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
+@router.get("/api/digest/internals/series")
+def digest_internals_series(bars: int = 200):
+    """cc#1121: the 5-min intraday history behind each INTERNALS card.
+
+    NEVER PADDED. Each series reports the bar count it actually has and the range it actually
+    covers; a series with 60 bars ships 60 and says so on the card. `bars` is a ceiling, not a
+    promise — all four currently hold a true 200 (verified on live rows: ADR and BREADTH 2,881
+    stored, PCR NIFTY 1,932, PCR BANKNIFTY 1,729).
+    """
+    bars = max(10, min(int(bars or 200), 500))
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            out = []
+            for key, label, dp in _SERIES_META:
+                cur.execute(_SERIES_SQL[key], (bars,))
+                rows = list(reversed(cur.fetchall()))       # oldest first for drawing
+                if not rows:
+                    out.append({"key": key, "label": label, "dp": dp, "bars": 0,
+                                "points": [], "sessions": [], "note": "no rows stored"})
+                    continue
+                d_from, d_to = rows[0][0].date(), rows[-1][0].date()
+                sessions = _trading_dates(cur, d_from, d_to)
+                pos = {d: i for i, d in enumerate(sessions)}
+                pts = []
+                for ts, v in rows:
+                    ds = ts.date().isoformat()
+                    if ds not in pos:        # a bar on a day the calendar calls closed: keep it,
+                        continue             # but never invent a slot for it
+                    mins = ts.hour * 60 + ts.minute - _SESSION_OPEN_MIN
+                    pts.append({"s": pos[ds],
+                                "f": round(max(0.0, min(1.0, mins / _SESSION_MIN)), 4),
+                                "v": round(float(v), 4)})
+                have = sorted({p["s"] for p in pts})
+                out.append({
+                    "key": key, "label": label, "dp": dp,
+                    "bars": len(pts),
+                    "points": pts,
+                    "sessions": sessions,                       # every trading date in the span
+                    "empty_sessions": [sessions[i] for i in range(len(sessions))
+                                       if i not in set(have)],  # feed holes, named not hidden
+                    "first": rows[0][0].strftime("%d-%b %H:%M"),
+                    "last": rows[-1][0].strftime("%d-%b %H:%M"),
+                })
+            return {"series": out, "resolution": "5-min", "asked": bars}
+    except Exception as e:
+        log.exception("digest_internals_series failed")
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "series": []}

@@ -123,6 +123,28 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rung{min-width:0;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
 .rung b{display:block;white-space:nowrap;margin-top:2px}
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
+/* cc#1121 · the INTERNALS deck. Same mechanism as mobile/home.html's hero deck — a scroll-snap
+   flex track and a dot row — so the swipe feels identical to the one already on Home rather than
+   being a second implementation with its own quirks. align-items:flex-start for the reason spelled
+   out on .swipe-t there: a shorter card should end at its own content, not stretch to the tallest. */
+.iswipe{margin:2px 0 0}
+.iswipe-t{display:flex;align-items:flex-start;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;
+ -webkit-overflow-scrolling:touch;scrollbar-width:none}
+.iswipe-t::-webkit-scrollbar{display:none}
+.ic{flex:0 0 100%;min-width:0;scroll-snap-align:center;background:var(--hi);border:1px solid var(--edge);
+ padding:10px 11px 9px;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.ichd{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.ichd .lb{font-family:'JetBrains Mono';font-size:9.5px;letter-spacing:1.4px;color:var(--muted)}
+.ibars{font-family:'JetBrains Mono';font-size:8.5px;letter-spacing:.8px;color:var(--dim,var(--muted));white-space:nowrap}
+.ic .vv{font-family:'JetBrains Mono';font-size:24px;font-weight:700;line-height:1.15;margin-top:3px}
+.ic .wk{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);letter-spacing:.6px}
+/* Fixed height so swiping between cards never resizes the deck under the finger. */
+.ichart{height:34px;margin-top:9px}
+.isvg{display:block;width:100%;height:34px;overflow:visible}
+.irange{font-family:'JetBrains Mono';font-size:8.5px;color:var(--muted);letter-spacing:.5px;margin-top:5px}
+.idots{display:flex;justify-content:center;gap:5px;margin-top:8px}
+.idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
+.idots i.on{background:var(--amber);width:15px;border-radius:3px}
 </style>
 </head>
 <body data-theme="goldnight" class="as-shell">
@@ -219,6 +241,123 @@ function ladder(ix){
    the mobile nav already use: the cue appears only while there IS more to the right, and clears at
    the end, because a fade over nothing is a hint that lies. Bound per ladder, and re-bound after
    every boot render since the nodes are replaced. */
+/* ── cc#1121 · INTERNALS becomes a four-card swipe deck with 5-min history ────────────────────
+   Four cards, not three: BREADTH earns its own because advances and declines are stored in
+   adr_intraday alongside adr, at the same 5-min cadence and the same depth — so there is a real
+   series behind it, not a single number with a chart bolted on.
+   The swipe is the deck pattern this app family already uses (mobile/home.html's hero deck):
+   CSS scroll-snap on a flex track plus a dot row that follows the finger. No new gesture code and
+   nothing to fight the page's own vertical scroll.
+   TODAY'S NUMBER STAYS THE HEADLINE. The chart sits under it, and neither the value nor its
+   colour rule changed — both still come from the daily payload exactly as the three tiles did. */
+function intCard(key, label, val, col, sub, stale){
+  return `<div class="ic"><div class="ichd"><span class="lb">${label}${stale?' · STALE':''}</span>
+      <span class="ibars" id="ib-${key}">…</span></div>
+    <div class="vv" style="color:${col}">${val}</div>
+    <div class="wk">${sub||''}</div>
+    <div class="ichart" id="ic-${key}"></div>
+    <div class="irange" id="ir-${key}"></div></div>`;
+}
+function iDots(){
+  var tr=document.getElementById('itrack'), dots=document.getElementById('idots');
+  if(!tr||!dots)return;
+  var i=Math.round(tr.scrollLeft/Math.max(1,tr.clientWidth));
+  Array.prototype.forEach.call(dots.children,function(el,j){
+    el.className=(j===i?'on':'');
+    el.onclick=function(){tr.scrollTo({left:j*tr.clientWidth,behavior:'smooth'});};
+  });
+}
+/* THE X AXIS IS TIME, NOT BAR INDEX, and that is load-bearing rather than pedantic. NIFTY PCR has
+   ZERO rows for 18-Aug while BANKNIFTY has 71. Drawn by index, 17-Aug would sit flush against
+   19-Aug and a missing session would read as a continuous market. The server sends every TRADING
+   date in the span (weekdays minus nse_holidays) and each point's session slot plus its fraction
+   through that session, so a session with no data keeps its slot and shows up as a gap — tinted,
+   counted underneath, and named in the payload as empty_sessions.
+   BASELINE. 1.00 for ADR and both PCRs, 0 for BREADTH A-D. These are not arbitrary: 1.00 is the
+   line the tile's own colour rule already turns on (advances beating declines, put writers over
+   call writers), so a bar above the baseline is green for the same reason the big number is. */
+function iChart(s){
+  var host=document.getElementById('ic-'+s.key);
+  if(!host)return;
+  var bl=document.getElementById('ib-'+s.key), rg=document.getElementById('ir-'+s.key);
+  if(bl)bl.textContent=s.bars?(s.bars+' BARS · 5-MIN'):'NO HISTORY';
+  if(!s.bars){
+    host.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';
+    if(rg)rg.textContent='';
+    return;
+  }
+  var W=100, H=34, n=Math.max(1,(s.sessions||[]).length);
+  var base=(s.key==='breadth')?0:1;
+  var vs=s.points.map(function(p){return p.v;});
+  /* ROBUST SCALE, AND THE CLIPPING IS SHOWN RATHER THAN HIDDEN. Measured on the live series before
+     choosing this: NIFTY PCR's last 200 bars run 0.631 to 3.255, but the 95th percentile is 0.979
+     and the median 0.928 — ONE bar carries that top. On a full-range axis the other 199 sit inside
+     the bottom eighth of the card and the chart says nothing. The axis is therefore the 2nd-98th
+     percentile, and any bar outside it is drawn to the edge with an amber cap and COUNTED in the
+     line underneath, with the true extreme printed. A silent truncation would be the dishonest
+     version of this; a chart that cannot be read is the useless one. */
+  var iq=function(a,q){
+    var b=a.slice().sort(function(x,y){return x-y;});
+    var i=(b.length-1)*q, lo=Math.floor(i), hi=Math.ceil(i);
+    return lo===hi?b[lo]:b[lo]+(b[hi]-b[lo])*(i-lo);
+  };
+  /* CLIP ONLY THE SIDE THAT ACTUALLY NEEDS IT. A flat 2nd-98th window clips both ends whether or
+     not there is anything extreme there, and the first version of this said "5 bars off-scale" on
+     the NIFTY series when exactly ONE bar is an outlier — the other four were ordinary low bars
+     sitting just under the 2nd percentile. Lumping them together makes the caption misleading in
+     the direction that matters. A side is clipped only when its tail runs more than two
+     inter-quantile spans past the window; otherwise the real extreme is kept. */
+  var q02=iq(vs,0.02), q98=iq(vs,0.98), iqr=(q98-q02)||Math.abs(base)||1;
+  var vmin=Math.min.apply(null,vs), vmax=Math.max.apply(null,vs);
+  var top=Math.max((vmax-q98>2*iqr)?q98:vmax, base);
+  var bot=Math.min((q02-vmin>2*iqr)?q02:vmin, base);
+  var span=(top-bot)||1;
+  var y=function(v){return H-(Math.max(bot,Math.min(top,v))-bot)/span*H;};
+  var yb=y(base), over=0, omin=null, omax=null;
+  var bw=Math.max(0.3,(W/n)/78*0.8);   /* ~78 five-min bars fill one session slot */
+  var body=s.points.map(function(p){
+    var x=(p.s+p.f)/n*W, y0=y(p.v), clipped=(p.v>top||p.v<bot);
+    if(clipped){over++; omin=(omin==null||p.v<omin)?p.v:omin; omax=(omax==null||p.v>omax)?p.v:omax;}
+    return '<rect x="'+(x-bw/2).toFixed(2)+'" y="'+Math.min(y0,yb).toFixed(2)
+      +'" width="'+bw.toFixed(2)+'" height="'+Math.max(0.35,Math.abs(y0-yb)).toFixed(2)
+      +'" fill="'+(p.v>=base?'var(--volt)':'var(--heat)')+'" opacity=".85"/>'
+      +(clipped?'<rect x="'+(x-bw/2).toFixed(2)+'" y="'+(p.v>top?0:H-0.8).toFixed(2)
+        +'" width="'+bw.toFixed(2)+'" height=".8" fill="var(--amber)"/>':'');
+  }).join('');
+  var marks='';
+  for(var i=1;i<n;i++){
+    var xd=(i/n*W).toFixed(2);
+    marks+='<line x1="'+xd+'" y1="0" x2="'+xd+'" y2="'+H+'" stroke="var(--edge)" stroke-width=".3"/>';
+  }
+  marks+='<line x1="0" y1="'+yb.toFixed(2)+'" x2="'+W+'" y2="'+yb.toFixed(2)
+       +'" stroke="var(--muted)" stroke-width=".3" stroke-dasharray="1.5 1.5" opacity=".7"/>';
+  var holes=(s.empty_sessions||[]).map(function(d){
+    var i=(s.sessions||[]).indexOf(d);
+    if(i<0)return '';
+    return '<rect x="'+(i/n*W).toFixed(2)+'" y="0" width="'+(W/n).toFixed(2)+'" height="'+H
+      +'" fill="var(--heat)" opacity=".09"/>';
+  }).join('');
+  host.innerHTML='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+    +holes+marks+body+'</svg>';
+  if(rg){
+    var miss=(s.empty_sessions||[]).length, d=s.dp==null?2:s.dp;
+    rg.textContent=s.first+' → '+s.last
+      +(miss?(' · '+miss+' session'+(miss>1?'s':'')+' missing from the feed'):'')
+      +(over?(' · '+over+' bar'+(over>1?'s':'')+' off-scale ('
+              +(omin===omax?Number(omax).toFixed(d)
+                           :Number(omin).toFixed(d)+' to '+Number(omax).toFixed(d))+')'):'');
+  }
+}
+/* Fetched separately from the digest payload and only after the page has painted — four series of
+   200 points is not something the first render should wait on. A failure costs the charts and
+   nothing else: the numbers above them are already on screen from /api/digest/v3. */
+function loadInternals(){
+  fetch('/api/digest/internals/series')
+    .then(function(r){return r.json();})
+    .then(function(d){(d.series||[]).forEach(iChart);})
+    .catch(function(){});
+}
+
 function bindLadders(){
   document.querySelectorAll('.ladder').forEach(function(el){
     var wrap=el.parentNode;
@@ -301,14 +440,24 @@ async function boot(){
 
   <div class="eyebrow">INTERNALS</div>
   <div class="card slab">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
-      <div class="tile well"><div class="lb">BREADTH${itl.adr_stale?' · STALE':''}</div>
-        <div class="vv" style="color:${adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)'}">${adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—'}</div>
-        <div class="wk">${adr?adr.advances+'A / '+adr.declines+'D':''}</div></div>
-      ${pcr.slice(0,2).map(p=>`<div class="tile well"><div class="lb">PCR ${esc(p.underlying)}${itl.pcr_stale?' · STALE':''}</div>
-        <div class="vv" style="color:${p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)'}">${p.pcr!=null?Number(p.pcr).toFixed(2):'—'}</div>
-        <div class="wk">${esc(p.date||'')}</div></div>`).join('')}
-    </div>
+    <div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iDots()">
+      ${intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
+                adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)',
+                adr?adr.advances+'A / '+adr.declines+'D':'', itl.adr_stale)}
+      ${intCard('breadth', 'BREADTH A-D',
+                adr&&adr.advances!=null&&adr.declines!=null?sgn(adr.advances-adr.declines,0):'—',
+                adr&&adr.advances!=null&&adr.declines!=null?(adr.advances>=adr.declines?'var(--volt)':'var(--heat)'):'var(--muted)',
+                adr?adr.advances+'A / '+adr.declines+'D':'', itl.adr_stale)}
+      ${pcr.slice(0,2).map(p=>intCard('pcr_'+String(p.underlying||'').toLowerCase(),
+                'PCR '+esc(p.underlying), p.pcr!=null?Number(p.pcr).toFixed(2):'—',
+                p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)',
+                esc(p.date||''), itl.pcr_stale)).join('')}
+    </div><div class="idots" id="idots">${
+      /* one dot per card that actually rendered. Hardcoding four would leave a dead dot on a day
+         pcr_daily carries only one underlying, and a dot that scrolls to nothing is a lie about
+         how much there is to swipe. */
+      Array.from({length:2+pcr.slice(0,2).length},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
+    }</div></div>
     <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">${esc(itl.read||'')}</div>
   </div>
 
@@ -343,6 +492,8 @@ async function boot(){
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
   bindLadders();   /* cc#1111: the ladders only exist after this paint */
+  iDots();         /* cc#1121: same reason — the deck's nodes are replaced on every render */
+  loadInternals();
 }
 boot();
 </script>
