@@ -1319,7 +1319,12 @@ function m3(d){
     : '';
   var grid = '<div class="lseggrid">' + head + shown.map(function(s){
       var tot = s.members_total || s.n;
-      return '<div class="lseg" onclick="location.href=\'/m/sector\'"'
+      /* cc#1110 item 1: these tiles used to each carry onclick=location.href='/m/sector'. Ten to
+         twenty-two invisible full-page links sat in the middle of a stats grid, so a tap meant to
+         read a number navigated away instead — the founder's "the page reloads". A grid of stats
+         is not a nav control. The destination is not lost: it is ONE labelled link row at the
+         bottom of this module, the same .lnav pattern modules 1 and 2 already use. */
+      return '<div class="lseg"'
         + (s.suppressed ? ' title="' + esc(s.suppressed) + '"' : '') + '>'
         + '<div class="nm">' + esc(s.segment) + '</div>'
         + '<div class="v ' + (s.day_pct == null ? '' : cls(s.day_pct)) + '">'
@@ -1339,8 +1344,9 @@ function m3(d){
        so the largest stock must not outvote the rest of its theme. */
     + '<div class="lnote">The 22 Scorr themes — same groups, same numbers as the website. Day move '
     + 'is the equal-weight average across a theme’s futures members, so one big name cannot carry '
-    + 'the theme. A theme with fewer than 3 priced members shows —, never a number. Tap for '
-    + 'sector intel.</div>';
+    + 'the theme. A theme with fewer than 3 priced members shows —, never a number.</div>'
+    /* cc#1110 item 1: the sector-intel destination, once, where it can be seen and chosen. */
+    + '<div class="lnav"><a href="/m/sector">Sector intel ›</a></div>';
   return lowCard('m3', 'Segments · ' + (d.segment_count || all.length), right, body);
 }
 
