@@ -217,31 +217,33 @@
    (live nav uses .bn/.bn.on). This block closes each one from the injected layer — still zero
    markup edits, still zero hide rules, parity guard holds structurally. */
 
-/* 1 · THE MOOD WORD IS THE SCOREBOARD — huge, display face, skewed, with the swoosh.
-   cc#1108: the selector was `.hero .mood, .mood` and it never once matched the thing it was
-   drawn for. The live mobile home renders the mood WORD as `.hero-mood`
-   (mobile_endpoints.py:1683, font-size 32px) — there is no `.hero .mood` anywhere in the repo.
-   What the bare `.mood` DID match is three CONTAINERS that happen to share the name:
-     · #pane-index .mood   — the V8 Index Intel gate strip, a flex row
-     · .mood               — the V8 master dashboard gate block (v8_dashboard.html:715)
-     · .mood               — the /m/v8 mood CARD (mobile/v8.html:401), whose word is .mv
-   None declares font-size, so 56px won on all three and the strips rendered as enormous
-   uppercase display text with a 150px swoosh bar under them. Measured on /dashboard's Index
-   pane: .mood computed font-size 16px -> 56px. That is the founder's "enormous washed-out
-   text over the sparklines". Pointing the rule at .hero-mood restores all three surfaces AND
-   gives R5 its intended target for the first time. */
-:root:root:not([data-theme="light"]) .hero-mood{
-  font-family:var(--r5-display);
-  font-size:56px; line-height:.95; letter-spacing:1px;
-  text-transform:uppercase;
-  display:inline-block; transform:skewX(-6deg); transform-origin:left center;
-  animation:none;   /* R5: the word states, it does not blink */
-}
-:root:root:not([data-theme="light"]) .hero-mood::after{
-  content:""; display:block; height:6px; width:150px; margin-top:4px;
-  background:linear-gradient(90deg, currentColor, transparent);
-  transform:skewX(-24deg); opacity:.9;
-}
+/* 1 · THE MOOD WORD — SIGNATURE TREATMENT WITHDRAWN (cc#1116).
+   HISTORY, because this rule has now been wrong twice in two different ways and the next reader
+   deserves both.
+
+   It was written as `.hero .mood, .mood` for the mood WORD in design_refs/scorr_mobile_R5 and in
+   previews/home_v2.html, where the hero word really is `.mood`. Neither selector matched that
+   word on the LIVE app. `.hero .mood` does not exist anywhere in the repo, and the bare `.mood`
+   matched three CONTAINERS that merely share the name — the V8 Index Intel gate strip, the V8
+   master dashboard gate block, and the /m/v8 mood card. None declares a font-size, so 56px won on
+   all three and they rendered as enormous uppercase display text with a swoosh bar under them.
+   That was the founder's "enormous washed-out text over the sparklines" (cc#1108).
+
+   cc#1108 repointed it at `.hero-mood`, which IS the live home's mood word. That stopped the
+   three containers being wrecked — and it made this signature treatment apply to the Home hero
+   for the first time, which the founder immediately reported as a regression (cc#1116): the word
+   jumped 32px -> 56px in Archivo Black, uppercase and skewed, with a 150px gradient bar appearing
+   under it. Measured, live markup, MOBILE_CSS + this sheet:
+       before cc#1108   32px  Space Grotesk   no uppercase  no skew  no bar
+       after  cc#1108   56px  Archivo Black   uppercase     skewed   150px bar
+   And because Archivo Black is a Google font it arrives AFTER first paint, so the card rendered
+   correctly for about a second and then visibly restyled — exactly what he photographed.
+
+   So the treatment is withdrawn rather than re-aimed a third time. cc#1108's actual fix survives
+   intact: no selector here touches `.mood`, so the three containers stay correct. If R5 still
+   wants a scoreboard mood word on Home, that is a design decision about the LIVE hero, taken
+   deliberately with the founder — not a rule inherited from a preview whose markup the app never
+   used. */
 
 /* 2 · CHECK PILLS AS W/L SET SCORES — the pass/fail letter is data the class already carries,
    so ::before only surfaces what .g/.r mean. Adds content, hides nothing. */
