@@ -629,6 +629,41 @@ function inrShort(v){
   }
   return sign + '₹' + Math.round(a).toLocaleString('en-IN');
 }
+/* ══ cc#1118 — THE DIWALI SWEEP ═══════════════════════════════════════════════════════════════
+   The mood word lights up letter by letter, left to right, once. Founder-approved design: a glow
+   and a small lift per letter, 60ms apart, about 0.6s end to end, one iteration.
+
+   IT IS ADDITIVE, NEVER A REPAINT. The colour stays on .hero-mood as an inline style from
+   moodColor(), and every letter inherits it — BEARISH stays red, BULLISH green, SIDEWAYS amber.
+   The animation touches text-shadow and transform only, so a festive effect can never be mistaken
+   for a different mood. That is the one thing this must not get wrong.
+
+   ONCE PER PAGE LOAD, and this is the part that needed care rather than CSS. The hero is rebuilt
+   from scratch on every data refresh, and a CSS animation on freshly-created nodes replays every
+   single time — which turns a moment of delight into a twitch every poll. animation-iteration-count
+   cannot help: each rebuild is new elements, not a new iteration. So the SWEEP CLASS ITSELF is
+   emitted only on the first build, tracked here in a module flag. After that the same markup ships
+   without it and the letters simply render.
+
+   Spaces are NOT wrapped: a letter span is inline-block so it can be transformed, and an
+   inline-block space collapses to nothing. A multi-word mood would lose its gap. */
+var MOOD_SWEPT = false;
+function moodLetters(word){
+  var w = String(word == null ? '--' : word);
+  var sweep = !MOOD_SWEPT;
+  MOOD_SWEPT = true;
+  if (!sweep) return esc(w);
+  var out = '', i = 0;
+  for (var n = 0; n < w.length; n++){
+    var ch = w.charAt(n);
+    if (ch === ' '){ out += ' '; continue; }   /* keep real word spacing */
+    /* esc() per CHARACTER, so an escaped entity can never be split down the middle. */
+    out += '<span class="mlt" style="animation-delay:' + (i * 60) + 'ms">' + esc(ch) + '</span>';
+    i++;
+  }
+  return out;
+}
+
 function moodColor(m){
   m = (m || '').toLowerCase();
   if (m.indexOf('bullish') > -1) return 'var(--grn)';
@@ -2400,7 +2435,7 @@ Promise.all([
   h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
     + '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
-    + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + esc(hero.mood || '--') + '</div>'
+    + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
     + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
     /* cc#1068: the V10 index line has LEFT the scoreboard. It is not deleted — it is promoted to
        its own INDEX SIGNALS card below the carousel, built from this same `v10` string, so every
