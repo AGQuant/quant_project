@@ -466,18 +466,18 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"ladder rsi_month (universe_technicals) failed: {e}")
 
             # ── 9. Pull G/V/M components + mcap per ladder ────────────────
-            # cc#1093 P4 — THE MCAP COMES FROM screener_raw NOW, NOT FROM gvm_scores.
-            # The two columns are different SOURCES, not a fresh copy and a stale one:
-            # gvm_scores.market_cap is written by gvm_nightly from input_raw and matches it on
-            # 1,791 of 1,791 scored rows, while matching screener_raw on ZERO. 1,282 rows differ
-            # by more than 5%, averaging 12.5% and reaching 160%. The page header and the 2-Pager
-            # both read screener_raw, so the live GVM card printed two different market caps for
-            # the same company on one screen — BHARATSE header 1,558 against its own ladder row
-            # 1,157.
-            # BINDING ONLY. gvm_scores.market_cap is left exactly as it is, because it is also the
-            # WEIGHT behind the mcap-weighted sector ratings; repointing that is a decision about
-            # which table is the truth for a weight, and it is logged for Fable rather than taken
-            # here. This fixes what is DISPLAYED and moves no rating.
+            # cc#1093 P4 — THE MCAP COMES FROM screener_raw. It stays that way; do not repoint.
+            # The card was raised because the live GVM card printed two different market caps for
+            # one company on one screen: BHARATSE header 1,558 against its own ladder row 1,157.
+            # gvm_scores.market_cap was then written from input_raw, which matched it on 1,791 of
+            # 1,791 scored rows and matched screener_raw on ZERO.
+            # cc#1104 RESOLVED THE UNDERLYING QUESTION (founder, 19-Aug-2026): input_raw was never a
+            # rival definition, it was a STALE SNAPSHOT — loaded twice in its life, while market cap
+            # moves with price daily. gvm_nightly now reads market_cap from screener_raw, so
+            # gvm_scores.market_cap and this JOIN are finally the SAME number rather than two
+            # sources that happened to be bound apart. The JOIN is kept explicit anyway: reading the
+            # value from the table this page already trusts is not something to undo on the grounds
+            # that a second table now agrees.
             try:
                 cur.execute("""
                     SELECT g.symbol, g.g_score, g.v_score, g.m_score, s.market_cap

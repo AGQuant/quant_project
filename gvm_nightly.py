@@ -494,27 +494,58 @@ def compute_sector_ratings(target_date: date) -> Dict:
         if df.empty:
             return {"status": "warn", "message": "gvm_scores empty", "segments": 0}
 
-        # mcap: use 1 as fallback if null (equal weight for mcap-unknown stocks)
-        df["market_cap"] = pd.to_numeric(df["market_cap"], errors="coerce").fillna(1)
+        df["market_cap"] = pd.to_numeric(df["market_cap"], errors="coerce")
         df["gvm_score"]  = pd.to_numeric(df["gvm_score"],  errors="coerce")
         df["g_score"]    = pd.to_numeric(df["g_score"],    errors="coerce")
         df["v_score"]    = pd.to_numeric(df["v_score"],    errors="coerce")
         df["m_score"]    = pd.to_numeric(df["m_score"],    errors="coerce")
         df = df.dropna(subset=["gvm_score"])
 
+        # cc#1104: A MISSING MARKET CAP IS AN EXPLICIT, REPORTED EXCLUSION — never a quiet number.
+        #
+        # This line used to read .fillna(1), commented "equal weight for mcap-unknown stocks". It was
+        # not equal weight. One crore against a segment whose members average tens of thousands of
+        # crore is arithmetically zero, so a company with no market cap was dropped out of its own
+        # segment's rating without a word while the row still claimed to include it. That is the same
+        # silent-blank class as cc#1094 OPM Expansion, and it is exactly what Sprint 5 exists to end.
+        #
+        # Now: excluded from the WEIGHTED average, still counted in stocks_count and still in the
+        # simple average (it has a GVM score — only its WEIGHT is unknown), and named in the return
+        # payload so the exclusion is reported rather than inferred from a moved number.
+        excluded = [
+            {"symbol": str(r.symbol), "segment": str(r.segment),
+             "gvm_score": float(r.gvm_score) if pd.notna(r.gvm_score) else None}
+            for r in df[df["market_cap"].isna()].itertuples()
+        ]
+        if excluded:
+            log.warning("cc#1104: %d scored companies have NO market cap and are EXCLUDED from the "
+                        "weighted average: %s", len(excluded),
+                        ", ".join(f"{e['symbol']} ({e['segment']})" for e in excluded))
+
         rows = []
+        thinned = []
         for seg, grp in df.groupby("segment"):
             if seg in ("Unknown", "", None):
                 continue
-            total_mcap = grp["market_cap"].sum()
-            if total_mcap <= 0:
-                total_mcap = len(grp)  # fallback: equal weight
+            wgrp = grp[grp["market_cap"].notna()]
+            if len(wgrp) != len(grp):
+                thinned.append({"segment": str(seg), "members": int(len(grp)),
+                                "weighted_members": int(len(wgrp)),
+                                "dropped": sorted(set(grp["symbol"]) - set(wgrp["symbol"]))})
+            # A segment where NOBODY has a market cap cannot be weighted at all. Falling back to an
+            # equal-weight mean over the whole group is the honest answer there — it is stated in the
+            # payload rather than presented as a weighting that happened.
+            total_mcap = float(wgrp["market_cap"].sum()) if len(wgrp) else 0.0
+            base = wgrp if (len(wgrp) and total_mcap > 0) else grp
+            if not (len(wgrp) and total_mcap > 0):
+                total_mcap = float(len(grp))
+                base = base.assign(market_cap=1.0)
 
-            def wt_avg(col):
-                return round(float((grp[col] * grp["market_cap"]).sum() / total_mcap), 3)
+            def wt_avg(col, _base=base, _tot=total_mcap):
+                return round(float((_base[col] * _base["market_cap"]).sum() / _tot), 3)
 
-            def simple_avg(col):
-                return round(float(grp[col].mean()), 3)
+            def simple_avg(col, _grp=grp):
+                return round(float(_grp[col].mean()), 3)
 
             mcap_gvm = wt_avg("gvm_score")
             top_row = grp.nlargest(1, "gvm_score").iloc[0]
@@ -564,7 +595,13 @@ def compute_sector_ratings(target_date: date) -> Dict:
             conn.commit()
 
         log.info(f"sector_ratings: {len(rows)} segments written for {target_date}")
-        return {"status": "ok", "segments": len(rows), "date": str(target_date)}
+        # cc#1104: the exclusions travel WITH the result. A caller that prints "ok, 130 segments"
+        # and nothing else would hide the fact that a segment lost a 34,000 Cr member from its own
+        # weighting — which is the whole reason this card required the report, not just the fix.
+        return {"status": "ok", "segments": len(rows), "date": str(target_date),
+                "weight_source": "screener_raw.market_cap",
+                "excluded_no_market_cap": excluded,
+                "thinned_segments": thinned}
 
     except Exception as e:
         log.error(f"compute_sector_ratings failed: {e}")
@@ -576,8 +613,25 @@ def compute_sector_ratings(target_date: date) -> Dict:
 # ============================================================
 def _load_merged_df(target_date: date) -> pd.DataFrame:
     with _conn() as conn:
+        # cc#1104 (founder ruled 19-Aug-2026): market_cap is NO LONGER read from input_raw.
+        #
+        # input_raw is a CONTENT table on an annual/quarterly refresh schedule (session_log 87, 90) —
+        # overview annual, key_takeaway quarterly, result_analysis quarterly. Nothing in it is meant
+        # to move daily. market_cap was simply parked there and a consumer was pointed at it, and it
+        # had been loaded exactly TWICE in its life: 24-May-2026 and 18-Jul-2026. So the mcap-weighted
+        # sector ratings were computed on month-old company sizes.
+        #
+        # It was never a rival DEFINITION, it was a stale SNAPSHOT — proven, not assumed: every large
+        # gap against screener_raw lines up with a large price move in the right direction (INDOTHAI
+        # 2,497 vs 1,024 with price -72% over 60 days; ORCHPHARMA 4,185 vs 9,966 with price +34%).
+        #
+        # The column is simply DROPPED from this SELECT rather than replaced with a COALESCE. The
+        # merge below is suffixes=("", "_scr"), so with market_cap present in only one of the two
+        # frames the merged column IS screener_raw's, unsuffixed, and every downstream reader picks
+        # it up untouched. A COALESCE would have left a silent fallback to the stale value, which is
+        # precisely the thing this card exists to remove.
         inp = pd.read_sql_query(
-            "SELECT nse_code, company_name, market_cap, gvm_segment, fy27_growth FROM input_raw", conn
+            "SELECT nse_code, company_name, gvm_segment, fy27_growth FROM input_raw", conn
         )
         scr = pd.read_sql_query("SELECT * FROM screener_raw", conn)
         # latest momentum on/before target date

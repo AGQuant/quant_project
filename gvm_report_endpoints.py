@@ -588,9 +588,12 @@ def gvm_company_report(symbol: str):
     mcap_rank    = None
     cap_category = None
     persist_error = None
-    # cc#450: header MCap value. gvm_scores/input_raw carry the score-snapshot market_cap (in Cr) that
-    # mcap_rank/cap_category were ranked on; screener_raw holds the freshest fundamentals scrape (the
-    # founder-verified "truth"). Prefer screener_raw for the displayed value, fall back to the snapshot.
+    # cc#450: header MCap value, preferring screener_raw and falling back to the score snapshot.
+    # cc#1104 (19-Aug-2026): that fallback is now a formality rather than a different number —
+    # gvm_scores.market_cap is itself written from screener_raw since gvm_nightly was repointed, so
+    # the snapshot and the live scrape can only differ by the age of the last recompute, never by
+    # source. The fallback is kept because a company scored before a screener row exists should
+    # still print the cap it was ranked on, not a blank.
     market_cap_disp = base.get("market_cap")
 
     try:
