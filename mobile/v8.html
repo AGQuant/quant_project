@@ -165,6 +165,12 @@
      strip, and a filter bar has no page boundaries worth snapping to. */
   touch-action:pan-x pan-y}
 .chipbar::-webkit-scrollbar{display:none}
+/* cc#1115: the sort row reuses .chipbar and .sub wholesale — same pill, same mono face, same
+   scroll behaviour — so it reads as one control family with the filter bar above it rather than
+   as a new widget. Only the label needs its own rule. */
+.sortbar{margin-top:0}
+.sortlb{flex:0 0 auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+  font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-right:2px}
 .chipbar .sub{flex:0 0 auto}
 /* a trailing spacer, not padding-right: a scroll container's right padding is dropped at the
    scroll end in several engines, which is exactly how a last chip ends up flush and unreadable. */
@@ -318,6 +324,11 @@ var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, s
               sub: {}, pop: null, fold: {}, stars: {}, act: {}, legend: null,
               gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
               legendOpen: false,           // cc#989: marker legend, on demand behind the (i)
+              /* cc#1115: null = the default view (period groups on the open page, newest-exit-first
+                 on the realised page). A non-null key switches BOTH pages to ONE FLAT LIST, because
+                 a book sorted by P&L and then chopped into Today/This week buckets is not sorted by
+                 P&L in any useful sense. Direction flips on a repeat tap of the active key. */
+              sortKey: null, sortDir: 'desc',
               page: 'open' };   // cc#943: which face of the book is showing   // cc#932: pivot markers by symbol
 
 function esc(s){ return String(s == null ? '' : s)
@@ -560,6 +571,66 @@ function applySub(list, ignore){
    with every OTHER dimension's filter applied but not its own, so switching Long to Short shows
    what you will actually get and a chip never advertises a count you cannot reach. A chip that
    would yield nothing is not rendered — no dead ends. */
+/* ══ cc#1115 — SORT ═══════════════════════════════════════════════════════════════════════════
+   Three keys, both pages, and the FIELD depends on which page is showing: the unrealised page
+   sorts on unrealised P&L and entry date, the realised page on realised P&L and exit date. Same
+   control, same state, different accessor — so switching pages carries the sort across instead of
+   silently dropping it (card item 5). All three keys translate, so nothing has to be reset.
+
+   NOTHING IS RECOMPUTED HERE. sortVal reads the very fields the rows already display, which are
+   the cc#970 canon values off the payload. Sorting is ordering; it must never become arithmetic. */
+var SORTS = [{k:'pnl', label:'P&L'}, {k:'date', label:'Date'}, {k:'name', label:'Name'}];
+
+function sortVal(p, key){
+  var open = STATE.page === 'open';
+  if (key === 'pnl')  return open ? p.unrealised : p.realised;
+  if (key === 'date') return (open ? (p.entry_date || p.entry_ts) : (p.exit_ts || p.exit_date)) || '';
+  return String(p.symbol || '');
+}
+
+/* A null P&L is NOT zero — it is a position whose value is unknown, and ranking it as break-even
+   would place it in the middle of the book as if that were a measured fact. Unknowns sink to the
+   bottom in both directions instead. */
+function sortRows(list){
+  var key = STATE.sortKey;
+  if (!key) return list;
+  var dir = STATE.sortDir === 'asc' ? 1 : -1;
+  return list.slice().sort(function(a, b){
+    var x = sortVal(a, key), y = sortVal(b, key);
+    var xn = (x == null || x === ''), yn = (y == null || y === '');
+    if (xn && yn) return 0;
+    if (xn) return 1;               /* unknown last, whichever way the arrow points */
+    if (yn) return -1;
+    if (key === 'name') return String(x).localeCompare(String(y)) * (STATE.sortDir === 'asc' ? 1 : -1);
+    return (x < y ? -1 : x > y ? 1 : 0) * dir;
+  });
+}
+
+/* Tap an inactive key to sort by it; tap the active key to flip direction; a third state is not
+   offered here because Clear is its own chip and a three-way cycle hides the way back. */
+function setSort(k){
+  if (STATE.sortKey === k) STATE.sortDir = (STATE.sortDir === 'desc' ? 'asc' : 'desc');
+  else { STATE.sortKey = k; STATE.sortDir = (k === 'name' ? 'asc' : 'desc'); }
+  renderBook();   /* cc#1110: the book section only — never the page */
+}
+function clearSort(){
+  if (!STATE.sortKey) return;
+  STATE.sortKey = null; STATE.sortDir = 'desc';
+  renderBook();   /* cc#1110 */
+}
+
+function sortBar(){
+  var on = STATE.sortKey;
+  var arrow = STATE.sortDir === 'asc' ? '\u2191' : '\u2193';
+  var h = '<span class="sortlb">Sort</span>';
+  SORTS.forEach(function(x){
+    h += '<button class="sub' + (on === x.k ? ' on' : '') + '" onclick="setSort(\'' + x.k + '\')">'
+       + x.label + (on === x.k ? ' <i>' + arrow + '</i>' : '') + '</button>';
+  });
+  if (on) h += '<button class="sub clr" onclick="clearSort()">Clear</button>';
+  return '<div class="chipbar sortbar">' + h + '</div>';
+}
+
 function chipBar(all){
   var sub = STATE.sub || {};
   var anyOn = Object.keys(sub).length > 0;
@@ -796,7 +867,7 @@ function realisedBlock(b){
   /* cc#968 item 4: ONE implementation, both pages. Closed trades carry the same `side` and
      `basket_label` fields the open rows do, so chipBar()/applySub() work here unchanged — the
      realised page did not need its own filter model, only the same one. */
-  var bar = '<div class="navwrap">' + chipBar(all) + '</div>';
+  var bar = '<div class="navwrap">' + chipBar(all) + sortBar() + '</div>';
   var rows = applySub(all);
   if (!rows.length)
     return bar + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
@@ -804,7 +875,7 @@ function realisedBlock(b){
   /* Default sort: most recent exit first (item 4 / item 3). Sorted HERE on a real date key rather
      than trusting arrival order — the endpoint orders by exit_ts DESC today, and relying on that
      silently is how a list ends up in the wrong order the day the query changes. */
-  var g = rows.slice().sort(function(a, c){
+  var g = STATE.sortKey ? sortRows(rows) : rows.slice().sort(function(a, c){
     var x = a.exit_ts || '', y = c.exit_ts || '';
     return x < y ? 1 : (x > y ? -1 : (c.id - a.id));
   });
@@ -826,7 +897,7 @@ function bookBlock(){
 
   var all = b.positions;
   var rows = applySub(all);
-  var h = '<div class="navwrap">' + chipBar(all) + '</div>';
+  var h = '<div class="navwrap">' + chipBar(all) + sortBar() + '</div>';
 
   if (!rows.length)
     return '<div id="bookpg" class="bookpg">' + hdr + h
@@ -836,6 +907,13 @@ function bookBlock(){
   /* cc#924 item 3: on a big book the Older bucket starts collapsed — it is history, and it
      should not push today's positions off the first screen. Threshold is the book size, not the
      bucket's, because that is what makes the screen long. */
+  /* cc#1115: a sort replaces the period grouping rather than nesting inside it. Group headers
+     carry a per-bucket subtotal, and a bucket subtotal over a P&L-ordered slice describes nothing,
+     so the headers go with the grouping. Clearing the sort brings both back. */
+  if (STATE.sortKey)
+    return '<div id="bookpg" class="bookpg">' + hdr + h
+      + sortRows(rows).map(function(p){ return posCard(p, 'open'); }).join('') + '</div>';
+
   var bulky = all.length > 12;
   h += groupPositions(rows).map(function(grp){
     var sum = 0, known = false;
