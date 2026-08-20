@@ -560,6 +560,56 @@ def _load_open_positions(basket: str) -> dict:
         return {}
 
 
+def _load_signal_refs(basket: str) -> dict:
+    """cc#1142 · the position-shaped payload for GATED signal rows on the basket tabs.
+
+    Founder ruling: signal rows should read like open positions — entry time, P&L and all —
+    restricted to the individual basket tabs, for glance only. They currently render a dash in
+    every column, and that is a display choice: v8_qualified.signal_ts is populated for every one
+    of them.
+
+    FROZEN REFERENCE, MOVING P&L. ref_entry is v8_qualified.cmp at the FIRST qualification of the
+    day and never moves; only the P&L moves with live CMP. That is what makes the row behave like
+    an open position and what makes it auditable later — recomputing the reference on each render
+    would drift intraday and could never be reconciled against anything.
+
+    DISTINCT ON (symbol) ... ORDER BY symbol, signal_ts ASC — the FIRST fire, not the latest. A
+    symbol re-qualifies on later ticks as long as it still passes the gate, so the latest row
+    would quietly walk the reference price forward all day.
+
+    NULLS ARE HONEST HERE. A symbol missing ref_entry, cmp_now or lot_size comes back with nulls
+    rather than a substituted price, per the data-honesty doctrine.
+
+    TARGET AND SL ARE DELIBERATELY ABSENT, and that is cc#1142's logged STOP rather than an
+    oversight. The card requires them to come from the SAME function the entry engine uses. There
+    is no such function: the level logic is an inline if/elif on basket inside
+    v8_signal_writer._auto_paper_entry (lines 1436-1457). Nor can they be read off v8_qualified
+    uniformly — today sell_momentum carries target/stop in metrics for 7 of 7 rows while
+    buy_reversal carries them for 0 of 2 — and sell_reversal's levels are computed in its own
+    V7-B handler and passed in frozen, so they do not exist until that handler runs. Inventing a
+    percentage here would be exactly the fabrication the card forbids. Rows carry
+    levels_reason so the surface can say why the cell is empty.
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (q.symbol)
+                       q.symbol, q.signal_ts, q.cmp AS ref_entry,
+                       (CURRENT_DATE - q.signal_date) AS days,
+                       c.cmp AS cmp_now,
+                       f.lot_size
+                FROM v8_qualified q
+                LEFT JOIN cmp_prices c      ON c.symbol = q.symbol
+                LEFT JOIN futures_universe f ON f.symbol = q.symbol
+                WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
+                ORDER BY q.symbol, q.signal_ts ASC
+            """, (basket,))
+            cols = [d[0] for d in cur.description]
+            return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
 def _load_slot_full(basket: str) -> set:
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -660,10 +710,11 @@ def _signal_reason(sym, signal_ts, slot_full, missed, conflict_syms) -> str:
 
 def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set,
                         closed_today: set = None, conflict_syms: set = None,
-                        missed: dict = None) -> list:
+                        missed: dict = None, signal_refs: dict = None) -> list:
     closed_today  = closed_today  or set()
     conflict_syms = conflict_syms or set()
     missed        = missed        or {}
+    signal_refs   = signal_refs   or {}
     out = []
     for s in stocks:
         sym = s.get("symbol", "")
@@ -696,6 +747,9 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
             s["side"]     = pos.get("side")
             s["entry_ts"] = pos.get("entry_ts")
             s["qty"]      = int(pos["qty"]) if pos.get("qty") is not None else None
+            # cc#1142/cc#1144: a real position. This flag is what the ring-fence keys on, so it
+            # is set explicitly on BOTH branches rather than inferred from status downstream.
+            s["notional"] = False
             out.append(s)
             continue
         # cc#326: traded+closed today on this side -> spent, drop entirely (day log / trades is its home)
@@ -712,6 +766,30 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         # "older API build".
         s["side"] = s["entry_ts"] = s["qty"] = None
         s["open_target"] = s["open_stop"] = None
+        # cc#1142 · position-shaped signal row. NOTIONAL, always — nothing here was ever traded.
+        s["notional"] = True
+        ref = signal_refs.get(sym) or {}
+        side_l  = "LONG" if basket.startswith("buy") else "SHORT"
+        r_entry = float(ref["ref_entry"]) if ref.get("ref_entry") is not None else None
+        r_cmp   = float(ref["cmp_now"])   if ref.get("cmp_now")   is not None else None
+        r_lot   = int(ref["lot_size"])    if ref.get("lot_size")  is not None else None
+        s["signal_ts"]  = ref.get("signal_ts") or s.get("signal_ts")
+        s["days"]       = ref.get("days")
+        s["ref_entry"]  = r_entry
+        s["cmp_now"]    = r_cmp
+        s["lot_size"]   = r_lot
+        # LONG (cmp - ref) * lot; SHORT (ref - cmp) * lot. Any missing input leaves BOTH the
+        # rupee figure and the percentage null — never a zero, which would read as a flat trade.
+        if r_entry is not None and r_cmp is not None and r_lot:
+            move = (r_cmp - r_entry) if side_l == "LONG" else (r_entry - r_cmp)
+            s["notional_pnl"] = round(move * r_lot, 2)
+            s["notional_pnl_pct"] = round(move / r_entry * 100, 2) if r_entry else None
+        else:
+            s["notional_pnl"] = s["notional_pnl_pct"] = None
+        # levels stay null by design — see _load_signal_refs; cc#1142 STOP is logged for this
+        s["target"] = s["sl"] = s["potential_left"] = None
+        s["levels_reason"] = ("engine level rule is inline in _auto_paper_entry, not callable; "
+                              "awaiting approval to extract it (cc#1142 STOP)")
         out.append(s)
     return out
 
@@ -1580,7 +1658,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
         with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
             rows = _inject_open_positions(cur, rows, basket, open_pos)
         rows = _enrich_with_status(rows, basket, open_pos, slot_full,
-                                   closed_today, conflict_syms, missed)   # cc#326
+                                   closed_today, conflict_syms, missed,   # cc#326
+                                   _load_signal_refs(basket))             # cc#1142
         # cc#517 Part D: F&O ban chip (display-only) -- the real entry-skip gate lives in
         # v8_signal_writer.py's _auto_paper_entry. Table-exists-safe (no-op before cc#517's first run).
         try:
