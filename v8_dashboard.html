@@ -495,7 +495,16 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .axis{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
 #pane-index .lvl{position:absolute;left:0;right:0;height:0}
 #pane-index .lvl .ln{position:absolute;top:0;height:1px}
-#pane-index .lvl .tag{position:absolute;font-family:var(--mono);font-size:10px;font-weight:600;top:-7px;white-space:nowrap}
+/* cc#1167: the ref sets white-space:nowrap here. NAMED DEVIATION, and the reason is measured:
+   at 2x accessibility text scaling a nowrap tag on pixel-fixed geometry runs past the card edge
+   with overflow-x:visible, so the price is not clipped-but-scrollable, it is GONE. The tag may now
+   fold; the PRICE span keeps nowrap so a number never splits across lines. Bounded so a long tag
+   can never reach the opposite half of the axis. */
+#pane-index .lvl .tag{position:absolute;font-family:var(--mono);font-size:10px;font-weight:600;top:-7px;
+    white-space:normal;overflow-wrap:break-word;line-height:1.2}
+#pane-index .lvl.piv .tag,#pane-index .lvl.mpl .tag{max-width:calc(50% - 96px)}
+#pane-index .lvl.wall .tag{max-width:calc(50% - 14px)}
+#pane-index .lvl .px{white-space:nowrap}
 #pane-index .lvl .px{font-weight:700;font-size:11.5px;color:var(--txt)}
 #pane-index .lvl.piv .ln{left:50%;width:84px;background:var(--line2)}
 #pane-index .lvl.piv .tag{left:calc(50% + 94px);color:var(--mut)}
@@ -531,6 +540,28 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 @media(max-width:920px){#pane-index .r-levels{grid-template-columns:1fr}}
 /* the pulsing spot dot is decorative; the dot must still be findable without it */
 @media(prefers-reduced-motion:reduce){#pane-index .spotdot{animation:none}}
+/* cc#1167: the spine's geometry is fixed in PIXELS - an 84px pivot rule plus a tag offset of
+   50% + 94px, with the tag on white-space:nowrap. On a desktop card that fits; at 412px the
+   right-hand tags ran 103px past the card edge with overflow-x:visible, so there was no way to
+   scroll to them - the text was simply gone.
+
+   HOW THIS WAS MISSED, worth writing down. The cc#1151 probe reported PASS at 412px, but that run
+   was the one where a broken harness rendered NOTHING. After the harness was fixed I checked tag
+   OVERLAP and found none - and never re-ran the overflow check on the working page. Two different
+   checks: overlap asks whether tags collide, overflow asks whether they fit. Passing one is not
+   passing the other.
+
+   The fix shrinks the geometry rather than clipping it. overflow:hidden here would delete the
+   prices instead of showing them, which is the cc#1127 mistake. */
+@media(max-width:560px){
+  #pane-index .spine{height:300px}
+  #pane-index .lvl .tag{font-size:9px}
+  #pane-index .lvl .px{font-size:10px}
+  #pane-index .lvl.piv .ln,#pane-index .lvl.mpl .ln{width:34px}
+  #pane-index .lvl.piv .tag,#pane-index .lvl.mpl .tag{left:calc(50% + 40px);max-width:calc(50% - 42px);white-space:normal;line-height:1.15}
+  #pane-index .lvl.wall .tag{right:calc(50% + 8px);max-width:calc(50% - 10px);white-space:normal;line-height:1.15}
+  #pane-index .lvl.spotl .tag{left:2%}
+}
 /* SPINE | LADDER switch in the card head (scope 6). Not a ref class - the ref shows the two
    components side by side to demonstrate both, and the card asks for a per-index toggle instead.
    Built on the ref's .pill grammar so it does not read as a new control type. */
@@ -5925,6 +5956,58 @@ function rSpine(key, name){
     <div class="spine"><div class="axis"></div>${html}${spotHtml}</div>${edge}`;
 }
 
+/* cc#1167: POST-LAYOUT tag fitting. nudgeTags() runs while the HTML is still a string, so it is
+   guessing at tag height with a fixed 14px gap — a number that was right for a single-line 10px
+   tag and badly wrong once a tag wraps to two lines at accessibility text scaling, where the
+   measured collisions were 112x19px of shared text. This pass runs AFTER the DOM lands, reads the
+   real rects, and pushes overlapping tags apart on their own side of the axis. Measurement, not
+   arithmetic about a font we cannot see. Cheap: two sorted walks over ~10 nodes per spine. */
+function fitSpineTags(root){
+  var host = root || document;
+  Array.prototype.forEach.call(host.querySelectorAll('.spine'), function(sp){
+    ['piv','wall'].forEach(function(side){
+      var sel = side==='wall' ? '.lvl.wall' : '.lvl.piv, .lvl.mpl';
+      var tags = Array.prototype.slice.call(sp.querySelectorAll(sel))
+        .map(function(l){ return l.querySelector('.tag'); }).filter(Boolean);
+      tags.forEach(function(t){ t.style.marginTop = ''; });        // start from the CSS position
+      tags.sort(function(a,b){ return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+      var prevBottom = -Infinity;
+      tags.forEach(function(t){
+        var r = t.getBoundingClientRect();
+        if(r.top < prevBottom + 2){
+          var push = Math.round(prevBottom + 2 - r.top);
+          t.style.marginTop = push + 'px';
+          prevBottom = r.bottom + push;
+        } else {
+          prevBottom = r.bottom;
+        }
+      });
+    });
+    /* Re-fit whenever the spine's own box changes size. A window resize listener is not enough:
+       text scaling changes the RENDERED size without any window event at all — the OS/browser
+       accessibility setting, a user zoom, or a late webfont swap all land that way. A
+       ResizeObserver on the element sees the thing that actually matters. Guarded and attached
+       once per spine, so re-renders do not stack observers. */
+    if(!sp._fitRO && typeof ResizeObserver === 'function'){
+      var raf = false;
+      sp._fitRO = new ResizeObserver(function(){
+        if(raf) return; raf = true;
+        requestAnimationFrame(function(){ raf = false;
+          try{ fitSpineTags(sp.parentNode || document); }catch(e){} });
+      });
+      /* Observe a TAG, not the spine. The spine's own box is a fixed height and a fluid width, so
+         scaling the text inside it changes nothing the observer would see — measured: the box was
+         identical at 1x and 2x while the tags inside had doubled. The tag's box is the one that
+         moves with font size, so that is the one worth watching. */
+      try{
+        sp._fitRO.observe(sp);
+        var probe = sp.querySelector('.lvl .tag');
+        if(probe) sp._fitRO.observe(probe);
+      }catch(e){}
+    }
+  });
+}
+
 function rLevelsCard(key, name){
   const view = D.levelsView[key]==='ladder' ? 'ladder' : 'spine';
   const body = view==='spine' ? rSpine(key,name)
@@ -6116,6 +6199,7 @@ function render(){
   }
   host.innerHTML = html;
   mountIdxTapes();   // cc#1058
+  try{ fitSpineTags(host); }catch(e){ console.warn('[spine fit]', e && e.message); }   // cc#1167
 }
 
 /* extend loaders with pivots + strike OI */
@@ -6142,6 +6226,16 @@ window.iiRepaintCharts=function(){
 window.openV10Chart=openV10Chart;
 window.idxSetLevelsView=idxSetLevelsView;   // cc#1151: SPINE|LADDER switch, called from inline onclick
 window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values, inline onclick
+/* cc#1167: the fit depends on rendered text size, so it must re-run when that can change.
+   rAF-debounced so a drag-resize does not run it per pixel. */
+(function(){
+  var q=false;
+  function again(){ if(q) return; q=true;
+    requestAnimationFrame(function(){ q=false;
+      try{ fitSpineTags(document.getElementById('idx-app')); }catch(e){} }); }
+  window.addEventListener('resize', again);
+  window.addEventListener('orientationchange', again);
+})();
 window.setV10Sym=setV10Sym;
 window.closeV10Chart=closeV10Chart;
 window.openV10ChartAt=function(sym,ts){ _v10pendingScroll=(ts||null); openV10Chart(sym); };
