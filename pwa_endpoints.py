@@ -2103,6 +2103,11 @@ def _read_root_js(name):
 SCORR_CARD_COMMON_JS = _read_root_js("scorr_card_common.js")
 # cc#859 Part A: the shared mobile section card — imported by cc#862 and cc#863, never redefined.
 SCORR_MOBILE_CARDS_JS = _read_root_js("scorr_mobile_cards.js")
+# cc#1129: the ONE news row, shared by /m/digest (WHAT MOVED, GLOBAL EVENTS) and /m/home (LIVE
+# NEWS). Both pages link it directly rather than relying on _MOBILE_HEAD, because /m/digest is
+# deliberately NOT in _PWA_INJECT_PATHS — promoted mobile screens carry their own bottom nav and
+# skip the desktop injection entirely.
+SCORR_NEWS_ROW_JS = _read_root_js("scorr_news_row.js")
 SCORR_ANALYSIS_CARD_JS = _read_root_js("scorr_analysis_card.js")
 SCORR_COCKPIT_CARD_JS = _read_root_js("scorr_cockpit_card.js")
 # cc#1021: the V8 dashboard's Ladder View row renderer. Served the same way as the card files —
@@ -2202,6 +2207,13 @@ def pwa_scorr_card_common_js():
 @router.get("/scorr_mobile_cards.js")
 def pwa_scorr_mobile_cards_js():
     return Response(SCORR_MOBILE_CARDS_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_news_row.js")
+def pwa_scorr_news_row_js():
+    """cc#1129: the shared news row. _CACHE_1D like its siblings, so both pages MUST link it with
+    the ?v= build stamp — an unstamped max-age=86400 asset is exactly the cc#1060 failure."""
+    return Response(SCORR_NEWS_ROW_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/v8_ladder_v2.js")

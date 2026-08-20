@@ -8,6 +8,11 @@
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <script src="/scorr_card_common.js"></script>
+<!-- cc#1129: the shared news row. This page uses its sentiment vocabulary, its category map and
+     its .nrdot styling so /m/home and /m/digest read as one family; the digest uses it to build
+     whole rows. main.py stamps this src with the ?v= build id (both screens are in PROTECTED), so
+     the route's 1-day cache header cannot serve a stale copy after a deploy. -->
+<script src="/scorr_news_row.js"></script>
 <style>
 /* ══ APP_QA_R4 P2 · HOME CONSUMES THE THREE-THEME TOKEN LAYER ═══════════════════════════════
    Ref: design_refs/scorr_home_themes_R1.html @ 80da8c6. Tokens come from
@@ -2062,11 +2067,20 @@ function rnBindSwipe(){
    360px; anything unrecognised falls through to its own text rather than to a guess. */
 var RN_CAT_SHORT = {'AI Editorial':'AI', 'Domestic':'IND', 'Global':'GLB',
                     'IPO':'IPO', 'Stock Views':'VIEW'};
-function rnCatShort(c){ return RN_CAT_SHORT[c] || String(c || ''); }
+/* cc#1129: the map now lives in scorr_news_row.js, which /m/digest uses too, so the two screens
+   cannot label the same category differently. The local copy above is kept only as the fallback
+   for a failed asset load — deleting it would trade one shared component for one blank tag. */
+function rnCatShort(c){
+  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : (RN_CAT_SHORT[c] || String(c || ''));
+}
 
 function rnPaint(){
   var box = document.getElementById('rnBox');
   if (!box) return;
+  /* cc#1129: the shared row's stylesheet is injected once, here, because that is where its
+     classes first reach the DOM. It defines only .nrow and its children, so the one class this
+     page borrows (.nrdot) arrives without touching anything .nwrow already owns. */
+  if (window.ScorrNewsRow) ScorrNewsRow.injectCss();
   /* cc#1092: tabs are painted BEFORE the empty guard. Painting them after the early return meant
      an empty tab rendered no switch at all — POLISH with zero articles would have stranded the
      reader on a blank card with no way back to RAW. The switch must outlive its own contents. */
@@ -2095,7 +2109,19 @@ function rnPaint(){
     var tag = n.polished && n.category
       ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>'
       : '<span class="nwchev">\u2304</span>';
+    /* cc#1129 · ALIGNED TO THE SHARED ROW, NOT REPLACED BY IT. This row already carried both
+       things the card asks for — the cc#1120 category tag and a time-ago — so the only thing
+       missing was the sentiment dot the digest rows have. It is added using the SHARED component's
+       .nrdot classes and its sentiment vocabulary, so "Bullish" and "positive" resolve to one
+       colour in one place across both screens instead of two normalisations drifting apart.
+       The row STAYS a <button> with nwOpen(): it lives inside a swipeable paginated card
+       (cc#1062 binding, cc#1092 tabs), which the digest's plain list does not. Swapping in the
+       digest's markup wholesale would rewrite the tap target, the swipe capture and the pager —
+       all three named in this card's do_not_touch. Extend, do not rewrite. */
+    var dot = window.ScorrNewsRow
+      ? '<span class="nrdot ' + ScorrNewsRow.sentiClass(n.sentiment) + '"></span>' : '';
     return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
+      + dot
       + '<span class="h">' + esc(n.headline) + '</span>'
       + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
       + tag + '</button>';

@@ -8,6 +8,11 @@
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
+<!-- cc#1129: the shared news row, used here and on /m/home so the two read as one family.
+     Linked directly rather than via _MOBILE_HEAD: /m/digest is deliberately NOT in
+     _PWA_INJECT_PATHS. It IS in PROTECTED, so main.py's middleware still rewrites this src with
+     the ?v= build stamp, which the 1-day cache header on the route depends on. -->
+<script src="/scorr_news_row.js"></script>
 <style>
 /* DAILY DIGEST — implements design_refs/scorr_digest_mobile_R1.html (b8949f6), R5.1 tokens */
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
@@ -507,9 +512,22 @@ async function boot(){
       <span class="chip ${cls}" style="font-size:9.5px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
     ||'<div class="unavail">No reporters yesterday.</div>';
 
-  const newsRows=items=>items.slice(0,4).map(n=>
-    `<div class="mrow"><span class="sdot" style="background:${senti(n.sentiment)}"></span>
-     <span style="flex:1">${esc(n.headline)}</span></div>`).join('')||'<div class="unavail">No items.</div>';
+  /* cc#1129: WHAT MOVED and GLOBAL EVENTS now use the shared row (scorr_news_row.js), the same
+     one /m/home's LIVE NEWS uses. The old row was a dot plus a wrapped headline in a plain box —
+     no category, no time, no hierarchy. The category comes from the SECTION, not from a per-row
+     field, because digest_v3._news queries one category at a time and the caller therefore knows
+     it exactly; nothing is inferred. Time-ago is computed from polished_news.published_time, the
+     POLISH time, which is what _news already selects — POLISH_LANDING_RULE, never published_at.
+     No chevron and no onclick: these rows do not open anything on this page, and an affordance
+     that leads nowhere is worse than none. Ordering is untouched — the payload arrives sorted on
+     polish time and is rendered in the order it arrives. */
+  const newsRows=(items,cat)=>window.ScorrNewsRow
+    ? ScorrNewsRow.list(items,{limit:4,category:cat,chevron:false,
+        empty:'<div class="unavail">No items.</div>'})
+    /* the component is a blocking tag above, so this only runs if the asset itself failed to
+       load — in which case the headlines still render rather than the section going blank. */
+    : (items.slice(0,4).map(n=>`<div class="mrow"><span class="sdot" style="background:${senti(n.sentiment)}"></span>
+       <span style="flex:1">${esc(n.headline)}</span></div>`).join('')||'<div class="unavail">No items.</div>');
 
   document.getElementById('app').innerHTML=`
   <div class="card slab rail" style="--rc:${railC};margin-top:12px">
@@ -577,10 +595,10 @@ async function boot(){
   </div>
 
   <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
-  <div class="card slab">${newsRows(wm)}</div>
+  <div class="card slab">${newsRows(wm,'Domestic')}</div>
 
   <div class="eyebrow">GLOBAL EVENTS</div>
-  <div class="card slab">${newsRows(ge)}</div>
+  <div class="card slab">${newsRows(ge,'Global')}</div>
 
   <div class="card slab rail" style="--rc:${railC}">
     <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>

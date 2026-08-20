@@ -454,7 +454,12 @@ async def auth_gate(request: Request, call_next):
                         b"v8_ladder_v2.js", b"index_tape_card.js",
                         # cc#1061: added WITH their script tags, in the same commit, so the
                         # cc#1060 failure cannot repeat for these two.
-                        b"scrub_layer.js", b"pcr_trend_card.js"):
+                        b"scrub_layer.js", b"pcr_trend_card.js",
+                        # cc#1129: the shared news row. Hardcoded as a blocking tag in BOTH
+                        # mobile/home.html and scorr_digest_mobile.html and served max-age=86400,
+                        # so it is added here in the SAME change as those tags — the cc#1060
+                        # lesson, applied at the time rather than after the outage.
+                        b"scorr_news_row.js"):
                 body = body.replace(b'src="/' + _js + b'"',
                                     b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
