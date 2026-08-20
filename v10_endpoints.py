@@ -4,12 +4,16 @@ Mounted in main.py via: app.include_router(v10_router)
 Isolated from V8 / live feed writes. Paper + advisory only.
 """
 import os
+import logging
 import psycopg
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 
+import max_pain as max_pain_mod   # cc#1155: the corrected max-pain computation + its guard
+
 router = APIRouter(prefix="/api/v10", tags=["v10"])
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+log = logging.getLogger("v10")    # cc#1155: the guard must be able to say so LOUDLY when it trips
 
 
 def _conn():
@@ -289,50 +293,57 @@ _MAXPAIN_SPOT = {"NIFTY": "NIFTY50", "BANKNIFTY": "BANKNIFTY"}
 
 @router.get("/maxpain")
 def v10_maxpain(symbol: str = "NIFTY"):
-    """Max-pain strike for the nearest expiry — the strike that minimises total
-    option-writer payout. Uses the LATEST OI snapshot per (strike, option_type)."""
+    """Max-pain strike for the nearest expiry — the expiry price that minimises total option-writer
+    payout across the WHOLE chain.
+
+    cc#1155: the computation moved to max_pain.py and was CORRECTED. The old inline SQL had three
+    defects — it kept strikes from earlier ticks that have since left the chain, it summed each
+    strike's own intrinsic value at the current spot instead of building a payout curve over
+    candidate expiry prices, and the spot it used was the previous daily close. That combination is
+    what printed NIFTY 22,650, a hundred points below its own chain floor. See max_pain.py for the
+    proof of each. The guard lives in max_pain.max_pain(), so no caller can route around it.
+    """
     underlying = (symbol or "NIFTY").upper()
     if underlying in ("NIFTY50", "NIFTY 50"):
         underlying = "NIFTY"
     spot_sym = _MAXPAIN_SPOT.get(underlying, "NIFTY50")
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                WITH exp AS (
-                    SELECT MIN(expiry) AS e FROM option_chain
-                    WHERE underlying=%s AND expiry >= CURRENT_DATE
-                ),
-                oc AS (
-                    SELECT DISTINCT ON (strike, option_type) strike, option_type, oi
-                    FROM option_chain
-                    WHERE underlying=%s AND expiry=(SELECT e FROM exp) AND oi IS NOT NULL
-                    ORDER BY strike, option_type, ts DESC
-                ),
-                spot AS (
-                    SELECT close AS s FROM raw_prices WHERE symbol=%s
-                    ORDER BY price_date DESC LIMIT 1
-                ),
-                pain AS (
-                    SELECT o.strike, SUM(CASE
-                        WHEN o.option_type='CE' THEN o.oi*GREATEST(o.strike-(SELECT s FROM spot),0)
-                        WHEN o.option_type='PE' THEN o.oi*GREATEST((SELECT s FROM spot)-o.strike,0)
-                        ELSE 0 END) AS total_pain
-                    FROM oc o GROUP BY o.strike
-                )
-                SELECT p.strike, (SELECT s FROM spot) AS spot, (SELECT e FROM exp) AS expiry
-                FROM pain p WHERE p.total_pain > 0
-                ORDER BY p.total_pain ASC LIMIT 1
-            """, (underlying, underlying, spot_sym))
-            r = cur.fetchone()
-        if not r or r[0] is None:
+            cur.execute(max_pain_mod.LATEST_CHAIN_SQL, {"u": underlying})
+            rows = cur.fetchall()
+            cur.execute(
+                "SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1",
+                (spot_sym,),
+            )
+            sr = cur.fetchone()
+        if not rows:
             return {"status": "no_data", "symbol": underlying,
                     "note": "Option chain data pending"}
-        strike = float(r[0]); spot = float(r[1]) if r[1] is not None else None
+        chain = {float(r[0]): (r[1] or 0, r[2] or 0) for r in rows}
+        expiry = rows[0][3]
+        tick = rows[0][4]
+        strike, curve = max_pain_mod.max_pain(chain)
+        lo, hi = max_pain_mod.chain_bounds(chain.keys())
+        if strike is None:
+            # Data honesty: absent beats wrong. The card renders an "MP unavailable" note.
+            log.warning(
+                "v10_maxpain GUARD TRIPPED underlying=%s expiry=%s tick=%s strikes=%d "
+                "chain=[%s, %s] best_candidate=%s — refusing to serve a number",
+                underlying, expiry, tick, len(chain), lo, hi,
+                curve[0][0] if curve else None,
+            )
+            return {"status": "unavailable", "symbol": underlying,
+                    "max_pain_strike": None, "expiry": str(expiry) if expiry else None,
+                    "chain_min": lo, "chain_max": hi, "strikes": len(chain),
+                    "note": "Max pain failed its own chain-range guard this tick"}
+        spot = float(sr[0]) if (sr and sr[0] is not None) else None
         dist = (strike - spot) if spot is not None else None
         dist_pct = round(dist / spot * 100, 2) if (spot and dist is not None) else None
         return {"status": "ok", "symbol": underlying, "max_pain_strike": strike,
                 "spot": spot, "distance": dist, "distance_pct": dist_pct,
-                "expiry": str(r[2]) if r[2] is not None else None}
+                "expiry": str(expiry) if expiry is not None else None,
+                "chain_min": lo, "chain_max": hi, "chain_tick": str(tick) if tick else None,
+                "top_candidates": [{"strike": k, "payout": float(v)} for k, v in curve]}
     except Exception as e:
         raise HTTPException(500, f"v10_maxpain failed: {e}")
 
