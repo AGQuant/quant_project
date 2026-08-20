@@ -513,13 +513,43 @@ def _load_open_positions(basket: str) -> dict:
     side = "LONG" if basket.startswith("buy") else "SHORT"
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # cc#1141 · THE TWO PRICE BASES, AND WHY THE SCREEN CONTRADICTED ITSELF.
+            # cc#1019 records entry_price on the FUTURES basis (the real fill), but the entry
+            # engine computes target and stop_loss off the CASH 5-min close. Both are correct.
+            # Reading a cash-derived target against a futures entry is what produced HCLTECH at
+            # -3.22% under a header that says -3.0% FIXED. Across the 19 open rows the futures
+            # basis runs -0.530% to +0.903%, so that is the size of the error in every displayed
+            # percentage.
+            # cash_entry = (target + stop_loss) / 2. Target and stop are symmetric about the cash
+            # entry in ALL FOUR baskets, so no schema change is needed and none is proposed
+            # (MAINTENANCE_LOCK_RULE cc#351). Verified on the live book just now: buy_momentum and
+            # buy_reversal come back at exactly +3.00, sell_momentum at exactly -3.00, and
+            # sell_reversal at -2.35 — which is the point, because sell_reversal is pivot-S1 with a
+            # mirrored stop and is NOT a fixed percentage. Nothing here hardcodes 3%.
+            # THE PERCENTAGES ARE DERIVED HERE, not in the template, so all four tabs and both
+            # view modes read one implementation instead of each re-deriving it against whichever
+            # entry field it happened to have.
+            # pnl_pct KEEPS THE FUTURES BASIS deliberately. It is the position's realised-to-date
+            # performance from the actual fill, and it pairs with the rupee P&L, which stays on
+            # entry_price per the card. Moving it to cash would make the percentage and the rupee
+            # figure describe different trades.
             cur.execute("""
                 SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty, p.entry_ts, p.side,
                        COALESCE(c.cmp, p.entry_price) AS cmp,
                        CASE WHEN p.side='LONG'
                             THEN ROUND(((COALESCE(c.cmp,p.entry_price)-p.entry_price)/p.entry_price*100)::numeric,2)
                             ELSE ROUND(((p.entry_price-COALESCE(c.cmp,p.entry_price))/p.entry_price*100)::numeric,2)
-                       END AS pnl_pct
+                       END AS pnl_pct,
+                       CASE WHEN p.target IS NOT NULL AND p.stop_loss IS NOT NULL
+                            THEN ROUND(((p.target + p.stop_loss)/2.0)::numeric, 2) END AS cash_entry,
+                       CASE WHEN p.target IS NOT NULL AND p.stop_loss IS NOT NULL
+                             AND (p.target + p.stop_loss) <> 0
+                            THEN ROUND(((p.target/((p.target+p.stop_loss)/2.0)-1)*100)::numeric, 2)
+                       END AS target_pct,
+                       CASE WHEN p.target IS NOT NULL AND p.stop_loss IS NOT NULL
+                             AND (p.target + p.stop_loss) <> 0
+                            THEN ROUND(((p.stop_loss/((p.target+p.stop_loss)/2.0)-1)*100)::numeric, 2)
+                       END AS stop_pct
                 FROM v8_paper_positions p
                 LEFT JOIN cmp_prices c ON c.symbol=p.symbol
                 WHERE p.basket=%s AND p.status='OPEN' AND p.side=%s
@@ -649,6 +679,15 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
             s["open_pnl_pct"] = float(pos["pnl_pct"])    if pos.get("pnl_pct")     else None
             s["open_target"]  = float(pos["target"])      if pos.get("target")      else None
             s["open_stop"]    = float(pos["stop_loss"])   if pos.get("stop_loss")   else None
+            # cc#1141: the CASH basis the levels were actually set off, plus the two percentages
+            # derived from it server-side. entry_price above stays the futures fill and keeps
+            # showing in the ENTRY column — this is what the levels mean, not a replacement for
+            # what was paid. A row missing target or stop_loss gets nulls and cash_entry_missing,
+            # so the surface can say so rather than quietly falling back to the wrong basis.
+            s["cash_entry"] = float(pos["cash_entry"]) if pos.get("cash_entry") is not None else None
+            s["target_pct"] = float(pos["target_pct"]) if pos.get("target_pct") is not None else None
+            s["stop_pct"]   = float(pos["stop_pct"])   if pos.get("stop_pct")   is not None else None
+            s["cash_entry_missing"] = s["cash_entry"] is None
             # cc#1023 scope B item 6: the basket tabs render like a Master row now, so the row must
             # carry the position's own identity too. Read-only join, already in hand from
             # _load_open_positions — no extra query. entry_ts is exposed on its OWN key because

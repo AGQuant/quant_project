@@ -3107,9 +3107,18 @@ const V8_COLS=[
   ["pp","PP",             x=>`<td style="color:var(--mut);text-align:right;${V8_COL_MONO}">${_cD(x.pp,v=>num(v,0))}</td>`],
   ["r1","R1",             x=>`<td class="pos" style="text-align:right;${V8_COL_MONO}">${_cD(x.r1,v=>num(v,0))}</td>`],
   ["s1","S1",             x=>`<td class="neg" style="text-align:right;${V8_COL_MONO}">${_cD(x.s1,v=>num(v,0))}</td>`],
-  ["entry_price","Entry", x=>`<td style="text-align:right;${V8_COL_MONO}${x._futGap?';color:var(--dim)':''}"${x._futGap?` title="${String(x._futGap).replace(/"/g,'&quot;')}"`:''}>${_cD(x.entry_price,v=>num(v,1))}</td>`],
-  ["target","Target",     x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--grn)">${_cD(x.target,v=>num(v))}</td>`],
-  ["stop_loss","SL",      x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--red)">${_cD(x.stop_loss,v=>num(v))}</td>`],
+  // cc#1141: the ENTRY cell keeps showing entry_price, the real futures fill — that is what was
+  // paid and it must not move. The title says what the LEVELS are set off, because target and SL
+  // are cash-derived and reading them against this number is what made the row contradict its own
+  // tab header. Any pre-existing _futGap note is preserved and the basis line appended to it.
+  ["entry_price","Entry", x=>{const _b=x.cash_entry!=null?`Futures fill. Levels are set off the cash close of ${num(x.cash_entry,2)}.`:'';const _t=[x._futGap,_b].filter(Boolean).join(' · ');return `<td style="text-align:right;${V8_COL_MONO}${x._futGap?';color:var(--dim)':''}"${_t?` title="${String(_t).replace(/"/g,'&quot;')}"`:''}>${_cD(x.entry_price,v=>num(v,1))}</td>`;}],
+  // cc#1141: the percentage beside each level is DERIVED SERVER-SIDE off cash_entry =
+  // (target+stop_loss)/2, never off entry_price and never from a hardcoded 3%. That matters
+  // because the four baskets do not share one rule — sell_reversal is pivot-S1 with a mirrored
+  // stop and legitimately reads -2.35%, not -3.00%. A row without both levels shows the price
+  // alone rather than a percentage computed off the wrong basis.
+  ["target","Target",     x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--grn)">${_cD(x.target,v=>num(v))}${x.target_pct!=null?` <span style="font-size:10px;color:var(--dim)">(${sign(x.target_pct,2)}%)</span>`:''}</td>`],
+  ["stop_loss","SL",      x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--red)">${_cD(x.stop_loss,v=>num(v))}${x.stop_pct!=null?` <span style="font-size:10px;color:var(--dim)">(${sign(x.stop_pct,2)}%)</span>`:''}</td>`],
   ["net_pnl","Net P&L",   x=>`<td style="text-align:right" class="${x.net_pnl==null?'':pnlCls(x.net_pnl)}">${_cD(x.net_pnl,inr)}</td>`],
   ["potential_left","Potential Left",x=>`<td style="text-align:right" class="${cls(x.potential_left)}">${x.potential_left==null?'--':inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`}</td>`],
   ["net_pnl_pct","Net P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.net_pnl_pct)}">${_cD(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>`],
