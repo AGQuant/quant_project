@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESIGN REF · INDEX INTEL R2 · dual-theme canonical</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ONE token contract drives the whole surface. DARK is :root; LIGHT is the
+   html[data-theme=light] remap below. No selector outside these two blocks
+   names a colour. Toggle button in the tabs row flips data-theme. */
+:root{
+  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --well:#0D1428;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
+  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --grn:#2FD48B; --grn-d:rgba(47,212,139,.13);
+  --red:#FF5C6C; --red-d:rgba(255,92,108,.12);
+  --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
+  --spotc:#37D3E8;
+  --spot-ring:rgba(55,211,232,.16); --spot-ring2:rgba(55,211,232,.06);
+  --spot-chip-bg:rgba(55,211,232,.1); --spot-chip-bd:rgba(55,211,232,.3);
+  --amber-bg:rgba(245,185,74,.08); --amber-bd:rgba(245,185,74,.4); --amber-row:rgba(245,185,74,.1);
+  --blu-row:rgba(77,124,254,.1); --blu-chip:rgba(77,124,254,.14); --blu-chip-bd:rgba(77,124,254,.3);
+  --vio-bg:rgba(155,124,255,.1); --vio-bd:rgba(155,124,255,.3);
+  --flat:#2a3350;
+  --glow-gold:rgba(245,185,74,.5); --glow-spot:rgba(55,211,232,.6);
+  --gridline:rgba(148,166,210,.05);
+  --shadow:0 18px 44px rgba(3,7,20,.5);
+  --font:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --r:16px;
+}
+html[data-theme="light"]{
+  --bg:#F5F7FB; --bg2:#EEF1F8; --panel:#FFFFFF; --panel2:#F7F9FD; --well:#EEF1F8;
+  --line:rgba(23,40,80,.10); --line2:rgba(23,40,80,.18);
+  --txt:#17203A; --mut:#5B6785; --dim:#93A0BE;
+  --grn:#0E9F62; --grn-d:rgba(14,159,98,.10);
+  --red:#DE3A52; --red-d:rgba(222,58,82,.09);
+  --blu:#3563E9; --cyan:#0E93B0; --amber:#B47B10; --violet:#6E4FE0;
+  --spotc:#0E93B0;
+  --spot-ring:rgba(14,147,176,.14); --spot-ring2:rgba(14,147,176,.05);
+  --spot-chip-bg:rgba(14,147,176,.08); --spot-chip-bd:rgba(14,147,176,.3);
+  --amber-bg:rgba(180,123,16,.07); --amber-bd:rgba(180,123,16,.35); --amber-row:rgba(180,123,16,.08);
+  --blu-row:rgba(53,99,233,.08); --blu-chip:rgba(53,99,233,.10); --blu-chip-bd:rgba(53,99,233,.3);
+  --vio-bg:rgba(110,79,224,.08); --vio-bd:rgba(110,79,224,.3);
+  --flat:#D5DAE8;
+  --glow-gold:rgba(180,123,16,.35); --glow-spot:rgba(14,147,176,.4);
+  --gridline:rgba(23,40,80,.035);
+  --shadow:0 10px 28px rgba(23,40,80,.08);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--txt);font-family:var(--font);
+  background-image:linear-gradient(var(--gridline) 1px,transparent 1px),
+    linear-gradient(90deg,var(--gridline) 1px,transparent 1px);
+  background-size:46px 46px;padding-bottom:44px}
+.wrap{max-width:1200px;margin:0 auto;padding:0 20px}
+.u{color:var(--grn)}.d{color:var(--red)}.mut{color:var(--mut)}.dim{color:var(--dim)}
+.tabs{display:flex;gap:2px;padding:12px 0 0;border-bottom:1px solid var(--line2);flex-wrap:wrap;align-items:center}
+.tab{font-family:var(--font);font-weight:700;font-size:12px;padding:10px 16px;color:var(--mut);
+  border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.02em}
+.tab.on{color:var(--blu);border-bottom-color:var(--blu)}
+.tabs .sp{flex:1}
+.pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border:1px solid var(--line2);
+  border-radius:6px;color:var(--mut);margin-left:6px;background:none;cursor:default}
+.pill b{color:var(--txt)}
+.pill.tgl{cursor:pointer}
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 0 12px;flex-wrap:wrap}
+.brand{font-weight:800;font-size:19px;color:var(--blu);letter-spacing:-.4px}
+.brand em{font-style:normal;color:var(--amber)}
+.tb-pipe{color:var(--line2)}
+.tb-sec{font-size:10px;letter-spacing:.22em;color:var(--dim);font-weight:700}
+.topbar .sp{flex:1}
+.mood-word{font-weight:800;font-size:13px;letter-spacing:.18em;color:var(--amber);
+  text-shadow:0 0 16px var(--glow-gold);animation:breathe 4s ease-in-out infinite}
+.mood-word .l{display:block;font-size:8.5px;letter-spacing:.2em;color:var(--dim);font-weight:700;text-shadow:none}
+@keyframes breathe{0%,100%{text-shadow:0 0 8px var(--glow-gold)}50%{text-shadow:0 0 22px var(--glow-gold)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.card-hd{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.card-hd .t{font-size:12px;font-weight:800;letter-spacing:.04em}
+.card-hd .s{font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+.row{display:grid;gap:16px;margin-bottom:16px}
+.r-idxvix{grid-template-columns:1.6fr 1fr}
+.r-adrpcr{grid-template-columns:1fr 1.4fr}
+.r-levels{grid-template-columns:1fr 1fr}
+@media(max-width:920px){.r-idxvix,.r-adrpcr,.r-levels{grid-template-columns:1fr}}
+.mood{background:linear-gradient(135deg,var(--panel),var(--panel2));border:1px solid var(--line2);
+  border-radius:var(--r);padding:18px 22px;margin:4px 0 16px;display:flex;align-items:center;gap:22px;
+  flex-wrap:wrap;box-shadow:var(--shadow)}
+.mood .word{font-weight:800;font-size:26px;letter-spacing:.1em;color:var(--amber);text-shadow:0 0 24px var(--glow-gold)}
+.mood .word .l{display:block;font-size:9px;letter-spacing:.26em;color:var(--dim);font-weight:700;text-shadow:none;margin-bottom:2px}
+.gates{display:flex;gap:8px;flex-wrap:wrap}
+.gate{font-family:var(--mono);font-size:10px;font-weight:600;padding:5px 11px;border-radius:7px;border:1px solid}
+.gate.ok{color:var(--grn);background:var(--grn-d);border-color:var(--grn)}
+.gate.no{color:var(--red);background:var(--red-d);border-color:var(--red)}
+.mood .sp{flex:1}
+.slots{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.slots b{font-size:16px;color:var(--txt)}
+.spark-pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.spark-pair{grid-template-columns:1fr}}
+.sp-box .nm{font-size:11px;font-weight:800;letter-spacing:.06em}
+.sp-box .px{font-family:var(--mono);font-weight:700;font-size:22px;margin:2px 0}
+.sp-box .ch{font-family:var(--mono);font-size:11px;font-weight:600}
+svg.line{width:100%;height:64px;display:block;margin-top:6px}
+.sp-note{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:5px}
+.axis-t{font-family:var(--mono);font-size:8.5px;fill:var(--dim)}
+.vix-big{font-family:var(--mono);font-weight:700;font-size:30px}
+.vix-band{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--grn);
+  background:var(--grn-d);border:1px solid var(--grn);border-radius:5px;padding:2px 8px;margin-left:10px;vertical-align:6px}
+.ban-empty{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;color:var(--mut)}
+.ban-empty .dot{width:8px;height:8px;border-radius:50%;background:var(--grn);box-shadow:0 0 10px var(--grn)}
+.adr-nums{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;font-weight:600;margin-bottom:8px}
+.adr-bar{display:flex;height:15px;border-radius:6px;overflow:hidden;border:1px solid var(--line2)}
+.adr-bar .a{background:linear-gradient(180deg,var(--grn),#1da75a)}
+.adr-bar .n{background:var(--flat)}
+.adr-bar .z{background:linear-gradient(180deg,var(--red),#d63753)}
+.adr-cells{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.adr-cell{border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
+.adr-cell .n2{font-family:var(--mono);font-weight:700;font-size:16px}
+.adr-cell .l2{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-top:2px}
+.pcr-top{display:flex;align-items:baseline;gap:14px}
+.pcr-big{font-family:var(--mono);font-weight:700;font-size:28px}
+.pcr-meta{font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+svg.pcr{width:100%;height:92px;display:block;margin-top:8px}
+.spine{position:relative;height:330px;margin:8px 0 2px}
+.axis{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
+.lvl{position:absolute;left:0;right:0;height:0}
+.lvl .ln{position:absolute;top:0;height:1px}
+.lvl .tag{position:absolute;font-family:var(--mono);font-size:10px;font-weight:600;top:-7px;white-space:nowrap}
+.lvl .px{font-weight:700;font-size:11.5px;color:var(--txt)}
+.lvl.piv .ln{left:50%;width:84px;background:var(--line2)}
+.lvl.piv .tag{left:calc(50% + 94px);color:var(--mut)}
+.lvl.piv.pp .ln{background:var(--amber);opacity:.7}
+.lvl.piv.pp .tag,.lvl.piv.pp .px{color:var(--amber)}
+.lvl.wall .ln{right:50%;background:currentColor;height:7px;top:-3px;border-radius:2px;opacity:.85}
+.lvl.wall .tag{right:calc(50% + 12px);text-align:right;color:currentColor}
+.lvl.wall.put{color:var(--grn)}
+.lvl.wall.call{color:var(--red)}
+.lvl.mpl .ln{left:50%;width:84px;background:var(--amber)}
+.lvl.mpl .tag{left:calc(50% + 94px);color:var(--amber)}
+.lvl.spotl{z-index:3}
+.lvl.spotl .ln{left:5%;right:5%;border-top:1.5px dashed var(--spotc);background:none}
+.spotdot{position:absolute;left:50%;top:-4px;width:9px;height:9px;margin-left:-4px;border-radius:50%;
+  background:var(--spotc);box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot);
+  animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot)}
+  50%{box-shadow:0 0 0 9px var(--spot-ring2),0 0 22px var(--glow-spot)}}
+.lvl.spotl .tag{left:5%;top:-20px;color:var(--spotc);background:var(--spot-chip-bg);
+  padding:1px 8px;border-radius:4px;border:1px solid var(--spot-chip-bd)}
+.mp-edge{display:flex;align-items:center;gap:8px;margin-top:9px;padding:5px 11px;width:max-content;max-width:100%;
+  background:var(--amber-bg);border:1px dashed var(--amber-bd);border-radius:6px;
+  font-family:var(--mono);font-size:9.5px;color:var(--amber)}
+.spine-hd{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px}
+.spine-hd .big2{font-size:19px;font-weight:700;color:var(--txt)}
+.rung{display:grid;grid-template-columns:1fr 78px 1fr;align-items:center;height:21px}
+.rung:nth-child(odd){background:var(--bg2)}
+.rung.atm{background:var(--blu-row)}
+.rung.atm .stk{color:var(--blu);font-weight:800}
+.rung.mp .stk{color:var(--amber);font-weight:800;background:var(--amber-row);border-radius:4px}
+.side{position:relative;height:12px}
+.bar{position:absolute;top:0;height:12px;border-radius:3px}
+.side.p .bar{right:0;background:var(--grn);opacity:.32}
+.side.c .bar{left:0;background:var(--red);opacity:.32}
+.rung.pw .side.p .bar,.rung.cw .side.c .bar{opacity:.9}
+.stk{text-align:center;font-family:var(--mono);font-size:11px;font-weight:600}
+.oi-heads{display:grid;grid-template-columns:1fr 78px 1fr;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--dim);margin-bottom:4px}
+.oi-heads .l{text-align:right;padding-right:10px;color:var(--grn)}
+.oi-heads .c{text-align:center}
+.oi-heads .r{padding-left:10px;color:var(--red)}
+.wallchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.wc{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:5px}
+.wc.p{background:var(--grn-d);color:var(--grn)}
+.wc.c{background:var(--red-d);color:var(--red)}
+.wc.a{background:var(--amber-row);color:var(--amber)}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+th{font-size:8.5px;letter-spacing:.14em;color:var(--dim);text-align:right;padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line)}
+th:first-child,th:nth-child(2){text-align:left}
+td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line)}
+td:first-child,td:nth-child(2){text-align:left}
+tr:last-child td{border:none}
+.tag2{font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.06em}
+.tag2.eng{background:var(--blu-chip);color:var(--blu);border:1px solid var(--blu-chip-bd)}
+.tag2.long{background:var(--grn-d);color:var(--grn)}
+.tag2.short{background:var(--red-d);color:var(--red)}
+.pos-hd-pl{font-family:var(--mono);font-weight:700;font-size:15px}
+.skel{height:11px;border-radius:5px;background:linear-gradient(90deg,var(--panel2) 25%,var(--well) 50%,var(--panel2) 75%);
+  background-size:200% 100%;animation:sh 1.6s linear infinite;display:inline-block}
+@keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+.notpulled{font-family:var(--mono);font-size:9px;color:var(--dim);border:1px dashed var(--line2);
+  border-radius:5px;padding:2px 8px;display:inline-block}
+.lockchip{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--violet);
+  background:var(--vio-bg);border:1px solid var(--vio-bd);border-radius:5px;padding:2px 8px}
+.set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.set-cell{border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+.set-cell .k{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700}
+.set-cell .v{font-family:var(--mono);font-size:12px;font-weight:600;margin-top:3px;letter-spacing:.2em;color:var(--mut)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{border:1px solid var(--line);border-radius:9px;padding:10px 12px;text-align:center}
+.stat .n{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--mut)}
+.stat .l{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-top:3px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.foot{padding:18px 2px 0;display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dim);flex-wrap:wrap;gap:6px}
+@media (prefers-reduced-motion:reduce){.mood-word,.spotdot,.skel{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab on">Index Intel</button><button class="tab">V14 Intraday</button>
+    <button class="tab">TC Scanner</button><button class="tab">V6 BT</button>
+    <button class="tab">Digest</button><button class="tab">Wall of Trades</button>
+    <span class="sp"></span>
+    <button class="pill tgl" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'':'light'">◐ <b>Theme</b></button>
+    <span class="pill">IST <b>11:30</b></span><span class="pill">EXP <b>25 AUG</b> · 5D</span>
+  </div>
+  <div class="topbar">
+    <span class="brand">INDEX <em>INTEL</em></span><span class="tb-pipe">|</span>
+    <span class="tb-sec">INDEX INTELLIGENCE · V10 PAPER</span>
+    <span class="sp"></span>
+    <span class="mood-word"><span class="l">MOOD</span>SUPPORTIVE</span>
+  </div>
+  <div class="mood">
+    <span class="word"><span class="l">MARKET GATE</span>SUPPORTIVE</span>
+    <span class="gates">
+      <span class="gate ok">PCR 1.19 ▲</span>
+      <span class="gate ok">ADR 78/11</span>
+      <span class="gate ok">VIX 11.32</span>
+      <span class="gate ok">NIFTY &gt; PP</span>
+    </span>
+    <span class="sp"></span>
+    <span class="slots">BUY SLOTS <b>—</b> · SELL SLOTS <b>—</b> <span class="notpulled">slot state not pulled for ref</span></span>
+  </div>
+  <div class="row r-idxvix">
+    <div class="card">
+      <div class="card-hd"><span class="t">Index · Day Change</span><span class="s">5-min intraday · prior close dashed</span></div>
+      <div class="spark-pair">
+        <div class="sp-box">
+          <span class="nm">NIFTY</span>
+          <div class="px">24,212 <span class="ch u">+134 · +0.56%</span></div>
+          <svg class="line" viewBox="0 0 300 64" preserveAspectRatio="none">
+            <polyline fill="none" stroke="var(--grn)" stroke-width="2" stroke-linejoin="round"
+              points="0,48 11,53 22,58 33,49 44,45 55,32 66,40 77,40 88,35 99,37 110,29 121,23 132,17 143,17 154,34 165,29 176,38 187,33 198,35 209,33 220,30 231,26 242,29 253,33 264,43 275,48 286,47 297,29"/>
+            <circle cx="297" cy="29" r="3.5" fill="var(--grn)"/>
+          </svg>
+          <div class="sp-note">prev close 24,078 · range 24,190–24,221 · real 28-bar series</div>
+        </div>
+        <div class="sp-box">
+          <span class="nm">BANKNIFTY</span>
+          <div class="px">57,615 <span class="ch u">+375 · +0.66%</span></div>
+          <svg class="line" viewBox="0 0 300 64" preserveAspectRatio="none">
+            <line x1="0" y1="52" x2="300" y2="52" stroke="var(--line2)" stroke-dasharray="3 4"/>
+            <text x="4" y="48" class="axis-t">prev 57,240</text>
+            <circle cx="290" cy="14" r="3.5" fill="var(--grn)"/>
+            <text x="196" y="16" class="axis-t">frozen CMP 57,615</text>
+          </svg>
+          <div class="sp-note"><span class="notpulled">intraday series not pulled for ref · endpoint unchanged</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">India VIX</span><span class="s">fear gauge · 5-day hourly</span></div>
+      <div><span class="vix-big">11.32</span><span class="vix-band">CALM · −0.56%</span></div>
+      <svg class="line" viewBox="0 0 300 64" preserveAspectRatio="none" style="height:70px">
+        <line x1="0" y1="32" x2="300" y2="32" stroke="var(--line)" stroke-dasharray="3 4"/>
+      </svg>
+      <div class="sp-note"><span class="notpulled">5-day series not pulled for ref</span> · below 13 = low-fear regime</div>
+    </div>
+  </div>
+  <div class="row"><div class="card">
+    <div class="card-hd"><span class="t">F&O Ban · MWPL</span><span class="s">barred from fresh F&O positions</span></div>
+    <div class="ban-empty"><span class="dot"></span>No securities in the F&O ban list today — full universe tradable.</div>
+  </div></div>
+  <div class="row r-adrpcr">
+    <div class="card">
+      <div class="card-hd"><span class="t">Advance / Decline</span><span class="s">209 F&O stocks · live</span></div>
+      <div class="adr-nums"><span class="u">78% ADV</span><span class="d">11% DEC</span></div>
+      <div class="adr-bar"><span class="a" style="width:78%"></span><span class="n" style="width:11%"></span><span class="z" style="width:11%"></span></div>
+      <div class="adr-cells">
+        <div class="adr-cell"><div class="n2 u">163</div><div class="l2">ADVANCING</div></div>
+        <div class="adr-cell"><div class="n2 mut">23</div><div class="l2">FLAT</div></div>
+        <div class="adr-cell"><div class="n2 d">23</div><div class="l2">DECLINING</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">PCR Trend</span><span class="s">NIFTY ATM±5 · 5-min · ● live</span></div>
+      <div class="pcr-top"><span class="pcr-big u">1.19</span>
+        <span class="pcr-meta">opened 0.72 · peak 1.26 @ 10:15 · rising = put writing = support</span></div>
+      <svg class="pcr" viewBox="0 0 300 92" preserveAspectRatio="none">
+        <line x1="0" y1="46" x2="300" y2="46" stroke="var(--line2)" stroke-width="1" stroke-dasharray="3 4"/>
+        <text x="2" y="43" class="axis-t">1.00</text>
+        <polyline fill="none" stroke="var(--grn)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+          points="0,84 11,84 22,59 33,48 44,40 55,37 66,28 77,32 88,31 99,23 110,24 121,20 132,7 143,7 154,8 165,10 176,12 187,12 198,14 209,12 220,11 231,7 242,7 253,7 264,8 275,12 286,18 297,16"/>
+        <circle cx="297" cy="16" r="3.5" fill="var(--grn)"/>
+        <text x="2" y="90" class="axis-t">09:15</text><text x="272" y="90" class="axis-t">11:30</text>
+      </svg>
+      <div class="sp-note"><span class="notpulled">7-day history region omitted in ref · today real</span></div>
+    </div>
+  </div>
+  <div class="row r-levels">
+    <div class="card">
+      <div class="card-hd"><span class="t">Levels · NIFTY</span><span class="s">pivots + OI walls + spot · one price axis</span></div>
+      <div class="spine-hd"><span class="big2">24,212</span><span>rolling-5d pivots · walls from ATM±7 chain</span></div>
+      <div class="spine">
+        <div class="axis"></div>
+        <div class="lvl piv" style="top:2%"><span class="ln"></span><span class="tag">R2 <span class="px">24,584</span> +1.54%</span></div>
+        <div class="lvl piv" style="top:31.2%"><span class="ln"></span><span class="tag">R1 <span class="px">24,331</span> +0.49%</span></div>
+        <div class="lvl wall call" style="top:35.0%"><span class="ln" style="width:33%"></span><span class="tag">131L CALL <span class="px">24,300</span></span></div>
+        <div class="lvl spotl" style="top:45.9%"><span class="ln"></span><span class="spotdot"></span><span class="tag">SPOT 24,212</span></div>
+        <div class="lvl wall call" style="top:47.3%"><span class="ln" style="width:36%"></span><span class="tag">WALL ×2 <span class="px">24,200</span></span></div>
+        <div class="lvl piv pp" style="top:49.9%"><span class="ln"></span><span class="tag">PP <span class="px">24,179</span> −0.14%</span></div>
+        <div class="lvl wall put" style="top:72.0%"><span class="ln" style="width:41%"></span><span class="tag">161L PUT <span class="px">24,000</span></span></div>
+        <div class="lvl piv" style="top:81.3%"><span class="ln"></span><span class="tag">S1 <span class="px">23,925</span> −1.19%</span></div>
+        <div class="lvl piv" style="top:98%"><span class="ln"></span><span class="tag">S2 <span class="px">23,773</span> −1.81%</span></div>
+      </div>
+      <div class="mp-edge">▾ MAX PAIN 22,650 · below scale — under lowest chain strike · audit flagged</div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">Max Pain · Strike-wise OI</span><span class="s">BANKNIFTY · ATM±7 · lakh contracts</span></div>
+      <div class="spine-hd" style="margin-bottom:8px"><span class="big2">57,615</span><span>MP 57,200 · ATM 57,200 · EXP 25 AUG</span></div>
+      <div class="oi-heads"><span class="l">PUT OI</span><span class="c">STRIKE</span><span class="r">CALL OI</span></div>
+      <div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:15%"></span></div><div class="stk">57,900</div><div class="side c"><span class="bar" style="width:42%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:21%"></span></div><div class="stk">57,800</div><div class="side c"><span class="bar" style="width:38%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:31%"></span></div><div class="stk">57,700</div><div class="side c"><span class="bar" style="width:54%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:36%"></span></div><div class="stk">57,600</div><div class="side c"><span class="bar" style="width:34%"></span></div></div>
+        <div class="rung cw"><div class="side p"><span class="bar" style="width:79%"></span></div><div class="stk">57,500</div><div class="side c"><span class="bar" style="width:66%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:18%"></span></div><div class="stk">57,400</div><div class="side c"><span class="bar" style="width:16%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:18%"></span></div><div class="stk">57,300</div><div class="side c"><span class="bar" style="width:17%"></span></div></div>
+        <div class="rung atm mp"><div class="side p"><span class="bar" style="width:22%"></span></div><div class="stk">57,200 ·A·MP</div><div class="side c"><span class="bar" style="width:12%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:24%"></span></div><div class="stk">57,100</div><div class="side c"><span class="bar" style="width:9%"></span></div></div>
+        <div class="rung pw"><div class="side p"><span class="bar" style="width:100%"></span></div><div class="stk">57,000</div><div class="side c"><span class="bar" style="width:46%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:12%"></span></div><div class="stk">56,900</div><div class="side c"><span class="bar" style="width:6%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:15%"></span></div><div class="stk">56,800</div><div class="side c"><span class="bar" style="width:3%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:11%"></span></div><div class="stk">56,700</div><div class="side c"><span class="bar" style="width:1%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:15%"></span></div><div class="stk">56,600</div><div class="side c"><span class="bar" style="width:1%"></span></div></div>
+        <div class="rung"><div class="side p"><span class="bar" style="width:42%"></span></div><div class="stk">56,500</div><div class="side c"><span class="bar" style="width:9%"></span></div></div>
+      </div>
+      <div class="wallchips">
+        <span class="wc p">PUT WALL 57,000 · 14.5L</span><span class="wc c">CALL WALL 57,500 · 9.5L</span>
+        <span class="wc a">PCR ±7 · 1.30</span>
+      </div>
+    </div>
+  </div>
+  <div class="stack">
+    <div class="card">
+      <div class="card-hd"><span class="t">Open Positions (2)</span><span class="pos-hd-pl u">₹611</span></div>
+      <table>
+        <tr><th>ENG</th><th>SYMBOL</th><th>SIDE</th><th>TYPE</th><th>ENTRY</th><th>CMP</th><th>TARGET</th><th>STOP</th><th>QTY</th><th>P&L</th><th>P&L%</th></tr>
+        <tr><td><span class="tag2 eng">V10</span></td><td>NIFTY50</td><td><span class="tag2 long">LONG</span></td><td class="dim">FUT</td>
+          <td>24,198</td><td>24,199</td><td class="u">24,398</td><td class="d">24,098</td><td>65</td><td class="u">₹39</td><td class="u">+0.00%</td></tr>
+        <tr><td><span class="tag2 eng">V10</span></td><td>NIFTY50 <span class="dim">24200 PE wrt</span></td><td><span class="tag2 short">SHORT</span></td><td class="dim">OPT-wrt</td>
+          <td>79</td><td>70</td><td class="dim">—</td><td class="dim">—</td><td>65</td><td class="u">₹572</td><td class="u">+11.11%</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">Closed Trades</span><span class="notpulled">rows not pulled for ref · design shows loading state</span></div>
+      <table><tr><th>ENG</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>P&L</th><th>REASON</th></tr>
+        <tr><td><span class="skel" style="width:34px"></span></td><td><span class="skel" style="width:90px"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:52px;margin-left:auto"></span></td><td><span class="skel" style="width:52px;margin-left:auto"></span></td><td><span class="skel" style="width:48px;margin-left:auto"></span></td><td><span class="skel" style="width:64px;margin-left:auto"></span></td></tr>
+        <tr><td><span class="skel" style="width:34px"></span></td><td><span class="skel" style="width:74px"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:52px;margin-left:auto"></span></td><td><span class="skel" style="width:52px;margin-left:auto"></span></td><td><span class="skel" style="width:48px;margin-left:auto"></span></td><td><span class="skel" style="width:56px;margin-left:auto"></span></td></tr>
+      </table>
+    </div>
+    <div class="row" style="grid-template-columns:1fr 1fr;margin:0">
+      <div class="card">
+        <div class="card-hd"><span class="t">Entry / Exit Settings</span><span class="lockchip">V10 · LOCKED 16-JUN-2026</span></div>
+        <div class="set-grid">
+          <div class="set-cell"><div class="k">ENTRY RULE</div><div class="v">••••••</div></div>
+          <div class="set-cell"><div class="k">EXIT RULE</div><div class="v">••••••</div></div>
+          <div class="set-cell"><div class="k">STOP LOGIC</div><div class="v">••••••</div></div>
+          <div class="set-cell"><div class="k">SIZING</div><div class="v">••••••</div></div>
+        </div>
+        <div class="sp-note" style="margin-top:9px">values masked in ref · proprietary parameters never appear in design files · live card keeps real values</div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="t">V10 Performance</span><span class="notpulled">stats not pulled for ref</span></div>
+        <div class="stat-grid">
+          <div class="stat"><div class="n">--</div><div class="l">CLOSED</div></div>
+          <div class="stat"><div class="n">--</div><div class="l">WIN RATE</div></div>
+          <div class="stat"><div class="n">--</div><div class="l">NET P&L</div></div>
+          <div class="stat"><div class="n">--</div><div class="l">AVG / TRADE</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">Futures Buildup · Stock F&O</span><span class="s">top movers · long (price ↑ OI ↑) vs short (price ↓ OI ↑)</span></div>
+      <table><tr><th>SYMBOL</th><th>BUILDUP</th><th>PRICE %</th><th>OI %</th><th>VOL ×</th></tr>
+        <tr><td><span class="skel" style="width:80px"></span></td><td><span class="skel" style="width:58px"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:36px;margin-left:auto"></span></td></tr>
+        <tr><td><span class="skel" style="width:66px"></span></td><td><span class="skel" style="width:58px"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:36px;margin-left:auto"></span></td></tr>
+      </table>
+      <div class="sp-note"><span class="notpulled">live rows not pulled for ref · endpoint unchanged</span></div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="t">Futures ⇄ Equity Divergence · Stock F&O</span><span class="s">flags basis %, 1hr and 1D divergence past threshold · live 5-min</span></div>
+      <table><tr><th>SYMBOL</th><th>BASIS %</th><th>1HR DIV</th><th>1D DIV</th><th>FLAG</th></tr>
+        <tr><td><span class="skel" style="width:84px"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:44px;margin-left:auto"></span></td><td><span class="skel" style="width:52px;margin-left:auto"></span></td></tr>
+      </table>
+      <div class="sp-note"><span class="notpulled">live rows not pulled for ref</span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span>DESIGN REF index_intel_R2 · dual-theme canonical · full 13-card inventory of the live pane (base sha cc1cfb73f) · real values frozen 20-Aug ~11:30 IST · masked/skeleton where not pulled</span>
+    <span>Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</span>
+  </div>
+</div>
+</body>
+</html>
