@@ -80,6 +80,7 @@ import guards          # cc#217 P2: canonical trading-day gate + entry-gate + gu
 from time import perf_counter   # cc#217 P3: tick wall-time (distinct from datetime.time)
 from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
 from price_sources import NOT_FUT_SQL   # cc#1056: the ONE futures-source list (cc#1053 registry)
+import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 
 log = logging.getLogger("scorr.signal_writer")
 
@@ -1274,10 +1275,24 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
 # -- Slot architecture --------------------------------------------------------
 
 def _mood_slots(gate_fails: int) -> tuple:
-    if gate_fails == 0: return 15, 5
-    if gate_fails == 1: return 14, 6
-    if gate_fails == 2: return 12, 8
-    return 8, 13
+    """Daily buy/sell slot caps from the mood check.
+
+    cc#1138 rule 3 (session_log 27321): SELL SLOTS +1 when the mood check fails 2, 3 or 4 of 4.
+    Fail 0 or 1 keeps base. BUY SLOTS ARE UNCHANGED - the bonus is added to the sell leg only.
+    So: fails 2 -> 8/9, fails 3 or 4 -> 8/14, fails 0 -> 15/5, fails 1 -> 14/6.
+
+    The base ladder above is untouched. The bonus is a separate term added after it, so the two
+    can be read and reverted independently, and the ladder still says what the mood alone buys.
+
+    NOTE the same ladder exists a second time in v8_endpoints.market_mood(), which is what the
+    surfaces and the admin paper_tick read. Both carry the bonus - if only one did, the engine
+    and the screen would disagree about how many shorts the day allows.
+    """
+    if gate_fails == 0: buy, sell = 15, 5
+    elif gate_fails == 1: buy, sell = 14, 6
+    elif gate_fails == 2: buy, sell = 12, 8
+    else: buy, sell = 8, 13
+    return buy, sell + v8_timing_rules.sell_slot_bonus(gate_fails)
 
 
 # -- Dynamic buy_reversal Nifty-linked filters --------------------------------

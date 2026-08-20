@@ -57,6 +57,7 @@ from nse_holidays import is_trading_day
 # copies (the source of the ghost true-weekly-RSI row on buy_reversal).
 from v8_signal_writer import (BASKET_FILTERS, BASKET_SPEC, basket_filter_config,
                               basket_stage_rows, basket_funnel_keys)
+import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 
 # cc#1038: how many CHEAP gates precede the heavy wRSI stage, asked of the registry rather than
 # written down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH
@@ -830,6 +831,13 @@ def market_mood():
             elif fails == 1: buy_slots, sell_slots, mood = 14, 6,  "Bullish"
             elif fails == 2: buy_slots, sell_slots, mood = 12, 8,  "Neutral"
             else:            buy_slots, sell_slots, mood = 8,  13, "Bearish"
+            # cc#1138 rule 3 (session_log 27321): SELL SLOTS +1 when the mood check fails 2, 3 or
+            # 4 of 4. Buy slots unchanged. The base ladder above is untouched and the bonus is a
+            # separate term, so the ladder still says what the mood alone buys.
+            # This is the SECOND home of that ladder - v8_signal_writer._mood_slots() is the
+            # engine's copy and carries the identical bonus. Both move together or the screen and
+            # the engine would disagree about how many shorts the day allows.
+            sell_slots += v8_timing_rules.sell_slot_bonus(fails)
             # cc#502 SUITE REBUILD: ring-fenced SO/S1B pools removed -- standard pool only,
             # 20 total slots. so_slots/s1b_slots/so_pool/s1b_pool retired with the baskets.
             total_slots = buy_slots + sell_slots
