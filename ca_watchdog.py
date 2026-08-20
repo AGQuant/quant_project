@@ -383,6 +383,33 @@ def master_watchdog_note():
     except Exception as e:
         lines["feed_guardian"] = f"err:{str(e)[:60]}"
 
+    # (e) cc#1147 · UNIVERSE COVERAGE. A new NSE listing enters input_raw ONLY when someone
+    # manually re-uploads the Drive CSV through /api/admin/load_input_from_drive — there is no
+    # scheduled job, so the gap grows silently and nothing reports it. That is the silent-no-op
+    # failure class, and this metric is the alarm it was missing.
+    # screener_raw is the detector because it is ALREADY in the pipeline and already sees new
+    # listings: Shiprocket is in screener_raw today and absent from input_raw, which is exactly
+    # the case that surfaced this. No new data vendor is introduced.
+    # READ-ONLY. This counts a gap; it never closes one. Adding rows to input_raw would move every
+    # screener and sector median (SCRAPE_UNIVERSE_TOP500, session_log 13546), so the boundary stays
+    # a founder ruling.
+    try:
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("""SELECT COUNT(*) FROM screener_raw s
+                           WHERE NOT EXISTS (SELECT 1 FROM input_raw i WHERE i.nse_code = s.nse_code)""")
+            _gap = cur.fetchone()[0]
+            cur.execute("""SELECT s.nse_code FROM screener_raw s
+                           WHERE NOT EXISTS (SELECT 1 FROM input_raw i WHERE i.nse_code = s.nse_code)
+                           ORDER BY s.nse_code LIMIT 10""")
+            _names = [r[0] for r in cur.fetchall()]
+        lines["universe_gap"] = {"in_screener_not_input": _gap, "sample": _names}
+        # Threshold, not zero: the two feeds are curated differently and a handful of permanent
+        # divergences is normal. A jump above 100 means listings are piling up unattended.
+        if _gap > 100:
+            red.append(f"universe: {_gap} symbols in screener_raw missing from input_raw")
+    except Exception as e:
+        lines["universe_gap"] = f"err:{str(e)[:60]}"
+
     note = {"status": "RED" if red else "OK",
             "headline": ("ALL CLEAR" if not red else " · ".join(red[:6])),
             "red_flags": red, "detail": lines}
