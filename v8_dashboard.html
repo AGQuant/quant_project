@@ -2,15 +2,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V8 Dashboard</title>
 <script>
-/* cc#1149: restore the theme BEFORE first paint. This runs ahead of the stylesheet below, so the
-   page never renders one theme and then snaps to the other. Wrapped in try/catch because
-   localStorage throws outright in some privacy modes and a theme preference must never be able to
-   stop the dashboard loading. */
-try{ if(localStorage.getItem('ii_theme')==='light'){ document.documentElement.dataset.theme='light'; } }catch(e){}
+/* cc#1168 push 1 — CORRECTING MY OWN cc#1149. That card gave this page a second theme switch on a
+   private key (ii_theme), not knowing main.py's auth_gate already injects a GLOBAL one. Both write
+   data-theme on <html>, so they fought: _MOBILE_HEAD (main.py:289) sets data-theme from
+   localStorage.scorr_theme synchronously before first paint on every PWA-injected page, and
+   /dashboard IS in _PWA_INJECT_PATHS. The visible consequence was that switching theme with MY
+   pill worked until the next reload and then silently reverted — and the founder's PDF shows both
+   controls on screen at once, the floating "Light" pill and the tabs-row "Theme LIGHT".
+
+   ONE KEY NOW. This pill reads and writes scorr_theme, the same key the global switch uses, so the
+   two controls agree by construction and a choice survives a reload. The pre-paint restore below
+   is kept as a no-flash guard for the case where the page is served without the PWA head.
+
+   NOT touching main.py's injection: those pills are shared with the app, and per the founder's
+   20-Aug directive a shared surface is not edited as a side-effect of a web push. */
+try{ if(localStorage.getItem('scorr_theme')==='light'){ document.documentElement.dataset.theme='light'; } }catch(e){}
 function iiToggleTheme(){
   var lit = document.documentElement.dataset.theme === 'light';
   document.documentElement.dataset.theme = lit ? '' : 'light';
-  try{ localStorage.setItem('ii_theme', lit ? 'dark' : 'light'); }catch(e){}
+  try{ localStorage.setItem('scorr_theme', lit ? 'dark' : 'light'); }catch(e){}
   iiPaintThemePill();
   /* the lightweight-charts instances take colours as plain strings at construction, so they cannot
      follow a CSS variable. Anything already drawn re-reads the tokens through this hook. */
@@ -23,6 +33,42 @@ function iiPaintThemePill(){
   b.setAttribute('aria-pressed', lit ? 'true' : 'false');
 }
 document.addEventListener('DOMContentLoaded', iiPaintThemePill);
+/* cc#1168 push 1 — DEFECT A. MOVE the injected pills into the tabs row rather than re-creating
+   them, so Logout keeps its own href and the global theme button keeps its own handler; nothing is
+   reimplemented and nothing can drift from the shared original.
+
+   The injection happens in main.py's auth_gate, which appends to the document, so the nodes may
+   arrive after DOMContentLoaded. Retry a bounded number of times rather than assuming, and stop —
+   an unbounded poll for a node that may legitimately never exist (an unauthenticated render) is a
+   leak, not a safeguard. */
+(function(){
+  var tries = 0;
+  function dock(){
+    var host = document.getElementById('pane-index-docked-controls');
+    /* This whole script block is in <head>, so on the first call the body does not exist yet and
+       the host is legitimately absent. Returning "done" here — which is what I wrote first — meant
+       the retry never started and the pills were never docked; the probe caught it because it
+       asserts the pills END UP in the host, not merely that the code ran. Absent host = not ready,
+       so keep trying; the bounded counter still stops it on a page that has no host at all. */
+    if(!host) return false;
+    var lo = document.getElementById('scorr-lo');
+    var th = document.getElementById('scorr-th');
+    if(lo) host.appendChild(lo);
+    if(th) host.appendChild(th);
+    /* Two theme buttons in one row would be the confusion this push exists to remove. The
+       tabs-row pill and the injected one now drive the SAME scorr_theme key, so the injected one
+       is redundant HERE — hidden on this page only, never removed from the DOM and never touched
+       at its source, so every other page keeps it exactly as it is. */
+    if(th) th.style.display = 'none';
+    return !!(lo && th);
+  }
+  function start(){
+    if(dock()) return;
+    var t = setInterval(function(){ if(dock() || ++tries > 30) clearInterval(t); }, 100);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
 </script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
@@ -816,6 +862,23 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 
 /* cc#542+543: top tab bar */
 .v8toptabs{display:flex;gap:4px;margin:12px 0 2px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+/* cc#1168 push 1 — DEFECT A: the floating Logout / theme pills printed OVER page content. On the
+   founder's PDF page 4 the Logout chip sits on the Closed Trades P&L% column header. They are
+   position:fixed at top 64px and 102px with z-index 9999 and no awareness of what is beneath, so
+   on a long scrolling tab they cross whatever happens to be under them.
+
+   THE SOURCE IS SHARED WITH THE APP. main.py's auth_gate injects #scorr-lo (:198) and #scorr-th
+   (:217) into EVERY authenticated page, /m/ surfaces included. Per the founder's 20-Aug directive
+   a shared surface is not edited as a side-effect of a web push, so main.py is untouched and this
+   is a PAGE-LOCAL override: it can only apply where this stylesheet loads, which is this tab.
+
+   DOCKED, not hidden. The card's first option is to dock them into the topbar, so they become
+   ordinary flow items inside the tabs row — no fixed position, no z-index race, nothing to overlap
+   because they now occupy their own space. Full opacity too: the 0.45 idle existed to make a
+   floating pill less obtrusive, and a docked one has no need to apologise. */
+#pane-index-docked-controls{display:flex;align-items:center;gap:6px;margin-left:6px}
+body #scorr-lo, body #scorr-th{position:static;top:auto;right:auto;z-index:auto;opacity:1}
+body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
 /* cc#1149: .pill / .pill.tgl transplanted from design_refs/index_intel_R2.html @ f5a31dd (.tabs row).
    .v8sp is the ref's .tabs .sp spacer, renamed only because .sp is already taken on this page by
    the stat pills. That rename is the one named seam in this rule set. */
@@ -999,8 +1062,10 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
          the spacer so it never crowds the tabs when they wrap. -->
     <span class="v8sp"></span>
     <button type="button" class="pill tgl" id="iiThemeBtn" aria-pressed="false"
-            title="Switch dark / light. Remembered on this device."
+            title="Switch dark / light. Remembered on this device — same setting as the site-wide switch."
             onclick="iiToggleTheme()">Theme <b>DARK</b></button>
+    <!-- cc#1168 push 1: the auth-gate pills are RELOCATED into this row, not duplicated. -->
+    <span id="pane-index-docked-controls"></span>
   </div>
   <div id="pane-v8">
 
