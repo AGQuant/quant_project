@@ -3,7 +3,8 @@ guards.py — cc#217 Phase 2: canonical entry-gate + guard primitives, single-so
 =================================================================================
 Consolidates logic that was duplicated verbatim across the three v8_signal_writer
 auto-entry functions (_auto_paper_entry / _so / _s1b): the trading-day gate, the
-09:15-15:20 entry window, and the earnings-blackout / same-side-open / traded-today
+09:15-15:15 entry window (cc#1138: entries additionally held to 09:30), and the
+earnings-blackout / same-side-open / traded-today
 guard queries.
 
 DESIGN — behavior-identical AND sim-aware (cc#218):

@@ -31,7 +31,8 @@ strict-intersection survivors.
     SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent n/n-1). mom_2d was score-band-only
     in V3 and KEEPS its score band; the sector_week hard gate drafted in 22375 was DROPPED by the
     founder, so sector_week is a score band only. Exits fixed +/-3.0%, standard slot pool,
-    entry window 09:15-15:20 (the 14:00 cutoff was proposed and founder-REJECTED).
+    entry window 09:30-15:15 (cc#1138 rule 1 moved the open from 09:15; cc#855 moved the cut
+    from 15:20. The 14:00 cutoff was proposed and founder-REJECTED).
   BUY_REVERSAL V6.1 (_write_buy_reversal_v6_qualified, cc#606 -> cc#754, supersedes V5): 9
     CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d [-0.5, 2.5]
     (cc#754 upper cap), week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5,
@@ -2102,7 +2103,7 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
     still comparable to a V4 score. sector_week is now a SCORE BAND ONLY again: 22386 dropped its
     hard gate, so it influences the score and never blocks an entry on its own.
     NO pivot-room gate (not in evidence; exits fixed). Exits FIXED +/-3.0% via _auto_paper_entry's
-    buy_momentum branch; standard BUY slot pool + all standard guards. Entry window 09:15-15:20
+    buy_momentum branch; standard BUY slot pool + all standard guards. Entry window 09:30-15:15
     UNCHANGED — the proposed 14:00 cutoff was explicitly REJECTED by the founder (22386)."""
     basket, side = "buy_momentum", "BUY"
 

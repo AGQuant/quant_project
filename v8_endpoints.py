@@ -845,7 +845,7 @@ def market_mood():
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
                 "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": total_slots,
-                "slot_note": "standard pool only -- no ring-fenced pools",
+                "slot_note": "standard pool only -- no ring-fenced pools; entries open 09:30 IST (cc#1138), shorts never gate-exit",
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
                                "unchanged": unchanged, "adr_date": adr_date,
