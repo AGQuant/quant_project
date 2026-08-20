@@ -125,9 +125,20 @@ PROBE = r"""
     if (typeof c === 'string' && c.trim()) s += '.' + c.trim().split(/\s+/).slice(0, 3).join('.');
     return s;
   };
+  /* A closed overlay is not a layout defect. /m/home carries full-screen popups as
+     .tpo{display:none} and their children are legitimately 0x0 until opened — the first version
+     reported all three of them as collapsed cells, which is a tool that cries wolf, and a tool
+     that cries wolf gets ignored. Anything inside a hidden ancestor is out of scope for every
+     check: it is not on screen, so it cannot overlap, clip or collapse anything a reader sees. */
+  const hiddenByAncestor = (el) => {
+    for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return true;
+    }
+    return false;
+  };
   const vis = (el) => {
-    const cs = getComputedStyle(el);
-    if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return false;
+    if (hiddenByAncestor(el)) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   };
@@ -199,7 +210,7 @@ PROBE = r"""
     if (!p) continue;
     const pd = getComputedStyle(p).display;
     if (!/grid|flex/.test(pd)) continue;
-    if (getComputedStyle(el).display === 'none') continue;
+    if (hiddenByAncestor(el)) continue;
     const r = el.getBoundingClientRect();
     if ((r.width < 0.5 || r.height < 0.5) && (el.textContent || '').trim()) {
       out.push({ check: 'collapse', detail: sel(el) + ' in ' + sel(p),

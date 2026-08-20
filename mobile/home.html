@@ -95,14 +95,27 @@ body[data-theme]{
 /* APP_QA_R5 P3 · VIX chip chrome — FLAT, identical to a sibling chip, colour in text only.
    The boxed treatment (tinted background + coloured border) is what made a green chip read as a
    badge of approval. Removed for this chip in both states; the red state keeps its red TEXT. */
+/* cc#1131 · THE VIX CHIP GETS ITS SIBLINGS' BORDER, COLOURED BY ITS OWN TIER.
+   It always had a 1px border — but pinned to var(--line2) while the five siblings carry a
+   coloured one at .45 alpha, so beside them it read as a different component. That is the
+   founder's complaint and it is a fair one.
+   THE BORDER FOLLOWS THE TEXT'S TIER, exactly as the card asks, using the cc#1123 (1dad464)
+   thresholds — so the chip is never red merely because the day is bearish; VIX colour is its own
+   rule. Two tiers are live here because the third is deliberately held: cc#1123 logged a STOPPED
+   on GREEN for this chip, since cc#1081/cc#1083 locked VIX_COLOR_RULE_V1 to never-green in a row
+   of pass/fail chips and rule 12 wants that supersession written to session_log before it is
+   acted on. When it is recorded, green is one more line here and one more clause there.
+   THE TINT STAYS OFF. Siblings pair a coloured border with a tinted background; APP_QA_R5 P3
+   removed the tint from THIS chip on purpose, because a boxed fear gauge reads as a badge. The
+   card asked for the border, and the border is what it gets. */
 .hc.vixc{background:transparent;border-color:var(--line2)}
-.hc.vixc.bad{background:transparent;border-color:var(--line2);color:var(--red)}
+.hc.vixc.bad{background:transparent;border-color:rgba(255,92,108,.45);color:var(--red)}
 /* cc#1123: the middle tier — VIX moved less than 5% either way. Same #FF9F45 as the tape's .neu
    and the Digest's --amber, so one number is one colour across all three surfaces. The chip stays
    FLAT (transparent, same border as its siblings) because APP_QA_R5 P3 removed the boxed
    treatment here on purpose: a tinted, bordered VIX chip read as a badge of approval. Colour in
    the text only, exactly as the red state does. */
-.hc.vixc.vixmid{background:transparent;border-color:var(--line2);color:#FF9F45}
+.hc.vixc.vixmid{background:transparent;border-color:rgba(255,159,69,.45);color:#FF9F45}
 
 
 /* cc#900 (founder 08-Aug): the tape lost its look when this page's CSS moved to the shared
@@ -376,8 +389,15 @@ body[data-theme]{
 /* The WHOLE row is the tap target (44px floor, Apple/Android minimum). The chevron only
    ANNOUNCES that the row opens something — it is not the hit area. A 13px glyph as the only
    target is the thing that makes a phone feel broken. */
+/* cc#1130 · THE OUTLINE WAS NEVER DESIGNED — it is the browser's. This rule set border-BOTTOM
+   only, and border-bottom does not touch the other three sides, so a <button> kept its user-agent
+   default there: measured 2px outset on top, right and left. That is the full rectangle in the
+   founder's screenshot. Exactly the shape of the cc#1120 bug one line up — a control inheriting
+   chrome nobody wrote — which is why the fix is `border:0` FIRST and the divider declared after,
+   so no side can ever fall back to a UA default again.
+   Founder ruling: dividers, not boxes. The hairline between rows stays and is the only border. */
 .nwrow{display:flex;align-items:center;gap:10px;padding:11px 2px;min-height:44px;
-  border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;
+  border:0;border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;
   font-family:inherit;color:inherit;cursor:pointer}
 .nwrow:last-of-type{border-bottom:0}
 .nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB)}
@@ -733,6 +753,45 @@ function inrShort(v){
 
    Spaces are NOT wrapped: a letter span is inline-block so it can be transformed, and an
    inline-block space collapses to nothing. A multi-word mood would lose its gap. */
+/* cc#1132 · the cc#1118 sweep, re-run every 60 seconds while the card is on screen.
+   NO NEW ANIMATION. The keyframes and the .mlt spans are cc#1118's and are not touched — the
+   letters are simply asked to run the animation they already have again. Setting animation:none,
+   forcing ONE reflow for the whole word (not one per letter), then clearing the inline value is
+   what restarts a finished CSS animation; clearing it back to '' rather than re-declaring it also
+   means the prefers-reduced-motion rule still wins, so a reader who asked for stillness keeps it
+   and never gets a blink every minute.
+   MOOD_SWEPT IS NOT RESET. It exists so only the FIRST mood word on the page sweeps; resetting it
+   would start sweeping the second one too. This re-animates spans that already exist rather than
+   rebuilding markup, so nothing about that guard — or the cc#1116/cc#1122 restyle fixes — is
+   touched.
+   BATTERY. The interval is CLEARED when the tab goes hidden and restarted when it comes back, not
+   merely skipped inside the tick: a guarded tick still fires, and a backgrounded PWA should have
+   no timer at all. On top of that each tick checks the word is actually in the viewport, so
+   scrolling away stops the work too. */
+var MOOD_TIMER = null;
+function moodBlink(){
+  var host = document.querySelector('.hero-mood');
+  if (!host) return;
+  var lts = host.querySelectorAll('.mlt');
+  if (!lts.length) return;                       /* nothing swept: nothing to replay */
+  var r = host.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > (window.innerHeight || 0)) return;   /* scrolled away */
+  for (var i = 0; i < lts.length; i++) lts[i].style.animation = 'none';
+  void host.offsetWidth;                         /* one reflow, then let them all go again */
+  for (var j = 0; j < lts.length; j++) lts[j].style.animation = '';
+}
+function moodBlinkStart(){
+  if (MOOD_TIMER || document.visibilityState === 'hidden') return;
+  MOOD_TIMER = setInterval(moodBlink, 60000);
+}
+function moodBlinkStop(){
+  if (!MOOD_TIMER) return;
+  clearInterval(MOOD_TIMER); MOOD_TIMER = null;
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible') moodBlinkStart(); else moodBlinkStop();
+});
+
 var MOOD_SWEPT = false;
 function moodLetters(word){
   var w = String(word == null ? '--' : word);
@@ -2785,6 +2844,7 @@ Promise.all([
   /* 5 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
+  moodBlinkStart();   /* cc#1132: the .mlt letters only exist after this paint */
 
   var tools = document.createElement('div');
   tools.className = 'tools';

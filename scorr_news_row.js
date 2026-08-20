@@ -102,7 +102,13 @@
      page's own tokens with a GOLD NIGHT fallback, so the row inherits whatever theme it lands in
      instead of pinning one. */
   var CSS = ''
-    + '.nrow{display:flex;align-items:flex-start;gap:9px;padding:9px 0;'
+    /* cc#1130 founder ruling: BORDERLESS. No outer box on a news row, on either screen — the
+       hairline between rows is the only border it may carry. `border:0` is declared FIRST and the
+       divider after, deliberately: on /m/home the same row is a <button>, and setting only one
+       side let the user-agent default (2px outset) stand on the other three, which is the
+       rectangle the founder photographed. Written this way the element type cannot reintroduce
+       chrome nobody designed. */
+    + '.nrow{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border:0;'
     +   'border-top:1px solid var(--edge,var(--line,rgba(148,166,210,.14)))}'
     + '.nrow:first-child{border-top:0}'
     + '.nrow.tap{cursor:pointer}'
