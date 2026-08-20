@@ -99,6 +99,21 @@
     var ry = Y(1.0).toFixed(1);
     s += '<line x1="' + pad + '" y1="' + ry + '" x2="' + (w - pad) + '" y2="' + ry +
          '" stroke="' + GAP + '" stroke-width="1" stroke-dasharray="3 2" opacity=".5"/>';
+    /* cc#1168 push 2: label the reference line, per the index_intel_R2 PCR card. The dashed line
+       has always been at PCR 1.00 and a reader had to know that; the ref prints the number on it.
+       Styled with attributes rather than a class because this module is consumed by two different
+       pages and only one of them declares .axis-t — a class here would render correctly on one
+       page and invisibly on the other. Placed just ABOVE the line and clear of the left padding,
+       and pointer-events:none so it can never take a scrub touch away from the chart. */
+    /* The label flips to the UNDERSIDE when the line is near the top. mn/mx are clamped to keep
+       1.00 in frame, so on a series that sits entirely below 1.00 the reference line pins to the
+       very top of the chart — and a label above it then lands on the meta text in the card above.
+       Measured, not predicted: it collided with "7-day 0.68-0.79" at 1280 and with the no-data
+       note as well at 390. */
+    var _ly = Number(ry) < 12 ? (Number(ry) + 9) : (Number(ry) - 2.5);
+    s += '<text x="' + (pad + 1) + '" y="' + _ly.toFixed(1) +
+         '" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="8.5" ' +
+         'fill="' + GAP + '" opacity=".85" style="pointer-events:none">1.00</text>';
 
     // One path per unbroken run. A null ends the current run — the line does not bridge it.
     var run = [], paths = [];
