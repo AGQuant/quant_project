@@ -489,6 +489,49 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .slot{border-radius:6px;padding:5px 13px;text-align:center;border:1px solid}
 #pane-index .slot .n{font-family:var(--mono);font-size:15px;font-weight:900}
 #pane-index .slot .l{font-size:8px;color:var(--mut);margin-top:1px}
+/* cc#1151 sprint 3/7: LEVELS SPINE. Transplanted verbatim from design_refs/index_intel_R2.html
+   @ f5a31dd (.spine/.axis/.lvl/.spotdot/.mp-edge/.spine-hd), namespaced under #pane-index. */
+#pane-index .spine{position:relative;height:330px;margin:8px 0 2px}
+#pane-index .axis{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
+#pane-index .lvl{position:absolute;left:0;right:0;height:0}
+#pane-index .lvl .ln{position:absolute;top:0;height:1px}
+#pane-index .lvl .tag{position:absolute;font-family:var(--mono);font-size:10px;font-weight:600;top:-7px;white-space:nowrap}
+#pane-index .lvl .px{font-weight:700;font-size:11.5px;color:var(--txt)}
+#pane-index .lvl.piv .ln{left:50%;width:84px;background:var(--line2)}
+#pane-index .lvl.piv .tag{left:calc(50% + 94px);color:var(--mut)}
+#pane-index .lvl.piv.pp .ln{background:var(--amber);opacity:.7}
+#pane-index .lvl.piv.pp .tag,#pane-index .lvl.piv.pp .px{color:var(--amber)}
+#pane-index .lvl.wall .ln{right:50%;background:currentColor;height:7px;top:-3px;border-radius:2px;opacity:.85}
+#pane-index .lvl.wall .tag{right:calc(50% + 12px);text-align:right;color:currentColor}
+#pane-index .lvl.wall.put{color:var(--grn)}
+#pane-index .lvl.wall.call{color:var(--red)}
+#pane-index .lvl.mpl .ln{left:50%;width:84px;background:var(--amber)}
+#pane-index .lvl.mpl .tag{left:calc(50% + 94px);color:var(--amber)}
+#pane-index .lvl.spotl{z-index:3}
+#pane-index .lvl.spotl .ln{left:5%;right:5%;border-top:1.5px dashed var(--spotc);background:none}
+#pane-index .spotdot{position:absolute;left:50%;top:-4px;width:9px;height:9px;margin-left:-4px;border-radius:50%;
+    background:var(--spotc);box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot);
+    animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot)}
+    50%{box-shadow:0 0 0 9px var(--spot-ring2),0 0 22px var(--glow-spot)}}
+#pane-index .lvl.spotl .tag{left:5%;top:-20px;color:var(--spotc);background:var(--spot-chip-bg);
+    padding:1px 8px;border-radius:4px;border:1px solid var(--spot-chip-bd)}
+#pane-index .mp-edge{display:flex;align-items:center;gap:8px;margin-top:9px;padding:5px 11px;width:max-content;max-width:100%;
+    background:var(--amber-bg);border:1px dashed var(--amber-bd);border-radius:6px;
+    font-family:var(--mono);font-size:9.5px;color:var(--amber)}
+#pane-index .spine-hd{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px}
+#pane-index .spine-hd .big2{font-size:19px;font-weight:700;color:var(--txt)}
+#pane-index .r-levels{grid-template-columns:1fr 1fr}
+@media(max-width:920px){#pane-index .r-levels{grid-template-columns:1fr}}
+/* the pulsing spot dot is decorative; the dot must still be findable without it */
+@media(prefers-reduced-motion:reduce){#pane-index .spotdot{animation:none}}
+/* SPINE | LADDER switch in the card head (scope 6). Not a ref class - the ref shows the two
+   components side by side to demonstrate both, and the card asks for a per-index toggle instead.
+   Built on the ref's .pill grammar so it does not read as a new control type. */
+#pane-index .vsw{display:flex;gap:2px}
+#pane-index .vsw button{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em;
+    padding:3px 9px;border:1px solid var(--line2);background:none;color:var(--dim);cursor:pointer;border-radius:5px}
+#pane-index .vsw button.on{color:var(--blu);border-color:var(--blu);background:var(--blu-chip)}
 #pane-index .sig-grid{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 #pane-index .sig-sym{font-family:var(--mono);font-size:22px;font-weight:900;line-height:1}
 #pane-index .sig-tags{display:flex;gap:6px;margin-top:6px;align-items:center}
@@ -5525,33 +5568,146 @@ async function loadPivots(){
     }
   }catch(e){}
 }
-function pivotLadder(name,pvt,cmp){
-  if(!pvt) return `<div class="pvt-row"><span class="pvt-l" style="width:auto;color:var(--mut)">${name}</span><span class="pvt-d">pivots pending</span></div>`;
-  const levels=[['R2',pvt.r2,DN],['R1',pvt.r1,DN],['PP',pvt.pp,C.amber],['S1',pvt.s1,UP],['S2',pvt.s2,UP]];
-  const vals=levels.map(l=>l[1]).filter(v=>v).concat(cmp?[cmp]:[]);
-  const rowsH=levels.map(([l,v,col])=>{
-    const near=cmp&&v?((cmp-v)/v*100):null;
-    const isNear=cmp&&v&&Math.abs(cmp-v)===Math.min(...levels.filter(x=>x[1]).map(x=>Math.abs(cmp-x[1])));
-    return `<div class="pvt-row" style="${isNear?'background:rgba(77,124,254,.12);':''}">
-      <span class="pvt-l" style="color:${col}">${l}</span>
-      <span class="pvt-v">${v?num(v):'—'}</span>
-      <span class="pvt-d">${near!=null?(near>=0?'+':'')+near.toFixed(2)+'%':''}</span></div>`;
-  }).join('');
-  return `<div style="margin-bottom:2px"><div style="font-size:14px;font-weight:800;margin-bottom:6px;display:flex;align-items:baseline;gap:8px">${name}
-    <span class="td-mono" style="color:var(--mut);font-weight:400;font-size:14px">CMP ${cmp?num(cmp):'—'}</span></div>
-    ${rowsH}</div>`;
+/* ══ cc#1151 sprint 3/7 · LEVELS SPINE ══════════════════════════════════════════════════════
+   Pivots, OI walls and spot are all PRICES. The old build showed them as three separate readings
+   and left the founder to merge them in his head. One vertical axis answers what is above me,
+   what is below me, and how far, in one look.
+
+   SCALE. pos(price) = (R2 - price) / (R2 - S2) * 100, clamped to [2,98] so a tag at either end
+   still has room to print. Unit-checked against today's real NIFTY pivots below.               */
+D.levelsView = { NIFTY:'spine', BANKNIFTY:'spine' };   // scope 6 default
+
+function spinePos(price, r2, s2){
+  if(!(r2>s2) || !price) return null;
+  const raw = (r2 - price) / (r2 - s2) * 100;
+  return Math.max(2, Math.min(98, raw));
 }
-function rPivots(){
-  return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Support / Resistance · Pivots</div>
-      <div class="s">rolling-5-day pivots · nearest level highlighted</div></div></div>
-    <div style="display:flex;flex-direction:column;gap:16px">
-      ${pivotLadder('NIFTY', D.pivots.NIFTY, D.idx.NIFTY.cmp)}
-      <div style="border-top:1px solid var(--line)"></div>
-      ${pivotLadder('BANKNIFTY', D.pivots.BANKNIFTY, D.idx.BANKNIFTY.cmp)}
-    </div></div>`;
+/* TRUE position, unclamped - used to decide whether a level is off the visible scale at all.
+   Max pain must never be clamped onto the axis: off-scale is a truthful state and clamping it
+   would draw a notch at the edge that looks like a real level sitting there. */
+function spinePosRaw(price, r2, s2){
+  if(!(r2>s2) || !price) return null;
+  return (r2 - price) / (r2 - s2) * 100;
+}
+/* Collision nudge (verify D). Tags are absolutely positioned at their level's percentage, so two
+   levels a few points apart print on top of each other. Walk the levels on ONE side in axis order
+   and push a tag down by up to 10px when it lands inside 14px of the tag above it. Same side only
+   - pivots and max pain tag right, walls tag left, so they cannot collide with each other. */
+function nudgeTags(levels, heightPx){
+  const MIN_GAP = 14, MAX_NUDGE = 10;
+  const bySide = { L:[], R:[] };
+  levels.forEach(l => { if(l.pos!=null) bySide[l.side].push(l); });
+  Object.values(bySide).forEach(list => {
+    list.sort((a,b)=>a.pos-b.pos);
+    let lastPx = -Infinity;
+    list.forEach(l => {
+      const px = l.pos/100*heightPx;
+      const want = Math.max(px, lastPx + MIN_GAP);
+      l.nudge = Math.min(MAX_NUDGE, Math.round(want - px));
+      lastPx = px + l.nudge;
+    });
+  });
+}
+/* Top-2 put strikes and top-2 call strikes by OI in the window the chain already returns.
+   A strike that is BOTH a top put wall and a top call wall collapses to one row tagged WALL x2 -
+   two walls at one price is a pin, and showing it as two rows hides that. */
+function wallLevels(strikes){
+  if(!strikes || !strikes.length) return [];
+  const top = (key) => strikes.filter(s=>Number(s[key])>0)
+    .sort((a,b)=>Number(b[key])-Number(a[key])).slice(0,2);
+  const puts = top('put_oi'), calls = top('call_oi');
+  const maxOI = Math.max(1, ...puts.map(s=>Number(s.put_oi)), ...calls.map(s=>Number(s.call_oi)));
+  const out = new Map();
+  const add = (s, side, oi) => {
+    const k = Number(s.strike);
+    if(out.has(k)){ const e=out.get(k); e.both=true; e.oi=Math.max(e.oi,oi); return; }
+    /* bar width maps OI onto 20%-42% of the half width, per the scale spec */
+    out.set(k, {strike:k, side, oi, both:false, w: 20 + (oi/maxOI)*22});
+  };
+  puts.forEach(s=>add(s,'put',Number(s.put_oi)));
+  calls.forEach(s=>add(s,'call',Number(s.call_oi)));
+  return [...out.values()];
+}
+const oiLakh = v => (Number(v)/100000);
+
+function rSpine(key, name){
+  const pvt = D.pivots[key];
+  const oi  = D.strikeOI[key];
+  const mp  = D.maxpainAll[key];
+  if(!pvt || !(pvt.r2>pvt.s2))
+    return `<div class="mp-pending">Pivots pending for ${esc(name)} — the spine needs R2 and S2 to have a scale at all.</div>`;
+  const {r2,s2,r1,pp,s1} = pvt;
+  /* spot: the chain's own spot first, because the walls come from the same read and mixing two
+     price sources on one axis is the class of bug cc#1141 just fixed on the basket tabs. */
+  const spot = Number(oi&&oi.spot) || Number(D.idx[key]&&D.idx[key].cmp) || 0;
+  const dpc  = v => spot&&v ? ((v-spot)/spot*100) : null;
+  const sgn  = v => v==null ? '' : (v>=0?'+':'') + v.toFixed(2) + '%';
+
+  const L = [];
+  [['R2',r2],['R1',r1],['PP',pp],['S1',s1],['S2',s2]].forEach(([nm,v])=>{
+    if(!v) return;
+    L.push({side:'R', cls:'piv'+(nm==='PP'?' pp':''), pos:spinePos(v,r2,s2),
+            tag:`${nm} <span class="px">${num(v)}</span> ${sgn(dpc(v))}`});
+  });
+  wallLevels(oi&&oi.strikes).forEach(w=>{
+    const p = spinePos(w.strike,r2,s2); if(p==null) return;
+    L.push({side:'L', cls:'wall '+w.side, pos:p, w:w.w,
+            tag:`${w.both?'WALL ×2':oiLakh(w.oi).toFixed(0)+'L '+w.side.toUpperCase()} <span class="px">${num(w.strike)}</span>`});
+  });
+  /* max pain: on the axis only when it is genuinely inside [S2,R2]. Outside, it gets the .mp-edge
+     chip that says which way and how far - never a clamped notch pretending to be a level. */
+  const mpS = (mp&&mp.status==='ok'&&mp.max_pain_strike!=null)?Number(mp.max_pain_strike):null;
+  const mpRaw = mpS!=null ? spinePosRaw(mpS,r2,s2) : null;
+  const mpOn = mpRaw!=null && mpRaw>=0 && mpRaw<=100;
+  if(mpOn) L.push({side:'R', cls:'mpl', pos:spinePos(mpS,r2,s2),
+                   tag:`MAX PAIN <span class="px">${num(mpS)}</span> ${sgn(dpc(mpS))}`});
+
+  nudgeTags(L, 330);
+  const spotPos = spinePos(spot,r2,s2);
+  const html = L.map(l=>{
+    const tagStyle = l.nudge ? ` style="margin-top:${l.nudge}px"` : '';
+    const ln = l.cls.indexOf('wall')===0 ? `<span class="ln" style="width:${l.w.toFixed(0)}%"></span>` : '<span class="ln"></span>';
+    return `<div class="lvl ${l.cls}" style="top:${l.pos}%">${ln}<span class="tag"${tagStyle}>${l.tag}</span></div>`;
+  }).join('');
+  const spotHtml = spotPos==null ? '' :
+    `<div class="lvl spotl" style="top:${spotPos}%"><span class="ln"></span><span class="spotdot"></span><span class="tag">SPOT ${num(spot)}</span></div>`;
+
+  let edge = '';
+  if(mpS!=null && !mpOn){
+    const above = mpRaw < 0;   /* pos runs downward: below 0 means ABOVE R2 */
+    const dist  = sgn(dpc(mpS));
+    const lo = oi&&oi.strikes&&oi.strikes.length ? Math.min(...oi.strikes.map(s=>Number(s.strike))) : null;
+    const hi = oi&&oi.strikes&&oi.strikes.length ? Math.max(...oi.strikes.map(s=>Number(s.strike))) : null;
+    const outsideChain = lo!=null && (mpS<lo || mpS>hi);
+    edge = `<div class="mp-edge">${above?'▴':'▾'} MAX PAIN ${num(mpS)} · ${above?'above':'below'} scale · ${dist} from spot`
+         + (outsideChain?' · outside the chain window — cc#1155 audits this':'') + `</div>`;
+  }else if(mpS==null){
+    edge = `<div class="mp-edge">MAX PAIN unavailable — endpoint returned no strike</div>`;
+  }
+  const expTxt = (mp&&mp.expiry)?' · EXP '+esc(String(mp.expiry)):'';
+  return `<div class="spine-hd"><span class="big2">${spot?num(spot):'—'}</span>
+      <span>rolling-5d pivots · walls from the ATM±7 chain${expTxt}</span></div>
+    <div class="spine"><div class="axis"></div>${html}${spotHtml}</div>${edge}`;
 }
 
+function rLevelsCard(key, name){
+  const view = D.levelsView[key]==='ladder' ? 'ladder' : 'spine';
+  const body = view==='spine' ? rSpine(key,name)
+                              : oiHisto(name, D.strikeOI[key], D.maxpainAll[key]);
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">Levels · ${esc(name)}</div>
+      <div class="s">${view==='spine'?'pivots + OI walls + spot · one price axis':'strike-wise OI · ATM ±7'}</div></div>
+      <div class="vsw">
+        <button class="${view==='spine'?'on':''}" onclick="idxSetLevelsView('${key}','spine')">SPINE</button>
+        <button class="${view==='ladder'?'on':''}" onclick="idxSetLevelsView('${key}','ladder')">LADDER</button>
+      </div></div>
+    ${body}</div>`;
+}
+function idxSetLevelsView(key, view){ D.levelsView[key]=view; render(); }
+
+/* cc#1151 verify E: pivotLadder() and rPivots() REMOVED, not left dangling. The spine replaces
+   the pivots list outright, and a dead renderer that still looks callable is how a later card
+   ends up reviving the thing this one retired. */
 /* strike-wise OI histograms — GET /api/v10/strike_oi?symbol= + max-pain marker from /maxpain */
 D.strikeOI={ NIFTY:null, BANKNIFTY:null };
 D.maxpainAll={ NIFTY:null, BANKNIFTY:null };
@@ -5596,15 +5752,9 @@ function oiHisto(name, oi, mp){
       <span>Exp <b style="color:var(--txt)">${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}</b></span></div>   <!-- cc#549: expiry moved here from removed compact max-pain card, per-index -->
   </div>`;
 }
-function rStrikeOI(){
-  return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Max Pain · Strike-wise OI</div>
-      <div class="s">Call red &uarr; / Put green &darr; · amber = max pain · ATM &plusmn;7</div></div></div>
-    ${oiHisto('NIFTY', D.strikeOI.NIFTY, D.maxpainAll.NIFTY)}
-    ${oiHisto('BANKNIFTY', D.strikeOI.BANKNIFTY, D.maxpainAll.BANKNIFTY)}
-  </div>`;
-}
-
+/* cc#1151 verify E: rStrikeOI() REMOVED for the same reason. Its content is not lost - oiHisto()
+   stays and is now the LADDER view inside each per-index Levels card, which is the view
+   cc#1152 rebuilds to the ref's rung ladder. */
 /* new render() for the Index Intel pane (adds pivots + strike-OI vs the V10 page) */
 // cc#1058: fill the tape slots after the pane's innerHTML lands, and re-fill on every
 // re-render — render() replaces the DOM wholesale, so the mounted listeners go with it.
@@ -5647,7 +5797,11 @@ function render(){
     `<div class="row r-2-16">${rIdxSpark()}${rVix()}</div>` +   // cc#681: V10 Active Signals -> index day-change sparklines
     `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
     `<div class="row" style="grid-template-columns:1fr 1.4fr">${rADR()}${rPCR()}</div>` +   // cc#549: compact max-pain card removed (strike-wise OI card covers it); ADR+PCR share the row wider
-    `<div class="row" style="grid-template-columns:1fr 1fr">${rPivots()}${rStrikeOI()}</div>` +
+    /* cc#1151 verify E: the old pivots list card and the standalone strike-OI card are REPLACED,
+       not duplicated. One row, one card per index, each holding both views behind the SPINE|LADDER
+       switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
+       reachable as the LADDER view, and cc#1152 rebuilds that view to the ref's rung ladder. */
+    `<div class="row r-levels">${rLevelsCard('NIFTY','NIFTY')}${rLevelsCard('BANKNIFTY','BANKNIFTY')}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
@@ -5685,6 +5839,7 @@ window.iiRepaintCharts=function(){
 
 /* expose handlers used by inline onclick (global scope) */
 window.openV10Chart=openV10Chart;
+window.idxSetLevelsView=idxSetLevelsView;   // cc#1151: SPINE|LADDER switch, called from inline onclick
 window.setV10Sym=setV10Sym;
 window.closeV10Chart=closeV10Chart;
 window.openV10ChartAt=function(sym,ts){ _v10pendingScroll=(ts||null); openV10Chart(sym); };
