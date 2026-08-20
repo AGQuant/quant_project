@@ -22,7 +22,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 8. NAV-COMPLETE SHIPPING (locked session_log id=2987, set 12-Jul-2026): a PAGE task is NOT done until it (a) is deployed live on scorr.in AND (b) has a nav entry in the navbar. The LIVE nav is ONE source — the `NAV` array in `pwa_endpoints.py` (pwa.js injects it into `#scorr-nav` on every page and OVERRIDES per-page hardcoded navs — editing a page's own nav does nothing on the live bar). New page => add its route to that NAV array (desktop top-nav + mobile "More" sheet auto-build from it), keep it collision-free + cache-protected (add to `_PWA_INJECT_PATHS` + `PROTECTED` in main.py), mirror it in the `NAV_REGISTRY` map in main.py, and state the label+URL in the task result. Self-check this before marking any page task done.
 9. **ENGINE_LIVENESS_RULE (session_log id=13829, set 02-Aug-2026):** no engine, basket, strategy or scheduled-content task is DONE until (a) its job row exists in `scheduler_master` (or a registry-derived enumeration provably covers it) AND (b) **first-run evidence** is stated in the task result — inception rows / first output / first tick, with row counts, or an explicitly logged valid-empty outcome (e.g. a cash month). **Built-and-registered is NOT live; the badge follows the data, never precedes it.** Corollaries: monthly/weekly boundaries must roll forward over weekends/holidays *by construction* (a boundary that can land on a non-trading day and skip is a defect); scheduler enumeration must be REGISTRY-DERIVED (`is_active`), never a hardcoded name list; a LIVE/PAPER-LIVE badge must derive from actual run data, never from registration alone. Origin: 02-Aug, three engines found built-but-never-breathing in one day (QB contra_value + breakout_52w cc#838; V9 Brahmastra cc#840).
 10. MAINTENANCE_LOCK_RULE (cc#351, set 12-Jul-2026): lock-taking maintenance (REINDEX / VACUUM FULL / CLUSTER / ALTER TABLE) is **Railway-console-only, weekends, propose-first** — the `run_sql` MCP path now hard-blocks them (10-Jul incident: a REINDEX wedged ~45 min behind an idle-in-transaction lock). DB-level `idle_in_transaction_session_timeout=300000` (5 min) auto-kills stale open txns. **Diagnostic tasks are READ-ONLY** — never run remediation beyond a task's explicit scope.
-11. **ROLE_CHARTER_V2 (session_log id=16159, founder-set 05-Aug-2026):** FIRST PART is Claude AI, SECOND PART is Claude Code. See the Role Split section below. This SUPERSEDES the old "never push code from Claude.ai chat" line — Claude AI now pushes design refs, new-product first builds and doctrine files. CC still owns every engine, all wiring, all data connection and every iteration after the first build.
+11. **ROLE_CHARTER_V4 / EXECUTION_MODEL_PHASE_3 (session_log id=27934, founder-set 20-Aug-2026; refines PUSH_MODES_V2 id=27933; supersedes ROLE_CHARTER_V3 id=17868 and ROLE_CHARTER_V2 id=16159):** **Fable owns APP development + DATABASE management. CC owns WEB surfaces + BACKEND + the AUDIT of every Fable push.** See the Role Split section below. Verification now runs BOTH directions: a push from either seat is a **claim** until the other seat's check passes.
 12. **SUPERSESSION AUTHORITY (founder-set 05-Aug-2026):** Arpit is **CEO**. Claude AI is **CTO**. CC is the senior techie. Any rule in this file or in `session_log` may be superseded by the CTO **on explicit CEO permission** — see the Supersession section below for how that is done and what it does not cover.
 13. **V8_PNL_CANON_V1 (session_log id=18337, founder-set 09-Aug-2026):** there is exactly ONE V8 book formula, served from ONE endpoint, consumed by EVERY surface (web master dashboard, web trade log tab, daylog, /m/v8, Home). NO surface recomputes book P&L or win rates locally. The formula: fresh era (`entry_ts >= app_config.v8_paper_rebuild_cutover_ts`), retired baskets excluded via the **registry** (app_config `v8_retired_baskets`, currently `s1_reclaim_obs` + `buy_s1_bounce`), realised = SUM(pnl) NET of Rs.500 × closed trades brokerage, wins = result='TARGET' only, losses = result='SL' only, rate on decided, dash never 0%. **Retired baskets vanish from all P&L displays completely — including all-era/history views.** Any intentional history figure must be labelled and still exclude retired baskets. Build/migration card: cc#970.
 
@@ -50,38 +50,45 @@ Three things are not rules to be waived — they are what makes the output worth
 **Extra care on the live path**
 Anything touching engines, the scheduler, `worker/**`, or the live trading path needs the CEO instruction to be **explicit and unambiguous**, not inferred from a general remark. Those are the changes that cost money.
 
-## Role Split — who pushes what (ROLE_CHARTER_V2, 05-Aug-2026)
+## Role Split — who owns what (ROLE_CHARTER_V4, 20-Aug-2026)
 
 The rule follows the SEAT, not the model. Claude AI may be Fable or Opus; the split is the same.
 
-**FIRST PART — Claude AI pushes**
-- `design_refs/**` — the numbered ref chain (R1, R2, R3 …). Never overwrite a revision.
+**FABLE — app development + database**
+- APP / mobile UI: design refs, the build, and **direct pushes** of new files or whole pages Fable authored.
+- `design_refs/**` — the numbered ref chain (R1, R2, R3 …). Never overwrite a revision. Every ref is also filed in full to `cc_task_logs` (DESIGN_REF_IN_FORUM_V1); if the forum copy and the repo copy differ, **the repo sha wins**.
 - `previews/**` — mobile review screens with dummy data, for founder review before wiring.
-- The FIRST BUILD of a new product, screener or page: its own new file, standing alone.
 - New product ARCHITECTURE documents.
-- Doctrine and context files: `CLAUDE.md`, `API_REFERENCE.md`, `SPEC_REGISTRY_INDEX.md`.
+- **Database management** — schema stewardship inside MAINTENANCE_LOCK_RULE, data quality, reconciles, DB-side operations.
 - All DB writes: `session_log`, `cc_tasks`, registry and reference tables.
 
-**SECOND PART — CC owns**
-- Wiring the first build in: `include_router` in main.py, the `NAV` array in `pwa_endpoints.py`, `_PWA_INJECT_PATHS`, `PROTECTED`, `NAV_REGISTRY`.
+**CC — web + backend + audit**
+- **WEB** surfaces (the desktop/web dashboards), built to Fable's specs. The surface split is APP = retail = Fable, WEB = premium = CC.
+- **BACKEND**: engines, all endpoints, `worker/**`, schedulers, `v8_signal_writer`, anything on the live trading path.
+- Wiring: `include_router` in main.py, the `NAV` array in `pwa_endpoints.py`, `_PWA_INJECT_PATHS`, `PROTECTED`, `NAV_REGISTRY`.
 - Connecting live data — replacing every sample value with a real endpoint and field.
-- All backend endpoints, and every iteration after the first build.
-- Engines, scheduler, `worker/**`, `v8_signal_writer`, anything on the live trading path.
-- All bug fixes, and every later revision of a file Claude AI first created.
+- **AUDIT of every Fable push**: committed-diff read at each sha + data validation + endpoint parity, filed as a cc_task per sprint. Defects found become **a new cc_task per defect, never a silent fix**.
+- Data-source gates: when a card asks whether a source exists, CC greps and answers before the build proceeds.
+
+**The boundary, stated so neither seat has to guess**
+- Surgery inside large EXISTING app files: Fable may make small surgical read-modify-write edits with a byte-diff check, **or** hand the file to CC — Fable states which, on the card. Reconstructing a large file from context is never acceptable from either seat.
+- **App-facing ENDPOINT changes are backend, so they are CC.** A page is Fable's; the endpoint feeding it is CC's.
+- **WEB pages stay CC even when they look like an app page.** Visual similarity does not move ownership.
 
 **Hard lines that do not move**
-- Claude AI NEVER pushes an engine, the scheduler, `worker/**`, or any file on the live trading path — not even a first build.
-- Claude AI NEVER edits `main.py`. It stays wiring only and CC owns it.
-- Claude AI NEVER pushes a second revision of a file CC has taken over. Once CC owns it, it owns it.
+- Fable NEVER pushes an engine, the scheduler, `worker/**`, or any file on the live trading path — not even a first build.
+- Fable NEVER edits `main.py`. It stays wiring only and CC owns it.
+- No pushes from either seat between 00:00 and 06:00 IST.
 - Rules 8, 9, 10 and the FEED WORKER DEPLOY RULE are unaffected.
 
-**Safeguards on a Claude AI push**
+**Safeguards on a push — BOTH seats**
 - Validate before pushing: `ast.parse` for Python, `node --check` for JS. Never push a file that has not parsed.
 - Verify AFTER pushing by reading the artifact back from the repo — present, size, sha. A push response is a claim, not evidence (origin cc#842 → cc#848).
 - Sample data must be stamped as sample inside the file. A first build is never a source of truth.
+- A UI card states a **positive rendered-element count** alongside its render check. A green render check on a page that rendered nothing is a FAIL, not a pass (origin cc#1151).
 
-**Handoff point**
-Claude AI pushes the new file and files the `cc_task`. CC wires it in and connects the data. The card must resolve every open design question — a card that leaves a decision open is an unfinished card, not a question for CC.
+**Verification runs both directions**
+A push from either seat is a **claim** until the other seat's check passes. Fable verifies CC's pushes with the committed diff plus a DB query on real rows. CC audits Fable's pushes the same way, day-end. Neither seat marks its own work verified.
 
 ## Deploy policy
 - RULE_7 (deploy-window "no deploy 09:00–15:35 IST", referenced in cc_task specs) is **SUSPENDED as of 07-Jul-2026** — dev-stage, product NOT live (policy id=1713). Deploy anytime, including market hours; task specs that reassert RULE_7 are overridden while in dev mode. Re-instate this window only when the product goes live.
@@ -168,7 +175,16 @@ Key endpoints: /api/v8/*, /api/scanners/*, /api/qb/*, /api/gvm/*, /api/paper/*, 
 - Live every 5-min: all 19 other metrics via v8_signal_writer
 - day_1d fix live from 19-Jun-2026 (first market day after fix)
 
-## Workflow
-Claude AI designs and pushes the FIRST PART → INSERTs the cc_task → Arpit tells CC "read cc tasks" →
-CC claims, wires it in, connects real data, logs and pushes → Claude AI verifies with BOTH the
-committed diff AND a DB query on real rows. A CC result is a claim, not evidence.
+## Workflow (ROLE_CHARTER_V4 — both directions)
+Two lanes run through the one boardroom (`cc_tasks` + `cc_task_logs`).
+
+**An APP card:** Fable designs, files the ref in full to the forum, builds and pushes directly →
+logs the sha → **CC audits day-end**: reads the committed diff at that sha, validates the data
+against real rows, checks endpoint parity. Until that audit passes, the push is a claim.
+
+**A WEB or BACKEND card:** Fable (or the founder) files the cc_task → CC claims, builds, logs and
+pushes → **Fable verifies** with BOTH the committed diff AND a DB query on real rows.
+
+Neither seat marks its own work verified. A result is a claim; the artifact is the evidence.
+A card that leaves a design question open is an unfinished card — but a data-source gate is a
+legitimate question TO CC, and CC answers it before the build proceeds rather than guessing.
