@@ -486,6 +486,25 @@ body[data-theme]{
    No content was invented to fill the space, because there was none to add. */
 .swipe-t{display:flex;align-items:flex-start;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
+/* cc#1125 — THIS SUPERSEDES MY OWN cc#1122 ITEM 4 ON THE HERO DECK, and the founder is right.
+   cc#1122 read the void as "card 1's border sits far below its last chip" and fixed it by letting
+   each face end at its own content. That moved the empty space out of the card and into the track,
+   where it still reads as a void — just an unbordered one — and left the deck visibly uneven
+   between the two faces. The answer he wants is the opposite: both faces the SAME height, and
+   card 1 actually USING the space rather than being top-loaded above it.
+   SCOPED TO #heroTrack ON PURPOSE. .swipe-t is also the V8 Open Book deck's track, and this card
+   says not to touch that one — so the stretch and the column layout are keyed to the hero deck's
+   id and the book deck keeps exactly the geometry cc#1122 gave it.
+   NO HARDCODED HEIGHTS, per the card. The shared height is whatever the taller face needs:
+   align-items:stretch makes both faces take the flex row's height, and the row's height is set by
+   the taller one. Nothing jumps on swipe because both faces are children of the SAME row — the
+   track height never changes as you scroll across it.
+   Card 1 becomes a column with the chip row pushed to the foot by margin-top:auto, so the card
+   reads as headline at the top and metrics at the bottom instead of a block of content with dead
+   space hanging under it. */
+#heroTrack{align-items:stretch}
+#heroTrack > .c{display:flex;flex-direction:column}
+#heroTrack > .c > .hchips{margin-top:auto}
 /* cc#1122 item 3 — the mood word is UPPERCASE and large by decision now, not by accident.
    PAGE-SCOPED ON PURPOSE. mobile.css sets .hero-mood at 32px for every /m/* page; this rule
    lives in home.html's own <style> so it reaches the Home hero and nothing else. That is the

@@ -146,6 +146,23 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  -webkit-text-size-adjust:100%;text-size-adjust:100%}
 .rung b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
  font-variant-numeric:tabular-nums}
+/* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
+   shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
+   one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
+   not overlap — the chip is flex:none so it keeps its full label, the subtitle takes what is left
+   with min-width:0 and ellipsises instead of wrapping, and if the chip ever grows wider than the
+   whole row the wrap sends it to its own line rather than on top of anything. Three outcomes, all
+   legible, none overlapping. Chip logic and countdown text are untouched — this is layout only. */
+.dg-hdr{flex-wrap:wrap;row-gap:5px}
+.dg-hdr .as-pg{flex:1 1 auto;min-width:0}
+.dg-sub{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-width:0}
+/* flex-basis 0, NOT auto. With basis:auto the subtitle's base size is its full content width, so
+   it and the chip together exceeded the row and the chip wrapped to a THIRD line — a 116px sticky
+   header on a phone. Basis 0 makes the subtitle grow into whatever the chip leaves and ellipsise
+   instead of forcing a wrap. The DATE survives every truncation because it is at the start of the
+   string; "the morning read" is the decorative half and is the part that goes. */
+.dg-sub .s{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dg-sub .as-slot{flex:none;margin-left:auto}
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
 /* cc#1121 · the INTERNALS deck. Same mechanism as mobile/home.html's hero deck — a scroll-snap
    flex track and a dot row — so the swipe feels identical to the one already on Home rather than
@@ -181,11 +198,21 @@ document.body.setAttribute('data-theme','goldnight');})();</script>
      #dd-date and #dd-state move into the shell's slot with their ids intact — the page still
      fills them, the shell only defines where they sit (ref rule 6). Nothing below this header
      changed and no loader was touched (rule 5). -->
-<div class="as-hdr">
+<!-- cc#1126: TWO ROWS. As one row this was wordmark + title/subtitle + state chip all competing
+     for 332px, and the chip is the widest thing in it ("PRE-OPEN · 2h 40m TO BELL"). .as-slot is
+     flex:none so the chip took what it needed and .as-pg absorbed the loss — about 90px, which is
+     why the subtitle wrapped one word per line and collided with the chip.
+     Row 1 is identity: wordmark and page title. Row 2 is the state line: date/subtitle on the
+     left, chip right-aligned. Markup only — .as-hdr, .as-wm, .as-pg and .as-slot keep their
+     shared classes, so the appshell's wordmark menu and back control are untouched, and the two
+     ids the page fills keep their names. -->
+<div class="as-hdr dg-hdr">
   <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
-  <div class="as-pg"><span class="t">Daily Digest</span>
-    <div class="s" id="dd-date">THE MORNING READ</div></div>
-  <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
+  <div class="as-pg"><span class="t">Daily Digest</span></div>
+  <div class="dg-sub">
+    <div class="s" id="dd-date">THE MORNING READ</div>
+    <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
+  </div>
 </div>
 <div id="app"><div class="card slab"><div class="unavail">Building the read…</div></div></div>
 <div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
