@@ -3117,11 +3117,18 @@ const V8_COLS=[
   // because the four baskets do not share one rule — sell_reversal is pivot-S1 with a mirrored
   // stop and legitimately reads -2.35%, not -3.00%. A row without both levels shows the price
   // alone rather than a percentage computed off the wrong basis.
-  ["target","Target",     x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--grn)">${_cD(x.target,v=>num(v))}${x.target_pct!=null?` <span style="font-size:10px;color:var(--dim)">(${sign(x.target_pct,2)}%)</span>`:''}</td>`],
+  ["target","Target",     x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--grn)"${(x.notional===true&&x.levels_reason)?` title="${String(x.levels_reason).replace(/"/g,'&quot;')}"`:''}>${_cD(x.target,v=>num(v))}${x.target_pct!=null?` <span style="font-size:10px;color:var(--dim)">(${sign(x.target_pct,2)}%)</span>`:''}</td>`],
   ["stop_loss","SL",      x=>`<td style="text-align:right;${V8_COL_MONO};color:var(--red)">${_cD(x.stop_loss,v=>num(v))}${x.stop_pct!=null?` <span style="font-size:10px;color:var(--dim)">(${sign(x.stop_pct,2)}%)</span>`:''}</td>`],
-  ["net_pnl","Net P&L",   x=>`<td style="text-align:right" class="${x.net_pnl==null?'':pnlCls(x.net_pnl)}">${_cD(x.net_pnl,inr)}</td>`],
+  // cc#1143/cc#1144: on a NOTIONAL row this cell shows notional_pnl, visibly marked and never
+  // x.net_pnl - which stays null so that nothing summing net_pnl can ever pick it up. Muted,
+  // italic and titled, so a glance figure can never be mistaken for a booked one.
+  ["net_pnl","Net P&L",   x=>(x.notional===true&&x.notional_pnl!=null)
+      ?`<td style="text-align:right;font-style:italic;opacity:.72" class="${pnlCls(x.notional_pnl)}" title="NOTIONAL — not a trade. Reference entry ${x.ref_entry!=null?num(x.ref_entry,2):'--'} frozen at signal time; nothing was bought or sold and this figure is excluded from every total.">${inr(x.notional_pnl)}<span style="font-size:9px;color:var(--dim);font-style:normal"> NOT.</span></td>`
+      :`<td style="text-align:right" class="${x.net_pnl==null?'':pnlCls(x.net_pnl)}">${_cD(x.net_pnl,inr)}</td>`],
   ["potential_left","Potential Left",x=>`<td style="text-align:right" class="${cls(x.potential_left)}">${x.potential_left==null?'--':inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`}</td>`],
-  ["net_pnl_pct","Net P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.net_pnl_pct)}">${_cD(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>`],
+  ["net_pnl_pct","Net P&L %",x=>(x.notional===true&&x.notional_pnl_pct!=null)
+      ?`<td style="text-align:right;${V8_COL_MONO};font-style:italic;opacity:.72" class="${cls(x.notional_pnl_pct)}" title="NOTIONAL — measured from the frozen reference entry, not a booked trade.">${sign(x.notional_pnl_pct,2)}%</td>`
+      :`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.net_pnl_pct)}">${_cD(x.net_pnl_pct,v=>sign(v,2)+'%')}</td>`],
   ["day_pnl_pct","Day P&L %",x=>`<td style="text-align:right;${V8_COL_MONO}" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${_cD(x.day_pnl_pct,v=>sign(v,2)+'%')}</td>`],
   ["sector_day","SEC D%", x=>`<td style="text-align:right;${V8_COL_MONO};font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_sd.label||x.sector_seg||'').replace(/"/g,'&quot;')} · day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} of ${x.sector_sd.n_total} priced)"`:''}>${_cD(x.sector_day,v=>sign(v,2)+'%')}</td>`],
   ["signal_ts","Since",   x=>`<td style="color:var(--dim);font-size:11px">${x.signal_ts?fmtSince(x.signal_ts):'--'}</td>`],
@@ -3156,8 +3163,29 @@ function v8NormRow(x,ctx){
   ['day_1d','mom_2d','dma_50','rsi_month','gvm_score'].forEach(k=>{if(x[k]==null&&m[k]!=null)x[k]=m[k];});
   ['pp','r1','s1'].forEach(k=>{if(x[k]===undefined)x[k]=null;});
   x.sector_seg=seg; x.sector_day=sd?sd.day_pct:null; x.sector_sd=sd||null;
-  if(!isOpen){   // a SIGNAL row is not a position: dashes, never invented values
+  if(!isOpen){
+    // cc#1143/cc#1144 · A SIGNAL ROW IS STILL NOT A POSITION. Nothing here was traded, so it
+    // never carries net_pnl, and it is never allowed to reach a surface that adds money up.
+    //
+    // THE RING-FENCE IS ctx.surface==='basket', and it is a whitelist rather than a blacklist on
+    // purpose: a new surface that forgets to exclude notional rows inherits the SAFE behaviour
+    // (dashes) instead of silently counting them. Dashboard, Trade Log, Day Log and the P&L
+    // surfaces do not pass 'basket', so they keep the exact behaviour they had before this push.
+    //
+    // On the basket tabs the row is filled from the cc#1142 payload and marked notional. The
+    // fields it takes are DELIBERATELY the notional_* ones, never net_pnl / net_pnl_pct - those
+    // two names are what every total on this app sums, and reusing them for a trade that does not
+    // exist is precisely how a glance figure becomes a booked figure.
     x.days=x.entry_ts=x.target=x.stop_loss=x.net_pnl=x.net_pnl_pct=x.day_pnl_pct=x.potential_left=x.pot_pct=null;
+    if(ctx.surface==='basket'&&x.notional===true){
+      x.days=x.days!=null?x.days:(x.signal_ts?holdDays(x.signal_ts):null);
+      x.entry_ts=x.signal_ts||null;
+      // ENTRY shows the frozen reference, so the row reads like a position that opened there.
+      if(x.entry_price==null&&x.ref_entry!=null)x.entry_price=Number(x.ref_entry);
+      if(x.cmp==null&&x.cmp_now!=null)x.cmp=Number(x.cmp_now);
+      // target/sl stay null until cc#1142's engine-level STOP is ruled on; levels_reason from the
+      // payload is what the cell titles explain, rather than a bare dash with no cause.
+    }
     return x;
   }
   const p=(ctx.paper&&ctx.paper[x.symbol+'|'+String(x.side||'').toUpperCase()])||{};
