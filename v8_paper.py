@@ -101,6 +101,7 @@ log = logging.getLogger("scorr.v8paper")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
+import v8_timing_rules               # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 
 def _now_ist(sim_ts=None):
     """Wall-clock now in IST as a NAIVE timestamp (matches the naive-IST convention
@@ -749,6 +750,20 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
 
     # ---- 3) ENTRIES ----
     after_cutoff = (now_t is not None and now_t >= ENTRY_CUTOFF)
+    # cc#1138 rule 1 (session_log 27321): no new entries before 09:30 IST. This is the exact
+    # mirror of after_cutoff at the other end of the day, and it sits on the SAME single guard
+    # the section already has, so both entry branches below (qualified + sell_overbought) are
+    # covered by one condition rather than four.
+    # LIVE ONLY. now_t is None whenever target_date is set, i.e. a replay — a replay must never
+    # be gated by the wall clock, or a backtest run at 09:00 would silently open nothing. The
+    # `now_t is not None` test is what keeps the two apart, and it is the same test after_cutoff
+    # already uses.
+    # EXITS ARE ABOVE THIS LINE and are untouched: section 2 has already run by the time we get
+    # here, so stops and targets still fire from the first tick of the day.
+    before_cooloff = (now_t is not None and not v8_timing_rules.entries_allowed(now_t))
+    if before_cooloff:
+        log.info("paper_tick: before 09:30 IST entry cool-off (cc#1138) — SKIPPING entries; "
+                 "exits + rebalance still ran")
     long_open, short_open = _open_counts(conn)
     # cc#216: with no slot caps, paper_tick would open UNLIMITED entries (the per-side cap
     # checks are guarded by `is not None`, so None => no cap). Fail-safe: skip ALL entry
@@ -758,7 +773,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     if not _slots_ok:
         log.warning("paper_tick: buy_slots/sell_slots not provided — SKIPPING entries "
                     "(exits + rebalance still ran); paper_tick is not the entry engine")
-    if _slots_ok and not after_cutoff:
+    if _slots_ok and not after_cutoff and not before_cooloff:
         for sym, q in qual.items():
             if sym not in piv: continue
             side = q["side"]; basket = q["basket"]

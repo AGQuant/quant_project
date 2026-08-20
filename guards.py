@@ -21,6 +21,7 @@ follow-up rather than an unverified change riding this push.
 from datetime import date, datetime
 
 import nse_holidays
+import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 
 # auto-entry window (IST): open 09:15, hard cut 15:15 — the writer stops opening at 15:15.
 # cc#855: cut moved 15:20 -> 15:15. SEBI's Closing Auction Session (live 03-Aug-2026) ends
@@ -40,11 +41,32 @@ def is_trading_day(d: date) -> bool:
 
 
 def in_entry_window(now_ist: datetime, open_hm=ENTRY_OPEN_HM, cut_hm=ENTRY_CUT_HM) -> bool:
-    """True iff now_ist is within [09:15, 15:15] IST. Replaces the three identical
-    market-hours blocks in the writer entry fns (mkt_open <= now <= mkt_cut)."""
+    """True iff now_ist is within [09:15, 15:15] IST AND at or after the 09:30 entry cool-off.
+
+    cc#1138 rule 1 (session_log 27321, V8_TIMING_RULES_V1): no new entries before 09:30 IST.
+
+    WIRED HERE BECAUSE THIS IS THE CHOKE POINT, and that is a grep result, not a guess. Every
+    live automatic entry in the system reaches a position through
+    v8_signal_writer._auto_paper_entry, which calls this function once at its top (line ~1379)
+    before any basket branch runs — so one edit covers all four baskets and there is no fifth
+    path to miss. The alternative, editing each basket's entry branch, is the shape of mistake
+    cc#847 exists to prevent.
+
+    THE WINDOW CONSTANT IS DELIBERATELY NOT MOVED. ENTRY_OPEN_HM stays (9,15): it describes when
+    the market opens, which has not changed, and BT7's golden-day certification is keyed to it.
+    The cool-off is a separate, later rule and is asked separately, so the two can be read — and
+    reverted — independently.
+
+    SIM-SAFE. now_ist is passed in by the caller, so under the BT7 frozen clock the cool-off is
+    evaluated against simulated time exactly as the window already is. Nothing here reads a
+    wall clock.
+
+    EXITS ARE UNAFFECTED. This function is consulted only on entry paths; stop, target and gap
+    monitoring never call it, so an open position is still watched from the first tick of the day.
+    """
     lo = now_ist.replace(hour=open_hm[0], minute=open_hm[1], second=0, microsecond=0)
     hi = now_ist.replace(hour=cut_hm[0],  minute=cut_hm[1],  second=0, microsecond=0)
-    return lo <= now_ist <= hi
+    return lo <= now_ist <= hi and v8_timing_rules.entries_allowed(now_ist)
 
 
 def blackout(conn, sym: str, d: date) -> bool:
