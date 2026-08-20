@@ -529,7 +529,27 @@ body[data-theme]{
    space hanging under it. */
 #heroTrack{align-items:stretch}
 #heroTrack > .c{display:flex;flex-direction:column}
-#heroTrack > .c > .hchips{margin-top:auto}
+/* cc#1134 · FINAL RULING, and it supersedes the space distribution I chose in cc#1125.
+   Three attempts on this one card, each satisfying its own spec text and opening a new gap,
+   because none of them had a TARGET layout: cc#1122 left the void below the chips, cc#1125 pushed
+   the chips to the floor with margin-top:auto and moved the void into the middle. This is the
+   target, implemented literally.
+   THE FIVE BLOCKS ARE ONE UNIT, top-anchored, with a single fixed gap between each. row-gap and
+   nothing else: no margin-top:auto, no space-between, no centering, no flex-grow on any inner
+   block. That is the property that guarantees no inner gap can reopen — with justify-content left
+   at its flex-start default and no auto margins anywhere, leftover height has nowhere to go
+   except after the last child. A middle void is not merely unlikely, it is unreachable.
+   Child margins are zeroed inside this scope so the gap is the ONLY spacing, rather than gap
+   plus whatever each block happened to carry (6px, 5px and 11px, all different).
+   SCOPED TO THE FIRST FACE. Card 2 keeps its own internal spacing untouched; only the shared
+   height from cc#1125 is common to both, and that invariant stands.
+   The card lists an accent bar between the tagline and the chips. There is no such element in
+   this markup — the swoosh it refers to was the r5 mood signature withdrawn in cc#1116 — so the
+   four blocks that exist are ordered as ruled and none was invented to fill the slot. */
+#heroTrack > .c:first-child{gap:13px}
+#heroTrack > .c:first-child > *{margin-top:0;margin-bottom:0}
+/* an empty popup host would otherwise buy itself a 13px gap it does not need */
+#heroTrack > .c:first-child > #chiptrend:empty{display:none}
 /* cc#1122 item 3 — the mood word is UPPERCASE and large by decision now, not by accident.
    PAGE-SCOPED ON PURPOSE. mobile.css sets .hero-mood at 32px for every /m/* page; this rule
    lives in home.html's own <style> so it reaches the Home hero and nothing else. That is the
