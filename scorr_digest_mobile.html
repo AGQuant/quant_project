@@ -338,16 +338,60 @@ function iChart(s){
   var span=(top-bot)||1;
   var y=function(v){return H-(Math.max(bot,Math.min(top,v))-bot)/span*H;};
   var yb=y(base), over=0, omin=null, omax=null;
-  var bw=Math.max(0.3,(W/n)/78*0.8);   /* ~78 five-min bars fill one session slot */
-  var body=s.points.map(function(p){
-    var x=(p.s+p.f)/n*W, y0=y(p.v), clipped=(p.v>top||p.v<bot);
+  /* cc#1128 — A LINE, NOT BARS (founder ruling on the cc#1121 output: 200 dense bars read as a
+     solid block, which is true — at ~0.5px a bar there is no shape left to see).
+     THE LINE BREAKS RATHER THAN LYING. It is not one continuous stroke: a segment ends wherever
+     the data actually stops. Two kinds of break, both real — the overnight boundary between
+     sessions, and a hole inside a session (17-Aug's NIFTY feed stops at 11:20 and resumes at
+     14:00). Detected from the x distance between consecutive points against the nominal 5-minute
+     step, so a gap is never interpolated across. That is the same honesty rule as the empty
+     session slots: nothing is drawn where nothing was recorded.
+     COLOUR FOLLOWS THE READ, so the stroke turns at the baseline — green above 1.00, red below —
+     matching the colour rule the headline number already uses. Runs of the same side are emitted
+     as one polyline, and the crossing point belongs to both runs so the stroke stays joined. */
+  var step=(W/n)/78, brk=step*2.5;      /* 78 five-min bars fill one session slot */
+  var pxs=s.points.map(function(p){
+    var clipped=(p.v>top||p.v<bot);
     if(clipped){over++; omin=(omin==null||p.v<omin)?p.v:omin; omax=(omax==null||p.v>omax)?p.v:omax;}
-    return '<rect x="'+(x-bw/2).toFixed(2)+'" y="'+Math.min(y0,yb).toFixed(2)
-      +'" width="'+bw.toFixed(2)+'" height="'+Math.max(0.35,Math.abs(y0-yb)).toFixed(2)
-      +'" fill="'+(p.v>=base?'var(--volt)':'var(--heat)')+'" opacity=".85"/>'
-      +(clipped?'<rect x="'+(x-bw/2).toFixed(2)+'" y="'+(p.v>top?0:H-0.8).toFixed(2)
-        +'" width="'+bw.toFixed(2)+'" height=".8" fill="var(--amber)"/>':'');
-  }).join('');
+    /* f is clamped just under 1: a 15:30 bar comes through as f=1.0, which lands on the exact
+       leading edge of the NEXT session's slot. Harmless most days, wrong on the day after is
+       empty — the closing bar would draw inside the tinted hole and look like data in a session
+       that has none. A slot covers [s, s+1), so the last bar belongs at its end, not past it. */
+    return {x:(p.s+Math.min(p.f,0.995))/n*W, y:y(p.v), s:p.s, up:(p.v>=base), clipped:clipped, v:p.v};
+  });
+  var runs=[], cur=null;
+  pxs.forEach(function(q,i){
+    var prev=i?pxs[i-1]:null;
+    /* EVERY SESSION IS ITS OWN STROKE. A distance test alone is not enough: the last bar of one
+       session sits at f=1.0 and the first of the next at f=0.0, which land on the SAME x, so the
+       overnight gap measured as zero and the line ran straight through 15:30 into the next
+       09:15 — drawing a continuous market across a closed one. The session index is the
+       authority; the distance test then catches holes INSIDE a session. */
+    var gap=prev&&(q.s!==prev.s||q.x-prev.x>brk);
+    if(!cur||gap){                       /* first point, or the data genuinely stopped */
+      cur={up:q.up,pts:[[q.x,q.y]]}; runs.push(cur); return;
+    }
+    if(q.up!==cur.up){                   /* crossed the baseline: both runs share this point */
+      cur.pts.push([q.x,q.y]);
+      cur={up:q.up,pts:[[prev.x,prev.y],[q.x,q.y]]}; runs.push(cur); return;
+    }
+    cur.pts.push([q.x,q.y]);
+  });
+  var body=runs.filter(function(r){return r.pts.length>1;}).map(function(r){
+    return '<polyline fill="none" stroke="'+(r.up?'var(--volt)':'var(--heat)')
+      +'" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="'
+      +r.pts.map(function(p){return p[0].toFixed(2)+','+p[1].toFixed(2);}).join(' ')+'"/>';
+  }).join('')
+  /* a single stored bar with no neighbour to join has no line to be part of, so it is drawn as a
+     dot rather than dropped — one reading is still a reading. */
+  + runs.filter(function(r){return r.pts.length===1;}).map(function(r){
+      return '<circle cx="'+r.pts[0][0].toFixed(2)+'" cy="'+r.pts[0][1].toFixed(2)+'" r=".7" fill="'
+        +(r.up?'var(--volt)':'var(--heat)')+'"/>';
+    }).join('')
+  /* off-scale points are CLAMPED and MARKED, never quietly flattened into the line */
+  + pxs.filter(function(q){return q.clipped;}).map(function(q){
+      return '<circle cx="'+q.x.toFixed(2)+'" cy="'+q.y.toFixed(2)+'" r="1.1" fill="var(--amber)"/>';
+    }).join('');
   var marks='';
   for(var i=1;i<n;i++){
     var xd=(i/n*W).toFixed(2);
