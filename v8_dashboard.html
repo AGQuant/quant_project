@@ -1,21 +1,85 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V8 Dashboard</title>
+<script>
+/* cc#1149: restore the theme BEFORE first paint. This runs ahead of the stylesheet below, so the
+   page never renders one theme and then snaps to the other. Wrapped in try/catch because
+   localStorage throws outright in some privacy modes and a theme preference must never be able to
+   stop the dashboard loading. */
+try{ if(localStorage.getItem('ii_theme')==='light'){ document.documentElement.dataset.theme='light'; } }catch(e){}
+function iiToggleTheme(){
+  var lit = document.documentElement.dataset.theme === 'light';
+  document.documentElement.dataset.theme = lit ? '' : 'light';
+  try{ localStorage.setItem('ii_theme', lit ? 'dark' : 'light'); }catch(e){}
+  iiPaintThemePill();
+  /* the lightweight-charts instances take colours as plain strings at construction, so they cannot
+     follow a CSS variable. Anything already drawn re-reads the tokens through this hook. */
+  if(typeof window.iiRepaintCharts === 'function'){ try{ window.iiRepaintCharts(); }catch(e){} }
+}
+function iiPaintThemePill(){
+  var b = document.getElementById('iiThemeBtn'); if(!b) return;
+  var lit = document.documentElement.dataset.theme === 'light';
+  b.innerHTML = lit ? 'Theme <b>LIGHT</b>' : 'Theme <b>DARK</b>';
+  b.setAttribute('aria-pressed', lit ? 'true' : 'false');
+}
+document.addEventListener('DOMContentLoaded', iiPaintThemePill);
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#344 page 1: DARK TERMINAL re-skin. The page is variable-driven, so remapping :root to the
      R2 palette flips the whole surface to the dark institutional terminal. Semantic names kept so
      no downstream selector changes; values are the design_refs/scorr_v8_R2 tokens. */
+  /* cc#1149 sprint 1/7: ONE token contract drives the whole surface, transplanted verbatim from
+     design_refs/index_intel_R2.html @ f5a31dd. DARK is :root; LIGHT is the html[data-theme=light]
+     remap below. The old cc#344 block was a strict subset of these DARK values, so nothing on the
+     page changes colour in dark mode. Legacy alias names (--card/--card2/--ink/--surface/--bull/
+     --bear) are kept and given light values too, so panes that consume them flip instead of
+     stranding on a dark hex. */
   :root{
-    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
-    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
-    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
-    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
-    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --well:#0D1428;
+    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
+    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --grn:#2FD48B; --grn-d:rgba(47,212,139,.13);
+    --red:#FF5C6C; --red-d:rgba(255,92,108,.12);
+    --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
+    --spotc:#37D3E8;
+    --spot-ring:rgba(55,211,232,.16); --spot-ring2:rgba(55,211,232,.06);
+    --spot-chip-bg:rgba(55,211,232,.1); --spot-chip-bd:rgba(55,211,232,.3);
+    --amber-bg:rgba(245,185,74,.08); --amber-bd:rgba(245,185,74,.4); --amber-row:rgba(245,185,74,.1);
+    --blu-row:rgba(77,124,254,.1); --blu-chip:rgba(77,124,254,.14); --blu-chip-bd:rgba(77,124,254,.3);
+    --vio-bg:rgba(155,124,255,.1); --vio-bd:rgba(155,124,255,.3);
+    --flat:#2a3350;
+    --glow-gold:rgba(245,185,74,.5); --glow-spot:rgba(55,211,232,.6);
+    --gridline:rgba(148,166,210,.05);
     --shadow:0 18px 44px rgba(3,7,20,.5);
-    --ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
-    --bull:#2FD48B;--bear:#FF5C6C;--r:18px;
+    --font:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+    --r:16px;
+    /* legacy aliases already consumed by the V8 / quick-analysis panes */
+    --ink:#0A0F1E; --surface:#121A33; --surface2:#182241;
+    --card:#121A33; --card2:#0D1428;
+    --bull:#2FD48B; --bear:#FF5C6C;
+  }
+  html[data-theme="light"]{
+    --bg:#F5F7FB; --bg2:#EEF1F8; --panel:#FFFFFF; --panel2:#F7F9FD; --well:#EEF1F8;
+    --line:rgba(23,40,80,.10); --line2:rgba(23,40,80,.18);
+    --txt:#17203A; --mut:#5B6785; --dim:#93A0BE;
+    --grn:#0E9F62; --grn-d:rgba(14,159,98,.10);
+    --red:#DE3A52; --red-d:rgba(222,58,82,.09);
+    --blu:#3563E9; --cyan:#0E93B0; --amber:#B47B10; --violet:#6E4FE0;
+    --spotc:#0E93B0;
+    --spot-ring:rgba(14,147,176,.14); --spot-ring2:rgba(14,147,176,.05);
+    --spot-chip-bg:rgba(14,147,176,.08); --spot-chip-bd:rgba(14,147,176,.3);
+    --amber-bg:rgba(180,123,16,.07); --amber-bd:rgba(180,123,16,.35); --amber-row:rgba(180,123,16,.08);
+    --blu-row:rgba(53,99,233,.08); --blu-chip:rgba(53,99,233,.10); --blu-chip-bd:rgba(53,99,233,.3);
+    --vio-bg:rgba(110,79,224,.08); --vio-bd:rgba(110,79,224,.3);
+    --flat:#D5DAE8;
+    --glow-gold:rgba(180,123,16,.35); --glow-spot:rgba(14,147,176,.4);
+    --gridline:rgba(23,40,80,.035);
+    --shadow:0 10px 28px rgba(23,40,80,.08);
+    /* legacy aliases, light side */
+    --ink:#17203A; --surface:#FFFFFF; --surface2:#F7F9FD;
+    --card:#FFFFFF; --card2:#EEF1F8;
+    --bull:#0E9F62; --bear:#DE3A52;
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
@@ -316,14 +380,10 @@
   .sp-c{background:rgba(55,211,232,.14);color:var(--cyan)}
 
 /* ===== cc#542 Index Intel pane (namespaced) ===== */
-:root{--bg:#0A0F1E; --card:#121A33; --card2:#0D1428; --panel:#121A33;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
-    --surface2:#182241; --well:#0D1428; --r:18px;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
-    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --shadow:0 18px 44px rgba(3,7,20,.5);}
+/* cc#1149: this pane used to carry its OWN :root block re-declaring the dark values. It was a
+   duplicate of the master contract, and because :root re-declared --bg/--txt/--panel it would have
+   fought html[data-theme=light] on every token it named. Removed - the single contract at the top
+   of this file now feeds this pane too, which is what makes the toggle reach it. */
 #pane-index .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
     border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
     position:sticky;top:0;z-index:50;box-shadow:var(--shadow)}
@@ -526,7 +586,16 @@
 #pane-v14 .ti-row .v{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt);font-weight:700;text-align:right}
 
 /* cc#542+543: top tab bar */
-.v8toptabs{display:flex;gap:4px;margin:12px 0 2px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.v8toptabs{display:flex;gap:4px;margin:12px 0 2px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+/* cc#1149: .pill / .pill.tgl transplanted from design_refs/index_intel_R2.html @ f5a31dd (.tabs row).
+   .v8sp is the ref's .tabs .sp spacer, renamed only because .sp is already taken on this page by
+   the stat pills. That rename is the one named seam in this rule set. */
+.v8sp{flex:1}
+.pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border:1px solid var(--line2);
+  border-radius:6px;color:var(--mut);margin-left:6px;background:none;cursor:default}
+.pill b{color:var(--txt)}
+.pill.tgl{cursor:pointer}
+.pill.tgl:hover{border-color:var(--blu);color:var(--blu)}
 .v8toptab{font:inherit;font-size:13px;font-weight:700;color:var(--mut);background:transparent;border:none;border-bottom:2px solid transparent;padding:9px 18px;cursor:pointer;transition:.15s}
 .v8toptab:hover{color:var(--txt)}
 .v8toptab.active{color:var(--blu);border-bottom-color:var(--blu)}
@@ -697,6 +766,12 @@
          and its own nav injection, so hosting it in a pane would nest a second navbar inside this
          one. One entry app-wide. -->
     <button class="v8toptab" data-pane="trades" onclick="location.href='/trades'">Wall of Trades</button>
+    <!-- cc#1149: theme switch. Sits in the tabs row exactly where the ref puts it, pushed right by
+         the spacer so it never crowds the tabs when they wrap. -->
+    <span class="v8sp"></span>
+    <button type="button" class="pill tgl" id="iiThemeBtn" aria-pressed="false"
+            title="Switch dark / light. Remembered on this device."
+            onclick="iiToggleTheme()">Theme <b>DARK</b></button>
   </div>
   <div id="pane-v8">
 
@@ -4530,22 +4605,32 @@ setInterval(loadDataIntegrity,10*60*1000);
    Charts = hand-drawn inline SVG sparklines.
 ════════════════════════════════════════════════════════════════ */
 
-/* ---- theme tokens (read from CSS vars for consistency) ---- */
-const CS = getComputedStyle(document.documentElement);
+/* ---- theme tokens (read LIVE from CSS vars) ----
+   cc#1149: this used to snapshot getComputedStyle once at IIFE load, with hardcoded light-palette
+   hexes as fallbacks. Two problems, both fixed here. (1) The snapshot froze the palette at load, so
+   after the theme toggle every colour this object feeds would still be the old theme's. Each key is
+   now a getter that re-reads the variable at the moment it is used, which is render time. (2) The
+   fallbacks were LIGHT hexes sitting inside a dark page — a wrong-theme colour waiting for any
+   token to go missing. They are gone: every name below is declared in the master contract at the
+   top of this file, so a miss is a bug to see, not a colour to guess. */
+const _tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const C = {
-  grn:   CS.getPropertyValue('--grn').trim()   || '#0fa968',
-  red:   CS.getPropertyValue('--red').trim()   || '#FF5C6C',
-  blu:   CS.getPropertyValue('--blu').trim()   || '#2563eb',
-  cyan:  CS.getPropertyValue('--cyan').trim()  || '#0891b2',
-  amber: CS.getPropertyValue('--amber').trim() || '#d97706',
-  violet:CS.getPropertyValue('--violet').trim()|| '#7c3aed',
-  txt:   CS.getPropertyValue('--txt').trim()   || '#1c2536',
-  mut:   CS.getPropertyValue('--mut').trim()   || '#5a6781',
-  line:  CS.getPropertyValue('--line').trim()  || 'rgba(148,166,210,.14)',
-  card:  CS.getPropertyValue('--card').trim()  || '#121A33',
+  get grn(){    return _tok('--grn');    },
+  get red(){    return _tok('--red');    },
+  get blu(){    return _tok('--blu');    },
+  get cyan(){   return _tok('--cyan');   },
+  get amber(){  return _tok('--amber');  },
+  get violet(){ return _tok('--violet'); },
+  get txt(){    return _tok('--txt');    },
+  get mut(){    return _tok('--mut');    },
+  get line(){   return _tok('--line');   },
+  get card(){   return _tok('--card');   },
+  get flat(){   return _tok('--flat');   },
+  get bg(){     return _tok('--bg');     },
 };
-/* semantic: green=up, red=down (light-theme palette) */
-const UP = C.grn, DN = C.red;
+/* semantic: green=up, red=down. let, not const, because the theme toggle reassigns them - they are
+   read as bare identifiers in 36 places and rebinding here beats editing all 36. */
+let UP = C.grn, DN = C.red;
 
 /* ---- Black-Scholes (r=0.065, T=dte/365, hVol direct) ---- */
 const ncdf = x => {
@@ -4889,7 +4974,7 @@ function rTopBar(){
 
 function rMood(){
   const {gate,fails,adr,nD,nW,nM}=D.mood;   // cc#549: slot boxes (bSlots/sSlots/soSlots) dropped — V8-master only
-  const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:'#F5B94A';
+  const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:C.amber;  /* cc#1149: literal #F5B94A was the dark --amber; the fails===2 arm now takes the token like the fails===1 arm above it */
   const conds=[['ADR',adr.toFixed(2),adr>=1.0],['Nifty D',pct(nD),nD>=0],['Nifty W',pct(nW),nW>=0],['Nifty M',pct(nM),nM>=0]];
   const condHtml = conds.map(([l,v,ok])=>{
     const col=ok?UP:DN;
@@ -5007,8 +5092,11 @@ function rFoBan(){
   const f=D.foBan||{}, syms=f.symbols||[], asof=f.date||'';
   const head = syms.length ? `F&O Ban · ${syms.length} Today` : 'F&O Ban';
   const body = syms.length
-    ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid var(--heat, #f2b8bf);background:#fde8ea;color:var(--heat, #c0392b);font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
-    : '<span style="font:700 12px/1 Sora,sans-serif;color:var(--volt, #0a7d47);background:#e7f7ee;border:1px solid var(--volt, #b6e6cd);padding:6px 12px;border-radius:7px">NO BANS</span>';
+    /* cc#1149: these two chips were the loudest part of the seam - a pale pink and a pale mint
+       background hardcoded into a dark page, plus --heat/--volt fallbacks naming light hexes.
+       Both now run on the red/green token pairs, so they read correctly in either theme. */
+    ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid var(--red);background:var(--red-d);color:var(--red);font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
+    : '<span style="font:700 12px/1 Sora,sans-serif;color:var(--grn);background:var(--grn-d);border:1px solid var(--grn);padding:6px 12px;border-radius:7px">NO BANS</span>';
   return `<div class="card">
     <div class="card-hd"><div><div class="t">${head}</div>
       <div class="s">MWPL · barred from fresh F&O positions${asof?(' · '+esc(asof)):''}</div></div></div>
@@ -5032,7 +5120,7 @@ function rVix(){
 function rADR(){
   const {adv,dec,unch,ratio}=D.adr;
   const tot=adv+dec+unch;
-  const rc = ratio>=2?UP:ratio>=1?'#10b981':ratio>=0.5?C.amber:DN;
+  const rc = ratio>=2?UP:ratio>=1?C.grn:ratio>=0.5?C.amber:DN;  /* cc#1149: #10b981 was a third green with no token behind it; the >=1 tier now shares --grn with the >=2 tier, which is what the ref shows */
   const cells=[['▲ ADV',adv,UP],['▼ DEC',dec,DN],['— UNC',unch,C.mut]];
   const cellHtml=cells.map(([l,v,col])=>`<div class="adr-cell" style="background:${col}12;border-color:${col}22"><div class="n" style="color:${col}">${v}</div><div class="l">${l}</div></div>`).join('');
   return `<div class="card">
@@ -5176,7 +5264,7 @@ function rPerf(){
 
 function buildupTable(title, rows, accent, pending){
   const sigClr = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
-                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?'#F5B94A' : C.mut;
+                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?C.amber : C.mut;  /* cc#1149: token swap only - the literal #F5B94A is exactly the dark --amber, so this is the same colour it always was. NOTE for cc#1154: that means SHORT_COVER and LONG_UNWIND render identically today. The ref skeletons this card and does not rule on a fourth buildup colour, so I am not inventing one here. */
   // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
   // of NEUTRAL tags is misleading. Show price-direction columns only.
   const head = pending
@@ -5268,7 +5356,10 @@ function syncV10Toggle(){
     const b=document.getElementById('v10tg-'+s); if(!b)return;
     const on=(s===_v10sym);
     b.style.background=on?'var(--blu)':'transparent';
-    b.style.color=on?'#fff':'var(--mut)';
+    /* cc#1149: '#fff' on a --blu fill is right in dark and wrong in light, where --blu is a
+       mid-blue that white text sits on badly. --bg is the page ground in both themes, so the
+       active pill always reads as knocked-out text. */
+    b.style.color=on?'var(--bg)':'var(--mut)';
   });
   const t=document.getElementById('v10ChartTitle');
   if(t) t.textContent=(_v10sym==='BANKNIFTY'?'BANKNIFTY':'NIFTY 50')+' · 5min · V10 trades';
@@ -5294,17 +5385,17 @@ function buildV10Markers(candles, open, closed){
   (closed||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
     const isLong=isLongSide(r.side);
     const eBar=_v10SnapBar(candles,r.entry_ts);
-    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?'#2FD48B':'#FF5C6C',
+    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?UP:DN,
       shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)});
     const xBar=_v10SnapBar(candles,r.exit_ts);
     if(xBar){ const p=Number(r.pnl), win=!isNaN(p)&&p>=0, rsn=r.exit_reason||'EXIT';
-      out.push({time:xBar.time,position:isLong?'aboveBar':'belowBar',color:win?'#2FD48B':'#FF5C6C',
+      out.push({time:xBar.time,position:isLong?'aboveBar':'belowBar',color:win?UP:DN,
         shape:isLong?'arrowDown':'arrowUp',text:rsn+(isNaN(p)?'':' '+(p>=0?'+':'')+num(p,0))}); }
   });
   (open||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
     const isLong=isLongSide(r.side);
     const eBar=_v10SnapBar(candles,r.entry_ts);
-    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?'#2FD48B':'#FF5C6C',
+    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?UP:DN,
       shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)+' •open'});
   });
   return out.sort((a,b)=>a.time-b.time);   // LWC requires ascending-by-time markers
@@ -5330,13 +5421,15 @@ async function loadV10Chart(){
   box.innerHTML='';
   const chart=LightweightCharts.createChart(box,{
     width:box.clientWidth, height:box.clientHeight,
-    layout:{background:{type:'solid',color:'#0A0F1E'},textColor:'#8C99BD',fontSize:11,fontFamily:"'Sora',system-ui,sans-serif"},
+    /* cc#1149: lightweight-charts takes plain colour strings and cannot follow a CSS variable,
+       so it is read from the tokens at construction and rebuilt by iiRepaintCharts on toggle. */
+    layout:{background:{type:'solid',color:C.bg},textColor:C.mut,fontSize:11,fontFamily:"'Sora',system-ui,sans-serif"},
     grid:{vertLines:{color:'rgba(148,166,210,.06)'},horzLines:{color:'rgba(148,166,210,.06)'}},
     rightPriceScale:{borderColor:'rgba(148,166,210,.14)'},
     timeScale:{borderColor:'rgba(148,166,210,.14)',timeVisible:true,secondsVisible:false},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
   });
-  const series=chart.addCandlestickSeries({upColor:'#2FD48B',downColor:'#FF5C6C',borderVisible:false,wickUpColor:'#2FD48B',wickDownColor:'#FF5C6C'});
+  const series=chart.addCandlestickSeries({upColor:UP,downColor:DN,borderVisible:false,wickUpColor:UP,wickDownColor:DN});
   series.setData(candles); _v10chart=chart; _v10series=series;
   const markers=buildV10Markers(candles, open, closed);
   if(markers.length) series.setMarkers(markers);
@@ -5507,6 +5600,18 @@ loadLive=async function(){
   const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[idx]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+};
+
+/* cc#1149: the theme toggle's hook into this pane.
+   Most of the surface is CSS-variable driven and flips on its own the instant data-theme changes.
+   Two things cannot: colours already baked into HTML strings by the r*() renderers, and the
+   lightweight-charts instance, which takes plain colour strings at construction. So the toggle
+   rebinds UP/DN, re-runs render() against the cached D, and rebuilds the chart if one is mounted.
+   Guarded end to end - a repaint failure must never leave the pane blank or block the toggle. */
+window.iiRepaintCharts=function(){
+  UP = C.grn; DN = C.red;
+  try{ if(document.getElementById('idx-app')) render(); }catch(e){ console.warn('[idx theme] render', e); }
+  try{ if(_v10chart && document.getElementById('v10ChartBox')) loadV10Chart(); }catch(e){ console.warn('[idx theme] chart', e); }
 };
 
 /* expose handlers used by inline onclick (global scope) */
