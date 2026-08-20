@@ -571,6 +571,34 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .lad-spot{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--spotc);z-index:2;pointer-events:none}
 #pane-index .lad-spot .lbl{position:absolute;right:0;top:-14px;font-family:var(--mono);font-size:8.5px;font-weight:700;
     color:var(--spotc);background:var(--spot-chip-bg);border:1px solid var(--spot-chip-bd);border-radius:4px;padding:0 5px}
+/* cc#1154 sprint 6/7: TAIL CARDS. Transplanted from design_refs/index_intel_R2.html @ f5a31dd
+   (.tag2/.skel/.lockchip/.set-cell/.stat-grid/.stat/.stack/.foot/.notpulled), namespaced.
+   ONE RULE DELIBERATELY NOT COPIED, and it is the trap this card warns about: the ref's
+   .set-cell .v carries letter-spacing:.2em and color:var(--mut). Those exist to make the DOT MASK
+   look right, because proprietary parameters never go in a design file. The LIVE settings card
+   shows real values, so copying that spacing would smear real numbers apart and grey them out.
+   The mask is ref-only; the live card keeps its own .set-box .v exactly as it was. */
+#pane-index .tag2{font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.06em}
+#pane-index .tag2.eng{background:var(--blu-chip);color:var(--blu);border:1px solid var(--blu-chip-bd)}
+#pane-index .tag2.long{background:var(--grn-d);color:var(--grn)}
+#pane-index .tag2.short{background:var(--red-d);color:var(--red)}
+#pane-index .pos-hd-pl{font-family:var(--mono);font-weight:700;font-size:15px}
+#pane-index .skel{height:11px;border-radius:5px;background:linear-gradient(90deg,var(--panel2) 25%,var(--well) 50%,var(--panel2) 75%);
+    background-size:200% 100%;animation:sh 1.6s linear infinite;display:inline-block}
+@keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+#pane-index .notpulled{font-family:var(--mono);font-size:9px;color:var(--dim);border:1px dashed var(--line2);
+    border-radius:5px;padding:2px 8px;display:inline-block}
+#pane-index .lockchip{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--violet);
+    background:var(--vio-bg);border:1px solid var(--vio-bd);border-radius:5px;padding:2px 8px}
+#pane-index .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+#pane-index .stat{border:1px solid var(--line);border-radius:9px;padding:10px 12px;text-align:center}
+#pane-index .stat .n{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--mut)}
+#pane-index .stat .l{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-top:3px}
+#pane-index .stack{display:flex;flex-direction:column;gap:16px}
+#pane-index .foot{padding:18px 2px 0;display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dim);flex-wrap:wrap;gap:6px}
+/* the shimmer is a loading cue, not decoration; a reader who has asked for no motion still needs
+   to see that something is pending, so the block stays and only the animation stops. */
+@media(prefers-reduced-motion:reduce){#pane-index .skel{animation:none}}
 #pane-index .sig-grid{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 #pane-index .sig-sym{font-family:var(--mono);font-size:22px;font-weight:900;line-height:1}
 #pane-index .sig-tags{display:flex;gap:6px;margin-top:6px;align-items:center}
@@ -4902,6 +4930,12 @@ const D = {
   buildup:{ long:[], short:[], pending:true },
   divergence:{ rows:[], market_hours:false, ts:'—', skipped_stale:0, threshold:1 },
   open:[], closed:[],
+  /* cc#1154 scope 2 + 5: a card that has not loaded yet is NOT a card with no rows. Before this,
+     D.open started as [] and rOpen printed "No open positions" while the fetch was still in
+     flight - an empty state standing in for a loading state, which tells the founder there is
+     nothing when the truth is that we do not know yet. `loaded` flips per section when its loader
+     returns, and until then the table renders shimmer rows. */
+  loaded:{ open:false, closed:false, buildup:false, divergence:false },
   cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
   perf:{},
   idxTape:null,   // cc#1054: /api/index/tape payload; null until loaded, and null on failure
@@ -5029,12 +5063,14 @@ function mapBuild(r){
 }
 async function loadBuildup(){
   const b = await getJSON('/api/v10/buildup?limit=15');
+  D.loaded.buildup = true;   // cc#1154
   D.buildup = { long:(b.long_buildup||[]).map(mapBuild),
                 short:(b.short_buildup||[]).map(mapBuild),
                 pending: !!b.oi_feed_pending };
 }
 async function loadDivergence(){
   const d = await getJSON('/api/v10/divergence');
+  D.loaded.divergence = true;   // cc#1154
   D.divergence = { rows:(d.rows||[]), market_hours:!!d.market_hours,
                    ts:d.ts||'—', skipped_stale:d.skipped_stale||0,
                    threshold:d.threshold!=null?d.threshold:1 };
@@ -5048,6 +5084,7 @@ async function loadOpen(){
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/positions')); }catch(e){}
   rows = rows.filter(idxOnly);
+  D.loaded.open = true;   // cc#1154: the await has resolved, so [] now genuinely means none
   D.open = rows.map((x,i)=>{
     const entry=Number(x.entry_price)||0, cmp=Number(x.cmp||x.current_price)||entry;
     const dir=normSide(x.direction||x.side);
@@ -5075,6 +5112,7 @@ async function loadClosed(){
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=500')); }catch(e){}   // cc#463 fix3: load ALL legs (was capped at 10)
   rows = rows.filter(idxOnly);
+  D.loaded.closed = true;   // cc#1154: same - after the await, not before it
   D.closed = rows.map((x,i)=>{
     const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
     const dir=normSide(x.direction||x.side);
@@ -5381,6 +5419,18 @@ function rPCR(){
 // cc#549: rMaxPain (compact Nifty Max Pain card) removed — the strike-wise OI card (rStrikeOI)
 // now carries both indices with full histogram + MP/spot/ATM readout; expiry moved into that card.
 
+/* cc#1154 scope 2 + 5: shimmer rows for a table whose loader has not returned yet. Widths vary per
+   column so it reads as a table shape rather than a block of identical bars. */
+function skelRows(cols, n){
+  const w = i => [70,86,54,62,58,66,50][i % 7];
+  let out = '';
+  for(let r=0; r<n; r++){
+    out += '<tr>' + Array.from({length:cols}, (_,i)=>
+      `<td><span class="skel" style="width:${w(i+r)}%"></span></td>`).join('') + '</tr>';
+  }
+  return out;
+}
+
 function rOpen(){
   const tot=D.open.reduce((a,p)=>a+p.pnl,0);
   const head=['ENG','SYMBOL','SIDE','TYPE','ENTRY','CMP','TARGET','STOP','QTY','P&L','P&L%'];
@@ -5396,7 +5446,9 @@ function rOpen(){
     <td class="td-mono" style="color:var(--mut)">${p.qty}</td>
     <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">${p.pnl!=null?'₹'+num(p.pnl):'—'}</td>
     <td class="td-mono" style="color:${cx(p.pPct)}">${p.cmp?pct(p.pPct):'—'}</td></tr>`).join('')
-    : `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`;
+    : (D.loaded.open
+        ? `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`
+        : skelRows(11, 2));
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Open Positions (${D.open.length})</div>
       <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
@@ -5422,7 +5474,9 @@ function rClosed(){
     <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
     <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
     <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
-    : `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`;
+    : (D.loaded.closed
+        ? `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`
+        : skelRows(10, 3));
   // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
   const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="idxToggleClosed()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
@@ -5441,7 +5495,8 @@ function rSettings(){
     ['Gap Exit',gapExit],['Lot NIFTY',`${lotN} units`],['Lot BANKNIFTY',`${lotB} units`]];
   const boxes=p.map(([k,v])=>`<div class="set-box"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Entry / Exit Settings</div><div class="s">V10 Configuration · Locked 16-Jun-2026</div></div></div>
+    <div class="card-hd"><div><div class="t">Entry / Exit Settings</div><div class="s">V10 Configuration</div></div>
+      <span class="lockchip">LOCKED 16-JUN-2026</span></div>
     <div class="set-grid">${boxes}</div>
   </div>`;
 }
@@ -5449,7 +5504,9 @@ function rSettings(){
 function rPerf(){
   const p=D.perf||{};
   const tot=p.total_trades||0;
-  const stat=(k,v,col)=>`<div class="set-box"><div class="k">${k}</div><div class="v" style="color:${col||'var(--txt)'}">${v}</div></div>`;
+  /* cc#1154 scope 4: the ref's .stat box, not the settings .set-box these were borrowing. Two
+     different cards were rendering through one class, so a change to either moved both. */
+  const stat=(k,v,col)=>`<div class="stat"><div class="n" style="color:${col||'var(--txt)'}">${v}</div><div class="l">${k}</div></div>`;
   const pf=p.profit_factor!=null?Number(p.profit_factor).toFixed(2):'—';
   const cards=[
     stat('Total Trades', tot),
@@ -5474,7 +5531,7 @@ function rPerf(){
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
       <div class="s">Live paper stats from v10_trades · ${tot} closed trades</div></div></div>
-    <div class="set-grid">${cards}</div>
+    <div class="stat-grid">${cards}</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       ${seg(p.by_symbol,'By Symbol','SYMBOL')}${seg(p.by_leg,'By Leg','LEG')}
     </div>
@@ -5537,7 +5594,9 @@ function rDivergence(){
     <td>${(r.signals||[]).map(s=>bdg(s,sigClr(s),true)).join(' ')}</td>
     <td class="td-mono" style="color:var(--dim);font-size:10px">${r.age_min!=null?r.age_min+'m ago':esc(r.last_tick||'—')}</td>
   </tr>`).join('')
-    : `<tr class="empty-row"><td colspan="8">No divergence signals above threshold</td></tr>`;
+    : (D.loaded.divergence
+        ? `<tr class="empty-row"><td colspan="8">No flags this tick — nothing exceeded the ±${d.threshold}% threshold</td></tr>`
+        : skelRows(8, 2));
   const note = d.skipped_stale
     ? `<div class="note" style="color:var(--mut)">${d.skipped_stale} symbol(s) skipped (stale &gt;15 min)</div>` : '';
   return `<div class="card" style="margin-bottom:10px">
@@ -5969,7 +6028,10 @@ function render(){
        switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
        reachable as the LADDER view, and cc#1152 rebuilds that view to the ref's rung ladder. */
     `<div class="row r-levels">${rLevelsCard('NIFTY','NIFTY')}${rLevelsCard('BANKNIFTY','BANKNIFTY')}</div>` +
-    rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
+    /* cc#1154 scope 6: the tail cards sit in the ref's .stack, which owns the gap between them.
+       They used to carry margin-bottom:10px each, so spacing was a property of every card rather
+       than of the column holding them. */
+    `<div class="stack">` + rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() + `</div>` +
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
