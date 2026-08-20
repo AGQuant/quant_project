@@ -532,6 +532,45 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .vsw button{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em;
     padding:3px 9px;border:1px solid var(--line2);background:none;color:var(--dim);cursor:pointer;border-radius:5px}
 #pane-index .vsw button.on{color:var(--blu);border-color:var(--blu);background:var(--blu-chip)}
+/* cc#1152 sprint 4/7: OI RUNG LADDER. Transplanted verbatim from design_refs/index_intel_R2.html
+   @ f5a31dd (.rung/.side/.bar/.stk/.oi-heads/.wallchips/.wc), namespaced under #pane-index.
+   The old card put 15 strikes on a HORIZONTAL axis, where fixed-width labels cannot fit and run
+   together into 23,75023,80023,850. No styling fixes that — the axis has to rotate 90 degrees.
+   Strikes become rows, so a label has a whole row to itself and collision is structurally
+   impossible rather than merely avoided. */
+#pane-index .rung{display:grid;grid-template-columns:1fr 78px 1fr;align-items:center;height:21px}
+#pane-index .rung:nth-child(odd){background:var(--bg2)}
+#pane-index .rung.atm{background:var(--blu-row)}
+#pane-index .rung.atm .stk{color:var(--blu);font-weight:800}
+#pane-index .rung.mp .stk{color:var(--amber);font-weight:800;background:var(--amber-row);border-radius:4px}
+#pane-index .side{position:relative;height:12px}
+#pane-index .bar{position:absolute;top:0;height:12px;border-radius:3px}
+#pane-index .side.p .bar{right:0;background:var(--grn);opacity:.32}
+#pane-index .side.c .bar{left:0;background:var(--red);opacity:.32}
+#pane-index .rung.pw .side.p .bar,#pane-index .rung.cw .side.c .bar{opacity:.9}
+#pane-index .stk{text-align:center;font-family:var(--mono);font-size:11px;font-weight:600}
+#pane-index .oi-heads{display:grid;grid-template-columns:1fr 78px 1fr;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--dim);margin-bottom:4px}
+#pane-index .oi-heads .l{text-align:right;padding-right:10px;color:var(--grn)}
+#pane-index .oi-heads .c{text-align:center}
+#pane-index .oi-heads .r{padding-left:10px;color:var(--red)}
+#pane-index .wallchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+#pane-index .wc{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:5px}
+#pane-index .wc.p{background:var(--grn-d);color:var(--grn)}
+#pane-index .wc.c{background:var(--red-d);color:var(--red)}
+#pane-index .wc.a{background:var(--amber-row);color:var(--amber)}
+/* scope 4: the OI number is always in the DOM as a title, and .lad.vals reveals it inline. Tap
+   toggles it on touch, where there is no hover to reveal anything. Not a ref class - the ref is a
+   static page and never had to answer "how does a phone see this number". */
+#pane-index .ladwrap{position:relative}
+#pane-index .rung .oiv{position:absolute;top:-1px;font-family:var(--mono);font-size:8.5px;font-weight:700;
+    color:var(--dim);opacity:0;transition:opacity .12s;pointer-events:none}
+#pane-index .side.p .oiv{right:4px}
+#pane-index .side.c .oiv{left:4px}
+#pane-index .rung:hover .oiv,#pane-index .ladwrap.vals .oiv{opacity:1}
+/* scope 5: spot as a thin dashed line crossing the rungs at its interpolated position */
+#pane-index .lad-spot{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--spotc);z-index:2;pointer-events:none}
+#pane-index .lad-spot .lbl{position:absolute;right:0;top:-14px;font-family:var(--mono);font-size:8.5px;font-weight:700;
+    color:var(--spotc);background:var(--spot-chip-bg);border:1px solid var(--spot-chip-bd);border-radius:4px;padding:0 5px}
 #pane-index .sig-grid{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 #pane-index .sig-sym{font-family:var(--mono);font-size:22px;font-weight:900;line-height:1}
 #pane-index .sig-tags{display:flex;gap:6px;margin-top:6px;align-items:center}
@@ -5693,7 +5732,7 @@ function rSpine(key, name){
 function rLevelsCard(key, name){
   const view = D.levelsView[key]==='ladder' ? 'ladder' : 'spine';
   const body = view==='spine' ? rSpine(key,name)
-                              : oiHisto(name, D.strikeOI[key], D.maxpainAll[key]);
+                              : oiLadder(name, D.strikeOI[key], D.maxpainAll[key]);   /* cc#1152 */
   return `<div class="card">
     <div class="card-hd"><div><div class="t">Levels · ${esc(name)}</div>
       <div class="s">${view==='spine'?'pivots + OI walls + spot · one price axis':'strike-wise OI · ATM ±7'}</div></div>
@@ -5718,43 +5757,98 @@ async function loadStrikeOI(){
     try{ D.maxpainAll[s]=await getJSON('/api/v10/maxpain?symbol='+s); }catch(e){ D.maxpainAll[s]=null; }
   }));
 }
-function oiHisto(name, oi, mp){
-  if(!oi || oi.status!=='ok' || !(oi.strikes&&oi.strikes.length))
-    return `<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:800;margin-bottom:6px">${name}</div>
-      <div class="mp-pending">Option chain OI pending</div></div>`;
-  const strikes=oi.strikes;
+/* ══ cc#1152 sprint 4/7 · OI RUNG LADDER ════════════════════════════════════════════════════
+   Replaces the horizontal histogram. That chart put 15 strikes on an x-axis where the labels are
+   wider than the columns, so they concatenated into 23,75023,80023,850 - unreadable, and not a
+   styling problem. Rotating the axis 90 degrees gives every strike its own row, which makes label
+   collision structurally impossible instead of merely unlikely. Higher strikes sit higher, so the
+   ladder reads like price.                                                                      */
+function oiLadder(name, oi, mp){
+  if(!oi || oi.status!=='ok' || !(oi.strikes && oi.strikes.length))
+    return `<div class="mp-pending">Option chain OI pending for ${esc(name)}</div>`;
+  /* descending strikes, top to bottom - the whole point is that it reads like a price axis */
+  const rows=[...oi.strikes].sort((a,b)=>Number(b.strike)-Number(a.strike));
   const spot=Number(oi.spot)||0;
-  const mpStrike=(mp&&mp.status==='ok')?Number(mp.max_pain_strike):null;
-  const maxOI=Math.max(1,...strikes.map(s=>Math.max(s.call_oi||0,s.put_oi||0)));
-  const cols=strikes.map(s=>{
-    const ch=((s.call_oi||0)/maxOI*100).toFixed(0), ph=((s.put_oi||0)/maxOI*100).toFixed(0);
-    const isMp=mpStrike!=null&&Math.abs(s.strike-mpStrike)<0.5;
-    return `<div class="hcol" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative">
-      ${isMp?'<div style="position:absolute;inset:-3px -1px 0;background:rgba(245,185,74,.12);border:1px solid rgba(245,185,74,.5);border-radius:4px;pointer-events:none"></div>':''}
-      <div style="width:60%;background:linear-gradient(180deg,var(--red),rgba(255,92,108,.35));border-radius:2px 2px 0 0;height:${ch}%"></div>
-      <div style="width:60%;background:linear-gradient(0deg,var(--grn),rgba(47,212,139,.35));border-radius:2px 2px 0 0;margin-top:1px;height:${ph}%"></div>
+  const atm=oi.atm_strike!=null?Number(oi.atm_strike):null;
+  const mpStrike=(mp&&mp.status==='ok'&&mp.max_pain_strike!=null)?Number(mp.max_pain_strike):null;
+  /* ONE shared scale across BOTH sides (scope 1). A per-side scale would make a 3L call bar look
+     the same length as a 20L put bar, which is the opposite of what this card is for. */
+  const maxOI=Math.max(1,...rows.map(r=>Math.max(Number(r.put_oi)||0,Number(r.call_oi)||0)));
+  const maxPut=Math.max(0,...rows.map(r=>Number(r.put_oi)||0));
+  const maxCall=Math.max(0,...rows.map(r=>Number(r.call_oi)||0));
+  const putWall=rows.find(r=>Number(r.put_oi)===maxPut&&maxPut>0);
+  const callWall=rows.find(r=>Number(r.call_oi)===maxCall&&maxCall>0);
+  const L=v=>(Number(v)/100000).toFixed(1);
+
+  const rungs=rows.map(r=>{
+    const k=Number(r.strike), po=Number(r.put_oi)||0, co=Number(r.call_oi)||0;
+    const cls=['rung'];
+    if(atm!=null&&Math.abs(k-atm)<0.5) cls.push('atm');
+    if(mpStrike!=null&&Math.abs(k-mpStrike)<0.5) cls.push('mp');
+    if(maxPut>0&&po===maxPut) cls.push('pw');
+    if(maxCall>0&&co===maxCall) cls.push('cw');
+    const tags=[];
+    if(atm!=null&&Math.abs(k-atm)<0.5) tags.push('A');
+    if(mpStrike!=null&&Math.abs(k-mpStrike)<0.5) tags.push('MP');
+    return `<div class="${cls.join(' ')}" data-strike="${k}">
+      <div class="side p" title="PUT OI ${L(po)}L"><span class="bar" style="width:${(po/maxOI*100).toFixed(1)}%"></span><span class="oiv">${L(po)}L</span></div>
+      <div class="stk">${num(k)}${tags.length?' ·'+tags.join('·')+'·':''}</div>
+      <div class="side c" title="CALL OI ${L(co)}L"><span class="bar" style="width:${(co/maxOI*100).toFixed(1)}%"></span><span class="oiv">${L(co)}L</span></div>
     </div>`;
   }).join('');
-  const labels=strikes.map(s=>{
-    const isMp=mpStrike!=null&&Math.abs(s.strike-mpStrike)<0.5;
-    return `<span style="flex:1;text-align:center;font-family:var(--mono);font-size:8px;color:${isMp?'var(--amber)':'var(--dim)'};font-weight:${isMp?'700':'400'}">${num(s.strike)}</span>`;
-  }).join('');
-  const above=(mpStrike!=null&&spot)?(mpStrike>=spot):null;
-  const badge=above==null?'':`<span class="bdg sm" style="color:${above?DN:UP};border-color:${(above?DN:UP)}55;background:${(above?DN:UP)}1f">${above?'ABOVE SPOT':'BELOW SPOT'}</span>`;
-  return `<div style="margin-bottom:14px">
-    <div style="font-size:11px;font-weight:800;margin-bottom:7px;display:flex;gap:8px;align-items:center">${name} ${badge}</div>
-    <div style="position:relative;height:104px;display:flex;align-items:flex-end;border-bottom:1px solid var(--line2);padding:0 4px">${cols}</div>
-    <div style="display:flex;padding:4px 4px 0">${labels}</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:9.5px;color:var(--mut)">
-      <span>MP <b style="color:var(--amber)">${mpStrike!=null?num(mpStrike):'—'}</b></span>
-      <span>Spot <b style="color:var(--txt)">${spot?num(spot):'—'}</b></span>
-      <span>ATM <b style="color:var(--txt)">${oi.atm_strike!=null?num(oi.atm_strike):'—'}</b></span>
-      <span>Exp <b style="color:var(--txt)">${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}</b></span></div>   <!-- cc#549: expiry moved here from removed compact max-pain card, per-index -->
-  </div>`;
+
+  /* scope 5: spot as a dashed line at its INTERPOLATED position between the two rungs that
+     bracket it - a spot of 24,212 is not at the 24,200 rung, it is a fifth of the way to 24,250.
+     Rung height is 21px, fixed by the ref. */
+  const RUNG=21;
+  let spotLine='';
+  if(spot){
+    const hi=rows.findIndex(r=>Number(r.strike)<=spot);   /* rows descend */
+    if(hi>0){
+      const up=Number(rows[hi-1].strike), dn=Number(rows[hi].strike);
+      const frac=(up-spot)/(up-dn);                        /* 0 at the higher rung */
+      const top=((hi-1)+frac+0.5)*RUNG;
+      spotLine=`<div class="lad-spot" style="top:${top.toFixed(1)}px"><span class="lbl">SPOT ${num(spot)}</span></div>`;
+    }
+  }
+
+  /* scope 3: PCR over the VISIBLE window only, and labelled as such, because a PCR over a
+     different strike set is a different number and the chip must not imply the chain-wide one. */
+  const sumPut=rows.reduce((a,r)=>a+(Number(r.put_oi)||0),0);
+  const sumCall=rows.reduce((a,r)=>a+(Number(r.call_oi)||0),0);
+  const pcrW=sumCall>0?(sumPut/sumCall):null;
+  const chips=[
+    putWall?`<span class="wc p">PUT WALL ${num(Number(putWall.strike))} · ${L(maxPut)}L</span>`:'',
+    callWall?`<span class="wc c">CALL WALL ${num(Number(callWall.strike))} · ${L(maxCall)}L</span>`:'',
+    pcrW!=null?`<span class="wc a">PCR ±7 · ${pcrW.toFixed(2)}</span>`:''
+  ].join('');
+
+  /* scope 5, same rule as cc#1151: max pain off the visible window gets a chip, never a row that
+     is not there. Here "window" is the ATM±7 strike list itself. */
+  const lo=Math.min(...rows.map(r=>Number(r.strike))), hi2=Math.max(...rows.map(r=>Number(r.strike)));
+  let edge='';
+  if(mpStrike!=null&&(mpStrike<lo||mpStrike>hi2)){
+    const above=mpStrike>hi2;
+    const dpc=spot?((mpStrike-spot)/spot*100):null;
+    edge=`<div class="mp-edge">${above?'▴':'▾'} MAX PAIN ${num(mpStrike)} · ${above?'above':'below'} the ATM±7 window`
+        +(dpc!=null?` · ${(dpc>=0?'+':'')+dpc.toFixed(2)}% from spot`:'')+` · cc#1155 audits this</div>`;
+  }else if(mpStrike==null){
+    edge=`<div class="mp-edge">MAX PAIN unavailable — endpoint returned no strike</div>`;
+  }
+
+  /* scope 6: the header pattern is kept, all four values live */
+  const head=`<div class="spine-hd" style="margin-bottom:8px"><span class="big2">${spot?num(spot):'—'}</span>
+    <span>MP ${mpStrike!=null?num(mpStrike):'—'} · ATM ${atm!=null?num(atm):'—'} · EXP ${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}</span></div>`;
+
+  return head
+    + `<div class="oi-heads"><span class="l">PUT OI</span><span class="c">STRIKE</span><span class="r">CALL OI</span></div>`
+    + `<div class="ladwrap" onclick="idxToggleOiVals(this)" title="Tap to show every OI value">${rungs}${spotLine}</div>`
+    + `<div class="wallchips">${chips}</div>` + edge;
 }
-/* cc#1151 verify E: rStrikeOI() REMOVED for the same reason. Its content is not lost - oiHisto()
-   stays and is now the LADDER view inside each per-index Levels card, which is the view
-   cc#1152 rebuilds to the ref's rung ladder. */
+/* scope 4: on a phone there is no hover, so a tap on the ladder reveals every OI number at once. */
+function idxToggleOiVals(el){ if(el&&el.classList) el.classList.toggle('vals'); }
+/* cc#1151 verify E: rStrikeOI() REMOVED. cc#1152 verify D: oiHisto() - the horizontal histogram
+   itself - is now REMOVED too, replaced by oiLadder(). Nothing calls it and nothing renders it. */
 /* new render() for the Index Intel pane (adds pivots + strike-OI vs the V10 page) */
 // cc#1058: fill the tape slots after the pane's innerHTML lands, and re-fill on every
 // re-render — render() replaces the DOM wholesale, so the mounted listeners go with it.
@@ -5840,6 +5934,7 @@ window.iiRepaintCharts=function(){
 /* expose handlers used by inline onclick (global scope) */
 window.openV10Chart=openV10Chart;
 window.idxSetLevelsView=idxSetLevelsView;   // cc#1151: SPINE|LADDER switch, called from inline onclick
+window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values, inline onclick
 window.setV10Sym=setV10Sym;
 window.closeV10Chart=closeV10Chart;
 window.openV10ChartAt=function(sym,ts){ _v10pendingScroll=(ts||null); openV10Chart(sym); };
