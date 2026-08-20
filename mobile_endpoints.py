@@ -1685,8 +1685,11 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    inline box does nothing); baseline alignment and no margin, so wrapping the letters cannot move
    the word by a pixel. currentColor everywhere means the glow is the mood's OWN colour — the
    effect never introduces a hue that could read as a different mood. */
-.hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow;
-  animation:moodLite .42s ease-out 1 both}
+/* cc#1135: the animation moves off the bare .mlt and onto .mlt.run, so the cycle driver can run
+   ONE letter at a time (the march) or every letter with a stagger (the sweep) using the same
+   keyframe. The keyframe itself is untouched — verbatim reuse, no second animation. */
+.hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow}
+.hero-mood .mlt.run{animation:moodLite .42s ease-out 1 both}
 @keyframes moodLite{
   0%  {transform:translateY(0)      scale(1);    text-shadow:none}
   45% {transform:translateY(-2px)   scale(1.06); text-shadow:0 0 10px currentColor,0 0 22px currentColor}
@@ -1694,7 +1697,11 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
 }
 /* the sweep is delight, not information — nothing is lost by skipping it, and the letters must
    land in their final state rather than mid-animation. */
-@media (prefers-reduced-motion:reduce){.hero-mood .mlt{animation:none}}
+/* cc#1135: !important is REQUIRED here now and it is not decoration. .mlt.run is a more specific
+   selector than .mlt, so without it this rule would lose to the run class and a reader who asked
+   for less motion would get the full cycle every ten seconds. The ruling says reduced-motion keeps
+   winning; this is what keeps it winning. The approved ref carries the same !important. */
+@media (prefers-reduced-motion:reduce){.hero-mood .mlt{animation:none!important}}
 .hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
 .v10line{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;
   margin-top:8px;color:var(--mut)}

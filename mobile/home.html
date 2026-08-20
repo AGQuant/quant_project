@@ -788,28 +788,83 @@ function inrShort(v){
    merely skipped inside the tick: a guarded tick still fires, and a backgrounded PWA should have
    no timer at all. On top of that each tick checks the word is actually in the viewport, so
    scrolling away stops the work too. */
-var MOOD_TIMER = null;
-function moodBlink(){
+/* cc#1135 · THE MOOD CYCLE. This REPLACES cc#1132 outright: MOOD_TIMER, its 60-second
+   setInterval and the moodBlinkStart/moodBlinkStop pair are gone. There is no setInterval left on
+   the mood path at all — the cycle is a chain of setTimeouts, so only one step is ever pending.
+   THE CYCLE, from the approved ref mood_anim_cycle_R3, looping while visible:
+     1. SWEEP  every letter runs moodLite, staggered i*60ms left to right — the cc#1118 effect
+     2. MARCH  one letter per second, left to right, that letter alone running moodLite
+     3. SWEEP  again, identical to 1
+     4. SLEEP  10 seconds, the word completely still
+   Length is derived from the word, never hardcoded, so BULLISH, NEUTRAL and CAUTIOUS all work.
+   NO NEW KEYFRAMES. Both phases reuse moodLite; the only change was moving the CSS declaration
+   from .mlt to .mlt.run so the driver can pick which letters run.
+   NOT A REPAINT: this adds and removes a class and an inline animation-delay on spans that
+   moodLetters() already rendered. The markup is never rebuilt, MOOD_SWEPT is never reset, and
+   moodColor()'s inline colour is never read or written — so the cc#1116/cc#1122 restyle behaviour
+   cannot be re-tripped. moodLite is transform and text-shadow only, so the word cannot move a
+   pixel and the cc#1134 layout ruling is safe.
+   ONE HANDLE, AND THAT IS THE WHOLE ANTI-STACKING GUARANTEE: every phase writes its pending step
+   to MOOD_H and nothing else ever schedules. moodStop clears it; moodStart is the ONLY entry into
+   the cycle and refuses whenever a handle already exists or the tab is hidden. A second driver
+   cannot exist because there is exactly one entry point and it is gated by the same handle it
+   sets, so repeated visibility flips can never leave two chains running. */
+var MOOD_H = null;
+function moodParts(){
   var host = document.querySelector('.hero-mood');
-  if (!host) return;
-  var lts = host.querySelectorAll('.mlt');
-  if (!lts.length) return;                       /* nothing swept: nothing to replay */
-  var r = host.getBoundingClientRect();
-  if (r.bottom < 0 || r.top > (window.innerHeight || 0)) return;   /* scrolled away */
-  for (var i = 0; i < lts.length; i++) lts[i].style.animation = 'none';
-  void host.offsetWidth;                         /* one reflow, then let them all go again */
-  for (var j = 0; j < lts.length; j++) lts[j].style.animation = '';
+  if (!host) return null;
+  var l = Array.prototype.slice.call(host.querySelectorAll('.mlt'));
+  return l.length ? { host: host, l: l } : null;
 }
-function moodBlinkStart(){
-  if (MOOD_TIMER || document.visibilityState === 'hidden') return;
-  MOOD_TIMER = setInterval(moodBlink, 60000);
+function moodReset(m){
+  for (var i = 0; i < m.l.length; i++){ m.l[i].classList.remove('run'); m.l[i].style.animationDelay = ''; }
+  void m.host.offsetWidth;            /* ONE reflow on the host, not one per letter */
 }
-function moodBlinkStop(){
-  if (!MOOD_TIMER) return;
-  clearInterval(MOOD_TIMER); MOOD_TIMER = null;
+function moodOnScreen(m){
+  var r = m.host.getBoundingClientRect();
+  return !(r.bottom < 0 || r.top > (window.innerHeight || 0));
+}
+function moodSweep(m, done){
+  moodReset(m);
+  for (var i = 0; i < m.l.length; i++){
+    m.l[i].style.animationDelay = (i * 60) + 'ms';
+    m.l[i].classList.add('run');
+  }
+  MOOD_H = setTimeout(done, m.l.length * 60 + 420 + 150);
+}
+function moodMarch(m, done){
+  var i = 0;
+  (function next(){
+    if (i >= m.l.length){ done(); return; }
+    moodReset(m);                     /* the previous letter is cleared before the next fires */
+    m.l[i].classList.add('run');      /* no delay: this letter pops now */
+    i++;
+    MOOD_H = setTimeout(next, 1000);
+  })();
+}
+function moodSleep(m, done){ moodReset(m); MOOD_H = setTimeout(done, 10000); }
+function moodCycle(){
+  var m = moodParts();
+  /* not painted yet, or scrolled away: idle-wait rather than killing the cycle */
+  if (!m || !moodOnScreen(m)){ MOOD_H = setTimeout(moodCycle, 1000); return; }
+  moodSweep(m, function(){
+    moodMarch(m, function(){
+      moodSweep(m, function(){ moodSleep(m, moodCycle); });
+    });
+  });
+}
+function moodStart(){
+  if (MOOD_H || document.visibilityState === 'hidden') return;
+  moodCycle();
+}
+function moodStop(){
+  if (MOOD_H){ clearTimeout(MOOD_H); MOOD_H = null; }
+  var m = moodParts();
+  if (m) moodReset(m);               /* no animation state survives while hidden */
 }
 document.addEventListener('visibilitychange', function(){
-  if (document.visibilityState === 'visible') moodBlinkStart(); else moodBlinkStop();
+  /* never resume mid-cycle: hidden tears everything down, visible starts again at the sweep */
+  if (document.visibilityState === 'visible') moodStart(); else moodStop();
 });
 
 var MOOD_SWEPT = false;
@@ -2864,7 +2919,7 @@ Promise.all([
   /* 5 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
-  moodBlinkStart();   /* cc#1132: the .mlt letters only exist after this paint */
+  moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
 
   var tools = document.createElement('div');
   tools.className = 'tools';
