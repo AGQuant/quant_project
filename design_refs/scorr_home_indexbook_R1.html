@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESIGN REF scorr_home_indexbook_R1 — Home: clickable indices + Index Intel button + Index Book strip</title>
+<style>
+  /* ============ TOKENS — matched to live app Home (GOLD NIGHT dark field) ============ */
+  :root{
+    --field:#0a0e17;          /* page */
+    --panel:#111a2e;          /* card navy */
+    --panel-edge:#1c2942;
+    --ink:#e8edf6;            /* chalk */
+    --dim:#7d8aa5;
+    --up:#37d67f;
+    --down:#ff5470;
+    --amber:#e8a33d;
+    --aqua:#57d7ff;
+    --gold:#d8b24a;
+    --mono:'JetBrains Mono','Roboto Mono',ui-monospace,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--field);color:var(--ink);font-family:var(--mono);padding:14px 12px 40px;max-width:430px;margin:0 auto}
+  .refnote{font-size:10px;color:var(--dim);letter-spacing:.08em;margin-bottom:10px;line-height:1.6}
+  .refnote b{color:var(--gold)}
+
+  /* cut-corner grammar, as live */
+  .cut{clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,0 100%)}
+
+  /* ============ THE MARKET TODAY — card size UNCHANGED, three additions only ============ */
+  .card{background:var(--panel);border:1px solid var(--panel-edge);padding:20px 18px 26px;position:relative}
+  .card-head{display:flex;justify-content:space-between;align-items:baseline}
+  .card-head h2{font-size:15px;font-style:italic;letter-spacing:.04em}
+  .card-head .date{font-size:12px;color:var(--dim)}
+  .mood{font-size:56px;font-weight:800;color:var(--up);letter-spacing:.02em;margin:14px 0 6px}
+  .mood span{display:inline-block;animation:flash .5s ease both}
+  /* cc#1157: stagger 0.04s (was 0.12s), duration .5s (was 1.5s) — 3x faster wave */
+  .mood span:nth-child(n){animation-delay:calc(var(--i) * .04s)}
+  @keyframes flash{0%{opacity:0}60%{opacity:1}100%{opacity:1}}
+  .fails{color:var(--dim);font-size:14px;margin-bottom:12px}
+  .bar{height:8px;background:#182339;border-radius:4px;overflow:hidden;margin-bottom:16px}
+  .bar i{display:block;height:100%;width:25%;background:linear-gradient(90deg,#c22147,#ff5470)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .chip{font-size:12.5px;padding:12px 12px;border:1px solid;background:#12203160}
+  .chip.ok{color:var(--up);border-color:#1e5c3d}
+  .chip.no{color:var(--down);border-color:#7e2b40;background:#33182360}
+  .chip.info{color:var(--amber);border-color:#6b4b1c;background:transparent}
+  .chip .v{font-weight:700}
+
+  /* ADDITION 1 — indices row: now tappable, same affordance family as chips */
+  .idx-row{display:flex;justify-content:space-between;border-top:1px solid var(--panel-edge);padding-top:14px}
+  .idx{display:flex;align-items:baseline;gap:8px;padding:4px 6px;margin:-4px -6px;border-radius:4px;cursor:pointer}
+  .idx:active{background:#182339}
+  .idx .lbl{color:var(--dim);font-size:12px}
+  .idx .px{font-size:19px;font-weight:700;border-bottom:1px dashed var(--dim)} /* dashed underline = tap target, exactly like ADR/VIX */
+  .idx .chg{font-size:13px;font-weight:700}
+  .idx .chart-glyph{font-size:11px;color:var(--dim)}
+  .up{color:var(--up)} .down{color:var(--down)}
+
+  /* ADDITION 2 — INDEX INTEL button: straddles the card's bottom edge, costs ZERO height */
+  .intel-btn{position:absolute;left:50%;bottom:0;transform:translate(-50%,50%);
+    background:var(--field);border:1px solid var(--aqua);color:var(--aqua);
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;padding:7px 16px;cursor:pointer}
+  .intel-btn:active{background:#0e2233}
+
+  /* ============ ADDITION 3 — INDEX BOOK strip: REPLACES the V10 signals box ============ */
+  .sect{margin-top:34px;display:flex;align-items:center;gap:10px}
+  .sect h3{font-size:12.5px;letter-spacing:.18em;color:var(--aqua);font-style:italic}
+  .sect .rule{flex:1;height:1px;background:var(--panel-edge)}
+  .book{background:var(--panel);border:1px solid var(--panel-edge);margin-top:10px}
+  .book-row{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;cursor:pointer}
+  .book-row + .book-row{border-top:1px solid var(--panel-edge)}
+  .book-row:active{background:#182339}
+  .br-id{display:flex;align-items:center;gap:10px}
+  .br-id .sym{font-size:14px;font-weight:700;letter-spacing:.04em;color:var(--amber)}
+  .dir{font-size:10.5px;font-weight:800;letter-spacing:.1em;padding:3px 8px;border:1px solid}
+  .dir.long{color:var(--up);border-color:#1e5c3d}
+  .dir.short{color:var(--down);border-color:#7e2b40}
+  .br-pnl{display:flex;align-items:center;gap:12px}
+  .br-pnl .pnl{font-size:16px;font-weight:800}
+  .br-pnl .arrow{color:var(--dim);font-size:14px}
+  .book-cap{font-size:10px;color:var(--dim);letter-spacing:.08em;padding:9px 16px;border-top:1px solid var(--panel-edge)}
+  .as-of{color:var(--gold)}
+</style>
+</head>
+<body>
+  <div class="refnote">
+    DESIGN REF <b>scorr_home_indexbook_R1</b> · Home page · card size UNCHANGED · V10 box REMOVED, Index Book strip in its place · P&amp;L values are <b>SAMPLE</b> — live wiring per spec · tap any underlined value / row (demo alert)
+  </div>
+
+  <!-- THE MARKET TODAY — exactly as live, plus the three additions -->
+  <div class="card cut">
+    <div class="card-head"><h2>THE MARKET TODAY</h2><span class="date">2026-08-20</span></div>
+    <div class="mood" id="mood"></div>
+    <div class="fails">1 of 4 checks failed today.</div>
+    <div class="bar"><i></i></div>
+    <div class="chips">
+      <div class="chip ok cut">ADR <span class="v">2.35</span></div>
+      <div class="chip ok cut">Nifty Day <span class="v">+0.64%</span></div>
+      <div class="chip no cut">Nifty Week <span class="v">-0.67%</span></div>
+      <div class="chip ok cut">Nifty Month <span class="v">+0.98%</span></div>
+      <div class="chip ok cut">PCR <span class="v">1.01</span></div>
+      <div class="chip info cut">VIX <span class="v">10.8</span></div>
+    </div>
+
+    <!-- ADDITION 1: NIFTY / BANKNIFTY now tappable → index chart (same pattern as ADR/VIX) -->
+    <div class="idx-row">
+      <div class="idx" onclick="alert('→ opens NIFTY chart (existing chart view)')">
+        <span class="lbl">NIFTY</span><span class="px">24,232</span>
+        <span class="chg up">+0.64%</span><span class="chart-glyph">▤</span>
+      </div>
+      <div class="idx" onclick="alert('→ opens BANKNIFTY chart (existing chart view)')">
+        <span class="lbl">BANKNIFTY</span><span class="px">57,496</span>
+        <span class="chg up">+0.45%</span><span class="chart-glyph">▤</span>
+      </div>
+    </div>
+
+    <!-- ADDITION 2: small button riding the bottom edge — zero extra card height -->
+    <button class="intel-btn" onclick="alert('→ opens Index Intel page')">INDEX INTEL ›</button>
+  </div>
+
+  <!-- ADDITION 3: INDEX BOOK strip — this REPLACES the old INDEX SIGNALS · V10 box -->
+  <div class="sect"><h3>INDEX BOOK · OPEN</h3><div class="rule"></div></div>
+  <div class="book cut">
+    <div class="book-row" onclick="alert('→ opens NIFTY chart WITH trades marked (already-built chart-wise trades view)')">
+      <div class="br-id"><span class="sym">NIFTY</span><span class="dir long">LONG</span></div>
+      <div class="br-pnl"><span class="pnl up">+12,450</span><span class="arrow">›</span></div>
+    </div>
+    <div class="book-row" onclick="alert('→ opens BANKNIFTY chart WITH trades marked')">
+      <div class="br-id"><span class="sym">BANKNIFTY</span><span class="dir short">SHORT</span></div>
+      <div class="br-pnl"><span class="pnl down">-3,210</span><span class="arrow">›</span></div>
+    </div>
+    <div class="book-cap">OPEN OPTION P&amp;L · TAP FOR CHART + TRADES · <span class="as-of">AS-OF 15:30 IST</span></div>
+  </div>
+
+<script>
+  // mood word letter flash — cc#1157 timing (3x faster: .04s stagger, .5s flash)
+  const word="BULLISH", host=document.getElementById('mood');
+  [...word].forEach((ch,i)=>{const s=document.createElement('span');s.textContent=ch;s.style.setProperty('--i',i);host.appendChild(s);});
+</script>
+</body>
+</html>
