@@ -144,12 +144,31 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    46.8px cell (a 6-char value needs ~30px, 36% headroom), at 412px 10.7px against 65.2px.
    ellipsis is the last-resort cue if a value somehow still cannot fit — a clipped number that
    says it is clipped, never one silently painted over its neighbour. */
+/* cc#1136 · ROUND 4 — the ellipsis clause above is WITHDRAWN, and both reasons are mine to own.
+   ONE: that "last resort" fired on every value on his phone. Device font scaling in the founder's
+   PWA browser defeats text-size-adjust, so the clamp could not shrink far enough, every .rung b
+   overflowed, and the whole ladder rendered as 23,… — a number that has lost its digits is worse
+   than one that needs a swipe. TWO: the scroll fallback I described in the cc#1127 result as the
+   live safety net was DEAD CODE. minmax(0,1fr) tracks cannot exceed their container, so
+   overflow-x:auto had nothing to scroll and .hasmore could never fire. I stated it as a working
+   fallback and it was not one.
+   THE RULING: numbers are NEVER ellipsized. Either five full columns fit, or the row becomes a
+   real scroller with the edge fade. Transplanted verbatim from the approved design ref
+   ladder_scrollmode_R1 per APPROVED_REF_EXACT_SPEC_RULE_V1 — three CSS changes and nothing else.
+   WHY THE MEASUREMENT CANNOT BE FOOLED: scrollWidth vs clientWidth is the BROWSER reporting its
+   own rendering after whatever font scale the device applied. It is not a prediction from font
+   metrics, which is what every previous round got wrong. overflow:hidden on .rung stays, so the
+   cc#1127 anti-overlap guarantee is untouched — the two rules cover different failures. */
 .ladder{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:start;
- margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+ margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.ladder::-webkit-scrollbar{display:none}
+/* measured scroll mode: tracks widen to the full number, the row scrolls, the fade engages */
+.ladder.scrollmode{grid-template-columns:repeat(5,minmax(max-content,1fr))}
 .rung{min-width:0;overflow:hidden;text-align:center;font-family:'JetBrains Mono',ui-monospace,monospace;
  font-size:clamp(8px,2.6vw,11px);padding:5px 0;border-top:2px solid var(--edge);color:var(--muted);
  -webkit-text-size-adjust:100%;text-size-adjust:100%}
-.rung b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
+/* no overflow:hidden and no text-overflow on the b — a digit is never traded for an ellipsis */
+.rung b{display:block;white-space:nowrap;margin-top:2px;
  font-variant-numeric:tabular-nums}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
@@ -460,16 +479,42 @@ function loadInternals(){
     .catch(function(){});
 }
 
-function bindLadders(){
+/* cc#1136 · fitLadders — transplanted from design ref ladder_scrollmode_R1, which merges the
+   cc#1111 fade binding into the measurement (an allowed seam; the fade behaviour is identical).
+   THE MEASUREMENT IS THE WHOLE POINT. Every previous round PREDICTED whether the numbers would
+   fit, from font metrics I could not see. This asks the browser what it actually rendered:
+   b.scrollWidth > b.clientWidth means this value is wider than its cell, right now, on this
+   device, after whatever font scale the user set. No device font scaling can defeat it, because
+   it is not a prediction — it is the browser reporting itself.
+   Equal tracks are tried FIRST and scrollmode is entered only when a value genuinely does not
+   fit, so a normal phone still gets five clean columns and nothing to swipe. */
+function fitLadders(){
   document.querySelectorAll('.ladder').forEach(function(el){
+    el.classList.remove('scrollmode');       /* always measure in equal-track mode */
+    var over=false;
+    el.querySelectorAll('.rung b').forEach(function(b){
+      if(b.scrollWidth > b.clientWidth+1) over=true;
+    });
+    if(over) el.classList.add('scrollmode');
     var wrap=el.parentNode;
     var sync=function(){
       wrap.classList.toggle('hasmore', el.scrollWidth-el.clientWidth-el.scrollLeft > 2);
     };
-    el.addEventListener('scroll', sync, {passive:true});
+    el.onscroll=sync;                        /* onscroll, not addEventListener: re-measuring must
+                                                not stack a second handler on the same node */
     sync();
   });
 }
+/* Re-measure when the box changes under the content. One debounced listener for both events —
+   an orientation change is a resize the layout has to survive, and a rotation into portrait is
+   exactly where five columns stop fitting. */
+var LAD_RAF=null;
+function fitLaddersSoon(){
+  if(LAD_RAF) return;
+  LAD_RAF=requestAnimationFrame(function(){ LAD_RAF=null; fitLadders(); });
+}
+addEventListener('resize', fitLaddersSoon);
+addEventListener('orientationchange', fitLaddersSoon);
 
 async function boot(){
   let d=null;
@@ -606,7 +651,7 @@ async function boot(){
     <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
-  bindLadders();   /* cc#1111: the ladders only exist after this paint */
+  fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
   iDots();         /* cc#1121: same reason — the deck's nodes are replaced on every render */
   loadInternals();
 }
