@@ -37,6 +37,7 @@ The batch scanner /api/trade-check/v4/scan lives in tc_v4_scan.py (cc#387) and i
 """
 
 import os
+import logging
 from datetime import datetime, timedelta, date
 
 import psycopg
@@ -47,6 +48,8 @@ from nifty_dwm import live_nifty_dwm
 from r6_volume import volume_ratio
 # reuse the pure low-level helpers from the older v4 module — no rule logic imported
 from tc_v4_endpoints import _f, _r, _rsi, _weekly_closes, _current_expiry
+
+log = logging.getLogger("tc_v4_dual")   # cc#1172: the registry fallback must be able to say so
 
 router = APIRouter()
 
@@ -1152,6 +1155,102 @@ _STRONG_RATIO = 0.84   # cc#767: preserves the prior BUY strictness (18.5/22 = 0
 _VALID_RATIO = 0.65    # cc#767: preserves the prior BUY floor  (14.4/22 = 0.655)
 
 
+# ══ cc#1172 TC_SCORE_V1 (session_log 27957) ═══════════════════════════════════════════════════
+# ONE normalized 0-10 score per bucket, weights from the tc_rule_weights registry.
+#
+#     score10 = 10 * sum(weight_i * pass_i) / sum(weight_i)      pass_i = credit_i / max_i
+#
+# pass_i is the ratio, not the raw credit, which is what preserves halves EXACTLY as each rule
+# scores them today: a rule that gives 1.0 of its own max 2.0 is a half here too. Reading raw
+# credit instead would silently double-count every 2-point rule.
+#
+# BANDS. STRONG 8.4 and VALID 6.5 on the 10-scale are the SAME thresholds as today by construction
+# — _STRONG_RATIO is 0.84 and _VALID_RATIO is 0.65 — so nothing re-bands as a side effect of this
+# card. WATCH (5.0-6.5) is genuinely new, carved out of what is REJECT today, and is founder-directed.
+#
+# ZERO-VETO STANDS. 27957's draft said a failed gate caps the verdict at REJECTED; there is no such
+# mechanism and cc#677 (spec id=9035, founder-final) is explicit that the verdict is score bands
+# alone. Fable struck the clause as a drafting error (forum log 2976). _verdict10 therefore consults
+# the score and nothing else, exactly like _verdict.
+_STRONG_10 = 8.4
+_VALID_10 = 6.5
+_WATCH_10 = 5.0
+
+_WEIGHTS_CACHE = {"at": 0.0, "map": None}
+_WEIGHTS_TTL = 60.0        # seconds; a founder re-weight is an UPDATE and should show up promptly
+
+
+def _rule_weights(force=False):
+    """The registry, as {bucket: {rule_key: weight}}. Cached briefly because it is read once per
+    scored card and the founder re-weights by UPDATE, not by deploy.
+
+    A registry that cannot be read must NOT silently become all-ones — that would serve a
+    plausible wrong score with no signal. It returns None, and the caller falls back to the raw
+    ratio and SAYS SO in the payload.
+    """
+    import time as _t
+    now = _t.time()
+    if not force and _WEIGHTS_CACHE["map"] is not None and (now - _WEIGHTS_CACHE["at"]) < _WEIGHTS_TTL:
+        return _WEIGHTS_CACHE["map"]
+    try:
+        with psycopg.connect(_DB) as conn, conn.cursor() as cur:
+            cur.execute("SELECT bucket, rule_key, weight FROM tc_rule_weights WHERE active")
+            out = {}
+            for b, k, w in cur.fetchall():
+                out.setdefault(b, {})[k] = float(w)
+        if not out:
+            return None
+        _WEIGHTS_CACHE["at"] = now
+        _WEIGHTS_CACHE["map"] = out
+        return out
+    except Exception as e:
+        log.warning("tc_rule_weights unreadable (%s) - scores fall back to unweighted ratio "
+                    "and the payload says so", e)
+        return None
+
+
+def _verdict10(score10):
+    """Bands on the 10-scale. Score alone — cc#677 ZERO-VETO."""
+    if score10 is None:
+        return None
+    if score10 >= _STRONG_10:
+        return "STRONG"
+    if score10 >= _VALID_10:
+        return "VALID"
+    if score10 >= _WATCH_10:
+        return "WATCH"
+    return "REJECT"
+
+
+def _score10(rules, bucket, weights=None):
+    """Return (score10, weighted, unmapped_keys). `weighted` is False when the registry was
+    unreadable or the bucket has no rows, so a surface can label an unweighted number rather than
+    present it as the calibrated one.
+
+    A rule with no registry row contributes at weight 1 and is NAMED in the return, never dropped
+    and never silently defaulted — the same discipline the push-1 gate used.
+    """
+    wmap = weights if weights is not None else _rule_weights()
+    bw = (wmap or {}).get(bucket) or {}
+    num = den = 0.0
+    unmapped = []
+    for r in rules:
+        mx = float(r.get("max") or 0)
+        if mx <= 0:
+            continue
+        w = bw.get(r["rule"])
+        if w is None:
+            w = 1.0
+            if bw:
+                unmapped.append(r["rule"])
+        frac = float(r.get("credit") or 0) / mx
+        num += w * frac
+        den += w
+    if den <= 0:
+        return None, bool(bw), unmapped
+    return round(10.0 * num / den, 2), bool(bw), unmapped
+
+
 def _verdict(score, max_score):
     """cc#767: DYNAMIC denominator (score_denominator rule, propagation map id=265). After the V8-gate
     imports + flow consolidation each style bucket carries its OWN max (see card_maxes() — derived,
@@ -1209,9 +1308,23 @@ def score_card(d, style, side):
         r["legacy_id"] = r["rule"]
     strong = round(_STRONG_RATIO * max_score, 1)
     valid = round(_VALID_RATIO * max_score, 1)
-    card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
+    label = f"{side}-{style[:3]}"
+    card = {"style": style, "side": side, "label": label,
             "score": score, "max": max_score, "verdict": _verdict(score, max_score), "rules": rules}
     card["bands"] = f"STRONG≥{strong} / VALID {valid}–{strong} / REJECT<{valid}"
+    # cc#1172: the normalized 0-10 score rides ALONGSIDE the raw score/max, which stay exactly as
+    # they were. Detail views that print "14.5 / 21" are untouched; surfaces that want the
+    # comparable number read score10. Nothing is removed, so no consumer breaks on this push.
+    s10, weighted, unmapped = _score10(rules, label)
+    card["score10"] = s10
+    card["verdict10"] = _verdict10(s10)
+    card["score10_weighted"] = weighted
+    card["bands10"] = f"STRONG≥{_STRONG_10} / VALID {_VALID_10} / WATCH {_WATCH_10}"
+    if unmapped:
+        # Named, never silently defaulted — the push-1 discipline, at compute time.
+        card["score10_unmapped_rules"] = unmapped
+    for r in rules:
+        r["weight"] = (_rule_weights() or {}).get(label, {}).get(r["rule"])
     if side == "SELL":
         card["recal"] = "V8-ALIGNED cc#767"
     return card
