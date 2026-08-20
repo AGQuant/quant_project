@@ -3698,7 +3698,14 @@ function renderFunnel(b){
 // fresh-book headline and to the Day Log, not to this tab. The founder's instruction is explicit —
 // with DURATION=All and BASKET=All this tab must read 86 trades across all five baskets, retired
 // or not. cc#817's view is not lost: the toggle still hides retired baskets in one tap.
-let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=true;
+// cc#1156 (founder ruling 20-Aug): TLOG_ERA. This REVERSES the cc#871 founder ruling of 05-Aug
+// that is quoted directly above — that one said the Trade Log IS the complete ledger and the era
+// split belongs elsewhere. The newer ruling wins: one strategy must show one canonical P&L, and
+// the headline the founder reads first must not mix the dead pre-cutover era into it. The cc#871
+// comment above is left in place deliberately, as the record of what was superseded and when.
+// Session-scoped by design, per scope 3 — never persisted, so a reload always returns to default.
+let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=true, TLOG_ERA='fresh';
+function setTlogEra(v){TLOG_ERA=(v==='all'?'all':'fresh');const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogDur(v){TLOG_DUR=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogBasket(v){TLOG_BASKET=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogRetired(v){
@@ -3719,8 +3726,37 @@ function renderTradeLog(){
   // era-filtered fresh-book view. Same source feeds BOTH the list and the P&L card, so a pre-cutover
   // basket (e.g. sell_momentum) shows its trades with a matching P&L. Falls back to the era fields
   // if an older API build hasn't shipped the full-history ones yet.
-  const _allT=p.all_trades||p.recent_trades||[];
-  let t=_allT.slice();const s=p.all_summary||p.summary||{};
+  // cc#1156: the era filter runs FIRST, and its bound is READ FROM THE PAYLOAD
+  // (p.rebuild_cutover_ts = app_config.v8_paper_rebuild_cutover_ts), never typed here. That is the
+  // same constant v8_book_canon._cutover() and the Day Log both use, which is what makes the two
+  // tabs agree to the paisa rather than agreeing by coincidence.
+  //
+  // ON SCOPE 1: the card asks for a shared cutover helper to be extracted. It already exists —
+  // v8_book_canon.py, built by cc#970 under rule 13, is THE one formula, and main.py already
+  // serves both of its eras as p.summary (fresh) and p.all_summary (all). Writing a second helper
+  // would be the duplication rule 13 exists to prevent, so this tab consumes the canon instead.
+  const _era = (TLOG_ERA==='all') ? 'all' : 'fresh';
+  const _cutTs = p.rebuild_cutover_ts || null;
+  const _allT0 = p.all_trades||p.recent_trades||[];
+  // No cutover served => no era split is possible. Show the full ledger and SAY SO, rather than
+  // silently labelling an unfiltered set as post-cutover — the wrong-number-that-looks-right.
+  const _eraOk = !!_cutTs;
+  // NORMALISE BEFORE COMPARING. The ledger's entry_ts arrives as "2026-07-18 06:17:59.896362"
+  // (space) while app_config stores the cutover as "2026-07-18T06:17:59.896362" (T). Comparing
+  // those as raw strings is wrong for any row on the cutover DATE itself: at index 10 a space is
+  // 0x20 and 'T' is 0x54, so "2026-07-18 07:00" sorts BEFORE "2026-07-18T06:17" and a trade
+  // entered an hour AFTER the cutover would be silently dropped from the fresh book. Both sides
+  // are flattened to the same separator first. Lexical comparison is then safe and exact, because
+  // both are zero-padded ISO in the same timezone.
+  const _tsKey = v => String(v||'').replace('T',' ');
+  const _cutKey = _tsKey(_cutTs);
+  const _allT = (_era==='fresh' && _eraOk)
+    ? _allT0.filter(x=>_tsKey(x.entry_ts) >= _cutKey)
+    : _allT0;
+  let t=_allT.slice();
+  // The canon serves BOTH eras already; pick the matching one so the All/All headline is the
+  // server's canonical number and not a client recompute that could drift from it.
+  const s=(_era==='fresh' && _eraOk) ? (p.summary||{}) : (p.all_summary||p.summary||{});
   // cc#1019: Futures view is the FUT-PRICED book — filter the ledger to trades that CLOSED on or
   // after the cutover, and force the recompute path below (isAll can't fall back to the all-time
   // server summary over a filtered set, or a futures list would sit under an all-time headline —
@@ -3758,7 +3794,10 @@ function renderTradeLog(){
   // printing s.total_pnl would show live-basket rows under a P&L that silently contains the retired
   // Rs.62k era: the exact number the founder wants out of the headline. When retired baskets exist
   // and are hidden, we recompute from the visible subset instead.
-  const isAll=(!_tlogFut&&TLOG_DUR==='all'&&TLOG_BASKET==='all'&&(TLOG_RETIRED||_retiredBk.length===0));
+  // cc#1156: `s` now matches the active era, so isAll stays valid for both. It still requires the
+  // era filter to have been applicable — with no cutover served, _allT is the full ledger and only
+  // the all-era summary describes it.
+  const isAll=(!_tlogFut&&TLOG_DUR==='all'&&TLOG_BASKET==='all'&&(TLOG_RETIRED||_retiredBk.length===0)&&(_era==='all'||_eraOk));
   const bTrades=isAll?(s.trades??t.length):t.length;
   // cc#371: classify WINS/LOSSES by gross-P&L SIGN, not the result string. result==TARGET/SL missed
   // GAP_TARGET_EXIT / GAP_SL_EXIT / MAX_HOLD / CONFLICT_EXIT rows (21+13!=42). ONE classifier for
@@ -3785,6 +3824,9 @@ function renderTradeLog(){
   const bAvgWin =_winRows.length ?_winRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_winRows.length :null;
   const bAvgLoss=_lossRows.length?_lossRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_lossRows.length:null;
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
+  // cc#1156 scope 3: the era switch. Two states, default 'Since cutover', never remembered.
+  const eraBtns=[['fresh','Since cutover'],['all','Full ledger since inception']]
+    .map(([v,l])=>`<button class="btn${TLOG_ERA===v?' on':''}" onclick="setTlogEra('${v}')" title="${v==='fresh'?'The post-cutover book — the era the Day Log counts, so the two tabs agree.':'Every closed trade since inception, including the retired pre-cutover era.'}">${l}</button>`).join('');
   // cc#751: DYNAMIC basket row — derived from the baskets actually present in the trade ledger (union
   // any currently-qualifying basket), so it always reflects what has run/is running instead of a stale
   // hardcoded 6. Canonical display order; unknown baskets sort last.
@@ -3822,14 +3864,21 @@ function renderTradeLog(){
   // same page and legitimately print different totals: this tab counts EVERY closed trade since
   // inception, the Day Log counts only the post-cutover era (cc#504). Two correct views of two
   // different sets is fine; two numbers on one screen with nothing saying why is not.
-  const scopeNote=isAll
-    ? 'Counting the COMPLETE ledger &mdash; every closed trade since inception, all baskets, retired included. The Day Log tab counts only the post&#8209;cutover era, so its totals are smaller on purpose.'
-    : ('Counting a FILTERED subset &mdash; '+[TLOG_DUR==='all'?null:(TLOG_DUR==='1w'?'last 1 week':'last 1 month'),
+  // cc#1156: the note follows the ERA as well as the filters. The full-ledger view carries an
+  // explicit caption saying it includes the retired pre-cutover era — scope 3. That view stays
+  // fully reachable; it just no longer speaks first.
+  const _eraNote = (_era==='fresh')
+    ? (_eraOk
+        ? 'Counting the POST&#8209;CUTOVER era only &mdash; the same book the Day Log counts, so the two tabs agree to the rupee. Switch to the full ledger for every trade since inception.'
+        : 'Cutover not served by the API this load, so no era split could be applied &mdash; this is the FULL ledger. It is labelled honestly rather than shown as post&#8209;cutover.')
+    : 'FULL LEDGER SINCE INCEPTION &mdash; includes the retired pre&#8209;cutover era, so these totals are LARGER than the Day Log and larger than this tab\'s default. History, not the book being traded.';
+  const scopeNote = isAll ? _eraNote
+    : (_eraNote+'<br>Counting a FILTERED subset &mdash; '+[TLOG_DUR==='all'?null:(TLOG_DUR==='1w'?'last 1 week':'last 1 month'),
         TLOG_BASKET==='all'?null:basketLabel(TLOG_BASKET),
         TLOG_RETIRED?null:'retired baskets hidden'].filter(Boolean).join(' &middot; ')+
-       '. Clear all three to see the complete ledger.');
+       '. Clear all three to see the whole era.');
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Era</span>${eraBtns}</div>    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}${retBtn?'<span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>'+retBtn:''}</div>
   </div>`;
   const summaryCards=`<div class="cards">
