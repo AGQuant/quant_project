@@ -118,10 +118,34 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  opacity:0;transition:opacity .15s;
  background:linear-gradient(to right,rgba(0,0,0,0),var(--panel))}
 .ladwrap.hasmore::after{opacity:1}
+/* cc#1127 — THIRD ATTEMPT, AND THE FIRST ONE WITH A STRUCTURAL GUARANTEE. cc#1111 and cc#1124
+   (mine) both made the numbers USUALLY fit. Neither made overlap IMPOSSIBLE, which is why it came
+   back as glyph soup on his phone while every measurement here said fine.
+   WHAT ACTUALLY HAPPENED. The grid was never wrong: five equal tracks, no container overflow,
+   measured clean at 320/360/390/412px. The value text was held off its neighbours only by being
+   narrower than its track, and four things conspire the moment it is not — .rung b is nowrap so
+   it cannot wrap, .rung had no overflow containment so it painted outside its track,
+   text-align:center threw that overflow BOTH ways so one value hit both neighbours at once, and
+   the text width depends on the FONT and the DEVICE TEXT SCALE, neither of which this page
+   controlled. Reproduced with a real monospace face at 2x text scaling: the value overflows a
+   54.8px cell by 17.5px and all four adjacent pairs overlap.
+   THE GUARANTEE IS overflow:hidden ON THE CELL. A cell's text can no longer paint outside its own
+   grid track under ANY font, any text scale, any language — the geometry forbids it, rather than
+   the arithmetic happening to work out. That is the structural property the previous two fixes
+   lacked, and it is why this one cannot regress the same way.
+   THE OTHER TWO RULES STOP IT EVER NEEDING TO CLIP. text-size-adjust:100% neutralises mobile text
+   inflation, which is the input that broke the arithmetic. And the value size is now tied to the
+   viewport instead of pinned at 10px, so it shrinks with the cell: at 320px it is 8.3px against a
+   46.8px cell (a 6-char value needs ~30px, 36% headroom), at 412px 10.7px against 65.2px.
+   ellipsis is the last-resort cue if a value somehow still cannot fit — a clipped number that
+   says it is clipped, never one silently painted over its neighbour. */
 .ladder{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:start;
  margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.rung{min-width:0;text-align:center;font-family:'JetBrains Mono';font-size:10px;padding:5px 0;border-top:2px solid var(--edge);color:var(--muted)}
-.rung b{display:block;white-space:nowrap;margin-top:2px}
+.rung{min-width:0;overflow:hidden;text-align:center;font-family:'JetBrains Mono',ui-monospace,monospace;
+ font-size:clamp(8px,2.6vw,11px);padding:5px 0;border-top:2px solid var(--edge);color:var(--muted);
+ -webkit-text-size-adjust:100%;text-size-adjust:100%}
+.rung b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
+ font-variant-numeric:tabular-nums}
 .unavail{font-size:11px;color:var(--muted);font-family:'JetBrains Mono'}
 /* cc#1121 · the INTERNALS deck. Same mechanism as mobile/home.html's hero deck — a scroll-snap
    flex track and a dot row — so the swipe feels identical to the one already on Home rather than
