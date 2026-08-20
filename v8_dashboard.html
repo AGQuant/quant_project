@@ -2358,9 +2358,21 @@ function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mi
 // (empty is honest when nothing qualified today) -- the score-gate near-miss watchlist stays
 // available only inside the STOCK PASS COUNT / funnel views, which never called this renderer.
 // SLOT_FULL folded into SIGNAL·slots; reason is a muted tag appended to the SIGNAL badge.
+// cc#1145 · plain English for every gate. Four reasons is the whole vocabulary the server can
+// emit (_MISS_REASON_MAP: slots, blackout, conflict, cutoff), so this map is complete rather than
+// a best-effort — an unmapped reason still renders its tag, just without a tooltip, so a new gate
+// name added server-side degrades to today's behaviour instead of disappearing.
+const SIG_REASON_TEXT={
+  slots:'Qualified, but no free slot on this side.',
+  conflict:'Already holding this stock the other way, so the engine skipped it.',
+  cutoff:'Qualified too late in the day. Entries close at 15:15.',
+  blackout:'Results are due. The engine stays out around earnings.'
+};
 function statusBadge(status,reason){
   if(status==='OPEN')return`<span class="badge b-open">&#9679; OPEN</span>`;
-  const rt=reason?`<span class="sig-reason">&middot;${String(reason).toUpperCase()}</span>`:'';
+  const k=String(reason||'').toLowerCase();
+  const tip=SIG_REASON_TEXT[k]?` title="${SIG_REASON_TEXT[k].replace(/"/g,'&quot;')}"`:'';
+  const rt=reason?`<span class="sig-reason"${tip}>&middot;${String(reason).toUpperCase()}</span>`:'';
   return`<span class="badge b-qualified">SIGNAL</span>${rt}`;}
 function rowClass(status){if(status==='OPEN')return'row-open';return'';}
 function mobCardClass(status){if(status==='OPEN')return'mob-open';return'';}
@@ -3123,7 +3135,7 @@ const V8_COLS=[
   // x.net_pnl - which stays null so that nothing summing net_pnl can ever pick it up. Muted,
   // italic and titled, so a glance figure can never be mistaken for a booked one.
   ["net_pnl","Net P&L",   x=>(x.notional===true&&x.notional_pnl!=null)
-      ?`<td style="text-align:right;font-style:italic;opacity:.72" class="${pnlCls(x.notional_pnl)}" title="NOTIONAL — not a trade. Reference entry ${x.ref_entry!=null?num(x.ref_entry,2):'--'} frozen at signal time; nothing was bought or sold and this figure is excluded from every total.">${inr(x.notional_pnl)}<span style="font-size:9px;color:var(--dim);font-style:normal"> NOT.</span></td>`
+      ?`<td style="text-align:right;font-style:italic;opacity:.72" class="${pnlCls(x.notional_pnl)}" title="NOTIONAL — not a trade. Reference entry ${x.ref_entry!=null?num(x.ref_entry,2):'--'} frozen at signal time; nothing was bought or sold and this figure is excluded from every total.${x.cmp_asof?` Priced off the ${x.cmp_asof} quote.`:''}${x.cmp_stale?' That quote is more than one 5-minute tick old, so this number is not current.':''}">${inr(x.notional_pnl)}<span style="font-size:9px;color:var(--dim);font-style:normal"> ${x.cmp_stale?'@'+(x.cmp_asof||'?'):'NOT.'}</span></td>`
       :`<td style="text-align:right" class="${x.net_pnl==null?'':pnlCls(x.net_pnl)}">${_cD(x.net_pnl,inr)}</td>`],
   ["potential_left","Potential Left",x=>`<td style="text-align:right" class="${cls(x.potential_left)}">${x.potential_left==null?'--':inr(x.potential_left)+` <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>`}</td>`],
   ["net_pnl_pct","Net P&L %",x=>(x.notional===true&&x.notional_pnl_pct!=null)
@@ -3403,7 +3415,9 @@ function renderFunnel(b){
   // 1280px rather than push the position economics off-screen right, which was half the complaint.
   const _bCols=v8View(V8_VIEW_BASKET);
   const desktopTable=sortTbl('bk_'+b.id,_bCols,sorted,x=>v8TableRow(x,_bCols),
-    {sortKey:null,dir:-1,empty:"No qualified names"});
+    /* cc#1145 scope 4: a quiet single line, in the founder's words, rather than "No qualified
+       names" — which reads like a filter error on a day the basket simply did not fire. */
+    {sortKey:null,dir:-1,empty:"No signals today"});
   const mobileCards=bkMobile(sorted,isSell);
   return meta+legend+desktopTable+mobileCards+markerLegend();
 }

@@ -597,6 +597,20 @@ def _load_signal_refs(basket: str) -> dict:
                        q.symbol, q.signal_ts, q.cmp AS ref_entry,
                        (CURRENT_DATE - q.signal_date) AS days,
                        c.cmp AS cmp_now,
+                       -- cc#1145 scope 2/3 · the CMP's own as-of, so a signal row states when its
+                       -- P&L was last true instead of looking permanently fresh.
+                       -- TIMEZONE BASIS, MEASURED NOT ASSUMED (cc#844 trap): BOTH timestamps on
+                       -- this row are NAIVE IST. v8_qualified.signal_ts is documented as such,
+                       -- and cmp_prices.updated_at proved to be as well — at 10:40 IST its newest
+                       -- row read 10:39, which is 1 minute old read as IST and MINUS 329 minutes
+                       -- read as UTC. That -329 is the phantom 5.5-hour offset, not an outage.
+                       -- So NOTHING here converts either column, and the age is computed against
+                       -- IST wall-clock.
+                       c.updated_at AS cmp_asof,
+                       CASE WHEN c.updated_at IS NOT NULL
+                            THEN ROUND(EXTRACT(EPOCH FROM
+                                 ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.updated_at))/60)
+                       END AS cmp_age_min,
                        f.lot_size
                 FROM v8_qualified q
                 LEFT JOIN cmp_prices c      ON c.symbol = q.symbol
@@ -778,6 +792,13 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         s["ref_entry"]  = r_entry
         s["cmp_now"]    = r_cmp
         s["lot_size"]   = r_lot
+        # cc#1145: the row's own as-of. Older than one 5-min tick means the notional P&L is not
+        # current, and the surface says so rather than showing a fresh-looking number.
+        _asof = ref.get("cmp_asof")
+        _age  = ref.get("cmp_age_min")
+        s["cmp_asof"] = _asof.strftime("%H:%M") if _asof is not None else None
+        s["cmp_age_min"] = int(_age) if _age is not None else None
+        s["cmp_stale"] = (_age is not None and _age > 5)
         # LONG (cmp - ref) * lot; SHORT (ref - cmp) * lot. Any missing input leaves BOTH the
         # rupee figure and the percentage null — never a zero, which would read as a flat trade.
         if r_entry is not None and r_cmp is not None and r_lot:
