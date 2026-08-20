@@ -601,14 +601,61 @@ def mobile_home2(request: Request):
         # cc#927: price_date comes along so card 2 can CITE the as-of beside the mood label it
         # derives. Same row, same query, one extra column — not a second fetch (18024: "same PCR
         # the hero chip reads — one derivation").
-        cur.execute("""
-            SELECT pcr, price_date FROM pcr_daily
-            WHERE underlying='NIFTY' AND pcr IS NOT NULL
-            ORDER BY price_date DESC LIMIT 1
-        """)
-        _p = cur.fetchone()
-        pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
-        pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
+        # cc#1140 · THE CARD WENT LIVE. Founder screenshot 09:29 with the market OPEN and the feed
+        # LIVE, while this card read PCR 0.68 · 08-19 — yesterday's close. pcr_intraday already had
+        # today's bars for both underlyings; the composer was live and only the READ was stale.
+        # STALE PATH (before): pcr_daily, ORDER BY price_date DESC LIMIT 1 — an EOD table, so
+        #   during the session it can only ever return yesterday.
+        # LIVE PATH (after): pcr_intraday.pcr_total for NIFTY, latest bar, when one exists for
+        #   TODAY. Outside market hours, or before the first bar lands, it falls back to exactly
+        #   the pcr_daily read it used before, unchanged.
+        # SAME COLUMN THE REST OF THE APP USES. pcr_total, not pcr_atm5 — this is the column
+        # cc#1121 reconciled against pcr_daily.pcr (NIFTY daily 0.678 vs intraday pcr_total 0.679,
+        # while pcr_atm5 was 0.844). Reading the other one here would put a number on this card
+        # that disagrees with the Digest chart for the same moment.
+        # NO NEW COMPOSER AND NO CLIENT MATHS: this reads the series the PCR scheduler already
+        # writes. Nothing computes a PCR here.
+        # AS-OF IS NOT OPTIONAL. pcr_asof carries the bar time and pcr_basis says LIVE or EOD, so
+        # the label can never show a live-looking number without saying which bar it is. That is
+        # why they are returned together from ONE query rather than assembled by the caller — a
+        # value and its timestamp that can be fetched separately will eventually be shown apart.
+        pcr_latest = pcr_date = pcr_asof = None
+        pcr_basis = "EOD"
+        pcr_stale = False
+        try:
+            cur.execute("""
+                SELECT pcr_total, ts FROM pcr_intraday
+                WHERE underlying='NIFTY' AND pcr_total IS NOT NULL
+                  AND ts::date = (SELECT MAX(ts)::date FROM pcr_intraday WHERE underlying='NIFTY')
+                ORDER BY ts DESC LIMIT 1
+            """)
+            _i = cur.fetchone()
+            if _i and _i[0] is not None and _i[1] is not None and _i[1].date() == now.date():
+                pcr_latest = float(_i[0])
+                pcr_date = _i[1].date().isoformat()
+                pcr_asof = _i[1].strftime("%H:%M")
+                pcr_basis = "LIVE"
+                # STALENESS GUARD (pcr_guard convention): a bar older than 15 minutes during the
+                # session is shown WITH its time and tagged, never presented as current. It is not
+                # suppressed — a 20-minute-old PCR is still the last thing that happened.
+                if is_td and now.time() >= dt_time(9, 15) and now.time() <= dt_time(15, 30):
+                    pcr_stale = (now - _i[1]).total_seconds() > 900
+        except Exception as e:
+            log.warning("cc#1140 intraday PCR unavailable, falling back to EOD: %s", e)
+            try:
+                cur.connection.rollback()
+            except Exception:
+                pass
+        if pcr_latest is None:
+            cur.execute("""
+                SELECT pcr, price_date FROM pcr_daily
+                WHERE underlying='NIFTY' AND pcr IS NOT NULL
+                ORDER BY price_date DESC LIMIT 1
+            """)
+            _p = cur.fetchone()
+            pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
+            pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
+            pcr_basis = "EOD"
         # ── cc#1083 · India VIX: LIVE level + previous-session close + the change ──────────────
         # WHY THIS MOVED OFF global_indices. That table's India VIX row is a DAILY close and it
         # lags: read 17-Aug 12:11 IST, its newest quote_date was 14-Aug at 11.305, so the hero
@@ -866,6 +913,13 @@ def mobile_home2(request: Request):
             "chips": chips,
             "pcr": pcr_latest,
             "pcr_date": pcr_date,
+            # cc#1140: the as-of travels WITH the value, always. pcr_basis is LIVE or EOD,
+            # pcr_asof is the bar time when live, pcr_stale flags a bar older than 15 min during
+            # the session. The card cannot render a live-looking number without them because they
+            # arrive in the same object from the same query.
+            "pcr_asof": pcr_asof,
+            "pcr_basis": pcr_basis,
+            "pcr_stale": pcr_stale,
             "vix": vix_latest,
             # cc#1083: completes VIX_COLOR_RULE_V1's confirming-fear half. Both sides are exposed,
             # not just the delta, so the chip (and anyone reading the payload) can see what the

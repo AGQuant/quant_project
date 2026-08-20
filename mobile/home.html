@@ -2600,8 +2600,18 @@ function pcrMood(hero){
         return '<i class="' + (j === i ? 'on' : '') + '"'
           + (j === i ? ' style="background:' + b[3] + '"' : '') + '></i>';
       }).join('') + '</div>'
+    /* cc#1140 · AS-OF HONESTY. The label states what it is showing: during the session
+       "PCR 0.94 · 10:30 LIVE", outside it "PCR 0.68 · 08-19 EOD". The number and its basis come
+       from the SAME payload object, so the card cannot render a live-looking figure without
+       saying which bar it is. A bar older than 15 minutes during the session is shown WITH its
+       time and tagged STALE rather than passed off as current — the server sets that flag using
+       the pcr_guard convention; nothing is judged here. */
     + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
-    + (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) : '') + '</div></div>';
+    + (hero.pcr_basis === 'LIVE'
+        ? (hero.pcr_asof ? ' · ' + esc(hero.pcr_asof) : '')
+          + (hero.pcr_stale ? ' · <span style="color:var(--amber,#FF9F45)">STALE</span>' : ' · LIVE')
+        : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
+    + '</div></div>';
 }
 function heroCard2(d){
   var t = {};
