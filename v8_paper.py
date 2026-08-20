@@ -727,6 +727,13 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 pos = cur.fetchall()
             excess = len(pos) - cap
             if excess <= 0: continue
+            # cc#1138 rule 2 (session_log 27321): GATE_EXIT is DISABLED for SHORT positions,
+            # COMPLETELY and unconditionally. A short releases only via TARGET, SL, the GAP
+            # variants or its own basket-spec exits. Guarded HERE, before any scoring, so a
+            # short is never even ranked for release. LONG is byte-identical below.
+            # Evidence: all 5 gate-exited shorts in the 10-19 Aug sample did better held -
+            # 3 reached target, 0 hit SL.
+            if v8_timing_rules.short_gate_exit_blocked(side): continue
             scored = []
             for (pid,sym,basket,entry,ets,qty,tgt,sl,pdt) in pos:
                 tl = _two_latest_closes(conn, sym, d)
@@ -909,6 +916,12 @@ def run_gate_rebalance(conn, buy_slots: int, sell_slots: int, target_date: date 
         slot_math[side] = {"open_before": before, "cap": cap, "excess": max(0, excess),
                            "closed": 0, "open_after": before}
         if excess <= 0: continue
+        # cc#1138 rule 2 (session_log 27321): shorts never gate-exit. Same guard, same reason as
+        # in paper_tick above; placed before scoring so no short is ranked for release. The
+        # slot_math row recorded just above still reports the true excess, so the surface shows
+        # that the cap IS exceeded rather than pretending it is not - the position simply is not
+        # closed to fix it.
+        if v8_timing_rules.short_gate_exit_blocked(side): continue
         scored = []
         for (pid,sym,basket,entry,ets,qty,tgt,sl,pdt) in pos:
             tl = _two_latest_closes(conn, sym, d)
