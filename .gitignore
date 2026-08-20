@@ -15,3 +15,7 @@ Thumbs.db
 # when running those by hand.
 input.csv
 screener.csv
+
+# cc#1133 CC EYES — render-check screenshots are container-local evidence, never repo content.
+tools/shots/
+*.render.png
