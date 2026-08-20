@@ -601,12 +601,42 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .mp-pending{font-size:10px;color:var(--dim);padding:18px 4px;text-align:center}
 #pane-index .big-val{font-family:var(--mono);font-size:26px;font-weight:900}
 #pane-index .big-chg{font-family:var(--mono);font-size:12px}
-#pane-index .adr-cells{display:flex;gap:6px;margin-bottom:8px}
-#pane-index .adr-cell{flex:1;border-radius:6px;padding:7px 6px;text-align:center;border:1px solid}
-#pane-index .adr-cell .n{font-family:var(--mono);font-size:20px;font-weight:900}
-#pane-index .adr-cell .l{font-size:8px;color:var(--mut);margin-top:3px}
-#pane-index .adr-bar{display:flex;height:6px;border-radius:3px;overflow:hidden}
-#pane-index .adr-pct{display:flex;justify-content:space-between;margin-top:3px;font-size:8px}
+/* cc#1153 sprint 5/7: card grammar. The five cards below take the ref's classes verbatim from
+   design_refs/index_intel_R2.html @ f5a31dd. The page-local ADR rules that used to live here were
+   a different design (6px bar, flex cells, colour written inline per render) and are replaced,
+   not layered over - two competing rule sets for one card is how a restyle half-lands. */
+#pane-index .adr-nums{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;font-weight:600;margin-bottom:8px}
+#pane-index .adr-bar{display:flex;height:15px;border-radius:6px;overflow:hidden;border:1px solid var(--line2)}
+#pane-index .adr-bar .a{background:linear-gradient(180deg,var(--grn),#1da75a)}
+#pane-index .adr-bar .n{background:var(--flat)}
+#pane-index .adr-bar .z{background:linear-gradient(180deg,var(--red),#d63753)}
+#pane-index .adr-cells{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+#pane-index .adr-cell{border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
+#pane-index .adr-cell .n2{font-family:var(--mono);font-weight:700;font-size:16px}
+#pane-index .adr-cell .l2{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-top:2px}
+#pane-index .vix-big{font-family:var(--mono);font-weight:700;font-size:30px}
+#pane-index .vix-band{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--grn);
+    background:var(--grn-d);border:1px solid var(--grn);border-radius:5px;padding:2px 8px;margin-left:10px;vertical-align:6px}
+/* the ref writes .vix-band green because its frozen VIX is calm. The band is DATA, so the amber
+   and red states are declared here rather than written inline at render time. */
+#pane-index .vix-band.amber{color:var(--amber);background:var(--amber-bg);border-color:var(--amber)}
+#pane-index .vix-band.red{color:var(--red);background:var(--red-d);border-color:var(--red)}
+#pane-index .ban-empty{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;color:var(--mut)}
+#pane-index .ban-empty .dot{width:8px;height:8px;border-radius:50%;background:var(--grn);box-shadow:0 0 10px var(--grn)}
+#pane-index .pcr-top{display:flex;align-items:baseline;gap:14px}
+#pane-index .pcr-big{font-family:var(--mono);font-weight:700;font-size:28px}
+#pane-index .pcr-meta{font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+#pane-index svg.pcr{width:100%;height:92px;display:block;margin-top:8px}
+#pane-index .sp-box .nm{font-size:11px;font-weight:800;letter-spacing:.06em}
+#pane-index .sp-box .px{font-family:var(--mono);font-weight:700;font-size:22px;margin:2px 0}
+#pane-index .sp-box .ch{font-family:var(--mono);font-size:11px;font-weight:600}
+#pane-index .spark-pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){#pane-index .spark-pair{grid-template-columns:1fr}}
+#pane-index .sp-note{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:5px}
+#pane-index .axis-t{font-family:var(--mono);font-size:8.5px;fill:var(--dim)}
+#pane-index .r-idxvix{grid-template-columns:1.6fr 1fr}
+#pane-index .r-adrpcr{grid-template-columns:1fr 1.4fr}
+@media(max-width:920px){#pane-index .r-idxvix,#pane-index .r-adrpcr{grid-template-columns:1fr}}
 #pane-index .pvt-row{display:flex;justify-content:space-between;align-items:center;
     padding:3px 5px;border-radius:4px;margin-bottom:2px}
 #pane-index .pvt-l{font-family:var(--mono);font-size:11px;font-weight:800;width:32px}
@@ -4938,6 +4968,9 @@ async function loadFoBan(){
 async function loadADR(){
   const a = await getJSON('/api/v8/adr');
   D.adr = { adv:a.advances||0, dec:a.declines||0, unch:a.unchanged||0, ratio:Number(a.adr)||0 };
+  /* cc#1153 scope 7: the card states the feed's OWN as-of, never the wall clock. A breadth read
+     frozen at 13:15 must not print as if it were taken now. */
+  D.adrAsof = a.adr_date || a.asof || (a.adr_detail && a.adr_detail.adr_date) || '';
 }
 async function loadVix(){
   const v = await getJSON('/api/v10/vix');
@@ -5245,40 +5278,60 @@ function rFoBan(){
        background hardcoded into a dark page, plus --heat/--volt fallbacks naming light hexes.
        Both now run on the red/green token pairs, so they read correctly in either theme. */
     ? syms.map(s=>`<button onclick="qaChart('${esc(s)}')" title="Open ${esc(s)} chart" style="border:1px solid var(--red);background:var(--red-d);color:var(--red);font:700 11px/1 Sora,sans-serif;padding:6px 10px;border-radius:7px;cursor:pointer">${esc(s)}</button>`).join('')
-    : '<span style="font:700 12px/1 Sora,sans-serif;color:var(--grn);background:var(--grn-d);border:1px solid var(--grn);padding:6px 12px;border-radius:7px">NO BANS</span>';
+    /* cc#1153 scope 4: the empty state is the ref's .ban-empty - a green dot and a sentence,
+       not a chip pretending to be a symbol. An empty ban list is good news and should read that
+       way rather than looking like a fifth banned stock. */
+    : '<span class="ban-empty"><span class="dot"></span>No stock is in the F&amp;O ban today</span>';
   return `<div class="card">
     <div class="card-hd"><div><div class="t">${head}</div>
       <div class="s">MWPL · barred from fresh F&O positions${asof?(' · '+esc(asof)):''}</div></div></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${body}</div></div>`;
 }
 
+/* cc#1153 scope 3 + verify D: the VIX regime bands, as a NAMED CONST so retuning them is one
+   edit in one place rather than a hunt through two ternaries that have to stay in step.
+   The old thresholds were 15 and 20 with the middle band called MODERATE; the card sets them at
+   13 and 17 with the middle band called NORMAL. Stated because it CHANGES what the founder sees:
+   a VIX of 14 read CALM before this push and reads NORMAL after it. */
+const VIX_BANDS = [
+  { max: 13,       label: 'CALM',     cls: '',      col: () => UP      },
+  { max: 17,       label: 'NORMAL',   cls: 'amber', col: () => C.amber },
+  { max: Infinity, label: 'ELEVATED', cls: 'red',   col: () => DN      },
+];
+function vixBand(v){ return VIX_BANDS.find(b => v < b.max) || VIX_BANDS[VIX_BANDS.length-1]; }
+
 function rVix(){
   const {cur,chg,data,label}=D.vix;
   const has = data && data.length;
-  const vc = cur<15?UP:cur<20?C.amber:DN;
-  const vl = cur<15?'CALM':cur<20?'MODERATE':'ELEVATED';
+  const band = vixBand(cur);
+  const vc = band.col();
   return `<div class="card">
-    <div class="card-hd"><div class="t">${esc(label||'India VIX')}</div>${bdg(vl,vc)}</div>
-    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">
-      <span class="big-val" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
-      <span class="big-chg" style="color:${cx(chg)}" title="VIX: falling = cooling fear (calm); coloured by sign (down = red, up = green)">${has?sgn(chg,2):''}</span></div>
-    ${has?sparkline(data, vc, {liveLast:true,h:55}):'<div style="font-size:8px;color:var(--dim)">no VIX feed yet</div>'}
+    <div class="card-hd"><div class="t">${esc(label||'India VIX')}</div></div>
+    <div style="margin-bottom:6px">
+      <span class="vix-big" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
+      <span class="vix-band ${band.cls}">${band.label}</span>
+      <span class="big-chg" style="color:${cx(chg)};margin-left:10px" title="VIX: falling = cooling fear (calm); coloured by sign (down = red, up = green)">${has?sgn(chg,2):''}</span></div>
+    ${has?sparkline(data, vc, {liveLast:true,h:55}):'<div class="sp-note">no VIX feed yet</div>'}
   </div>`;
 }
 
 function rADR(){
+  /* cc#1153 scope 5: adv, dec AND unch all come straight off /api/v8/adr, which states all three.
+     Deriving unch as total-minus-adv-minus-dec would silently absorb any feed inconsistency into
+     the flat bucket and make a broken read look tidy. */
   const {adv,dec,unch,ratio}=D.adr;
   const tot=adv+dec+unch;
-  const rc = ratio>=2?UP:ratio>=1?C.grn:ratio>=0.5?C.amber:DN;  /* cc#1149: #10b981 was a third green with no token behind it; the >=1 tier now shares --grn with the >=2 tier, which is what the ref shows */
-  const cells=[['▲ ADV',adv,UP],['▼ DEC',dec,DN],['— UNC',unch,C.mut]];
-  const cellHtml=cells.map(([l,v,col])=>`<div class="adr-cell" style="background:${col}12;border-color:${col}22"><div class="n" style="color:${col}">${v}</div><div class="l">${l}</div></div>`).join('');
+  const rc = ratio>=2?UP:ratio>=1?C.grn:ratio>=0.5?C.amber:DN;
+  const cells=[['ADVANCES',adv,UP],['UNCHANGED',unch,C.mut],['DECLINES',dec,DN]];
+  const cellHtml=cells.map(([l,v,col])=>`<div class="adr-cell"><div class="n2" style="color:${col}">${v}</div><div class="l2">${l}</div></div>`).join('');
+  const pc = n => tot ? (n/tot*100) : 0;
   return `<div class="card">
-    <div class="card-hd"><div><div class="t">Advance / Decline</div><div class="s">Nifty 500</div></div>${bdg('A/D '+ratio.toFixed(2),rc)}</div>
-    <div class="adr-cells">${cellHtml}</div>
-    <div class="adr-bar"><div style="flex:${adv||1};background:${UP}"></div><div style="flex:${dec||1};background:${DN}"></div><div style="flex:${unch||1};background:${C.line}"></div></div>
-    <div class="adr-pct"><span class="td-mono" style="color:${UP}">${tot?(adv/tot*100).toFixed(0):0}%</span>
+    <div class="card-hd"><div><div class="t">Advance / Decline</div><div class="s">Nifty 500${D.adrAsof?(' \u00b7 '+esc(D.adrAsof)):''}</div></div>${bdg('A/D '+ratio.toFixed(2),rc)}</div>
+    <div class="adr-nums"><span style="color:${UP}">${pc(adv).toFixed(0)}%</span>
       <span style="color:var(--mut)">${tot} stocks</span>
-      <span class="td-mono" style="color:${DN}">${tot?(dec/tot*100).toFixed(0):0}%</span></div>
+      <span style="color:${DN}">${pc(dec).toFixed(0)}%</span></div>
+    <div class="adr-bar"><div class="a" style="flex:${adv||0}"></div><div class="n" style="flex:${unch||0}"></div><div class="z" style="flex:${dec||0}"></div></div>
+    <div class="adr-cells">${cellHtml}</div>
   </div>`;
 }
 
@@ -5295,11 +5348,28 @@ function rPCR(){
       : '<div style="font-size:8px;color:var(--dim)">no data</div>';
     // A gap in the window is stated, not hidden — the panel should say when it is incomplete.
     const gaps = (d&&d.gaps)?`<span style="font-size:9px;color:var(--mut)"> · ${d.gaps} day${d.gaps>1?'s':''} no data</span>`:'';
+    /* cc#1153 scope 6: the ref's .pcr-top / .pcr-big / .pcr-meta typography, on the data this card
+       actually has. TWO THINGS THE REF ASKS FOR THAT I DID NOT BUILD, both stated rather than faked:
+       (1) The ref's meta line reads "opened 0.72 - peak 1.26 @ 10:15". That is INTRADAY. This card
+           is fed by /api/daily/pcr, one value per day over 7 days, so there is no open and no peak
+           time in it. Scope 6 also says keep the 7-day history, so the two halves of that scope
+           disagree. The meta line below states what the daily series genuinely knows - its range
+           and its gaps - instead of inventing an intraday reading.
+       (2) The ref colours the big value green above 1.00 and red below. This card colours by the
+           cc#1061 four-band scheme, and the two disagree: at 1.19 the ref says green while the
+           band scheme says BEARISH. Shipping a green number beside a BEARISH chip would be a
+           contradiction on a risk metric, so the established guarded semantics stay until this is
+           ruled on. Logged as a QUESTION. */
+    const vals=(d&&d.days)?d.days.map(x=>x&&x.pcr).filter(v=>v!=null):[];
+    const meta = vals.length
+      ? `7-day ${Math.min(...vals).toFixed(2)}–${Math.max(...vals).toFixed(2)}`
+      : 'no readings in window';
     return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(cur),col,true)}</div>
-      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
-        <span class="td-mono" style="font-size:20px;font-weight:900;color:${col}">${cur==null?'—':cur.toFixed(2)}</span>
-        <span class="td-mono" style="font-size:10px;color:${d&&d.chg!=null?cx(d.chg):C.mut}">${d&&d.chg!=null?sgn(d.chg,2):''}</span>${gaps}</div>
+      <div class="pcr-top">
+        <span class="pcr-big" style="color:${col}">${cur==null?'—':cur.toFixed(2)}</span>
+        <span class="td-mono" style="font-size:10px;color:${d&&d.chg!=null?cx(d.chg):C.mut}">${d&&d.chg!=null?sgn(d.chg,2):''}</span></div>
+      <div class="pcr-meta">${meta}${gaps}</div>
       ${chart}</div>`;
   };
   return `<div class="card">
@@ -5888,9 +5958,12 @@ function render(){
   let html;
   try{
     html = rTopBar() + rMood() +
-    `<div class="row r-2-16">${rIdxSpark()}${rVix()}</div>` +   // cc#681: V10 Active Signals -> index day-change sparklines
+    /* cc#1153 scope 1: the ref's own row classes replace the page-local r-2-16 and the inline
+       grid-template written on the ADR/PCR row. Same intent, but declared once in CSS with the
+       ref's ratios and its 920px breakpoint, instead of two different numbers in two places. */
+    `<div class="row r-idxvix">${rIdxSpark()}${rVix()}</div>` +
     `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
-    `<div class="row" style="grid-template-columns:1fr 1.4fr">${rADR()}${rPCR()}</div>` +   // cc#549: compact max-pain card removed (strike-wise OI card covers it); ADR+PCR share the row wider
+    `<div class="row r-adrpcr">${rADR()}${rPCR()}</div>` +
     /* cc#1151 verify E: the old pivots list card and the standalone strike-OI card are REPLACED,
        not duplicated. One row, one card per index, each holding both views behind the SPINE|LADDER
        switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
