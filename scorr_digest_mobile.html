@@ -206,7 +206,6 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* Fixed height so swiping between cards never resizes the deck under the finger. */
 .ichart{height:34px;margin-top:9px}
 .isvg{display:block;width:100%;height:34px;overflow:visible}
-.irange{font-family:'JetBrains Mono';font-size:8.5px;color:var(--muted);letter-spacing:.5px;margin-top:5px}
 .idots{display:flex;justify-content:center;gap:5px;margin-top:8px}
 .idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
 .idots i.on{background:var(--amber);width:15px;border-radius:3px}
@@ -332,8 +331,7 @@ function intCard(key, label, val, col, sub, stale){
       <span class="ibars" id="ib-${key}">…</span></div>
     <div class="vv" style="color:${col}">${val}</div>
     <div class="wk">${sub||''}</div>
-    <div class="ichart" id="ic-${key}"></div>
-    <div class="irange" id="ir-${key}"></div></div>`;
+    <div class="ichart" id="ic-${key}"></div></div>`;
 }
 function iDots(){
   var tr=document.getElementById('itrack'), dots=document.getElementById('idots');
@@ -356,11 +354,10 @@ function iDots(){
 function iChart(s){
   var host=document.getElementById('ic-'+s.key);
   if(!host)return;
-  var bl=document.getElementById('ib-'+s.key), rg=document.getElementById('ir-'+s.key);
+  var bl=document.getElementById('ib-'+s.key);
   if(bl)bl.textContent=s.bars?(s.bars+' BARS · 5-MIN'):'NO HISTORY';
   if(!s.bars){
     host.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';
-    if(rg)rg.textContent='';
     return;
   }
   var W=100, H=34, n=Math.max(1,(s.sessions||[]).length);
@@ -390,7 +387,9 @@ function iChart(s){
   var bot=Math.min((q02-vmin>2*iqr)?q02:vmin, base);
   var span=(top-bot)||1;
   var y=function(v){return H-(Math.max(bot,Math.min(top,v))-bot)/span*H;};
-  var yb=y(base), over=0, omin=null, omax=null;
+  /* cc#1137: over/omin/omax are gone with the caption they existed to write. `clipped` STAYS —
+     it is what draws the amber clamped-point marker, and the in-chart honesty is not negotiable. */
+  var yb=y(base);
   /* cc#1128 — A LINE, NOT BARS (founder ruling on the cc#1121 output: 200 dense bars read as a
      solid block, which is true — at ~0.5px a bar there is no shape left to see).
      THE LINE BREAKS RATHER THAN LYING. It is not one continuous stroke: a segment ends wherever
@@ -405,7 +404,6 @@ function iChart(s){
   var step=(W/n)/78, brk=step*2.5;      /* 78 five-min bars fill one session slot */
   var pxs=s.points.map(function(p){
     var clipped=(p.v>top||p.v<bot);
-    if(clipped){over++; omin=(omin==null||p.v<omin)?p.v:omin; omax=(omax==null||p.v>omax)?p.v:omax;}
     /* f is clamped just under 1: a 15:30 bar comes through as f=1.0, which lands on the exact
        leading edge of the NEXT session's slot. Harmless most days, wrong on the day after is
        empty — the closing bar would draw inside the tinted hole and look like data in a session
@@ -460,14 +458,6 @@ function iChart(s){
   }).join('');
   host.innerHTML='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
     +holes+marks+body+'</svg>';
-  if(rg){
-    var miss=(s.empty_sessions||[]).length, d=s.dp==null?2:s.dp;
-    rg.textContent=s.first+' → '+s.last
-      +(miss?(' · '+miss+' session'+(miss>1?'s':'')+' missing from the feed'):'')
-      +(over?(' · '+over+' bar'+(over>1?'s':'')+' off-scale ('
-              +(omin===omax?Number(omax).toFixed(d)
-                           :Number(omin).toFixed(d)+' to '+Number(omax).toFixed(d))+')'):'');
-  }
 }
 /* Fetched separately from the digest payload and only after the page has painted — four series of
    200 points is not something the first render should wait on. A failure costs the charts and
