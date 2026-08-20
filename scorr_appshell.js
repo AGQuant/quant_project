@@ -35,12 +35,63 @@
     } catch (e) { return false; }
   }
 
+  /* cc#1119 · THE THEME ROW ARRIVES, AND ONLY TWO THEMES DO WITH IT.
+     Founder approved option (a): GOLD NIGHT and DARK AQUA are selectable now; WHITE-GOLDEN
+     (goldday) stays hidden. That is not caution for its own sake — scorr_themes.css declares 13
+     tokens per theme and the rest of the palette falls through from scorr_theme_r5.css, whose
+     values are DARK. Both themes offered here are dark, so every fall-through lands somewhere
+     consistent with them. goldday is a LIGHT field, so the same fall-through would put
+     dark-theme text colours on a near-white surface. The gate is the fall-through, not taste.
+     The stored key is never rewritten by omission: a phone that already holds 'goldday' keeps
+     holding it, and simply renders goldnight until the day that theme ships. */
+  var THEMES = [
+    { k: 'goldnight', label: 'Gold Night', ic: '◆' },
+    { k: 'dark',      label: 'Dark Aqua',  ic: '◇' }
+  ];
+  var THEME_OK = { goldnight: 1, dark: 1 };
+
+  function storedTheme() {
+    try { return localStorage.getItem('scorr_theme'); } catch (e) { return null; }
+  }
+  function applyTheme(k) {
+    document.body.setAttribute('data-theme', THEME_OK[k] ? k : 'goldnight');
+  }
+
   function buildMenu(wm) {
     var menu = document.createElement('div');
     menu.className = 'as-menu';
-    menu.innerHTML = '<button type="button" id="as-lo"><span class="ic">⏏</span>Log out</button>';
+    /* the theme row sits ABOVE Log out: it is the thing you come back to, and Log out is the
+       thing you press once. A separator keeps a mis-tap off the exit. */
+    menu.innerHTML = THEMES.map(function (t) {
+        return '<button type="button" class="as-th" data-k="' + t.k + '">'
+          + '<span class="ic">' + t.ic + '</span>' + t.label
+          + '<span class="as-tick" aria-hidden="true"></span></button>';
+      }).join('')
+      + '<div class="as-sep"></div>'
+      + '<button type="button" id="as-lo"><span class="ic">⏏</span>Log out</button>';
     wm.classList.add('as-has-menu');
     wm.appendChild(menu);
+
+    function markCurrent() {
+      var cur = THEME_OK[storedTheme()] ? storedTheme() : 'goldnight';
+      Array.prototype.forEach.call(menu.querySelectorAll('.as-th'), function (b) {
+        b.classList.toggle('on', b.getAttribute('data-k') === cur);
+      });
+    }
+    markCurrent();
+    Array.prototype.forEach.call(menu.querySelectorAll('.as-th'), function (b) {
+      b.onclick = function () {
+        var k = b.getAttribute('data-k');
+        try { localStorage.setItem('scorr_theme', k); } catch (e) {}
+        /* APPLIED IN PLACE, no reload. The themes are pure CSS custom properties on <body>, so
+           swapping the attribute repaints everything that reads them. A reload here would cost a
+           full refetch of the page's data to change a colour, and on the digest that is the whole
+           morning read. */
+        applyTheme(k);
+        markCurrent();
+        menu.classList.remove('open');
+      };
+    });
 
     /* the wordmark is an <a href="/m/home">. It stays a real link for anyone who wants home —
        the menu opens on tap and the navigation is suppressed only while it does. */

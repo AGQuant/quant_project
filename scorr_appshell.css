@@ -83,6 +83,13 @@ body.as-shell{padding-bottom:76px}
   text-align:left;cursor:pointer}
 .as-menu button:active{background:var(--panel2,var(--edge))}
 .as-menu .ic{width:16px;text-align:center;font-size:14px;color:var(--muted)}
+/* cc#1119: the theme rows. Same 44px target as Log out, so nothing about the menu's geometry
+   changes — only its length. The tick is pushed right by margin-left:auto rather than a fixed
+   column, so a longer theme name never collides with it. */
+.as-menu .as-th.on .ic{color:var(--brand,var(--gold,#D4AF37))}
+.as-menu .as-tick{margin-left:auto;width:14px;text-align:center;color:var(--brand,var(--gold,#D4AF37))}
+.as-menu .as-th.on .as-tick::before{content:"\2713"}
+.as-sep{height:1px;margin:4px 0;background:var(--edge,rgba(148,166,210,.18))}
 
 /* ── back control ──
    The shell had no way back at all: the wordmark goes to /m/home and the bottom nav does not

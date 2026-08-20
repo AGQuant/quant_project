@@ -196,8 +196,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 <body data-theme="goldnight" class="as-shell">
 <!-- APP_QA_R5 P6 (was R4 P4): goldnight FORCED this sprint; stored theme read and kept, not applied. Original note: stored theme applied as the first statement inside <body>, before paint. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* preserved, not applied while the sprint gate stands */}}catch(e){}
-document.body.setAttribute('data-theme','goldnight');})();</script>
+if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
+     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
+     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
 <div class="phone">
 <!-- APP_QA_R4 P4 · SHELL VARIANT A (tool page), ref design_refs/scorr_appshell_R1.html @ a20ae0d.
      #dd-date and #dd-state move into the shell's slot with their ids intact — the page still

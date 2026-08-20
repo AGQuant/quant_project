@@ -600,8 +600,10 @@ body[data-theme]{
      Kept as the R4 parse-time pattern: first statement inside <body>, before first paint. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
 /* read for continuity, ignored while the sprint gate stands — see the note above */
-if(t){/* preserved, not applied */}}catch(e){}
-document.body.setAttribute('data-theme','goldnight');})();</script>
+if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
+     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
+     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
