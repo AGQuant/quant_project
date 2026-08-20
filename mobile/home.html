@@ -140,6 +140,15 @@ body[data-theme]{
    every surface means the same thing by them, and a bare .neu is a common enough name that
    putting it in the shared sheet is how cc#1108 happened. */
 .tk .d.neu{color:#FF9F45}
+/* cc#1139 · the Market Today footer strip. No box on the cells — a hairline divider above is the
+   whole separation, so it reads as the card's footer rather than a second row of metric chips. */
+.ixrow{display:flex;gap:7px;padding-top:9px;border-top:1px solid var(--line)}
+.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.ixnm{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;
+  font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB)}
+.ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+  font-variant-numeric:tabular-nums}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
    value/date on the right, which updates under the finger. Only the SECOND grows; the title
    stays small so the header does not turn into two competing headlines. Scoped here rather than
@@ -2613,6 +2622,35 @@ function pcrMood(hero){
         : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
     + '</div></div>';
 }
+/* cc#1139 · the INDEX ROW that fills the cc#1134 surplus zone — NIFTY and BANKNIFTY, level and
+   day change, the two numbers a trader checks first.
+   VALUES ARE NOT RECOMPUTED. They are read from d.ticker[], the SAME array that renders the tape
+   at the top of this page (mobile_home2 builds it with name / price / chg_pct per row), so the
+   footer and the tape cannot disagree on one paint and there is no new endpoint and no new timer
+   — it repaints on the page's existing refresh, like everything else fed by that payload.
+   A missing value prints an em-dash, never a zero and never a stale figure dressed as live.
+   PLACEMENT: this is a NEW BLOCK in the cc#1134 column, appended AFTER the chip grid, so the
+   block order becomes title / mood / tagline / chips / index row. It joins the existing fixed
+   row-gap; it does not touch the gap logic. That is what keeps the void from reopening — the
+   column still has no auto margins and justify-content is still flex-start, so every block sits
+   at a fixed gap from the last and ALL remaining surplus stays below the final block, which is
+   now this row rather than the chips.
+   No border on the cells, per the ruling: a hairline divider above reads as a card footer strip
+   and keeps it visually distinct from the bordered metric chips. */
+function idxFooter(d){
+  var t = {};
+  (d.ticker || []).forEach(function(x){ if (x && x.name) t[x.name] = x; });
+  var cell = function(label, key){
+    var r = t[key] || {};
+    var lvl = (r.price == null) ? '\u2014' : px(r.price);
+    var chg = (r.chg_pct == null) ? '' :
+      '<span class="ixch ' + cls(r.chg_pct) + '">' + pct(r.chg_pct) + '</span>';
+    return '<div class="ixcell"><span class="ixnm">' + esc(label) + '</span>'
+      + '<span class="ixlv">' + esc(lvl) + '</span>' + chg + '</div>';
+  };
+  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY') + cell('BANKNIFTY', 'BANKNIFTY') + '</div>';
+}
+
 function heroCard2(d){
   var t = {};
   (d.ticker || []).forEach(function(x){ t[x.name] = x.price; });
@@ -2785,6 +2823,7 @@ Promise.all([
         : (hero.vix_chg_pct != null ? ' vixmid' : '')))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
+    + idxFooter(d)          /* cc#1139: LAST block in the cc#1134 column, after the chip grid */
     + '</div>'
     + heroCard2(d)
     + '</div><div class="dots" id="heroDots"><i class="on"></i><i></i></div></div>';
