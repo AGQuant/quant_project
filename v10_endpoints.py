@@ -351,9 +351,28 @@ def v10_maxpain(symbol: str = "NIFTY"):
 @router.get("/strike_oi")
 def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
     """cc#542: strike-wise Call/Put OI around ATM (+/- n strikes) for the nearest expiry, for
-    NIFTY + BANKNIFTY — powers the V8 Index Intel max-pain OI histogram cards. Read-only; latest
-    OI snapshot per (strike, option_type). The max-pain marker itself comes from /maxpain (one
-    source of truth); this returns the per-strike bars + spot + ATM strike for the histogram."""
+    NIFTY + BANKNIFTY — powers the V8 Index Intel Levels Spine and OI Ladder. Read-only. The
+    max-pain marker itself comes from /maxpain (one source of truth); this returns the per-strike
+    bars + spot + ATM strike.
+
+    cc#1167 — TWO DEFECTS FIXED, both found from a founder screenshot of the live web dashboard.
+
+    SPOT WAS THE PREVIOUS DAILY CLOSE. It read `SELECT close FROM raw_prices ORDER BY price_date
+    DESC LIMIT 1`, which on 20-Aug served 24,078.30 — the 19-Aug close — while cmp_prices held the
+    live 24,231.85. The Levels Spine printed that as "SPOT 24,078" and computed every level's
+    %-distance from it, on a page showing the live 24,217.9 two cards above. Stale data presented
+    as live. Spot now prefers cmp_prices and the payload STATES which basis it used, so a surface
+    can never again show a previous close under a live-looking label.
+
+    THE STRIKE SET SPANNED EVERY TICK. `DISTINCT ON (strike, option_type) ... ORDER BY ts DESC`
+    ran over the whole expiry, not the latest tick, so a strike that has since dropped out of the
+    chain still appeared carrying its last-known OI — the same defect cc#1155 found in max pain.
+    It now uses max_pain.LATEST_CHAIN_SQL, so both endpoints read the chain the same way from one
+    piece of SQL rather than two that can drift.
+
+    Knock-on worth stating: atm_strike is derived from spot, so a stale spot also mis-centred the
+    ATM+/-n window. On 20-Aug it centred on 24,100 instead of 24,250 — a three-strike shift, which
+    changes which walls the founder is shown."""
     underlying = (symbol or "NIFTY").upper()
     if underlying in ("NIFTY50", "NIFTY 50"):
         underlying = "NIFTY"
@@ -367,24 +386,33 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
                         (underlying,))
             er = cur.fetchone()
             expiry = er[0] if er else None
-            cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1",
-                        (spot_sym,))
-            sr = cur.fetchone()
-            spot = float(sr[0]) if sr and sr[0] is not None else None
+            # cc#1167: LIVE spot first. The previous close is still a legitimate answer outside
+            # market hours, but it is returned LABELLED so the surface can say which it is.
+            # NOTE ON updated_at (cc#844 class): it is stored NAIVE IST. Do NOT subtract NOW(),
+            # which is UTC — that yields a phantom -330 minutes. The raw stamp is returned and the
+            # surface prints it as IST; no age is computed here.
+            spot = spot_basis = spot_asof = None
+            cur.execute("SELECT cmp, updated_at FROM cmp_prices WHERE symbol=%s", (spot_sym,))
+            cr = cur.fetchone()
+            if cr and cr[0] is not None:
+                spot = float(cr[0]); spot_basis = "live"
+                spot_asof = cr[1].isoformat() if cr[1] else None
+            else:
+                cur.execute("SELECT close, price_date FROM raw_prices WHERE symbol=%s "
+                            "ORDER BY price_date DESC LIMIT 1", (spot_sym,))
+                sr = cur.fetchone()
+                if sr and sr[0] is not None:
+                    spot = float(sr[0]); spot_basis = "prev_close"
+                    spot_asof = str(sr[1]) if sr[1] else None
             rows = []
+            chain_tick = None
             if expiry is not None:
-                cur.execute("""
-                    WITH oc AS (
-                        SELECT DISTINCT ON (strike, option_type) strike, option_type, oi
-                        FROM option_chain
-                        WHERE underlying=%s AND expiry=%s AND oi IS NOT NULL
-                        ORDER BY strike, option_type, ts DESC)
-                    SELECT strike,
-                           COALESCE(SUM(oi) FILTER (WHERE option_type='CE'), 0) AS call_oi,
-                           COALESCE(SUM(oi) FILTER (WHERE option_type='PE'), 0) AS put_oi
-                    FROM oc GROUP BY strike ORDER BY strike
-                """, (underlying, expiry))
-                rows = cur.fetchall()
+                # cc#1167: ONE latest-chain query, shared with max pain, so the two cannot drift.
+                cur.execute(max_pain_mod.LATEST_CHAIN_SQL, {"u": underlying})
+                raw = cur.fetchall()
+                rows = [(r[0], r[1], r[2]) for r in raw]
+                if raw:
+                    chain_tick = raw[0][4]
         strikes = [{"strike": float(r[0]), "call_oi": int(r[1] or 0), "put_oi": int(r[2] or 0)} for r in rows]
         atm_strike, window = None, strikes
         if spot is not None and strikes:
@@ -393,6 +421,10 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
             if idx is not None:
                 window = strikes[max(0, idx - n): idx + n + 1]
         return {"status": "ok" if window else "no_data", "symbol": underlying, "spot": spot,
+                # cc#1167: the basis travels WITH the number. A surface that shows spot must be
+                # able to say whether it is live or a previous close, without guessing.
+                "spot_basis": spot_basis, "spot_asof": spot_asof,
+                "chain_tick": str(chain_tick) if chain_tick else None,
                 "expiry": str(expiry) if expiry is not None else None, "atm_strike": atm_strike,
                 "n": n, "strikes": window}
     except Exception as e:

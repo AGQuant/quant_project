@@ -516,6 +516,12 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
     50%{box-shadow:0 0 0 9px var(--spot-ring2),0 0 22px var(--glow-spot)}}
 #pane-index .lvl.spotl .tag{left:5%;top:-20px;color:var(--spotc);background:var(--spot-chip-bg);
     padding:1px 8px;border-radius:4px;border:1px solid var(--spot-chip-bd)}
+/* cc#1167: when spot is a PREVIOUS CLOSE rather than a live tick, the pulsing dot is exactly the
+   part that says "this is moving right now", so it stops pulsing and the chip drops to muted.
+   Same reasoning as the cc#238 frozen mood hero. */
+#pane-index .lvl.spotl.stale .spotdot{animation:none;background:var(--mut);box-shadow:0 0 0 3px var(--line2)}
+#pane-index .lvl.spotl.stale .ln{border-top-style:dotted;border-top-color:var(--mut)}
+#pane-index .lvl.spotl.stale .tag{color:var(--mut);background:none;border-color:var(--line2)}
 #pane-index .mp-edge{display:flex;align-items:center;gap:8px;margin-top:9px;padding:5px 11px;width:max-content;max-width:100%;
     background:var(--amber-bg);border:1px dashed var(--amber-bd);border-radius:6px;
     font-family:var(--mono);font-size:9.5px;color:var(--amber)}
@@ -5855,8 +5861,15 @@ function rSpine(key, name){
     return `<div class="mp-pending">Pivots pending for ${esc(name)} — the spine needs R2 and S2 to have a scale at all.</div>`;
   const {r2,s2,r1,pp,s1} = pvt;
   /* spot: the chain's own spot first, because the walls come from the same read and mixing two
-     price sources on one axis is the class of bug cc#1141 just fixed on the basket tabs. */
+     price sources on one axis is the class of bug cc#1141 just fixed on the basket tabs.
+     cc#1167: the endpoint now STATES its basis. It used to serve the previous daily close with no
+     label, and this card printed it as "SPOT 24,078" while the index card two rows above showed
+     the live 24,217.9 — stale data wearing a live label, on the founder's screen. If the basis is
+     anything other than live, the tag and the caption say so rather than letting the reader assume. */
   const spot = Number(oi&&oi.spot) || Number(D.idx[key]&&D.idx[key].cmp) || 0;
+  const spotBasis = (oi && oi.spot_basis) || null;
+  const spotLive = spotBasis === 'live';
+  const spotTag = spotLive ? 'SPOT' : (spotBasis === 'prev_close' ? 'PREV CLOSE' : 'SPOT');
   const dpc  = v => spot&&v ? ((v-spot)/spot*100) : null;
   const sgn  = v => v==null ? '' : (v>=0?'+':'') + v.toFixed(2) + '%';
 
@@ -5887,7 +5900,7 @@ function rSpine(key, name){
     return `<div class="lvl ${l.cls}" style="top:${l.pos}%">${ln}<span class="tag"${tagStyle}>${l.tag}</span></div>`;
   }).join('');
   const spotHtml = spotPos==null ? '' :
-    `<div class="lvl spotl" style="top:${spotPos}%"><span class="ln"></span><span class="spotdot"></span><span class="tag">SPOT ${num(spot)}</span></div>`;
+    `<div class="lvl spotl${spotLive?'':' stale'}" style="top:${spotPos}%"><span class="ln"></span><span class="spotdot"></span><span class="tag">${spotTag} ${num(spot)}</span></div>`;
 
   let edge = '';
   if(mpS!=null && !mpOn){
@@ -5902,8 +5915,13 @@ function rSpine(key, name){
     edge = `<div class="mp-edge">MAX PAIN unavailable — endpoint returned no strike</div>`;
   }
   const expTxt = (mp&&mp.expiry)?' · EXP '+esc(String(mp.expiry)):'';
+  /* cc#1167: the caption carries the spot basis and its as-of. A distance like "+2.10%" is only
+     meaningful against a stated price, and every level on this axis is measured from spot. */
+  const basisTxt = spotLive
+    ? (oi&&oi.spot_asof ? ' · spot live '+esc(String(oi.spot_asof).slice(11,16))+' IST' : ' · spot live')
+    : (spotBasis ? ' · spot = PREVIOUS CLOSE'+(oi&&oi.spot_asof?' '+esc(String(oi.spot_asof)):'')+', distances measured from it' : '');
   return `<div class="spine-hd"><span class="big2">${spot?num(spot):'—'}</span>
-      <span>rolling-5d pivots · walls from the ATM±7 chain${expTxt}</span></div>
+      <span>rolling-5d pivots · walls from the ATM±7 chain${expTxt}${basisTxt}</span></div>
     <div class="spine"><div class="axis"></div>${html}${spotHtml}</div>${edge}`;
 }
 
@@ -6015,8 +6033,13 @@ function oiLadder(name, oi, mp){
   }
 
   /* scope 6: the header pattern is kept, all four values live */
+  /* cc#1167: same basis label as the spine — the ladder's spot line and its ATM row both depend
+     on this number, so it must not read as live when it is a previous close. */
+  const _lbasis = (oi && oi.spot_basis) || null;
+  const _lLive = _lbasis === 'live';
+  const _lTxt = _lLive ? '' : (_lbasis ? ' · SPOT = PREVIOUS CLOSE' : '');
   const head=`<div class="spine-hd" style="margin-bottom:8px"><span class="big2">${spot?num(spot):'—'}</span>
-    <span>MP ${mpStrike!=null?num(mpStrike):'—'} · ATM ${atm!=null?num(atm):'—'} · EXP ${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}</span></div>`;
+    <span>MP ${mpStrike!=null?num(mpStrike):'—'} · ATM ${atm!=null?num(atm):'—'} · EXP ${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}${_lTxt}</span></div>`;
 
   return head
     + `<div class="oi-heads"><span class="l">PUT OI</span><span class="c">STRIKE</span><span class="r">CALL OI</span></div>`
