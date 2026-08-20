@@ -469,6 +469,19 @@ async def auth_gate(request: Request, call_next):
             for _css in (b"scorr_themes.css", b"scorr_appshell.css"):
                 body = body.replace(b'href="/static/' + _css + b'"',
                                     b'href="/static/' + _css + b'?v=' + _BUILD_B + b'"')
+            # cc#1066 · THE SAME HOLE, ON THE JS SIDE OF /static. The loop above stamps
+            # /static/*.css and the loop before it stamps root-relative /*.js — but NOTHING stamped
+            # /static/*.js, and scorr_appshell.js is served with max-age=86400 from an unchanging
+            # URL. That is the cc#1060 failure exactly: a returning phone keeps yesterday's file for
+            # a full day after a deploy. It is hardcoded as a blocking tag in three templates
+            # (scorr_digest_mobile, scorr_v10_signal, scorr_gvm_fightcard) and it is the file that
+            # carries cc#1119's theme switcher and the back control, so a stale copy means the
+            # founder deploys a theme row and does not see one.
+            # This is a REAL cause of "deploys do not reach my phone" and it is NOT the service
+            # worker — see the cc#1066 result for why the SW was already correct.
+            for _sjs in (b"scorr_appshell.js",):
+                body = body.replace(b'src="/static/' + _sjs + b'"',
+                                    b'src="/static/' + _sjs + b'?v=' + _BUILD_B + b'"')
             # cc#327: shared mobile design system into <head> (fallback: end of document)
             # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
             # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal
