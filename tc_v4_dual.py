@@ -744,10 +744,20 @@ def _rules(d, style, side):
                       {"today": _r(vt), "vol1M": _r(v1m), "leg_today": leg_a, "leg_1m": leg_b},
                       required=req, max_credit=2.0))
     else:
+        # cc#1172 AMENDMENT 1 (session_log 27975, founder-locked) — BUY-MOM ONLY. This `else` is
+        # reached only when (BUY and MOM), because the `if` above takes BUY-REV and both SELL cards.
+        # WAS partial at today>=1.1x. NOW today>=0.8x. Rationale from the lock: adequate volume must
+        # not ZERO a persistence trade, while genuinely thin volume still fails.
+        #
+        # WHAT I DID NOT CHANGE, deliberately. The amendment names "vol_ratio" singular at 1.5/0.8,
+        # and this rule has TWO legs — today's pace and the 1-month up/down ratio. I moved only the
+        # today-leg partial floor and left the 1M leg exactly as it was, because removing a leg the
+        # ruling never mentioned would be a bigger change than the ruling asked for. Flagged for
+        # Fable to confirm that reading.
         v1m = d.get("vol21_up_dn")
         full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
-        part = ((vt is not None and vt >= 1.1) or (v1m is not None and v1m >= 0.9))
-        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=1.1x/1M>=0.9 = 0.5)"
+        part = ((vt is not None and vt >= 0.8) or (v1m is not None and v1m >= 0.9))
+        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=0.8x/1M>=0.9 = 0.5)"
         c = 1.0 if full else (0.5 if part else 0.0)
         out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
 
@@ -757,11 +767,17 @@ def _rules(d, style, side):
     mr = v8.get("rsi_month")
     twr = d.get("true_weekly_rsi")
     if MOM and BUY:
+        # cc#1172 AMENDMENT 2 (session_log 27975, founder-locked) — BUY-MOM ONLY, inside this
+        # `MOM and BUY` branch, so BUY-REV and both SELL cards are literally unreachable from here.
+        # WAS full 70-85, half [60,70) and (85,90]. NOW full 55-80, half 50-85.
+        # The finding behind it: V8 buy_momentum trades PERSISTENCE IN LEADERS, not breakouts, and
+        # weekly RSI 77 in a strong trend is normal rather than overheated. Above 85 is still
+        # penalised — the amendment widens the healthy band, it does not remove the ceiling.
         mr_ok = (mr is not None and mr >= 50)
-        twr_band = (1.0 if (twr is not None and 70 <= twr <= 85)
-                    else (0.5 if (twr is not None and ((60 <= twr < 70) or (85 < twr <= 90))) else 0.0))
+        twr_band = (1.0 if (twr is not None and 55 <= twr <= 80)
+                    else (0.5 if (twr is not None and 50 <= twr <= 85) else 0.0))
         c = twr_band if mr_ok else min(twr_band, 0.5)
-        req = "mRSI>=50 AND twr in [70,85] (twr [60,70)/(85,90] or mRSI<50 = 0.5 cap)"
+        req = "mRSI>=50 AND twr in [55,80] (twr [50,85] = 0.5; mRSI<50 caps at 0.5)"
         val = {"mRSI": _r(mr), "trueWk": _r(twr)}
         label = "RSI frame"
     elif not BUY:
