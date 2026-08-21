@@ -791,11 +791,21 @@ def _rules(d, style, side):
             req = "weekly RSI <= 40 (cold — the downtrend is already running)"
             label = "RSI weekly cold"
         else:
-            # SELL-REV FLIPS: was twr <= 45 (weekly-COOL), which described a stock already falling —
-            # the wrong picture for a card that fades an UPTREND into resistance. Now weekly-HOT.
-            c = 1.0 if (twr is not None and twr >= 70) else 0.0
-            req = "weekly RSI >= 70 (hot — overbought into the fade)"
-            label = "RSI weekly heat"
+            # cc#1173 AMENDMENT 1 of the five that 27976 unlocks by name (LOCK_TRIO_RSI, weight 1.5,
+            # source 27976_LOCKED_V2) — SELL-REV ONLY. This `else` is reachable only when `not BUY`
+            # and `not MOM`, so BUY-MOM, BUY-REV and SELL-MOM cannot enter it: the guard is the
+            # branch itself, not a flag I have to remember to check.
+            # HISTORY, because this line has now flipped twice and the next reader deserves both.
+            # It was twr <= 45 (weekly-COOL). cc#936 flipped it to twr >= 70 (weekly-HOT) on the
+            # reasoning that this card fades an UPTREND into resistance. The founder's sweep says
+            # otherwise and 27976 locks it: the winning SELL-REV setups sit in a WEAK band, not a
+            # hot one — an already-overbought name is a crowded fade, and the separation came from
+            # 30-45. Full 30-45, half 25-50.
+            # The half band is the lock's own, not invented here: 27976 states "(half 25-50)".
+            c = (1.0 if (twr is not None and 30 <= twr <= 45)
+                 else (0.5 if (twr is not None and 25 <= twr <= 50) else 0.0))
+            req = "weekly RSI in [30,45] (weak band; [25,50] = 0.5)"
+            label = "RSI weekly weak"
         val = {"trueWk": _r(twr)}
     else:
         # cc#767 BUY-REV: monthly RSI in [60,90] = 1 (V6.1 gate). Replaces the dead V5 remnant twr>=70
