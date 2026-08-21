@@ -811,6 +811,16 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .seg-tbl th:first-child, #pane-index .seg-tbl td:first-child{text-align:left}
 #pane-index .seg-tbl th{font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
 #pane-index .seg-tbl tbody tr:last-child td{border-bottom:none}
+/* cc#1168 push 6 · Buildup. Same numbers-right rule as .seg-tbl, scoped the same way. SIGNAL is a
+   BADGE, not a figure, so it is targeted by its own class rather than by :last-child — when the OI
+   feed is pending the SIGNAL column is dropped entirely and BASIS becomes last, and a :last-child
+   rule would then left-align a number. */
+#pane-index .bld-tbl th, #pane-index .bld-tbl td{text-align:right}
+#pane-index .bld-tbl th:first-child, #pane-index .bld-tbl td:first-child{text-align:left}
+#pane-index .bld-tbl th.th-sig, #pane-index .bld-tbl td.td-sig{text-align:left}
+#pane-index .bld-tbl th{font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
+#pane-index .bld-tbl tbody tr:last-child td{border-bottom:none}
+#pane-index .eyebrow .scrollhint{margin-left:8px}
 #pane-index .moreline{display:flex;justify-content:center;padding:9px 0 2px}
 #pane-index .morebtn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
     color:var(--blu);background:transparent;border:1px solid var(--line2);border-radius:7px;
@@ -5750,7 +5760,7 @@ function rPerf(){
        lands HERE and does not leak into Open Positions, Closed Trades, Buildup or Divergence,
        whose column orders are different and whose pushes own them. */
     return `<div style="flex:1;min-width:240px">
-      <div class="eyebrow">${title}</div>
+      <div class="eyebrow">${title}<span class="scrollhint">SCROLL →</span></div>
       <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
   };
   return `<div class="card" style="margin-bottom:10px">
@@ -5780,11 +5790,19 @@ function buildupTable(title, rows, accent, pending){
     <td class="td-mono" style="color:${r.oiChg!=null?cx(r.oiChg):'var(--dim)'}">${r.oiChg!=null?sgn(r.oiChg/1e5,1)+'L':'—'}</td>
     <td class="td-mono" style="color:var(--dim)">${r.volR!=null?r.volR.toFixed(2):'—'}</td>
     <td class="td-mono" style="color:${r.basis!=null?cx(r.basis):'var(--dim)'}">${r.basis!=null?sgn(r.basis,1):'—'}</td>
-    ${pending?'':`<td>${bdg(r.sig.replace('_',' '),sigClr(r.sig),true)}</td>`}</tr>`).join('')
+    ${pending?'':`<td class="td-sig">${bdg(r.sig.replace('_',' '),sigClr(r.sig),true)}</td>`}</tr>`).join('')
     : `<tr class="empty-row"><td colspan="${colspan}">No data</td></tr>`;
+  /* cc#1168 push 6 · DEFECT C. The eyebrow token replaces the hand-written 10px/.6px label, but
+     KEEPS the accent colour: green for long buildup, red for short, which is the only thing
+     telling the two tables apart at a glance and is direction, not decoration.
+     The table is wrapped in the SAME tbl-hold measured-scroll wrapper as Open Positions rather
+     than a second mechanism, and carries its own hint because this card holds two tables under
+     one header. Seven or eight columns inside a 300px-floor flex column is the widest table on
+     the tab -- measured at 640px against a 579px half-card at 1280, which is precisely the OI
+     CHANGE column the founder saw cut mid-value in the PDF. */
   return `<div style="flex:1;min-width:300px">
-    <div style="font-size:10px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${title}</div>
-    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="eyebrow" style="color:${accent}">${title}<span class="scrollhint">SCROLL →</span></div>
+    <div class="tbl-hold"><div class="tbl-scroll"><table class="bld-tbl"><thead><tr>${head.map(h=>`<th${h==='SIGNAL'?' class="th-sig"':''}>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
   </div>`;
 }
 function rBuildup(){
@@ -6354,8 +6372,15 @@ function idxMarkScroll(host){
   if(!host) return;
   host.querySelectorAll('.tbl-hold').forEach(hold=>{
     const sc=hold.querySelector('.tbl-scroll'); if(!sc) return;
+    /* cc#1168 push 6: the hint is looked up in the hold's OWN section first, and only then on the
+       card. The Buildup card holds TWO tables under one header — long and short — and with a
+       single card-level hint whichever table was measured last would have owned it, so a clipped
+       long table could be silently un-flagged by a short table that fits. Each section carries its
+       own hint now; a card with one table behaves exactly as before, because there the hold's
+       parent IS the card. */
     const card=hold.closest('.card');
-    const hint=card?card.querySelector('.scrollhint'):null;
+    const scope=hold.parentElement||hold;
+    const hint=scope.querySelector('.scrollhint')||(card?card.querySelector('.scrollhint'):null);
     const mark=()=>{
       // 1px of tolerance: sub-pixel table widths would otherwise light the fade on a table that
       // fits, which trains the reader to ignore it.
