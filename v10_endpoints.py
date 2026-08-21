@@ -218,6 +218,107 @@ def v10_trades_paired(symbol: str = "", limit: int = 200):
     return paired_trades(symbol.strip().upper() or None, limit)
 
 
+def paired_positions(symbol=None):
+    """cc#1158 — the OPEN book, paired. cc#941 did this for closed trades; this is its other half.
+
+    WHY IT HAS TO EXIST HERE AND NOT IN THE APP. /api/v10/positions serves RAW LEGS — one row per
+    FUT and per OPT — and that is what the web Index Positions button reads. The cc#1158 ref (R2,
+    7564bc4) wants the app strip to show PAIRED FUT+OPT NET with direction from the FUT leg, and
+    doing that grouping in the app's JS would put a second copy of the cc#941 pairing rule on a
+    different surface, which is the drift cc#941 was written to end. One derivation, both surfaces.
+
+    NET IS ALL-OR-NOTHING. A leg with no P&L (no CMP, no premium quote) makes the whole net None
+    and is NAMED in missing_pnl. Summing the legs that happen to have a number and printing it as
+    the trade's result is how a hedged position gets reported at its futures P&L alone: on the live
+    book right now that would say NIFTY +2,200 when the trade is +3,607, and it would look
+    completely plausible.
+
+    AS-OF IS THE OLDEST STAMP, NEVER THE FRESHEST. A position's basis is only as live as its
+    stalest leg, so the position's as_of is the minimum across its legs and the payload's top-level
+    as_of is the minimum across positions. get_open_positions returns premium_asof for the OPT leg
+    but nothing at all for the FUT leg's CMP, so cmp_prices.updated_at is read here — read-only,
+    and get_open_positions is not touched.
+
+    A group with no FUT leg is SKIPPED and counted in `unpaired`, exactly as cc#941 does: without
+    a futures leg there is no direction and no headline price, and promoting an option premium to
+    either is worse than saying the group could not be paired.
+    """
+    import v10_st_ema
+    legs = v10_st_ema.get_open_positions() or []
+    if symbol:
+        want = symbol.strip().upper()
+        legs = [l for l in legs if (l.get("symbol") or "").upper() == want]
+
+    # The FUT leg's CMP comes from cmp_prices and arrives without its timestamp. Read the stamps
+    # so the strip can state a basis instead of implying a live one.
+    cmp_asof = {}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT symbol, updated_at FROM cmp_prices "
+                        "WHERE symbol IN ('NIFTY50','BANKNIFTY')")
+            cmp_asof = {r[0]: (r[1].isoformat() if r[1] else None) for r in cur.fetchall()}
+    except Exception as e:
+        log.warning("cc#1158 paired_positions: cmp_prices as-of unreadable (%s) — the FUT leg "
+                    "basis will be reported as unknown rather than guessed", e)
+
+    groups = {}
+    for l in legs:
+        groups.setdefault((l.get("symbol"), l.get("entry_ts")), []).append(l)
+
+    out, unpaired = [], 0
+    for (sym, ets), grp in sorted(groups.items(), key=lambda kv: (kv[0][0] or "")):
+        fut = next((l for l in grp if (l.get("leg") or "").upper() == "FUT"), None)
+        if fut is None:
+            unpaired += 1
+            continue
+        opt = next((l for l in grp if (l.get("leg") or "").upper() == "OPT"), None)
+        missing = [(l.get("leg") or "?") for l in grp if l.get("unrealised_pnl") is None]
+        net = (round(sum(float(l["unrealised_pnl"]) for l in grp), 2) if not missing else None)
+
+        stamps = [s for s in ([cmp_asof.get(sym)] + [l.get("premium_asof") for l in grp]) if s]
+        as_of = min(stamps) if stamps else None
+
+        out.append({
+            "symbol": sym,
+            "direction": "LONG" if (fut.get("side") or "").upper() == "BUY" else "SHORT",
+            "entry_ts": ets,
+            "fut": {"side": fut.get("side"), "entry_price": fut.get("entry_price"),
+                    "cmp": fut.get("cmp"), "lot_size": fut.get("lot_size"),
+                    "pnl": fut.get("unrealised_pnl")},
+            # The hedge is a sub-line, never a headline — same shape rule as cc#941.
+            "hedge": None if opt is None else {
+                "side": opt.get("side"), "strike": opt.get("opt_strike"),
+                "opt_type": opt.get("opt_type"), "expiry": opt.get("opt_expiry"),
+                "entry_price": opt.get("entry_price"), "cmp": opt.get("cmp"),
+                "lot_size": opt.get("lot_size"), "pnl": opt.get("unrealised_pnl")},
+            "legs": len(grp),
+            "net_pnl": net,
+            "missing_pnl": missing,
+            "as_of": as_of,
+        })
+
+    priced = [p for p in out if p["net_pnl"] is not None]
+    stamps = [p["as_of"] for p in out if p["as_of"]]
+    return {
+        "positions": out, "count": len(out), "unpaired": unpaired,
+        "as_of": (min(stamps) if stamps else None),
+        "basis": "PAIRED FUT + OPT NET, direction from the FUT leg (cc#941)",
+        "summary": {
+            "open": len(out),
+            "net_pnl": (round(sum(p["net_pnl"] for p in priced), 2) if priced else None),
+            "priced": len(priced), "unpriced": len(out) - len(priced),
+            "hedged": sum(1 for p in out if p["hedge"]),
+        },
+    }
+
+
+@router.get("/positions/paired")
+def v10_positions_paired(symbol: str = ""):
+    """cc#1158: the open book as TRADES, not legs. The app Index Book strip reads this, and it is
+    the same pairing rule cc#941 locked for the closed log, so the two surfaces cannot disagree."""
+    return paired_positions(symbol.strip().upper() or None)
+
+
 @router.get("/candles")
 def v10_candles(symbol: str = "NIFTY50", days: int = 30):
     """cc#537: read-only 5-min OHLC candles for the V10 chart overlay. NIFTY50 -> nifty_5m_test_data,
