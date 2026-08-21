@@ -550,9 +550,30 @@ body[data-theme]{
 .ibk-pnl .v.neg{color:var(--red)}
 .ibk-pnl .v.na{color:var(--mut);font-size:13px}
 .ibk-pnl .arrow{color:var(--dim);font-size:14px}
-.ibk-cap{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
-  letter-spacing:.08em;padding:9px 16px;border-top:1px solid var(--line);line-height:1.7}
-.ibk-cap .asof{color:#F5B94A}
+/* cc#1181 — .ibk-cap is deleted. The founder removed the caption note off two live renders
+   (28349), and the single Index Intel entry point below the strip replaces the "TAP FOR CHART +
+   TRADES" half of what it said. The other half was already true without being written down: the
+   rows have said LONG/SHORT and shown a paired number since cc#1158.
+   THE CAPTION ALSO CARRIED THE AS-OF STAMP, and that is not chrome — it is the only thing on
+   this strip that said how fresh the money numbers are. It goes with the caption because the
+   ruling deleted the caption, but it is logged as a QUESTION rather than dropped quietly. */
+/* THE BUTTON ITSELF IS A .slab AND NOT A NEW STYLE. The card says match an existing bevel family
+   rather than invent one, so I enumerated instead of recalling: the repo has exactly ONE bevel
+   grammar for tappable things, .slab in scorr_theme_r5.css — raised face, gold ledge, 5px press —
+   with .pressed as its sunk counterpart for containers that are NOT buttons, and the rule written
+   at the top of that file decides between them in one question: does tapping it go somewhere.
+   This does, so it is a slab. NOT .dense: dense is the 3px ledge the TOOLS tiles use because nine
+   of them share a grid, and this is one full-width primary entry, which is the scale the
+   full-width .c slab cards already use on this page.
+   Everything here is layout and type only — face, border, radius, ledge and press all come from
+   .slab, so a future palette or depth change moves this button with every other one.
+   THE LEDGE NEEDS SOMEWHERE TO LAND. .slab paints a 5px shadow BELOW the border box, and a shadow
+   takes no space in flow, so the next section would otherwise measure its margin from a line the
+   ledge is still painting on. The 5px bottom margin is that reserve, written to match the ledge. */
+.ibk-intel{display:block;width:100%;box-sizing:border-box;margin:10px 0 5px;text-align:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
+  letter-spacing:.14em;color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
+  line-height:20px}
 .ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.1em;
   color:var(--mut);text-align:center;padding:18px 16px}
 .rnlist{min-height:360px;animation:rnfade .18s ease-out}
@@ -664,56 +685,35 @@ body[data-theme]{
    it. scroll-snap-align:start per the card; at a full-width face start and center coincide. */
 .swipe-t > a{flex:0 0 100%;max-width:100%;min-width:0;scroll-snap-align:start;display:block}
 .swipe-t > a > .c{margin-bottom:0}
-/* ══ cc#1160 · INDEX INTEL, riding the card's bottom edge ════════════════════════════════════
-   Geometry from design_refs/scorr_home_indexbook_R2.html (.intel-btn): left 50%, bottom 0,
-   translate(-50%,50%). Absolutely positioned, so it takes NO space in the card's flow and the
-   card box measures exactly what it measured before.
-   THE CARD NEEDS position:relative or the button anchors to the wrong box. .swipe-t > .c has no
-   position of its own, so without this the nearest positioned ancestor is the viewport and the
-   button lands at the bottom of the SCREEN.
-   AND THEN THE TRACK CLIPS IT. #heroTrack is overflow-x:auto, and CSS will not give you auto on
-   one axis and visible on the other — setting either forces the other to auto. So half the button
-   hangs into a region the track paints nothing in. Measured before the padding was added: the
-   button's own box was 29px tall and 14px of it sat below the track's visible bottom.
-   The padding gives the track somewhere to paint it, and the negative dots margin gives that space
-   straight back, so nothing below the deck moves.
-   THE RESERVE IS IN em, NOT PIXELS, AND THAT IS THE WHOLE POINT. A flat 15px was written first and
-   measured: fine at 1.0, but at 1.3x text scaling the button grows to 32px and its overhang to
-   16px, so the last pixel was clipped at all three widths. In em the reserve grows with the text
-   exactly as the button does. The two declarations are ONE expression written twice with opposite
-   signs — they cancel at any scale, so the dots and everything under them never move. Change one
-   and you must change the other. */
-/* THE CARD ITSELF CLIPS, and this is the rule that stops it. .c in MOBILE_CSS carries
-   overflow:hidden (it is what keeps the ::before accent bar inside the 14px radius), so without
-   this the button's lower half is simply cut off by its own card — the track padding above would
-   have solved nothing. Scoped to the hero deck so the other cards on the page keep clipping
-   exactly as they do now.
-   .c already sets position:relative in MOBILE_CSS; it is restated here only because this rule
-   overrides overflow on the same selector and the two belong together — the button anchors to
-   this box and is clipped by this box.
-   THE ACCENT BAR HAS TO BE ROUNDED TO MATCH. ::before is a 3px bar at left:0, top:0, bottom:0 with
-   square corners; overflow:hidden is what was rounding it. Turn that off and it pokes out past
-   the card's rounded corners. It gets the card's own left radius instead, so the corner looks
-   exactly as it did.
-   overflow-x:clip WAS TRIED HERE AND MEASURED WORSE, so it is written down rather than left for
-   the next person to rediscover. The idea was to keep containing sideways while releasing
-   downward, since visible+clip is the one mixed pair CSS allows. In Chromium the pair collapses:
-   the card computed hidden/hidden again and cut the button at all three widths and both scales.
-   Plain overflow:visible measures clean everywhere, so that is what ships.
-   ITS ONE SIDE EFFECT IS AN IMPROVEMENT, AND IT WAS CHECKED BOTH WAYS. The card was already
-   failing render_check at 2x before this card existed — div.c hiding 137px of content past its
-   edge with no way to scroll to it. Releasing the overflow makes that content reachable instead
-   of cut off, and the after page passes at every width and scale against a before baseline that
-   did not. */
-#heroTrack > .c{position:relative;overflow:visible}
-#heroTrack > .c::before{border-radius:14px 0 0 14px}
-#heroTrack{padding-bottom:1.05em}
-#heroTrack ~ .dots{margin-top:calc(7px - 1.05em)}
-.intel-btn{position:absolute;left:50%;bottom:0;transform:translate(-50%,50%);
-  background:var(--bg,#0A0F1E);border:1px solid var(--cyan,#37D3E8);color:var(--cyan,#37D3E8);
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:700;
-  letter-spacing:.14em;padding:7px 16px;white-space:nowrap;text-decoration:none;z-index:2}
-.intel-btn:active{background:var(--panel2)}
+/* ══ cc#1160 · INDEX INTEL ON THE CARD'S BOTTOM EDGE — REMOVED AT cc#1181 ═════════════
+   The button, its absolute geometry, the em track reserve and the cancelling dots margin
+   all shipped here and are all deleted below. Two findings from that build are kept because
+   they are about THIS CARD and not about the button, and both cost a measurement to learn:
+     • overflow-x:clip does NOT work here. Chromium collapses visible+clip back to hidden on
+       both axes, so the mixed pair CSS allows is not a route out of #heroTrack's overflow-x.
+     • the hero card was failing render_check at 2x BEFORE cc#1160 existed — div.c hiding
+       137px of its own content past its edge with no way to scroll to it. overflow:visible
+       is what fixes that, which is why it survives the button that introduced it. */
+/* ── cc#1181 · THE EDGE BUTTON IS GONE, AND SO ARE ALL FOUR OF ITS ACCOMMODATIONS ────────────
+   Founder ruling 28349, from two live phone renders: one Index Intel entry, not two, and it is
+   the bevel button under the INDEX BOOK strip. Four rules existed only to carry the button that
+   rode this card's bottom edge, and all four are deleted, so nothing is left here at all:
+     position:relative        MOBILE_CSS already sets it on .c; it was restated to anchor the button
+     overflow:visible         released the card's clipping so the button's lower half showed
+     ::before radius          rounded the accent bar that the released clipping stopped rounding
+     the em reserve + margin  gave the track somewhere to paint the overhang, then gave it back
+
+   I FIRST KEPT TWO OF THEM AND THE MEASUREMENT SAID NO. The argument for keeping overflow:visible
+   was cc#1160's note that it also fixed a defect predating the button — the card hiding 137px of
+   its own content past its edge at 2x. That note came from render_check, and render_check strips
+   every external stylesheet before rendering: on this page that removes .c{overflow:hidden}
+   itself, plus the shared JS that defines fetchWithTimeout, so the page paints 37 elements, ZERO
+   cards and 71 characters of text. The finding was measured on a blank screen and does not stand.
+   Re-measured in the real cascade with the card full of real content: at 360 and 430, with the
+   trend chart panel both closed and open, the number of descendants sitting beyond the card's
+   edge is ZERO with overflow visible and ZERO with it hidden, and the card height is identical to
+   the pixel (322/327 closed, 453/458 open). The rule is doing no work, so it goes with the button
+   that brought it, and the card gets exactly the pre-cc#1160 geometry it asked for. */
 .dots{display:flex;justify-content:center;gap:6px;margin-top:7px}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:3px}
@@ -1546,8 +1546,9 @@ function renderIndexBook(d){
       + '<span class="arrow">›</span></span>'
       + '</button>';
   }).join('');
-  h += '<div class="ibk-cap">PAIRED FUT + OPT NET P&amp;L · DIRECTION FROM THE FUT LEG (cc#941)<br>'
-    + 'TAP FOR CHART + TRADES · <span class="asof">' + esc(ibkAsOf(d && d.as_of)) + '</span></div>';
+  /* cc#1181: the caption line is gone (founder 28349). ibkAsOf is deliberately left in the file
+     and not deleted with it — the stamp is a question in the room, not a settled removal, and
+     deleting the helper would make putting it back a rewrite instead of one line. */
   box.innerHTML = h;
   return rows.length;
 }
@@ -3068,11 +3069,9 @@ Promise.all([
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
     + idxFooter(d)          /* cc#1139: LAST block in the cc#1134 column, after the chip grid */
-    /* cc#1160: INDEX INTEL, straddling this card's bottom edge. Absolutely positioned, so it is
-       the last CHILD but not the last block in the column — it takes no space in the flow and the
-       card measures exactly what it did before. /m/v10 is the app's Index Intel route, the same
-       one main.py's NAV_REGISTRY and the pwa NAV array label "Index Intel (mobile)". */
-    + '<a class="intel-btn" href="/m/v10">INDEX INTEL ›</a>'
+    /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
+       28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
+       The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
     + '</div>'
     + heroCard2(d)
     + '</div><div class="dots" id="heroDots"><i class="on"></i><i></i></div></div>';
@@ -3173,8 +3172,17 @@ Promise.all([
      empty cannot be told apart from a book that failed to load, and this card is explicit that
      flat must SAY flat. The strip paints immediately and loadIndexBook() fills it after, the
      same way LIVE NEWS is filled. */
+  /* cc#1181: the Index Intel entry is STATIC MARKUP beside the strip, not something
+     renderIndexBook prints inside it. Two reasons, and the second is the one that matters.
+     (1) The ruling puts it BELOW the strip, full strip width, as a standalone button \u2014 that is
+     a sibling of the box, not a row in it.
+     (2) The book has three states \u2014 rows, FLAT, and UNAVAILABLE \u2014 and the last two replace the
+     box's whole innerHTML. A single entry point that disappears on the days the book is empty or
+     the endpoint is down is not a single entry point, it is an intermittent one. Out here it is
+     painted with the section and never depends on a fetch. */
   h += '<div class="sect">INDEX BOOK \u00b7 OPEN</div>'
-    + '<div class="ibk" id="ibkBox"><div class="ibk-flat">Loading index book\u2026</div></div>';
+    + '<div class="ibk" id="ibkBox"><div class="ibk-flat">Loading index book\u2026</div></div>'
+    + '<a class="ibk-intel slab" href="/m/v10">INDEX INTEL \u203a</a>';
 
   h += '<div class="sect">THE BOOK</div>'
     + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
