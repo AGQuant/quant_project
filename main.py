@@ -136,6 +136,7 @@ import yahoo_index_backfill
 from yahoo_symbol_resolver import router as yahoo_resolver_router   # cc#938: Yahoo ticker resolver + price-feed exclusion register
 from room_endpoints import router as room_router   # cc#1086: /room + /api/room/feed (read-only Fable Room viewer)
 from ondemand_bars import router as ondemand_bars_router   # cc#1103: /api/bars/{symbol} on-demand 5-min pull
+from tc_screener_v2 import router as tc_screener_v2_router   # cc#1172: four-bucket screener (tc_screener_v2)
 import v8_paper
 import global_indices
 import v8_signal_writer
@@ -632,6 +633,7 @@ app.include_router(digest_v3_router)   # cc#846: /digest + /api/digest/v3
 app.include_router(yahoo_resolver_router)   # cc#938: /api/admin/yahoo/resolve · /api/feeds/price-excluded · /api/feeds/symbol-map
 app.include_router(room_router)   # cc#1086: /room + /api/room/feed
 app.include_router(ondemand_bars_router)   # cc#1103: /api/bars/{symbol} + /api/bars/_cache/stats
+app.include_router(tc_screener_v2_router)   # cc#1172: /api/trade-check/screen-v2 + /api/admin/run-tc-screener-v2
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
