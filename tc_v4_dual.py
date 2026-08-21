@@ -451,15 +451,23 @@ def _load_one(cur, symbol):
     vr = volume_ratio(cur, symbol)          # R6 — time-adjusted intraday volume
     d["vol_ratio_today"] = vr["ratio"]
 
-    cur.execute("""SELECT dma_20, dma_50, dma_200, daily_rsi, rsi_month, rsi_weekly,
-                          week_return, month_return, mom_2d, week_index_52,
-                          sector_week, sector_month, day_1d
+    # cc#1173: ma9_vs_ma21 joins the select. Both locked SELL rulebooks read it — SELL-REV wants
+    # abs() < 1 (an early break, not an exhausted one) and SELL-MOM wants >= -3 (an exhaustion
+    # filter) — and it was the one input in the two tables with no loader line. The column itself
+    # is not new: v8_engine and v8_signal_writer have written it to v8_metrics all along. Checked
+    # against real rows before adding it, so a rule cannot be scored against a field that is
+    # always null: on the latest score_date 208 of 209 symbols carry a value, range -5.88 to
+    # +9.35, and the two locked thresholds split the universe 66/209 and 195/209 respectively.
+    # KEYS AND COLUMNS ARE ONE LIST NOW. They were two, in the same order, and a column added to
+    # one and not the other silently shifts every field after it onto the wrong name.
+    _V8_COLS = ["dma_20", "dma_50", "dma_200", "daily_rsi", "rsi_month", "rsi_weekly",
+                "week_return", "month_return", "mom_2d", "week_index_52",
+                "sector_week", "sector_month", "day_1d", "ma9_vs_ma21"]
+    cur.execute("SELECT " + ", ".join(_V8_COLS) + """
                    FROM v8_metrics WHERE symbol=%s
                    ORDER BY score_date DESC LIMIT 1""", (symbol,))
     m = cur.fetchone()
-    keys = ["dma_20", "dma_50", "dma_200", "daily_rsi", "rsi_month", "rsi_weekly",
-            "week_return", "month_return", "mom_2d", "week_index_52",
-            "sector_week", "sector_month", "day_1d"]
+    keys = _V8_COLS
     d["v8"] = {k: _f(m[i]) for i, k in enumerate(keys)} if m else {k: None for k in keys}
 
     cur.execute("""SELECT gvm_score, segment, v_score, m_score FROM gvm_scores WHERE symbol=%s
@@ -615,6 +623,186 @@ def _alerts(d):
     return out
 
 
+# ══ cc#1173 · THE LOCKED SELL RULEBOOKS ═══════════════════════════════════════════════════════
+#
+# WHY THIS IS A SEPARATE FUNCTION AND NOT MORE BRANCHES IN _rules().
+# The four-bucket lock (27974 BUY-REV, 27975 BUY-MOM, 27976 SELL-REV, 27977 SELL-MOM) leaves the
+# two BUY rulebooks alone and REPLACES both SELL rulebooks. 27976 says it in as many words: the
+# hot-RSI / fade-at-resistance framing "scored the wrong archetype and are withdrawn". A replaced
+# rulebook is not a tuning pass, and threading it back through _rules() would mean editing perhaps
+# thirty interleaved `if BUY / elif MOM` branches to reach eleven rules — with BUY-REV conditions
+# sitting inside the same expressions, and the card listing them under DO_NOT_TOUCH.
+# So SELL returns from here, before _rules() runs a line. The isolation VERIFY B asks for is then
+# structural rather than something I have to grep for and hope I did not miss: BUY cannot reach
+# the new code and SELL cannot reach the old.
+#
+# WHY THE KEYS ARE LOCK_*, WHICH LOOKS ODD NEXT TO R1..R24.
+# REGISTRY_KEY_RULE_V1 (Fable ruling, cc_task_logs 3057): a rule with a live equivalent takes the
+# R-key; a rule with NO live equivalent KEEPS its LOCK_* name as the engine key, so the registry
+# and the engine read identically and the provenance is on the rule's face. These eleven and nine
+# are new rules from the sweep, not renamed old ones, so they keep the lock names. That is also
+# what closes the defect cc#1172 found and 13efc55 labelled: the ACTIVE registry rows for both
+# SELL buckets were LOCK_* while the engine emitted R1..R19, so every SELL rule fell through to
+# weight 1 and the score was an unweighted ratio. Binding is what this function is for, and it
+# binds ALL TWENTY AT ONCE — a half-bound bucket is a half-calibrated score, which is worse than
+# either end.
+#
+# THE DENOMINATORS ARE NOT WRITTEN DOWN ANYWHERE. Each rule's weight lives in tc_rule_weights and
+# _score10 sums the weights of the rules that actually fired. The registry sums to 15.0 for
+# SELL-REV and 13.25 for SELL-MOM; if a weight is edited by UPDATE the score moves with it and no
+# constant here has to be found and changed. What this file owns is the CONDITIONS.
+
+
+def _sell_rules(d, style):
+    """The 27976 (SELL-REV) and 27977 (SELL-MOM) rulebooks, emitted with the registry's own keys.
+
+    Conditions are the locked tables, transcribed with the bands the rulings state and no band
+    they do not. Where a ruling gives one threshold the rule is binary — inventing a half-credit
+    tier would be a threshold nobody set, and the sweep that chose these was run against the
+    thresholds as written.
+    """
+    MOM = style == "MOMENTUM"
+    v8 = d.get("v8") or {}
+    out = []
+
+    vr = d.get("vol_ratio_today")
+    mom2 = v8.get("mom_2d")
+    wk = v8.get("week_return")
+    mo = v8.get("month_return")
+    w52 = v8.get("week_index_52")
+    twr = d.get("true_weekly_rsi")
+    day = v8.get("day_1d")
+    ma = v8.get("ma9_vs_ma21")
+    gvm = d.get("gvm_score")
+    fails = d.get("mood_fails", 0)
+    sm = v8.get("sector_month")
+
+    if MOM:
+        # ── SELL-MOM · 27977 · ignition shorts: momentum begins, short the break ──────────────
+        # ENTRY-DAY FALL IS EMITTED FIRST AND ITS CREDIT IS CAPTURED, because ALT-IGNITION is a
+        # substitute for it and has to know whether it already scored. Order matters here in a way
+        # it does not anywhere else in this file.
+        ed = 1.0 if (day is not None and day <= -2) else (0.5 if (day is not None and day <= -0.7) else 0.0)
+        out.append(_R("LOCK_ENTRYDAY_FALL", "Entry-day fall", ed, {"day": _r(day)},
+                      required="day change <= -2 (<= -0.7 = 0.5)"))
+
+        out.append(_R("LOCK_WEEK_FALLING_BAND", "Week falling band",
+                      1.0 if (wk is not None and -6.5 <= wk <= -1.5) else 0.0, {"wk": _r(wk)},
+                      required="week_return in [-6.5, -1.5] (falling but not exhausted; both edges bind)"))
+
+        out.append(_R("LOCK_VOLUME", "Volume",
+                      1.0 if (vr is not None and vr >= 1.0) else (0.5 if (vr is not None and vr >= 0.6) else 0.0),
+                      {"ratio": _r(vr)}, required="vol_ratio >= 1.0 (>= 0.6 = 0.5)"))
+
+        out.append(_R("LOCK_MOM_2D", "2-day momentum",
+                      1.0 if (mom2 is not None and mom2 <= -1) else (0.5 if (mom2 is not None and mom2 <= -0.3) else 0.0),
+                      {"mom2d": _r(mom2)}, required="mom_2d <= -1 (<= -0.3 = 0.5)"))
+
+        # ── ALT-IGNITION · 27977 · STRICTLY CONDITIONAL, AND THE THREE STATES ARE REAL ────────
+        # "only when entry-day-fall credit is zero AND mom_2d <= -2.4 (steep 2-day slide
+        # substitutes for the single candle)". A substitute is not a bonus, so it must never stack.
+        #   ACTIVE          entry-day credit == 0 and mom_2d <= -2.4  -> credit 1, in the denominator
+        #   INACTIVE        entry-day credit == 0 and mom_2d >  -2.4  -> credit 0, in the denominator
+        #   NOT-APPLICABLE  entry-day credit  > 0                     -> max 0, OUT of the denominator
+        # The last state is the one worth explaining. Scoring it 0 while leaving it in the
+        # denominator would dock 1.25 out of 13.25 from every stock that DID fall hard on the day —
+        # a penalty for succeeding on the primary rule, which is the opposite of what a substitute
+        # path is for. _score10 skips any rule whose max is 0, so a not-applicable ALT leaves the
+        # card scored out of 12.0 and the row still renders with its state. The registry sum stays
+        # 13.25 either way; that is a property of tc_rule_weights, not of one symbol's card.
+        if ed > 0:
+            alt_state, alt_credit, alt_max = "not-applicable", 0.0, 0.0
+        elif mom2 is not None and mom2 <= -2.4:
+            alt_state, alt_credit, alt_max = "active", 1.0, 1.0
+        else:
+            alt_state, alt_credit, alt_max = "inactive", 0.0, 1.0
+        out.append(_R("LOCK_ALT_IGNITION", "Alt-ignition (steep 2-day slide)", alt_credit,
+                      {"mom2d": _r(mom2), "state": alt_state, "entryday_credit": ed},
+                      required="mom_2d <= -2.4, evaluated ONLY when entry-day fall scored zero",
+                      max_credit=alt_max))
+
+        out.append(_R("LOCK_52W_INDEX", "52w index",
+                      1.0 if (w52 is not None and w52 <= 60) else 0.0, {"w52": _r(w52)},
+                      required="week_index_52 <= 60"))
+
+        # ma9_vs_ma21 is a v8_metrics column the loader did not previously select. Checked before
+        # writing this rather than assumed: 208 of 209 symbols carry it on the latest score_date,
+        # range -5.88 to +9.35, and the locked threshold splits them 195/209 — a real filter, not
+        # a field that is always null and always scores zero.
+        out.append(_R("LOCK_MA_NOT_DEEP", "MA not deep",
+                      1.0 if (ma is not None and ma >= -3) else 0.0, {"ma9v21": _r(ma)},
+                      required="ma9_vs_ma21 >= -3 (exhaustion filter — too far below is a spent move)"))
+
+        out.append(_R("LOCK_GVM", "GVM cap",
+                      1.0 if (gvm is not None and gvm <= 6.5) else 0.0, {"gvm": _r(gvm)},
+                      required="gvm_score <= 6.5"))
+
+        out.append(_R("LOCK_MOOD", "Mood (any bearish)",
+                      1.0 if (fails or 0) >= 1 else 0.0, fails,
+                      required="any mood check bearish (fails >= 1)"))
+        return out
+
+    # ── SELL-REV · 27976 · short CONTINUATION in already-weak stocks ─────────────────────────
+    # The sweep's own finding, kept here because the conditions look wrong without it: this bucket
+    # is NOT fade-the-rally-at-resistance. Every studied entry had weekly RSI 30-42, 52w index at
+    # lows, negative months and MAs down. The RSI band is inverted for that reason and the
+    # freshness rule reads the RIGHT way round — a deeply fallen stock is a crowded short, so
+    # month_return >= -6 scores FULL and a deeper fall scores less.
+    out.append(_R("LOCK_VOLUME", "Volume",
+                  1.0 if (vr is not None and vr >= 1.5) else (0.5 if (vr is not None and vr >= 0.9) else 0.0),
+                  {"ratio": _r(vr)}, required="vol_ratio >= 1.5 (>= 0.9 = 0.5)"))
+
+    out.append(_R("LOCK_FALL_FRESHNESS", "Fall freshness",
+                  1.0 if (mo is not None and mo >= -6) else (0.5 if (mo is not None and mo >= -8) else 0.0),
+                  {"mo": _r(mo)}, required="month_return >= -6 (>= -8 = 0.5; deep-fallen = crowded short)"))
+
+    out.append(_R("LOCK_TRIO_52W", "Downtrend trio · 52w index",
+                  1.0 if (w52 is not None and w52 <= 40) else (0.5 if (w52 is not None and w52 <= 55) else 0.0),
+                  {"w52": _r(w52)}, required="week_index_52 <= 40 (<= 55 = 0.5)"))
+
+    # Amendment 1 of the five 27976 unlocks by name, already reasoned through at e910ca8: this line
+    # has flipped twice. It was weekly-COOL (<= 45), cc#936 flipped it to weekly-HOT (>= 70) on the
+    # fade-at-resistance reading, and the sweep says the separation comes from the WEAK band. The
+    # half band 25-50 is the lock's own, not invented here.
+    out.append(_R("LOCK_TRIO_RSI", "Downtrend trio · weekly RSI",
+                  (1.0 if (twr is not None and 30 <= twr <= 45)
+                   else (0.5 if (twr is not None and 25 <= twr <= 50) else 0.0)),
+                  {"trueWk": _r(twr)}, required="weekly RSI in [30,45] (weak band; [25,50] = 0.5)"))
+
+    # R11 SPLIT, ruled at cc_task_logs 3057. The live rule was COMPOUND — mom_2d <= +0.5 AND
+    # week_return <= +2 — while the lock weights the two legs separately at 1.5 each. A compound
+    # rule hiding one lock inside another is the drift this whole card exists to kill, so the two
+    # legs are two rules and the compound R11 retires with the rest of the old rulebook.
+    out.append(_R("LOCK_TRIO_MOM2D", "Downtrend trio · 2-day momentum",
+                  1.0 if (mom2 is not None and mom2 <= -1) else (0.5 if (mom2 is not None and mom2 <= 0) else 0.0),
+                  {"mom2d": _r(mom2)}, required="mom_2d <= -1 (<= 0 = 0.5)"))
+
+    out.append(_R("LOCK_WEEK_FALLING", "Week falling",
+                  1.0 if (wk is not None and wk <= -1) else 0.0, {"wk": _r(wk)},
+                  required="week_return <= -1 (continuation, not bounce)"))
+
+    out.append(_R("LOCK_5M_WEAK", "Day weak",
+                  1.0 if (day is not None and day < 0) else 0.0, {"day": _r(day)},
+                  required="day change < 0"))
+
+    out.append(_R("LOCK_MA_SHALLOW", "MA shallow",
+                  1.0 if (ma is not None and abs(ma) < 1) else 0.0, {"ma9v21": _r(ma)},
+                  required="abs(ma9_vs_ma21) < 1 (an early break beats an exhausted one)"))
+
+    out.append(_R("LOCK_QUALITY_FADE", "Quality fade",
+                  1.0 if (gvm is not None and gvm <= 5.5) else 0.0, {"gvm": _r(gvm)},
+                  required="gvm_score <= 5.5"))
+
+    out.append(_R("LOCK_MOOD", "Mood (any bearish)",
+                  1.0 if (fails or 0) >= 1 else 0.0, fails,
+                  required="any mood check bearish (fails >= 1)"))
+
+    out.append(_R("LOCK_SECTOR_WEAK", "Sector weak",
+                  1.0 if (sm is not None and sm < 0) else 0.0, {"mo": _r(sm)},
+                  required="sector month < 0"))
+    return out
+
+
 # ── the rulebook (style + side aware). Rule COUNT differs per card — ask card_maxes(), never count. ──
 
 def _rules(d, style, side):
@@ -629,7 +817,17 @@ def _rules(d, style, side):
     uptrend at resistance). Two rules were rewritten rather than tuned: R3 is now a plain breadth
     count of falling peers, and R18 is a 180-day M DELTA instead of an M level. Both SELL cards now
     score volume as two independent 1-point legs, like BUY-REV.
-    NO CARD'S MAX IS WRITTEN DOWN HERE — see card_maxes(). Today it derives 21 / 20 / 14 / 13."""
+    NO CARD'S MAX IS WRITTEN DOWN HERE — see card_maxes(). Today it derives 21 / 20 / 14 / 13.
+
+    cc#1173: SELL LEAVES ON THE FIRST LINE. Both SELL rulebooks were REPLACED by the founder's
+    locked tables (27976 / 27977), not tuned, so they are served whole by _sell_rules() above.
+    Everything below this return is therefore BUY-ONLY, and every `not BUY` / `elif not BUY`
+    branch in it is now unreachable. They are left in place deliberately: deleting them means
+    rewriting the conditionals of BUY-REV and BUY-MOM rules that this card lists under
+    DO_NOT_TOUCH, to remove code no longer executed. That is a mechanical cleanup with real risk
+    and no behaviour change, and it belongs on its own card, not folded into a re-weighting."""
+    if side == "SELL":
+        return _sell_rules(d, style)
     MOM = style == "MOMENTUM"
     BUY = side == "BUY"
     v8 = d.get("v8") or {}
