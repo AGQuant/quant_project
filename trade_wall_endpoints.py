@@ -93,15 +93,47 @@ INSTRUMENTS = ("EQUITY", "FUTURES", "OPTIONS")
 # the mobile page inherit this through the single union below. Stated in the header as "since 10 Aug".
 WALL_EPOCH = "2026-08-10"
 
-# cc#1000: the wall is scoped to EXACTLY FOUR engine groups (founder list):
+# cc#1000, amended at cc#1175: the wall is scoped to EXACTLY FOUR engine groups (founder list):
 #   V8 Futures      <- v8_paper_trades + v8_paper_positions   (FUTURES)
 #   Index           <- v10_trades, split FUTURES/OPTIONS by leg (cc#992)
 #   Quant Basket    <- quant_paper_positions                  (EQUITY)
-#   Equity Screener <- tc_intraday_trades + v14_trades        (EQUITY, the two intraday scanners merged)
-# DELIBERATELY EXCLUDED, recorded so it is a decision not an accident:
+#   Equity Swing    <- qsr_trades                             (EQUITY, cc#1175 / 27980)
+# STILL FOUR. Equity Swing REPLACED Equity Screener rather than joining it — the founder's locked
+# 27980 text has the screener group absent, and Fable ruled option B at cc_task_logs 3057.
+# DELIBERATELY EXCLUDED, recorded so each one is a decision and not an accident:
+#   tc_intraday_trades + v14_trades — the old Equity Screener group, removed at cc#1175. BOTH
+#                   TABLES ARE UNTOUCHED in the database; this is wall chrome, and a one-push
+#                   revert of the hunk below brings the group back.
 #   options_trades  (the stock-options engine) — not on the founder's four-group list.
 #   v9_paper_trades (V9 Pairs) — not on the list either; it would be a fifth group. Empty today; when
 #                   the pairs engine goes live it needs a NEW card to re-enter the wall, by design.
+
+# ── EQUITY_SCREENER_REMOVAL (cc#1175, Fable ruling cc_task_logs 3057, option B) ───────────────
+# Four branches left the union below: v14_trades ENTRY/EXIT and tc_intraday_trades ENTRY/EXIT.
+#
+# NOTHING IS DELETED AND NOTHING IS ARCHIVED AWAY. Both tables are untouched in the database,
+# which is what cc#1170 actually requires — archive means the TABLES are preserved, not that the
+# wall keeps a tile pointing at them. This is read-only wall chrome, and putting the group back is
+# a one-push revert of this one hunk.
+#
+# WHAT ACTUALLY LEFT THE WALL, MEASURED AGAINST THE LIVE UNION RATHER THAN COUNTED OFF THE TABLES,
+# and it is NOT the number the card carried. The wall applies WALL_EPOCH, so raw row counts are not
+# event counts:
+#     v14_trades           34 rows total ->  9 ENTRY + 9 EXIT = 18 events on the wall
+#     tc_intraday_trades   12 rows total ->  0 events on the wall. Its last trade is 18-June, before
+#                                            the epoch, so it has not appeared on this wall at all
+#                                            since cc#1000 set the filter.
+# The removal therefore takes 18 events, ALL of them v14 — not the 46 the ruling names, which is
+# the two tables' raw row count. My own earlier STOPPED note was wrong the same way and is
+# corrected with it: I warned that dropping the group would take tc_intraday_trades off the wall
+# alongside v14, and it could not, because tc_intraday was never on it. Option B is unaffected
+# either way — the group goes.
+#
+# THE PROSE LIVES HERE, NOT IN AN SQL COMMENT. Everything inside _EVENTS_SQL travels to the driver
+# on every request, and this file already has one rule about what may appear in that string
+# (PERCENT_SIGNS_IN_SQL, below). Table names in a removal note inside the SQL also defeat any
+# substring check for "is this branch gone" — the first version of my own post-edit assert failed
+# on exactly that.
 
 # ── PERCENT_SIGNS_IN_SQL (cc#992, my own P0) ─────────────────────────────────────────────────
 # NOT ONE percent character may appear anywhere inside _EVENTS_SQL — not in a string literal, and
@@ -176,38 +208,7 @@ WITH ev AS (
          NULLIF(CONCAT_WS(' ', leg, opt_type, opt_strike::text), '')
   FROM v10_trades WHERE exit_ts IS NOT NULL
 
-  -- V14 INTRADAY · timestamptz -> converted. No qty column; pnl is in PERCENT, not rupees, so it
-  -- is NOT shipped in the `pnl` field (that field means rupees everywhere else on this wall).
-  -- net_pnl_pct rides in the note instead, labelled, so nothing reads a percent as money.
-  UNION ALL
-  SELECT 'v14', id, 'ENTRY', (entry_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
-         NULL, entry_px::numeric, NULL, NULL, tag
-  FROM v14_trades WHERE entry_ts IS NOT NULL
-  UNION ALL
-  SELECT 'v14', id, 'EXIT', (exit_ts AT TIME ZONE 'Asia/Kolkata'), 'min',
-         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
-         NULL, exit_px::numeric, NULL, exit_reason,
-         NULLIF(CONCAT_WS(' · ', tag,
-                -- chr(37) is the percent sign; see PERCENT_SIGNS_IN_SQL above for why the
-                -- character itself must never appear in this string, comments included.
-                CASE WHEN net_pnl_pct IS NOT NULL
-                     THEN ROUND(net_pnl_pct::numeric, 2)::text || chr(37) || ' net' END), '')
-  FROM v14_trades WHERE exit_ts IS NOT NULL
-
-  -- INTRADAY (tc) · entry_ts/exit_ts are NAIVE IST -> read raw. Context isolation (rule 7) is a
-  -- WRITE rule; this is a read-only display and each event states its own engine, so a tc row can
-  -- never be mistaken for a v8 row here.
-  UNION ALL
-  SELECT 'tc', id, 'ENTRY', entry_ts::timestamp, 'min',
-         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
-         qty::numeric, entry_price::numeric, NULL, NULL, NULL
-  FROM tc_intraday_trades WHERE entry_ts IS NOT NULL
-  UNION ALL
-  SELECT 'tc', id, 'EXIT', exit_ts::timestamp, 'min',
-         symbol, UPPER(side), 'Equity Screener', 'EQUITY',
-         qty::numeric, exit_price::numeric, pnl::numeric, result, NULL
-  FROM tc_intraday_trades WHERE exit_ts IS NOT NULL
+  -- EQUITY SCREENER · four branches removed at cc#1175. See EQUITY_SCREENER_REMOVAL above.
 
   -- EQUITY SWING (QSR) · cc#1175, session_log 27980. The equity swing slot, with a live source.
   -- entry_ts and exit_ts are NAIVE IST already (qsr_engine writes them that way, the cc#844
