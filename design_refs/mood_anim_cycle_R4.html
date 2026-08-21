@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESIGN REF — mood_anim_cycle_R4 · cc#1178 · glimpse only, 4s cycle</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --field:#0b0d12;
+    --card:#141a2a;
+    --chalk:#e8e6df;
+    --dim:#8a8f9c;
+    --gold:#d9a92c;
+    --red:#f4526a;
+    --line:#2a3148;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--field);
+    font-family:'Courier New',ui-monospace,monospace;
+    color:var(--chalk);
+    min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;
+    padding:20px 12px;
+  }
+  .refnote{font-size:11px;color:var(--dim);letter-spacing:.08em;margin-bottom:14px;text-align:center;line-height:1.6}
+  .refnote b{color:var(--gold)}
+
+  .card{
+    width:100%;max-width:400px;
+    background:var(--card);
+    padding:22px 20px 26px;
+    display:flex;flex-direction:column;row-gap:14px;
+    clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,0 100%);
+  }
+  .titlerow{display:flex;justify-content:space-between;align-items:baseline}
+  .titlerow .t{font-weight:700;font-style:italic;font-size:17px;letter-spacing:.02em}
+  .titlerow .d{color:var(--dim);font-size:13px}
+
+  /* ===== EXACT live cc#1118 — verbatim from MOBILE_CSS (mobile_endpoints.py) ===== */
+  .hero-mood{font-family:'Space Grotesk',sans-serif;font-size:48px;font-weight:800;
+             letter-spacing:-.01em;line-height:1.1;color:var(--red)}
+  .hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow}
+  .hero-mood .mlt.run{animation:moodLite .42s ease-out 1 both}
+  @keyframes moodLite{
+    0%  {transform:translateY(0)      scale(1);    text-shadow:none}
+    45% {transform:translateY(-2px)   scale(1.06); text-shadow:0 0 10px currentColor,0 0 22px currentColor}
+    100%{transform:translateY(0)      scale(1);    text-shadow:0 0 6px rgba(0,0,0,0)}
+  }
+  @media (prefers-reduced-motion:reduce){.hero-mood .mlt{animation:none!important}}
+  /* ===== end verbatim ===== */
+
+  .tagline{color:var(--dim);font-size:15px}
+  .bar{height:7px;background:linear-gradient(90deg,var(--red),#ff9aa8);
+       clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%)}
+
+  .chips{display:flex;flex-wrap:wrap;gap:10px}
+  .chip{border:1px solid rgba(244,82,106,.45);background:rgba(244,82,106,.07);color:var(--red);
+        padding:12px 14px;font-size:14px;
+        clip-path:polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)}
+  .chip.vix{border-color:rgba(217,169,44,.75);background:transparent;color:var(--gold)}
+
+  .phase{margin-top:16px;font-size:12px;letter-spacing:.1em;color:var(--dim);
+         border:1px dashed var(--line);padding:8px 14px;min-width:280px;text-align:center}
+  .phase b{color:var(--gold)}
+  .timeline{margin-top:10px;font-size:11px;color:var(--dim);line-height:2;max-width:400px;text-align:center}
+  .timeline .on{color:var(--gold)}
+</style>
+</head>
+<body>
+
+<div class="refnote">
+  DESIGN REF <b>mood_anim_cycle_R4</b> · cc#1178 · revises R3 · glitter = the TRUE live cc#1118 moodLite keyframe, verbatim<br>
+  cycle: <b>SWEEP</b> (60ms stagger) → sleep <b>4s</b> → repeat<br>
+  R3 had SWEEP → letter shine 1/sec L→R → SWEEP → sleep 10s. Founder ruling 21-Aug (session_log 28179),
+  from a live phone render: the per-letter shine is REMOVED and the still shortens to 4s. The second sweep
+  goes with it — it only ever closed the shine. CSS below is untouched from R3, byte for byte.
+</div>
+
+<div class="card">
+  <div class="titlerow"><span class="t">THE MARKET TODAY</span><span class="d">2026-08-20</span></div>
+  <div class="hero-mood" id="mood" aria-label="BEARISH"></div>
+  <div class="tagline">4 of 4 checks failed today.</div>
+  <div class="bar"></div>
+  <div class="chips">
+    <span class="chip">ADR 0.37</span>
+    <span class="chip">Nifty Day -0.32%</span>
+    <span class="chip">Nifty Week -1.46%</span>
+    <span class="chip">Nifty Month -0.45%</span>
+    <span class="chip">PCR 0.68</span>
+    <span class="chip vix">VIX 11.3</span>
+  </div>
+</div>
+
+<div class="phase">PHASE: <b id="phaseTxt">—</b></div>
+<div class="timeline" id="tl"></div>
+
+<script>
+/* R3 driver — BOTH phases use the one true keyframe (moodLite), exactly as the
+   cc#1135 spec instructs CC: no new keyframes, one scheduler handle, restart via
+   the live restart trick (animation:none -> one reflow -> clear). */
+const WORD = 'BEARISH';
+const mood = document.getElementById('mood');
+const phaseTxt = document.getElementById('phaseTxt');
+mood.innerHTML = WORD.split('').map(c=>`<span class="mlt">${c}</span>`).join('');
+const letters = [...mood.children];
+
+let handle = null;
+const setPhase = t => phaseTxt.textContent = t;
+
+function resetAll(){
+  letters.forEach(l=>{ l.classList.remove('run'); l.style.animationDelay=''; });
+  void mood.offsetWidth;              /* the live restart trick: one reflow for the word */
+}
+
+/* SWEEP = the live cc#1118 effect exactly: all letters run moodLite, 60ms stagger */
+function sweep(done){
+  setPhase('SWEEP · live cc#1118 · 60ms stagger');
+  resetAll();
+  letters.forEach((l,i)=>{ l.style.animationDelay=(i*60)+'ms'; l.classList.add('run'); });
+  handle = setTimeout(done, letters.length*60 + 420 + 150);
+}
+
+function sleep4(done){
+  setPhase('SLEEP · 4s still');
+  resetAll();
+  handle = setTimeout(done, 4000);
+}
+
+function cycle(){ sweep(()=> sleep4(cycle)); }
+
+document.addEventListener('visibilitychange', ()=>{
+  clearTimeout(handle);
+  resetAll();
+  if(document.visibilityState === 'visible') cycle();
+  else setPhase('PAUSED · tab hidden');
+});
+
+document.getElementById('tl').innerHTML =
+  'timeline: <span class="on">sweep</span> (0.99s for a 7-letter word) → 4s still → <span class="on">sweep</span> → repeat';
+cycle();
+</script>
+</body>
+</html>

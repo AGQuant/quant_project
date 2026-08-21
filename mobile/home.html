@@ -800,14 +800,17 @@ function inrShort(v){
 /* cc#1135 · THE MOOD CYCLE. This REPLACES cc#1132 outright: MOOD_TIMER, its 60-second
    setInterval and the moodBlinkStart/moodBlinkStop pair are gone. There is no setInterval left on
    the mood path at all — the cycle is a chain of setTimeouts, so only one step is ever pending.
-   THE CYCLE, from the approved ref mood_anim_cycle_R3, looping while visible:
+   THE CYCLE, from ref mood_anim_cycle_R4 (cc#1178 revises R3), looping while visible:
      1. SWEEP  every letter runs moodLite, staggered i*60ms left to right — the cc#1118 effect
-     2. MARCH  one letter per second, left to right, that letter alone running moodLite
-     3. SWEEP  again, identical to 1
-     4. SLEEP  10 seconds, the word completely still
+     2. SLEEP  4 seconds, the word completely still
+   R3 had four phases: sweep, a per-letter march at one letter per second, sweep again, then ten
+   seconds still. The founder removed the march on 21-Aug from a live phone render (28179) and
+   shortened the still to four seconds. The second sweep went with the march — it existed to
+   close the march, and two identical waves back to back with nothing between them would read as
+   one stuttered wave, not as the glimpse the ruling asked to keep.
    Length is derived from the word, never hardcoded, so BULLISH, NEUTRAL and CAUTIOUS all work.
-   NO NEW KEYFRAMES. Both phases reuse moodLite; the only change was moving the CSS declaration
-   from .mlt to .mlt.run so the driver can pick which letters run.
+   NO NEW KEYFRAMES, in either direction. moodLite is the cc#1118 keyframe untouched; the only
+   change cc#1135 made was moving the CSS declaration from .mlt to .mlt.run.
    NOT A REPAINT: this adds and removes a class and an inline animation-delay on spans that
    moodLetters() already rendered. The markup is never rebuilt, MOOD_SWEPT is never reset, and
    moodColor()'s inline colour is never read or written — so the cc#1116/cc#1122 restyle behaviour
@@ -836,37 +839,28 @@ function moodOnScreen(m){
 function moodSweep(m, done){
   moodReset(m);
   for (var i = 0; i < m.l.length; i++){
-    /* cc#1157: stagger 60ms -> 20ms, a third of the wait between letters. */
-    m.l[i].style.animationDelay = (i * 20) + 'ms';
+    /* cc#1178: back to the ref R3 stagger of 60ms, with the 420ms flash term below it. */
+    m.l[i].style.animationDelay = (i * 60) + 'ms';
     m.l[i].classList.add('run');
   }
-  /* cc#1157: this timeout is DERIVED from the two numbers above — letters times stagger, plus one
-     flash duration, plus a settle buffer. Both terms had to move with them (60->20, 420->140) or
-     the sweep phase would sit waiting three times longer than the animation it is waiting for,
-     and the cycle would silently stretch instead of speeding up. The 150ms buffer is unchanged;
-     it is settle time, not part of the wave. */
-  MOOD_H = setTimeout(done, m.l.length * 20 + 140 + 150);
+  /* This timeout is DERIVED from the two numbers above — letters times stagger, plus one flash
+     duration, plus a settle buffer — so the phase never waits longer than the wave it is waiting
+     for. The 420 must track the .42s in MOBILE_CSS and the 60 must track the stagger on the line
+     above; that is the whole reason it is written as a sum rather than as one number. The 150ms
+     buffer is settle time, not part of the wave, and is unchanged. */
+  MOOD_H = setTimeout(done, m.l.length * 60 + 420 + 150);
 }
-function moodMarch(m, done){
-  var i = 0;
-  (function next(){
-    if (i >= m.l.length){ done(); return; }
-    moodReset(m);                     /* the previous letter is cleared before the next fires */
-    m.l[i].classList.add('run');      /* no delay: this letter pops now */
-    i++;
-    MOOD_H = setTimeout(next, 1000);
-  })();
-}
-function moodSleep(m, done){ moodReset(m); MOOD_H = setTimeout(done, 10000); }
+/* cc#1178: moodMarch is DELETED, not disabled and not left at a zero interval. The founder ruled
+   from a live phone render (28179) that the per-letter blink goes, and a function still sitting
+   here with no caller is the thing someone wires back up by accident six weeks from now. The
+   cycle is now the glimpse and the still — there is no second phase, and the two back-to-back
+   sweeps went with the march, because they only ever framed it. */
+function moodSleep(m, done){ moodReset(m); MOOD_H = setTimeout(done, 4000); }
 function moodCycle(){
   var m = moodParts();
   /* not painted yet, or scrolled away: idle-wait rather than killing the cycle */
   if (!m || !moodOnScreen(m)){ MOOD_H = setTimeout(moodCycle, 1000); return; }
-  moodSweep(m, function(){
-    moodMarch(m, function(){
-      moodSweep(m, function(){ moodSleep(m, moodCycle); });
-    });
-  });
+  moodSweep(m, function(){ moodSleep(m, moodCycle); });
 }
 function moodStart(){
   if (MOOD_H || document.visibilityState === 'hidden') return;
@@ -893,11 +887,12 @@ function moodLetters(word){
     var ch = w.charAt(n);
     if (ch === ' '){ out += ' '; continue; }   /* keep real word spacing */
     /* esc() per CHARACTER, so an escaped entity can never be split down the middle. */
-    /* cc#1157: the SECOND copy of the stagger, and the one that would have been missed. This is
-       the FIRST-PAINT sweep written straight into the markup; the driver's copy above only runs
-       from the second sweep onward. Left at 60 here, the very first wave a reader sees would still
-       be the slow one while every later wave was fast. */
-    out += '<span class="mlt" style="animation-delay:' + (i * 20) + 'ms">' + esc(ch) + '</span>';
+    /* The SECOND copy of the stagger, and the one that gets missed. This is the FIRST-PAINT sweep
+       written straight into the markup; the driver's copy above only runs from the second sweep
+       onward, so a value changed in one place and not the other shows up as a first wave that
+       does not match every wave after it. cc#1178 moves it back to the ref R3 60ms with the
+       driver. */
+    out += '<span class="mlt" style="animation-delay:' + (i * 60) + 'ms">' + esc(ch) + '</span>';
     i++;
   }
   return out;

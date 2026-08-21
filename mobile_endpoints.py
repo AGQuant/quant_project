@@ -1685,15 +1685,19 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    inline box does nothing); baseline alignment and no margin, so wrapping the letters cannot move
    the word by a pixel. currentColor everywhere means the glow is the mood's OWN colour — the
    effect never introduces a hue that could read as a different mood. */
-/* cc#1135: the animation moves off the bare .mlt and onto .mlt.run, so the cycle driver can run
-   ONE letter at a time (the march) or every letter with a stagger (the sweep) using the same
-   keyframe. The keyframe itself is untouched — verbatim reuse, no second animation. */
+/* cc#1135: the animation moves off the bare .mlt and onto .mlt.run so the cycle driver can pick
+   which letters run. cc#1178 removed the march, so the only caller left is the sweep — every
+   letter, staggered. The keyframe itself has never been touched: verbatim reuse, no second
+   animation, in either direction. */
 .hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow}
-/* cc#1157 (founder ruling 20-Aug 16:03, from a live phone render): the per-letter flash is 3x
-   faster. Duration .42s -> .14s. Easing, iteration count, fill mode and the keyframe itself are
-   BYTE-IDENTICAL — the ruling was about speed, and changing the curve while changing the speed
-   would make the result impossible to judge against the ruling. */
-.hero-mood .mlt.run{animation:moodLite .14s ease-out 1 both}
+/* cc#1178 (founder ruling 21-Aug ~09:10, session_log 28179): back to the ref R3 duration of .42s.
+   cc#1157 had cut it to .14s under the 20-Aug ruling, and 28179 voids that ruling by name. The
+   card requires the glimpse to be byte-identical to the ref apart from its interval, and .14s is
+   not byte-identical to .42s, so the duration goes back. NOTE FOR THE FOUNDER: cc#1157 was NOT
+   unclaimed as 28179 assumes — it shipped at c32c6e3, 08:58 IST, about ten minutes before the
+   ruling, so the faster wave is probably what was on the phone. If that speed was wanted, this
+   one number is the whole revert. */
+.hero-mood .mlt.run{animation:moodLite .42s ease-out 1 both}
 @keyframes moodLite{
   0%  {transform:translateY(0)      scale(1);    text-shadow:none}
   45% {transform:translateY(-2px)   scale(1.06); text-shadow:0 0 10px currentColor,0 0 22px currentColor}
@@ -1703,8 +1707,9 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    land in their final state rather than mid-animation. */
 /* cc#1135: !important is REQUIRED here now and it is not decoration. .mlt.run is a more specific
    selector than .mlt, so without it this rule would lose to the run class and a reader who asked
-   for less motion would get the full cycle every ten seconds. The ruling says reduced-motion keeps
-   winning; this is what keeps it winning. The approved ref carries the same !important. */
+   for less motion would get the full cycle — every four seconds now, which is exactly why this
+   still matters. The ruling says reduced-motion keeps winning; this is what keeps it winning.
+   The approved ref carries the same !important. */
 @media (prefers-reduced-motion:reduce){.hero-mood .mlt{animation:none!important}}
 .hero-why{color:var(--mut);font-size:12.5px;margin-top:5px}
 .v10line{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700;
