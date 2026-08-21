@@ -1315,13 +1315,24 @@ def score_card(d, style, side):
     max_score = round(sum(r.get("max", 1.0) for r in rules), 2)
     if float(max_score).is_integer():
         max_score = int(max_score)
-    # cc#934 item 5: DISPLAY sequence 1..N in evaluation order, with no gaps. The internal R-codes
-    # jump (R5->R7, R12->R15) from years of consolidations and drops, and they are referenced by
-    # locked specs (3019, 6621-6624, 12289), so they are NEVER renumbered — they travel as
-    # legacy_id. Surfaces render `seq`; the payload keeps both.
-    for i, r in enumerate(rules, 1):
-        r["seq"] = i
-        r["legacy_id"] = r["rule"]
+    # cc#934 item 5: DISPLAY sequence 1..N, no gaps. The internal R-codes jump (R5->R7, R12->R15)
+    # from years of consolidations and drops, and they are referenced by locked specs (3019,
+    # 6621-6624, 12289), so they are NEVER renumbered — they travel as legacy_id. Surfaces render
+    # `seq`; the payload keeps both.
+    #
+    # cc#1173 DISPLAY RULING (session_log 27977, founder 22:25 IST): every detailed report, on all
+    # four check types, renders rules ORDERED BY WEIGHT DESCENDING with the weight visible per row.
+    # The order is applied HERE rather than in each surface, so every consumer inherits it and no
+    # surface can drift from the ruling by forgetting to sort.
+    #
+    # seq is re-assigned over the sorted list, which is correct rather than a liberty: cc#934
+    # defines seq as the DISPLAY sequence, so it follows display order by definition. legacy_id
+    # carries the stable R-code, which is what the locked specs actually reference.
+    #
+    # The sort is STABLE and keyed on weight alone, so rules of equal weight keep their evaluation
+    # order — the heaviest move to the top and nothing else is shuffled. Missing weight sorts last
+    # (an unmapped rule is the least calibrated thing on the card, so the bottom is the honest
+    # place for it) rather than crashing the sort on a None.
     strong = round(_STRONG_RATIO * max_score, 1)
     valid = round(_VALID_RATIO * max_score, 1)
     label = f"{side}-{style[:3]}"
@@ -1339,8 +1350,16 @@ def score_card(d, style, side):
     if unmapped:
         # Named, never silently defaulted — the push-1 discipline, at compute time.
         card["score10_unmapped_rules"] = unmapped
+    # Weights are attached BEFORE the sort below, and the order matters: the first version of this
+    # sorted on a key that had not been written yet, so every weight read as None and the sort was
+    # a silent no-op that still looked like it worked.
     for r in rules:
         r["weight"] = (_rule_weights() or {}).get(label, {}).get(r["rule"])
+    rules.sort(key=lambda r: -(r.get("weight") if r.get("weight") is not None else -1.0))
+    for i, r in enumerate(rules, 1):
+        r["seq"] = i
+        r["legacy_id"] = r["rule"]
+
     if side == "SELL":
         card["recal"] = "V8-ALIGNED cc#767"
     return card
