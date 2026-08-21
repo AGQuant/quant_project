@@ -765,7 +765,30 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .oi-sub .v{font-family:var(--mono);font-size:12px;font-weight:700}
 #pane-index .oi-charts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #pane-index .oi-chart-lbl{font-size:8px;color:var(--mut);margin-bottom:4px}
-#pane-index .tbl-scroll{overflow-x:auto}
+/* cc#1168 push 3 · DEFECT D — the measured-scroll pattern, one shared table treatment.
+   MEASURED FIRST, on the real markup with the four real open legs and three real closed legs:
+   at 1280 both tables fit in 1250 of 1250 with ZERO margin to spare; at 768 Open Positions runs
+   209px past the card edge and Closed Trades 98px; at 390 it is 587px and 476px. So the founder's
+   scrollbar is real below desktop, and at desktop the table is one wide value away from it.
+   overflow-x:auto on its own is a SILENT clip — the same family as the digest ladder — because the
+   overlay scrollbar only appears while scrolling and nothing on the card says there is more.
+   The fix keeps the scroller, gives it a thin visible bar, and adds a fade at the edge that is
+   present only while there is genuinely more to the right. Nothing is hidden and nothing is faked:
+   if a table fits, the card looks exactly as it did. */
+#pane-index .tbl-scroll{overflow-x:auto;scrollbar-width:thin;
+    scrollbar-color:var(--line2) transparent;-webkit-overflow-scrolling:touch}
+#pane-index .tbl-scroll::-webkit-scrollbar{height:7px}
+#pane-index .tbl-scroll::-webkit-scrollbar-track{background:transparent}
+#pane-index .tbl-scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+#pane-index .tbl-hold{position:relative}
+#pane-index .tbl-hold::after{content:'';position:absolute;top:0;right:0;bottom:0;width:36px;
+    pointer-events:none;opacity:0;transition:opacity .18s ease;
+    background:linear-gradient(90deg,transparent,var(--card))}
+#pane-index .tbl-hold.clipped::after{opacity:1}
+#pane-index .scrollhint{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em;
+    color:var(--mut);border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+    margin-left:8px;white-space:nowrap;display:none}
+#pane-index .scrollhint.on{display:inline-block}
 #pane-index table{width:100%;border-collapse:collapse;font-size:13px}
 #pane-index thead th{padding:5px 8px;color:var(--mut);font-weight:700;text-align:left;
     font-size:11px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
@@ -5601,9 +5624,9 @@ function rOpen(){
         ? `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`
         : skelRows(11, 2));
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div class="t">Open Positions (${D.open.length})</div>
+    <div class="card-hd"><div class="t">Open Positions (${D.open.length})<span class="scrollhint">SCROLL →</span></div>
       <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
-    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="tbl-hold"><div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
   </div>`;
 }
 
@@ -5631,10 +5654,10 @@ function rClosed(){
   // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
   const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="idxToggleClosed()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})</div>
+    <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})<span class="scrollhint">SCROLL →</span></div>
       <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
         <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
-    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}
+    <div class="tbl-hold"><div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>${more}
   </div>`;
 }
 
@@ -6265,6 +6288,33 @@ function render(){
   host.innerHTML = html;
   mountIdxTapes();   // cc#1058
   try{ fitSpineTags(host); }catch(e){ console.warn('[spine fit]', e && e.message); }   // cc#1167
+  try{ idxMarkScroll(host); }catch(e){ console.warn('[tbl scroll]', e && e.message); } // cc#1168
+}
+
+/* cc#1168 push 3 — DEFECT D. Measure each table AFTER it is in the document and say, on the card,
+   whether there is more to the right. A card that clips in silence reads as a complete table; the
+   founder photographed the consequence of that on the Open Positions card.
+
+   The class is driven by MEASUREMENT, never by a width guess: scrollWidth against clientWidth on
+   the element that actually scrolls. It re-measures on scroll, so the fade and the hint go away
+   once the reader has reached the end — an affordance that stays lit after it is spent is noise.
+   A table that fits is left completely alone. */
+function idxMarkScroll(host){
+  if(!host) return;
+  host.querySelectorAll('.tbl-hold').forEach(hold=>{
+    const sc=hold.querySelector('.tbl-scroll'); if(!sc) return;
+    const card=hold.closest('.card');
+    const hint=card?card.querySelector('.scrollhint'):null;
+    const mark=()=>{
+      // 1px of tolerance: sub-pixel table widths would otherwise light the fade on a table that
+      // fits, which trains the reader to ignore it.
+      const more = sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 1;
+      hold.classList.toggle('clipped', more);
+      if(hint) hint.classList.toggle('on', more);
+    };
+    mark();
+    if(!sc._ccScrollBound){ sc.addEventListener('scroll', mark, {passive:true}); sc._ccScrollBound=true; }
+  });
 }
 
 /* extend loaders with pivots + strike OI */
@@ -6297,7 +6347,11 @@ window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values,
   var q=false;
   function again(){ if(q) return; q=true;
     requestAnimationFrame(function(){ q=false;
-      try{ fitSpineTags(document.getElementById('idx-app')); }catch(e){} }); }
+      try{ fitSpineTags(document.getElementById('idx-app')); }catch(e){}
+      // cc#1168: a table that fits at 1280 clips at 900. Whether there is more to the right is a
+      // function of the width, so it is re-measured on the same signal the spine fit uses rather
+      // than only at render time.
+      try{ idxMarkScroll(document.getElementById('idx-app')); }catch(e){} }); }
   window.addEventListener('resize', again);
   window.addEventListener('orientationchange', again);
 })();
