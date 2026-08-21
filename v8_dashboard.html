@@ -660,7 +660,8 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
    .set-cell .v carries letter-spacing:.2em and color:var(--mut). Those exist to make the DOT MASK
    look right, because proprietary parameters never go in a design file. The LIVE settings card
    shows real values, so copying that spacing would smear real numbers apart and grey them out.
-   The mask is ref-only; the live card keeps its own .set-box .v exactly as it was. */
+   The mask is ref-only; the live card keeps its own .set-cell .v exactly as it was.
+   (cc#1168 push 4 renamed the class from .set-box to the ref's .set-cell; the decision is unchanged.) */
 #pane-index .tag2{font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.06em}
 #pane-index .tag2.eng{background:var(--blu-chip);color:var(--blu);border:1px solid var(--blu-chip-bd)}
 #pane-index .tag2.long{background:var(--grn-d);color:var(--grn)}
@@ -674,7 +675,15 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .lockchip{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--violet);
     background:var(--vio-bg);border:1px solid var(--vio-bd);border-radius:5px;padding:2px 8px}
 #pane-index .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-#pane-index .stat{border:1px solid var(--line);border-radius:9px;padding:10px 12px;text-align:center}
+/* cc#1168 push 4: min-width:0 and a wrap rule on the tile. The ref's minmax(120px,1fr) gives the
+   COLUMN a floor, but a grid item defaults to min-width:auto, so a label wider than its column
+   pushes past the card instead of wrapping. Measured at 412px with 2x text scaling: MAX DRAWDOWN
+   ran 16px past the edge with overflow-x:visible, so there was no way to reach it. The ref never
+   rendered a real label at a real text scale, so this is a defect in the transplant, not a
+   disagreement with the design. */
+#pane-index .stat{border:1px solid var(--line);border-radius:9px;padding:10px 12px;text-align:center;
+    min-width:0;overflow-wrap:anywhere}
+#pane-index .set-cell{min-width:0;overflow-wrap:anywhere}
 #pane-index .stat .n{font-family:var(--mono);font-weight:700;font-size:17px;color:var(--mut)}
 #pane-index .stat .l{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-top:3px}
 #pane-index .stack{display:flex;flex-direction:column;gap:16px}
@@ -800,18 +809,29 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .ivp-track{width:48px;height:5px;background:var(--line);border-radius:3px;overflow:hidden;flex-shrink:0}
 #pane-index .ivp-fill{height:100%;border-radius:3px}
 #pane-index .ivp-val{font-family:var(--mono);font-size:11px;font-weight:800}
-#pane-index .set-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-@media(max-width:760px){#pane-index .set-grid{grid-template-columns:repeat(2,1fr)}}
-#pane-index .set-box{background:var(--card2);border-radius:6px;padding:6px 8px;border:1px solid var(--line)}
-#pane-index .set-box .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+/* cc#1168 push 4 — the Settings tiles finish moving to the ref's .set-cell grammar
+   (design_refs/index_intel_R2.html @ f5a31dd). cc#1154 brought the Performance card's .stat tiles
+   across but left these behind, so two tile families sat in one pane on different tokens: the stat
+   label at 8.5px/.14em and the settings label at 10px/.5px, a visible mismatch in cards the founder
+   reads side by side.
+   auto-fit REPLACES the hardcoded 5-column grid and its 760px breakpoint. Five fixed columns is a
+   count, not a layout: it squeezed each tile to a fifth of the card whatever the width, and the one
+   breakpoint below it jumped straight to two. minmax lets the tile keep a floor and the row decide
+   how many fit, which is the ref's own rule.
+   The cc#1154 decision on .set-cell .v STANDS and is not reopened: the ref's letter-spacing .2em
+   and colour --mut exist to make its DOT MASK look right, and smearing real configuration values
+   apart in grey would be copying a masking artefact as if it were design. */
+#pane-index .set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+#pane-index .set-cell{border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+#pane-index .set-cell .k{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700}
 /* cc#818 fix_2: the V10 Performance and Entry/Exit Settings cards were ALREADY identical — both
-   render .set-box > .k/.v through this single rule, so there was no parity bug to fix between them.
+   render .set-cell > .k/.v through this single rule, so there was no parity bug to fix between them.
    What is real: these tiles sat at 12px while every table in the same pane (#pane-index table) is
    13px, so inside the Performance card the stat tiles read smaller than the By Symbol / By Leg rows
    directly beneath them, while the Settings card has no table to be judged against. Raising the tile
    value to 13px matches the pane's table token and removes that mismatch. Because both cards share
    this ONE rule, they cannot drift apart — parity is structural, not something to re-check. */
-#pane-index .set-box .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--txt)}
+#pane-index .set-cell .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--txt);margin-top:3px}
 #pane-index .legend{display:flex;gap:20px;margin-top:10px;padding:6px 10px;
     background:var(--card2);border-radius:6px;flex-wrap:wrap}
 #pane-index .lg{display:flex;align-items:center;gap:5px}
@@ -5667,10 +5687,13 @@ function rSettings(){
     ['SuperTrend',`${stP}/${stM} · ${stTf}`],['EMA Gate',`${emaF}/${emaS} · ${emaTf}`],
     ['Trade Legs',legs],['Entry Window',`${entry} IST`],['Entry Cutoff',`${cut} IST`],
     ['Gap Exit',gapExit],['Lot NIFTY',`${lotN} units`],['Lot BANKNIFTY',`${lotB} units`]];
-  const boxes=p.map(([k,v])=>`<div class="set-box"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
+  const boxes=p.map(([k,v])=>`<div class="set-cell"><div class="k">${k.toUpperCase()}</div><div class="v">${esc(v)}</div></div>`).join('');
+  /* cc#1168 push 4: the ref's own header for this card — one title, one lock chip, and V10 folded
+     INTO the chip. The "V10 Configuration" sub-line said what the chip now says, so it went rather
+     than being kept alongside it. The chip keeps the ref's exact string. */
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Entry / Exit Settings</div><div class="s">V10 Configuration</div></div>
-      <span class="lockchip">LOCKED 16-JUN-2026</span></div>
+    <div class="card-hd"><span class="t">Entry / Exit Settings</span>
+      <span class="lockchip">V10 · LOCKED 16-JUN-2026</span></div>
     <div class="set-grid">${boxes}</div>
   </div>`;
 }
@@ -5678,7 +5701,7 @@ function rSettings(){
 function rPerf(){
   const p=D.perf||{};
   const tot=p.total_trades||0;
-  /* cc#1154 scope 4: the ref's .stat box, not the settings .set-box these were borrowing. Two
+  /* cc#1154 scope 4: the ref's .stat box, not the settings tile class these were borrowing. Two
      different cards were rendering through one class, so a change to either moved both. */
   const stat=(k,v,col)=>`<div class="stat"><div class="n" style="color:${col||'var(--txt)'}">${v}</div><div class="l">${k}</div></div>`;
   const pf=p.profit_factor!=null?Number(p.profit_factor).toFixed(2):'—';
