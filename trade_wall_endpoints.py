@@ -209,6 +209,29 @@ WITH ev AS (
          qty::numeric, exit_price::numeric, pnl::numeric, result, NULL
   FROM tc_intraday_trades WHERE exit_ts IS NOT NULL
 
+  -- EQUITY SWING (QSR) · cc#1175, session_log 27980. The equity swing slot, with a live source.
+  -- entry_ts and exit_ts are NAIVE IST already (qsr_engine writes them that way, the cc#844
+  -- convention) so they are read RAW — no AT TIME ZONE here. Converting them would shift every
+  -- QSR event by 5h30m and scramble it against the v8 rows beside it, which is the exact bug the
+  -- header of this file warns about.
+  -- pnl is in RUPEES on this engine, so it ships in the `pnl` field like v8 and quant do, and the
+  -- PERCENT rides in the note instead — labelled, and emitted with chr(37) because a literal
+  -- percent character anywhere in this string breaks psycopg's placeholder scan (see
+  -- PERCENT_SIGNS_IN_SQL above; that outage took the whole wall dark once).
+  UNION ALL
+  SELECT 'qsr', id, 'ENTRY', entry_ts::timestamp, 'min',
+         symbol, 'LONG', 'Equity Swing', 'EQUITY',
+         qty::numeric, entry_price::numeric, NULL, NULL, segment
+  FROM qsr_trades WHERE entry_ts IS NOT NULL
+  UNION ALL
+  SELECT 'qsr', id, 'EXIT', exit_ts::timestamp, 'min',
+         symbol, 'LONG', 'Equity Swing', 'EQUITY',
+         qty::numeric, exit_price::numeric, pnl::numeric, exit_reason,
+         NULLIF(CONCAT_WS(' · ', segment,
+                CASE WHEN pnl_pct IS NOT NULL
+                     THEN ROUND(pnl_pct::numeric, 2)::text || chr(37) END), '')
+  FROM qsr_trades WHERE exit_ts IS NOT NULL
+
   -- cc#1000: OPTIONS (options_trades, the stock-options engine) is EXCLUDED from the wall — it is
   -- NOT on the founder's four-group list. Read-only exclusion; the table is untouched. The OPTIONS
   -- instrument CLASS still exists on the wall via the V10 Index option legs above.
