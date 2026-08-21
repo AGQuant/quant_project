@@ -897,7 +897,26 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-v14 .logo b{color:var(--blu)}
 #pane-v14 .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
 #pane-v14 .spacer{flex:1}
-#pane-v14 .clock{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut)}
+/* cc#1170 push 2: the header slot no longer holds a ticking clock, it holds a state. Muted and
+   bordered rather than red — V14 is RETIRED, not failing, and an error colour would send someone
+   looking for a fault to fix. */
+#pane-v14 .clock{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;
+    font-weight:700;letter-spacing:.14em;color:var(--mut);border:1px solid var(--line2);
+    border-radius:6px;padding:3px 9px}
+/* THE SILENT BANNER. Deliberately not styled as an alert: no red, no warning triangle. The one
+   place amber IS used is the stranded-position line, because an unmanaged open position on a dead
+   engine is the only thing on this tab that would need someone to act. */
+#pane-v14 .v14-silent{border:1px solid var(--line2);border-radius:12px;padding:14px 16px;
+    background:var(--card2);margin:14px 0 4px}
+#pane-v14 .v14-silent-hd{font-size:13px;font-weight:800;letter-spacing:.1em;color:var(--mut);
+    display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+#pane-v14 .v14-silent-hd span{font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--dim)}
+#pane-v14 .v14-silent-body{font-size:12px;color:var(--txt);line-height:1.6;margin-top:8px;
+    max-width:70ch}
+#pane-v14 .v14-silent-sub{font-size:10.5px;color:var(--dim);line-height:1.55;margin-top:7px;
+    max-width:70ch}
+#pane-v14 .v14-silent-warn{font-size:11.5px;color:var(--amber);line-height:1.55;margin-top:8px;
+    border-left:3px solid var(--amber);padding-left:9px;max-width:70ch}
 #pane-v14 .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:16px 0 10px;display:flex;gap:8px;align-items:center}
 #pane-v14 .ptitle .ct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
 #pane-v14 .chip{display:inline-flex;align-items:center;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid;white-space:nowrap}
@@ -1286,8 +1305,11 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
     <header>
       <div class="logo">Index &middot; <b>V14 Intraday</b></div>
       <div class="spacer"></div>
-      <button id="replayBtn" class="rbtn">&#9654; Replay Day</button>
-      <div class="clock" id="v14-clk">--:--</div>
+      <!-- cc#1170 push 2: the Replay Day button and the live IST clock are REMOVED. A silent
+           engine must not look pausable-live, and a second-ticking clock in the header of a
+           retired engine is the most convincing live signal on the page. The clock element is
+           replaced by a static state chip; the replay machinery below is now unreachable. -->
+      <div class="clock" id="v14-clk" title="V14 is retired — founder ruling, session_log 27951">SILENT</div>
     </header>
     <div id="v14-root"><div class="loading">Loading V14 intraday engine…</div></div>
     <div class="rp-ov" id="rpOv">
@@ -6542,6 +6564,33 @@ function rClosed(){
     <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="note">Every row carries a full gates snapshot at entry (in v14_trades.gates_snapshot) for evening per-tag analysis.</div>`;
 }
+/* cc#1170 push 2 (founder ruling, session_log 27951): the honest silent state.
+   This REPLACES the Daily P&L strip at the top of the tab. That strip read Open P&L (MTM), Open
+   positions, Closed today — three numbers that only mean anything for an engine that is still
+   trading. On a retired engine they are not stale, they are misleading: a reader would take
+   "Closed today 0.00%" as a flat day rather than as no engine.
+   The banner says WHEN it stopped, WHO stopped it, and WHY, because "silent" without a reason
+   invites someone to switch it back on. The gate it missed is quoted so the bar is on the page. */
+function rSilent(){
+  const closed=(D.closed||[]).length;
+  const open=(D.open||[]).length;
+  // The open-position line is CONDITIONAL and it matters: a silenced engine with positions still
+  // on the book would have them frozen and unmanaged, and that must be shouted, not implied.
+  const stranded = open
+    ? `<div class="v14-silent-warn">${open} position(s) still open on this book — the engine is
+       not managing them. They will not be exited by V14.</div>`
+    : `<div class="v14-silent-sub">Book is flat — no position was left unmanaged when the engine
+       stopped.</div>`;
+  return `<div class="v14-silent">
+      <div class="v14-silent-hd">● ENGINE SILENT <span>since 20-Aug-2026</span></div>
+      <div class="v14-silent-body">Founder ruling. V14 did not clear the merit gate:
+        average return of at least 1% per trade AND at least 60% accuracy. It is retired, not
+        paused and not broken. Nothing has been deleted.</div>
+      ${stranded}
+      <div class="v14-silent-sub">${closed} closed trades below, retained as a research ledger.
+        Read-only history — the numbers are what the engine actually did, not a live position.</div>
+    </div>`;
+}
 function rDaily(){
   const d=D.daily; if(!d)return'';
   const o=d.open||{},c=d.closed_today||{};
@@ -6568,7 +6617,10 @@ function rDayLog(){
   return `<div class="ptitle">Day log <span class="ct">${l.length} days</span></div>
     <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
-function render(){document.getElementById('v14-root').innerHTML=rDaily()+rSummary()+rOpen()+rClosed()+rDayLog();}
+/* cc#1170 push 2: rSilent REPLACES rDaily at the head of the tab. rDaily is left in the file
+   unused rather than deleted — restoring V14 is a registry UPDATE, and the strip it renders
+   should come back with the engine rather than have to be rewritten. */
+function render(){document.getElementById('v14-root').innerHTML=rSilent()+rSummary()+rOpen()+rClosed()+rDayLog();}
 async function load(){
   try{
     const [pos,tr,sm]=await Promise.all([getJSON(EP.pos),getJSON(EP.trades),getJSON(EP.summary)]);
@@ -6631,8 +6683,13 @@ function renderReplay(clk, frac, now){
     +`<div class="ptitle">Closed trades <span class="ct">${closed.length} done &middot; net ${sign(closedNet,2)}%</span></div><div class="scroll"><table><thead><tr>${ch.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${cb}</tbody></table></div>`
     +`<div class="ptitle">Per-tag <span class="ct">live</span></div><div class="scroll"><table><thead><tr><th>TAG</th><th>TRADES</th><th>WR</th><th>NET %</th></tr></thead><tbody>${tb}</tbody></table></div>`;
 }
-document.getElementById('replayBtn').onclick=startReplay;
-document.getElementById('rpClose').onclick=stopReplay;
+/* cc#1170 push 2: the Replay button is gone from the markup, so this lookup now returns null.
+   Guarded rather than deleted — an unguarded .onclick on null throws at script-evaluation time
+   and would take every statement below it with it, including the tab controller. The replay
+   machinery stays in the file, unreachable, so restoring V14 is a registry UPDATE plus putting
+   one button back. */
+var _rpBtn=document.getElementById('replayBtn'); if(_rpBtn) _rpBtn.onclick=startReplay;
+var _rpClose=document.getElementById('rpClose'); if(_rpClose) _rpClose.onclick=stopReplay;
 document.querySelectorAll('.rp-speed button').forEach(b=>b.onclick=()=>{RP.dur=+b.getAttribute('data-dur');document.querySelectorAll('.rp-speed button').forEach(x=>x.classList.remove('on'));b.classList.add('on');if(RP.running){stopReplay();startReplay();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&RP.running)stopReplay();});
 
@@ -6689,8 +6746,11 @@ window.closeTradeInfo=closeTradeInfo;
 var _v14Booted=false;
 window.v14Boot=function(){
   if(_v14Booted) return; _v14Booted=true;
-  tick(); setInterval(tick,1000);
-  load(); setInterval(function(){ var p=document.getElementById('pane-v14'); if(p&&p.style.display!=='none') load(); },60000);
+  /* cc#1170 push 2: BOTH intervals are gone. The 1-second clock and the 60-second auto-refresh
+     were the tab's live affordances — a page that re-fetches every minute is telling the reader
+     something is still happening. Nothing is happening. The ledger is history, so it is loaded
+     ONCE and left alone; re-opening the tab re-runs this boot only if the latch was never set. */
+  load();
 };
 
 })();
