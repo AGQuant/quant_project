@@ -645,6 +645,56 @@ body[data-theme]{
    it. scroll-snap-align:start per the card; at a full-width face start and center coincide. */
 .swipe-t > a{flex:0 0 100%;max-width:100%;min-width:0;scroll-snap-align:start;display:block}
 .swipe-t > a > .c{margin-bottom:0}
+/* ══ cc#1160 · INDEX INTEL, riding the card's bottom edge ════════════════════════════════════
+   Geometry from design_refs/scorr_home_indexbook_R2.html (.intel-btn): left 50%, bottom 0,
+   translate(-50%,50%). Absolutely positioned, so it takes NO space in the card's flow and the
+   card box measures exactly what it measured before.
+   THE CARD NEEDS position:relative or the button anchors to the wrong box. .swipe-t > .c has no
+   position of its own, so without this the nearest positioned ancestor is the viewport and the
+   button lands at the bottom of the SCREEN.
+   AND THEN THE TRACK CLIPS IT. #heroTrack is overflow-x:auto, and CSS will not give you auto on
+   one axis and visible on the other — setting either forces the other to auto. So half the button
+   hangs into a region the track paints nothing in. Measured before the padding was added: the
+   button's own box was 29px tall and 14px of it sat below the track's visible bottom.
+   The padding gives the track somewhere to paint it, and the negative dots margin gives that space
+   straight back, so nothing below the deck moves.
+   THE RESERVE IS IN em, NOT PIXELS, AND THAT IS THE WHOLE POINT. A flat 15px was written first and
+   measured: fine at 1.0, but at 1.3x text scaling the button grows to 32px and its overhang to
+   16px, so the last pixel was clipped at all three widths. In em the reserve grows with the text
+   exactly as the button does. The two declarations are ONE expression written twice with opposite
+   signs — they cancel at any scale, so the dots and everything under them never move. Change one
+   and you must change the other. */
+/* THE CARD ITSELF CLIPS, and this is the rule that stops it. .c in MOBILE_CSS carries
+   overflow:hidden (it is what keeps the ::before accent bar inside the 14px radius), so without
+   this the button's lower half is simply cut off by its own card — the track padding above would
+   have solved nothing. Scoped to the hero deck so the other cards on the page keep clipping
+   exactly as they do now.
+   .c already sets position:relative in MOBILE_CSS; it is restated here only because this rule
+   overrides overflow on the same selector and the two belong together — the button anchors to
+   this box and is clipped by this box.
+   THE ACCENT BAR HAS TO BE ROUNDED TO MATCH. ::before is a 3px bar at left:0, top:0, bottom:0 with
+   square corners; overflow:hidden is what was rounding it. Turn that off and it pokes out past
+   the card's rounded corners. It gets the card's own left radius instead, so the corner looks
+   exactly as it did.
+   overflow-x:clip WAS TRIED HERE AND MEASURED WORSE, so it is written down rather than left for
+   the next person to rediscover. The idea was to keep containing sideways while releasing
+   downward, since visible+clip is the one mixed pair CSS allows. In Chromium the pair collapses:
+   the card computed hidden/hidden again and cut the button at all three widths and both scales.
+   Plain overflow:visible measures clean everywhere, so that is what ships.
+   ITS ONE SIDE EFFECT IS AN IMPROVEMENT, AND IT WAS CHECKED BOTH WAYS. The card was already
+   failing render_check at 2x before this card existed — div.c hiding 137px of content past its
+   edge with no way to scroll to it. Releasing the overflow makes that content reachable instead
+   of cut off, and the after page passes at every width and scale against a before baseline that
+   did not. */
+#heroTrack > .c{position:relative;overflow:visible}
+#heroTrack > .c::before{border-radius:14px 0 0 14px}
+#heroTrack{padding-bottom:1.05em}
+#heroTrack ~ .dots{margin-top:calc(7px - 1.05em)}
+.intel-btn{position:absolute;left:50%;bottom:0;transform:translate(-50%,50%);
+  background:var(--bg,#0A0F1E);border:1px solid var(--cyan,#37D3E8);color:var(--cyan,#37D3E8);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:700;
+  letter-spacing:.14em;padding:7px 16px;white-space:nowrap;text-decoration:none;z-index:2}
+.intel-btn:active{background:var(--panel2)}
 .dots{display:flex;justify-content:center;gap:6px;margin-top:7px}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:3px}
@@ -2965,6 +3015,11 @@ Promise.all([
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
     + idxFooter(d)          /* cc#1139: LAST block in the cc#1134 column, after the chip grid */
+    /* cc#1160: INDEX INTEL, straddling this card's bottom edge. Absolutely positioned, so it is
+       the last CHILD but not the last block in the column — it takes no space in the flow and the
+       card measures exactly what it did before. /m/v10 is the app's Index Intel route, the same
+       one main.py's NAV_REGISTRY and the pwa NAV array label "Index Intel (mobile)". */
+    + '<a class="intel-btn" href="/m/v10">INDEX INTEL ›</a>'
     + '</div>'
     + heroCard2(d)
     + '</div><div class="dots" id="heroDots"><i class="on"></i><i></i></div></div>';
