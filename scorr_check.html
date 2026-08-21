@@ -237,6 +237,54 @@
   .inv-score-card.watch .inv-bar-fill{background:var(--amber)}
   .inv-score-card.avoid .inv-bar-fill{background:var(--red)}
   /* cc#588 — v3.0 gate+conviction verdicts */
+  /* ── cc#1174 push 5 · Investment Check V2 weighted report ───────────────────────────────
+     Rows are a GRID, not a table. A table with four columns cannot give up its width, and the
+     founder reads this on a 360px phone as often as on a desktop; the grid drops the raw-value
+     column to its own line below 520px instead of forcing the card to scroll sideways. */
+  .icv2-card{display:none}
+  .icv2-card.show{display:block}
+  .icv2-spec{font-size:9.5px;color:var(--dim);border:1px solid var(--line);border-radius:6px;
+    padding:1px 5px;margin-left:6px;letter-spacing:.5px}
+  .icv2-vtag{font-size:9.5px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;margin-right:6px;letter-spacing:1px}
+  .icv2-bar-track{height:7px;border-radius:4px;background:var(--well);overflow:hidden;margin:10px 0 6px}
+  .icv2-bar-fill{height:100%;width:0;border-radius:4px;background:var(--mut);transition:width .35s ease}
+  .icv2-card.STRONG_BUY .icv2-bar-fill{background:var(--grn)}
+  .icv2-card.ACCUMULATE .icv2-bar-fill{background:var(--cyan)}
+  .icv2-card.WATCH .icv2-bar-fill{background:var(--amber)}
+  .icv2-card.AVOID .icv2-bar-fill{background:var(--red)}
+  .icv2-card.STRONG_BUY .tier-score{color:var(--grn)}
+  .icv2-card.ACCUMULATE .tier-score{color:var(--cyan)}
+  .icv2-card.WATCH .tier-score{color:var(--amber)}
+  .icv2-card.AVOID .tier-score{color:var(--red)}
+  .icv2-sub{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+    font-size:10.5px;color:var(--dim);margin-bottom:10px}
+  .icv2-rows{display:flex;flex-direction:column;gap:4px}
+  /* WRAPPING FLEX, not a grid. The first version used grid-template-columns 42px 1fr auto auto and
+     collapsed the name to 0 width at 1280px with 2x text scaling — the two auto columns took the
+     whole row and 1fr has no floor. A flex child with a flex-basis wraps to the next line instead
+     of shrinking to nothing, so this cannot collapse at any width or text scale. Caught by
+     render_check, not by reading the CSS. */
+  .icv2-row{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;
+    padding:7px 9px;border-radius:var(--radius-sm);background:var(--well);
+    border-left:3px solid var(--line2);font-size:11.5px}
+  .icv2-row.full{border-left-color:var(--grn)}
+  .icv2-row.part{border-left-color:var(--amber)}
+  .icv2-row.none{border-left-color:var(--red)}
+  .icv2-row.excl{border-left-color:var(--dim);opacity:.72}
+  .icv2-w{flex:0 0 auto;min-width:40px;font-size:10px;color:var(--mut);background:var(--panel2);
+    border-radius:5px;padding:2px 4px;text-align:center;letter-spacing:.5px}
+  .icv2-name{flex:1 1 130px;color:var(--txt);min-width:0;overflow-wrap:anywhere}
+  .icv2-raw{flex:1 1 100%;color:var(--mut);font-size:10.5px;overflow-wrap:anywhere}
+  .icv2-chip{flex:0 0 auto;margin-left:auto;font-size:9.5px;letter-spacing:.6px;
+    border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .icv2-chip.full{background:var(--grn-d);color:var(--grn)}
+  .icv2-chip.part{background:var(--amber-d);color:var(--amber)}
+  .icv2-chip.none{background:var(--red-d);color:var(--red)}
+  .icv2-chip.excl{background:var(--panel2);color:var(--mut)}
+  .icv2-why{flex:1 1 100%;font-size:10px;color:var(--dim);overflow-wrap:anywhere}
+  .icv2-foot{margin-top:10px;font-size:10px;color:var(--dim);overflow-wrap:anywhere}
+  .icv2-uncal{color:var(--amber)}
   .inv-badge.strong-invest{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
   .inv-badge.invest{background:var(--cyan-d);color:var(--cyan);border:1px solid var(--aqua, #a5d8e8)}
   .inv-badge.watch{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
@@ -662,9 +710,25 @@
         </div>
       </div>
     </div>
+    <!-- cc#1174 push 5 — the V2 weighted report. Sits ABOVE v1 because it is the new headline,
+         and v1 stays right below it, reachable and labelled, until the founder retires it. -->
+    <div class="card icv2-card" id="icv2Card" style="padding:14px 18px">
+      <div class="tier-label">
+        <span>Investment Check <b>V2</b> &mdash; weighted score out of 10
+          <span class="icv2-spec">27979</span></span>
+        <span class="tier-score" id="icv2Score">&mdash;</span>
+      </div>
+      <div class="icv2-bar-track"><div class="icv2-bar-fill" id="icv2Bar"></div></div>
+      <div class="icv2-sub">
+        <span id="icv2Sub"></span>
+        <span id="icv2Denom"></span>
+      </div>
+      <div class="icv2-rows" id="icv2Rows"></div>
+      <div class="icv2-foot" id="icv2Foot"></div>
+    </div>
     <div class="card" style="padding:14px 18px">
       <div class="tier-label">
-        <span>Investment Check v3.0 &mdash; 3 Gates + 12 Conviction Filters</span>
+        <span><span class="icv2-vtag">V1</span> Investment Check v3.0 &mdash; 3 Gates + 12 Conviction Filters</span>
         <span class="tier-score" id="invRuleScore"></span>
       </div>
       <table class="inv-rules-table">
@@ -1528,6 +1592,99 @@ async function runInvestCheck(sym){
   try{d=await r.json();}catch(e){showErr('Bad response from server.');return;}
   if(d.error){showErr(d.error);return;}
   renderInvest(d);
+  loadInvestV2(sym);   // cc#1174: independent — a V2 failure must never blank the v1 report
+}
+
+// ── cc#1174 push 5 · Investment Check V2 ──────────────────────────────────────────────────
+// Fetched SEPARATELY from v1 and rendered into its own card, so the two engines cannot take
+// each other down. If V2 errors the card simply stays hidden and v1 reads exactly as before.
+const ICV2_FMT={
+  gvm_level:d=>(d.gvm!=null?'GVM '+Number(d.gvm).toFixed(2):'—'),
+  fundamentals:d=>(d.passed!=null?d.passed+' of '+d.of+' checks'
+    +(d.bfsi_exempt?' · ROCE exempt (BFSI)':''):'—'),
+  dgvm_90d:d=>{
+    if(d.delta==null)return '—';
+    // The ARROW is the point of this component: 27979 says direction of quality beats level.
+    const a=d.delta>0?'▲':(d.delta<0?'▼':'▬');
+    return a+' '+(d.delta>0?'+':'')+Number(d.delta).toFixed(2)
+      +(d.as_of?' since '+d.as_of:'');
+  },
+  dma_stack:d=>(d.dma20!=null?'20 '+d.dma20+' · 50 '+d.dma50+' · 200 '+d.dma200
+    +' · '+d.legs+' of 2 legs':'—'),
+  accumulation:d=>(d.up_down_vol_ratio!=null?'up/down vol '+d.up_down_vol_ratio:(d.note||'—')),
+  s1_reclaim:d=>{
+    const t=(d.touched_sessions_ago!=null?'touched S1 '+d.touched_sessions_ago+' sessions ago'
+      :'no S1 touch in 7 sessions');
+    return t+' · CMP '+(d.cmp!=null?d.cmp:'—')+(d.above_pivot?' above':' below')+' PP '+(d.pp!=null?d.pp:'—');
+  },
+  rs_1y:d=>(d.excess_pp!=null?'stock '+d.stock_1y+'% vs '+(d.benchmark||'NIFTY50')+' '+d.benchmark_1y
+    +'% · '+(d.excess_pp>0?'+':'')+d.excess_pp+'pp':'—'),
+  segment_month:d=>(d.month_avg_pct!=null?(d.segment||'')+' '+(d.month_avg_pct>0?'+':'')
+    +d.month_avg_pct+'% · '+d.members_priced+' members':'—'),
+  rsi_monthly:d=>(d.rsi_monthly!=null?'RSI '+d.rsi_monthly+' · band '+(d.band||'35-75')
+    +' · '+d.monthly_closes+' monthly closes':'—')
+};
+
+function icv2State(c){
+  if(!c.computable)return 'excl';
+  if(c.credit>=1)return 'full';
+  return c.credit>0?'part':'none';
+}
+
+async function loadInvestV2(sym){
+  const card=document.getElementById('icv2Card'); if(!card)return;
+  card.classList.remove('show');
+  let d=null;
+  try{
+    const r=await fetchWithTimeout('/api/investment-check-v2?symbol='+encodeURIComponent(sym));
+    if(!r.ok)return;
+    d=await r.json();
+  }catch(e){return;}
+  if(!d||d.error||d.score10==null)return;
+  renderInvestV2(d);
+}
+
+function renderInvestV2(d){
+  const card=document.getElementById('icv2Card');
+  card.className='card icv2-card show '+(d.band||'');
+  document.getElementById('icv2Score').textContent=Number(d.score10).toFixed(1)+'/10 · '
+    +String(d.band||'').replace('_',' ');
+  document.getElementById('icv2Bar').style.width=Math.max(0,Math.min(100,d.score10*10))+'%';
+  document.getElementById('icv2Sub').textContent='STRONG BUY 8.4 · ACCUMULATE 6.5 · WATCH 5.0';
+  // The DENOMINATOR is on the face of the card, not buried. A score out of 90 and a score out of
+  // 100 are different statements, and the reader has to be able to see which one they are holding.
+  const dn=document.getElementById('icv2Denom');
+  dn.textContent='earned '+d.earned_weight+' of a computable '+d.computable_weight
+    +' (full book 100)';
+  dn.className=(Number(d.computable_weight)<100?'icv2-uncal':'');
+
+  const rows=document.getElementById('icv2Rows'); rows.innerHTML='';
+  // NOT re-sorted here. The engine returns components heaviest-first (founder display ruling
+  // 27977/27979) precisely so no surface has to remember to sort, and a second sort in the page
+  // is a second place for the order to drift.
+  (d.components||[]).forEach(c=>{
+    const st=icv2State(c);
+    const chip=st==='excl'?'EXCLUDED':(st==='full'?'FULL':(st==='part'
+      ? Number(c.credit).toFixed(2).replace(/0$/,'')+' OF 1' : 'NONE'));
+    const raw=st==='excl'?'' : ((ICV2_FMT[c.key]?ICV2_FMT[c.key](c.detail||{}):'')||'');
+    let html='<div class="icv2-row '+st+'">'
+      +'<span class="icv2-w">w'+c.weight+'</span>'
+      +'<span class="icv2-name">'+c.label+'</span>'
+      +'<span class="icv2-chip '+st+'">'+chip+'</span>';
+    if(raw)html+='<span class="icv2-raw">'+raw+'</span>';
+    // An excluded component shows its REASON. It is never drawn as a zero, because a gap in the
+    // data and a failed test are different findings and only one of them is the company's fault.
+    if(st==='excl'&&c.excluded_reason)
+      html+='<span class="icv2-why">not measurable — '+c.excluded_reason+'</span>';
+    rows.insertAdjacentHTML('beforeend',html+'</div>');
+  });
+
+  const ao=d.as_of||{};
+  let foot='Prices to '+(ao.price_date||'—')+' · weights from '+(d.weight_source||'—');
+  if(!d.weighted)foot+=' · UNCALIBRATED: registry unreadable, scored on the in-code lock';
+  if((d.excluded_components||[]).length)
+    foot+=' · '+d.excluded_components.length+' component(s) excluded, denominator reduced';
+  document.getElementById('icv2Foot').textContent=foot;
 }
 
 // cc#300: Fibcheck (setFibHorizon/runFibcheck/drawFibSvg/renderFib + _fmt helper) removed —
