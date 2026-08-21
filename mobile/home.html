@@ -2866,10 +2866,11 @@ Promise.all([
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
     + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
     + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
-    /* cc#1068: the V10 index line has LEFT the scoreboard. It is not deleted — it is promoted to
-       its own INDEX SIGNALS card below the carousel, built from this same `v10` string, so every
-       element (both names, both states, both chart icons) survives the move. Founder-ordered
-       relocation; the content-parity guard is satisfied by the move, not bypassed. */
+    /* cc#1068 moved the V10 index line out of this scoreboard into its own INDEX SIGNALS card
+       below the carousel. cc#1158 then replaced that card with the INDEX BOOK strip on founder
+       ruling, so the line and its `v10` builder are gone from this page entirely. Left as a note
+       rather than deleted: a reader looking for where the V10 state went should find the answer
+       here, at the place it used to be, instead of concluding it was never there. */
     + '<div class="hchips">' + (hero.chips || []).map(function(c){
         var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
         var isAdr = String(c.label).indexOf('ADR') > -1;
