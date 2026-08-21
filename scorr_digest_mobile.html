@@ -505,6 +505,28 @@ function fitLaddersSoon(){
 }
 addEventListener('resize', fitLaddersSoon);
 addEventListener('orientationchange', fitLaddersSoon);
+/* cc#1161 · A FONT LOAD IS A RESIZE THAT FIRES NO RESIZE EVENT, and that is the whole bug.
+   fitLadders() measured once at boot paint. JetBrains Mono arrives async from Google Fonts, so on
+   a real phone the measurement ran against the FALLBACK face — narrower — decided the values fit,
+   left equal-track mode on, and then the real font painted wider and .rung's overflow:hidden (the
+   cc#1127 anti-overlap guarantee, which stays) clipped the digits with no ellipsis. Nothing
+   re-measured, because a font swap is not a resize and not an orientation change. That is exactly
+   what the founder photographed at 16:07 on 20-Aug.
+   NOTHING ABOUT THE MEASUREMENT CHANGES HERE. Same function, same scrollWidth-vs-clientWidth
+   question, same CSS, same tracks, same fade. This card adds WHEN it measures and never HOW.
+   THREE HOOKS, because they fail in different ways and none of them is reliable alone.
+   fonts.ready settles once after the initial font set resolves. loadingdone also fires for a face
+   that arrives LATER — a second weight, a slow retry — which fonts.ready has already stopped
+   caring about. window load is the belt for a browser with no Font Loading API at all, where the
+   other two simply never run.
+   THEY CANNOT STACK. Every one of them goes through fitLaddersSoon, which is already rAF-debounced
+   and returns early while a frame is pending, so three hooks firing in the same frame do one
+   measurement between them. The existing resize and orientationchange listeners are untouched. */
+if (document.fonts) {
+  if (document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(fitLaddersSoon);
+  if (document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fitLaddersSoon);
+}
+addEventListener('load', fitLaddersSoon);
 
 async function boot(){
   let d=null;
