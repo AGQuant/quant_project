@@ -6169,22 +6169,48 @@ function fitSpineTags(root){
   var host = root || document;
   Array.prototype.forEach.call(host.querySelectorAll('.spine'), function(sp){
     ['piv','wall'].forEach(function(side){
-      var sel = side==='wall' ? '.lvl.wall' : '.lvl.piv, .lvl.mpl';
+      /* cc#1171: .lvl.spotl JOINS THE WALL GROUP, and this is the actual residual defect.
+         The old comment on nudgeTags says pivots tag right and walls tag left "so they cannot
+         collide with each other". True of those two. But the SPOT chip is a third thing and its
+         CSS puts it at left:5% — in the wall column, not the pivot one — while this function
+         listed only .piv/.mpl and .wall, so the spot tag was never fitted against anything at
+         all. Measured on the real 21-Aug BANKNIFTY board: at 360px the only overlapping pair on
+         the whole spine was "WALL x2 57,500" against "SPOT 57,413", 72x8px, and at 412px 47x8px.
+         Grouping it where it actually renders lets the existing same-side push separate the two. */
+      var sel = side==='wall' ? '.lvl.wall, .lvl.spotl' : '.lvl.piv, .lvl.mpl';
       var tags = Array.prototype.slice.call(sp.querySelectorAll(sel))
         .map(function(l){ return l.querySelector('.tag'); }).filter(Boolean);
       tags.forEach(function(t){ t.style.marginTop = ''; });        // start from the CSS position
       tags.sort(function(a,b){ return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
-      var prevBottom = -Infinity;
-      tags.forEach(function(t){
-        var r = t.getBoundingClientRect();
-        if(r.top < prevBottom + 2){
-          var push = Math.round(prevBottom + 2 - r.top);
-          t.style.marginTop = push + 'px';
-          prevBottom = r.bottom + push;
-        } else {
-          prevBottom = r.bottom;
+      /* cc#1171: TO A FIXED POINT, and every number MEASURED.
+         The single pass this replaces got two things wrong, and both only showed up at 2x text
+         scaling. It PREDICTED the pushed tag's new bottom as r.bottom + push, using the height it
+         had before the push; and the tags share a flow, so pushing one moves the ones under it,
+         which made the very next tag's rect stale in the same walk. At 1x the tags are short
+         enough that neither error is visible. At 2x they wrap to two lines and the residue was
+         ten overlaps about 9px tall.
+         Now: after each push the tag's own bottom is READ BACK, so the value carried forward is
+         the one the browser actually laid out, not arithmetic about it. And the whole side is
+         re-walked until a pass moves nothing.
+         BOUNDED AT 3. This converges in one or two passes because every push is downward and the
+         list is sorted; the cap is there so a pathological layout costs a wasted frame instead of
+         a hung tab. If it ever leaves the loop still moving, the tags are merely as separated as
+         three passes could get them — never worse than where it started. */
+      for(var pass = 0; pass < 3; pass++){
+        var moved = false, prevBottom = -Infinity;
+        for(var i = 0; i < tags.length; i++){
+          var t = tags[i], r = t.getBoundingClientRect();
+          if(r.top < prevBottom + 2){
+            var cur = parseFloat(t.style.marginTop) || 0;
+            t.style.marginTop = Math.round(cur + (prevBottom + 2 - r.top)) + 'px';
+            moved = true;
+            prevBottom = t.getBoundingClientRect().bottom;   /* read back, never predicted */
+          } else {
+            prevBottom = r.bottom;
+          }
         }
-      });
+        if(!moved) break;
+      }
     });
     /* Re-fit whenever the spine's own box changes size. A window resize listener is not enough:
        text scaling changes the RENDERED size without any window event at all — the OS/browser
