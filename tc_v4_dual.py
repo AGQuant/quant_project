@@ -1386,6 +1386,22 @@ def _compute_result(d, symbol, side):
     # only the CHOICE between already-scored cards changes.
     def _pct(c):
         return (c["score"] / c["max"]) if c.get("max") else 0
+
+    # cc#1172 — WHY BEST-OF-FOUR IS NOT MOVED TO score10 YET, deliberately.
+    # 27957 says best-of-four becomes the highest NORMALIZED score and calls it "identical by
+    # construction" to the cc#1033 ratio. That is only true while every weight is equal. Once the
+    # registry carries real weights the two disagree, so it is a behaviour change, not a rename.
+    #
+    # And right now it would be a BIASED one. The BUY buckets have live founder-locked weights;
+    # the SELL buckets are deactivated pending the corrected mapping ruling, so their score10 falls
+    # back to the unweighted ratio. Selecting on score10 today would compare a WEIGHTED BUY number
+    # against an UNWEIGHTED SELL number — precisely the like-for-like failure cc#1033 (session_log
+    # 22353, founder-locked) exists to prevent, which is how a BUY card once surfaced on a stock
+    # down 6.5% in a week.
+    #
+    # So the CHOICE stays on the locked ratio until SELL is calibrated; the 10-scale rides in the
+    # payload for display. Flipping the selector is one line and its own push, once the four
+    # buckets are comparable again.
     best = max(cards, key=_pct, default=None)
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
@@ -1396,6 +1412,13 @@ def _compute_result(d, symbol, side):
         # cc#1033: the ratio the choice was made on, so a surface can print it without recomputing.
         "best_pct": (round(_pct(best), 4) if best else None),
         "best_verdict": (best["verdict"] if best else "REJECT"),   # score bands alone
+        # cc#1172: the normalized 0-10 score of the chosen card, for surfaces that show N.N/10.
+        "best_score10": (best.get("score10") if best else None),
+        "best_verdict10": (best.get("verdict10") if best else None),
+        # TRUE only when the chosen card's bucket has live registry weights. A surface MUST be able
+        # to say when a 10-scale number is uncalibrated rather than print it as if it were the
+        # founder-locked one.
+        "best_score10_weighted": (bool(best.get("score10_weighted")) if best else False),
         "cards": cards,
         "pivots": {k: _r(v) for k, v in d["pivots"].items()},
         "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),

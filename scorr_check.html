@@ -361,6 +361,16 @@
   .v4-badge.STRONG{background:var(--grn-d);color:var(--grn)}
   .v4-badge.VALID{background:var(--amber-d);color:var(--amber)}
   .v4-badge.REJECT{background:var(--red-d);color:var(--red)}
+  /* cc#1172: WATCH is the new band between REJECT and VALID on the 0-10 scale (5.0-6.5). It is
+     carved out of what used to be REJECT, so it reads warmer than a reject and cooler than a
+     valid — a card to keep an eye on, not one to act on. */
+  .v4-badge.WATCH{background:var(--cyan-d);color:var(--cyan)}
+  /* cc#1172: an UNCALIBRATED marker. A 10-scale score whose bucket has no live registry weights is
+     an unweighted ratio, not the founder-locked number, and it must never pass itself off as one.
+     Deliberately plain and grey — it is a caveat, not an alarm. */
+  .v4-uncal{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;padding:1px 6px;margin-left:6px;border-radius:4px;
+    color:var(--dim);border:1px dashed var(--line2, rgba(148,166,210,.3))}
   /* cc#513: 4-column rule table (RULE | REQUIRED | ACTUAL | POINTS) — V8 stock-detail modal format */
   .v4-rtable{margin-top:6px}
   .v4-rhead{display:grid;grid-template-columns:76px 1fr 112px 44px;gap:8px;font-size:9px;font-weight:700;
@@ -1120,9 +1130,17 @@ function renderV4Dual(d, uiMode){
     }).join('');
     const recal=c.recal?'<span class="v4-recal">'+c.recal+'</span>':'';
     return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4styleChip(c.label)
-      +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'+Number(c.score).toFixed(2)+'</span>'
-      +'<span style="font-size:11px;color:var(--dim)">/'+(c.max||15)+'</span>'
-      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'
+      /* cc#1172: each of the four cards leads with its own N.N/10 and band; the raw credit pair
+         stays alongside so the rule table below still reconciles. Colour keeps reading the raw
+         score/verdict pair it always did — the bands are the same thresholds expressed on a
+         different scale (8.4 IS 0.84x, 6.5 IS 0.65x), so no colour changes meaning here. */
+      +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'
+      +   (c.score10!=null?Number(c.score10).toFixed(1):Number(c.score).toFixed(2))+'</span>'
+      +'<span style="font-size:11px;color:var(--dim)">'+(c.score10!=null?'/10':'/'+(c.max||15))+'</span>'
+      +'<span class="v4-badge '+(c.verdict10||c.verdict)+'">'+(c.verdict10||c.verdict)+'</span>'
+      +(c.score10!=null&&c.score10_weighted===false?'<span class="v4-uncal">uncal</span>':'')
+      +'<span style="font-size:10px;color:var(--dim);margin-left:6px">raw '+Number(c.score).toFixed(2)+'/'+(c.max||15)+'</span>'
+      +recal+'</div>'
       +'<div class="v4-rtable"><div class="v4-rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>'
       +rules+'</div></div>';   // cc#677: gate rows removed — no gates in the rule table
   };
@@ -1165,10 +1183,22 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+/* cc#935: the max and the bands come from the card the engine returned. The old fallbacks here
-   guessed 22/20 and printed a full band sentence for a card that had not been scored — both were
-   already stale. If the payload has no card, say nothing rather than say something wrong. */
-     '/'+((d.best&&d.best.max)!=null?d.best.max:'—')+'</b>'+((d.best&&d.best.bands)?' · '+d.best.bands:'')+'</div>'
+    /* cc#1172: the headline is now the normalized 0-10 score (TC_SCORE_V1, session_log 27957), with
+       the raw score/max kept beside it because the detail table is scored in raw credits and a
+       reader must be able to tie the two together.
+       cc#935 still holds for the raw pair: max and bands come from the card the engine returned,
+       never a guessed 22/20 — if the payload has no card, say nothing rather than something wrong.
+       UNCALIBRATED IS STATED, NOT HIDDEN: when the chosen card's bucket has no live registry
+       weights the 10-scale is an unweighted ratio, and it says so rather than passing itself off
+       as the founder-locked number. */
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'
+    +     (d.best_score10!=null?Number(d.best_score10).toFixed(1)+'/10':'—')+'</b>'
+    +     (d.best_verdict10?' · <b>'+d.best_verdict10+'</b>':'')
+    +     (d.best_score10!=null&&d.best_score10_weighted===false
+             ? '<span class="v4-uncal" title="This bucket has no live rule weights, so the 10-scale is an unweighted ratio, not the calibrated score.">uncalibrated</span>':'')
+    +     ' <span style="color:var(--dim)">· raw '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')
+    +     '/'+((d.best&&d.best.max)!=null?d.best.max:'—')+'</span>'
+    +     ((d.best&&d.best.bands10)?' · '+d.best.bands10:'')+'</div>'
     +   (alertsHtml?'<div class="v4-alerts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">'+alertsHtml+'</div>':'')
     + '</div></div>'
     + cardsHtml
