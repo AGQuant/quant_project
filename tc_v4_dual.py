@@ -1367,7 +1367,16 @@ def score_card(d, style, side):
     # comparable number read score10. Nothing is removed, so no consumer breaks on this push.
     s10, weighted, unmapped = _score10(rules, label)
     card["score10"] = s10
-    card["verdict10"] = _verdict10(s10)
+    # cc#1173 INTERIM RULING (Fable log 3035): a score whose denominator is not the founder-locked
+    # one gets NO VERDICT BAND. The number and the rule detail still ship — a reader can see every
+    # rule and what it scored — but STRONG/VALID/WATCH/REJECT is a claim about calibration, and
+    # while SELL's live rules are unbound the calibration is not there to claim. The band returns
+    # by itself the moment weighted flips TRUE; nothing has to be remembered and un-done.
+    # SET AT THE SOURCE, ON PURPOSE. verdict10 is read by scorr_check, tc_screener_v2 and
+    # tc_position_stars_v2, and suppressing it on each of them would be three chances to miss one.
+    # ZERO-VETO (cc#677 / 9035) is untouched: no gate rejects anything here. The band is absent,
+    # not failing — those are different states and this is the first one.
+    card["verdict10"] = _verdict10(s10) if weighted else None
     card["score10_weighted"] = weighted
     card["bands10"] = f"STRONG≥{_STRONG_10} / VALID {_VALID_10} / WATCH {_WATCH_10}"
     if unmapped:

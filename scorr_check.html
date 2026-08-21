@@ -1202,7 +1202,16 @@ function renderV4Dual(d, uiMode){
       +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'
       +   (c.score10!=null?Number(c.score10).toFixed(1):Number(c.score).toFixed(2))+'</span>'
       +'<span style="font-size:11px;color:var(--dim)">'+(c.score10!=null?'/10':'/'+(c.max||15))+'</span>'
-      +'<span class="v4-badge '+(c.verdict10||c.verdict)+'">'+(c.verdict10||c.verdict)+'</span>'
+      /* cc#1173 interim ruling (Fable 3035): NO BAND on an uncalibrated score. The engine already
+         sends verdict10 as null for an unweighted card, but this line carried a `|| c.verdict`
+         fallback — so a null band would have quietly reverted to the RAW-score verdict and the
+         reader would have seen a verdict anyway, on the very number the ruling says must not carry
+         one. The fallback stays for genuinely legacy cards that have no score10 at all; it is
+         skipped only when score10 exists AND is known to be unweighted. The `uncal` chip on the
+         next line is what says so out loud, and it now stands alone rather than beside a band. */
+      +((c.score10!=null&&c.score10_weighted===false)
+          ? ''
+          : '<span class="v4-badge '+(c.verdict10||c.verdict)+'">'+(c.verdict10||c.verdict)+'</span>')
       +(c.score10!=null&&c.score10_weighted===false?'<span class="v4-uncal">uncal</span>':'')
       +'<span style="font-size:10px;color:var(--dim);margin-left:6px">raw '+Number(c.score).toFixed(2)+'/'+(c.max||15)+'</span>'
       +recal+'</div>'
