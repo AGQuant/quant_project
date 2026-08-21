@@ -86,6 +86,7 @@ from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
 from pwa_endpoints import router as pwa_router
 from investment_check import router as investment_check_router
+from invest_check_v2 import router as invest_check_v2_router   # cc#1174: Investment Check V2 (27979)
 from scanner_endpoints import router as scanner_router
 from intraday_scanner_endpoints import router as intraday_scanner_router  # cc#481: restored (cc#476 kill reversed)
 from tc_scanner_endpoints import router as tc_scanner_router  # cc#464: TC Scanner (13-check binary engine, id=399/400)
@@ -576,6 +577,7 @@ app.include_router(result_corner_page_router)   # cc#603: /api/result-corner pag
 app.include_router(result_analysis_gen_router)   # cc#602: /api/admin/result_analysis/regenerate
 app.include_router(scheduler_master_router)   # cc#525
 app.include_router(investment_check_router)
+app.include_router(invest_check_v2_router)   # cc#1174: /api/investment-check-v2 (+/batch, /weights)
 app.include_router(scanner_router)
 app.include_router(intraday_scanner_router)   # cc#481: restored
 app.include_router(tc_scanner_router)         # cc#464: TC Scanner
