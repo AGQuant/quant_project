@@ -477,7 +477,11 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .card-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
 #pane-index .card-hd .t{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.8px;font-weight:700}
 #pane-index .card-hd .s{font-size:8px;color:var(--dim);margin-top:2px}
-#pane-index .row{display:grid;gap:10px;margin-bottom:10px}
+/* cc#1168 push 8 · RHYTHM. The ref's .row is gap 16 / margin-bottom 16 (index_intel_R2 @ f5a31dd),
+   and its .stack is gap 16. This file had .row at 10 while the stack below it was already at 16,
+   so the tab ran on TWO vertical rhythms: 10px between the rows at the top and 16px between the
+   tail cards. One number now, and it is the ref's. */
+#pane-index .row{display:grid;gap:16px;margin-bottom:16px}
 #pane-index .r-2-16{grid-template-columns:3fr 1.6fr}
 #pane-index .r-3{grid-template-columns:1fr 1.4fr 1fr}
 @media(max-width:900px){#pane-index .r-2-16, #pane-index .r-3{grid-template-columns:1fr}}
@@ -878,8 +882,13 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .lg-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
 #pane-index .lg .l{font-size:8px;color:var(--mut)}
 #pane-index .note{font-size:8px;color:var(--dim);margin-top:6px;text-align:right}
-#pane-index .foot{text-align:center;padding:16px 0 4px;font-size:8px;color:var(--dim);
-    border-top:1px solid var(--line);margin-top:8px}
+/* cc#1168 push 8: the OLD .foot rule that used to sit here is DELETED, not layered over. It was
+   declared a second time further down the file from the ref transplant at line ~690, so the
+   rendered footer was a hybrid: display:flex and justify-content came from the ref rule, while
+   text-align, padding and font-size came from this one. Two competing rule sets for one element
+   is how a restyle half-lands — the same reasoning cc#1153 used on the ADR card. The ref's foot
+   now governs alone: padding 18/2/0, mono 9px, no border. The ref separates the footer with
+   space rather than a rule line, and the footer TEXT is untouched. */
 #pane-index .loading{padding:60px 20px;text-align:center;color:var(--mut);font-size:13px}
 #pane-index svg.spark{display:block;width:100%;height:auto}
 /* ===== cc#543 V14 pane (namespaced) ===== */
@@ -5683,7 +5692,7 @@ function rOpen(){
     : (D.loaded.open
         ? `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`
         : skelRows(11, 2));
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><div class="t">Open Positions (${D.open.length})<span class="scrollhint">SCROLL →</span></div>
       <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
     <div class="tbl-hold"><div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
@@ -5717,7 +5726,7 @@ function rClosed(){
      grammar, with the state it will move TO named in the label, so the reader is never guessing
      which way it goes. */
   const more = all.length>15 ? `<div class="moreline"><button type="button" class="morebtn" onclick="idxToggleClosed()">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</button></div>` : '';
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})<span class="scrollhint">SCROLL →</span></div>
       <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
         <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
@@ -5735,7 +5744,7 @@ function rSettings(){
   /* cc#1168 push 4: the ref's own header for this card — one title, one lock chip, and V10 folded
      INTO the chip. The "V10 Configuration" sub-line said what the chip now says, so it went rather
      than being kept alongside it. The chip keeps the ref's exact string. */
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><span class="t">Entry / Exit Settings</span>
       <span class="lockchip">V10 · LOCKED 16-JUN-2026</span></div>
     <div class="set-grid">${boxes}</div>
@@ -5774,7 +5783,7 @@ function rPerf(){
       <div class="eyebrow">${title}<span class="scrollhint">SCROLL →</span></div>
       <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
   };
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
       <div class="s">Live paper stats from v10_trades · ${tot} closed trades</div></div></div>
     <div class="stat-grid">${cards}</div>
@@ -5821,7 +5830,7 @@ function rBuildup(){
   const note = b.pending
     ? `<div class="note" style="color:var(--amber)">⚠ OI data not available — showing price direction only. Signal classification disabled.</div>`
     : '';
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><div><div class="t">Futures Buildup — Stock F&O</div>
       <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
@@ -5853,7 +5862,7 @@ function rDivergence(){
         : skelRows(8, 2));
   const note = d.skipped_stale
     ? `<div class="note" style="color:var(--mut)">${d.skipped_stale} symbol(s) skipped (stale &gt;15 min)</div>` : '';
-  return `<div class="card" style="margin-bottom:10px">
+  return `<div class="card">
     <div class="card-hd"><div><div class="t">Futures ⇄ Equity Divergence — Stock F&O<span class="scrollhint">SCROLL →</span></div>
       <div class="s">Flagged when basis %, 1hr divergence or 1D divergence exceeds ±${d.threshold}% · ${rows.length} of F&O universe · live 5-min</div></div>
       <div class="hd-meta">${bdg(d.market_hours?'● LIVE':'○ CLOSED', d.market_hours?UP:C.mut)}</div></div>
