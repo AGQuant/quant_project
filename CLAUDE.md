@@ -90,6 +90,18 @@ The rule follows the SEAT, not the model. Claude AI may be Fable or Opus; the sp
 **Verification runs both directions**
 A push from either seat is a **claim** until the other seat's check passes. Fable verifies CC's pushes with the committed diff plus a DB query on real rows. CC audits Fable's pushes the same way, day-end. Neither seat marks its own work verified.
 
+**The founder may come straight to CC for web front-end work** (FOUNDER_DIRECT_TO_CC_WEB_V1, session_log 27943, founder-set 20-Aug-2026; addendum to ROLE_CHARTER_V4)
+
+For **website front-end tasks and small web changes**, Arpit can hand the job to CC directly — words plus a PDF or a screenshot — and CC finishes it in one sprint. No Fable spec up front. The Fable-writes-the-spec-first step becomes optional for this work only; the founder's brief is a valid spec source.
+
+What does **not** change:
+- CC still opens a `cc_task` row for the ask and still logs every push in the forum. Coming direct changes **who writes the spec, not whether the boardroom records it**.
+- **Verification is still Fable's.** Every founder-direct web sprint gets a Fable pass — committed diff, a DB query, and parity wherever a number is shown. A CC result stays a claim until that passes, and Fable polls the forum for these without being asked.
+- Sprint sizing (5–15 pushes) applies when it really is a sprint. A genuinely small change may ship as one or two pushes under a single card.
+- **Scope is WEB FRONT-END.** Anything touching engines, endpoints or backend logic, `worker/**`, schedulers, or how data is derived still needs a spec with gates. If a founder-direct ask crosses that line, CC **stops and asks**.
+- App and mobile surfaces stay Fable's, per the Role Split above.
+- A PDF or screenshot is a valid visual reference for static web layout. CC rasterises the pages to judge look and feel (cc#1133 Chromium) and **never eyeball-derives a token where a token file exists**.
+
 ## Deploy policy
 - RULE_7 (deploy-window "no deploy 09:00–15:35 IST", referenced in cc_task specs) is **SUSPENDED as of 07-Jul-2026** — dev-stage, product NOT live (policy id=1713). Deploy anytime, including market hours; task specs that reassert RULE_7 are overridden while in dev mode. Re-instate this window only when the product goes live.
 - **FEED WORKER DEPLOY RULE (set 09-Jul-2026, cc#339; restructured cc#416 12-Jul):** the fyers feed worker (Railway service `truthful-friendship`) start command is **`python worker/fyers_feed.py`** and redeploys on changes under **`worker/**`** (all worker-runtime files now live there: `worker/fyers_feed.py`, `worker/fyers_autologin.py`, `worker/fyers_hist_backfill.py`) plus the two app-shared root modules it still uses (`fyers_backfill.py`, `nse_holidays.py`) — watch-paths in `railway.worker.json`. **Bounce mechanism: touch `worker/fyers_feed.py`.** RULE_7's dev-stage suspension does **NOT** apply to the worker: changes to those files deploy the worker **deliberately and OUTSIDE market hours (after 15:30 IST)** unless Arpit explicitly approves a market-hours worker deploy — a mid-market reboot is a coin-flip on re-auth (root cause of the 07-Jul + 09-Jul 100-min feed freezes). App/UI/task pushes are unaffected (worker no longer bounces on them). One-time setup: point the `truthful-friendship` service's Railway config-file path at `railway.worker.json` AND set its start command to `python worker/fyers_feed.py`.
