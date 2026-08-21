@@ -2332,7 +2332,20 @@ BASKET_FILTERS = {
         {"key": "sector_week",  "label": "sector week",  "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
         {"key": "month_return", "label": "month return", "cond_min": "",        "cond_max": "< 5",  "min": None,  "max": 5.0,   "type": "band"},
         {"key": "day_1d",       "label": "day 1d",       "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
-        {"key": "gvm_score",    "label": "gvm score",    "cond_min": ">= 6.5",  "cond_max": "",     "min": 6.5,   "max": None,  "type": "band", "strict": True},
+        # cc#1179: `strict: True` REMOVED from this row, and only from this row. It made the three
+        # DISPLAY readers of the flag evaluate this gate as > 6.5 while the engine's own _gvm_ok is
+        # `v is not None and float(v) >= 6.5` — inclusive — and while this row's own cond_min says
+        # ">= 6.5". It was the only row in the whole registry whose strict flag contradicted its own
+        # condition string; every other one reads "> 0", "< 0", "< 30", "< 40" and agrees.
+        # NOT THEORETICAL: on the latest score_date exactly one symbol sits at gvm_score 6.50, and
+        # across history 315 symbol-days on 201 distinct days have. Each of those would have shown
+        # GVM red in the modal on a stock the engine counts as passing — the same false verdict this
+        # card exists to remove, one threshold lower down.
+        # THE FUNNEL CANNOT MOVE. `strict` has exactly three readers, all in v8_endpoints.py and all
+        # display: _passes_registry_band (the modal's pass column), _reg_cond (the condition prose)
+        # and the hard_gates prose list. The funnel counts come from _gvm_ok in this file, which is
+        # untouched. The word STRICT in that predicate's comment means NULL FAILS, not exclusive.
+        {"key": "gvm_score",    "label": "gvm score",    "cond_min": ">= 6.5",  "cond_max": "",     "min": 6.5,   "max": None,  "type": "band"},
     ],
     # SELL_REVERSAL_V7-B (cc#1100, spec session_log 26363 filters_v7b, founder ruled LIVE 19-Aug) —
     # 12 cheap gates, NO heavy final stage. This REPLACED the V6.1 set on the live basket. Two

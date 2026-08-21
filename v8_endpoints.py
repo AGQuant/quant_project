@@ -2109,8 +2109,18 @@ def br_stock_detail(symbol: str):
 
         # cc#607: rows GENERATED from the BASKET_FILTERS["buy_reversal"] registry (single source),
         # so the modal, the pass-count card and the funnel always show the same gate set.
+        # cc#1179: gvm_score JOINS THE VALMAP, and it is the whole defect. The SELECT above has
+        # always fetched it and `gvm` has always been unpacked — it simply never reached here, so
+        # valmap.get("gvm_score") returned None for the registry's eighth gate, _fmt printed "--"
+        # and _passes_registry_band returned False on a None. Every stock read 7 of 8 with GVM red,
+        # including stocks the engine had qualified. cc#1107's rule is that a gate which is
+        # EVALUATED must show its real value and a real pass — there is no third state — and this
+        # row was the third state.
+        # Same source the gate evaluates: _write_buy_reversal_v6_qualified reads gvm_score off the
+        # all_metrics rows, which are v8_metrics rows, which is what the SELECT above reads.
         valmap = {"mom_2d": mom2d, "week_return": wret, "rsi_month": rmon,
-                  "sector_week": swk, "month_return": mret, "day_1d": d1}
+                  "sector_week": swk, "month_return": mret, "day_1d": d1,
+                  "gvm_score": gvm}
         pct_keys = {"mom_2d", "week_return", "month_return", "day_1d"}
         s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
         low_lbl = f"prior4d {_fmt(p4lo,2)} / today {_fmt(tlo,2)} vs S1 {_fmt(s1,2)}"
