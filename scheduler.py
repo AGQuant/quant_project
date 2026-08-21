@@ -2474,11 +2474,55 @@ def _bg_guardian_eod_oi():
         log.error(f"guardian_eod_oi: {e}")
 
 
+_JOB_ACTIVE_CACHE = {}          # job_name -> (checked_at_monotonic, active_or_None)
+
+
+def _job_active(job_name, ttl=60):
+    """Is this job ACTIVE in scheduler_master? True / False / None when the registry is unreadable.
+
+    cc#1170. The registry is the source of truth for whether an engine should run, but most of this
+    module's market-hours loops are dispatched by a hardcoded `if` that never consults it. That is
+    fine while every job is live and becomes a lie the moment one is retired: the row says silent
+    and the engine keeps ticking. This is ENGINE_LIVENESS_RULE in reverse — a state flag running
+    ahead of the data — and it is why flipping `active` alone does NOT silence anything today.
+
+    Returning None rather than a guess is deliberate: a caller silencing a retired engine and a
+    caller guarding a live one want OPPOSITE defaults on a database blip, so the decision belongs
+    to the caller, not to this helper. Cached for a minute so a 5-minute loop costs one query an
+    hour, and never raises — a scheduler helper that can throw is a scheduler that can stop.
+    """
+    import time as _t
+    hit = _JOB_ACTIVE_CACHE.get(job_name)
+    if hit and (_t.monotonic() - hit[0]) < ttl:
+        return hit[1]
+    val = None
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT active FROM scheduler_master WHERE job_name=%s", (job_name,))
+            row = cur.fetchone()
+        if row is not None:
+            val = bool(row[0])
+    except Exception as e:
+        log.warning(f"_job_active({job_name}): registry unreadable: {e}")
+    _JOB_ACTIVE_CACHE[job_name] = (_t.monotonic(), val)
+    return val
+
+
 _v14_running = False
 
 def _bg_v14_cycle():
     """cc#442: one V14 intraday paper cycle (manage exits + evaluate 3 setups + paper-open triggers).
-    Non-reentrant; read-only on V8/V10 engine state."""
+    Non-reentrant; read-only on V8/V10 engine state.
+
+    cc#1170 (founder ruling, session_log 27951): V14 is SILENT. It did not clear the merit gate.
+    The gate is READ FROM THE REGISTRY, not hardcoded here, so the founder can restore the engine
+    with an UPDATE and no deploy — and so this file carries no retired-engine name list of its own.
+
+    UNKNOWN COUNTS AS SILENT. If the registry cannot be read, this returns rather than running: a
+    database blip must never resurrect an engine the founder retired. The opposite default would
+    mean the quietest possible failure putting paper trades back on the book."""
+    if _job_active("bg_v14_cycle") is not True:
+        return
     global _v14_running
     if _v14_running:
         return
