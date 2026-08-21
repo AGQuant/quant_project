@@ -422,15 +422,39 @@
     color:var(--dim);border:1px dashed var(--line2, rgba(148,166,210,.3))}
   /* cc#513: 4-column rule table (RULE | REQUIRED | ACTUAL | POINTS) — V8 stock-detail modal format */
   .v4-rtable{margin-top:6px}
-  .v4-rhead{display:grid;grid-template-columns:76px 1fr 112px 44px;gap:8px;font-size:9px;font-weight:700;
+  /* cc#1173 · the first column carries a WEIGHT BADGE now (founder ruling, 27977), so it widens
+     from 76px to 104px. Measured on the real rule table — 56 rows out of the engine, all four
+     cards, widest real badge w1.25 — with the wrap below switched off so the raw demand shows:
+     the cell needs 72px at normal text, 83px at 1.3x and 108px at 2x. So 76px was NOT failing
+     today; it fails the moment a reader turns text scaling on, which is the input that broke the
+     pivot ladder three times. At 104px only 2x still spills, and the wrap below takes that.
+     The widening also keeps rows shorter: with the badge in, the first table measures 390px tall
+     at 1.3x on a 104px column against 426px on a 76px one, because less of it wraps.
+     The other three tracks are untouched — Required keeps the 1fr, so the extra 28px comes out of
+     the condition text, which wraps, and not out of Actual or Pts, which do not. */
+  .v4-rhead{display:grid;grid-template-columns:104px 1fr 112px 44px;gap:8px;font-size:9px;font-weight:700;
     color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:3px 6px 5px}
-  .v4-rrow{display:grid;grid-template-columns:76px 1fr 112px 44px;gap:8px;align-items:center;
+  .v4-rrow{display:grid;grid-template-columns:104px 1fr 112px 44px;gap:8px;align-items:center;
     font-size:11px;padding:5px 6px;border-bottom:.5px solid var(--line);border-radius:5px}
+  /* The badge states the rule's WEIGHT IN THE REGISTRY, not its points. Points are the right-hand
+     column and are what the rule scored; the weight is how much that score counts, and the founder
+     asked for both to be visible because a rule can score 1.00 and still barely move the number.
+     A rule with no registry row shows no badge at all rather than a zero — absent and zero are
+     different states, and the payload already names unmapped rules separately. */
+  .v4-rrow .rw{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:9px;font-weight:700;
+    color:var(--blu);background:rgba(77,124,254,.12);border:1px solid rgba(77,124,254,.32);
+    border-radius:4px;padding:1px 4px;line-height:1.3;flex:none}
   .v4-rrow:last-child{border-bottom:none}
   .v4-rrow.rg{background:rgba(47,212,139,.09)}
   .v4-rrow.ra{background:rgba(245,185,74,.09)}
   .v4-rrow.rr{background:rgba(255,92,108,.07)}
-  .v4-rrow .rl{color:var(--txt);font-weight:600;display:flex;align-items:center;gap:5px;min-width:0}
+  /* cc#1173: the cell WRAPS now. A fixed 104px track holds the seq, the weight badge and the (i)
+     button at normal and at 1.3x text, but a pixel constant does not scale with text and at 2x the
+     three of them need 108px. Wrapping lets the badge drop under the number instead of spilling
+     into the Required column, so the widening handles the common case and the wrap handles the
+     tail. align-items stays centre; a wrapped cell is two short lines, not a ragged one. */
+  .v4-rrow .rl{color:var(--txt);font-weight:600;display:flex;align-items:center;gap:5px;min-width:0;
+    flex-wrap:wrap;row-gap:2px}
   .v4-rrow .rreq{color:var(--mut);font-size:10px;line-height:1.3}
   .v4-rrow .ract{color:var(--txt);font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:10px}
   .v4-rrow .rc{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;text-align:right}
@@ -1083,7 +1107,58 @@ const TC_RULE_DEFS={
     BM:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['0','< 0 (or no 180d history)']],
     BR:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['0','< 0 (or no 180d history)']],
     SM:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']],
-    SR:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']]}
+    SR:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']]},
+
+  /* ══ cc#1173 · THE LOCKED SELL RULEBOOKS ═══════════════════════════════════════════════════
+     Both SELL rulebooks were REPLACED by the founder's sweep (27976 SELL-REV, 27977 SELL-MOM),
+     so the R-keys above no longer describe what a SELL card scores. These keys are the engine's
+     own — REGISTRY_KEY_RULE_V1: a rule with no live equivalent keeps its LOCK_* name so the
+     registry and the engine read identically. Only the SM/SR variants exist, because no BUY card
+     can emit one of these; tcRuleInfo prints the bands for the variant it was opened from and an
+     absent BM/BR simply has no bands to print.
+     THE STYLE FINDING BELONGS IN THE DICTIONARY, not just in the log, because these conditions
+     read wrong without it: SELL-REV is NOT fade-the-rally-at-resistance. Every studied entry had
+     weekly RSI 30-42, the 52w index at its lows, negative months and MAs down. It is short
+     CONTINUATION in an already-weak stock, which is why the RSI band is the weak one and why a
+     deeply fallen stock scores LESS, not more. */
+  LOCK_VOLUME:{n:'Volume',m:'Today’s volume against its own 21-day average.',s:'derived vol_ratio_today',w:'A break needs participation behind it; a quiet break is a drift.',
+    SM:[['1','vol ratio ≥ 1.0'],['0.5','≥ 0.6'],['0','below 0.6']],
+    SR:[['1','vol ratio ≥ 1.5'],['0.5','≥ 0.9'],['0','below 0.9']]},
+  LOCK_MOOD:{n:'Mood (any bearish)',m:'The market-mood gate — how many of its checks are failing.',s:'mood gate fail count',w:'A short into an all-bullish tape is fighting the market.',
+    SM:[['1','any mood check bearish'],['0','all bullish']],
+    SR:[['1','any mood check bearish'],['0','all bullish']]},
+  LOCK_ENTRYDAY_FALL:{n:'Entry-day fall',m:'The day’s own move — the ignition candle this bucket shorts.',s:'v8_metrics.day_1d',w:'SELL-MOM is an ignition short: the break happens on the day you enter.',
+    SM:[['1','day change ≤ −2%'],['0.5','≤ −0.7%'],['0','above −0.7%']]},
+  LOCK_WEEK_FALLING_BAND:{n:'Week falling band',m:'The week’s return inside a band with BOTH edges binding.',s:'v8_metrics.week_return',w:'Falling but not exhausted. A stock already down 8% on the week has had its move.',
+    SM:[['1','week return between −6.5% and −1.5%'],['0','outside the band, either side']]},
+  LOCK_MOM_2D:{n:'2-day momentum',m:'The 2-day price move.',s:'v8_metrics.mom_2d',w:'The slide should already be underway when the ignition candle prints.',
+    SM:[['1','mom_2d ≤ −1'],['0.5','≤ −0.3'],['0','above −0.3']]},
+  LOCK_ALT_IGNITION:{n:'Alt-ignition (steep 2-day slide)',m:'A SUBSTITUTE for the entry-day fall, never an addition. Evaluated only when that rule scored zero; a steep 2-day slide stands in for the single candle. When the entry-day fall scored anything at all this rule is not-applicable and leaves the denominator entirely.',s:'v8_metrics.mom_2d, conditional on the entry-day fall credit',w:'The same ignition can arrive as one candle or as two days of selling; the score should not miss the second shape, and should not pay twice for the first.',
+    SM:[['1','entry-day fall scored 0 AND mom_2d ≤ −2.4'],['0','entry-day fall scored 0 and the slide is shallower'],['—','entry-day fall scored — rule not applicable, out of the denominator']]},
+  LOCK_52W_INDEX:{n:'52w index',m:'Where price sits inside its own 52-week range (0 = low, 100 = high).',s:'v8_metrics.week_index_52',w:'A short wants a name that is not near its highs.',
+    SM:[['1','52w index ≤ 60'],['0','above 60']]},
+  LOCK_MA_NOT_DEEP:{n:'MA not deep',m:'The 9-day mean against the 21-day, as a percentage. An EXHAUSTION filter.',s:'v8_metrics.ma9_vs_ma21',w:'Far below the slower mean is a move already spent, not one starting.',
+    SM:[['1','ma9 vs ma21 ≥ −3%'],['0','below −3% (spent move)']]},
+  LOCK_GVM:{n:'GVM cap',m:'The Scorr quality score.',s:'gvm_scores.gvm_score',w:'Quality names bounce; a short wants the ones that do not.',
+    SM:[['1','GVM ≤ 6.5'],['0','above 6.5']]},
+  LOCK_FALL_FRESHNESS:{n:'Fall freshness',m:'The month’s return, read the way round that surprises people: a SHALLOWER fall scores higher.',s:'v8_metrics.month_return',w:'A stock already down 15% on the month is a crowded short. The edge is in the fresh break.',
+    SR:[['1','month return ≥ −6%'],['0.5','≥ −8%'],['0','below −8% (crowded short)']]},
+  LOCK_TRIO_52W:{n:'Downtrend trio · 52w index',m:'One leg of the three-part downtrend check.',s:'v8_metrics.week_index_52',w:'Continuation shorts start from the lows, not from a rally into resistance.',
+    SR:[['1','52w index ≤ 40'],['0.5','≤ 55'],['0','above 55']]},
+  LOCK_TRIO_RSI:{n:'Downtrend trio · weekly RSI',m:'One leg of the three-part downtrend check, on the WEAK band. This line has flipped twice: it was weekly-cool, cc#936 flipped it to weekly-hot on the fade-at-resistance reading, and the founder’s sweep put it back on the weak band because that is where the separation came from.',s:'true weekly RSI',w:'An already-overbought name is a crowded fade. The winning setups sat at RSI 30-42.',
+    SR:[['1','weekly RSI between 30 and 45'],['0.5','between 25 and 50'],['0','outside 25-50']]},
+  LOCK_TRIO_MOM2D:{n:'Downtrend trio · 2-day momentum',m:'One leg of the three-part downtrend check. Split out of the old compound R11, which hid this leg and the week leg inside one rule while the lock weights them separately.',s:'v8_metrics.mom_2d',w:'The two-day move should already be down when the position opens.',
+    SR:[['1','mom_2d ≤ −1'],['0.5','≤ 0'],['0','above 0']]},
+  LOCK_WEEK_FALLING:{n:'Week falling',m:'The week’s return — continuation, not bounce. The sweep inverted the old bounce framing.',s:'v8_metrics.week_return',w:'This bucket shorts a stock that is already falling, and keeps falling.',
+    SR:[['1','week return ≤ −1%'],['0','above −1%']]},
+  LOCK_5M_WEAK:{n:'Day weak',m:'The day’s own move, as a direction check.',s:'v8_metrics.day_1d',w:'The session should be going your way on the day you enter it.',
+    SR:[['1','day change < 0'],['0','flat or up']]},
+  LOCK_MA_SHALLOW:{n:'MA shallow',m:'The 9-day mean against the 21-day, in ABSOLUTE terms — near zero scores best.',s:'v8_metrics.ma9_vs_ma21',w:'An early break beats an exhausted one. A wide gap either way means the move has run.',
+    SR:[['1','|ma9 vs ma21| < 1%'],['0','1% or wider, either side']]},
+  LOCK_QUALITY_FADE:{n:'Quality fade',m:'The Scorr quality score, capped tighter than SELL-MOM’s.',s:'gvm_scores.gvm_score',w:'A continuation short wants a name whose quality is fading, not one that will be bought.',
+    SR:[['1','GVM ≤ 5.5'],['0','above 5.5']]},
+  LOCK_SECTOR_WEAK:{n:'Sector weak',m:'The sector’s month return.',s:'v8_metrics.sector_month',w:'A falling sector carries the trade; a rising one fights it.',
+    SR:[['1','sector month < 0'],['0','flat or up']]}
 };
 // cc#588: Investment Check v3.0 — Gate + Conviction rule definitions.
 // 3 hard gates (G1-G3, pass/fail disqualifiers) + 12 weighted conviction filters (F1-F12, graded).
@@ -1187,7 +1262,14 @@ function renderV4Dual(d, uiMode){
            R12->R15) after years of consolidations and drops, and they are referenced by locked
            specs, so they are never renumbered — the code travels as legacy_id and shows in the
            tooltip. The info button still resolves on the R-code. */
+        /* cc#1173: the weight badge, per the founder's display ruling in 27977. Rows already
+           arrive heaviest-first — score_card sorts them at the source so every surface inherits
+           the order and none can drift by forgetting to sort — and this makes the reason visible.
+           No badge when the weight is null: that means the rule has no registry row, which the
+           payload reports separately as score10_unmapped_rules, and printing w0 would say
+           something different and false. */
         +'<span class="rl" title="'+(r.legacy_id||r.rule)+'">'+(r.seq!=null?r.seq:r.rule)
+          +(r.weight!=null?'<span class="rw" title="Registry weight">w'+r.weight+'</span>':'')
           +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span>'
         +'<span class="rreq">'+r.label+' — '+(r.required||'—')+'</span>'
         +'<span class="ract">'+_v4Actual(r.value)+'</span>'
