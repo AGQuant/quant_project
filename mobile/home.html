@@ -143,10 +143,40 @@ body[data-theme]{
 /* cc#1139 · the Market Today footer strip. No box on the cells — a hairline divider above is the
    whole separation, so it reads as the card's footer rather than a second row of metric chips. */
 .ixrow{display:flex;gap:7px;padding-top:9px;border-top:1px solid var(--line)}
-.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+/* cc#1159: the cell is a BUTTON now — it opens a chart, so it should be reachable by keyboard
+   and announced as pressable. font/background/border/padding are reset because a button inherits
+   none of them, and text-align:left because a button centres by default.
+   THE HIT AREA IS A PSEUDO-ELEMENT, NOT PADDING. The card asks for a 40px target AND an unchanged
+   card height, and padding cannot give you both — it would push the row taller by however much it
+   added. An absolutely-positioned ::after takes no space in the flow at all, so the touchable
+   region grows to 40px while the card measures exactly what it measured before. */
+.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+  position:relative;background:none;border:0;padding:0;font:inherit;color:inherit;
+  text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* VERTICAL ONLY. This bled 4px past the cell on each side at first, and render_check called it:
+   the last cell's hit area ran past the row's right edge with overflow-x:visible, 12 findings
+   across the widths. The horizontal reach was never needed anyway — the cell is already ~152px
+   wide at 360px. Height is the only dimension that was short of 40. */
+.ixcell::after{content:'';position:absolute;left:0;right:0;top:50%;
+  height:40px;transform:translateY(-50%)}
+.ixcell:active .ixlv{color:var(--blu,#4D7CFE)}
+.ixcell:active .ixgl{color:var(--blu,#4D7CFE)}
 .ixnm{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+/* the dashed underline is this page's existing "you can tap this" grammar, per the ref */
 .ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;
-  font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB)}
+  font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB);
+  /* DASHED UNDERLINE THAT COSTS NO HEIGHT. The obvious border-bottom:1px dashed plus a 1px
+     padding was written first and measured: it grew .ixrow from 41px to 42px at 360 and 24 to 25
+     at 412. The card asks for the affordance AND an unchanged card, and a border cannot give you
+     both because it is part of the box. A repeating background gradient paints the same dashes
+     inside the existing box and adds nothing to it — measured identical to the old row at both
+     widths afterwards.
+     The colour fallback is not decoration either: --line2 chains to --edge, which lives in
+     scorr_themes.css and not in this file, and a var() that resolves to nothing takes the whole
+     declaration down with it. The neighbouring --txt carries a fallback for the same reason. */
+  background-image:linear-gradient(to right,var(--line2,rgba(148,166,210,.26)) 55%,transparent 55%);
+  background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%}
+.ixgl{font-size:9px;color:var(--dim);margin-left:1px}
 .ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
   font-variant-numeric:tabular-nums}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
@@ -941,7 +971,8 @@ var TRENDS = {
   adr: { title: 'ADR' },
   pcr: { title: 'NIFTY PCR' },
   vix: { title: 'INDIA VIX' },
-  nifty: { title: 'NIFTY 50' }   /* cc#998: the three Home Nifty chips (Day/Week/Month) all open this one close series */
+  nifty: { title: 'NIFTY 50' },  /* cc#998: the three Home Nifty chips (Day/Week/Month) all open this one close series */
+  banknifty: { title: 'BANK NIFTY' }   /* cc#1159: the Home footer index cells */
 };
 /* cc#908: a point label is a DATE on a daily series and a TIME on an intraday one. One helper
    decides, so the axis, the scrub readout and the tape charts can never disagree about it.
@@ -2750,15 +2781,24 @@ function pcrMood(hero){
 function idxFooter(d){
   var t = {};
   (d.ticker || []).forEach(function(x){ if (x && x.name) t[x.name] = x; });
-  var cell = function(label, key){
+  /* cc#1159: each cell opens the chart through togTrend(), the SAME opener the ADR and VIX chips
+     already use \u2014 not a second one. `kind` is the TRENDS key, and cc#1159 added a banknifty kind
+     to that map and to /api/mobile/trends, which serves it off the same raw_prices table and the
+     same shape as nifty (1,296 BANKNIFTY closes against NIFTY50's 1,297, verified before wiring).
+     The chart lands in the shared #chiptrend host below the chips, exactly where a chip tap puts
+     it, so tapping a footer index and tapping a Nifty chip behave identically. */
+  var cell = function(label, key, kind){
     var r = t[key] || {};
     var lvl = (r.price == null) ? '\u2014' : px(r.price);
     var chg = (r.chg_pct == null) ? '' :
       '<span class="ixch ' + cls(r.chg_pct) + '">' + pct(r.chg_pct) + '</span>';
-    return '<div class="ixcell"><span class="ixnm">' + esc(label) + '</span>'
-      + '<span class="ixlv">' + esc(lvl) + '</span>' + chg + '</div>';
+    return '<button class="ixcell" onclick="togTrend(event,\'' + kind + '\')"'
+      + ' aria-label="' + esc(label) + ', open chart"><span class="ixnm">' + esc(label) + '</span>'
+      + '<span class="ixlv">' + esc(lvl) + '</span>' + chg
+      + '<span class="ixgl">\u25a6</span></button>';
   };
-  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY') + cell('BANKNIFTY', 'BANKNIFTY') + '</div>';
+  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY', 'nifty')
+       + cell('BANKNIFTY', 'BANKNIFTY', 'banknifty') + '</div>';
 }
 
 function heroCard2(d){

@@ -24,7 +24,7 @@ FOUNDER COMMENTS 08-Aug (batch 2, this commit):
     global_indices — the cc#894 frontend guessed response keys of other endpoints and
     rendered --. Server-side values end the guessing.
   * Live News: cc#899 — up to the LAST 100 stories (2 editorials pinned + 98 newest shorts).
-  * NEW /api/mobile/trends?kind=adr|pcr|vix — uniform {series:[{d,v}]} for the chip chart
+  * NEW /api/mobile/trends?kind=adr|pcr|vix|nifty|banknifty — uniform {series:[{d,v}]} for the chip chart
     popups. adr_daily / pcr_daily(NIFTY) / global_indices(name='India VIX', quote_date is the
     daily history axis, 1,231 rows verified 08-Aug).
 
@@ -170,7 +170,7 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
     if g:
         return g
     kind = (kind or "adr").lower()
-    if kind not in ("adr", "pcr", "vix", "nifty"):
+    if kind not in ("adr", "pcr", "vix", "nifty", "banknifty"):
         kind = "adr"
     want = max(1, min(int(days or 30), 120))
     # cc#998: nifty is a DAILY-only line — the Home Nifty Day/Week/Month chips are three deltas of the
@@ -214,14 +214,20 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
                     WHERE name = 'India VIX' AND price IS NOT NULL
                     ORDER BY quote_date DESC LIMIT %s
                 """, (dd,))
-            elif kind == "nifty":
+            elif kind in ("nifty", "banknifty"):
                 # cc#998: NIFTY50 daily close series (raw_prices, price_date-keyed, same EOD source the
                 # digest reads). One line; the three Home chips (Day/Week/Month) all open it.
+                # cc#1159 adds banknifty off the SAME table and the SAME shape, so the Home footer
+                # index cells open a chart through the existing opener rather than a second one.
+                # Verified before wiring: raw_prices holds 1,296 BANKNIFTY closes against NIFTY50's
+                # 1,297, both 2021-05-24 to 2026-08-19 — the series exists and is as deep.
+                # The symbol comes from a LOOKUP, never from string-building on the query param,
+                # so the parameter cannot reach the SQL text (the _V10_TABLES rule, applied here).
                 cur.execute("""
                     SELECT price_date AS d, close AS v FROM raw_prices
-                    WHERE symbol = 'NIFTY50' AND close IS NOT NULL
+                    WHERE symbol = %s AND close IS NOT NULL
                     ORDER BY price_date DESC LIMIT %s
-                """, (dd,))
+                """, ({"nifty": "NIFTY50", "banknifty": "BANKNIFTY"}[kind], dd))
             else:
                 cur.execute("""
                     SELECT price_date AS d, adr AS v FROM adr_daily
