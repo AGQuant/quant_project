@@ -798,6 +798,25 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
     color:var(--mut);border:1px solid var(--line);border-radius:5px;padding:1px 6px;
     margin-left:8px;white-space:nowrap;display:none}
 #pane-index .scrollhint.on{display:inline-block}
+/* cc#1168 push 5 · By Symbol / By Leg + the closed-trades expander.
+   EYEBROW is the pane's one small-label token, the same 8.5px/.14em the ref gives .stat .l and
+   .set-cell .k. Three different label sizes were living inside the Performance card. */
+#pane-index .eyebrow{font-size:8.5px;letter-spacing:.14em;color:var(--dim);font-weight:700;
+    text-transform:uppercase;margin-bottom:7px}
+/* NUMBERS RIGHT, names left — the ref's table rule, applied through a class rather than to every
+   table in the pane. #pane-index table also dresses Open Positions, Closed Trades, Buildup and
+   Divergence, whose column orders differ (SIDE and TYPE are badges, not figures) and whose own
+   pushes own them. A global rule here would have right-aligned badge columns in four other cards. */
+#pane-index .seg-tbl th, #pane-index .seg-tbl td{text-align:right}
+#pane-index .seg-tbl th:first-child, #pane-index .seg-tbl td:first-child{text-align:left}
+#pane-index .seg-tbl th{font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
+#pane-index .seg-tbl tbody tr:last-child td{border-bottom:none}
+#pane-index .moreline{display:flex;justify-content:center;padding:9px 0 2px}
+#pane-index .morebtn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
+    color:var(--blu);background:transparent;border:1px solid var(--line2);border-radius:7px;
+    padding:5px 14px;cursor:pointer;transition:border-color .15s ease,background .15s ease}
+#pane-index .morebtn:hover{border-color:var(--blu-chip-bd);background:var(--blu-chip)}
+#pane-index .morebtn:focus-visible{outline:2px solid var(--blu);outline-offset:2px}
 #pane-index table{width:100%;border-collapse:collapse;font-size:13px}
 #pane-index thead th{padding:5px 8px;color:var(--mut);font-weight:700;text-align:left;
     font-size:11px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
@@ -5672,7 +5691,11 @@ function rClosed(){
         ? `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`
         : skelRows(10, 3));
   // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
-  const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="idxToggleClosed()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
+  /* cc#1168 push 5: the expander was a bare span carrying five inline styles and no affordance —
+     nothing said it was pressable except its colour. It is now a real button on the ref's chip
+     grammar, with the state it will move TO named in the label, so the reader is never guessing
+     which way it goes. */
+  const more = all.length>15 ? `<div class="moreline"><button type="button" class="morebtn" onclick="idxToggleClosed()">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</button></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})<span class="scrollhint">SCROLL →</span></div>
       <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
@@ -5721,9 +5744,14 @@ function rPerf(){
       return `<tr><td class="td-mono" style="font-weight:700">${esc(k)}</td>
         <td class="td-mono">${v.trades||0}</td><td class="td-mono">${wr}%</td>
         <td class="td-mono" style="font-weight:800;color:${cx(v.pnl||0)}">₹${fK(v.pnl||0)}</td></tr>`;}).join('');
+    /* cc#1168 push 5: the section label takes the pane's eyebrow token — the SAME 8.5px/.14em the
+       stat labels and settings keys use — instead of its own 10px/.6px. Three label sizes inside
+       one card was the mismatch. The table gets .seg-tbl, so the ref's numbers-right treatment
+       lands HERE and does not leak into Open Positions, Closed Trades, Buildup or Divergence,
+       whose column orders are different and whose pushes own them. */
     return `<div style="flex:1;min-width:240px">
-      <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${title}</div>
-      <div class="tbl-scroll"><table><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      <div class="eyebrow">${title}</div>
+      <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
   };
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
