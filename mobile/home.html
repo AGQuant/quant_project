@@ -184,6 +184,25 @@ body[data-theme]{
    stays small so the header does not turn into two competing headlines. Scoped here rather than
    in the shared sheet because .trendhd renders on this page only. */
 .trendhd span:last-child{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
+/* cc#1183 — the same readout, addressed by class. The header gained a third child (the close
+   button) on the chip panel, so the value span is no longer :last-child there. Both rules carry
+   the same declarations and the old one is untouched, so the tape charts and every path without
+   a close button render exactly as before. */
+.trendhd .trd-v{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
+/* The title takes the slack, so the value and the X sit together on the right rather than being
+   spread apart by the shared sheet's justify-content:space-between. */
+.trendhd .trd-t{margin-right:auto;min-width:0}
+/* cc#1183 close (X). The chip trend panel expands in place; before this the only way to shut it
+   was to re-tap the exact cell that opened it, which the founder had no reason to know. The
+   glyph is 28px but the TAP TARGET is 44px, given by a transparent ::after box centred on the
+   button — the same trick the .ixcell row uses, because a 28px control fails the touch minimum
+   and growing the visible button would push the header taller. */
+.trendx{position:relative;flex:0 0 auto;width:28px;height:28px;margin:-4px -6px -4px 8px;
+  display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;
+  font-family:inherit;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer}
+.trendx::after{content:'';position:absolute;top:50%;left:50%;width:44px;height:44px;
+  transform:translate(-50%,-50%)}
+.trendx:active{color:var(--txt,#E9EEFB)}
 /* cc#905 range pills */
 .rgs{display:flex;gap:6px;margin:6px 0 8px}
 .rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;
@@ -1188,9 +1207,20 @@ function renderChart(key){
   if (!c) return;
   var el = document.getElementById(c.host);
   if (!el) return;
+  /* cc#1183: the header can now carry a close button, but ONLY for a chart that registered a
+     closeCall. The chip trend panel expands in place under the hero and had no way out except
+     re-tapping the exact cell that opened it; the tape charts sit inside the tape overlay, which
+     already has its own close, and a second X per row would be two closes on one screen.
+     The two spans are given classes because a third child breaks `span:last-child`. The old
+     rule is left in place so every path that renders no close button styles byte-identically. */
   var head = function(right){
-    return '<div class="trendhd"><span>' + esc(c.title) + '</span>'
-      + (right ? '<span id="trd_' + key + '">' + right + '</span>' : '') + '</div>';
+    var x = c.closeCall
+      ? '<button class="trendx" type="button" aria-label="Close chart" onclick="'
+        + c.closeCall + '">×</button>'
+      : '';
+    return '<div class="trendhd"><span class="trd-t">' + esc(c.title) + '</span>'
+      + (right ? '<span class="trd-v" id="trd_' + key + '">' + right + '</span>' : '')
+      + x + '</div>';
   };
   el.innerHTML = '<div class="loading" style="padding:6px 0 0">Loading ' + esc(c.title) + '…</div>';
   var want = c.days;
@@ -1360,7 +1390,25 @@ function tapeChart(i){
    shape. 1D therefore requests days=2 and draws the real last-two-prints line, which is exactly
    the move the founder is asking about. The pill row states the window; the chart never pretends
    to more resolution than the daily source has. */
-var TREND_RANGE = { adr: 15, pcr: 15, vix: 15 };
+/* cc#1183: nifty and banknifty were MISSING from this map, and that is the whole defect the
+   founder photographed. togTrend seeds a chart with days: TREND_RANGE[kind]; a kind with no entry
+   seeds `undefined`, chipLoader builds "...&days=undefined", mobile_trends declares days as an
+   int so FastAPI answers 422 with a detail body and no series, and renderChart's s.length < 2
+   branch prints "Not enough history for this window." on a symbol with 1,297 rows of history.
+   Worse, no pill renders as selected either, because the pills compare r[0] === c.days and
+   nothing equals undefined — so the panel looks like every window is broken when in fact only
+   the FIRST render is, and tapping any pill fixes it. Reproduced in the harness before this fix:
+   first open 422 and no svg; 1D, 7D, 15D and 30D all drew correctly once tapped.
+   THE HOLE PRE-DATES cc#1159. The nifty kind has been in TRENDS since cc#998 with no range, so
+   the Nifty Day/Week/Month chips have opened on a failed first render all along. My cc#1159 push
+   did not create it — it wired two more entry points into it, which is how it reached glass. I
+   noted on that card that I was giving banknifty no entry "to match the precedent"; the precedent
+   was broken, and matching it was the wrong call.
+   15 matches adr/pcr/vix rather than inventing a different default for the index rows. */
+var TREND_RANGE = { adr: 15, pcr: 15, vix: 15, nifty: 15, banknifty: 15 };
+/* The belt to that braces: even with the map filled, a kind added later with no entry must never
+   put the string "undefined" into a query. One fallback here closes the class, not just the case. */
+var TREND_RANGE_DEFAULT = 15;
 
 /* WHAT CHANGED AT cc#908. 1D used to request days=2 and draw the last two DAILY prints, because
    a one-point line would have been a fabricated shape. It no longer has to fake anything: the
@@ -1385,8 +1433,13 @@ function togTrend(ev, kind){
   TREND.open = kind;
   CHART[kind] = {
     host: 'chiptrend', title: TRENDS[kind].title, ranges: RANGES_ALL,
-    days: TREND_RANGE[kind], load: chipLoader(kind),
-    live: function(){ return TREND.open === kind; }
+    /* cc#1183: the fallback, not TREND_RANGE[kind] on its own. A kind with no entry used to seed
+       `undefined`, which chipLoader put into the query string as the literal text "undefined".
+       Number() is the second half of the belt: an entry that ever arrives as a string still
+       reaches the pills as a number, so `r[0] === c.days` can match and a pill renders selected. */
+    days: Number(TREND_RANGE[kind] || TREND_RANGE_DEFAULT), load: chipLoader(kind),
+    live: function(){ return TREND.open === kind; },
+    closeCall: 'togTrend(event,\'' + kind + '\')'
   };
   renderChart(kind);
 }
