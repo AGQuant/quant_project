@@ -104,7 +104,13 @@ SCHEDULE_SEED: List[Dict[str, Any]] = [
     ("oi_snapshot", "5-min market hours", "scheduler._bg_oi_snapshot", "oi snapshot freshness"),
     ("guardian_tick", "5-min market hours", "feed_guardian", "per-leg detect/repair"),
     ("guardian_offhours", "off-hours cadence", "feed_guardian", "off-hours integrity"),
-    ("v14_cycle", "market-hours cycle", "scheduler._bg_v14_cycle", "v14 freshness"),
+    # cc#1170: RETIRED 20-Aug-2026 by founder ruling (session_log 27951) — V14 did not clear the
+    # merit gate. The seed row stays so the job remains NAMED and its retirement is visible rather
+    # than a gap, but its cadence no longer claims a live loop. The enabled=false flag lives in the
+    # ROW, not here: seed_registries' ON CONFLICT updates cadence/owner/watchdog and deliberately
+    # does NOT touch `enabled`, so a retirement set in the registry survives every deploy.
+    ("v14_cycle", "RETIRED 20-Aug-2026 (was market-hours cycle)", "scheduler._bg_v14_cycle",
+     "retired — no freshness expected; see scheduler_master.bg_v14_cycle notes"),
     ("v8_paper_exit", "market-hours live exit pass", "scheduler._bg_v8_paper_exit", "paper exit pass ran"),
     ("v10_tick", "market-hours tick", "scheduler._bg_v10_tick", "v10 freshness"),
     ("pcr_intraday", "market-hours", "scheduler._bg_pcr_intraday", "pcr intraday freshness"),
@@ -193,9 +199,25 @@ def control_plane_diagnosis(cur) -> Dict[str, Any]:
     cur.execute("""SELECT job_key FROM schedule_registry WHERE enabled
                    AND job_key NOT IN (SELECT DISTINCT job_key FROM job_runs) ORDER BY job_key""")
     silent = [r[0] for r in cur.fetchall()]
+    # cc#1170: RETIRED jobs are reported as retired, not left to vanish. A disabled row simply
+    # dropped out of every list above, so a reader could not tell "deliberately switched off" from
+    # "never existed" — and a retired engine that reads as absent is how someone switches it back
+    # on. The reason travels with it, read from scheduler_master's own note rather than restated
+    # here, so there is ONE place the retirement is written down. The join derives the scheduler
+    # job name from owner_module (scheduler._bg_x -> bg_x) instead of carrying a second name column.
+    cur.execute("""SELECT sr.job_key, sr.owner_module, sm.active, sm.notes
+                   FROM schedule_registry sr
+                   LEFT JOIN scheduler_master sm
+                     ON sm.job_name = LTRIM(SPLIT_PART(sr.owner_module, '.', 2), '_')
+                   WHERE sr.enabled IS FALSE ORDER BY sr.job_key""")
+    retired = [{"job_key": jk, "owner_module": om,
+                "scheduler_active": (None if act is None else bool(act)),
+                "reason": (notes or "no reason recorded — this is itself a gap")}
+               for jk, om, act, notes in cur.fetchall()]
     return {"coverage_miss": coverage_miss, "coverage_miss_n": len(coverage_miss),
             "unreviewed_failures": unreviewed, "recent_failures": failures,
-            "drift_unregistered": unregistered, "drift_silent_registered": silent}
+            "drift_unregistered": unregistered, "drift_silent_registered": silent,
+            "retired": retired, "retired_n": len(retired)}
 
 
 @control_plane_router.on_event("startup")
