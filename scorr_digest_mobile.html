@@ -165,22 +165,28 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    own rendering after whatever font scale the device applied. It is not a prediction from font
    metrics, which is what every previous round got wrong. overflow:hidden on .rung stays, so the
    cc#1127 anti-overlap guarantee is untouched — the two rules cover different failures. */
-.ladder{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:start;
- margin-top:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.ladder::-webkit-scrollbar{display:none}
-/* measured scroll mode: tracks widen to the full number, the row scrolls, the fade engages */
-.ladder.scrollmode{grid-template-columns:repeat(5,minmax(max-content,1fr))}
-.rung{min-width:0;overflow:hidden;text-align:center;font-family:'JetBrains Mono',ui-monospace,monospace;
- font-size:9.5px;letter-spacing:1px;padding:6px 0 5px;border-top:2px solid var(--edge);color:var(--muted);
- -webkit-text-size-adjust:100%;text-size-adjust:100%}
-/* cc#1186 · the vw clamp is GONE. Tying the value size to viewport width solved nothing the
-   measurement does not already solve, and it is what made the digits balloon on a high-scale
-   device: vw ignores text scale, so the clamp ceiling and the device scale multiplied. Fixed
-   sizes + the cc#1136 measured scrollmode is the honest pair: either five fixed-size columns
-   fit, or the row scrolls. Nothing predicts; the browser reports. */
-/* no overflow:hidden and no text-overflow on the b — a digit is never traded for an ellipsis */
-.rung b{display:block;white-space:nowrap;margin-top:2px;font-size:12.5px;letter-spacing:0;
- font-variant-numeric:tabular-nums}
+/* cc#1187 · THE LADDER IS NOW VERTICAL, and this is a surrender that should have come two rounds
+   ago. Four fixes (cc#1096/1111/1124/1127) plus two honest fallbacks (cc#1136 measured scroll,
+   cc#1186 fixed sizes) all fought the same fight: five full Indian-format index values across a
+   phone width the page does not control, under a device text scale it also does not control.
+   Founder's 17:38 screenshot: Samsung text scaling inflates even fixed px, R2 off the edge again.
+   A pivot ladder's five levels are REFERENCE data — all five must be visible at once, and a level
+   you have to swipe for is a level you will not check at a glance. Vertical rows are immune by
+   construction: one level per row, the value right-aligned with the whole card width to itself.
+   It is also the shape traders already read — a ladder. R2 at the top, S2 at the floor.
+   The grid, scrollmode, fade and measurement below are all retired WITH their failure mode. */
+.ladder{margin-top:8px}
+.lrow{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-top:1px solid var(--edge)}
+.lrow:first-child{border-top:none}
+.lrow .ll{font-family:'JetBrains Mono';font-size:10px;font-weight:700;letter-spacing:1.5px;
+ color:var(--muted);flex:none;width:26px}
+.lrow .lbar{flex:1;height:2px;border-radius:2px;background:var(--edge);opacity:.55}
+.lrow .lv{font-family:'JetBrains Mono';font-weight:800;font-size:14px;letter-spacing:0;
+ font-variant-numeric:tabular-nums;color:var(--chalk);flex:none}
+.lrow.pp .ll,.lrow.pp .lv{color:var(--amber)}
+.lrow.cmprow .ll{color:var(--aqua)}
+.lrow.cmprow .lbar{background:var(--aqua);opacity:.8}
+/* cc#1187: .rung/.rung b retired — the ladder is vertical rows now (see .lrow above) */
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
    one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
@@ -314,9 +320,21 @@ function ladder(ix){
   /* cc#1111: .cl marks a clause that must not break. "below PP 0.76%" is one phrase — the number
      means nothing on a line of its own. */
   const sideTxt=side?`<span class="cl" style="color:${side==='above'?'var(--volt)':'var(--heat)'}">${side} PP ${bp.dist_pct!=null?Math.abs(bp.dist_pct).toFixed(2)+'%':''}</span>`:'';
-  const cells=order.map(L=>{const r=rungs.find(x=>x.label===L);
-    const col=L==='PP'?'var(--amber)':(L[0]==='S'?'#5A2634':'#3E5A18');
-    return `<div class="rung" style="border-color:${col}${L==='PP'?';color:var(--amber)':''}">${L}<br><b style="color:var(--chalk)">${r?num(r.value):'—'}</b></div>`;}).join('');
+  /* cc#1187: R2 down to S2 — high at the top, the way a ladder hangs. CMP is threaded into its
+     true slot between the levels it sits between, so the read is spatial: you SEE the price
+     standing above PP without parsing a percentage. */
+  const desc=['R2','R1','PP','S1','S2'];
+  let rows=[], cmpDone=false;
+  desc.forEach(L=>{
+    const r=rungs.find(x=>x.label===L);
+    if(cmp!=null&&!cmpDone&&r&&cmp>=Number(r.value)){
+      rows.push(`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`);
+      cmpDone=true;
+    }
+    rows.push(`<div class="lrow${L==='PP'?' pp':''}"><span class="ll">${L}</span><span class="lbar"></span><span class="lv">${r?num(r.value):'—'}</span></div>`);
+  });
+  if(cmp!=null&&!cmpDone)rows.push(`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`);
+  const cells=rows.join('');
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
      now follows d.market.state, the SAME composer the header chip already reads, via window.__MK:
@@ -326,8 +344,8 @@ function ladder(ix){
   const mk=window.__MK||{};
   const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
   return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
-    <span class="note"><span class="cl">CMP <b class="num" style="color:var(--chalk)">${cmp!=null?num(cmp):'—'}</b></span> · <span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
-    <div class="ladwrap"><div class="ladder">${cells}</div></div></div>`;
+    <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
+    <div class="ladder">${cells}</div></div>`;
 }
 
 /* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
@@ -498,21 +516,10 @@ function loadInternals(){
    Equal tracks are tried FIRST and scrollmode is entered only when a value genuinely does not
    fit, so a normal phone still gets five clean columns and nothing to swipe. */
 function fitLadders(){
-  document.querySelectorAll('.ladder').forEach(function(el){
-    el.classList.remove('scrollmode');       /* always measure in equal-track mode */
-    var over=false;
-    el.querySelectorAll('.rung b').forEach(function(b){
-      if(b.scrollWidth > b.clientWidth+1) over=true;
-    });
-    if(over) el.classList.add('scrollmode');
-    var wrap=el.parentNode;
-    var sync=function(){
-      wrap.classList.toggle('hasmore', el.scrollWidth-el.clientWidth-el.scrollLeft > 2);
-    };
-    el.onscroll=sync;                        /* onscroll, not addEventListener: re-measuring must
-                                                not stack a second handler on the same node */
-    sync();
-  });
+  /* cc#1187: NO-OP by design, kept so the cc#1161 font hooks and boot() call sites stay valid.
+     Vertical rows have nothing to measure — a row cannot overflow sideways — and deleting the
+     hooks would be a wider diff for zero behaviour. If the ladder ever goes horizontal again
+     (it should not), the hooks are already wired. */
 }
 /* Re-measure when the box changes under the content. One debounced listener for both events —
    an orientation change is a resize the layout has to survive, and a rotation into portrait is
