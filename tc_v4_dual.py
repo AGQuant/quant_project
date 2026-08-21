@@ -1240,11 +1240,23 @@ def _verdict10(score10):
 
 def _score10(rules, bucket, weights=None):
     """Return (score10, weighted, unmapped_keys). `weighted` is False when the registry was
-    unreadable or the bucket has no rows, so a surface can label an unweighted number rather than
-    present it as the calibrated one.
+    unreadable, when the bucket has no rows, OR when any rule the engine emitted had no registry
+    row — so a surface can label an unweighted number rather than present it as the calibrated one.
 
     A rule with no registry row contributes at weight 1 and is NAMED in the return, never dropped
     and never silently defaulted — the same discipline the push-1 gate used.
+
+    cc#1172, 21-Aug: `weighted` used to be bool(bw) alone — "does this bucket have any rows" —
+    and that is not the same question. Measured on the live registry this morning: the ACTIVE
+    SELL-MOM and SELL-REV rows are all LOCK_* keys from the 27976/27977 replacement rulebooks,
+    while the engine emits R1..R19 and the word LOCK_ appears nowhere in this file. So every
+    single live SELL rule fell through to weight 1, the score was a plain unweighted ratio, and
+    it was going out labelled weighted=True on every surface — including the 09:30 star batch,
+    which persisted nine of them. Requiring an empty `unmapped` is what makes the flag mean what
+    it says. Verified against the rulebook rather than assumed: BUY-MOM's 19 active rows are
+    exactly the 19 rule ids the engine emits and BUY-REV's 17 are exactly its 17, so BUY is
+    genuinely weighted and this change does not touch it. NO WEIGHT AND NO CONDITION IS ALTERED
+    HERE — SELL stays frozen; only the label stops lying about it.
     """
     wmap = weights if weights is not None else _rule_weights()
     bw = (wmap or {}).get(bucket) or {}
@@ -1262,9 +1274,10 @@ def _score10(rules, bucket, weights=None):
         frac = float(r.get("credit") or 0) / mx
         num += w * frac
         den += w
+    truly_weighted = bool(bw) and not unmapped
     if den <= 0:
-        return None, bool(bw), unmapped
-    return round(10.0 * num / den, 2), bool(bw), unmapped
+        return None, truly_weighted, unmapped
+    return round(10.0 * num / den, 2), truly_weighted, unmapped
 
 
 def _verdict(score, max_score):
