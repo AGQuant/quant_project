@@ -2520,12 +2520,21 @@ def _bg_v14_cycle():
 
     UNKNOWN COUNTS AS SILENT. If the registry cannot be read, this returns rather than running: a
     database blip must never resurrect an engine the founder retired. The opposite default would
-    mean the quietest possible failure putting paper trades back on the book."""
+    mean the quietest possible failure putting paper trades back on the book.
+
+    BOTH EARLY RETURNS CARRY _SKIPPED, and that is not tidiness. cc#1170's first version returned
+    a bare None, which _run_recorded maps to last_status='ok'. Caught on the 21-Aug VERIFY A
+    capture: the row read active=false with last_run_at 09:15:02 IST and last_status='ok', 92ms —
+    a silenced engine stamping a fresh healthy tick every minute. This is the exact failure the
+    _SKIPPED sentinel was added for at cc#526, and it matters because engine_watchdog and
+    protocol_one both judge liveness off last_run_at and last_status: a retired engine that keeps
+    reporting 'ok' is invisible to the two things whose job is to notice. The DATA never moved —
+    v14_trades held at 34 and v14_watchlist at 23 — so nothing traded; only the record lied."""
     if _job_active("bg_v14_cycle") is not True:
-        return
+        return _SKIPPED
     global _v14_running
     if _v14_running:
-        return
+        return _SKIPPED
     _v14_running = True
     try:
         import v14_engine
