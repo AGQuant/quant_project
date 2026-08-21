@@ -915,6 +915,31 @@ def _bg_tc_position_stars():
         _tc_position_stars_running = False
 
 
+_tc_position_stars_v2_running = False            # cc#1172 push 7: four-bucket star batch guard
+
+def _bg_tc_position_stars_v2():
+    """cc#1172 push 7: the SAME open-position batch, scored on the four-bucket engine (tc_v4_dual).
+
+    Runs ALONGSIDE _bg_tc_position_stars, not instead of it. The v1 star comes from the old
+    tier1+tier2 scorer with fixed maxes 20/19; this one comes from the engine the Check page and
+    tc_screener_v2 use, so the two tables can be compared row-for-row on real data before any read
+    path moves. Nothing is switched over on this push and nothing is deleted.
+
+    All the logic lives in tc_position_stars_v2; this stays a dispatcher, and stays crash-proof if
+    the module is absent."""
+    global _tc_position_stars_v2_running
+    if _tc_position_stars_v2_running: return
+    _tc_position_stars_v2_running = True
+    try:
+        import tc_position_stars_v2 as _psv2
+        r = _psv2.run_position_stars_v2()
+        log.info(f"tc_position_stars_v2: {r}")
+    except Exception as e:
+        log.error(f"tc_position_stars_v2: {e}")
+    finally:
+        _tc_position_stars_v2_running = False
+
+
 def _bg_smartgain_mtm():
     """cc#123 (P0): refresh smartgain_holdings.ltp/updated_at from the live feed
     every 5 min during market hours. The stored ltp was a manual stamp that froze
@@ -3989,6 +4014,7 @@ async def _scheduler_loop():
         # Predictable star cadence (7 marks/day) replacing cc#720's per-render 15-min cache.
         if now.weekday() < 5 and _is_trading_day(today) and m == 30 and 9 <= h <= 15:
             _spawn(_bg_tc_position_stars)
+            _spawn(_bg_tc_position_stars_v2)   # cc#1172 push 7: four-bucket star, same mark, own table
         # cc#748: TC outcome sim — hourly STRONG-entry tracker on the session's entry marks (09:30-15:30
         # today, sourced from nse_session so it follows the 03-Aug NSE change). Trading-day gate + all
         # entry/exit logic live inside run_tc_sim_tick(); dispatch stays crash-proof if the module is absent.

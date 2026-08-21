@@ -1367,6 +1367,25 @@ def score_card(d, style, side):
 
 # ── public compute (single symbol, both sides / a chosen side) ───────────────────
 
+def card_pct(c):
+    """The cc#1033 ratio (session_log 22353, founder-locked): score as a fraction of that card's own
+    max. This is the ONE quantity best-of-four is chosen on."""
+    return (c["score"] / c["max"]) if c.get("max") else 0
+
+
+def best_card(cards, side=None):
+    """The winning card on the locked ratio. Module-level and public ON PURPOSE (cc#1172 push 7):
+    the position-star batch needs the SAME selection rule, and a second copy of `max(..., key=pct)`
+    living in another file is exactly the propagation drift this whole card exists to end.
+
+    `side` narrows the field to one direction. A position's star must be judged on its OWN side —
+    a LONG position is not reassured by a strong SELL card, and cc#728/cc#738 locked direction as
+    the position's own. Passing None keeps the across-all-four behaviour the Check page has.
+    """
+    pool = [c for c in cards if (side is None or c.get("side") == side)]
+    return max(pool, key=card_pct, default=None)
+
+
 def _compute_result(d, symbol, side):
     """Score both style cards for each requested side and assemble the dual result. Shared by the
     dual endpoint and the detail endpoint (cc#408) so scores are identical by construction."""
@@ -1384,9 +1403,6 @@ def _compute_result(d, symbol, side):
     # card has the most points available, which is how NBCC showed a BUY card on a stock down 6.5%
     # in a week. A ratio compares like with like. Scoring, rules, bands and card_maxes are untouched;
     # only the CHOICE between already-scored cards changes.
-    def _pct(c):
-        return (c["score"] / c["max"]) if c.get("max") else 0
-
     # cc#1172 — WHY BEST-OF-FOUR IS NOT MOVED TO score10 YET, deliberately.
     # 27957 says best-of-four becomes the highest NORMALIZED score and calls it "identical by
     # construction" to the cc#1033 ratio. That is only true while every weight is equal. Once the
@@ -1402,7 +1418,7 @@ def _compute_result(d, symbol, side):
     # So the CHOICE stays on the locked ratio until SELL is calibrated; the 10-scale rides in the
     # payload for display. Flipping the selector is one line and its own push, once the four
     # buckets are comparable again.
-    best = max(cards, key=_pct, default=None)
+    best = best_card(cards)
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
         "alerts": _alerts(d),                       # cc#677: informational chips only (never gate)
@@ -1410,7 +1426,7 @@ def _compute_result(d, symbol, side):
         "best_label": best["label"] if best else None,
         "best_score": best["score"] if best else None,
         # cc#1033: the ratio the choice was made on, so a surface can print it without recomputing.
-        "best_pct": (round(_pct(best), 4) if best else None),
+        "best_pct": (round(card_pct(best), 4) if best else None),
         "best_verdict": (best["verdict"] if best else "REJECT"),   # score bands alone
         # cc#1172: the normalized 0-10 score of the chosen card, for surfaces that show N.N/10.
         "best_score10": (best.get("score10") if best else None),
