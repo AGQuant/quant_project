@@ -317,23 +317,26 @@ def _segment_month(cur, segment):
     calls this the SEGMENT's month, and an average that changes depending on who is asking is not
     the segment's month.
     """
+    # Two DISTINCT ON passes, not one windowed pass. Postgres allows FILTER on aggregates only, so
+    # ROW_NUMBER() ... FILTER is a syntax error, not a slow query — the first draft of this would
+    # have thrown on the first real call. Caught by running the SQL against Railway before pushing.
     cur.execute("""
         WITH mem AS (SELECT symbol FROM gvm_scores WHERE segment = %s),
-        px AS (
-            SELECT r.symbol, r.price_date, r.close,
-                   ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.price_date DESC) rn_new,
-                   ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.price_date DESC)
-                     FILTER (WHERE r.price_date <= CURRENT_DATE - 30) rn_old
+        newp AS (
+            SELECT DISTINCT ON (r.symbol) r.symbol, r.close
             FROM raw_prices r JOIN mem m ON m.symbol = r.symbol
             WHERE r.close IS NOT NULL AND r.price_date >= CURRENT_DATE - INTERVAL '120 days'
+            ORDER BY r.symbol, r.price_date DESC
         ),
-        pair AS (
-            SELECT n.symbol, n.close AS c_new, o.close AS c_old
-            FROM (SELECT symbol, close FROM px WHERE rn_new = 1) n
-            JOIN (SELECT symbol, close FROM px WHERE rn_old = 1) o USING (symbol)
-            WHERE o.close > 0
+        oldp AS (
+            SELECT DISTINCT ON (r.symbol) r.symbol, r.close
+            FROM raw_prices r JOIN mem m ON m.symbol = r.symbol
+            WHERE r.close IS NOT NULL AND r.price_date >= CURRENT_DATE - INTERVAL '120 days'
+              AND r.price_date <= CURRENT_DATE - 30
+            ORDER BY r.symbol, r.price_date DESC
         )
-        SELECT AVG((c_new / c_old - 1) * 100), COUNT(*) FROM pair
+        SELECT AVG((n.close / o.close - 1) * 100), COUNT(*)
+        FROM newp n JOIN oldp o USING (symbol) WHERE o.close > 0
     """, (segment,))
     row = cur.fetchone() or (None, 0)
     return _f(row[0]), int(row[1] or 0)
