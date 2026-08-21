@@ -134,7 +134,7 @@ body[data-theme]{
 .tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
 .tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;white-space:nowrap}
 /* cc#1123: volatility's neutral tier on the tape. #FF9F45 is not a new amber — it is the exact
-   value this page already gives the index NAME on the hero's V10 line (.v10i .nm below) and the
+   value this page already gives an index NAME (.ibk-id .sym below, cc#1158) and the
    exact value --amber holds on the Digest, so the neutral VIX reads the same on both screens.
    Written page-scoped rather than as a shared .neu in mobile.css: .pos/.neg are shared because
    every surface means the same thing by them, and a bare .neu is a common enough name that
@@ -201,10 +201,7 @@ body[data-theme]{
 .tpr.up{background:rgba(47,212,139,.07)}
 .tpr.dn{background:rgba(255,92,108,.07)}
 /* ── cc#906: V10 trade-log chart ─────────────────────────────────────────────────────────── */
-.v10ic{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
-  margin-left:6px;border-radius:6px;border:1px solid var(--line2);color:var(--mut);
-  background:none;cursor:pointer;vertical-align:middle;padding:0}
-.v10ic svg{display:block}
+/* cc#1158: .v10ic went with v10Icon(), its only caller. */
 .v10tg{display:flex;gap:6px;margin:10px 0 6px}
 .v10tg button{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:10.5px;font-weight:800;letter-spacing:.05em;color:var(--mut);background:var(--panel);
@@ -469,11 +466,46 @@ body[data-theme]{
    pass on every tap. Aqua is a HEADING identity only — links and buttons keep pulse, so the
    interactive colour still means "you can touch this". */
 .sect{color:#35E0FF;text-shadow:0 0 12px rgba(53,224,255,.4)}
-/* cc#1068: INDEX SIGNALS card — R5 panel, edge, cut corner, mono sub-line. */
-.r5-idxcard{background:#161F33;border:1px solid #26334F;
+/* cc#1158 — INDEX BOOK strip, per design_refs/scorr_home_indexbook_R2.html (7564bc4). It takes
+   the place of the cc#1068 INDEX SIGNALS card, whose .r5-idxcard / .r5-idxsub rules are removed
+   with it rather than left behind. The ref's own token names (--aqua/--panel-edge/--up/--down/
+   --gold) do not exist in this file; these are the app's equivalents, checked one by one. The
+   amber is the same #FF9F45 the old index line used for an index NAME, so the colour still
+   means the same thing here as it did there. */
+.ibk{background:var(--panel);border:1px solid var(--line);margin-top:10px;
   clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
-.r5-idxsub{margin-top:8px;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;letter-spacing:1.4px;color:var(--mut)}
+/* a row is a BUTTON, not a div with onclick: it is a tap target that opens a chart, so it should
+   be reachable by keyboard and announced as pressable. font/color/background are reset because a
+   button does not inherit them. */
+/* WRAPS, and the left column can shrink. Measured before this was here: at 412px@2x the row ran
+   62px past the card edge with overflow-x:visible, so the P&L was not clipped-but-scrollable, it
+   was gone, and the document itself scrolled sideways by 46px. The left block had no min-width:0,
+   so it refused to shrink below its content, and .ibk-pnl is flex:0 0 auto and got pushed off.
+   flex-wrap lets the P&L drop under the identity at big text instead of leaving the card. */
+.ibk-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
+  gap:8px 12px;padding:15px 16px;min-height:44px;width:100%;text-align:left;cursor:pointer;
+  background:none;border:0;font:inherit;color:inherit}
+.ibk-row + .ibk-row{border-top:1px solid var(--line)}
+.ibk-row:active{background:var(--panel2)}
+.ibk-l{flex:1 1 58%;min-width:0}
+.ibk-id{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+.ibk-id .sym{font-size:14px;font-weight:700;letter-spacing:.04em;color:#FF9F45}
+.ibk-dir{font-size:10.5px;font-weight:800;letter-spacing:.1em;padding:3px 8px;border:1px solid}
+.ibk-dir.long{color:var(--grn);border-color:var(--grn)}
+.ibk-dir.short{color:var(--red);border-color:var(--red)}
+.ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);
+  letter-spacing:.06em;margin-top:3px;overflow-wrap:anywhere}
+.ibk-pnl{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+.ibk-pnl .v{font-size:16px;font-weight:800}
+.ibk-pnl .v.pos{color:var(--grn)}
+.ibk-pnl .v.neg{color:var(--red)}
+.ibk-pnl .v.na{color:var(--mut);font-size:13px}
+.ibk-pnl .arrow{color:var(--dim);font-size:14px}
+.ibk-cap{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+  letter-spacing:.08em;padding:9px 16px;border-top:1px solid var(--line);line-height:1.7}
+.ibk-cap .asof{color:#F5B94A}
+.ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.1em;
+  color:var(--mut);text-align:center;padding:18px 16px}
 .rnlist{min-height:360px;animation:rnfade .18s ease-out}
 @keyframes rnfade{from{opacity:.35}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
@@ -485,20 +517,9 @@ body[data-theme]{
 .rnb:disabled{opacity:.35;cursor:default}
 .rnp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
   color:var(--dim);letter-spacing:.06em}
-/* ── cc#919: the V10 index block was one wrapping text line ──────────────────────────────────
-   It rendered as "V10: <b>Nifty Long</b>[icon] · <b>Bank Nifty No Trade</b>[icon]" in a plain
-   11.5px mono block with no flex and no nowrap. Measured: ~312px of content in a 324px card at
-   380px, so it wrapped — and because the chart icons are inline-flex with vertical-align:middle,
-   the wrap broke the baseline and the whole thing read as two stacked blocks, which is what the
-   founder saw. One row per instrument instead: name left, state right in mono, chart icon last.
-   Fixed widths total ~90px so the name takes the rest and it cannot overflow at 380px or 360px. */
-.v10b{margin-top:8px;display:flex;align-items:center;gap:12px;white-space:nowrap;
-  overflow:hidden;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px}
-.v10i{display:inline-flex;align-items:center;gap:5px;min-width:0}
-.v10i .nm{font-weight:700;color:#FF9F45;letter-spacing:.04em}
-.v10i .stt{font-weight:800;letter-spacing:.04em;color:var(--mut)}
-.v10i .stt.long{color:var(--grn)}
-.v10i .stt.short{color:var(--red)}
+/* cc#1158: the cc#919 .v10b / .v10i rules are removed with the INDEX SIGNALS markup they
+   styled. Nothing in the repo selects them any more - checked against every .py, .js and
+   .html, including the pwa enhancer, where the only remaining mentions are comments. */
 /* ── founder 08-Aug: the hero becomes a two-card deck you swipe ─────────────────────────────
    Card 1 keeps the mood, the checks line, the one-line V10 state and the ADR/PCR/VIX chips.
    Card 2 carries INDEX RANGE — where NIFTY and BANKNIFTY actually sit between today's support
@@ -1318,13 +1339,97 @@ var V10 = { sym: 'NIFTY50', data: null, sel: null,
             leg: 'FUT', win: null, mfold: {},
             loading: false, pageErr: null };   // cc#949: one in-flight page fetch, last error
 
-function v10Icon(sym){
-  return '<button class="v10ic" onclick="openV10(event,\'' + sym + '\')" aria-label="V10 chart"'
-    + ' title="3-month chart with V10 trades">'
-    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-    + ' stroke-width="2.4" stroke-linecap="round"><path d="M5 20V11M5 8V4M12 20v-4M12 13V4M19 20v-9M19 8V4"/></svg>'
-    + '</button>';
+/* cc#1158: v10Icon() is DELETED with the INDEX SIGNALS card. It had exactly one caller, the `v10`
+   string that card was built from, so leaving it here would be a function nothing can reach that
+   still looks like a live affordance. openV10 stays and now has a new caller: the Index Book rows.
+   The .v10ic rule it used is removed from the stylesheet for the same reason. */
+
+/* ══ cc#1158 · INDEX BOOK STRIP ══════════════════════════════════════════════════════════════
+   Reads /api/v10/positions/paired — the cc#941 pairing rule applied to the OPEN book, added
+   server-side in the same sprint so the app and the web can never disagree about a net P&L.
+   The app does NO pairing of its own; if it did, that would be the second copy cc#941 exists
+   to prevent.
+
+   THREE STATES, ALL OF THEM SPOKEN. Positions, flat, and could-not-load are different facts and
+   each gets its own words. The card is explicit that flat must say FLAT and must never hide.
+
+   AS-OF IS NOT DECORATION. The endpoint returns the OLDEST stamp across the legs, and this
+   prints the DATE too whenever that stamp is not today. Right now the whole book is priced off
+   yesterday's 15:35 close, and "AS-OF 15:35 IST" on its own would read as fifteen minutes ago.  */
+function ibkSigned(v){
+  /* inr() already prints a minus for negatives; positives need the plus so a gain reads as one.
+     Reusing inr rather than writing a second money formatter — the page has two already and a
+     third is how they drift. */
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  return (Number(v) >= 0 ? '+' : '') + inr(v);
 }
+function ibkAsOf(iso){
+  if (!iso) return 'AS-OF UNKNOWN';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return 'AS-OF UNKNOWN';
+  var hh = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  var today = new Date();
+  var sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth()
+             && d.getDate() === today.getDate();
+  if (sameDay) return 'AS-OF ' + hh + ' IST';
+  var mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  return 'AS-OF ' + d.getDate() + '-' + mon + ' ' + hh + ' IST';
+}
+function ibkLegs(p){
+  /* rounded, per the ref: it prints FUT 57,517, and toLocaleString on the raw 57517.3 gives
+     57,517.3 — a tenth of an index point on a legs sub-line is noise, and the ref is the spec. */
+  var out = 'FUT ' + Math.round(Number(p.fut.entry_price)).toLocaleString('en-IN');
+  if (p.hedge){
+    /* "wrt" only when the hedge really is written. A bought hedge is a different trade and
+       labelling it written would misstate the position on the founder's own screen. */
+    out += ' + ' + esc(String(p.hedge.strike)) + ' ' + esc(String(p.hedge.opt_type || ''))
+        + (String(p.hedge.side || '').toUpperCase() === 'SELL' ? ' wrt' : '');
+  }
+  return out + ' · ' + p.legs + ' leg' + (p.legs === 1 ? '' : 's');
+}
+function renderIndexBook(d){
+  var box = document.getElementById('ibkBox');
+  if (!box) return 0;
+  var rows = (d && d.positions) || [];
+  if (!rows.length){
+    box.innerHTML = '<div class="ibk-flat">FLAT · NO OPEN INDEX POSITIONS</div>';
+    return 1;
+  }
+  var h = rows.map(function(p){
+    var pos = p.net_pnl === null || p.net_pnl === undefined;
+    /* NIFTY50 is the feed key; NIFTY is what the ref and the founder call it. The label is
+       shortened and the KEY is what gets handed to openV10, so no display name is ever mapped
+       back to a feed key. */
+    var label = p.symbol === 'NIFTY50' ? 'NIFTY' : p.symbol;
+    var dir = (p.direction === 'LONG') ? 'long' : 'short';
+    return '<button class="ibk-row" onclick="openV10(event,\'' + esc(p.symbol) + '\')"'
+      + ' aria-label="' + esc(label) + ' ' + esc(p.direction) + ', open chart with trades">'
+      + '<span class="ibk-l"><span class="ibk-id"><span class="sym">' + esc(label) + '</span>'
+      + '<span class="ibk-dir ' + dir + '">' + esc(p.direction) + '</span></span>'
+      + '<span class="ibk-legs">' + ibkLegs(p) + '</span></span>'
+      + '<span class="ibk-pnl" style="margin-left:auto"><span class="v ' + (pos ? 'na' : (p.net_pnl >= 0 ? 'pos' : 'neg')) + '">'
+      + (pos ? 'P&L PENDING' : ibkSigned(p.net_pnl)) + '</span>'
+      + '<span class="arrow">›</span></span>'
+      + '</button>';
+  }).join('');
+  h += '<div class="ibk-cap">PAIRED FUT + OPT NET P&amp;L · DIRECTION FROM THE FUT LEG (cc#941)<br>'
+    + 'TAP FOR CHART + TRADES · <span class="asof">' + esc(ibkAsOf(d && d.as_of)) + '</span></div>';
+  box.innerHTML = h;
+  return rows.length;
+}
+function loadIndexBook(){
+  var box = document.getElementById('ibkBox');
+  if (!box) return;
+  fetchWithTimeout('/api/v10/positions/paired')
+    .then(function(r){ return r.json(); })
+    .then(function(d){ renderIndexBook(d); })
+    .catch(function(){
+      /* NOT the flat state. A book that could not load is not a flat book, and printing FLAT
+         here would be the page inventing a fact about the founder's money. */
+      box.innerHTML = '<div class="ibk-flat">INDEX BOOK UNAVAILABLE</div>';
+    });
+}
+
 function openV10(ev, sym){
   if (ev){ ev.stopPropagation(); ev.preventDefault(); }
   V10.sym = sym || 'NIFTY50';
@@ -2750,22 +2855,12 @@ Promise.all([
   var hero = d.hero || {};
   /* cc#906: each index on the V10 line gets its own chart icon. The symbol comes from the
      server (hero.v10[].symbol), so the template never maps a display name back to a feed key. */
-  /* founder 08-Aug: BACK TO ONE LINE, sitting under the checks line — cc#919 split it into two
-     rows because the original wrapped, but two rows was not what he wanted; one line that FITS is.
-     What makes it fit now is shortening the strings, not shrinking the type: "Bank Nifty No Trade"
-     becomes "BANKNIFTY NO TRADE" and the row is nowrap. Measured at 10.5px mono on a 380px phone
-     (324px of card): NIFTY LONG ~63px + icon 22, BANKNIFTY NO TRADE ~113px + icon 22, separator
-     ~14px = ~234px, so it clears 324px here and 304px on a 360px phone with room to spare. */
-  function v10State(st){
-    var t = String(st || '').toLowerCase();
-    return t === 'long' ? 'long' : (t === 'short' ? 'short' : '');
-  }
-  var v10 = (hero.v10 || []).map(function(x){
-      return '<span class="v10i"><span class="nm">'
-        + esc(String(x.name).toUpperCase().replace('BANK NIFTY', 'BANKNIFTY')) + '</span>'
-        + '<span class="stt ' + v10State(x.state) + '">' + esc(String(x.state || '--').toUpperCase()) + '</span>'
-        + (x.symbol ? v10Icon(x.symbol) : '') + '</span>';
-    }).join('');
+  /* cc#1158: the `v10` hero string and its v10State helper are DELETED. They existed only to
+     build the INDEX SIGNALS card, which the founder replaced with the Index Book strip below,
+     and a builder whose only consumer is gone is dead code that still reads as live. The server
+     payload field hero.v10 is left alone - that is backend, nothing else on this page reads it,
+     and removing a payload field is not what this card asked for. The .v10b / .v10i rules go
+     from the stylesheet with the markup they styled. */
   h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
     + '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
@@ -2920,24 +3015,17 @@ Promise.all([
       + Math.round(bk.brokerage || 0).toLocaleString('en-IN') + ' brokerage.</div>'
       + '</div></a>';
   }
-  /* cc#1068 · INDEX SIGNALS — the row that used to sit inside the scoreboard, now its own card
-     between the carousel and THE BOOK. Same `v10` markup, so the chart icons come with it.
-     THE ENHANCER COULD NOT DO THIS, which is why it belongs here: three matcher attempts failed
-     (session_log 23379) because at runtime the two index blocks share no small common wrapper.
-     At source they are one string, and the move is a one-line cut. Whole card links to /m/v10
-     (cc#1069 builds that page; until it lands the link 404s rather than silently doing nothing,
-     which is the honest failure). */
-  if (v10) {
-    h += '<div class="sect">INDEX SIGNALS \u00b7 V10</div>'
-      + '<a class="card-link" href="/m/v10"><div class="c r5-idxcard">'
-      + '<div class="v10b">' + v10 + '</div>'
-      /* APP_QA_R4 P7 (F3): the destination is called Index Intel everywhere. This line used to
-         carry the engine's internal name, which is a build detail leaking onto a user-facing
-         string. Bottom-nav labels untouched — the Intel tab rename is PARKED on a founder
-         DECIDE. (The old wording is deliberately not quoted here: P7's verify greps for it.) */
-      + '<div class="r5-idxsub">TAP FOR INDEX INTEL <span class="h-chev">\u203a</span></div>'
-      + '</div></a>';
-  }
+  /* cc#1158 · INDEX BOOK — the founder replaced the cc#1068 INDEX SIGNALS card here with the
+     OPEN index book: direction and paired P&L per index, and a row tap opening the chart that is
+     already built. The V10 engine, its endpoints and /m/v10 are untouched — this removes one
+     Home surface and nothing else.
+     ALWAYS RENDERED, NEVER CONDITIONAL. The old card sat inside `if (v10)`, so on a day the hero
+     carried no V10 line the whole section simply was not there. A book that vanishes when it is
+     empty cannot be told apart from a book that failed to load, and this card is explicit that
+     flat must SAY flat. The strip paints immediately and loadIndexBook() fills it after, the
+     same way LIVE NEWS is filled. */
+  h += '<div class="sect">INDEX BOOK \u00b7 OPEN</div>'
+    + '<div class="ibk" id="ibkBox"><div class="ibk-flat">Loading index book\u2026</div></div>';
 
   h += '<div class="sect">THE BOOK</div>'
     + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
@@ -2974,6 +3062,7 @@ Promise.all([
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
+  loadIndexBook();    /* cc#1158: #ibkBox only exists after this paint, same as the mood letters */
 
   var tools = document.createElement('div');
   tools.className = 'tools';
