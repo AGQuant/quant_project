@@ -1897,9 +1897,13 @@ async function openBrDetail(symbol,basket){
   // the basket went to V4. nf is just the loading placeholder; the fetched d.total replaces it.
   const _regL=(FILTER_REG[basket]||{}).spec_label;
   const lbl=' · '+(_regL||(isSR?'Sell Reversal V7-B':isSM?'Sell Momentum V4':isBM?'Buy Momentum V4':'Buy Reversal V5'));
-  const nf=(FILTER_REG[basket]||{}).gates?.length||(isSR?11:isSM?9:isBM?9:7);   // cc#509: sell_reversal is 11 (10 cheap gates + true_weekly_rsi)
+  // cc#1177: the literal fallbacks here (11/9/9/7) were all three stale — sell_reversal is 12
+  // under V7-B, sell_momentum is 8 since cc#854 and buy_momentum is 8 since V4. They were only
+  // ever a cold-start placeholder, replaced a moment later by the fetched d.total, so rather than
+  // write four numbers down again to go stale again, say nothing when the registry has not loaded.
+  const nf=(FILTER_REG[basket]||{}).gates?.length;
   document.getElementById('mTitle').textContent=symbol+lbl;
-  document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
+  document.getElementById('mSub').textContent=nf?`Loading ${nf}-filter breakdown…`:'Loading filter breakdown…';
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
   // cc#514: Derivative Cockpit button — present on the filter-breakdown modal for all 4 baskets,
   // opens /dashboard?dc=SYMBOL in a new tab (that route auto-triggers openDerivCockpit on load).

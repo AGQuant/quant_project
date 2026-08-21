@@ -430,6 +430,24 @@ def _registry_selfcheck(basket: str, stored_keys=None) -> dict:
             "ok": not missing and not ghost}
 
 
+def _registry_req_str(f) -> str:
+    """The REQUIRED column for a registry gate, rendered from the registry row itself.
+
+    cc#1177 lifted this out of br_stock_detail, where it was a local closure. It is the only place
+    a threshold gets turned into prose, and the whole point of this card is that a threshold
+    written down a second time drifts: sell_momentum's modal said "-4 to -2" for a gate the
+    registry has held at [-4,-1] since cc#854.
+    """
+    cmn, cmx = f.get("cond_min", ""), f.get("cond_max", "")
+    if f.get("min") is not None and f.get("max") is not None:
+        return f"{f['min']:g} to {f['max']:g}"
+    if cmn or cmx:
+        return cmn or cmx
+    # A custom leg carries its rule in its label ("CMP < PP") because there is no band to print.
+    # Falling through to an empty string would leave the REQUIRED column blank on screen.
+    return f.get("label", "") if f.get("type") == "custom" else ""
+
+
 def _passes_registry_band(value, f) -> bool:
     """cc#607: evaluate a BASKET_FILTERS band gate honouring the registry's `strict` flag exactly as
     the handler does — a strict min gate is > (e.g. sector_week>0, day_1d>0), a strict max gate is <
@@ -1449,22 +1467,30 @@ def filter_config(basket: str):
             **_basket_meta(basket)
         }
     if basket == "sell_momentum":
-        # cc#502 SELL_MOMENTUM_V4 (renamed from V3-N5). 6 v8_metrics gates + 3 live/pivot gates.
+        # cc#1177 SELL_MOMENTUM_V4_N5I (session_log 15366, founder-locked 04-Aug). 6 v8_metrics
+        # gates + 2 live/pivot gates = 8. There is NO heavy FINAL stage on this basket: the true
+        # weekly RSI gate was removed on 04-Aug after the live funnel read 208 -> 0 with twr
+        # killing all 208, and the founder said do not restore it, not at 40 and not at 45.
+        # This branch kept appending it anyway, so filters[] said 9 while registry_gates said 8
+        # in the SAME payload — the display calling the engine a liar. The row is gone; count is
+        # len(rows) and falls to 8 by derivation, never by a second number written down here.
         rows = []
         for metric, bounds in FILTER_CONFIG["sell_momentum"].items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             rows.append({"metric": metric, "min": mn, "max": mx,
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx})
-        rows += [{"metric": "true_weekly_rsi", "condition": "<= 40 (TRUE calendar weekly, FINAL heavy stage)"},
-                 {"metric": "cmp_lt_pp",        "condition": "CMP < PP"},
-                 {"metric": "s2_clearance",     "condition": "(CMP-S2)/CMP >= 3%"}]
+        rows += [{"metric": "cmp_lt_pp",    "condition": "CMP < PP"},
+                 {"metric": "s2_clearance", "condition": "(CMP-S2)/CMP >= 3%"}]
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "-3.0% fixed", "target_formula": "entry * 0.97 (frozen at entry)",
             "stop": "+3.0% fixed = entry * 1.03 (true 1:1)",
-            "gate_note": "V4: strict AND of 9, dedicated handler; fixed +/-3% exits (true 1:1). "
-                         "twr tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
+            # cc#1177: the two clauses that used to follow the exits described the cc#502 DRIFT,
+            # which 15366 REVERTED. They are deleted, not corrected — the history of this basket
+            # belongs in session_log 15366, and a gate_note that narrates old thresholds is how a
+            # reverted number gets read back as live.
+            "gate_note": "V4: strict AND of 8, dedicated handler; fixed +/-3% exits (true 1:1).",
             "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
             **_basket_meta(basket)
@@ -2089,12 +2115,6 @@ def br_stock_detail(symbol: str):
         s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
         low_lbl = f"prior4d {_fmt(p4lo,2)} / today {_fmt(tlo,2)} vs S1 {_fmt(s1,2)}"
 
-        def _req_str(f):
-            cmn, cmx = f.get("cond_min", ""), f.get("cond_max", "")
-            if f.get("min") is not None and f.get("max") is not None:
-                return f"{f['min']:g} to {f['max']:g}"
-            return cmn or cmx or ""
-
         rows = []
         for f in BASKET_FILTERS["buy_reversal"]:
             key = f["key"]
@@ -2104,7 +2124,7 @@ def br_stock_detail(symbol: str):
                 v = valmap.get(key)
                 dec = 1 if key == "rsi_month" else 2
                 act = _fmt(v, dec) + ("%" if key in pct_keys else "")
-                rows.append({"filter": key, "required": _req_str(f),
+                rows.append({"filter": key, "required": _registry_req_str(f),
                              "actual": act, "pass": _passes_registry_band(v, f)})
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1,
@@ -2303,16 +2323,17 @@ def sr_stock_detail(symbol: str):
         raise HTTPException(500, f"sr_stock_detail failed: {e}")
 
 
-# cc#502 SELL_MOMENTUM_V4 (renamed from V3): twr<=45->40, mom_2d[-4,-1]->[-4,-2], else unchanged.
-# Cheap-first, true_weekly_rsi last (heavy, only on the 8-cheap-gate intersection). Labels carry
-# spaces for verbatim render.
+# cc#1177 SELL_MOMENTUM_V4_N5I (session_log 15366): 8 gates, all cheap, no heavy FINAL stage.
+# The stage list is generated from BASKET_FILTERS, so it has been 8 rows since cc#854; only the
+# prose here still described the reverted cc#502 drift and a heavy stage that no longer exists.
 _SM_V3_STAGES = basket_stage_rows("sell_momentum")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def sm_funnel_detail():
-    """cc#502: 9-stage funnel for SELL_MOMENTUM_V4, reshaped from the handler-written
+    """cc#1177: 8-stage funnel for SELL_MOMENTUM_V4, reshaped from the handler-written
     v8_funnel_counts row. INDEPENDENT per-filter pass counts across the universe (buy_momentum
-    convention); true_weekly_rsi (stage 9) is passes vs the stocks clearing all 8 cheap gates.
-    Final = strict-AND of all 9. Empty until the first live tick writes."""
+    convention). Every stage's denominator is the universe — this basket has no heavy stage and
+    therefore no survivor-denominator row. Final = strict-AND of all 8. Empty until the first
+    live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             counts, _asof = _latest_funnel_counts(cur, "sell_momentum")
@@ -2327,25 +2348,21 @@ def sm_funnel_detail():
             qualified_parity, qualified_table_count = _qualified_parity(cur, "sell_momentum", final, _asof)
    # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
-        stage8   = counts.get("_stage8_survivors")
-        stage8   = int(stage8) if stage8 is not None else None
+        # cc#1177: the true_weekly_rsi special case that used to sit in this loop was DEAD CODE —
+        # _SM_V3_STAGES comes from the registry and has carried no twr key since cc#854, so the
+        # branch could never fire and `_stage8_survivors` is a key the writer stopped emitting.
+        # Dead code that names a retired gate is how the gate gets restored by someone tidying up.
         stages = []
         for key, label, cmin, cmax in _SM_V3_STAGES:
             passes = int(counts.get(key, 0) or 0)
-            denom = (stage8 if stage8 is not None else universe) if key == "true_weekly_rsi" else universe
-            fails = max(denom - passes, 0)
-            stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
-                     "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
-                     "pass_pct": round(passes / denom * 100, 1) if denom else 0}
-            if key == "true_weekly_rsi":
-                stage["denominator"] = denom
-                stage["note"] = f"of {denom} stocks passing all 8 cheap gates"
-            stages.append(stage)
+            fails = max(universe - passes, 0)
+            stages.append({"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
+                           "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
+                           "pass_pct": round(passes / universe * 100, 1) if universe else 0})
         return {
             "basket": "sell_momentum", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": _n_filters("sell_momentum"), "n_filters": _n_filters("sell_momentum"),
-            "stage8_survivors": stage8,
-            "gate_type": "independent per-filter counts; final = strict AND of all 9",
+            "gate_type": f"independent per-filter counts; final = strict AND of all {_n_filters('sell_momentum')}",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
@@ -2408,10 +2425,16 @@ def sm_stock_passcount():
 
 @router.get("/sm_stock_detail/{symbol}")
 def sm_stock_detail(symbol: str):
-    """cc#502: per-stock 9-filter breakdown for SELL_MOMENTUM_V4 (renamed from V3, twr<=45->40,
-    mom_2d[-4,-1]->[-4,-2]). Mirrors sm_stock_passcount / the handler so the green-row count
-    equals n/9. true_weekly_rsi always computed here so the row is never blank."""
-    from v8_signal_writer import _true_weekly_rsi
+    """cc#1177: per-stock 8-filter breakdown for SELL_MOMENTUM_V4, GENERATED from BASKET_FILTERS.
+
+    This was the second hand-written copy of the gate set — the one cc#1107 did not reach when it
+    deleted the *_PASSCOUNT_GATES tables, and it had drifted in exactly the two ways that copy
+    always drifts. It appended a true_weekly_rsi row that session_log 15366 REMOVED from this
+    basket on 04-Aug, and it hard-coded mom_2d at [-4,-2], the cc#502 band that 15366 reverted to
+    [-4,-1]. Both were visible on screen: a nine-row modal reporting n out of a `total` of 8, and
+    a stock failing a band the engine does not run. Rows come off the registry now, so the modal,
+    the pass-count card, the funnel and the i-button cannot disagree. Display only, never qualifies.
+    """
     sym = symbol.upper()
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -2429,40 +2452,39 @@ def sm_stock_detail(symbol: str):
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
             cr = cur.fetchone()
             cmp = float(cr[0]) if cr else None
-            twr = _true_weekly_rsi(conn, sym, cmp)
 
         def _fmt(v, d):
             return "--" if v is None else f"{v:.{d}f}"
         s2c = ((cmp - s2) / cmp * 100.0) if (cmp and s2 is not None) else None
 
-        p_rm   = rmon is not None and rmon < 40.0
-        p_mom  = _passes_filter(mom2d, -4.0, -2.0)
-        p_dma  = _passes_filter(dma200, None, 2.0)
-        p_wret = _passes_filter(wret, -10.0, -0.5)
-        p_sw   = swk is not None and swk < 0.0
-        p_w52  = _passes_filter(w52, 20.0, 60.0)
-        p_cmp  = (cmp is None or pp is None) or (cmp < pp)
-        p_s2c  = (cmp is None or s2 is None) or (s2c is not None and s2c >= 3.0)
-        cleared = all([p_rm, p_mom, p_dma, p_wret, p_sw, p_w52, p_cmp, p_s2c])   # 8 cheap gates
-        p_twr  = cleared and (twr is not None and twr <= 40.0)
+        # The two pivot legs NULL-pass off-market when there is no CMP or no pivot, exactly as
+        # sm_stock_passcount does — an unknown is not a failure, and showing it as one would fail
+        # every stock on the board every evening.
+        p_cmp = (cmp is None or pp is None) or (cmp < pp)
+        p_s2c = (cmp is None or s2 is None) or (s2c is not None and s2c >= 3.0)
+        valmap  = {"rsi_month": rmon, "mom_2d": mom2d, "dma_200": dma200,
+                   "week_return": wret, "sector_week": swk, "week_index_52": w52}
+        pct_keys = {"mom_2d", "dma_200", "week_return"}
+        custom = {
+            "cmp_lt_pp":    (p_cmp, f"{_fmt(cmp, 2)} vs {_fmt(pp, 2)}"),
+            "s2_clearance": (p_s2c, _fmt(s2c, 2) + "%"),
+        }
 
-        rows = [
-            {"filter": "rsi_month",       "required": "< 40",     "actual": _fmt(rmon, 1),        "pass": p_rm},
-            {"filter": "mom_2d",          "required": "-4 to -2", "actual": _fmt(mom2d, 2) + "%", "pass": p_mom},
-            {"filter": "dma_200",         "required": "<= 2",     "actual": _fmt(dma200, 2) + "%","pass": p_dma},
-            {"filter": "week_return",     "required": "-10 to -0.5","actual": _fmt(wret, 2) + "%","pass": p_wret},
-            {"filter": "sector_week",     "required": "< 0",      "actual": _fmt(swk, 2),         "pass": p_sw},
-            {"filter": "week_index_52",   "required": "20 to 60", "actual": _fmt(w52, 1),         "pass": p_w52},
-            {"filter": "cmp_lt_pp",       "required": "CMP < PP", "actual": f"{_fmt(cmp, 2)} vs {_fmt(pp, 2)}", "pass": p_cmp},
-            {"filter": "s2_clearance",    "required": ">= 3%",    "actual": _fmt(s2c, 2) + "%",   "pass": p_s2c},
-            {"filter": "true_weekly_rsi", "required": "<= 40",    "actual": _fmt(twr, 1),         "pass": p_twr},
-        ]
-        if not cleared:
-            rows[8]["note"] = "engine evaluates true weekly RSI only after all 8 cheap gates pass"
+        rows = []
+        for f in BASKET_FILTERS["sell_momentum"]:
+            key = f["key"]
+            if key in custom:
+                ok, act = custom[key]
+            else:
+                v = valmap.get(key)
+                dec = 1 if key in ("rsi_month", "week_index_52") else 2
+                act = _fmt(v, dec) + ("%" if key in pct_keys else "")
+                ok = _passes_registry_band(v, f)
+            rows.append({"filter": key, "required": _registry_req_str(f), "actual": act, "pass": ok})
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s2": s2,
                 "s2_clearance_pct": round(s2c, 2) if s2c is not None else None,
-                "passed": passed, "total": _n_filters("sell_momentum"), "rows": rows,
+                "passed": passed, "total": len(rows), "rows": rows,
                 "spec": "SELL_MOMENTUM_V4"}
     except HTTPException:
         raise
