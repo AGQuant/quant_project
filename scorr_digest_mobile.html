@@ -123,6 +123,12 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  opacity:0;transition:opacity .15s;
  background:linear-gradient(to right,rgba(0,0,0,0),var(--panel))}
 .ladwrap.hasmore::after{opacity:1}
+/* cc#1186 · each index gets its own .well-grammar sub-tile so NIFTY50 and BANKNIFTY read as two
+   instruments, not one run-on block — same raised-tile language as the GLOBAL TAPE tiles. */
+.lad-ix{background:var(--hi);border:1px solid var(--edge);padding:11px 12px 10px;margin-top:10px;
+ clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.lad-ix:first-child{margin-top:0}
+.lad-ix .ladwrap::after{background:linear-gradient(to right,rgba(0,0,0,0),var(--hi))}
 /* cc#1127 — THIRD ATTEMPT, AND THE FIRST ONE WITH A STRUCTURAL GUARANTEE. cc#1111 and cc#1124
    (mine) both made the numbers USUALLY fit. Neither made overlap IMPOSSIBLE, which is why it came
    back as glyph soup on his phone while every measurement here said fine.
@@ -165,10 +171,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* measured scroll mode: tracks widen to the full number, the row scrolls, the fade engages */
 .ladder.scrollmode{grid-template-columns:repeat(5,minmax(max-content,1fr))}
 .rung{min-width:0;overflow:hidden;text-align:center;font-family:'JetBrains Mono',ui-monospace,monospace;
- font-size:clamp(8px,2.6vw,11px);padding:5px 0;border-top:2px solid var(--edge);color:var(--muted);
+ font-size:9.5px;letter-spacing:1px;padding:6px 0 5px;border-top:2px solid var(--edge);color:var(--muted);
  -webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* cc#1186 · the vw clamp is GONE. Tying the value size to viewport width solved nothing the
+   measurement does not already solve, and it is what made the digits balloon on a high-scale
+   device: vw ignores text scale, so the clamp ceiling and the device scale multiplied. Fixed
+   sizes + the cc#1136 measured scrollmode is the honest pair: either five fixed-size columns
+   fit, or the row scrolls. Nothing predicts; the browser reports. */
 /* no overflow:hidden and no text-overflow on the b — a digit is never traded for an ellipsis */
-.rung b{display:block;white-space:nowrap;margin-top:2px;
+.rung b{display:block;white-space:nowrap;margin-top:2px;font-size:12.5px;letter-spacing:0;
  font-variant-numeric:tabular-nums}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
@@ -306,9 +317,17 @@ function ladder(ix){
   const cells=order.map(L=>{const r=rungs.find(x=>x.label===L);
     const col=L==='PP'?'var(--amber)':(L[0]==='S'?'#5A2634':'#3E5A18');
     return `<div class="rung" style="border-color:${col}${L==='PP'?';color:var(--amber)':''}">${L}<br><b style="color:var(--chalk)">${r?num(r.value):'—'}</b></div>`;}).join('');
-  return `<div class="grp" style="margin-top:14px"><h3>${esc(ix.symbol)}</h3>
-    <span class="note"><span class="cl">CMP <b class="num" style="color:var(--chalk)">${cmp!=null?num(cmp):'—'}</b></span> · <span class="cl">${esc(ix.tier||'')}</span> · ${sideTxt}</span></div>
-    <div class="ladwrap"><div class="ladder">${cells}</div></div>`;
+  /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
+     (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
+     now follows d.market.state, the SAME composer the header chip already reads, via window.__MK:
+     tier prints only while the market is OPEN; otherwise the market label (CLOSED / PRE-OPEN /
+     CAS) prints, muted. One composer, no second clock, and the card can no longer disagree with
+     the chip above it. */
+  const mk=window.__MK||{};
+  const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
+  return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
+    <span class="note"><span class="cl">CMP <b class="num" style="color:var(--chalk)">${cmp!=null?num(cmp):'—'}</b></span> · <span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
+    <div class="ladwrap"><div class="ladder">${cells}</div></div></div>`;
 }
 
 /* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
@@ -549,6 +568,8 @@ async function boot(){
   const st=document.getElementById('dd-state'); st.textContent=(d.market&&d.market.label)||'—';
   const mst=(d.market&&d.market.state)||'';
   st.className='chip '+(mst==='OPEN'?'w':(mst==='CLOSED'?'mu':(mst?'n':'n')));
+  window.__MK={state:mst,label:(d.market&&d.market.label)||''};   /* cc#1186: the ladder state
+     clause reads this — set before the render below, same payload, same composer as the chip */
 
   const tiles=(S.global_tape&&S.global_tape.tiles)||[];
   window.__TILES=tiles;   /* APP_QA_R5 P5: kept so the switch re-renders without a refetch */
