@@ -214,15 +214,17 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .iswipe-t::-webkit-scrollbar{display:none}
 .ic{flex:0 0 100%;min-width:0;scroll-snap-align:center;background:var(--hi);border:1px solid var(--edge);
- padding:10px 11px 9px;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+ padding:14px 15px 13px;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .ichd{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.ichd .lb{font-family:'JetBrains Mono';font-size:9.5px;letter-spacing:1.4px;color:var(--muted)}
+.ichd .lb{font-family:'JetBrains Mono';font-size:10.5px;letter-spacing:1.6px;color:var(--muted)}
 .ibars{font-family:'JetBrains Mono';font-size:8.5px;letter-spacing:.8px;color:var(--dim,var(--muted));white-space:nowrap}
-.ic .vv{font-family:'JetBrains Mono';font-size:24px;font-weight:700;line-height:1.15;margin-top:3px}
-.ic .wk{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);letter-spacing:.6px}
-/* Fixed height so swiping between cards never resizes the deck under the finger. */
-.ichart{height:34px;margin-top:9px}
-.isvg{display:block;width:100%;height:34px;overflow:visible}
+/* cc#1188: the value is the headline of the card and now sizes like one; the 86A/120D sub-line is
+   REMOVED by founder ruling (22-Aug) — the split lives in the ADR maths, not on the face. */
+.ic .vv{font-family:'JetBrains Mono';font-size:34px;font-weight:700;line-height:1.1;margin-top:5px}
+/* Fixed height so swiping between cards never resizes the deck under the finger.
+   cc#1188: doubled — the founder asked for a larger card and the chart is what earns the space. */
+.ichart{height:72px;margin-top:12px}
+.isvg{display:block;width:100%;height:72px;overflow:visible}
 .idots{display:flex;justify-content:center;gap:5px;margin-top:8px}
 .idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
 .idots i.on{background:var(--amber);width:15px;border-radius:3px}
@@ -364,20 +366,45 @@ function ladder(ix){
    TODAY'S NUMBER STAYS THE HEADLINE. The chart sits under it, and neither the value nor its
    colour rule changed — both still come from the daily payload exactly as the three tiles did. */
 function intCard(key, label, val, col, sub, stale){
+  /* cc#1188: `sub` is accepted and DROPPED — founder ruling 22-Aug removed the 86A/120D line from
+     the face. Kept in the signature so no call site changes and the split stays one edit from
+     returning if he ever wants it back. data-ib/data-ic instead of ids: the loop track clones
+     this markup and ids must stay unique. */
   return `<div class="ic"><div class="ichd"><span class="lb">${label}${stale?' · STALE':''}</span>
-      <span class="ibars" id="ib-${key}">…</span></div>
+      <span class="ibars" data-ib="${key}">…</span></div>
     <div class="vv" style="color:${col}">${val}</div>
-    <div class="wk">${sub||''}</div>
-    <div class="ichart" id="ic-${key}"></div></div>`;
+    <div class="ichart" data-ic="${key}"></div></div>`;
 }
+/* cc#1188 · CONTINUOUS SWIPE. The track renders the card set THREE times and starts the view on
+   the middle set. Whenever a snap settles inside the first or last set, the view is jumped one
+   whole set toward the middle with behavior:'auto' — the clone under the finger is pixel-identical
+   (iChart draws into every clone), so the jump cannot be seen and the swipe never hits a wall in
+   either direction. Dots read index modulo the real count. */
+var IN_N=0;
 function iDots(){
   var tr=document.getElementById('itrack'), dots=document.getElementById('idots');
-  if(!tr||!dots)return;
-  var i=Math.round(tr.scrollLeft/Math.max(1,tr.clientWidth));
+  if(!tr||!dots||!IN_N)return;
+  var w=Math.max(1,tr.clientWidth);
+  var i=Math.round(tr.scrollLeft/w)%IN_N;
   Array.prototype.forEach.call(dots.children,function(el,j){
     el.className=(j===i?'on':'');
-    el.onclick=function(){tr.scrollTo({left:j*tr.clientWidth,behavior:'smooth'});};
+    el.onclick=function(){
+      var cur=Math.round(tr.scrollLeft/w);
+      tr.scrollTo({left:(cur-(cur%IN_N)+j)*w,behavior:'smooth'});
+    };
   });
+}
+var IW_TMR=null;
+function iWrap(){
+  iDots();
+  if(IW_TMR)clearTimeout(IW_TMR);
+  IW_TMR=setTimeout(function(){
+    var tr=document.getElementById('itrack');
+    if(!tr||!IN_N)return;
+    var w=Math.max(1,tr.clientWidth), i=Math.round(tr.scrollLeft/w);
+    if(i<IN_N)tr.scrollTo({left:(i+IN_N)*w,behavior:'auto'});
+    else if(i>=2*IN_N)tr.scrollTo({left:(i-IN_N)*w,behavior:'auto'});
+  },90);
 }
 /* THE X AXIS IS TIME, NOT BAR INDEX, and that is load-bearing rather than pedantic. NIFTY PCR has
    ZERO rows for 18-Aug while BANKNIFTY has 71. Drawn by index, 17-Aug would sit flush against
@@ -389,15 +416,19 @@ function iDots(){
    line the tile's own colour rule already turns on (advances beating declines, put writers over
    call writers), so a bar above the baseline is green for the same reason the big number is. */
 function iChart(s){
-  var host=document.getElementById('ic-'+s.key);
-  if(!host)return;
-  var bl=document.getElementById('ib-'+s.key);
-  if(bl)bl.textContent=s.bars?(s.bars+' BARS · 5-MIN'):'NO HISTORY';
+  /* cc#1188: hosts are matched by data attribute, PLURAL, because the loop track renders the card
+     set three times (see the deck note) and an id may only exist once. Every clone gets the same
+     drawing, so the wrap jump lands on pixels identical to the ones it left. */
+  var hosts=document.querySelectorAll('[data-ic="'+s.key+'"]');
+  if(!hosts.length)return;
+  document.querySelectorAll('[data-ib="'+s.key+'"]').forEach(function(bl){
+    bl.textContent=s.bars?(s.bars+' BARS · 5-MIN'):'NO HISTORY';
+  });
   if(!s.bars){
-    host.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';
+    hosts.forEach(function(h){h.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';});
     return;
   }
-  var W=100, H=34, n=Math.max(1,(s.sessions||[]).length);
+  var W=100, H=72, n=Math.max(1,(s.sessions||[]).length);
   var base=(s.key==='breadth')?0:1;
   var vs=s.points.map(function(p){return p.v;});
   /* ROBUST SCALE, AND THE CLIPPING IS SHOWN RATHER THAN HIDDEN. Measured on the live series before
@@ -493,8 +524,9 @@ function iChart(s){
     return '<rect x="'+(i/n*W).toFixed(2)+'" y="0" width="'+(W/n).toFixed(2)+'" height="'+H
       +'" fill="var(--heat)" opacity=".09"/>';
   }).join('');
-  host.innerHTML='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+  var svg='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
     +holes+marks+body+'</svg>';
+  hosts.forEach(function(h){h.innerHTML=svg;});
 }
 /* Fetched separately from the digest payload and only after the page has painted — four series of
    200 points is not something the first render should wait on. A failure costs the charts and
@@ -640,25 +672,26 @@ async function boot(){
 
   <div class="eyebrow">INTERNALS</div>
   <div class="card slab">
-    <div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iDots()">
-      ${intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
+    ${(()=>{const cards=[
+      intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
                 adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)',
-                adr?adr.advances+'A / '+adr.declines+'D':'', itl.adr_stale)}
-      ${intCard('breadth', 'BREADTH A-D',
+                null, itl.adr_stale),
+      intCard('breadth', 'BREADTH A-D',
                 adr&&adr.advances!=null&&adr.declines!=null?sgn(adr.advances-adr.declines,0):'—',
                 adr&&adr.advances!=null&&adr.declines!=null?(adr.advances>=adr.declines?'var(--volt)':'var(--heat)'):'var(--muted)',
-                adr?adr.advances+'A / '+adr.declines+'D':'', itl.adr_stale)}
-      ${pcr.slice(0,2).map(p=>intCard('pcr_'+String(p.underlying||'').toLowerCase(),
+                null, itl.adr_stale)
+      ].concat(pcr.slice(0,2).map(p=>intCard('pcr_'+String(p.underlying||'').toLowerCase(),
                 'PCR '+esc(p.underlying), p.pcr!=null?Number(p.pcr).toFixed(2):'—',
                 p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)',
-                esc(p.date||''), itl.pcr_stale)).join('')}
-    </div><div class="idots" id="idots">${
-      /* one dot per card that actually rendered. Hardcoding four would leave a dead dot on a day
-         pcr_daily carries only one underlying, and a dot that scrolls to nothing is a lie about
-         how much there is to swipe. */
-      Array.from({length:2+pcr.slice(0,2).length},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
-    }</div></div>
-    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:8px">${esc(itl.read||'')}</div>
+                null, itl.pcr_stale)));
+      IN_N=cards.length;
+      const set=cards.join('');
+      /* three sets — see the continuous-swipe note on iWrap. The footer read line that sat under
+         the dots is REMOVED (founder ruling 22-Aug), and the .wk sub-lines went with it, so the
+         deck is the whole card now. */
+      return `<div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iWrap()">${set}${set}${set}</div><div class="idots" id="idots">${
+        Array.from({length:IN_N},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
+      }</div></div>`;})()}
   </div>
 
   <div class="eyebrow">REPORTING TODAY</div>
@@ -692,6 +725,9 @@ async function boot(){
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
   fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
+  var _tr=document.getElementById('itrack');   /* cc#1188: start on the MIDDLE set, instantly,
+     before first paint of the deck — the user never sees the parking move */
+  if(_tr&&IN_N)_tr.scrollTo({left:IN_N*_tr.clientWidth,behavior:'auto'});
   iDots();         /* cc#1121: same reason — the deck's nodes are replaced on every render */
   loadInternals();
 }
