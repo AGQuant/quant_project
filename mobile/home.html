@@ -836,10 +836,16 @@ function moodOnScreen(m){
 function moodSweep(m, done){
   moodReset(m);
   for (var i = 0; i < m.l.length; i++){
-    m.l[i].style.animationDelay = (i * 60) + 'ms';
+    /* cc#1157: stagger 60ms -> 20ms, a third of the wait between letters. */
+    m.l[i].style.animationDelay = (i * 20) + 'ms';
     m.l[i].classList.add('run');
   }
-  MOOD_H = setTimeout(done, m.l.length * 60 + 420 + 150);
+  /* cc#1157: this timeout is DERIVED from the two numbers above — letters times stagger, plus one
+     flash duration, plus a settle buffer. Both terms had to move with them (60->20, 420->140) or
+     the sweep phase would sit waiting three times longer than the animation it is waiting for,
+     and the cycle would silently stretch instead of speeding up. The 150ms buffer is unchanged;
+     it is settle time, not part of the wave. */
+  MOOD_H = setTimeout(done, m.l.length * 20 + 140 + 150);
 }
 function moodMarch(m, done){
   var i = 0;
@@ -887,7 +893,11 @@ function moodLetters(word){
     var ch = w.charAt(n);
     if (ch === ' '){ out += ' '; continue; }   /* keep real word spacing */
     /* esc() per CHARACTER, so an escaped entity can never be split down the middle. */
-    out += '<span class="mlt" style="animation-delay:' + (i * 60) + 'ms">' + esc(ch) + '</span>';
+    /* cc#1157: the SECOND copy of the stagger, and the one that would have been missed. This is
+       the FIRST-PAINT sweep written straight into the markup; the driver's copy above only runs
+       from the second sweep onward. Left at 60 here, the very first wave a reader sees would still
+       be the slow one while every later wave was fast. */
+    out += '<span class="mlt" style="animation-delay:' + (i * 20) + 'ms">' + esc(ch) + '</span>';
     i++;
   }
   return out;

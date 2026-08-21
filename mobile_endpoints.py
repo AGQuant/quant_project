@@ -1689,7 +1689,11 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    ONE letter at a time (the march) or every letter with a stagger (the sweep) using the same
    keyframe. The keyframe itself is untouched — verbatim reuse, no second animation. */
 .hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow}
-.hero-mood .mlt.run{animation:moodLite .42s ease-out 1 both}
+/* cc#1157 (founder ruling 20-Aug 16:03, from a live phone render): the per-letter flash is 3x
+   faster. Duration .42s -> .14s. Easing, iteration count, fill mode and the keyframe itself are
+   BYTE-IDENTICAL — the ruling was about speed, and changing the curve while changing the speed
+   would make the result impossible to judge against the ruling. */
+.hero-mood .mlt.run{animation:moodLite .14s ease-out 1 both}
 @keyframes moodLite{
   0%  {transform:translateY(0)      scale(1);    text-shadow:none}
   45% {transform:translateY(-2px)   scale(1.06); text-shadow:0 0 10px currentColor,0 0 22px currentColor}
