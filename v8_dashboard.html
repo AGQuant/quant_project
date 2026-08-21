@@ -820,6 +820,17 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .bld-tbl th.th-sig, #pane-index .bld-tbl td.td-sig{text-align:left}
 #pane-index .bld-tbl th{font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
 #pane-index .bld-tbl tbody tr:last-child td{border-bottom:none}
+/* cc#1168 push 7 · Divergence. Same numbers-right rule, same per-table scoping. Two columns are
+   NOT figures and are named by their own classes rather than by position: SIGNALS holds the
+   BASIS/1HR/1D flag chips, and UPDATED holds a freshness stamp. Both stay left. The chips
+   themselves and the LIVE/CLOSED state chip are untouched — they are the card's honesty about
+   what it knows and when it last knew it, and this push is presentation only. */
+#pane-index .div-tbl th, #pane-index .div-tbl td{text-align:right}
+#pane-index .div-tbl th:first-child, #pane-index .div-tbl td:first-child{text-align:left}
+#pane-index .div-tbl th.th-sig, #pane-index .div-tbl td.td-sig,
+#pane-index .div-tbl th.th-stamp, #pane-index .div-tbl td.td-stamp{text-align:left}
+#pane-index .div-tbl th{font-size:8.5px;letter-spacing:.14em;color:var(--dim)}
+#pane-index .div-tbl tbody tr:last-child td{border-bottom:none}
 #pane-index .eyebrow .scrollhint{margin-left:8px}
 #pane-index .moreline{display:flex;justify-content:center;padding:9px 0 2px}
 #pane-index .morebtn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
@@ -5834,8 +5845,8 @@ function rDivergence(){
     ${cell(r.basis_pct)}${cell(r.div_1hr)}${cell(r.div_1d)}
     <td class="td-mono">${r.spot_ltp!=null?num(r.spot_ltp,2):'—'}</td>
     <td class="td-mono">${r.futures_ltp!=null?num(r.futures_ltp,2):'—'}</td>
-    <td>${(r.signals||[]).map(s=>bdg(s,sigClr(s),true)).join(' ')}</td>
-    <td class="td-mono" style="color:var(--dim);font-size:10px">${r.age_min!=null?r.age_min+'m ago':esc(r.last_tick||'—')}</td>
+    <td class="td-sig">${(r.signals||[]).map(s=>bdg(s,sigClr(s),true)).join(' ')}</td>
+    <td class="td-stamp td-mono" style="color:var(--dim);font-size:10px">${r.age_min!=null?r.age_min+'m ago':esc(r.last_tick||'—')}</td>
   </tr>`).join('')
     : (D.loaded.divergence
         ? `<tr class="empty-row"><td colspan="8">No flags this tick — nothing exceeded the ±${d.threshold}% threshold</td></tr>`
@@ -5843,10 +5854,10 @@ function rDivergence(){
   const note = d.skipped_stale
     ? `<div class="note" style="color:var(--mut)">${d.skipped_stale} symbol(s) skipped (stale &gt;15 min)</div>` : '';
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Futures ⇄ Equity Divergence — Stock F&O</div>
+    <div class="card-hd"><div><div class="t">Futures ⇄ Equity Divergence — Stock F&O<span class="scrollhint">SCROLL →</span></div>
       <div class="s">Flagged when basis %, 1hr divergence or 1D divergence exceeds ±${d.threshold}% · ${rows.length} of F&O universe · live 5-min</div></div>
       <div class="hd-meta">${bdg(d.market_hours?'● LIVE':'○ CLOSED', d.market_hours?UP:C.mut)}</div></div>
-    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="tbl-hold"><div class="tbl-scroll"><table class="div-tbl"><thead><tr>${head.map(h=>`<th${h==='SIGNALS'?' class="th-sig"':(h==='UPDATED'?' class="th-stamp"':'')}>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
     ${note}
   </div>`;
 }
