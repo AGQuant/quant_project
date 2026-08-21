@@ -155,13 +155,21 @@ LEFT JOIN v8_paper_pivots v ON v.symbol = c.symbol AND v.pivot_date = (SELECT d 
 
 def _pct(a, b):
     """Percent change b -> a. None when either side is missing or the base is zero — never 0.0,
-    which would read as 'flat' and quietly pass a band that should have had no answer."""
+    which would read as 'flat' and quietly pass a band that should have had no answer.
+
+    ROUNDED TO 6 PLACES, AND THAT IS A CORRECTNESS FIX, NOT TIDINESS. The founder's bands are
+    inclusive: day 0-3, week 0-5, month 0-10. In binary floating point (103/100 - 1) * 100 is
+    3.0000000000000027, so a stock closing exactly +3.00% would have FAILED the day band by
+    2.7e-15 — a real name rejected for a representation artefact, on a boundary the lock wrote as
+    included. Six places is far finer than any threshold here and removes the noise entirely.
+    Caught by asserting the helper against a hand-computed 3.0 rather than by reading it.
+    """
     if a is None or b is None:
         return None
     a, b = float(a), float(b)
     if b == 0:
         return None
-    return (a / b - 1.0) * 100.0
+    return round((a / b - 1.0) * 100.0, 6)
 
 
 def _in_band(v, band):
@@ -327,3 +335,180 @@ def scan(conn=None):
     finally:
         if own:
             conn.close()
+
+
+# ── persistence: the funnel ledger, then the book ────────────────────────────────────────────
+def _write_funnel(cur, f, entered, notes=None):
+    """One row per scan_date, written on EVERY run.
+
+    ON CONFLICT UPDATE rather than skip: a re-run of the same session must correct its own row,
+    not leave the first attempt's numbers standing as though nothing happened. The unique
+    constraint on scan_date is what makes a day one row instead of a pile.
+    """
+    trunc = {k: v for k, v in f["fails_truncated"].items() if v}
+    payload = dict(f["fails"])
+    if trunc:
+        # Counts are always exact; only the NAMED examples are capped. Say so in the row rather
+        # than letting a reader think a stage killed exactly 40 names.
+        payload["_truncated"] = trunc
+    cur.execute("""
+        INSERT INTO qsr_funnel_daily
+            (scan_date, scan_ts, universe, s_quality, s_sector, s_returns, s_location, s_volume,
+             qualified, entered, fails, notes)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (scan_date) DO UPDATE SET
+            scan_ts = EXCLUDED.scan_ts, universe = EXCLUDED.universe,
+            s_quality = EXCLUDED.s_quality, s_sector = EXCLUDED.s_sector,
+            s_returns = EXCLUDED.s_returns, s_location = EXCLUDED.s_location,
+            s_volume = EXCLUDED.s_volume, qualified = EXCLUDED.qualified,
+            entered = EXCLUDED.entered, fails = EXCLUDED.fails, notes = EXCLUDED.notes
+    """, (f["scan_ts"].date(), f["scan_ts"], f["universe"],
+          f["stages"]["quality"], f["stages"]["sector"], f["stages"]["returns"],
+          f["stages"]["location"], f["stages"]["volume"],
+          len(f["qualified"]), entered, json.dumps(payload), notes))
+
+
+def _open_slots(cur):
+    cur.execute("SELECT COUNT(*) FROM qsr_positions WHERE status = 'OPEN'")
+    return MAX_OPEN - int(cur.fetchone()[0])
+
+
+def _already_open(cur):
+    cur.execute("SELECT symbol FROM qsr_positions WHERE status = 'OPEN'")
+    return {r[0] for r in cur.fetchall()}
+
+
+def run_qsr_scan(dry_run=False):
+    """The nightly job. Scans, writes the funnel ledger, then opens what the caps allow.
+
+    THE LEDGER IS WRITTEN EVEN WHEN NOTHING QUALIFIES, and even when dry_run stops the book from
+    moving. That ordering is the point of the whole card: the record of what the market offered
+    is not contingent on the engine having taken anything.
+    """
+    now = _ist_now()
+    with _conn() as conn:
+        f = scan(conn)
+        with conn.cursor() as cur:
+            held = _already_open(cur)
+            slots = _open_slots(cur)
+
+            # RANKED, THEN CAPPED, in that order. scan() already sorted by dGVM_90d descending,
+            # which is the founder's rank key, so the day's three go to the three fastest-rising
+            # names rather than to whoever the universe happened to list first.
+            take, skipped = [], []
+            for q in f["qualified"]:
+                if q["symbol"] in held:
+                    skipped.append((q["symbol"], "already open"))
+                    continue
+                if len(take) >= MAX_NEW_PER_DAY:
+                    skipped.append((q["symbol"], "daily cap %d reached" % MAX_NEW_PER_DAY))
+                    continue
+                if len(take) >= slots:
+                    skipped.append((q["symbol"], "book full at %d open" % MAX_OPEN))
+                    continue
+                take.append(q)
+
+            entered = 0
+            if not dry_run:
+                for q in take:
+                    px = float(q["cmp"])
+                    if px <= 0:
+                        skipped.append((q["symbol"], "no usable price"))
+                        continue
+                    qty = int(NOTIONAL // px)
+                    if qty < 1:
+                        # A 1L notional cannot buy one share of a very expensive name. That is a
+                        # real outcome, not an error, and it is recorded rather than rounded up.
+                        skipped.append((q["symbol"], "1L notional buys < 1 share at %.2f" % px))
+                        continue
+                    cur.execute("""
+                        INSERT INTO qsr_positions
+                            (symbol, entry_date, entry_ts, entry_price, qty, notional, stop_price,
+                             gvm_at_entry, dgvm_90d, segment, gates, status)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
+                        ON CONFLICT (symbol, entry_date) DO NOTHING
+                    """, (q["symbol"], now.date(), now, px, qty, qty * px,
+                          round(px * (1 + HARD_STOP_PCT / 100.0), 2),
+                          q["gvm"], q["dgvm_90d"], q["segment"], json.dumps(q["gates"])))
+                    entered += cur.rowcount
+
+            note = "dry_run" if dry_run else None
+            if skipped:
+                note = ((note + " | ") if note else "") + "skipped: " + "; ".join(
+                    "%s (%s)" % s for s in skipped[:FAIL_LIST_CAP])
+            _write_funnel(cur, f, entered, note)
+        conn.commit()
+
+    log.info("qsr scan %s: universe=%d quality=%d sector=%d returns=%d location=%d volume=%d "
+             "qualified=%d entered=%d",
+             now.date(), f["universe"], f["stages"]["quality"], f["stages"]["sector"],
+             f["stages"]["returns"], f["stages"]["location"], f["stages"]["volume"],
+             len(f["qualified"]), entered)
+    return {"scan_date": str(now.date()), "universe": f["universe"], "stages": f["stages"],
+            "qualified": [q["symbol"] for q in f["qualified"]],
+            "entered": entered, "dry_run": dry_run,
+            "skipped": [{"symbol": s, "why": w} for s, w in skipped]}
+
+
+def run_qsr_exits():
+    """Nightly exit sweep. Three reasons, no target — 27980 says winners run until one fires.
+
+    Evaluated in severity order: a stop that was hit is the trade's outcome even if the quality
+    also broke and the clock also ran out on the same day. Reporting the softest reason when the
+    hardest one fired would misdescribe the loss.
+    """
+    now = _ist_now()
+    closed = []
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, symbol, entry_date, entry_ts, entry_price, qty, stop_price, "
+                    "gvm_at_entry, dgvm_90d, segment, gates FROM qsr_positions WHERE status='OPEN'")
+        cols = [d[0] for d in cur.description]
+        open_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        if not open_rows:
+            return {"checked": 0, "closed": 0, "exits": []}
+
+        syms = [r["symbol"] for r in open_rows]
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, close, price_date FROM raw_prices
+                       WHERE symbol = ANY(%s) AND close IS NOT NULL
+                       ORDER BY symbol, price_date DESC""", (syms,))
+        px = {r[0]: (float(r[1]), r[2]) for r in cur.fetchall()}
+        cur.execute("""SELECT symbol, gvm_score FROM gvm_scores
+                       WHERE symbol = ANY(%s)
+                         AND score_date = (SELECT MAX(score_date) FROM gvm_scores)""", (syms,))
+        gvm = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+
+        for p in open_rows:
+            last = px.get(p["symbol"])
+            if last is None:
+                continue                       # no price today: hold, never guess an exit
+            price, pdate = last
+            held = (pdate - p["entry_date"]).days
+            g_now = gvm.get(p["symbol"])
+            reason = None
+            if price <= float(p["stop_price"]):
+                reason = "HARD_STOP"
+            elif g_now is not None and g_now < QUALITY_BREAK_GVM:
+                reason = "QUALITY_BREAK"
+            elif held >= TIME_STOP_SESS:
+                reason = "TIME_STOP"
+            if not reason:
+                continue
+
+            entry, qty = float(p["entry_price"]), int(p["qty"])
+            pnl = (price - entry) * qty
+            cur.execute("""
+                INSERT INTO qsr_trades
+                    (symbol, entry_date, entry_ts, entry_price, qty, exit_date, exit_ts,
+                     exit_price, exit_reason, held_sessions, pnl, pnl_pct,
+                     gvm_at_entry, gvm_at_exit, dgvm_90d, segment, gates)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (p["symbol"], p["entry_date"], p["entry_ts"], entry, qty, pdate, now,
+                  price, reason, held, round(pnl, 2), round((price / entry - 1) * 100, 2),
+                  p["gvm_at_entry"], g_now, p["dgvm_90d"], p["segment"],
+                  json.dumps(p["gates"]) if isinstance(p["gates"], (dict, list)) else p["gates"]))
+            cur.execute("UPDATE qsr_positions SET status='CLOSED' WHERE id=%s", (p["id"],))
+            closed.append({"symbol": p["symbol"], "reason": reason,
+                           "pnl_pct": round((price / entry - 1) * 100, 2)})
+        conn.commit()
+    log.info("qsr exits: checked=%d closed=%d", len(open_rows), len(closed))
+    return {"checked": len(open_rows), "closed": len(closed), "exits": closed}

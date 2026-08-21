@@ -1103,6 +1103,72 @@ def _bg_v21_killswitch():
         log.error(f"v21_killswitch: {e}")
 
 
+_qsr_scan_ran = None
+_qsr_exits_ran = None
+
+
+def _bg_qsr_scan():
+    """cc#1175 — the QSR nightly scan (session_log 27980).
+
+    TIMED OFF THE DATA, NOT OFF A ROUND NUMBER. It runs at 15:55, which is after the 15:35 yahoo
+    EOD refresh has put today's official closes in raw_prices and after v8_eod at 15:45, so the
+    returns bands and the S1 touch read TODAY rather than yesterday. Running it at 15:45 alongside
+    v8_eod would have raced the same refresh both engines depend on.
+
+    REGISTRY-GATED (cc#1170). The founder silences this with an UPDATE to scheduler_master and no
+    deploy, and UNKNOWN COUNTS AS SILENT: if the registry cannot be read this returns rather than
+    trading, because a database blip must never open a position.
+
+    _SKIPPED, not a bare return — a no-op tick must not stamp last_status ok on a job that did
+    nothing (the cc#526 sentinel, and the defect cc#1170 push 4 fixed on the V14 gate).
+    """
+    global _qsr_scan_ran
+    if _job_active("bg_qsr_scan") is not True:
+        return _SKIPPED
+    today = _ist_now().date()
+    if _qsr_scan_ran == today:
+        return _SKIPPED
+    try:
+        import qsr_engine
+        res = qsr_engine.run_qsr_scan()
+        with _conn() as conn:
+            _log_health(conn, "qsr_scan", {"universe": res.get("universe"),
+                                           "qualified": len(res.get("qualified") or []),
+                                           "entered": res.get("entered")})
+        log.info("qsr_scan: universe=%s qualified=%s entered=%s",
+                 res.get("universe"), len(res.get("qualified") or []), res.get("entered"))
+        _qsr_scan_ran = today
+    except Exception as e:
+        log.error("qsr_scan: %s", e)
+
+
+def _bg_qsr_exits():
+    """cc#1175 — the QSR exit sweep.
+
+    AFTER THE NIGHTLY GVM, DELIBERATELY. One of the three exits is "quality break: GVM < 7 on
+    nightly recompute", and gvm_recompute is dispatched at 01:30. Running the sweep before it
+    would test yesterday's GVM and call it tonight's — so this sits at 01:45, fifteen minutes
+    behind the job it depends on. Verified against the dispatch table rather than assumed: the
+    22:00 in my head was wrong, the schedule says 01:30.
+    """
+    global _qsr_exits_ran
+    if _job_active("bg_qsr_exits") is not True:
+        return _SKIPPED
+    today = _ist_now().date()
+    if _qsr_exits_ran == today:
+        return _SKIPPED
+    try:
+        import qsr_engine
+        res = qsr_engine.run_qsr_exits()
+        with _conn() as conn:
+            _log_health(conn, "qsr_exits", {"checked": res.get("checked"),
+                                            "closed": res.get("closed")})
+        log.info("qsr_exits: checked=%s closed=%s", res.get("checked"), res.get("closed"))
+        _qsr_exits_ran = today
+    except Exception as e:
+        log.error("qsr_exits: %s", e)
+
+
 def _bg_v8_eod():
     global _eod_running, _eod_ran_today
     today = _ist_now().date()
@@ -4093,6 +4159,12 @@ async def _scheduler_loop():
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 45:
             _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
+        # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
+        # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
+        # off nse_holidays like its neighbours; the job's own registry gate and
+        # day-guard decide whether it actually does anything.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 55:
+            _spawn(_bg_qsr_scan)
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
             _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
@@ -4115,6 +4187,10 @@ async def _scheduler_loop():
         if h == 1 and m == 5:   _spawn(_bg_lot_sync)   # cc#314: nightly Fyers lot-size audit (day-locked)
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
+        # cc#1175: QSR exits at 01:45, FIFTEEN MINUTES BEHIND the GVM recompute
+        # above, because the quality-break exit reads that recompute. Before it,
+        # the sweep would test yesterday's GVM and report it as tonight's.
+        if h == 1 and m == 45:  _spawn(_bg_qsr_exits)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog

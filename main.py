@@ -48,6 +48,7 @@ from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
+from qsr_endpoints import router as qsr_router   # cc#1175: QSR daily equity swing engine
 from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
 from results_endpoints import router as results_router   # cc#572: Results "R" card backend (id=6438)
 from pcr_endpoints import router as pcr_router
@@ -545,6 +546,7 @@ app.include_router(diagnosis_router)
 app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(v14_router)   # cc#442
+app.include_router(qsr_router)   # cc#1175: /api/qsr/* Quality S1 Reclaim (session_log 27980)
 app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
 app.include_router(results_router)   # cc#572: /api/results/card (Results R-card backend)
 app.include_router(pcr_router)
