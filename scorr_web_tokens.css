@@ -1,0 +1,206 @@
+/* scorr_web_tokens.css — THE WEB TOKEN CONTRACT. (cc#1203 WEB_THEME_TOKEN_LOCK_V1, session_log
+ * 29075; founder ruling (a), session_log 29158.)
+ *
+ * ONE token contract for every web page. Before this, 37 web files declared their own :root and
+ * only FOUR had a light block at all — which is why /digest rendered black with Theme LIGHT
+ * selected. The other 33 had no light half to select.
+ *
+ * THE VALUES BELOW ARE COPIED VERBATIM FROM v8_dashboard.html AND NOT ONE WAS RETYPED. That file
+ * IS the contract (cc#1149 index_intel_R2, founder-confirmed 22-Aug: navy dark / white light) and
+ * the card's do_not_touch says its values are not mine to change. They were extracted from the
+ * live file by parsing its :root and html[data-theme="light"] blocks, so a transcription slip is
+ * not possible — 46 dark tokens and 43 light ones, exactly as the dashboard declares them.
+ *
+ * WHY THE LIGHT BLOCK IS SHORTER: --font, --mono and --r are typography and geometry, not colour.
+ * They belong to neither theme and are declared once in :root, which is why light has 43 and not
+ * 46. That asymmetry is correct and deliberate.
+ *
+ * APP IS NOT WEB. mobile/** and scorr_theme_r5.css are the app's black-and-gold contract and
+ * cc#1193 owns that split. Nothing here touches them.
+ */
+
+/* ── DARK · the default. 46 tokens, verbatim from v8_dashboard.html :root ─────────────── */
+:root {
+  --bg           : #0A0F1E;
+  --bg2          : #0D1428;
+  --panel        : #121A33;
+  --panel2       : #182241;
+  --well         : #0D1428;
+  --line         : rgba(148,166,210,.14);
+  --line2        : rgba(148,166,210,.26);
+  --txt          : #E9EEFB;
+  --mut          : #8C99BD;
+  --dim          : #5E6B8F;
+  --grn          : #2FD48B;
+  --grn-d        : rgba(47,212,139,.13);
+  --red          : #FF5C6C;
+  --red-d        : rgba(255,92,108,.12);
+  --blu          : #4D7CFE;
+  --cyan         : #37D3E8;
+  --amber        : #F5B94A;
+  --violet       : #9B7CFF;
+  --spotc        : #37D3E8;
+  --spot-ring    : rgba(55,211,232,.16);
+  --spot-ring2   : rgba(55,211,232,.06);
+  --spot-chip-bg : rgba(55,211,232,.1);
+  --spot-chip-bd : rgba(55,211,232,.3);
+  --amber-bg     : rgba(245,185,74,.08);
+  --amber-bd     : rgba(245,185,74,.4);
+  --amber-row    : rgba(245,185,74,.1);
+  --blu-row      : rgba(77,124,254,.1);
+  --blu-chip     : rgba(77,124,254,.14);
+  --blu-chip-bd  : rgba(77,124,254,.3);
+  --vio-bg       : rgba(155,124,255,.1);
+  --vio-bd       : rgba(155,124,255,.3);
+  --flat         : #2a3350;
+  --glow-gold    : rgba(245,185,74,.5);
+  --glow-spot    : rgba(55,211,232,.6);
+  --gridline     : rgba(148,166,210,.05);
+  --shadow       : 0 18px 44px rgba(3,7,20,.5);
+  --font         : 'Sora',system-ui,sans-serif;
+  --mono         : 'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --r            : 16px;
+  --ink          : #0A0F1E;
+  --surface      : #121A33;
+  --surface2     : #182241;
+  --card         : #121A33;
+  --card2        : #0D1428;
+  --bull         : #2FD48B;
+  --bear         : #FF5C6C;
+}
+
+/* ── LIGHT · 43 tokens, verbatim from v8_dashboard.html html[data-theme="light"] ──────── */
+html[data-theme="light"] {
+  --bg           : #F5F7FB;
+  --bg2          : #EEF1F8;
+  --panel        : #FFFFFF;
+  --panel2       : #F7F9FD;
+  --well         : #EEF1F8;
+  --line         : rgba(23,40,80,.10);
+  --line2        : rgba(23,40,80,.18);
+  --txt          : #17203A;
+  --mut          : #5B6785;
+  --dim          : #93A0BE;
+  --grn          : #0E9F62;
+  --grn-d        : rgba(14,159,98,.10);
+  --red          : #DE3A52;
+  --red-d        : rgba(222,58,82,.09);
+  --blu          : #3563E9;
+  --cyan         : #0E93B0;
+  --amber        : #B47B10;
+  --violet       : #6E4FE0;
+  --spotc        : #0E93B0;
+  --spot-ring    : rgba(14,147,176,.14);
+  --spot-ring2   : rgba(14,147,176,.05);
+  --spot-chip-bg : rgba(14,147,176,.08);
+  --spot-chip-bd : rgba(14,147,176,.3);
+  --amber-bg     : rgba(180,123,16,.07);
+  --amber-bd     : rgba(180,123,16,.35);
+  --amber-row    : rgba(180,123,16,.08);
+  --blu-row      : rgba(53,99,233,.08);
+  --blu-chip     : rgba(53,99,233,.10);
+  --blu-chip-bd  : rgba(53,99,233,.3);
+  --vio-bg       : rgba(110,79,224,.08);
+  --vio-bd       : rgba(110,79,224,.3);
+  --flat         : #D5DAE8;
+  --glow-gold    : rgba(180,123,16,.35);
+  --glow-spot    : rgba(14,147,176,.4);
+  --gridline     : rgba(23,40,80,.035);
+  --shadow       : 0 10px 28px rgba(23,40,80,.08);
+  --ink          : #17203A;
+  --surface      : #FFFFFF;
+  --surface2     : #F7F9FD;
+  --card         : #FFFFFF;
+  --card2        : #EEF1F8;
+  --bull         : #0E9F62;
+  --bear         : #DE3A52;
+}
+
+/* ── THE TINT SCALE, one recipe for every accent (founder ruling (a)) ────────────────────────────
+ * The inventory found 113 orphan token names across the web pages, and the largest single group
+ * was per-page shades of a contract colour: --amber-bd, --blu-row, --cyan-d and so on, invented
+ * page by page because the contract had no tint scale to reach for.
+ *
+ * FOUR SUFFIXES, THE SAME MEANING EVERYWHERE:
+ *     -bg    8%   a tinted fill behind a chip or a row
+ *     -row  10%   a tinted table row
+ *     -bd   30%   a border in the accent's colour
+ *     -d          the accent dimmed for text on a tinted fill
+ *
+ * BUILT WITH color-mix, NOT WITH HAND-WRITTEN rgba, and that is the point: color-mix resolves
+ * against whatever --grn currently is, so ONE declaration serves both themes and a re-tuned
+ * accent drags its whole tint family with it. Writing these as rgba would mean 24 more literals
+ * per theme and 24 more chances for light and dark to drift apart.
+ *
+ * THE ACCENTS THAT ALREADY HAD HAND-TUNED TINTS KEEP THEM. --amber-bg, --amber-bd, --amber-row,
+ * --blu-row, --blu-chip, --blu-chip-bd, --vio-bg, --vio-bd, --grn-d, --red-d and the --spot-*
+ * family are all declared above with the dashboard's own values and are NOT recomputed here.
+ * They are the contract; these fill the gaps around them.
+ */
+:root, html[data-theme="light"] {
+  --grn-bg    : color-mix(in srgb, var(--grn) 8%, transparent);
+  --grn-row   : color-mix(in srgb, var(--grn) 10%, transparent);
+  --grn-bd    : color-mix(in srgb, var(--grn) 30%, transparent);
+  --red-bg    : color-mix(in srgb, var(--red) 8%, transparent);
+  --red-row   : color-mix(in srgb, var(--red) 10%, transparent);
+  --red-bd    : color-mix(in srgb, var(--red) 30%, transparent);
+  --blu-bg    : color-mix(in srgb, var(--blu) 8%, transparent);
+  --blu-bd    : color-mix(in srgb, var(--blu) 30%, transparent);
+  --blu-d     : color-mix(in srgb, var(--blu) 78%, var(--txt));
+  --cyan-bg   : color-mix(in srgb, var(--cyan) 8%, transparent);
+  --cyan-row  : color-mix(in srgb, var(--cyan) 10%, transparent);
+  --cyan-bd   : color-mix(in srgb, var(--cyan) 30%, transparent);
+  --cyan-d    : color-mix(in srgb, var(--cyan) 78%, var(--txt));
+  --amber-d   : color-mix(in srgb, var(--amber) 78%, var(--txt));
+  --violet-bg : color-mix(in srgb, var(--violet) 8%, transparent);
+  --violet-row: color-mix(in srgb, var(--violet) 10%, transparent);
+  --violet-bd : color-mix(in srgb, var(--violet) 30%, transparent);
+  --violet-d  : color-mix(in srgb, var(--violet) 78%, var(--txt));
+}
+
+/* ── ALIASES — every name the 37 pages already use, pointed at the contract ──────────────────────
+ * DECLARED ONCE, IN :root, AND NOT REPEATED FOR LIGHT. That is not an oversight, it is the whole
+ * reason this block is cheap: a var() reference resolves where it is USED, not where it is
+ * declared, so --win: var(--grn) is already green in dark and green in light without a second
+ * copy. Duplicating them under html[data-theme="light"] would double the file and create the
+ * exact drift this card exists to end.
+ *
+ * THESE EXIST SO PUSHES 5-14 ARE A DELETION, NOT A REWRITE. A page's own :root block can be
+ * removed and its markup keeps working, because every name it used still resolves here. The
+ * abbreviations are the ones the ruling says "alias then die page by page" — they stay until the
+ * last page stops using them, and this comment is where the next person finds out which.
+ */
+:root {
+  /* second surfaces — the ruling adds --bg3; the other three are the dashboard's own */
+  --bg3       : var(--well);
+  /* legacy names from scorr_themes.css, which no page links any more (retired at push 15) */
+  --field     : var(--panel);
+  --muted     : var(--mut);
+  --rule      : var(--line);
+  --accent    : var(--blu);
+  --brand     : var(--cyan);
+  /* ONE win/loss pair. Six vocabularies existed for two colours; all six now point at two. */
+  --win       : var(--grn);
+  --loss      : var(--red);
+  --up        : var(--grn);
+  --down      : var(--red);
+  --bull-soft : var(--grn-d);
+  --bear-soft : var(--red-d);
+  --grn-soft  : var(--grn-d);
+  --red-soft  : var(--red-d);
+  /* text names */
+  --chalk     : var(--txt);
+  --faint     : var(--dim);
+  /* borders and edges */
+  --border    : var(--line);
+  --border2   : var(--line2);
+  --edge      : var(--line2);
+  /* abbreviations — alias now, die page by page (ruling (a)) */
+  --acc       : var(--blu);
+  --am        : var(--amber);
+  --amb       : var(--amber);
+  --cy        : var(--cyan);
+  --bd        : var(--line2);
+  --blue      : var(--blu);
+  --aqua      : var(--cyan);
+}

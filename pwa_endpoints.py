@@ -2214,6 +2214,21 @@ def pwa_theme_mobile_css():
     return Response(THEME_MOBILE_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
+# cc#1203: the WEB token contract, served exactly like its two siblings above. Read once at
+# import; main.py links it on every web page ahead of the page's own <style>, so a page can
+# still override a token locally while it is being migrated (pushes 5-14) and stops needing to.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_web_tokens.css"), "r", encoding="utf-8") as _wtf:
+        SCORR_WEB_TOKENS_CSS = _wtf.read()
+except Exception:
+    SCORR_WEB_TOKENS_CSS = ""
+
+
+@router.get("/static/scorr_web_tokens.css")
+def pwa_scorr_web_tokens_css():
+    return Response(SCORR_WEB_TOKENS_CSS, media_type="text/css", headers=_CACHE_1D)
+
+
 # APP_QA_R4 P1: the three-theme token layer (dark / goldday / goldnight), byte-faithful to
 # design_refs/scorr_home_themes_R1.html @ 80da8c6. Served the same way scorr_theme_r5.css is —
 # file at repo root, read once at import, exposed under the /static/ URL namespace. P1 ships the
