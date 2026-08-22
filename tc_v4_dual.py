@@ -1577,6 +1577,30 @@ def score_card(d, style, side):
     card["verdict10"] = _verdict10(s10) if weighted else None
     card["score10_weighted"] = weighted
     card["bands10"] = f"STRONG≥{_STRONG_10} / VALID {_VALID_10} / WATCH {_WATCH_10}"
+    # ── cc#1209 TC_SCORE_100_V1 (session_log 29138): the /100 scale ────────────────────────────
+    # score100 is score10 x 10 AND NOTHING ELSE. Same numerator, same denominator, same verdict —
+    # a presentation scale, not a recalibration. The bands are the same three constants x10, so
+    # 8.4/6.5/5.0 become 84/65/50 exactly and no row can change band by being rendered.
+    #
+    # WHY IT IS ONLY THIS, when the card asked for a new denominator: the card's premise is that
+    # the Check page divides by a hardcoded 20 while the registry sums to 21. Neither half holds.
+    # 20 is not hardcoded — card_maxes() DERIVES it by running the rulebook over an empty symbol,
+    # and running that today returns BUY-REV 20.0 from 17 rules. And 20 and 21 are not the same
+    # quantity: 20 is the RAW max, the sum of each rule's own max, while 21 is the registry WEIGHT
+    # sum. Every bucket has two different numbers and always has — BUY-MOM 21 raw vs 27 weighted,
+    # BUY-REV 20 vs 21, SELL-MOM 9 vs 13.25, SELL-REV 11 vs 15.
+    #
+    # So dividing the RAW credit by the WEIGHT sum, as the card's scope 5 asks, mixes units: raw
+    # credit is unweighted. It would have turned BHARTIARTL's 13.00/20 into 13.00/21 and flipped a
+    # live verdict from VALID to WATCH on an arithmetic error rather than a fix. Stopped and logged
+    # rather than shipped; the denominator question is on the card's thread.
+    card["score100"] = round(s10 * 10.0, 1) if s10 is not None else None
+    card["bands100"] = {"STRONG": round(_STRONG_10 * 10, 1),
+                        "VALID": round(_VALID_10 * 10, 1),
+                        "WATCH": round(_WATCH_10 * 10, 1)}
+    # The raw denominator this card was actually scored out of, served so no surface has to write
+    # one down — the same reason card_maxes() exists. Note it is the RAW max, not the weight sum.
+    card["max_raw"] = max_score
     if unmapped:
         # Named, never silently defaulted — the push-1 discipline, at compute time.
         card["score10_unmapped_rules"] = unmapped
