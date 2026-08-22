@@ -468,7 +468,16 @@ def result_corner_v2():
                             "sales_qoq": _pct(_num(s_now), _num(s_prev)),
                             "sales_yoy": _pct(_num(s_now), _num(s_yoy)),
                             "pat_qoq": _pct(_num(p_now), _num(p_prev)),
-                            "pat_yoy": _pct(_num(p_now), _num(p_yoy)),
+                            # cc#1192 (RESULT_PEER_SOURCE_RULE_V1, session_log 29006): PAT YoY is
+                            # NULL on a CSV-sourced row. Sales YoY stays — measured across the
+                            # top-mcap analysed name in the nine largest segments, the CSV and the
+                            # filed history agree on sales 9 times out of 9. PAT disagrees on 4 of
+                            # 9, because the CSV profit line is not the post-minority Net Profit
+                            # every other result surface is struck on. CONTROLPR: same 3.92 this
+                            # quarter, year-ago 8.57 filed against 6.47 CSV, so -54.3% against
+                            # -39.4%. A number that is wrong by a fifth is worse than an absent
+                            # one, and the basis dot already tells the reader this row is CSV.
+                            "pat_yoy": None,
                             "opm": _num(opm_now), "opm_ly": _num(opm_ly),
                             "pe": _num(pe_v), "segment_pe": _num(seg_pe),
                             "result_date": lrd,
@@ -532,6 +541,13 @@ def result_corner_v2():
                 "n_used": _n_used,
                 "tiny_base": _n_used > 0 and _n_used < 3,
                 "basic_count": sum(1 for s in syms if fund[s].get("basis") == "basic"),
+                # cc#1192: how many of this sector's rows actually carry a PAT reading now that
+                # CSV rows have none. The median above is struck on THESE rows only, so the count
+                # has to travel with it — a median over two filings and a median over twenty are
+                # not the same claim, and the reader can now tell them apart.
+                "pat_n_detailed": sum(1 for s in syms
+                                      if fund[s].get("basis") == "detailed"
+                                      and fund[s].get("pat_yoy") is not None),
             })
         # cc#834: DEFAULT ORDER = average sector mcap, heaviest first. Sorting by PAT YoY put a
         # 3-member micro sector with two reporters and a +325% swing above Banks and IT — a ranking
@@ -571,6 +587,13 @@ def result_corner_v2():
                 "basic": sum(1 for s in same if fund[s].get("basis") == "basic"),
             },
             "csv_added": csv_added,
+            # cc#1192: the season PAT median is now struck on DETAILED rows only, because CSV rows
+            # carry no PAT YoY. The count travels beside it so the median is never read as covering
+            # every reporter — a median over 391 filings and a median over 637 mixed rows are
+            # different claims, and only one of them is true now.
+            "pat_n_detailed": sum(1 for s in same
+                                  if fund[s].get("basis") == "detailed"
+                                  and fund[s].get("pat_yoy") is not None),
         }
 
         # ── section 03 companies: same-quarter reporters (numbers) + reported-but-unscraped (dashes) ──

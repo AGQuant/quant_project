@@ -22,6 +22,7 @@ from typing import Optional
 
 import psycopg2
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse   # cc#1192: /api/results/peers returns real 4xx codes
 
 log = logging.getLogger("results_card")
 router = APIRouter()
@@ -539,7 +540,7 @@ def _result_day_move(cur, psym, rep_date):
         return None
 
 
-def _peer_results(cur, sym, segment, today=None):
+def _peer_results(cur, sym, segment, today=None, include_self=False):
     """cc#766: pre-results peer context for the R-card. Uses the SAME top-3-by-GVM same-segment peer set
     as the MISS/BEAT block (self-excluded). For each peer with a VALIDATED reported result THIS quarter
     (earnings_calendar status='reported' AND verified<>'false', ex_date >= the last completed quarter-end
@@ -559,6 +560,19 @@ def _peer_results(cur, sym, segment, today=None):
     peers = cur.fetchall()
     if not peers:
         return None
+    # cc#1192: the SUBJECT joins the pool when asked, and only then. The top-3 selection above is
+    # untouched — self is still excluded from it, so which three peers appear never changes. The
+    # subject is APPENDED, flagged is_self, and scored through the identical arithmetic below, so
+    # /api/results/peers can show "you versus your three best peers" without a second code path
+    # that could drift from this one.
+    self_gvm = None
+    if include_self:
+        cur.execute("""SELECT g.gvm_score FROM gvm_scores g
+                       WHERE g.symbol=%s AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                       LIMIT 1""", (sym,))
+        _sg = cur.fetchone()
+        self_gvm = _sg[0] if _sg else None
+        peers = list(peers) + [(sym, self_gvm)]
     # cc#857 fix 6: was 3 peers x 3 queries = 9 round trips. Now TWO queries keyed by symbol,
     # fetched once and looked up in the loop. Same rows, same gates (status='reported',
     # verified<>'false', ex_date >= completed quarter end — the cc#765 news-lead gate is preserved
@@ -570,11 +584,47 @@ def _peer_results(cur, sym, segment, today=None):
                      AND verified<>'false' AND ex_date >= %s
                    ORDER BY UPPER(ticker), ex_date DESC""", (psyms, q_start))
     rep_map = {r[0]: r[1] for r in cur.fetchall()}
+    # cc#1192 (RESULT_PEER_SOURCE_RULE_V1, session_log 29006): screener_raw still supplies the
+    # company NAME and the two OPM columns, and nothing else. qoq_sales_growth and
+    # qoq_profit_growth are GONE from this function — they were the last result surface still
+    # reading them, and they disagree with every other result surface on the card.
+    #
+    # MEASURED, not asserted: on the top-mcap analysed name in each of the nine largest segments,
+    # sales YoY is identical on both sources 9 times out of 9, and PAT YoY differs on 4 of 9.
+    # CONTROLPR is the clearest: this quarter's PAT is 3.92 on both, but the year-ago figure is
+    # 8.57 in the filed quarterly history and 6.47 in the CSV, giving -54.3% against -39.4%. The
+    # filing is the number the company reported; the CSV line is not the post-minority Net Profit
+    # the rest of this card is struck on. cc#801 already killed this second source inside
+    # _peer_comparison for exactly this reason; _peer_results was the leftover.
     cur.execute("""SELECT DISTINCT ON (UPPER(nse_code)) UPPER(nse_code), company_name,
-                          qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q
+                          opm_latest_q, opm_prev_year_q
                    FROM screener_raw WHERE UPPER(nse_code) = ANY(%s)
                    ORDER BY UPPER(nse_code)""", (psyms,))
     scr_map = {r[0]: r[1:] for r in cur.fetchall()}
+
+    # YoY from fundamentals_history, the SAME CTE shape _peer_comparison uses — latest period_end
+    # per symbol, year-ago row at exactly period_end minus one year, Sales or Revenue, Net Profit.
+    # Not a re-derivation: the shape is copied so the two peer blocks on one card cannot disagree.
+    cur.execute("""
+        WITH q AS (
+            SELECT UPPER(f.symbol) AS sym, f.period_end,
+                   NULLIF(replace(COALESCE(f.metrics->>'Sales', f.metrics->>'Revenue'),',',''),'')::numeric AS rev,
+                   NULLIF(replace(f.metrics->>'Net Profit',',',''),'')::numeric AS pat
+            FROM fundamentals_history f
+            WHERE f.section='quarters' AND f.period_type='quarter'
+              AND UPPER(f.symbol) = ANY(%s)),
+        ranked AS (
+            SELECT sym, period_end, rev, pat,
+                   MAX(period_end) OVER (PARTITION BY sym) AS max_pe
+            FROM q)
+        SELECT c.sym,
+               CASE WHEN p.rev > 0 THEN (c.rev - p.rev) / p.rev * 100 END AS s_yoy,
+               CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END AS p_yoy
+        FROM ranked c
+        LEFT JOIN q p ON p.sym = c.sym
+                     AND p.period_end = (c.period_end - INTERVAL '1 year')::date
+        WHERE c.period_end = c.max_pe""", (psyms,))
+    yoy_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
     out, n_reported = [], 0
     for psym, gvm in peers:
@@ -582,14 +632,20 @@ def _peer_results(cur, sym, segment, today=None):
         sr = scr_map.get(psym)
         name = (sr[0] if sr and sr[0] else None) or psym
         rec = {"symbol": psym, "name": name, "gvm": _f(gvm), "reported": rep_date is not None}
+        if include_self and psym == sym:
+            rec["is_self"] = True
         if rep_date is not None:
             n_reported += 1
+            _yy = yoy_map.get(psym) or (None, None)
             rec.update({
                 "result_date": str(rep_date),
-                "sales_yoy": _f(_flt(sr[1])) if sr else None,
-                "pat_yoy": _f(_flt(sr[2])) if sr else None,
-                "margin": _f(_flt(sr[3])) if sr else None,
-                "margin_ly": _f(_flt(sr[4])) if sr else None,
+                # cc#1192: sales_yoy and pat_yoy come from fundamentals_history now. The two OPM
+                # columns still come from screener_raw and their indices shifted by two when the
+                # qoq pair left the SELECT — indices are why this is spelled out rather than nudged.
+                "sales_yoy": _f(_yy[0]),
+                "pat_yoy": _f(_yy[1]),
+                "margin": _f(_flt(sr[1])) if sr else None,
+                "margin_ly": _f(_flt(sr[2])) if sr else None,
                 "move_pct": _result_day_move(cur, psym, rep_date),
             })
         else:
@@ -657,6 +713,41 @@ def results_card_context(symbol: str):
     except Exception as e:
         log.exception("cc#858 card context failed")
         out["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+    return out
+
+
+@router.get("/api/results/peers/{symbol}")
+def results_peers(symbol: str):
+    """cc#1192 scope 2 — the peer result block on its own, WITH the subject in it.
+
+    The same _peer_results the R card calls, so there is no second copy of the arithmetic to drift.
+    include_self appends the subject flagged is_self, which is what makes this useful on its own:
+    a reader gets "you against your three best-scored peers" from one call, all four rows struck
+    on the identical fundamentals_history basis.
+
+    THE CACHE KEY CARRIES THE SYMBOL, and that is not cosmetic. _cached keys on (kind, segment,
+    day). Every symbol in a segment shares a segment, so caching this under a bare kind would
+    serve the FIRST caller's self-row to every other name in that segment — a card confidently
+    showing another company's numbers as your own. The kind is namespaced per symbol and per
+    include_self for that reason.
+    """
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return JSONResponse({"error": "symbol required"}, status_code=400)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT segment FROM gvm_scores WHERE UPPER(symbol)=%s
+                       AND score_date=(SELECT MAX(score_date) FROM gvm_scores) LIMIT 1""", (sym,))
+        r = cur.fetchone()
+        segment = r[0] if r else None
+        if not segment:
+            # A 404 with a reason, not an empty 200. An unsegmented name has no peer set at all,
+            # and a caller must be able to tell that apart from "the segment has nobody reported".
+            return JSONResponse({"error": "no segment for symbol", "symbol": sym}, status_code=404)
+        out = _cached("peerres_self:%s" % sym, segment, date.today(),
+                      lambda: _peer_results(cur, sym, segment, include_self=True))
+    if out is None:
+        return JSONResponse({"error": "no peer has reported this quarter",
+                             "symbol": sym, "segment": segment}, status_code=404)
     return out
 
 

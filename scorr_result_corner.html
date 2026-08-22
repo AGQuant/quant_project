@@ -56,6 +56,10 @@ header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:2
 .seg-legend b{font-family:var(--mono);color:var(--txt)}
 .dot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
 .medians{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px}
+  /* cc#1192: the PAT median is struck on scraped filings only now that CSV rows carry no
+     PAT YoY, so the count sits under it. Deliberately the quietest text on the block - it is a
+     caveat on one number, not a headline. */
+  .md-n{font-size:9.5px;color:var(--dim);margin-top:2px;letter-spacing:.02em}
 .md-k{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
 .md-v{font-family:var(--mono);font-size:21px;font-weight:700;margin-top:3px}
 .pos{color:var(--grn)}.neg{color:var(--red)}
@@ -266,7 +270,7 @@ function render(){
     <div>
       <div class="medians">
         <div><div class="md-k">Median Sales YoY</div><div class="md-v ${cls(s.median_sales_yoy)}">${pctS(s.median_sales_yoy)}</div></div>
-        <div><div class="md-k">Median PAT YoY</div><div class="md-v ${cls(s.median_pat_yoy)}">${pctS(s.median_pat_yoy)}</div></div>
+        <div><div class="md-k">Median PAT YoY</div><div class="md-v ${cls(s.median_pat_yoy)}">${pctS(s.median_pat_yoy)}</div>${s.pat_n_detailed!=null?`<div class="md-n">PAT read on ${s.pat_n_detailed} scraped filings</div>`:''}</div>
         <div><div class="md-k">Median Sales QoQ</div><div class="md-v ${cls(s.median_sales_qoq)}">${pctS(s.median_sales_qoq)}</div></div>
         <div><div class="md-k">Median PAT QoQ</div><div class="md-v ${cls(s.median_pat_qoq)}">${pctS(s.median_pat_qoq)}</div></div>
       </div>
