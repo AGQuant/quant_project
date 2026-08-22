@@ -150,6 +150,16 @@ def v8_futures_book(request: Request):
             cur.execute("SELECT value FROM app_config WHERE key = %s", (BOOK_CUTOVER_KEY,))
             _cut = cur.fetchone()
             book_cutover = _cut[0] if _cut and _cut[0] else None
+            # cc#1198: the newest session that actually produced equity bars. This is the yardstick
+            # for cmp_stale, and it is DERIVED rather than "today minus one weekday" so a holiday
+            # or a half day cannot make a perfectly current book look stale. fyers_eq is the right
+            # reference precisely BECAUSE it is the other leg: on 21-Aug the futures feed was dead
+            # while equity was later healed in, so fut_cmp was Thursday's close sitting next to a
+            # Friday equity book — two different days presented as one snapshot, with nothing on
+            # screen saying so. That is the state this field exists to expose.
+            cur.execute("SELECT MAX(ts)::date FROM intraday_prices WHERE source = 'fyers_eq'")
+            _lt = cur.fetchone()
+            latest_session = _lt[0] if _lt else None
     except Exception as e:
         log.exception("v8 futures book failed")
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "positions": [], "count": 0}
@@ -173,6 +183,11 @@ def v8_futures_book(request: Request):
         bar = _f(p["fut_bar_at_entry"])
         entry = None
         gap = None
+        # cc#1198: a MACHINE-READABLE reason beside the human sentence. The counts in the payload
+        # are built from this, never by matching words in `gap` — a reworded sentence would
+        # silently zero a counter, and a counter that reads 0 because the prose changed is worse
+        # than no counter at all.
+        gap_reason = None
 
         # ── cc#1019: the entry leg is the BOOK's entry price, audited against the futures bar that
         # existed at the fill. Three outcomes, and only the first one prints a price.
@@ -182,6 +197,7 @@ def v8_futures_book(request: Request):
         if bar is None or lag_min is None or lag_min > ENTRY_LAG_TOLERANCE_MIN:
             # No futures bar was live at this fill — a halt, an illiquid leg, or a position older
             # than the feed. Never substituted with the cash entry.
+            gap_reason = "no_bar_at_entry"
             gap = ("No futures bar was live at this entry"
                    + (f" — the newest was {int(lag_min)} min stale" if lag_min is not None else "")
                    + f". The fyers_fut feed began {series_start.strftime('%d %b %H:%M')}. "
@@ -193,6 +209,7 @@ def v8_futures_book(request: Request):
             # A futures bar exists but the book holds a different number — the fill fell back to
             # the cash price (the engine logs a WARNING when it does). Saying nothing here would
             # print a cash price under a FUT heading, which is the one thing this view must not do.
+            gap_reason = "cash_basis_fill"
             gap = (f"This fill was recorded on the CASH basis ({stored}) — the futures bar at the "
                    f"entry was {bar}. Showing no futures entry rather than labelling a cash price "
                    f"FUT. See the engine's cc#1019 warning for this symbol.")
@@ -220,6 +237,8 @@ def v8_futures_book(request: Request):
             # cc#1019: 'book' = the stored entry_price, futures-priced and audited against the bar.
             # 'none' = no futures entry is shown, and `gap` says which of the two reasons applies.
             "entry_source": "book" if entry is not None else "none",
+            # cc#1198: which of the two "none" cases this is, as a code the UI can branch on.
+            "gap_reason": gap_reason,
             "fut_cmp": cmp_,
             "fut_cmp_ts": p["fut_cmp_ts"].strftime("%d %b %H:%M") if p["fut_cmp_ts"] else None,
             "fut_pnl": round(pnl, 2) if pnl is not None else None,
@@ -238,12 +257,38 @@ def v8_futures_book(request: Request):
             "gap": gap,
         })
 
+    # cc#1198 — COVERAGE, so the unrealised number stops reading as a reconciliation failure.
+    # The sum itself is UNCHANGED: it still adds only the rows that have both legs, which is the
+    # only honest thing it can do. What was missing is that nothing on screen said how many rows
+    # that was. Counted from the rows just built, and the reasons come from gap_reason rather
+    # than from the wording of `gap`.
+    priced = sum(1 for r in out if r["fut_pnl"] is not None)
+    unpriced = len(out) - priced
+    unpriced_reasons = {
+        "no_bar_at_entry": sum(1 for r in out if r["gap_reason"] == "no_bar_at_entry"),
+        "cash_basis_fill": sum(1 for r in out if r["gap_reason"] == "cash_basis_fill"),
+    }
+    # The freshest futures bar anywhere in the book, and whether the whole book is therefore
+    # showing a CMP from an older session than the market's last one.
+    _cmp_ts = [p["fut_cmp_ts"] for p in pos if p["fut_cmp_ts"] is not None]
+    cmp_as_of = max(_cmp_ts) if _cmp_ts else None
+    cmp_stale = bool(cmp_as_of and latest_session and cmp_as_of.date() < latest_session)
+
     return {
         "basis": "FUT",
         "positions": out,
         "count": len(out),
         "unrealised": round(unrealised, 2) if out else None,
         "unresolved": unresolved,
+        # cc#1198: priced + unpriced == count, always. `unresolved` is kept untouched beside them
+        # because something already consumes it; dropping a field breaks whoever has it.
+        "priced": priced,
+        "unpriced": unpriced,
+        "unpriced_reasons": unpriced_reasons,
+        "cmp_as_of": cmp_as_of.strftime("%d %b %H:%M") if cmp_as_of else None,
+        "cmp_as_of_date": cmp_as_of.date().isoformat() if cmp_as_of else None,
+        "cmp_stale": cmp_stale,
+        "latest_session_date": latest_session.isoformat() if latest_session else None,
         "series_start": series_start.strftime("%Y-%m-%d %H:%M"),
         "series_start_date": series_date.isoformat(),
         "excluded_pre_series": len(excluded),

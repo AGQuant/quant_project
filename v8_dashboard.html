@@ -3204,7 +3204,7 @@ function renderMaster(){
       // carry any more, only the book's own price.
       return{...x,
         entry_price:f.fut_entry, cmp:f.fut_cmp, prev_close:f.fut_prev_close,
-        unrealised_pnl:f.fut_pnl, _basis:'FUT', _futGap:f.gap,
+        unrealised_pnl:f.fut_pnl, _basis:'FUT', _futGap:f.gap, _futGapReason:f.gap_reason,
         _futEntryTs:f.fut_entry_ts, _entrySrc:f.entry_source};
     }).filter(Boolean);
   }
@@ -3273,9 +3273,47 @@ function renderMaster(){
   // are futures prices now, so it reads "FUT · SINCE 14-AUG" — the date coming from the served
   // cutover, not typed here. No EQ wording survives anywhere on this tab.
   const _reTag=_fut?` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:1px 3px;vertical-align:middle">FUT${_futCutLabel()?' &middot; SINCE '+_futCutLabel():''}</span>`:'';
+  // cc#1198 COVERAGE ON SCREEN. The Futures tab showed one unrealised number over a subset of the
+  // book with nothing saying it was a subset, so it read as a reconciliation failure against
+  // Equity. It was never wrong — 6 of 13 rows simply had no futures entry to price.
+  //
+  // THE COUNTS ARE COMPUTED FROM `open`, THE ALREADY-FILTERED ROWS, and NOT from FUTBOOK.priced /
+  // FUTBOOK.unpriced, which are whole-book totals. This file's own cc#817/cc#880 note names that
+  // trap: filtered rows sitting beneath an unfiltered headline. Pick Long, or one basket, and the
+  // served totals would describe a book the table is no longer showing.
+  //
+  // The two reasons are kept apart because they are different problems with different fixes. No
+  // futures bar at entry is missing DATA and a backfill cures it. A cash-basis fill means the bar
+  // exists and the book's stored entry disagrees with it — that is a fill recorded on the wrong
+  // basis, and no amount of backfilling changes it. Collapsing them into one "unpriced" number
+  // would hide that distinction from the one person who can act on it.
+  const _fPriced = _fut ? open.filter(x=>x.unrealised_pnl!==null&&x.unrealised_pnl!==undefined).length : 0;
+  const _fNoBar  = _fut ? open.filter(x=>x._futGapReason==='no_bar_at_entry').length : 0;
+  const _fCash   = _fut ? open.filter(x=>x._futGapReason==='cash_basis_fill').length : 0;
+  const _fBits   = [];
+  if(_fNoBar) _fBits.push(`${_fNoBar} no futures bar at entry`);
+  if(_fCash)  _fBits.push(`${_fCash} cash-basis fill${_fCash===1?'':'s'}`);
+  // Sub-line, not the headline: the big number stays the position count so the card keeps the
+  // shape every other card on this row has. In Equity mode this is the empty string and the
+  // markup is byte-identical to what it was (cc#885).
+  const _posSub = (_fut && _fBits.length)
+    ? `<div class="v-sub">${_fPriced} priced &middot; ${_fBits.join(' &middot; ')}</div>` : '';
+  // The as-of stamp answers "as of when", which the tab never said. The amber chip fires only when
+  // the served cmp_stale is true — that is, the newest futures bar in the book predates the last
+  // session that actually traded. On 21-Aug that was exactly the case and nothing on screen showed
+  // it: futures CMP was Thursday's close beside a Friday equity book.
+  const _stale = !!(_fut && FUTBOOK && FUTBOOK.cmp_stale);
+  const _staleChip = _stale
+    ? ` <span style="font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:1px 3px;vertical-align:middle">STALE</span>`
+    : '';
+  const _asOf = (_fut && FUTBOOK && FUTBOOK.cmp_as_of)
+    ? ` &middot; FUT as of ${FUTBOOK.cmp_as_of}${_staleChip}` : '';
+  const _unrealSub = _fut
+    ? `<div class="v-sub">${_fPriced} of ${open.length} position${open.length===1?'':'s'}${_asOf}</div>`
+    : '';
   const cards=`<div class="cards">
-    <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
-    <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
+    <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div>${_posSub}</div>
+    <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div>${_unrealSub}</div>
     <div class="card"><div class="k">Realised P&L${_reTag}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
     <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
