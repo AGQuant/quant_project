@@ -43,6 +43,10 @@ html,body{margin:0;padding:0;background:var(--bg);}
 .adx .card .strip .b .v{font-size:14px;font-weight:600;margin-top:2px;letter-spacing:-.3px;}
 .adx .card .go{font-size:10px;font-weight:600;letter-spacing:.3px;color:var(--blu);margin-top:14px;}
 .adx .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:12px;}
+/* cc#1215: below 1024px Pay-in and Payout collapse away and Net pay-in stays. On a narrow screen
+   the net is the number worth keeping, and eleven columns on a phone is not a table, it is a
+   horizontal scroll pretending to be one. */
+@media(max-width:1023px){.adx .lg{display:none;}}
 /* cc#1212 — the ledger sheet. There was no popout on this page to reuse, so this is built on the
    page's own tokens rather than importing a pattern from elsewhere: it inherits the theme the
    contract sets, in both directions, with nothing hardcoded.
@@ -307,8 +311,21 @@ html,body{margin:0;padding:0;background:var(--bg);}
       /* cc#1205: nulls sort last, same as every other numeric column here — a client we cannot
          measure alpha for is not the worst performer. */
       if(k==='alpha_pct') return (p.alpha_pct==null?-Infinity:p.alpha_pct);
+      /* cc#1215: the three ledger columns sort like every other numeric one here, and a client
+         with no ledger sorts LAST rather than as a zero - we do not know what they paid in, and
+         a zero would rank them below someone who genuinely paid nothing. */
+      if(k==='payin_total')  return p.payin_total;
+      if(k==='payout_total') return p.payout_total;
+      if(k==='net_payin')    return p.net_payin;
       return 0; }
-    return ps.slice().sort(function(a,b){ var va=val(a), vb=val(b); if(va<vb) return -dir; if(va>vb) return dir; return 0; });
+    /* cc#1215: NULLS LAST IN BOTH DIRECTIONS, which is what the alpha column above has always
+       CLAIMED to do. Returning -Infinity for a missing value only achieves it descending; sort
+       the other way and every client we cannot measure floats to the top. Handled in the
+       comparator instead, so it holds for any column whose val() returns null. */
+    return ps.slice().sort(function(a,b){ var va=val(a), vb=val(b);
+      var na=(va==null||va===-Infinity), nb=(vb==null||vb===-Infinity);
+      if(na&&nb) return 0; if(na) return 1; if(nb) return -1;
+      if(va<vb) return -dir; if(va>vb) return dir; return 0; });
   }
   function renderTable(ps){
     if(!ps.length){ listEl.innerHTML='<div class="empty">No matching clients.</div>'; return; }
@@ -316,9 +333,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
     /* cc#1098: the visible header becomes "From" — it is a tracking start, not a freshness stamp.
        The sort KEY stays the literal 'asof' on purpose: sortRows() switches on it, and renaming
        the key would silently break the column sort while looking like a copy edit. */
-    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right']];
+    /* cc#1215: three ledger columns after Invested. The `lg` class is what the 1024px rule
+       below hides - Pay-in and Payout collapse away and Net pay-in stays, because on a narrow
+       screen the net is the number worth keeping. */
+    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['payin_total','Pay-in','right'],['payout_total','Payout','right'],['net_payin','Net pay-in','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right']];
+    var COLLAPSE={payin_total:1,payout_total:1};
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
-    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'" style="text-align:'+c[2]+';padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
+    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
           pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)')),
           acol=(p.alpha_pct==null?'var(--muted)':(p.alpha_pct>=0?'var(--grn)':'var(--red)'));
@@ -327,13 +348,33 @@ html,body{margin:0;padding:0;background:var(--bg);}
         /* cc#1098: same guard as the cards — an em-dash when there is no tracking_date, never
            created_at wearing a "From" label. dmy() already returns an em-dash for null, so the
            guard is startDate() supplying null rather than a fallback date. */
-        + '<td style="padding:10px 12px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;">'+(p.n_holdings||0)+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;">'+inr(p.invested)+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;">'+inr(p.current)+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:10px 8px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;">'+(p.n_holdings||0)+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;">'+inr(p.invested)+'</td>'
+        /* cc#1215: the three ledger columns. An em-dash with a tooltip when there is no ledger,
+           never a zero - the same distinction the cards make.
+           NET PAY-IN is a link into the cc#1212 sheet via the SAME delegated [data-lgpid]
+           handler the cards use. The card says do not fork it, so it is not forked: this is a
+           second trigger on one handler, not a second sheet. The row itself navigates to the
+           report, so this cell stops the click reaching it. */
+        + '<td class="lg" style="padding:10px 8px;text-align:right;">'
+          + (p.payin_total==null?'<span title="no ledger on record">—</span>':inr(p.payin_total))+'</td>'
+        + '<td class="lg" style="padding:10px 8px;text-align:right;">'
+          + (p.payout_total==null?'<span title="no ledger on record">—</span>':inr(p.payout_total))+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;">'
+          + (p.net_payin==null
+              ? '<span title="no ledger on record">—</span>'
+              : '<span data-lgpid="'+esc(p.id)+'" data-lgname="'+esc(clientName(p))+'"'
+                + ' style="color:var(--blu);cursor:pointer;" title="Open the ledger">'
+                + inr(p.net_payin)+'</span>'
+                + (Math.abs((p.net_payin||0)-(p.invested||0))>1000
+                    ? ' <span title="Invested is set manually for this account" style="color:var(--faint)">*</span>'
+                    : ''))
+          + '</td>'
+        + '<td style="padding:10px 8px;text-align:right;">'+inr(p.current)+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
         + '<td style="padding:10px 12px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">View →</td></tr>';
     }).join('');
     listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:13.5px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
@@ -382,12 +423,17 @@ html,body{margin:0;padding:0;background:var(--bg);}
     /* cc#1212: ONE delegated listener on the list, not one per card. renderCards() replaces
        listEl.innerHTML on every keystroke in the search box, so per-card binds would be lost on
        the next render and stack up on the ones that survived. */
+    /* CAPTURE PHASE, deliberately. Table rows carry an inline onclick that navigates to the
+       report, and an event reaches the row on the way UP - so a bubbling listener here runs
+       after the navigation has already been ordered. Capturing means this sees the click on the
+       way DOWN and can stop it before the row ever gets it. The cards do not have this problem;
+       the table does, and one listener has to serve both. */
     listEl.addEventListener('click', function(e){
       var b=e.target.closest && e.target.closest('[data-lgpid]');
       if(!b) return;
       e.preventDefault(); e.stopPropagation();
       openLedger(b.getAttribute('data-lgpid'), b.getAttribute('data-lgname'));
-    });
+    }, true);
     tabCards.addEventListener('click',function(){ setView('cards'); });
     tabTable.addEventListener('click',function(){ setView('table'); });
     searchEl.addEventListener('input',render);
