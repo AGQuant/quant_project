@@ -10,21 +10,21 @@
 <style>
 /* cc#651 part_2 — Adaptive Dashboard: the client-facing shelf of Portfolio Health Reports.
    Theme tokens mirror scorr_health.html (light default, dark via [data-theme="dark"]). */
-:root{
-  --bg:#ECEEF3; --paper:#F8F9FC; --mast:#07111F;
-  --ink:#07111F; --faint:#B8BECC; --muted:#5B667D;
-  --rule:rgba(7,17,31,.10); --hover:rgba(7,17,31,.03);
-  --blu:#1847DF; --grn:#0B6E42; --red:#B52432;
-}
-:root[data-theme="dark"]{
-  --bg:#0A0F1E; --paper:#101830; --mast:#060B16;
-  --ink:#E9EEFB; --faint:#5E6B8F; --muted:#8C99BD;
-  --rule:rgba(148,166,210,.14); --hover:rgba(148,166,210,.05);
-  --blu:#4D7CFE; --grn:#2FD48B; --red:#FF5C6C;
-}
+/* cc#1203 push 16: this page's light AND dark palettes both moved to the injected contract.
+   Every dark value it declared was already the contract's exactly; the light values shift a
+   little (ground ECEEF3 to F5F7FB, green 0B6E42 to 0E9F62, red B52432 to DE3A52, blue 1847DF to
+   3563E9, amber 8F5C07 to B47B10, faint B8BECC to 93A0BE), which is one light palette replacing
+   another rather than a page losing its own.
+
+   --ink was RENAMED, not deleted. On this page --ink is the TEXT colour - 07111F on light,
+   E9EEFB on dark - while the contract's --ink is 0A0F1E, the near-black GROUND. Same name,
+   opposite ends of the page. Deleting the block without the rename would have put near-black
+   text on a near-black page in dark mode. It says --txt now. */
+:root{}
+
 html,body{margin:0;padding:0;background:var(--bg);}
 .adx,.adx *,.adx *::before,.adx *::after{box-sizing:border-box;margin:0;padding:0;}
-.adx{color:var(--ink);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;max-width:1180px;margin:0 auto;}
+.adx{color:var(--txt);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;max-width:1180px;margin:0 auto;}
 .adx .pos{color:var(--grn);} .adx .neg{color:var(--red);}
 .adx a{text-decoration:none;color:inherit;}
 /* masthead pill-safe (clears fixed theme/logout pills) */

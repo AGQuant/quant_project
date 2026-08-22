@@ -65,6 +65,12 @@
   --surface2     : #182241;
   --card         : #121A33;
   --card2        : #0D1428;
+  /* cc#1203 push 16: names owned by /adaptive and /health, which share one vocabulary.
+     --mast is a masthead that stays near-black in BOTH themes on purpose - a contract can hold a
+     token that does not flip, and pretending it flips would be worse than naming it here. */
+  --mast         : #060B16;
+  --hover        : rgba(148,166,210,.05);
+  --flagbg       : rgba(255,92,108,.05);
   --bull         : #2FD48B;
   --bear         : #FF5C6C;
 }
@@ -107,6 +113,10 @@ html[data-theme="light"] {
   --glow-spot    : rgba(14,147,176,.4);
   --gridline     : rgba(23,40,80,.035);
   --shadow       : 0 10px 28px rgba(23,40,80,.08);
+  /* cc#1203 push 16 — see the dark block for why --mast barely moves. */
+  --mast         : #07111F;
+  --hover         : rgba(7,17,31,.03);
+  --flagbg       : rgba(181,36,50,.03);
   --ink          : #17203A;
   --surface      : #FFFFFF;
   --surface2     : #F7F9FD;
@@ -203,6 +213,12 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 16: /adaptive and /health spellings. The -t family is their tint suffix. */
+  --paper     : var(--panel);
+  --grn-t     : var(--grn-d);
+  --red-t     : var(--red-d);
+  --amb-t     : var(--amber-row);
+  --blu-t     : var(--blu-row);
   /* cc#1203 push 15: two more names the contract already carries at identical values. */
   --gold      : var(--amber);
   --grey      : var(--mut);

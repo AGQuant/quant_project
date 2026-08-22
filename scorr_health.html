@@ -17,28 +17,22 @@
    ============================================================ */
 
 /* THEME TOKENS — light default (cc#348), dark via [data-theme="dark"] */
-:root{
-  --bg:#ECEEF3; --paper:#F8F9FC; --mast:#07111F;
-  --ink:#07111F; --faint:#B8BECC; --muted:#5B667D;
-  --rule:rgba(7,17,31,.10); --hover:rgba(7,17,31,.025);
-  --blu:#1847DF; --grn:#0B6E42; --red:#B52432; --amb:#8F5C07;
-  --grn-t:rgba(11,110,66,.10); --red-t:rgba(181,36,50,.10);
-  --amb-t:rgba(143,92,7,.10); --blu-t:rgba(24,71,223,.10);
-  --flagbg:rgba(181,36,50,.03);
-}
-:root[data-theme="dark"]{
-  --bg:#0A0F1E; --paper:#101830; --mast:#060B16;
-  --ink:#E9EEFB; --faint:#5E6B8F; --muted:#8C99BD;
-  --rule:rgba(148,166,210,.14); --hover:rgba(148,166,210,.05);
-  --blu:#4D7CFE; --grn:#2FD48B; --red:#FF5C6C; --amb:#F5B94A;
-  --grn-t:rgba(47,212,139,.12); --red-t:rgba(255,92,108,.12);
-  --amb-t:rgba(245,185,74,.12); --blu-t:rgba(77,124,254,.13);
-  --flagbg:rgba(255,92,108,.05);
-}
+/* cc#1203 push 16: this page's light AND dark palettes both moved to the injected contract.
+   Every dark value it declared was already the contract's exactly; the light values shift a
+   little (ground ECEEF3 to F5F7FB, green 0B6E42 to 0E9F62, red B52432 to DE3A52, blue 1847DF to
+   3563E9, amber 8F5C07 to B47B10, faint B8BECC to 93A0BE), which is one light palette replacing
+   another rather than a page losing its own.
+
+   --ink was RENAMED, not deleted. On this page --ink is the TEXT colour - 07111F on light,
+   E9EEFB on dark - while the contract's --ink is 0A0F1E, the near-black GROUND. Same name,
+   opposite ends of the page. Deleting the block without the rename would have put near-black
+   text on a near-black page in dark mode. It says --txt now. */
+:root{}
+
 html,body{margin:0;padding:0;background:var(--bg);}
 /* scoped reset — never touches middleware-injected pills / PWA nav */
 .phr, .phr *, .phr *::before, .phr *::after{box-sizing:border-box;margin:0;padding:0;}
-.phr{color:var(--ink);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;
+.phr{color:var(--txt);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;
      max-width:1180px;margin:0 auto;}
 .phr .pos{color:var(--grn);} .phr .neg{color:var(--red);}
 
@@ -67,7 +61,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
 /* misc */
 .phr .lbl{font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);}
 .phr .note{font-size:12.5px;color:var(--muted);line-height:1.7;margin-top:9px;}
-.phr .note b{color:var(--ink);font-weight:600;}
+.phr .note b{color:var(--txt);font-weight:600;}
 .phr .flag{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--muted);margin:8px 0;line-height:1.6;}
 .phr .flag .dot{width:6px;height:6px;border-radius:50%;margin-top:5px;flex:none;}
 .phr .rrow{display:grid;grid-template-columns:100px 1fr 44px;gap:10px;align-items:center;}
@@ -361,13 +355,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
   <div style="padding:22px 24px;border-right:1px solid var(--rule);">
     <div class="lbl" style="margin-bottom:14px;">Key Highlights</div>
     <div style="display:flex;flex-direction:column;gap:7px;" id="hr-highlights">
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">01</span><span><b style="color:var(--ink);">71% profitable</b> — healthy breadth</span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">02</span><span>Largecap <b style="color:var(--ink);">below 50%</b> — aggressive tilt</span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">03</span><span>Only <b style="color:var(--ink);">6% weak-GVM</b> capital</span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">04</span><span><b style="color:var(--ink);">Beating</b> Nifty 50 and Nifty 500 · 1yr</span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">05</span><span>PE premium to Nifty, <b style="color:var(--ink);">discount to sectors</b></span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">06</span><span>Top-5 sector concentration <b style="color:var(--ink);">73%</b> — monitor</span></div>
-      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">07</span><span>Avoid-rated holding — <b style="color:var(--ink);">replacements ready</b></span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">01</span><span><b style="color:var(--txt);">71% profitable</b> — healthy breadth</span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">02</span><span>Largecap <b style="color:var(--txt);">below 50%</b> — aggressive tilt</span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">03</span><span>Only <b style="color:var(--txt);">6% weak-GVM</b> capital</span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">04</span><span><b style="color:var(--txt);">Beating</b> Nifty 50 and Nifty 500 · 1yr</span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">05</span><span>PE premium to Nifty, <b style="color:var(--txt);">discount to sectors</b></span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">06</span><span>Top-5 sector concentration <b style="color:var(--txt);">73%</b> — monitor</span></div>
+      <div style="display:flex;gap:8px;font-size:13px;color:var(--muted);"><span style="color:var(--faint);flex:none;">07</span><span>Avoid-rated holding — <b style="color:var(--txt);">replacements ready</b></span></div>
     </div>
   </div>
 
@@ -687,17 +681,17 @@ html,body{margin:0;padding:0;background:var(--bg);}
       + '<div style="font-size:13px;color:rgba(255,255,255,.45);margin-top:6px;">Excel / CSV / PDF, or paste rows — symbol, qty, avg price</div></div></div>'
       + '<div style="background:var(--paper);padding:28px 32px;display:flex;flex-direction:column;gap:18px;max-width:640px;">'
       + '<div><div class="lbl" style="margin-bottom:8px;">Upload file</div>'
-      + '<input id="hr-file" type="file" accept=".xlsx,.xls,.csv,.pdf" style="font-size:14px;color:var(--ink);"></div>'
+      + '<input id="hr-file" type="file" accept=".xlsx,.xls,.csv,.pdf" style="font-size:14px;color:var(--txt);"></div>'
       + '<div style="text-align:center;color:var(--faint);font-size:12px;">— or —</div>'
       + '<div><div class="lbl" style="margin-bottom:8px;">Paste rows</div>'
-      + '<textarea id="hr-paste" rows="7" placeholder="RELIANCE, 50, 2400&#10;TCS, 20, 3200" style="width:100%;font-family:\'IBM Plex Mono\',monospace;font-size:14px;padding:10px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:3px;"></textarea></div>'
+      + '<textarea id="hr-paste" rows="7" placeholder="RELIANCE, 50, 2400&#10;TCS, 20, 3200" style="width:100%;font-family:\'IBM Plex Mono\',monospace;font-size:14px;padding:10px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);border-radius:3px;"></textarea></div>'
       + '<div><div class="lbl" style="margin-bottom:8px;">Portfolio name</div>'
-      + '<input id="hr-pname" type="text" value="My Portfolio" style="width:100%;font-size:14px;padding:9px 10px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:3px;"></div>'
+      + '<input id="hr-pname" type="text" value="My Portfolio" style="width:100%;font-size:14px;padding:9px 10px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);border-radius:3px;"></div>'
       + '<button id="hr-parse" style="font-family:\'IBM Plex Mono\',monospace;font-size:13px;font-weight:600;padding:11px 20px;border:none;background:var(--blu);color:#fff;border-radius:3px;letter-spacing:.3px;cursor:pointer;align-self:flex-start;">ANALYZE →</button>'
       + '<div id="hr-parse-msg" style="font-size:13px;color:var(--muted);"></div>'
       + '<div id="hr-grid"></div></div>'
       + '<div style="background:var(--paper);padding:0 32px 32px;max-width:820px;">'
-      + '<a href="/adaptive" style="display:inline-flex;align-items:center;gap:6px;font-family:\'IBM Plex Mono\',monospace;font-size:12px;font-weight:600;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:20px;text-decoration:none;letter-spacing:.3px;">Client portfolios &#8594;</a></div>';
+      + '<a href="/adaptive" style="display:inline-flex;align-items:center;gap:6px;font-family:\'IBM Plex Mono\',monospace;font-size:12px;font-weight:600;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);border-radius:20px;text-decoration:none;letter-spacing:.3px;">Client portfolios &#8594;</a></div>';
     $('hr-parse').addEventListener('click', doParse);
     // cc#1014: the saved-portfolios shelf moved to the Adaptive Dashboard (the client-facing shelf).
     // /health is the report builder + viewer only now — loadSaved() and its /api/health/portfolios
@@ -732,7 +726,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
         if(c.tracking_date) sub.push('since '+esc(c.tracking_date));
         var total=(p.total_portfolio!=null)?p.total_portfolio:(p.current||0);
         return '<a href="/health?pid='+p.id+'" style="display:flex;justify-content:space-between;align-items:center;gap:12px;'
-          + 'text-decoration:none;color:var(--ink);padding:12px 14px;border:1px solid var(--rule);border-radius:4px;min-height:44px;background:var(--bg);">'
+          + 'text-decoration:none;color:var(--txt);padding:12px 14px;border:1px solid var(--rule);border-radius:4px;min-height:44px;background:var(--bg);">'
           + '<div style="min-width:0;"><div style="font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(c.name||p.name||('Portfolio '+p.id))+'</div>'
           + '<div style="font-size:12.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+sub.join(' · ')+'</div></div>'
           + '<div style="text-align:right;flex:none;"><div style="font-size:15px;font-weight:600;">'+inr(total)+'</div>'
@@ -743,7 +737,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
       var inactHtml='';
       if(inactive.length){
         var irows=inactive.map(function(p){var c=p.client||{};return '<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 4px;border-bottom:1px solid var(--rule);font-size:13px;">'
-          + '<a href="/health?pid='+p.id+'" style="color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(c.name||p.name||('Portfolio '+p.id))+'</a>'
+          + '<a href="/health?pid='+p.id+'" style="color:var(--txt);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(c.name||p.name||('Portfolio '+p.id))+'</a>'
           + '<span style="color:var(--muted);flex:none;">'+(p.cash>0?inr(p.cash):'—')+'</span></div>';}).join('');
         inactHtml='<details style="margin-top:16px;"><summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);padding:6px 0;">Inactive clients <span>'+inactive.length+'</span></summary>'
           + '<div style="margin-top:6px;">'+irows+'</div></details>';
@@ -774,18 +768,18 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var fl=$('hr-repair-flags'); if(fl) fl.textContent=zeros?('· '+zeros+' row'+(zeros===1?'':'s')+' missing avg price'):'';
     var rows=hs.map(function(h,ix){ var z=rpZero(h);
       return '<tr data-ix="'+ix+'">'
-        +'<td style="padding:4px;"><input class="rp-sym" value="'+esc(h.symbol||'')+'" style="width:110px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);"></td>'
-        +'<td style="padding:4px;"><input class="rp-qty" value="'+(h.qty!=null?h.qty:'')+'" style="width:70px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;"></td>'
-        +'<td style="padding:4px;white-space:nowrap;"><input class="rp-avg" value="'+(h.avg_price!=null?h.avg_price:'')+'" style="width:80px;font-size:13px;padding:4px;border:1px solid '+(z?'var(--red)':'var(--rule)')+';background:var(--bg);color:var(--ink);text-align:right;">'+(z?' <span style="color:var(--red);font-size:10px;">avg?</span>':'')+'</td>'
+        +'<td style="padding:4px;"><input class="rp-sym" value="'+esc(h.symbol||'')+'" style="width:110px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);"></td>'
+        +'<td style="padding:4px;"><input class="rp-qty" value="'+(h.qty!=null?h.qty:'')+'" style="width:70px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);text-align:right;"></td>'
+        +'<td style="padding:4px;white-space:nowrap;"><input class="rp-avg" value="'+(h.avg_price!=null?h.avg_price:'')+'" style="width:80px;font-size:13px;padding:4px;border:1px solid '+(z?'var(--red)':'var(--rule)')+';background:var(--bg);color:var(--txt);text-align:right;">'+(z?' <span style="color:var(--red);font-size:10px;">avg?</span>':'')+'</td>'
         +'<td style="padding:4px;"><button type="button" onclick="rpDel('+ix+')" style="font-size:12px;padding:3px 8px;border:1px solid var(--rule);background:var(--bg);color:var(--muted);cursor:pointer;">&#10005;</button></td></tr>';
     }).join('');
     body.innerHTML='<div style="overflow-x:auto;"><table style="width:100%;"><thead><tr>'
       +'<th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Symbol</th><th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Qty</th><th style="text-align:left;font-size:11px;color:var(--faint);padding:4px;">Avg</th><th></th></tr></thead>'
       +'<tbody id="hr-repair-tb">'+rows+'</tbody></table></div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;">'
-      +'<button type="button" onclick="rpAdd()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">+ Add row</button>'
-      +'<button type="button" onclick="rpMergePreview()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">Merge duplicates…</button>'
-      +'<button type="button" onclick="rpToggle()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;">'+(inactive?'Activate':'Deactivate')+'</button>'
+      +'<button type="button" onclick="rpAdd()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);cursor:pointer;">+ Add row</button>'
+      +'<button type="button" onclick="rpMergePreview()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);cursor:pointer;">Merge duplicates…</button>'
+      +'<button type="button" onclick="rpToggle()" style="font-size:13px;padding:8px 14px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);cursor:pointer;">'+(inactive?'Activate':'Deactivate')+'</button>'
       +'<button type="button" onclick="rpSave()" style="font-size:13px;font-weight:600;padding:8px 16px;border:none;background:var(--grn);color:#fff;cursor:pointer;margin-left:auto;">Save changes</button>'
       +'</div><div id="hr-repair-msg" style="font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-line;"></div>';
   }
@@ -839,10 +833,10 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var body=rows.map(function(r,ix){
       var okc = r.resolved?'var(--grn)':'var(--red)';
       return '<tr data-ix="'+ix+'">'
-        + '<td style="padding:6px 8px;"><input class="g-sym" style="width:120px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);" value="'+esc(r.symbol||r.input||'')+'"></td>'
+        + '<td style="padding:6px 8px;"><input class="g-sym" style="width:120px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);" value="'+esc(r.symbol||r.input||'')+'"></td>'
         + '<td style="padding:6px 8px;font-size:13px;color:var(--muted);">'+esc(r.company_name||'')+'</td>'
-        + '<td style="padding:6px 8px;"><input class="g-qty" style="width:70px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;" value="'+(r.qty!=null?r.qty:'')+'"></td>'
-        + '<td style="padding:6px 8px;"><input class="g-avg" style="width:80px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;" value="'+(r.avg_price!=null?r.avg_price:'')+'"></td>'
+        + '<td style="padding:6px 8px;"><input class="g-qty" style="width:70px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);text-align:right;" value="'+(r.qty!=null?r.qty:'')+'"></td>'
+        + '<td style="padding:6px 8px;"><input class="g-avg" style="width:80px;font-size:13px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--txt);text-align:right;" value="'+(r.avg_price!=null?r.avg_price:'')+'"></td>'
         + '<td style="padding:6px 8px;"><span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:'+okc+';" title="'+(r.resolved?'resolved':'unresolved')+'"></span></td></tr>';
     }).join('');
     g.innerHTML='<div class="lbl" style="margin:6px 0 10px;">Confirm holdings <span style="color:var(--faint);text-transform:none;letter-spacing:0;">— fix symbol / qty / avg, then save</span></div>'
