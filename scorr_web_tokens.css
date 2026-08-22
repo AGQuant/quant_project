@@ -71,6 +71,10 @@
   --mast         : #060B16;
   --hover        : rgba(148,166,210,.05);
   --flagbg       : rgba(255,92,108,.05);
+  /* cc#1203 push 17: text sitting ON an accent fill. v15 puts it on green and on cyan, both
+     bright in dark, so near-black reads. In light those accents darken to 0E9F62 and 0E93B0 and
+     near-black stops reading, so this one genuinely flips to white. */
+  --on-accent    : #0A0F1E;
   --bull         : #2FD48B;
   --bear         : #FF5C6C;
 }
@@ -117,7 +121,15 @@ html[data-theme="light"] {
   --mast         : #07111F;
   --hover         : rgba(7,17,31,.03);
   --flagbg       : rgba(181,36,50,.03);
-  --ink          : #17203A;
+  /* cc#1203 push 17 — see the dark block. */
+  --on-accent    : #FFFFFF;
+  /* cc#1203 push 17: WAS #17203A, which is the dark TEXT colour. That made --ink mean the page
+     GROUND in dark (#0A0F1E) and the TEXT in light - one name, opposite ends of the page,
+     depending on the theme. It arrived that way in push 2, copied verbatim from
+     v8_dashboard, and v15 found it: that page uses --ink as its body background, so in light it
+     painted the body #17203A and its text #17203A too. Invisible. The dark value is the honest
+     one, so light now carries the light ground to match. */
+  --ink          : #F5F7FB;
   --surface      : #FFFFFF;
   --surface2     : #F7F9FD;
   --card         : #FFFFFF;
@@ -213,6 +225,9 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 17: v15 spellings. */
+  --amber-soft: var(--amber-row);
+  --disp      : var(--font);
   /* cc#1203 push 16: /adaptive and /health spellings. The -t family is their tint suffix. */
   --paper     : var(--panel);
   --grn-t     : var(--grn-d);

@@ -7,27 +7,25 @@
 <title>V15 · MF Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
---line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
---text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
---bull:#2FD48B;--bull-soft:rgba(47,212,139,.14);--bear:#FF5C6C;--bear-soft:rgba(255,92,108,.13);
---amber:#F5B94A;--amber-soft:rgba(245,185,74,.14);--blue:#4D7CFE;--cyan:#37D3E8;
---on-accent:#0A0F1E;
---disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:20px}
+:root{
+  /* cc#1203 push 17: this page's light AND dark palettes both moved to the injected contract.
+     Nearly every value it declared was already the contract's exactly - ink, surface, surface2,
+     well, line, text, mut, dim, bull, bear, amber, blue and cyan all matched to the byte. The
+     four that moved are one step each: line2 .24 to .26, bull-soft .14 to .13, bear-soft .13 to
+     .12, amber-soft .14 to .10.
+
+     --r stays. It is shape, not theme, and this page's 20px corner is not the contract's 16px. */
+  --r:20px;
+}
 /* cc#532: real light theme, same storage key (scorr_theme) + data-theme attribute the global
    pwa.js toggle already sets -- token overrides only, no structural changes. Background/text
    pair mirrors the site's existing light chrome (nav #FFFFFF/#0E1630, theme-color #F4F7FE).
    --on-accent stays fixed-dark in both themes: it's for text painted ON a bright accent chip
    (ELITE badge, compare button), never for page background, so it must not flip with --ink. */
-:root[data-theme="light"]{--ink:#F4F7FE;--surface:#FFFFFF;--surface2:#FFFFFF;--well:#EAF0FB;
---line:rgba(20,35,80,.10);--line2:rgba(20,35,80,.18);
---text:#0E1630;--mut:#5B6B94;--dim:#8B96B8;
---bull:#0FA968;--bull-soft:rgba(15,169,104,.12);--bear:#D93B4A;--bear-soft:rgba(217,59,74,.10);
---amber:#B8791A;--amber-soft:rgba(184,121,26,.12);--blue:#3D6BEC;--cyan:#0E8FA8;
---on-accent:#0A0F1E}
+
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{background:var(--ink);color:var(--text);font-family:var(--disp);-webkit-font-smoothing:antialiased;padding:0 16px 110px;position:relative;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--disp);-webkit-font-smoothing:antialiased;padding:0 16px 110px;position:relative;overflow-x:hidden}
 body::before{content:"";position:fixed;inset:0;z-index:-2;
 background:radial-gradient(52% 38% at 78% -6%,rgba(77,124,254,.16),transparent 62%),
 radial-gradient(44% 34% at 8% 12%,rgba(55,211,232,.10),transparent 60%),
