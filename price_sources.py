@@ -89,3 +89,29 @@ def spot_only():
     rather than a futures exclusion. Prefer not_fut() — an exclusion stays correct when
     a new cash source is added, an allow-list silently drops it."""
     return list(SPOT_SOURCES)
+
+
+# cc#1200: the CONTINUOUS cash leg — no futures, and no auction print either.
+#
+# This is the "separately" the SPOT_SOURCES comment above promised. Two callers need it and both
+# were solving it by hand: _write_adr_intraday spells out all four excluded sources inline, and
+# nifty_dwm went the other way and allow-listed the single source 'fyers_eq'.
+#
+# THE ALLOW-LIST IS THE ONE THAT BREAKS, exactly as spot_only's docstring warns. cc#1200 scope 1
+# heals the index cash legs from Yahoo and writes them source='yahoo'. A filter that names
+# 'fyers_eq' cannot see those bars, so the heal would have run, written real data, and left the
+# Nifty day gate reading the same stale number it read before — a fix invisible to the surface it
+# was written for.
+#
+# Auctions are excluded for the cc#855 reason: the 15:15-15:35 auction print must never stand in
+# as "the latest continuous bar". That is a different question from spot-vs-futures, which is why
+# it is a different constant rather than a wider FUT_SOURCES.
+AUCTION_SOURCES = ("fyers_eq_auction", "auction")
+CONTINUOUS_EXCLUDED = FUT_SOURCES + AUCTION_SOURCES
+
+
+def continuous_cash():
+    """The bind value for `COALESCE(source,'') <> ALL(%s)` when a caller wants the continuous
+    cash series: futures out (different instrument), auction prints out (not continuous), and
+    every present or future cash source in — including healed ones."""
+    return list(CONTINUOUS_EXCLUDED)

@@ -945,25 +945,22 @@ def _read_adr_cached(cur, ttl=60):
     return data
 
 
-def _live_nifty_dwm(cur, symbol="NIFTY50"):
-    cur.execute("""
-        SELECT close FROM intraday_prices
-        WHERE symbol = %s AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
-    """, (symbol,))
-    live = cur.fetchone()
-    if not live or live[0] is None: return None
-    latest = float(live[0])
-    cur.execute("""
-        SELECT close FROM raw_prices
-        WHERE symbol = %s AND price_date < CURRENT_DATE ORDER BY price_date DESC LIMIT 30
-    """, (symbol,))
-    hist = cur.fetchall()
-    if len(hist) < 22: return None
-    prev  = float(hist[0][0])
-    week  = float(hist[4][0]) if len(hist) > 4 else float(hist[-1][0])
-    month = float(hist[20][0]) if len(hist) > 20 else float(hist[-1][0])
-    return (round((latest/prev-1)*100,2), round((latest/week-1)*100,2),
-            round((latest/month-1)*100,2), latest)
+# cc#1200 scope 4: this file used to carry its own private _live_nifty_dwm. It was a SECOND
+# implementation of nifty_dwm.live_nifty_dwm — the canonical one, already shared by four callers
+# (tc_v4_endpoints, tc_v4_scan, tc_v4_dual, native_trade_check) — and the copy had drifted in the
+# one way that matters: IT HAD NO SOURCE FILTER AT ALL.
+#
+#     SELECT close FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ...
+#
+# That is the cc#1053 defect domestic_live was fixed for, never applied here. It takes the last
+# bar of ANY source, futures included. NIFTY50 escapes only by accident — its futures leg lives
+# under the separate symbol NIFTY — while BANKNIFTY carries futures under the SAME symbol, so one
+# caller passing BANKNIFTY would have compared a futures print against a cash close from
+# raw_prices. market_mood only ever passed NIFTY50, so it was latent rather than live. Latent is
+# not fixed; it is one argument away.
+#
+# Deleted rather than patched. Two copies of one calculation is the defect; giving the copy a
+# source filter would have left two copies to drift again.
 
 
 @router.get("/market_mood")
@@ -973,23 +970,17 @@ def market_mood():
             advances, declines, unchanged, adr, breadth_source, adr_date = _read_adr_cached(cur)
             adr_indeterminate = adr is None                       # cc#719: feed dead -> INDETERMINATE
             adr_pass = (adr is not None and adr >= 1.0)
-            live_nifty = _live_nifty_dwm(cur, "NIFTY50")
-            if live_nifty:
-                nifty_day, nifty_week, nifty_month, _ = live_nifty
-                nifty_source = "live_intraday"
-            else:
-                cur.execute("SELECT price_date, close FROM raw_prices WHERE symbol='NIFTY50' ORDER BY price_date DESC LIMIT 30")
-                nifty = cur.fetchall()
-                if len(nifty) < 22:
-                    nifty_day = nifty_week = nifty_month = None
-                else:
-                    latest = float(nifty[0][1]); prev = float(nifty[1][1])
-                    week   = float(nifty[5][1]) if len(nifty) > 5 else float(nifty[-1][1])
-                    month  = float(nifty[21][1]) if len(nifty) > 21 else float(nifty[-1][1])
-                    nifty_day   = round((latest/prev-1)*100,2)
-                    nifty_week  = round((latest/week-1)*100,2)
-                    nifty_month = round((latest/month-1)*100,2)
-                nifty_source = "eod_fallback"
+            # cc#1200: the canonical composer. Its 4th return is the SOURCE, where the deleted
+            # private copy returned the latest price — mapped back to this endpoint's existing
+            # vocabulary below so the payload contract does not move.
+            from nifty_dwm import live_nifty_dwm
+            nifty_day, nifty_week, nifty_month, _nsrc = live_nifty_dwm(cur, "NIFTY50")
+            # The EOD branch that used to live here is gone with the private copy, not disabled:
+            # live_nifty_dwm falls back to the raw_prices series itself, on the same 1/5/22-day
+            # anchors, so keeping a second fallback would have been a third implementation of the
+            # same arithmetic sitting behind a dead condition. `eod_fallback` is preserved as the
+            # emitted name so nothing reading nifty_source has to change.
+            nifty_source = "live_intraday" if _nsrc == "live_intraday" else "eod_fallback"
             nifty_day_pass   = nifty_day   is not None and nifty_day   >= 0
             nifty_week_pass  = nifty_week  is not None and nifty_week  >= 0
             nifty_month_pass = nifty_month is not None and nifty_month >= 0

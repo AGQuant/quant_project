@@ -16,6 +16,8 @@ formula unchanged.
 
 from datetime import datetime, time, timedelta, timezone
 
+from price_sources import continuous_cash   # cc#1200: exclusion, never an allow-list
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 _MKT_OPEN = time(9, 15)
@@ -50,22 +52,33 @@ def live_nifty_dwm(cur, symbol: str = "NIFTY50"):
     """
     now = _ist_now()
     if _is_market_hours(now):
+        # cc#1200: was `source='fyers_eq'`, an allow-list of ONE. The index cash legs are now
+        # healed from Yahoo and written source='yahoo' (index_heal.py), and this filter could not
+        # see them — so the heal would have written real bars while this gate went on reading the
+        # stale number it read before. An exclusion sees every cash source, present and future;
+        # an allow-list silently drops each new one. price_sources.spot_only's own docstring says
+        # so, and this is the case that proves it.
         cur.execute("""
             SELECT close FROM intraday_prices
-            WHERE symbol=%s AND timeframe='5m' AND source='fyers_eq'
+            WHERE symbol=%s AND timeframe='5m'
+              AND COALESCE(source,'') <> ALL(%s)
             ORDER BY ts DESC LIMIT 1
-        """, (symbol,))
+        """, (symbol, continuous_cash()))
         row = cur.fetchone()
         latest = float(row[0]) if row and row[0] is not None else None
 
         if latest is not None:
             today_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            # The previous session's last continuous bar. Same exclusion as above, and the same
+            # reason: the anchor must move to the healed series too, or day % would compare a
+            # healed latest against an unhealed anchor — two different series.
             cur.execute("""
                 SELECT close FROM intraday_prices
-                WHERE symbol=%s AND timeframe='5m' AND source='fyers_eq'
+                WHERE symbol=%s AND timeframe='5m'
+                  AND COALESCE(source,'') <> ALL(%s)
                   AND ts < %s AND ts::time BETWEEN '09:15' AND '15:30'
                 ORDER BY ts DESC LIMIT 1
-            """, (symbol, today_open))
+            """, (symbol, continuous_cash(), today_open))
             pr = cur.fetchone()
             prev_close = float(pr[0]) if pr and pr[0] is not None else None
 
