@@ -132,13 +132,22 @@ html,body{margin:0;padding:0;background:var(--bg);}
 
 <!-- ══════════ SNAPSHOT STRIP ══════════ -->
 <div class="g4-snap page" style="background:var(--paper);border-bottom:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr 1fr 320px;">
-  <div style="padding:16px 20px;border-right:1px solid var(--rule);">
+  <div style="padding:16px 20px;border-right:1px solid var(--rule);position:relative;">
     <div class="lbl">Invested</div>
     <div style="font-size:22px;font-weight:600;margin-top:5px;letter-spacing:-.5px;" id="hr-invested">&#8377;13,77,144</div>
+    <!-- cc#1213: shown only when this client has ledger rows. Hidden by default so a client
+         without one never sees a control that would open an empty sheet. -->
+    <button type="button" id="hr-breakup" style="display:none;margin-top:8px;padding:0 10px;
+        min-height:44px;line-height:44px;font-size:10.5px;font-weight:700;letter-spacing:.3px;
+        color:var(--blu);background:transparent;border:1px solid var(--rule);border-radius:8px;
+        cursor:pointer;font-family:inherit;">Breakup</button>
+    <div id="hr-breakup-pop" style="display:none;"></div>
   </div>
   <div style="padding:16px 20px;border-right:1px solid var(--rule);">
     <div class="lbl">Current Value</div>
     <div style="font-size:22px;font-weight:600;margin-top:5px;letter-spacing:-.5px;" id="hr-current">&#8377;14,19,622</div>
+    <!-- cc#1213: the cash line, same muted style as the P&L card's split line beside it. -->
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5;" id="hr-cash-line"></div>
   </div>
   <div style="padding:16px 20px;border-right:1px solid var(--rule);">
     <div class="lbl">P&amp;L</div>
@@ -449,6 +458,103 @@ html,body{margin:0;padding:0;background:var(--bg);}
     // per-holding cost is demoted below. NULL invested (unknown cost, no meta) -> em-dash, never 0.
     set('hr-invested', s.invested!=null ? inr(s.invested) : '—');
     set('hr-current', inr(s.current));
+    /* cc#1213 — the cash line. THE CARD SAYS "X = current value minus cash" AND THAT WOULD BE
+       WRONG HERE, so it is not what this does. In build_report, total_current is the sum of the
+       HOLDINGS and cash is added on top of it: total_pnl = total_current + cash - invested. The
+       founder's own screenshot proves it - 11,63,094 + 3,574 - 10,31,491 = 1,35,177, which is
+       exactly the P&L shown. Subtracting cash from a number that never contained it would show
+       holdings 3,574 short and quietly contradict the P&L printed beside it.
+       So Holdings is the Current Value as displayed, and Cash sits next to it. Cash of zero is
+       shown as a real zero; a portfolio with no meta row at all shows an em-dash, because "this
+       account holds no cash" and "we do not know" are different statements. */
+    /* ── cc#1213 INVESTED BREAKUP ────────────────────────────────────────────────────────
+       Reuses GET /api/health/ledger?pid= from cc#1212 rather than adding a second endpoint that
+       would compute the same three numbers a different way. The button appears only when that
+       call comes back with rows; a client with no ledger sees nothing new at all.
+       Anchored to the Invested card, closes on outside click and on Escape. Fetched once. */
+    (function(){
+      var btn=$('hr-breakup'), pop=$('hr-breakup-pop');
+      if(!btn||!pop||!pid) return;
+      var NAME=(d.portfolio && d.portfolio.name) ? d.portfolio.name : 'Portfolio';
+      var DATA=null, open=false;
+      function money(n){ return (n==null||isNaN(n)) ? '—'
+        : '₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+      function close(){ open=false; pop.style.display='none'; }
+      function draw(){
+        var manual = (DATA.net_payin!=null && s.invested!=null
+                      && Math.abs(DATA.net_payin - s.invested) > 1000);
+        pop.innerHTML =
+          '<div style="position:absolute;z-index:60;left:20px;top:100%;min-width:290px;'
+          + 'background:var(--paper);border:1px solid var(--rule);border-radius:10px;'
+          + 'box-shadow:0 18px 44px rgba(3,7,20,.30);padding:14px 16px;font-size:12px;">'
+          + '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;'
+          +   'color:var(--muted);margin-bottom:9px;">Invested — breakup</div>'
+          + row('Total pay-in', money(DATA.payin_total))
+          + row('Total payout', money(DATA.payout_total))
+          + row('Net pay-in', money(DATA.net_payin), true)
+          + '<div style="height:1px;background:var(--rule);margin:9px 0;"></div>'
+          + row('Invested on record', money(s.invested))
+          /* Plain words. It states that the figure was set by hand and stops there - the report
+             is client-facing and the reason is not the reader's business. */
+          + (manual ? '<div style="margin-top:8px;color:var(--muted);font-size:11px;">'
+                      + 'Invested is set manually for this account.</div>' : '')
+          + '<div style="margin-top:10px;"><a href="#" id="hr-bk-full" style="font-size:11px;'
+          +   'font-weight:700;color:var(--blu);">View full ledger →</a></div>'
+          + '</div>';
+        pop.style.display='block';
+        var full=document.getElementById('hr-bk-full');
+        if(full) full.addEventListener('click', function(e){
+          e.preventDefault();
+          /* cc#1212 owns the sheet. If this page ever gains it, call it; until then the popover
+             lists the rows itself rather than sending the reader to a page that has no sheet. */
+          if(window.ScorrLedger && window.ScorrLedger.open){ close(); window.ScorrLedger.open(pid, NAME); }
+          else { inlineRows(); }
+        });
+      }
+      function row(label, val, strong){
+        return '<div style="display:flex;justify-content:space-between;gap:18px;margin-top:5px;">'
+          + '<span style="color:var(--muted);">'+label+'</span>'
+          + '<span style="font-weight:'+(strong?'700':'600')+';font-variant-numeric:tabular-nums;">'
+          + val+'</span></div>'; }
+      function inlineRows(){
+        var rows=(DATA.rows||[]);
+        var body=rows.map(function(r){
+          return '<tr'+(r.is_internal?' style="color:var(--faint)"':'')+'>'
+            + '<td style="padding:4px 8px 4px 0;white-space:nowrap;">'+(r.txn_date||'')+'</td>'
+            + '<td style="padding:4px 8px;">'+(r.is_internal?'Internal':(r.txn_type==='PAYIN'?'Pay-in':'Payout'))+'</td>'
+            + '<td style="padding:4px 0;text-align:right;font-variant-numeric:tabular-nums;">'+money(r.amount)+'</td></tr>';
+        }).join('');
+        var box=pop.firstChild;
+        box.innerHTML += '<div style="margin-top:10px;max-height:220px;overflow:auto;">'
+          + '<table style="width:100%;border-collapse:collapse;font-size:11px;">'+body+'</table></div>';
+      }
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        if(open){ close(); return; }
+        open=true;
+        if(DATA){ draw(); return; }
+        fetch('/api/health/ledger?pid='+encodeURIComponent(pid), {credentials:'same-origin'})
+          .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function(d){ DATA=d; draw(); })
+          .catch(function(){ close(); });
+      });
+      document.addEventListener('click', function(e){
+        if(open && !pop.contains(e.target) && e.target!==btn) close(); });
+      document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+
+      /* The button is revealed only after the ledger is known to have rows. One probe on load,
+         so a client with no ledger never sees a control that would open an empty popover. */
+      fetch('/api/health/ledger?pid='+encodeURIComponent(pid), {credentials:'same-origin'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){ if(d && (d.rows||[]).length){ DATA=d; btn.style.display='inline-block'; } })
+        .catch(function(){});
+    })();
+
+    var cashEl=$('hr-cash-line');
+    if(cashEl){
+      cashEl.textContent = 'Holdings ' + inr(s.current)
+        + ' · Cash ' + (s.cash==null ? '—' : inr(s.cash));
+    }
     var pnlEl=$('hr-pnl'); if(pnlEl){
       if(s.pnl_abs==null){ pnlEl.textContent='—'; pnlEl.style.color='var(--muted)'; }
       else { pnlEl.textContent=inrSigned(s.pnl_abs); pnlEl.style.color=(s.pnl_abs>=0?'var(--grn)':'var(--red)'); }
