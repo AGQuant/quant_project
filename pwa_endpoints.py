@@ -2198,6 +2198,22 @@ def pwa_scorr_theme_r5_css():
     return Response(SCORR_THEME_R5_CSS, media_type="text/css", headers=_CACHE_1D)
 
 
+# cc#1193 SHARED_CSS_RULE_V1 (session_log 29017): the APP-ONLY half of the R5 theme. Read once at
+# import and served exactly like its sibling above, but main.py injects the link ONLY on /m/* and
+# /preview/* — the web dashboards never fetch it, which is the entire point of splitting it out.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "mobile", "theme_mobile.css"),
+              "r", encoding="utf-8") as _tmf:
+        THEME_MOBILE_CSS = _tmf.read()
+except Exception:
+    THEME_MOBILE_CSS = ""
+
+
+@router.get("/static/theme_mobile.css")
+def pwa_theme_mobile_css():
+    return Response(THEME_MOBILE_CSS, media_type="text/css", headers=_CACHE_1D)
+
+
 # APP_QA_R4 P1: the three-theme token layer (dark / goldday / goldnight), byte-faithful to
 # design_refs/scorr_home_themes_R1.html @ 80da8c6. Served the same way scorr_theme_r5.css is —
 # file at repo root, read once at import, exposed under the /static/ URL namespace. P1 ships the

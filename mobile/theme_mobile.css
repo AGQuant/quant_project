@@ -1,0 +1,43 @@
+/* mobile/theme_mobile.css — APP-ONLY R5 rules. (cc#1193, SHARED_CSS_RULE_V1 session_log 29017)
+ *
+ * WHY THIS FILE EXISTS. scorr_theme_r5.css is loaded by web and app alike from a single injection
+ * point, so an app-only rule written there is live on the web dashboards too. cc#1108 is what that
+ * costs: a bare `.mood` rule for the mobile hero enlarged every badge on web Index Intel.
+ *
+ * WHAT IS IN HERE. Only selectors the cc#1193 audit found rendering on APP SURFACES ALONE —
+ * mobile/*.html, previews/*.html and scorr_digest_mobile.html. Nothing generic, nothing shared.
+ * 41 of the 49 selectors in the shared sheet are genuinely shared or web-only and stayed there;
+ * this is the scalpel, not a split down the middle.
+ *
+ * THE ORDER OF THE THREE `.chd .t` RULES IS LOAD-BEARING and is the order they had in the shared
+ * sheet: the display face and skew first, then display:inline-block (a transform on an inline box
+ * does nothing, which is why that second rule exists at all), then the chalk colour override from
+ * cc#1073. Re-order them and the heading loses either its skew or its colour.
+ *
+ * CASCADE. This file loads AFTER scorr_theme_r5.css, so these rules also sit later in source
+ * order than they used to. That changes nothing: each carries the same
+ * :root:root:not([data-theme="light"]) prefix and the same specificity it had before, and no other
+ * rule in the shared sheet targets these elements at equal specificity — `.t` alone loses to
+ * `.chd .t` on specificity whatever the order.
+ *
+ * DECLARATIONS ARE VERBATIM. This was a MOVE, not a restyle. Not one value was touched.
+ */
+
+:root:root:not([data-theme="light"]) .chd .t{
+  font-family:var(--r5-display);
+  transform:skewX(-6deg);
+  text-transform:uppercase;
+  letter-spacing:.5px;
+}
+:root:root:not([data-theme="light"]) .chd .t{ display:inline-block; transform-origin:left center; }
+:root:root:not([data-theme="light"]) .rnp{ font-family:var(--r5-mono); }
+:root:root:not([data-theme="light"]) .rnb{
+  border-radius:0;
+  clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
+}
+:root:root:not([data-theme="light"]) .ix{
+  border-radius:0 !important;
+  clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
+}
+:root:root:not([data-theme="light"]) .ix .v{ font-family:var(--r5-mono); }
+:root:root:not([data-theme="light"]) .chd .t{ color:var(--r5-chalk); }

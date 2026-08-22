@@ -1,3 +1,21 @@
+/* scorr_theme_r5.css — SHARED. No surface-specific selectors. (SHARED_CSS_RULE_V1, session_log 29017)
+ *
+ * WEB AND APP BOTH LOAD THIS FILE, from one injection point: main.py's _MOBILE_HEAD, which goes to
+ * every path in _PWA_INJECT_PATHS (the web dashboards) as well as /m/* and /preview/*. So a rule
+ * written here for one surface lands on the other, and a generic class name is all it takes.
+ *
+ * That is not hypothetical. cc#1108: a bare `.mood` rule written for the mobile home hero enlarged
+ * every badge on web Index Intel, because three unrelated web containers happen to be called
+ * `.mood`. It was fixed by tightening the selector; this rule fixes the sharing.
+ *
+ * APP-ONLY RULES GO IN mobile/theme_mobile.css, which loads after this file and only on /m/* and
+ * /preview/*. cc#1193 moved .chd .t, .ix, .ix .v, .rnb and .rnp there, and deleted .bottomnav,
+ * .pager, .r5-glow and .rnage as dead. The audit that classified all 49 selectors is in
+ * cc_task_logs under cc#1193.
+ *
+ * Before adding a selector here, ask which surfaces render it. If the answer is one surface, it
+ * does not belong in this file.
+ */
 /* scorr_theme_r5.css — cc#1064 "TELEMETRY DROP"
    =============================================================================================
    Spec: design_refs/scorr_mobile_R5.html at a727abb. Every value below is lifted from it; none
@@ -139,8 +157,7 @@
 :root:root:not([data-theme="light"]) h1,
 :root:root:not([data-theme="light"]) h2,
 :root:root:not([data-theme="light"]) .sect,
-:root:root:not([data-theme="light"]) .card-hd .t,
-:root:root:not([data-theme="light"]) .chd .t{
+:root:root:not([data-theme="light"]) .card-hd .t{
   font-family:var(--r5-display);
   transform:skewX(-6deg);
   text-transform:uppercase;
@@ -148,7 +165,6 @@
 }
 /* transform on an inline element does nothing, so the skew needs a block box to land on. */
 :root:root:not([data-theme="light"]) .card-hd .t,
-:root:root:not([data-theme="light"]) .chd .t,
 :root:root:not([data-theme="light"]) .sect{ display:inline-block; transform-origin:left center; }
 
 /* ALL numbers in mono — R5's rule. These are the app's existing numeric classes; the app
@@ -156,9 +172,7 @@
 :root:root:not([data-theme="light"]) .num,
 :root:root:not([data-theme="light"]) .td-mono,
 :root:root:not([data-theme="light"]) .big-val,
-:root:root:not([data-theme="light"]) .mono,
-:root:root:not([data-theme="light"]) .rnage,
-:root:root:not([data-theme="light"]) .rnp{ font-family:var(--r5-mono); }
+:root:root:not([data-theme="light"]) .mono{ font-family:var(--r5-mono); }
 
 /* ── geometry: one cut corner, never a uniform radius ───────────────────────────────────────
    The cut is 16px into the TOP-RIGHT. Every card class it lands on carries >= 12px padding, so
@@ -178,7 +192,6 @@
 :root:root:not([data-theme="light"]) .pill,
 :root:root:not([data-theme="light"]) .chip,
 :root:root:not([data-theme="light"]) .bdg,
-:root:root:not([data-theme="light"]) .rnb,
 :root:root:not([data-theme="light"]) .tool{
   border-radius:0;
   clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
@@ -187,19 +200,13 @@
 /* ── interactive = pulse, and ONLY interactive (R5 rule 5) ────────────────────────────────── */
 :root:root:not([data-theme="light"]) a{ color:var(--r5-pulse); }
 :root:root:not([data-theme="light"]) a:hover{ color:#9B82FF; }
-/* the news pager's active dot is the one decorative-looking element R5 still paints pulse,
-   because it reports WHICH page you are on — it is state, not decoration. */
-:root:root:not([data-theme="light"]) .pager i.on{ background:var(--r5-pulse); }
 
 /* ── bottom tab bar: volt active tab with the notch ─────────────────────────────────────── */
-:root:root:not([data-theme="light"]) .tabs,
-:root:root:not([data-theme="light"]) .bottomnav{
+:root:root:not([data-theme="light"]) .tabs{
   background:#0A101E; border-top:1px solid var(--r5-edge);
 }
-:root:root:not([data-theme="light"]) .tab.on,
-:root:root:not([data-theme="light"]) .bottomnav a.active{ color:var(--r5-volt); position:relative; }
-:root:root:not([data-theme="light"]) .tab.on::before,
-:root:root:not([data-theme="light"]) .bottomnav a.active::before{
+:root:root:not([data-theme="light"]) .tab.on{ color:var(--r5-volt); position:relative; }
+:root:root:not([data-theme="light"]) .tab.on::before{
   content:""; position:absolute; top:-1px; left:25%; right:25%; height:3px;
   background:var(--r5-volt);
   clip-path:polygon(0 0, 100% 0, calc(100% - 3px) 100%, 3px 100%);
@@ -278,7 +285,6 @@
 :root:root:not([data-theme="light"]) .sg-basket,
 :root:root:not([data-theme="light"]) .badge2,
 :root:root:not([data-theme="light"]) .st,
-:root:root:not([data-theme="light"]) .ix,
 :root:root:not([data-theme="light"]) .tool{
   border-radius:0 !important;
   clip-path:polygon(var(--r5-cut-sm) 0, 100% 0, 100% 100%, 0 100%, 0 var(--r5-cut-sm));
@@ -302,7 +308,6 @@
 /* 5 · NUMBERS — the live home's figure classes join the mono rule (screenshot showed .st .v and
    the ticker prices still in body face). */
 :root:root:not([data-theme="light"]) .st .v,
-:root:root:not([data-theme="light"]) .ix .v,
 :root:root:not([data-theme="light"]) .row .pv,
 :root:root:not([data-theme="light"]) .row .pc,
 :root:root:not([data-theme="light"]) .sg-total,
@@ -436,23 +441,7 @@
    card-title classes, so every mobile and web surface picks this up at once with no page edit.
    Size, weight and the skew set above are untouched — colour only. The chevrons and `>` links
    keep pulse because they are not titles and are not matched here. */
-:root:root:not([data-theme="light"]) .card-hd .t,
-:root:root:not([data-theme="light"]) .chd .t{ color:var(--r5-chalk); }
-
-/* ─── AQUA GLOW + SECTION EYEBROWS · cc#1073 ────────────────────────────────────────────────
-   23878 does not define aqua as a flat colour. It defines it as "#35E0FF … + glow text-shadow
-   0 0 12px rgba(53,224,255,.4)" — the glow is part of the token, not a decoration on top of it.
-   So it is declared once, as a class anything can take, and applied to the one element the same
-   entry names: section headings.
-
-   `.sect` IS the app's section heading, on every screen. cc#1068 already made it aqua-with-glow
-   — by writing the hex into mobile/home.html, which themes exactly one page and is the per-page
-   duplication rule 2 exists to stop. Here it lands for every `.sect` in the app at once, from
-   the layer that is already injected everywhere. The home page's own rule now agrees with this
-   one rather than being the only thing holding it up; it is left in place deliberately, since
-   removing it would open a gap on that page for no gain. Colour and shadow only — the flex/gap
-   line item 6 above sets is untouched, and nothing here can hide anything. */
-:root:root:not([data-theme="light"]) .r5-glow,
+:root:root:not([data-theme="light"]) .card-hd .t{ color:var(--r5-chalk); }
 :root:root:not([data-theme="light"]) .sect{
   color:var(--r5-aqua);
   text-shadow:0 0 12px rgba(53, 224, 255, .4);

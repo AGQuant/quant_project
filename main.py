@@ -353,6 +353,13 @@ _MOBILE_APP_DARK = (
     b"}catch(e){}})();</script>"
 )
 
+# cc#1193 SHARED_CSS_RULE_V1 (session_log 29017): the APP-ONLY R5 rules, linked on /m/* and
+# /preview/* only. Build-stamped like every other asset in _MOBILE_HEAD so a deploy busts the
+# 1-day cache — a new stylesheet served max-age=86400 with no stamp is the cc#1060 outage.
+_THEME_MOBILE_LINK = (
+    b'<link rel="stylesheet" href="/static/theme_mobile.css?v=' + _BUILD_B + b'">'
+)
+
 
 def _find_outside_comments(hay: bytes, needle: bytes) -> int:
     """cc#821: index of `needle` in `hay`, ignoring occurrences inside an HTML comment.
@@ -511,6 +518,18 @@ async def auth_gate(request: Request, call_next):
                     _at = _find_outside_comments(body, b"</body>")
                 if _at >= 0:
                     _head = _MOBILE_HEAD
+                    # cc#1193 SHARED_CSS_RULE_V1: the app-only half of the R5 theme, injected on
+                    # APP SURFACES ONLY. It must come AFTER _MOBILE_HEAD, which is where
+                    # scorr_theme_r5.css is linked — same rules, same specificity, later sheet.
+                    #
+                    # /preview/* is included alongside /m/* deliberately. Previews are live mobile
+                    # review screens served by preview_endpoints and given this same PWA injection
+                    # a few lines up (`do_pwa = path in _PWA_INJECT_PATHS or _prev`), and two of
+                    # the moved selectors — .chd and .ix — render there. Injecting only on /m/
+                    # would have left previews/home_v2.html and previews/digest.html unstyled,
+                    # which is the one visible way this change could have gone wrong.
+                    if path.startswith("/m/") or _prev:
+                        _head = _head + _THEME_MOBILE_LINK
                     if path.startswith("/m/"):
                         _head = _head + _MOBILE_APP_DARK   # cc#1064: dark-only surface, stamped honestly
                     body = body[:_at] + _head + body[_at:]
