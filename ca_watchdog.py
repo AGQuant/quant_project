@@ -316,6 +316,7 @@ def master_watchdog_note():
     One terse, red-flags-first summary across every watchdog. Each source is guarded so the note always
     writes, even if one probe fails."""
     red = []
+    warn = []   # cc#1196: curation problems, which are not outages and must not read as one
     lines = {}
 
     # (a) signal-writer / scheduler engine health
@@ -410,9 +411,35 @@ def master_watchdog_note():
     except Exception as e:
         lines["universe_gap"] = f"err:{str(e)[:60]}"
 
-    note = {"status": "RED" if red else "OK",
-            "headline": ("ALL CLEAR" if not red else " · ".join(red[:6])),
-            "red_flags": red, "detail": lines}
+    # cc#1196 SEGMENT_MIN_SIZE_RULE_V1: any segment in the latest gvm_scores holding fewer than
+    # three names. Below three there is no peer set worth the word - the peers panel shows one
+    # other stock, and a sector aggregate over two rows is an average of a coin flip.
+    #
+    # WARNING, NOT RED, deliberately. A thin segment is a curation job, not an outage, and it
+    # should not sit in the same headline as a dead feed. It surfaces so someone folds it into a
+    # neighbour, which is what the two entries added to SEGMENT_MERGE in this card did.
+    try:
+        with psycopg.connect(DB_URL) as _c, _c.cursor() as _cur:
+            _cur.execute("""SELECT segment, count(*) FROM gvm_scores
+                            WHERE score_date = (SELECT max(score_date) FROM gvm_scores)
+                              AND segment IS NOT NULL AND segment <> ''
+                            GROUP BY segment HAVING count(*) < 3
+                            ORDER BY count(*), segment""")
+            _thin = [{"segment": r[0], "n": int(r[1])} for r in _cur.fetchall()]
+        lines["segment_min_size"] = _thin
+        if _thin:
+            warn.append("segments under 3 names: "
+                        + ", ".join("%s (%d)" % (t["segment"], t["n"]) for t in _thin[:4]))
+    except Exception as e:
+        lines["segment_min_size"] = f"err:{str(e)[:60]}"
+
+    note = {"status": "RED" if red else ("WARN" if warn else "OK"),
+            # cc#1196: a warning still reaches the headline when nothing is red, because a note
+            # that reads ALL CLEAR while a segment has two names in it is not clear at all. It
+            # never displaces a red flag, though - an outage outranks a curation job.
+            "headline": (" · ".join(red[:6]) if red
+                         else (" · ".join(warn[:4]) if warn else "ALL CLEAR")),
+            "red_flags": red, "warn_flags": warn, "detail": lines}
     _oplog("watchdog_daily", "MASTER_WATCHDOG_NOTE", note)
     return note
 
