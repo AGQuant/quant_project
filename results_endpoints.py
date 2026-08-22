@@ -731,6 +731,113 @@ def results_card_context(symbol: str):
     return out
 
 
+# ── cc#1191 scope 2: the whole segment's results in one payload ──────────────────────────────
+# ONE SQL. The card says no per-row loops and it is not a style note: 130 segments exist and the
+# largest carry 20+ members, so a per-symbol round trip would be the cc#857 mistake again (3 peers
+# x 3 queries became 9 trips there; here it would be 23 x 4).
+#
+# THE TWO ESTIMATE SOURCES ARE NEVER BLENDED, per estimate_sources_locked on the card:
+#   vs_est   is screener_raw.expected_quarterly_net_profit ONLY - a per-QUARTER absolute, compared
+#            against the fundamentals_history actual for the SAME quarter. Labelled "vs Screener
+#            run-rate" so nobody reads it as a broker consensus.
+#   fy27_est is input_raw.fy27_growth ONLY - Trendlyne consensus, the same field the R card's FY27
+#            row already reads, 1,536 of 2,008 filled.
+# Never input_raw.fy27_revenue_est (0 rows), never fy27_outlook (retired at cc#609), never the
+# screener qoq_* columns (killed for result surfaces at cc#1192, one card ago).
+_SEGMENT_RESULTS_SQL = """
+    WITH seg AS (
+        SELECT UPPER(g.symbol) AS sym, g.gvm_score, g.company_name
+        FROM gvm_scores g
+        WHERE g.segment = %s AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)),
+    rep AS (
+        SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS sym, ex_date
+        FROM earnings_calendar
+        WHERE UPPER(ticker) IN (SELECT sym FROM seg) AND status = 'reported'
+          AND verified <> 'false' AND ex_date >= %s
+        ORDER BY UPPER(ticker), ex_date DESC),
+    nxt AS (
+        SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS sym, ex_date
+        FROM earnings_calendar
+        WHERE UPPER(ticker) IN (SELECT sym FROM seg) AND ex_date >= %s
+        ORDER BY UPPER(ticker), ex_date ASC),
+    q AS (
+        SELECT UPPER(f.symbol) AS sym, f.period_end,
+               NULLIF(replace(COALESCE(f.metrics->>'Sales', f.metrics->>'Revenue'),',',''),'')::numeric AS rev,
+               NULLIF(replace(f.metrics->>'Net Profit',',',''),'')::numeric AS pat
+        FROM fundamentals_history f
+        WHERE f.section = 'quarters' AND f.period_type = 'quarter'
+          AND UPPER(f.symbol) IN (SELECT sym FROM seg)),
+    ranked AS (
+        SELECT sym, period_end, rev, pat,
+               MAX(period_end) OVER (PARTITION BY sym) AS max_pe FROM q),
+    yoy AS (
+        SELECT c.sym, c.pat AS act_pat,
+               CASE WHEN p.rev > 0 THEN (c.rev - p.rev) / p.rev * 100 END AS sales_yoy,
+               CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END AS pat_yoy
+        FROM ranked c
+        LEFT JOIN q p ON p.sym = c.sym
+                     AND p.period_end = (c.period_end - INTERVAL '1 year')::date
+        WHERE c.period_end = c.max_pe)
+    SELECT s.sym, COALESCE(s.company_name, s.sym) AS company, s.gvm_score,
+           r.ex_date AS result_date, n.ex_date AS expected_date,
+           y.sales_yoy, y.pat_yoy, y.act_pat,
+           sr.expected_quarterly_net_profit AS exp_pat,
+           ir.fy27_growth
+    FROM seg s
+    LEFT JOIN rep r  ON r.sym  = s.sym
+    LEFT JOIN nxt n  ON n.sym  = s.sym
+    LEFT JOIN yoy y  ON y.sym  = s.sym
+    LEFT JOIN screener_raw sr ON UPPER(sr.nse_code) = s.sym
+    LEFT JOIN input_raw    ir ON UPPER(ir.nse_code) = s.sym
+    ORDER BY (r.ex_date IS NOT NULL) DESC, r.ex_date DESC NULLS LAST, s.gvm_score DESC NULLS LAST
+"""
+
+
+def _segment_results(cur, segment, today=None):
+    """Every member of a segment, reported ones first, with the numbers the popout table shows."""
+    d = today or date.today()
+    q_start = _completed_quarter_end(d)
+    cur.execute(_SEGMENT_RESULTS_SQL, (segment, q_start, d))
+    rows, n_reported = [], 0
+    for (sym, company, gvm, rdate, edate, s_yoy, p_yoy, act_pat, exp_pat, fy27) in cur.fetchall():
+        reported = rdate is not None
+        n_reported += 1 if reported else 0
+        rec = {"symbol": sym, "company": company, "gvm": _f(gvm), "reported": reported,
+               "sales_yoy": _f(s_yoy), "pat_yoy": _f(p_yoy), "fy27_est": _f(fy27)}
+        if reported:
+            rec["result_date"] = str(rdate)
+            # vs_est: the SAME BEAT/IN-LINE/MISS bands _expectations uses (+/-2%), not a second
+            # set of thresholds. A card and its segment table disagreeing on what counts as a
+            # beat would be the drift cc#1192 just finished removing from this file.
+            _e, _a = _f(exp_pat), _f(act_pat)
+            if _e not in (None, 0) and _a is not None:
+                dev = (_a - _e) / abs(_e) * 100.0
+                rec["vs_est"] = {"side": "profit", "dev_pct": round(dev, 1),
+                                 "tag": "BEAT" if dev > 2 else ("MISS" if dev < -2 else "IN-LINE")}
+            else:
+                rec["vs_est"] = None
+        else:
+            # An unreported member is greyed with its own next expected date. Absent is absent —
+            # no date is invented when the calendar has none.
+            rec["expected_date"] = str(edate) if edate else None
+        rows.append(rec)
+    return {"segment": segment, "quarter": _fq_label(q_start),
+            "n_reported": n_reported, "n_total": len(rows), "rows": rows}
+
+
+@router.get("/api/results/segment/{segment}")
+def results_segment(segment: str):
+    """cc#1191 scope 2 — SEGMENT RESULTS, the table behind the R card's segment chip."""
+    seg = (segment or "").strip()
+    if not seg:
+        return JSONResponse({"error": "segment required"}, status_code=400)
+    with _conn() as conn, conn.cursor() as cur:
+        out = _cached("segresults", seg, date.today(), lambda: _segment_results(cur, seg))
+    if not out["rows"]:
+        return JSONResponse({"error": "unknown segment", "segment": seg}, status_code=404)
+    return out
+
+
 @router.get("/api/results/peers/{symbol}")
 def results_peers(symbol: str):
     """cc#1192 scope 2 — the peer result block on its own, WITH the subject in it.
