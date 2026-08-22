@@ -1180,12 +1180,17 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   </div>
   <div id="pane-v8">
 
+  <!-- cc#1201: TWO DIFFERENT TIMES LIVE IN THIS BANNER, and conflating them is what made it wrong.
+       WHEN it appears is the EXCHANGE close, 15:30 — unchanged, sharing the NSE OPEN/CLOSED clock.
+       WHAT it says is the ENGINE freeze, which moved to 15:20, written by JS from
+       ENGINE_FREEZE_IST so label and pill cannot drift. The 15:20 in the markup is only what a
+       reader sees before the first tick. -->
   <!-- cc#238 (V8_EOD_NO_REQUALIFICATION_V1): frozen-status banner. Shows when IST >= 15:30 on a
        trading day (or anytime market is closed), so a post-close signal never reads as live. -->
   <div id="frozenBanner" style="display:none;margin:0 0 12px;padding:10px 14px;border-radius:10px;
        background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.45);color:var(--amber, #b45309);
        font-size:12px;font-weight:700;text-align:center;letter-spacing:.02em">
-    &#128274; Market Closed &mdash; Final as of 15:30 IST &middot; figures frozen until 09:15 next trading day
+    &#128274; Market Closed &mdash; Final as of <span id="freezeAt">15:20</span> IST &middot; figures frozen until 09:15 next trading day
   </div>
 
   <!-- cc#760: the full-width Data Integrity strip is REMOVED — its content now lives in the header
@@ -2864,6 +2869,13 @@ function statusBadge(status,reason){
 function rowClass(status){if(status==='OPEN')return'row-open';return'';}
 function mobCardClass(status){if(status==='OPEN')return'mob-open';return'';}
 
+// cc#1201 V10_TICK_WINDOW_V1.1 (session_log 29067): the ENGINE's last tick — the minute V8 and
+// V10 both stop writing. NOT the exchange close: NSE trades to 15:30 and the OPEN/CLOSED clock
+// inside tick() is unchanged at minute 930. This mirrors scheduler.CASH_CONTINUOUS_END_STR, the
+// boundary the predicate actually uses. A mirror rather than a read because this page is static
+// HTML served to a browser and cannot import the scheduler; serving it through an endpoint is the
+// durable fix and is written on the card rather than smuggled in here.
+const ENGINE_FREEZE_IST='15:20';
 function tick(){
   const ist=new Date(Date.now()+(5*60+30)*60000);
   const hh=String(ist.getUTCHours()).padStart(2,'0'),mm=String(ist.getUTCMinutes()).padStart(2,'0'),ss=String(ist.getUTCSeconds()).padStart(2,'0');
@@ -2875,7 +2887,10 @@ function tick(){
   const fb=document.getElementById('frozenBanner'); if(fb) fb.style.display=open?'none':'';
   const ab=document.getElementById('autoBtn');
   if(ab){ if(open){ ab.textContent='Auto 5m: '+(AUTO?'ON':'OFF'); ab.classList.toggle('on',AUTO); }
-          else { ab.textContent='Frozen · 15:30'; ab.classList.remove('on'); } }
+          else { ab.textContent='Frozen · '+ENGINE_FREEZE_IST; ab.classList.remove('on'); } }
+  // cc#1201: the banner's as-of stamp comes from the SAME constant as the pill. They were two
+  // separate literals both reading 15:30, which is how the old boundary outlived itself in copy.
+  const fa=document.getElementById('freezeAt'); if(fa) fa.textContent=ENGINE_FREEZE_IST;
 }
 setInterval(tick,1000);tick();
 
@@ -4204,7 +4219,7 @@ function renderRaw(){
       <td class="${cls(x.vs_pp)}">${sign(x.vs_pp)}%${x.r1_touch?' <span title="High touched R1 today" style="color:var(--grn);font-weight:700">&#10003;</span>':''}</td>
       <td title="${x.room_level||''}">${x.room_pct==null?'--':(x.room_pct>=0?'+':'')+Number(x.room_pct).toFixed(1)+'%'}</td></tr>`;
   return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
-    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">24 signal-driving columns (full six-basket coverage) — Symbol pinned; indices (NIFTY50/BANKNIFTY) on top. RSI(D)=daily, tRSI(W)=true calendar-weekly; vs-PP%=CMP vs pivot PP; ROOM%=side-aware room to R1 (above PP) / S1·S2 (below), hover names the level; &#10003; in vs-PP% = day high touched R1 (SOB trigger). Hour%/Fall%/Rec2D%/Intra%/WkLow%/vs-PP%/ROOM%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:30.</div>`+
+    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">24 signal-driving columns (full six-basket coverage) — Symbol pinned; indices (NIFTY50/BANKNIFTY) on top. RSI(D)=daily, tRSI(W)=true calendar-weekly; vs-PP%=CMP vs pivot PP; ROOM%=side-aware room to R1 (above PP) / S1·S2 (below), hover names the level; &#10003; in vs-PP% = day high touched R1 (SOB trigger). Hour%/Fall%/Rec2D%/Intra%/WkLow%/vs-PP%/ROOM%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:20 (cc#1201 engine freeze; NSE itself trades to 15:30).</div>`+
     sortTbl('raw',
     [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(D)"],["true_weekly_rsi","tRSI(W)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"],["vs_pp","vs-PP%"],["room_pct","ROOM%"]],
     rest,row,

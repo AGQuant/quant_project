@@ -269,6 +269,12 @@ def _is_market_hours(now):
     return (9,15) <= t <= (15,30)
 
 
+# cc#1201: the ONE place the engine day ends. Both the predicate and every surface that prints
+# the freeze time read this, so the boundary and the copy can never disagree again.
+CASH_CONTINUOUS_END = (15, 20)
+CASH_CONTINUOUS_END_STR = "%02d:%02d" % CASH_CONTINUOUS_END
+
+
 # ── cc#855 SEBI CLOSING AUCTION SESSION: the day now has THREE boundaries, not one ─────────────
 def _is_cash_continuous(now):
     """09:15-15:15 — while F&O-eligible CASH stocks have a CONTINUOUS market.
@@ -280,10 +286,29 @@ def _is_cash_continuous(now):
     both 03-Aug and 04-Aug, which never occurred between 20-Jul and 31-Jul. Every 5-min tick after
     15:15 re-stamped v8_qualified.signal_ts and adr_intraday with the same prices, so the last
     three writes of the day were duplicates of the 15:15 state at best, and contaminated by the
-    auction print at worst."""
+    auction print at worst.
+
+    cc#1201 / V10_TICK_WINDOW_V1.1 (session_log 29067, FOUNDER AMENDMENT 22-Aug): the end moves
+    15:15 -> 15:20, so BOTH engines have the same last tick. V10 narrows into it from 15:30; V8
+    widens into it from 15:15. One predicate, both registrations, no second boundary.
+
+    THE FOUNDER SHOULD KNOW WHAT THE WIDENING COSTS, because it is the exact thing cc#855 removed
+    and the tape has not changed since. MEASURED on 19 and 20-Aug, source=fyers_eq 5m:
+        15:05  212 symbols      15:10  212 symbols
+        15:15  6 symbols (19-Aug) / 98 (20-Aug)        15:20  NO BAR AT ALL
+    The last COMPLETE cash bar of the day is 15:10. So a 15:20 tick re-reads a bar it has already
+    written — the writer's cc#259 staleness gate passes it (10 minutes old, under the 12-minute
+    threshold) and it re-stamps v8_qualified and adr_intraday with prices that have not moved.
+    That is a duplicate WRITE, not a duplicate TRADE: the paper-entry guards are unchanged and a
+    re-stamp cannot open a second position. The cost is data hygiene, which is the founder's call
+    to spend, and he has made it explicitly and in writing. Logged rather than argued.
+
+    THE END MINUTE IS A NAMED CONSTANT because cc#1201 scope 6 makes surfaces PRINT it. A literal
+    here plus a literal in the dashboard is how "Frozen · 15:30" outlived the 15:15 boundary for
+    three weeks."""
     if now.weekday() >= 5: return False
     t = (now.hour, now.minute)
-    return (9,15) <= t <= (15,15)
+    return (9,15) <= t <= CASH_CONTINUOUS_END
 
 
 def _is_session_live(now):
@@ -4299,6 +4324,12 @@ async def _scheduler_loop():
         if _is_cash_continuous(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_pivot_star)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
+            # cc#1201 (V10_TICK_WINDOW_V1.1, session_log 29067): Index Intel stops when V8 stops.
+            # It was on _is_market_hours and ran to 15:30, three ticks past the writer. Same
+            # predicate now, so there is one engine day and not two — and it NARROWS here, from
+            # 15:30 to 15:20, which is the half of this card that removes auction contamination
+            # rather than adding it.
+            _spawn(_bg_v10_tick)
         # cc#876 item 3: dead-man page. Dispatched on the BARE 5-minute tick with NO outer gate on
         # purpose — the job carries its own 09:45-15:30 trading-day gate, so no future edit to
         # _is_cash_continuous or to the guardian's dispatch can silently disable the one alarm whose
@@ -4319,7 +4350,12 @@ async def _scheduler_loop():
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_v14_cycle)
             _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
-            _spawn(_bg_v10_tick)
+            # cc#1201: _bg_v10_tick LEFT THIS BLOCK and now dispatches on _is_cash_continuous with
+            # the pivot star, a few lines up. It could NOT simply take this whole block with it:
+            # six other jobs share this guard, and one of them is _bg_v8_paper_exit, the LIVE exit
+            # pass. Switching the block would have quietly moved paper exits from 15:30 to 15:20
+            # — a trading-behaviour change nobody asked for, hidden inside a copy tweak about a
+            # freeze label. Only the V10 tick moved.
             _spawn(_bg_pcr_intraday)
             _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
             _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
