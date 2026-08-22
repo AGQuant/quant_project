@@ -52,26 +52,50 @@ async function apiGet(path, opts) {
   return r.json();
 }
 
-// cc#344 dark + cc#348 theme-aware: the React palette follows data-theme (read at load; the global
-// toggle reloads, so C is always correct for the active theme). Dark = design_refs R2 tokens.
-const _DARK_C = {
-  bg: "#0A0F1E", card: "#121A33", border: "rgba(148,166,210,.14)",
-  accent: "#4D7CFE", gold: "#F5B94A", green: "#2FD48B",
-  red: "#FF5C6C", orange: "#F5B94A", purple: "#9B7CFF",
-  text: "#E9EEFB", muted: "#8C99BD", gridLine: "rgba(148,166,210,.12)",
-  nav: "#121A33", gPillar: "#2FD48B", vPillar: "#F5B94A", mPillar: "#4D7CFE",
+// cc#344 dark, cc#348 theme-aware, cc#1203 push 19: this page no longer carries its own two
+// palettes. It READS the contract, so there is exactly one place a colour is defined and this
+// React surface cannot drift from the CSS pages beside it. Its dark values were already the
+// contract's to the byte; its light values had drifted a little and now match too.
+//
+// Each read carries the old hardcoded value as a fallback, so a missing token degrades to what
+// this page rendered before rather than to nothing - an empty custom property would otherwise
+// paint an invisible chart.
+//
+// THE RELOAD LISTENER BELOW IS A FIX FOR A REGRESSION I SHIPPED IN PUSH 4. The comment that used
+// to sit here said "the global toggle reloads, so C is always correct for the active theme", and
+// that was true until push 4 removed the reload. C is computed once at module load and
+// PILLAR_INFO bakes its values in at module scope, so after that change a reader could switch
+// theme and this page would keep painting the old palette until they refreshed by hand. Every
+// other surface repaints from CSS variables and needs no reload; this one is the only page in
+// the repo that reads data-theme from JavaScript, so the listener lives here rather than being
+// forced back onto everybody.
+function _tok(name, fallback) {
+  try {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return (v && v.trim()) || fallback;
+  } catch (e) { return fallback; }
+}
+const C = {
+  bg:      _tok('--bg', '#0A0F1E'),
+  card:    _tok('--panel', '#121A33'),
+  border:  _tok('--line', 'rgba(148,166,210,.14)'),
+  accent:  _tok('--blu', '#4D7CFE'),
+  gold:    _tok('--amber', '#F5B94A'),
+  green:   _tok('--grn', '#2FD48B'),
+  red:     _tok('--red', '#FF5C6C'),
+  orange:  _tok('--amber', '#F5B94A'),
+  purple:  _tok('--violet', '#9B7CFF'),
+  text:    _tok('--txt', '#E9EEFB'),
+  muted:   _tok('--mut', '#8C99BD'),
+  gridLine:_tok('--gridline', 'rgba(148,166,210,.12)'),
+  nav:     _tok('--panel', '#121A33'),
+  gPillar: _tok('--grn', '#2FD48B'),
+  vPillar: _tok('--amber', '#F5B94A'),
+  mPillar: _tok('--blu', '#4D7CFE'),
 };
-const _LIGHT_C = {
-  bg: "#F4F7FE", card: "#FFFFFF", border: "rgba(20,35,80,.10)",
-  accent: "#3D6BEC", gold: "#C98A12", green: "#0FA968",
-  red: "#E0405A", orange: "#C98A12", purple: "#7C3AED",
-  text: "#0E1630", muted: "#5B6B94", gridLine: "rgba(20,35,80,.08)",
-  nav: "#FFFFFF", gPillar: "#0FA968", vPillar: "#C98A12", mPillar: "#3D6BEC",
-};
-const C = (function () {
-  try { return document.documentElement.getAttribute('data-theme') === 'light' ? _LIGHT_C : _DARK_C; }
-  catch (e) { return _LIGHT_C; }
-})();
+try {
+  window.addEventListener('scorr:theme', function () { location.reload(); });
+} catch (e) {}
 
 const GVM_PILLAR_MAP = {
   sales_5y:"G", sales_3y:"G", profit_5y:"G", profit_3y:"G",
