@@ -940,6 +940,44 @@ def _bg_tc_position_stars_v2():
         _tc_position_stars_v2_running = False
 
 
+_tc_screener_v2_running = False           # cc#1172 push 4: four-bucket screener batch guard
+
+def _bg_tc_screener_v2():
+    """cc#1172 push 4 — the screener, ACTUALLY RUN on the four-bucket engine.
+
+    WHY THIS JOB DID NOT EXIST UNTIL NOW, recorded because it is the whole defect. Push 4 built
+    tc_screener_v2 properly: the module, the table, the router, an admin trigger. Nothing ever
+    called it. The 16:00 job dispatches trade_check_v34_endpoints.run_tc_screener_precompute(),
+    which is the OLD path writing tc_screener_cache, and it reports rows and status ok every
+    night — so the health line looked perfect while tc_screener_v2 sat at ZERO ROWS for two days.
+    Built, mounted, registered and never once executed. That is ENGINE_LIVENESS_RULE exactly:
+    registered is not live, and a green status on the job beside it proves nothing about this one.
+
+    ALONGSIDE, NOT INSTEAD OF. The 16:00 old-path job keeps running and keeps writing the archive
+    table, per the card: tc_screener_cache is left exactly as it is. This runs five minutes later
+    so the two can be compared row-for-row on the same evening's data before any read path moves.
+
+    ALL DAYS, like the 16:00 job it shadows, which has no weekday gate either. A screener cache
+    built on a Saturday scores Friday's metrics, which is what a cache is for.
+    """
+    global _tc_screener_v2_running
+    if _job_active("bg_tc_screener_v2") is not True:
+        return _SKIPPED
+    if _tc_screener_v2_running:
+        return _SKIPPED
+    _tc_screener_v2_running = True
+    try:
+        import tc_screener_v2 as _scv2
+        r = _scv2.run_tc_screener_v2()
+        log.info("tc_screener_v2: %s", r)
+        return r
+    except Exception as e:
+        log.error("tc_screener_v2: %s", e)
+        raise
+    finally:
+        _tc_screener_v2_running = False
+
+
 def _bg_smartgain_mtm():
     """cc#123 (P0): refresh smartgain_holdings.ltp/updated_at from the live feed
     every 5 min during market hours. The stored ltp was a manual stamp that froze
@@ -4196,7 +4234,11 @@ async def _scheduler_loop():
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
             _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
+            # cc#1172 push 4: the FOUR-BUCKET screener, five minutes behind the old one so both
+            # write the same evening and can be diffed. Registry-gated inside.
             _spawn(_bg_stock_news_watchdog)      # cc#245: stock-news staleness/all-blocked alert
+        if h == 16 and m == 5:
+            _spawn(_bg_tc_screener_v2)           # cc#1172 push 4: four-bucket screener -> tc_screener_v2
         if now.weekday() < 5 and h == 16 and m == 10:
             _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
         if h == 16 and m == 15:
