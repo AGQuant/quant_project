@@ -8,9 +8,12 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 /* cc#344 page 8: DARK TERMINAL re-skin (design_refs R2 palette) */
-:root{--green:#2FD48B;--blue:#4D7CFE;--gold:#F5B94A;--red:#FF5C6C;--bg:#0A0F1E;--ink:#E9EEFB;--grey:#8C99BD;--card:#121A33;--line:rgba(148,166,210,.14);--surface2:#182241;--well:#0D1428}
+:root{
+    /* cc#1203 push 15: colour tokens moved to the injected contract, so the page follows the
+       reader's theme instead of being a dark island. */
+  }
 html,body{height:100%}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);font-size:13px;display:flex;flex-direction:column}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:13px;display:flex;flex-direction:column}
 /* -- Canonical Scorr model-nav -- */
 .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel, #121A33);border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06);flex-shrink:0}
 .model-nav::-webkit-scrollbar{display:none}
@@ -50,7 +53,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .rng{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .rng:last-child{margin-bottom:0}
 .rng input[type=range]{flex:1;accent-color:var(--blue);height:3px}
-.rng .v{font-size:11px;font-weight:700;color:var(--ink);min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+.rng .v{font-size:11px;font-weight:700;color:var(--txt);min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
 .rng .e{font-size:9.5px;color:var(--grey);width:26px;font-weight:600}
 .pills{display:flex;flex-wrap:wrap;gap:6px}
 .pill{padding:5px 10px;border:1px solid rgba(148,166,210,.14);border-radius:13px;background:var(--panel, #121A33);color:var(--muted, #8C99BD);font-size:10.5px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;transition:.1s}
@@ -60,7 +63,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 input[type=number]{width:100%;padding:7px 8px;border:1px solid rgba(148,166,210,.14);border-radius:7px;font-size:12px;font-family:inherit;outline:none;background:var(--panel, #121A33)}
 input[type=number]:focus{border-color:var(--blue)}
 .nums .sepw{color:var(--grey);font-size:11px;flex-shrink:0}
-.tog{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink)}
+.tog{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--txt)}
 .tog input{width:15px;height:15px;accent-color:var(--green)}
 /* segment search dropdown */
 .segsearch input[type=text]{width:100%;padding:7px 9px;border:1px solid rgba(148,166,210,.14);border-radius:7px;font-size:12px;font-family:inherit;outline:none;margin-bottom:6px}
@@ -87,7 +90,7 @@ input[type=number]:focus{border-color:var(--blue)}
 .row .gvm{font-weight:800;font-size:13px;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
 .gvm.g4{color:var(--green)}.gvm.g3{color:var(--blue)}.gvm.g2{color:var(--gold)}.gvm.g1{color:var(--red)}
 .vchip{display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;border-radius:11px;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap}
-.vchip.g4{background:rgba(47,212,139,.14);color:var(--volt, #2FD48B)}.vchip.g3{background:rgba(77,124,254,.14);color:var(--pulse, #4D7CFE)}.vchip.g2{background:rgba(245,185,74,.14);color:var(--amber, #F5B94A)}.vchip.g1{background:rgba(255,92,108,.14);color:var(--heat, #FF5C6C)}
+.vchip.g4{background:rgba(47,212,139,.14);color:var(--grn)}.vchip.g3{background:rgba(77,124,254,.14);color:var(--pulse, #4D7CFE)}.vchip.g2{background:rgba(245,185,74,.14);color:var(--amber, #F5B94A)}.vchip.g1{background:rgba(255,92,108,.14);color:var(--red)}
 .more{text-align:center;padding:16px 10px;color:var(--grey);font-size:11.5px}
 .empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--grey);font-size:13px;padding:60px 20px;line-height:1.6}
 /* skeleton */

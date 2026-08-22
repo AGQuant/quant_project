@@ -13,18 +13,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fable Room · Scorr</title>
 <style>
-:root{--bg:#0A0F1E;--card:#121A33;--bd:rgba(148,166,210,.14);
---txt:#E9EEFB;--mut:#8C99BD;--acc:#4D7CFE;--gold:#F5B94A;--grn:#2FD48B;--red:#FF5C6C;}
+:root{
+    /* cc#1203 push 15: colour tokens moved to the injected contract, so the page follows the
+       reader's theme instead of being a dark island. */
+  }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:14px}
 .wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px}
-.head{display:flex;align-items:center;gap:12px;padding:16px 0 12px;border-bottom:1px solid var(--bd);position:sticky;top:0;background:var(--bg);z-index:5}
+.head{display:flex;align-items:center;gap:12px;padding:16px 0 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
 .head h1{font-size:17px;font-weight:800;margin:0}
 .head .sub{font-size:12.5px;color:var(--mut)}
 .pulse{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35);border-radius:12px;padding:3px 10px}
-.pulse.off{color:var(--mut);background:rgba(148,166,210,.12);border-color:var(--bd)}
+.pulse.off{color:var(--mut);background:rgba(148,166,210,.12);border-color:var(--line)}
 .filters{display:flex;gap:6px;padding:12px 0;flex-wrap:wrap}
-.f{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--bd);background:transparent;color:var(--mut);font-family:inherit}
+.f{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--mut);font-family:inherit}
 .f.on{border-color:var(--acc);background:rgba(77,124,254,.12);color:var(--acc)}
 .f .n{font-family:ui-monospace,Menlo,monospace;font-size:11px;opacity:.75;margin-left:5px}
 .tk{margin:22px 0 10px;display:flex;align-items:center;gap:10px}
@@ -33,7 +35,7 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,Bl
 .tk .st{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:5px;padding:2px 7px;flex-shrink:0;margin-left:auto}
 .st.run{color:var(--gold);background:rgba(245,185,74,.14);border:1px solid rgba(245,185,74,.35)}
 .st.done{color:var(--grn);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.35)}
-.st.wait{color:var(--mut);background:rgba(148,166,210,.12);border:1px solid var(--bd)}
+.st.wait{color:var(--mut);background:rgba(148,166,210,.12);border:1px solid var(--line)}
 .st.stop{color:var(--red);background:rgba(255,92,108,.14);border:1px solid rgba(255,92,108,.35)}
 .msg{display:flex;flex-direction:column;margin:10px 0}
 .msg.fable{align-items:flex-end}
@@ -41,7 +43,7 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,Bl
 .meta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mut);margin-bottom:4px;flex-wrap:wrap}
 .who{font-weight:800;letter-spacing:.04em}
 .who.cc{color:var(--mut)} .who.fb{color:var(--acc)} .who.ot{color:var(--mut);opacity:.8}
-.bub{max-width:76%;border-radius:12px;padding:11px 15px;border:1px solid var(--bd);background:var(--card);line-height:1.55;font-size:13px;color:var(--mut);white-space:pre-wrap;overflow-wrap:anywhere}
+.bub{max-width:76%;border-radius:12px;padding:11px 15px;border:1px solid var(--line);background:var(--card);line-height:1.55;font-size:13px;color:var(--mut);white-space:pre-wrap;overflow-wrap:anywhere}
 .msg.fable .bub{background:rgba(77,124,254,.10);border-color:rgba(77,124,254,.30)}
 .msg.other .bub{max-width:70%;opacity:.85;font-size:12.5px}
 .kind{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;border-radius:4px;padding:1px 6px}

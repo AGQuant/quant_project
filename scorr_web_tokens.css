@@ -203,6 +203,9 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 15: two more names the contract already carries at identical values. */
+  --gold      : var(--amber);
+  --grey      : var(--mut);
   /* cc#1203 push 13: fpc_v11's own spelling of four names the contract already carries, at
      identical values. Aliased rather than renamed in the page because there is no collision. */
   --text      : var(--txt);
