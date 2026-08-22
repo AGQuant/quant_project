@@ -1753,9 +1753,24 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
 
 def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_date: date,
                                        gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """SELL_REVERSAL_V7-B — the LIVE sell_reversal spec. cc#1100, session_log 26363 filters_v7b.
+    """SELL_REVERSAL_V7-C — the LIVE sell_reversal spec. cc#1206, session_log 29123.
 
-    FOUNDER RULED LIVE, NOT SHADOW (19-Aug-2026, relayed in cc_task_logs 2793). V7-B REPLACES the
+    V7-C SUPERSEDES V7-B (cc#1100) ON THE LIVE BASKET and retires ONE gate: fall_from_r1, the
+    ">= 3% below R1" distance test. The founder's complaint was that two R1 gates read as one, and
+    they were not measuring the same thing — r1_touch asks whether price REACHED R1 in the last
+    three days, fall_from_r1 asked how far it had since dropped below it. The distance is already
+    covered by day_1d, mom_2d and room, so the distance test went and the touch stayed. r1_touch
+    and its SQL are byte-identical.
+
+    THE VALUE IS STILL MEASURED. `_sr_fall_r1` is computed and written to the row snapshot as
+    before; only the AND and the funnel lost it. A retired gate is not a reason to stop recording
+    the number, and the signal card still displays it.
+
+    THE FUNCTION NAME STILL SAYS v7b, deliberately. Renaming it would touch every dispatch site
+    for no behavioural gain, and the version this handler serves is stated here and in
+    BASKET_VERSIONS, which is what any surface actually reads.
+
+    FOUNDER RULED LIVE, NOT SHADOW (19-Aug-2026, relayed in cc_task_logs 2793). V7-B REPLACED the
     V6.1 filter set on this basket. Same basket tag `sell_reversal`, same SELL slot pool, same book.
     The earlier shadow build (a separate `sell_reversal_v7b` tag behind the s1_reclaim_obs
     ring-fence) is WITHDRAWN and removed — a second tag would have split the book in two.
@@ -1765,7 +1780,8 @@ def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_dat
     is the failed bounce off R1. The stock's position inside its 52-week range is context, not the
     identity of the setup (founder, 19-Aug ~01:40).
 
-    THE TWELVE GATES (verbatim from cc_task_logs 2791):
+    THE ELEVEN GATES (V7-B's twelve, verbatim from cc_task_logs 2791, less (9) fall_from_r1
+    which cc#1206 retired):
       (1)  R1-touch: day HIGH >= that day's R1 on any of the last 3 trading days
       (2)  day_1d in [-2, 0]        the BAND, not negative-only — see the note below
       (3)  dma_20 < 0
@@ -1857,16 +1873,21 @@ def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_dat
         s["_r1_touch"] = s["symbol"] in r1_touch
         base.append(s)
 
+    # cc#1206: the gate count comes from the registry, never from a literal. BASKET_FILTERS is the
+    # single source for what this basket screens on, so anything that counts gates must read it.
+    _SR_GATE_N = len(BASKET_FILTERS["sell_reversal"])
+
     def _sw_le(s):        # sector_week <= -0.5
         v = s.get("sector_week")
         return v is not None and float(v) <= -0.5
 
-    def _fall_ok(s):      # fall from R1 >= 3%
-        v = s.get("_sr_fall_r1")
-        return v is not None and v >= 3.0
+    # cc#1206: _fall_ok is gone with the gate. `_sr_fall_r1` is still COMPUTED above and still
+    # written to the row snapshot below, because it is displayed as a value on the signal card —
+    # grepped before deleting: snap["fall_from_r1"] reads it. Retiring a gate is not a reason to
+    # stop measuring the thing it gated on.
 
-    # cc#364-style INDEPENDENT per-filter pass counts across `base`. V7-B has NO heavy final stage
-    # — every gate is cheap, so all 12 rows are counted over the same universe and there is no
+    # cc#364-style INDEPENDENT per-filter pass counts across `base`. V7-C has NO heavy final stage
+    # — every gate is cheap, so all 11 rows are counted over the same universe and there is no
     # survivor denominator to carry.
     funnel = {"_universe": len(base)}
     funnel["r1_touch"]      = sum(1 for s in base if s["_r1_touch"])                               # (1)
@@ -1877,7 +1898,6 @@ def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_dat
     funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), None, 30.0))  # (6)
     funnel["rsi_month"]     = sum(1 for s in base if _passes(s.get("rsi_month"), None, 30.0))      # (7)
     funnel["sector_week"]   = sum(1 for s in base if _sw_le(s))                                    # (8)
-    funnel["fall_from_r1"]  = sum(1 for s in base if _fall_ok(s))                                  # (9)
     funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -1.0))         # (10)
     funnel["month_return"]  = sum(1 for s in base if _passes(s.get("month_return"), -10.0, None))  # (11)
     funnel["room"]          = sum(1 for s in base if s["_sr_room_ok"])                             # (12)
@@ -1890,12 +1910,12 @@ def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_dat
                  and _passes(s.get("week_index_52"), None, 30.0)
                  and _passes(s.get("rsi_month"), None, 30.0)
                  and _sw_le(s)
-                 and _fall_ok(s)
                  and _passes(s.get("mom_2d"), -4.0, -1.0)
                  and _passes(s.get("month_return"), -10.0, None)
                  and s["_sr_room_ok"]]
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"sell_reversal_v7b: {len(qualified)} qualified of {len(base)} (12-gate strict AND) [cc#1100]")
+    log.info(f"sell_reversal_v7c: {len(qualified)} qualified of {len(base)} "
+             f"({_SR_GATE_N}-gate strict AND) [cc#1206]")
 
     _upsert_funnel_counts(conn, basket, target_date, funnel)
 
@@ -1921,8 +1941,13 @@ def _write_sell_reversal_v7b_qualified(conn, all_metrics: List[dict], target_dat
             "room_pct":        s.get("_sr_room_pct"),
             "target":          tgt,
             "stop":            stop,
-            "filter_score": 12, "filter_total": 12,
-            "spec": "SELL_REVERSAL_V7B cc#1100",
+            # cc#1206: DERIVED, not typed. This read 12/12 while the registry carried 12 rows, and
+            # would have gone on reading 12/12 after the gate was retired — a row claiming to have
+            # passed a filter that no longer exists. A qualified row has passed every gate in the
+            # registry by definition, so both numbers are the registry's length. The next
+            # retirement moves this on its own.
+            "filter_score": _SR_GATE_N, "filter_total": _SR_GATE_N,
+            "spec": "SELL_REVERSAL_V7C cc#1206",
         }
         try:
             with conn.cursor() as cur:
@@ -2347,8 +2372,14 @@ BASKET_FILTERS = {
         # untouched. The word STRICT in that predicate's comment means NULL FAILS, not exclusive.
         {"key": "gvm_score",    "label": "gvm score",    "cond_min": ">= 6.5",  "cond_max": "",     "min": 6.5,   "max": None,  "type": "band"},
     ],
-    # SELL_REVERSAL_V7-B (cc#1100, spec session_log 26363 filters_v7b, founder ruled LIVE 19-Aug) —
-    # 12 cheap gates, NO heavy final stage. This REPLACED the V6.1 set on the live basket. Two
+    # SELL_REVERSAL_V7-C (cc#1206, session_log 29123; supersedes V7-B cc#1100 on the live basket) —
+    # 11 cheap gates, NO heavy final stage.
+    #
+    # V7-C RETIRES fall_from_r1. Two R1 gates read as one to the founder, and they were not
+    # measuring the same thing: r1_touch asks whether price REACHED R1 in the last three days,
+    # fall_from_r1 asked how far it has since dropped BELOW it. The second is already covered by
+    # day_1d, mom_2d and room, which is why it went rather than the touch. r1_touch and its SQL
+    # are untouched. This REPLACED the V6.1 set on the live basket. Two
     # things left V6.1 and both are deliberate: true_weekly_rsi <= 45 is gone (it was LEAKING —
     # four live trades entered at stored wRSI 49.4, 57.0, 70.4, 74.0 against that gate), and
     # sector_month was never added because it acted as a regime switch, dark for 4 months of 12.
@@ -2361,7 +2392,6 @@ BASKET_FILTERS = {
         {"key": "week_index_52",  "label": "52w index",    "cond_min": "",       "cond_max": "< 30",   "min": None,  "max": 30.0, "type": "band", "strict": True},
         {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "<= 30",  "min": None,  "max": 30.0, "type": "band"},
         {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "<= -0.5","min": None,  "max": -0.5, "type": "band"},
-        {"key": "fall_from_r1",   "label": "fall from R1", "cond_min": ">= 3%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
         {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1",  "min": -4.0,  "max": -1.0, "type": "band"},
         {"key": "month_return",   "label": "month return", "cond_min": ">= -10", "cond_max": "",       "min": -10.0, "max": None, "type": "band"},
         {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
@@ -2410,7 +2440,7 @@ BASKET_FILTERS = {
 # Header-pill spec label per basket (dashboard reads this via /api/v8/filters).
 BASKET_SPEC = {
     "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
-    "sell_reversal": {"version": "V7-B", "cc": "cc#1100", "label": "Sell Reversal V7-B"},
+    "sell_reversal": {"version": "V7-C", "cc": "cc#1206", "label": "Sell Reversal V7-C"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
     "buy_momentum":  {"version": "V5",   "cc": "cc#1051", "label": "Buy Momentum V5"},
 }

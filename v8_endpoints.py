@@ -2165,7 +2165,8 @@ def br_stock_detail(symbol: str):
 _SR_V61_STAGES = basket_stage_rows("sell_reversal")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def sr_funnel_detail():
-    """cc#1100: 12-stage funnel for SELL_REVERSAL_V7-B, reshaped from the handler-written
+    """cc#1206: 11-stage funnel for SELL_REVERSAL_V7-C (was 12 under V7-B, cc#1100 — fall_from_r1
+    retired), reshaped from the handler-written
     v8_funnel_counts row. INDEPENDENT per-filter pass counts across the universe (buy_momentum
     convention); true_weekly_rsi (stage 11) is passes vs the stocks clearing all 10 cheap gates.
     Final = strict-AND of all 11. Empty until the first live tick writes.
@@ -2208,7 +2209,11 @@ def sr_funnel_detail():
             "basket": "sell_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": _n_filters("sell_reversal"), "n_filters": _n_filters("sell_reversal"),
             "stage9_survivors": stage10,
-            "gate_type": "independent per-filter counts; final = strict AND of all 12",
+            # cc#1206: DERIVED. This sentence is served to the funnel modal, so a literal here
+            # would have told the reader "all 12" while eleven gates ran. The registry is the only
+            # thing that knows how many there are.
+            "gate_type": ("independent per-filter counts; final = strict AND of all %d"
+                          % len(BASKET_FILTERS.get("sell_reversal", []))),
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
@@ -2230,7 +2235,8 @@ def sr_funnel_detail():
 
 
 def sr_stock_passcount():
-    """cc#1107: SELL_REVERSAL V7-B pass-count, GENERATED from BASKET_FILTERS. n/12, all cheap.
+    """cc#1107: SELL_REVERSAL V7-C pass-count, GENERATED from BASKET_FILTERS. n/11 since cc#1206,
+    all cheap.
 
     cc#1100 brought this to the right twelve gates by hand; cc#1107 makes it registry-driven so it
     cannot drift away from them again. Off-market / missing pivot or CMP: the room check NULL-passes,
@@ -2280,7 +2286,7 @@ def sr_stock_passcount():
 def sr_stock_detail(symbol: str):
     """cc#1100: per-stock 12-filter breakdown for SELL_REVERSAL_V7-B — ACTUAL vs REQUIRED +
     PASS/FAIL. Mirrors sr_stock_passcount / _write_sell_reversal_v7b_qualified so the green-row
-    count equals n/12 and the card and the modal always agree. Every gate is cheap, so every row
+    count equals n/11 (cc#1206) and the card and the modal always agree. Every gate is cheap, so every row
     is always computed and none is ever blank."""
     sym = symbol.upper()
     try:
