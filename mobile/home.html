@@ -717,22 +717,64 @@ body[data-theme]{
 .dots{display:flex;justify-content:center;gap:6px;margin-top:7px}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:3px}
-.irow{display:flex;align-items:baseline;gap:8px;margin-top:11px}
+.irow{display:flex;align-items:baseline;gap:8px;margin-top:calc(11px * var(--rh,1))}
 .irow .inm{font-size:10px;font-weight:800;letter-spacing:.08em;color:#FF9F45;flex:1}
 .irow .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:16px;font-weight:800}
 .irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut)}
 .ibar{position:relative;height:4px;border-radius:2px;background:var(--panel2);
-  border:1px solid var(--line);margin:6px 0 3px}
+  border:1px solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
 .ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
   border-radius:50%;background:var(--amber,#F5B94A);border:2px solid var(--panel)}
 .isr{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
 .isr span:last-child{margin-left:auto}
-.digl{display:block;margin-top:13px;padding-top:11px;border-top:1px solid var(--line);
-  font-size:12.5px;font-weight:700;color:var(--blu,#4D7CFE);text-decoration:none}
+/* ── cc#1182 · CARD 2'S RHYTHM IS ONE RATIO, AND THE CTA IS ANCHORED TO THE FLOOR ────────────
+   THE HEIGHT INVARIANT IS NOT ARITHMETIC HERE, IT IS STRUCTURAL, and that is the only reason
+   this change is safe. #heroTrack is align-items:stretch, so the deck's height is the TALLER
+   face's, and measured at all three widths with the real cascade that is card 1 every time:
+   card 1 387.72 / 391.70 / 327.03 against card 2's 267.14 flat. Card 2 is the stretched one, so
+   it carries 120.58 / 124.56 / 59.89px of surplus below its content and every pixel this card
+   spends comes out of that surplus, never out of the deck. Card 1 is not touched at all.
+   430 IS THE BINDING WIDTH AND IT IS THE NARROWEST BUDGET, which is not the intuition — card 1
+   is SHORTER at 430 because its chip grid wraps to fewer rows there. A probe run at 360 alone
+   would have reported 120px of room and waved through a change that overflows at 430.
+   ONE RATIO, NOT EIGHT PIXEL EDITS. --rh multiplies the gaps that are already there instead of
+   restating them, so the stack keeps its grouping: a bar still sits closer to its own S/R labels
+   than to the next index. A single flat gap down the column (cc#1134's answer for card 1) would
+   have loosened the rhythm and destroyed that grouping in the same move. The fallback is 1, so
+   the seven classes below render exactly as they do today anywhere --rh is not declared.
+   WHY 1.35 AND NOT MORE. The spend at 430 is 22.05px of rhythm + 14px of CTA clearance + 9px of
+   button growth = 45.05 against 59.89 available, leaving 14.8px of headroom. 1.5 was measured
+   first and it OVERSHOOTS — card 2 lands at 338.14 against card 1's 327.03 and the deck grows
+   11px, which is the delta this card forbids. The headroom is deliberate: card 1's height moves
+   with its chip count, and a ratio that fits with nothing to spare is a defect waiting for a
+   payload with one chip fewer. */
+#heroTrack > .c:nth-child(2){--rh:1.35}
+#heroTrack > .c:nth-child(2) > .chd{margin-bottom:calc(6px * var(--rh,1))}
+/* The block above the CTA carries the minimum clearance. margin-top:auto takes all the surplus
+   but it cannot promise a floor — if card 2 ever became the taller face, auto resolves to 0 and
+   the button would sit flush against the S/R line. A real margin on the previous sibling is a
+   gap that exists whether or not there is surplus to distribute. :nth-last-child(2) rather than
+   a class, so it stays the block before the CTA whatever that block turns out to be. */
+#heroTrack > .c:nth-child(2) > :nth-last-child(2){margin-bottom:14px}
+/* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
+   grammar in the repo for tappable things, at the same full-width primary scale rather than
+   .dense. It keeps its own blue: the card asks for the bevel FAMILY, and the Digest doorway has
+   been --blu since it shipped, so the depth is adopted and the colour identity is left alone.
+   THE HAIRLINE AND ITS PADDING ARE GONE. They existed to make a text link read as a card footer
+   strip; a raised slab with a gold ledge separates itself, and keeping both would have stacked
+   two separators on one element.
+   margin-top:auto is what "anchored at the card bottom" means literally — it also closes the
+   120px void that has sat under this link since the deck shipped, the same void cc#1122/1125/
+   1134 chased around card 1. The 5px ledge lands inside .c's own 13px padding-bottom, so no
+   bottom reserve is needed here and .c's overflow:hidden cannot clip it. */
+.digl{display:block;width:100%;box-sizing:border-box;margin-top:auto;text-align:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
+  letter-spacing:.14em;color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
+  line-height:20px}
 /* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
-.pmood{margin-bottom:4px}
+.pmood{margin-bottom:calc(4px * var(--rh,1))}
 .pmood .pw{font-size:21px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
-.pmeter{display:flex;gap:4px;margin:8px 0 5px}
+.pmeter{display:flex;gap:4px;margin:calc(8px * var(--rh,1)) 0 calc(5px * var(--rh,1))}
 .pmeter i{flex:1;height:5px;border-radius:3px;background:var(--line2);opacity:.45}
 .pmeter i.on{opacity:1}
 .pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim)}
@@ -2913,7 +2955,10 @@ function heroCard2(d){
     + pcrMood(d.hero || {})
     + idxRow('NIFTY 50', 'NIFTY50', t['NIFTY'])
     + idxRow('BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
-    + '<a class="digl" href="/m/digest">Read the Daily Digest &#8594;</a>'
+    /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
+       one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
+       palette or depth change moves this button with the Index Intel one. */
+    + '<a class="digl slab" href="/m/digest">DAILY DIGEST &#8594;</a>'
     + '</div>';
 }
 /* the deck: two cards, snap-scrolled, with a dot that follows the finger */
