@@ -9,12 +9,10 @@
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#442: V14 intraday engine page — dark terminal skin (V-family, design_refs/scorr_v8_R2). */
   :root{
-    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
-    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
-    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);--red:#FF5C6C;--red-d:rgba(255,92,108,.13);
-    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;--violet:#9B7CFF;
-    --shadow:0 18px 44px rgba(3,7,20,.5);
+    /* cc#1203 push 8: this page's colour tokens moved to the injected contract
+       (scorr_web_tokens.css). Every name it uses is a contract name, at the same value or within
+       one hand-tuned step of it, so the block is simply gone rather than aliased or renamed —
+       and the page gains a light mode it never had, because the contract carries one. */
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
