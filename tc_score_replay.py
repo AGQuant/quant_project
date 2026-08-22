@@ -564,3 +564,127 @@ def _nth_session(day, n):
     if not later:
         return day
     return later[min(n - 1, len(later) - 1)]
+
+
+# ── results ───────────────────────────────────────────────────────────────────────────────
+
+MERIT_AVG = 1.0
+MERIT_ACC = 60.0
+
+
+def coverage(cur):
+    """The two honesty flags the card asks for, computed rather than asserted.
+
+    A thin tick and a backfilled bar both make a cell look like evidence when it is not, so they
+    are counted and printed above the table rather than mentioned in passing.
+    """
+    cur.execute("""SELECT ts, count(DISTINCT symbol) n FROM tc_score_replay_ticks
+                   GROUP BY ts ORDER BY ts""")
+    per_tick = cur.fetchall()
+    thin = [(t, n) for t, n in per_tick if n < 150]
+    cur.execute("""SELECT source, count(*) FROM intraday_prices
+                   WHERE ts::date = DATE '2026-08-21' AND timeframe='5m'
+                   GROUP BY source ORDER BY 2 DESC""")
+    aug21 = cur.fetchall()
+    return {"ticks": len(per_tick),
+            "thin_ticks": thin,
+            "min_symbols": min([n for _, n in per_tick], default=0),
+            "aug21_sources": aug21}
+
+
+def _cells(cur):
+    cur.execute("""SELECT threshold, hold_days,
+                          count(*),
+                          count(*) FILTER (WHERE pnl_pct > 0),
+                          avg(pnl_pct), sum(pnl_pct),
+                          count(*) FILTER (WHERE exit_reason='TGT'),
+                          count(*) FILTER (WHERE exit_reason='SL'),
+                          count(*) FILTER (WHERE exit_reason='SQ'),
+                          count(*) FILTER (WHERE entry_src <> 'fyers_fut')
+                   FROM tc_score_replay_trades
+                   GROUP BY threshold, hold_days
+                   ORDER BY threshold, hold_days""")
+    out = []
+    for th, hold, n, w, avg, tot, tgt, sl, sq, fb in cur.fetchall():
+        acc = (100.0 * w / n) if n else 0.0
+        avg = float(avg or 0)
+        merit = (avg >= MERIT_AVG and acc >= MERIT_ACC)
+        out.append({"threshold": th, "hold": hold, "trades": n, "wins": w,
+                    "acc": round(acc, 1), "avg": round(avg, 3),
+                    "sum": round(float(tot or 0), 2),
+                    "tgt": tgt, "sl": sl, "sq": sq, "fallback_px": fb, "merit": merit})
+    return out
+
+
+def results_table():
+    """The card's deliverable: ONE markdown table, plus what it took to believe it.
+
+    Everything that could make a number misleading is printed with the number rather than left
+    for the reader to discover: how many symbols the thinnest tick scored, how many trades priced
+    off a fallback feed, how many were clamped by the end of the window, and which four inputs
+    were not rewound at all.
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        cov = coverage(cur)
+        cells = _cells(cur)
+        cur.execute("""SELECT threshold, hold_days, count(*) FROM tc_score_replay_trades
+                       WHERE entry_ts::date > (DATE %s - hold_days + 1)
+                       GROUP BY threshold, hold_days""", (SESSIONS[-1],))
+        clamped = {(t, h): n for t, h, n in cur.fetchall()}
+
+    L = []
+    L.append("**TC SCORE ENTRY REPLAY /100** — sessions %s to %s (5 trading days)."
+             % (SESSIONS[0], SESSIONS[-1]))
+    L.append("")
+    L.append("The card said 15,18,19,20,21-Aug. 15-Aug-2026 is a SATURDAY and Independence Day, "
+             "and v8_metrics has no row for it, so the five sessions are MON 17 to FRI 21.")
+    L.append("")
+    L.append("Entry: first tick that day where score100 >= threshold, no open position same "
+             "symbol+side. Exit: +2% target / -2% stop walked on 5m high/low, **stop taken "
+             "first when a bar touches both**, else square-off 15:20 on session N.")
+    L.append("")
+    L.append("| thr | N | trades | wins | acc% | avg% | sum% | TGT | SL | SQ | fallback px | clamped | merit |")
+    L.append("|----:|--:|-------:|-----:|-----:|-----:|-----:|----:|---:|---:|------------:|--------:|:-----:|")
+    for c in cells:
+        L.append("| %d | %d | %d | %d | %.1f | %+.3f | %+.2f | %d | %d | %d | %d | %d | %s |"
+                 % (c["threshold"], c["hold"], c["trades"], c["wins"], c["acc"], c["avg"],
+                    c["sum"], c["tgt"], c["sl"], c["sq"], c["fallback_px"],
+                    clamped.get((c["threshold"], c["hold"]), 0), "Y" if c["merit"] else "N"))
+    L.append("")
+    L.append("merit gate = avg >= %.1f%% AND acc >= %.0f%%." % (MERIT_AVG, MERIT_ACC))
+    L.append("")
+    L.append("**Read these before the table.**")
+    L.append("- ticks scored: %d; thinnest tick scored %d symbols%s"
+             % (cov["ticks"], cov["min_symbols"],
+                ("; %d ticks under 150 symbols" % len(cov["thin_ticks"])) if cov["thin_ticks"] else ""))
+    L.append("- 21-Aug bar sources: %s — anything not fyers_fut is backfill or heal, not a live feed"
+             % ", ".join("%s %d" % (s, n) for s, n in cov["aug21_sources"]))
+    L.append("- **clamped** counts trades whose hold ran past the end of the window and squared "
+             "off early. Those rows are hold-1 behaviour under a longer label.")
+    L.append("- **not as-of**: %s. These come from shared scorer helpers that take no date bound, "
+             "and the card forbids editing the scorer. They are 63 and 180 session windows, so "
+             "they barely move across five days — but a replayed score is as-of for price, "
+             "volume, breadth, pivots, delivery, basis and every v8 metric, and CURRENT for "
+             "those five." % ", ".join(ASOF_LIMITS["not_rewound"]))
+    return "\n".join(L)
+
+
+def best_cells(n=2):
+    with _conn() as conn, conn.cursor() as cur:
+        cells = _cells(cur)
+    return sorted(cells, key=lambda c: (c["avg"], c["acc"]), reverse=True)[:n]
+
+
+def bucket_breakdown(threshold, hold):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT bucket, count(*), count(*) FILTER (WHERE pnl_pct>0),
+                              avg(pnl_pct), sum(pnl_pct)
+                       FROM tc_score_replay_trades WHERE threshold=%s AND hold_days=%s
+                       GROUP BY bucket ORDER BY 1""", (threshold, hold))
+        rows = cur.fetchall()
+    L = ["**%d / hold %d — by bucket**" % (threshold, hold), "",
+         "| bucket | trades | wins | acc% | avg% | sum% |", "|---|---:|---:|---:|---:|---:|"]
+    for b, n, w, avg, tot in rows:
+        L.append("| %s | %d | %d | %.1f | %+.3f | %+.2f |"
+                 % (b, n, w, (100.0 * w / n) if n else 0, float(avg or 0), float(tot or 0)))
+    return "\n".join(L)
