@@ -76,9 +76,19 @@ def _expected_cols(cur):
     global _EXPECTED_COLS
     if _EXPECTED_COLS is None:
         try:
+            # cc#1191 BUG FIX. This probed for expected_qtr_profit, which DOES NOT EXIST in
+            # screener_raw. The real column is expected_quarterly_net_profit — 1,688 of 1,866 rows
+            # filled, right there beside expected_qtr_sales at 1,693. So the probe returned only
+            # the sales column, got.get("expected_qtr_profit") was always None, and _expectations
+            # has never once returned a profit side on any symbol. Not a data gap: a typo in a
+            # column name, silently degrading to half a feature because the lookup used .get().
+            # expected_qtr_profit stays in the IN list as a FALLBACK ALIAS, per the card — if some
+            # environment does carry that name, it still resolves, and the alias costs one string.
             cur.execute("""SELECT column_name FROM information_schema.columns
                            WHERE table_name='screener_raw'
-                             AND column_name IN ('expected_qtr_sales','expected_qtr_profit')""")
+                             AND column_name IN ('expected_qtr_sales',
+                                                 'expected_quarterly_net_profit',
+                                                 'expected_qtr_profit')""")
             _EXPECTED_COLS = {r[0] for r in cur.fetchall()}
         except Exception:
             _EXPECTED_COLS = set()
@@ -117,7 +127,12 @@ def _expectations(cur, sym, actual_sales=None, actual_profit=None):
 
     out = {}
     s = side(got.get("expected_qtr_sales"), actual_sales)
-    p = side(got.get("expected_qtr_profit"), actual_profit)
+    # cc#1191: real name first, historical alias second. Written as an explicit two-step rather
+    # than a single .get() so that which column actually answered is readable at a glance.
+    _exp_pat = got.get("expected_quarterly_net_profit")
+    if _exp_pat is None:
+        _exp_pat = got.get("expected_qtr_profit")
+    p = side(_exp_pat, actual_profit)
     if s:
         out["sales"] = s
     if p:
