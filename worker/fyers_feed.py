@@ -3675,7 +3675,8 @@ def run(auth_code=None):
         opt_stock_subscribed = False  # cc#241: STOCK options subscribed once >=09:25 + cmp fresh
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
         opt_gate_day         = None   # cc#189: reset the gate each trading day
-        starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
+        starvation_day       = None   # cc#228: fyers_eq starvation ALERT fired once per trading day
+        last_starv_check     = None   # cc#1195: throttle the (now repeating) starvation check to 15 min
         relogin_day          = None   # cc#473: 09:05 daily staleness re-login fired once per trading day
         consecutive_db_failures = 0   # cc#497 fix_2b: un-blind the watchdog — see _mark_db_error below
         sub_bounce_day       = None   # cc#497 fix_1_TIMING_FINAL: 09:14 pre-open socket bounce, once/day
@@ -3915,30 +3916,83 @@ def run(auth_code=None):
                 opt_gate_day = today
                 opt_deadline_alerted = False
 
-            # cc#228: fyers_eq starvation watchdog. fyers_eq (live WS) is now the SOLE equity
-            # source (legacy fyers backfill is dormant), and it is new — only 03-Jul is proven
-            # full (~15,700 bars/day). If it wrote < 10,000 5m bars by 11:00 IST on a trading
-            # day, the equity feed is starving -> fire a one-per-day ops_log alert so the
-            # dormant legacy path can be manually re-armed if needed.
-            if (starvation_day != today and now.time() >= dt_time(11, 0)
-                    and is_trading_day(today)):
-                starvation_day = today
+            # cc#228: fyers_eq starvation watchdog. fyers_eq (live WS) is the SOLE equity source
+            # (legacy fyers backfill is dormant), so a starving equity leg has to be caught here.
+            #
+            # cc#1195 scope 4 — THE FLOOR WAS A FULL-DAY NUMBER APPLIED AT 11:00, so this alarm
+            # was FALSE ON EVERY HEALTHY DAY. At 11:00 only 21 of the day's 73 five-minute bars
+            # have closed, so a perfect feed can only have written syms x 21. The Railway logs
+            # print "FYERS_EQ STARVATION: only 4452 5m bars by 11:00 IST (<10000)" on 19-Aug AND
+            # 20-Aug — two days the DB shows as completely healthy at 15,270 and 15,362 full-day
+            # bars. 212 x 21 = 4,452 exactly. The alarm was measuring the clock, not the feed.
+            #
+            # An alarm that cries wolf every single day is worse than no alarm: it is the reason
+            # nobody looked twice on 21-Aug, when the feed really was dead.
+            #
+            # THE FLOOR IS NOW TIME-SCALED: baseline_syms x bars_elapsed_since_0915 x 0.8.
+            # MEASURED on the six healthy sessions 12-Aug to 20-Aug, the by-11:00 fill ratio is
+            # EXACTLY 1.0000 on every one of them (4,452 of an ideal 4,452, six days running),
+            # and the full-day ratio is 0.987-0.993. So 0.8 is not a guess about the margin — it
+            # sits well below a floor that has never once dipped, and still catches a leg writing
+            # four fifths of what it should.
+            #
+            # BASELINE_SYMS IS DATA-DERIVED, NOT THE CONSTANT 212. A hardcoded universe size goes
+            # stale the day the universe changes and then silently mis-grades the feed forever.
+            # It is the MAX distinct-symbol count over the prior 10 days of sessions, and MAX
+            # rather than "the last session" on purpose: 21-Aug would otherwise have become the
+            # baseline for 22-Aug, and a dead day must never quietly lower the bar for the next
+            # one. Today's own symbol count is deliberately NOT used — it is the thing being
+            # measured, and grading a feed against itself passes a feed with three live symbols.
+            # No baseline at all (a fresh install) SKIPS the check rather than passing it.
+            #
+            # Cadence: from 09:45 instead of 11:00, throttled to every 15 minutes, and
+            # starvation_day is now set ONLY when the alert actually fires. Before, it was set
+            # before the check ran, so the single 11:00 look was the only look all day — a feed
+            # that starved at 12:00 was never flagged. One alert per day still, but the window
+            # is the whole session and a real outage is now caught about 75 minutes earlier.
+            #
+            # No futures twin exists to fix: this is the only starvation check in the file.
+            if (starvation_day != today and is_trading_day(today)
+                    and dt_time(9, 45) <= now.time() <= dt_time(15, 30)
+                    and (last_starv_check is None
+                         or (now - last_starv_check).total_seconds() >= 15 * 60)):
+                last_starv_check = now
                 try:
+                    _elapsed_min = ((now.hour * 60 + now.minute) - (9 * 60 + 15))
+                    bars_elapsed = max(1, min(73, _elapsed_min // 5))
                     with conn.cursor() as cur:
                         cur.execute("SELECT COUNT(*) FROM intraday_prices "
                                     "WHERE source='fyers_eq' AND timeframe='5m' "
                                     "AND ts >= %s AND ts < %s",
                                     (today, today + timedelta(days=1)))
                         eq_bars = cur.fetchone()[0]
-                    if eq_bars < 10000:
-                        _log_feed_incident("fyers_eq_starvation",
-                            f"fyers_eq wrote only {eq_bars} 5m bars by 11:00 IST (<10000; ~15700 "
-                            f"expected) — equity feed may be starving. Legacy fyers backfill is "
-                            f"dormant (cc#228); re-arm manually (force=True / LEGACY_EQUITY_BACKFILL) "
-                            f"if the WS cannot recover.")
-                        log.error(f"FYERS_EQ STARVATION: only {eq_bars} 5m bars by 11:00 IST (<10000)")
+                        cur.execute("SELECT COALESCE(MAX(n), 0) FROM ("
+                                    "  SELECT COUNT(DISTINCT symbol) AS n"
+                                    "    FROM intraday_prices"
+                                    "   WHERE source='fyers_eq' AND timeframe='5m'"
+                                    "     AND ts::date < %s AND ts::date >= %s - 10"
+                                    "   GROUP BY ts::date) x",
+                                    (today, today))
+                        baseline_syms = cur.fetchone()[0] or 0
+                    if baseline_syms <= 0:
+                        log.info("fyers_eq starvation check skipped: no prior session to "
+                                 "size the floor from")
                     else:
-                        log.info(f"fyers_eq starvation check OK: {eq_bars} 5m bars by 11:00 IST")
+                        floor = int(baseline_syms * bars_elapsed * 0.8)
+                        if eq_bars < floor:
+                            starvation_day = today   # only NOW is the once-per-day alert spent
+                            _log_feed_incident("fyers_eq_starvation",
+                                f"fyers_eq wrote {eq_bars} 5m bars by {now:%H:%M} IST against a "
+                                f"time-scaled floor of {floor} ({baseline_syms} symbols x "
+                                f"{bars_elapsed} closed bars x 0.8) — equity feed is starving. "
+                                f"Legacy fyers backfill is dormant (cc#228); re-arm manually "
+                                f"(force=True / LEGACY_EQUITY_BACKFILL) if the WS cannot recover.")
+                            log.error(f"FYERS_EQ STARVATION: {eq_bars} 5m bars by {now:%H:%M} IST "
+                                      f"(floor {floor} = {baseline_syms} syms x {bars_elapsed} "
+                                      f"bars x 0.8)")
+                        else:
+                            log.info(f"fyers_eq starvation check OK: {eq_bars} 5m bars by "
+                                     f"{now:%H:%M} IST (floor {floor})")
                 except Exception as _sv:
                     if not _mark_db_error(_sv, 'fyers_eq starvation watchdog'):
                         log.warning(f"fyers_eq starvation watchdog: {_sv}")
