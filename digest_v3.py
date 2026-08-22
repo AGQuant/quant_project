@@ -370,6 +370,123 @@ def _yesterday_results(cur, basis) -> Dict[str, Any]:
                      f"{tally['neutral']} neutral · {tally['pending']} awaiting desk")}
 
 
+# ── cc#1190 · LATEST RESULT ANALYSIS ──────────────────────────────────────────────────────────
+# The mobile digest's results card reads earnings_calendar for one session and matches it against
+# news headlines, so on a thin day it says "Top 2 of 2 · 2 awaiting desk" and shows nothing worth
+# reading. result_analysis_v2 holds 633 rows of written analysis. This builds a payload from
+# THAT, as a NEW key. _yesterday_results is not touched and the web page keeps reading it.
+#
+# THE VERDICT LINE HAS THREE SHAPES, NOT ONE, AND I ONLY KNOW THAT BECAUSE I COUNTED. The card
+# says "after VERDICT: to first newline". Measured across all 633 rows:
+#     511  start "VERDICT:"  or "Verdict:"   <- BOTH casings, 248 upper and 263 mixed
+#     102  start "Headline:"
+#      20  carry no label at all, just prose
+# A case-SENSITIVE match on 'VERDICT:' is the trap here and it does not fail loudly: Postgres
+# position() returns 0 for a miss, so `substring(from position + 8)` starts at character 8 of the
+# row and returns a string beginning mid-word — ": Very strong growth across every line". That is
+# 385 of 633 rows, 61%, silently mangled into something that still looks like a sentence. The
+# regex below is case-insensitive and takes Headline: too, with the first non-empty line as the
+# fallback for the unlabelled 20. Verified: 633 extracted, ZERO starting with a colon, zero empty.
+#
+# EXTRACTED IN SQL ON PURPOSE. analysis_text averages ~4KB; pulling all 633 into Python to slice
+# one line off each would move ~2.5MB per digest request to throw nearly all of it away. The
+# first line crosses the wire and nothing else, which is also how the card's "no analysis_text"
+# rule stays true by construction rather than by remembering to delete a key.
+_RESULTS_ANALYSED_SQL = """
+WITH latest_gvm AS (
+    SELECT DISTINCT ON (symbol) symbol, segment, market_cap
+    FROM gvm_scores ORDER BY symbol, score_date DESC
+), ranked AS (
+    -- The cap tier is a rank over the LIVE gvm universe, not a stored column. input_raw carries an
+    -- mcap_rank, and it was the obvious candidate, but it disagrees with the card: it leaves 10 of
+    -- these 633 unranked where the card's own verify line says 4. Ranking gvm_scores.market_cap
+    -- reproduces 4 exactly, so that is the source the card meant.
+    SELECT symbol, RANK() OVER (ORDER BY market_cap DESC NULLS LAST) AS mcap_rank
+    FROM latest_gvm WHERE market_cap IS NOT NULL
+)
+SELECT r.symbol,
+       s.company_name,
+       k.mcap_rank,
+       g.segment,
+       r.quarter,
+       r.polished_at,
+       btrim(split_part(
+           regexp_replace(r.analysis_text, '^\\s*(verdict|headline)\\s*:\\s*', '', 'i'),
+           E'\\n', 1)) AS verdict
+FROM result_analysis_v2 r
+LEFT JOIN screener_raw s ON s.nse_code = r.symbol
+LEFT JOIN latest_gvm    g ON g.symbol  = r.symbol
+LEFT JOIN ranked        k ON k.symbol  = r.symbol
+ORDER BY r.polished_at DESC, r.symbol
+"""
+
+
+def _tier(rank) -> Optional[str]:
+    """Large 1-100 / Mid 101-250 / Small 251+, per the card. No rank = no tier, never a guess."""
+    if rank is None:
+        return None
+    r = int(rank)
+    return "LARGE" if r <= 100 else ("MID" if r <= 250 else "SMALL")
+
+
+def _results_analysed(cur) -> Dict[str, Any]:
+    import re as _re
+    cur.execute(_RESULTS_ANALYSED_SQL)
+    rows = cur.fetchall()
+
+    out, tiers = [], {"LARGE": 0, "MID": 0, "SMALL": 0}
+    tally = {"bullish": 0, "cautious": 0, "neutral": 0}
+    unranked = 0
+    seen = {}
+    for sym, company, rank, segment, quarter, polished, verdict in rows:
+        tier = _tier(rank)
+        if tier:
+            tiers[tier] += 1
+        else:
+            unranked += 1
+        v = verdict or ""
+        # The card says use the EXISTING _BULL/_BEAR, so it uses them unchanged. See the note
+        # below on what that actually produces on this text.
+        bull = bool(_re.search(_BULL, v, _re.I))
+        bear = bool(_re.search(_BEAR, v, _re.I))
+        read = "BULLISH" if (bull and not bear) else ("CAUTIOUS" if bear else "NEUTRAL")
+        tally["bullish" if read == "BULLISH" else "cautious" if read == "CAUTIOUS" else "neutral"] += 1
+        seen[sym] = seen.get(sym, 0) + 1
+        out.append({
+            "symbol": sym,
+            "company": company,
+            "tier": tier,
+            "segment": segment,
+            "quarter": quarter,
+            # IST, like every other time on this payload. polished_at is timestamptz, so this is a
+            # real conversion and not a relabelling of a UTC clock.
+            "polished_at": polished.astimezone(IST).isoformat() if polished else None,
+            "polished_ist": polished.astimezone(IST).strftime("%d %b") if polished else None,
+            "verdict": v,
+            "read": read,
+        })
+
+    # KIMS carries TWO rows, Q4FY26 and Q1FY27, so 633 rows are 632 companies. The card says "all
+    # result_analysis_v2 rows" and its verify pins total to COUNT(*), so all 633 ship and total is
+    # 633 — but a deck titled LATEST RESULT ANALYSIS showing a superseded quarter beside the
+    # current one is a real question, not a rounding detail, so the duplicate is NAMED in the
+    # payload rather than left for someone to notice on a phone.
+    dupes = sorted(s for s, n in seen.items() if n > 1)
+    return {
+        "companies": out,
+        "total": len(out),
+        "distinct_symbols": len(seen),
+        "duplicate_symbols": dupes,
+        "tiers": tiers,
+        "unranked": unranked,
+        "latest_polished": out[0]["polished_at"] if out else None,
+        "tally": tally,
+        "read": (f"{tally['bullish']} bullish · {tally['cautious']} cautious · "
+                 f"{tally['neutral']} neutral"),
+        "tier": "STATIC",
+    }
+
+
 def build_digest(cur) -> Dict[str, Any]:
     now = _ist_now()
     prev_trading = _prev_trading_date(cur, now.date())   # cc#1109: one basis, used everywhere
@@ -424,6 +541,9 @@ def build_digest(cur) -> Dict[str, Any]:
             "what_moved": {"items": _news(cur, "Domestic"), "tier": "LIVE"},
             "global_events": {"items": _news(cur, "Global"), "tier": "LIVE"},
             "yesterday_results": _yesterday_results(cur, prev_trading),
+            # cc#1190: ADDED beside yesterday_results, not in place of it. The web digest reads
+            # yesterday_results and is untouched by this card; the mobile deck reads this one.
+            "results_analysed": _results_analysed(cur),
         },
         "prev_trading_date": prev_trading.isoformat(),   # cc#1109: for the page's date filters
         "market_read": {
