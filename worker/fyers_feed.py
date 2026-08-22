@@ -3580,7 +3580,37 @@ def run(auth_code=None):
         """cc_task #112 — the missing auto-restart. Socket-reconnect failed to revive
         the feed (rejected as a fix on its own), so RE-EXEC the whole process: a clean
         boot re-auths (same-day token reused), rebuilds the WS and re-subscribes all 212
-        symbols from scratch. Railway also relaunches the worker if execv ever fails."""
+        symbols from scratch. Railway also relaunches the worker if execv ever fails.
+
+        cc#1194 — 21-Aug-2026: THIS RESTART DID NOT COME BACK, and it cost a whole
+        trading session. The last line of the last comment is the assumption that failed:
+        "Railway also relaunches the worker if execv ever fails" only covers execv
+        RAISING. It does not cover the re-exec-ed image starting and then going quiet.
+
+        The record, from ops_log, two consecutive days of the same 09:05 self-heal:
+          20-Aug  09:05:26 feed_hard_restart -> 09:07:23 feed_boot_ok (selftest
+                  NSE:SBIN-EQ) -> 09:07:26 feed_preopen_hold -> 09:16:02
+                  feed_ws_connect, 658 symbols. Alive; 16,016 futures bars that day.
+          21-Aug  09:05:09 feed_hard_restart -> nothing. No feed_boot_ok, no
+                  feed_boot_gap, no feed_preopen_hold, no feed_ws_connect, ever.
+                  worker_heartbeat froze at 08:57:07 (the beat before this call) and
+                  boot_ts never moved off 20-Aug 09:07:23. Still frozen 21.7 hours
+                  later, with worker_silent firing every 15 minutes into an empty room.
+
+        Consequences downstream, all one event: fyers_fut 0 bars, fyers_eq 0 live bars
+        (the 14,844 in the table are the 15:44 IST heal_intraday backfill, not a feed),
+        v8_qualified 0, v8_funnel_counts 0, adr_intraday 0, futures_basis 0.
+
+        NOT YET PROVEN, so it is written here as the open question and not as a fix:
+        whether the new image CRASHED or HUNG. railway.worker.json is ON_FAILURE with
+        maxRetries 10, so a crash should have been relaunched ten times within seconds;
+        a hang before the first log line keeps PID 1 alive and Railway sees a healthy
+        process, so nothing restarts it. 21.7 quiet hours fits a hang and does not fit a
+        crash loop. Changing execv to a clean os._exit(1) — letting Railway do the
+        restart with the mechanism that demonstrably boots — is the obvious candidate,
+        but it is a change to the restart path of the live feed on an unproven theory,
+        so it is PROPOSED to the room rather than pushed from here. Do not apply it
+        without the Railway service log for 21-Aug 09:05-09:10 IST."""
         log.error(f"FEED WATCHDOG: HARD RESTART — {reason}")
         _log_feed_incident("feed_hard_restart", reason)
         try:
