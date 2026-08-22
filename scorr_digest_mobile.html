@@ -78,6 +78,32 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .gsw button.on{background:var(--panel);color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .mrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge);font-size:12.5px}
 .mrow:first-of-type{border-top:none}
+/* cc#1190 · LATEST RESULT ANALYSIS. GOLD NIGHT tokens only — every colour here is a var already
+   declared at the top of this file, no new literal. */
+.rchips{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.rchip{min-height:34px;padding:5px 10px;cursor:pointer;font-family:'JetBrains Mono';font-size:10px;
+ font-weight:800;letter-spacing:1.2px;color:var(--muted);background:var(--hi);
+ border:1px solid var(--edge);clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
+.rchip .num{color:var(--chalk);font-weight:800}
+.rchip.on .num{color:var(--aqua)}
+/* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
+   that count, not guessed: without it a final short page collapses and the deck jumps height
+   mid-swipe, which reads as a broken carousel rather than a short page. */
+.rpage{flex:0 0 100%;scroll-snap-align:start;min-height:212px}
+.rpg{font-size:9px;letter-spacing:1.4px;color:var(--muted);margin-bottom:2px}
+.rrow{align-items:flex-start}
+.rmain{flex:1;min-width:0}
+.rtop{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.rtop b{font-size:12.5px}
+.rq{font-size:9px;color:var(--muted);letter-spacing:.8px}
+.rt{font-size:8.5px;font-weight:800;letter-spacing:1.1px;color:var(--aqua);
+ font-family:'JetBrains Mono'}
+/* The verdict is one sentence but the source is prose and the longest measured is 987 characters,
+   so it is clamped to two lines. Unclamped, one long row would push the other three off its page
+   and the "4 rows per page" the card asks for would quietly stop being true. */
+.rv{font-size:11.5px;line-height:1.45;color:var(--muted);margin-top:3px;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sdot{width:7px;height:7px;border-radius:50%;flex:none}
 .plink{color:var(--pulse);font-weight:700;font-size:12.5px;text-decoration:none}
 .foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
@@ -380,31 +406,136 @@ function intCard(key, label, val, col, sub, stale){
    whole set toward the middle with behavior:'auto' — the clone under the finger is pixel-identical
    (iChart draws into every clone), so the jump cannot be seen and the swipe never hits a wall in
    either direction. Dots read index modulo the real count. */
-var IN_N=0;
-function iDots(){
-  var tr=document.getElementById('itrack'), dots=document.getElementById('idots');
-  if(!tr||!dots||!IN_N)return;
-  var w=Math.max(1,tr.clientWidth);
-  var i=Math.round(tr.scrollLeft/w)%IN_N;
+/* cc#1190 · THE HELPERS TAKE A DECK ID NOW, because this page has TWO decks.
+   They were written for the internals deck and hardcoded #itrack, #idots and a single IN_N.
+   A second deck reusing them would have driven the internals track from the results track's
+   scroll and read both dot rows off one count. Forking them into iDots2/iWrap2 was the other
+   option and it is the wrong one - one continuous-swipe implementation, parameterised, is the
+   rule this app already follows for scorr_mobile_cards.js.
+   iDots() and iWrap() survive as the internals deck's own names so every existing call site,
+   including the onscroll= attribute in the markup, is untouched. DECKS holds the REAL card count
+   per track, replacing the single IN_N. */
+var DECKS={}, DECK_TMR={};
+/* THE PITCH IS THE SLIDE WIDTH PLUS THE GAP, NOT clientWidth, and that was wrong before this card
+   touched it. .iswipe-t is a flex row with gap:9px, so a slide advances by width+9 while the
+   helpers stepped by clientWidth — 9px short per slide, compounding across a set. On the
+   internals deck (6 cards) scroll-snap mandatory drags it back onto a snap point each time, which
+   is why it has never looked broken; on a deck with more slides per set the dots start reading the
+   wrong index. Measured here rather than hardcoded, so a future gap change cannot desync it. */
+function deckPitch(tr){
+  var c=tr.firstElementChild;
+  if(!c)return Math.max(1,tr.clientWidth);
+  var cs=getComputedStyle(tr);
+  var gap=parseFloat(cs.columnGap||cs.gap||0)||0;
+  return Math.max(1,c.getBoundingClientRect().width+gap);
+}
+function deckDots(trackId,dotsId){
+  var tr=document.getElementById(trackId), dots=document.getElementById(dotsId), n=DECKS[trackId];
+  if(!tr||!dots||!n)return;
+  var w=deckPitch(tr);
+  var i=Math.round(tr.scrollLeft/w)%n;
   Array.prototype.forEach.call(dots.children,function(el,j){
     el.className=(j===i?'on':'');
     el.onclick=function(){
       var cur=Math.round(tr.scrollLeft/w);
-      tr.scrollTo({left:(cur-(cur%IN_N)+j)*w,behavior:'smooth'});
+      tr.scrollTo({left:(cur-(cur%n)+j)*w,behavior:'smooth'});
     };
   });
 }
-var IW_TMR=null;
-function iWrap(){
-  iDots();
-  if(IW_TMR)clearTimeout(IW_TMR);
-  IW_TMR=setTimeout(function(){
-    var tr=document.getElementById('itrack');
-    if(!tr||!IN_N)return;
-    var w=Math.max(1,tr.clientWidth), i=Math.round(tr.scrollLeft/w);
-    if(i<IN_N)tr.scrollTo({left:(i+IN_N)*w,behavior:'auto'});
-    else if(i>=2*IN_N)tr.scrollTo({left:(i-IN_N)*w,behavior:'auto'});
+function deckWrap(trackId,dotsId){
+  deckDots(trackId,dotsId);
+  if(DECK_TMR[trackId])clearTimeout(DECK_TMR[trackId]);
+  DECK_TMR[trackId]=setTimeout(function(){
+    var tr=document.getElementById(trackId), n=DECKS[trackId];
+    if(!tr||!n)return;
+    var w=deckPitch(tr), i=Math.round(tr.scrollLeft/w);
+    if(i<n)tr.scrollTo({left:(i+n)*w,behavior:'auto'});
+    else if(i>=2*n)tr.scrollTo({left:(i-n)*w,behavior:'auto'});
   },90);
+}
+/* park a freshly rendered deck on the MIDDLE set, instantly, before it is ever seen */
+function deckPark(trackId){
+  var tr=document.getElementById(trackId), n=DECKS[trackId];
+  if(tr&&n)tr.scrollTo({left:n*deckPitch(tr),behavior:'auto'});
+  deckDots(trackId,trackId==='itrack'?'idots':'rdots');
+}
+function iDots(){ deckDots('itrack','idots'); }
+function iWrap(){ deckWrap('itrack','idots'); }
+function rDots(){ deckDots('rtrack','rdots'); }
+function rWrap(){ deckWrap('rtrack','rdots'); }
+
+/* ══ cc#1190 · LATEST RESULT ANALYSIS DECK ═══════════════════════════════════════════════════
+   Replaces YESTERDAY'S RESULTS · SCORED. That card read one session of earnings_calendar and
+   matched it against news headlines, so on a thin day it said "Top 2 of 2 · 2 awaiting desk" and
+   showed nothing worth reading. This reads result_analysis_v2 — 633 rows of written analysis.
+
+   RA_MAX IS A JUDGEMENT CALL AND IT IS ONE CONSTANT SO IT COSTS ONE LINE TO CHANGE. The card
+   specifies 4 rows per page, a modulo loop, "p of N", and a sub-line reading "n of total
+   analysed" — the n-of-total wording is what says the deck shows a SUBSET, but it never says how
+   big. All 633 would be 159 pages, which is not a swipe, and SHOW MORE exists precisely to hand
+   the full list to Result Corner. 20 (five pages) is the default; the question is logged. */
+var RA=null, RA_TIER='ALL';
+var RA_PAGE=4, RA_MAX=20;
+var RA_TIERS=['ALL','LARGE','MID','SMALL'];
+
+function raList(){
+  var all=(RA&&RA.companies)||[];
+  var f=(RA_TIER==='ALL')?all:all.filter(function(c){return c.tier===RA_TIER;});
+  return {shown:f.slice(0,RA_MAX), matched:f.length};
+}
+function raPick(t){
+  if(RA_TIERS.indexOf(t)<0)return;
+  RA_TIER=t;
+  var host=document.getElementById('rawrap');
+  if(!host)return;
+  /* THE CHIPS RE-RENDER WITH THE DECK, and they have to. The first build put raChips() in the
+     section template and only re-rendered the deck here: the rows filtered correctly and the
+     ACTIVE CHIP NEVER MOVED, so the screen showed LARGE-only rows under a highlighted ALL. The
+     filter was working and the page was lying about which filter was on. Caught by a headless
+     click, not by reading — the rows were visibly right. */
+  host.innerHTML=raChips()+raDeck();
+  deckPark('rtrack');            /* a filter change resets to page 1, per the card */
+}
+function raDeck(){
+  var L=raList(), rows=L.shown;
+  if(!rows.length){
+    var what=(RA_TIER==='ALL')?'No result analysis yet this season.'
+                              :('No '+RA_TIER.toLowerCase()+' names analysed yet.');
+    DECKS.rtrack=0;
+    return '<div class="unavail">'+esc(what)+'</div>';
+  }
+  var pages=[];
+  for(var i=0;i<rows.length;i+=RA_PAGE)pages.push(rows.slice(i,i+RA_PAGE));
+  DECKS.rtrack=pages.length;
+  var set=pages.map(function(pg,pi){
+    /* NO onclick AND NO CHEVRON IN THIS PUSH. The sheet is scope 3 and is not built yet, and a
+       row that looks tappable and does nothing is worse than a row that does not invite the tap.
+       The affordance arrives with the thing it opens. */
+    return '<div class="rpage"><div class="rpg num">'+(pi+1)+' of '+pages.length+'</div>'
+      + pg.map(function(c){
+          var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'';
+          return '<div class="mrow rrow"><div class="rmain">'
+            + '<div class="rtop"><b>'+esc(c.symbol||'')+'</b>'
+            + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
+            + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
+            + '</div>'
+            + '<div class="rv">'+esc(c.verdict||'')+'</div></div>'
+            + '<span class="chip '+cls+'" style="font-size:9.5px;padding:1px 6px">'
+            + esc(c.read||'—')+'</span></div>';
+        }).join('')
+      + '</div>';
+  }).join('');
+  var dots=Array.from({length:pages.length},function(_,j){
+    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+  return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
+       + set+set+set+'</div><div class="idots" id="rdots">'+dots+'</div></div>';
+}
+function raChips(){
+  return '<div class="rchips">'+RA_TIERS.map(function(t){
+    var n=(t==='ALL')?((RA&&RA.total)||0):(((RA&&RA.tiers)||{})[t]||0);
+    return '<button class="rchip'+(t===RA_TIER?' on':'')+'" onclick="raPick(\''+t+'\')">'
+         + esc(t)+' <span class="num">'+n+'</span></button>';
+  }).join('')+'</div>';
 }
 /* THE X AXIS IS TIME, NOT BAR INDEX, and that is load-bearing rather than pedantic. NIFTY PCR has
    ZERO rows for 18-Aug while BANKNIFTY has 71. Drawn by index, 17-Aug would sit flush against
@@ -615,21 +746,22 @@ async function boot(){
   const eodNote=S.global_tape&&S.global_tape.eod_note;
   const lad=(S.ladders&&S.ladders.indexes)||[];
   const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
-  const rep=S.reporting_today||{}, yr=S.yesterday_results||{};
+  const rep=S.reporting_today||{};
   const wm=(S.what_moved&&S.what_moved.items)||[], ge=(S.global_events&&S.global_events.items)||[];
-  const tally=yr.tally||{};
+  /* cc#1190: the results card now reads results_analysed. RA is a module-level global on purpose
+     — the tier chips re-render the deck on tap, outside this render pass, and they need the list.
+     yesterday_results is still ON the payload and still read by the WEB digest; this page simply
+     stopped being its consumer. */
+  RA = S.results_analysed || {};
+  const ra = RA, raT = ra.tally || {};
+  const raLatest = (ra.companies && ra.companies[0] && ra.companies[0].polished_ist) || '';
 
   const bias=(mr.bias||'—').toUpperCase();
   const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
 
-  const yrRows=(yr.companies||[]).slice(0,6).map(c=>{
-    const cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':c.read==='PENDING'?'n':'';
-    /* cc#1096 D3: same resolution as the chips above — a numeric BSE code is shown as the
-       company name, because there is no NSE symbol to resolve it to. */
-    return `<div class="mrow"><b>${esc(c.label||c.ticker)}</b>
-      <span style="flex:1;font-size:11.5px;color:var(--muted)">${esc(c.headline||c.pending_reason||'')}</span>
-      <span class="chip ${cls}" style="font-size:9.5px;padding:1px 6px">${esc(c.read||'—')}</span></div>`;}).join('')
-    ||'<div class="unavail">No reporters yesterday.</div>';
+  /* cc#1190: the yrRows builder is DELETED with the card it fed. Its cc#1096 D3 BSE-code
+     resolution is not lost — result_analysis_v2 is keyed on NSE symbols, so there is no numeric
+     code to resolve on this deck. */
 
   /* cc#1129: WHAT MOVED and GLOBAL EVENTS now use the shared row (scorr_news_row.js), the same
      one /m/home's LIVE NEWS uses. The old row was a dot plus a wrapped headline in a plain box —
@@ -684,13 +816,13 @@ async function boot(){
                 'PCR '+esc(p.underlying), p.pcr!=null?Number(p.pcr).toFixed(2):'—',
                 p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)',
                 null, itl.pcr_stale)));
-      IN_N=cards.length;
+      DECKS.itrack=cards.length;
       const set=cards.join('');
       /* three sets — see the continuous-swipe note on iWrap. The footer read line that sat under
          the dots is REMOVED (founder ruling 22-Aug), and the .wk sub-lines went with it, so the
          deck is the whole card now. */
       return `<div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iWrap()">${set}${set}${set}</div><div class="idots" id="idots">${
-        Array.from({length:IN_N},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
+        Array.from({length:DECKS.itrack},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
       }</div></div>`;})()}
   </div>
 
@@ -706,12 +838,11 @@ async function boot(){
       ${rep.count>6?`<span class="chip" style="color:var(--muted)">+${rep.count-6} more</span>`:''}</div>
   </div>
 
-  <div class="eyebrow">YESTERDAY'S RESULTS · SCORED</div>
+  <div class="eyebrow">LATEST RESULT ANALYSIS</div>
   <div class="card slab">
-    <div class="grp"><h3>Top ${(yr.companies||[]).length} of ${yr.reported_total!=null?yr.reported_total:'—'}</h3>
-      <span class="note"><b style="color:var(--volt)">${tally.bullish||0} bull</b> · <b style="color:var(--heat)">${tally.cautious||0} caut</b> · <b style="color:var(--muted)">${tally.neutral||0} neut · ${tally.pending||0} pending</b></span></div>
-    ${yrRows}
-    <div style="margin-top:8px;font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono'">${esc(yr.match_rule||'')}</div>
+    <div class="grp"><h3>${raList().shown.length} of ${ra.total!=null?ra.total:'—'} analysed</h3>
+      <span class="note"><b style="color:var(--volt)">${raT.bullish||0} bull</b> · <b style="color:var(--heat)">${raT.cautious||0} caut</b> · <b style="color:var(--muted)">${raT.neutral||0} neut</b>${raLatest?` · latest ${esc(raLatest)}`:''}</span></div>
+    <div id="rawrap">${raChips()}${raDeck()}</div>
   </div>
 
   <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
@@ -725,10 +856,12 @@ async function boot(){
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
   fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
-  var _tr=document.getElementById('itrack');   /* cc#1188: start on the MIDDLE set, instantly,
-     before first paint of the deck — the user never sees the parking move */
-  if(_tr&&IN_N)_tr.scrollTo({left:IN_N*_tr.clientWidth,behavior:'auto'});
-  iDots();         /* cc#1121: same reason — the deck's nodes are replaced on every render */
+  /* cc#1188: start each deck on the MIDDLE set, instantly, before its first paint — the user
+     never sees the parking move. cc#1190: two decks now, one call each. deckPark also refreshes
+     the dots, which is what the separate iDots() here used to do (cc#1121: the deck's nodes are
+     replaced on every render, so the dot handlers must be rebound). */
+  deckPark('itrack');
+  deckPark('rtrack');
   loadInternals();
 }
 boot();
