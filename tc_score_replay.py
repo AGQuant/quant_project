@@ -330,3 +330,237 @@ def selfcheck(symbol="RELIANCE", side="BUY", style="MOMENTUM"):
         out["rule_diffs"] = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
         out["match_rules"] = not out["rule_diffs"]
     return out
+
+
+# ── tables ────────────────────────────────────────────────────────────────────────────────
+#
+# Two tables, and the split between them is deliberate. Scoring is the expensive half - roughly
+# 100k card evaluations over five sessions - and the sweep is cheap. Storing every tick's score
+# once means the 15 threshold-by-hold cells are re-derived from stored numbers instead of
+# re-scoring the universe fifteen times. It also means a disagreement about a cell can be traced
+# back to the exact score that produced it.
+
+DDL = """
+CREATE TABLE IF NOT EXISTS tc_score_replay_ticks (
+  ts        timestamp   NOT NULL,
+  symbol    text        NOT NULL,
+  bucket    text        NOT NULL,
+  score100  numeric,
+  raw       numeric,
+  max_raw   numeric,
+  PRIMARY KEY (ts, symbol, bucket)
+);
+CREATE INDEX IF NOT EXISTS tc_srt_ts    ON tc_score_replay_ticks (ts);
+CREATE INDEX IF NOT EXISTS tc_srt_score ON tc_score_replay_ticks (bucket, score100);
+
+CREATE TABLE IF NOT EXISTS tc_score_replay_trades (
+  threshold   int    NOT NULL,
+  hold_days   int    NOT NULL,
+  symbol      text   NOT NULL,
+  bucket      text   NOT NULL,
+  side        text   NOT NULL,
+  entry_ts    timestamp NOT NULL,
+  entry_px    numeric,
+  entry_src   text,
+  exit_ts     timestamp,
+  exit_px     numeric,
+  exit_reason text,
+  pnl_pct     numeric,
+  PRIMARY KEY (threshold, hold_days, symbol, bucket, entry_ts)
+);
+CREATE INDEX IF NOT EXISTS tc_srtr_cell ON tc_score_replay_trades (threshold, hold_days);
+"""
+
+SESSIONS = ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"]
+THRESHOLDS = (60, 65, 70, 80, 84)
+HOLDS = (1, 2, 3)
+TARGET_PCT = 2.0
+STOP_PCT = 2.0
+SQUAREOFF = (15, 20)
+FUT_SOURCES = ("fyers_fut", "fyers_fut_rest", "yahoo")   # preference order, tagged as entry_src
+
+
+def ticks_for(day):
+    """09:30 to 15:15 inclusive, every 15 minutes. 24 ticks, which is what the card asks for."""
+    base = datetime.strptime(day, "%Y-%m-%d")
+    out, t = [], base.replace(hour=9, minute=30)
+    end = base.replace(hour=15, minute=15)
+    while t <= end:
+        out.append(t)
+        t += timedelta(minutes=15)
+    return out
+
+
+def _active_universe(cur):
+    cur.execute("SELECT UPPER(symbol) FROM futures_universe WHERE is_active=TRUE ORDER BY 1")
+    return [r[0] for r in cur.fetchall()]
+
+
+# ── phase 1: score every tick ─────────────────────────────────────────────────────────────
+
+def score_all(days=None, symbols=None, progress=None):
+    """Fill tc_score_replay_ticks. Idempotent per (ts, symbol, bucket).
+
+    Deliberately does NOT skip a symbol whose card comes back None - a missing score is written
+    as NULL so a thin tick is visible in the table rather than being indistinguishable from a
+    symbol that was never attempted. The card asks for ticks with under 150 symbols scored to be
+    flagged, and that flag can only be honest if absence is recorded.
+    """
+    days = days or SESSIONS
+    done = 0
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(DDL)
+        conn.commit()
+        syms = symbols or _active_universe(cur)
+        for day in days:
+            for at in ticks_for(day):
+                rows = []
+                for sym in syms:
+                    try:
+                        d = _asof_load(cur, sym, at)
+                    except Exception:
+                        continue                      # unscoreable symbol at this tick
+                    if d.get("cmp") is None:
+                        continue
+                    for side, style in BUCKETS:
+                        try:
+                            c = score_card(d, style, side)
+                        except Exception:
+                            continue
+                        rows.append((at, sym, f"{side}-{style[:3]}",
+                                     c.get("score100"), c.get("score"), c.get("max_raw")))
+                if rows:
+                    cur.executemany(
+                        """INSERT INTO tc_score_replay_ticks (ts,symbol,bucket,score100,raw,max_raw)
+                           VALUES (%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (ts,symbol,bucket) DO UPDATE
+                             SET score100=EXCLUDED.score100, raw=EXCLUDED.raw,
+                                 max_raw=EXCLUDED.max_raw""", rows)
+                    conn.commit()
+                done += 1
+                if progress:
+                    progress(day, at, len(rows), done)
+    return done
+
+
+# ── phase 2: prices, then the sweep ───────────────────────────────────────────────────────
+
+def _fut_bars(cur, symbol, t0, t1):
+    """5m futures bars between two timestamps, preferring fyers_fut and tagging what was used.
+
+    The preference order is the card's: fyers_fut, then fyers_fut_rest, then yahoo. A trade that
+    priced off a fallback is not wrong, but it is different, and entry_src carries that so the
+    results table can say how many did.
+    """
+    for src in FUT_SOURCES:
+        cur.execute("""SELECT ts, open, high, low, close FROM intraday_prices
+                       WHERE symbol=%s AND source=%s AND timeframe='5m'
+                         AND ts >= %s AND ts <= %s ORDER BY ts""", (symbol, src, t0, t1))
+        rows = cur.fetchall()
+        if rows:
+            return [{"ts": r[0], "open": _f(r[1]), "high": _f(r[2]),
+                     "low": _f(r[3]), "close": _f(r[4])} for r in rows], src
+    return [], None
+
+
+def _walk(bars, side, entry_px, deadline):
+    """Walk 5m bars to the first of target, stop, or the square-off deadline.
+
+    STOP IS CHECKED BEFORE TARGET INSIDE A BAR, always. A 5m bar that touches both tells us
+    nothing about which came first, and assuming the good one is how a backtest flatters itself.
+    Taking the stop is the conservative reading and it is the one the card asks for.
+    """
+    up = entry_px * (1 + TARGET_PCT / 100)
+    dn = entry_px * (1 - STOP_PCT / 100)
+    tgt, stop = (up, dn) if side == "BUY" else (dn, up)
+    for b in bars:
+        if b["high"] is None or b["low"] is None:
+            continue
+        hit_stop = (b["low"] <= stop) if side == "BUY" else (b["high"] >= stop)
+        hit_tgt = (b["high"] >= tgt) if side == "BUY" else (b["low"] <= tgt)
+        if hit_stop:
+            return b["ts"], stop, "SL"
+        if hit_tgt:
+            return b["ts"], tgt, "TGT"
+        if b["ts"] >= deadline:
+            return b["ts"], b["close"], "SQ"
+    if bars:
+        return bars[-1]["ts"], bars[-1]["close"], "SQ"
+    return None, None, None
+
+
+def sweep(thresholds=THRESHOLDS, holds=HOLDS):
+    """Fill tc_score_replay_trades for every cell, from the scores already stored.
+
+    Entry rule, exactly as the card states it: score100 >= threshold, no open position in the
+    same symbol and side, and the FIRST qualification that day latches - a symbol that clears the
+    bar at 09:30 and again at 11:00 is one trade, not two.
+    """
+    made = 0
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(DDL)
+        conn.commit()
+        for th in thresholds:
+            for hold in holds:
+                cur.execute("""DELETE FROM tc_score_replay_trades
+                               WHERE threshold=%s AND hold_days=%s""", (th, hold))
+                cur.execute("""SELECT ts, symbol, bucket, score100 FROM tc_score_replay_ticks
+                               WHERE score100 >= %s ORDER BY ts""", (th,))
+                qualified = cur.fetchall()
+                open_until = {}          # (symbol, side) -> exit_ts of the trade still running
+                rows = []
+                for ts, sym, bucket, sc in qualified:
+                    side = bucket.split("-")[0]
+                    key = (sym, side)
+                    if key in open_until and ts <= open_until[key]:
+                        continue                          # position already open
+                    day = ts.date()
+                    deadline = datetime.combine(
+                        _nth_session(day, hold), datetime.min.time()
+                    ).replace(hour=SQUAREOFF[0], minute=SQUAREOFF[1])
+                    bars, src = _fut_bars(cur, sym, ts, deadline)
+                    if not bars:
+                        continue
+                    entry_px = bars[0]["close"]
+                    if not entry_px:
+                        continue
+                    x_ts, x_px, why = _walk(bars[1:], side, entry_px, deadline)
+                    if x_ts is None:
+                        continue
+                    pnl = ((x_px / entry_px - 1) * 100) if side == "BUY" \
+                        else ((entry_px / x_px - 1) * 100)
+                    open_until[key] = x_ts
+                    rows.append((th, hold, sym, bucket, side, ts, entry_px, src,
+                                 x_ts, x_px, why, round(pnl, 4)))
+                if rows:
+                    cur.executemany(
+                        """INSERT INTO tc_score_replay_trades
+                           (threshold,hold_days,symbol,bucket,side,entry_ts,entry_px,entry_src,
+                            exit_ts,exit_px,exit_reason,pnl_pct)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT DO NOTHING""", rows)
+                    conn.commit()
+                    made += len(rows)
+    return made
+
+
+def _nth_session(day, n):
+    """The nth trading session on or after `day`, counted within the replay window.
+
+    Uses the replay's own session list rather than a weekday rule, because a weekday rule would
+    walk a trade into 15-Aug - a Saturday and Independence Day - which is the same mistake the
+    card's own day list makes.
+
+    THE CLAMP AT THE END OF THE WINDOW BIASES THE LONGER HOLDS, and the results table has to say
+    so. A trade entered on Friday 21-Aug with hold 3 cannot run three sessions - the replay window
+    ends that day - so it squares off same-day and is really a hold-1 trade wearing a hold-3
+    label. The same is true, less severely, for 20-Aug. The effect is that the hold-2 and hold-3
+    columns are diluted toward hold-1 behaviour by the trades opened near the window's end, which
+    flatters neither direction but does blur the comparison the founder is trying to make. The
+    count of clamped trades per cell is reported alongside the cell.
+    """
+    ds = [datetime.strptime(s, "%Y-%m-%d").date() for s in SESSIONS]
+    later = [x for x in ds if x >= day]
+    if not later:
+        return day
+    return later[min(n - 1, len(later) - 1)]
