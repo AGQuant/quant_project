@@ -449,6 +449,12 @@ async def auth_gate(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
     _prev = path == '/preview' or path.startswith('/preview/')   # cc#866
+    # cc#1203: WEB vs APP, decided once. /m/* is the retail app and /preview/* is its review
+    # surface; both are the black-and-gold contract and are pinned dark. Everything else is the
+    # premium web site, which is what the token contract, the theme boot and the Theme pill are
+    # for. Three separate injections below key off this one name so they cannot drift apart —
+    # the failure mode being a page that gets the pill but not the boot, or neither control.
+    _web = not (path.startswith("/m/") or _prev)
     do_logout = path in PROTECTED or _prev
     do_pwa = path in _PWA_INJECT_PATHS or _prev
     if (do_logout or do_pwa) and "text/html" in response.headers.get("content-type", ""):
@@ -459,7 +465,13 @@ async def auth_gate(request: Request, call_next):
         if not is_embed:
             if do_logout:
                 body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
-            if (do_logout or do_pwa) and b'id="scorr-th"' not in body:   # cc#348: global theme switch
+            # cc#348: global theme switch. cc#1203 push 4: NOT on web pages any more — the shared
+            # Theme pill now sits in the canonical top-nav, and shipping both would put two theme
+            # controls on one screen, disagreeing about their labels (this one reads its own
+            # localStorage with its own 'light' default; the pill reads ScorrTheme, which defaults
+            # dark). The condition is the SAME one that decides whether the boot ships, written the
+            # same way, so the two can never drift into a page with neither control.
+            if (do_logout or do_pwa) and not _web and b'id="scorr-th"' not in body:
                 body = body.replace(b"</body>", _THEME_BTN + b"</body>", 1)
             if do_pwa and b'src="/pwa.js"' not in body:
                 body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
@@ -555,7 +567,7 @@ async def auth_gate(request: Request, call_next):
                     # tokens exist when the attribute lands, and both go in before the page's own
                     # <style>, so a page can still override a token locally while it is being
                     # migrated in pushes 5-14 and simply stops needing to.
-                    if not (path.startswith("/m/") or _prev):
+                    if _web:
                         _head = _head + _WEB_TOKENS_LINK + _THEME_BOOT
                     # cc#1193 SHARED_CSS_RULE_V1: the app-only half of the R5 theme, injected on
                     # APP SURFACES ONLY. It must come AFTER _MOBILE_HEAD, which is where

@@ -422,25 +422,59 @@ PWA_JS = """
     ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('open'); });
 
     // cc#345: theme toggle — dark default (brand identity), user pick persisted forever.
-    function curTheme() { try { return localStorage.getItem('scorr_theme') || 'light'; } catch (e) { return 'light'; } }
+    //
+    // cc#1203 push 4 — WHY EVERY BRANCH BELOW ASKS FOR window.ScorrTheme FIRST.
+    // This block used to be a second, independent owner of the theme: its own localStorage read
+    // with its own 'light' default, its own setAttribute, and its own write. Once push 3 added the
+    // pre-paint boot, the two owners disagreed and the LATER one won — applyTheme(curTheme()) runs
+    // at DOM-ready, after the boot, so it re-stamped 'light' AND persisted 'light' into storage on
+    // a first visit. A reader who had never touched the control was silently opted into light and
+    // it stuck. Caught in a browser, not by reading the code: a fresh context came back
+    // attr=light, stored=light, while ScorrTheme.get() still said dark.
+    //
+    // The fix is ownership, not ordering — a later re-stamp would just move the race. Where the
+    // boot ships, ScorrTheme is the only thing that writes the attribute or the key, and this
+    // block becomes what it should always have been: a button that asks and a label that follows.
+    // Where the boot does not ship (/m/*, /preview/*), the legacy path is untouched.
+    function curTheme() {
+      if (window.ScorrTheme) return window.ScorrTheme.get();
+      try { return localStorage.getItem('scorr_theme') || 'light'; } catch (e) { return 'light'; }
+    }
     function syncThemeBtn() {
       var t = curTheme(), ic = document.getElementById('pwa-theme-ic'), lbl = document.getElementById('pwa-theme-lbl');
       if (ic) ic.innerHTML = (t === 'light') ? '\\u263e' : '\\u2600';         // moon (->dark) / sun (->light)
       if (lbl) lbl.textContent = (t === 'light') ? 'Switch to Dark' : 'Switch to Light';
     }
     function applyTheme(t) {
-      document.documentElement.setAttribute('data-theme', t);
-      try { localStorage.setItem('scorr_theme', t); } catch (e) {}
+      // Only the legacy path writes. Under ScorrTheme the attribute and the key are already
+      // correct — this call exists to sync the meta colour and the label, nothing more, and
+      // re-stamping here is exactly the bug described above.
+      if (!window.ScorrTheme) {
+        document.documentElement.setAttribute('data-theme', t);
+        try { localStorage.setItem('scorr_theme', t); } catch (e) {}
+      }
       var m = document.querySelector('meta[name="theme-color"]');
       if (m) m.content = (t === 'light') ? '#F4F7FE' : '#0A0F1E';
       syncThemeBtn();
     }
     document.getElementById('pwa-theme-toggle').addEventListener('click', function () {
+      if (window.ScorrTheme) {
+        // No reload. cc#348 reloaded because the theme lived in hardcoded per-page colours and a
+        // repaint was the only way to reach them; under the token contract every migrated page
+        // repaints from the var() the attribute selects, live. Pages still awaiting pushes 5-14
+        // are hardcoded, so a reload would not have fixed them either — it only cost the reader
+        // their scroll position and any open panel.
+        window.ScorrTheme.toggle();
+        return;
+      }
       // cc#348: reload so EVERY page (CSS-var, React GVM, hardcoded) renders in the new theme.
       var t = curTheme() === 'light' ? 'dark' : 'light';
       try { localStorage.setItem('scorr_theme', t); } catch (e) {}
       location.reload();
     });
+    // Keep the sheet's label truthful when the switch came from somewhere else — the nav pill,
+    // or a page's own control while it is being migrated.
+    window.addEventListener('scorr:theme', function () { applyTheme(curTheme()); });
     applyTheme(curTheme());   // sync meta + button to the theme the head script already applied
   }
 
@@ -551,6 +585,22 @@ PWA_JS = """
       + ':root[data-theme="light"] .scorr-cnav a:hover{color:#0E1630}'
       + ':root[data-theme="light"] .scorr-cnav a.active{border-bottom-color:#3D6BEC;color:#3D6BEC}'
       + ':root[data-theme="light"] .scorr-cnav .sep{background:rgba(20,35,80,.1)}'
+      // cc#1203 push 4: the ONE theme control for the whole web site. It lives here, in the
+      // canonical top-nav, for the same reason the nav itself does — a per-page toggle is a
+      // per-page drift, and this bar is already the single source every web page rebuilds from.
+      // margin-left:auto pushes it to the far right without needing a spacer element, so the
+      // NAV array and its separators are untouched.
+      //
+      // It is styled off the token contract from push 2 (--panel2/--line2/--mut/--txt) with the
+      // dark hex as the fallback, exactly like the nav links above. That means it follows the
+      // theme it switches, in both directions, with no light-mode override block of its own.
+      + '.scorr-theme-pill{margin-left:auto;display:flex;align-items:center;gap:5px;flex-shrink:0;'
+      + '  height:26px;padding:0 10px;border-radius:13px;cursor:pointer;white-space:nowrap;'
+      + '  font:600 10.5px/1 inherit;letter-spacing:.02em;'
+      + '  color:var(--mut, #8C99BD);background:var(--panel2, #182241);'
+      + '  border:1px solid var(--line2, rgba(148,166,210,.26));transition:.12s}'
+      + '.scorr-theme-pill:hover{color:var(--txt, #E9EEFB);border-color:var(--blu, #4D7CFE)}'
+      + '.scorr-theme-pill .ic{font-size:12px;line-height:1}'
       + '@media(max-width:767px){.scorr-cnav{display:none!important}}';
     var nst = document.createElement('style');
     nst.id = 'scorr-cnav-style'; nst.textContent = ncss;
@@ -578,6 +628,51 @@ PWA_JS = """
     // HERE by pwa.js, OUTSIDE the NAV array (the cc#860 append above) \u2014 so THIS was the web "Models"
     // the founder pointed at, not a NAV-array entry. The ScorrModels overlay, /api/models/status and
     // the /m/models route all stay untouched; only the nav button is gone.
+
+    // cc#1203 push 4: the shared Theme pill, far right of the same bar.
+    //
+    // GUARDED ON window.ScorrTheme, and that guard is the whole app/web split. main.py inlines the
+    // theme boot on WEB paths only; /m/* and /preview/* are the app's black-and-gold contract and
+    // are pinned dark by _MOBILE_APP_DARK. Those pages still get pwa.js and still render this nav
+    // at desktop width, so without the guard the app would grow a control that fights the pin.
+    // Testing for the API rather than re-testing the path means the two can never drift apart:
+    // wherever the boot ships, the pill ships, and nowhere else.
+    //
+    // Appended as a DOM node, not concatenated into the innerHTML above, so the NAV array stays the
+    // only thing that string builds \u2014 the cc#995 lesson about buttons hiding inside that map.
+    if (window.ScorrTheme) {
+      var TH = {
+        dark:  { ic: '\\u2600', label: 'Light' },   // in dark mode the pill offers light
+        light: { ic: '\\u263E', label: 'Dark'  }
+      };
+      var pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'scorr-theme-pill';
+      pill.id = 'scorr-theme-pill';
+
+      // The pill names the theme it will SWITCH TO, not the one you are in. Both readings are
+      // defensible and people hold different ones, so the title spells it out rather than leaving
+      // the reader to guess from a sun glyph.
+      function paint(name) {
+        var t = TH[name] || TH.dark;
+        pill.innerHTML = '<span class="ic">' + t.ic + '</span>' + t.label;
+        pill.title = 'Switch to ' + t.label.toLowerCase() + ' theme';
+        pill.setAttribute('aria-label', pill.title);
+      }
+      paint(window.ScorrTheme.get());
+
+      pill.addEventListener('click', function () {
+        try { window.ScorrTheme.toggle(); } catch (e) {}
+      });
+      // Repaint from the EVENT, not from the click handler's return. Anything else that switches
+      // theme \u2014 another tab's pill in a later push, a console call, a page's own control while it
+      // is still being migrated \u2014 leaves this label correct instead of stale.
+      window.addEventListener('scorr:theme', function (e) {
+        paint((e && e.detail && e.detail.theme) || window.ScorrTheme.get());
+      });
+
+      host.appendChild(pill);
+    }
   })();
 
   // 5) install prompt
