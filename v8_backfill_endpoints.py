@@ -116,9 +116,11 @@ def backfill_metrics(x_admin_token: str = Header(None)):
                     INSERT INTO v8_metrics
                     (symbol,score_date,gvm_score,dma_50,dma_200,
                      rsi_month,rsi_weekly,month_return,week_return,mom_2d,
-                     sector_week,sector_month)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     sector_week,sector_month,computed_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                            NOW() AT TIME ZONE 'Asia/Kolkata')
                     ON CONFLICT (symbol,score_date) DO UPDATE SET
+                        computed_at=NOW() AT TIME ZONE 'Asia/Kolkata',
                         gvm_score=EXCLUDED.gvm_score,dma_50=EXCLUDED.dma_50,
                         dma_200=EXCLUDED.dma_200,rsi_month=EXCLUDED.rsi_month,
                         rsi_weekly=EXCLUDED.rsi_weekly,month_return=EXCLUDED.month_return,

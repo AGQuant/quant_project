@@ -213,8 +213,9 @@ def metrics_gapfill(x_admin_token: str = Header(None), dry_run: bool = True):
                 INSERT INTO v8_metrics
                 (symbol, score_date, gvm_score, dma_50, dma_200,
                  rsi_month, rsi_weekly, month_return, week_return, mom_2d,
-                 sector_week, sector_month)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 sector_week, sector_month, computed_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                        NOW() AT TIME ZONE 'Asia/Kolkata')
                 ON CONFLICT (symbol, score_date) DO NOTHING
             """, row)
             inserted += cur.rowcount
