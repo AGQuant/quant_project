@@ -488,13 +488,36 @@ body[data-theme]{
    chrome nobody wrote — which is why the fix is `border:0` FIRST and the divider declared after,
    so no side can ever fall back to a UA default again.
    Founder ruling: dividers, not boxes. The hairline between rows stays and is the only border. */
-.nwrow{display:flex;align-items:center;gap:10px;padding:11px 2px;min-height:44px;
+/* ── cc#1204 · THE CARD STOPS CHANGING HEIGHT (LIVE_NEWS_FIXED_HEIGHT_V1, session_log 29088) ──
+   Founder screenshots 22-Aug 07:50: RAW page 3 is six 2-line rows, page 4 is six 3-line rows, and
+   the card is ~80px taller on page 4 — so the Prev/Next bar jumps under the thumb between pages
+   and again on the POLISH/RAW switch. .rnlist already carried min-height:360px, which is a FLOOR
+   and not a lock: any page whose rows exceed it grows past it, which is exactly what happens the
+   moment one headline takes three lines.
+   --news-row-h is the measured height of a 2-line row at base font: 11px padding top and bottom,
+   a 12.5px headline at line-height 1.45 (18.125px a line, 36.25 for two) and the 1px divider,
+   which lands on 59px. It is a token so the clamp, the row and the pad row cannot drift apart -
+   three places that must agree, one number. */
+:root{--news-row-h:59px}
+.nwrow{display:flex;align-items:center;gap:10px;padding:11px 2px;
+  height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
   border:0;border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;
   font-family:inherit;color:inherit;cursor:pointer}
 .nwrow:last-of-type{border-bottom:0}
-.nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB)}
+/* TWO LINES, THEN AN ELLIPSIS. The clamp is what makes the fixed height honest: without it a
+   three-line headline would be cut mid-sentence by overflow:hidden with no sign it was cut.
+   The full text is never lost - the row is a button and nwOpen() puts the whole headline in the
+   sheet, which is verified rather than assumed. */
+.nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* FIXED WIDTH ON THE RIGHT COLUMN, so the headline column is the same width on every row and a
+   long timestamp cannot make one row wrap where its neighbour did not. */
 .nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
-  white-space:nowrap}
+  white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
+/* The pad row holds the last page open to six. It is inert - no button, no tap target, no
+   divider under the final one - so the card keeps its height without inventing a row that looks
+   like it has something in it. aria-hidden because there is nothing here to announce. */
+.nwrow.nwpad{cursor:default;pointer-events:none}
 /* cc#1120 · WHY IT LOOKED LIKE A BOX, which is not what the card assumed and is worth recording.
    The chevron span was class="c" — and .c in mobile_app.css is THE CARD CLASS: background panel,
    1px border, 14px radius, 13px padding, 9px bottom margin, plus a ::before left rail. A one-glyph
@@ -503,6 +526,14 @@ body[data-theme]{
    designed ornament at all, a class-name collision. It also inflated the row from its 44px
    minimum to 76px.
    The chevron now has its own name and cannot collide. */
+/* cc#1204 item 3: THE TAG SLOT IS ONE FIXED WIDTH whatever fills it. A POLISH row carries a
+   category chip and a RAW row carries a chevron, and they are not the same width - measured, the
+   headline column came out at four distinct widths across the five views (216.3 / 220.2 / 261.2 /
+   265.1). A headline column that changes width between tabs is the same defect as a card that
+   changes height: the text reflows under the thumb on a control the reader did not touch. Both
+   fillers now take the same basis and centre inside it, so the headline keeps one width. */
+.nwrow .nwchev,.nwrow .nwcat{flex:0 0 46px;min-width:0;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
 .nwrow .nwchev{color:var(--gold,#D4AF37);font-size:13px;flex-shrink:0;
   background:none;border:0;border-radius:0;padding:0;margin:0}
 .nwrow .nwchev::before{content:none}
@@ -613,7 +644,11 @@ body[data-theme]{
   line-height:20px}
 .ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.1em;
   color:var(--mut);text-align:center;padding:18px 16px}
-.rnlist{min-height:360px;animation:rnfade .18s ease-out}
+/* cc#1204: EXACT, not a floor. min-height:360px reserved six rows and then let any page that
+   needed more simply take more - which is the whole defect. Six rows at the token is the height,
+   full stop, so a page that tried to exceed it would show up as a clipped row in the harness
+   instead of silently moving the pager. */
+.rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
 @keyframes rnfade{from{opacity:.35}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
 .rnpg{display:flex;align-items:center;justify-content:space-between;gap:8px;
@@ -2595,6 +2630,11 @@ function rnPaint(){
       + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
       + tag + '</button>';
   }).join('');
+  /* cc#1204 item 2: the last page is padded to six so the card cannot shrink on it. Without this
+     the height lock holds every FULL page at the same height and the final page - which is the one
+     with fewer items - still collapses, moving the pager exactly where the founder saw it move. */
+  for (var _pad = slice.length; _pad < RN.per; _pad++)
+    rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
   /* the whole control row is one flex line: Prev, the page counter, Next. Disabled ends are
      rendered disabled rather than hidden, so the row never changes width mid-session. */
   var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
