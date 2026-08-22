@@ -1255,7 +1255,9 @@ NAV_REGISTRY = {
     # cc#851: /dashboard#digest retired — the V8 Digest pane is gone and the hash now
     # redirects to /digest, which is the single Digest entry (see NAV above).
     "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
-    "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
+    # cc#1207: hidden from the nav — the engine is silent, so the tab is revealed only by a
+    # direct #v14 link. Route and pane both still work; it is off the menu, not retired.
+    "/dashboard#v14":   ("V14 · Intraday (V8 tab, hidden — direct link only)", "typed-url"),  # cc#543/#1207
     "/dashboard#bt":    ("V6 BT — V8 tab-only deep-link (removed from top nav)", "tab"),  # cc#551: dropped from NAV, reachable via the V8 tab bar only
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit

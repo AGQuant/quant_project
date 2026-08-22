@@ -1153,7 +1153,13 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div class="v8toptabs" id="v8toptabs">
     <button class="v8toptab active" data-pane="v8" onclick="showV8Pane('v8')">V8</button>
     <button class="v8toptab" data-pane="index" onclick="showV8Pane('index')">Index Intel</button>
-    <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')">V14 Intraday</button>
+    <!-- cc#1207: V14 Intraday is HIDDEN, not removed. The engine is silent (bg_v14_cycle
+         active=false, cc#1170) so the tab has nothing to show, but /dashboard#v14 is a link
+         people already hold and the pane still renders for it — the button reveals itself below
+         when the hash asks for it. Deleting the button and leaving the pane would have made that
+         link land on a page with no way back to the tab it names. -->
+    <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')"
+            id="v14tab" style="display:none">V14 Intraday</button>
     <button class="v8toptab" data-pane="tcscan" onclick="showV8Pane('tcscan')">TC Scanner</button>
     <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
     <!-- cc#853 (founder 04-Aug): Digest belongs in THIS row, immediately after V6 BT, and NOT in
@@ -6858,6 +6864,9 @@ function showV8Pane(name){
    rather than silently opening Master, so the link keeps meaning what it meant. */
 (function(){var TABS=['index','v14','tcscan','bt'];var h=(location.hash||'').replace('#','');
   if(h==='digest'){location.replace('/digest');return;}
+  // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
+  // clean for everyone else and the deep link still works with its tab visible.
+  if(h==='v14'){var _vt=document.getElementById('v14tab'); if(_vt) _vt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
 window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt'];var h=(location.hash||'').replace('#','');
   if(h==='digest'){location.replace('/digest');return;}
