@@ -736,7 +736,9 @@ function rPCR(){
       ? ScorrPcrTrend.placeholder(key,col,55)
       : '<div style="font-size:8px;color:var(--dim)">no data</div>';
     // A gap in the window is stated, not hidden — the panel should say when it is incomplete.
-    const gaps = (d&&d.gaps)?`<span style="font-size:9px;color:var(--mut)"> · ${d.gaps} day${d.gaps>1?'s':''} no data</span>`:'';
+    /* cc#1200 scope 3: name the day. "1 day no data" cannot tell a dead feed from a holiday. */
+    const _gn = (window.ScorrPcrTrend&&window.ScorrPcrTrend.gapNote)?window.ScorrPcrTrend.gapNote(d):'';
+    const gaps = _gn?`<span style="font-size:9px;color:var(--mut)"> · ${_gn}</span>`:'';
     return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(cur),col,true)}</div>
       <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">

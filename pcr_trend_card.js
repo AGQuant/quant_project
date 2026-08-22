@@ -73,7 +73,14 @@
       days: days, n: days.length,
       cur: cur, cur_date: curDate,
       chg: (cur !== null && prev !== null) ? (cur - prev) : null,
-      gaps: days.filter(function (d) { return d.pcr === null; }).length
+      gaps: days.filter(function (d) { return d.pcr === null; }).length,
+      /* cc#1200 scope 3: the DATES behind that count, not just how many. "1 day no data" is
+         true and useless — it does not say WHICH day, so a reader cannot tell a stale feed from
+         a holiday. The dates were already here in `days`; only the count was being carried out.
+         Newest first, because the day a reader cares about is almost always the last one. */
+      gap_dates: days.filter(function (d) { return d.pcr === null; })
+                     .map(function (d) { return d.date; })
+                     .filter(Boolean).reverse()
     };
   }
 
@@ -207,5 +214,28 @@
     }
   }
 
-  root.ScorrPcrTrend = { parse: parse, placeholder: placeholder, mountAll: mountAll, DEFAULT_H: DEFAULT_H };
+  /* cc#1200 scope 3: one wording for the gap note, exported so v8 and v10 cannot drift into
+     describing the same gap two different ways — they already render this card from two separate
+     copies of the surrounding markup. Names up to three days and counts the rest; an unbounded
+     list would run off a 9px meta line the moment a long holiday week appears. */
+  function gapNote(series) {
+    var ds = (series && series.gap_dates) || [];
+    if (!ds.length) { return ''; }
+    var shown = ds.slice(0, 3).map(_dayLabel).join(', ');
+    var extra = ds.length > 3 ? ' +' + (ds.length - 3) + ' more' : '';
+    return shown + extra + ' no reading';
+  }
+
+  function _dayLabel(iso) {
+    /* 2026-08-21 -> 21-Aug. Sliced, never Date-parsed: `new Date('2026-08-21')` is UTC midnight,
+       which renders as the 20th for any viewer west of Greenwich — the whole point of this card
+       is naming the right day. */
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) { return String(iso || ''); }
+    var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return String(Number(m[3])).padStart(2, '0') + '-' + MON[Number(m[2]) - 1];
+  }
+
+  root.ScorrPcrTrend = { parse: parse, placeholder: placeholder, mountAll: mountAll,
+                         gapNote: gapNote, DEFAULT_H: DEFAULT_H };
 })(window);

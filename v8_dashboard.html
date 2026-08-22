@@ -5692,7 +5692,9 @@ function rPCR(){
       ? ScorrPcrTrend.placeholder(key,col,55)
       : '<div style="font-size:8px;color:var(--dim)">no data</div>';
     // A gap in the window is stated, not hidden — the panel should say when it is incomplete.
-    const gaps = (d&&d.gaps)?`<span style="font-size:9px;color:var(--mut)"> · ${d.gaps} day${d.gaps>1?'s':''} no data</span>`:'';
+    /* cc#1200 scope 3: name the day. "1 day no data" cannot tell a dead feed from a holiday. */
+    const _gn = (window.ScorrPcrTrend&&window.ScorrPcrTrend.gapNote)?window.ScorrPcrTrend.gapNote(d):'';
+    const gaps = _gn?`<span style="font-size:9px;color:var(--mut)"> · ${_gn}</span>`:'';
     /* cc#1153 scope 6: the ref's .pcr-top / .pcr-big / .pcr-meta typography, on the data this card
        actually has. TWO THINGS THE REF ASKS FOR THAT I DID NOT BUILD, both stated rather than faked:
        (1) The ref's meta line reads "opened 0.72 - peak 1.26 @ 10:15". That is INTRADAY. This card
