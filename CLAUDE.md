@@ -154,10 +154,31 @@ What does **not** change:
 ## CC Task System — 2-Way Workflow
 
 ### Trigger phrases (Arpit says these to CC):
+- **"production mode on" → PRODUCTION_MODE_V1. See the rule below. This is the most important trigger in this file.**
 - "read cc tasks" → run the SQL below, show pending tasks, implement them
 - "read railway cc tasks" → same as above
 - "what tasks are pending" → same as above
 - "check fable room" → the backup wake (founder-set 17-Aug-2026). Run the Fable Room protocol below: read the room, act on everything waiting, answer in the room.
+
+### PRODUCTION_MODE_V1 (founder-set 22-Aug-2026) — "production mode on" means exactly this
+
+Three things, every time, with no further prompting:
+
+1. **RE-ARM EVERY 60 SECONDS, FOR THE NEXT 2 HOURS.** Sixty seconds is the floor the runtime
+   allows (wakeups clamp to 1 minute – 1 hour); 60 is what the founder asked for and 60 is what
+   CC sets. Not 10 minutes, not 15. If CC thinks a longer gap is better it **says so in the reply
+   and still sets 60** — the founder decides the cadence, not CC. On 22-Aug CC was asked for
+   every-minute polling and quietly set 10, which is the behaviour this rule exists to stop.
+2. **AUTO-CLAIM.** Claim the next task without asking. One at a time (CC_QUEUE_DRAIN_RULE_V1
+   point 1), finish it to a pushed sha before claiming the next (V1.1, Fable 3120).
+3. **DISCUSS IN THE FABLE ROOM.** Every question, every stop, every decision goes in
+   `cc_task_logs` — not held for the next founder reply. Fable reads the room and answers there.
+
+**The interval is the gap AFTER a turn ends, not a speed limit on the work.** CC does not stop
+mid-card to wake up; it finishes, pushes, logs, then sleeps. So 60s means "come straight back",
+which is the point.
+
+Ends after 2 hours unless the founder re-arms. `production mode off` / `stop` ends it immediately.
 
 ### The Fable Room (CC_COMMS_LOOP_V1, session_log 24138, founder-set 17-Aug-2026)
 The meeting room is `cc_tasks` + `cc_task_logs`. Arpit moderates and watches on the app; Fable (Claude AI) and CC talk THROUGH THE TABLE, not through him.
