@@ -347,6 +347,28 @@ _MOBILE_HEAD = (
 # stayed invisible because nothing read it there — until the R5 layer, which is gated on exactly
 # that attribute and would have skipped the entire mobile app. Fixed at the stamp rather than
 # worked around in the CSS: this runs after _MOBILE_HEAD's script, so it wins.
+# cc#1203 push 3: the web theme boot, INLINED rather than linked. It must stamp
+# html[data-theme] before the first paint, and both a <script src> round trip and the deferred
+# siblings below run too late — the page would paint dark and snap to light. Read once at import
+# from scorr_theme_boot.js, which stays the one place the logic is edited. No build stamp is
+# needed precisely BECAUSE it is inlined: there is no cached asset to bust (the cc#1060 trap does
+# not apply to bytes that ship inside the page).
+#
+# The read is guarded, but NOT silently. A bare `except: pass` here would turn a typo or a missing
+# file into "every web page ships an empty <script>" — a failure that renders as plain dark and so
+# looks exactly like success. The log line is the difference between a bug you find in the deploy
+# log and one you find in a screenshot a week later.
+_THEME_BOOT_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scorr_theme_boot.js")
+try:
+    with open(_THEME_BOOT_SRC, "r", encoding="utf-8") as _tbf:
+        _THEME_BOOT = b"<script>" + _tbf.read().encode("utf-8") + b"</script>"
+    if len(_THEME_BOOT) < 200:          # the file is ~2.5KB; anything tiny means a truncated read
+        raise ValueError("scorr_theme_boot.js read back too small: %d bytes" % len(_THEME_BOOT))
+except Exception as _tbe:
+    _THEME_BOOT = b""   # absent boot = pages keep whatever theme their own CSS defaults to
+    print("[cc#1203] theme boot NOT inlined (%s): %s" % (_THEME_BOOT_SRC, _tbe), flush=True)
+
+
 _MOBILE_APP_DARK = (
     b"<script>(function(){try{"
     b"document.documentElement.setAttribute('data-theme','dark');"
@@ -356,6 +378,12 @@ _MOBILE_APP_DARK = (
 # cc#1193 SHARED_CSS_RULE_V1 (session_log 29017): the APP-ONLY R5 rules, linked on /m/* and
 # /preview/* only. Build-stamped like every other asset in _MOBILE_HEAD so a deploy busts the
 # 1-day cache — a new stylesheet served max-age=86400 with no stamp is the cc#1060 outage.
+# cc#1203: the web token contract. Build-stamped like every other linked asset — this one IS a
+# fetched file, so the cc#1060 cache rule applies to it even though the boot beside it is inlined.
+_WEB_TOKENS_LINK = (
+    b'<link rel="stylesheet" href="/static/scorr_web_tokens.css?v=' + _BUILD_B + b'">'
+)
+
 _THEME_MOBILE_LINK = (
     b'<link rel="stylesheet" href="/static/theme_mobile.css?v=' + _BUILD_B + b'">'
 )
@@ -518,6 +546,17 @@ async def auth_gate(request: Request, call_next):
                     _at = _find_outside_comments(body, b"</body>")
                 if _at >= 0:
                     _head = _MOBILE_HEAD
+                    # cc#1203: the WEB token contract + the theme boot, on WEB PATHS ONLY.
+                    # /m/* and /preview/* are the app's black-and-gold contract (cc#1193) and are
+                    # pinned dark by _MOBILE_APP_DARK below — giving them a light-capable boot
+                    # would be two rules fighting over one attribute on every app page load.
+                    #
+                    # ORDER MATTERS TWICE OVER. The stylesheet goes in BEFORE the boot so the
+                    # tokens exist when the attribute lands, and both go in before the page's own
+                    # <style>, so a page can still override a token locally while it is being
+                    # migrated in pushes 5-14 and simply stops needing to.
+                    if not (path.startswith("/m/") or _prev):
+                        _head = _head + _WEB_TOKENS_LINK + _THEME_BOOT
                     # cc#1193 SHARED_CSS_RULE_V1: the app-only half of the R5 theme, injected on
                     # APP SURFACES ONLY. It must come AFTER _MOBILE_HEAD, which is where
                     # scorr_theme_r5.css is linked — same rules, same specificity, later sheet.
