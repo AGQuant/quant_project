@@ -1282,8 +1282,15 @@ function renderV4Dual(d, uiMode){
          score/verdict pair it always did — the bands are the same thresholds expressed on a
          different scale (8.4 IS 0.84x, 6.5 IS 0.65x), so no colour changes meaning here. */
       +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'
-      +   (c.score10!=null?Number(c.score10).toFixed(1):Number(c.score).toFixed(2))+'</span>'
-      +'<span style="font-size:11px;color:var(--dim)">'+(c.score10!=null?'/10':'/'+(c.max||15))+'</span>'
+      /* cc#1210 TC_SCORE_100_V1: the headline is the /100 scale. score100 is score10 x 10 at the
+         source (cc#1209 cc68255) — same numerator, same denominator, same band — so this is a
+         relabel, not a recalculation. score10 is still read as the fallback for a card served by
+         an older deploy, and it is multiplied here rather than printed raw so the two can never
+         appear side by side in different units. */
+      +   (c.score100!=null?Number(c.score100).toFixed(1)
+           :(c.score10!=null?(Number(c.score10)*10).toFixed(1):Number(c.score).toFixed(2)))+'</span>'
+      +'<span style="font-size:11px;color:var(--dim)">'
+      +((c.score100!=null||c.score10!=null)?'/100':'/'+(c.max||15))+'</span>'
       /* cc#1173 interim ruling (Fable 3035): NO BAND on an uncalibrated score. The engine already
          sends verdict10 as null for an unweighted card, but this line carried a `|| c.verdict`
          fallback — so a null band would have quietly reverted to the RAW-score verdict and the
@@ -1348,7 +1355,7 @@ function renderV4Dual(d, uiMode){
        weights the 10-scale is an unweighted ratio, and it says so rather than passing itself off
        as the founder-locked number. */
     +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'
-    +     (d.best_score10!=null?Number(d.best_score10).toFixed(1)+'/10':'—')+'</b>'
+    +     (d.best_score10!=null?(Number(d.best_score10)*10).toFixed(1)+'/100':'—')+'</b>'
     +     (d.best_verdict10?' · <b>'+d.best_verdict10+'</b>':'')
     +     (d.best_score10!=null&&d.best_score10_weighted===false
              ? '<span class="v4-uncal" title="This bucket has no live rule weights, so the 10-scale is an unweighted ratio, not the calibrated score.">uncalibrated</span>':'')
@@ -1360,7 +1367,12 @@ function renderV4Dual(d, uiMode){
        it. */
     +   '<div class="v4-best-sub">raw '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')
     +     '/'+((d.best&&d.best.max)!=null?d.best.max:'—')
-    +     ((d.best&&d.best.bands10)?' · '+d.best.bands10:'')+'</div>'
+    /* cc#1210: the band line is rescaled from the SERVED bands10 string, never retyped. If the
+       band constants ever move, this follows them; a hand-typed "84 / 65 / 50" would not. */
+    +     ((d.best&&d.best.bands10)
+             ? ' · '+String(d.best.bands10).replace(/\d+(?:\.\d+)?/g,
+                 function(n){return String(Math.round(Number(n)*10*10)/10);})
+             : '')+'</div>'
     +   (alertsHtml?'<div class="v4-alerts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">'+alertsHtml+'</div>':'')
     + '</div></div>'
     + cardsHtml
