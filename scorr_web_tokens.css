@@ -203,6 +203,10 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 7: --pulse was used on /check twice and declared NOWHERE - not in that page's
+     :root, not in the contract, not in scorr_themes.css. It resolved to nothing. pwa.js has read
+     it as the accent blue for years via var(--pulse, #4D7CFE), so that is what it becomes. */
+  --pulse     : var(--blu);
 
   /* cc#1203 push 5 — the digest vocabulary. Added when that page's own :root was deleted, which
    * is what these aliases are for: the markup is untouched and every name it uses still resolves.
