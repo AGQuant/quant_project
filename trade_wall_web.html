@@ -1,13 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
+<head>
+<!-- cc#1203 push 6: head and body tags are NEW here, and they are the fix for a live
+     defect, not tidying. This file opened with a doctype and an html tag but had NO head and NO
+     body tag of any kind. main.py's shared-asset injections all anchor on the closing head or
+     closing body tag: the token sheet and theme boot look for one then fall back to the other,
+     and the logout pill, theme button and pwa.js tag each do a plain one-shot replace on the
+     closing body tag. None of them could match, so none of them ran. The proof is three lines
+     below — this page ships an empty nav placeholder div that pwa.js is supposed to fill, and
+     pwa.js was never on the page to fill it. /trades has been serving a blank navbar since
+     cc#991. Same shape, same cause as /digest in push 5; found by the sweep in that push.
+     The page's own style block stays in head where it already was. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Wall of Trades · Scorr</title>
 <style>
-  :root{--bg:#f6f8fb;--panel:#fff;--card2:#f6f8fb;--line:#e8ecf2;--line2:#e8ecf2;
-        --txt:#1c2536;--mut:#667085;--dim:#9aa4b5;--blu:#2f6df4;--grn:#0f9d58;--red:#d0433b;}
-  :root[data-theme="dark"]{--bg:#0e1420;--panel:#141c2b;--card2:#182131;--line:#243044;--line2:#243044;
-        --txt:#e8eef7;--mut:#93a0b5;--dim:#6c7c93;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
        font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
@@ -53,6 +60,8 @@
     thead th,tbody td{padding:7px 6px;font-size:12px}
   }
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <div id="scorr-nav"></div>
@@ -249,4 +258,5 @@ function boot(keepCounts){
 
 boot(false);
 </script>
+</body>
 </html>
