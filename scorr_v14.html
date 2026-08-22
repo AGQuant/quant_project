@@ -48,6 +48,16 @@
   .loading{color:var(--mut);font-size:13px;padding:20px 4px}
   .empty{color:var(--dim);font-size:13px;padding:20px 12px;text-align:center}
   .note{font-size:10px;color:var(--dim);margin:4px 0 0}
+  /* cc#1170: the SILENT banner, styled here because the dashboard's copy is scoped to
+     #pane-v14 and does not reach this page. Same words, same shape, so the two surfaces cannot
+     drift into telling the founder two different stories about one engine. */
+  .v14-silent{border:1px solid var(--line2);border-radius:12px;padding:14px 16px;margin:6px 0 14px;
+    background:var(--panel)}
+  .v14-silent-hd{font-size:13px;font-weight:800;letter-spacing:.1em;color:var(--mut);
+    text-transform:uppercase}
+  .v14-silent-hd span{font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--dim)}
+  .v14-silent-body{font-size:12px;color:var(--txt);line-height:1.6;margin-top:8px;max-width:70ch}
+  .v14-silent-sub{font-size:10.5px;color:var(--dim);line-height:1.55;margin-top:7px;max-width:70ch}
   /* cc#458: Replay Day */
   .rbtn{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border:1px solid var(--blu);border-radius:8px;padding:6px 12px;cursor:pointer;letter-spacing:.3px}
   .rbtn:hover{background:rgba(77,124,254,.22)}
@@ -90,10 +100,22 @@
   <header>
     <div class="logo">V14 · <b>Intraday</b></div>
     <div class="spacer"></div>
-    <button id="replayBtn" class="rbtn">&#9654; Replay Day</button>
-    <div class="clock" id="clk">--:--</div>
+    <!-- cc#1170 push 3: the Replay Day button and the live IST clock are REMOVED from the
+         standalone page too. Push 2 took them off the dashboard pane; this page kept them, and a
+         silenced engine offering to replay its day is the exact thing the card forbids — a reader
+         who can press play believes something is still running. The overlay markup and startReplay
+         stay in the file as dead code rather than being ripped out mid-archive; nothing reaches
+         them now that the only trigger is gone. -->
   </header>
-  <div id="root"><div class="loading">Loading V14 intraday engine…</div></div>
+  <div class="v14-silent">
+    <div class="v14-silent-hd">● ENGINE SILENT <span>since 20-Aug-2026</span></div>
+    <div class="v14-silent-body">Founder ruling. V14 did not clear the merit gate: average return
+      of at least 1% per trade AND at least 60% accuracy. It is retired, not paused and not broken.
+      Nothing has been deleted.</div>
+    <div class="v14-silent-sub">The closed-trade ledger below is retained as research history.
+      Read-only — the numbers are what the engine actually did, not a live position.</div>
+  </div>
+  <div id="root"><div class="loading">Loading the retained V14 ledger…</div></div>
 </div>
 <!-- cc#458: Replay Day overlay -->
 <div class="rp-ov" id="rpOv">
@@ -264,7 +286,8 @@ function renderReplay(clk, frac, now){
     +`<div class="ptitle">Closed trades <span class="ct">${closed.length} done &middot; net ${sign(closedNet,2)}%</span></div><div class="scroll"><table><thead><tr>${ch.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${cb}</tbody></table></div>`
     +`<div class="ptitle">Per-tag <span class="ct">live</span></div><div class="scroll"><table><thead><tr><th>TAG</th><th>TRADES</th><th>WR</th><th>NET %</th></tr></thead><tbody>${tb}</tbody></table></div>`;
 }
-document.getElementById('replayBtn').onclick=startReplay;
+/* cc#1170: the Replay Day trigger is gone with its button. startReplay and the overlay remain
+   defined but unreachable — no element binds to them any more. */
 document.getElementById('rpClose').onclick=stopReplay;
 document.querySelectorAll('.rp-speed button').forEach(b=>b.onclick=()=>{RP.dur=+b.getAttribute('data-dur');document.querySelectorAll('.rp-speed button').forEach(x=>x.classList.remove('on'));b.classList.add('on');if(RP.running){stopReplay();startReplay();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&RP.running)stopReplay();});
@@ -313,9 +336,14 @@ function tradeInfo(id){
 function closeTradeInfo(){document.getElementById('tiOv').classList.remove('open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTradeInfo();});
 
-function tick(){const i=new Date(Date.now()+(5*60+30)*60000);document.getElementById('clk').textContent=String(i.getUTCHours()).padStart(2,'0')+':'+String(i.getUTCMinutes()).padStart(2,'0')+' IST';}
-tick();setInterval(tick,1000);
-load();setInterval(load,60000);
+/* cc#1170: THE CLOCK AND THE AUTO-REFRESH ARE BOTH GONE, and the second one is the one that
+   mattered. Removing the clock element without its updater left tick() writing to a null every
+   second — the page threw "Cannot set properties of null" on load, which is how removing an
+   element orphans its wiring. Both are deleted together.
+   setInterval(load, 60000) polled a SILENT engine once a minute. On a retired book that is not
+   merely wasteful, it is the page insisting something is still happening: the numbers would
+   "refresh" forever and never change. The ledger is fetched ONCE, because history does not move. */
+load();
 </script>
 </body>
 </html>

@@ -515,8 +515,16 @@ async function openStrategies(){
     body.innerHTML = (s.strategies||[]).map(x=>{
       const here = (x.url==='/scanners' && x.tab);
       const act = here ? `onclick="closeStrat();selectTab('${x.tab}')"` : `onclick="location.href='${x.url}'"`;
-      return `<div ${act} style="padding:10px 12px;border-top:1px solid var(--line);cursor:pointer">
-        <div style="font-weight:700">${x.label}${here?' <span style="font-size:10px;color:var(--dim)">(this page)</span>':''}</div>
+      /* cc#1170: a strategy may carry a STATE, and the menu has to show it or the field is
+         decoration. A silent engine still opens — its ledger is history worth reading — so the row
+         stays clickable and is dimmed and badged rather than removed. Removing it would read as
+         deleted, which is not what happened. Any future state renders the same way; nothing here
+         is spelled V14. */
+      const st = x.state ? `<span style="font-size:9px;font-weight:800;letter-spacing:.08em;
+        color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:1px 5px;
+        margin-left:7px;vertical-align:middle">${x.state}</span>` : '';
+      return `<div ${act} style="padding:10px 12px;border-top:1px solid var(--line);cursor:pointer${x.state?';opacity:.72':''}">
+        <div style="font-weight:700">${x.label}${st}${here?' <span style="font-size:10px;color:var(--dim)">(this page)</span>':''}</div>
         <div style="font-size:11.5px;color:var(--dim);margin-top:2px">${x.desc}</div></div>`;
     }).join('');
   }catch(e){ body.innerHTML='<span style="color:var(--red)">Registry unavailable</span>'; }

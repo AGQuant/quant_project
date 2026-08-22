@@ -1065,8 +1065,16 @@ SCANNER_REGISTRY = [
      "desc": "Pre-results OI-positioning quadrant for next-day reporters (observation study)."},
     {"id": "tc_scanner",    "label": "TC Scanner (V8 dash)", "url": "/dashboard", "tab": "TC",
      "desc": "Dual-style Trade-Check buckets (BUY/SELL × Momentum/Reversal) on the V8 dashboard."},
+    # cc#1170 push 3: V14 is SILENT, not dead and not broken, and this list is one of the surfaces
+    # that implied it was still running — "live exits" on a retired engine. `state` is a real field
+    # the menu RENDERS, not a flag sitting unread: scorr_intraday.html draws a badge from it and
+    # dims the row. The entry stays in the registry because the ledger is still reachable and a
+    # missing row would read as "deleted", which is the opposite of what the founder ruled.
     {"id": "v14_orb",       "label": "V14 Intraday",         "url": "/v14",      "tab": None,
-     "desc": "V14 paper intraday engine — ORB / VWAP-reclaim / R1-rejection setups with live exits."},
+     "state": "SILENT",
+     "desc": "SILENT since 20-Aug-2026 (founder ruling — did not clear the merit gate). "
+             "ORB / VWAP-reclaim / R1-rejection paper engine; 34-trade research ledger retained, "
+             "read-only. No live exits, no new entries."},
 ]
 
 
