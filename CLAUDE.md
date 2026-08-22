@@ -12,7 +12,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 - Timezone: always IST (Asia/Kolkata). NSE: Mon-Fri 09:15-15:30
 
 ## Critical Rules (never violate)
-1. AUTO MODE (set 30-Jun-2026): always push, never ask. Run cc tasks end-to-end autonomously — claim → implement → ast.parse → push → verify SHA → finalize DB → claim next. No push-approval prompts.
+1. ~~AUTO MODE (set 30-Jun-2026): always push, never ask. Run cc tasks end-to-end autonomously — claim → implement → ast.parse → push → verify SHA → finalize DB → claim next. No push-approval prompts.~~ **SUPERSEDED 22-Aug-2026 by CC_QUEUE_DRAIN_RULE_V1 (session_log 28971, cc#1189) — see the section below. Kept, not deleted: always-push is still true and is now part of the drain loop. What changed is that "production mode" is no longer a thing to switch on, and claiming more than one task at a time is forbidden.**
 2. ALWAYS ast.parse() Python files before push
 3. NEVER push placeholder text as file content
 4. main.py = wiring only (imports + routes + include_router, no logic)
@@ -25,6 +25,23 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 11. **ROLE_CHARTER_V4 / EXECUTION_MODEL_PHASE_3 (session_log id=27934, founder-set 20-Aug-2026; refines PUSH_MODES_V2 id=27933; supersedes ROLE_CHARTER_V3 id=17868 and ROLE_CHARTER_V2 id=16159):** **Fable owns APP development + DATABASE management. CC owns WEB surfaces + BACKEND + the AUDIT of every Fable push.** See the Role Split section below. Verification now runs BOTH directions: a push from either seat is a **claim** until the other seat's check passes.
 12. **SUPERSESSION AUTHORITY (founder-set 05-Aug-2026):** Arpit is **CEO**. Claude AI is **CTO**. CC is the senior techie. Any rule in this file or in `session_log` may be superseded by the CTO **on explicit CEO permission** — see the Supersession section below for how that is done and what it does not cover.
 13. **V8_PNL_CANON_V1 (session_log id=18337, founder-set 09-Aug-2026):** there is exactly ONE V8 book formula, served from ONE endpoint, consumed by EVERY surface (web master dashboard, web trade log tab, daylog, /m/v8, Home). NO surface recomputes book P&L or win rates locally. The formula: fresh era (`entry_ts >= app_config.v8_paper_rebuild_cutover_ts`), retired baskets excluded via the **registry** (app_config `v8_retired_baskets`, currently `s1_reclaim_obs` + `buy_s1_bounce`), realised = SUM(pnl) NET of Rs.500 × closed trades brokerage, wins = result='TARGET' only, losses = result='SL' only, rate on decided, dash never 0%. **Retired baskets vanish from all P&L displays completely — including all-era/history views.** Any intentional history figure must be labelled and still exclude retired baskets. Build/migration card: cc#970.
+
+## CC_QUEUE_DRAIN_RULE_V1 (founder-set 22-Aug-2026, session_log 28971)
+
+Founder ruling after two days of tasks left mid-way or unclaimed. The five points, verbatim:
+
+1. **CLAIM ONE AT A TIME.** CC claims exactly ONE cc_task (status=in_progress, claimed_at=now()). It does not claim a second task until the first has a commit_sha and a result logged. Batch-claiming (four tasks at 09:00 on 21-Aug) is forbidden — it is the root cause of orphaned in_progress rows when a session dies.
+2. **DRAIN UNTIL EMPTY.** On "read cc tasks", CC loops: claim highest-priority pending (P0>P1>P2, then lowest id) → implement → push → log SHA+result in cc_tasks and cc_task_logs → claim next. Stops only when queue is empty, a GATE fails, or a hard window applies (worker/** in market hours, 00:00-06:00 IST). No asking between tasks. "Production mode" is no longer needed — this IS the default.
+3. **GATED TASKS** are skipped (not claimed) until their gate sha exists; CC logs "skipped: gate cc#N not landed" and moves on.
+4. **STALE CLAIM RELEASE.** Any in_progress task with commit_sha IS NULL and claimed_at older than 90 minutes is reset to pending by a scheduler job (cc_task to follow). A fresh CC session treats such rows as its own work, never as another session's.
+5. **CONTEXT GUARD.** If context is near full, CC finishes the current task, logs, and STOPS cleanly with a cc_task_logs line "session end — queue not empty". It never claims a task it cannot finish.
+
+Supersedes: PUSH_MODES_V1 production-mode standing instruction. Dual mode and founder gates unchanged.
+
+**Point 4 is machinery, not a promise.** `stale_claim_release` runs every 15 minutes from the app
+scheduler (`cc_queue_maintenance.release_stale_claims`), registry-gated in `scheduler_master` like
+every other job. A task that already has a commit_sha is NEVER reset — releasing finished work
+would invite a second session to redo a landed change, which is worse than a stale row.
 
 ## Supersession — how a rule changes (rule 12, founder-set 05-Aug-2026)
 

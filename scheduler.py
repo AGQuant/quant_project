@@ -1142,6 +1142,29 @@ def _bg_qsr_scan():
         log.error("qsr_scan: %s", e)
 
 
+def _bg_stale_claim_release():
+    """cc#1189 — release cc_task claims a dead CC session left behind (CC_QUEUE_DRAIN_RULE_V1 p4).
+
+    Registry-gated like every other job here, so it can be switched off by UPDATE and not by a
+    deploy. Returns _SKIPPED on a no-op tick rather than a bare None: a flag-gated job that returns
+    None stamps last_status='ok' on every tick it did nothing, which is how an engine that has not
+    actually run in days looks perfectly healthy (cc#526).
+
+    NO SKIP LIST ON THE SCHEDULED PATH, on purpose. The manual first run excludes whatever a live
+    session is holding; from here on the 90-minute age test is the only signal that exists, because
+    a session that died left nothing behind to ask.
+    """
+    if _job_active("stale_claim_release") is not True:
+        return _SKIPPED
+    import cc_queue_maintenance
+    released = cc_queue_maintenance.release_stale_claims()
+    if not released:
+        return _SKIPPED
+    log.info("stale_claim_release: %d released (%s)", len(released),
+             ", ".join("cc#%s after %.0fmin" % (r["id"], r["claimed_min"]) for r in released))
+    return {"released": len(released), "ids": [r["id"] for r in released]}
+
+
 def _bg_qsr_exits():
     """cc#1175 — the QSR exit sweep.
 
@@ -4109,6 +4132,11 @@ async def _scheduler_loop():
             # cc#660: 15-min ALL-DAYS worker-liveness (heartbeat >45min) + off-hours incident relay.
             # Replaces the m%5 feed_incident_relay — worker incidents any hour still surface here.
             _spawn(_bg_guardian_offhours)
+            # cc#1189: stale cc_task claim release. On the BARE 15-minute tick, ALL DAYS and ALL
+            # HOURS — the work queue does not keep market hours, and the orphans this clears were
+            # created at 09:00 on a weekday and found at 06:00 on a Saturday. Gated inside on the
+            # registry, so it is switched off by UPDATE and never by a deploy.
+            _spawn(_bg_stale_claim_release)
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
         # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
