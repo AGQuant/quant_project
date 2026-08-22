@@ -8,13 +8,10 @@
 <style>
   /* cc#344 page 2: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#0A0F1E; --card:#121A33; --panel:#121A33;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
-    --shadow:0 18px 44px rgba(3,7,20,.5);
-    --surface2:#182241; --well:#0D1428; --r:18px;
+    /* cc#1203 push 9: colour tokens moved to the injected contract. Every name is a contract
+       name at the same value or one step from it, including --font and --shadow, so the block
+       is gone rather than aliased. The shadow now lightens with the theme instead of staying a
+       dark-mode drop shadow on a white page. */
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}

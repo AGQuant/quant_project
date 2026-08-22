@@ -203,6 +203,10 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 9: --panel-hi is used across 12 files and declared in exactly one of them, so
+     everywhere else it has been falling back — to #182241 on some lines and #16223f on others,
+     two shades for one name. It is the raised panel, which is what --panel2 already is. */
+  --panel-hi  : var(--panel2);
   /* cc#1203 push 7: --pulse was used on /check twice and declared NOWHERE - not in that page's
      :root, not in the contract, not in scorr_themes.css. It resolved to nothing. pwa.js has read
      it as the accent blue for years via var(--pulse, #4D7CFE), so that is what it becomes. */
