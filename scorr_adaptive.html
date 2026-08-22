@@ -43,6 +43,45 @@ html,body{margin:0;padding:0;background:var(--bg);}
 .adx .card .strip .b .v{font-size:14px;font-weight:600;margin-top:2px;letter-spacing:-.3px;}
 .adx .card .go{font-size:10px;font-weight:600;letter-spacing:.3px;color:var(--blu);margin-top:14px;}
 .adx .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:12px;}
+/* cc#1212 — the ledger sheet. There was no popout on this page to reuse, so this is built on the
+   page's own tokens rather than importing a pattern from elsewhere: it inherits the theme the
+   contract sets, in both directions, with nothing hardcoded.
+   Scrolling is INSIDE the sheet, never the page behind it, and the table scrolls inside the
+   sheet - so a narrow phone gets a horizontally scrollable table rather than a page that shifts
+   sideways under the reader's thumb. */
+.adx-lx{position:fixed;inset:0;z-index:9998;display:none;align-items:center;justify-content:center;
+        background:rgba(3,7,20,.55);padding:16px;}
+.adx-lx.open{display:flex;}
+.adx-lx .pan{background:var(--paper);color:var(--txt);border:1px solid var(--rule);border-radius:10px;
+        width:100%;max-width:760px;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;
+        font-family:'IBM Plex Mono',monospace;box-shadow:0 24px 60px rgba(3,7,20,.35);}
+.adx-lx .hd{padding:16px 18px;border-bottom:1px solid var(--rule);display:flex;align-items:flex-start;gap:12px;}
+.adx-lx .hd h3{font-family:'Sora',sans-serif;font-size:16px;font-weight:800;letter-spacing:-.2px;flex:1;}
+.adx-lx .hd .sb{font-size:10.5px;color:var(--muted);margin-top:4px;font-weight:400;}
+.adx-lx .x{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+        border:1px solid var(--rule);border-radius:8px;background:transparent;color:var(--muted);
+        cursor:pointer;font-size:16px;line-height:1;font-family:inherit;}
+.adx-lx .x:hover{color:var(--txt);border-color:var(--blu);}
+.adx-lx .bd{overflow:auto;padding:0;}
+.adx-lx table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:640px;}
+.adx-lx th{text-align:left;padding:9px 12px;font-size:9.5px;font-weight:600;letter-spacing:.5px;
+        text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--rule);
+        position:sticky;top:0;background:var(--paper);}
+.adx-lx td{padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap;}
+.adx-lx td.n{text-align:right;font-variant-numeric:tabular-nums;}
+.adx-lx tr.int td{color:var(--faint);}
+.adx-lx .chip{display:inline-block;padding:2px 7px;border-radius:9px;font-size:9px;font-weight:700;
+        letter-spacing:.4px;text-transform:uppercase;}
+.adx-lx .chip.in{color:var(--grn);background:var(--grn-t);}
+.adx-lx .chip.out{color:var(--red);background:var(--red-t);}
+.adx-lx .chip.intr{color:var(--faint);background:var(--hover);}
+.adx-lx tfoot td{font-weight:700;border-top:1px solid var(--rule);border-bottom:none;background:var(--hover);}
+.adx-lx .ft{padding:12px 18px;border-top:1px solid var(--rule);font-size:10.5px;color:var(--muted);}
+.adx .lgbtn{display:inline-block;margin-top:10px;padding:0 12px;min-height:44px;line-height:44px;
+        font-size:10.5px;font-weight:700;letter-spacing:.3px;color:var(--blu);border:1px solid var(--rule);
+        border-radius:8px;cursor:pointer;font-family:inherit;background:transparent;}
+.adx .lgbtn:hover{border-color:var(--blu);background:var(--hover);}
+@media(max-width:600px){.adx-lx .pan{max-height:92vh;}}
 .adx .empty a{color:var(--blu);font-weight:600;}
 @media print{ .no-print,#scorr-lo,#scorr-th{display:none !important;} }
 @media (max-width:767px){
@@ -85,6 +124,90 @@ html,body{margin:0;padding:0;background:var(--bg);}
       toolbar=document.getElementById('adx-toolbar'), searchEl=document.getElementById('adx-search'),
       tabCards=document.getElementById('adx-tab-cards'), tabTable=document.getElementById('adx-tab-table');
   function inr(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '₹'+Math.round(n).toLocaleString('en-IN'); }
+  /* cc#1212 — 2-dp money for the ledger sheet, where a rounded rupee hides the paise that make a
+     voucher reconcile. The shelf keeps 0 dp; only the row-level ledger uses this. */
+  function inr2(n){ if(n===null||n===undefined||isNaN(n)) return '—';
+    return '₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  /* ── cc#1212 LEDGER SHEET ─────────────────────────────────────────────────────────────────
+     ONE handler, exported on window, because cc#1213 and cc#1215 are both told to open this
+     same sheet and told not to fork it. Anything that wants a ledger calls ScorrLedger.open().
+     Fetched lazily on first open and cached per portfolio: a reader who opens, closes and
+     reopens the same client should not re-hit the endpoint, and a reader who never opens one
+     should not pay for it at page load. */
+  var LEDGER_CACHE={};
+  function ledgerEl(){
+    var el=document.getElementById('adx-ledger');
+    if(el) return el;
+    el=document.createElement('div'); el.id='adx-ledger'; el.className='adx-lx';
+    el.innerHTML='<div class="pan" role="dialog" aria-modal="true" aria-labelledby="adx-lg-t">'
+      + '<div class="hd"><div style="flex:1"><h3 id="adx-lg-t"></h3><div class="sb"></div></div>'
+      + '<button class="x" type="button" aria-label="Close">✕</button></div>'
+      + '<div class="bd"></div><div class="ft"></div></div>';
+    document.body.appendChild(el);
+    /* Close on the X, on the backdrop, and on Esc. A sheet that can only be closed one way is a
+       trap on a phone, where the backdrop is the biggest target on the screen. */
+    el.querySelector('.x').addEventListener('click', closeLedger);
+    el.addEventListener('click', function(e){ if(e.target===el) closeLedger(); });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeLedger(); });
+    return el;
+  }
+  function closeLedger(){ var el=document.getElementById('adx-ledger'); if(el) el.classList.remove('open'); }
+  function renderLedger(el, name, d){
+    var rows=d.rows||[];
+    el.querySelector('h3').textContent=(name||d.name||'Client')+' — Ledger';
+    var span = rows.length ? (dmy(rows[0].txn_date)+' to '+dmy(rows[rows.length-1].txn_date)) : '';
+    var intn = (d.internal_rows||0);
+    el.querySelector('.sb').textContent = rows.length
+      ? (span+' · '+rows.length+' row'+(rows.length===1?'':'s')
+         + (intn ? ' · '+intn+' internal, not counted' : ''))
+      : 'No ledger on record';
+    if(!rows.length){ el.querySelector('.bd').innerHTML=
+        '<div class="empty">No ledger rows for this client.</div>';
+      el.querySelector('.ft').textContent=''; return; }
+    var body=rows.map(function(r){
+      var isIn=(r.txn_type==='PAYIN'), open=(r.segment==='OPENING');
+      /* An OPENING row is a balance carried in, not a receipt. It is shown in the Pay-in column
+         and counted, but its chip says so rather than calling it a pay-in. */
+      var chip = r.is_internal ? '<span class="chip intr">Internal</span>'
+               : open ? '<span class="chip intr">Opening</span>'
+               : isIn ? '<span class="chip in">Pay-in</span>' : '<span class="chip out">Payout</span>';
+      return '<tr class="'+(r.is_internal?'int':'')+'">'
+        + '<td>'+dmy(r.txn_date)+'</td>'
+        + '<td>'+esc(r.segment||'—')+'</td>'
+        + '<td>'+esc(r.voucher_no||'—')+'</td>'
+        + '<td>'+chip+'</td>'
+        + '<td class="n">'+(isIn?inr2(r.amount):'')+'</td>'
+        + '<td class="n">'+(isIn?'':inr2(r.amount))+'</td></tr>';
+    }).join('');
+    el.querySelector('.bd').innerHTML='<table><thead><tr>'
+      + '<th>Date</th><th>Segment</th><th>Voucher</th><th>Type</th>'
+      + '<th style="text-align:right">Pay-in</th><th style="text-align:right">Payout</th></tr></thead>'
+      + '<tbody>'+body+'</tbody><tfoot>'
+      + '<tr><td colspan="4">Total</td><td class="n">'+inr2(d.payin_total)+'</td>'
+      +     '<td class="n">'+inr2(d.payout_total)+'</td></tr>'
+      + '<tr><td colspan="4">Net pay-in</td><td class="n" colspan="2">'+inr2(d.net_payin)+'</td></tr>'
+      + '</tfoot></table>';
+    el.querySelector('.ft').textContent = intn
+      ? 'Internal rows are shown for completeness and are not counted in the totals.'
+      : 'Totals cover every row listed.';
+  }
+  function openLedger(pid, name){
+    var el=ledgerEl(); el.classList.add('open');
+    if(LEDGER_CACHE[pid]){ renderLedger(el, name, LEDGER_CACHE[pid]); return; }
+    el.querySelector('h3').textContent=(name||'Client')+' — Ledger';
+    el.querySelector('.sb').textContent='Loading…';
+    el.querySelector('.bd').innerHTML='<div class="empty">Loading ledger…</div>';
+    el.querySelector('.ft').textContent='';
+    fetch('/api/health/ledger?pid='+encodeURIComponent(pid), {credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function(d){ LEDGER_CACHE[pid]=d; renderLedger(el, name, d); })
+      /* A failed fetch says so in the sheet. It must never leave "Loading…" on screen, which a
+         reader would take for a slow network rather than a dead endpoint. */
+      .catch(function(e){ el.querySelector('.sb').textContent='';
+        el.querySelector('.bd').innerHTML='<div class="empty">Could not load the ledger ('+esc(e.message)+').</div>'; });
+  }
+  window.ScorrLedger={open:openLedger, close:closeLedger};
   function dmy(iso){ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10)||'—';
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
@@ -138,7 +261,25 @@ html,body{margin:0;padding:0;background:var(--bg);}
                 +(p.alpha_pct>=0?'var(--grn,#0b6e42)':'var(--red,#b42318)')+'" title="P&amp;L % minus Nifty 50 return since start date">'
                 +(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'% vs N50</div>')
         +   '</div>'
-        + '</div><div class="go">View report →</div></a>';
+        /* cc#1212 item 5: one extra line under the strip when a ledger exists. Absent entirely
+           when there is none - a card with nothing to say stays quiet, the same rule the alpha
+           chip above already follows. The manual-set hint fires only when net pay-in and the
+           recorded Invested disagree by more than a thousand rupees, because a few rupees of
+           rounding is not a discrepancy worth a marker. */
+        + (p.net_payin==null ? '' :
+             '<div style="font-size:10.5px;color:var(--muted);margin-top:10px">Net pay-in '
+             + inr(p.net_payin)
+             + (Math.abs((p.net_payin||0)-(p.invested||0))>1000
+                 ? ' <span title="Invested is set manually for this account" style="color:var(--faint)">*</span>'
+                 : '')
+             + '</div>')
+        + '</div>'
+        /* The card is a link to the report, so the ledger button has to stop the click reaching
+           it. Rendered only when there are rows to show. */
+        + ((p.ledger_rows||0) > 0
+             ? '<button type="button" class="lgbtn" data-lgpid="'+esc(p.id)+'" data-lgname="'
+               + esc(clientName(p))+'">View ledger</button>' : '')
+        + '<div class="go">View report →</div></a>';
     }).join('');
     listEl.innerHTML='<div class="grid">'+cards+'</div>';
   }
@@ -223,6 +364,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
     toolbar.style.display='flex';
     var saved=null; try{ saved=sessionStorage.getItem('adx_view'); }catch(e){}
     VIEW=(saved==='cards'||saved==='table')?saved:(ALL.length>6?'table':'cards');
+    /* cc#1212: ONE delegated listener on the list, not one per card. renderCards() replaces
+       listEl.innerHTML on every keystroke in the search box, so per-card binds would be lost on
+       the next render and stack up on the ones that survived. */
+    listEl.addEventListener('click', function(e){
+      var b=e.target.closest && e.target.closest('[data-lgpid]');
+      if(!b) return;
+      e.preventDefault(); e.stopPropagation();
+      openLedger(b.getAttribute('data-lgpid'), b.getAttribute('data-lgname'));
+    });
     tabCards.addEventListener('click',function(){ setView('cards'); });
     tabTable.addEventListener('click',function(){ setView('table'); });
     searchEl.addEventListener('input',render);
