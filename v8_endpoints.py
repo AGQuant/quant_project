@@ -74,6 +74,17 @@ import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 # cleanup card, not in a display-truth fix.
 _BM_CHEAP_N = len([f for f in BASKET_FILTERS.get("buy_momentum", []) if not f.get("heavy")])
 
+# cc#1138 push 5, completing surface parity. Rule 2 of V8_TIMING_RULES_V1 (session_log 27321)
+# disables GATE_EXIT for SHORT positions unconditionally, and push 5 had said so in ONE place —
+# market_mood's slot_note. That is where SLOTS are described. A reader asking how a short gets out
+# looks at the basket's own exit copy, and both SELL baskets described target and stop and said
+# nothing about the release that no longer applies to them. cc#1107: a surface that describes a
+# gate must describe the gate that is actually there, and an exit that cannot fire is part of the
+# description. Written once and shared, so the two baskets cannot drift into different wording.
+_SHORT_EXIT_NOTE = ("Shorts NEVER gate-exit (cc#1138 rule 2, session_log 27321): a SHORT releases "
+                    "only via target, stop, GAP variants or this basket's own exits. Longs keep "
+                    "gate exits unchanged.")
+
 router = APIRouter(prefix="/api/v8", tags=["v8"])
 
 def _conn():
@@ -1470,6 +1481,7 @@ def filter_config(basket: str):
             "target": "S1/S2 dynamic",
             "target_formula": "S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2); no signal if <2%",
             "stop": "1:1 mirror = entry + (entry - target)",
+            "exit_note": _SHORT_EXIT_NOTE,
             "gate_note": "V7-B: strict AND of 12, all cheap, RAW -- no market gate, no auto kill-switch.",
             "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
@@ -1495,6 +1507,7 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "-3.0% fixed", "target_formula": "entry * 0.97 (frozen at entry)",
             "stop": "+3.0% fixed = entry * 1.03 (true 1:1)",
+            "exit_note": _SHORT_EXIT_NOTE,
             # cc#1177: the two clauses that used to follow the exits described the cc#502 DRIFT,
             # which 15366 REVERTED. They are deleted, not corrected — the history of this basket
             # belongs in session_log 15366, and a gate_note that narrates old thresholds is how a
