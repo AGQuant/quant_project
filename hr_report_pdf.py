@@ -177,6 +177,133 @@ def _chip_cls(call):
 
 
 # ── the white-label print HTML ──────────────────────────────────────────────────
+
+# ── cc#1217: the pay-in / payout annexure and the XIRR line ────────────────────────────────
+
+def _ledger_for_pdf(pid):
+    """Counted rows, internal rows and totals for one portfolio, plus its XIRR.
+
+    Returns a shape the renderer can use unconditionally. EVERY failure path lands on the same
+    "no ledger" shape rather than raising, because a report that will not render is worse than a
+    report with one honest line saying there is nothing to show. A client waiting on a PDF does
+    not care which of our tables was missing.
+    """
+    out = {"counted": [], "internal": [], "payin": 0.0, "payout": 0.0, "net": None,
+           "xirr": None, "nifty_xirr": None, "alpha_xirr": None}
+    if not pid:
+        return out
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT txn_date, segment, txn_type, amount, is_internal
+                           FROM hr_ledger WHERE portfolio_id=%s
+                           ORDER BY txn_date ASC, id ASC""", (pid,))
+            for d, seg, ttype, amt, internal in cur.fetchall():
+                row = {"d": d, "seg": seg, "type": ttype, "amt": float(amt or 0)}
+                if internal:
+                    out["internal"].append(row)
+                else:
+                    out["counted"].append(row)
+                    if ttype == "PAYIN":
+                        out["payin"] += row["amt"]
+                    else:
+                        out["payout"] += row["amt"]
+            if out["counted"]:
+                out["net"] = out["payin"] - out["payout"]
+        try:
+            # cc#1216 owns this computation. Read it, never recompute it - two implementations of
+            # one rate is exactly how a PDF ends up disagreeing with the dashboard it came from.
+            import hr_xirr
+            x = hr_xirr.compute_xirr(pid)
+            out["xirr"] = x.get("xirr")
+            out["nifty_xirr"] = x.get("nifty_xirr")
+            out["alpha_xirr"] = x.get("alpha_xirr")
+        except Exception:
+            pass
+    except Exception:
+        return {"counted": [], "internal": [], "payin": 0.0, "payout": 0.0, "net": None,
+                "xirr": None, "nifty_xirr": None, "alpha_xirr": None}
+    return out
+
+
+def _xirr_line_html(lg):
+    """Line 2 of the RETURN card. Line 1 is untouched - the founder's amendment is append-only.
+
+    When it cannot be computed the line says WHAT IS MISSING rather than showing a dash. A reader
+    holding a printed report cannot hover a tooltip, so the words have to carry it.
+    """
+    def sgn(v):
+        return ("+" if v >= 0 else "&minus;") + ("%.1f%%" % abs(v))
+    if lg.get("xirr") is None:
+        return ('<div style="font-size:9.5px;color:#5B667D;margin-top:6px;">'
+                'XIRR: needs pay-in / payout ledger</div>')
+    parts = "XIRR " + sgn(lg["xirr"])
+    if lg.get("nifty_xirr") is not None:
+        parts += " vs Nifty 50 " + sgn(lg["nifty_xirr"])
+    if lg.get("alpha_xirr") is not None:
+        parts += " (" + sgn(lg["alpha_xirr"]) + " a year)"
+    return ('<div style="font-size:9.5px;color:#5B667D;margin-top:6px;">%s</div>' % parts)
+
+
+def _annexure_html(lg, invested):
+    """The final page: every counted flow, its totals, and the net against page 1's Invested.
+
+    NET INVESTED IS RECONCILED AGAINST PAGE 1 RATHER THAN ASSUMED TO MATCH. When the two differ
+    the annexure prints BOTH and says the figure was set by hand. A client comparing the two
+    pages will find the difference in seconds, and a report that shows one number twice with a
+    quiet discrepancy between them is worse than one that names it.
+    """
+    if not lg["counted"] and not lg["internal"]:
+        return ('<div class="sec" style="page-break-before:always;"><h3>Annexure &mdash; Pay-in / Payout</h3>'
+                '<div class="note">No pay-in / payout ledger on record; '
+                'return shown is simple P&amp;L on invested.</div></div>')
+
+    def row(r, grey=False):
+        style = ' style="color:#9098A8;"' if grey else ''
+        label = ("Opening" if r["seg"] == "OPENING"
+                 else ("Pay-in" if r["type"] == "PAYIN" else "Payout"))
+        is_in = (r["type"] == "PAYIN")
+        return ("<tr%s><td>%s</td><td>%s</td><td style='text-align:right'>%s</td>"
+                "<td style='text-align:right'>%s</td></tr>"
+                % (style, r["d"].strftime("%d %b %Y"), label,
+                   _money2(r["amt"]) if is_in else "", "" if is_in else _money2(r["amt"])))
+
+    body = "".join(row(r) for r in lg["counted"])
+    foot = ("<tr style='font-weight:700;border-top:1px solid #E4E8EF;'>"
+            "<td colspan='2'>Total</td><td style='text-align:right'>%s</td>"
+            "<td style='text-align:right'>%s</td></tr>" % (_money2(lg["payin"]), _money2(lg["payout"])))
+    net = lg["net"]
+    mismatch = (invested is not None and net is not None and abs(float(invested) - net) > 1.0)
+    foot += ("<tr style='font-weight:700;'><td colspan='2'>Net invested</td>"
+             "<td colspan='2' style='text-align:right'>%s</td></tr>" % _money2(net))
+    if mismatch:
+        foot += ("<tr><td colspan='4' style='color:#5B667D;font-size:9px;padding-top:6px;'>"
+                 "Invested on page 1 is %s. Invested is set manually for this account.</td></tr>"
+                 % _money2(invested))
+
+    grey = ""
+    if lg["internal"]:
+        grey = ("<h3 class='lbl' style='margin:18px 0 6px;color:#9098A8;'>Earlier history / internal "
+                "transfers &mdash; for reference, not counted</h3>"
+                "<table><tbody>%s</tbody></table>"
+                % "".join(row(r, grey=True) for r in lg["internal"]))
+
+    return ('<div class="sec" style="page-break-before:always;"><h3>Annexure &mdash; Pay-in / Payout</h3>'
+            '<table><thead><tr><th>Date</th><th>Type</th>'
+            '<th style="text-align:right">Pay-in</th><th style="text-align:right">Payout</th></tr></thead>'
+            '<tbody>%s%s</tbody></table>%s</div>' % (body, foot, grey))
+
+
+def _money2(n):
+    """Two decimals for the annexure. A ledger reconciles to the paise or it does not reconcile,
+    and page 1's whole-rupee formatting would hide a difference of a few paise per voucher."""
+    if n is None:
+        return "&mdash;"
+    try:
+        return "&#8377;" + format(float(n), ",.2f")
+    except (TypeError, ValueError):
+        return "&mdash;"
+
+
 def render_report_html(rep):
     """Build a self-contained, white-label, print-friendly HTML string from a build_report() dict.
     Simplified block/table layout (no CSS grid) so WeasyPrint renders it reliably."""
@@ -300,6 +427,11 @@ def render_report_html(rep):
     alpha_since_lbl = (' &middot; since ' + _esc(snap.get('alpha_label'))) if snap.get('alpha_label') else ''
     alpha_block = _alpha_line('vs Nifty 50', snap.get('alpha_n50')) + _alpha_line('vs Nifty 500', snap.get('alpha_n500'))
 
+    # cc#1217: the ledger and its XIRR, read once for both the card line and the annexure.
+    _lg = _ledger_for_pdf(port.get("id"))
+    xirr_line = _xirr_line_html(_lg)
+    annexure = _annexure_html(_lg, snap.get("invested"))
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 /* cc#662 / HEALTH_REPORT_CLIENT_FORMAT_V1.1: client docs use DejaVu SANS (not mono) at a 12.5px
    base — a readable client deliverable, not a terminal dump. */
@@ -359,7 +491,7 @@ ul {{ margin:0; padding-left:18px; }} li {{ font-size:11.5px; color:#5B667D; mar
   <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div>{cash_line}</div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
     <div style="font-size:11px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
-  <div class="c" style="border-right:none;"><div class="lbl">Alpha{alpha_since_lbl}</div>{alpha_block}</div>
+  <div class="c" style="border-right:none;"><div class="lbl">Alpha{alpha_since_lbl}</div>{alpha_block}{xirr_line}</div>
 </div>
 <div class="cols">
   <div class="col">
@@ -393,6 +525,7 @@ ul {{ margin:0; padding-left:18px; }} li {{ font-size:11.5px; color:#5B667D; mar
 <div class="sec"><h3>Key Highlights</h3><ul>{hl}</ul></div>
 <div class="take"><div class="lbl" style="color:rgba(255,255,255,.35);margin-bottom:8px;">Expert Take</div>{_esc(rep.get('expert_take'))}
   <div style="font-size:9px;color:rgba(255,255,255,.3);margin-top:14px;">Data as of report date &middot; Research only, not investment advice.</div></div>
+{annexure}
 </body></html>"""
 
 

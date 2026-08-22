@@ -82,6 +82,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
   .phr{max-width:100%;}
   .phr .page{break-inside:avoid;}
   .phr *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  /* cc#1217: the annexure is collapsed on screen and OPEN in print, so a browser print carries
+     the same final page the PDF does. Forcing the content visible rather than relying on the
+     <details> open attribute, because a reader who collapsed it by hand would otherwise print a
+     report with the annexure missing and no sign that it was ever there. */
+  #hr-annexure, #hr-annexure > div{display:block !important;}
+  #hr-annexure summary{list-style:none;}
+  #hr-annexure{break-before:page;}
 }
 @media (max-width:800px){
   .phr .mast{padding:70px 20px 20px;flex-direction:column;}
@@ -441,9 +448,14 @@ html,body{margin:0;padding:0;background:var(--bg);}
   var SEG_COLORS = ['#0B6E42','#2A3650','#1847DF','#9A3C1E','#4532A8','#1A9070','#5B667D','#8892AA'];
 
   // ---------------------------------------------------------------- render
+  var SNAP = null;          // cc#1217: the last rendered snapshot, for the annexure below
   function render(d){
     if(!d || d.error){ showMsg(d && d.error ? d.error : 'Report unavailable.'); return; }
     var s=d.snapshot||{}, rt=d.ratings||{}, b=d.benchmark||{}, v=d.valuation||{}, y=d['yield']||{};
+    /* cc#1217: the annexure at the foot of this page reconciles Net invested against the Invested
+       on the strip, and it runs OUTSIDE this function - `s` is local here. Stashed rather than
+       re-fetched, so the two figures can never come from two different loads of the report. */
+    SNAP = s;
 
     // masthead
     set('hr-name', d.portfolio && d.portfolio.name ? d.portfolio.name : 'My Portfolio');
@@ -1048,6 +1060,74 @@ html,body{margin:0;padding:0;background:var(--bg);}
       .catch(function(){ hrToast('PDF service unavailable — please retry'); btn.innerHTML='&#8595; RETRY PDF'; btn.disabled=false; });
   }
   var sp=$('hr-savepdf'); if(sp) sp.addEventListener('click', function(){ savePdf(sp); });
+
+  /* ── cc#1217: the pay-in / payout annexure, the same one the PDF carries ─────────────────
+     Collapsed on screen because most readers of the web report want the summary, and opened by
+     the print rule above so a browser print matches the PDF page for page. Built from the same
+     ledger endpoint the breakup popover and the shelf use - one source, three readers. */
+  (function(){
+    if(!pid) return;
+    var host=document.createElement('details'); host.id='hr-annexure';
+    host.style.cssText='margin:0 24px 40px;border-top:1px solid var(--rule);padding-top:16px;';
+    host.innerHTML='<summary style="cursor:pointer;font-size:11px;font-weight:700;'
+      + 'letter-spacing:.6px;text-transform:uppercase;color:var(--muted);">'
+      + 'Annexure &mdash; Pay-in / Payout</summary><div style="margin-top:12px;"></div>';
+    var body=host.querySelector('div');
+    function money(n){ return (n==null||isNaN(n)) ? '—'
+      : '₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function label(r){ return r.segment==='OPENING' ? 'Opening'
+      : (r.txn_type==='PAYIN' ? 'Pay-in' : 'Payout'); }
+    fetch('/api/health/ledger?pid='+encodeURIComponent(pid), {credentials:'same-origin'})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){
+        if(!d) return;
+        var counted=(d.rows||[]).filter(function(r){ return !r.is_internal; });
+        var internal=(d.rows||[]).filter(function(r){ return r.is_internal; });
+        if(!counted.length && !internal.length){
+          body.innerHTML='<div style="font-size:12px;color:var(--muted);">No pay-in / payout '
+            + 'ledger on record; return shown is simple P&amp;L on invested.</div>';
+          document.body.appendChild(host); return;
+        }
+        function tr(r,grey){
+          var isIn=(r.txn_type==='PAYIN');
+          return '<tr'+(grey?' style="color:var(--faint)"':'')+'>'
+            + '<td style="padding:5px 10px 5px 0;white-space:nowrap;">'+r.txn_date+'</td>'
+            + '<td style="padding:5px 10px;">'+label(r)+'</td>'
+            + '<td style="padding:5px 0;text-align:right;">'+(isIn?money(r.amount):'')+'</td>'
+            + '<td style="padding:5px 0 5px 10px;text-align:right;">'+(isIn?'':money(r.amount))+'</td></tr>';
+        }
+        /* Reconciled against the Invested on the strip above, exactly as the PDF does. A client
+           comparing the two will find a difference in seconds, so it is named rather than left
+           for them to notice. */
+        /* Read at CALLBACK time, not when this function was defined: the report and this fetch
+           race, and whichever lands second must still see the other's result. */
+        var inv=(SNAP&&SNAP.invested!=null)?SNAP.invested:null;
+        var mism=(inv!=null && d.net_payin!=null && Math.abs(inv-d.net_payin)>1);
+        body.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:11.5px;">'
+          + '<thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase;">'
+          + '<th style="text-align:left;padding-bottom:6px;">Date</th><th style="text-align:left;">Type</th>'
+          + '<th style="text-align:right;">Pay-in</th><th style="text-align:right;">Payout</th></tr></thead>'
+          + '<tbody>'+counted.map(function(r){return tr(r,false);}).join('')+'</tbody>'
+          + '<tfoot><tr style="font-weight:700;border-top:1px solid var(--rule);">'
+          +   '<td colspan="2" style="padding-top:7px;">Total</td>'
+          +   '<td style="text-align:right;padding-top:7px;">'+money(d.payin_total)+'</td>'
+          +   '<td style="text-align:right;padding-top:7px;">'+money(d.payout_total)+'</td></tr>'
+          + '<tr style="font-weight:700;"><td colspan="2">Net invested</td>'
+          +   '<td colspan="2" style="text-align:right;">'+money(d.net_payin)+'</td></tr>'
+          + (mism?'<tr><td colspan="4" style="font-size:10.5px;color:var(--muted);padding-top:6px;">'
+                  + 'Invested above is '+money(inv)+'. Invested is set manually for this account.</td></tr>':'')
+          + '</tfoot></table>'
+          + (internal.length
+              ? '<div style="margin-top:16px;font-size:10px;font-weight:700;letter-spacing:.5px;'
+                + 'text-transform:uppercase;color:var(--faint);">Earlier history / internal transfers '
+                + '&mdash; for reference, not counted</div>'
+                + '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px;">'
+                + '<tbody>'+internal.map(function(r){return tr(r,true);}).join('')+'</tbody></table>'
+              : '');
+        document.body.appendChild(host);
+      })
+      .catch(function(){});
+  })();
 
   if(wl) applyWhiteLabel();   // static branding stripped immediately (before the async report data lands)
   if(pid){ load('GET'); loadRepair(); } else renderUpload();   // cc#757: repair panel on the report view
