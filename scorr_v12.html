@@ -4,11 +4,8 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
   :root{
-    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
-    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
-    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);--red:#FF5C6C;--red-d:rgba(255,92,108,.13);
-    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    /* cc#1203 push 14: colour tokens moved to the injected contract, so the page follows the
+       reader's theme instead of being a dark island. */
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
@@ -273,7 +270,7 @@ function renderResults(res){
     card('XIRR',sc(s.xirr_pct,'%'))+card('Accuracy',s.accuracy_pct==null?'--':s.accuracy_pct+'%')+
     card('Trades',s.total_trades)+card('Win/Loss',s.win_trades+' / '+s.loss_trades)+'</div>';
   html+='<div class="chartwrap">'+svgChart(res.equity_series||[],res.benchmark_series||[])+
-    '<div class="legend"><span><span class="sw" style="background:var(--pulse, #4D7CFE)"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
+    '<div class="legend"><span><span class="sw" style="background:var(--blu)"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
   // yearly split
   if(res.yearly&&res.yearly.length){html+='<h2 style="font-size:13px;margin:14px 0 4px">Yearly split</h2><div class="scroll"><table><thead><tr><th>Year</th><th>Return</th></tr></thead><tbody>'+
     res.yearly.map(y=>'<tr><td>'+y.year+'</td><td>'+sc(y.return_pct,'%')+'</td></tr>').join('')+'</tbody></table></div>';}

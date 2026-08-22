@@ -4,10 +4,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Screeners · Scorr</title>
 <style>
-  :root{--bg:#f6f8fb;--panel:#fff;--card2:#f6f8fb;--line:#e8ecf2;--line2:#e8ecf2;
-        --txt:#1c2536;--mut:#667085;--dim:#9aa4b5;--blu:#2f6df4;--grn:#0f9d58;--red:#d0433b;}
-  :root[data-theme="dark"]{--bg:#0e1420;--panel:#141c2b;--card2:#182131;--line:#243044;--line2:#243044;
-        --txt:#e8eef7;--mut:#93a0b5;--dim:#6c7c93;}
+  :root{
+    /* cc#1203 push 14: this page was a LIGHT island on a dark site - #f6f8fb ground, white
+       panels, #1c2536 text - and every one of its eleven names is a contract name. The block is
+       gone, so it now follows the reader's theme in both directions. Its two border names were
+       opaque hex where the contract uses rgba; the rgba is what reads correctly on either.
+       A SECOND block sat below this one, :root[data-theme="dark"], carrying its own dark palette
+       - #0e1420 ground, #141c2b panels. Deleting only the first left that one winning in dark,
+       which is why the page still painted rgb(14,20,32) after the first pass. The render check
+       caught it; the classifier could not, because it only reads a page's first :root. Both are
+       gone now and both themes come from the contract. */
+  }
+
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
        font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}

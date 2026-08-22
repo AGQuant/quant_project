@@ -10,13 +10,8 @@
   /* cc#426: standalone V9 Sector Pairs page — extracted from the V8 dashboard tab.
      Dark terminal palette mirrors the V8/V10 V-family surfaces (design_refs/scorr_v8_R2). */
   :root{
-    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
-    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
-    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
-    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
-    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
-    --shadow:0 18px 44px rgba(3,7,20,.5);
+    /* cc#1203 push 14: colour tokens moved to the injected contract, so the page follows the
+       reader's theme instead of being a dark island. */
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
@@ -109,7 +104,7 @@ function renderV9Pairs(){
   const _incep = sum.inception_date || sum.first_rebalance_date || null;
   const _badge = _live
     ? `<span class="ct" style="background:var(--grn-d);border-color:var(--grn);color:var(--grn)">PAPER LIVE${_incep?` &middot; since ${_incep}`:''}</span>`
-    : `<span class="ct" style="background:var(--amber-d,rgba(245,185,74,.12));border-color:var(--amber);color:var(--amber)">AWAITING FIRST ENTRY</span>`;
+    : `<span class="ct" style="background:var(--amber-row);border-color:var(--amber);color:var(--amber)">AWAITING FIRST ENTRY</span>`;
   let h=`<div class="ptitle">V9 Sector Pairs &middot; Brahmastra ${_badge}</div>`;
   if(!_live){
     h+=`<div style="font-size:12px;color:var(--mut);line-height:1.6;margin:-6px 0 12px">

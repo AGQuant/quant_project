@@ -8,20 +8,15 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 :root{
-  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241;
-  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-  --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
-  --grn-d:rgba(47,212,139,.12); --red-d:rgba(255,92,108,.12);
-  --font:'Sora',sans-serif; --mono:'IBM Plex Mono',monospace;
-}
+    /* cc#1203 push 14: colour tokens moved to the injected contract. This page is the first in
+       the sprint that ALREADY had a light mode - a hand-tuned :root[data-theme="light"] from
+       cc#628, with its own #F4F6FB ground and #EAEEF6 second surface. That block is gone too.
+       One contract means one light as well as one dark, and a page keeping its own light values
+       is the same drift in the other direction. The shifts are small: ground #F4F6FB to #F5F7FB,
+       second surface #EAEEF6 to #EEF1F8, raised #F1F4FA to #F7F9FD. */
+  }
 /* cc#628: light theme derives from the same structure (site theme toggle sets data-theme). */
-:root[data-theme="light"]{
-  --bg:#F4F6FB; --bg2:#EAEEF6; --panel:#FFFFFF; --panel2:#F1F4FA;
-  --line:rgba(20,40,90,.10); --line2:rgba(20,40,90,.18);
-  --txt:#101828; --mut:#5A6B82; --dim:#94A3BE;
-  --grn-d:rgba(15,157,88,.10); --red-d:rgba(208,67,59,.10);
-}
+
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1180px;margin:0 auto;padding:26px 22px 60px}
