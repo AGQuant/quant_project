@@ -16,14 +16,12 @@
 <style>
   /* cc#344 page 7: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#0A0F1E; --card:#121A33; --card2:#0D1428; --panel:#121A33;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
-    --surface2:#182241; --well:#0D1428; --r:18px;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
+    /* cc#1203 push 11: colour tokens moved to the injected contract, including --shadow, which
+       was identical to the contract's and so now gains a light partner for free. --mono STAYS:
+       this page uses a real monospace stack in 24 places and the contract's leads with IBM Plex
+       Mono. Whether that font is loaded here decides whether swapping it is invisible or a
+       24-place typeface change, and a token migration is not the place to find out. */
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --shadow:0 18px 44px rgba(3,7,20,.5);
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
@@ -216,7 +214,7 @@
 
 <!-- cc#537: full-screen candlestick overlay (sibling of #app so render()'s innerHTML rewrite
      never wipes it). TradingView Lightweight Charts (MIT, open-source lib -- NOT the widget). -->
-<div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--field, #0A0F1E);flex-direction:column">
+<div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--bg);flex-direction:column">
   <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">
     <div id="v10ChartTitle" style="font-size:15px;font-weight:800;color:var(--txt)">NIFTY 50 · 5min · V10 trades</div>
     <div style="display:flex;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:8px;padding:3px">

@@ -8,12 +8,9 @@
 <style>
   /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
 :root{
-    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --grn-d:rgba(47,212,139,.14); --red:#FF5C6C; --red-d:rgba(255,92,108,.13);
-    --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
+    /* cc#1203 push 11: colour tokens moved to the injected contract. --mono stays because on
+       this page it is not a monospace face at all - it is Sora, the same deliberate override
+       /check and cockpit carry. */
     --mono:'Sora',sans-serif;
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
