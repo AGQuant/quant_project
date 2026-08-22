@@ -203,4 +203,24 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+
+  /* cc#1203 push 5 — the digest vocabulary. Added when that page's own :root was deleted, which
+   * is what these aliases are for: the markup is untouched and every name it uses still resolves.
+   * Its three surface names shifted down one rung instead of aliasing, because two of them
+   * COLLIDE with contract names — an alias cannot redefine --panel for one page without
+   * redefining it for every shared component on that page too. --raise has no collision, so it
+   * aliases like the rest. */
+  --raise     : var(--panel2);
+  --tx        : var(--txt);
+  --tx2       : var(--mut);
+  --tx3       : var(--dim);
+  --gr        : var(--grn);
+  --rd        : var(--red);
+  --grDim     : var(--grn-d);
+  --rdDim     : var(--red-d);
+  --amDim     : var(--amber-row);
+  --vi        : var(--violet);
+  /* fonts are not theme tokens, but they were in that :root, so they move with it */
+  --f-d       : var(--font);
+  --f-m       : var(--mono);
 }

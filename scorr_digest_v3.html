@@ -1,3 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorr · Daily Digest</title>
+<!-- cc#1203 push 5: this document skeleton is NEW, and it is not cosmetic.
+     scorr_digest_v3.html was a FRAGMENT — it began at <style> and ended at </script>, with no
+     closing head or body tag anywhere in it. Every shared-asset injection in main.py anchors on one
+     of those two tags: _MOBILE_HEAD and the token/boot pair look for the closing head tag then fall
+     back to the closing body tag, and _LOGOUT_BTN, _THEME_BTN and _PWA_TAG all do a plain
+     one-shot body.replace on the closing body tag. With
+     neither tag present, replace() matched nothing and every one of them silently did nothing.
+     /digest has therefore been serving with NO shared nav, NO logout pill and NO pwa.js since
+     cc#846 — a rule 8 nav gap that looked fine because the page renders its own header.
+     Browsers build html/head/body for a fragment, which is why nothing ever looked broken in a
+     browser; the injector is a byte-level string replace on the server and had nothing to find.
+     Found while migrating this page's tokens: with its own :root deleted, the page came back with
+     every var unresolved, because the stylesheet it now depends on was never being injected.
+     The page's own <style> stays exactly where it was, in <body>. That is valid HTML5, it keeps
+     this diff to a skeleton rather than a reshuffle, and document order still puts it after the
+     injected sheet — so a page rule continues to win over a contract token. -->
+</head>
+<body>
 <style>
 /* cc#853: CSS PORTED VERBATIM from design_refs/scorr_digest_v3_R3.html (commit 39d4693),
    founder-approved 04-Aug. The token block and every section rule below are R3's, copied not
@@ -7,14 +31,7 @@
      1. the cc#849 chart-drawer + clickable-tile rules are appended below — R3 is a static
         reference and does not model the drawer, but the drawer is a shipped feature.
      2. R3's mobile block is kept as-is; the drawer's own mobile rules follow it. */
-:root{
-  --bg:#0A0F1E; --panel:#0E1526; --panel2:#131C31; --raise:#18233C;
-  --line:#1E2A44; --line2:#2A3A5C;
-  --tx:#E6EDF7; --tx2:#9DAEC8; --tx3:#64748B;
-  --cy:#22D3EE; --gr:#34D399; --rd:#F87171; --am:#FBBF24; --vi:#A78BFA;
-  --grDim:rgba(52,211,153,.14); --rdDim:rgba(248,113,113,.14); --amDim:rgba(251,191,36,.13);
-  --f-d:'Sora',system-ui,sans-serif; --f-m:'IBM Plex Mono',ui-monospace,monospace;
-}
+
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;line-height:1.5;
   -webkit-font-smoothing:antialiased;padding:0 0 60px}
@@ -22,7 +39,7 @@ body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;
 
 /* ── LEDGER HEAD ───────────────────────────────── */
 .head{border-bottom:1px solid var(--line);background:
-  radial-gradient(1200px 300px at 15% -60%,rgba(34,211,238,.10),transparent 70%),var(--panel);
+  radial-gradient(1200px 300px at 15% -60%,rgba(34,211,238,.10),transparent 70%),var(--well);
   padding:18px 0 0}
 .headtop{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
 .brand{font-size:11px;letter-spacing:.32em;color:var(--tx3);font-weight:600}
@@ -54,7 +71,7 @@ h1 span{color:var(--cy)}
 .tlab.now .t{color:var(--cy)} .tlab.now .l{color:var(--cy)}
 .railpins{display:flex;gap:8px;margin-top:44px;flex-wrap:wrap}
 .pin{font-family:var(--f-m);font-size:10.5px;padding:4px 9px;border-radius:3px;
-  border:1px solid var(--line2);color:var(--tx2);background:var(--panel2)}
+  border:1px solid var(--line2);color:var(--tx2);background:var(--panel)}
 .pin b{color:var(--tx);font-weight:600}
 .pin.warn{border-color:rgba(251,191,36,.4);color:var(--am);background:var(--amDim)}
 
@@ -74,15 +91,15 @@ section{margin-top:26px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .asof{margin-left:auto;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)}
 .asof b{color:var(--tx2);font-weight:500}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.card{background:var(--well);border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .read{font-size:12.5px;color:var(--tx2);padding:10px 14px;border-top:1px solid var(--line);
-  background:var(--panel2);line-height:1.55}
+  background:var(--panel);line-height:1.55}
 .read b{color:var(--tx);font-weight:600}
 .read .tag{font-family:var(--f-m);font-size:9.5px;letter-spacing:.14em;color:var(--cy);
   margin-right:9px;font-weight:600}
 
 /* ── THE READ (hero) ───────────────────────────── */
-.hero{background:linear-gradient(135deg,var(--panel2),var(--panel));
+.hero{background:linear-gradient(135deg,var(--panel),var(--well));
   border:1px solid var(--line2);border-radius:7px;padding:20px 22px;margin-top:24px;
   position:relative;overflow:hidden}
 .hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
@@ -92,7 +109,7 @@ section{margin-top:26px}
 .hbody b{font-weight:600;color:#fff}
 .hstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
   margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden}
-.hs{background:var(--panel);padding:11px 14px}
+.hs{background:var(--well);padding:11px 14px}
 .hs .k{font-size:9.5px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
 .hs .v{font-family:var(--f-m);font-size:19px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
 .hs .n{font-size:10.5px;color:var(--tx3);margin-top:1px}
@@ -110,7 +127,7 @@ section{margin-top:26px}
    narrowed, because a page could always adopt it deliberately later. */
 .striplab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
   font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
-  border-right:1px solid var(--line);background:var(--panel2)}
+  border-right:1px solid var(--line);background:var(--panel)}
 .tiles{display:flex;flex:1;flex-wrap:wrap}
 .tile{flex:1 1 0;min-width:64px;padding:6px 7px 7px;text-align:center;
   border-right:1px solid rgba(10,15,30,.55);transition:filter .12s}
@@ -172,7 +189,7 @@ section{margin-top:26px}
 /* ── RESULTS CHIPS ─────────────────────────────── */
 .chips{display:flex;flex-wrap:wrap;gap:7px;padding:14px 16px}
 .chip{font-family:var(--f-m);font-size:11px;padding:5px 10px;border-radius:3px;
-  border:1px solid var(--line2);background:var(--panel2);color:var(--tx);white-space:nowrap}
+  border:1px solid var(--line2);background:var(--panel);color:var(--tx);white-space:nowrap}
 .chip b{color:var(--cy);font-weight:600}
 .chip.more{color:var(--tx3);border-style:dashed}
 
@@ -190,7 +207,7 @@ section{margin-top:26px}
 /* ── RESULTS TABLE ─────────────────────────────── */
 .rtab{width:100%;border-collapse:collapse}
 .rtab th{font-size:9.5px;letter-spacing:.15em;color:var(--tx3);text-transform:uppercase;
-  text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel2);font-weight:600}
+  text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
 .rtab th.r{text-align:right} .rtab th.c{text-align:center}
 .rtab td{padding:11px 14px;border-bottom:1px solid rgba(30,42,68,.6);vertical-align:top}
 .rtab tr:last-child td{border-bottom:none}
@@ -209,7 +226,7 @@ section{margin-top:26px}
 .p-neu{color:var(--tx2);border-color:var(--line2)}
 .p-pend{color:var(--tx3);border-color:var(--line2);border-style:dashed}
 .rfoot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);
-  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);background:var(--panel2)}
+  font-family:var(--f-m);font-size:10.5px;color:var(--tx3);background:var(--panel)}
 .rlink{margin-left:auto;color:var(--cy)}
 @media(max-width:700px){.rtab th:nth-child(2),.rtab td:nth-child(2){display:none}}
 
@@ -238,10 +255,10 @@ section{margin-top:26px}
 .gdwrap{position:fixed;inset:0;z-index:90;display:none}
 .gdwrap.on{display:block}
 .gdscrim{position:absolute;inset:0;background:rgba(5,9,18,.72);backdrop-filter:blur(2px)}
-.gdpanel{position:absolute;right:0;top:0;bottom:0;width:min(640px,100%);background:var(--panel);
+.gdpanel{position:absolute;right:0;top:0;bottom:0;width:min(640px,100%);background:var(--well);
   border-left:1px solid var(--line2);display:flex;flex-direction:column;overflow-y:auto}
 .gdhead{display:flex;align-items:flex-start;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line);
-  background:var(--panel2);position:relative}
+  background:var(--panel);position:relative}
 .gdname{font-size:16px;font-weight:700;display:block;letter-spacing:-.01em}
 .gdsym{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);letter-spacing:.06em}
 .gdpx{margin-left:auto;text-align:right;padding-right:26px}
@@ -253,7 +270,7 @@ section{margin-top:26px}
 .gdx:hover{color:var(--tx)}
 .gdtabs{display:flex;gap:6px;padding:12px 18px 0}
 .gtf{font-family:var(--f-m);font-size:11px;padding:6px 14px;min-height:32px;border-radius:3px;
-  border:1px solid var(--line2);background:var(--panel2);color:var(--tx2);cursor:pointer}
+  border:1px solid var(--line2);background:var(--panel);color:var(--tx2);cursor:pointer}
 .gtf.on{background:var(--cy);border-color:var(--cy);color:#05131a;font-weight:600}
 .gtf.off{opacity:.38;cursor:not-allowed}
 #gdChart{height:300px;margin:12px 18px 0;position:relative}
@@ -261,7 +278,7 @@ section{margin-top:26px}
 .gdmsg{font-size:12px;color:var(--tx3);padding:22px 0;text-align:center}
 .gdrets{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);
   border:1px solid var(--line);border-radius:4px;overflow:hidden;margin:14px 18px 0}
-.gdr{background:var(--panel2);padding:9px 4px;text-align:center}
+.gdr{background:var(--panel);padding:9px 4px;text-align:center}
 .gdr .gk{display:block;font-family:var(--f-m);font-size:9px;letter-spacing:.1em;color:var(--tx3)}
 .gdr .gv{display:block;font-family:var(--f-m);font-size:11.5px;margin-top:3px}
 .gd52{display:flex;flex-wrap:wrap;gap:14px;padding:12px 18px 20px;font-size:11.5px;color:var(--tx3)}
@@ -924,3 +941,5 @@ fetchWithTimeout('/api/digest/v3').then(function(r){return r.text();}).then(func
     '<div class="card">Digest unavailable — '+esc(String(e&&e.message||e))+'</div>';
 });
 </script>
+</body>
+</html>
