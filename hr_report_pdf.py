@@ -278,6 +278,20 @@ def render_report_html(rep):
     pnl_split = (f'<div style="font-size:9.5px;color:#5B667D;margin-top:4px;">Realised {_money(_rp)} '
                  f'&middot; Unrealised {_money(snap.get("unrealised_pnl"))}</div>') if _rp not in (None, 0) else ""
 
+    # cc#1213 scope item 1: the cash line under Current Value. Same 9.5px muted style as the
+    # Realised/Unrealised line beside it, so the strip reads as one thing rather than two.
+    #
+    # Holdings is the Current Value AS PRINTED, not current minus cash. build_report sums the
+    # holdings into total_current and adds cash on top of it - total_pnl = total_current + cash -
+    # invested - so cash was never inside the number above. Subtracting it would print a Holdings
+    # figure that disagrees with the P&L on the same strip, in a document that goes to a client.
+    # _money already draws the distinction this line needs: 0 prints as a rupee zero, None prints
+    # as an em-dash. "This account holds no cash" and "we have no meta row for it" stay different
+    # statements without a conditional of my own second-guessing the module's own convention.
+    cash_line = (f'<div style="font-size:9.5px;color:#5B667D;margin-top:4px;">'
+                 f'Holdings {_money(snap.get("current"))} &middot; '
+                 f'Cash {_money(snap.get("cash"))}</div>')
+
     # cc#656: dual money-return alpha (vs Nifty 50 + vs Nifty 500), each its own +/- colour, date once.
     def _alpha_line(lbl, v):
         col = "#5B667D" if v is None else ("#0B6E42" if v >= 0 else "#B52432")
@@ -342,7 +356,7 @@ ul {{ margin:0; padding-left:18px; }} li {{ font-size:11.5px; color:#5B667D; mar
 </div>
 <div class="strip">
   <div class="c"><div class="lbl">Invested</div><div class="big">{_money(snap.get('invested'))}</div></div>
-  <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div></div>
+  <div class="c"><div class="lbl">Current Value</div><div class="big">{_money(snap.get('current'))}</div>{cash_line}</div>
   <div class="c"><div class="lbl">P&amp;L</div><div class="big" style="color:{pnl_col};">{_money(snap.get('pnl_abs'))}</div>
     <div style="font-size:11px;color:{pnl_col};">{_pct(snap.get('pnl_pct'))}</div>{pnl_split}</div>
   <div class="c" style="border-right:none;"><div class="lbl">Alpha{alpha_since_lbl}</div>{alpha_block}</div>
