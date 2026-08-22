@@ -15,9 +15,10 @@ synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
     week_return>=-2, rsi_month[60,90], sector_week>0, month_return<5, day_1d>0 strict,
     gvm_score>=6.5 strict (cc#754). All cheap (cc#606 dropped the
     heavy wRSI>=70 FINAL stage). Fixed +/-3.0% exits.
-  buy_momentum   BUY_MOMENTUM_V4   (_write_buy_momentum_v3_qualified, cc#1038): TWO independent
-    layers -- 7 HARD gates (dma_50[5,12], dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0,
-    mom_2d[0,4] (the ONE V4 addition), hourly_pct>0&NOT NULL) + FINAL heavy wRSI[70,85],
+  buy_momentum   BUY_MOMENTUM   (_write_buy_momentum_v3_qualified; V5 gate set per spec 23186):
+    TWO independent layers -- 8 HARD gates, ALL CHEAP, no FINAL heavy stage (dma_50[5,12],
+    dma_20>0, week_index_52>=75, gvm_score>=7, day_1d in (0,2], hourly_pct>0&NOT NULL, s1_touch
+    over 3 sessions, pp_band 0-1.5% above PP) plus a hard 10:15-13:00 IST entry window,
     PLUS SCORE>=7-of-10 fixed-threshold V2 bands
     (gvm/dma_50/dma_200/rsi_month/week_return/month_return/mom_2d/sector_week/sector_month + wRSI
     reused at [60,85]). Fixed +/-3.0% exits.
@@ -59,11 +60,18 @@ from v8_signal_writer import (BASKET_FILTERS, BASKET_SPEC, basket_filter_config,
                               basket_stage_rows, basket_funnel_keys)
 import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
 
-# cc#1038: how many CHEAP gates precede the heavy wRSI stage, asked of the registry rather than
-# written down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH
-# failure cc#1025 catalogued, and it would have silently gated every stock out of the heavy stage
-# the moment V4 made it 8 (nothing would ever reach true_weekly_rsi, and the page would have shown
-# a plausible, wrong 0). Derived, it cannot drift again.
+# cc#1038: how many buy_momentum HARD gates there are, asked of the registry rather than written
+# down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH failure
+# cc#1025 catalogued, and it would have silently gated every stock out of the next stage the
+# moment V4 made it 8 (the page would have shown a plausible, wrong 0). Derived, it cannot drift.
+#
+# cc#1180: THE NAME IS NOW HALF-TRUE AND THE COMMENT SAYS SO RATHER THAN THE NAME LYING QUIETLY.
+# "CHEAP" meant "precedes the heavy wRSI FINAL stage". There is no heavy stage on this basket any
+# more — 23186 removed the wRSI [70,85] gate and made wRSI a SCORE band — and no basket in the
+# registry carries a `heavy` flag at all, so this filter drops nothing and the count is simply the
+# full gate count, 8. The expression is left registry-derived rather than replaced by a literal;
+# renaming the constant would touch every call site for no behaviour change, which belongs in a
+# cleanup card, not in a display-truth fix.
 _BM_CHEAP_N = len([f for f in BASKET_FILTERS.get("buy_momentum", []) if not f.get("heavy")])
 
 router = APIRouter(prefix="/api/v8", tags=["v8"])
@@ -1438,7 +1446,8 @@ def filter_config(basket: str):
                            + (" [FINAL heavy stage]" if f.get("heavy") else "")
                            for f in BASKET_FILTERS.get(basket, [])],
             "gate_note": (f"{BASKET_SPEC.get(basket,{}).get('label',basket)}: TWO independent layers "
-                          f"-- {_BM_CHEAP_N} HARD gates + FINAL heavy wRSI, PLUS SCORE>=7-of-10 "
+                          f"-- {_BM_CHEAP_N} HARD gates, all cheap, no FINAL heavy stage "
+                          f"(23186 made wRSI a SCORE band), PLUS SCORE>=7-of-10 "
                           f"(the 9 bands above + wRSI[60,85] reused as the 10th)."),
             "backtest": {"note": "Pending live audit"},
             **_registry_gates_payload(basket),
@@ -2551,7 +2560,7 @@ def bm_funnel_detail():
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
             if key == "true_weekly_rsi":
                 stage["denominator"] = denom
-                stage["note"] = f"of {denom} stocks passing all {_BM_CHEAP_N} cheap hard gates"
+                stage["note"] = f"of {denom} stocks passing all {_BM_CHEAP_N} hard gates"
             stages.append(stage)
         stages.append({
             # cc#514: not a passed_filters/failed_filters entry -- the funnel-row click-through
@@ -2561,14 +2570,14 @@ def bm_funnel_detail():
             "survivors": final, "killed": max(score_denom - final, 0),
             "pass_pct": round(final / score_denom * 100, 1) if score_denom else 0,
             "denominator": score_denom,
-            "note": f"of {score_denom} stocks passing all HARD gates (incl. wRSI[70,85]) at the "
+            "note": f"of {score_denom} stocks passing all HARD gates at the "
                     f"day's peak tick; the {final} shown is the day's total qualifiers",
         })
         return {
             "basket": "buy_momentum", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": _n_filters("buy_momentum"), "n_filters": _n_filters("buy_momentum"),
             "stage6_survivors": stage6, "hard_qualified": hard_qualified,
-            "gate_type": f"HARD gates ({_BM_CHEAP_N}) + FINAL heavy wRSI + SCORE>=7-of-10 V2 bands",
+            "gate_type": f"HARD gates ({_BM_CHEAP_N}, all cheap) + SCORE>=7-of-10 V2 bands",
             "score_qualified": final, "pivot_pass": final,
             "stale_format": stale_format, "qualified_parity": qualified_parity,
             # cc#1101 item 4: the mismatch is SHOWN, with both numbers, not only logged.
@@ -2673,12 +2682,35 @@ def bm_stock_passcount():
 
 @router.get("/bm_stock_detail/{symbol}")
 def bm_stock_detail(symbol: str):
-    """cc#502 -> cc#1038: per-stock breakdown for BUY_MOMENTUM_V4 -- 9 HARD gates (ACTUAL vs
-    REQUIRED + PASS/FAIL, computed LIVE for one symbol, true_weekly_rsi only after all 8 cheap gates
-    clear) PLUS a separate SCORE/10 breakdown (SCORE_BANDS, fixed >=7 threshold, wRSI band reuses
-    the same true_weekly_rsi value) once every hard gate passes. Qualification requires BOTH all
-    hard gates AND score>=7. Mirrors bm_stock_passcount / _write_buy_momentum_v3_qualified exactly.
-    Display only, never qualifies."""
+    """Per-stock breakdown for BUY_MOMENTUM — one row per REGISTRY gate, plus the SCORE/10 block.
+
+    cc#1180 REBUILT THIS FROM THE REGISTRY. It used to hand-write seven rows against an eight-gate
+    registry, and every one of the three ways that can go wrong had gone wrong at once:
+
+      * A GHOST GATE. It carried a true_weekly_rsi row required "70 to 85" and marked PASS/FAIL on
+        it. That gate has not existed since spec 23186 — the engine's own comment says the wRSI
+        [70,85] heavy stage "that had gated this basket since cc#502" is "GONE by design, not by
+        accident", and wRSI is a SCORE band now. The modal was failing stocks on a rule the engine
+        does not apply. Per cc#1107, a gate that is NOT evaluated gets NO row: the row is deleted,
+        and wRSI still appears where it belongs, in score_rows below, labelled as a score band.
+      * TWO MISSING GATES. s1_touch and pp_band DO gate — they are the S1-pullback legs 23186 put
+        in wRSI's place — and had no rows at all, because this endpoint did not recompute the
+        live/pivot legs. It does now, off the same helpers br_stock_detail uses and the same
+        rolling-5-day pivots every basket is handed. Three sessions for the S1 low, not four:
+        buy_reversal uses four and buy_momentum uses three, which is why _basket_prior3_low exists
+        as its own helper rather than a parameter someone later gets wrong for one basket.
+      * A COUNT THAT DISAGREED WITH ITS OWN ROWS. `total` read _n_filters (registry, 8) while
+        `rows` held 7, so the modal said "5 of 8" over five green rows and two absent ones.
+
+    Rows are now GENERATED by walking BASKET_FILTERS["buy_momentum"], the same single source the
+    funnel stages and the pass-count card read, so this class of drift cannot recur here: adding a
+    gate to the registry adds a row, and removing one removes it.
+
+    NOT COVERED BY ANY ROW, and stated rather than silently missing: the engine also enforces an
+    ENTRY WINDOW of 10:15-13:00 IST. That is a clock gate, not a metric gate, so it has no registry
+    row and no ACTUAL value to print. It is named in gate_note instead.
+
+    Qualification needs BOTH every hard gate AND score >= 7. Display only, never qualifies."""
     from v8_signal_writer import _true_weekly_rsi
     sym = symbol.upper()
     try:
@@ -2695,43 +2727,68 @@ def bm_stock_detail(symbol: str):
             cr = cur.fetchone()
             cmp = float(cr[0]) if cr else None
             hp = _load_v21_live_metrics(conn, [sym]).get(sym, {}).get("hourly_pct")
-            twr = _true_weekly_rsi(conn, sym, cmp)   # one stock -- always compute so the row is never blank
+            # wRSI is still computed — it is a SCORE band (23186), so it is needed below even
+            # though it no longer has a gate row of its own.
+            twr = _true_weekly_rsi(conn, sym, cmp)
+            # cc#1180: the two live/pivot legs this endpoint used to skip. Same pivots every other
+            # basket is handed (rolling 5-day classic), read not re-derived — 23186 forbids a
+            # private copy of the formula.
+            cur.execute("""SELECT pp, s1 FROM v8_paper_pivots WHERE symbol=%s
+                AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
+            pv = cur.fetchone()
+            pp = float(pv[0]) if pv and pv[0] is not None else None
+            s1 = float(pv[1]) if pv and pv[1] is not None else None
+            p3lo = _basket_prior3_low(cur, [sym]).get(sym)
+            tlo  = _basket_day_low_today(cur).get(sym)
 
         def _fmt(v, d):
             return "--" if v is None else f"{v:.{d}f}"
 
-        p_dma50 = _passes_filter(dma50, 5.0, 12.0)
-        p_dma20 = dma20 is not None and dma20 > 0.0
-        p_w52   = _passes_filter(w52, 75.0, None)
-        p_gvm   = _passes_filter(gvm, 7.0, None)
-        p_d1d   = d1d is not None and 0.0 < d1d <= 2.0     # cc#1051 V5: capped at +2%
-        p_hp    = hp is not None and hp > 0.0
-        # cc#1045: mom_2d joins the cheap set, so a stock failing it never reaches the heavy wRSI
-        # row — same as the handler, which is the whole point of this endpoint. sector_week is NOT
-        # here: 22386 dropped its hard gate, and it scores below like any other band.
-        # cc#1051 V5: s1_touch and pp_band are live/pivot legs this display endpoint does not
-        # recompute, so `cleared` covers the stored-column gates only and the note below says so.
-        cleared = all([p_dma50, p_dma20, p_w52, p_gvm, p_d1d, p_hp])
-        p_twr   = cleared and (twr is not None and 70.0 <= twr <= 85.0)
+        # The two custom legs, computed exactly as _write_buy_momentum_v3_qualified computes them.
+        s1_ok = s1 is not None and ((p3lo is not None and p3lo <= s1) or (tlo is not None and tlo <= s1))
+        s1_lbl = f"prior3d {_fmt(p3lo,2)} / today {_fmt(tlo,2)} vs S1 {_fmt(s1,2)}"
+        pp_off = ((cmp / pp - 1) * 100.0) if (cmp and pp) else None
+        pp_ok = pp_off is not None and 0.0 <= pp_off <= 1.5
+        pp_lbl = (f"{_fmt(pp_off,2)}% above PP {_fmt(pp,2)}" if pp_off is not None
+                  else f"-- (cmp {_fmt(cmp,2)} / PP {_fmt(pp,2)})")
 
-        rows = [
-            {"filter": "dma_50",          "required": "5 to 12",  "actual": _fmt(dma50, 2) + "%", "pass": p_dma50},
-            {"filter": "dma_20",          "required": "> 0",      "actual": _fmt(dma20, 2) + "%", "pass": p_dma20},
-            {"filter": "week_index_52",   "required": ">= 75",    "actual": _fmt(w52, 1),          "pass": p_w52},
-            {"filter": "gvm_score",       "required": ">= 7",     "actual": _fmt(gvm, 1),          "pass": p_gvm},
-            {"filter": "day_1d",          "required": "> 0 and <= 2", "actual": _fmt(d1d, 2) + "%", "pass": p_d1d},
-            {"filter": "hourly_pct",      "required": "> 0",      "actual": _fmt(hp, 2) + "%",     "pass": p_hp},
-            {"filter": "true_weekly_rsi", "required": "70 to 85", "actual": _fmt(twr, 1),          "pass": p_twr},
-        ]
-        if not cleared:
-            # cc#1038: index the heavy row by identity, not by the literal 6 — inserting the two V4
-            # gates moved it, and a positional index would have quietly annotated sector_week.
-            rows[-1]["note"] = (f"engine evaluates true weekly RSI only after all "
-                                f"{_BM_CHEAP_N} cheap gates pass")
+        # cc#1180: ROWS ARE WALKED OFF THE REGISTRY, not listed here. The three custom keys carry
+        # their own value strings because they have no single stored column to print; every other
+        # key reads its value from the map and its band straight off the registry row, so the
+        # REQUIRED column can never disagree with the gate that was actually applied.
+        valmap = {"dma_50": dma50, "dma_20": dma20, "week_index_52": w52,
+                  "gvm_score": gvm, "day_1d": d1d, "hourly_pct": hp}
+        pct_keys = {"dma_50", "dma_20", "day_1d", "hourly_pct"}
+        rows = []
+        for f in BASKET_FILTERS["buy_momentum"]:
+            key = f["key"]
+            if key == "s1_touch":
+                rows.append({"filter": key, "required": "<= S1", "actual": s1_lbl, "pass": s1_ok})
+            elif key == "pp_band":
+                rows.append({"filter": key, "required": "0 to 1.5% above PP",
+                             "actual": pp_lbl, "pass": pp_ok})
+            elif key == "hourly_pct":
+                # NULL BLOCKS, and that is not the same as failing a band — before ~10:15 the
+                # rolling 60-minute window has not opened yet and the value does not exist. The
+                # row says which of the two it is instead of printing a bare FAIL.
+                rows.append({"filter": key, "required": "> 0 and NOT NULL",
+                             "actual": _fmt(hp, 2) + "%", "pass": hp is not None and hp > 0.0,
+                             "note": None if hp is not None else
+                                     "rolling 60m window has not opened yet (no value before ~10:15)"})
+            else:
+                v = valmap.get(key)
+                dec = 1 if key == "week_index_52" else 2
+                rows.append({"filter": key, "required": _registry_req_str(f),
+                             "actual": _fmt(v, dec) + ("%" if key in pct_keys else ""),
+                             "pass": _passes_registry_band(v, f)})
         passed = sum(1 for r in rows if r["pass"])
+        cleared = all(r["pass"] for r in rows)
 
         score, score_rows = None, None
-        if p_twr:
+        # cc#1180: the score block shows once every HARD gate clears, which is what the engine
+        # does. It used to be gated on the wRSI [70,85] gate row — a rule the engine dropped at
+        # 23186 — so a stock that cleared every real gate with wRSI at 68 was shown no score at all.
+        if cleared:
             metric_vals = {"gvm_score": gvm, "dma_50": dma50, "dma_200": dma200, "rsi_month": rmon,
                             "week_return": wret, "month_return": mret, "mom_2d": mom2d,
                             "sector_week": swk, "sector_month": smon}
