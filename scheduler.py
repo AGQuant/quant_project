@@ -1358,11 +1358,34 @@ def _bg_heal_intraday():
     try:
         import main
         res = main._heal_morning_gaps()
+        # cc#1200 scope 1: the equity heal drops every index symbol before it starts, so the
+        # NIFTY50/BANKNIFTY CASH legs have never been healed by it. On 21-Aug that meant 206
+        # equities repaired and 0 index legs, and the dashboard then showed the same gap three
+        # ways without once saying "as of Thursday". Runs as its own step in its own module
+        # (index_heal) because the equity path cannot fetch an index — see that file for why.
+        #
+        # NON-FATAL BY CONSTRUCTION: an index failure must never cost the equity heal its
+        # ops_log row. The equity result is already in hand at this point and gets written
+        # whatever happens here.
+        idx = {}
+        try:
+            import index_heal
+            idx = index_heal.heal_index_cash()
+        except Exception as _ie:
+            idx = {"errors": ["index_heal raised: %s" % str(_ie)[:140]]}
+            log.error("heal_intraday: index leg failed — %s", _ie, exc_info=True)
         with _conn() as _c:   # cc#255
             _log_health(_c, "heal_intraday",
-                        {"healed": res.get("symbols_healed"), "bars": res.get("bars_inserted")})
+                        {"healed": res.get("symbols_healed"), "bars": res.get("bars_inserted"),
+                         # healed_index is its OWN key, per the card. Folded into `healed` it
+                         # would have read 206 on the day the indices healed zero.
+                         "healed_index": idx.get("healed_index", 0),
+                         "index_bars": idx.get("bars", 0),
+                         "index_skipped": idx.get("skipped", []),
+                         "index_errors": idx.get("errors", [])})
         log.info(f"heal_intraday(EOD Branch B): healed={res.get('symbols_healed')} "
-                 f"bars={res.get('bars_inserted')} window={res.get('window')}")
+                 f"bars={res.get('bars_inserted')} window={res.get('window')} "
+                 f"healed_index={idx.get('healed_index', 0)} index_bars={idx.get('bars', 0)}")
         _heal_ran_today = today
     except Exception as e:
         log.error(f"heal_intraday(EOD Branch B): {e}")
