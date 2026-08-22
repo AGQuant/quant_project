@@ -1013,9 +1013,15 @@ _UPSERT_METRICS_SQL = """
      day_1d, eod_chg,
      sector_day, sector_week, sector_month,
      month_index, week_index_52,
-     ma9_vs_ma21, vol_ratio)
+     ma9_vs_ma21, vol_ratio,
+     -- cc#1194 scope 5: the INSERT branch stamps IST, matching the DO UPDATE SET below.
+     -- A LITERAL, not a param: _metrics_row() is unchanged and the executemany tuple keeps its
+     -- 22 values, so the batch path and the per-symbol fallback stay byte-identical to each
+     -- other, which is the cc#217 P3 invariant this SQL exists to hold.
+     computed_at)
     VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
-            %s,%s, %s,%s,%s, %s,%s, %s,%s)
+            %s,%s, %s,%s,%s, %s,%s, %s,%s,
+            NOW() AT TIME ZONE 'Asia/Kolkata')
     ON CONFLICT (symbol, score_date) DO UPDATE SET
         gvm_score     = EXCLUDED.gvm_score,
         dma_20        = EXCLUDED.dma_20,

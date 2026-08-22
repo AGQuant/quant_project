@@ -1642,7 +1642,17 @@ def health_feeds():
     try:
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td, time as _tt
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(computed_at)))/60.0 FROM v8_metrics")
+            # cc#1194 scope 5: BOTH SIDES IN IST. computed_at is a naive `timestamp` holding IST
+            # wall-clock; bare NOW() is timestamptz on a UTC Railway session, and subtracting the
+            # two made Postgres read the stored IST clock AS UTC. The age came out exactly 330
+            # minutes short — measured on the live table: 1753.7 as shipped against 2083.7 correct.
+            # The threshold below is 10 minutes, so a writer had to be frozen for 340 minutes
+            # before this could say stale — longer than the 09:15-15:30 session itself. The check
+            # cc#580 built for a five-hour freeze could not report one. feed_guardian already
+            # converts to IST for the same reason (cc#1022); this was the last raw subtraction.
+            cur.execute("SELECT EXTRACT(EPOCH FROM "
+                        "((NOW() AT TIME ZONE 'Asia/Kolkata') - MAX(computed_at)))/60.0 "
+                        "FROM v8_metrics")
             r = cur.fetchone()
         age_min = round(float(r[0]), 1) if r and r[0] is not None else None
         now_ist = _dt.now(_tz(_td(hours=5, minutes=30))).replace(tzinfo=None)

@@ -310,7 +310,13 @@ def store_metrics(conn, m: Dict):
              day_1d, eod_chg,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
-             ma9_vs_ma21, vol_ratio)
+             ma9_vs_ma21, vol_ratio,
+             -- cc#1194 scope 5: THE INSERT BRANCH STAMPS IST TOO. cc#855 (1a12ef8) set
+             -- computed_at explicitly in the DO UPDATE SET below and stopped there, so a row
+             -- that did not already exist fell through to the LIVE column default, which is a
+             -- bare now() = UTC on Railway. Same statement, two conventions, decided by whether
+             -- the row happened to be there already.
+             computed_at)
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
@@ -318,7 +324,8 @@ def store_metrics(conn, m: Dict):
              %(day_1d)s, %(eod_chg)s,
              %(sector_day)s, %(sector_week)s, %(sector_month)s,
              %(month_index)s, %(week_index_52)s,
-             %(ma9_vs_ma21)s, %(vol_ratio)s)
+             %(ma9_vs_ma21)s, %(vol_ratio)s,
+             NOW() AT TIME ZONE 'Asia/Kolkata')
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
