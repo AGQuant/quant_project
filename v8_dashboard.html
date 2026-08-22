@@ -81,52 +81,24 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
      page changes colour in dark mode. Legacy alias names (--card/--card2/--ink/--surface/--bull/
      --bear) are kept and given light values too, so panes that consume them flip instead of
      stranding on a dark hex. */
-  :root{
-    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --well:#0D1428;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --grn-d:rgba(47,212,139,.13);
-    --red:#FF5C6C; --red-d:rgba(255,92,108,.12);
-    --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
-    --spotc:#37D3E8;
-    --spot-ring:rgba(55,211,232,.16); --spot-ring2:rgba(55,211,232,.06);
-    --spot-chip-bg:rgba(55,211,232,.1); --spot-chip-bd:rgba(55,211,232,.3);
-    --amber-bg:rgba(245,185,74,.08); --amber-bd:rgba(245,185,74,.4); --amber-row:rgba(245,185,74,.1);
-    --blu-row:rgba(77,124,254,.1); --blu-chip:rgba(77,124,254,.14); --blu-chip-bd:rgba(77,124,254,.3);
-    --vio-bg:rgba(155,124,255,.1); --vio-bd:rgba(155,124,255,.3);
-    --flat:#2a3350;
-    --glow-gold:rgba(245,185,74,.5); --glow-spot:rgba(55,211,232,.6);
-    --gridline:rgba(148,166,210,.05);
-    --shadow:0 18px 44px rgba(3,7,20,.5);
-    --font:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
-    --r:16px;
-    /* legacy aliases already consumed by the V8 / quick-analysis panes */
-    --ink:#0A0F1E; --surface:#121A33; --surface2:#182241;
-    --card:#121A33; --card2:#0D1428;
-    --bull:#2FD48B; --bear:#FF5C6C;
-  }
-  html[data-theme="light"]{
-    --bg:#F5F7FB; --bg2:#EEF1F8; --panel:#FFFFFF; --panel2:#F7F9FD; --well:#EEF1F8;
-    --line:rgba(23,40,80,.10); --line2:rgba(23,40,80,.18);
-    --txt:#17203A; --mut:#5B6785; --dim:#93A0BE;
-    --grn:#0E9F62; --grn-d:rgba(14,159,98,.10);
-    --red:#DE3A52; --red-d:rgba(222,58,82,.09);
-    --blu:#3563E9; --cyan:#0E93B0; --amber:#B47B10; --violet:#6E4FE0;
-    --spotc:#0E93B0;
-    --spot-ring:rgba(14,147,176,.14); --spot-ring2:rgba(14,147,176,.05);
-    --spot-chip-bg:rgba(14,147,176,.08); --spot-chip-bd:rgba(14,147,176,.3);
-    --amber-bg:rgba(180,123,16,.07); --amber-bd:rgba(180,123,16,.35); --amber-row:rgba(180,123,16,.08);
-    --blu-row:rgba(53,99,233,.08); --blu-chip:rgba(53,99,233,.10); --blu-chip-bd:rgba(53,99,233,.3);
-    --vio-bg:rgba(110,79,224,.08); --vio-bd:rgba(110,79,224,.3);
-    --flat:#D5DAE8;
-    --glow-gold:rgba(180,123,16,.35); --glow-spot:rgba(14,147,176,.4);
-    --gridline:rgba(23,40,80,.035);
-    --shadow:0 10px 28px rgba(23,40,80,.08);
-    /* legacy aliases, light side */
-    --ink:#17203A; --surface:#FFFFFF; --surface2:#F7F9FD;
-    --card:#FFFFFF; --card2:#EEF1F8;
-    --bull:#0E9F62; --bear:#DE3A52;
-  }
+  /* cc#1203 push 20: THIS is the file the contract was copied from. Push 2 lifted these two
+   blocks verbatim - 46 dark tokens and 43 light - into scorr_web_tokens.css, and they have been
+   duplicated ever since: the same values declared here and injected there, with nothing keeping
+   them in step. Removing them is what makes the contract a contract rather than a copy.
+
+   Verified name by name before deleting, in BOTH themes. All 46 dark values and 42 of the 43
+   light values are byte-identical to the contract. The one that differs is --ink in light, which
+   this page set to #17203A and the contract now sets to #F5F7FB - and that is push 17's fix for a
+   token that meant the page GROUND in dark and the dark TEXT colour in light. This page never
+   used --ink at all, not once in 533KB, so the defect it exported to the contract was invisible
+   here and cost v15 its light mode instead. Deleting these blocks is otherwise a no-op.
+
+   Four names were retargeted rather than left leaning on a fallback: a hover colour that asked
+   for --chalk with a light-mode fallback, a full-screen chart overlay that asked for --field with
+   the page ground as its fallback while the contract aliases --field to a card surface, and two
+   uses of --heat, a name nothing declares anywhere. They now say --txt, --bg and --red. */
+
+  
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
   a{color:inherit}
@@ -382,7 +354,7 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
   .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
     border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
     color:var(--muted, #5a6781);font-size:11.5px;font-weight:600;transition:.12s}
-  .mnav-item:hover{color:var(--chalk, #1c2536)}
+  .mnav-item:hover{color:var(--txt)}
   .mnav-item.active{border-bottom-color:var(--pulse, #2563eb);color:var(--pulse, #2563eb)}
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:var(--line2);flex-shrink:0;margin:0 4px}
@@ -1142,7 +1114,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
       <!-- cc#760: data-integrity alert icon (replaces the full-width banner). Hidden at zero flags. -->
       <span id="diAlert" title="Data integrity" onclick="toggleDiPop(event)" style="display:none;position:relative;cursor:pointer;align-items:center;justify-content:center;padding:0 3px">
         <span id="diAlertIcon" style="font-size:16px;line-height:1">&#9888;</span>
-        <span id="diAlertBadge" style="position:absolute;top:-5px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--heat, #d92d3c);color:#fff;font-size:9px;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box"></span>
+        <span id="diAlertBadge" style="position:absolute;top:-5px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--red);color:#fff;font-size:9px;font-weight:800;line-height:15px;text-align:center;box-sizing:border-box"></span>
       </span>
       <a class="btn" href="/v13" title="Filter registry — every platform metric" style="text-decoration:none">&#9636; V13</a>
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
@@ -1299,7 +1271,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div id="pane-index" style="display:none">
     <div id="idx-app"><div class="loading">Loading Index Intelligence…</div></div>
   </div>
-  <div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--field, #0A0F1E);flex-direction:column">
+  <div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:var(--bg);flex-direction:column">
     <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">
       <div id="v10ChartTitle" style="font-size:15px;font-weight:800;color:var(--txt)">NIFTY 50 · 5min · V10 trades</div>
       <div style="display:flex;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:8px;padding:3px">
@@ -5102,7 +5074,7 @@ function renderDiPop(){
     + line('Genuine-crash flags', b.genuine_crash_flags, '#d92d3c', x=>`${esc(x.symbol)}${x.drop_pct!=null?' ('+Number(x.drop_pct).toFixed(1)+'%)':''}`)
     + line('Restated overnight', b.restated_overnight, '#d92d3c', x=>esc(x.symbol))
     + line('Upcoming ex-dates', b.upcoming_ex_dates, '#d9820e', x=>`${esc(x.symbol)}${x.ex_date?' · '+esc(x.ex_date):''}`)
-    + ((DI_DATA.master_headline&&DI_DATA.red)?`<div style="padding:7px 0;border-top:1px solid var(--line);color:var(--heat, #d92d3c);font-size:11px">${esc(DI_DATA.master_headline)}</div>`:'');
+    + ((DI_DATA.master_headline&&DI_DATA.red)?`<div style="padding:7px 0;border-top:1px solid var(--line);color:var(--red);font-size:11px">${esc(DI_DATA.master_headline)}</div>`:'');
 }
 function toggleDiPop(ev){ if(ev)ev.stopPropagation(); const pop=document.getElementById('diPop'); if(!pop)return; pop.style.display=pop.style.display==='none'?'block':'none'; }
 document.addEventListener('click',function(e){
