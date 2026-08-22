@@ -104,6 +104,59 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    and the "4 rows per page" the card asks for would quietly stop being true. */
 .rv{font-size:11.5px;line-height:1.45;color:var(--muted);margin-top:3px;
  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rrow{cursor:pointer}
+.rchev{color:var(--muted);font-size:14px;flex:none;align-self:center}
+/* ── cc#1190 scope 3/4 · THE SHEET ───────────────────────────────────────────────────────────
+   MIRRORS /m/home's news sheet — same veil, same 78vh ceiling, same grab handle, same slide-up,
+   same body lock — but it is NOT the same CSS, and that is a finding rather than a shortcut.
+   The card says "the SAME bottom-sheet component the news rows use". There is no such component:
+   scorr_news_row.js ships a stylesheet for the ROW only, and home's sheet is page-local CSS in
+   mobile/home.html built on that page's token set (--t-sunk, --txt). This page's tokens are
+   --hi/--edge/--chalk/--muted, so copying those rules would resolve half of them to nothing.
+   Extracting the sheet into a real shared component is the right fix and it is a bigger change
+   than this card scopes, on a second surface — logged for its own card. */
+.rveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
+.rsheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;
+ z-index:81;background:var(--panel);border-top:1px solid var(--edge);border-radius:16px 16px 0 0;
+ box-shadow:0 -12px 34px rgba(0,0,0,.6);animation:rup .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes rup{from{transform:translateY(100%)}}
+@media (prefers-reduced-motion:reduce){.rsheet{animation:none}}
+.rgrab{width:38px;height:4px;border-radius:2px;background:var(--edge);margin:9px auto 4px;flex:none}
+.rshd{padding:4px 18px 10px;border-bottom:1px solid var(--edge);flex:none}
+.rshd .sy{font-family:'Archivo Black';font-size:17px;transform:skewX(-6deg);display:inline-block}
+.rshd .co{font-size:12.5px;color:var(--chalk);margin-top:2px}
+.rshd .meta{font-family:'JetBrains Mono';font-size:9.5px;letter-spacing:1px;color:var(--muted);
+ margin-top:5px;display:flex;gap:8px;flex-wrap:wrap}
+.rsb{overflow-y:auto;padding:12px 18px 26px;-webkit-overflow-scrolling:touch}
+.rsp{font-size:13px;line-height:1.6;color:var(--chalk);margin-bottom:10px}
+.rsp.hd{font-family:'JetBrains Mono';font-size:10.5px;font-weight:800;letter-spacing:1.6px;
+ color:var(--aqua);margin:16px 0 6px}
+.rsx{min-width:44px;min-height:44px;position:absolute;right:8px;top:6px;background:none;border:0;
+ color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
+/* the peers button takes the page's own bevel language — .chip is what every other tappable
+   thing here uses, at full width and tap height */
+.rpeer{display:block;width:100%;box-sizing:border-box;min-height:44px;margin:14px 0 4px;
+ cursor:pointer;text-align:center;font-family:'JetBrains Mono';font-size:10.5px;font-weight:800;
+ letter-spacing:1.6px;color:var(--aqua);background:var(--hi);border:1px solid var(--aqua);
+ clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.rptab{width:100%;border-collapse:collapse;margin-top:10px;font-family:'JetBrains Mono';font-size:10px}
+.rptab th{text-align:right;padding:5px 4px;color:var(--muted);font-size:8.5px;letter-spacing:1px;
+ border-bottom:1px solid var(--edge);white-space:nowrap}
+.rptab th:first-child,.rptab td:first-child{text-align:left}
+.rptab td{text-align:right;padding:7px 4px;border-bottom:1px solid var(--edge);white-space:nowrap}
+.rptab tr.self td{background:var(--hi);color:var(--chalk);font-weight:800}
+.rptab tr.un td{color:var(--muted);opacity:.65}
+.rptab tr.tap{cursor:pointer}
+.rpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.rfoot{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.rfoot a{flex:1;min-width:130px;min-height:44px;display:flex;align-items:center;justify-content:center;
+ text-decoration:none;font-family:'JetBrains Mono';font-size:10px;font-weight:800;letter-spacing:1.4px;
+ color:var(--pulse);background:var(--hi);border:1px solid var(--edge);
+ clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.rmore{display:block;width:100%;box-sizing:border-box;min-height:44px;margin-top:10px;text-align:center;
+ line-height:44px;text-decoration:none;font-family:'JetBrains Mono';font-size:10px;font-weight:800;
+ letter-spacing:1.6px;color:var(--pulse);background:var(--hi);border:1px solid var(--edge);
+ clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 .sdot{width:7px;height:7px;border-radius:50%;flex:none}
 .plink{color:var(--pulse);font-weight:700;font-size:12.5px;text-decoration:none}
 .foot{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted);letter-spacing:.6px;margin:6px 18px 20px}
@@ -508,27 +561,157 @@ function raDeck(){
   for(var i=0;i<rows.length;i+=RA_PAGE)pages.push(rows.slice(i,i+RA_PAGE));
   DECKS.rtrack=pages.length;
   var set=pages.map(function(pg,pi){
-    /* NO onclick AND NO CHEVRON IN THIS PUSH. The sheet is scope 3 and is not built yet, and a
-       row that looks tappable and does nothing is worse than a row that does not invite the tap.
-       The affordance arrives with the thing it opens. */
+    /* cc#1190 scope 3: the tap and its chevron arrive together with the sheet they open, which is
+       why push 2 shipped these rows deliberately inert. */
     return '<div class="rpage"><div class="rpg num">'+(pi+1)+' of '+pages.length+'</div>'
       + pg.map(function(c){
           var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'';
-          return '<div class="mrow rrow"><div class="rmain">'
+          return '<div class="mrow rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
             + '<div class="rtop"><b>'+esc(c.symbol||'')+'</b>'
             + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
             + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
             + '</div>'
             + '<div class="rv">'+esc(c.verdict||'')+'</div></div>'
             + '<span class="chip '+cls+'" style="font-size:9.5px;padding:1px 6px">'
-            + esc(c.read||'—')+'</span></div>';
+            + esc(c.read||'—')+'</span><span class="rchev">\u203a</span></div>';
         }).join('')
       + '</div>';
   }).join('');
   var dots=Array.from({length:pages.length},function(_,j){
     return '<i class="'+(j?'':'on')+'"></i>';}).join('');
   return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
-       + set+set+set+'</div><div class="idots" id="rdots">'+dots+'</div></div>';
+       + set+set+set+'</div><div class="idots" id="rdots">'+dots+'</div></div>'
+       /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
+       + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
+}
+/* ── cc#1190 scope 3/4/5 · THE SHEET ─────────────────────────────────────────────────────────
+   RA_SEEN is the back-stack for peer hops. Tapping a peer swaps the sheet to that symbol, and
+   without a stack the only way back was to close and re-find the row you came from. */
+var RA_OPEN=null, RA_SEEN=[], RA_PEERS=null, RA_PSHOW=false;
+
+function raClose(){
+  var v=document.getElementById('rveil'), s=document.getElementById('rsheet');
+  if(v)v.remove(); if(s)s.remove();
+  document.body.style.overflow='';
+  RA_OPEN=null; RA_SEEN=[]; RA_PEERS=null; RA_PSHOW=false;
+}
+function raRow(sym){
+  var all=(RA&&RA.companies)||[];
+  for(var i=0;i<all.length;i++)if(all[i].symbol===sym)return all[i];
+  return null;
+}
+/* ALL-CAPS LINES ARE HEADERS. The analysis is written as "FINANCIAL GLIMPSE." over a paragraph.
+   The test is on the LETTERS only — a line like "Revenue Rs 1,278 Cr, +50% YoY" is full of digits
+   and punctuation, so a naive uppercase check on the whole string would promote data to a heading.
+   Short line, has letters, and every letter is uppercase. */
+function raIsHead(line){
+  var letters=line.replace(/[^A-Za-z]/g,'');
+  return letters.length>1 && line.length<=60 && letters===letters.toUpperCase();
+}
+function raBody(text){
+  return String(text||'').split(/\n+/).map(function(p){
+    p=p.trim(); if(!p)return '';
+    return '<div class="rsp'+(raIsHead(p)?' hd':'')+'">'+esc(p)+'</div>';
+  }).join('');
+}
+function raOpen(sym,push){
+  var r=raRow(sym)||{symbol:sym};
+  if(push&&RA_OPEN&&RA_OPEN!==sym)RA_SEEN.push(RA_OPEN);
+  RA_OPEN=sym; RA_PEERS=null; RA_PSHOW=false;
+  if(!document.getElementById('rsheet')){
+    var v=document.createElement('div'); v.id='rveil'; v.className='rveil'; v.onclick=raClose;
+    var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
+    document.body.appendChild(v); document.body.appendChild(s);
+    document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
+  }
+  raPaint(r,'<div class="rsp" style="color:var(--muted)">Loading the analysis…</div>');
+  fetch('/api/results/v2/'+encodeURIComponent(sym)).then(function(x){return x.json();})
+    .then(function(d){
+      if(RA_OPEN!==sym)return;                       /* a faster second tap already won */
+      if(d&&d.has_analysis){
+        raPaint(r,raBody(d.analysis),d);
+      }else{
+        /* the card's own wording for a peer with numbers but no written piece */
+        raPaint(r,'<div class="rsp" style="color:var(--muted)">No written analysis yet.</div>',d);
+      }
+    })
+    .catch(function(){
+      if(RA_OPEN!==sym)return;
+      raPaint(r,'<div class="rsp" style="color:var(--heat)">The analysis did not load. '
+        + 'Nothing is invented in its place.</div>');
+    });
+}
+function raPaint(r,bodyHtml,d){
+  var s=document.getElementById('rsheet'); if(!s)return;
+  var q=(d&&d.quarter)||r.quarter||'', when=r.polished_ist||'';
+  var back=RA_SEEN.length?'<button class="rsx" style="left:8px;right:auto" onclick="raBack()" '
+      + 'aria-label="back">&#8592;</button>':'';
+  s.innerHTML='<div class="rgrab"></div>'
+    + '<div class="rshd" style="position:relative">'+back
+    + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+    + '<div class="sy">'+esc(r.symbol||'')+'</div>'
+    + (r.company?'<div class="co">'+esc(r.company)+'</div>':'')
+    + '<div class="meta">'+(r.segment?'<span>'+esc(r.segment)+'</span>':'')
+    + (q?'<span>'+esc(q)+'</span>':'')
+    + (when?'<span>polished '+esc(when)+'</span>':'')+'</div></div>'
+    + '<div class="rsb" id="rsb">'+bodyHtml
+    + raPeerBlock(r)
+    + '<div class="rfoot">'
+    /* /m/results IS the mobile Result Corner (mobile_endpoints.py:1066). It does not read
+       location.search today, so ?symbol= is inert — the link carries it anyway so it works the
+       day the page honours it, and the gap is logged rather than silently dropped. */
+    + '<a href="/m/results?symbol='+encodeURIComponent(r.symbol||'')+'">VIEW DETAIL</a>'
+    + '</div></div>';
+}
+function raBack(){ var prev=RA_SEEN.pop(); if(prev)raOpen(prev,false); }
+
+function raPeerBlock(r){
+  if(!r.segment)return '';                 /* no segment = no peer set; the button is hidden */
+  if(!RA_PSHOW)
+    return '<button class="rpeer" onclick="raPeerToggle()">SEE '+esc(r.segment.toUpperCase())+' PEERS</button>';
+  var out='<button class="rpeer" onclick="raPeerToggle()">HIDE PEERS</button>';
+  if(RA_PEERS==='loading')return out+'<div class="rsp" style="color:var(--muted)">Loading peers…</div>';
+  if(!RA_PEERS||!RA_PEERS.peers||!RA_PEERS.peers.length)
+    return out+'<div class="rsp" style="color:var(--muted)">No segment peer has reported yet.</div>';
+  var rows=RA_PEERS.peers.map(function(p){
+    var cls=(p.is_self?'self ':'')+(p.reported?'tap':'un');
+    if(!p.reported)
+      return '<tr class="'+cls+'"><td>'+esc(p.symbol)+'</td>'
+        + '<td colspan="5">not reported'+(p.expected_date?' · expected '+esc(p.expected_date):'')+'</td></tr>';
+    var f=function(v,suf){return v==null?'—':(v>0?'+':'')+Number(v).toFixed(1)+(suf||'');};
+    return '<tr class="'+cls+'"'+(p.is_self?'':' onclick="raOpen(\''+esc(p.symbol)+'\',1)"')+'>'
+      + '<td>'+esc(p.symbol)+'</td><td>'+esc(p.result_date||'—')+'</td>'
+      + '<td>'+f(p.sales_yoy,'%')+'</td><td>'+f(p.pat_yoy,'%')+'</td>'
+      + '<td>'+(p.margin==null?'—':Number(p.margin).toFixed(1)+'%')+'</td>'
+      + '<td>'+f(p.move_pct,'%')+'</td></tr>';
+  }).join('');
+  return out+'<div class="rpwrap"><table class="rptab"><thead><tr><th>SYMBOL</th><th>RESULT DATE</th>'
+    + '<th>SALES YOY</th><th>PAT YOY</th><th>MARGIN</th><th>MOVE</th></tr></thead>'
+    + '<tbody>'+rows+'</tbody></table></div>';
+}
+function raPeerToggle(){
+  RA_PSHOW=!RA_PSHOW;
+  var r=raRow(RA_OPEN)||{symbol:RA_OPEN};
+  if(RA_PSHOW&&RA_PEERS===null){
+    RA_PEERS='loading';
+    var sym=RA_OPEN;
+    fetch('/api/results/peers/'+encodeURIComponent(sym)).then(function(x){return x.json();})
+      .then(function(d){ if(RA_OPEN!==sym)return; RA_PEERS=(d&&d.peers)?d:{peers:[]}; raRepaint(); })
+      .catch(function(){ if(RA_OPEN!==sym)return; RA_PEERS={peers:[]}; raRepaint(); });
+  }
+  raRepaint();
+}
+/* Repaint keeps the body text that is already on screen rather than refetching it — toggling the
+   peer table must not make the analysis flicker back to "Loading". */
+function raRepaint(){
+  var sb=document.getElementById('rsb'); if(!sb)return;
+  var keep=[]; var kids=sb.children;
+  for(var i=0;i<kids.length;i++){
+    var c=kids[i];
+    if(c.className==='rfoot'||c.classList.contains('rpeer')||c.classList.contains('rpwrap'))break;
+    keep.push(c.outerHTML);
+  }
+  raPaint(raRow(RA_OPEN)||{symbol:RA_OPEN},keep.join(''));
 }
 function raChips(){
   return '<div class="rchips">'+RA_TIERS.map(function(t){
