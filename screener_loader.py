@@ -86,13 +86,36 @@ SEGMENT_MERGE = {
     "Capital Goods-Non Electrical Equipment":       "Capital Goods - Industrial Small",
     "Auto Ancillaries Small":                       "Auto - Body & Stampings",
     "Pharma Smallcap":                              "Pharma - Formulations",
-    "Retail Smallcap":                              "Retail - Small",
+    # cc#1219: RE-POINTED, not left alone. This used to land on "Retail - Small", which is one of
+    # the six sub-3 segments this card merges away — see the note below for why adding the new
+    # pairs without fixing these two would have quietly re-created the strays on the next load.
+    "Retail Smallcap":                              "Retail - Mid",
     "Agro Chemicals":                               "Agro Chemicals - Small",
     "Mining and Minerals":                          "Steel - Mid & Small",
-    "Technology - Smallcap":                        "IT - Mid & Small",
+    "Technology - Smallcap":                        "IT - Small",          # cc#1219: was "IT - Mid & Small"
     "Non Ferrous Metals":                           "Aluminium & Non Ferrous",
     "Miscellaneous":                                "Business Services",
+
+    # ── cc#1219 · SEGMENT_MIN_SIZE_RULE_V1.1 (session_log 29327) ─────────────────────────────
+    # Six segments held fewer than three names. Their eight members are dead label rows — every
+    # one has market_cap NULL, cap_category NULL, zero raw_prices and zero gvm_scores — so these
+    # are spelling variants that never resolved to a real company, not real segments that shrank.
+    # The DB rows are relabelled by nse_code; these entries stop the loader re-creating the labels.
+    "Beverages Small":                              "Beverages & Spirits",
+    "Media & Entertainment":                        "Print Media & Publishing",
+    "Precious Metals, Jewellery and Watches":       "Gems & Jewellery - Small",
+    "Telecomm Equipment & Infra Services":          "Telecom Equipment & Services",
+    "IT - Mid & Small":                             "IT - Small",
+    "Retail - Small":                               "Retail - Mid",
 }
+# ADDING THE SIX PAIRS ALONE WOULD NOT HAVE HELD, and that is the whole reason the two entries
+# above are re-pointed. This map is applied by `Series.replace(SEGMENT_MERGE)`, and replace() does
+# NOT chain — measured on pandas 3.0.5 rather than assumed: with both
+# {"Retail Smallcap": "Retail - Small", "Retail - Small": "Retail - Mid"} in one dict, the input
+# "Retail Smallcap" comes out as "Retail - Small" and stops there. So the next load_input_from_drive
+# would have written two of the six strays straight back into input_raw, the watchdog would have
+# gone red again, and the card would have read as done. One pass, one hop: every key has to point
+# at its FINAL destination, not at an intermediate that is itself being merged away.
 
 
 def load_and_merge(input_csv, screener_csv):
