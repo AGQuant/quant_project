@@ -1949,9 +1949,56 @@ def purge_old_bars(conn):
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source=%s", (ext_cutoff, EXT_SOURCE))
             ext_del = cur.rowcount
+            # cc#1198 — THE FUTURES LEG IS NOW CARVED OUT OF THIS CATCH-ALL, because at a flat 7
+            # days it was deleting the ENTRY-AUDIT BAR out from under positions that are still
+            # open. Measured on the live book 22-Aug: 18 OPEN rows in v8_paper_positions, and 11
+            # of them have NO fyers_fut bar at or before their entry_ts. MIN(ts) for fyers_fut
+            # across the whole table was 17-Aug — five days of history behind a book whose oldest
+            # open entry is 05-Aug. v8_futures_book then prints no entry and no P&L for those
+            # rows and drops them out of the unrealised sum, so the Futures tab read -10,044 over
+            # 7 priced rows beside Equity +7,012 over 18. That looks like a reconciliation
+            # failure and is actually a subset.
+            #
+            # THE FLOOR: keep at least the 7-day window, and at least back to one day before the
+            # OLDEST STILL-OPEN entry. Whichever reaches further back wins. A bar that an open
+            # position depends on for its entry audit is not old data, however old it is.
+            #
+            # WHY THE WORKER READS THE BOOK, rather than the app writing a floor into app_config
+            # as the card's fallback suggests: the floor has to be right AT THE MOMENT OF THE
+            # PURGE. A value written by another process on another schedule is stale exactly when
+            # it matters — a position opened after the last refresh would not be protected by it.
+            # One query on the connection already open is both simpler and always current. Note
+            # this is a READ of v8_paper_positions and nothing else; rule 7's context isolation is
+            # about v8_paper_* never mixing with tc_intraday_*, which this does not touch.
+            #
+            # ON FAILURE IT SKIPS THE DELETE ENTIRELY, and that asymmetry is deliberate. Falling
+            # back to the flat 7 days on a transient error would re-create this exact bug on the
+            # one run where the query happened to fail. Deleting audit data is irreversible;
+            # skipping one purge cycle costs a day of disk.
+            _fut_sources = ('fyers_fut', 'fyers_fut_rest')
+            fut_floor, fut_floor_why = fut_cutoff, "%dd" % INTRADAY_FUT_RETENTION_DAYS
+            fut_del = None
+            try:
+                cur.execute("SELECT MIN(entry_ts) FROM v8_paper_positions WHERE status = 'OPEN'")
+                _oldest = cur.fetchone()[0]
+                if _oldest is not None:
+                    _pos_floor = _oldest - timedelta(days=1)
+                    if _pos_floor < fut_floor:
+                        fut_floor = _pos_floor
+                        fut_floor_why = "oldest OPEN entry %s minus 1d" % _oldest.date()
+                cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                            "AND source = ANY(%s)", (fut_floor, list(_fut_sources)))
+                fut_del = cur.rowcount
+            except Exception as _fe:
+                log.error("purge_old_bars: futures retention floor could not be resolved (%s) — "
+                          "SKIPPING the futures purge this run rather than falling back to the "
+                          "flat %dd window, which is what deleted open positions' entry bars "
+                          "(cc#1198)", _fe, INTRADAY_FUT_RETENTION_DAYS)
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source IS DISTINCT FROM 'fyers_eq' AND source IS DISTINCT FROM 'fyers_hist' "
-                        "AND source IS DISTINCT FROM %s", (fut_cutoff, EXT_SOURCE))
+                        "AND source <> ALL(%s) "
+                        "AND source IS DISTINCT FROM %s",
+                        (fut_cutoff, list(_fut_sources), EXT_SOURCE))
             other_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
@@ -1962,7 +2009,9 @@ def purge_old_bars(conn):
                  f"index={idx_del} (>{INDEX_RETENTION_DAYS}d), "
                  f"fyers_hist={hist_del} (>{HIST_RETENTION_DAYS}d), "
                  f"{EXT_SOURCE}={ext_del} (>{EXT_RETENTION_DAYS}d), "
-                 f"fut/legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
+                 f"fyers_fut={fut_del if fut_del is not None else 'SKIPPED'} "
+                 f"(floor {fut_floor:%Y-%m-%d %H:%M} — {fut_floor_why}), "   # cc#1198: floor logged every run
+                 f"legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
                  f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), "
                  f"futures_basis={basis_del} (>{INTRADAY_FUT_RETENTION_DAYS}d)")
     except Exception as e:
