@@ -102,7 +102,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
      not a hypothetical. No fallback here, deliberately — a missing start date is shown by SAYING
      NOTHING, never by substituting a different date that happens to be available.
      asOf() is left exactly as it is; the table view still uses it. */
-  function startDate(p){ return (p.client && p.client.tracking_date) || null; }
+  /* cc#1205: the served start_date first. This used to read ONLY client_index.tracking_date,
+     which is the THIRD fallback and the only free-text one — so eight of nine clients showed an
+     em-dash in a column they had a real date for, sitting in hr_portfolios.alpha_start_date all
+     along. The endpoint now resolves alpha -> meta -> client_index and says which it used, so
+     the page reads one field instead of guessing. The old read stays as the last resort for a
+     payload served by an older deploy. */
+  function startDate(p){ return p.start_date || (p.client && p.client.tracking_date) || null; }
   function filtered(){ var q=(searchEl.value||'').trim().toLowerCase();
     return q?ALL.filter(function(p){ return clientName(p).toLowerCase().indexOf(q)>-1; }):ALL.slice(); }
   function setView(v){ VIEW=v; try{ sessionStorage.setItem('adx_view',v); }catch(e){}
@@ -124,7 +130,14 @@ html,body{margin:0;padding:0;background:var(--bg);}
         + '<div class="strip">'
         +   '<div class="b"><div class="l">Invested</div><div class="v">'+inr(p.invested)+'</div></div>'
         +   '<div class="b"><div class="l">Current</div><div class="v">'+inr(p.current)+'</div></div>'
-        +   '<div class="b"><div class="l">P&amp;L</div><div class="v" style="color:'+col+'">'+pnlStr(p.pnl,p.pnl_pct)+'</div></div>'
+        +   '<div class="b"><div class="l">P&amp;L</div><div class="v" style="color:'+col+'">'+pnlStr(p.pnl,p.pnl_pct)+'</div>'
+        +     /* cc#1205: alpha rides UNDER the P&L it is derived from, and only when it exists —
+                 no chip at all rather than an em-dash chip, so a card with nothing to say is
+                 quiet instead of cluttered. */
+              (p.alpha_pct==null?'':'<div style="font-size:10.5px;font-weight:700;margin-top:2px;color:'
+                +(p.alpha_pct>=0?'var(--grn,#0b6e42)':'var(--red,#b42318)')+'" title="P&amp;L % minus Nifty 50 return since start date">'
+                +(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'% vs N50</div>')
+        +   '</div>'
         + '</div><div class="go">View report →</div></a>';
     }).join('');
     listEl.innerHTML='<div class="grid">'+cards+'</div>';
@@ -135,6 +148,9 @@ html,body{margin:0;padding:0;background:var(--bg);}
       if(k==='holdings') return p.n_holdings||0;
       if(k==='invested') return p.invested||0; if(k==='current') return p.current||0;
       if(k==='pnl') return (p.pnl==null?-Infinity:p.pnl); if(k==='pnl_pct') return (p.pnl_pct==null?-Infinity:p.pnl_pct);
+      /* cc#1205: nulls sort last, same as every other numeric column here — a client we cannot
+         measure alpha for is not the worst performer. */
+      if(k==='alpha_pct') return (p.alpha_pct==null?-Infinity:p.alpha_pct);
       return 0; }
     return ps.slice().sort(function(a,b){ var va=val(a), vb=val(b); if(va<vb) return -dir; if(va>vb) return dir; return 0; });
   }
@@ -144,11 +160,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
     /* cc#1098: the visible header becomes "From" — it is a tracking start, not a freshness stamp.
        The sort KEY stays the literal 'asof' on purpose: sortRows() switches on it, and renaming
        the key would silently break the column sort while looking like a copy edit. */
-    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right']];
+    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right']];
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
     var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'" style="text-align:'+c[2]+';padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
-          pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)'));
+          pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)')),
+          acol=(p.alpha_pct==null?'var(--muted)':(p.alpha_pct>=0?'var(--grn)':'var(--red)'));
       return '<tr onclick="location.href=\'/health?pid='+p.id+'&wl=1\'" style="cursor:pointer;border-bottom:1px solid var(--rule,#eef1f5);">'
         + '<td style="padding:10px 12px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
         /* cc#1098: same guard as the cards — an em-dash when there is no tracking_date, never
@@ -160,6 +177,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
         + '<td style="padding:10px 12px;text-align:right;">'+inr(p.current)+'</td>'
         + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
         + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:10px 12px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
         + '<td style="padding:10px 12px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">View →</td></tr>';
     }).join('');
     listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:13.5px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';

@@ -556,9 +556,31 @@ def health_portfolios():
         return {"portfolios": [], "error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
+def _parse_loose_date(v):
+    """cc#1205: client_index.tracking_date is TEXT, not DATE, and holds values like "15May2025".
+    Returns a date, or None when the value is missing or unparseable — never a raw string, so a
+    caller can hand the result to SQL and to a formatter without checking which it got."""
+    if v is None:
+        return None
+    if hasattr(v, "year"):            # already a date/datetime
+        return v
+    txt = str(v).strip()
+    if not txt:
+        return None
+    from datetime import datetime as _dt
+    for fmt in ("%Y-%m-%d", "%d%b%Y", "%d-%b-%Y", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return _dt.strptime(txt, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _health_portfolios_inner():
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, name, created_by, source, created_at FROM hr_portfolios ORDER BY id DESC")
+        # cc#1205: alpha_start_date rides along — the START column's first choice.
+        cur.execute("SELECT id, name, created_by, source, created_at, alpha_start_date "
+                    "FROM hr_portfolios ORDER BY id DESC")
         ports = cur.fetchall()
         cur.execute("SELECT portfolio_id, symbol, qty, avg_price FROM hr_holdings")
         rows = cur.fetchall()
@@ -575,8 +597,11 @@ def _health_portfolios_inner():
         # headline P&L = current_value + cash - invested (% on invested) — the only honest basis when
         # per-holding buy prices are unknown (all avg_price NULL -> cost ~0 -> the +1880.5% bug). See
         # build_report / founder rule locked 11-Aug-2026.
-        cur.execute("SELECT portfolio_id, invested_amount, cash FROM hr_portfolio_meta")
-        meta_map = {r[0]: (float(r[1]) if r[1] is not None else None, float(r[2] or 0)) for r in cur.fetchall()}
+        cur.execute("SELECT portfolio_id, invested_amount, cash, tracking_date FROM hr_portfolio_meta")
+        _meta_rows = cur.fetchall()
+        meta_map = {r[0]: (float(r[1]) if r[1] is not None else None, float(r[2] or 0)) for r in _meta_rows}
+        # cc#1205: the START column's second choice, kept separate so the fallback ORDER is visible.
+        meta_track = {r[0]: r[3] for r in _meta_rows if r[3] is not None}
         # cc#756: client_index metadata via created_by=account_id. SELECT ONLY non-secret columns —
         # password/totp_key are NEVER read here (cc#758 denylist honoured by hand-picking columns).
         ci = {}
@@ -591,6 +616,44 @@ def _health_portfolios_inner():
                             "active": bool(r[6]) if r[6] is not None else None}
         except Exception:
             ci = {}   # client_index absent (pre-migration) -> cards still render without the enrichment
+        # ── cc#1205: START date and ALPHA vs Nifty 50 ────────────────────────────────────────
+        # THE NIFTY RETURN IS NOT COMPUTED HERE. hr_report._nifty50_return_since already does it,
+        # and the card says to reuse it if it exists — it does, and the PDF alpha the founder
+        # already trusts is built from it. A second copy would drift the first time either moved.
+        # Imported inside the function so this module keeps working if hr_report is mid-deploy.
+        try:
+            from hr_report import _nifty50_return_since as _n50_since
+        except Exception:
+            _n50_since = None
+        # One lookup per DISTINCT start date, not per portfolio — twenty clients sharing a
+        # tracking date is one query, not twenty.
+        _start_of = {}
+        for _p in ports:
+            _pid, _alpha_start = _p[0], _p[5]
+            if _alpha_start is not None:
+                _start_of[_pid] = (_alpha_start, "alpha")
+            elif meta_track.get(_pid) is not None:
+                _start_of[_pid] = (meta_track[_pid], "meta")
+            else:
+                # THE THIRD FALLBACK IS FREE TEXT, and that is not a hypothetical. The other two
+                # columns are DATE; client_index.tracking_date is TEXT and the live table holds
+                # "15May2025". Passing that straight into a date comparison, as a plain COALESCE
+                # would, either errors or silently matches nothing — and it would have rendered
+                # "15May2025" in a column of "15 May 2025". Parsed defensively; anything that does
+                # not parse is treated as ABSENT, because an unreadable date is not a date.
+                # It never fires today (every client_index row that has one also has an
+                # alpha_start_date) — it fires the first time someone adds a client without one.
+                _ci_t = _parse_loose_date((ci.get(_p[2]) or {}).get("tracking_date"))
+                _start_of[_pid] = ((_ci_t, "client_index") if _ci_t else (None, None))
+        _n50_cache = {}
+        if _n50_since is not None:
+            with _conn() as _c2, _c2.cursor() as _cur2:
+                for _d, _ in set(v for v in _start_of.values() if v[0] is not None):
+                    try:
+                        _n50_cache[_d] = _n50_since(_cur2, _d)
+                    except Exception:
+                        _n50_cache[_d] = None
+
     agg = {}
     for pid_, sym, qty, avg in rows:
         a = agg.setdefault(pid_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0, "null_avg": False})
@@ -606,7 +669,10 @@ def _health_portfolios_inner():
         a["inv"] += q * ap
         a["cur"] += q * px.get(_norm_sym(sym), px.get(sym, ap))
     out = []
-    for id_, name, created_by, source, created in ports:
+    # cc#1205: the SELECT gained alpha_start_date, so this unpack gained a slot. Named `_a_start`
+    # and unused here on purpose — the start resolution happens once above, in _start_of, rather
+    # than being re-derived per row with a different fallback order.
+    for id_, name, created_by, source, created, _a_start in ports:
         a = agg.get(id_, {"n": 0, "inv": 0.0, "cur": 0.0, "cash": 0.0, "null_avg": False})
         realised = realised_map.get(id_, 0.0)
         curv = a["cur"]; holdings_cost = a["inv"]
@@ -628,6 +694,9 @@ def _health_portfolios_inner():
             pnl = None; pnl_pct = None
         src = str(source or "")
         category = "PMS" if src.startswith("PMS") else ("NSEPAY" if src.startswith("NSEPAY") else src)
+        _sd, _ssrc = _start_of.get(id_, (None, None))
+        _npct = _n50_cache.get(_sd) if _sd is not None else None
+        _npct = round(_npct, 1) if _npct is not None else None
         out.append({"id": id_, "name": name, "source": source, "created_by": created_by,
                     "category": category, "active": id_ in active_ids, "created_at": str(created),
                     "n_holdings": a["n"],
@@ -638,6 +707,15 @@ def _health_portfolios_inner():
                     "basis": basis, "needs_invested_amount": needs_inv,
                     "realised_pnl": round(realised, 2), "unrealised_pnl": round(curv - holdings_cost, 2),
                     "holdings_cost": round(holdings_cost, 2),
+                    # cc#1205: the real tracking date and where it came from, so the column can
+                    # show a date instead of an em-dash and a reader can tell WHICH date it is.
+                    "start_date": (str(_sd) if _sd is not None else None),
+                    "start_source": _ssrc,
+                    "nifty_pct": _npct,
+                    # alpha is NULL when either side is null — never 0. "we could not measure it"
+                    # and "it matched the index exactly" are different statements.
+                    "alpha_pct": (round(pnl_pct - _npct, 1)
+                                  if (pnl_pct is not None and _npct is not None) else None),
                     "client": ci.get(created_by)})
     return {"portfolios": out}
 
