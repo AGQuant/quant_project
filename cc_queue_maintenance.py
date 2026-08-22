@@ -39,7 +39,33 @@ log = logging.getLogger("scorr.cc_queue")
 _DB = os.getenv("DATABASE_URL", "")
 
 # The claim age past which an in_progress row with no push is treated as abandoned.
+# DEFAULT ONLY — the live value is app_config.cc_stale_claim_minutes, read on every tick
+# (Fable 3148, 22-Aug): the founder wants 30 on push days and 90 otherwise, and that is a knob
+# that should turn by UPDATE, not by deploy. Same reasoning as _job_active for the on/off switch.
 STALE_CLAIM_MINUTES = 90
+_CONFIG_KEY = "cc_stale_claim_minutes"
+
+
+def _configured_minutes(cur, fallback=STALE_CLAIM_MINUTES):
+    """The live threshold from app_config, or the compiled default.
+
+    A BAD VALUE FALLS BACK RATHER THAN RELEASING EVERYTHING. If the row is missing, empty,
+    non-numeric or <= 0, this returns the default — because the failure mode of trusting it is
+    a threshold of 0, which would release every in_progress task on the next tick including one
+    a live session is holding. A knob that can empty the queue on a typo is not a knob.
+    """
+    try:
+        cur.execute("SELECT value FROM app_config WHERE key = %s", (_CONFIG_KEY,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            v = float(str(row[0]).strip())
+            if v > 0:
+                return v
+            log.warning("cc_queue: %s is %r (must be > 0) — using default %s",
+                        _CONFIG_KEY, row[0], fallback)
+    except Exception as e:
+        log.warning("cc_queue: %s unreadable (%s) — using default %s", _CONFIG_KEY, e, fallback)
+    return fallback
 
 # A CTE, and the reason is a bug the first version shipped with — caught by RUNNING the statement
 # against the real table rather than reading it.
@@ -105,7 +131,7 @@ _RELEASE_SQL = """
 """
 
 
-def release_stale_claims(skip_ids=None, minutes=STALE_CLAIM_MINUTES, conn=None):
+def release_stale_claims(skip_ids=None, minutes=None, conn=None):
     """Release abandoned claims. Returns a list of {id, title, claimed_min} for what was released.
 
     `skip_ids` is the escape hatch the card asks for on the FIRST manual run: the task a live CC
@@ -123,6 +149,10 @@ def release_stale_claims(skip_ids=None, minutes=STALE_CLAIM_MINUTES, conn=None):
     c = psycopg.connect(_DB) if own else conn
     try:
         with c.cursor() as cur:
+            # cc#1189 follow-up: the caller may pin a threshold (tests, a one-off manual run);
+            # otherwise the registry decides, every tick, with no deploy.
+            if minutes is None:
+                minutes = _configured_minutes(cur)
             # COUNT FIRST, and it is not a nicety. See _CANDIDATE_SQL for what this job could not
             # tell anyone on 22-Aug. The count is taken with the identical predicate, so
             # candidates > 0 with released == 0 is a real contradiction the next reader can act
@@ -161,7 +191,8 @@ def release_stale_claims(skip_ids=None, minutes=STALE_CLAIM_MINUTES, conn=None):
                       "impossible on one connection. Investigate before trusting this job.",
                       candidates)
         else:
-            log.info("cc_queue: 0 stale candidates (audit ledgers excluded) — nothing to release")
+            log.info("cc_queue: 0 stale candidates at %s min (audit ledgers excluded) — "
+                     "nothing to release", minutes)
         return released
     finally:
         if own:
