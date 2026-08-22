@@ -7,7 +7,10 @@
 <title>Performance</title>
 <style>
 /* cc#348: theme-aware — dark defaults; mobile.css light override flips these */
-:root{--bg:#0A0F1E;--panel:#121A33;--surface2:#182241;--well:#0D1428;--txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24)}
+:root{
+    /* cc#1203 push 13: colour tokens moved to the injected contract, so the page gains a light
+       mode it never had. */
+  }
 
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:13px}
@@ -34,7 +37,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .card .v{font-size:18px;font-weight:800;margin-top:4px}
 .card .s{font-size:11px;color:var(--mut);margin-top:2px}
 .st{font-size:11px;color:var(--mut);margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--volt, #2FD48B);flex-shrink:0}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);flex-shrink:0}
 .dot.y{background:var(--amber, #F5B94A)}
 .tw{overflow-x:auto;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
 table{width:100%;border-collapse:collapse;font-size:12px}
@@ -44,11 +47,11 @@ tbody tr{border-bottom:1px solid var(--surface2)}
 tbody tr:hover{background:var(--surface2)}
 td{padding:7px 10px;white-space:nowrap}
 .sym{font-weight:700}
-.up{color:var(--volt, #2FD48B);font-weight:600}
-.dn{color:var(--heat, #FF5C6C);font-weight:600}
+.up{color:var(--grn);font-weight:600}
+.dn{color:var(--red);font-weight:600}
 .nt{color:var(--mut)}
 .gp{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:18px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:700}
-.g4{background:rgba(47,212,139,.14);color:#065f46}.g3{background:rgba(77,124,254,.14);color:var(--pulse, #1e40af)}.g2{background:rgba(245,185,74,.14);color:var(--amber, #92400e)}.g1{background:rgba(255,92,108,.13);color:var(--heat, #991b1b)}
+.g4{background:rgba(47,212,139,.14);color:var(--grn)}.g3{background:rgba(77,124,254,.14);color:var(--blu)}.g2{background:rgba(245,185,74,.14);color:var(--amber, #92400e)}.g1{background:rgba(255,92,108,.13);color:var(--red)}
 .empty{text-align:center;padding:40px 20px;color:var(--mut)}
 .wlh{margin:18px 0 8px;font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
 @media(max-width:768px){

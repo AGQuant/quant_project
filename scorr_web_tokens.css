@@ -203,6 +203,12 @@ html[data-theme="light"] {
   --bd        : var(--line2);
   --blue      : var(--blu);
   --aqua      : var(--cyan);
+  /* cc#1203 push 13: fpc_v11's own spelling of four names the contract already carries, at
+     identical values. Aliased rather than renamed in the page because there is no collision. */
+  --text      : var(--txt);
+  --text2     : var(--mut);
+  --text3     : var(--dim);
+  --green     : var(--grn);
   /* cc#1203 push 9: --panel-hi is used across 12 files and declared in exactly one of them, so
      everywhere else it has been falling back — to #182241 on some lines and #16223f on others,
      two shades for one name. It is the raised panel, which is what --panel2 already is. */

@@ -7,17 +7,21 @@
 <title>QB</title>
 <style>
 /* cc#348: theme-aware — dark defaults; mobile.css light override flips these */
-:root{--bg:#0A0F1E;--panel:#121A33;--surface2:#182241;--well:#0D1428;--txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24)}
+:root{}
 
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
-  :root {
-    --bg:var(--bg); --card:#fff; --panel:#fff;
-    --line:var(--line); --line2:var(--line2);
-    --txt:var(--txt); --mut:var(--mut); --dim:var(--dim);
-    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
-    --shadow:0 1px 4px rgba(20,35,70,.06);
-  }
+  /* cc#1203 push 13. THIS PAGE WAS BROKEN BEFORE THIS SPRINT TOUCHED IT, and the block that used
+     to sit here is why. It was a second :root, later in the cascade than the first, and it
+     redeclared six neutrals as SELF-REFERENCES: each of bg, txt, mut, dim, line and line2 was set
+     to a var() of its own name. A custom property that references itself is a cycle, which CSS
+     resolves to the guaranteed-invalid value, so all six computed to EMPTY. Measured on the
+     committed file with no contract injected: those six empty, body background transparent, body
+     text black. It also pinned card and panel to #fff and carried a light-mode shadow, on a page
+     whose other half is dark.
+
+     Removing it is the fix. Every name now comes from the contract, in whichever theme the reader
+     has chosen, which is the first time this page has had a working set of neutrals. */
+
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px;line-height:1.55}
 
@@ -49,7 +53,7 @@
   .cy-step{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
     padding:5px 12px;border-radius:20px;border:1px solid var(--line2);color:var(--mut)}
   .cy-step b{font-weight:800}
-  .cy-step.turn{border-color:rgba(255,138,92,.5);color:var(--amber, #FF8A5C)}
+  .cy-step.turn{border-color:var(--amber-bd);color:var(--amber)}
   .cy-step.confirm{border-color:rgba(55,211,232,.5);color:var(--cyan)}
   .cy-step.trend{border-color:rgba(47,212,139,.4);color:var(--grn)}
   .cy-arrow{color:var(--dim);font-size:13px}
@@ -67,7 +71,7 @@
   .bc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px}
   .bc-role{font-size:8.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
     padding:3px 8px;border-radius:6px;white-space:nowrap}
-  .role-turn{background:rgba(255,138,92,.13);color:var(--amber, #FF8A5C)}
+  .role-turn{background:var(--amber-row);color:var(--amber)}
   .role-confirm{background:rgba(55,211,232,.12);color:var(--cyan)}
   .role-trend{background:rgba(47,212,139,.10);color:var(--grn)}
   .chip{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:1px 6px;
@@ -84,9 +88,9 @@
   .bc-info{font-size:10px;color:var(--mut)}
   .bc-info b{color:var(--txt);font-weight:600}
   .bc-badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;border:1px solid;white-space:nowrap}
-  .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:var(--volt, #a7f3d0)}
+  .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:var(--grn-bd)}
   .bc-badge.warn{background:var(--panel)beb;color:var(--amber);border-color:#fcd34d}
-  .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:var(--heat, #fca5a5)}
+  .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:var(--red-bd)}
   .bc-badge.seed{background:rgba(245,185,74,.1);color:var(--amber);border-color:rgba(245,185,74,.4)}  /* cc#561 */
 
   .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
@@ -95,7 +99,7 @@
   .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
     padding:2px 6px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}
   .bc-crit-label.entry{background:rgba(77,124,254,.14);color:var(--pulse, #4D7CFE)}
-  .bc-crit-label.exit{background:rgba(255,92,108,.08);color:var(--heat, #FF5C6C)}
+  .bc-crit-label.exit{background:rgba(255,92,108,.08);color:var(--red)}
   .bc-crit-text{font-size:10px;color:var(--mut);line-height:1.5}
 
   .bc-click{font-size:10px;color:var(--blu);margin-top:10px;text-align:center;font-weight:500}
@@ -104,7 +108,7 @@
   .neg{color:var(--red);font-weight:700}
   .neu{color:var(--txt)}
 
-  .alerts-box{background:var(--card);border:1px solid var(--heat, #fca5a5);border-radius:14px;padding:14px 16px;margin-bottom:20px}
+  .alerts-box{background:var(--card);border:1px solid var(--red-bd);border-radius:14px;padding:14px 16px;margin-bottom:20px}
   .alerts-hd{font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
   .alert-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
   .alert-row:last-child{border:none;padding-bottom:0}

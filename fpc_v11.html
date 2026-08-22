@@ -9,24 +9,20 @@
 *{box-sizing:border-box;margin:0;padding:0}
 /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
 :root{
-  /* Scorr light theme (canonical tokens from scorr_home.html) */
-  --bg:#0A0F1E;--bg2:#121A33;--bg3:#182241;
-  --text:#E9EEFB;--text2:#8C99BD;--text3:#5E6B8F;
-  --border:rgba(148,166,210,.14);--border2:rgba(148,166,210,.24);
-  --accent:#37D3E8;--green:#2FD48B;--gold:#F5B94A;
-  --red:#FF5C6C;--warn:#F5B94A;--blue:#4D7CFE;
-  --radius:8px;--radius-lg:12px;
-}
+    /* cc#1203 push 13: colour tokens moved to the injected contract. Radius stays - it is shape,
+       and this page's 8px is not the contract's 16px. */
+    --radius:8px; --radius-lg:12px;
+  }
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:0}
 .page{max-width:780px;margin:0 auto;padding:24px 20px 60px}
 .header{text-align:center;padding:32px 0 24px;border-bottom:0.5px solid var(--border);margin-bottom:24px}
-.header-brand{font-size:12px;font-weight:600;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;margin-bottom:8px}
+.header-brand{font-size:12px;font-weight:600;letter-spacing:.12em;color:var(--cyan);text-transform:uppercase;margin-bottom:8px}
 .header-title{font-size:26px;font-weight:600;color:var(--text);margin-bottom:4px}
 .header-sub{font-size:13px;color:var(--text2)}
 .nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:24px;border-bottom:0.5px solid var(--border);padding-bottom:16px}
 .tab{padding:7px 14px;border-radius:var(--radius);border:0.5px solid transparent;font-size:12px;font-weight:500;color:var(--text2);cursor:pointer;background:transparent;transition:all .15s;display:flex;align-items:center;gap:6px}
-.tab.active{background:var(--bg3);border-color:var(--border2);color:var(--text)}
-.tab:hover:not(.active){color:var(--text);background:var(--bg2)}
+.tab.active{background:var(--panel2);border-color:var(--border2);color:var(--text)}
+.tab:hover:not(.active){color:var(--text);background:var(--panel)}
 .section{display:none}.section.active{display:block}
 .stitle{font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px}
 .ssub{font-size:13px;color:var(--text2);margin-bottom:20px}
@@ -35,27 +31,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:20px}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:11px;color:var(--text2);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
-.field input,.field select{height:36px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:14px;padding:0 10px;font-family:inherit;width:100%;transition:border-color .15s}
-.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
-.field select option{background:var(--bg2)}
-.mc{background:var(--bg3);border-radius:var(--radius);padding:14px 16px}
+.field input,.field select{height:36px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--panel);color:var(--text);font-size:14px;padding:0 10px;font-family:inherit;width:100%;transition:border-color .15s}
+.field input:focus,.field select:focus{outline:none;border-color:var(--cyan)}
+.field select option{background:var(--panel)}
+.mc{background:var(--panel2);border-radius:var(--radius);padding:14px 16px}
 .mc-label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
 .mc-value{font-size:22px;font-weight:600;color:var(--text);line-height:1.2}
 .mc-sub{font-size:11px;color:var(--text2);margin-top:3px}
-.card{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:12px}
+.card{background:var(--panel);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:12px}
 .card-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.04em}
 .row-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--border);font-size:13px}
 .row-item:last-child{border-bottom:none}
 .rl{color:var(--text2)}.rv{font-weight:500;color:var(--text)}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
-.bg{background:rgba(29,158,117,.15);color:var(--volt, #0e7a50)}
-.br{background:rgba(226,75,74,.15);color:var(--heat, #c0392b)}
+.bg{background:rgba(29,158,117,.15);color:var(--grn)}
+.br{background:rgba(226,75,74,.15);color:var(--red)}
 .bw{background:rgba(186,117,23,.15);color:var(--amber, #a16207)}
 .bi{background:rgba(55,138,221,.15);color:var(--pulse, #4D7CFE)}
 .sb{display:flex;align-items:center;font-size:13px;padding:8px 0;border-bottom:0.5px solid var(--border)}
 .sb:last-child{border-bottom:none}
 .sl{width:140px;color:var(--text2);font-size:12px}
-.sbw{flex:1;background:var(--bg3);border-radius:20px;height:6px;margin:0 12px}
+.sbw{flex:1;background:var(--panel2);border-radius:20px;height:6px;margin:0 12px}
 .sbb{height:6px;border-radius:20px;transition:width .5s ease}
 .sn{width:36px;text-align:right;font-weight:600;font-size:13px}
 .ai{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:0.5px solid var(--border)}
@@ -67,38 +63,38 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ar{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:0.5px solid var(--border);font-size:13px}
 .ar:last-child{border-bottom:none}
 .an{width:160px;color:var(--text2);font-size:12px}
-.abw{flex:1;background:var(--bg3);border-radius:20px;height:5px}
+.abw{flex:1;background:var(--panel2);border-radius:20px;height:5px}
 .ab{height:5px;border-radius:20px;transition:width .4s}
 .ap{width:36px;text-align:right;font-weight:600;color:var(--text);font-size:13px}
 .yt{width:100%;font-size:12px;border-collapse:collapse}
 .yt th{text-align:left;color:var(--text2);font-weight:500;padding:7px 8px;border-bottom:0.5px solid var(--border2);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 .yt td{padding:6px 8px;border-bottom:0.5px solid var(--border);color:var(--text)}
 .yt tr:last-child td{border-bottom:none}
-.yt tr:hover td{background:var(--bg3)}
+.yt tr:hover td{background:var(--panel2)}
 .yt .num{text-align:right;font-variant-numeric:tabular-nums}
-.cbtn{width:100%;margin-top:12px;padding:11px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg3);color:var(--text);font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
-.cbtn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
-.q-opt{display:flex;align-items:center;gap:8px;padding:9px 12px;border:0.5px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--text2);background:var(--bg2);transition:all .15s}
-.q-opt.selected{border-color:var(--green);background:rgba(29,158,117,.12);color:var(--volt, #0e7a50)}
+.cbtn{width:100%;margin-top:12px;padding:11px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--panel2);color:var(--text);font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
+.cbtn:hover{background:var(--cyan);border-color:var(--cyan);color:#fff}
+.q-opt{display:flex;align-items:center;gap:8px;padding:9px 12px;border:0.5px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--text2);background:var(--panel);transition:all .15s}
+.q-opt.selected{border-color:var(--green);background:rgba(29,158,117,.12);color:var(--grn)}
 .q-opt:hover:not(.selected){border-color:var(--border2);color:var(--text)}
 .q-opt input[type=radio]{display:none}
-.swp-ok{background:rgba(29,158,117,.15);color:var(--volt, #0e7a50);border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
+.swp-ok{background:rgba(29,158,117,.15);color:var(--grn);border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
 .swp-warn{background:rgba(186,117,23,.15);color:var(--amber, #a16207);border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
-.swp-bad{background:rgba(226,75,74,.15);color:var(--heat, #c0392b);border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
+.swp-bad{background:rgba(226,75,74,.15);color:var(--red);border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
 .prob-band{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:0.5px solid var(--border);font-size:13px}
 .prob-band:last-child{border-bottom:none}
 .prob-label{width:130px;color:var(--text2);font-size:12px}
-.prob-bar-wrap{flex:1;background:var(--bg3);border-radius:20px;height:8px}
+.prob-bar-wrap{flex:1;background:var(--panel2);border-radius:20px;height:8px}
 .prob-bar{height:8px;border-radius:20px;transition:width .5s ease}
 .prob-val{width:90px;text-align:right;font-weight:600;color:var(--text);font-size:13px}
 .footer{text-align:center;padding:32px 0 0;font-size:11px;color:var(--text2);border-top:0.5px solid var(--border)}
 canvas{display:block}
 @media(max-width:600px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
-.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20}
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20}
 .model-nav::-webkit-scrollbar{display:none}
 .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:var(--text2);font-size:11.5px;font-weight:600;transition:.12s}
 .mnav-item:hover{color:var(--text)}
-.mnav-item.active{border-bottom-color:var(--accent);color:var(--accent)}
+.mnav-item.active{border-bottom-color:var(--cyan);color:var(--cyan)}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
 .mnav-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;margin:0 4px}
 @media(max-width:768px){
@@ -469,7 +465,7 @@ function calculate(){
           <span style="font-weight:500;color:var(--text)">${g.n}</span>
           <span style="text-align:right;color:var(--text2)">${g.year}</span>
           <span style="text-align:right">${fmt(g.fv)}</span>
-          <span style="text-align:right;color:var(--volt, #0e7a50);font-weight:600">${g.sip>0?fmt(g.sip):g.yrs===0?'Now':'—'}</span>
+          <span style="text-align:right;color:var(--grn);font-weight:600">${g.sip>0?fmt(g.sip):g.yrs===0?'Now':'—'}</span>
         </div>`).join('')}
       <div style="display:flex;justify-content:space-between;padding:10px 0 0;font-size:13px;font-weight:600">
         <span style="color:var(--text2)">Total goal SIPs per month</span>
@@ -514,7 +510,7 @@ function buildProjChart(){
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`₹${c.parsed.y} Cr`}}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'Cr'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
   });
   const rows=projData.filter((_,i)=>i%2===0||i===projData.length-1).slice(0,20);
-  document.getElementById('projTable').innerHTML=`<div class="card"><table class="yt"><thead><tr><th>Year</th><th>Age</th><th class="num">Opening</th><th class="num">Annual SIP</th><th class="num">Return</th><th class="num">Closing</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.y}</td><td>${r.age}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.sip)}</td><td class="num">${fmt(r.roi)}</td><td class="num" style="font-weight:600;color:var(--volt, #0e7a50)">${fmt(r.close)}</td></tr>`).join('')}</tbody></table></div>`;
+  document.getElementById('projTable').innerHTML=`<div class="card"><table class="yt"><thead><tr><th>Year</th><th>Age</th><th class="num">Opening</th><th class="num">Annual SIP</th><th class="num">Return</th><th class="num">Closing</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.y}</td><td>${r.age}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.sip)}</td><td class="num">${fmt(r.roi)}</td><td class="num" style="font-weight:600;color:var(--grn)">${fmt(r.close)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 let swpC=null;
@@ -559,11 +555,11 @@ function runSWP(){
   });
   document.getElementById('swpTable').innerHTML=`
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)">
-      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:var(--volt, #2FD48B);display:inline-block"></span>Corpus balance</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:var(--grn);display:inline-block"></span>Corpus balance</span>
       <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:var(--amber, #F5B94A);display:inline-block;border-radius:2px"></span>Annual withdrawal (step-up)</span>
     </div>
     <div class="card"><table class="yt"><thead><tr><th>Year</th><th class="num">Opening</th><th class="num">Annual withdrawal</th><th class="num">Real value (infl. adj.)</th><th class="num">Closing corpus</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr style="${r.ex?'color:var(--heat, #c0392b)':''}"><td>${r.y}</td><td class="num">${fmt(r.openBal)}</td><td class="num">${fmt(r.wdl)}</td><td class="num">${fmt(r.realWdl)}</td><td class="num" style="font-weight:600;${r.ex?'color:var(--heat, #c0392b)':'color:var(--volt, #0e7a50)'}">${fmt(r.closeBal)}</td></tr>`).join('')}</tbody></table></div>`;
+    <tbody>${rows.map(r=>`<tr style="${r.ex?'color:var(--red)':''}"><td>${r.y}</td><td class="num">${fmt(r.openBal)}</td><td class="num">${fmt(r.wdl)}</td><td class="num">${fmt(r.realWdl)}</td><td class="num" style="font-weight:600;${r.ex?'color:var(--red)':'color:var(--grn)'}">${fmt(r.closeBal)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 let mcC=null;
@@ -600,9 +596,9 @@ function runMonteCarlo(){
 
   document.getElementById('mcSummary').innerHTML=`
     <div class="grid4" style="margin-bottom:16px">
-      <div class="mc"><div class="mc-label">Worst 10%</div><div class="mc-value" style="color:var(--heat, #c0392b)">${fmt(p10)}</div><div class="mc-sub">Unlucky scenario</div></div>
+      <div class="mc"><div class="mc-label">Worst 10%</div><div class="mc-value" style="color:var(--red)">${fmt(p10)}</div><div class="mc-sub">Unlucky scenario</div></div>
       <div class="mc"><div class="mc-label">Median (50th)</div><div class="mc-value">${fmt(p50)}</div><div class="mc-sub">Most likely</div></div>
-      <div class="mc"><div class="mc-label">Best 10%</div><div class="mc-value" style="color:var(--volt, #0e7a50)">${fmt(p90)}</div><div class="mc-sub">Lucky scenario</div></div>
+      <div class="mc"><div class="mc-label">Best 10%</div><div class="mc-value" style="color:var(--grn)">${fmt(p90)}</div><div class="mc-sub">Lucky scenario</div></div>
       <div class="mc"><div class="mc-label">Success rate</div><div class="mc-value">${Math.round(successRate)}%</div><div class="mc-sub">Scenarios above start</div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -638,9 +634,9 @@ function runMonteCarlo(){
       <div class="card-title"><i class="ti ti-info-circle"></i> What this means for you</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.8">
         Based on <strong style="color:var(--text)">${nsims.toLocaleString()} simulations</strong> at mean return <strong style="color:var(--text)">${v('mcMean')}%</strong> with volatility <strong style="color:var(--text)">${v('mcStd')}%</strong> over <strong style="color:var(--text)">${yrs} years</strong>:<br><br>
-        → <span style="color:var(--volt, #0e7a50);font-weight:600">${Math.round(successRate)}%</span> of scenarios ended above your starting corpus.<br>
-        → Worst 10% of market environments: corpus ends at <span style="color:var(--heat, #c0392b);font-weight:600">${fmt(p10)}</span>.<br>
-        → Best 10% of market environments: corpus reaches <span style="color:var(--volt, #0e7a50);font-weight:600">${fmt(p90)}</span> (${Math.round(p90/corpus)}× multiple).<br>
+        → <span style="color:var(--grn);font-weight:600">${Math.round(successRate)}%</span> of scenarios ended above your starting corpus.<br>
+        → Worst 10% of market environments: corpus ends at <span style="color:var(--red);font-weight:600">${fmt(p10)}</span>.<br>
+        → Best 10% of market environments: corpus reaches <span style="color:var(--grn);font-weight:600">${fmt(p90)}</span> (${Math.round(p90/corpus)}× multiple).<br>
         → Median realistic outcome: <span style="font-weight:600;color:var(--text)">${fmt(p50)}</span>.<br>
         ${detMin?`→ Fixed-return projection (₹${fmt(detMin)}) ${detMin>p50?'is above the median — the fixed return assumption is optimistic':'is below the median — you may be undershooting'}.`:''}
         <br><br>

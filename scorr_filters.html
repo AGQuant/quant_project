@@ -7,7 +7,10 @@
 <title>V13 Screener</title>
 <style>
 /* cc#348: theme-aware — dark defaults; mobile.css light override flips these */
-:root{--bg:#0A0F1E;--panel:#121A33;--surface2:#182241;--well:#0D1428;--txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24)}
+:root{
+    /* cc#1203 push 13: colour tokens moved to the injected contract, so the page gains a light
+       mode it never had. */
+  }
 
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:13px}
@@ -23,7 +26,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
 .h2{font-size:11px;color:var(--mut);margin-top:2px;margin-bottom:14px}
 .st{font-size:11px;color:var(--mut);margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--volt, #2FD48B);flex-shrink:0}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);flex-shrink:0}
 .dot.y{background:var(--amber, #F5B94A)}
 .dot.busy{background:var(--pulse, #4D7CFE);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -54,8 +57,8 @@ tbody tr:last-child{border-bottom:none}
 td{padding:7px 10px;white-space:nowrap}
 .sym{font-weight:700}
 .seg{font-size:10px;color:var(--mut);margin-top:1px}
-.up{color:var(--volt, #2FD48B);font-weight:600}
-.dn{color:var(--heat, #FF5C6C);font-weight:600}
+.up{color:var(--grn);font-weight:600}
+.dn{color:var(--red);font-weight:600}
 .nt{color:var(--mut)}
 .muted{color:var(--mut)}
 .empty{text-align:center;padding:40px 20px;color:var(--mut)}
