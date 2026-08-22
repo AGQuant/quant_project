@@ -8,11 +8,10 @@
 <style>
   /* cc#344 page 3: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#0A0F1E;--card:#121A33;--border:rgba(148,166,210,.14);
-    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
-    --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;
-    --surface2:#182241;--well:#0D1428;--line2:rgba(148,166,210,.24);--r:18px;
-    --font:'Sora',-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+    /* cc#1203 push 12: colour tokens moved to the injected contract. --border was already
+       identical to the contract's --line, just spelled as its own name. --mono stays: it is a
+       real monospace stack here and the contract's leads with a font this page may not load. */
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
@@ -97,7 +96,7 @@
   /* cc#133 */
   .hero-buckets-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
   .hero-bk-sub{font-size:10.5px;font-weight:700;margin-top:3px;font-family:monospace}
-  .pos-card.loss{border-color:var(--heat, #f5b8bd)!important;border-width:1.5px!important}
+  .pos-card.loss{border-color:var(--red-bd)!important;border-width:1.5px!important}
 
   /* cc#138 */
   .pos-row3{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0}

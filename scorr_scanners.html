@@ -7,7 +7,11 @@
 <title>Scanners</title>
 <style>
 /* cc#348: theme-aware — dark defaults; mobile.css light override flips these */
-:root{--bg:#0A0F1E;--panel:#121A33;--surface2:#182241;--well:#0D1428;--txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24)}
+:root{
+    /* cc#1203 push 12: colour tokens moved to the injected contract. Every name resolves there
+       at the same value or one hand-tuned step from it, so the block is gone rather than
+       aliased, and the page gains a light mode it never had. */
+  }
 
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:13px}
@@ -16,7 +20,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .model-nav::-webkit-scrollbar{display:none}
 .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
 .mnav-item:hover{color:var(--txt)}
-.mnav-item.active{border-bottom-color:var(--pulse, #4D7CFE);color:var(--pulse, #4D7CFE)}
+.mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
 .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 .page{max-width:980px;margin:0 auto;padding:14px 12px}
@@ -25,15 +29,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tabs{display:flex;border-bottom:1px solid var(--line);margin-bottom:14px}
 .tab{padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px;transition:.12s}
 .tab:hover{color:var(--txt);background:var(--surface2)}
-.tab.on{color:var(--pulse, #4D7CFE);border-bottom-color:var(--pulse, #4D7CFE)}
+.tab.on{color:var(--blu);border-bottom-color:var(--blu)}
 .panel{display:none}
 .panel.on{display:block}
 .bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .bar label{font-size:11px;color:var(--mut);font-weight:600}
 .st{font-size:11px;color:var(--mut);margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--volt, #2FD48B);flex-shrink:0}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--grn);flex-shrink:0}
 .dot.y{background:var(--amber, #F5B94A)}
-.dot.busy{background:var(--pulse, #4D7CFE);animation:pulse 1s infinite}
+.dot.busy{background:var(--blu);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .tw{overflow-x:auto;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
 table{width:100%;border-collapse:collapse;font-size:12px}
@@ -45,14 +49,14 @@ tbody tr:last-child{border-bottom:none}
 td{padding:7px 10px;white-space:nowrap}
 .sym{font-weight:700}
 .seg{font-size:10px;color:var(--mut);margin-top:1px}
-.up{color:var(--volt, #2FD48B);font-weight:600}
-.dn{color:var(--heat, #FF5C6C);font-weight:600}
+.up{color:var(--grn);font-weight:600}
+.dn{color:var(--red);font-weight:600}
 .nt{color:var(--mut)}
 .gp{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:18px;padding:0 5px;border-radius:4px;font-size:10px;font-weight:700}
 .g4{background:rgba(47,212,139,.14);color:#065f46}
-.g3{background:rgba(77,124,254,.14);color:var(--pulse, #1e40af)}
+.g3{background:rgba(77,124,254,.14);color:var(--blu)}
 .g2{background:rgba(245,185,74,.14);color:var(--amber, #92400e)}
-.g1{background:rgba(255,92,108,.13);color:var(--heat, #991b1b)}
+.g1{background:rgba(255,92,108,.13);color:var(--red)}
 .fs{display:inline-block;font-size:8px;font-weight:800;background:#37D3E8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:5px;vertical-align:middle}
 .fsrow{background:rgba(55,211,232,.14)}
 .fsrow:hover{background:rgba(55,211,232,.14)}
