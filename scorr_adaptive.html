@@ -126,6 +126,23 @@ html,body{margin:0;padding:0;background:var(--bg);}
   function inr(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '₹'+Math.round(n).toLocaleString('en-IN'); }
   /* cc#1212 — 2-dp money for the ledger sheet, where a rounded rupee hides the paise that make a
      voucher reconcile. The shelf keeps 0 dp; only the row-level ledger uses this. */
+  /* cc#1212: the three ledger blocks for a client card. Returns an empty string when there is
+     no ledger at all - a card with nothing to say stays quiet, which is the rule the alpha chip
+     on the same card already follows. */
+  function ledgerBlocks(p){
+    if(p.net_payin==null && p.payin_total==null && p.payout_total==null) return '';
+    var dash='<span title="no ledger on record">—</span>';
+    function b(label, val, extra){
+      return '<div class="b"><div class="l">'+label+'</div><div class="v">'
+        + (val==null ? dash : inr(val)) + (extra||'') + '</div></div>';
+    }
+    var manual = (p.net_payin!=null && p.invested!=null
+                  && Math.abs(p.net_payin - p.invested) > 1000)
+      ? ' <span title="Invested is set manually for this account" style="color:var(--faint);font-weight:400;">*</span>'
+      : '';
+    return b('Pay-in', p.payin_total) + b('Payout', p.payout_total)
+         + b('Net pay-in', p.net_payin, manual);
+  }
   function inr2(n){ if(n===null||n===undefined||isNaN(n)) return '—';
     return '₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
@@ -261,18 +278,16 @@ html,body{margin:0;padding:0;background:var(--bg);}
                 +(p.alpha_pct>=0?'var(--grn,#0b6e42)':'var(--red,#b42318)')+'" title="P&amp;L % minus Nifty 50 return since start date">'
                 +(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'% vs N50</div>')
         +   '</div>'
-        /* cc#1212 item 5: one extra line under the strip when a ledger exists. Absent entirely
-           when there is none - a card with nothing to say stays quiet, the same rule the alpha
-           chip above already follows. The manual-set hint fires only when net pay-in and the
-           recorded Invested disagree by more than a thousand rupees, because a few rupees of
-           rounding is not a discrepancy worth a marker. */
-        + (p.net_payin==null ? '' :
-             '<div style="font-size:10.5px;color:var(--muted);margin-top:10px">Net pay-in '
-             + inr(p.net_payin)
-             + (Math.abs((p.net_payin||0)-(p.invested||0))>1000
-                 ? ' <span title="Invested is set manually for this account" style="color:var(--faint)">*</span>'
-                 : '')
-             + '</div>')
+        /* cc#1212 items 3+5, per Fable's ruling of 20:0x: the three ledger figures join the
+           strip as their own blocks rather than going into a "detailed view" - that view does
+           not exist on this page and never did. They sit after P&L, and the strip already wraps,
+           so a narrow card gets two rows of three rather than a squeeze.
+
+           An em-dash with a tooltip when there is no ledger, NOT a zero: a client we hold no
+           ledger for has not received nothing, we simply do not know. The manual-set marker on
+           NET PAY-IN fires only when it and the recorded Invested disagree by more than a
+           thousand rupees, because a few rupees of rounding is not a discrepancy worth flagging. */
+        +   ledgerBlocks(p)
         + '</div>'
         /* The card is a link to the report, so the ledger button has to stop the click reaching
            it. Rendered only when there are rows to show. */
