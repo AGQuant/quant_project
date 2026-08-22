@@ -333,6 +333,7 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
+    + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row
     + b'<script src="/results_card.js?v=' + _BUILD_B + b'" defer></script>'       # cc#573: shared Results R-pill + card
     + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card (letter C)
     + b'<script src="/scorr_analysis_card.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared Analysis modal (letter A)
@@ -463,7 +464,13 @@ async def auth_gate(request: Request, call_next):
                         # mobile/home.html and scorr_digest_mobile.html and served max-age=86400,
                         # so it is added here in the SAME change as those tags — the cc#1060
                         # lesson, applied at the time rather than after the outage.
-                        b"scorr_news_row.js"):
+                        b"scorr_news_row.js",
+                        # cc#1191: added WITH its script tag in the same commit. This file is
+                        # served max-age=86400 like its neighbours, so without the stamp a reader
+                        # who loaded a page before this deploy keeps the old bundle for a day —
+                        # which for a brand-new file means the segment chip does nothing when
+                        # clicked, with no error to explain it. The cc#1060 failure, pre-empted.
+                        b"scorr_segment_results.js"):
                 body = body.replace(b'src="/' + _js + b'"',
                                     b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
             # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,

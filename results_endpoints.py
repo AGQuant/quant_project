@@ -923,6 +923,13 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         def _with_peer(d):
             d["peer_comparison"] = peer_comparison
             d["peer_results"] = peer_results
+            # cc#1191 scope 3: the segment travels on the CORE payload so the header chip can be
+            # drawn on the card's first paint. It is added HERE, in the one wrapper every return
+            # path in this function passes through, rather than on each of the five branches —
+            # a field added to four of five branches is a chip that vanishes on the fifth, and
+            # nobody would find that until a name in that state was opened.
+            # Null for an unsegmented name, which scope 5 renders as no chip at all.
+            d["segment"] = segment
             return d
 
         cur.execute("SELECT ex_date, status FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY ex_date DESC LIMIT 1", (sym,))

@@ -1287,6 +1287,38 @@ RESULTS_CARD_JS = """
     + '.rcard-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}'
     + '.rcard-sym{font:800 16px/1.1 Sora,sans-serif}'
     + '.rcard-x{border:none;background:none;color:var(--dim,#8892a6);font-size:22px;cursor:pointer;line-height:1}'
+    /* cc#1191: the segment chip. Link-styled because it OPENS something — every other chip in
+       this header is a passive state badge, so it must not look like one, or nobody will click
+       it. Sits inline after the status chip.
+
+       HIDDEN BELOW 768px, AND THAT IS THE POINT OF THE MEDIA QUERY. This builder is shared
+       web+app, so anything added here lands on the app's R card as well — and cc#1191 is a WEB
+       card (spec surface: "web"; scope 4 names Result Corner, the dashboard and the GVM page,
+       all of them web). Measured on the real extracted stylesheet at 360: the longest real
+       segment name ("Electronics - Heavy Electrical & Industrial", 43 chars, 14 members) does
+       not fit beside the status pill and drops to its own row, growing the app card header from
+       72px to 98px. A width cap does not fix it either, because the pill beside it is not a
+       fixed string — 'Result due 28 Jul' is far wider than 'Announced', so the room left over
+       is not a constant and any px cap I picked would be a guess that fails on the other pill.
+
+       So the chip does not exist below the app breakpoint. The app header measures 72px with the
+       chip and 72px without it, at 360 and at 412 — byte-for-byte the layout it has today. If
+       the app wants this later it is one line of CSS and a Fable card, not a silent inheritance.
+
+       On web the name shows in full; max-width:100% with an ellipsis is the guard for a name
+       longer than the 620px modal, and it never wraps to a second line.
+
+       inline-BLOCK rather than inline-flex on purpose: text-overflow does not apply to a flex
+       container's anonymous item, so inline-flex would have clipped with no ellipsis. The full
+       name is never lost — it is in the title tooltip and in data-segchip, which is what the
+       click actually sends. */
+    + '.rcard-seg{display:inline-block;vertical-align:middle;font:700 10px/1 Sora,sans-serif;'
+    + 'text-transform:uppercase;letter-spacing:.06em;padding:4px 9px;border-radius:6px;margin-top:6px;'
+    + 'margin-left:6px;cursor:pointer;color:var(--blu,#4D7CFE);background:rgba(77,124,254,.10);'
+    + 'max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+    + 'border:1px solid rgba(77,124,254,.35)}'
+    + '@media(max-width:767px){.rcard-seg{display:none}}'
+    + '.rcard-seg:hover{background:rgba(77,124,254,.18)}'
     + '.rcard-status{display:inline-flex;align-items:center;gap:6px;font:700 10px/1 Sora,sans-serif;'
     + 'text-transform:uppercase;letter-spacing:.06em;padding:4px 9px;border-radius:6px;margin-top:6px}'
     + '.rcard-st-a{color:var(--volt, #0f9d58);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
@@ -1863,6 +1895,13 @@ RESULTS_CARD_JS = """
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
       + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span>'
       + levelTag(d)   /* cc#794: BASIC / DETAILED coverage tag, next to the status chip */
+      /* cc#1191 scope 3 + scope 5: the segment chip, and NOTHING AT ALL when the name is
+         unsegmented. d.segment rides the core payload (results_endpoints _with_peer), so the chip
+         paints on first render rather than waiting for the context call. data-segchip is read by
+         a delegated listener in scorr_segment_results.js — no handler is bound here, so the chip
+         works identically in the modal, the inline card and the collapsible one. */
+      + (d && d.segment ? '<span class=\"rcard-seg\" data-segchip=\"'+esc(d.segment)+'\" '
+          + 'title=\"See every reporter in this segment\">'+esc(d.segment)+'</span>' : '')
       + '</div>'
       + (opts.close!==false && window.ScorrCardStripHtml ? window.ScorrCardStripHtml(sym,'R') : '')   /* cc#675: host C·A·R·D strip */
       + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>');
@@ -2079,6 +2118,22 @@ except Exception:
 @router.get("/scorr_card_strip.js")
 def pwa_scorr_card_strip_js():
     return Response(SCORR_CARD_STRIP_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+# cc#1191: the SEGMENT RESULTS popout, same read-once-at-import pattern as its neighbours.
+# It is served from here rather than bundled into scorr_card_strip.js because it is a different
+# thing with a different lifetime: the strip is a tiny always-on component on every card, and this
+# is a table that most readers never open.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_segment_results.js"), "r", encoding="utf-8") as _sgr_f:
+        SCORR_SEGMENT_RESULTS_JS = _sgr_f.read()
+except Exception:
+    SCORR_SEGMENT_RESULTS_JS = "/* scorr_segment_results.js unavailable */"
+
+
+@router.get("/scorr_segment_results.js")
+def pwa_scorr_segment_results_js():
+    return Response(SCORR_SEGMENT_RESULTS_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 # cc#805: the A (Analysis) and D (Derivative Cockpit) cards, extracted out of v8_dashboard.html so the
