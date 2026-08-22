@@ -59,6 +59,36 @@ _SKIPPED = "SKIPPED"   # cc#526: sentinel a flag-gated job returns from a no-op 
                         # which made a job that hadn't actually run in days look perfectly healthy.
 
 
+class _Empty:
+    """cc#1194 — the third outcome, and the one 21-Aug-2026 proved was missing.
+
+    _SKIPPED covers "this job had nothing to do". An exception covers "this job broke". Between
+    them sits the case that cost a whole trading session: the job RAN, finished cleanly, raised
+    nothing — and wrote ZERO rows on a trading day.
+
+    On 21-Aug the feed worker died at 09:05 and never came back. v8_signal_writer found no
+    intraday bars, logged its alert, and returned {"skipped": "no_intraday_bars"} — a normal
+    return. _bg_signal_writer returned None. _run_recorded saw no exception and stamped
+    last_status='ok'. It did that on every tick from 09:10 to 15:15 while v8_qualified,
+    v8_funnel_counts, adr_intraday and futures_basis all stayed at zero rows. Every watchdog was
+    green and the day was empty.
+
+    ENGINE_LIVENESS_RULE (session_log 13829) says the badge follows the data. A status of 'ok'
+    on a job that wrote nothing is a badge running ahead of its data, so it gets its own status
+    and carries the reason into last_error where the next reader will actually see it.
+
+    Deliberately NOT an exception: an empty tick is not a crash, must not increment a failure
+    streak, and must not trigger a restart ladder. It is an honest report of an empty result.
+    """
+    __slots__ = ("detail",)
+
+    def __init__(self, detail):
+        self.detail = str(detail)[:400]
+
+    def __repr__(self):
+        return "_Empty(%r)" % (self.detail,)
+
+
 def _run_recorded(fn, args):
     """cc#525 run recorder: wraps the job call so every _spawn dispatch upserts
     last_run_at/last_status/last_error/last_duration_ms into scheduler_master, with ZERO
@@ -76,8 +106,16 @@ def _run_recorded(fn, args):
         raise
     try:
         import scheduler_master
-        status = "skipped" if result == _SKIPPED else "ok"
-        scheduler_master.record_run(fn.__name__, status, None, int((time.time() - t0) * 1000))
+        # cc#1194: _Empty is checked FIRST and by isinstance, not by ==. An _Empty instance
+        # compared against the _SKIPPED string is False anyway, but the order is stated so a
+        # later edit cannot reintroduce the silent-ok by reordering these two branches.
+        if isinstance(result, _Empty):
+            status, err = "empty", result.detail
+        elif result == _SKIPPED:
+            status, err = "skipped", None
+        else:
+            status, err = "ok", None
+        scheduler_master.record_run(fn.__name__, status, err, int((time.time() - t0) * 1000))
     except Exception:
         pass
     return result
@@ -618,7 +656,10 @@ def _bg_signal_writer():
     # guard: skip only if a tick is genuinely in flight and within the timeout window
     if _signal_writer_started_at is not None:
         if (now - _signal_writer_started_at) < SIGNAL_WRITER_TIMEOUT:
-            return
+            # cc#1194: was a bare `return`, which stamped last_status='ok' on a tick that did
+            # nothing because the previous one was still in flight. Same class as the _SKIPPED
+            # sentinel it now uses — a no-op tick must not report success.
+            return _SKIPPED
         # exceeded timeout → previous tick is hung; abandon it and start fresh
         _log_alert("signal_writer_timeout",
                    f"previous tick hung >{SIGNAL_WRITER_TIMEOUT} (since {_signal_writer_started_at}) — starting fresh")
@@ -640,6 +681,27 @@ def _bg_signal_writer():
         # heartbeat (sched_writer_hb) now written inside run_live_signal_writer using
         # the already-open conn — covers scheduler + MCP + API paths (task #18).
         log.info(f"signal_writer: {r.get('updated', 0) if isinstance(r, dict) else 0} updated")
+        # cc#1194 THE 21-AUG SILENT ZERO DAY, fixed at the point where it was hidden.
+        # run_live_signal_writer has four clean-return skip paths, and every one of them wrote
+        # zero rows while this function returned None and the recorder stamped 'ok':
+        #   nontrading_day      — genuinely nothing to do, and the ONLY honest 'skipped'
+        #   no_intraday_bars    — the feed is down (21-Aug: all day, every tick from 09:10)
+        #   stale_intraday_bars — the feed is frozen (the 07-Jul failure mode)
+        #   no symbols          — futures_universe came back empty
+        # The last three are a trading day that produced nothing, which is exactly what
+        # ENGINE_LIVENESS_RULE says must never read as healthy. The reason travels into
+        # last_error, naming the tables that stayed at zero, so the next person to open
+        # scheduler_master sees WHY without going to the logs.
+        if isinstance(r, dict) and r.get("skipped"):
+            _why = r["skipped"]
+            if _why == "nontrading_day":
+                return _SKIPPED
+            return _Empty(
+                "wrote 0 rows on a trading day (%s) — v8_metrics, v8_qualified, "
+                "v8_funnel_counts and adr_intraday all skipped this tick" % _why)
+        if isinstance(r, dict) and r.get("msg") == "no symbols":
+            return _Empty("wrote 0 rows on a trading day — futures_universe returned no "
+                          "active symbols, so no metrics, quals or ADR were computed")
     except Exception as e:
         _signal_writer_fail_streak += 1
         log.error(f"signal_writer: FAIL #{_signal_writer_fail_streak}: {e}")
@@ -822,15 +884,52 @@ def _bg_v10_tick():
     finally: _v10_running = False
 
 def _bg_pcr_intraday():
+    """cc#1194 scope 4. On 21-Aug this job recorded last_status='ok' on every tick of a trading
+    day that produced ZERO pcr_intraday rows, because it returned None whatever happened and
+    swallowed exceptions into a log line the DB never sees.
+
+    Two separate faults, fixed separately:
+
+    (1) The bare `except: log.error` meant a CRASHING pcr job still stamped 'ok'. It now
+        re-raises so _run_recorded records 'error' with the real message — the same correction
+        cc#996 made to _bg_pivot_star for the identical reason.
+
+    (2) 'Computed nothing' is reported honestly, but NOT as an alarm on every quiet tick. This
+        job is a self-heal: it walks option_chain bars that pcr_intraday has not got to yet, so
+        computed==0 is the NORMAL state whenever it wins the race against the 5-min option
+        writer. Flagging every one of those would fire dozens of false 'empty' rows a day and
+        train the reader to ignore the status — which is how the silent zero day survived in
+        the first place. So an idle tick is 'skipped', and 'empty' is reserved for the state
+        that actually means something: market hours on a trading day, this tick wrote nothing,
+        AND the table holds nothing at all for today. That is the 21-Aug shape, and on 21-Aug
+        it would have fired from the first tick after 09:20.
+    """
     global _pcr_intraday_running
-    if _pcr_intraday_running: return
+    if _pcr_intraday_running:
+        return _SKIPPED
     _pcr_intraday_running = True
     try:
         import pcr_intraday
-        with _conn() as conn: res = pcr_intraday.compute_pcr_intraday(conn=conn)
-        log.info(f"pcr_intraday: {res.get('computed', res.get('bars'))}")
-    except Exception as e: log.error(f"pcr_intraday: {e}")
-    finally: _pcr_intraday_running = False
+        with _conn() as conn:
+            res = pcr_intraday.compute_pcr_intraday(conn=conn)
+            done = (res or {}).get("computed")
+            log.info(f"pcr_intraday: {res.get('computed', res.get('bars'))}")
+            if done:
+                return None                      # real work landed — 'ok' is the truth
+            now = _ist_now()
+            if not (_is_trading_day(now.date()) and _is_market_hours(now)):
+                return _SKIPPED
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM pcr_intraday WHERE ts::date = %s", (now.date(),))
+                today_rows = cur.fetchone()[0] or 0
+            if today_rows == 0:
+                return _Empty(
+                    "0 pcr_intraday rows for %s during market hours — nothing to compute because "
+                    "option_chain has no unprocessed bars, i.e. the upstream options feed wrote "
+                    "nothing today" % now.date())
+            return _SKIPPED                      # caught up; a quiet tick, not an empty day
+    finally:
+        _pcr_intraday_running = False
 
 def _bg_intraday_paper():
     """DEACTIVATED 18-Jun-2026. On-demand via /api/intraday/tick only."""

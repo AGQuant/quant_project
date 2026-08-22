@@ -1534,6 +1534,19 @@ def health_feeds():
         ("quant_positions","SELECT MAX(updated_at)::date, COUNT(*) FROM quant_paper_positions WHERE status='open'"),
         ("futures_basis","SELECT MAX(ts)::date, COUNT(*) FROM futures_basis"),
         ("option_chain","SELECT MAX(ts)::date, COUNT(*) FROM option_chain"),
+        # cc#1194 scope 4: the two live intraday tables that were BOTH at zero rows all of
+        # 21-Aug while every other row on this page looked healthy. Two list entries, no logic —
+        # main.py stays wiring.
+        #
+        # The count is scoped to the LATEST DAY, not the lifetime total every row above uses.
+        # That is the whole point: adr_intraday holds ~2,000 rows of history, so a lifetime
+        # count reads reassuringly large on a day that produced nothing. Latest-day count next
+        # to latest date says "2026-08-20, 70 rows" on a Friday and the gap is visible at a
+        # glance instead of being averaged away by history.
+        ("adr_intraday","SELECT MAX(ts)::date, COUNT(*) FROM adr_intraday "
+                        "WHERE ts::date = (SELECT MAX(ts)::date FROM adr_intraday)"),
+        ("pcr_intraday","SELECT MAX(ts)::date, COUNT(*) FROM pcr_intraday "
+                        "WHERE ts::date = (SELECT MAX(ts)::date FROM pcr_intraday)"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
