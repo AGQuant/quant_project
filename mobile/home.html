@@ -108,6 +108,43 @@ body[data-theme]{
    THE TINT STAYS OFF. Siblings pair a coloured border with a tinted background; APP_QA_R5 P3
    removed the tint from THIS chip on purpose, because a boxed fear gauge reads as a badge. The
    card asked for the border, and the border is what it gets. */
+/* ── cc#1184 · THE SIX CHECK CHIPS TAKE THE BEVEL FAMILY (founder 28373) ──────────────────────
+   THE CARD'S PREMISE WAS WRONG AND THE RULING STILL STANDS. 28373 says the chips look poor with
+   "slant-cut corners". Measured under the full cascade at 360/390/430 before touching anything:
+   border-radius 14px, clip-path NONE — they are plain rounded pills and no slant has ever been
+   there. So verify A has nothing to remove. What the founder is actually asking for is the
+   POSITIVE half: make them read like the two bevel buttons on this screen, and that is what ships.
+
+   .slab.dense, NOT plain .slab. The 5px ledge is for a full-width primary entry — cc#1181's
+   Index Intel button and cc#1182's Digest button both take it. Six of them in a wrapped grid
+   would read as stripes, which is the exact case the .dense modifier exists for, so the chips get
+   the 3px ledge and the 11px radius. One grammar, two scales.
+
+   THE STATE COLOURS FLOW THROUGH THE SHELL, THEY DO NOT FIGHT IT. .slab's dark override sets
+   background and border at (0,4,0) — `:root:root:not([data-theme="light"]) .slab` — so the
+   existing .hc.ok / .hc.bad / .hc.vixc rules at (0,2,0) would have LOST, and all six chips would
+   have come out the same grey with the semantic colours silently gone. That is the half-adoption
+   defect the r5 sheet documents twice, and restating six backgrounds at (0,5,0) would have been
+   fighting the shell. Instead each state declares --panel and --line ON the chip: .slab resolves
+   both at its own use site, so the colour is carried BY the family rather than layered over it,
+   and the ledge outline picks up the state border for free. `color` is untouched throughout —
+   .slab never sets it, so .hc.ok / .hc.bad / .hc.vixc.vixmid keep their text colours byte for
+   byte. VIX stays transparent: APP_QA_R5 P3 removed its tint on purpose so a fear gauge could not
+   read as a badge, and a ruling about the bevel is not a licence to put that back.
+
+   PADDING IS COMPENSATED TO THE HALF PIXEL, and that is the whole height proof. .dense's own
+   padding is 10px 13px, which would widen every chip by 8px and can only push the row to another
+   line — and the chip row sits inside card 1, the face that SETS the deck height. Vertically
+   nothing can move: the global tap-target rule pins these buttons at min-height:44px and the
+   content box is ~25px, so padding and border have no say. Horizontally .slab's border is 1.5px
+   against .hc's 1px, so the padding drops 9px to 8.5px and the border box comes out identical.
+   Same widths, same wrap, same card height. */
+.hchips .hc.slab{padding:5px 8.5px;--panel:transparent;--line:var(--line2)}
+.hchips .hc.slab.ok{--panel:var(--grn-d);--line:rgba(47,212,139,.45)}
+.hchips .hc.slab.bad{--panel:rgba(255,92,108,.10);--line:rgba(255,92,108,.45)}
+.hchips .hc.slab.vixc{--panel:transparent;--line:var(--line2)}
+.hchips .hc.slab.vixc.bad{--panel:transparent;--line:rgba(255,92,108,.45)}
+.hchips .hc.slab.vixc.vixmid{--panel:transparent;--line:rgba(255,159,69,.45)}
 .hc.vixc{background:transparent;border-color:var(--line2)}
 .hc.vixc.bad{background:transparent;border-color:rgba(255,92,108,.45);color:var(--red)}
 /* cc#1123: the middle tier — VIX moved less than 5% either way. Same #FF9F45 as the tape's .neu
@@ -3069,14 +3106,15 @@ Promise.all([
         var tapKind = isAdr ? 'adr' : (isNifty ? 'nifty' : '');
         var val = (c.value == null) ? '--'
                 : (isAdr ? Number(c.value).toFixed(2) : pct(c.value));
-        return '<button class="hc' + k
+        // cc#1184: `slab dense` carries the bevel; `k` and the state CSS carry the colours.
+        return '<button class="hc slab dense' + k
           + (tapKind ? ' tap" onclick="togTrend(event,\'' + tapKind + '\')"' : '"') + '>'
           + esc(c.label) + ' ' + esc(val) + '</button>';
       }).join('')
     /* founder 08-Aug batch 3: PCR/VIX chips carry colour. PCR >= 1.0 = puts heavy = supportive
        (green), < 1.0 = red. VIX <= 14 = calm (green), >= 17 = elevated (red), between = neutral.
        Null stays uncoloured -- with no invented band. */
-    + '<button class="hc tap' + (hero.pcr == null ? '' : (Number(hero.pcr) >= 1 ? ' ok' : ' bad'))
+    + '<button class="hc slab dense tap' + (hero.pcr == null ? '' : (Number(hero.pcr) >= 1 ? ' ok' : ' bad'))
     + '" onclick="togTrend(event,\'pcr\')">PCR ' + (hero.pcr == null ? '--' : esc(Number(hero.pcr).toFixed(2))) + '</button>'
     /* VIX_COLOR_RULE_V1 (cc#1081, executed as APP_QA_R5 P3). A fear gauge must never celebrate.
        The old logic gave VIX <= 14 the `ok` class — green — so on a calm day with the gate
@@ -3105,7 +3143,7 @@ Promise.all([
        tiers today, so a VIX down 6% IS green on this screen — on the tape, one row above.
        The old level rule (>= 17) stays as an OR, unchanged: an absolutely high VIX is red whatever
        today's move was, and cc#1123 did not ask for that to go. */
-    + '<button class="hc vixc tap' + (hero.vix == null ? '' : (
+    + '<button class="hc slab dense vixc tap' + (hero.vix == null ? '' : (
         (Number(hero.vix) >= 17
           || (hero.vix_chg_pct != null && Number(hero.vix_chg_pct) >= 5)
           || (hero.vix_chg != null && Number(hero.vix_chg) > 0
