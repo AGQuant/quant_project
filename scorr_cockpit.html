@@ -10,18 +10,13 @@
 
   /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
 :root{
-    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --panel3:#182241;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
-    --grn:#2FD48B; --grn-d:#e8f9f1; --grn-b:#c3edd8;
-    --red:#FF5C6C; --red-d:#fdf0f1; --red-b:#f5c6ca;
-    --blu:#4D7CFE; --blu-d:rgba(77,124,254,.14);
-    --cyan:#37D3E8; --cyan-d:rgba(55,211,232,.14);
-    --amber:#F5B94A; --amber-d:rgba(245,185,74,.14); --amber-b:#fcd89a;
+    /* cc#1203 push 10: colour tokens moved to the injected contract. What stays is SHAPE, plus
+       two deliberate overrides. --mono is Sora here, not a monospace face, in 5 places. --shadow
+       is this page's own tuned elevation - the contract's is a 44px dark drop shadow and swapping
+       it in would restyle every card on the page, which is not what a token migration is for. */
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --mono:'Sora',sans-serif;
     --shadow:0 1px 4px rgba(20,35,70,.06);
-    --shadow-md:0 4px 16px rgba(20,35,70,.09);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:var(--bg);color:var(--txt);
@@ -56,7 +51,7 @@
   .qp-head:first-child{padding-top:4px}
   .qp-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;
     cursor:pointer;transition:.1s;user-select:none}
-  .qp-item:hover{background:var(--cyan-d)}
+  .qp-item:hover{background:var(--cyan-row)}
   .qp-ic{font-size:13px;color:var(--cyan);width:16px;text-align:center;flex-shrink:0;line-height:1}
   .qp-lb{font-size:12px;font-weight:500;color:var(--txt);white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
@@ -88,7 +83,7 @@
   .mode-pill{border:none;background:transparent;color:var(--mut);font-family:var(--font);font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;cursor:pointer;transition:.12s}
   .mode-pill:hover{color:var(--txt)}
   .mode-pill.on{color:#fff}
-  .mode-pill[data-mode="native"].on{background:var(--volt, #2FD48B)}
+  .mode-pill[data-mode="native"].on{background:var(--grn)}
   .mode-pill[data-mode="haiku"].on{background:var(--pulse, #4D7CFE)}
   .mode-pill[data-mode="gemini"].on{background:var(--amber, #F5B94A)}
 
@@ -110,7 +105,7 @@
   .qchip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;background:var(--panel);
     border:1px solid var(--line);border-radius:8px;cursor:pointer;transition:.12s;
     font-family:var(--font);box-shadow:var(--shadow);max-width:100%}
-  .qchip:hover{border-color:var(--cyan);background:var(--cyan-d);transform:translateY(-1px)}
+  .qchip:hover{border-color:var(--cyan);background:var(--cyan-row);transform:translateY(-1px)}
   .qchip .qc-ic{font-size:13px;color:var(--cyan);flex-shrink:0;line-height:1}
   .qchip .qc-lb{font-size:12px;font-weight:600;color:var(--txt);white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}
@@ -137,7 +132,7 @@
   .av{width:30px;height:30px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;
     justify-content:center;font-size:10px;font-weight:700;letter-spacing:.5px}
   .msg.user .av{background:var(--blu);color:#fff}
-  .msg.bot .av{background:var(--cyan-d);color:var(--cyan);border:1px solid var(--aqua, #b7e0eb)}
+  .msg.bot .av{background:var(--cyan-row);color:var(--cyan);border:1px solid var(--aqua, #b7e0eb)}
   .body{max-width:90%;min-width:0}
   .bubble{padding:11px 14px;border-radius:10px;word-break:break-word;font-size:13px}
   .msg.user .bubble{background:var(--blu);color:#fff;white-space:pre-wrap;border-bottom-right-radius:3px}
@@ -146,7 +141,7 @@
   .meta{font-size:10px;color:var(--dim);margin-top:4px;padding:0 4px}
   .msg.user .meta{text-align:right}
   .tools-used{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-  .tool-badge{padding:2px 8px;border-radius:4px;background:var(--cyan-d);
+  .tool-badge{padding:2px 8px;border-radius:4px;background:var(--cyan-row);
     border:1px solid var(--aqua, #b7e0eb);font-size:9.5px;color:var(--cyan);font-weight:600;
     font-family:var(--mono);font-variant-numeric:tabular-nums}
 
@@ -698,7 +693,7 @@ function ivrPicker(root,node,need){
     +'padding:9px 12px;color:var(--txt);font-family:inherit;font-size:12.5px';
   const go=document.createElement('button');
   go.textContent='Go';
-  go.style.cssText='background:var(--volt, #2FD48B);border:none;border-radius:9px;padding:9px 16px;color:#08131f;'
+  go.style.cssText='background:var(--grn);border:none;border-radius:9px;padding:9px 16px;color:#08131f;'
     +'font-family:inherit;font-weight:800;font-size:12px;cursor:pointer';
   const commit=()=>{ const v=(inp.value||'').trim(); if(!v) return;
     if(need==='segment'){ IVR_CTX.seg=v; }
