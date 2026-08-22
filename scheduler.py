@@ -1291,7 +1291,24 @@ def _bg_stale_claim_release():
     session is holding; from here on the 90-minute age test is the only signal that exists, because
     a session that died left nothing behind to ask.
     """
-    if _job_active("stale_claim_release") is not True:
+    # cc#1189 fix, found by Fable 22-Aug: THE GATE WAS READING A DIFFERENT ROW FROM THE ONE THE
+    # RECORDER WRITES, and that is why this job did nothing for a day while looking healthy.
+    #
+    # scheduler_master ended up with TWO rows for one job. record_run() registers under
+    # fn.__name__.lstrip("_"), which is "bg_stale_claim_release" — that row is active and carries
+    # every last_run_at. The gate asked for "stale_claim_release", a separate row that is
+    # active=false. So the gate read the inactive twin and returned _SKIPPED on every tick, for
+    # ever, while the row beside it recorded a healthy-looking run every fifteen minutes.
+    #
+    # A manual UPDATE on the twin is not the fix and was already proved not to hold: it was set
+    # true at 07:30 UTC, read true at 07:32, and was false again by 09:30 — something reconciles
+    # that row back down because no code function answers to that name. The durable fix is to stop
+    # having two names. GATE ON THE NAME THE RECORDER WRITES, so the row that says "active" is the
+    # same row that says "last run", and there is no twin left to drift.
+    #
+    # The leftover `stale_claim_release` row is now read by nothing. Deleting a registry row is
+    # Fable's lane (ROLE_CHARTER_V4), so it is flagged in the room rather than dropped from here.
+    if _job_active("bg_stale_claim_release") is not True:
         return _SKIPPED
     import cc_queue_maintenance
     released = cc_queue_maintenance.release_stale_claims()
