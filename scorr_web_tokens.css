@@ -195,7 +195,15 @@ html[data-theme="light"] {
 :root {
   /* second surfaces — the ruling adds --bg3; the other three are the dashboard's own */
   --bg3       : var(--well);
-  /* legacy names from scorr_themes.css, which no page links any more (retired at push 15) */
+  /* Names that scorr_themes.css also defines. I wrote here in push 2 that no page links that
+     file any more and that it would be retired at push 15. BOTH HALVES OF THAT WERE WRONG, and
+     the closing check of this sprint is what caught it: three pages still link it, and all three
+     are APP screens - /m/gvm2, /m/v10 and /m/digest. It is not retired and must not be. Deleting
+     it would break those three exactly the way deleting a page's own palette broke the gvm
+     fightcard earlier today, because /m/* never receives this contract by design.
+
+     These aliases stay useful regardless: they are for WEB pages that use the old spellings, and
+     they cost nothing. What changes is only the claim about the file. */
   --field     : var(--panel);
   --muted     : var(--mut);
   --rule      : var(--line);
