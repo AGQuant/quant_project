@@ -14,7 +14,7 @@ import re
 import logging
 
 import psycopg
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -556,6 +556,42 @@ def health_portfolios():
         return {"portfolios": [], "error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
+@router.get("/api/health/ledger")
+def health_ledger(pid: int):
+    """cc#1212: the row-level ledger for one portfolio, for the VIEW LEDGER sheet.
+
+    Returns every row, internal included, because the sheet SHOWS internal rows - greyed, with an
+    INTERNAL chip - so a reader can see the whole account history and still read a total that
+    only counts real money. is_internal rides along per row so the client never has to infer it.
+
+    404 for an unknown portfolio. An empty rows array with null totals for a real portfolio that
+    simply has no ledger: that is a 200, not an error, because "this client has no ledger" is an
+    answer and the shelf renders it as an em-dash.
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name FROM hr_portfolios WHERE id=%s", (pid,))
+        prow = cur.fetchone()
+        if not prow:
+            raise HTTPException(status_code=404, detail=f"portfolio {pid} not found")
+        cur.execute("""SELECT txn_date, segment, voucher_no, txn_type, amount, narration,
+                              is_internal
+                       FROM hr_ledger WHERE portfolio_id=%s
+                       ORDER BY txn_date ASC, id ASC""", (pid,))
+        rows = [{"txn_date": str(r[0]), "segment": r[1], "voucher_no": r[2],
+                 "txn_type": r[3], "amount": float(r[4] or 0), "narration": r[5],
+                 "is_internal": bool(r[6])} for r in cur.fetchall()]
+
+    counted = [r for r in rows if not r["is_internal"]]
+    payin = round(sum(r["amount"] for r in counted if r["txn_type"] == "PAYIN"), 2)
+    payout = round(sum(r["amount"] for r in counted if r["txn_type"] == "PAYOUT"), 2)
+    return {"portfolio_id": pid, "name": prow[1], "rows": rows,
+            # None, not 0, when there is nothing to total - same rule as the shelf.
+            "payin_total": (payin if rows else None),
+            "payout_total": (payout if rows else None),
+            "net_payin": (round(payin - payout, 2) if rows else None),
+            "counted_rows": len(counted), "internal_rows": len(rows) - len(counted)}
+
+
 def _parse_loose_date(v):
     """cc#1205: client_index.tracking_date is TEXT, not DATE, and holds values like "15May2025".
     Returns a date, or None when the value is missing or unparseable — never a raw string, so a
@@ -597,6 +633,37 @@ def _health_portfolios_inner():
         # headline P&L = current_value + cash - invested (% on invested) — the only honest basis when
         # per-holding buy prices are unknown (all avg_price NULL -> cost ~0 -> the +1880.5% bug). See
         # build_report / founder rule locked 11-Aug-2026.
+        # ── cc#1212: per-portfolio ledger aggregates, ONE grouped query for the whole shelf ──
+        # is_internal rows are DISPLAY-ONLY. They are pre-split history and the Dec-24/Jan-25
+        # transfers to AliceBlue, and counting them would double-count money that never left the
+        # client. So they are excluded from every total here and rendered grey in the sheet.
+        # ledger_rows counts ALL rows, internal included, because that is what the sheet lists and
+        # what the VIEW LEDGER button is gating on - a portfolio with only internal rows still has
+        # a ledger worth opening, it just has no countable money in it.
+        # NULL, never 0, when a portfolio has no rows at all: "no ledger on record" and "a ledger
+        # that nets to zero" are different statements and the shelf renders them differently.
+        ledger_map = {}
+        try:
+            cur.execute("""SELECT portfolio_id,
+                                  count(*),
+                                  SUM(amount) FILTER (WHERE txn_type='PAYIN'  AND NOT is_internal),
+                                  SUM(amount) FILTER (WHERE txn_type='PAYOUT' AND NOT is_internal),
+                                  MIN(txn_date), MAX(txn_date)
+                           FROM hr_ledger GROUP BY portfolio_id""")
+            for _r in cur.fetchall():
+                _pin = float(_r[2]) if _r[2] is not None else 0.0
+                _pout = float(_r[3]) if _r[3] is not None else 0.0
+                ledger_map[_r[0]] = {
+                    "ledger_rows": int(_r[1] or 0),
+                    "payin_total": round(_pin, 2),
+                    "payout_total": round(_pout, 2),
+                    "net_payin": round(_pin - _pout, 2),
+                    "ledger_first_date": (str(_r[4]) if _r[4] else None),
+                    "ledger_last_date": (str(_r[5]) if _r[5] else None),
+                }
+        except Exception:
+            ledger_map = {}   # table absent (pre-migration) -> the shelf renders without the figures
+
         cur.execute("SELECT portfolio_id, invested_amount, cash, tracking_date FROM hr_portfolio_meta")
         _meta_rows = cur.fetchall()
         meta_map = {r[0]: (float(r[1]) if r[1] is not None else None, float(r[2] or 0)) for r in _meta_rows}
@@ -716,7 +783,13 @@ def _health_portfolios_inner():
                     # and "it matched the index exactly" are different statements.
                     "alpha_pct": (round(pnl_pct - _npct, 1)
                                   if (pnl_pct is not None and _npct is not None) else None),
-                    "client": ci.get(created_by)})
+                    "client": ci.get(created_by),
+                    # cc#1212: ledger figures ride along so the shelf needs no second call. All
+                    # five are None together when there is no ledger - a partly-filled set would
+                    # let a card render a payout with no pay-in beside it.
+                    **(ledger_map.get(id_) or {"ledger_rows": 0, "payin_total": None,
+                                               "payout_total": None, "net_payin": None,
+                                               "ledger_first_date": None, "ledger_last_date": None})})
     return {"portfolios": out}
 
 
