@@ -160,6 +160,9 @@ html,body{margin:0;padding:0;background:var(--bg);}
     <div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;">
       <div style="font-size:16px;font-weight:600;letter-spacing:-.3px;" id="hr-alpha-n50">—</div>
       <div style="font-size:16px;font-weight:600;letter-spacing:-.3px;" id="hr-alpha-n500">—</div>
+      <!-- cc#1216: XIRR is ADDED inside the ALPHA card as a second line. Lines 1 and 2 above
+           keep their exact content - the founder's 22-Aug amendment is append-only. -->
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5;" id="hr-xirr-line"></div>
     </div>
   </div>
 </div>
@@ -589,6 +592,26 @@ html,body{margin:0;padding:0;background:var(--bg);}
     setAlpha('hr-alpha-n500','vs Nifty 500', s.alpha_n500);
     // cc#653: dynamic alpha window label — "Alpha vs Nifty 500 · SINCE 02 Feb 26" (never a static 1yr)
     var alL=$('hr-alpha-lbl'); if(alL){ alL.textContent='Alpha vs Nifty 500'+(s.alpha_label?(' · since '+s.alpha_label):''); }
+    /* cc#1216: the XIRR line. Fetched from the ledger endpoint, which carries the same three
+       figures the shelf uses, so the report and the dashboard can never disagree about a
+       client's return - one computation, two readers.
+       When it cannot be computed the line SAYS WHAT IS MISSING rather than showing an em-dash.
+       "needs pay-in / payout ledger" tells a reader what would make the number appear; a dash
+       tells them nothing and looks like a failure. */
+    (function(){
+      var el=$('hr-xirr-line'); if(!el||!pid) return;
+      function sgn(v){ return (v>=0?'+':'−')+Math.abs(v).toFixed(1)+'%'; }
+      fetch('/api/health/ledger?pid='+encodeURIComponent(pid), {credentials:'same-origin'})
+        .then(function(r){ return r.ok?r.json():null; })
+        .then(function(d){
+          if(!d) return;
+          if(d.xirr==null){ el.textContent='XIRR: needs pay-in / payout ledger'; return; }
+          el.textContent='XIRR '+sgn(d.xirr)
+            + (d.nifty_xirr==null ? '' : ' vs Nifty 50 '+sgn(d.nifty_xirr))
+            + (d.alpha_xirr==null ? '' : ' ('+sgn(d.alpha_xirr)+' a year)');
+        })
+        .catch(function(){});
+    })();
 
     // parameters (Growth/Value/Momentum/Quality) — update bars + values in DOM order
     var pr=document.querySelectorAll('#hr-params .rrow'), pv=[rt.growth,rt.value,rt.momentum,rt.quality];

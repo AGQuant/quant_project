@@ -281,6 +281,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
               (p.alpha_pct==null?'':'<div style="font-size:10.5px;font-weight:700;margin-top:2px;color:'
                 +(p.alpha_pct>=0?'var(--grn,#0b6e42)':'var(--red,#b42318)')+'" title="P&amp;L % minus Nifty 50 return since start date">'
                 +(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'% vs N50</div>')
+        +     /* cc#1216: XIRR joins the card UNDER the existing P&L %, never in place of it -
+                 the founder's 22-Aug amendment is explicit that this is append-only. Absent
+                 entirely when it cannot be computed, which is the same quiet rule the alpha
+                 chip above follows: a card with nothing to add says nothing. */
+              (p.xirr==null?'':'<div style="font-size:10px;color:var(--muted);margin-top:3px" '
+                +'title="Money-weighted return on your dated pay-ins and payouts">XIRR '
+                +(p.xirr>=0?'+':'−')+Math.abs(p.xirr).toFixed(1)+'%'
+                +(p.nifty_xirr==null?'':' (vs Nifty '+(p.nifty_xirr>=0?'+':'−')
+                  +Math.abs(p.nifty_xirr).toFixed(1)+'%)')+'</div>')
         +   '</div>'
         /* cc#1212 items 3+5, per Fable's ruling of 20:0x: the three ledger figures join the
            strip as their own blocks rather than going into a "detailed view" - that view does
@@ -317,6 +326,8 @@ html,body{margin:0;padding:0;background:var(--bg);}
       if(k==='payin_total')  return p.payin_total;
       if(k==='payout_total') return p.payout_total;
       if(k==='net_payin')    return p.net_payin;
+      if(k==='xirr')         return p.xirr;
+      if(k==='alpha_xirr')   return p.alpha_xirr;
       return 0; }
     /* cc#1215: NULLS LAST IN BOTH DIRECTIONS, which is what the alpha column above has always
        CLAIMED to do. Returning -Infinity for a missing value only achieves it descending; sort
@@ -336,8 +347,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
     /* cc#1215: three ledger columns after Invested. The `lg` class is what the 1024px rule
        below hides - Pay-in and Payout collapse away and Net pay-in stays, because on a narrow
        screen the net is the number worth keeping. */
-    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['payin_total','Pay-in','right'],['payout_total','Payout','right'],['net_payin','Net pay-in','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right']];
-    var COLLAPSE={payin_total:1,payout_total:1};
+    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['payin_total','Pay-in','right'],['payout_total','Payout','right'],['net_payin','Net pay-in','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right'],
+              /* cc#1216: XIRR and its alpha are ADDED after the existing alpha column, which
+                 keeps its meaning untouched. Both collapse below 1024px alongside Pay-in and
+                 Payout - on a narrow screen the simple figures are the ones that survive. */
+              ['xirr','XIRR','right'],['alpha_xirr','XIRR alpha','right']];
+    var COLLAPSE={payin_total:1,payout_total:1,xirr:1,alpha_xirr:1};
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
     var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
@@ -375,6 +390,16 @@ html,body{margin:0;padding:0;background:var(--bg);}
         + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
         + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
         + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
+        /* cc#1216: em-dash with the reason as a tooltip, never a zero - a client whose ledger is
+           not loaded has not returned nothing. */
+        + '<td class="lg" style="padding:10px 8px;text-align:right;font-weight:600;color:'
+          +(p.xirr==null?'var(--muted)':(p.xirr>=0?'var(--grn)':'var(--red)'))+'"'
+          +(p.xirr==null?' title="needs a dated pay-in / payout ledger"':'')+'>'
+          +(p.xirr==null?'—':(p.xirr>=0?'+':'−')+Math.abs(p.xirr).toFixed(1)+'%')+'</td>'
+        + '<td class="lg" style="padding:10px 8px;text-align:right;font-weight:600;color:'
+          +(p.alpha_xirr==null?'var(--muted)':(p.alpha_xirr>=0?'var(--grn)':'var(--red)'))+'"'
+          +(p.alpha_xirr==null?' title="needs a dated pay-in / payout ledger"':' title="XIRR minus Nifty 50 XIRR on the same dated flows"')+'>'
+          +(p.alpha_xirr==null?'—':(p.alpha_xirr>=0?'+':'−')+Math.abs(p.alpha_xirr).toFixed(1)+'%')+'</td>'
         + '<td style="padding:10px 12px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">View →</td></tr>';
     }).join('');
     listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:13.5px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';

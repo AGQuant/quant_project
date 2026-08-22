@@ -556,6 +556,22 @@ def health_portfolios():
         return {"portfolios": [], "error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
+def _xirr_block(pid):
+    """cc#1216: the XIRR trio for one portfolio, shaped for a JSON response.
+
+    Returns all four keys whatever happens. A caller reading a response should never have to
+    test whether a field exists, and a null beside a reason is more useful than a missing key.
+    """
+    try:
+        import hr_xirr
+        r = hr_xirr.compute_xirr(pid)
+        return {"xirr": r.get("xirr"), "nifty_xirr": r.get("nifty_xirr"),
+                "alpha_xirr": r.get("alpha_xirr"), "xirr_reason": r.get("reason_if_null")}
+    except Exception as e:
+        return {"xirr": None, "nifty_xirr": None, "alpha_xirr": None,
+                "xirr_reason": type(e).__name__}
+
+
 @router.get("/api/health/ledger")
 def health_ledger(pid: int):
     """cc#1212: the row-level ledger for one portfolio, for the VIEW LEDGER sheet.
@@ -589,7 +605,10 @@ def health_ledger(pid: int):
             "payin_total": (payin if rows else None),
             "payout_total": (payout if rows else None),
             "net_payin": (round(payin - payout, 2) if rows else None),
-            "counted_rows": len(counted), "internal_rows": len(rows) - len(counted)}
+            "counted_rows": len(counted), "internal_rows": len(rows) - len(counted),
+            # cc#1216: the same three figures the shelf carries, so the sheet and the shelf can
+            # never disagree about a client's return - one computation, two readers.
+            **_xirr_block(pid)}
 
 
 def _parse_loose_date(v):
@@ -663,6 +682,28 @@ def _health_portfolios_inner():
                 }
         except Exception:
             ledger_map = {}   # table absent (pre-migration) -> the shelf renders without the figures
+
+        # ── cc#1216: XIRR, computed ONLY for portfolios that have ledger rows ────────────────
+        # There is no point solving for the seven clients whose ledgers are not loaded yet: rule
+        # (a) would reject them anyway, and the reason is already knowable from ledger_map. One
+        # connection is reused for the whole shelf rather than opened per client.
+        #
+        # APPEND-ONLY (founder 22-Aug, session_log 29274). Not one existing field is touched -
+        # pnl_pct, alpha_pct, nifty_pct and start_date all keep their exact meaning and value.
+        # XIRR arrives beside them, never in place of them.
+        xirr_map = {}
+        try:
+            import hr_xirr
+            _with_ledger = [pid for pid, v in ledger_map.items() if v.get("ledger_rows")]
+            for _pid in _with_ledger:
+                try:
+                    xirr_map[_pid] = hr_xirr.compute_xirr(_pid, conn=conn)
+                except Exception as _xe:
+                    # One client's bad flows must not cost the other eight their shelf.
+                    xirr_map[_pid] = {"xirr": None, "nifty_xirr": None, "alpha_xirr": None,
+                                      "reason_if_null": type(_xe).__name__}
+        except Exception:
+            xirr_map = {}      # helper absent mid-deploy -> the shelf renders without XIRR
 
         cur.execute("SELECT portfolio_id, invested_amount, cash, tracking_date FROM hr_portfolio_meta")
         _meta_rows = cur.fetchall()
@@ -789,7 +830,13 @@ def _health_portfolios_inner():
                     # let a card render a payout with no pay-in beside it.
                     **(ledger_map.get(id_) or {"ledger_rows": 0, "payin_total": None,
                                                "payout_total": None, "net_payin": None,
-                                               "ledger_first_date": None, "ledger_last_date": None})})
+                                               "ledger_first_date": None, "ledger_last_date": None}),
+                    # cc#1216: nulls with a REASON, so a surface can say why rather than only that
+                    # it cannot. no_ledger and too_short mean very different things to a reader.
+                    **{k: (xirr_map.get(id_) or {}).get(k) for k in
+                       ("xirr", "nifty_xirr", "alpha_xirr")},
+                    "xirr_reason": (xirr_map.get(id_) or {}).get(
+                        "reason_if_null", None if id_ in xirr_map else "no_ledger")})
     return {"portfolios": out}
 
 
