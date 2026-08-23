@@ -219,6 +219,67 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .pfchips{flex-wrap:wrap}
 .pfchips .clchip{flex:1 1 30%}
 .pfgrid{grid-template-columns:1fr 1fr}
+/* cc#1264 · THE SEGMENT ROW HAD NO STYLE ON THIS PAGE AT ALL, and the render is how that surfaced.
+   .rchip is written in scorr_digest_mobile.html and NOWHERE ELSE — not in scorr_themes.css and not
+   in the appshell sheet — so the chips cc#1245 and cc#1247 put on Index Intel have been drawing as
+   bare user-agent buttons, white boxes with a system border, since the day they shipped. Nobody
+   caught it because both cards were checked on isolated blocks where the class was equally absent,
+   so the render matched the expectation and the expectation was wrong. This card rebuilds that
+   control, so the rules land here rather than in a follow-up; the older mis-render is written up in
+   the forum rather than quietly absorbed.
+   The vocabulary is the digest's, deliberately — same idiom, same tokens, so the two surfaces do
+   not invent two chip languages. The glow is dropped: it is a raw rgba the token layer does not
+   own, and the aqua border already carries the state. (One shared module is the real answer and is
+   already raised as its own card; this is not the place to smuggle it in.) */
+.rchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:nowrap}
+.rchip{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden;
+ min-height:34px;padding:var(--space-5) var(--space-4);cursor:pointer;font-family:'JetBrains Mono';
+ font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px12);color:var(--muted);
+ background:var(--hi);border:var(--bw-1) solid var(--edge);
+ clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.rchip.on{color:var(--aqua);border-color:var(--aqua)}
+.rchip .num{color:var(--chalk);font-weight:800}
+.rchip.on .num{color:var(--aqua)}
+/* ── cc#1264 · THE RECORD: trade-book rows per R2 ──────────────────────────────────────────
+   A row is no longer a table line, it is a small card holding a journey. Two bands: WHO and WHAT
+   IT MADE on top, WHERE IT OPENED and WHERE IT CLOSED underneath. */
+/* FOUR ACROSS, per R2, overriding cc#1247's 2x2. The label is "PROFIT F." for the same reason the
+   ref abbreviates it: at a quarter of a 360px card "PROFIT FACTOR" is the only one of the four that
+   cannot fit, and wrapping one box to two lines makes the strip uneven. Measured, not assumed —
+   the harness reports each box's width and whether the strip overflows its card at 360/390/430. */
+.rcstrip{grid-template-columns:repeat(4,1fr);gap:var(--space-4);margin-bottom:var(--space-12)}
+/* THE LABELS SET THE MINIMUM, AND THEY WERE 4px OVER AT 360. Measured, not guessed: the card's
+   inner width is 298 there and the strip wanted 302, because "PROFIT F." at 9.5px with 1.2px of
+   tracking is 56px wide before its 18px of padding. Two small changes buy it back — a 4px gutter
+   instead of 6, and 0.8px of tracking instead of 1.2 on these four labels only. Neither touches the
+   font size, so the strip still reads at arm's length, and it now clears 360 with room instead of
+   spilling. The alternative was to let the labels wrap, which makes one box two lines tall and the
+   strip visibly uneven. */
+.rcstrip .lb{white-space:nowrap;letter-spacing:var(--track-px8)}
+.rcpage{display:flex;flex-direction:column;gap:var(--space-8)}
+.rctr{background:var(--sunk);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);
+ padding:var(--space-10) var(--space-11)}
+.rctop{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
+ margin-bottom:var(--space-8)}
+/* min-width:0 IS LOAD-BEARING on .rcwho, and cc#1252 is where that was proved rather than assumed:
+   a flex item's default min-width is auto, so BANKNIFTY + a strike label + a pill refuse to shrink
+   and push the P&L off the right edge at 360 instead of ellipsising the symbol. */
+.rcwho{display:flex;align-items:center;gap:var(--space-7);min-width:0}
+.rcsym{font-weight:700;font-size:var(--type-135);letter-spacing:var(--track-px1);
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcleg{font-family:'JetBrains Mono';font-size:var(--type-10);color:var(--muted);white-space:nowrap}
+/* ALL PILLS ARE TEXT-SIZED, per the card: padding fits the word, so S, TGT and GAP_EXIT each come
+   out at their own width instead of sharing one box sized for the longest. */
+.rcside,.rcrsn{font-size:var(--type-9);padding:var(--space-2) var(--space-6);flex:none}
+.rcpnl{font-size:var(--type-15);font-weight:800;white-space:nowrap;flex:none}
+.rcjr{display:grid;grid-template-columns:1fr auto 1fr auto;gap:var(--space-8);align-items:center}
+.rclp{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
+.rck{font-size:var(--type-8);color:var(--muted);letter-spacing:var(--track-px10)}
+.rcd{font-size:var(--type-105);color:var(--muted)}
+.rcp{font-size:var(--type-13);font-weight:700}
+.rcright{text-align:right}
+.rcarrow{color:var(--amber);font-size:var(--type-13);flex:none;line-height:1}
+.rcexit{justify-self:end}
 /* ── cc#1248 · the buildup state strip and its table ───────────────────────────────────── */
 .bustate{display:flex;align-items:baseline;gap:var(--space-8);margin:var(--space-8) 0 var(--space-10)}
 .bubadge{font-size:var(--type-105);padding:var(--space-4) var(--space-10)}
@@ -296,7 +357,7 @@ const cx=n=>n>=0?'var(--volt)':'var(--heat)';
 const gj=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
 const IST=()=>new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
 
-const D={mood:null,sig:{},lm:{},vix:null,adr:null,pcr:{},mp:null,open:[],closed:[],psum:{},perf:null,build:null,div:null,cand:{},
+const D={mood:null,sig:{},lm:{},vix:null,adr:null,pcr:{},mp:null,open:[],closed:[],psum:{},stats:{},counts:{},build:null,div:null,cand:{},
   /* cc#1242: the deck's own reads. mp stays the NIFTY max pain the old vitals tile used; mpB is
      the BANKNIFTY one the page never asked for, which is the whole of what 6055 saw. */
   mpB:null, oi:{}, piv:null};
@@ -329,8 +390,14 @@ async function loadAll(){
        to read /trades/paired, which is one row per TRADE (52), and counting those gave the
        wrong ALL and the wrong FUT. The paired endpoint is untouched and still serves every
        consumer that genuinely wants a trade-level row. */
-    async()=>{const t=await gj('/api/v10/trades/legs?limit=1000');D.closed=t.trades||[];D.psum=t.summary||{}},
-    async()=>{D.perf=await gj('/api/v10/performance')},
+    /* cc#1264: the SAME response now carries the per-segment stats The Record's strip draws, so
+       the strip and the list are two views of one payload and cannot disagree. That is why the
+       /api/v10/performance fetch below it is GONE rather than kept as a second opinion: it
+       aggregates over all of v10_trades with no exit_ts filter, so the first open position would
+       have put a live trade in the strip while the list beside it showed only closed ones. It is
+       still served, and the web dashboard still reads it; this page simply has no use for it. */
+    async()=>{const t=await gj('/api/v10/trades/legs?limit=1000');
+              D.closed=t.trades||[];D.psum=t.summary||{};D.stats=t.stats||{};D.counts=t.counts||{}},
     /* cc#1248: limit 5 -> 250. The endpoint returns TOP-N-BY-DAY-MOVE slices, so a SHORT_COVER
        symbol sitting mid-table was outside both slices and could never be bucketed. At 250 the two
        slices each cover the whole 208-symbol universe and their union is every row. This is a query
@@ -769,150 +836,197 @@ function uLabel(i){
 function uWrap(){ dkWrap('utrack'); uLabel(dkDots('utrack')); }
 function uPark(){ dkPark('utrack'); uLabel(dkDots('utrack')); }
 
-var PF_SEG = 'ALL';
-var PF_SEGS = ['ALL','NIFTY','BANKNIFTY','FUT','OPT'];
-function perfSeg(k){
-  var p = D.perf || {};
-  if (k === 'ALL') return {trades: p.total_trades, win_rate: p.win_rate,
-                           profit_factor: p.profit_factor, pnl: p.total_pnl};
-  if (k === 'NIFTY')     return (p.by_symbol || {})['NIFTY50']   || {};
-  if (k === 'BANKNIFTY') return (p.by_symbol || {})['BANKNIFTY'] || {};
-  return (p.by_leg || {})[k] || {};
+/* ══ cc#1264 · THE RECORD — the closed book and its stats, MERGED INTO ONE CARD ═════════════
+   This replaces two cards that had been telling one story badly. cc#1245 built a Closed list with
+   its own ALL/FUT/OPT chips; cc#1247 built a Performance card with its own ALL/NIFTY/BANKNIFTY/
+   FUT/OPT chips. Two chip rows, two selections, two subtitles — and nothing stopping the page from
+   showing OPTIONS stats above a list filtered to FUT. R2 makes them one card with one control.
+
+   ONE STATE, AND IT IS ONE VARIABLE. RC_SEG drives the chips, the stat strip, the trade list and
+   the subtitle together. There is no second selection to fall out of step with the first, which is
+   the structural version of the fix rather than the managed one: nothing has to be remembered to
+   keep them in sync, because there is only one thing to remember.
+
+   THE STRIP AND THE LIST READ THE SAME PAYLOAD. /api/v10/trades/legs returns the rows AND the
+   per-segment stats folded over exactly those rows, so a strip saying 43 trades sits above a list
+   holding 43. The old Performance card read /api/v10/performance, which cuts over ALL of
+   v10_trades with no exit_ts filter — the same numbers today only because nothing is open.
+
+   SEGMENT STATE IS PER PAGE-LOAD by construction, as before: RC_SEG is a module global set only by
+   a tap, so leaving and returning re-runs boot() and it is back to ALL.
+
+   THE DECK ID STAYS ctrack. It is the same deck doing the same job with different rows inside it,
+   so it keeps its DK entry, its dots and its scroll wrappers rather than acquiring a fourth
+   near-identical copy of the paging machinery. */
+var RC_SEGS  = ['ALL','NIFTY','BANKNIFTY','FUT','OPT'];
+var RC_SEG   = 'ALL';
+var RC_PER   = 5;
+var RC_PAGES = 0;
+
+/* cc#1263's rule, unchanged and now used by both halves of the card: the leg column classifies,
+   and nothing else does. NIFTY and BANKNIFTY are SYMBOL cuts and FUT/OPT are LEG cuts, so the two
+   pairs partition the same 95 rows two different ways — 49+46 and 52+43 both come to 95. */
+function rcLeg(t){ return String(t && t.leg || 'FUT').toUpperCase(); }
+function rcMatch(t, k){
+  if (k === 'NIFTY')     return t.symbol === 'NIFTY50';
+  if (k === 'BANKNIFTY') return t.symbol === 'BANKNIFTY';
+  if (k === 'FUT' || k === 'OPT') return rcLeg(t) === k;
+  return true;                                   /* ALL */
 }
-function perfNote(){
-  return 'LIVE PAPER · v10_trades' + (PF_SEG === 'ALL' ? '' : ' · ' + PF_SEG);
+function rcList(){ return (D.closed || []).filter(function(t){ return rcMatch(t, RC_SEG); }); }
+function rcStat(k){ return (D.stats || {})[k] || {}; }
+
+/* ── number faces, per R2 scope 6 ──────────────────────────────────────────────────────────
+   THE SIGN IS ALWAYS DRAWN ON A P&L, including a positive one. A bare "₹13,419" beside a bare
+   "₹5,762" makes the reader lean on the colour alone to tell a win from a loss, and colour is the
+   one channel that does not survive a screenshot, a colour-blind reader or a bright phone outdoors.
+   PRICES GET TWO DECIMALS AND en-IN GROUPING, which is why an option premium comes out 177.00 and
+   61.25 with no separator while an index price comes out 24,303.70 with one — the same rule
+   applied to numbers of different size, not two rules. */
+function rcMoney(v){
+  if (v == null) return '—';
+  var n = Number(v);
+  return (n < 0 ? '−' : '+') + '₹' + num(Math.abs(n));
 }
-function perfChips(){
-  return '<div class="clchips pfchips">' + PF_SEGS.map(function(k){
-    var n = perfSeg(k).trades;
-    return '<button class="rchip clchip' + (k === PF_SEG ? ' on' : '') + '" onclick="perfPick(\'' + k + '\')">'
+function rcBig(v){
+  if (v == null) return '—';
+  var n = Number(v);
+  return (n < 0 ? '−' : '+') + '₹' + fK(Math.abs(n));
+}
+function rcPrice(v){
+  if (v == null) return '—';
+  return Number(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+/* "19-Aug 15:15" -> "19-Aug". The journey line carries the DAY on each end; the minute belongs to
+   a trade detail, not to a five-row glance. */
+function rcDay(s){ return String(s || '').slice(0, 6); }
+
+function rcNote(){
+  /* the subtitle names the basis, always. cc#1190 shipped a card whose heading said ALL over
+     filtered numbers; a subtitle that does not move when the selection does is that same lie. */
+  return 'LIVE PAPER · CLOSED LEGS' + (RC_SEG === 'ALL' ? '' : ' · ' + RC_SEG);
+}
+
+function rcChips(){
+  /* counts come from the endpoint's own fold over the rows it shipped in the same response, so a
+     chip cannot disagree with the list behind it — the cc#1263 failure, made impossible rather
+     than fixed. A segment the payload does not carry shows an em-dash, never a 0. */
+  var c = D.counts || {};
+  return '<div class="clchips pfchips">' + RC_SEGS.map(function(k){
+    var n = c[k];
+    return '<button class="rchip clchip' + (k === RC_SEG ? ' on' : '') + '" onclick="rcPick(\'' + k + '\')">'
          + k + ' <span class="num">' + (n == null ? '—' : n) + '</span></button>';
   }).join('') + '</div>';
 }
-function perfBox(lb, val, colour){
+
+function rcBox(lb, val, colour){
   return '<div class="vital"><div class="lb">' + lb + '</div>'
        + '<div class="vv num"' + (colour ? ' style="color:' + colour + '"' : '') + '>' + val + '</div></div>';
 }
-function perfGrid(){
-  var d = perfSeg(PF_SEG);
-  var t  = (d.trades == null) ? '—' : d.trades;
-  var wr = (d.win_rate == null) ? '—' : d.win_rate + '%';
+function rcStrip(){
+  /* EM-DASH, NEVER A FABRICATED ZERO — cc#1247's rule, kept and extended to the P&L box. The
+     endpoint returns null for win rate and profit factor on an empty segment, but it returns a
+     REAL 0.0 for the sum, because the sum of nothing genuinely is zero. Printing "+₹0" under
+     TRADES 0 would still read as "this segment traded and broke even", so the P&L box follows the
+     trade count rather than the value: no trades, no number. */
+  var d   = rcStat(RC_SEG);
+  var t   = (d.trades == null) ? '—' : d.trades;
+  var wr  = (d.win_rate == null) ? '—' : d.win_rate + '%';
   var pfv = (d.profit_factor == null) ? '—' : Number(d.profit_factor).toFixed(2);
-  var pnl = (d.pnl == null) ? '—' : '₹' + fK(Number(d.pnl));
-  return '<div class="vitals pfgrid">'
-    + perfBox('TRADES', t)
-    + perfBox('WIN RATE', wr)
-    + perfBox('PROFIT FACTOR', pfv, d.profit_factor == null ? '' : (d.profit_factor >= 1 ? 'var(--volt)' : 'var(--heat)'))
-    + perfBox('NET P&amp;L', pnl, d.pnl == null ? '' : cx(Number(d.pnl)))
+  var pnl = d.trades ? rcBig(d.pnl) : '—';
+  return '<div class="vitals pfgrid rcstrip">'
+    + rcBox('TRADES', t)
+    + rcBox('WIN RATE', wr)
+    + rcBox('PROFIT F.', pfv,
+            d.profit_factor == null ? '' : (d.profit_factor >= 1 ? 'var(--volt)' : 'var(--heat)'))
+    + rcBox('NET P&amp;L', pnl, d.trades ? cx(Number(d.pnl)) : '')
     + '</div>';
 }
-/* the note re-renders with the grid — a subtitle still reading ALL over OPTIONS numbers is the
-   cc#1190 lie in a different costume. */
-function perfPick(k){
-  if (PF_SEGS.indexOf(k) < 0) return;
-  PF_SEG = k;
-  var host = document.getElementById('pfwrap'), note = document.getElementById('pfnote');
-  if (host) host.innerHTML = perfChips() + perfGrid();
-  if (note) note.textContent = perfNote();
-}
 
-var CL_FILTER = 'ALL';           /* ALL | FUT | OPT */
-var CL_PER = 5;
-
-/* cc#1263 · CLASSIFY ON THE LEG COLUMN, AND NOTHING ELSE.
-   The old test was `t.hedge`, which answers "is this trade HEDGED?" — a real question, and not
-   this one. It made FUT count the 9 UNHEDGED TRADES. The set was wrong too: D.closed read
-   /trades/paired, which returns one row per TRADE, so ALL counted 52 pairs where the truth is 95
-   legs. Both now come from /trades/legs, which returns closed v10_trades rows one per leg with the
-   leg column normalised server-side.
-   THE OLD NUMBERS WERE NEARLY RIGHT, WHICH IS WHY THIS SURVIVED: 52 pairs each hold exactly one
-   FUT leg and 43 of them carry a hedge, so OPT 43 was correct BY COINCIDENCE and 52 appeared in
-   both models meaning two different things — 52 pairs, 52 futures legs. Only FUT 9 looked wrong,
-   and only because the founder had the web list beside it. */
-function clLeg(t){ return String(t && t.leg || 'FUT').toUpperCase(); }
-function clList(){
-  var all = D.closed || [];
-  if (CL_FILTER === 'FUT') return all.filter(function(t){ return clLeg(t) === 'FUT'; });
-  if (CL_FILTER === 'OPT') return all.filter(function(t){ return clLeg(t) === 'OPT'; });
-  return all;
-}
-function clChips(){
-  var all = D.closed || [];
-  /* counted off the SAME array the rows render from, so a chip cannot disagree with what is
-     behind it — which is the failure this card exists to fix. */
-  var n = {ALL: all.length,
-           FUT: all.filter(function(t){ return clLeg(t) === 'FUT'; }).length,
-           OPT: all.filter(function(t){ return clLeg(t) === 'OPT'; }).length};
-  return '<div class="clchips">' + ['ALL','FUT','OPT'].map(function(k){
-    return '<button class="rchip clchip' + (k === CL_FILTER ? ' on' : '') + '" onclick="clPick(\'' + k + '\')">'
-         + k + ' <span class="num">' + n[k] + '</span></button>';
-  }).join('') + '</div>';
-}
-/* Re-render the CHIPS with the deck, not just the deck. cc#1190 shipped exactly this bug on the
-   results deck: the rows filtered correctly and the active chip never moved, so the screen showed
-   filtered rows under a highlighted ALL — working filter, lying page. */
-function clPick(k){
-  if (['ALL','FUT','OPT'].indexOf(k) < 0) return;
-  CL_FILTER = k;
-  var host = document.getElementById('clwrap');
-  if (!host) return;
-  host.innerHTML = clChips() + closedDeck();
-  dkPark('ctrack');
-}
-function clRow(t){
-  /* cc#1263 · A ROW IS A LEG NOW, so it reads that leg's OWN numbers. pnl not net_pnl: net was
-     the pair's result, and printing it on a hedge row would show the trade's total beside the
-     option's points. Side is the leg's own side too — a hedge sits opposite its future by
-     construction, so stamping the trade direction on it would state the reverse of what that leg
-     did. The label distinguishes the two at a glance: FUT, or the strike and type for an option. */
-  var pn = (t.pnl == null) ? null : Number(t.pnl);
-  /* cc#1263 · THE CHIP TAKES THE REASON, NOT THE AUDIT NOTE APPENDED TO IT. Several option legs
-     carry exit_reason like "SL [CC#746: WRITTEN-PE LABEL CORRECTED BUY->SELL; P&L UNCHANGED]" —
-     a provenance stamp from an old correction, written into the same column. That never showed
-     before because OPT legs were not rows; now that 43 of them are, the whole sentence would go
-     into a chip sized for three letters. The bracket and everything after it is dropped from the
-     LABEL only — nothing is edited in the data, and the outcome word is still the real one. */
-  var rsn = String(t.reason || 'EXIT').toUpperCase().split(' [')[0].trim() || 'EXIT';
-  var lbl = (rsn === 'TARGET') ? 'TGT' : rsn;
-  var side = (t.direction === 'SHORT') ? 'SHORT' : 'LONG';
-  return '<div class="clrow">'
-    + '<span class="cld num">' + esc(String(t.exit_ist || '').slice(0, 6)) + '</span>'
-    + '<b class="cls">' + esc(t.symbol) + ' <span class="cllg">' + esc(t.label || clLeg(t)) + '</span></b>'
-    + '<span class="chip ' + (side === 'SHORT' ? 'l' : 'w') + ' clside">' + (side === 'SHORT' ? 'S' : 'L') + '</span>'
-    + '<span class="clp num">' + (t.points != null ? sgn(Number(t.points), 0) : '—') + '</span>'
-    + '<span class="clv num" style="color:' + (pn != null ? cx(pn) : 'var(--muted)') + '">'
-    + (pn != null ? '₹' + num(pn) : '—') + '</span>'
-    + '<span class="chip ' + (rsn === 'SL' ? 'l' : rsn === 'TARGET' ? 'w' : 'mu') + ' clrsn">' + esc(lbl) + '</span>'
+/* ── the trade-book row, per R2 ────────────────────────────────────────────────────────────
+   A row is one LEG and reads as a JOURNEY: who traded, what it made, then where it opened and
+   where it closed. pnl not net_pnl — net is the pair's result, and printing it on a hedge row
+   would show the whole trade's money beside the option's own prices. Side is the leg's own side
+   too: a hedge sits opposite its future by construction, so stamping the trade direction on it
+   would state the reverse of what that leg actually did. */
+function rcRow(t){
+  var pn   = (t.pnl == null) ? null : Number(t.pnl);
+  /* cc#1263's rule, still needed: several option legs carry an exit_reason like
+     "SL [CC#746: WRITTEN-PE LABEL CORRECTED BUY->SELL; P&L UNCHANGED]" — a provenance stamp
+     written into the same column. The bracket and everything after it is dropped from the LABEL
+     only; nothing is edited in the data and the outcome word is still the real one. */
+  var rsn  = String(t.reason || 'EXIT').toUpperCase().split(' [')[0].trim() || 'EXIT';
+  var lbl  = (rsn === 'TARGET') ? 'TGT' : rsn;
+  var win  = (rsn === 'TARGET' || rsn === 'TGT');
+  var shrt = (t.direction === 'SHORT');
+  return '<div class="rctr">'
+    + '<div class="rctop">'
+    +   '<div class="rcwho">'
+    +     '<span class="rcsym">' + esc(t.symbol) + '</span>'
+    +     '<span class="rcleg">' + esc(t.label || rcLeg(t)) + '</span>'
+    +     '<span class="chip ' + (shrt ? 'l' : 'w') + ' rcside">' + (shrt ? 'S' : 'L') + '</span>'
+    +   '</div>'
+    +   '<div class="rcpnl num" style="color:' + (pn != null ? cx(pn) : 'var(--muted)') + '">'
+    +     rcMoney(pn) + '</div>'
+    + '</div>'
+    + '<div class="rcjr">'
+    +   '<div class="rclp"><span class="rck">OPEN</span>'
+    +     '<span class="rcd">' + esc(rcDay(t.entry_ist)) + '</span>'
+    +     '<span class="rcp num">' + rcPrice(t.entry_price) + '</span></div>'
+    +   '<div class="rcarrow">→</div>'
+    +   '<div class="rclp rcright"><span class="rck">CLOSE</span>'
+    +     '<span class="rcd">' + esc(rcDay(t.exit_ist)) + '</span>'
+    +     '<span class="rcp num">' + rcPrice(t.exit_price) + '</span></div>'
+    +   '<div class="rcexit"><span class="chip ' + (rsn === 'SL' ? 'l' : win ? 'w' : 'mu')
+    +     ' rcrsn">' + esc(lbl) + '</span></div>'
+    + '</div>'
     + '</div>';
 }
-function closedDeck(){
-  var rows = clList();
+
+function rcDeck(){
+  var rows = rcList();
   if (!rows.length){
+    /* HONEST EMPTY STATE: the deck is emptied rather than left holding the previous segment's
+       pages, and the line says which filter found nothing rather than implying the book is. */
     DK.ctrack.n = 0;
+    RC_PAGES = 0;
     return '<div class="unavail">No closed trades'
-         + (CL_FILTER === 'ALL' ? '.' : ' in this filter.') + '</div>';
+         + (RC_SEG === 'ALL' ? '.' : ' in ' + RC_SEG + '.') + '</div>';
   }
   var pages = [];
-  for (var i = 0; i < rows.length; i += CL_PER) pages.push(rows.slice(i, i + CL_PER));
+  for (var i = 0; i < rows.length; i += RC_PER) pages.push(rows.slice(i, i + RC_PER));
   DK.ctrack.n = pages.length;
-  CL_PAGES = pages.length;
+  RC_PAGES = pages.length;
   var set = pages.map(function(pg){
-    return '<div class="vpage"><div class="clpage">' + pg.map(clRow).join('') + '</div></div>';
+    return '<div class="vpage"><div class="rcpage">' + pg.map(rcRow).join('') + '</div></div>';
   }).join('');
   var dots = pages.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
-  /* A dot per page reads fine at 2 and is unreadable at 11, so the count carries the position and
-     the dots stay as the familiar affordance. Same reason the results deck prints "1 OF N". */
+  /* A dot per page reads fine at 2 and is unreadable at 19, so the count carries the position and
+     the dots stay as the familiar affordance. */
   return '<div class="vswipe"><div class="vswipe-t" id="ctrack" onscroll="cWrap()">'
        + set + set + set + '</div><div class="rpager"><div class="vdots" id="cdots">' + dots + '</div>'
        + '<span class="clpg" id="clpg">1 / ' + pages.length + '</span></div></div>';
 }
-var CL_PAGES = 0;
-function clLabel(i){
-  var el = document.getElementById('clpg');
-  if (el && CL_PAGES) el.textContent = ((i || 0) + 1) + ' / ' + CL_PAGES;
+
+/* Re-render the CHIPS and the STRIP with the deck, not just the deck. cc#1190 shipped exactly this
+   bug: the rows filtered correctly and the active chip never moved, so the screen showed filtered
+   rows under a highlighted ALL — working filter, lying page. Here the strip is in the same blast
+   radius, which is the whole point of merging the two cards. */
+function rcPick(k){
+  if (RC_SEGS.indexOf(k) < 0) return;
+  RC_SEG = k;
+  var host = document.getElementById('rcwrap'), note = document.getElementById('rcnote');
+  if (!host) return;
+  host.innerHTML = rcChips() + rcStrip() + rcDeck();
+  if (note) note.textContent = rcNote();
+  dkPark('ctrack');
 }
-function cWrap(){ dkWrap('ctrack'); clLabel(dkDots('ctrack')); }
-function cPark(){ dkPark('ctrack'); clLabel(dkDots('ctrack')); }
+function rcLabel(i){
+  var el = document.getElementById('clpg');
+  if (el && RC_PAGES) el.textContent = ((i || 0) + 1) + ' / ' + RC_PAGES;
+}
+function cWrap(){ dkWrap('ctrack'); rcLabel(dkDots('ctrack')); }
+function cPark(){ dkPark('ctrack'); rcLabel(dkDots('ctrack')); }
 
 function posSide(p){
   /* ONE place decides LONG/SHORT, reading `side` because that is the field the endpoint sends.
@@ -1020,21 +1134,12 @@ function render(){
   const openF=D.open, totO=openF.reduce((a,p)=>a+(Number(p.unrealised_pnl)||0),0);
   const openDeck=bookDeck(openF);
 
-  const cl=D.closed;
-  /* cc#1263 · net_pnl -> pnl, and this line would have shipped silently broken without a trace.
-     net_pnl is a PAIR's field: the futures leg plus its hedge. The closed book now holds LEGS,
-     which carry pnl and have no net_pnl at all — so Number(t.net_pnl) was about to be NaN on every
-     row, rendering WR 0% and all-time P&L Rs 0 while the list beside it looked perfectly healthy.
-     THE ALL-TIME TOTAL DOES NOT MOVE, and that is the check that matters: a pair's net IS the sum
-     of its legs, so summing 95 legs and summing 52 nets are the same arithmetic reaching the same
-     number. Verified against the table - Rs 155,051.75 both ways. The WIN RATE does move, because
-     it is now asking a different and narrower question: 95 legs judged one by one instead of 52
-     trades judged on their net. Both are honest; they are not the same statistic, and the change
-     is posted on the thread rather than left for someone to notice. */
-  const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.pnl)>0).length/cl.length):null;
-  const totC=cl.reduce((a,t)=>a+(Number(t.pnl)||0),0);
-
-  const pf=D.perf||{};
+  /* cc#1264: cl / wr / totC / pf are GONE with the two cards they fed. The Record's header carries
+     no numbers of its own — the stat strip is the header — so nothing here recomputes a win rate or
+     a total that the strip already serves from the endpoint. cc#1263's finding still holds and is
+     worth keeping written down: a pair's net IS the sum of its legs, so the all-time total is
+     Rs 155,051.75 whether it is summed over 95 legs or 52 pairs, while the WIN RATE legitimately
+     differs between the two because it asks a narrower question of a different set. */
   /* cc#1248: bl/bs/brow are gone with the two-column list they fed — buildupDeck() reads
      D.build directly and buckets by the signal the endpoint already computes. */
   const dv=(D.div&&D.div.rows||[]).slice(0,4);
@@ -1066,13 +1171,8 @@ function render(){
   </div>
   ${openDeck}
   <div class="card">
-    <div class="grp"><h3>Closed · ${cl.length}</h3>
-      <span class="note">${wr!=null?`<span class="chip w clwr">WR ${wr}%</span> `:''}<b class="num" style="color:${cx(totC)}">₹${fK(totC)}</b> all-time</span></div>
-    <div id="clwrap">${clChips()}${closedDeck()}</div>
-  </div>
-  <div class="card">
-    <div class="grp"><h3>Performance</h3><span class="note" id="pfnote">${perfNote()}</span></div>
-    <div id="pfwrap">${perfChips()}${perfGrid()}</div>
+    <div class="grp"><h3>The Record</h3><span class="note" id="rcnote">${rcNote()}</span></div>
+    <div id="rcwrap">${rcChips()}${rcStrip()}${rcDeck()}</div>
   </div>
 
   <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>

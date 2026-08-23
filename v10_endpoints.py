@@ -292,18 +292,65 @@ def closed_legs(symbol=None, limit=1000):
         })
     decided = [t for t in out if t["pnl"] is not None]
     wins = sum(1 for t in decided if t["win"])
+    seg = _segment_stats(out)
     return {
         "trades": out,
         "count": len(out),
         # Counts come from the SAME list the client renders, so a chip can never disagree with the
         # rows behind it — the failure this card exists to fix.
-        "counts": {"ALL": len(out),
-                   "FUT": sum(1 for t in out if t["leg"] == "FUT"),
-                   "OPT": sum(1 for t in out if t["leg"] == "OPT")},
+        "counts": {k: v["trades"] for k, v in seg.items()},
+        "stats": seg,
         "summary": {"closed": len(decided), "wins": wins, "losses": len(decided) - wins,
                     "win_rate": (round(100.0 * wins / len(decided), 1) if decided else None),
                     "total_pnl": (round(sum(t["pnl"] for t in decided), 2) if decided else None)},
     }
+
+
+# cc#1264 · THE FIVE SEGMENTS, in the order The Record draws them. NIFTY is the LABEL and NIFTY50
+# is the symbol in v10_trades; the map is here so the app never has to know that difference.
+_SEGMENTS = [
+    ("ALL",       lambda t: True),
+    ("NIFTY",     lambda t: t["symbol"] == "NIFTY50"),
+    ("BANKNIFTY", lambda t: t["symbol"] == "BANKNIFTY"),
+    ("FUT",       lambda t: t["leg"] == "FUT"),
+    ("OPT",       lambda t: t["leg"] == "OPT"),
+]
+
+
+def _segment_stats(rows):
+    """cc#1264 — one stat block per segment, struck over the SAME rows the list renders.
+
+    THE STRIP AND THE LIST CANNOT DISAGREE, BY CONSTRUCTION. The card's ONE STATE rule is that the
+    selected segment drives the stat strip and the trade list together. The obvious way to serve
+    the strip was /api/v10/performance, which already cuts by_symbol and by_leg — and today it even
+    returns the right numbers. It is still the wrong source: it aggregates over ALL of v10_trades
+    with no exit_ts filter, so the first open position would put a live trade in the strip while
+    the list beside it, which IS filtered, kept showing only closed ones. The strip would then be
+    counting a trade the list denies. Here the stats are folded over the exact list that ships in
+    the same response, so the two cannot drift apart whatever the table does later.
+
+    THE FORMULAS ARE NOT REDEFINED, THEY ARE IMPORTED. _cut_stats is cc#1247's, and win rate and
+    profit factor keep meaning what they already mean everywhere else. The card says the formulas
+    do not change, and the way to honour that is to call the same function rather than to write a
+    second copy of it that starts identical and drifts. Imported inside the function on purpose:
+    v10_st_ema pulls in pandas and numpy, and this router should not carry that at import time.
+
+    NULL, NEVER A FABRICATED ZERO — inherited from _cut_stats. A segment with no trades has no win
+    rate (0.0% would read as "lost every one") and a segment that never took a loss has no profit
+    factor (the denominator is zero, not small). Both come back None and the app draws an em-dash.
+    """
+    from v10_st_ema import _cut_stats
+
+    out = {}
+    for name, keep in _SEGMENTS:
+        sel = [t for t in rows if keep(t) and t["pnl"] is not None]
+        gp = sum(t["pnl"] for t in sel if t["pnl"] > 0)
+        gl = sum(t["pnl"] for t in sel if t["pnl"] < 0)
+        d = _cut_stats((name, len(sel), sum(1 for t in sel if t["pnl"] > 0),
+                        round(sum(t["pnl"] for t in sel), 2), gp, gl))
+        d["pnl"] = round(d["pnl"], 2)
+        out[name] = d
+    return out
 
 
 @router.get("/trades/legs")
