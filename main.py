@@ -287,6 +287,7 @@ _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 # the service-worker cache name still rotated. Same intent, opposite behaviour, and only visible in
 # production. Importing removes the possibility rather than re-stating the rule in two places.
 from pwa_endpoints import BUILD_ID as _BUILD_ID   # noqa: E402  (single source, see above)
+from pwa_endpoints import APP_THEME_RESOLVE_JS as _THEME_RESOLVE_JS   # noqa: E402  cc#1185 P10
 _BUILD_B = _BUILD_ID.encode()
 
 _MOBILE_HEAD = (
@@ -385,6 +386,12 @@ _MOBILE_APP_DARK = (
 _WEB_TOKENS_LINK = (
     b'<link rel="stylesheet" href="/static/scorr_web_tokens.css?v=' + _BUILD_B + b'">'
 )
+
+# cc#1185 P10: theme resolution, injected at the END of <head> so it runs after each page's own
+# inline boot and is the authority. The rule itself lives in ONE place (pwa_endpoints), not in nine
+# copies across eight pages and the appshell. It no-ops on any page whose <body> carries no
+# data-theme attribute, which is what keeps it off the web surfaces.
+_APP_THEME_RESOLVE = b"<script>" + _THEME_RESOLVE_JS.encode("utf-8") + b"</script>"
 
 _THEME_MOBILE_LINK = (
     b'<link rel="stylesheet" href="/static/theme_mobile.css?v=' + _BUILD_B + b'">'
@@ -582,7 +589,7 @@ async def auth_gate(request: Request, call_next):
                     # would have left previews/home_v2.html and previews/digest.html unstyled,
                     # which is the one visible way this change could have gone wrong.
                     if path.startswith("/m/") or _prev:
-                        _head = _head + _THEME_MOBILE_LINK
+                        _head = _head + _THEME_MOBILE_LINK + _APP_THEME_RESOLVE
                     if path.startswith("/m/"):
                         _head = _head + _MOBILE_APP_DARK   # cc#1064: dark-only surface, stamped honestly
                     body = body[:_at] + _head + body[_at:]

@@ -2335,6 +2335,63 @@ except Exception:
     SCORR_THEMES_CSS = ""
 
 
+# ── cc#1185 P10 · THEME RESOLUTION, ONE PLACE ────────────────────────────────────────────────
+# WHAT WAS WRONG. Eight app pages each carried their own copy of
+# `(t==='dark'||t==='goldnight')?t:'goldnight'` inline, plus a ninth in scorr_appshell.js. Nine
+# copies of one rule is nine chances for the list to drift, and the sprint that added a fourth
+# theme is exactly when that starts to hurt.
+#
+# THIS IS NOW THE ONE DEFINITION of which themes exist, which is default, and which name the
+# hidden preview accepts. main.py injects it at the end of <head> on /m/* and /preview/*, so it
+# runs AFTER each page's own inline boot and is authoritative.
+#
+# THE PER-PAGE BOOTS ARE DELIBERATELY LEFT IN PLACE. They set the attribute before first paint,
+# which is what stops the flash, and this script cannot replace that job — it has to wait for
+# document.body to exist. Removing them would also mean trusting, unverified, that the middleware
+# injection reaches all eight pages; this seat cannot run the app to check (scorr.in is
+# egress-blocked and DATABASE_URL is unset), and eight live pages is not a thing to guess at.
+# So: they are the before-paint fallback, this is the authority, and consolidating them is a
+# separate card that needs a running app.
+#
+# THE PREVIEW IS HIDDEN AND NEVER STICKS. `?theme=aqua_white` applies for that page load only. It
+# is never written to localStorage, it appears in no UI, and a reload without the parameter is
+# back to goldnight. That is the card's invariant, enforced by there being no write path at all
+# rather than by a flag someone could flip.
+#
+# IT DOES NOTHING ON A PAGE WITHOUT THE THEME LAYER. If <body> carries no data-theme attribute,
+# this returns untouched. Setting one would ACTIVATE the theme blocks on a web page that was never
+# built for them, which is a visible break, so the guard is the first thing it checks.
+APP_THEME_RESOLVE_JS = """(function(){
+  var ALLOWED={goldnight:1,dark:1};
+  var DEFAULT='goldnight';
+  var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite'};
+  function stored(){try{return localStorage.getItem('scorr_theme');}catch(e){return null;}}
+  function previewed(){
+    try{var m=/[?&]theme=([\\w-]+)/.exec(location.search);
+        return m?(PREVIEW[m[1].toLowerCase()]||null):null;}catch(e){return null;}
+  }
+  function resolve(){
+    var q=previewed();
+    if(q)return q;
+    var t=stored();
+    return (t&&ALLOWED[t])?t:DEFAULT;
+  }
+  function apply(){
+    var b=document.body;
+    if(!b||!b.hasAttribute('data-theme'))return;
+    b.setAttribute('data-theme',resolve());
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);
+  else apply();
+  /* Applied twice on purpose. scorr_appshell.js writes the same attribute from its own switcher
+     wiring, and the two run close enough together that the order is not guaranteed. In the normal
+     case both writes are the same value so the second is invisible; in the preview case the load
+     write is what makes the preview survive. */
+  window.addEventListener('load',apply);
+  window.SCORR_THEME={allowed:ALLOWED,def:DEFAULT,preview:PREVIEW,resolve:resolve};
+})();"""
+
+
 @router.get("/static/scorr_themes.css")
 def pwa_scorr_themes_css():
     return Response(SCORR_THEMES_CSS, media_type="text/css", headers=_CACHE_1D)
