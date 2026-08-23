@@ -111,13 +111,17 @@ class _Skip:
     THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". Of 102 sites, 93 now
     carry a token and 9 do not. An unknown reason grades amber, never green.
 
-    WHAT THE LAST 9 HAVE IN COMMON is that the guard cannot say WHICH condition fired. Seven are
-    `A or B` where A and B are different families — `_eod_ran_today == today or _eod_running` is
+    WHAT THE LAST 5 HAVE IN COMMON is that the guard cannot say WHICH condition fired. The four
+    `A or B` guards that mixed two families — `_eod_ran_today == today or _eod_running` is
     already_ran OR already_running, and one of those is healthy while the other is how a wedged
-    job looks from outside. Labelling the pair with either token would state something the code
-    does not know. They can be split into two ifs, which changes nothing about WHETHER a job
-    skips, but that is a deliberate edit to job control flow and belongs on its own card rather
-    than folded into a labelling pass. The remaining two do not sit directly under an `if` at all.
+    job looks from outside — were SPLIT under cc#1269 into two consecutive ifs, each carrying its
+    own token. The halves are copied verbatim and `or` short-circuits left to right, so the same
+    tick that skipped before still skips; only the naming changed.
+
+    The five left are judgement calls rather than mechanics: a 5-minute debounce, a "nothing was
+    released" no-op, a mixed flag-and-clock arming test, and two returns that do not sit directly
+    under an `if` at all. Each needs reading in context, and until then an unknown reason grades
+    amber, never green.
 
     HOW THE 63 WERE PICKED — structurally, never by eye. An ast walk finds the nearest enclosing
     `if` for each `return`, so the token comes from the guard that actually produced the skip and
@@ -1482,7 +1486,8 @@ def _bg_qsr_exits():
 def _bg_v8_eod():
     global _eod_running, _eod_ran_today
     today = _ist_now().date()
-    if _eod_ran_today == today or _eod_running: return _SKIPPED
+    if _eod_ran_today == today: return _Skip.already_ran()
+    if _eod_running: return _Skip.already_running()
     _eod_running = True
     try:
         import v8_engine
@@ -2956,7 +2961,8 @@ def _bg_qb_eod():
     # runs the scheduled rebalance (exits + residual + advance next_rebalance + log). Trading-day guarded.
     global _qb_eod_ran_today, _qb_eod_running
     today = _ist_now().date()
-    if _qb_eod_ran_today == today or _qb_eod_running: return _SKIPPED
+    if _qb_eod_ran_today == today: return _Skip.already_ran()
+    if _qb_eod_running: return _Skip.already_running()
     if not _is_trading_day(today): return _Skip.not_trading_day()
     _qb_eod_running = True
     try:
@@ -4116,8 +4122,10 @@ def _bg_v9_paper_mtm():
     frozen at entry for a month. Day-locked; trading days only."""
     global _v9_mtm_ran_today
     today = datetime.now(IST).date()
-    if _v9_mtm_ran_today == today or not _is_trading_day(today):
-        return _SKIPPED
+    if _v9_mtm_ran_today == today:
+        return _Skip.already_ran()
+    if not _is_trading_day(today):
+        return _Skip.not_trading_day()
     try:
         import v9_paper_engine
         res = v9_paper_engine.mark_to_market()
@@ -4146,8 +4154,10 @@ def _bg_shareholding_quarterly():
     if now_ist.month not in (1, 4, 7, 10) or now_ist.day < 25:
         return _Skip.outside_window()
     today = now_ist.date()
-    if _shareholding_q_ran_on == today or _shareholding_q_running:
-        return _SKIPPED
+    if _shareholding_q_ran_on == today:
+        return _Skip.already_ran()
+    if _shareholding_q_running:
+        return _Skip.already_running()
     _shareholding_q_running = True
     try:
         import fundamentals_scraper
