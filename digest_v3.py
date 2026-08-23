@@ -102,6 +102,60 @@ def market_state(now: datetime) -> Dict[str, Any]:
     return {"state": "CLOSED", "label": "CLOSED", "mins_to_open": None}
 
 
+# ── cc#1228 · FRESHNESS, NOT A LITERAL ───────────────────────────────────────────────────────
+# WHAT WAS WRONG. The ladders section returned `"tier": "LIVE"` as a hardcoded string, and each
+# index flipped its own tier to LIVE the moment ANY intraday_prices row existed for it — with no
+# test of how old that row was. On a Sunday the newest row is Friday's 15:30 close, so the card
+# showed a green LIVE pill beside an honest "as of 21 Aug, 15:30". The as-of line was right and
+# the badge contradicted it.
+#
+# THE NAIVE-COLUMN TRAP, which is the whole reason this is a function and not an inline compare.
+# intraday_prices.ts is `timestamp WITHOUT time zone` and its values are IST WALL CLOCK — the
+# newest NIFTY50 row reads 2026-08-21 15:30:00, a real NSE close. Comparing that against a UTC
+# now() is 330 minutes wrong, which is exactly the mistake cc#1218 was filed over. So the compare
+# is done against _ist_now() with its tzinfo dropped: naive IST on both sides, one convention.
+#
+# THE VOCABULARY IS BORROWED, NOT INVENTED. The V8 header already says NSE CLOSED and Frozen
+# 15:20, so this returns CLOSED and FROZEN and adds no third word.
+#   LIVE   — the tick is from TODAY'S session and the market is OPEN or in the closing auction
+#   FROZEN — the tick is from today's session but the bell has gone
+#   CLOSED — the tick is from an earlier session: weekend, holiday, or simply stale
+#   EOD    — there is no intraday tick at all, only a daily close. That was already honest.
+def freshness_tier(as_of: Optional[str], now: Optional[datetime] = None) -> str:
+    """One rule, used by every ladder pill and by the section header. See the note above."""
+    if not as_of:
+        return "STATIC"
+    now = now or _ist_now()
+    naive_now = now.replace(tzinfo=None)
+    txt = str(as_of).strip()
+    try:
+        if len(txt) <= 10:
+            # A DATE, so it came from raw_prices: a daily close, and EOD is the honest word.
+            # PARSED, not measured by length — "not a date" is also ten characters, and returning
+            # EOD for it would be the same generous default this whole function exists to remove.
+            datetime.strptime(txt, "%Y-%m-%d")
+            return "EOD"
+        stamp = datetime.fromisoformat(txt.replace("Z", "")[:26])
+        if stamp.tzinfo is not None:            # defensive: normalise anything aware into IST
+            stamp = stamp.astimezone(IST).replace(tzinfo=None)
+    except Exception:
+        return "STATIC"                         # unparseable is not a licence to claim LIVE
+    if stamp.date() != naive_now.date():
+        return "CLOSED"
+    return "LIVE" if market_state(now)["state"] in ("OPEN", "CAS") else "FROZEN"
+
+
+_TIER_RANK = {"LIVE": 4, "FROZEN": 3, "EOD": 2, "CLOSED": 1, "STATIC": 0}
+
+
+def _section_tier(tiers) -> str:
+    """The section pill is the FRESHEST of its cards, never a literal. Freshest and not stalest on
+    purpose: the header answers "is anything on this section live", and a reader who sees LIVE then
+    reads each card's own pill to see which."""
+    best = max(tiers, key=lambda t: _TIER_RANK.get(t, 0), default=None)
+    return best or "STATIC"
+
+
 # ── 01 GLOBAL TAPE — reuse the cc#842 component, never a second implementation ────────────────
 def _global_tape(cur) -> Dict[str, Any]:
     try:
@@ -151,7 +205,9 @@ def _ladders(cur) -> Dict[str, Any]:
                        ORDER BY ts DESC LIMIT 1""", (sym, not_fut()))
         iv = cur.fetchone()
         if iv and iv[0] is not None:
-            cmp_v, as_of, tier = _f(iv[0]), str(iv[1]), "LIVE"
+            # cc#1228: the tick's AGE decides the badge, not the mere existence of a row.
+            cmp_v, as_of = _f(iv[0]), str(iv[1])
+            tier = freshness_tier(as_of)
         if not p:
             out.append({"symbol": sym, "cmp": cmp_v, "as_of": as_of, "tier": tier,
                         "rungs": [], "reason": "no stored pivots"})
@@ -174,7 +230,9 @@ def _ladders(cur) -> Dict[str, Any]:
             if pp and pp["dist_pct"] is not None:
                 side = "above" if l["cmp"] > pp["value"] else "below"
                 reads.append(f"{l['symbol']} {side} PP by {abs(pp['dist_pct']):.2f}%")
-    return {"indexes": out, "tier": "LIVE", "read": ("; ".join(reads) if reads else
+    # cc#1228: was a hardcoded "LIVE". Now the freshest of the cards it is summarising.
+    return {"indexes": out, "tier": _section_tier([l.get("tier") for l in out]),
+            "read": ("; ".join(reads) if reads else
             "No pivot ladder available — v8_paper_pivots has no recent row for these indexes.")}
 
 

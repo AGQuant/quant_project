@@ -372,7 +372,11 @@ function pc(v){ if(v==null) return '<span class="flat">—</span>';
 function pcInv(v,inv){ if(v==null) return '<span class="flat">—</span>';
   var eff = inv ? -v : v, c = eff>0?'pos':(eff<0?'neg':'flat');
   return '<span class="'+c+'">'+(v>=0?'+':'')+Number(v).toFixed(2)+'%</span>'; }
-function badge(t){ var m={LIVE:'b-live',EOD:'b-eod',STATIC:'b-static'};
+/* cc#1228: FROZEN and CLOSED are real states now, not unknowns falling through to b-static.
+   FROZEN is a real reading that has stopped moving, so it takes the same cyan as EOD. CLOSED is
+   grey. The green dot stays exclusive to LIVE — it is the one mark that claims the number is
+   moving, and nothing else may wear it. */
+function badge(t){ var m={LIVE:'b-live',EOD:'b-eod',FROZEN:'b-eod',CLOSED:'b-static',STATIC:'b-static'};
   return '<span class="badge '+(m[t]||'b-static')+'">'+(t==='LIVE'?'<span class="dot"></span>':'')+t+'</span>'; }
 function tIST(iso){ if(!iso) return '—';
   var s=String(iso).replace(' ','T'); var d=new Date(s.length<=10?s+'T00:00:00':s);
