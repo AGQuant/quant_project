@@ -1013,7 +1013,12 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 </div>
 
 <script>
-var TREND = { open: null };   /* which chip popup is open: 'adr' | 'pcr' | 'vix' */
+/* cc#1232 · THE POPOUT BELONGS TO ONE CARD, AND NOW SAYS WHICH. `open` was the whole state, so
+   nothing in it recorded that the chart lives inside hero card 0 — it just happened to, because
+   #chiptrend is markup inside that card. `card` makes the ownership explicit, and heroDots() below
+   uses it to close the popout when the deck settles on any other face. A second expandable card
+   added later declares its own index rather than inheriting this one by accident. */
+var TREND = { open: null, card: 0 };   /* which chip popup is open: 'adr' | 'pcr' | 'vix', and whose */
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -3166,6 +3171,15 @@ function heroDots(){
   Array.prototype.forEach.call(dots.children, function(el, j){
     el.className = (j === i ? 'on' : '');
   });
+  /* cc#1232 · LEAVING THE CARD CLOSES ITS POPOUT, and this is also what removes the tall empty
+     body the founder photographed on the next card. #heroTrack is align-items:stretch, so the row
+     is as tall as its tallest face: an expanded chart grew card 0, and card 1 — which has no
+     chart and nothing to fill the space — stretched to match and arrived as a mostly empty box.
+     Collapsing on the way out means the row is back to its natural height before the next face is
+     read, so the symptom goes with the cause rather than being styled around.
+     Guarded on the index so this only fires when the deck has actually settled on another card;
+     the gesture itself is untouched, this only reacts to where it ended up. */
+  if (TREND.open && i !== TREND.card) togTrend(null, TREND.open);
 }
 
 /* pivots ride alongside the main call — the deck renders either way, and a pivot failure costs
