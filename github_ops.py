@@ -1,8 +1,14 @@
+import functools
+import logging
 import os
 import base64
+import traceback
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Header
+from fastapi.responses import JSONResponse
 from typing import Optional
+
+log = logging.getLogger("github_ops")
 
 # ── GitHub Ops router ───────────────────────────────────────────────
 # Extracted from main.py (File 5/5 split). Self-contained: reads env
@@ -16,6 +22,55 @@ DEPLOY_GUARD = os.getenv("DEPLOY_GUARD", "false").lower() == "true"
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 router = APIRouter()
+
+
+# ── cc#1249 · FAIL-CLOSED: AN EMPTY BODY IS ITSELF A DEFECT ─────────────────────────────────────
+# All four github tools went dark together and every one of them reported the SAME thing to the
+# caller: "Expecting value: line 1 column 1 (char 0)". That is not an error message, it is json
+# parsing failing on an empty string, and it says nothing about what actually broke. The chain is:
+# an exception that is not an HTTPException escapes the handler -> FastAPI returns a 500 whose body
+# is plain text, not JSON -> mcp_dispatch calls r.json() on it with no status check -> the MCP layer
+# surfaces the parse error and the real cause never leaves the server.
+#
+# So the first fix is not a fix for the outage, it is a fix for the BLINDNESS. Every handler now
+# answers in JSON whatever happens, naming the exception type, its message and the traceback's last
+# frame. A tool that fails should say why in the same breath.
+#
+# HTTPException is deliberately re-raised untouched: FastAPI already renders those as JSON, they
+# carry a deliberate status code, and wrapping them would flatten 403/404/422 into one 500.
+def _json_errors(fn):
+    @functools.wraps(fn)
+    async def wrapper(*a, **kw):
+        try:
+            return await fn(*a, **kw)
+        except HTTPException:
+            raise
+        except Exception as e:
+            tb = traceback.extract_tb(e.__traceback__)
+            where = ("%s:%s in %s" % (os.path.basename(tb[-1].filename), tb[-1].lineno, tb[-1].name)
+                     if tb else "unknown")
+            log.exception("github_ops.%s failed", fn.__name__)
+            detail = str(e)[:400]
+            # httpx raise_for_status() hides the response body, which for the GitHub API is where
+            # the actual reason lives ("Bad credentials", "API rate limit exceeded", ...). Dig it
+            # out rather than reporting only the status line.
+            gh_status = gh_body = None
+            resp = getattr(e, "response", None)
+            if resp is not None:
+                gh_status = getattr(resp, "status_code", None)
+                try:
+                    gh_body = resp.text[:300]
+                except Exception:
+                    gh_body = None
+            return JSONResponse(status_code=500, content={
+                "status": "error", "tool": fn.__name__, "error_type": type(e).__name__,
+                "error": detail, "at": where,
+                "github_status": gh_status, "github_body": gh_body,
+                "note": "cc#1249 fail-closed wrapper: the handler raised and this JSON is the "
+                        "report. Before this existed the caller got an empty body and the reason "
+                        "was lost on the server.",
+            })
+    return wrapper
 
 def _gh_headers():
     if not GITHUB_TOKEN: raise HTTPException(500,"GITHUB_TOKEN not configured")
@@ -62,6 +117,7 @@ async def _gh_list_tree(path_prefix=""):
         return [{"name":x["name"],"path":x["path"],"type":x["type"],"size":x.get("size",0)} for x in data]
 
 @router.get("/api/admin/github_read")
+@_json_errors
 async def github_read(filepath: str, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
@@ -70,6 +126,7 @@ async def github_read(filepath: str, x_admin_token: Optional[str] = Header(None)
     return {"filepath":filepath,"size":info["size"],"sha":info["sha"],"content":info["content"],"lines":info["content"].count("\n")+1}
 
 @router.get("/api/admin/github_list")
+@_json_errors
 async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
@@ -77,6 +134,7 @@ async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None
     return {"path":path or "/","items":files,"count":len(files)}
 
 @router.post("/api/admin/github_push")
+@_json_errors
 async def github_push(req: Request, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
@@ -116,6 +174,7 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
             "old_size":existing["size"],"new_size":len(new_content),"theme_gate":theme_note}
 
 @router.post("/api/admin/github_delete")
+@_json_errors
 async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")

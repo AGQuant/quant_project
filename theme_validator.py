@@ -219,10 +219,23 @@ def validate(paths=None):
             "ok": not any(not f["ok"] for f in files)}
 
 
+# cc#1249 scope 3 · DESIGN REFS ARE EXEMPT, BY POLICY, NOT BY ACCIDENT.
+# A design ref is a self-contained artboard: it declares its own local token block and writes raw
+# hex on purpose, because it has to render standalone in a browser with no app stylesheet behind
+# it. scorr_digest_results_R1 scores 51 raw declarations and every one of them is correct. Judging
+# refs by the app's ratchet would either block a founder-approved ref or force it to be filed with
+# an override flag, and both of those teach people to route around the gate. They are logged as
+# exempt rather than silently skipped, so the decision is visible in the response.
+EXEMPT_PREFIXES = ("design_refs/", "previews/")
+
+
 def gate(path, content):
     """The push hook. Returns (allowed, message). Only themed surfaces with a baseline are judged;
     everything else passes untouched, because a gate that opines on files it was never given a
     number for is a gate people learn to ignore."""
+    if path.startswith(EXEMPT_PREFIXES):
+        return True, ("THEME_GATE_EXEMPT: %s is a design ref / preview — local token blocks and raw "
+                      "hex are deliberate there, so the app ratchet does not apply." % path)
     if not (path.endswith(".css") or path.endswith(".html")):
         return True, None
     r = check_file(path, content)

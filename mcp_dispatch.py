@@ -174,6 +174,31 @@ def _blackout_rows_blocking(sym):
         return cur.fetchall()
 
 
+async def _http_json(client, method, url, tool, **kw):
+    """cc#1249 — call the app and ALWAYS come back with a dict, never a parse error.
+
+    A tool that fails should say why in the same breath. Three outcomes and all three are named:
+    the request itself failed (no response at all), the body would not parse as JSON, or it parsed
+    and is returned untouched. The body snippet is capped because a 500 page can be an entire HTML
+    document and the useful part is at the front.
+    """
+    try:
+        r = await client.request(method, url, **kw)
+    except Exception as e:
+        return {"error": f"{tool}: request failed before any response",
+                "error_type": type(e).__name__, "detail": str(e)[:300], "url": url}
+    try:
+        return r.json()
+    except Exception as e:
+        return {"error": f"{tool}: response was not JSON", "error_type": type(e).__name__,
+                "http_status": r.status_code,
+                "content_type": r.headers.get("content-type"),
+                "body_snippet": (r.text or "")[:400],
+                "body_len": len(r.text or ""),
+                "note": "cc#1249: an empty or non-JSON body is itself a defect — this names it "
+                        "instead of surfacing a json parse error with no context."}
+
+
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
         h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
@@ -260,10 +285,17 @@ async def _call_tool(name, args):
             sym = args["symbol"].upper()
             rows = await asyncio.to_thread(_blackout_rows_blocking, sym)   # cc#879: off the loop
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
-        elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers=h); return r.json()
-        elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path","")}, headers=h); return r.json()
-        elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers=h); return r.json()
-        elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers=h); return r.json()
+        # cc#1249: these four went dark together and each reported only
+        # "Expecting value: line 1 column 1 (char 0)" — json failing on an empty string, which tells
+        # the caller nothing. r.json() was called with no status check, so any non-JSON body (a
+        # FastAPI plain-text 500, a proxy error page, an empty response) became that parse error and
+        # the real cause never left the server. _http_json reports the status and a body snippet
+        # instead. github_ops now also answers in JSON on its own side; this is the second half of
+        # the same contract, for the cases the server never got to answer at all.
+        elif name == "github_read": return await _http_json(client, "GET", f"{BASE_URL}/api/admin/github_read", name, params={"filepath": args["filepath"]}, headers=h)
+        elif name == "github_list": return await _http_json(client, "GET", f"{BASE_URL}/api/admin/github_list", name, params={"path": args.get("path","")}, headers=h)
+        elif name == "github_push": return await _http_json(client, "POST", f"{BASE_URL}/api/admin/github_push", name, json=args, headers=h)
+        elif name == "github_delete": return await _http_json(client, "POST", f"{BASE_URL}/api/admin/github_delete", name, json=args, headers=h)
         elif name == "v8_market_mood": r = await client.get(f"{BASE_URL}/api/v8/market_mood"); return r.json()
         elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit",50)}); return r.json()
         elif name == "v8_filter_config": r = await client.get(f"{BASE_URL}/api/v8/filter_config/{args['basket']}"); return r.json()
