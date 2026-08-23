@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="goldnight">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESIGN REF — Futures Buildup Deck R1</title>
+<style>
+  :root{
+    --field:#0B0B0D; --card:#131318; --row:#18181F;
+    --chalk:#F2F0EA; --chalk-dim:#9A9890;
+    --gold:#C9A227; --gold-soft:#8A712B;
+    --grn:#3DDC84; --red:#FF5D73; --amber:#F5B94A; --cyan:#5CC8FF;
+    --line:#26262E;
+    --mono:'JetBrains Mono','Roboto Mono',monospace;
+    --disp:'Archivo Black','Arial Black',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{background:#000;color:var(--chalk);font-family:var(--mono);display:flex;justify-content:center;padding:24px 0}
+  .phone{width:390px;background:var(--field);padding:16px 14px 28px}
+  .ref-note{font-size:10px;color:var(--chalk-dim);letter-spacing:.08em;margin-bottom:12px;line-height:1.5}
+
+  .deck-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 12px 12px;position:relative;overflow:hidden}
+  .deck-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,var(--gold),transparent 70%)}
+
+  .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+  .hd .t{font-family:var(--disp);font-size:16px}
+  .hd .asof{font-size:9px;color:var(--chalk-dim);letter-spacing:.1em}
+
+  /* state title strip — which of the 4 buildup cards this is */
+  .state{display:flex;align-items:baseline;gap:8px;margin:8px 0 10px}
+  .state .badge{font-family:var(--disp);font-size:12px;letter-spacing:.05em;padding:4px 10px 4px 13px;
+      clip-path:polygon(6px 0,100% 0,100% 100%,0 100%);border-radius:3px}
+  .state .badge.long{background:rgba(61,220,132,.14);color:var(--grn)}
+  .state .sub{font-size:9px;color:var(--chalk-dim);letter-spacing:.08em}
+
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{font-size:8.5px;color:var(--chalk-dim);letter-spacing:.09em;text-align:right;padding:4px 4px;border-bottom:1px solid var(--line);font-weight:400}
+  th:first-child, td:first-child{text-align:left;padding-left:2px}
+  td{padding:8px 4px;text-align:right;border-bottom:1px solid rgba(38,38,46,.5)}
+  tr:last-child td{border-bottom:none}
+  td.sym{font-weight:700;letter-spacing:.02em}
+  .up{color:var(--grn)} .dn{color:var(--red)} .am{color:var(--amber)}
+
+  .pager{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px}
+  .dot{width:5px;height:5px;border-radius:3px;background:var(--line)}
+  .dot.on{width:16px;background:var(--gold)}
+  .pager .lbl{font-size:9px;color:var(--chalk-dim);letter-spacing:.12em;margin-left:8px}
+
+  .swipe-hint{margin-top:18px;font-size:9px;color:var(--chalk-dim);letter-spacing:.08em;text-align:center}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="ref-note">
+    DESIGN REF · FUTURES BUILDUP DECK · R1 · GOLD NIGHT<br>
+    Card 1 of 4 shown (LONG BUILDUP). Card order locked by founder: 1 LONG BUILDUP (green) · 2 SHORT COVERING (green) ·<br>
+    3 SHORT BUILDUP (red) · 4 LONG UNWINDING (red). Cards 2–4 identical anatomy.<br>
+    Symbols real from 23-Aug top movers; OI/VOL/BASIS values are layout samples.<br>
+    Fut ⇄ Equity Divergence card: DROPPED per founder order.
+  </div>
+
+  <div class="deck-card">
+    <div class="hd">
+      <div class="t">Futures Buildup</div>
+      <div class="asof">LIVE 5-MIN · 15:30 IST</div>
+    </div>
+
+    <div class="state">
+      <div class="badge long">▲ LONG BUILDUP</div>
+      <div class="sub">PRICE UP · OI UP</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>SYMBOL</th><th>FUT</th><th>DAY%</th><th>OI Δ%</th><th>VOL×</th><th>BASIS Δ</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="sym">MCX</td><td>9,412</td><td class="up">+5.82</td><td class="up">+11.4</td><td class="am">3.1×</td><td class="up">+14.2</td></tr>
+        <tr><td class="sym">GLENMARK</td><td>2,148</td><td class="up">+4.31</td><td class="up">+8.7</td><td class="am">2.4×</td><td class="up">+6.8</td></tr>
+        <tr><td class="sym">MUTHOOTFIN</td><td>2,391</td><td class="up">+4.02</td><td class="up">+6.2</td><td>1.8×</td><td class="up">+4.1</td></tr>
+        <tr><td class="sym">DIXON</td><td>17,240</td><td class="up">+2.94</td><td class="up">+5.5</td><td>1.6×</td><td class="up">+9.6</td></tr>
+        <tr><td class="sym">KAYNES</td><td>6,882</td><td class="up">+2.61</td><td class="up">+4.9</td><td>1.4×</td><td class="dn">-1.2</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pager">
+      <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="lbl">1 OF 4 · LONG BUILDUP</div>
+    </div>
+  </div>
+
+  <div class="swipe-hint">← swipe order: SHORT COVERING · SHORT BUILDUP · LONG UNWINDING →</div>
+</div>
+</body>
+</html>
