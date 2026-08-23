@@ -206,6 +206,9 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* SIZED TO THE TEXT. The founder saw oversized half-empty boxes; that was the cc#1244 direction
    bug emptying them, but these are also given padding that fits their own label rather than a
    fixed width, so SL, TGT and FLIP each come out at their own size. */
+/* cc#1263: the leg tag beside the symbol — FUT, or 24300 PE. Muted and small so the symbol
+   still leads the row; it is a qualifier, not a second headline. */
+.cllg{font-family:'JetBrains Mono';font-size:var(--type-85);color:var(--muted);font-weight:400}
 .clside,.clrsn,.clwr{font-size:var(--type-9);padding:var(--space-2) var(--space-6);flex:none}
 .clside{width:auto;min-width:0}
 .clrsn{margin-left:var(--space-4)}
@@ -322,7 +325,11 @@ async function loadAll(){
        surfaces cannot print different pivots for the same session. */
     async()=>{D.piv=await gj('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY').catch(()=>null)},
     async()=>{const p=await gj('/api/v10/positions');D.open=p.open_positions||p.rows||[]},
-    async()=>{const t=await gj('/api/v10/trades/paired?limit=200');D.closed=t.trades||[];D.psum=t.summary||{}},
+    /* cc#1263: the closed book reads /trades/legs — one row per closed LEG, 95 today. It used
+       to read /trades/paired, which is one row per TRADE (52), and counting those gave the
+       wrong ALL and the wrong FUT. The paired endpoint is untouched and still serves every
+       consumer that genuinely wants a trade-level row. */
+    async()=>{const t=await gj('/api/v10/trades/legs?limit=1000');D.closed=t.trades||[];D.psum=t.summary||{}},
     async()=>{D.perf=await gj('/api/v10/performance')},
     /* cc#1248: limit 5 -> 250. The endpoint returns TOP-N-BY-DAY-MOVE slices, so a SHORT_COVER
        symbol sitting mid-table was outside both slices and could never be bucketed. At 250 the two
@@ -812,17 +819,30 @@ function perfPick(k){
 var CL_FILTER = 'ALL';           /* ALL | FUT | OPT */
 var CL_PER = 5;
 
+/* cc#1263 · CLASSIFY ON THE LEG COLUMN, AND NOTHING ELSE.
+   The old test was `t.hedge`, which answers "is this trade HEDGED?" — a real question, and not
+   this one. It made FUT count the 9 UNHEDGED TRADES. The set was wrong too: D.closed read
+   /trades/paired, which returns one row per TRADE, so ALL counted 52 pairs where the truth is 95
+   legs. Both now come from /trades/legs, which returns closed v10_trades rows one per leg with the
+   leg column normalised server-side.
+   THE OLD NUMBERS WERE NEARLY RIGHT, WHICH IS WHY THIS SURVIVED: 52 pairs each hold exactly one
+   FUT leg and 43 of them carry a hedge, so OPT 43 was correct BY COINCIDENCE and 52 appeared in
+   both models meaning two different things — 52 pairs, 52 futures legs. Only FUT 9 looked wrong,
+   and only because the founder had the web list beside it. */
+function clLeg(t){ return String(t && t.leg || 'FUT').toUpperCase(); }
 function clList(){
   var all = D.closed || [];
-  if (CL_FILTER === 'FUT') return all.filter(function(t){ return !t.hedge; });
-  if (CL_FILTER === 'OPT') return all.filter(function(t){ return !!t.hedge; });
+  if (CL_FILTER === 'FUT') return all.filter(function(t){ return clLeg(t) === 'FUT'; });
+  if (CL_FILTER === 'OPT') return all.filter(function(t){ return clLeg(t) === 'OPT'; });
   return all;
 }
 function clChips(){
   var all = D.closed || [];
+  /* counted off the SAME array the rows render from, so a chip cannot disagree with what is
+     behind it — which is the failure this card exists to fix. */
   var n = {ALL: all.length,
-           FUT: all.filter(function(t){ return !t.hedge; }).length,
-           OPT: all.filter(function(t){ return !!t.hedge; }).length};
+           FUT: all.filter(function(t){ return clLeg(t) === 'FUT'; }).length,
+           OPT: all.filter(function(t){ return clLeg(t) === 'OPT'; }).length};
   return '<div class="clchips">' + ['ALL','FUT','OPT'].map(function(k){
     return '<button class="rchip clchip' + (k === CL_FILTER ? ' on' : '') + '" onclick="clPick(\'' + k + '\')">'
          + k + ' <span class="num">' + n[k] + '</span></button>';
@@ -840,13 +860,24 @@ function clPick(k){
   dkPark('ctrack');
 }
 function clRow(t){
-  var pn = (t.net_pnl == null) ? null : Number(t.net_pnl);
-  var rsn = (t.reason || 'EXIT').toUpperCase();
+  /* cc#1263 · A ROW IS A LEG NOW, so it reads that leg's OWN numbers. pnl not net_pnl: net was
+     the pair's result, and printing it on a hedge row would show the trade's total beside the
+     option's points. Side is the leg's own side too — a hedge sits opposite its future by
+     construction, so stamping the trade direction on it would state the reverse of what that leg
+     did. The label distinguishes the two at a glance: FUT, or the strike and type for an option. */
+  var pn = (t.pnl == null) ? null : Number(t.pnl);
+  /* cc#1263 · THE CHIP TAKES THE REASON, NOT THE AUDIT NOTE APPENDED TO IT. Several option legs
+     carry exit_reason like "SL [CC#746: WRITTEN-PE LABEL CORRECTED BUY->SELL; P&L UNCHANGED]" —
+     a provenance stamp from an old correction, written into the same column. That never showed
+     before because OPT legs were not rows; now that 43 of them are, the whole sentence would go
+     into a chip sized for three letters. The bracket and everything after it is dropped from the
+     LABEL only — nothing is edited in the data, and the outcome word is still the real one. */
+  var rsn = String(t.reason || 'EXIT').toUpperCase().split(' [')[0].trim() || 'EXIT';
   var lbl = (rsn === 'TARGET') ? 'TGT' : rsn;
   var side = (t.direction === 'SHORT') ? 'SHORT' : 'LONG';
   return '<div class="clrow">'
     + '<span class="cld num">' + esc(String(t.exit_ist || '').slice(0, 6)) + '</span>'
-    + '<b class="cls">' + esc(t.symbol) + '</b>'
+    + '<b class="cls">' + esc(t.symbol) + ' <span class="cllg">' + esc(t.label || clLeg(t)) + '</span></b>'
     + '<span class="chip ' + (side === 'SHORT' ? 'l' : 'w') + ' clside">' + (side === 'SHORT' ? 'S' : 'L') + '</span>'
     + '<span class="clp num">' + (t.points != null ? sgn(Number(t.points), 0) : '—') + '</span>'
     + '<span class="clv num" style="color:' + (pn != null ? cx(pn) : 'var(--muted)') + '">'
@@ -990,8 +1021,18 @@ function render(){
   const openDeck=bookDeck(openF);
 
   const cl=D.closed;
-  const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.net_pnl)>0).length/cl.length):null;
-  const totC=cl.reduce((a,t)=>a+(Number(t.net_pnl)||0),0);
+  /* cc#1263 · net_pnl -> pnl, and this line would have shipped silently broken without a trace.
+     net_pnl is a PAIR's field: the futures leg plus its hedge. The closed book now holds LEGS,
+     which carry pnl and have no net_pnl at all — so Number(t.net_pnl) was about to be NaN on every
+     row, rendering WR 0% and all-time P&L Rs 0 while the list beside it looked perfectly healthy.
+     THE ALL-TIME TOTAL DOES NOT MOVE, and that is the check that matters: a pair's net IS the sum
+     of its legs, so summing 95 legs and summing 52 nets are the same arithmetic reaching the same
+     number. Verified against the table - Rs 155,051.75 both ways. The WIN RATE does move, because
+     it is now asking a different and narrower question: 95 legs judged one by one instead of 52
+     trades judged on their net. Both are honest; they are not the same statistic, and the change
+     is posted on the thread rather than left for someone to notice. */
+  const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.pnl)>0).length/cl.length):null;
+  const totC=cl.reduce((a,t)=>a+(Number(t.pnl)||0),0);
 
   const pf=D.perf||{};
   /* cc#1248: bl/bs/brow are gone with the two-column list they fed — buildupDeck() reads

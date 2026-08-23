@@ -87,6 +87,20 @@ def v10_trades(limit: int = 200):
 # cc#941 — PAIRED TRADE LOG. ONE derivation, read by BOTH surfaces.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
+def dur(sec):
+    """'20h 35m'. None when the trade is still open — an unknown duration is not zero.
+
+    cc#1263: hoisted out of paired_trades so closed_legs shares it rather than carrying a second
+    copy. Two functions formatting the same duration two ways is how the paired view and the leg
+    view would start disagreeing about a held time that came from one column.
+    """
+    if sec is None:
+        return None
+    m = int(sec // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
 def paired_trades(symbol=None, limit=200):
     """cc#941 — v10_trades stores ONE trade as TWO rows and every surface showed them raw.
 
@@ -137,14 +151,6 @@ def paired_trades(symbol=None, limit=200):
 
     def f(x):
         return None if x is None else float(x)
-
-    def dur(sec):
-        """'20h 35m'. None when the trade is still open — an unknown duration is not zero."""
-        if sec is None:
-            return None
-        m = int(sec // 60)
-        h, m = divmod(m, 60)
-        return f"{h}h {m}m" if h else f"{m}m"
 
     groups, order = {}, []
     for r in rows:
@@ -216,6 +222,95 @@ def v10_trades_paired(symbol: str = "", limit: int = 200):
     """cc#941: the paired trade log — one row per TRADE, not per leg. Both the mobile card list
     and the desktop table read THIS, so the two can never disagree about a net P&L (16202)."""
     return paired_trades(symbol.strip().upper() or None, limit)
+
+
+def closed_legs(symbol=None, limit=1000):
+    """cc#1263 — the closed book PER LEG, which is what the closed list was always meant to show.
+
+    WHY THIS EXISTS RATHER THAN A FILTER FIX ON THE APP. The app's closed list read
+    /trades/paired, which returns one row per TRADE — the FUT leg flattened to the top with the
+    OPT leg nested under `hedge`. Counting those rows gives 52 (pairs) where the truth is 95
+    (legs), and there is no way to recover a 95-row list from a 52-row payload without the client
+    reconstructing legs out of a nested field. Worse, a reconstructed OPT leg has no exit time or
+    exit reason of its own in that payload — those belong to the FUT leg it was nested under. A
+    per-leg list needs a per-leg source, so here it is.
+
+    LEG IS THE ONLY CLASSIFIER. The card is explicit and the bug is exactly what happens when
+    something else is used: the app tested `t.hedge`, which answers "is this trade hedged?", and
+    so counted 9 unhedged TRADES as its futures count. The `leg` column is normalised here once —
+    NULL is read as FUT, matching how paired_trades already treats it at line 160 — and every
+    consumer classifies on that string and nothing else.
+
+    exit_ts IS NOT NULL IS THE DEFINITION OF CLOSED, and it is stated in SQL rather than inferred
+    downstream from a P&L being present. paired_trades has no such filter, which is harmless only
+    while v10_trades holds no open rows (verified: zero today) and would put OPEN trades in the
+    closed book the moment one exists.
+    """
+    where, params = ["exit_ts IS NOT NULL"], []
+    if symbol:
+        where.append("symbol = %s")
+        params.append(symbol.upper())
+    sql = f"""
+        SELECT id, symbol, side, COALESCE(NULLIF(UPPER(leg), ''), 'FUT') AS leg,
+               opt_strike, opt_type, entry_price, exit_price, exit_reason,
+               points, pnl, lot_size,
+               to_char(entry_ts AT TIME ZONE 'Asia/Kolkata', 'DD-Mon HH24:MI') AS entry_ist,
+               to_char(exit_ts  AT TIME ZONE 'Asia/Kolkata', 'DD-Mon HH24:MI') AS exit_ist,
+               EXTRACT(EPOCH FROM (exit_ts - entry_ts))                        AS held_s
+        FROM v10_trades
+        WHERE {' AND '.join(where)}
+        ORDER BY exit_ts DESC, leg ASC
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def f(v):
+        return None if v is None else float(v)
+
+    out = []
+    for r in rows[:max(1, min(int(limit or 1000), 5000))]:
+        leg = r["leg"]
+        side = (r["side"] or "").upper()
+        pnl = f(r["pnl"])
+        out.append({
+            "id": r["id"], "symbol": r["symbol"], "leg": leg,
+            # Per-leg side, NOT the trade's direction. On a hedge the side is the opposite of the
+            # futures leg by construction, and printing the trade direction on an option row would
+            # state the reverse of what that leg actually did.
+            "direction": "LONG" if side == "BUY" else "SHORT",
+            "opt_strike": f(r["opt_strike"]), "opt_type": r["opt_type"],
+            "label": (("%s %s" % (int(f(r["opt_strike"])) if r["opt_strike"] is not None else "?",
+                                  r["opt_type"] or "")).strip() if leg == "OPT" else "FUT"),
+            "entry_price": f(r["entry_price"]), "exit_price": f(r["exit_price"]),
+            "points": f(r["points"]), "pnl": pnl, "lot_size": r["lot_size"],
+            "reason": (r["exit_reason"] or "EXIT").upper(),
+            "entry_ist": r["entry_ist"], "exit_ist": r["exit_ist"],
+            "held": dur(f(r["held_s"])),
+            "win": None if pnl is None else (pnl >= 0),
+        })
+    decided = [t for t in out if t["pnl"] is not None]
+    wins = sum(1 for t in decided if t["win"])
+    return {
+        "trades": out,
+        "count": len(out),
+        # Counts come from the SAME list the client renders, so a chip can never disagree with the
+        # rows behind it — the failure this card exists to fix.
+        "counts": {"ALL": len(out),
+                   "FUT": sum(1 for t in out if t["leg"] == "FUT"),
+                   "OPT": sum(1 for t in out if t["leg"] == "OPT")},
+        "summary": {"closed": len(decided), "wins": wins, "losses": len(decided) - wins,
+                    "win_rate": (round(100.0 * wins / len(decided), 1) if decided else None),
+                    "total_pnl": (round(sum(t["pnl"] for t in decided), 2) if decided else None)},
+    }
+
+
+@router.get("/trades/legs")
+def v10_trades_legs(symbol: str = "", limit: int = 1000):
+    """cc#1263: the closed book per LEG. The paired view stays exactly as it is for every consumer
+    that wants one row per trade; this is the other cut, for the list that counts legs."""
+    return closed_legs(symbol.strip().upper() or None, limit)
 
 
 def paired_positions(symbol=None):
