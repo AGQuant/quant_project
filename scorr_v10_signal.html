@@ -45,6 +45,62 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .tbl{width:100%;font-size:var(--type-115);font-family:'JetBrains Mono'}
 .tbl td{padding:var(--space-6) var(--space-4);border-top:var(--bw-1) solid var(--edge)}
 .tbl tr:first-child td{border-top:none}
+/* ══ cc#1242 · VOLATILITY & FLOW BECOMES A 4-CARD DECK ═══════════════════════════════════════
+   THE DECK HELPERS ARE PORTED FROM scorr_digest_mobile.html, NOT INVENTED, and that is worth
+   naming rather than hiding: this page had no deck of its own, and the app now has the same
+   scroll-snap + dot-pager gesture written page-local in two files. Copying beats inventing a third
+   dialect, but the right home is a shared module and neither file is it. That is a separate card,
+   not something to smuggle in here — flagged in the forum.
+   Everything here is scoped under .vswipe/.vpage/.vdots, all new class names, so nothing on this
+   page or any other can be restyled by accident. */
+.vswipe{margin:0 var(--space-14) var(--space-12)}
+.vswipe-t{display:flex;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;
+ -webkit-overflow-scrolling:touch;scrollbar-width:none}
+.vswipe-t::-webkit-scrollbar{display:none}
+.vpage{flex:0 0 100%;scroll-snap-align:start}
+.vpage .card{margin:0}
+.vdots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
+.vdots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
+.vdots i.on{background:var(--amber);width:15px;border-radius:var(--radius-3)}
+/* ── the OI histogram, spec 6055 section 7 anatomy ──────────────────────────────────────────
+   Call OI grows UP from a centre axis in red, Put OI grows DOWN in green. That pairing is the
+   convention the spec fixes and it is the opposite of a naive "green is good": a call wall is
+   resistance overhead, a put wall is support beneath, so the colour marks WHERE the writers are,
+   not whether the news is welcome. Bars are % heights against the largest OI on the card, so the
+   two halves share one scale and a tall put bar and a tall call bar mean the same quantity. */
+.oib{position:relative;display:flex;align-items:stretch;gap:var(--space-2);height:132px;margin-top:var(--space-10);padding:var(--space-11) 0}
+.oic{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.oic .up{flex:1;display:flex;align-items:flex-end}
+.oic .dn{flex:1;display:flex;align-items:flex-start}
+.oic .up i,.oic .dn i{display:block;width:100%;background:var(--heat);opacity:.85}
+.oic .dn i{background:var(--volt)}
+.oic.mp .up i,.oic.mp .dn i{background:var(--amber);opacity:1}
+.oiax{height:var(--bw-1);background:var(--edge)}
+.oispot{position:absolute;top:0;bottom:0;width:0;border-left:var(--bw-1) dashed var(--aqua);pointer-events:none}
+/* The wall tags sit in the 11px the chart reserves above and below its bars, so a tag can never
+   land on top of the bar it is labelling. transform:translateX(-50%) centres each tag on its own
+   column rather than starting at it, which matters at the chart edges where the wall is often the
+   first or last strike. */
+.oiwall{position:absolute;font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
+ white-space:nowrap;transform:translateX(-50%);pointer-events:none}
+.oiwall.cw{top:0;color:var(--heat)}
+.oiwall.pw{bottom:0;color:var(--volt)}
+.oird{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);margin-top:var(--space-10);
+ line-height:1.6}
+.oird b{color:var(--chalk)}
+.asof{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--muted)}
+.asof.stale{color:var(--amber)}
+/* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
+.plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
+.prg{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-5) var(--space-8);
+ background:var(--hi);border:var(--bw-1) solid var(--edge)}
+.prg .rl{font-family:'JetBrains Mono';font-size:var(--type-95);letter-spacing:var(--track-px11);
+ color:var(--muted);width:26px;flex:none}
+.prg .rv{font-family:'JetBrains Mono';font-size:var(--type-125);font-weight:800;flex:1;text-align:right}
+.prg.pp{border-color:var(--amber)}
+.prg.pp .rl,.prg.pp .rv{color:var(--amber)}
+.prg.cmp{background:transparent;border-color:var(--aqua)}
+.prg.cmp .rl,.prg.cmp .rv{color:var(--aqua)}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -87,7 +143,10 @@ const cx=n=>n>=0?'var(--volt)':'var(--heat)';
 const gj=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
 const IST=()=>new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
 
-const D={mood:null,sig:{},lm:{},vix:null,adr:null,pcr:{},mp:null,open:[],closed:[],psum:{},perf:null,build:null,div:null,cand:{}};
+const D={mood:null,sig:{},lm:{},vix:null,adr:null,pcr:{},mp:null,open:[],closed:[],psum:{},perf:null,build:null,div:null,cand:{},
+  /* cc#1242: the deck's own reads. mp stays the NIFTY max pain the old vitals tile used; mpB is
+     the BANKNIFTY one the page never asked for, which is the whole of what 6055 saw. */
+  mpB:null, oi:{}, piv:null};
 
 async function loadAll(){
   const T=[
@@ -101,6 +160,17 @@ async function loadAll(){
     async()=>{D.pcr.N=await gj('/api/daily/pcr?underlying=NIFTY&days=8').catch(()=>null);
               D.pcr.B=await gj('/api/daily/pcr?underlying=BANKNIFTY&days=8').catch(()=>null)},
     async()=>{D.mp=await gj('/api/v10/maxpain?symbol=NIFTY')},
+    /* cc#1242 · NO ENDPOINT WAS EXTENDED AND NONE NEEDED TO BE. /maxpain and /strike_oi have both
+       taken a `symbol` since cc#542/cc#1155 and _MAXPAIN_SPOT already maps BANKNIFTY to its spot;
+       what was NIFTY-only was this page's call list, not the API. Verified against real rows before
+       building: BANKNIFTY 61 strikes on expiry 2026-08-25 at tick 2026-08-20 15:35, and
+       max_pain.max_pain() over that chain returns 57600 without tripping its own guard. */
+    async()=>{D.mpB=await gj('/api/v10/maxpain?symbol=BANKNIFTY').catch(()=>null)},
+    async()=>{D.oi.N=await gj('/api/v10/strike_oi?symbol=NIFTY&n=7').catch(()=>null);
+              D.oi.B=await gj('/api/v10/strike_oi?symbol=BANKNIFTY&n=7').catch(()=>null)},
+    /* the SAME table the digest ladders read (v8_paper_pivots via /api/paper/pivots), so the two
+       surfaces cannot print different pivots for the same session. */
+    async()=>{D.piv=await gj('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY').catch(()=>null)},
     async()=>{const p=await gj('/api/v10/positions');D.open=p.open_positions||p.rows||[]},
     async()=>{const t=await gj('/api/v10/trades/paired?limit=200');D.closed=t.trades||[];D.psum=t.summary||{}},
     async()=>{D.perf=await gj('/api/v10/performance')},
@@ -140,6 +210,162 @@ function pcrBand(v){return v==null?['NO DATA','']:(v<0.7?['BEARISH','l']:v<0.9?[
    The eyebrow goes with the tiles. Leaving "THE SIGNALS · V10 ST+EMA" over nothing would be an
    orphan heading, and the section that follows moves straight up under the header. */
 var SHOW_SIGNAL_TILES = false;
+/* ══ cc#1242 · THE VOLATILITY & FLOW DECK ═══════════════════════════════════════════════════
+   Four cards, one gesture: MAX PAIN NIFTY -> MAX PAIN BANKNIFTY -> PIVOT NIFTY -> PIVOT BANKNIFTY.
+   The old section (VIX tile, A/D tile, compact max-pain tile, the two PCR sparklines) is HIDDEN
+   behind SHOW_VOL_TILES, the same shape of hide cc#1241 used an hour ago: markup kept, one line to
+   restore, and no engine, endpoint, scheduler or data pipeline involved — this file is a page
+   template and reads them, nothing more.
+   STATE IS PER CARD BY CONSTRUCTION (the cc#1232 principle). Each card renders from its own slice
+   of the payload and holds no expanded/collapsed flag at all, so there is nothing a swipe could
+   carry from one card to the next. */
+var SHOW_VOL_TILES = false;
+
+var VDECK = 0, VTMR = null;
+function vPitch(tr){
+  var c = tr.firstElementChild;
+  if(!c) return Math.max(1, tr.clientWidth);
+  var cs = getComputedStyle(tr), gap = parseFloat(cs.columnGap || cs.gap || 0) || 0;
+  return Math.max(1, c.getBoundingClientRect().width + gap);
+}
+function vDots(){
+  var tr = document.getElementById('vtrack'), dots = document.getElementById('vdots');
+  if(!tr || !dots || !VDECK) return 0;
+  var w = vPitch(tr), i = Math.round(tr.scrollLeft / w) % VDECK;
+  Array.prototype.forEach.call(dots.children, function(el, j){
+    el.className = (j === i ? 'on' : '');
+    el.onclick = function(){
+      var cur = Math.round(tr.scrollLeft / w);
+      tr.scrollTo({left:(cur - (cur % VDECK) + j) * w, behavior:'smooth'});
+    };
+  });
+  return i;
+}
+/* the triple-set wrap, same as the digest decks: three copies of the card set and a silent jump
+   back to the middle one, so a swipe never hits a wall in either direction. */
+function vWrap(){
+  vDots();
+  if(VTMR) clearTimeout(VTMR);
+  VTMR = setTimeout(function(){
+    var tr = document.getElementById('vtrack');
+    if(!tr || !VDECK) return;
+    var w = vPitch(tr), i = Math.round(tr.scrollLeft / w);
+    if(i < VDECK) tr.scrollTo({left:(i + VDECK) * w, behavior:'auto'});
+    else if(i >= 2 * VDECK) tr.scrollTo({left:(i - VDECK) * w, behavior:'auto'});
+  }, 90);
+}
+function vPark(){
+  var tr = document.getElementById('vtrack');
+  if(tr && VDECK) tr.scrollTo({left:VDECK * vPitch(tr), behavior:'auto'});
+  vDots();
+}
+
+/* ── as-of honesty (scope 5) ────────────────────────────────────────────────────────────────
+   The chain tick is a NAIVE IST timestamp (the cc#844 class of bug: subtracting a UTC now() from
+   it invents a 330-minute offset), so nothing here computes an age in minutes. It compares DATES
+   only and says plainly whether the chain predates the last session. option_chain held ZERO rows
+   for 21-Aug — the outage cc#1233 is about — so on a page opened today this stamp reads stale, and
+   that is the correct reading rather than a defect. */
+function chainAsOf(tick){
+  if(!tick) return {txt:'chain tick unknown', stale:true};
+  var d = String(tick).slice(0, 10), t = String(tick).slice(11, 16);
+  var today = IST().toISOString().slice(0, 10);
+  return {txt:'OI as of ' + d + (t ? ' ' + t : '') + ' IST', stale:(d < today), day:d};
+}
+function oiUnavail(name, why){
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3></div>'
+    + '<div class="unavail">' + esc(why) + '</div></div></div>';
+}
+
+/* ── the histogram, spec 6055 section 7 ─────────────────────────────────────────────────── */
+function oiCard(name, oi, mp){
+  if(!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
+    return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.');
+  var rows = oi.strikes, mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
+  var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
+  var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
+  var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
+  var cols = rows.map(function(r){
+    var isMp = (mpStrike != null && Number(r.strike) === mpStrike);
+    return '<div class="oic' + (isMp ? ' mp' : '') + '" title="' + r.strike + '">'
+      + '<div class="up"><i style="height:' + (100 * (r.call_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '<div class="oiax"></div>'
+      + '<div class="dn"><i style="height:' + (100 * (r.put_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '</div>';
+  }).join('');
+  /* the dashed spot line, placed by interpolating spot across the rendered strike span rather than
+     snapped to the nearest column — snapping would draw spot ON a strike it is not at. */
+  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '';
+  if(oi.spot != null && hi > lo){
+    var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
+    spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+  }
+  /* the two wall tags, placed on their own columns. The x of column i is the centre of its share
+     of the track, which is (i + 0.5) / count — not i / count, or every tag would sit a half-column
+     left of the bar it names. */
+  var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
+  var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
+  if(cwI >= 0) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
+  if(pwI >= 0) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
+  var ao = chainAsOf(oi.chain_tick);
+  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
+    + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(ao.txt) + '</span></div>'
+    + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + '<div class="oird">'
+    + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
+    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span><br>'
+    + 'put wall <b class="num">' + num(putWall.strike) + '</b>'
+    + ' · call wall <b class="num">' + num(callWall.strike) + '</b>'
+    + ' · expiry <b>' + esc(oi.expiry || '—') + '</b>'
+    + (ao.stale ? '<br><span style="color:var(--amber)">Chain is older than the last session — 21-Aug has no rows at all.</span>' : '')
+    + '</div></div></div>';
+}
+
+/* ── the pivot ladder ───────────────────────────────────────────────────────────────────── */
+function pivRow(lbl, v, cls){
+  return '<div class="prg' + (cls ? ' ' + cls : '') + '"><span class="rl">' + esc(lbl) + '</span>'
+    + '<span class="rv">' + (v != null ? num(v) : '—') + '</span></div>';
+}
+function pivCard(name, row, cmp){
+  if(!row) return '<div class="vpage"><div class="card"><div class="grp"><h3>Pivot Range ' + esc(name)
+    + '</h3></div><div class="unavail">No stored pivot row for this index.</div></div></div>';
+  /* the CMP marker is placed BETWEEN the rungs it actually sits between, so the ladder reads as a
+     map rather than a list with a number bolted on the end. */
+  var rungs = [['R2', row.r2], ['R1', row.r1], ['PP', row.pp], ['S1', row.s1], ['S2', row.s2]];
+  var html = '', placed = false;
+  rungs.forEach(function(r){
+    if(!placed && cmp != null && r[1] != null && Number(cmp) >= Number(r[1])){
+      html += pivRow('CMP', cmp, 'cmp'); placed = true;
+    }
+    html += pivRow(r[0], r[1], r[0] === 'PP' ? 'pp' : '');
+  });
+  if(!placed && cmp != null) html += pivRow('CMP', cmp, 'cmp');
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Pivot Range ' + esc(name) + '</h3>'
+    + '<span class="asof">' + esc(row.pivot_date || '—') + '</span></div>'
+    + '<div class="plad">' + html + '</div></div></div>';
+}
+
+function volDeck(){
+  var pv = D.piv, list = Array.isArray(pv) ? pv : ((pv && (pv.rows || pv.data)) || []);
+  var byS = {};
+  list.forEach(function(r){ if(r && r.symbol) byS[String(r.symbol).toUpperCase()] = r; });
+  var cards = [
+    oiCard('NIFTY', D.oi.N, D.mp),
+    oiCard('BANKNIFTY', D.oi.B, D.mpB),
+    pivCard('NIFTY', byS.NIFTY50, (D.lm.N || {}).cmp),
+    pivCard('BANKNIFTY', byS.BANKNIFTY, (D.lm.B || {}).cmp)
+  ];
+  VDECK = cards.length;
+  var set = cards.join('');
+  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  return '<div class="vswipe"><div class="vswipe-t" id="vtrack" onscroll="vWrap()">'
+       + set + set + set + '</div><div class="vdots" id="vdots">' + dots + '</div></div>';
+}
+
 function sigCard(name,key){
   const s=D.sig[key], lm=D.lm[key]||{};
   const cmp=lm.cmp!=null?Number(lm.cmp):null, day=lm.day_pct!=null?Number(lm.day_pct):null;
@@ -219,7 +445,8 @@ function render(){
   ${sigCard('BANKNIFTY','B')}
   ` : ''}
   <div class="eyebrow">VOLATILITY &amp; FLOW</div>
-  <div class="card">
+  ${volDeck()}
+  ${SHOW_VOL_TILES ? `<div class="card">
     <div class="vitals">
       <div class="vital"><div class="lb">INDIA VIX</div><div class="vv num" style="color:${vc==null?'var(--muted)':vc<15?'var(--volt)':vc<20?'var(--amber)':'var(--heat)'}">${vc!=null?vc.toFixed(2):'—'}</div><div class="sb">${vix.chg!=null?sgn(Number(vix.chg)):''} · ${vlab}</div></div>
       <div class="vital"><div class="lb">A/D · N500</div><div class="vv num" style="color:${ar==null?'var(--muted)':ar>=1?'var(--volt)':'var(--heat)'}">${ar!=null?ar.toFixed(2):'—'}</div><div class="sb">${adr.advances!=null?adr.advances+'A / '+adr.declines+'D':''}</div></div>
@@ -230,7 +457,7 @@ function render(){
       <div style="flex:1"><div style="display:flex;justify-content:space-between"><span style="font-size:10px;color:var(--muted);letter-spacing:1.5px">PCR BNK</span><span class="chip ${bbC}" style="font-size:9px;padding:2px 6px">${bbL}${pB.cur!=null?' '+pB.cur.toFixed(2):''}</span></div>${spark(pB.series,'#C8F542')}</div>
     </div>
     <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">7-day daily PCR${(pN.gaps+pB.gaps)?` · ${pN.gaps+pB.gaps} day(s) no reading — gaps stated, never zero`:''}</div>
-  </div>
+  </div>` : ''}
 
   <div class="eyebrow">THE BOOK · V10</div>
   <div class="card">
@@ -270,7 +497,7 @@ function render(){
   </div>`;
 }
 
-async function boot(){ await loadAll(); render(); }
+async function boot(){ await loadAll(); render(); vPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
