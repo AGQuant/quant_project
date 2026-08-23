@@ -138,6 +138,18 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .as-hdr.ii-hdr .as-pg .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .as-hdr.ii-hdr #asof{flex:none;white-space:nowrap;font-family:'JetBrains Mono';
  font-size:var(--type-95);color:var(--muted)}
+/* ── cc#1244 · the open book row. Two lines: identity + side + uP&L on the first, the five
+   levels on the second as label/value pairs that wrap as a group rather than mid-pair. */
+.bkrow{padding:var(--space-10) 0;border-top:var(--bw-1) solid var(--edge)}
+.bkrow:first-of-type{border-top:none}
+.bk1{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}
+.bk1 b{font-size:var(--type-125)}
+.bkleg{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted)}
+.bkside{font-size:var(--type-9);padding:var(--space-2) var(--space-7)}
+.bkpnl{margin-left:auto;font-weight:800;font-size:var(--type-125);white-space:nowrap}
+.bk2{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-12);margin-top:var(--space-6);
+ font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-px8);color:var(--muted)}
+.bk2 b{color:var(--chalk);font-weight:700}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -267,44 +279,58 @@ var SHOW_SIGNAL_TILES = false;
    carry from one card to the next. */
 var SHOW_VOL_TILES = false;
 
-var VDECK = 0, VTMR = null;
-function vPitch(tr){
+/* cc#1244 · THE HELPERS TAKE A TRACK ID NOW. cc#1242 wrote them for one deck with 'vtrack' baked
+   in; this card adds a second deck to the same page and 1245/1248 add more. Copying them per deck
+   is how a page ends up with four dialects of one gesture, so the state moves into a registry and
+   the functions take an id. Adding a deck is now one DK entry and one wrapper, not forty lines.
+   (The wider duplication — these helpers also exist page-local in scorr_digest_mobile.html — still
+   wants a shared module. That is raised in the forum as its own card, not smuggled in here.) */
+var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, btrack:{dots:'bdots', n:0, tmr:null} };
+var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
+function dkPitch(tr){
   var c = tr.firstElementChild;
   if(!c) return Math.max(1, tr.clientWidth);
   var cs = getComputedStyle(tr), gap = parseFloat(cs.columnGap || cs.gap || 0) || 0;
   return Math.max(1, c.getBoundingClientRect().width + gap);
 }
-function vDots(){
-  var tr = document.getElementById('vtrack'), dots = document.getElementById('vdots');
-  if(!tr || !dots || !VDECK) return 0;
-  var w = vPitch(tr), i = Math.round(tr.scrollLeft / w) % VDECK;
+function dkDots(id){
+  var d = DK[id]; if(!d) return 0;
+  var tr = document.getElementById(id), dots = document.getElementById(d.dots);
+  if(!tr || !dots || !d.n) return 0;
+  var w = dkPitch(tr), i = Math.round(tr.scrollLeft / w) % d.n;
   Array.prototype.forEach.call(dots.children, function(el, j){
     el.className = (j === i ? 'on' : '');
     el.onclick = function(){
       var cur = Math.round(tr.scrollLeft / w);
-      tr.scrollTo({left:(cur - (cur % VDECK) + j) * w, behavior:'smooth'});
+      tr.scrollTo({left:(cur - (cur % d.n) + j) * w, behavior:'smooth'});
     };
   });
   return i;
 }
 /* the triple-set wrap, same as the digest decks: three copies of the card set and a silent jump
    back to the middle one, so a swipe never hits a wall in either direction. */
-function vWrap(){
-  vDots();
-  if(VTMR) clearTimeout(VTMR);
-  VTMR = setTimeout(function(){
-    var tr = document.getElementById('vtrack');
-    if(!tr || !VDECK) return;
-    var w = vPitch(tr), i = Math.round(tr.scrollLeft / w);
-    if(i < VDECK) tr.scrollTo({left:(i + VDECK) * w, behavior:'auto'});
-    else if(i >= 2 * VDECK) tr.scrollTo({left:(i - VDECK) * w, behavior:'auto'});
+function dkWrap(id){
+  var d = DK[id]; if(!d) return;
+  dkDots(id);
+  if(d.tmr) clearTimeout(d.tmr);
+  d.tmr = setTimeout(function(){
+    var tr = document.getElementById(id);
+    if(!tr || !d.n) return;
+    var w = dkPitch(tr), i = Math.round(tr.scrollLeft / w);
+    if(i < d.n) tr.scrollTo({left:(i + d.n) * w, behavior:'auto'});
+    else if(i >= 2 * d.n) tr.scrollTo({left:(i - d.n) * w, behavior:'auto'});
   }, 90);
 }
-function vPark(){
-  var tr = document.getElementById('vtrack');
-  if(tr && VDECK) tr.scrollTo({left:VDECK * vPitch(tr), behavior:'auto'});
-  vDots();
+function dkPark(id){
+  var d = DK[id]; if(!d) return;
+  var tr = document.getElementById(id);
+  if(tr && d.n) tr.scrollTo({left:d.n * dkPitch(tr), behavior:'auto'});
+  dkDots(id);
 }
+function vWrap(){ dkWrap('vtrack'); }
+function vPark(){ dkPark('vtrack'); }
+function bWrap(){ dkWrap('btrack'); }
+function bPark(){ dkPark('btrack'); }
 
 /* ── as-of honesty (scope 5) ────────────────────────────────────────────────────────────────
    The chain tick is a NAIVE IST timestamp (the cc#844 class of bug: subtracting a UTC now() from
@@ -405,11 +431,89 @@ function volDeck(){
     pivCard('NIFTY', byS.NIFTY50, (D.lm.N || {}).cmp),
     pivCard('BANKNIFTY', byS.BANKNIFTY, (D.lm.B || {}).cmp)
   ];
-  VDECK = cards.length;
+  VDECK = DK.vtrack.n = cards.length;
   var set = cards.join('');
   var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
   return '<div class="vswipe"><div class="vswipe-t" id="vtrack" onscroll="vWrap()">'
        + set + set + set + '</div><div class="vdots" id="vdots">' + dots + '</div></div>';
+}
+
+/* ══ cc#1244 · THE OPEN BOOK, AND THE EMPTY GREEN CHIPS ═════════════════════════════════════
+   THE ROOT CAUSE OF THE EMPTY CHIP, named with the line. The old row wrote:
+       <span class="chip ${(p.direction==='SHORT')?'l':'w'}">${esc(p.direction||'')}</span>
+   /api/v10/positions serves v10_st_ema.get_open_positions(), whose SELECT is
+       "SELECT symbol, leg, side, entry_price, entry_ts, stop, target, lot_size, opt_strike,
+        opt_type, opt_expiry FROM v10_positions WHERE status='OPEN'"
+   There is no `direction` column and the payload has never carried one — the field is `side`,
+   BUY or SELL. So p.direction was undefined on every row, which did TWO things at once and that
+   is why it looked like a styling bug rather than a data one: the text resolved to '' via
+   (undefined || ''), and the class fell through the ternary to 'w', which is the GREEN chip.
+   An empty green box, on every open row, exactly as photographed. Confirmed against the live
+   table: all four open legs carry side BUY/SELL and no direction.
+
+   WHERE ELSE THE SAME PATTERN IS USED ON THIS PAGE — I grepped rather than assumed. Three chip
+   sites exist: this one, the WR chip in the closed header, and the reason chip on each closed row.
+   The other two read `wr` (a number computed right above them) and `t.reason` (defaulted to
+   'EXIT'), so they always have text, and the closed rows read t.direction from paired_trades,
+   which DOES emit direction — v10_endpoints.paired_trades line 85 sets it from the FUT leg's side.
+   So the open-row chip was the only genuinely empty one, and the fix is to read the field that
+   exists. sigCard carried the identical `pos.direction` bug; it is hidden by cc#1241 but the
+   helper below is written so the value comes from one place if it ever comes back.
+
+   THE DECK: two cards BY INSTRUMENT per the founder's 17:02 revision, not per index. Card 1 holds
+   both futures legs, card 2 both option legs, each with its own combined uP&L in the header.
+   Per-card state cannot leak on swipe because there is none — each card renders from its own
+   filtered slice and holds no flag (the cc#1232 principle, made structural rather than managed). */
+function posSide(p){
+  /* ONE place decides LONG/SHORT, reading `side` because that is the field the endpoint sends.
+     `direction` is accepted first only so that a future payload adding it needs no change here. */
+  var d = p && (p.direction || p.side);
+  if (!d) return null;                     // absent stays absent — no chip beats a blank chip
+  d = String(d).toUpperCase();
+  if (d === 'SHORT' || d === 'SELL') return 'SHORT';
+  if (d === 'LONG'  || d === 'BUY')  return 'LONG';
+  return d;
+}
+function bookRow(p){
+  var side = posSide(p), pn = Number(p.unrealised_pnl) || 0;
+  var leg = p.opt_type
+    ? esc(String(p.opt_strike || '')) + ' ' + esc(p.opt_type) + '·wrt'
+    : 'FUT';
+  /* em-dash where the value is genuinely absent, per the card's data-honesty line: the option
+     legs carry no stop or target in v10_positions and must not borrow the futures leg's. */
+  var lv = function(v){ return (v === null || v === undefined || v === '') ? '—' : num(v); };
+  return '<div class="bkrow">'
+    + '<div class="bk1"><b>' + esc(p.symbol) + '</b> <span class="bkleg">' + leg + '</span>'
+    + (side ? '<span class="chip ' + (side === 'SHORT' ? 'l' : 'w') + ' bkside">' + side + '</span>' : '')
+    + '<span class="bkpnl num" style="color:' + cx(pn) + '">₹' + num(pn) + '</span></div>'
+    + '<div class="bk2">'
+    + '<span>OPEN <b class="num">' + esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—') + '</b></span>'
+    + '<span>ENTRY <b class="num">' + lv(p.entry_price) + '</b></span>'
+    + '<span>CMP <b class="num">' + lv(p.cmp) + '</b></span>'
+    + '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
+    + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>'
+    + '</div></div>';
+}
+function bookCard(label, rows){
+  if(!rows.length)
+    return '<div class="vpage"><div class="card"><div class="grp"><h3>' + esc(label) + '</h3></div>'
+         + '<div class="unavail">No open ' + esc(label.toLowerCase()) + ' leg.</div></div></div>';
+  var tot = rows.reduce(function(a, p){ return a + (Number(p.unrealised_pnl) || 0); }, 0);
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>' + esc(label) + '</h3>'
+    + '<span class="num" style="font-weight:800;color:' + cx(tot) + '">₹' + num(tot) + '</span></div>'
+    + rows.map(bookRow).join('') + '</div></div>';
+}
+function bookDeck(open){
+  open = open || [];
+  var futs = open.filter(function(p){ return !p.opt_type; });
+  var opts = open.filter(function(p){ return !!p.opt_type; });
+  var cards = [bookCard('FUTURES', futs), bookCard('OPTIONS', opts)];
+  DK.btrack.n = cards.length;
+  var set = cards.join('');
+  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  return '<div class="vswipe"><div class="vswipe-t" id="btrack" onscroll="bWrap()">'
+       + set + set + set + '</div><div class="vdots" id="bdots">' + dots + '</div></div>';
 }
 
 function sigCard(name,key){
@@ -457,13 +561,7 @@ function render(){
   const [bnL,bnC]=pcrBand(pN.cur), [bbL,bbC]=pcrBand(pB.cur);
 
   const openF=D.open, totO=openF.reduce((a,p)=>a+(Number(p.unrealised_pnl)||0),0);
-  const openRows=openF.length?openF.map(p=>{
-    const pn=Number(p.unrealised_pnl)||0;
-    return `<tr><td><b>${esc(p.symbol)}</b>${p.opt_type?` <span style="color:var(--muted);font-size:10px">${esc(p.opt_strike||'')} ${esc(p.opt_type)}·wrt</span>`:' FUT'}</td>
-      <td><span class="chip ${(p.direction==='SHORT')?'l':'w'}" style="font-size:9px;padding:1px 6px">${esc(p.direction||'')}</span></td>
-      <td class="num">${num(p.entry_price)}</td>
-      <td class="num" style="color:${cx(pn)};text-align:right"><b>₹${num(pn)}</b></td></tr>`;}).join('')
-    :`<tr><td class="unavail" colspan="4">No open positions</td></tr>`;
+  const openDeck=bookDeck(openF);
 
   const cl=D.closed, shown=cl.slice(0,5);
   const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.net_pnl)>0).length/cl.length):null;
@@ -506,10 +604,10 @@ function render(){
   </div>` : ''}
 
   <div class="eyebrow">THE BOOK · V10</div>
-  <div class="card">
+  <div class="card" style="padding-bottom:var(--space-10)">
     <div class="grp"><h3>Open · ${openF.length}</h3><span class="num" style="font-weight:800;color:${cx(totO)}">₹${num(totO)}</span></div>
-    <table class="tbl">${openRows}</table>
   </div>
+  ${openDeck}
   <div class="card">
     <div class="grp"><h3>Closed · last ${shown.length} of ${cl.length}</h3>
       <span class="note">${wr!=null?`<span class="chip w" style="font-size:9px;padding:2px 6px">WR ${wr}%</span> `:''}<b class="num" style="color:${cx(totC)}">₹${fK(totC)}</b> all-time</span></div>
@@ -543,7 +641,7 @@ function render(){
   </div>`;
 }
 
-async function boot(){ await loadAll(); render(); vPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
+async function boot(){ await loadAll(); render(); vPark(); bPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
