@@ -57,7 +57,17 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .vswipe-t{display:flex;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;
  -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .vswipe-t::-webkit-scrollbar{display:none}
-.vpage{flex:0 0 100%;scroll-snap-align:start}
+/* min-width:0 IS LOAD-BEARING, and the closed book is what proved it. A flex item will not shrink
+   below its CONTENT's minimum, whatever its flex-basis says — so a page whose rows carry fixed-width
+   cells came out 324px wide inside a 300px track and the last 24px, which is where the exit-reason
+   chip sits, was clipped by the track's own overflow. flex:0 0 100% looked like it settled the
+   width and did not. With min-width:0 the page is exactly the track width and the row's flexible
+   cell (the symbol) takes the squeeze and ellipsises, which is what it is there for.
+   The other two decks never showed this because their rows have no fixed-width cells. */
+.vpage{flex:0 0 100%;min-width:0;scroll-snap-align:start}
+/* a deck nested inside a .card must not re-apply the track's own page margin — the card already
+   pads, and doubling it is what made this track narrower than its pages in the first place. */
+.card .vswipe{margin-left:0;margin-right:0}
 .vpage .card{margin:0}
 .vdots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
 .vdots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
@@ -150,6 +160,32 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .bk2{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-12);margin-top:var(--space-6);
  font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-px8);color:var(--muted)}
 .bk2 b{color:var(--chalk);font-weight:700}
+/* ── cc#1245 · the closed book: filter chips, paged rows, chips sized to their own text ── */
+.clchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10)}
+.clchip{flex:1;min-width:0;text-align:center;white-space:nowrap}
+.clpage{display:flex;flex-direction:column}
+.clrow{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-9) 0;
+ border-top:var(--bw-1) solid var(--edge)}
+.clrow:first-of-type{border-top:none}
+/* THE FIXED CELLS ARE SIZED TO THEIR WIDEST REAL VALUE, NOT ROUNDED UP. At 46/46/74 the row came
+   to 320 inside a 298px page on a 360 phone, so the symbol — the only flexible cell — absorbed the
+   whole squeeze and ellipsised on all five rows. Measured against the live book: dates are "01 Aug"
+   (6 chars), the widest points value is -279.75 rendered as -280 (4), and the widest row P&L is
+   ₹13,419 (7). 40/40/64 covers all three with room and hands 32px back to the symbol, which is
+   what stops BANKNIFTY truncating at 360. The ellipsis stays as the honest fallback for a longer
+   symbol; it is no longer the normal case. */
+.cld{font-size:var(--type-95);color:var(--muted);flex:none;width:40px}
+.cls{font-size:var(--type-115);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clp{font-size:var(--type-105);color:var(--muted);flex:none;width:40px;text-align:right}
+.clv{font-size:var(--type-115);font-weight:800;flex:none;width:64px;text-align:right}
+/* SIZED TO THE TEXT. The founder saw oversized half-empty boxes; that was the cc#1244 direction
+   bug emptying them, but these are also given padding that fits their own label rather than a
+   fixed width, so SL, TGT and FLIP each come out at their own size. */
+.clside,.clrsn,.clwr{font-size:var(--type-9);padding:var(--space-2) var(--space-6);flex:none}
+.clside{width:auto;min-width:0}
+.clrsn{margin-left:var(--space-4)}
+.clpg{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);
+ letter-spacing:var(--track-px12);white-space:nowrap}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -285,13 +321,36 @@ var SHOW_VOL_TILES = false;
    the functions take an id. Adding a deck is now one DK entry and one wrapper, not forty lines.
    (The wider duplication — these helpers also exist page-local in scorr_digest_mobile.html — still
    wants a shared module. That is raised in the forum as its own card, not smuggled in here.) */
-var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, btrack:{dots:'bdots', n:0, tmr:null} };
+var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, btrack:{dots:'bdots', n:0, tmr:null},
+           ctrack:{dots:'cdots', n:0, tmr:null} };
 var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
+/* PITCH COMES FROM LAYOUT OFFSETS, NOT FROM A MEASURED WIDTH PLUS THE GAP, and cc#1245 is where
+   that stopped being academic. getBoundingClientRect().width returns a SUB-PIXEL number — 324.484
+   here — so width+gap gave a pitch of 333.484 against a true layout pitch of 333. Under a pixel per
+   page, and invisible on a 2-card deck. The closed book has ELEVEN pages: parking at n*pitch landed
+   3,668 where page 11 actually starts at 3,697, so the deck rested 29px off its own boundary and
+   the next page's chips showed at the card edge. offsetLeft is the integer position the browser
+   actually laid the page out at, so consecutive offsets give the pitch exactly and nothing
+   accumulates. The same width+gap pattern sits in scorr_digest_mobile.html's deckPitch; its decks
+   are small enough that the drift stays under two pixels, but it is the same latent bug and it is
+   named in the forum rather than left for the next long deck to find. */
 function dkPitch(tr){
-  var c = tr.firstElementChild;
-  if(!c) return Math.max(1, tr.clientWidth);
+  var k = tr.children;
+  if(k.length > 1) return Math.max(1, k[1].offsetLeft - k[0].offsetLeft);
+  if(!k.length) return Math.max(1, tr.clientWidth);
   var cs = getComputedStyle(tr), gap = parseFloat(cs.columnGap || cs.gap || 0) || 0;
-  return Math.max(1, c.getBoundingClientRect().width + gap);
+  return Math.max(1, k[0].getBoundingClientRect().width + gap);
+}
+/* offsetLeft is relative to the OFFSET PARENT, not to the scroll container, so it carries a
+   constant ancestor offset (14px here, the track's own margin). The DELTA between two pages is
+   still exact — that is what dkPitch uses — but the absolute value is not a scroll position.
+   Subtracting the first page's offset converts it into one. Measured: parking by the raw offset
+   left every deck 14px short of its own boundary; this lands all three exactly. */
+function dkAt(tr, i){
+  var k = tr.children;
+  if(!k.length) return 0;
+  var el = k[i];
+  return el ? (el.offsetLeft - k[0].offsetLeft) : i * dkPitch(tr);
 }
 function dkDots(id){
   var d = DK[id]; if(!d) return 0;
@@ -301,8 +360,8 @@ function dkDots(id){
   Array.prototype.forEach.call(dots.children, function(el, j){
     el.className = (j === i ? 'on' : '');
     el.onclick = function(){
-      var cur = Math.round(tr.scrollLeft / w);
-      tr.scrollTo({left:(cur - (cur % d.n) + j) * w, behavior:'smooth'});
+      var cur = Math.round(tr.scrollLeft / w), t = cur - (cur % d.n) + j;
+      tr.scrollTo({left: dkAt(tr, t), behavior:'smooth'});
     };
   });
   return i;
@@ -317,14 +376,16 @@ function dkWrap(id){
     var tr = document.getElementById(id);
     if(!tr || !d.n) return;
     var w = dkPitch(tr), i = Math.round(tr.scrollLeft / w);
-    if(i < d.n) tr.scrollTo({left:(i + d.n) * w, behavior:'auto'});
-    else if(i >= 2 * d.n) tr.scrollTo({left:(i - d.n) * w, behavior:'auto'});
+    var to = (i < d.n) ? i + d.n : (i >= 2 * d.n) ? i - d.n : -1;
+    if(to >= 0) tr.scrollTo({left: dkAt(tr, to), behavior:'auto'});
   }, 90);
 }
 function dkPark(id){
   var d = DK[id]; if(!d) return;
   var tr = document.getElementById(id);
-  if(tr && d.n) tr.scrollTo({left:d.n * dkPitch(tr), behavior:'auto'});
+  /* park ON the middle set's first page by its own offsetLeft rather than by arithmetic, so the
+     rest position is exactly where the browser laid that page out. */
+  if(tr && d.n) tr.scrollTo({left: dkAt(tr, d.n), behavior:'auto'});
   dkDots(id);
 }
 function vWrap(){ dkWrap('vtrack'); }
@@ -464,6 +525,98 @@ function volDeck(){
    both futures legs, card 2 both option legs, each with its own combined uP&L in the header.
    Per-card state cannot leak on swipe because there is none — each card renders from its own
    filtered slice and holds no flag (the cc#1232 principle, made structural rather than managed). */
+/* ══ cc#1245 · THE CLOSED BOOK, PAGED THROUGH THE WHOLE HISTORY ═════════════════════════════
+   THE SCOPE 4 GATE DOES NOT TRIP AND NO READ PATH NEEDED EXTENDING. The page already fetches
+   /api/v10/trades/paired?limit=200 and the closed book is 52 trades, so the FULL history has been
+   sitting in the client all along — `cl.slice(0,5)` was throwing 47 of them away after they had
+   already been downloaded. Paging is pure presentation here; nothing about the endpoint or the
+   engine is touched. 52 at 5 a page is 11 pages, which is exactly the "1/11" the card predicted.
+
+   WHAT FUT/OPT CAN MEAN HERE, CHECKED AGAINST THE DATA RATHER THAN ASSUMED. A row in this list is
+   a PAIRED trade (cc#941): a futures position plus an optional written hedge, grouped on
+   (symbol, entry_ts). Counted on the live table: 52 trades, 43 carrying a hedge leg, 9 futures
+   only, and ZERO with no futures leg. So there is no such thing as an option-only trade in this
+   book, and the only split the data actually supports is hedged vs unhedged — which partitions
+   cleanly, 9 + 43 = 52, and gives both buttons something real to do. FUT shows the 9 that ran
+   naked, OPT the 43 that carried a written leg. Stated on the card thread rather than left to be
+   inferred from the counts.
+
+   FILTER STATE IS PER PAGE-LOAD by construction: CL_FILTER is a module global set only by a tap,
+   so leaving the page and coming back re-runs boot() and it is back to ALL. */
+var CL_FILTER = 'ALL';           /* ALL | FUT | OPT */
+var CL_PER = 5;
+
+function clList(){
+  var all = D.closed || [];
+  if (CL_FILTER === 'FUT') return all.filter(function(t){ return !t.hedge; });
+  if (CL_FILTER === 'OPT') return all.filter(function(t){ return !!t.hedge; });
+  return all;
+}
+function clChips(){
+  var all = D.closed || [];
+  var n = {ALL: all.length,
+           FUT: all.filter(function(t){ return !t.hedge; }).length,
+           OPT: all.filter(function(t){ return !!t.hedge; }).length};
+  return '<div class="clchips">' + ['ALL','FUT','OPT'].map(function(k){
+    return '<button class="rchip clchip' + (k === CL_FILTER ? ' on' : '') + '" onclick="clPick(\'' + k + '\')">'
+         + k + ' <span class="num">' + n[k] + '</span></button>';
+  }).join('') + '</div>';
+}
+/* Re-render the CHIPS with the deck, not just the deck. cc#1190 shipped exactly this bug on the
+   results deck: the rows filtered correctly and the active chip never moved, so the screen showed
+   filtered rows under a highlighted ALL — working filter, lying page. */
+function clPick(k){
+  if (['ALL','FUT','OPT'].indexOf(k) < 0) return;
+  CL_FILTER = k;
+  var host = document.getElementById('clwrap');
+  if (!host) return;
+  host.innerHTML = clChips() + closedDeck();
+  dkPark('ctrack');
+}
+function clRow(t){
+  var pn = (t.net_pnl == null) ? null : Number(t.net_pnl);
+  var rsn = (t.reason || 'EXIT').toUpperCase();
+  var lbl = (rsn === 'TARGET') ? 'TGT' : rsn;
+  var side = (t.direction === 'SHORT') ? 'SHORT' : 'LONG';
+  return '<div class="clrow">'
+    + '<span class="cld num">' + esc(String(t.exit_ist || '').slice(0, 6)) + '</span>'
+    + '<b class="cls">' + esc(t.symbol) + '</b>'
+    + '<span class="chip ' + (side === 'SHORT' ? 'l' : 'w') + ' clside">' + (side === 'SHORT' ? 'S' : 'L') + '</span>'
+    + '<span class="clp num">' + (t.points != null ? sgn(Number(t.points), 0) : '—') + '</span>'
+    + '<span class="clv num" style="color:' + (pn != null ? cx(pn) : 'var(--muted)') + '">'
+    + (pn != null ? '₹' + num(pn) : '—') + '</span>'
+    + '<span class="chip ' + (rsn === 'SL' ? 'l' : rsn === 'TARGET' ? 'w' : 'mu') + ' clrsn">' + esc(lbl) + '</span>'
+    + '</div>';
+}
+function closedDeck(){
+  var rows = clList();
+  if (!rows.length){
+    DK.ctrack.n = 0;
+    return '<div class="unavail">No closed trades'
+         + (CL_FILTER === 'ALL' ? '.' : ' in this filter.') + '</div>';
+  }
+  var pages = [];
+  for (var i = 0; i < rows.length; i += CL_PER) pages.push(rows.slice(i, i + CL_PER));
+  DK.ctrack.n = pages.length;
+  CL_PAGES = pages.length;
+  var set = pages.map(function(pg){
+    return '<div class="vpage"><div class="clpage">' + pg.map(clRow).join('') + '</div></div>';
+  }).join('');
+  var dots = pages.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  /* A dot per page reads fine at 2 and is unreadable at 11, so the count carries the position and
+     the dots stay as the familiar affordance. Same reason the results deck prints "1 OF N". */
+  return '<div class="vswipe"><div class="vswipe-t" id="ctrack" onscroll="cWrap()">'
+       + set + set + set + '</div><div class="rpager"><div class="vdots" id="cdots">' + dots + '</div>'
+       + '<span class="clpg" id="clpg">1 / ' + pages.length + '</span></div></div>';
+}
+var CL_PAGES = 0;
+function clLabel(i){
+  var el = document.getElementById('clpg');
+  if (el && CL_PAGES) el.textContent = ((i || 0) + 1) + ' / ' + CL_PAGES;
+}
+function cWrap(){ dkWrap('ctrack'); clLabel(dkDots('ctrack')); }
+function cPark(){ dkPark('ctrack'); clLabel(dkDots('ctrack')); }
+
 function posSide(p){
   /* ONE place decides LONG/SHORT, reading `side` because that is the field the endpoint sends.
      `direction` is accepted first only so that a future payload adding it needs no change here. */
@@ -563,19 +716,9 @@ function render(){
   const openF=D.open, totO=openF.reduce((a,p)=>a+(Number(p.unrealised_pnl)||0),0);
   const openDeck=bookDeck(openF);
 
-  const cl=D.closed, shown=cl.slice(0,5);
+  const cl=D.closed;
   const wr=cl.length?Math.round(100*cl.filter(t=>Number(t.net_pnl)>0).length/cl.length):null;
   const totC=cl.reduce((a,t)=>a+(Number(t.net_pnl)||0),0);
-  const clRows=shown.length?shown.map(t=>{
-    const pn=t.net_pnl==null?null:Number(t.net_pnl);
-    const rsn=(t.reason||'EXIT').toUpperCase();
-    return `<tr><td class="num" style="color:var(--muted)">${esc(String(t.exit_ist||'').slice(0,6))}</td>
-      <td><b>${esc(t.symbol)}</b></td>
-      <td style="color:${t.direction==='SHORT'?'var(--heat)':'var(--volt)'}">${t.direction==='SHORT'?'▼S':'▲L'}</td>
-      <td class="num">${t.points!=null?sgn(Number(t.points),0):'—'}</td>
-      <td class="num" style="text-align:right;color:${pn!=null?cx(pn):'var(--muted)'}"><b>${pn!=null?'₹'+num(pn):'—'}</b></td>
-      <td><span class="chip ${rsn==='SL'?'l':rsn==='TARGET'?'w':''}" style="font-size:9px;padding:1px 5px">${esc(rsn==='TARGET'?'TGT':rsn)}</span></td></tr>`;}).join('')
-    :`<tr><td class="unavail" colspan="6">No closed trades</td></tr>`;
 
   const pf=D.perf||{};
   const bd=D.build||{}, bl=(bd.long_buildup||[]).slice(0,3), bs=(bd.short_buildup||[]).slice(0,3);
@@ -609,9 +752,9 @@ function render(){
   </div>
   ${openDeck}
   <div class="card">
-    <div class="grp"><h3>Closed · last ${shown.length} of ${cl.length}</h3>
-      <span class="note">${wr!=null?`<span class="chip w" style="font-size:9px;padding:2px 6px">WR ${wr}%</span> `:''}<b class="num" style="color:${cx(totC)}">₹${fK(totC)}</b> all-time</span></div>
-    <table class="tbl">${clRows}</table>
+    <div class="grp"><h3>Closed · ${cl.length}</h3>
+      <span class="note">${wr!=null?`<span class="chip w clwr">WR ${wr}%</span> `:''}<b class="num" style="color:${cx(totC)}">₹${fK(totC)}</b> all-time</span></div>
+    <div id="clwrap">${clChips()}${closedDeck()}</div>
   </div>
   <div class="card">
     <div class="grp"><h3>Performance</h3><span class="note">LIVE PAPER · v10_trades</span></div>
@@ -641,7 +784,7 @@ function render(){
   </div>`;
 }
 
-async function boot(){ await loadAll(); render(); vPark(); bPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
+async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
