@@ -1205,6 +1205,14 @@ function railHtml(r){
    founder 08-Aug: the cc#894 pickers guessed other endpoints' JSON keys and rendered "--";
    the new endpoint returns ONE shape ({series:[{d,v}]}) so nothing is guessed, and the popup
    draws a real chart instead of text rows. */
+/* cc#1231 · THE COVERAGE SET COMES FROM THE SERVER, and this page keeps NO list of its own.
+   /api/mobile/home2 ships trend_intraday, derived from mobile_home2._INTRADAY_KINDS — the single
+   place the platform records which chip series have a 5-minute source. Empty until the payload
+   lands, and trendRanges() below treats "not in the set" as daily-only, so the worst case before
+   the payload arrives is a conservative 7D default rather than a fabricated 1D. */
+var TREND_INTRADAY = [];
+function hasIntraday(kind){ return TREND_INTRADAY.indexOf(kind) >= 0; }
+
 var TRENDS = {
   adr: { title: 'ADR' },
   pcr: { title: 'NIFTY PCR' },
@@ -1219,7 +1227,10 @@ function dlab(d){
   d = String(d == null ? '' : d);
   return /^\d{1,2}:\d{2}$/.test(d) ? d : d.slice(5);
 }
-function trendSvg(series, kind){
+/* cc#1231 scope 3: `markers` draws a dot on every close so a daily series reads as daily prints
+   rather than a continuous line. Defaulted off, so every existing caller renders byte-identically
+   and the intraday charts are untouched. */
+function trendSvg(series, kind, markers){
   var W = 320, H = 110, PL = 6, PR = 6, PT = 8, PB = 18;
   var vs = series.map(function(p){ return p.v; });
   var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
@@ -1234,6 +1245,9 @@ function trendSvg(series, kind){
   return '<svg id="tsvg_' + kind + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block;touch-action:none">'
     + '<polygon points="' + area + '" fill="rgba(77,124,254,.14)"/>'
     + '<polyline points="' + pts + '" fill="none" stroke="var(--blu,#4D7CFE)" stroke-width="1.6"/>'
+    + (markers ? series.map(function(p, i){
+        return '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(p.v).toFixed(1)
+             + '" r="2" fill="var(--blu,#4D7CFE)"/>'; }).join('') : '')
     + '<circle cx="' + xs(n - 1).toFixed(1) + '" cy="' + ys(last).toFixed(1) + '" r="2.6" fill="var(--blu,#4D7CFE)"/>'
     + '<line id="tcx_' + kind + '" x1="0" y1="' + PT + '" x2="0" y2="' + (H - PB) + '" stroke="var(--amber,#F5B94A)" stroke-width="1" stroke-dasharray="3 2" style="display:none"/>'
     + '<circle id="tcd_' + kind + '" r="3.2" fill="var(--amber,#F5B94A)" style="display:none"/>'
@@ -1359,7 +1373,10 @@ function setRange(ev, key, days){
   if (!CHART[key]) return;
   CHART[key].days = days;
   // a chip's chosen window survives closing and reopening the popup within the visit
-  if (TREND_RANGE.hasOwnProperty(key)) TREND_RANGE[key] = days;
+  /* cc#1231: guard on TRENDS, not on TREND_RANGE's own keys. The map is now empty at parse time
+     (see below), so hasOwnProperty would have been false for every kind and nothing would ever be
+     remembered. TRENDS is the real set of chip kinds and is what the guard always meant. */
+  if (TRENDS.hasOwnProperty(key)) TREND_RANGE[key] = days;
   renderChart(key);
 }
 function rangePills(key){
@@ -1408,7 +1425,7 @@ function renderChart(key){
     var last = s[s.length - 1];
     el.innerHTML = '<div class="trendbox">'
       + head(esc(Number(last.v).toFixed(2)) + ' · ' + esc(dlab(last.d)))
-      + rangePills(key) + trendSvg(s, key) + note + '</div>';
+      + rangePills(key) + trendSvg(s, key, c.markers) + note + '</div>';
     wireScrub(key, s);   // rebound on every redraw — a new SVG needs a new binding
   }).catch(function(e){
     if (CHART[key] !== c || !c.live()) return;
@@ -1574,7 +1591,15 @@ function tapeChart(i){
    noted on that card that I was giving banknifty no entry "to match the precedent"; the precedent
    was broken, and matching it was the wrong call.
    15 matches adr/pcr/vix rather than inventing a different default for the index rows. */
-var TREND_RANGE = { adr: 15, pcr: 15, vix: 15, nifty: 15, banknifty: 15 };
+/* cc#1231 · THE MAP NOW HOLDS ONLY WHAT THE FOUNDER ACTUALLY TAPPED. Pre-seeding every kind at 15
+   made a default indistinguishable from a choice, and that is what stopped a daily-only series
+   opening on its own 7D default: togTrend read 15 out of this map and could not tell whether the
+   founder had chosen it. Empty at parse time, written only by setRange on a real tap, so "no entry"
+   honestly means "no choice yet" and each kind falls back to the default that suits it — 7D where
+   there is no intraday source, 15D where there is. cc#1183's undefined-in-the-query-string bug
+   stays closed by the Number(...|| 0) fallback in togTrend, which does not depend on this map being
+   pre-filled. */
+var TREND_RANGE = {};
 /* The belt to that braces: even with the map filled, a kind added later with no entry must never
    put the string "undefined" into a query. One fallback here closes the class, not just the case. */
 var TREND_RANGE_DEFAULT = 15;
@@ -1600,13 +1625,32 @@ function togTrend(ev, kind){
   if (!el) return;
   if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; delete CHART[kind]; return; }
   TREND.open = kind;
+  /* cc#1231 · NO 1D TAB ON A DAILY-ONLY SERIES. This was `ranges: RANGES_ALL` for every kind, so
+     India VIX offered a 1D pill it has no data for; the endpoint fell back to the daily line and
+     the chart drew a straight diagonal between two closes with an area fill under it — a full
+     day's intraday rise that never happened, printed directly above a caption saying the series
+     has no intraday feed. The tab is hidden rather than disabled, which the card prefers, and
+     RANGES_DAILY already existed for exactly this case; the tape charts have used it since cc#940.
+     The default drops to 7D for the same series, because 1D is no longer one of its options. */
+  var daily = !hasIntraday(kind);
   CHART[kind] = {
-    host: 'chiptrend', title: TRENDS[kind].title, ranges: RANGES_ALL,
+    host: 'chiptrend', title: TRENDS[kind].title,
+    ranges: daily ? RANGES_DAILY : RANGES_ALL,
+    markers: daily,   /* a point per close, so it reads as daily prints and not a continuous feed */
     /* cc#1183: the fallback, not TREND_RANGE[kind] on its own. A kind with no entry used to seed
        `undefined`, which chipLoader put into the query string as the literal text "undefined".
        Number() is the second half of the belt: an entry that ever arrives as a string still
        reaches the pills as a number, so `r[0] === c.days` can match and a pill renders selected. */
-    days: Number(TREND_RANGE[kind] || TREND_RANGE_DEFAULT), load: chipLoader(kind),
+    days: (function(){
+      /* A daily-only series DEFAULTS to 7D per the card, not to the shared 15D default — and a
+         remembered 1D from before this change cannot survive onto it, because 1D is no longer one
+         of its pills and the selected pill would match nothing. A remembered 7/15/30 is still
+         honoured: the founder's own choice outranks the default, it just cannot be 1D here. */
+      var rem = Number(TREND_RANGE[kind] || 0);
+      if (daily) return (rem && rem !== 1) ? rem : 7;
+      return rem || Number(TREND_RANGE_DEFAULT);
+    })(),
+    load: chipLoader(kind),
     live: function(){ return TREND.open === kind; },
     closeCall: 'togTrend(event,\'' + kind + '\')'
   };
@@ -3176,6 +3220,7 @@ Promise.all([
   // cc#904: the tape is now a doorway. Hold-to-pause still works — a tap and a hold are
   // different gestures, and the pause is CSS (:active), not JS, so the two cannot fight.
   TAPE.rows = d.ticker || [];
+  TREND_INTRADAY = d.trend_intraday || [];   /* cc#1231: server's intraday coverage set */
   h += '<div class="tkr" onclick="openTape()" style="--tkr-dur:' + tkDur + 's;cursor:pointer">'
     + '<div class="tkr-track">' + tkItems + tkItems + '</div></div>';
 

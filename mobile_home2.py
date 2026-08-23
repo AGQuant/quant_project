@@ -136,6 +136,21 @@ _VIX_NO_INTRADAY = ("India VIX has no intraday feed — it is not one of the 15 
                     "global_intraday. This is the daily close line.")
 
 
+# ── cc#1231 · THE INTRADAY COVERAGE SET, NAMED ONCE ────────────────────────────────────────────
+# This tuple was written inline in mobile_trends as `kind in ("adr", "pcr")` and it is the ONLY
+# place the platform records which chip series have a 5-minute source. India VIX is not in it
+# because there is no intraday India VIX anywhere — global_intraday carries 15 names and VIX is not
+# one of them — and nifty/banknifty are daily close series by the same reasoning (cc#998).
+#
+# It is hoisted and EXPORTED because the client needs the same answer. The Home chip popout was
+# offering a 1D tab for every kind, so tapping 1D on VIX drew a straight diagonal between two daily
+# closes with an area fill under it — a full day of intraday movement that never happened, directly
+# contradicting the honest caption printed beneath it. The fix is not a second list in JavaScript:
+# the page reads THIS set, so there is exactly one definition and the chart cannot disagree with the
+# caption again.
+_INTRADAY_KINDS = ("adr", "pcr")
+
+
 @router.get("/api/mobile/trends")
 @_json_safe
 def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
@@ -175,7 +190,7 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
     want = max(1, min(int(days or 30), 120))
     # cc#998: nifty is a DAILY-only line — the Home Nifty Day/Week/Month chips are three deltas of the
     # SAME NIFTY50 close series, so there is no per-chip intraday variant (unlike adr/pcr's 1D view).
-    intraday = (want == 1 and kind in ("adr", "pcr"))
+    intraday = (want == 1 and kind in _INTRADAY_KINDS)
     note = None
 
     with _conn() as conn, conn.cursor() as cur:
@@ -246,6 +261,10 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
     elif series:
         as_of = series[-1]["d"]
     return {"kind": kind, "series": series, "intraday": intraday,
+            # cc#1231: whether this kind HAS a 5-min source at all, as distinct from `intraday`
+            # above which says whether THIS request returned one. A surface needs the first to
+            # decide if a 1D tab should exist; the second only tells it what it just got.
+            "has_intraday": kind in _INTRADAY_KINDS,
             "as_of": as_of, "note": note,
             "latest": series[-1]["v"] if series else None}
 
@@ -905,6 +924,12 @@ def mobile_home2(request: Request):
             "sources": list(FEED_SOURCES),
         },
         "ticker": ticker,
+        # cc#1231: which chip series have a 5-min source, from the one definition above. The page
+        # needs this BEFORE it opens a popout, to decide whether a 1D tab should exist at all —
+        # asking /api/mobile/trends would mean drawing the wrong tabs first and correcting them
+        # after the response. Shipped as a list rather than a per-kind flag so the client holds no
+        # list of its own: it tests membership, it does not restate the set.
+        "trend_intraday": list(_INTRADAY_KINDS),
         # retained one deploy for any cached template; the ticker replaces this grid
         "indices": [{
             "name": "Nifty 50" if k == "NIFTY50" else "Bank Nifty",
