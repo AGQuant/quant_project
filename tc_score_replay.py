@@ -369,6 +369,27 @@ CREATE TABLE IF NOT EXISTS tc_score_replay_trades (
   PRIMARY KEY (threshold, hold_days, symbol, bucket, entry_ts)
 );
 CREATE INDEX IF NOT EXISTS tc_srtr_cell ON tc_score_replay_trades (threshold, hold_days);
+
+-- cc#1221 PORTFOLIO MODE. A SEPARATE table, never the sweep's: the sweep answers "what does every
+-- signal above the bar do", this answers "what does a book that can only hold twenty do". Mixing
+-- them in one table would make every future query specify which run it meant.
+CREATE TABLE IF NOT EXISTS tc_score_replay_port_trades (
+  symbol      text   NOT NULL,
+  bucket      text   NOT NULL,
+  side        text   NOT NULL,
+  entry_ts    timestamp NOT NULL,
+  entry_px    numeric,
+  entry_src   text,
+  score100    numeric,
+  slot_rank   int,
+  open_book_size int,
+  exit_ts     timestamp,
+  exit_px     numeric,
+  exit_reason text,
+  pnl_pct     numeric,
+  PRIMARY KEY (symbol, entry_ts)
+);
+CREATE INDEX IF NOT EXISTS tc_srpt_ts ON tc_score_replay_port_trades (entry_ts);
 """
 
 SESSIONS = ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"]
@@ -542,6 +563,140 @@ def sweep(thresholds=THRESHOLDS, holds=HOLDS):
                     conn.commit()
                     made += len(rows)
     return made
+
+
+# ══ cc#1221 · PORTFOLIO MODE ══════════════════════════════════════════════════════════════════
+# The sweep takes EVERY signal above the bar — 809 trades at threshold 60, 2,328 of them SELL-MOM
+# alone — and every cell came out negative. This asks the different question the founder wants:
+# what does a book that can only hold twenty names do, when it is filled by rank?
+#
+# SELECTION, NOT QUANTITY. That is the whole difference. A cap forces the run to choose, and the
+# thing being tested stops being "does the score work" and becomes "does the score RANK".
+SCORE_MIN = 80
+BOOK_CAP = 20
+MAX_HOLD_SESS = 3
+
+
+def portfolio(score_min=SCORE_MIN, cap=BOOK_CAP, max_hold=MAX_HOLD_SESS):
+    """Re-walk the STORED ticks under a capped book. No re-scoring, ever.
+
+    WHY THIS CANNOT REUSE sweep()'s SHAPE. sweep() streams qualified ticks in time order and opens
+    a position whenever that symbol+side is free — each decision is independent of every other.
+    Here they are not: whether a candidate gets a slot depends on how many positions are still
+    open at that instant, which depends on exits computed at earlier ticks. So the walk has to go
+    tick by tick, carrying the book forward, and a candidate that would have been taken at 09:30
+    is simply missed if twenty better ones are already held.
+    """
+    made = 0
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(DDL)
+        cur.execute("DELETE FROM tc_score_replay_port_trades")
+        conn.commit()
+
+        cur.execute("""SELECT ts, symbol, bucket, score100 FROM tc_score_replay_ticks
+                       WHERE score100 >= %s ORDER BY ts, score100 DESC""", (score_min,))
+        by_tick = {}
+        for ts, sym, bucket, sc in cur.fetchall():
+            by_tick.setdefault(ts, []).append((float(sc), sym, bucket))
+
+        book = {}            # symbol -> exit_ts of the position still running
+        traded_today = set()  # (symbol, date) — the card forbids a same-day re-entry
+        rows = []
+
+        for ts in sorted(by_tick):
+            # retire anything that has already exited BEFORE deciding who gets a slot
+            for s in [s for s, x in book.items() if x is not None and x <= ts]:
+                del book[s]
+            slots = cap - len(book)
+            if slots <= 0:
+                continue
+
+            # ONE CANDIDATE PER SYMBOL, highest-scoring bucket wins. A symbol qualifying in two
+            # buckets is one opportunity, not two, and taking both would quietly double its weight
+            # in a book that is supposed to hold twenty distinct names.
+            best = {}
+            for sc, sym, bucket in by_tick[ts]:
+                if sym in book or (sym, ts.date()) in traded_today:
+                    continue
+                if sym not in best or sc > best[sym][0]:
+                    best[sym] = (sc, bucket)
+
+            ranked = sorted(best.items(), key=lambda kv: (-kv[1][0], kv[0]))
+            rank = 0
+            for sym, (sc, bucket) in ranked:
+                if slots <= 0:
+                    break
+                rank += 1
+                side = bucket.split("-")[0]
+                deadline = datetime.combine(
+                    _nth_session(ts.date(), max_hold), datetime.min.time()
+                ).replace(hour=SQUAREOFF[0], minute=SQUAREOFF[1])
+                bars, src = _fut_bars(cur, sym, ts, deadline)
+                if not bars:
+                    continue
+                entry_px = bars[0]["close"]
+                if not entry_px:
+                    continue
+                x_ts, x_px, why = _walk(bars[1:], side, entry_px, deadline)
+                if x_ts is None:
+                    continue
+                pnl = ((x_px / entry_px - 1) * 100) if side == "BUY" \
+                    else ((entry_px / x_px - 1) * 100)
+                book[sym] = x_ts
+                traded_today.add((sym, ts.date()))
+                slots -= 1
+                # open_book_size is the book INCLUDING this position, so avg() reads as "how full
+                # did the book run" and max() is the cap check the card asks for.
+                rows.append((sym, bucket, side, ts, entry_px, src, round(sc, 2), rank, len(book),
+                             x_ts, x_px, why, round(pnl, 4)))
+
+        if rows:
+            cur.executemany(
+                """INSERT INTO tc_score_replay_port_trades
+                   (symbol,bucket,side,entry_ts,entry_px,entry_src,score100,slot_rank,
+                    open_book_size,exit_ts,exit_px,exit_reason,pnl_pct)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT DO NOTHING""", rows)
+            conn.commit()
+            made = len(rows)
+    return made
+
+
+def portfolio_summary():
+    """What the capped book actually did. Returns None when nothing has run — never a zero row."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM tc_score_replay_port_trades")
+        if not cur.fetchone()[0]:
+            return None
+        cur.execute("""SELECT count(*), count(*) FILTER (WHERE pnl_pct>0), avg(pnl_pct),
+                              sum(pnl_pct), avg(open_book_size), max(open_book_size),
+                              avg(slot_rank), min(score100)
+                       FROM tc_score_replay_port_trades""")
+        n, w, avg, tot, abook, mbook, arank, minsc = cur.fetchone()
+        cur.execute("""SELECT bucket, count(*), count(*) FILTER (WHERE pnl_pct>0),
+                              avg(pnl_pct), sum(pnl_pct)
+                       FROM tc_score_replay_port_trades GROUP BY bucket ORDER BY 1""")
+        buckets = [{"bucket": b, "trades": c, "wins": ww, "acc": round(100.0 * ww / c, 1) if c else 0,
+                    "avg": round(float(a or 0), 3), "sum": round(float(s or 0), 2)}
+                   for b, c, ww, a, s in cur.fetchall()]
+        cur.execute("""SELECT entry_ts::date, count(*), avg(pnl_pct), sum(pnl_pct)
+                       FROM tc_score_replay_port_trades GROUP BY 1 ORDER BY 1""")
+        days = [{"day": str(d), "trades": c, "avg": round(float(a or 0), 3),
+                 "sum": round(float(s or 0), 2)} for d, c, a, s in cur.fetchall()]
+        cur.execute("""SELECT exit_reason, count(*) FROM tc_score_replay_port_trades
+                       GROUP BY 1 ORDER BY 2 DESC""")
+        exits = {r[0]: r[1] for r in cur.fetchall()}
+    return {"params": {"score_min": SCORE_MIN, "book_cap": BOOK_CAP,
+                       "target_pct": TARGET_PCT, "stop_pct": STOP_PCT,
+                       "max_hold_sessions": MAX_HOLD_SESS},
+            "trades": n, "wins": w, "acc": round(100.0 * w / n, 1) if n else 0,
+            "avg_pnl_pct": round(float(avg or 0), 3), "total_pnl_pct": round(float(tot or 0), 2),
+            "avg_open_book": round(float(abook or 0), 1), "max_open_book": int(mbook or 0),
+            "slot_utilisation_pct": round(100.0 * float(abook or 0) / BOOK_CAP, 1),
+            "avg_slot_rank": round(float(arank or 0), 2), "min_score_taken": float(minsc or 0),
+            "by_bucket": buckets, "by_day": days, "exits": exits,
+            "merit_gate": {"avg": MERIT_AVG, "acc": MERIT_ACC},
+            "merit": bool(float(avg or 0) >= MERIT_AVG and (100.0 * w / n if n else 0) >= MERIT_ACC)}
 
 
 def _nth_session(day, n):

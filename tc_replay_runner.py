@@ -63,6 +63,12 @@ def _walk(phase):
             out["ticks_scored"] = R.score_all()
         if phase in ("sweep", "all"):
             out["trades"] = R.sweep()
+        # cc#1221: portfolio is DELIBERATELY NOT part of "all". It re-walks the stored ticks and
+        # never re-scores, so it is cheap and independent — but folding it into `all` would mean a
+        # routine re-score also silently rebuilt the capped book, and the two runs answer different
+        # questions the founder asked separately. Ask for it by name.
+        if phase == "portfolio":
+            out["port_trades"] = R.portfolio()
     except Exception as e:
         err = "%s: %s" % (type(e).__name__, e)
         out["traceback"] = traceback.format_exc().splitlines()[-12:]
@@ -77,8 +83,8 @@ def _walk(phase):
 def start(phase="all"):
     """Kick a replay. Returns immediately; poll status()."""
     phase = str(phase or "all").lower().strip()
-    if phase not in ("all", "score", "sweep"):
-        return {"error": "phase must be one of all, score, sweep — got %r" % phase}
+    if phase not in ("all", "score", "sweep", "portfolio"):
+        return {"error": "phase must be one of all, score, sweep, portfolio — got %r" % phase}
     with _LOCK:
         if _STATE["running"]:
             return {"busy": True, "phase": _STATE["phase"], "run_id": _STATE["run_id"],
@@ -149,6 +155,13 @@ def status(selfcheck=True):
         out["markdown"] = None
         out["note"] = ("no trades stored yet — the sweep has not produced a cell. "
                        "This is an ABSENCE, not a result of zero.")
+
+    # cc#1221: the capped-book summary. None when portfolio has never run - an ABSENCE, reported
+    # as one, rather than a block of zeros that reads like a book that traded nothing.
+    try:
+        out["portfolio"] = R.portfolio_summary()
+    except Exception as e:
+        out["portfolio"] = {"error": "%s: %s" % (type(e).__name__, e)}
 
     # The selfcheck is the only test that catches the as-of loader having drifted from the live
     # scorer, so it rides along with the status rather than waiting to be asked for separately.
