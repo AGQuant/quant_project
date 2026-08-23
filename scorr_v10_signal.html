@@ -502,10 +502,23 @@ function pivCard(name, row, cmp){
     + '</h3></div><div class="unavail">No stored pivot row for this index.</div></div></div>';
   /* the CMP marker is placed BETWEEN the rungs it actually sits between, so the ladder reads as a
      map rather than a list with a number bolted on the end. */
-  var rungs = [['R2', row.r2], ['R1', row.r1], ['PP', row.pp], ['S1', row.s1], ['S2', row.s2]];
+  /* cc#1257 · ASCENDING BY VALUE, rule 29630 — supports on top, because that is the order people
+     read numbers in. This card cannot inherit the digest payload: it is built from a flat row
+     (row.r2, row.r1, …) off a different endpoint, not from a rungs array. So it applies THE SAME
+     RULE rather than a copied list — sort by value. That matters: a hardcoded
+     ['S2','S1','PP','R1','R2'] here would be a second ordering able to drift away from the
+     digest's, and expressing the rule instead of the result is what keeps the two in step without
+     anything to remember.
+     THE CMP TEST FLIPS WITH THE ORDER, and it would be an easy thing to miss. Descending, CMP went
+     before the first level at or BELOW it. Ascending, it goes before the first level ABOVE it —
+     the same "between the levels it really sits between", read from the other end. Leaving the old
+     comparison in place would have quietly parked the price at the wrong rung on every card. */
+  var rungs = [['R2', row.r2], ['R1', row.r1], ['PP', row.pp], ['S1', row.s1], ['S2', row.s2]]
+                .filter(function(r){ return r[1] != null; })
+                .sort(function(a, b){ return Number(a[1]) - Number(b[1]); });
   var html = '', placed = false;
   rungs.forEach(function(r){
-    if(!placed && cmp != null && r[1] != null && Number(cmp) >= Number(r[1])){
+    if(!placed && cmp != null && Number(cmp) <= Number(r[1])){
       html += pivRow('CMP', cmp, 'cmp'); placed = true;
     }
     html += pivRow(r[0], r[1], r[0] === 'PP' ? 'pp' : '');

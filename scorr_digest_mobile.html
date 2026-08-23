@@ -501,20 +501,25 @@ function ladder(ix){
   /* cc#1111: .cl marks a clause that must not break. "below PP 0.76%" is one phrase — the number
      means nothing on a line of its own. */
   const sideTxt=side?`<span class="cl" style="color:${side==='above'?'var(--volt)':'var(--heat)'}">${side} PP ${bp.dist_pct!=null?Math.abs(bp.dist_pct).toFixed(2)+'%':''}</span>`:'';
-  /* cc#1187: R2 down to S2 — high at the top, the way a ladder hangs. CMP is threaded into its
-     true slot between the levels it sits between, so the read is spatial: you SEE the price
-     standing above PP without parsing a percentage. */
-  const desc=['R2','R1','PP','S1','S2'];
-  let rows=[], cmpDone=false;
-  desc.forEach(L=>{
-    const r=rungs.find(x=>x.label===L);
-    if(cmp!=null&&!cmpDone&&r&&cmp>=Number(r.value)){
-      rows.push(`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`);
-      cmpDone=true;
-    }
-    rows.push(`<div class="lrow${L==='PP'?' pp':''}"><span class="ll">${L}</span><span class="lbar"></span><span class="lv">${r?num(r.value):'—'}</span></div>`);
+  /* cc#1257 · RENDERED IN PAYLOAD ORDER, and that is the whole point of this change.
+     cc#1187 put R2 at the top "the way a ladder hangs"; rule 29630 overrules it — people read the
+     lower number on top, so supports come first. But the ORDER IS NOT FLIPPED HERE. This function
+     used to carry its own ['R2','R1','PP','S1','S2'] and look each level up by label, which made
+     it a SECOND copy of the ordering that could silently disagree with the web digest rendering
+     the same payload. It is deleted. digest_v3 now sorts the rungs ascending by value and hands
+     back cmp_slot as the insertion index, and both digest surfaces simply render what they are
+     given — one sort, at the source, per scope 3.
+     The local fallback exists only for a payload that predates the sort (a client holding an old
+     bundle mid-deploy); it computes the same slot from the values rather than guessing. */
+  const slot=(ix.cmp_slot!=null)?ix.cmp_slot
+             :rungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
+  const cmpRow=`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`;
+  let rows=[];
+  rungs.forEach((r,i)=>{
+    if(cmp!=null&&i===slot)rows.push(cmpRow);
+    rows.push(`<div class="lrow${r.label==='PP'?' pp':''}"><span class="ll">${esc(r.label)}</span><span class="lbar"></span><span class="lv">${r.value!=null?num(r.value):'—'}</span></div>`);
   });
-  if(cmp!=null&&!cmpDone)rows.push(`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`);
+  if(cmp!=null&&slot>=rungs.length)rows.push(cmpRow);
   const cells=rows.join('');
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause

@@ -219,10 +219,25 @@ def _ladders(cur) -> Dict[str, Any]:
         band = [{"label": k, "value": v,
                  "dist_pct": (round((v / cmp_v - 1) * 100, 2) if (v and cmp_v) else None)}
                 for k, v in rungs if v is not None]
-        above = [b for b in band if b["value"] > (cmp_v or 0)]
+        # cc#1257 · THE LADDER IS SORTED HERE AND NOWHERE ELSE, ascending by value, per rule 29630
+        # and the founder's line: people read the lower number on top, so supports come first.
+        # This reverses cc#1187, which put R2 at the top "the way a ladder hangs" — that reasoning
+        # was sound and is simply overruled; recording it so the next reader knows it was a
+        # decision and not an accident.
+        # SORTED BY VALUE, NOT BY A LABEL SEQUENCE. A hardcoded ['S2','S1','PP','R1','R2'] would be
+        # a second place for the order to live and a second place for it to drift. Value order is
+        # the rule itself, it needs no list to stay in step, and it stays correct even on a day the
+        # pivot maths puts two levels in an unexpected relation.
+        band.sort(key=lambda b: b["value"])
+        # cmp_slot is the INSERTION INDEX for the CMP row, so it must be recomputed for the new
+        # order rather than carried over. It used to be len(above) because the descending list put
+        # the higher levels first; ascending puts the LOWER ones first, so it is now the count of
+        # levels strictly below the price. Getting this wrong does not crash anything — it silently
+        # parks CMP in the wrong slot, which is the one thing this card must not do.
+        below = [b for b in band if b["value"] < (cmp_v or 0)]
         out.append({"symbol": sym, "cmp": cmp_v, "as_of": as_of, "tier": tier,
                     "pivot_date": str(pdate) if pdate else None,
-                    "rungs": band, "cmp_slot": len(above)})
+                    "rungs": band, "cmp_slot": len(below)})
     reads = []
     for l in out:
         if l.get("cmp") and l.get("rungs"):
