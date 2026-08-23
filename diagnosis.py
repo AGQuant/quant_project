@@ -453,8 +453,30 @@ def _registry(cur) -> Dict[str, tuple]:
     bg_ops_metrics_season_sweep had run sixty seconds before the read.
     Enumerated with active rather than a name list, so a new job cannot be silently uncovered.
     """
-    cur.execute("SELECT job_name, last_run_at, last_status FROM scheduler_master WHERE active")
-    return {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+    # cc#1256: last_error joins the tuple because it is where a skip now carries its reason
+    # ("skip:EXPECTED:not_trading_day"). Every reader of that column gates on last_status ==
+    # 'error' before touching it, so a skip reason living there cannot be mistaken for a failure.
+    cur.execute("SELECT job_name, last_run_at, last_status, last_error "
+                "FROM scheduler_master WHERE active")
+    return {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+
+
+def _skip_reason(err):
+    """cc#1256 — read a skip tag back. -> (family, token, detail) or (None, None, '').
+
+    Anything that is not a recognised tag reads as UNKNOWN, which grades amber. That includes an
+    empty column, a legacy row written before this shipped, and a bare _SKIPPED from one of the 55
+    guards not yet classified. Unknown is never green: the whole point of the card is that a skip
+    nobody wrote a reason for cannot be graded healthy.
+    """
+    s = str(err or "")
+    if not s.startswith("skip:"):
+        return (None, None, "")
+    parts = s.split(":", 2)
+    if len(parts) < 3:
+        return (None, None, "")
+    rest = parts[2].split(" · ", 1)
+    return (parts[1], rest[0], rest[1] if len(rest) > 1 else "")
 
 
 def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0, reg=None):
@@ -480,9 +502,22 @@ def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0, r
         status = (reg[1] or 'unknown').lower()
         if tick_age <= yellow_h * 60:
             if status == 'skipped':
-                return _chk(label, f'ticked · skipped ({_age_txt(tick_age)})', ok=False, warn=True,
-                            detail=f'Expected {expected} · registry {_ist_stamp(ticked)} · '
-                                   f'ran and skipped, no reason recorded (cc#1253 Phase B)')
+                # cc#1256 Phase B · the skip now carries its family, and the family decides the
+                # colour. EXPECTED means the calendar or the market state said no, and a job that
+                # correctly declines to run on a Sunday is a HEALTHY job — that one is green, and
+                # it is the state Phase A could not reach. CONDITIONAL means a gate said no, which
+                # might be right and might be a fault, so it stays amber with the token printed.
+                # UNKNOWN — no tag at all — stays amber too: 55 guards are not yet classified and
+                # a skip nobody wrote a reason for must never be graded healthy (rule 9).
+                fam, tok, why = _skip_reason(reg[2] if len(reg) > 2 else None)
+                _lbl = tok or 'no reason recorded'
+                _d = (f'Expected {expected} · registry {_ist_stamp(ticked)} · '
+                      f'ran and skipped · {_lbl}' + (f' · {why}' if why else ''))
+                if fam == 'EXPECTED':
+                    return _chk(label, f'ticked · skipped · {tok} ({_age_txt(tick_age)})',
+                                ok=True, detail=_d)
+                return _chk(label, f'ticked · skipped · {_lbl} ({_age_txt(tick_age)})',
+                            ok=False, warn=True, detail=_d)
             if status == 'ok' and age_min is None:
                 return _chk(label, f'ticked · ok ({_age_txt(tick_age)})', ok=(tick_age <= green_h*60),
                             warn=True,

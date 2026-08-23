@@ -89,6 +89,82 @@ class _Empty:
         return "_Empty(%r)" % (self.detail,)
 
 
+_SKIP_EXPECTED = "EXPECTED"
+_SKIP_CONDITIONAL = "CONDITIONAL"
+
+
+class _Skip:
+    """cc#1256 — a skip that says WHY, so the watchdog can tell a correct skip from a silent one.
+
+    cc#1253 Phase A made a skip VISIBLE: a ticked job that skipped reads amber instead of a false
+    red. It could not make a skip JUDGEABLE, because nothing recorded the reason — 30 active jobs
+    sat at last_status='skipped' with last_error empty on every single one, so "correctly skipped
+    because it is Sunday" and "skipped because a precondition silently failed" were the same row.
+
+    THE VOCABULARY IS TWO FAMILIES, and that split is the entire point:
+      EXPECTED    — the calendar or the market state said no. Nothing is wrong. The watchdog may
+                    grade this GREEN, because a job that correctly declines to run on a Sunday is
+                    a healthy job.
+      CONDITIONAL — a gate or a precondition said no. That MIGHT be correct and might be a fault,
+                    and the row cannot tell which, so it stays AMBER with the reason printed.
+
+    THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". 102 sites return it
+    and 58 of them are guards whose family is a judgement call — a session-live window, a
+    multi-condition arming check. Those are deliberately NOT relabelled by pattern-matching at
+    23:00 on a Sunday: a wrongly EXPECTED token would grade a real fault GREEN, which is worse
+    than the amber it replaces and is the exact rule-9 failure this card exists to prevent. An
+    unknown reason stays amber. The tokens land where the guard is unambiguous, and the rest are
+    listed in the forum to be classified deliberately, one at a time.
+
+    Deliberately NOT an exception and NOT an _Empty: a skip is neither a crash nor an empty
+    result. It must not increment a failure streak and must not trigger a restart ladder.
+    """
+    __slots__ = ("token", "family", "detail")
+
+    def __init__(self, token, family, detail=""):
+        self.token = token
+        self.family = family
+        self.detail = str(detail)[:200]
+
+    def tag(self):
+        """What lands in scheduler_master.last_error. MACHINE-READABLE FIRST, prose last, so a
+        query can group on the token without parsing a sentence — the card asks for tokens, not
+        prose. Safe to put in last_error because every reader of that column gates on
+        last_status == 'error' before touching it (checked: scheduler_master._judge line 373,
+        protocol_one._scheduler_health line 184, diagnosis). _Empty already sets this precedent in
+        this same file, writing its own detail there under status 'empty'."""
+        s = "skip:%s:%s" % (self.family, self.token)
+        return s + (" · " + self.detail if self.detail else "")
+
+    def __repr__(self):
+        return "_Skip(%r, %r)" % (self.token, self.family)
+
+    @staticmethod
+    def already_ran():     return _Skip("already_ran", _SKIP_EXPECTED)
+
+    @staticmethod
+    def not_trading_day(): return _Skip("not_trading_day", _SKIP_EXPECTED)
+
+    @staticmethod
+    def market_closed():   return _Skip("market_closed", _SKIP_EXPECTED)
+
+    @staticmethod
+    def disabled():        return _Skip("disabled", _SKIP_EXPECTED)
+
+    # CONDITIONAL — a gate said no. Amber, never green, because nobody can tell from here whether
+    # the gate was right. already_running is single-flight: usually benign, but a tick that keeps
+    # finding the previous one in flight is how a wedged job looks from the outside.
+    @staticmethod
+    def already_running(): return _Skip("already_running", _SKIP_CONDITIONAL)
+
+    @staticmethod
+    def gate_closed(detail=""): return _Skip("gate_closed", _SKIP_CONDITIONAL, detail)
+
+    @staticmethod
+    def precondition_missing(detail=""):
+        return _Skip("precondition_missing", _SKIP_CONDITIONAL, detail)
+
+
 def _run_recorded(fn, args):
     """cc#525 run recorder: wraps the job call so every _spawn dispatch upserts
     last_run_at/last_status/last_error/last_duration_ms into scheduler_master, with ZERO
@@ -111,6 +187,13 @@ def _run_recorded(fn, args):
         # later edit cannot reintroduce the silent-ok by reordering these two branches.
         if isinstance(result, _Empty):
             status, err = "empty", result.detail
+        # cc#1256: _Skip is checked BEFORE the bare sentinel and by isinstance, for the same
+        # reason _Empty is — a _Skip instance compared against the _SKIPPED string is False
+        # anyway, but the order is stated so a later edit cannot drop the reason by reordering.
+        # The status stays 'skipped' either way: this card records WHY a skip happened, it never
+        # changes WHETHER one happens, and nothing downstream sees a new status value.
+        elif isinstance(result, _Skip):
+            status, err = "skipped", result.tag()
         elif result == _SKIPPED:
             status, err = "skipped", None
         else:
@@ -761,7 +844,7 @@ def _premarket_writer_check():
     global _premarket_check_ran
     today = _ist_now().date()
     if _premarket_check_ran == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     _premarket_check_ran = today
     # cc#206/#211: canonical trading-day guard (single _is_trading_day helper, nse_holidays
     # based — no duplicate inline check). The 09:10 readiness restart fired on SAT 04-Jul
@@ -769,7 +852,7 @@ def _premarket_writer_check():
     # cold-boot risk (id=166 class). No live writer runs off-session, so skip weekends +
     # NSE holidays entirely. (Writes are also gated at the writer choke point in cc#211.)
     if not _is_trading_day(today):
-        return _SKIPPED
+        return _Skip.not_trading_day()
     try:
         age = _tick_age_minutes()
         if age is None or age > 60:
@@ -866,7 +949,7 @@ def _bg_v8_paper_exit_eod():
     loop missed (e.g. the writer was down). Uses the latest completed trading day."""
     global _v8_paper_exit_eod_ran
     today = _ist_now().date()
-    if _v8_paper_exit_eod_ran == today: return _SKIPPED
+    if _v8_paper_exit_eod_ran == today: return _Skip.already_ran()
     try:
         import v8_paper
         with _conn() as conn:
@@ -931,7 +1014,7 @@ def _bg_pcr_intraday():
     """
     global _pcr_intraday_running
     if _pcr_intraday_running:
-        return _SKIPPED
+        return _Skip.already_running()
     _pcr_intraday_running = True
     try:
         import pcr_intraday
@@ -1086,9 +1169,9 @@ def _bg_tc_screener_v2():
     """
     global _tc_screener_v2_running
     if _job_active("bg_tc_screener_v2") is not True:
-        return _SKIPPED
+        return _Skip.disabled()
     if _tc_screener_v2_running:
-        return _SKIPPED
+        return _Skip.already_running()
     _tc_screener_v2_running = True
     try:
         import tc_screener_v2 as _scv2
@@ -1252,7 +1335,7 @@ def _bg_v21_killswitch():
     fault."""
     global _v21_ks_ran_today
     today = _ist_now().date()
-    if _v21_ks_ran_today == today: return _SKIPPED
+    if _v21_ks_ran_today == today: return _Skip.already_ran()
     try:
         import v8_filter_killswitch
         with _conn() as conn: res = v8_filter_killswitch.run_killswitch_check(conn)
@@ -1286,10 +1369,10 @@ def _bg_qsr_scan():
     """
     global _qsr_scan_ran
     if _job_active("bg_qsr_scan") is not True:
-        return _SKIPPED
+        return _Skip.disabled()
     today = _ist_now().date()
     if _qsr_scan_ran == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         import qsr_engine
         res = qsr_engine.run_qsr_scan()
@@ -1334,7 +1417,7 @@ def _bg_stale_claim_release():
     # The leftover `stale_claim_release` row is now read by nothing. Deleting a registry row is
     # Fable's lane (ROLE_CHARTER_V4), so it is flagged in the room rather than dropped from here.
     if _job_active("bg_stale_claim_release") is not True:
-        return _SKIPPED
+        return _Skip.disabled()
     import cc_queue_maintenance
     released = cc_queue_maintenance.release_stale_claims()
     if not released:
@@ -1355,10 +1438,10 @@ def _bg_qsr_exits():
     """
     global _qsr_exits_ran
     if _job_active("bg_qsr_exits") is not True:
-        return _SKIPPED
+        return _Skip.disabled()
     today = _ist_now().date()
     if _qsr_exits_ran == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         import qsr_engine
         res = qsr_engine.run_qsr_exits()
@@ -1396,7 +1479,7 @@ def _bg_heal_intraday():
     global _heal_ran_today
     today = _ist_now().date()
     if _heal_ran_today == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         import main
         res = main._heal_morning_gaps()
@@ -1445,7 +1528,7 @@ def _bg_gate_rebalance():
     global _gate_rebalance_ran_today
     today = _ist_now().date()
     if _gate_rebalance_ran_today == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         # stale-mood guard — compute age in IST (adr_intraday.ts is naive IST)
         with _conn() as conn, conn.cursor() as cur:
@@ -1601,8 +1684,8 @@ def _bg_adr_pcr():
     # those phantom 0-rows displaced Friday's real ADR as "latest" and broke the mood gate.
     if not _is_trading_day(today):
         log.debug(f"adr_pcr: skip — {today} is not a trading day")
-        return _SKIPPED
-    if _adr_pcr_ran_today == today: return _SKIPPED
+        return _Skip.not_trading_day()
+    if _adr_pcr_ran_today == today: return _Skip.already_ran()
     try:
         with _conn() as conn:
             _compute_and_store_adr(conn)
@@ -1627,8 +1710,8 @@ def _bg_adr_pcr_retry():
     """task #59: 10-min retry — if the 15:50 run didn't produce today's ADR, redo
     it once at 16:00 (covers a transient feed/scheduler hiccup)."""
     today = _ist_now().date()
-    if not _is_trading_day(today): return _SKIPPED         # cc#417: no retry on non-trading days
-    if _adr_pcr_ran_today == today: return _SKIPPED        # already verified-complete
+    if not _is_trading_day(today): return _Skip.not_trading_day()         # cc#417: no retry on non-trading days
+    if _adr_pcr_ran_today == today: return _Skip.already_ran()        # already verified-complete
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()
 
@@ -1640,7 +1723,7 @@ def _bg_tc_sim_tick():
     an hourly tick can never overlap a still-running one (universe scoring can be slow). No V8 objects (id=244)."""
     global _tc_sim_running
     if _tc_sim_running:
-        return _SKIPPED
+        return _Skip.already_running()
     _tc_sim_running = True
     try:
         import tc_sim
@@ -2041,7 +2124,7 @@ def _bg_ops_polish_detector(scheduled=False):
     symbol-quarters are skipped by CC at extraction time (spec instructs check-existing-rows-first)."""
     global _ops_polish_detect_running, _ops_polish_detect_ran_today
     if _ops_polish_detect_running:
-        return _SKIPPED
+        return _Skip.already_running()
     today = _ist_now().date()
     on_demand = False
     if not scheduled:
@@ -2057,7 +2140,7 @@ def _bg_ops_polish_detector(scheduled=False):
             return _SKIPPED
     else:
         if _ops_polish_detect_ran_today == today:
-            return _SKIPPED
+            return _Skip.already_ran()
     _ops_polish_detect_running = True
     try:
         import ops_metrics_pipeline as _omp
@@ -2139,7 +2222,7 @@ def _bg_ops_polish_detector(scheduled=False):
 def _bg_gvm():
     global _gvm_ran_today
     today = _ist_now().date()
-    if _gvm_ran_today == today: return _SKIPPED
+    if _gvm_ran_today == today: return _Skip.already_ran()
     try:
         import gvm_nightly
         with _conn() as conn:
@@ -2420,7 +2503,7 @@ def _bg_yahoo_symbol_resolve():
     """
     global _yahoo_resolve_running, _yahoo_resolve_ran_day
     if _yahoo_resolve_running:
-        return _SKIPPED
+        return _Skip.already_running()
     now = _ist_now()
     today = now.date()
     syms, armed = [], False
@@ -2499,7 +2582,7 @@ def _bg_yahoo_symbol_resolve():
 def _bg_pivots():
     global _pivots_ran_today
     today = _ist_now().date()
-    if _pivots_ran_today == today: return _SKIPPED
+    if _pivots_ran_today == today: return _Skip.already_ran()
     try:
         import v8_paper
         with _conn() as conn:
@@ -2525,7 +2608,7 @@ def _bg_universe_pivots():
     Same table + ON CONFLICT (symbol, pivot_date) upsert — idempotent, complements _bg_pivots."""
     global _upivots_ran_today
     today = _ist_now().date()
-    if _upivots_ran_today == today: return _SKIPPED
+    if _upivots_ran_today == today: return _Skip.already_ran()
     try:
         import gvm_universe_pivots
         res = gvm_universe_pivots.compute_universe_pivots(today)
@@ -2551,7 +2634,7 @@ def _bg_universe_technicals():
     in the real 01:00-02:00 nightly chain instead, after the last existing job."""
     global _ut_ran_today
     today = _ist_now().date()
-    if _ut_ran_today == today: return _SKIPPED
+    if _ut_ran_today == today: return _Skip.already_ran()
     try:
         import universe_technicals
         with _conn() as conn:
@@ -2574,7 +2657,7 @@ def _bg_rvol_profiles():
     global _rvol_ran_today
     today = _ist_now().date()
     if _rvol_ran_today == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         import rvol_engine
         with _conn() as conn:
@@ -2628,7 +2711,7 @@ def _bg_nse_eod_ingest():
     pass found not-yet-published)."""
     try:
         if not _is_trading_day(_ist_now().date()):
-            return _SKIPPED
+            return _Skip.not_trading_day()
         import nse_eod_ingest
         res = nse_eod_ingest.run_nightly()
         log.info(f"nse_eod_ingest: {res}")
@@ -2642,7 +2725,7 @@ def _bg_fo_eod():
     OI fallback) + cross-checks vs the live value. Trading days only."""
     now = _ist_now()
     if not _is_trading_day(now.date()):
-        return _SKIPPED
+        return _Skip.not_trading_day()
     try:
         import nse_fo_eod
         res = nse_fo_eod.run_nightly()
@@ -2657,7 +2740,7 @@ def _bg_fo_ban_fetch():
     Trading days only; idempotent per-date replace via upsert_fo_ban."""
     now = _ist_now()
     if not _is_trading_day(now.date()):
-        return _SKIPPED
+        return _Skip.not_trading_day()
     try:
         import nse_eod_ingest as nse
         sess = nse._nse_session()
@@ -2822,10 +2905,10 @@ def _bg_v14_cycle():
     reporting 'ok' is invisible to the two things whose job is to notice. The DATA never moved —
     v14_trades held at 34 and v14_watchlist at 23 — so nothing traded; only the record lied."""
     if _job_active("bg_v14_cycle") is not True:
-        return _SKIPPED
+        return _Skip.disabled()
     global _v14_running
     if _v14_running:
-        return _SKIPPED
+        return _Skip.already_running()
     _v14_running = True
     try:
         import v14_engine
@@ -2849,7 +2932,7 @@ def _bg_qb_eod():
     global _qb_eod_ran_today, _qb_eod_running
     today = _ist_now().date()
     if _qb_eod_ran_today == today or _qb_eod_running: return _SKIPPED
-    if not _is_trading_day(today): return _SKIPPED
+    if not _is_trading_day(today): return _Skip.not_trading_day()
     _qb_eod_running = True
     try:
         import qb_eod_checker, qb_rebalance
@@ -2899,7 +2982,7 @@ def _bg_qb_eod():
 def _bg_fu_sync():
     global _fu_sync_ran_this_week
     today = _ist_now().date()
-    if _fu_sync_ran_this_week == today: return _SKIPPED
+    if _fu_sync_ran_this_week == today: return _Skip.already_ran()
     try:
         import fyers_sync
         with _conn() as conn:
@@ -2919,7 +3002,7 @@ def _bg_lot_sync():
     stale after an expiry-day lot revision -> mis-sized V8 paper + client qty). Idempotent."""
     global _lot_sync_ran_today
     today = _ist_now().date()
-    if _lot_sync_ran_today == today: return _SKIPPED
+    if _lot_sync_ran_today == today: return _Skip.already_ran()
     try:
         import lot_sync
         with _conn() as conn:
@@ -3286,7 +3369,7 @@ def _bg_mf_derived_nightly():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _mf_derived_nightly_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _mf_derived_nightly_armed_day = day_key
     try:
         import mf_derived
@@ -3306,7 +3389,7 @@ def _bg_mf_derived_audit():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _mf_derived_audit_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _mf_derived_audit_armed_day = day_key
     try:
         import mf_derived
@@ -3341,7 +3424,7 @@ def _bg_mf_monthly_mc():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _mf_monthly_mc_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _mf_monthly_mc_armed_day = day_key
 
     started = _ist_now()
@@ -3665,7 +3748,7 @@ def _bg_ops_metrics_backfill():
     A stale-running resume (see below) also waits for this window rather than firing immediately."""
     global _ops_metrics_running
     if _ops_metrics_running:
-        return _SKIPPED   # cc#734 guardrail: single-flight — a concurrent trigger no-ops (already_running)
+        return _Skip.already_running()   # cc#734 guardrail: single-flight — a concurrent trigger no-ops (already_running)
     now_ist = datetime.now(IST)
     # cc#734: read the flag BEFORE the window gate so an on-demand 'run_now' can bypass it. The
     # cc#526 overnight window (01:00-06:00 IST) still governs the DEFAULT scheduled 'pending' path
@@ -3749,7 +3832,7 @@ def _bg_ops_text_fetch():
     founder overrides that for this one-time fetch pass)."""
     global _ops_text_fetch_running
     if _ops_text_fetch_running:
-        return _SKIPPED
+        return _Skip.already_running()
     now_ist = datetime.now(IST)
     in_window = now_ist.hour >= 23 or now_ist.hour < 6
     if not in_window:
@@ -3803,7 +3886,7 @@ def _bg_ops_peer_benchmark():
     global _ops_peer_benchmark_ran_on
     today = _ist_now().date()
     if _ops_peer_benchmark_ran_on == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     try:
         import ops_peer_benchmark
         res = ops_peer_benchmark.run_rebuild()
@@ -3827,7 +3910,7 @@ def _bg_engine_watchdog():
         return _SKIPPED
     today = now.date()
     if _engine_watchdog_ran_on == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     _engine_watchdog_ran_on = today
     try:
         import engine_watchdog
@@ -3864,7 +3947,7 @@ def _bg_result_corner_verify():
         return _SKIPPED
     today = now.date()
     if _result_corner_ran_on == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     _result_corner_ran_on = today
     try:
         import result_corner
@@ -3916,7 +3999,7 @@ def _bg_futures_gap_backfill():
         return _SKIPPED
     today = now.date()
     if _futures_gap_backfill_ran_on == today:
-        return _SKIPPED
+        return _Skip.already_ran()
     _futures_gap_backfill_ran_on = today
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -4074,7 +4157,7 @@ def _bg_ops_metrics_t1():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _ops_metrics_t1_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _ops_metrics_t1_armed_day = day_key
     try:
         import ops_metrics_pipeline
@@ -4093,7 +4176,7 @@ def _bg_ops_metrics_saturday():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _ops_metrics_saturday_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _ops_metrics_saturday_armed_day = day_key
     try:
         import ops_metrics_pipeline
@@ -4573,7 +4656,7 @@ def _bg_scheduler_master_daily_audit():
         return _SKIPPED
     day_key = now.date().isoformat()
     if _scheduler_master_audit_armed_day == day_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _scheduler_master_audit_armed_day = day_key
     try:
         import scheduler_master
