@@ -278,7 +278,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .ladwrap.hasmore::after{opacity:1}
 /* cc#1186 · each index gets its own .well-grammar sub-tile so NIFTY50 and BANKNIFTY read as two
    instruments, not one run-on block — same raised-tile language as the GLOBAL TAPE tiles. */
-.lad-ix{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-11) var(--space-12) var(--space-10);margin-top:var(--space-10);
+/* cc#1235: the tile's own padding comes in with the rows — 11/10 top and bottom against a block
+   that is now 30px shorter was the wrapper still sized for the old ladder. Left/right stays 12px
+   so the value column keeps the same distance from the tile edge it always had. */
+.lad-ix{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-9) var(--space-12) var(--space-9);margin-top:var(--space-10);
  clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .lad-ix:first-child{margin-top:0}
 .lad-ix .ladwrap::after{background:linear-gradient(to right,rgba(0,0,0,0),var(--hi))}
@@ -328,13 +331,29 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    construction: one level per row, the value right-aligned with the whole card width to itself.
    It is also the shape traders already read — a ladder. R2 at the top, S2 at the floor.
    The grid, scrollmode, fade and measurement below are all retired WITH their failure mode. */
-.ladder{margin-top:var(--space-8)}
-.lrow{display:flex;align-items:baseline;gap:var(--space-10);padding:var(--space-5) 0;border-top:var(--bw-1) solid var(--edge)}
+/* cc#1235 · THE LADDER GETS SMALLER, AND THE LABEL SHRINKS WITH IT. cc#1187 won the fight over
+   whether all five levels are visible; it left them at headline weight. Six rows of 14px number
+   on a 26px pitch made one index tile 223px, so the two tiles plus the card ran 495px — the
+   ladder read like the page's headline when it is REFERENCE data you glance at.
+   WHAT MOVED AND WHY EACH ONE. The value drops 14px -> 10px. The label drops WITH it, 10px ->
+   8.5px, and that second move is the one that matters: the card asked for 55-65% of the old
+   value size, which is 7.7-9.1px, and at that size the value would have been AT OR UNDER the
+   10px label and stopped being the dominant thing in its own row. Shrinking the label first is
+   what buys the value room to come down at all. 10px against 8.5px keeps the value ahead by the
+   same ratio the old 14/10 pair had, so the eye still lands on the number, not its name.
+   Row padding 5px -> 4px and the ladder's top gap 8px -> 6px close the rhythm so six rows read as
+   one block rather than six separate lines.
+   HIERARCHY IS UNTOUCHED — every cue below this comment is the same rule it was: CMP keeps its
+   aqua label and aqua bar, PP keeps amber on both label and value, the label column keeps its
+   fixed 26px track, and the above/below-PP subline and the CLOSED/WEEKEND clause live in .grp,
+   which this change does not reach. Only sizes moved. */
+.ladder{margin-top:var(--space-6)}
+.lrow{display:flex;align-items:baseline;gap:var(--space-10);padding:var(--space-4) 0;border-top:var(--bw-1) solid var(--edge)}
 .lrow:first-child{border-top:none}
-.lrow .ll{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-px14);
+.lrow .ll{font-family:'JetBrains Mono';font-size:var(--type-85);font-weight:700;letter-spacing:var(--track-px14);
  color:var(--muted);flex:none;width:26px}
 .lrow .lbar{flex:1;height:2px;border-radius:var(--radius-2);background:var(--edge);opacity:.55}
-.lrow .lv{font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-14);letter-spacing:0;
+.lrow .lv{font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);letter-spacing:0;
  font-variant-numeric:tabular-nums;color:var(--chalk);flex:none}
 .lrow.pp .ll,.lrow.pp .lv{color:var(--amber)}
 .lrow.cmprow .ll{color:var(--aqua)}
