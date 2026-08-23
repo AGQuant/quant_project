@@ -402,8 +402,22 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .ic .vv{font-family:'JetBrains Mono';font-size:var(--type-34);font-weight:700;line-height:1.1;margin-top:var(--space-5)}
 /* Fixed height so swiping between cards never resizes the deck under the finger.
    cc#1188: doubled — the founder asked for a larger card and the chart is what earns the space. */
-.ichart{height:72px;margin-top:var(--space-12)}
+/* cc#1258 · height is AUTO now, not 72px. The svg keeps its own 72px; the axis row below adds its
+   own height, and a fixed 72px on the wrapper would have clipped the labels away entirely. */
+.ichart{margin-top:var(--space-12)}
 .isvg{display:block;width:100%;height:72px;overflow:visible}
+/* cc#1258 · THE TICK LABELS LIVE IN HTML, NOT IN THE SVG, and that is not a style preference.
+   .isvg is preserveAspectRatio="none" so the viewBox is stretched horizontally to whatever width
+   the card happens to be — which is exactly what makes the chart resolution-independent, and
+   exactly what would smear <text> into distorted glyphs. Positioning the labels in HTML over the
+   same 0-100 coordinate space keeps the type upright at every width. */
+.ixax{position:relative;height:12px;margin-top:var(--space-4)}
+.ixt{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+ font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px9);
+ color:var(--dim,var(--muted))}
+.ixt.d{color:var(--muted)}          /* a day boundary reads a shade stronger than a time inside one */
+.ixt.lo{transform:none;left:0}      /* clamped so an edge tick cannot hang off the card */
+.ixt.hi{transform:none;left:auto;right:0}
 .idots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
 .idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
 .idots i.on{background:var(--amber);width:15px;border-radius:var(--radius-3)}
@@ -982,8 +996,17 @@ function iChart(s){
      drawing, so the wrap jump lands on pixels identical to the ones it left. */
   var hosts=document.querySelectorAll('[data-ic="'+s.key+'"]');
   if(!hosts.length)return;
+  /* cc#1258 · the header answers WHEN, not HOW MANY. "200 BARS" told the reader the size of an
+     internal window, which is implementation detail; "5-MIN · 21 AUG 15:15" tells them the
+     resolution and how fresh the last bar is, which is the thing a stale chart hides.
+     THE TIMESTAMP COMES FROM THE DATA, NEVER THE CLIENT CLOCK. s.last is formatted server-side
+     from the series' own last row, and adr_intraday.ts is a naive column carrying IST, so that
+     string is already IST wall time with no conversion to get wrong. Reading a phone's clock here
+     would print the reader's timezone over Indian market data — the exact naive-column trap this
+     card warns about. Only the presentation changes: "21-Aug 15:15" -> "21 AUG 15:15". */
+  var stamp=String(s.last||'').replace('-',' ').toUpperCase();
   document.querySelectorAll('[data-ib="'+s.key+'"]').forEach(function(bl){
-    bl.textContent=s.bars?(s.bars+' BARS · 5-MIN'):'NO HISTORY';
+    bl.textContent=s.bars?('5-MIN'+(stamp?' · '+stamp:'')):'NO HISTORY';
   });
   if(!s.bars){
     hosts.forEach(function(h){h.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';});
@@ -1112,7 +1135,45 @@ function iChart(s){
   }).join('');
   var svg='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
     +holes+marks+body+'</svg>';
-  hosts.forEach(function(h){h.innerHTML=svg;});
+  /* cc#1258 · SPARSE DATE/TIME TICKS, sharing the x-space the chart already uses.
+     A date tick sits at the START of each session, which is the SAME x the cc#1236 day divider is
+     drawn at (i/n*W), so the label and the line cannot drift apart — they are computed from the
+     one session index, not measured against each other.
+     THINNED, because clutter is the failure mode on a phone: at most four date ticks, taking every
+     k-th session; and only when that leaves three or fewer does a TIME tick get added, inside the
+     last session, so the axis shows both kinds without ever crowding. That keeps the total in the
+     3-5 the card asks for whether the window holds three sessions or ten.
+     THE DATE IS PARSED BY SPLITTING THE STRING, NOT BY new Date(). '2026-08-21' goes through
+     Date.parse as UTC midnight, and formatting that back in a browser west of Greenwich returns
+     the 20th — a silent off-by-one-day on a chart axis, which is worse than no axis. Splitting the
+     ISO string cannot move the date, whatever timezone the reader is in. */
+  var MON=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function dlab(iso){
+    var p=String(iso||'').split('-');
+    if(p.length<3)return '';
+    return String(Number(p[2]))+' '+(MON[Number(p[1])-1]||'');
+  }
+  var sess=s.sessions||[], ticks=[];
+  var stepS=Math.ceil(sess.length/4)||1;
+  for(var si=0; si<sess.length; si+=stepS){
+    ticks.push({x:si/n*W, t:dlab(sess[si]), day:true});
+  }
+  if(ticks.length<=3 && sess.length){
+    /* 12:00 placed at its TRUE fraction of the session, the same (mins-open)/375 the points use,
+       so the label lands where a 12:00 bar actually is rather than at a convenient midpoint. */
+    /* 555 = 09:15 and 375 = the session length in minutes, mirroring digest_v3's
+       _SESSION_OPEN_MIN and _SESSION_MIN — the same two numbers that produced every point's f, so
+       the tick is placed on the identical scale rather than an approximation of it. */
+    var f12=(720-555)/375;
+    ticks.push({x:(sess.length-1+f12)/n*W, t:'12:00', day:false});
+  }
+  ticks.sort(function(a,b){return a.x-b.x;});
+  var ax='<div class="ixax">'+ticks.filter(function(t){return t.t;}).map(function(t){
+    var cls='ixt'+(t.day?' d':'')+(t.x<8?' lo':(t.x>92?' hi':''));
+    var pos=(t.x<8||t.x>92)?'':'left:'+t.x.toFixed(2)+'%';
+    return '<span class="'+cls+'"'+(pos?' style="'+pos+'"':'')+'>'+t.t+'</span>';
+  }).join('')+'</div>';
+  hosts.forEach(function(h){h.innerHTML=svg+ax;});
 }
 /* Fetched separately from the digest payload and only after the page has painted — four series of
    200 points is not something the first render should wait on. A failure costs the charts and
