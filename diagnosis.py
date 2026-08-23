@@ -436,9 +436,58 @@ def _ist_stamp(ts, assume: str = None) -> str:
     return f'{str(ts)[:16]} (tz unknown)'
 
 
-def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0):
+def _age_txt(mins: float) -> str:
+    """cc#1253: the same minutes-or-hours wording _sched_row already used for its own value,
+    pulled out so the registry rows read identically to the ops_log rows beside them."""
+    return f'{int(mins)} min ago' if mins < 180 else f'{mins/60.0:.1f}h ago'
+
+
+def _registry(cur) -> Dict[str, tuple]:
+    """cc#1253 Phase A · the job registry, read once: {job_name: (last_run_at, last_status)}.
+
+    scheduler_master IS the truth about whether a job ticked, and rule 9 says liveness must be
+    registry-derived. ops_log is a record of WORK DONE, which is a different question — a job that
+    runs and legitimately skips (weekend, gate closed) updates the registry and writes no ops_log
+    row at all. Reading only ops_log is what made this section report three live jobs as dead on
+    23-Aug: bg_qb_eod had run that morning, bg_gate_rebalance had run on the Friday, and
+    bg_ops_metrics_season_sweep had run sixty seconds before the read.
+    Enumerated with active rather than a name list, so a new job cannot be silently uncovered.
+    """
+    cur.execute("SELECT job_name, last_run_at, last_status FROM scheduler_master WHERE active")
+    return {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+
+
+def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0, reg=None):
     """Traffic-light for a job whose last successful run is age_min minutes ago
-    (green=on-time, yellow=late/recovered, red=missing)."""
+    (green=on-time, yellow=late/recovered, red=missing).
+
+    cc#1253 Phase A · `reg` is this job's (last_run_at, last_status) from the registry, and when
+    it is supplied it answers DID IT TICK — ops_log then only answers did it do work. That split
+    is the whole fix, and it produces a THIRD state this row never had:
+      ticked + status ok       -> graded on the ops_log age exactly as before
+      ticked + status skipped  -> YELLOW, printed as "ticked · skipped", never green and never red
+      did not tick             -> the old ops_log path, unchanged
+    WHY SKIPPED IS NOT GREEN, which is the part that needed a ruling and did not get one: 30 active
+    jobs currently sit at skipped and NONE of them records a reason — last_error is empty on every
+    one. So "correctly skipped because it is Sunday" is indistinguishable from "skipped because a
+    precondition silently failed". Grading those green would be a LIVE badge running ahead of the
+    data, which rule 9 exists to forbid. Amber says the true thing: it ran, it chose not to work,
+    and nobody wrote down why. Recording the reason is Phase B and needs its own card.
+    """
+    if reg is not None and reg[0] is not None:
+        ticked = reg[0]
+        tick_age = (_ist_now() - ticked).total_seconds() / 60.0
+        status = (reg[1] or 'unknown').lower()
+        if tick_age <= yellow_h * 60:
+            if status == 'skipped':
+                return _chk(label, f'ticked · skipped ({_age_txt(tick_age)})', ok=False, warn=True,
+                            detail=f'Expected {expected} · registry {_ist_stamp(ticked)} · '
+                                   f'ran and skipped, no reason recorded (cc#1253 Phase B)')
+            if status == 'ok' and age_min is None:
+                return _chk(label, f'ticked · ok ({_age_txt(tick_age)})', ok=(tick_age <= green_h*60),
+                            warn=True,
+                            detail=f'Expected {expected} · registry {_ist_stamp(ticked)} · '
+                                   f'no ops_log row, registry says it ran')
     if age_min is None:
         # cc#1253 · the VALUE used to read 'no run recorded', which is a claim this function
         # cannot support: it has looked at ops_log and a data proxy, not at the job registry.
@@ -447,9 +496,18 @@ def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0):
         # The words now say only what was actually checked. The colour is deliberately NOT
         # touched: making this green needs the skipped-counts-as-alive ruling on cc#1253, and a
         # verdict change without it would swap one wrong light for another.
+        # cc#1253 Phase A: the detail now reports WHICH sources were actually checked, because the
+        # answer differs per row and a blanket "not consulted" became untrue the moment some rows
+        # started consulting it. Three honest endings, never a claim about a source not read.
+        if reg is None:
+            _why = 'no registry job mapped for this row'
+        elif reg[0] is None:
+            _why = 'registry row exists but has never recorded a run'
+        else:
+            _why = (f'registry last tick {_ist_stamp(reg[0])} '
+                    f'({(reg[1] or "unknown")}), older than this row allows')
         return _chk(label, 'no ops_log row', ok=False, warn=False,
-                    detail=f'Expected {expected} · no ops_log/proxy row · '
-                           f'scheduler_master NOT consulted (cc#1253)')
+                    detail=f'Expected {expected} · no ops_log/proxy row · {_why}')
     disp = f'{int(age_min)} min ago' if age_min < 180 else f'{age_min/60.0:.1f}h ago'
     return _chk(label, disp, ok=(age_min <= green_h*60), warn=(age_min <= yellow_h*60),
                 detail=f'Expected {expected} · last {_ist_stamp(last_ts, assume="utc")}')
@@ -476,6 +534,18 @@ def _section_scheduler(cur) -> Dict:
     checks = []
     now = _ist_now()
     mkt = _market_state(now) == 'market'
+    # cc#1253 Phase A: one registry read for the whole section. Rows that name a job get the
+    # registry as their did-it-tick authority; rows that do not are untouched and behave exactly
+    # as before, so nothing can regress by omission. Every mapping below was VERIFIED against
+    # scheduler_master before being wired — eleven by an exact bg_<ops_title> name match, and five
+    # (bg_gvm, bg_pivots, bg_cleanup_news, bg_gate_rebalance, bg_adr_pcr) by matching the job's
+    # stored cadence to the time printed in the row's own label, because for those five the name
+    # convention does NOT hold and guessing would have pointed a row at the wrong job.
+    # Deliberately NOT wired: 'Stock-news fetch (08:30/12:30/16:30)'. Its ops title maps by
+    # convention to bg_fetch_stock_news, but that job's stored cadence is h==0 and m==30, which
+    # does not match the label's three slots. Two candidates and no way to tell from here, so it
+    # keeps the old ops_log-only behaviour rather than being pointed at a job I cannot confirm.
+    REG = _registry(cur)
 
     # ── Live market-hours engine — 6 jobs share ONE 5-min dispatch block, so
     #    v8_metrics freshness is a faithful umbrella proxy (avoid 6 duplicate rows).
@@ -506,11 +576,11 @@ def _section_scheduler(cur) -> Dict:
         cur.execute("""SELECT EXTRACT(EPOCH FROM (NOW()-MAX(updated_at)))/60.0, MAX(updated_at)
                        FROM quant_paper_positions WHERE status='open'""")
         r = cur.fetchone(); age, ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
-    checks.append(_sched_row('QB EOD checker (01:15)', age, ts, 'daily 01:15 IST'))
+    checks.append(_sched_row('QB EOD checker (01:15)', age, ts, 'daily 01:15 IST', reg=REG.get('bg_qb_eod')))
 
     age, ts = _ops_age_min(cur, 'gvm_recompute', 'scheduler_health')
     if age is not None:
-        checks.append(_sched_row('GVM recompute (01:30)', age, ts, 'daily 01:30 IST'))
+        checks.append(_sched_row('GVM recompute (01:30)', age, ts, 'daily 01:30 IST', reg=REG.get('bg_gvm')))
     else:
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         gd = cur.fetchone()[0]; gdd = _days_old(gd)
@@ -518,18 +588,18 @@ def _section_scheduler(cur) -> Dict:
             ok=(gdd <= 1), warn=(gdd <= 3), detail='daily 01:30 IST · gvm_scores date'))
 
     age, ts = _ops_age_min(cur, 'pivots_build', 'scheduler_health')
-    checks.append(_sched_row('Paper pivots build (01:45)', age, ts, 'daily 01:45 IST'))
+    checks.append(_sched_row('Paper pivots build (01:45)', age, ts, 'daily 01:45 IST', reg=REG.get('bg_pivots')))
 
     age, ts = _ops_age_min(cur, 'cleanup_news', 'scheduler_health')
     if age is None:
         age, ts = _ops_age_min(cur, 'news_retention', 'news_retention')
-    checks.append(_sched_row('News retention purge (01:50)', age, ts, 'daily 01:50 IST'))
+    checks.append(_sched_row('News retention purge (01:50)', age, ts, 'daily 01:50 IST', reg=REG.get('bg_cleanup_news')))
 
     age, ts = _ops_age_min(cur, 'v8_paper_exit_eod', 'scheduler_health')
-    checks.append(_sched_row('Paper EOD exit fallback (02:00)', age, ts, 'daily 02:00 IST'))
+    checks.append(_sched_row('Paper EOD exit fallback (02:00)', age, ts, 'daily 02:00 IST', reg=REG.get('bg_v8_paper_exit_eod')))
 
     age, ts = _ops_age_min(cur, 'universe_technicals', 'scheduler_health')
-    checks.append(_sched_row('Universe technicals (02:05)', age, ts, 'daily 02:05 IST'))
+    checks.append(_sched_row('Universe technicals (02:05)', age, ts, 'daily 02:05 IST', reg=REG.get('bg_universe_technicals')))
 
     # ── Pre-market cluster ────────────────────────────────────────────────────────
     cur.execute("SELECT MAX(quote_date) FROM global_indices")
@@ -541,7 +611,7 @@ def _section_scheduler(cur) -> Dict:
     if age is None:
         cur.execute("SELECT EXTRACT(EPOCH FROM (NOW()-MAX(loaded_at)))/60.0, MAX(loaded_at) FROM earnings_calendar")
         r = cur.fetchone(); age, ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
-    checks.append(_sched_row('Earnings refresh (06:15)', age, ts, 'weekdays 06:15 IST', yellow_h=74.0))
+    checks.append(_sched_row('Earnings refresh (06:15)', age, ts, 'weekdays 06:15 IST', yellow_h=74.0, reg=REG.get('bg_earnings_refresh')))
 
     age, ts = _ops_age_min(cur, 'fetch_stock_news')
     checks.append(_sched_row('Stock-news fetch (08:30/12:30/16:30)', age, ts,
@@ -554,14 +624,14 @@ def _section_scheduler(cur) -> Dict:
 
     age, ts = _ops_age_min(cur, 'fu_sync', 'scheduler_health')
     checks.append(_sched_row('Futures universe sync (Mon 08:00)', age, ts,
-                             'weekly Mon 08:00 IST', green_h=192.0, yellow_h=384.0))
+                             'weekly Mon 08:00 IST', green_h=192.0, yellow_h=384.0, reg=REG.get('bg_fu_sync')))
 
     # ── Post-close chain ──────────────────────────────────────────────────────────
     age, ts = _ops_age_min(cur, 'gate_rebalance_15_20', 'gate_rebalance')
-    checks.append(_sched_row('Gate rebalance (15:20)', age, ts, 'weekdays 15:20 IST', yellow_h=74.0))
+    checks.append(_sched_row('Gate rebalance (15:20)', age, ts, 'weekdays 15:20 IST', yellow_h=74.0, reg=REG.get('bg_gate_rebalance')))
 
     age, ts = _ops_age_min(cur, 'heal_intraday', 'scheduler_health')
-    checks.append(_sched_row('Session-gap heal (15:40)', age, ts, 'weekdays 15:40 IST', yellow_h=74.0))
+    checks.append(_sched_row('Session-gap heal (15:40)', age, ts, 'weekdays 15:40 IST', yellow_h=74.0, reg=REG.get('bg_heal_intraday')))
 
     age, ts = _ops_age_min(cur, 'v8_eod', 'scheduler_health')
     if age is None:
@@ -570,19 +640,19 @@ def _section_scheduler(cur) -> Dict:
         checks.append(_chk('V8 EOD engine (15:45)', str(vd),
             ok=(vdd == 0), warn=(vdd <= 1), detail='weekdays 15:45 IST · v8_metrics date'))
     else:
-        checks.append(_sched_row('V8 EOD engine (15:45)', age, ts, 'weekdays 15:45 IST', yellow_h=74.0))
+        checks.append(_sched_row('V8 EOD engine (15:45)', age, ts, 'weekdays 15:45 IST', yellow_h=74.0, reg=REG.get('bg_v8_eod')))
 
     age, ts = _ops_age_min(cur, 'adr_compute', 'scheduler_health')
-    checks.append(_sched_row('ADR/PCR compute (15:50)', age, ts, 'weekdays 15:50 IST', yellow_h=74.0))
+    checks.append(_sched_row('ADR/PCR compute (15:50)', age, ts, 'weekdays 15:50 IST', yellow_h=74.0, reg=REG.get('bg_adr_pcr')))
 
     age, ts = _ops_age_min(cur, 'tc_screener_precompute', 'scheduler_health')
-    checks.append(_sched_row('TC screener precompute (16:00)', age, ts, 'weekdays 16:00 IST', yellow_h=74.0))
+    checks.append(_sched_row('TC screener precompute (16:00)', age, ts, 'weekdays 16:00 IST', yellow_h=74.0, reg=REG.get('bg_tc_screener_precompute')))
 
     checks.append(_alert_absence_row(cur, 'Stock-news watchdog (16:00)',
                                      'stock_news_stale', 'trading days 16:00 IST', window_min=1500.0))
 
     age, ts = _ops_age_min(cur, 'v21_killswitch', 'scheduler_health')
-    checks.append(_sched_row('V2.1 kill-switch (16:10)', age, ts, 'weekdays 16:10 IST', yellow_h=74.0))
+    checks.append(_sched_row('V2.1 kill-switch (16:10)', age, ts, 'weekdays 16:10 IST', yellow_h=74.0, reg=REG.get('bg_v21_killswitch')))
 
     # cc#524 QUARTERLY UPDATE FRAMEWORK coverage -- T+1 (daily), Saturday scoped retry
     # (weekly), season-close sweep (quarterly: Sep/Dec/Mar/Jun 1st).
@@ -610,7 +680,7 @@ def _section_scheduler(cur) -> Dict:
 
     age, ts = _ops_age_either('RESULT_SEASON_SWEEP_DONE', 'OPS_METRICS_SEASON_SWEEP_DONE')
     checks.append(_sched_row('Result season sweep', age, ts,
-                             'Sep/Dec/Mar/Jun 1st 10:00 IST', green_h=2400.0, yellow_h=3120.0))
+                             'Sep/Dec/Mar/Jun 1st 10:00 IST', green_h=2400.0, yellow_h=3120.0, reg=REG.get('bg_ops_metrics_season_sweep')))
 
     return {'name': 'Scheduler', 'checks': checks, 'status': _status(checks)}
 
