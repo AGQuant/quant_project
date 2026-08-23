@@ -118,10 +118,13 @@ class _Skip:
     own token. The halves are copied verbatim and `or` short-circuits left to right, so the same
     tick that skipped before still skips; only the naming changed.
 
-    The five left are judgement calls rather than mechanics: a 5-minute debounce, a "nothing was
-    released" no-op, a mixed flag-and-clock arming test, and two returns that do not sit directly
-    under an `if` at all. Each needs reading in context, and until then an unknown reason grades
-    amber, never green.
+    THE LAST 2 ARE A DESIGN QUESTION, NOT A LABELLING ONE, and that is why they are still bare.
+    `_bg_stale_claim_release` and `_bg_pcr_intraday` both RAN their work and found nothing to do —
+    release_stale_claims() returned zero, and pcr is "caught up; a quiet tick" in its own comment.
+    _SKIPPED says "I did not run" and _Empty says "I ran and wrote nothing on a day I should have",
+    which is a warning shape. Neither is true here: "ran, nothing needed doing" is healthy and has
+    no sentinel today. Adding one is a question for the founder, not a token to pick, so they stay
+    unknown-and-amber until it is answered rather than being labelled with the nearest wrong word.
 
     HOW THE 63 WERE PICKED — structurally, never by eye. An ast walk finds the nearest enclosing
     `if` for each `return`, so the token comes from the guard that actually produced the skip and
@@ -297,7 +300,8 @@ def _bg_catchup_sweep():
     global _catchup_last_sweep
     now = datetime.now(IST)
     if _catchup_last_sweep and (now - _catchup_last_sweep).total_seconds() < 300:
-        return _SKIPPED
+        # cc#1269: a 5-minute debounce is the job pacing itself, not a fault. EXPECTED.
+        return _Skip.already_ran()
     _catchup_last_sweep = now
     fired = []
     examined = 0
@@ -3823,8 +3827,13 @@ def _bg_ops_metrics_backfill():
     if not (is_run_now or is_pending or is_stale_running):
         return _Skip.precondition_missing('nothing queued')
     # window gate applies to the SCHEDULED path only (pending / stale-resume); run_now is clock-free.
-    if not is_run_now and not (1 <= now_ist.hour < 6):
-        return _SKIPPED
+    if not is_run_now:
+        # cc#1269: split so the row says WHICH half declined. `and`, so this nests rather than
+        # sitting side by side — the window gate applies only when nobody asked for a run now,
+        # which is precisely what the single condition said. An on-demand run still skips the
+        # window check entirely, exactly as before.
+        if not (1 <= now_ist.hour < 6):
+            return _Skip.outside_window()
     if is_stale_running:
         log.warning(f"_bg_ops_metrics_backfill: flag stuck at 'running' for {r[1]:.0f} min -- "
                     f"treating as an orphaned run (likely killed by a mid-run redeploy) and resuming")
