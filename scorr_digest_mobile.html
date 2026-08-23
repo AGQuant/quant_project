@@ -135,21 +135,12 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rq{font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px9);white-space:nowrap}
 .rt{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-px11);color:var(--aqua);
  font-family:'JetBrains Mono';white-space:nowrap}
-/* THE VERDICT PILL. Geometry only — the three tints are the page's EXISTING .w/.l/.mu chip
-   classes, so BULLISH stays volt-on-green and CAUTIOUS stays the same red it is everywhere else
-   on this page. R1 declares its own rgba tints, but those are ref-local tokens; the card says map
-   onto the app token sheet and never hardcode a hex where a token exists, and here a whole styled
-   class already exists. The slant is R1's: a diagonal on the LEFT edge only, which keeps the
-   banner language the founder approved without the banner's width. */
-.rvd{grid-column:2;grid-row:1;justify-self:end;font-size:var(--type-105);font-weight:800;
- letter-spacing:var(--track-px10);font-family:'JetBrains Mono';padding:var(--space-5) var(--space-10);
- clip-path:polygon(7px 0,100% 0,100% 100%,0 100%);border-radius:var(--radius-3);white-space:nowrap}
-/* NEUTRAL NEEDS ITS OWN SURFACE HERE, and the first render is why. .mu paints background:var(--hi),
-   which is exactly what the new row surface is, so a NEUTRAL pill vanished into its own row while
-   BULLISH and CAUTIOUS stood out on their tints -- one of the three verdicts silently had no pill.
-   --panel is the card behind the row, so the neutral pill reads as recessed rather than raised:
-   quiet, which is what neutral should be, and still unmistakably a pill. An existing token, no hex. */
-.rvd.mu{background:var(--panel)}
+/* cc#1255 · THE VERDICT PILL AND ITS RULES ARE DELETED, not left orphaned. RESULT_ROW_DOTS_ONLY
+   (29663) retires the three words, so .rvd has nothing left to paint — and dead CSS for a class
+   nobody emits is how a later render check ends up proving a rule that is no longer on the page.
+   The .w/.l/.mu chip classes it borrowed are the page's own and stay where they are; only the
+   pill geometry goes. The row's second column is now empty, and the grid keeps its `1fr auto`
+   because `auto` collapses to nothing when there is nothing in it. */
 /* cc#1238 · RESULT TRAFFIC DOT (RESULT_DOT_RULE_V1, session_log 29519). Deliberately the SAME
    7px circle and the SAME three tokens as scorr_news_row.js's .nrdot, because the card asks for
    the news dots' visual language rather than a new one — up/ct/dn are that module's own class
@@ -173,6 +164,13 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    ends at a line boundary rather than at whatever the flex box happened to leave. */
 .rv{grid-column:1 / -1;grid-row:2;font-size:var(--type-11);line-height:1.45;color:var(--muted);
  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+/* cc#1255 · TWO LINES, using the space the verdict pill vacated. The sentence stopped being a
+   caption under a headline word and became the row's actual content, so one line was no longer
+   enough — a one-line clamp cut most of these verdicts mid-clause. Three would push four rows off
+   a phone screen and turn a deck into a scroll, so two is the ruling's number and it is enough for
+   the sentences result_analysis_v2 actually holds. Kept as a MODIFIER rather than changed on .rv,
+   because .rv is shared and the other users of it still want one line. */
+.rv2{-webkit-line-clamp:2}
 .rrow{cursor:pointer}
 /* cc#1237 · THE CHEVRON IS GONE. R1 has no affordance glyph on the row: the whole row is the tap
    target and it already was (the onclick has been on .rrow since cc#1190). The chevron occupied a
@@ -710,6 +708,31 @@ function raPick(t){
    no dot renders NOTHING rather than a grey placeholder — 29519 is explicit that an absent dot is
    absent, not a fabricated neutral. */
 var RA_DOTCLS={green:'up',amber:'ct',red:'dn'};
+/* cc#1255 · THE TALLY IS DOT COUNTS NOW (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663), and it reads in
+   the same three colours the dots themselves use, so the strip and the rows below it are visibly
+   one system rather than two vocabularies stacked.
+
+   THE NO-DOT COUNT IS SHOWN WHEN IT IS MATERIAL AND HIDDEN WHEN IT IS NOT — the ruling's word.
+   Material is taken as 1 in 20 of the rows the strip covers: below that it is a footnote that
+   costs a phone line, above it the three counts no longer describe the deck and saying so is the
+   honest thing. It is drawn muted, never as a fourth outcome, because "no dot" means neither
+   check could be computed and NOT that the company missed both — folding it into "neither" would
+   state a miss that never happened.
+
+   Numbers come from the payload and nothing is recomputed here. If the tally is absent the strip
+   renders nothing rather than four zeros, which would read as a deck of companies that all
+   missed. */
+function raTally(t){
+  t = t || {};
+  var n = function(k){ return Number(t[k]) || 0; };
+  var b = n('beat_both'), o = n('beat_one'), x = n('beat_neither'), nd = n('no_dot');
+  if (!(b || o || x || nd)) return '';
+  var s = '<b style="color:var(--volt)">' + b + ' beat both</b>'
+        + ' · <b style="color:var(--amber)">' + o + ' beat one</b>'
+        + ' · <b style="color:var(--heat)">' + x + ' beat neither</b>';
+  if (nd && nd * 20 >= (b + o + x + nd)) s += ' · <b style="color:var(--muted)">' + nd + ' no dot</b>';
+  return s;
+}
 function raDot(c){
   var k=RA_DOTCLS[c&&c.dot];
   if(!k)return '';
@@ -745,14 +768,18 @@ function raDeck(){
        the grid for the same element. The tint classes stay the page's own w/l/mu. */
     return '<div class="rpage">'
       + pg.map(function(c){
-          var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'mu';
+          /* cc#1255 · THE VERDICT PILL IS GONE (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663). The row is
+             now the DOT and the analyst's own sentence — the same sentence the web R button
+             shows, which is why the two surfaces now agree by construction rather than by two
+             derivations being kept in step. The sentence takes the space the pill vacated and
+             clamps to TWO lines instead of one: it is the row's content now, not a caption under
+             a headline word. */
           return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
             + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
             + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
             + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
             + '</div></div>'
-            + '<span class="rvd '+cls+'">'+esc(c.read||'—')+'</span>'
-            + '<div class="rv">'+esc(c.verdict||'')+'</div></div>';
+            + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
         }).join('')
       + '</div>';
   }).join('');
@@ -1407,7 +1434,7 @@ async function boot(){
   <div class="eyebrow">LATEST RESULT ANALYSIS</div>
   <div class="card slab">
     <div class="grp"><h3>${raList().shown.length} of ${ra.total!=null?ra.total:'—'} analysed</h3>
-      <span class="note"><b style="color:var(--volt)">${raT.bullish||0} bull</b> · <b style="color:var(--heat)">${raT.cautious||0} caut</b> · <b style="color:var(--muted)">${raT.neutral||0} neut</b>${raLatest?` · latest ${esc(raLatest)}`:''}</span></div>
+      <span class="note">${raTally(raT)}${raLatest?` · latest ${esc(raLatest)}`:''}</span></div>
     <div id="rawrap">${raChips()}${raDeck()}</div>
   </div>
 

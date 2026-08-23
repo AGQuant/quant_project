@@ -627,7 +627,21 @@ def _result_dots(cur) -> Dict[str, Dict[str, Any]]:
 
 
 def _results_analysed(cur) -> Dict[str, Any]:
-    import re as _re
+    """cc#1255 · DOTS ONLY — RESULT_ROW_DOTS_ONLY_RULE_V1 (session_log 29663).
+
+    THE THREE WORDS ARE GONE FROM THIS PAYLOAD, and the reason is worth keeping written down. The
+    verdict tag was derived HERE, by running the _BULL/_BEAR prose regex over the analyst's
+    written verdict — a second, independent reading of text that the R button already reads a
+    different way. The founder's complaint was that digest verdicts did not match the web R
+    button, and the fix turned out not to be "make them agree": the R button emits no word at all,
+    only a SENTENCE, so there was nothing to agree WITH. Rather than invent a numbers-to-words
+    mapping to make the two match, the ruling retires the word everywhere.
+
+    WHAT REPLACES IT IS ALREADY HERE AND ALREADY EARNED. The dot (rule 29519) is computed from
+    real numbers — profit growth against the segment median, and actual against the run-rate
+    estimate — not from adjectives in prose. A row is now the dot plus the analyst's own sentence,
+    which is the exact text the R button shows. Nothing is derived twice.
+    """
     cur.execute(_RESULTS_ANALYSED_SQL)
     rows = cur.fetchall()
     dots = _result_dots(cur)
@@ -635,7 +649,6 @@ def _results_analysed(cur) -> Dict[str, Any]:
                "single_check": 0, "median_from_2_or_fewer": 0}
 
     out, tiers = [], {"LARGE": 0, "MID": 0, "SMALL": 0}
-    tally = {"bullish": 0, "cautious": 0, "neutral": 0}
     unranked = 0
     seen = {}
     for sym, company, rank, segment, quarter, polished, verdict in rows:
@@ -645,12 +658,8 @@ def _results_analysed(cur) -> Dict[str, Any]:
         else:
             unranked += 1
         v = verdict or ""
-        # The card says use the EXISTING _BULL/_BEAR, so it uses them unchanged. See the note
-        # below on what that actually produces on this text.
-        bull = bool(_re.search(_BULL, v, _re.I))
-        bear = bool(_re.search(_BEAR, v, _re.I))
-        read = "BULLISH" if (bull and not bear) else ("CAUTIOUS" if bear else "NEUTRAL")
-        tally["bullish" if read == "BULLISH" else "cautious" if read == "CAUTIOUS" else "neutral"] += 1
+        # cc#1255: the _BULL/_BEAR pass over this text is DELETED, not disabled. `read` is gone
+        # from the row with it, so no surface can print a word this payload no longer carries.
         seen[sym] = seen.get(sym, 0) + 1
         out.append({
             "symbol": sym,
@@ -663,7 +672,6 @@ def _results_analysed(cur) -> Dict[str, Any]:
             "polished_at": polished.astimezone(IST).isoformat() if polished else None,
             "polished_ist": polished.astimezone(IST).strftime("%d %b") if polished else None,
             "verdict": v,
-            "read": read,
         })
         # The dot is attached ONLY when the quarter it was computed for is the quarter this row is
         # about. See _fq_label for why that guard exists rather than a plain symbol lookup.
@@ -695,9 +703,26 @@ def _results_analysed(cur) -> Dict[str, Any]:
         "tiers": tiers,
         "unranked": unranked,
         "latest_polished": out[0]["polished_at"] if out else None,
-        "tally": tally,
-        "read": (f"{tally['bullish']} bullish · {tally['cautious']} cautious · "
-                 f"{tally['neutral']} neutral"),
+        # cc#1255 · THE TALLY IS NOW DOT COUNTS, and every number in it comes off the dot table
+        # rather than off a second reading of prose. green = beat BOTH checks, amber = beat one,
+        # red = beat neither, exactly the rule-29519 meaning and nothing new invented.
+        #
+        # no_dot IS REPORTED, NOT HIDDEN. A row with no computable dot is not a fourth outcome and
+        # must not be folded into "neither" — that would state a company missed both checks when
+        # the truth is that neither check could be run. It is stated separately so the three
+        # counts always add up to the rows that actually have a dot.
+        #
+        # THE HONEST CAVEAT, kept beside the number it qualifies: on a single-check row amber is
+        # unreachable by construction, so its green means "beat the one check that could be
+        # computed", not "beat both". single_check already counts those and travels in
+        # dot_coverage, so the strip can qualify itself instead of overstating.
+        "tally": {"beat_both": dot_cov["green"],
+                  "beat_one": dot_cov["amber"],
+                  "beat_neither": dot_cov["red"],
+                  "no_dot": dot_cov["no_dot"],
+                  "single_check": dot_cov["single_check"]},
+        "read": (f"{dot_cov['green']} beat both · {dot_cov['amber']} beat one · "
+                 f"{dot_cov['red']} beat neither · {dot_cov['no_dot']} no dot"),
         # cc#1238 scope 6: the coverage report ships WITH the payload rather than living only in a
         # task thread, so the split can be re-read on any day without re-running a one-off query.
         "dot_coverage": dot_cov,
