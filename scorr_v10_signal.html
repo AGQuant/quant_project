@@ -191,6 +191,32 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .pfchips{flex-wrap:wrap}
 .pfchips .clchip{flex:1 1 30%}
 .pfgrid{grid-template-columns:1fr 1fr}
+/* ── cc#1248 · the buildup state strip and its table ───────────────────────────────────── */
+.bustate{display:flex;align-items:baseline;gap:var(--space-8);margin:var(--space-8) 0 var(--space-10)}
+.bubadge{font-size:var(--type-105);padding:var(--space-4) var(--space-10)}
+.busub{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px8)}
+.butbl{width:100%;border-collapse:collapse;font-size:var(--type-105);table-layout:fixed}
+.butbl th{font-size:var(--type-85);color:var(--muted);letter-spacing:var(--track-px8);text-align:right;
+ padding:var(--space-4) var(--space-3);border-bottom:var(--bw-1) solid var(--edge);font-weight:400}
+.butbl th:first-child,.butbl td:first-child{text-align:left;padding-left:var(--space-2)}
+/* COLUMN WIDTHS ARE EXPLICIT BECAUSE table-layout:fixed SPLITS EVENLY OTHERWISE, and an even sixth
+   is not enough for a symbol: AXISBANK, BRITANNIA and BHARTIARTL all truncated on the first render.
+   The five numeric columns are sized to their widest real value at this font — "+26.39L" is the
+   widest OI delta in the universe, "-1.68%" the widest day move, "14,820" the widest futures price
+   — and the remainder goes to SYMBOL, which is the only column whose content is a name rather than
+   a number. GMRAIRPORT and CUMMINSIND are the longest in the F&O list at ten characters and both
+   fit. Percentages rather than pixels so the same allocation holds from 360 to 430. */
+.butbl th:nth-child(1),.butbl td:nth-child(1){width:27%}
+.butbl th:nth-child(2),.butbl td:nth-child(2){width:15%}
+.butbl th:nth-child(3),.butbl td:nth-child(3){width:15%}
+.butbl th:nth-child(4),.butbl td:nth-child(4){width:18%}
+.butbl th:nth-child(5),.butbl td:nth-child(5){width:12%}
+.butbl th:nth-child(6),.butbl td:nth-child(6){width:13%}
+.butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
+ font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.butbl tr:last-child td{border-bottom:none}
+.butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif}
+.butbl .up{color:var(--volt)} .butbl .dn{color:var(--heat)} .butbl .am{color:var(--amber)}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -273,7 +299,11 @@ async function loadAll(){
     async()=>{const p=await gj('/api/v10/positions');D.open=p.open_positions||p.rows||[]},
     async()=>{const t=await gj('/api/v10/trades/paired?limit=200');D.closed=t.trades||[];D.psum=t.summary||{}},
     async()=>{D.perf=await gj('/api/v10/performance')},
-    async()=>{D.build=await gj('/api/v10/buildup?limit=5')},
+    /* cc#1248: limit 5 -> 250. The endpoint returns TOP-N-BY-DAY-MOVE slices, so a SHORT_COVER
+       symbol sitting mid-table was outside both slices and could never be bucketed. At 250 the two
+       slices each cover the whole 208-symbol universe and their union is every row. This is a query
+       parameter, not a read-path change — the endpoint already classifies all four states. */
+    async()=>{D.build=await gj('/api/v10/buildup?limit=250')},
     async()=>{D.div=await gj('/api/v10/divergence')},
   ];
   await Promise.all(T.map(f=>f().catch(e=>console.warn('[intel]',e.message))));
@@ -327,7 +357,7 @@ var SHOW_VOL_TILES = false;
    (The wider duplication — these helpers also exist page-local in scorr_digest_mobile.html — still
    wants a shared module. That is raised in the forum as its own card, not smuggled in here.) */
 var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, btrack:{dots:'bdots', n:0, tmr:null},
-           ctrack:{dots:'cdots', n:0, tmr:null} };
+           ctrack:{dots:'cdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null} };
 var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
 /* PITCH COMES FROM LAYOUT OFFSETS, NOT FROM A MEASURED WIDTH PLUS THE GAP, and cc#1245 is where
    that stopped being academic. getBoundingClientRect().width returns a SUB-PIXEL number — 324.484
@@ -565,6 +595,100 @@ function volDeck(){
    "lost every trade" rather than "has none" — and a segment that has never taken a loss has no
    profit factor, because the denominator is zero rather than small. The endpoint returns null for
    both and this renders an em-dash. */
+/* ══ cc#1248 · FUTURES BUILDUP, FOUR CARDS ══════════════════════════════════════════════════
+   THE SCOPE 3 GATE DOES NOT TRIP AND NOTHING WAS EXTENDED. /api/v10/buildup already classifies all
+   four states in its own _row() — LONG_BUILD, SHORT_BUILD, SHORT_COVER, LONG_UNWIND — and already
+   serves every column R1 asks for: symbol, price, day_1d, oi_chg, vol_ratio (populated since
+   cc#819 bug_2) and basis, plus an oi_feed_pending flag. The only change is the limit above.
+
+   THE OI-PENDING RULE IS KEPT AND IT MATTERS THAT IT IS NOT NEEDED TODAY. The endpoint classifies
+   ONLY when oi_chg is present and returns NEUTRAL otherwise, so a symbol can never be labelled a
+   buildup state on price alone. Counted on the live table for the latest session: 208 symbols, 208
+   with oi_chg. So oi_feed_pending is false and every badge below is earned. When the feed does drop
+   the header says so and the four cards go honestly empty rather than re-classifying on price.
+
+   DELTA BASIS. The endpoint anchors day% on the PREVIOUS SESSION's futures close, and the two
+   sessions here are 19-Aug and 20-Aug. There is no 21-Aug row in futures_basis at all — the same
+   outage cc#1233 covers — so the anchor steps back to a real session rather than bridging a missing
+   day. The as-of line prints the session it actually read.
+
+   Card order is the founder's, locked in R1 @ 31d9a02, and it is NOT the order the enum happens to
+   produce: long buildup, short covering, short buildup, long unwinding. */
+var SHOW_DIVERGENCE = false;
+var BU_STATES = [
+  {k:'LONG_BUILD',  t:'LONG BUILDUP',   sub:'PRICE UP · OI UP',     cls:'w', mark:'▲'},
+  {k:'SHORT_COVER', t:'SHORT COVERING', sub:'PRICE UP · OI DOWN',   cls:'w', mark:'▲'},
+  {k:'SHORT_BUILD', t:'SHORT BUILDUP',  sub:'PRICE DOWN · OI UP',   cls:'l', mark:'▼'},
+  {k:'LONG_UNWIND', t:'LONG UNWINDING', sub:'PRICE DOWN · OI DOWN', cls:'l', mark:'▼'}
+];
+function buRows(k){
+  var bd = D.build || {};
+  /* the two slices overlap, so dedupe by symbol before bucketing — otherwise a symbol appearing in
+     both lists would be counted twice inside its own state. */
+  var seen = {}, all = [];
+  (bd.long_buildup || []).concat(bd.short_buildup || []).forEach(function(r){
+    if (r && r.symbol && !seen[r.symbol]) { seen[r.symbol] = 1; all.push(r); }
+  });
+  return all.filter(function(r){ return r.signal === k; })
+            .sort(function(a, b){ return Math.abs(b.day_1d || 0) - Math.abs(a.day_1d || 0); })
+            .slice(0, 5);
+}
+function buNum(v, dp, suffix, colour){
+  if (v === null || v === undefined) return '<td>—</td>';
+  var n = Number(v);
+  var cls = colour ? (n > 0 ? ' class="up"' : n < 0 ? ' class="dn"' : '') : '';
+  return '<td' + cls + '>' + (colour && n > 0 ? '+' : '') + n.toFixed(dp) + (suffix || '') + '</td>';
+}
+function buCard(st){
+  var rows = buRows(st.k), bd = D.build || {};
+  var body;
+  if (bd.oi_feed_pending){
+    /* the 6055 rule, literally: with OI pending there IS no buildup state, so nothing is classified
+       and the card says why instead of showing a price-only list under a buildup badge. */
+    body = '<div class="unavail">OI feed pending — buildup state needs open interest, and it is not '
+         + 'being guessed from the price move.</div>';
+  } else if (!rows.length){
+    body = '<div class="unavail">No ' + esc(st.t.toLowerCase()) + ' on this session.</div>';
+  } else {
+    body = '<table class="butbl"><thead><tr><th>SYMBOL</th><th>FUT</th><th>DAY%</th>'
+      + '<th>OI Δ</th><th>VOL×</th><th>BASIS</th></tr></thead><tbody>'
+      + rows.map(function(r){
+          return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+            + '<td>' + (r.price != null ? num(r.price) : '—') + '</td>'
+            + buNum(r.day_1d, 2, '%', true)
+            + (r.oi_chg == null ? '<td>—</td>'
+               : '<td class="' + (r.oi_chg > 0 ? 'up' : r.oi_chg < 0 ? 'dn' : '') + '">'
+                 + (r.oi_chg > 0 ? '+' : '') + fK(r.oi_chg) + '</td>')
+            + (r.vol_ratio == null ? '<td>—</td>'
+               : '<td class="am">' + Number(r.vol_ratio).toFixed(1) + '×</td>')
+            + buNum(r.basis, 1, '', true)
+            + '</tr>';
+        }).join('') + '</tbody></table>';
+  }
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Futures Buildup</h3>'
+    + '<span class="asof">' + esc(bd.session || 'LIVE 5-MIN') + '</span></div>'
+    + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' ' + st.t + '</span>'
+    + '<span class="busub">' + st.sub + '</span></div>'
+    + body + '</div></div>';
+}
+function buildupDeck(){
+  var cards = BU_STATES.map(buCard);
+  DK.utrack.n = cards.length;
+  var set = cards.join('');
+  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  return '<div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>'
+       + '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
+       + set + set + set + '</div><div class="rpager"><div class="vdots" id="udots">' + dots + '</div>'
+       + '<span class="clpg" id="upg">1 / 4 · LONG BUILDUP</span></div></div>';
+}
+function uLabel(i){
+  var el = document.getElementById('upg'), st = BU_STATES[i || 0];
+  if (el && st) el.textContent = ((i || 0) + 1) + ' / ' + BU_STATES.length + ' · ' + st.t;
+}
+function uWrap(){ dkWrap('utrack'); uLabel(dkDots('utrack')); }
+function uPark(){ dkPark('utrack'); uLabel(dkDots('utrack')); }
+
 var PF_SEG = 'ALL';
 var PF_SEGS = ['ALL','NIFTY','BANKNIFTY','FUT','OPT'];
 function perfSeg(k){
@@ -790,8 +914,8 @@ function render(){
   const totC=cl.reduce((a,t)=>a+(Number(t.net_pnl)||0),0);
 
   const pf=D.perf||{};
-  const bd=D.build||{}, bl=(bd.long_buildup||[]).slice(0,3), bs=(bd.short_buildup||[]).slice(0,3);
-  const brow=r=>`<div class="mrow"><b>${esc(r.symbol)}</b><span style="flex:1"></span><span class="num" style="color:${cx(Number(r.day_1d)||0)}">${sgn(Number(r.day_1d)||0)}%</span></div>`;
+  /* cc#1248: bl/bs/brow are gone with the two-column list they fed — buildupDeck() reads
+     D.build directly and buckets by the signal the endpoint already computes. */
   const dv=(D.div&&D.div.rows||[]).slice(0,4);
   const drow=r=>`<div class="mrow"><b>${esc(r.symbol)}</b><span class="chip n" style="font-size:9px;padding:1px 6px">${esc((r.signals||[]).join(' · ')||'—')}</span><span style="flex:1"></span><span class="num" style="color:var(--muted)">${r.age_min!=null?r.age_min+'m':'—'}</span></div>`;
 
@@ -831,17 +955,11 @@ function render(){
   </div>
 
   <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
-  <div class="card">
-    <div class="grp"><h3>Futures Buildup</h3><span class="note">${bd.oi_feed_pending?'PRICE DIRECTION ONLY — OI PENDING':'TOP MOVERS'}</span></div>
-    <div style="display:flex;gap:14px">
-      <div style="flex:1"><div style="font-size:10px;color:var(--volt);letter-spacing:1.5px;margin-bottom:6px">▲ LONG</div>${bl.length?bl.map(brow).join(''):'<div class="unavail">no data</div>'}</div>
-      <div style="flex:1"><div style="font-size:10px;color:var(--heat);letter-spacing:1.5px;margin-bottom:6px">▼ SHORT</div>${bs.length?bs.map(brow).join(''):'<div class="unavail">no data</div>'}</div>
-    </div>
-  </div>
-  <div class="card">
+  ${buildupDeck()}
+  ${SHOW_DIVERGENCE ? `<div class="card">
     <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±${D.div&&D.div.threshold!=null?D.div.threshold:1}%</span></div>
     ${dv.length?dv.map(drow).join(''):'<div class="unavail">No divergence signals above threshold</div>'}
-  </div>
+  </div>` : ''}
 
   <div class="eyebrow">ENGINE</div>
   <div class="card" style="padding:12px 16px">
@@ -849,7 +967,7 @@ function render(){
   </div>`;
 }
 
-async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
+async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); uPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
