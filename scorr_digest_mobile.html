@@ -1227,11 +1227,13 @@ async function boot(){
     ${(()=>{const cards=[
       intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
                 adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)',
-                null, itl.adr_stale),
-      intCard('breadth', 'BREADTH A-D',
-                adr&&adr.advances!=null&&adr.declines!=null?sgn(adr.advances-adr.declines,0):'—',
-                adr&&adr.advances!=null&&adr.declines!=null?(adr.advances>=adr.declines?'var(--volt)':'var(--heat)'):'var(--muted)',
                 null, itl.adr_stale)
+      /* cc#1250 · BREADTH A-D pane removed from this deck by founder order (23-Aug 18:32). It is
+         a DISPLAY removal and nothing else: adr.advances / adr.declines still arrive in the same
+         payload, the breadth series is still computed, still stored, and still served by
+         /api/digest/internals/series, and the web digest's Advance/Decline tile is untouched.
+         The pager needs no edit — DECKS.itrack is cards.length, so it counts what is actually
+         here and drops from four to three on its own. */
       ].concat(pcr.slice(0,2).map(p=>intCard('pcr_'+String(p.underlying||'').toLowerCase(),
                 'PCR '+esc(p.underlying), p.pcr!=null?Number(p.pcr).toFixed(2):'—',
                 p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)',
