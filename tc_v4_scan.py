@@ -287,6 +287,11 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             "sector_day": seg_day.get(d.get("segment")),   # cc#455: segment mcap-weighted day % (last-tick)
             "gvm": _r(d.get("gvm_score")),                  # cc#455: for the top-10 tie-break
             "best_label": best["label"], "best_score": best["score"], "verdict": best["verdict"],
+            # cc#1222: score100 has ridden on every card since cc#1209 (score10 x 10, same
+            # numerator and denominator) — the scan payload simply was not forwarding it. The
+            # scanner annotations are all expressed on the /100 scale, so it is forwarded here
+            # rather than recomputed anywhere downstream.
+            "best_score100": best.get("score100"),
             # cc#1033: the ratio the choice was made on, mirroring best_pct in the dual payload.
             "best_pct": (round(best["score"] / best["max"], 4) if best.get("max") else None),
             "scores": {c["label"]: c["score"] for c in cards},
@@ -294,9 +299,29 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             "v8_basket": ctx.get("v8_baskets", {}).get(sym, []),
         })
     results.sort(key=lambda x: x["best_score"], reverse=True)
+    # ── cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — MARK, DO NOT CUT (session_log 29448) ─────────────
+    # OBSERVATION MODE: every row that was scored still ships. annotate() adds the bucket bar, the
+    # three side gates, the rank inside the bucket today and a strict would_qualify flag; it cannot
+    # remove a row because it returns marks for the list it was handed. The gates read the SAME
+    # v8_metrics tick the scoring read — _load_bulk already pulled sector_week, sector_month and
+    # rsi_month into d["v8"] — so the strip costs no extra query and cannot disagree with the score
+    # about which session it is describing.
+    #
+    # Annotated BEFORE the limit slice on purpose: rank-in-bucket and the would-qualify count are
+    # statements about the whole day's scan, and ranking a truncated list would renumber the tail
+    # and quietly shrink the count in the header.
+    tc_summary = None
+    try:
+        from tc_scanner_config import annotate as _tc_annotate, TC_SCANNER_CONFIG
+        tc_summary = _tc_annotate(results, {s: (d.get("v8") or {}) for s, d in D.items()})
+        tc_summary["config_version"] = TC_SCANNER_CONFIG["version"]
+    except Exception as e:
+        # A broken annotator must not take the scan down with it — the scores are the product here
+        # and the marks are a layer on top. Named, never silently dropped.
+        tc_summary = {"error": "%s: %s" % (type(e).__name__, str(e)[:160])}
     runtime = round((datetime.utcnow() - t0).total_seconds(), 2)
     return {"count": len(results), "runtime_s": runtime, "universe": ctx.get("count", 0),
-            "side": side, "verdict": verdict, "segment": segment,
+            "side": side, "verdict": verdict, "segment": segment, "tc_config": tc_summary,
             "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
             "as_of": ctx.get("as_of"), "session_bars_as_of": ctx.get("session_bars_as_of"),
             "spec_ref": SPEC_REF, "version": VERSION, "results": results[:limit]}

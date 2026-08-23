@@ -71,6 +71,7 @@ from trade_check_v34_endpoints import router as trade_check_v34_router
 from tc_v4_endpoints import router as tc_v4_router
 from tc_v4_dual import router as tc_v4_dual_router   # cc#386: dual-style v4 engine (spec id=2926)
 from tc_v4_scan import router as tc_v4_scan_router   # cc#387: dual-style v4 batch scanner
+from tc_scanner_config import router as tc_scanner_config_router   # cc#1222: TC_SCANNER_GATED_CONFIG_V1.1 — one config, served
 from check_endpoint import router as check_router
 from tc_sim_endpoints import router as tc_sim_router   # cc#748: TC outcome sim
 from client_index_endpoints import router as client_index_router   # cc#758: client_index credential security
@@ -644,6 +645,7 @@ app.include_router(trade_check_v34_router)
 app.include_router(tc_v4_router)
 app.include_router(tc_v4_dual_router)   # cc#386
 app.include_router(tc_v4_scan_router)   # cc#387
+app.include_router(tc_scanner_config_router)   # cc#1222
 app.include_router(check_router)
 app.include_router(tc_sim_router)   # cc#748: /api/tc-sim/*
 app.include_router(client_index_router)   # cc#758: /api/admin/client-index/*

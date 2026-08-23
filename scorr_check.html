@@ -476,6 +476,20 @@
   .tcinfo-band b{font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none;width:28px;text-align:right}
   .tcinfo-band span{color:var(--txt);line-height:1.4}
   .tcinfo-band.g b{color:var(--grn)} .tcinfo-band.a b{color:var(--amber)} .tcinfo-band.r b{color:var(--dim)}
+  /* cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — OBSERVATION MODE marks. Every one of these is a MARK on
+     a row that is shown anyway; none of them hides anything. Colour carries pass/fail, and the
+     third state (grey) is "not measured", which is deliberately NOT the same as fail. */
+  .tcg-bar{display:block;font-size:9px;color:var(--dim);font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.02em;margin-top:1px}
+  .tcg-strip{display:inline-flex;gap:3px;align-items:center}
+  .tcg-pill{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:15px;padding:0 3px;border-radius:4px;font-size:8.5px;font-weight:800;font-family:var(--mono);font-variant-numeric:tabular-nums;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:help;letter-spacing:.03em}
+  .tcg-pill.ok{color:var(--grn);background:var(--grn-d);border-color:var(--grn-bd)}
+  .tcg-pill.no{color:var(--red);background:var(--red-d);border-color:var(--red-bd)}
+  .tcg-pill.na{color:var(--dim);border-style:dashed}
+  .tcg-rank{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;padding:0 4px;border-radius:4px;font-size:9.5px;font-weight:800;font-family:var(--mono);font-variant-numeric:tabular-nums;border:1px solid var(--line2);background:var(--panel2);color:var(--mut)}
+  .tcg-rank.in{color:var(--txt);border-color:var(--blu)}
+  .tcg-q{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);background:var(--panel2);font-size:10.5px;font-weight:700;color:var(--mut);font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tcg-q b{color:var(--txt)}
+  .tcg-obs{font-size:10.5px;color:var(--amber);font-weight:700}
   .v4-recal{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:8.5px;font-weight:700;letter-spacing:.5px;padding:2px 7px;
     border-radius:20px;background:var(--cyan-row);color:var(--cyan);border:1px solid var(--line2)}
   .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
@@ -2136,7 +2150,7 @@ function runScreen(){
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
-    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px" id="v4ScanBlurb">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17-R20); the higher card wins with its style label. Tap a row for the full dual scorecard.<span id="v4ScanBands"></span></div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px" id="v4ScanBlurb">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17-R20); the higher card wins with its style label. Tap a row for the full dual scorecard.<span id="v4ScanBands"></span><span id="v4ScanQual"></span></div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
     +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
@@ -2171,6 +2185,13 @@ async function loadV4Scan(){
   catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
   if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
   if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s'+(d.as_of?' · as-of '+d.as_of:'');
+  /* cc#1222: the WOULD-QUALIFY count and the i-button ride in the scanner's own blurb line, next
+     to the bands, so they sit with the other rules rather than in the meta timestamp. They get
+     their OWN span rather than being appended to v4ScanBands: that element is written by a second
+     async call (tcBands) which can land either side of this one and would wipe the count, and a
+     Rescan would append a duplicate. One element, rewritten whole, is idempotent both ways. */
+  var qz=document.getElementById('v4ScanQual');
+  if(qz)qz.innerHTML=' '+_tcHeaderBits(d.tc_config);
   v4ScanData=d.results||[];
   v4SortKey=null; v4SortDir=-1;   // reset to server order (best_score desc)
   _renderV4ScanTable();
@@ -2178,6 +2199,83 @@ async function loadV4Scan(){
 function v4SortBy(key){
   if(v4SortKey===key){v4SortDir=-v4SortDir;} else {v4SortKey=key; v4SortDir=-1;}
   _renderV4ScanTable();
+}
+/* ── cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — OBSERVATION MODE (session_log 29448) ────────────────
+   The rules are MARKED on every row, never applied as a cut. No row is hidden, dimmed out of the
+   list, or moved into a collapsed section: the founder amendment asks for a full unfiltered week
+   so next weekend's refinement has real data to read, and a filter now would delete exactly the
+   rows that ruling needs.
+
+   NOT ONE THRESHOLD IS TYPED HERE. Every bar, gate bound and cap comes from the backend payload —
+   the row marks from `tc_config` on the scan response, the sheet from /api/tc-scanner/config, and
+   both of those are rendered from the single TC_SCANNER_CONFIG dict in tc_scanner_config.py. That
+   is scope 5's "defined once", and it is the reason this block reads values rather than numbers.
+
+   THREE STATES, NOT TWO. A gate whose input is null is grey and dashed, not red. "Not measured" is
+   not "failed", and on a surface whose job this week is to accumulate a record, collapsing the two
+   would bias that record against thinly covered names. */
+var TC_CFG=null;
+function tcCfg(){
+  if(TC_CFG)return Promise.resolve(TC_CFG);
+  return fetch('/api/tc-scanner/config').then(function(r){return r.json()})
+    .then(function(j){TC_CFG=j;return j}).catch(function(){return null});
+}
+var _TCG_SHORT={sector_week:'SW',sector_month:'SM',rsi_month:'RSI'};
+function _tcAttr(s){return String(s==null?'':s).replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function _tcGateStrip(x){
+  var g=x&&x.gate; if(!g||!g.gates||!g.gates.length)return '<span style="color:var(--dim)">—</span>';
+  return '<span class="tcg-strip">'+g.gates.map(function(one){
+    var cls=one.pass===true?'ok':(one.pass===false?'no':'na');
+    var sh=_TCG_SHORT[one.key]||String(one.key||'?').slice(0,3).toUpperCase();
+    return '<span class="tcg-pill '+cls+'" title="'+_tcAttr(one.text)+'">'+sh+'</span>';
+  }).join('')+'</span>';
+}
+function _tcScoreCell(x){
+  if(x.best_score100==null)return '<td><span style="color:var(--dim)">—</span></td>';
+  /* colour reads bar_met and nothing else — this column exists to answer one question */
+  var col=x.bar_met===true?'var(--grn)':(x.bar_met===false?'var(--mut)':'var(--dim)');
+  var bar=x.bar!=null?('&ge;'+x.bar+(x.bar_met===true?' met':' not met')):'no bar';
+  return '<td style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;color:'+col+'">'
+    + Number(x.best_score100).toFixed(1)
+    + '<span class="tcg-bar">'+bar+'</span></td>';
+}
+function _tcRankCell(x){
+  if(x.rank_in_bucket==null)return '<td><span style="color:var(--dim)">—</span></td>';
+  var inCap=x.within_cap===true;
+  var t=inCap?('rank '+x.rank_in_bucket+' of its bucket today — inside the daily cap')
+             :('rank '+x.rank_in_bucket+' of its bucket today — beyond the daily cap');
+  return '<td><span class="tcg-rank'+(inCap?' in':'')+'" title="'+_tcAttr(t)+'">#'+x.rank_in_bucket+'</span></td>';
+}
+/* The header line. Reports WOULD-qualify against the total, so nobody reads the qualified count as
+   the size of the list — in observation mode the list is always the total. */
+function _tcHeaderBits(sum){
+  if(!sum||sum.error)return '';
+  return '<span class="tcg-q" title="Signals that would pass the V1 rules. Nothing is filtered out this week.">'
+    +   'WOULD QUALIFY <b>'+sum.would_qualify+'</b> of <b>'+sum.total+'</b>'
+    +   (sum.book_cap!=null?' &middot; book cap '+sum.book_cap:'')+'</span>'
+    + (sum.observation_mode?' <span class="tcg-obs">OBSERVATION MODE &middot; nothing filtered</span>':'')
+    + ' <span class="v4-ibtn" onclick="tcScannerSheet()" title="How these signals are picked">i</span>';
+}
+function tcScannerSheet(){
+  var box=document.getElementById('tcInfoBox'); if(!box)return;
+  box.innerHTML='<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+    +'<div class="tcinfo-h">Loading rules&hellip;</div>';
+  document.getElementById('tcInfoOv').classList.add('open');
+  tcCfg().then(function(j){
+    if(!j||!j.sheet){box.innerHTML='<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+      +'<div class="tcinfo-h">Rules unavailable</div>'
+      +'<div class="tcinfo-v">The config endpoint did not answer. Nothing is being filtered either way.</div>';return;}
+    var s=j.sheet;
+    box.innerHTML='<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+      +'<div class="tcinfo-h">'+_tcAttr(s.title)+'</div>'
+      +'<div class="tcinfo-sub">TC scanner &middot; research surface</div>'
+      + s.lines.map(function(L){
+          return '<div class="tcinfo-row">'
+            + (L.k?'<div class="tcinfo-k">'+_tcAttr(L.k)+'</div>':'')
+            + '<div class="tcinfo-v">'+_tcAttr(L.v)+'</div></div>';
+        }).join('')
+      +'<div class="tcinfo-src">'+_tcAttr(s.footer)+'</div>';
+  });
 }
 function _renderV4ScanTable(){
   const tbl=document.getElementById('v4ScanTbl'); if(!tbl)return;
@@ -2202,6 +2300,12 @@ function _renderV4ScanTable(){
       + '<td style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700">'+dcCell+'</td>'
       + '<td>'+_v4styleChip(x.best_label)+'</td>'
       + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0,x.verdict)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
+      /* cc#1222: the three marks. Added ALONGSIDE the raw score and verdict, which keep their old
+         meaning and colour — a live column that changes what it means is a worse bug than a wide
+         table, and this surface already scrolls. */
+      + _tcScoreCell(x)
+      + '<td>'+_tcGateStrip(x)+'</td>'
+      + _tcRankCell(x)
       + '<td><span class="v4-badge '+x.verdict+'">'+x.verdict+'</span></td>'
       + '<td class="v4t-fail" title="'+failTitle+'">'+failStr+'</td>'
       + '<td>'+bkStr+'</td>'
@@ -2211,7 +2315,11 @@ function _renderV4ScanTable(){
   tbl.innerHTML='<div style="overflow-x:auto"><table class="scr-table"><thead><tr>'
     +'<th>#</th><th>Symbol</th><th>Sector</th>'
     +'<th class="v4-sortable" onclick="v4SortBy(\'day_chg\')" style="cursor:pointer" title="Sort by day change">Day %'+dayArrow+'</th>'
-    +'<th>Best card</th><th>Score</th><th>Verdict</th>'
+    +'<th>Best card</th><th>Score</th>'
+    +'<th title="Score on the /100 scale against this bucket&#39;s V1 bar">/100 vs bar</th>'
+    +'<th title="Sector week · sector month · monthly RSI, tested for this row&#39;s side">Gates</th>'
+    +'<th title="Rank inside this bucket today, strongest first">Rank</th>'
+    +'<th>Verdict</th>'
     +'<th>Rules failed</th><th>V8 Basket</th><th>Buy M/R · Sell M/R</th>'
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
