@@ -2673,13 +2673,16 @@ function rnBindSwipe(){
    invented here and nothing is mapped to a category the data does not contain. The short forms
    exist because "AI Editorial" and "Stock Views" do not fit a 48px row beside a timestamp at
    360px; anything unrecognised falls through to its own text rather than to a guess. */
-var RN_CAT_SHORT = {'AI Editorial':'AI', 'Domestic':'IND', 'Global':'GLB',
-                    'IPO':'IPO', 'Stock Views':'VIEW'};
-/* cc#1129: the map now lives in scorr_news_row.js, which /m/digest uses too, so the two screens
-   cannot label the same category differently. The local copy above is kept only as the fallback
-   for a failed asset load — deleting it would trade one shared component for one blank tag. */
+/* cc#1259 · THE LOCAL COPY IS GONE, and cc#1129's reasoning for keeping it is what this change
+   overturns. That comment said deleting the fallback would "trade one shared component for one
+   blank tag", which was true and is no longer the better trade: rule 29631 scope 3 asks for one
+   helper and no per-surface copies, and this copy had already drifted — it still said IND after
+   the vocabulary moved to DOM. A stale map is not a safety net; it is the failure it was meant to
+   prevent, arriving quietly on the one screen that falls back.
+   With the component absent the row now carries NO tag, which is also what scope 4 asks for when a
+   category cannot be resolved: no tag beats a wrong one. */
 function rnCatShort(c){
-  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : (RN_CAT_SHORT[c] || String(c || ''));
+  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : '';
 }
 
 function rnPaint(){

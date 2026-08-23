@@ -22,10 +22,18 @@
   'use strict';
   if (window.ScorrNewsRow) return;
 
-  /* cc#1120's map, verbatim. New categories fall through to the raw label rather than being
-     dropped — an unmapped category is still a fact about the row. */
+  /* cc#1259 · THE VOCABULARY, rule 29631: DOM, GLB, AI-ED, IPO. Domestic was IND and AI Editorial
+     was AI; both are renamed here and nowhere else, which is the point of this map existing.
+     'Stock Views' is KEPT as VIEW even though the rule names only four. It is a real category in
+     polished_news, and dropping it would not remove a tag — it would fall through and print the
+     full words "Stock Views" in an 8.5px meta line, which is worse than the short form the founder
+     did not ask about. Flagged rather than silently decided.
+     THE FALLBACK IS NOW EMPTY, NOT THE RAW LABEL. cc#1120 let an unmapped category print itself,
+     on the reasoning that an unmapped category is still a fact. Rule 29631 scope 4 overrules that:
+     an uncategorised item shows NO tag rather than a wrong one, so an unrecognised value returns
+     '' and the row simply carries no tag. */
   var CAT_SHORT = {
-    'AI Editorial': 'AI', 'Domestic': 'IND', 'Global': 'GLB',
+    'AI Editorial': 'AI-ED', 'Domestic': 'DOM', 'Global': 'GLB',
     'IPO': 'IPO', 'Stock Views': 'VIEW'
   };
 
@@ -35,7 +43,7 @@
     });
   }
 
-  function catShort(c) { return CAT_SHORT[c] || String(c || ''); }
+  function catShort(c) { return CAT_SHORT[c] || ''; }
 
   /* Sentiment vocabulary in polished_news is inconsistent by design — it is passed through raw
      from the source and normalised once, here, so the two pages cannot normalise it differently.
@@ -78,12 +86,24 @@
    * opts.now       — injectable clock, so the time-ago is testable without waiting for a minute.
    */
   function render(n, opts) {
+    /* cc#1259 · render() INJECTS THE STYLESHEET TOO, and finding out why it did not is most of
+       this card. Only list() called injectCss(), but /m/digest builds its news decks by calling
+       render() per row — so the digest has been drawing this component's MARKUP with none of its
+       CSS since cc#1129, silently, falling back to whatever page styles happened to match.
+       That is why the first pass of this card changed nothing on the digest: the rules were
+       correct and were never on the page. A component that ships its own stylesheet has to attach
+       it on every path that renders, not on the one path that happened to be written first.
+       injectCss() is id-guarded, so calling it per row costs one getElementById and nothing else. */
+    injectCss();
     n = n || {}; opts = opts || {};
     var cat = n.category || opts.category || '';
     var t = ago(n.published || n.published_time, opts.now);
     var tap = opts.onclick ? ' onclick="' + esc(opts.onclick) + '"' : '';
     var meta = [];
-    if (cat) meta.push('<span class="nrtag">' + esc(catShort(cat)) + '</span>');
+    /* cc#1259: an unmapped category now yields '', so the tag span is not emitted at all —
+       an empty bordered pill would be a wrong tag drawn in the shape of a right one. */
+    var shortCat = catShort(cat);
+    if (shortCat) meta.push('<span class="nrtag">' + esc(shortCat) + '</span>');
     if (t) meta.push('<span class="nrago">' + esc(t) + '</span>');
     if (n.source) meta.push('<span class="nrsrc">' + esc(n.source) + '</span>');
     return '<div class="nrow' + (opts.onclick ? ' tap' : '') + '"' + tap + '>'
@@ -121,9 +141,16 @@
     /* two lines then ellipsis: a third line of headline pushes the meta out of the glance */
     + '.nrhl{font-size:12.5px;line-height:1.35;color:var(--chalk,var(--txt,#EAF0FA));'
     +   'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
-    + '.nrmeta{display:flex;align-items:center;flex-wrap:wrap;gap:0 6px;margin-top:4px;'
+    /* cc#1259 rule 29631: the tag and the age sit RIGHT-aligned and italic, in the one accent.
+       ACCENT PICKED: --amber. It is already the tag colour so nothing regresses, it is a real
+       token defined on every surface that renders this row, and the hex fallback keeps it
+       correct on a page that has not loaded the token sheet. No per-category colours - the
+       card puts those out of scope, and one accent is what makes the line read as one thing. */
+    + '.nrmeta{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;'
+    +   'gap:0 6px;margin-top:4px;font-style:italic;'
     +   'font-family:\'JetBrains Mono\',ui-monospace,monospace;font-size:8.5px;letter-spacing:.08em;'
-    +   'color:var(--muted,var(--dim,#8A97B0))}'
+    +   'color:var(--amber,#FF9F45)}'
+    /* the separator stays upright: a skewed middot reads as a smudge at 8.5px */
     + '.nrmeta i{font-style:normal;opacity:.5}'
     + '.nrtag{font-weight:800;color:var(--amber,#FF9F45);border:1px solid var(--amber,#FF9F45);'
     +   'border-radius:3px;padding:1px 5px;line-height:1.4}'
