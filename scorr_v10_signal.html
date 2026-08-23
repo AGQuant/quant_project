@@ -677,8 +677,9 @@ function buildupDeck(){
   DK.utrack.n = cards.length;
   var set = cards.join('');
   var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
-  return '<div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>'
-       + '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
+  /* the eyebrow stays in the page template where it always was — emitting it here as well is how
+     the combined render came back with STOCK F&O RADAR twice. */
+  return '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
        + set + set + set + '</div><div class="rpager"><div class="vdots" id="udots">' + dots + '</div>'
        + '<span class="clpg" id="upg">1 / 4 · LONG BUILDUP</span></div></div>';
 }
