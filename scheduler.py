@@ -108,13 +108,20 @@ class _Skip:
       CONDITIONAL — a gate or a precondition said no. That MIGHT be correct and might be a fault,
                     and the row cannot tell which, so it stays AMBER with the reason printed.
 
-    THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". 102 sites return it
-    and 58 of them are guards whose family is a judgement call — a session-live window, a
-    multi-condition arming check. Those are deliberately NOT relabelled by pattern-matching at
-    23:00 on a Sunday: a wrongly EXPECTED token would grade a real fault GREEN, which is worse
-    than the amber it replaces and is the exact rule-9 failure this card exists to prevent. An
-    unknown reason stays amber. The tokens land where the guard is unambiguous, and the rest are
-    listed in the forum to be classified deliberately, one at a time.
+    THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". Of 102 sites, 63 now
+    carry a token and 39 do not. Those 39 are guards whose family is a genuine judgement call — a
+    session-live check, a data-freshness probe, a multi-condition arming flag — and they are
+    deliberately NOT relabelled by pattern match: a wrongly EXPECTED token would grade a real
+    fault GREEN, which is worse than the amber it replaces and is the exact rule-9 failure this
+    card exists to prevent. An unknown reason stays amber. They get classified one at a time.
+
+    HOW THE 63 WERE PICKED — structurally, never by eye. An ast walk finds the nearest enclosing
+    `if` for each `return`, so the token comes from the guard that actually produced the skip and
+    not from whatever line happens to sit above it (several of these returns sit under comments
+    and log calls, which is exactly where a line-above heuristic goes wrong). A test is only
+    labelled `outside_window` when EVERY free identifier in it is a clock source — no registry
+    lookup, no flag, no data probe — because such a guard can only be answering "is it my minute
+    yet?".
 
     Deliberately NOT an exception and NOT an _Empty: a skip is neither a crash nor an empty
     result. It must not increment a failure streak and must not trigger a restart ladder.
@@ -147,6 +154,13 @@ class _Skip:
 
     @staticmethod
     def market_closed():   return _Skip("market_closed", _SKIP_EXPECTED)
+
+    # cc#1256: the job's own SCHEDULE said no — "is it my minute yet?". A job wired to run at
+    # 05:40 is dispatched on every tick and correctly declines all the others, so this is by far
+    # the most common healthy skip in the file and the one that made 30 jobs sit amber. Distinct
+    # from market_closed, which is about the MARKET's state rather than the job's own window.
+    @staticmethod
+    def outside_window():  return _Skip("outside_window", _SKIP_EXPECTED)
 
     @staticmethod
     def disabled():        return _Skip("disabled", _SKIP_EXPECTED)
@@ -2800,7 +2814,7 @@ def _bg_feed_deadman():
     # 09:45 floor, not 09:15: the first 5m bars need time to land, and a 30-min threshold at 09:20
     # would fire every single morning.
     if not (dt_time(9, 45) <= now.time() <= dt_time(15, 30)):
-        return _SKIPPED
+        return _Skip.outside_window()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT MAX(ts) FROM intraday_prices WHERE ts::date = %s", (now.date(),))
@@ -3366,7 +3380,7 @@ def _bg_mf_derived_nightly():
     global _mf_derived_nightly_armed_day
     now = _ist_now()
     if not (now.hour == 1 and 35 <= now.minute < 50):   # after the 01:00 yahoo EOD load
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _mf_derived_nightly_armed_day == day_key:
         return _Skip.already_ran()
@@ -3386,7 +3400,7 @@ def _bg_mf_derived_audit():
     global _mf_derived_audit_armed_day
     now = _ist_now()
     if not (now.weekday() == 5 and now.hour == 7 and now.minute < 15):
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _mf_derived_audit_armed_day == day_key:
         return _Skip.already_ran()
@@ -3419,9 +3433,9 @@ def _bg_mf_monthly_mc():
     global _mf_monthly_mc_armed_day
     now = _ist_now()
     if now.day != 11 or now.hour != 3:      # 03:30 IST — clear of the 01:00-02:00 nightly cascade
-        return _SKIPPED
+        return _Skip.outside_window()
     if now.minute >= 40:
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _mf_monthly_mc_armed_day == day_key:
         return _Skip.already_ran()
@@ -3907,7 +3921,7 @@ def _bg_engine_watchdog():
     global _engine_watchdog_ran_on
     now = datetime.now(IST)
     if not (now.hour == 5 and 58 <= now.minute < 60):   # cc#622 C: watchdog 08:45 -> 05:58 (LAST, after result-corner 05:55)
-        return _SKIPPED
+        return _Skip.outside_window()
     today = now.date()
     if _engine_watchdog_ran_on == today:
         return _Skip.already_ran()
@@ -3944,7 +3958,7 @@ def _bg_result_corner_verify():
     global _result_corner_ran_on
     now = datetime.now(IST)
     if not (now.hour == 5 and 55 <= now.minute < 60):   # cc#622 C: result-corner 08:15 -> 05:55 (AFTER T+1 05:40)
-        return _SKIPPED
+        return _Skip.outside_window()
     today = now.date()
     if _result_corner_ran_on == today:
         return _Skip.already_ran()
@@ -3967,7 +3981,7 @@ def _bg_result_analysis_weekly_sweep():
     global _result_analysis_sweep_ran_on
     now = datetime.now(IST)
     if not (now.weekday() == 6 and now.hour == 5 and now.minute < 15):   # cc#622 C: Sun sweep 09:00 -> 05:00 (clear 06:00-09:10)
-        return _SKIPPED
+        return _Skip.outside_window()
     if _result_analysis_sweep_ran_on == now.date():
         return _SKIPPED
     _result_analysis_sweep_ran_on = now.date()
@@ -3996,7 +4010,7 @@ def _bg_futures_gap_backfill():
     global _futures_gap_backfill_ran_on
     now = datetime.now(IST)
     if not (now.hour == 0 and 15 <= now.minute < 45):
-        return _SKIPPED
+        return _Skip.outside_window()
     today = now.date()
     if _futures_gap_backfill_ran_on == today:
         return _Skip.already_ran()
@@ -4071,7 +4085,7 @@ def _bg_v9_paper_monthly():
     if first_td != today:
         return _SKIPPED
     if now.hour < 1 or (now.hour == 1 and now.minute < 50):
-        return _SKIPPED                      # at-or-AFTER 01:50, never exactly-at
+        return _Skip.outside_window()                      # at-or-AFTER 01:50, never exactly-at
     try:
         import v9_paper_engine
         if v9_paper_engine.ran_this_month(asof=today):
@@ -4154,7 +4168,7 @@ def _bg_ops_metrics_t1():
     global _ops_metrics_t1_armed_day
     now = datetime.now(IST)
     if not (now.hour == 5 and 40 <= now.minute < 50):   # cc#622 C: T+1 08:00 -> 05:40 (clear 06:00-09:10)
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _ops_metrics_t1_armed_day == day_key:
         return _Skip.already_ran()
@@ -4173,7 +4187,7 @@ def _bg_ops_metrics_saturday():
     global _ops_metrics_saturday_armed_day
     now = datetime.now(IST)
     if not (now.weekday() == 5 and now.hour == 10 and now.minute < 10):
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _ops_metrics_saturday_armed_day == day_key:
         return _Skip.already_ran()
@@ -4193,12 +4207,12 @@ def _bg_ops_metrics_season_sweep():
     global _ops_metrics_season_armed_month
     now = datetime.now(IST)
     if now.month not in (3, 6, 9, 12):
-        return _SKIPPED
+        return _Skip.outside_window()
     if not (now.day == 1 and now.hour == 10 and now.minute < 10):
-        return _SKIPPED
+        return _Skip.outside_window()
     month_key = f"{now.year}-{now.month:02d}"
     if _ops_metrics_season_armed_month == month_key:
-        return _SKIPPED
+        return _Skip.already_ran()
     _ops_metrics_season_armed_month = month_key
     try:
         import ops_metrics_pipeline
@@ -4653,7 +4667,7 @@ def _bg_scheduler_master_daily_audit():
     global _scheduler_master_audit_armed_day
     now = datetime.now(IST)
     if not (now.hour == 5 and now.minute == 5):   # cc#622 C: drift audit 08:45 -> 05:05 (clear 06:00-09:10)
-        return _SKIPPED
+        return _Skip.outside_window()
     day_key = now.date().isoformat()
     if _scheduler_master_audit_armed_day == day_key:
         return _Skip.already_ran()
