@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="goldnight">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESIGN REF — Digest Results Deck R1</title>
+<style>
+  /* ============ GOLD NIGHT tokens (design-ref local; build uses the app token sheet) ============ */
+  :root{
+    --field:#0B0B0D;            /* black field */
+    --card:#131318;             /* card surface */
+    --row:#18181F;              /* row surface */
+    --chalk:#F2F0EA;            /* white chalk */
+    --chalk-dim:#9A9890;        /* secondary text */
+    --gold:#C9A227;             /* gold accent */
+    --gold-soft:#8A712B;
+    --bull:#3DDC84;
+    --caut:#FF5D73;
+    --neut:#A8A6A0;
+    --line:#26262E;
+    --mono:'JetBrains Mono','Roboto Mono',monospace;
+    --disp:'Archivo Black','Arial Black',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{background:#000;color:var(--chalk);font-family:var(--mono);display:flex;justify-content:center;padding:24px 0}
+  .phone{width:390px;background:var(--field);min-height:760px;padding:16px 14px 28px}
+
+  .ref-note{font-size:10px;color:var(--chalk-dim);letter-spacing:.08em;margin-bottom:12px}
+
+  /* ============ CARD ============ */
+  .deck-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 14px 14px;position:relative;overflow:hidden}
+  .deck-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:linear-gradient(90deg,var(--gold),transparent 70%)}
+
+  /* header */
+  .hd{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .hd .count{font-family:var(--disp);font-size:19px;letter-spacing:.01em}
+  .hd .count b{color:var(--gold)}
+  .hd .asof{font-size:10px;color:var(--chalk-dim);letter-spacing:.1em}
+  .tally{display:flex;gap:12px;font-size:11px;letter-spacing:.06em;margin-bottom:12px}
+  .tally .b{color:var(--bull)} .tally .c{color:var(--caut)} .tally .n{color:var(--neut)}
+
+  /* tier chips — one row, equal weight */
+  .tiers{display:flex;gap:6px;margin-bottom:14px}
+  .tier{flex:1;text-align:center;padding:7px 0;font-size:11px;letter-spacing:.08em;color:var(--chalk-dim);
+        background:var(--row);border:1px solid var(--line);border-radius:8px}
+  .tier b{color:var(--chalk);font-weight:600}
+  .tier.on{color:var(--gold);border-color:var(--gold-soft);background:rgba(201,162,39,.08)}
+  .tier.on b{color:var(--gold)}
+
+  /* ============ RESULT ROWS ============ */
+  .rows{display:flex;flex-direction:column;gap:8px}
+  .r{background:var(--row);border:1px solid var(--line);border-radius:10px;padding:11px 12px;display:grid;
+     grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:10px;row-gap:5px;align-items:center}
+  .r .who{display:flex;align-items:baseline;gap:8px;min-width:0}
+  .r .sym{font-family:var(--disp);font-size:14px;letter-spacing:.02em;white-space:nowrap}
+  .r .meta{font-size:9px;color:var(--chalk-dim);letter-spacing:.08em;white-space:nowrap}
+  .r .meta .cap{color:#5CC8FF}
+
+  /* verdict pill — compact, slanted left edge keeps the banner language without the overlap */
+  .v{grid-column:2;grid-row:1;justify-self:end;font-family:var(--disp);font-size:11px;letter-spacing:.06em;
+     padding:5px 10px 5px 14px;clip-path:polygon(7px 0,100% 0,100% 100%,0 100%);border-radius:3px}
+  .v.bull{background:rgba(61,220,132,.14);color:var(--bull)}
+  .v.neut{background:rgba(168,166,160,.14);color:var(--neut)}
+  .v.caut{background:rgba(255,93,115,.14);color:var(--caut)}
+
+  .r .line{grid-column:1 / -1;font-size:11px;line-height:1.45;color:var(--chalk-dim);
+     display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .r .line em{color:var(--chalk);font-style:normal}
+
+  /* pager */
+  .pager{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px}
+  .dot{width:5px;height:5px;border-radius:3px;background:var(--line)}
+  .dot.on{width:16px;background:var(--gold)}
+  .pager .lbl{font-size:9px;color:var(--chalk-dim);letter-spacing:.12em;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="ref-note">DESIGN REF · DIGEST RESULTS DECK · R1 · GOLD NIGHT · real Q1FY27 rows</div>
+
+  <div class="deck-card">
+    <div class="hd">
+      <div class="count"><b>20</b> of 633 analysed</div>
+      <div class="asof">LATEST 16 AUG</div>
+    </div>
+    <div class="tally">
+      <span class="b">188 bull</span><span class="c">119 caut</span><span class="n">326 neut</span>
+    </div>
+
+    <div class="tiers">
+      <div class="tier">ALL <b>633</b></div>
+      <div class="tier on">LARGE <b>100</b></div>
+      <div class="tier">MID <b>148</b></div>
+      <div class="tier">SMALL <b>381</b></div>
+    </div>
+
+    <div class="rows">
+      <div class="r">
+        <div class="who"><span class="sym">LENSKART</span><span class="meta">Q1FY27 · <span class="cap">LARGE</span></span></div>
+        <div class="v bull">BULLISH</div>
+        <div class="line"><em>The best growth profile in this batch</em> — revenue and profit both compounding ahead of peers.</div>
+      </div>
+      <div class="r">
+        <div class="who"><span class="sym">APOLLOHOSP</span><span class="meta">Q1FY27 · <span class="cap">LARGE</span></span></div>
+        <div class="v neut">NEUTRAL</div>
+        <div class="line">Growth on every line with a margin gain, roughly in step with a strong hospital sector.</div>
+      </div>
+      <div class="r">
+        <div class="who"><span class="sym">BRITANNIA</span><span class="meta">Q1FY27 · <span class="cap">LARGE</span></span></div>
+        <div class="v neut">NEUTRAL</div>
+        <div class="line">A steady quarter with a small margin gain, ahead of the food sector on revenue.</div>
+      </div>
+      <div class="r">
+        <div class="who"><span class="sym">PFC</span><span class="meta">Q1FY27 · <span class="cap">LARGE</span></span></div>
+        <div class="v neut">NEUTRAL</div>
+        <div class="line">A flat quarter — revenue unchanged, profit up marginally; the market took 8% off in three days.</div>
+      </div>
+    </div>
+
+    <div class="pager">
+      <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <div class="lbl">1 OF 5</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
