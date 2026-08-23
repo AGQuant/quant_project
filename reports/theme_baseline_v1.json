@@ -1,0 +1,31 @@
+{
+ "sha": "55fa94f",
+ "note": "cc#1185 P8 baseline. A file may go DOWN or stay level, never up.",
+ "total": 1237,
+ "files": {
+  "mobile_endpoints.py": 560,
+  "pwa_endpoints.py": 231,
+  "mobile/v8.html": 218,
+  "scorr_cards_preview.html": 53,
+  "scorr_theme_r5.css": 50,
+  "mobile/home.html": 41,
+  "mobile/trade_wall.html": 34,
+  "scorr_appshell.css": 29,
+  "scorr_digest_mobile.html": 9,
+  "scorr_gvm_fightcard.html": 3,
+  "mobile/check.html": 2,
+  "mobile/models.html": 2,
+  "mobile/qb.html": 2,
+  "scorr_v10_signal.html": 2,
+  "mobile/gvm.html": 1,
+  "mobile/intel.html": 0,
+  "mobile/positions.html": 0,
+  "mobile/results.html": 0,
+  "mobile/screeners.html": 0,
+  "mobile/sector.html": 0,
+  "mobile/holdings.html": 0,
+  "mobile/fpc.html": 0,
+  "mobile/login.html": 0,
+  "scorr_themes.css": 0
+ }
+}

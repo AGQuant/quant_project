@@ -89,11 +89,31 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
     if not existing["exists"] and not create_if_missing: raise HTTPException(404,f"File {filepath} does not exist")
     if existing["exists"] and existing["content"] == new_content:
         return {"status":"noop","message":"Content identical","filepath":filepath}
+    # cc#1185 P8 THEME_TOKEN_LOCK — the gate, on the one push path this app owns.
+    # It judges the content that is ABOUT to land, not what already did, and it is a RATCHET: a
+    # themed file may lose raw declarations or stay level, never gain them. Files with no recorded
+    # baseline pass untouched — a gate that opines on numbers it was never given is one people
+    # learn to switch off. A deliberate regression lands with allow_theme_regression and is echoed
+    # back in the response, so it is on the record instead of being silent.
+    theme_note = None
+    if not body.get("allow_theme_regression"):
+        try:
+            from theme_validator import gate as _theme_gate
+            allowed, why = _theme_gate(filepath, new_content)
+            if not allowed:
+                raise HTTPException(422, why)
+        except HTTPException:
+            raise
+        except Exception as e:
+            # A broken validator must never block a push — it is a lint, not the deploy path.
+            theme_note = f"theme validator skipped: {type(e).__name__}: {str(e)[:120]}"
+    else:
+        theme_note = "theme regression allowed explicitly by the caller"
     sha = existing["sha"] if existing["exists"] else None
     result = await _gh_put_file(filepath, new_content, commit_message, sha)
     return {"status":"ok","filepath":filepath,"action":"updated" if existing["exists"] else "created",
             "commit_sha":result.get("commit",{}).get("sha"),"commit_url":result.get("commit",{}).get("html_url"),
-            "old_size":existing["size"],"new_size":len(new_content)}
+            "old_size":existing["size"],"new_size":len(new_content),"theme_gate":theme_note}
 
 @router.post("/api/admin/github_delete")
 async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None)):
