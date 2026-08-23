@@ -132,6 +132,19 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    --panel is the card behind the row, so the neutral pill reads as recessed rather than raised:
    quiet, which is what neutral should be, and still unmistakably a pill. An existing token, no hex. */
 .rvd.mu{background:var(--panel)}
+/* cc#1238 · RESULT TRAFFIC DOT (RESULT_DOT_RULE_V1, session_log 29519). Deliberately the SAME
+   7px circle and the SAME three tokens as scorr_news_row.js's .nrdot, because the card asks for
+   the news dots' visual language rather than a new one — up/ct/dn are that module's own class
+   names and reusing them keeps the two readable as one system. It sits INSIDE .rtop, which is a
+   flex row, so the R1 grid is untouched: the dot costs the name cell a few pixels and no column.
+   Named .rtdot and not .rdot on purpose — #rdots is the pager, and two things called rdot on one
+   page is the collision this file has already had five times on short class names. */
+.rtdot{width:7px;height:7px;border-radius:50%;flex:none;align-self:center}
+.rtdot.up{background:var(--volt)}
+.rtdot.ct{background:var(--amber)}
+.rtdot.dn{background:var(--heat)}
+/* the sheet's one-line note when only one of the two checks could be computed */
+.rbasis{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-8);line-height:1.5}
 /* The verdict is one sentence but the source is prose and the longest measured is 987 characters,
    so it is clamped to two lines. Unclamped, one long row would push the other three off its page
    and the "4 rows per page" the card asks for would quietly stop being true.
@@ -611,6 +624,26 @@ function raPick(t){
   host.innerHTML=raChips()+raDeck();
   deckPark('rtrack');            /* a filter change resets to page 1, per the card */
 }
+/* cc#1238 · the dot is READ, never computed here. digest_v3._result_dots strikes both checks
+   server-side so one place owns the rule and any future surface reads the same field. A row with
+   no dot renders NOTHING rather than a grey placeholder — 29519 is explicit that an absent dot is
+   absent, not a fabricated neutral. */
+var RA_DOTCLS={green:'up',amber:'ct',red:'dn'};
+function raDot(c){
+  var k=RA_DOTCLS[c&&c.dot];
+  if(!k)return '';
+  return '<span class="rtdot '+k+'" title="'+esc(raBasisText(c)||'')+'"></span>';
+}
+/* The wording the sheet shows when only ONE check was computable. Both-checks rows say nothing —
+   the dot means what the rule says it means and does not need explaining every time. */
+function raBasisText(c){
+  if(!c||!c.dot)return '';
+  if(c.dot_basis==='peers')
+    return 'Dot from the peer comparison only \u2014 no run-rate estimate on file for this quarter.';
+  if(c.dot_basis==='estimate')
+    return 'Dot from the estimate comparison only \u2014 no segment median available for this quarter.';
+  return '';
+}
 function raDeck(){
   var L=raList(), rows=L.shown;
   if(!rows.length){
@@ -633,7 +666,7 @@ function raDeck(){
       + pg.map(function(c){
           var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'mu';
           return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
-            + '<div class="rtop"><b>'+esc(c.symbol||'')+'</b>'
+            + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
             + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
             + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
             + '</div></div>'
@@ -721,7 +754,9 @@ function raPaint(r,bodyHtml,d){
     + '<div class="meta">'+(r.segment?'<span>'+esc(r.segment)+'</span>':'')
     + (q?'<span>'+esc(q)+'</span>':'')
     + (when?'<span>polished '+esc(when)+'</span>':'')+'</div></div>'
-    + '<div class="rsb" id="rsb">'+bodyHtml
+    + '<div class="rsb" id="rsb">'
+    + (raBasisText(r)?'<div class="rbasis">'+raBasisText(r)+'</div>':'')
+    + bodyHtml
     + raPeerBlock(r)
     + '<div class="rfoot">'
     /* /m/results IS the mobile Result Corner (mobile_endpoints.py:1066). It does not read

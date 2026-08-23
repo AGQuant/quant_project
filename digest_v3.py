@@ -487,10 +487,117 @@ def _tier(rank) -> Optional[str]:
     return "LARGE" if r <= 100 else ("MID" if r <= 250 else "SMALL")
 
 
+# ── cc#1238 · RESULT TRAFFIC DOT (RESULT_DOT_RULE_V1, session_log 29519) ──────────────────────
+# Two binary checks, and neither invents a source. CHECK A is the company's PAT YoY against its
+# SEGMENT MEDIAN PAT YoY for the same quarter, struck on fundamentals_history alone — that is
+# RESULT_PEER_SOURCE_RULE_V1 (cc#1192), which killed the screener qoq_* columns for result surfaces
+# because the CSV profit line is not the post-minority Net Profit every other result surface uses.
+# CHECK B is the actual PAT against screener_raw.expected_quarterly_net_profit, which is the SAME
+# field the "vs est." surface reads (results_endpoints _SEGMENT_RESULTS_SQL). No new estimate
+# pathway, and the label stays honest: it is a Screener projected run-rate, not a broker consensus.
+#
+# THE YoY BASE GUARD IS COPIED, NOT REINVENTED: `WHEN p.pat > 0`. A year-ago loss makes a percentage
+# change meaningless rather than merely large, so it yields NULL and the check goes uncomputable —
+# which the rule already has an answer for. Every other result surface strikes it the same way.
+#
+# THE MEDIAN IS PER (segment, period_end), never per segment alone. A company whose latest filed
+# quarter is older than the season is then compared against peers on THAT quarter, not against a
+# different quarter's cohort. n_used travels with it so a median resting on one or two reporters can
+# be named rather than quietly trusted.
+_RESULT_DOT_SQL = """
+WITH latest_gvm AS (
+    SELECT DISTINCT ON (symbol) symbol, segment
+    FROM gvm_scores ORDER BY symbol, score_date DESC
+), q AS (
+    SELECT UPPER(f.symbol) AS sym, f.period_end,
+           NULLIF(replace(f.metrics->>'Net Profit', ',', ''), '')::numeric AS pat
+    FROM fundamentals_history f
+    WHERE f.section = 'quarters' AND f.period_type = 'quarter'
+), latest AS (
+    SELECT sym, period_end, pat, MAX(period_end) OVER (PARTITION BY sym) AS max_pe FROM q
+), yoy AS (
+    SELECT c.sym, c.period_end, c.pat AS act_pat,
+           CASE WHEN p.pat > 0 THEN (c.pat - p.pat) / p.pat * 100 END AS pat_yoy
+    FROM latest c
+    LEFT JOIN q p ON p.sym = c.sym
+                 AND p.period_end = (c.period_end - INTERVAL '1 year')::date
+    WHERE c.period_end = c.max_pe
+), withseg AS (
+    SELECT y.sym, y.period_end, y.act_pat, y.pat_yoy, g.segment
+    FROM yoy y LEFT JOIN latest_gvm g ON UPPER(g.symbol) = y.sym
+), med AS (
+    SELECT segment, period_end,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY pat_yoy) AS seg_med,
+           COUNT(pat_yoy) AS n_used
+    FROM withseg
+    WHERE segment IS NOT NULL AND pat_yoy IS NOT NULL
+    GROUP BY segment, period_end
+)
+SELECT w.sym, w.period_end, w.pat_yoy, m.seg_med, m.n_used, w.act_pat,
+       NULLIF(replace(sr.expected_quarterly_net_profit::text, ',', ''), '')::numeric AS exp_pat
+FROM withseg w
+LEFT JOIN med m ON m.segment = w.segment AND m.period_end = w.period_end
+LEFT JOIN screener_raw sr ON UPPER(sr.nse_code) = w.sym
+"""
+
+
+def _fq_label(period_end) -> Optional[str]:
+    """'Q1FY27' for a quarter period-end, in result_analysis_v2's own spelling (no space).
+
+    This exists so a dot can only ever be attached to the quarter it was actually computed for.
+    The dot is struck on the symbol's LATEST filed quarter; result_analysis_v2 carries one row on a
+    superseded quarter (KIMS Q4FY26, already named in duplicate_symbols). Without this guard that
+    older row would wear a dot describing a different quarter, which is exactly the kind of quiet
+    mislabelling the null rule is written to prevent. No match, no dot.
+    """
+    if not period_end:
+        return None
+    q = {6: 1, 9: 2, 12: 3, 3: 4}.get(period_end.month)
+    if not q:
+        return None
+    fy = period_end.year + 1 if period_end.month in (6, 9, 12) else period_end.year
+    return "Q%dFY%02d" % (q, fy % 100)
+
+
+def _result_dots(cur) -> Dict[str, Dict[str, Any]]:
+    """{SYMBOL: {quarter, dot, basis, ...}} — the colour plus every number it was struck on.
+
+    The inputs ship alongside the colour on purpose. A dot with no way to see the four numbers
+    behind it is a claim, and the sheet has to be able to say which comparison it is based on when
+    only one check was computable.
+    """
+    cur.execute(_RESULT_DOT_SQL)
+    out: Dict[str, Dict[str, Any]] = {}
+    for sym, pe, pat_yoy, seg_med, n_used, act_pat, exp_pat in cur.fetchall():
+        a = None if (pat_yoy is None or seg_med is None) else (pat_yoy >= seg_med)
+        b = None if (act_pat is None or exp_pat is None) else (act_pat >= exp_pat)
+        if a is None and b is None:
+            dot, basis = None, None            # absent, never a fabricated neutral
+        elif a is None or b is None:
+            one = a if b is None else b
+            dot = "green" if one else "red"    # amber is unreachable on a single check
+            basis = "peers" if b is None else "estimate"
+        else:
+            dot = "green" if (a and b) else ("red" if not (a or b) else "amber")
+            basis = "both"
+        out[sym] = {
+            "quarter": _fq_label(pe), "dot": dot, "dot_basis": basis,
+            "pat_yoy": None if pat_yoy is None else round(float(pat_yoy), 2),
+            "seg_median_pat_yoy": None if seg_med is None else round(float(seg_med), 2),
+            "seg_n": n_used,
+            "act_pat": None if act_pat is None else round(float(act_pat), 2),
+            "exp_pat": None if exp_pat is None else round(float(exp_pat), 2),
+        }
+    return out
+
+
 def _results_analysed(cur) -> Dict[str, Any]:
     import re as _re
     cur.execute(_RESULTS_ANALYSED_SQL)
     rows = cur.fetchall()
+    dots = _result_dots(cur)
+    dot_cov = {"green": 0, "amber": 0, "red": 0, "no_dot": 0,
+               "single_check": 0, "median_from_2_or_fewer": 0}
 
     out, tiers = [], {"LARGE": 0, "MID": 0, "SMALL": 0}
     tally = {"bullish": 0, "cautious": 0, "neutral": 0}
@@ -523,6 +630,21 @@ def _results_analysed(cur) -> Dict[str, Any]:
             "verdict": v,
             "read": read,
         })
+        # The dot is attached ONLY when the quarter it was computed for is the quarter this row is
+        # about. See _fq_label for why that guard exists rather than a plain symbol lookup.
+        d = dots.get(sym)
+        if d and d["quarter"] and quarter and d["quarter"] == quarter and d["dot"]:
+            out[-1]["dot"] = d["dot"]
+            out[-1]["dot_basis"] = d["dot_basis"]
+            out[-1]["dot_inputs"] = {k: d[k] for k in
+                                     ("pat_yoy", "seg_median_pat_yoy", "seg_n", "act_pat", "exp_pat")}
+            dot_cov[d["dot"]] += 1
+            if d["dot_basis"] != "both":
+                dot_cov["single_check"] += 1
+            if d["seg_n"] is not None and d["seg_n"] <= 2:
+                dot_cov["median_from_2_or_fewer"] += 1
+        else:
+            dot_cov["no_dot"] += 1
 
     # KIMS carries TWO rows, Q4FY26 and Q1FY27, so 633 rows are 632 companies. The card says "all
     # result_analysis_v2 rows" and its verify pins total to COUNT(*), so all 633 ship and total is
@@ -541,6 +663,9 @@ def _results_analysed(cur) -> Dict[str, Any]:
         "tally": tally,
         "read": (f"{tally['bullish']} bullish · {tally['cautious']} cautious · "
                  f"{tally['neutral']} neutral"),
+        # cc#1238 scope 6: the coverage report ships WITH the payload rather than living only in a
+        # task thread, so the split can be re-read on any day without re-running a one-off query.
+        "dot_coverage": dot_cov,
         "tier": "STATIC",
     }
 
