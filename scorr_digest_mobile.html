@@ -817,6 +817,10 @@ function nwOpen(cat,i){
   var n=(NW[cat]||[])[i]; if(!n)return;
   sheetEnsure();
   var sh=document.getElementById('rsheet'); if(!sh)return;
+  /* cc#1260: the whole build runs inside sheetPaint, so a throw anywhere below — a payload field
+     that is not the shape this expects, a helper that is not loaded yet — ends in the minimal
+     view with the headline still on it, never in a veil over nothing. */
+  sheetPaint(function(){
   var meta=[];
   if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
   if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
@@ -826,13 +830,14 @@ function nwOpen(cat,i){
     || '<div class="rsp" style="color:var(--muted)">No polished body on this item.</div>';
   var chips=(n.symbols||[]).map(function(x){
     return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
-  sh.innerHTML='<div class="rgrab"></div>'
+  return '<div class="rgrab"></div>'
     + '<div class="rshd" style="position:relative">'
     + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
     + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
     + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
     + '<div class="rsb">'+body
     + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
+  }, esc(n.headline||'This item could not be opened.'));
 }
 /* time-ago, borrowed from the shared row component so the deck and the sheet cannot disagree. */
 function ago(t){ return window.ScorrNewsRow&&ScorrNewsRow.ago?ScorrNewsRow.ago(t):''; }
@@ -859,6 +864,46 @@ function sheetEnsure(){
   document.body.appendChild(v); document.body.appendChild(s);
   document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
 }
+/* ── cc#1260 · A FAILED SHEET MUST NEVER LEAVE A BLOCKING OVERLAY ────────────────────────────
+   The reported symptom is the shape of this bug class exactly: sheetEnsure() mounts the veil
+   FIRST, and every painter runs after it. Any throw between those two points leaves a full-screen
+   veil over an empty, zero-height sheet — the page looks dead, and the only reason it is not
+   permanently dead is that the veil happens to carry an onclick.
+   That is one unguarded expression away at all times, on every surface that uses this sheet, so
+   the guard belongs at the seam rather than on whichever painter is suspected today. sheetPaint
+   runs the build inside try/catch: on a throw it paints the honest minimal view the card asks for
+   instead of nothing, and if even that fails it tears the whole thing down. There is no path left
+   where an exception can end with a veil and no way out. */
+function sheetPaint(build, minimal){
+  var s=document.getElementById('rsheet');
+  if(!s){ raClose(); return false; }
+  try{
+    s.innerHTML=build();
+    return true;
+  }catch(e){
+    try{ if(window.console&&console.error)console.error('cc#1260 sheet render failed', e); }catch(_){}
+    try{
+      /* The honest minimal view: whatever the caller could still say about the item. Never a
+         fabricated body — an empty sheet that says it is empty beats a blank one that looks
+         broken, and both beat a silent overlay. */
+      s.innerHTML='<div class="rgrab"></div>'
+        + '<div class="rshd" style="position:relative">'
+        + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+        + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'
+        + (minimal||'This item could not be opened.') + '</div></div>'
+        + '<div class="rsb"><div class="rsp" style="color:var(--muted)">'
+        + 'The detail failed to render. Nothing is invented in its place.</div></div>';
+      return false;
+    }catch(e2){ raClose(); return false; }
+  }
+}
+/* cc#1260 scope 4 · the overlay comes down on a back gesture and on a bfcache restore, not only
+   on a tap. Both are pure teardown — no pushState, no history of our own — so page navigation is
+   completely unchanged and there is no back-button trap to get wrong. Without these, a back
+   gesture with the sheet open, or a return to a frozen page, can restore the veil with nothing
+   behind it, which is the same dead screen arriving by a different road. */
+addEventListener('popstate', function(){ if(document.getElementById('rveil'))raClose(); });
+addEventListener('pageshow', function(e){ if(e.persisted&&document.getElementById('rveil'))raClose(); });
 function raRow(sym){
   var all=(RA&&RA.companies)||[];
   for(var i=0;i<all.length;i++)if(all[i].symbol===sym)return all[i];
@@ -902,10 +947,15 @@ function raOpen(sym,push){
 }
 function raPaint(r,bodyHtml,d){
   var s=document.getElementById('rsheet'); if(!s)return;
+  /* cc#1260: the results sheet gets the same guard as the news sheet. It is the more exposed of
+     the two — raOpen paints once for "Loading…" and again inside a .then, and a throw in that
+     second paint is swallowed by the promise chain, which is precisely how a veil ends up over a
+     sheet still saying Loading with nothing more ever coming. */
+  sheetPaint(function(){
   var q=(d&&d.quarter)||r.quarter||'', when=r.polished_ist||'';
   var back=RA_SEEN.length?'<button class="rsx" style="left:8px;right:auto" onclick="raBack()" '
       + 'aria-label="back">&#8592;</button>':'';
-  s.innerHTML='<div class="rgrab"></div>'
+  return '<div class="rgrab"></div>'
     + '<div class="rshd" style="position:relative">'+back
     + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
     + '<div class="sy">'+esc(r.symbol||'')+'</div>'
@@ -923,6 +973,7 @@ function raPaint(r,bodyHtml,d){
        day the page honours it, and the gap is logged rather than silently dropped. */
     + '<a href="/m/results?symbol='+encodeURIComponent(r.symbol||'')+'">VIEW DETAIL</a>'
     + '</div></div>';
+  }, esc(r.symbol||'This result could not be opened.'));
 }
 function raBack(){ var prev=RA_SEEN.pop(); if(prev)raOpen(prev,false); }
 
