@@ -368,8 +368,14 @@ def _section_quant_basket(cur) -> Dict:
     r = cur.fetchone()
     qb_ts = r[0]
     qb_days = _days_old(qb_ts.date() if qb_ts else None)
-    checks.append(_chk('QB EOD checker last run', str(qb_ts)[:16] if qb_ts else 'never',
-        ok=(qb_days <= 1), warn=(qb_days <= 2)))
+    # cc#1253: same str(ts)[:16] UTC-printed-as-IST shape as _sched_row had. Note what this row
+    # actually measures — the freshness of quant_paper_positions, i.e. a DATA proxy, not the job.
+    # The label says "EOD checker last run" and the number is a side effect of it, which is the
+    # wrong-source half of cc#1253 and is left for that card's ruling. Only the stamp is fixed.
+    checks.append(_chk('QB EOD checker last run',
+        _ist_stamp(qb_ts, assume='utc') if qb_ts else 'never',
+        ok=(qb_days <= 1), warn=(qb_days <= 2),
+        detail='quant_paper_positions freshness (data proxy, not the job) · cc#1253'))
 
     return {'name': 'Quant Basket', 'checks': checks, 'status': _status(checks)}
 
@@ -399,15 +405,54 @@ def _alert_age_min(cur, title):
     return float(r[0]) if r and r[0] is not None else None
 
 
+def _ist_stamp(ts, assume: str = None) -> str:
+    """cc#1253 · Render a timestamp in IST, because this whole report is stamped IST.
+
+    THE BUG THIS REPLACES is `str(ts)[:16]`. Measured 23-Aug: bg_v8_eod ran at 15:45 IST, exactly
+    on schedule, and the report printed `10:15` — which reads as a job firing five and a half
+    hours off its slot. The AGE was never wrong; it is computed in SQL as NOW()-ts. Only the
+    human-readable half lied.
+
+    WHY THIS TAKES AN EXPLICIT `assume` AND GUESSES NOTHING. This database holds BOTH naive
+    conventions and a function cannot tell them apart from the value:
+      · ops_log.session_ts and quant_paper_positions.updated_at are `timestamp WITHOUT time zone`
+        carrying naive UTC — verified, ops_log's newest row read 13:59 against NOW() of 14:07 UTC.
+      · adr_intraday.ts is the same column type carrying naive IST — verified, its newest bar
+        reads 15:15, which is a session bar; as UTC that would be 20:45 IST and impossible.
+    So a naive value is converted ONLY when the caller states the convention it came from.
+    With no `assume`, the value prints unchanged and is explicitly NOT labelled IST — the report
+    would rather say it does not know than stamp a timezone it cannot prove. Guessing here is how
+    a 5.5-hour error gets laundered into something that looks authoritative.
+    A tz-AWARE value (scheduler_master.last_run_at is TIMESTAMPTZ) needs no assumption at all.
+    """
+    if ts is None:
+        return '—'
+    if getattr(ts, 'tzinfo', None) is not None:
+        return ts.astimezone(IST).strftime('%Y-%m-%d %H:%M IST')
+    if assume == 'utc':
+        return ts.replace(tzinfo=timezone.utc).astimezone(IST).strftime('%Y-%m-%d %H:%M IST')
+    if assume == 'ist':
+        return ts.strftime('%Y-%m-%d %H:%M IST')
+    return f'{str(ts)[:16]} (tz unknown)'
+
+
 def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0):
     """Traffic-light for a job whose last successful run is age_min minutes ago
     (green=on-time, yellow=late/recovered, red=missing)."""
     if age_min is None:
-        return _chk(label, 'no run recorded', ok=False, warn=False,
-                    detail=f'Expected {expected} · no ops_log/proxy row yet')
+        # cc#1253 · the VALUE used to read 'no run recorded', which is a claim this function
+        # cannot support: it has looked at ops_log and a data proxy, not at the job registry.
+        # Measured 23-Aug 19:30 — 'Result season sweep: no run recorded' was printed for
+        # bg_ops_metrics_season_sweep, whose scheduler_master.last_run_at was SIXTY SECONDS old.
+        # The words now say only what was actually checked. The colour is deliberately NOT
+        # touched: making this green needs the skipped-counts-as-alive ruling on cc#1253, and a
+        # verdict change without it would swap one wrong light for another.
+        return _chk(label, 'no ops_log row', ok=False, warn=False,
+                    detail=f'Expected {expected} · no ops_log/proxy row · '
+                           f'scheduler_master NOT consulted (cc#1253)')
     disp = f'{int(age_min)} min ago' if age_min < 180 else f'{age_min/60.0:.1f}h ago'
     return _chk(label, disp, ok=(age_min <= green_h*60), warn=(age_min <= yellow_h*60),
-                detail=f'Expected {expected} · last {str(last_ts)[:16]}')
+                detail=f'Expected {expected} · last {_ist_stamp(last_ts, assume="utc")}')
 
 
 def _alert_absence_row(cur, label, alert_title, expected, window_min=1200.0):
