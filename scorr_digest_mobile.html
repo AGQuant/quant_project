@@ -80,8 +80,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .mrow:first-of-type{border-top:none}
 /* cc#1190 · LATEST RESULT ANALYSIS. GOLD NIGHT tokens only — every colour here is a var already
    declared at the top of this file, no new literal. */
-.rchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:wrap}
-.rchip{min-height:34px;padding:var(--space-5) var(--space-10);cursor:pointer;font-family:'JetBrains Mono';font-size:var(--type-10);
+/* cc#1237 scope 3 · FOUR EQUAL CHIPS IN ONE ROW, per design ref scorr_digest_results_R1
+   (design_refs/scorr_digest_results_R1.html, 09bc13a). The ref's .tiers is flex with .tier{flex:1},
+   i.e. the four tiers split the width evenly and the row NEVER wraps. flex-wrap:wrap was the old
+   behaviour and it is what let SMALL drop to a second line on a narrow phone, which is half of why
+   the block read as untidy. min-width:0 goes with flex:1 or a long label refuses to shrink and
+   pushes the row wider than the card. */
+.rchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:nowrap}
+.rchip{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden}
+.rchip{min-height:34px;padding:var(--space-5) var(--space-4);cursor:pointer;font-family:'JetBrains Mono';font-size:var(--type-10);
  font-weight:800;letter-spacing:var(--track-px12);color:var(--muted);background:var(--hi);
  border:var(--bw-1) solid var(--edge);clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 .rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
@@ -90,22 +97,65 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
    that count, not guessed: without it a final short page collapses and the deck jumps height
    mid-swipe, which reads as a broken carousel rather than a short page. */
-.rpage{flex:0 0 100%;scroll-snap-align:start;min-height:212px}
-.rpg{font-size:var(--type-9);letter-spacing:var(--track-px13);color:var(--muted);margin-bottom:var(--space-2)}
-.rrow{align-items:flex-start}
-.rmain{flex:1;min-width:0}
-.rtop{display:flex;align-items:baseline;gap:var(--space-7);flex-wrap:wrap}
-.rtop b{font-size:var(--type-125)}
-.rq{font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px9)}
+.rpage{flex:0 0 100%;scroll-snap-align:start;min-height:212px;display:flex;flex-direction:column;gap:var(--space-8)}
+/* cc#1237 · THE ROW IS A GRID NOW, AND THAT IS THE WHOLE FIX FOR THE OVERLAP.
+   The founder's 16:24 screenshot showed the verdict banner sitting on top of the symbol name and
+   the summary cut mid-word. The old row was ONE flex line — .rmain took the remaining width and
+   the read chip was a sibling competing for the same axis, so a long symbol and a wide banner had
+   nothing arbitrating between them. R1's answer is two columns and two rows: the name block and
+   the pill each own a cell on row 1, and the summary spans both on row 2. Overlap stops being
+   unlikely and becomes impossible — grid cells do not intersect.
+   Each row also gets its own surface and border per the ref (.r) instead of the shared .mrow
+   top-border, which is what makes four rows read as four cards rather than one ruled list. */
+.rrow{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;
+ column-gap:var(--space-10);row-gap:var(--space-5);align-items:center;
+ background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);
+ padding:var(--space-11) var(--space-12)}
+.rmain{grid-column:1;grid-row:1;min-width:0}
+.rtop{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
+.rtop b{font-size:var(--type-14);white-space:nowrap}
+.rq{font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px9);white-space:nowrap}
 .rt{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-px11);color:var(--aqua);
- font-family:'JetBrains Mono'}
+ font-family:'JetBrains Mono';white-space:nowrap}
+/* THE VERDICT PILL. Geometry only — the three tints are the page's EXISTING .w/.l/.mu chip
+   classes, so BULLISH stays volt-on-green and CAUTIOUS stays the same red it is everywhere else
+   on this page. R1 declares its own rgba tints, but those are ref-local tokens; the card says map
+   onto the app token sheet and never hardcode a hex where a token exists, and here a whole styled
+   class already exists. The slant is R1's: a diagonal on the LEFT edge only, which keeps the
+   banner language the founder approved without the banner's width. */
+.rvd{grid-column:2;grid-row:1;justify-self:end;font-size:var(--type-105);font-weight:800;
+ letter-spacing:var(--track-px10);font-family:'JetBrains Mono';padding:var(--space-5) var(--space-10);
+ clip-path:polygon(7px 0,100% 0,100% 100%,0 100%);border-radius:var(--radius-3);white-space:nowrap}
+/* NEUTRAL NEEDS ITS OWN SURFACE HERE, and the first render is why. .mu paints background:var(--hi),
+   which is exactly what the new row surface is, so a NEUTRAL pill vanished into its own row while
+   BULLISH and CAUTIOUS stood out on their tints -- one of the three verdicts silently had no pill.
+   --panel is the card behind the row, so the neutral pill reads as recessed rather than raised:
+   quiet, which is what neutral should be, and still unmistakably a pill. An existing token, no hex. */
+.rvd.mu{background:var(--panel)}
 /* The verdict is one sentence but the source is prose and the longest measured is 987 characters,
    so it is clamped to two lines. Unclamped, one long row would push the other three off its page
-   and the "4 rows per page" the card asks for would quietly stop being true. */
-.rv{font-size:var(--type-115);line-height:1.45;color:var(--muted);margin-top:var(--space-3);
- display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+   and the "4 rows per page" the card asks for would quietly stop being true.
+   cc#1237 MOVES IT TO ONE LINE AND SPANS IT ACROSS BOTH COLUMNS, per R1's .line. Two lines was
+   the right call while the summary shared a flex line with the pill; on the grid it has the full
+   row width to itself, so one line carries as much text as two used to and every row on a page is
+   now the same height — which is what stops the "summary cut mid-word" reading, because the clamp
+   ends at a line boundary rather than at whatever the flex box happened to leave. */
+.rv{grid-column:1 / -1;grid-row:2;font-size:var(--type-11);line-height:1.45;color:var(--muted);
+ display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .rrow{cursor:pointer}
-.rchev{color:var(--muted);font-size:var(--type-14);flex:none;align-self:center}
+/* cc#1237 · THE CHEVRON IS GONE. R1 has no affordance glyph on the row: the whole row is the tap
+   target and it already was (the onclick has been on .rrow since cc#1190). The chevron occupied a
+   third flex cell that the grid has no column for, and keeping it would have re-introduced the
+   width competition the grid exists to end. Nothing about the tap changes. */
+/* cc#1237 · THE PAGER IS ONE ROW AT THE FOOT, dots plus "1 OF N", per R1's .pager. It replaces the
+   per-page "1 of 5" caption that sat ABOVE each slide (.rpg) — that caption was inside the scroll
+   track, so on a narrow phone it clipped at the track edge, which is the third defect in the
+   founder's screenshot. The label is a SIBLING of #rdots, never a child: deckDots() rewrites
+   className on every child of the dots element, so a label inside it would be turned into a dot. */
+.rpager{display:flex;align-items:center;justify-content:center;gap:var(--space-8)}
+.rpager .idots{margin-top:0}
+.rplbl{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);
+ letter-spacing:var(--track-px12);white-space:nowrap}
 /* ── cc#1190 scope 3/4 · THE SHEET ───────────────────────────────────────────────────────────
    MIRRORS /m/home's news sheet — same veil, same 78vh ceiling, same grab handle, same slide-up,
    same body lock — but it is NOT the same CSS, and that is a finding rather than a shortcut.
@@ -494,6 +544,10 @@ function deckDots(trackId,dotsId){
       tr.scrollTo({left:(cur-(cur%n)+j)*w,behavior:'smooth'});
     };
   });
+  /* cc#1237: hand the resolved page index back. The results pager prints "1 OF N" beside these
+     dots and it must never disagree with which dot is lit, so it reads THIS number rather than
+     recomputing scrollLeft/pitch itself. Additive - iDots()/iWrap() ignore the return value. */
+  return i;
 }
 function deckWrap(trackId,dotsId){
   deckDots(trackId,dotsId);
@@ -510,12 +564,20 @@ function deckWrap(trackId,dotsId){
 function deckPark(trackId){
   var tr=document.getElementById(trackId), n=DECKS[trackId];
   if(tr&&n)tr.scrollTo({left:n*deckPitch(tr),behavior:'auto'});
-  deckDots(trackId,trackId==='itrack'?'idots':'rdots');
+  var i=deckDots(trackId,trackId==='itrack'?'idots':'rdots');
+  if(trackId==='rtrack')raPagerLabel(i);
 }
 function iDots(){ deckDots('itrack','idots'); }
 function iWrap(){ deckWrap('itrack','idots'); }
-function rDots(){ deckDots('rtrack','rdots'); }
-function rWrap(){ deckWrap('rtrack','rdots'); }
+/* cc#1237 · the results deck's own wrappers keep the pager label in step with the dots. This is
+   why cc#1190 gave this deck named wrappers rather than calling deckDots directly everywhere: the
+   shared helpers stay shared, and anything specific to THIS deck lives here. */
+function raPagerLabel(i){
+  var el=document.getElementById('rplbl');
+  if(el&&RA_PAGES)el.textContent=((i||0)+1)+' OF '+RA_PAGES;
+}
+function rDots(){ raPagerLabel(deckDots('rtrack','rdots')); }
+function rWrap(){ deckWrap('rtrack','rdots'); raPagerLabel(deckDots('rtrack','rdots')); }
 
 /* ══ cc#1190 · LATEST RESULT ANALYSIS DECK ═══════════════════════════════════════════════════
    Replaces YESTERDAY'S RESULTS · SCORED. That card read one session of earnings_calendar and
@@ -527,7 +589,7 @@ function rWrap(){ deckWrap('rtrack','rdots'); }
    analysed" — the n-of-total wording is what says the deck shows a SUBSET, but it never says how
    big. All 633 would be 159 pages, which is not a swipe, and SHOW MORE exists precisely to hand
    the full list to Result Corner. 20 (five pages) is the default; the question is logged. */
-var RA=null, RA_TIER='ALL';
+var RA=null, RA_TIER='ALL', RA_PAGES=0;
 var RA_PAGE=4, RA_MAX=20;
 var RA_TIERS=['ALL','LARGE','MID','SMALL'];
 
@@ -563,24 +625,29 @@ function raDeck(){
   var set=pages.map(function(pg,pi){
     /* cc#1190 scope 3: the tap and its chevron arrive together with the sheet they open, which is
        why push 2 shipped these rows deliberately inert. */
-    return '<div class="rpage"><div class="rpg num">'+(pi+1)+' of '+pages.length+'</div>'
+    /* cc#1237 scope 2 · R1 ROW ANATOMY. The row is a grid: name block left on row 1, verdict pill
+       right on row 1, one-line summary spanning row 2. `mrow` is dropped from the class list --
+       it is the page's shared ruled-list row (display:flex) and leaving it on would have fought
+       the grid for the same element. The tint classes stay the page's own w/l/mu. */
+    return '<div class="rpage">'
       + pg.map(function(c){
-          var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'';
-          return '<div class="mrow rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
+          var cls=c.read==='BULLISH'?'w':c.read==='CAUTIOUS'?'l':'mu';
+          return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
             + '<div class="rtop"><b>'+esc(c.symbol||'')+'</b>'
             + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
             + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
-            + '</div>'
-            + '<div class="rv">'+esc(c.verdict||'')+'</div></div>'
-            + '<span class="chip '+cls+'" style="font-size:9.5px;padding:1px 6px">'
-            + esc(c.read||'—')+'</span><span class="rchev">\u203a</span></div>';
+            + '</div></div>'
+            + '<span class="rvd '+cls+'">'+esc(c.read||'—')+'</span>'
+            + '<div class="rv">'+esc(c.verdict||'')+'</div></div>';
         }).join('')
       + '</div>';
   }).join('');
   var dots=Array.from({length:pages.length},function(_,j){
     return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+  RA_PAGES=pages.length;
   return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
-       + set+set+set+'</div><div class="idots" id="rdots">'+dots+'</div></div>'
+       + set+set+set+'</div><div class="rpager"><div class="idots" id="rdots">'+dots+'</div>'
+       + '<span class="rplbl" id="rplbl">1 OF '+pages.length+'</span></div></div>'
        /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
        + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
 }
