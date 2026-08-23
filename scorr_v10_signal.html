@@ -101,6 +101,43 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .prg.pp .rl,.prg.pp .rv{color:var(--amber)}
 .prg.cmp{background:transparent;border-color:var(--aqua)}
 .prg.cmp .rl,.prg.cmp .rv{color:var(--aqua)}
+/* ══ cc#1243 · THE HEADER IS TWO ROWS, AND THE FIX IS PAGE-LOCAL ON PURPOSE ══════════════════
+   WHAT WAS ACTUALLY BROKEN, measured before touching anything: the subtitle rendered at 20px tall
+   against a 10px line-height at BOTH 360 and 390 — two lines — and at 10px (one line) only at 430.
+   The desktop header was ported without a mobile pass, so the status slot took its width from the
+   right and the identity block got whatever was left, which on a 360 phone is not enough for
+   "NIFTY · BANKNIFTY · THE LIVE DESK". Giving row 2 the full width is the whole fix; the ellipsis
+   below is the belt-and-braces for a longer subtitle, not the mechanism.
+
+   SCOPED HERE, NOT IN THE APPSHELL, AND THAT IS THE LOAD-BEARING DECISION. .as-hdr lives in
+   SCORR_APPSHELL_CSS, which is a SHARED sheet — every /m/ page on the shell links it. Restyling
+   .as-hdr there would silently re-lay-out the header of every one of them, which is exactly the
+   cc#1108 failure (a look shipped through a shared selector landing on surfaces nobody was
+   designing for) and what SHARED_CSS_RULE_V1 exists to prevent. So the overrides are keyed to
+   .ii-hdr, a class that exists only on this page, and the shared file is not touched at all.
+   The web Index Intel is a different file entirely (v10_dashboard.html) and has no .as-hdr, so no
+   media query is needed to protect it — the scoping is by FILE, the strongest kind available. */
+.as-hdr.ii-hdr{flex-direction:column;align-items:stretch;gap:var(--space-6)}
+.ii-r1{display:flex;align-items:center;gap:var(--space-9)}
+.ii-r1 .ii-sp{flex:1}
+/* 44px both ways per MOBILE_UX_STANDARD_V1 — a back control that is only as big as its glyph is
+   not a tap target. The chevron is drawn optically smaller than its box, which is the point. */
+.ii-back{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+ margin-left:var(--space-n10);font-size:var(--type-24);line-height:1;color:var(--muted);
+ text-decoration:none;flex:none}
+/* flex-end, not baseline. `align-items:baseline` aligns a flex child by its FIRST baseline, and
+   .as-pg's first baseline is the TITLE's — which put the clock level with INDEX INTEL instead of
+   with the subtitle. The card lists the clock alongside the subtitle, and pairing the two small
+   mono elements is also the better read. flex-end aligns their bottoms, and at the same 10px
+   mono line-height that is their baseline to within a pixel. */
+.ii-r2{display:flex;align-items:flex-end;gap:var(--space-10)}
+.ii-r2 .as-pg{flex:1;min-width:0}
+/* ONE LINE EACH, and min-width:0 above is what actually allows the ellipsis: a flex child defaults
+   to min-width:auto and refuses to shrink below its content, so text-overflow never engages. */
+.as-hdr.ii-hdr .as-pg .t{white-space:nowrap}
+.as-hdr.ii-hdr .as-pg .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.as-hdr.ii-hdr #asof{flex:none;white-space:nowrap;font-family:'JetBrains Mono';
+ font-size:var(--type-95);color:var(--muted)}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -120,12 +157,21 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
      OWN status slot — #gatechip and #asof are carried across untouched, ids and all, because the
      slot is the shell's and the content is the page's (ref rule 6). Rule 5 holds: nothing below
      this header changed, and no loader was touched. -->
-<div class="as-hdr">
-  <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
-  <div class="as-pg"><span class="t">Index Intel</span>
-    <div class="s">NIFTY · BANKNIFTY · THE LIVE DESK</div></div>
-  <div class="as-slot"><span id="gatechip" class="chip">GATE · —</span>
-    <div id="asof" style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:5px">loading…</div></div>
+<!-- cc#1243 · TWO ROWS. Same elements, same ids, same data bindings — #gatechip and #asof are
+     carried across untouched exactly as the R1 shell rule requires, and nothing about what they
+     display changed. Only the boxes around them moved. -->
+<div class="as-hdr ii-hdr">
+  <div class="ii-r1">
+    <a class="ii-back" href="/m/home" aria-label="Back to home">&#8249;</a>
+    <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
+    <span class="ii-sp"></span>
+    <span id="gatechip" class="chip">GATE · —</span>
+  </div>
+  <div class="ii-r2">
+    <div class="as-pg"><span class="t">Index Intel</span>
+      <div class="s">NIFTY · BANKNIFTY · THE LIVE DESK</div></div>
+    <div id="asof">loading…</div>
+  </div>
 </div>
 <div id="app"><div class="card"><div class="unavail">Loading the desk…</div></div></div>
 <div class="foot">INDEX INTEL · research only, not investment advice</div>
