@@ -127,6 +127,19 @@ function spark(vals,color){
 }
 function pcrBand(v){return v==null?['NO DATA','']:(v<0.7?['BEARISH','l']:v<0.9?['BULLISH','w']:v<1.1?['NEUTRAL','n']:['BEARISH','l']);}
 
+/* ── cc#1241 · THE TWO SIGNAL TILES ARE HIDDEN, NOT DELETED ──────────────────────────────────
+   Founder order, 23-Aug 16:56: hide the NIFTY and BANKNIFTY signal tile cards on the MOBILE Index
+   Intel page. One flag, because the card says hide rather than delete and this is the form of hide
+   that is one line to reverse: sigCard() below is kept whole, the /api/v10/signal fetches in boot()
+   are kept, and nothing about the V10 engine, its scheduler or its position tracking is involved at
+   all — this file is a page template and touches none of them.
+   THE HIDE IS SCOPED BY FILE, WHICH IS WHY WEB CANNOT BE AFFECTED. scorr_v10_signal.html is served
+   at /m/v10 and nowhere else (v10_page_endpoints.py:32/76). The web Index Intel is a different
+   file, v10_dashboard.html, which has no sigCard at all — checked, zero occurrences. So there is no
+   shared component to scope around and no CSS selector that could leak across.
+   The eyebrow goes with the tiles. Leaving "THE SIGNALS · V10 ST+EMA" over nothing would be an
+   orphan heading, and the section that follows moves straight up under the header. */
+var SHOW_SIGNAL_TILES = false;
 function sigCard(name,key){
   const s=D.sig[key], lm=D.lm[key]||{};
   const cmp=lm.cmp!=null?Number(lm.cmp):null, day=lm.day_pct!=null?Number(lm.day_pct):null;
@@ -201,10 +214,10 @@ function render(){
   const drow=r=>`<div class="mrow"><b>${esc(r.symbol)}</b><span class="chip n" style="font-size:9px;padding:1px 6px">${esc((r.signals||[]).join(' · ')||'—')}</span><span style="flex:1"></span><span class="num" style="color:var(--muted)">${r.age_min!=null?r.age_min+'m':'—'}</span></div>`;
 
   $('app').innerHTML=`
-  <div class="eyebrow">THE SIGNALS · V10 ST+EMA</div>
+  ${SHOW_SIGNAL_TILES ? `<div class="eyebrow">THE SIGNALS · V10 ST+EMA</div>
   ${sigCard('NIFTY','N')}
   ${sigCard('BANKNIFTY','B')}
-
+  ` : ''}
   <div class="eyebrow">VOLATILITY &amp; FLOW</div>
   <div class="card">
     <div class="vitals">
