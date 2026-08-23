@@ -688,7 +688,12 @@ function secNews(n,title,s,tier){
   /* R3 row: .sdot sentiment dot · a block with .nh headline + .ns summary · right-aligned .nsent.
      The shipped version put `ns` on the ROW (it is the summary class) and pushed the summary into
      .nsent (the right-aligned sentiment slot), so headline and body collapsed into one column. */
-  h += (s.items||[]).length ? (s.items||[]).map(function(i){
+  /* cc#1239 · THE SLICE PINS WEB TO WHAT IT ALREADY RENDERED. That card raised the shared
+     builder's news limit from 6 to 20 for the APP decks, and this page reads the SAME payload —
+     without this, a card scoped to the app would have quietly tripled every news section on the
+     web digest. Its do_not_touch list names web news surfaces, so the output here is held
+     identical: same six items, same order, same everything. */
+  h += (s.items||[]).length ? (s.items||[]).slice(0,6).map(function(i){
         var b=sentBucket(i.sentiment);
         return '<div class="nrow"><span class="sdot '+b.c+'"></span>'+
                '<div><div class="nh">'+esc(i.headline)+'</div>'+

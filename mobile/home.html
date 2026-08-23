@@ -2772,7 +2772,8 @@ function loadRawNews(){
              endpoint has always sent it (news_endpoints.py selects it straight from
              v_polished_articles) and this mapping simply did not read it. */
           return { headline: a.headline_clean, published_at: a.published_time,
-                   source: a.source, sentiment: a.sentiment, impact: a.impact,
+                   /* cc#1239: source deliberately NOT mapped — see nwOpen. */
+                   sentiment: a.sentiment, impact: a.impact,
                    category: a.category || '',
                    body: a.full_summary || a.summary || '', polished: true };
         });
@@ -2826,9 +2827,15 @@ function nwOpen(idx){
   nwClose();
   NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
 
-  var meta = '<span>' + esc(n.source || 'source unknown') + '</span>';
+  /* cc#1239 · THE OUTLET NAME IS GONE FROM THIS SHEET. It led the meta line as
+     `n.source || 'source unknown'`, which is where Home printed LiveMint / Economic Times. The
+     card is explicit: no external source names render on these surfaces, the polished content
+     stands on its own. `source` is also no longer carried on the polished mapping below, so there
+     is nothing left to print even if a future line tried.
+     The ROW never showed a source — only this sheet did — so nothing changes in the list. */
+  var meta = '';
   var ago = rnAgo(n.published_at);
-  if (ago) meta += '<span>\u00b7</span><span>' + esc(ago) + '</span>';
+  if (ago) meta += '<span>' + esc(ago) + '</span>';
   meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
 
   var body = String(n.body || '').trim()

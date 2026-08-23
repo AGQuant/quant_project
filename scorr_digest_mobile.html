@@ -538,6 +538,11 @@ var DECKS={}, DECK_TMR={};
    internals deck (6 cards) scroll-snap mandatory drags it back onto a snap point each time, which
    is why it has never looked broken; on a deck with more slides per set the dots start reading the
    wrong index. Measured here rather than hardcoded, so a future gap change cannot desync it. */
+/* cc#1239 · A REGISTRY, NOT A GROWING TERNARY. deckPark resolved its dots element with
+   `trackId==='itrack'?'idots':'rdots'`, which silently made every future deck the results deck's.
+   This card adds two more (Domestic and Global news), so the mapping is declared once here and a
+   new deck registers itself rather than editing a conditional that already had the shape of a bug. */
+var DECK_DOTS={itrack:'idots',rtrack:'rdots',nwdtrack:'nwddots',nwgtrack:'nwgdots'};
 function deckPitch(tr){
   var c=tr.firstElementChild;
   if(!c)return Math.max(1,tr.clientWidth);
@@ -577,7 +582,7 @@ function deckWrap(trackId,dotsId){
 function deckPark(trackId){
   var tr=document.getElementById(trackId), n=DECKS[trackId];
   if(tr&&n)tr.scrollTo({left:n*deckPitch(tr),behavior:'auto'});
-  var i=deckDots(trackId,trackId==='itrack'?'idots':'rdots');
+  var i=deckDots(trackId,DECK_DOTS[trackId]);
   if(trackId==='rtrack')raPagerLabel(i);
 }
 function iDots(){ deckDots('itrack','idots'); }
@@ -684,6 +689,78 @@ function raDeck(){
        /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
        + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
 }
+/* ══ cc#1239 · DOMESTIC + GLOBAL NEWS DECKS ════════════════════════════════════
+   WHAT WAS ACTUALLY WRONG, because it is not what the card's title says. These rows were ALREADY
+   polished-only: digest_v3._news has only ever read polished_news. There was no raw feed item to
+   remove. What the founder photographed was the OUTLET LABEL riding on a polished row —
+   scorr_news_row.js prints `n.source` when the payload carries one. So the fix is at the payload:
+   _news no longer selects source, the shared component's `if (n.source)` is simply false, and the
+   component is not edited for the surfaces still using it.
+
+   FOUR ROWS A PAGE, SAME AS THE RESULTS DECK, and the same helpers drive it — deckDots, deckWrap,
+   deckPark, the triple set for the infinite wrap. 20 rows is 5 pages. The gesture is the one this
+   page already teaches twice.
+
+   EXPANSION CANNOT LEAK ACROSS A SWIPE HERE, and it is worth saying why rather than claiming it:
+   there is no inline expansion to leak. The detail opens in the MODAL sheet, which locks body
+   scroll while it is open, so the deck cannot be swiped underneath it, and nwOpen paints from the
+   tapped index every time rather than from a deck-level flag. That is the cc#1232 defect made
+   structurally absent rather than fixed. */
+var NW={};
+function nwDeck(items,cat,key){
+  var rows=items||[];
+  if(!rows.length)return '<div class="unavail">No items.</div>';
+  var tid='nw'+key+'track', did='nw'+key+'dots';
+  var pages=[];
+  for(var i=0;i<rows.length;i+=4)pages.push(rows.slice(i,i+4));
+  DECKS[tid]=pages.length;
+  var set=pages.map(function(pg,pi){
+    return '<div class="rpage">'+pg.map(function(n,j){
+      var idx=pi*4+j;
+      /* chevron:false and no source on the payload — the row shows the sentiment dot, the
+         headline, its category tag and the time-ago, and nothing about which outlet filed it. */
+      return window.ScorrNewsRow
+        ? ScorrNewsRow.render(n,{category:cat,chevron:false,
+            onclick:"nwOpen('"+cat+"',"+idx+")"})
+        : '<div class="mrow" onclick="nwOpen(\''+cat+'\','+idx+')"><span class="sdot" style="background:'
+          + senti(n.sentiment)+'"></span><span style="flex:1">'+esc(n.headline||'')+'</span></div>';
+    }).join('')+'</div>';
+  }).join('');
+  var dots=Array.from({length:pages.length},function(_,j){
+    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+  return '<div class="iswipe"><div class="iswipe-t" id="'+tid+'" onscroll="deckWrap(\''+tid+'\',\''+did+'\')">'
+       + set+set+set+'</div><div class="rpager"><div class="idots" id="'+did+'">'+dots+'</div></div></div>';
+}
+function newsDeck(items,cat){ return nwDeck(items,cat,cat==='Domestic'?'d':'g'); }
+
+/* The polished piece, in the SAME sheet the results rows open. headline, the full body, the
+   sentiment/impact line and the mentioned symbols as chips — nothing else, and explicitly no
+   outlet. There is no VIEW DETAIL foot: the polished piece IS the detail, so a link promising more
+   would be a link to nothing. */
+function nwOpen(cat,i){
+  var n=(NW[cat]||[])[i]; if(!n)return;
+  sheetEnsure();
+  var sh=document.getElementById('rsheet'); if(!sh)return;
+  var meta=[];
+  if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
+  if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
+  if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
+  var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
+    t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
+    || '<div class="rsp" style="color:var(--muted)">No polished body on this item.</div>';
+  var chips=(n.symbols||[]).map(function(x){
+    return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
+  sh.innerHTML='<div class="rgrab"></div>'
+    + '<div class="rshd" style="position:relative">'
+    + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+    + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
+    + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
+    + '<div class="rsb">'+body
+    + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
+}
+/* time-ago, borrowed from the shared row component so the deck and the sheet cannot disagree. */
+function ago(t){ return window.ScorrNewsRow&&ScorrNewsRow.ago?ScorrNewsRow.ago(t):''; }
+
 /* ── cc#1190 scope 3/4/5 · THE SHEET ─────────────────────────────────────────────────────────
    RA_SEEN is the back-stack for peer hops. Tapping a peer swaps the sheet to that symbol, and
    without a stack the only way back was to close and re-find the row you came from. */
@@ -694,6 +771,17 @@ function raClose(){
   if(v)v.remove(); if(s)s.remove();
   document.body.style.overflow='';
   RA_OPEN=null; RA_SEEN=[]; RA_PEERS=null; RA_PSHOW=false;
+}
+/* cc#1239 · THE SHEET SHELL, LIFTED OUT OF raOpen SO NEWS CAN USE IT. The card says extend the
+   sheet the app already uses and never fork it, and this is the literal form of that: one veil,
+   one #rsheet element, one body-scroll lock, one close path. Results and news differ only in what
+   they paint INTO it. Lifted verbatim from raOpen — no behaviour changed for results. */
+function sheetEnsure(){
+  if(document.getElementById('rsheet'))return;
+  var v=document.createElement('div'); v.id='rveil'; v.className='rveil'; v.onclick=raClose;
+  var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
+  document.body.appendChild(v); document.body.appendChild(s);
+  document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
 }
 function raRow(sym){
   var all=(RA&&RA.companies)||[];
@@ -718,12 +806,7 @@ function raOpen(sym,push){
   var r=raRow(sym)||{symbol:sym};
   if(push&&RA_OPEN&&RA_OPEN!==sym)RA_SEEN.push(RA_OPEN);
   RA_OPEN=sym; RA_PEERS=null; RA_PSHOW=false;
-  if(!document.getElementById('rsheet')){
-    var v=document.createElement('div'); v.id='rveil'; v.className='rveil'; v.onclick=raClose;
-    var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
-    document.body.appendChild(v); document.body.appendChild(s);
-    document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
-  }
+  sheetEnsure();
   raPaint(r,'<div class="rsp" style="color:var(--muted)">Loading the analysis…</div>');
   fetch('/api/results/v2/'+encodeURIComponent(sym)).then(function(x){return x.json();})
     .then(function(d){
@@ -1057,13 +1140,10 @@ async function boot(){
      No chevron and no onclick: these rows do not open anything on this page, and an affordance
      that leads nowhere is worse than none. Ordering is untouched — the payload arrives sorted on
      polish time and is rendered in the order it arrives. */
-  const newsRows=(items,cat)=>window.ScorrNewsRow
-    ? ScorrNewsRow.list(items,{limit:4,category:cat,chevron:false,
-        empty:'<div class="unavail">No items.</div>'})
-    /* the component is a blocking tag above, so this only runs if the asset itself failed to
-       load — in which case the headlines still render rather than the section going blank. */
-    : (items.slice(0,4).map(n=>`<div class="mrow"><span class="sdot" style="background:${senti(n.sentiment)}"></span>
-       <span style="flex:1">${esc(n.headline)}</span></div>`).join('')||'<div class="unavail">No items.</div>');
+  /* cc#1239 · the two feeds are decks now, and the tap opens the polished piece in the sheet.
+     NW holds the rows so nwOpen can find one by index without re-reading the payload. */
+  NW.Domestic=wm; NW.Global=ge;
+  const newsRows=(items,cat)=>newsDeck(items,cat);
 
   document.getElementById('app').innerHTML=`
   <div class="card slab rail" style="--rc:${railC};margin-top:12px">
@@ -1147,6 +1227,11 @@ async function boot(){
      replaced on every render, so the dot handlers must be rebound). */
   deckPark('itrack');
   deckPark('rtrack');
+  /* cc#1239: the news decks park on the middle set like the other two, so the first swipe LEFT
+     wraps instead of hitting a wall. Guarded on DECKS because a feed with no rows renders the
+     empty state and has no track to park. */
+  if(DECKS.nwdtrack)deckPark('nwdtrack');
+  if(DECKS.nwgtrack)deckPark('nwgtrack');
   loadInternals();
 }
 boot();

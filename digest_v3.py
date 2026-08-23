@@ -332,18 +332,38 @@ def _reporting_today(cur) -> Dict[str, Any]:
                      if rows else "No scheduled reporters today.")}
 
 
-def _news(cur, category: str, limit: int = 6) -> List[Dict[str, Any]]:
+def _news(cur, category: str, limit: int = 20) -> List[Dict[str, Any]]:
     # cc#853: sentiment added so the R3 news rows can carry their .sdot colour and .nsent label.
     # It is READ from polished_news, never inferred here — the column is populated but its
     # vocabulary is inconsistent (Bullish/Positive/positive, Bearish/Negative/negative, Cautious,
     # Neutral/neutral), so it is passed through raw and normalised once, on the client.
-    cur.execute("""SELECT headline_clean, COALESCE(summary, full_summary), source, published_time,
-                          sentiment
+    #
+    # cc#1239 · SOURCE IS NO LONGER SELECTED, and that is the whole of the "no ET/Mint labels"
+    # change on this surface. The rows were ALREADY polished-only — polished_news is the only table
+    # this query has ever read — so there was never a raw item to remove here; what the founder
+    # photographed was the outlet label riding along on a polished row. Dropping the column from the
+    # payload is a stronger fix than hiding it in CSS or teaching the shared row component to omit
+    # it: scorr_news_row.js renders the label only `if (n.source)`, so with no source on the payload
+    # nothing renders and the SHARED component is not touched for the surfaces still using it.
+    #
+    # full_summary and mentioned_symbols are new, and only for the bottom sheet. The list keeps
+    # reading `summary` so a row is still one short line; the sheet is where the full piece lives.
+    # limit 6 -> 20 per the card. Verified live at 225 Domestic / 74 Global rows over 7 days, so 20
+    # is always a full deck rather than a target the data cannot meet.
+    cur.execute("""SELECT id, headline_clean, COALESCE(summary, full_summary), published_time,
+                          sentiment, impact, full_summary, mentioned_symbols
                    FROM polished_news WHERE category=%s
                    ORDER BY published_time DESC LIMIT %s""", (category, limit))
-    return [{"headline": r[0], "summary": r[1], "source": r[2],
-             "published": r[3].isoformat() if r[3] else None,
-             "sentiment": r[4]} for r in cur.fetchall()]
+    out = []
+    for r in cur.fetchall():
+        syms = r[7]
+        if isinstance(syms, str):                      # text column on some rows, list on others
+            syms = [x.strip() for x in syms.split(",") if x.strip()]
+        out.append({"id": r[0], "headline": r[1], "summary": r[2],
+                    "published": r[3].isoformat() if r[3] else None,
+                    "sentiment": r[4], "impact": r[5], "full_summary": r[6],
+                    "symbols": list(syms) if syms else []})
+    return out
 
 
 # ── 07 YESTERDAY'S RESULTS · SCORED — the strict three-condition match ────────────────────────
