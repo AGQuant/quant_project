@@ -195,7 +195,54 @@ PWA_JS = """
   }
 
   // 2) register the service worker (root scope)
+  //
+  // cc#1246 · AND TELL AN ALREADY-OPEN PAGE WHEN A NEW VERSION LANDS. This is the missing half of
+  // the update flow and it is the root cause of three cards closed as "cache ghosts" — cc#1225,
+  // cc#1240 and cc#1255. Every layer was already correct FOR A NEW LOAD: the HTML routes serve
+  // no-store, the shared assets carry ?v= the deploy commit sha (verified live: the stamp equals
+  // the sha and changes every deploy), and the SW purges every non-current cache on activate then
+  // claims its clients. None of that helps the case that actually happens — the app is ALREADY
+  // OPEN. The deploy lands, the new SW takes control, and the page goes on rendering the DOM it
+  // built before the deploy, forever, until someone navigates or pulls to refresh. Which is
+  // exactly what was reported each time: "a refresh cleared it". The bytes were never stale. The
+  // RENDER was.
+  //
+  // THREE GUARDS, because a careless reload here is worse than the bug it fixes:
+  //  1. HAD A CONTROLLER. controllerchange also fires on the FIRST install, when there was no
+  //     previous version and nothing to be stale. Reloading then would bounce every first-time
+  //     visitor for no reason. `primed` is captured BEFORE registering, so it answers "was this
+  //     page already being controlled", not "is it now".
+  //  2. ONE SHOT. `done` makes the reload unrepeatable within a page life. The SW calls
+  //     skipWaiting() itself, once per new SW version, so a fresh version yields exactly one
+  //     controllerchange — but a flag costs nothing and a reload loop on a phone costs trust.
+  //  3. NEVER UNDER HIS FINGER. If the page is VISIBLE the reload is deferred, not cancelled: it
+  //     fires on the next visibilitychange back to visible. So the app is fresh the moment it is
+  //     opened from the background — the founder's actual usage — and a tap is never interrupted
+  //     mid-gesture by the page reloading itself. A visible page that is never backgrounded
+  //     simply keeps working, exactly as it does today.
+  // Nothing here touches SW_JS. The worker's own flow was already right; only the client was deaf.
   if ('serviceWorker' in navigator) {
+    var swPrimed = !!navigator.serviceWorker.controller;   // guard 1: captured BEFORE register
+    var swDone = false;                                    // guard 2
+    var swReload = function () {
+      if (swDone) return;
+      swDone = true;
+      // guard 3: reload only while the page is AWAY, never while it is being looked at. Waiting
+      // for it to become VISIBLE would be the obvious reading and the wrong one — that reloads
+      // the page at the exact moment he is looking at it. Reloading while hidden means the work
+      // happens unseen and he simply finds fresh content when he comes back. A page that is
+      // never backgrounded keeps working as it does today; it is never yanked mid-tap.
+      if (document.visibilityState === 'hidden') { location.reload(); return; }
+      document.addEventListener('visibilitychange', function onVis() {
+        if (document.visibilityState === 'hidden') {
+          document.removeEventListener('visibilitychange', onVis);
+          location.reload();
+        }
+      });
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (swPrimed) swReload();
+    });
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/service_worker.js').catch(function () {});
     });
