@@ -108,7 +108,14 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
    that count, not guessed: without it a final short page collapses and the deck jumps height
    mid-swipe, which reads as a broken carousel rather than a short page. */
-.rpage{flex:0 0 100%;scroll-snap-align:start;min-height:212px;display:flex;flex-direction:column;gap:var(--space-8)}
+/* cc#1252 · min-width:0 IS LOad-BEARING, not tidiness. flex:0 0 100% asks for exactly the track
+   width, but a flex item still cannot shrink below its CONTENT minimum, and one unbreakable token
+   in one row is enough to override the basis. Measured at 360px with a 60-character token in a
+   single news row: this page went 298px -> 711.281px while its siblings stayed 307px, so the deck
+   no longer had one pitch at all, and deckPark missed its target by 1653px — it opened on the
+   wrong page. min-width:0 lets the page shrink to the basis it already asked for, so an
+   over-long token wraps or clips inside the page instead of resizing it. */
+.rpage{flex:0 0 100%;min-width:0;scroll-snap-align:start;min-height:212px;display:flex;flex-direction:column;gap:var(--space-8)}
 /* cc#1237 · THE ROW IS A GRID NOW, AND THAT IS THE WHOLE FIX FOR THE OVERLAP.
    The founder's 16:24 screenshot showed the verdict banner sitting on top of the symbol name and
    the summary cut mid-word. The old row was ONE flex line — .rmain took the remaining width and
@@ -573,12 +580,30 @@ var DECKS={}, DECK_TMR={};
    This card adds two more (Domestic and Global news), so the mapping is declared once here and a
    new deck registers itself rather than editing a conditional that already had the shape of a bug. */
 var DECK_DOTS={itrack:'idots',rtrack:'rdots',nwdtrack:'nwddots',nwgtrack:'nwgdots'};
+/* cc#1252 · PITCH COMES FROM THE LAYOUT, NOT FROM A RECT. This is the cc#1245 fix ported from
+   scorr_v10_signal.html, where the same helper reported 333.484 against a true pitch of 333 and
+   left every deck 29px short over 11 pages. getBoundingClientRect().width is sub-pixel, and the
+   error is multiplied by the page index at every call site. The delta between two consecutive
+   children is the pitch the browser actually laid out, with no rounding to accumulate.
+   The rect path is KEPT as the single-child fallback, because with one child there is no delta to
+   take and a deck of one page has no drift to suffer. */
 function deckPitch(tr){
-  var c=tr.firstElementChild;
-  if(!c)return Math.max(1,tr.clientWidth);
+  var k=tr.children;
+  if(k.length>1)return Math.max(1,k[1].offsetLeft-k[0].offsetLeft);
+  if(!k.length)return Math.max(1,tr.clientWidth);
   var cs=getComputedStyle(tr);
   var gap=parseFloat(cs.columnGap||cs.gap||0)||0;
-  return Math.max(1,c.getBoundingClientRect().width+gap);
+  return Math.max(1,k[0].getBoundingClientRect().width+gap);
+}
+/* cc#1252 · offsetLeft is relative to the OFFSET PARENT, not the scroll container, so it carries a
+   constant ancestor offset. The DELTA between two pages is exact — that is what deckPitch uses —
+   but the absolute value is not a scroll position until the first page's offset is subtracted.
+   Scrolling to a page by its OWN offset, rather than by index times pitch, is what makes the rest
+   position exactly where the browser put that page. Same shape as v10's dkAt. */
+function deckAt(tr,i){
+  var k=tr.children;
+  if(!k.length)return 0;
+  return k[i]?(k[i].offsetLeft-k[0].offsetLeft):i*deckPitch(tr);
 }
 function deckDots(trackId,dotsId){
   var tr=document.getElementById(trackId), dots=document.getElementById(dotsId), n=DECKS[trackId];
@@ -589,7 +614,7 @@ function deckDots(trackId,dotsId){
     el.className=(j===i?'on':'');
     el.onclick=function(){
       var cur=Math.round(tr.scrollLeft/w);
-      tr.scrollTo({left:(cur-(cur%n)+j)*w,behavior:'smooth'});
+      tr.scrollTo({left:deckAt(tr,cur-(cur%n)+j),behavior:'smooth'});
     };
   });
   /* cc#1237: hand the resolved page index back. The results pager prints "1 OF N" beside these
@@ -604,14 +629,16 @@ function deckWrap(trackId,dotsId){
     var tr=document.getElementById(trackId), n=DECKS[trackId];
     if(!tr||!n)return;
     var w=deckPitch(tr), i=Math.round(tr.scrollLeft/w);
-    if(i<n)tr.scrollTo({left:(i+n)*w,behavior:'auto'});
-    else if(i>=2*n)tr.scrollTo({left:(i-n)*w,behavior:'auto'});
+    var to=(i<n)?i+n:(i>=2*n)?i-n:-1;
+    if(to>=0)tr.scrollTo({left:deckAt(tr,to),behavior:'auto'});
   },90);
 }
 /* park a freshly rendered deck on the MIDDLE set, instantly, before it is ever seen */
 function deckPark(trackId){
   var tr=document.getElementById(trackId), n=DECKS[trackId];
-  if(tr&&n)tr.scrollTo({left:n*deckPitch(tr),behavior:'auto'});
+  /* cc#1252: park ON the middle set's first page by its own offsetLeft rather than by arithmetic,
+     so the rest position is exactly where the browser laid that page out. */
+  if(tr&&n)tr.scrollTo({left:deckAt(tr,n),behavior:'auto'});
   var i=deckDots(trackId,DECK_DOTS[trackId]);
   if(trackId==='rtrack')raPagerLabel(i);
 }
