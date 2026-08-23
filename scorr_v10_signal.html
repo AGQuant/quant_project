@@ -169,11 +169,22 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .bk1{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}
 .bk1 b{font-size:var(--type-125)}
 .bkleg{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted)}
-.bkside{font-size:var(--type-9);padding:var(--space-2) var(--space-7)}
+/* cc#1262 · A PILL, NOT A SLAB. The .chip base carries clip-path:polygon(5px 0,…) — the angular
+   cut that makes every chip on this page read as a boxy tile. At the side badge's size that shape
+   is the "big square" the founder is looking at, so the cut is switched off HERE and a radius put
+   in its place. Padding is sized to the word it holds, matching .clside/.clrsn in the closed list,
+   which is the pill language the card points at. The red/green tint is untouched: it comes from
+   the existing .l and .w classes, so SHORT and LONG keep the exact colours they already had. */
+.bkside{font-size:var(--type-9);padding:var(--space-2) var(--space-6);
+ clip-path:none;border-radius:var(--radius-10);line-height:1.35}
 .bkpnl{margin-left:auto;font-weight:800;font-size:var(--type-125);white-space:nowrap}
-.bk2{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-12);margin-top:var(--space-6);
- font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-px8);color:var(--muted)}
-.bk2 b{color:var(--chalk);font-weight:700}
+/* cc#1262 · READABLE ON A PHONE. This line was 9px for both the label and the number, which is
+   the "small-caps tiny" the founder is reading past. The label goes to 11px and the VALUE to 14px
+   at weight 800, so the eye lands on the number and the label recedes to what it is — a caption.
+   The row-gap grows with it: 11px labels on a 4px gap would touch when the row wraps at 360. */
+.bk2{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-12);margin-top:var(--space-8);
+ font-family:'JetBrains Mono';font-size:var(--type-11);letter-spacing:var(--track-px8);color:var(--muted)}
+.bk2 b{color:var(--chalk);font-weight:800;font-size:var(--type-14)}
 /* ── cc#1245 · the closed book: filter chips, paged rows, chips sized to their own text ── */
 .clchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10)}
 .clchip{flex:1;min-width:0;text-align:center;white-space:nowrap}
@@ -898,8 +909,15 @@ function bookRow(p){
     + '<span>OPEN <b class="num">' + esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—') + '</b></span>'
     + '<span>ENTRY <b class="num">' + lv(p.entry_price) + '</b></span>'
     + '<span>CMP <b class="num">' + lv(p.cmp) + '</b></span>'
-    + '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
-    + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>'
+    /* cc#1262 · TGT and STOP are FUTURES-ONLY now. The comment above already says the option legs
+       carry no stop or target in v10_positions, so on an OPTIONS row these two fields were a
+       guaranteed pair of em-dashes — two labels and no information, taking a third of the line.
+       The row already knows which it is: p.opt_type is the same flag bookDeck splits the two cards
+       on, so this needs no new argument and cannot disagree with which card the row landed in.
+       FUTURES keeps them exactly as they were, values untouched. */
+    + (p.opt_type ? ''
+        : '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
+        + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>')
     + '</div></div>';
 }
 function bookCard(label, rows){
