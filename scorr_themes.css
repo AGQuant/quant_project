@@ -37,7 +37,16 @@
    DERIVED, NOT INVENTED. Every value below was read out of a real declaration in a real file by
    the P3 census, which walked the same corpus as the P1 and P2 reports with comments masked. P2's
    1,710 bucket-(b) declarations reuse a much smaller set of distinct VALUES; this block is that
-   set, named once each. 141 keys cover all 1,710.
+   set, named once each. 152 keys cover all 1,710.
+
+   ELEVEN OF THOSE 152 COME FROM BUCKET (a), and the reason matters. P2 filed a literal under (a)
+   when its VALUE happened to equal some already-declared token. For a COLOUR that is usually
+   intent — #d4af37 is --brand, #ff9f45 is --label — and those repoint to the existing name, not
+   to a new one. For a LENGTH it is coincidence: 16px is not "the cut token" because both happen
+   to be 16. Repointing a font-size at a token that means something else is how a theme file
+   becomes a trap, so the eleven (a) LENGTH values get ordinary ramp keys like every other length.
+   The biggest of them, 6px, carries 74 uses — leaving it out would have left the largest single
+   spacing hole in the file behind a classification artefact.
 
    IT SITS ON :root, NOT INSIDE A THEME BLOCK, and that is the whole reason this push is safe.
    Today every one of these values is a hardcoded literal, identical on all three themes because a
@@ -73,25 +82,26 @@
    allowlist, and that is a one-line change to this block.
    -------------------------------------------------------------------------------------------- */
 :root{
-  /* font-size — 30 steps, every distinct value the app uses, ascending. */
+  /* font-size — 32 steps, every distinct value the app uses, ascending. */
   --type-8:8px;--type-85:8.5px;--type-9:9px;--type-95:9.5px;--type-10:10px;--type-105:10.5px;
   --type-11:11px;--type-115:11.5px;--type-12:12px;--type-125:12.5px;--type-13:13px;
-  --type-135:13.5px;--type-14:14px;--type-145:14.5px;--type-15:15px;--type-165:16.5px;
-  --type-17:17px;--type-19:19px;--type-20:20px;--type-21:21px;--type-22:22px;--type-24:24px;
-  --type-26:26px;--type-30:30px;--type-32:32px;--type-34:34px;--type-36:36px;--type-40:40px;
-  --type-52:52px;--type-80:80px;
-  /* padding / margin / gap — 31 steps, every distinct value the app uses, ascending. */
-  --space-n16:-16px;--space-n12:-12px;--space-n6:-6px;--space-n45:-4.5px;--space-n4:-4px;
-  --space-n2:-2px;--space-0:0px;--space-1:1px;--space-2:2px;--space-3:3px;--space-4:4px;
-  --space-5:5px;--space-7:7px;--space-8:8px;--space-85:8.5px;--space-9:9px;--space-10:10px;
-  --space-11:11px;--space-12:12px;--space-13:13px;--space-14:14px;--space-15:15px;
-  --space-17:17px;--space-19:19px;--space-20:20px;--space-22:22px;--space-24:24px;
-  --space-40:40px;--space-70:70px;--space-78:78px;--space-80:80px;
-  /* border-radius — 17 steps, every distinct value the app uses, ascending. */
-  --radius-1:1px;--radius-2:2px;--radius-3:3px;--radius-4:4px;--radius-5:5px;--radius-7:7px;
-  --radius-8:8px;--radius-9:9px;--radius-10:10px;--radius-11:11px;--radius-12:12px;
-  --radius-13:13px;--radius-14:14px;--radius-15:15px;--radius-17:17px;--radius-19:19px;
-  --radius-20:20px;
+  --type-135:13.5px;--type-14:14px;--type-145:14.5px;--type-15:15px;--type-16:16px;
+  --type-165:16.5px;--type-17:17px;--type-18:18px;--type-19:19px;--type-20:20px;--type-21:21px;
+  --type-22:22px;--type-24:24px;--type-26:26px;--type-30:30px;--type-32:32px;--type-34:34px;
+  --type-36:36px;--type-40:40px;--type-52:52px;--type-80:80px;
+  /* padding / margin / gap — 37 steps, every distinct value the app uses, ascending. */
+  --space-n16:-16px;--space-n14:-14px;--space-n12:-12px;--space-n10:-10px;--space-n6:-6px;
+  --space-n45:-4.5px;--space-n4:-4px;--space-n2:-2px;--space-0:0px;--space-1:1px;--space-2:2px;
+  --space-3:3px;--space-4:4px;--space-5:5px;--space-6:6px;--space-7:7px;--space-8:8px;
+  --space-85:8.5px;--space-9:9px;--space-10:10px;--space-11:11px;--space-12:12px;
+  --space-13:13px;--space-14:14px;--space-15:15px;--space-16:16px;--space-17:17px;
+  --space-18:18px;--space-19:19px;--space-20:20px;--space-22:22px;--space-24:24px;
+  --space-40:40px;--space-60:60px;--space-70:70px;--space-78:78px;--space-80:80px;
+  /* border-radius — 20 steps, every distinct value the app uses, ascending. */
+  --radius-1:1px;--radius-2:2px;--radius-3:3px;--radius-4:4px;--radius-5:5px;--radius-6:6px;
+  --radius-7:7px;--radius-8:8px;--radius-9:9px;--radius-10:10px;--radius-11:11px;
+  --radius-12:12px;--radius-13:13px;--radius-14:14px;--radius-15:15px;--radius-16:16px;
+  --radius-17:17px;--radius-18:18px;--radius-19:19px;--radius-20:20px;
   /* border width — 4 steps, every distinct value the app uses, ascending. */
   --bw-1:1px;--bw-15:1.5px;--bw-2:2px;--bw-3:3px;
   /* letter-spacing — 33 steps. em and px are separate ramps: they are different
