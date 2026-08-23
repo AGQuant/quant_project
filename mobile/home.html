@@ -138,8 +138,25 @@ body[data-theme]{
    nothing can move: the global tap-target rule pins these buttons at min-height:44px and the
    content box is ~25px, so padding and border have no say. Horizontally .slab's border is 1.5px
    against .hc's 1px, so the padding drops 9px to 8.5px and the border box comes out identical.
-   Same widths, same wrap, same card height. */
-.hchips .hc.slab{padding:var(--space-5) var(--space-85);--panel:transparent;--line:var(--line2)}
+   Same widths, same wrap, same card height.
+
+   cc#1230 RAISES THIS PADDING AND THE PARAGRAPH ABOVE IS NOW PARTLY STALE — kept, not deleted,
+   because its horizontal arithmetic is still the constraint that decides the number. Two claims
+   in it did not survive measurement in the real cascade: the chips are NOT pinned at 44px (the
+   tap-target rule keys off a selector these anchors do not match — they measure 23px), so
+   vertical padding does move them; and "same card height" was true only while card 1 set the
+   deck height, which it no longer does since cc#1182 grew card 2.
+   5px -> 6px vertical is +2px per chip ROW, and 8.5px -> 10px horizontal is +3px per chip. The
+   horizontal number is the one that can cost a whole row by rewrapping, so it was measured at
+   360 before it was written: 6 chips still wrap to 3 rows, 2 rows at 390 and 430, identical to
+   the counts before this change.
+   7px WAS TRIED FIRST AND IT OVERFLOWED 360 BY 13px. 360 is the binding width and it is by far
+   the tightest: the chips wrap to THREE rows there, so every vertical pixel is paid three times,
+   and card 1's slack under its index row is only 11px against 38 at 390 and 53 at 430. 6px spends
+   6 of those 11 and the chip gap spends 4, which is what fits. It is a smaller increase than the
+   card asked for and that is deliberate — shrinking the font to buy the room is the one thing the
+   card rules out, and 360 has no dead space to reclaim in the first place. */
+.hchips .hc.slab{padding:var(--space-6) var(--space-10);--panel:transparent;--line:var(--line2)}
 .hchips .hc.slab.ok{--panel:var(--grn-d);--line:rgba(47,212,139,.45)}
 .hchips .hc.slab.bad{--panel:rgba(255,92,108,.10);--line:rgba(255,92,108,.45)}
 .hchips .hc.slab.vixc{--panel:transparent;--line:var(--line2)}
@@ -720,8 +737,46 @@ body[data-theme]{
    four blocks that exist are ordered as ruled and none was invented to fill the slot. */
 #heroTrack > .c:first-child{gap:var(--space-13)}
 #heroTrack > .c:first-child > *{margin-top:0;margin-bottom:0}
-/* an empty popup host would otherwise buy itself a 13px gap it does not need */
+/* an empty popup host would otherwise buy itself a gap it does not need */
 #heroTrack > .c:first-child > #chiptrend:empty{display:none}
+/* ── cc#1230 · THE DEAD TAIL UNDER CARD 1, AND WHY cc#1134's "NO AUTO MARGINS" NO LONGER HOLDS ──
+   THE PREMISE cc#1134 WAS BUILT ON HAS BEEN FALSE SINCE cc#1182. It reasoned that leftover height
+   "has nowhere to go except after the last child" and treated that as harmless, because at the
+   time card 1 was the TALLER face and there was no leftover height to place. cc#1182 spent 45px
+   growing card 2, which flipped the deck: card 2 now sets the height and card 1 is the stretched
+   one. Measured in the page's real cascade, the space sitting under card 1's index row is
+   25px at 360, 52px at 390 and 67px at 430 — at 430 that is 22% of the card, empty, exactly the
+   "bottom half is empty while the chips sit cramped at the top" the founder photographed.
+   (Recorded because it cost me a run: my first harness appended the shared sheets AFTER the page's
+   own <style>. That inverts the cascade — mobile.css's .hero-mood{32px} then beats this page's
+   clamp() — and it under-reported the tail as 14-16px. The sheets now sit where their <link> does.)
+
+   THIS IS NOT cc#1125 COMING BACK. cc#1125 put margin-top:auto on ONE child, the chip row, so all
+   the free space collected in a single place and the void simply moved from the foot to the
+   middle. When TWO children carry an auto top margin, flexbox splits the free space EQUALLY
+   between them — so the same 67px becomes two ~33px gaps rather than one hole. That is the
+   difference between the two changes and it is a property of the layout, not a tuning.
+   THE SPLIT IS 2, NOT 4, BECAUSE THE EYEBROW, THE MOOD WORD AND THE TAGLINE ARE ONE VERDICT
+   BLOCK. Loosening them from each other would break the grouping cc#1182 was careful to protect
+   on card 2. They keep the fixed 13px gap; the space goes where the card's three real units meet:
+   verdict -> chips, and chips -> index row. Measured, those two gaps come out at 13/14 on a 360,
+   29/29 on a 390 and 37/36 on a 430, and the space under the index row drops from 25/52/67 to
+   14/14/14 at all three — 14 being the card's own padding and border, i.e. no dead space left at
+   all. The wider the screen the more there was to convert, which is the shape of the complaint.
+   THE FIXED GAP IS DELIBERATELY NOT RAISED. Raising it 13->15 costs 8px on all four gaps at every
+   width, and 360 has only 11px of slack in total, so it would grow the deck there — measured, 307
+   -> 320. The distribution above already produces gaps far larger than 15 wherever there is room
+   to produce them, so the flat raise would buy nothing at 390/430 and break the invariant at 360.
+   IT CANNOT GROW THE CARD. An auto margin resolves to 0 when there is no free space, so on any
+   payload where card 1 becomes the taller face again these rules contribute nothing at all and
+   the deck is exactly the height its content asks for. The only unconditional spend is the chip
+   padding and the chip gap, and both were measured against the 11px available at 360. */
+#heroTrack > .c:first-child > .hchips,
+#heroTrack > .c:first-child > .ixrow{margin-top:auto}
+/* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
+   surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
+   SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
+#heroTrack > .c:first-child > .hchips{gap:var(--space-9)}
 /* cc#1122 item 3 — the mood word is UPPERCASE and large by decision now, not by accident.
    PAGE-SCOPED ON PURPOSE. mobile.css sets .hero-mood at 32px for every /m/* page; this rule
    lives in home.html's own <style> so it reaches the Home hero and nothing else. That is the
