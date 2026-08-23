@@ -155,9 +155,17 @@ section{margin-top:26px}
 .idxchg{font-family:var(--f-m);font-size:12.5px;font-weight:600}
 .idxsub{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);margin-top:2px}
 .ladder{margin-top:15px;position:relative}
+/* cc#1227: the dashed row separators are gone (founder choice 23-Aug). The gray track bars,
+   the coloured fills, the labels, the values, the pct column and the CMP highlight band all stay
+   exactly as they were. Padding goes 5px to 6px in the same change: dropping the 1px rule made
+   every rung a pixel SHORTER, and 6px both restores the rhythm and lines the normal rungs up with
+   the CMP band, which already sat at 6px.
+   The old `.rung:last-child{border-bottom:none}` companion is removed rather than left behind.
+   It is not just redundant now — it was quietly stripping the CMP band's own bottom border on the
+   layouts where CMP renders last (cmp_slot === rungs.length), because .rung.cmp's `border:1px
+   solid` is a four-side border and that rule cancelled one side of it. */
 .rung{display:grid;grid-template-columns:34px 1fr 74px 56px;align-items:center;gap:9px;
-  padding:5px 0;border-bottom:1px dashed rgba(30,42,68,.75);font-family:var(--f-m);font-size:11px}
-.rung:last-child{border-bottom:none}
+  padding:6px 0;font-family:var(--f-m);font-size:11px}
 .rung .k{font-size:9.5px;letter-spacing:.1em;color:var(--tx3);font-weight:600}
 .rung .bar{height:4px;border-radius:2px;background:var(--line);position:relative}
 .rung .bar i{position:absolute;inset:0 auto 0 0;border-radius:2px;display:block}
