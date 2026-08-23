@@ -611,7 +611,7 @@ def _section_scheduler(cur) -> Dict:
     if age is None:
         cur.execute("SELECT EXTRACT(EPOCH FROM (NOW()-MAX(loaded_at)))/60.0, MAX(loaded_at) FROM earnings_calendar")
         r = cur.fetchone(); age, ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
-    checks.append(_sched_row('Earnings refresh (06:15)', age, ts, 'weekdays 06:15 IST', yellow_h=74.0, reg=REG.get('bg_earnings_refresh')))
+    checks.append(_sched_row('Earnings refresh (05:10)', age, ts, 'daily 05:10 IST', yellow_h=74.0, reg=REG.get('bg_earnings_refresh')))
 
     age, ts = _ops_age_min(cur, 'fetch_stock_news')
     checks.append(_sched_row('Stock-news fetch (08:30/12:30/16:30)', age, ts,
@@ -623,8 +623,8 @@ def _section_scheduler(cur) -> Dict:
                                      'feed_silent_at_open', 'trading days 09:25 IST'))
 
     age, ts = _ops_age_min(cur, 'fu_sync', 'scheduler_health')
-    checks.append(_sched_row('Futures universe sync (Mon 08:00)', age, ts,
-                             'weekly Mon 08:00 IST', green_h=192.0, yellow_h=384.0, reg=REG.get('bg_fu_sync')))
+    checks.append(_sched_row('Futures universe sync (Mon 05:40)', age, ts,
+                             'weekly Mon 05:40 IST', green_h=192.0, yellow_h=384.0, reg=REG.get('bg_fu_sync')))
 
     # ── Post-close chain ──────────────────────────────────────────────────────────
     age, ts = _ops_age_min(cur, 'gate_rebalance_15_20', 'gate_rebalance')
