@@ -186,6 +186,11 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .clrsn{margin-left:var(--space-4)}
 .clpg{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);
  letter-spacing:var(--track-px12);white-space:nowrap}
+/* cc#1247 · five chips need to wrap on a narrow phone rather than shrink to unreadable; the
+   2x2 stat grid replaces the 3-across row now that NET P&L is a fourth box. */
+.pfchips{flex-wrap:wrap}
+.pfchips .clchip{flex:1 1 30%}
+.pfgrid{grid-template-columns:1fr 1fr}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -543,6 +548,70 @@ function volDeck(){
 
    FILTER STATE IS PER PAGE-LOAD by construction: CL_FILTER is a module global set only by a tap,
    so leaving the page and coming back re-runs boot() and it is back to ALL. */
+/* ══ cc#1247 · PERFORMANCE, PER SEGMENT ═════════════════════════════════════════════════════
+   THE SCOPE 3 GATE DOES NOT TRIP. /api/v10/performance already served by_symbol and by_leg, but
+   each carried only trades / wins / pnl — no win rate and no profit factor per cut. Adding them is
+   READ-PATH AGGREGATION: two more aggregate columns on queries that already grouped exactly these
+   rows, struck with the SAME formulas the overall card uses. No engine logic, no new table, no
+   changed definition. v10_st_ema._cut_stats is where it lives.
+
+   THE SEGMENTS ARE LEG ROWS, NOT PAIRED TRADES, and that is why the counts add up the way they do.
+   v10_trades stores one trade as up to two rows, so ALL is 95 legs: NIFTY50 49 + BANKNIFTY 46 = 95,
+   and FUT 52 + OPT 43 = 95. Both cuts partition the same 95 rows two different ways. The card's own
+   ALL figures (95 / 49.5% / 1.59) are unchanged because they are read from exactly the same total
+   block as before.
+
+   EM-DASH, NEVER A FABRICATED ZERO. A segment with no trades has no win rate — 0.0% would read as
+   "lost every trade" rather than "has none" — and a segment that has never taken a loss has no
+   profit factor, because the denominator is zero rather than small. The endpoint returns null for
+   both and this renders an em-dash. */
+var PF_SEG = 'ALL';
+var PF_SEGS = ['ALL','NIFTY','BANKNIFTY','FUT','OPT'];
+function perfSeg(k){
+  var p = D.perf || {};
+  if (k === 'ALL') return {trades: p.total_trades, win_rate: p.win_rate,
+                           profit_factor: p.profit_factor, pnl: p.total_pnl};
+  if (k === 'NIFTY')     return (p.by_symbol || {})['NIFTY50']   || {};
+  if (k === 'BANKNIFTY') return (p.by_symbol || {})['BANKNIFTY'] || {};
+  return (p.by_leg || {})[k] || {};
+}
+function perfNote(){
+  return 'LIVE PAPER · v10_trades' + (PF_SEG === 'ALL' ? '' : ' · ' + PF_SEG);
+}
+function perfChips(){
+  return '<div class="clchips pfchips">' + PF_SEGS.map(function(k){
+    var n = perfSeg(k).trades;
+    return '<button class="rchip clchip' + (k === PF_SEG ? ' on' : '') + '" onclick="perfPick(\'' + k + '\')">'
+         + k + ' <span class="num">' + (n == null ? '—' : n) + '</span></button>';
+  }).join('') + '</div>';
+}
+function perfBox(lb, val, colour){
+  return '<div class="vital"><div class="lb">' + lb + '</div>'
+       + '<div class="vv num"' + (colour ? ' style="color:' + colour + '"' : '') + '>' + val + '</div></div>';
+}
+function perfGrid(){
+  var d = perfSeg(PF_SEG);
+  var t  = (d.trades == null) ? '—' : d.trades;
+  var wr = (d.win_rate == null) ? '—' : d.win_rate + '%';
+  var pfv = (d.profit_factor == null) ? '—' : Number(d.profit_factor).toFixed(2);
+  var pnl = (d.pnl == null) ? '—' : '₹' + fK(Number(d.pnl));
+  return '<div class="vitals pfgrid">'
+    + perfBox('TRADES', t)
+    + perfBox('WIN RATE', wr)
+    + perfBox('PROFIT FACTOR', pfv, d.profit_factor == null ? '' : (d.profit_factor >= 1 ? 'var(--volt)' : 'var(--heat)'))
+    + perfBox('NET P&amp;L', pnl, d.pnl == null ? '' : cx(Number(d.pnl)))
+    + '</div>';
+}
+/* the note re-renders with the grid — a subtitle still reading ALL over OPTIONS numbers is the
+   cc#1190 lie in a different costume. */
+function perfPick(k){
+  if (PF_SEGS.indexOf(k) < 0) return;
+  PF_SEG = k;
+  var host = document.getElementById('pfwrap'), note = document.getElementById('pfnote');
+  if (host) host.innerHTML = perfChips() + perfGrid();
+  if (note) note.textContent = perfNote();
+}
+
 var CL_FILTER = 'ALL';           /* ALL | FUT | OPT */
 var CL_PER = 5;
 
@@ -757,12 +826,8 @@ function render(){
     <div id="clwrap">${clChips()}${closedDeck()}</div>
   </div>
   <div class="card">
-    <div class="grp"><h3>Performance</h3><span class="note">LIVE PAPER · v10_trades</span></div>
-    <div class="vitals">
-      <div class="vital"><div class="lb">TRADES</div><div class="vv num">${pf.total_trades!=null?pf.total_trades:'—'}</div></div>
-      <div class="vital"><div class="lb">WIN RATE</div><div class="vv num">${pf.win_rate!=null?pf.win_rate+'%':'—'}</div></div>
-      <div class="vital"><div class="lb">PROFIT FACTOR</div><div class="vv num" style="color:${pf.profit_factor>=1?'var(--volt)':'var(--heat)'}">${pf.profit_factor!=null?Number(pf.profit_factor).toFixed(2):'—'}</div></div>
-    </div>
+    <div class="grp"><h3>Performance</h3><span class="note" id="pfnote">${perfNote()}</span></div>
+    <div id="pfwrap">${perfChips()}${perfGrid()}</div>
   </div>
 
   <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>

@@ -549,6 +549,27 @@ def get_summary():
     }
 
 
+
+def _cut_stats(r):
+    """cc#1247 — one segment's stats, struck with the SAME formulas as the overall card.
+
+    NULL, NOT ZERO, WHERE A NUMBER WOULD BE A LIE. A segment with no trades has no win rate — 0.0%
+    would read as "it lost every trade" rather than "it has none" — and a segment that has never
+    taken a loss has no profit factor, because the denominator is zero and not small. Both come back
+    None and the surface renders an em-dash. This is deliberately stricter than the overall block
+    above, which still returns 0.0 for an empty book; that number is on the do-not-touch list for
+    this card, so it is left alone and only the new per-segment fields follow the honest rule.
+    """
+    key, trades, wins, pnl, gp, gl = r
+    return {
+        "trades": trades,
+        "wins": wins,
+        "pnl": float(pnl),
+        "win_rate": round(100.0 * wins / trades, 1) if trades else None,
+        "profit_factor": round(float(gp) / abs(float(gl)), 2) if float(gl) != 0 else None,
+    }
+
+
 def get_performance():
     """Full live-paper stats from v10_trades for the dashboard performance panel."""
     conn = _db()
@@ -561,12 +582,17 @@ def get_performance():
                 "COALESCE(SUM(pnl) FILTER (WHERE pnl>0),0), "
                 "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades")
             tot, wins, pnl, avg_win, avg_loss, gross_profit, gross_loss = cur.fetchone()
-            cur.execute("SELECT symbol, COUNT(*), COUNT(*) FILTER (WHERE pnl>0), "
-                        "COALESCE(SUM(pnl),0) FROM v10_trades GROUP BY symbol")
-            by_symbol = {r[0]: {"trades": r[1], "wins": r[2], "pnl": float(r[3])} for r in cur.fetchall()}
-            cur.execute("SELECT leg, COUNT(*), COUNT(*) FILTER (WHERE pnl>0), "
-                        "COALESCE(SUM(pnl),0) FROM v10_trades GROUP BY leg")
-            by_leg = {r[0]: {"trades": r[1], "wins": r[2], "pnl": float(r[3])} for r in cur.fetchall()}
+            # cc#1247: the two cuts now carry gross profit and gross loss as well, so win rate and
+            # profit factor can be struck PER SEGMENT from the SAME formulas the total uses. This is
+            # read-path aggregation only — two extra aggregate columns on queries that already
+            # grouped these rows. No engine logic, no new table, no changed definition.
+            _CUT = ("SELECT {k}, COUNT(*), COUNT(*) FILTER (WHERE pnl>0), COALESCE(SUM(pnl),0), "
+                    "COALESCE(SUM(pnl) FILTER (WHERE pnl>0),0), "
+                    "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades GROUP BY {k}")
+            cur.execute(_CUT.format(k="symbol"))
+            by_symbol = {r[0]: _cut_stats(r) for r in cur.fetchall()}
+            cur.execute(_CUT.format(k="leg"))
+            by_leg = {r[0]: _cut_stats(r) for r in cur.fetchall()}
             cur.execute("SELECT exit_ts::date d, COALESCE(SUM(pnl),0) FROM v10_trades "
                         "WHERE exit_ts >= NOW() - INTERVAL '7 days' GROUP BY d ORDER BY d")
             last_7 = [{"date": str(r[0]), "pnl": float(r[1])} for r in cur.fetchall()]
