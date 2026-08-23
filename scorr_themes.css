@@ -1,8 +1,11 @@
-/* scorr_themes.css — APP_QA_R4 P1 · the three-theme token layer
+/* scorr_themes.css — APP_QA_R4 P1 · the theme token layer  (four sets as of cc#1185 P9)
    =============================================================================================
-   Source of truth: design_refs/scorr_home_themes_R1.html @ 80da8c6. The three token blocks below
-   are BYTE-FAITHFUL to that ref — same names, same values, same order. Nothing is added, dropped
-   or "improved" here; if a value looks wrong, the ref is the thing to change, then this file.
+   Source of truth: design_refs/scorr_home_themes_R1.html @ 80da8c6. The THREE ORIGINAL token
+   blocks (dark, goldday, goldnight) are BYTE-FAITHFUL to that ref — same names, same values, same
+   order. Nothing there is added, dropped or "improved"; if a value looks wrong, the ref is the
+   thing to change, then this file. Two things have since been APPENDED without touching those
+   three: the cc#1185 P3 :root schema, and the cc#1185 P9 AQUA WHITE set at the bottom, which has
+   no ref because it does not exist in one yet.
 
    WHERE THIS FILE LIVES, since P1 asks which pattern was used: repo ROOT, served at
    /static/scorr_themes.css by a route in pwa_endpoints.py. That is the existing convention —
@@ -154,3 +157,50 @@ body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge
      is what is written, and the divergence is logged rather than silently resolved. */
   --gold-lo:#7A6320;--gold-hi:#F0D67A;--sunk:#0C0C0F
 }
+
+/* ══ cc#1185 P9 · AQUA WHITE ═══════════════════════════════════════════════════════════════════
+   The fourth set. HIDDEN and INERT the moment it lands: every boot script in the repo accepts only
+   `dark` or `goldnight` and falls back to goldnight for anything else, so no page can select this
+   today. It is here to be complete and contrast-checked, not to ship. P10 adds the founder's
+   hidden preview.
+
+   ONE THING P10 MUST GET RIGHT: the attribute value is `aquawhite`, one word. The card names the
+   preview parameter `?theme=aqua_white`, so P10 has to normalise the underscore away before it
+   sets the attribute. Written here rather than left to be discovered by a preview that silently
+   renders goldnight.
+
+   EVERY ONE OF THE 17 CONTRACT KEYS IS FILLED. That is the P8 completeness check's whole point:
+   a set missing a key does not render blank, it falls through to whatever sits underneath and
+   looks correct on the theme you happen to be testing. dark and goldday are each missing three;
+   this set is not, and the validator says so.
+
+   CONTRAST, MEASURED AGAINST ALL THREE GROUNDS (--panel #FFFFFF, --field #F4F9FB, --hi #E9F3F7).
+   The worst ratio of the three is the one that counts, because a token that only passes on the
+   whitest surface fails on the card it actually sits in:
+       --ink    #0E1A20   17.69 / 16.67 / 15.69   worst 15.69:1
+       --muted  #576B74    5.58 /  5.26 /  4.95   worst  4.95:1
+       --brand  #07657A    6.66 /  6.28 /  5.91   worst  5.91:1
+       --label  #8F5300    6.17 /  5.81 /  5.47   worst  5.47:1
+       --win    #14794A    5.44 /  5.12 /  4.82   worst  4.82:1
+       --loss   #C0273A    5.85 /  5.51 /  5.19   worst  5.19:1
+   All six clear WCAG AA for body text (4.5:1) on every ground. --edge is 1.31:1 against --panel
+   and that is correct, not a failure — it is a hairline border, never text, and a border that
+   passed a text-contrast test would be a rule drawn in ink.
+
+   P&L KEEPS ITS HUE AND CHANGES ITS SHADE, which is the rule this file already states and already
+   follows: volt on the dark field, #1F9D61 on goldday's paper, #3DD68C on black-gold. Aqua white's
+   ground is lighter and cooler than goldday's, and goldday's exact pair measures 3.47:1 for green
+   on --hi — below AA. So the pair is DARKENED, not re-hued: green is still green, red is still
+   red, a profit still reads as a profit. The alternative was keeping a matching hex that fails a
+   contrast floor, and a number a founder cannot read is not money truth either.
+
+   --gold-lo / --gold-hi / --sunk keep their GOLD names and carry AQUA values. The names came from
+   goldnight's slab bevel (cc#1095) and renaming them would break the contract for every set that
+   already fills them. Inherited name, correct value — said plainly so nobody "fixes" it later.
+   -------------------------------------------------------------------------------------------- */
+body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge:#D3E4EB;
+ --ink:#0E1A20;--muted:#576B74;--brand:#07657A;--brandglow:rgba(7,101,122,.25);--accent:#07657A;
+ --label:#8F5300;--win:#14794A;--loss:#C0273A;
+ --railgrad:linear-gradient(90deg,#07657A,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
+ --gold-lo:#9FC6D2;--gold-hi:#FFFFFF;--sunk:#E4EEF2}
