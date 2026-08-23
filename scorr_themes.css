@@ -30,6 +30,96 @@
    nothing on any live screen until a page links it AND sets body[data-theme].
 --------------------------------------------------------------------------------------------- */
 
+/* ══ cc#1185 P3 · THE LOCKED SCHEMA ═══════════════════════════════════════════════════════════
+   Spec: session_log 28379, push 3 — "extend the token file to the COMPLETE key set from P1; every
+   primitive a page uses has a key, GOLD NIGHT values filled for all."
+
+   DERIVED, NOT INVENTED. Every value below was read out of a real declaration in a real file by
+   the P3 census, which walked the same corpus as the P1 and P2 reports with comments masked. P2's
+   1,710 bucket-(b) declarations reuse a much smaller set of distinct VALUES; this block is that
+   set, named once each. 141 keys cover all 1,710.
+
+   IT SITS ON :root, NOT INSIDE A THEME BLOCK, and that is the whole reason this push is safe.
+   Today every one of these values is a hardcoded literal, identical on all three themes because a
+   literal cannot vary. Declaring it on :root gives every theme exactly the value it renders now.
+   The three body[data-theme] blocks below are UNTOUCHED — which is what DO_NOT_TOUCH requires for
+   WHITE-GOLDEN (goldday) and the legacy dark aqua set, and it means dark stays correct when the
+   repoint pushes land. AQUA WHITE (P9) overrides on its own block only the keys it needs to move.
+
+   ZERO PIXEL DELTA, BY CONSTRUCTION AND BY MEASUREMENT. Nothing reads these names yet, so nothing
+   can render differently. Measured rather than asserted: all 141 names were checked against every
+   declaration and every var() call site in the repository — 0 collisions with an existing
+   declaration, 0 with an existing call site. A brand-new name that nothing reads cannot move a
+   pixel. The repointing is P4 to P7; this push is the vocabulary, not the rewrite.
+
+   THE NAMES CARRY THEIR VALUES on purpose (--type-95 is 9.5px, --space-n4 is -4px). That is not
+   a style preference, it is an honest label: this is an INVENTORY of what the app uses, not a
+   designed ramp. A thirty-step type scale in half-pixel increments is an accretion, and semantic
+   names like --type-sm would imply a design decision nobody has made. Collapsing it into a real
+   ramp moves pixels, so it is a separate card and a founder call, not something to slip in here.
+
+   WHAT IS DELIBERATELY NOT KEYED, so nobody reads the absence as an oversight:
+   · width / height / max-width — 44 distinct values. Layout geometry, not theme. A theme swap
+     does not move a page's 430px max-width or an icon's 26px box.
+   · clip-path (15) and backdrop-filter (2) — shape and effect geometry, same reason.
+   · 18 of the 33 shadows — composites of geometry, colour and spread. A composite is not a token,
+     it is a copy. The two repeated glow geometries ARE keyed; the rest are P7's.
+   · font-weight and line-height — they carry no px/rem/em literal, so P2 never counted them as
+     violations and there is nothing here to name.
+   · P&L green/red and pass/fail — SEMANTIC, exempt from the swap by the card's own invariant.
+   One judgement worth a second pair of eyes: --state-live / --state-stale / --state-off are the
+   live-feed status colours. They are keyed as theme colours here because live-vs-stale is not
+   money truth, but if the founder wants them frozen across themes they move to the semantic
+   allowlist, and that is a one-line change to this block.
+   -------------------------------------------------------------------------------------------- */
+:root{
+  /* font-size — 30 steps, every distinct value the app uses, ascending. */
+  --type-8:8px;--type-85:8.5px;--type-9:9px;--type-95:9.5px;--type-10:10px;--type-105:10.5px;
+  --type-11:11px;--type-115:11.5px;--type-12:12px;--type-125:12.5px;--type-13:13px;
+  --type-135:13.5px;--type-14:14px;--type-145:14.5px;--type-15:15px;--type-165:16.5px;
+  --type-17:17px;--type-19:19px;--type-20:20px;--type-21:21px;--type-22:22px;--type-24:24px;
+  --type-26:26px;--type-30:30px;--type-32:32px;--type-34:34px;--type-36:36px;--type-40:40px;
+  --type-52:52px;--type-80:80px;
+  /* padding / margin / gap — 31 steps, every distinct value the app uses, ascending. */
+  --space-n16:-16px;--space-n12:-12px;--space-n6:-6px;--space-n45:-4.5px;--space-n4:-4px;
+  --space-n2:-2px;--space-0:0px;--space-1:1px;--space-2:2px;--space-3:3px;--space-4:4px;
+  --space-5:5px;--space-7:7px;--space-8:8px;--space-85:8.5px;--space-9:9px;--space-10:10px;
+  --space-11:11px;--space-12:12px;--space-13:13px;--space-14:14px;--space-15:15px;
+  --space-17:17px;--space-19:19px;--space-20:20px;--space-22:22px;--space-24:24px;
+  --space-40:40px;--space-70:70px;--space-78:78px;--space-80:80px;
+  /* border-radius — 17 steps, every distinct value the app uses, ascending. */
+  --radius-1:1px;--radius-2:2px;--radius-3:3px;--radius-4:4px;--radius-5:5px;--radius-7:7px;
+  --radius-8:8px;--radius-9:9px;--radius-10:10px;--radius-11:11px;--radius-12:12px;
+  --radius-13:13px;--radius-14:14px;--radius-15:15px;--radius-17:17px;--radius-19:19px;
+  --radius-20:20px;
+  /* border width — 4 steps, every distinct value the app uses, ascending. */
+  --bw-1:1px;--bw-15:1.5px;--bw-2:2px;--bw-3:3px;
+  /* letter-spacing — 33 steps. em and px are separate ramps: they are different
+     units and folding them into one list would invite a wrong swap later. */
+  --track-em1:-0.03em;--track-em2:-0.02em;--track-em3:-0.01em;--track-em4:-0.005em;
+  --track-em5:0.01em;--track-em6:0.02em;--track-em7:0.04em;--track-em8:0.05em;
+  --track-em9:0.06em;--track-em10:0.07em;--track-em11:0.08em;--track-em12:0.1em;
+  --track-em13:0.11em;--track-em14:0.12em;--track-em15:0.13em;--track-em16:0.14em;
+  --track-em17:0.2em;--track-px1:-1px;--track-px2:-0.2px;--track-px3:-0.1px;--track-px4:0.2px;
+  --track-px5:0.3px;--track-px6:0.4px;--track-px7:0.5px;--track-px8:0.6px;--track-px9:0.8px;
+  --track-px10:1px;--track-px11:1.1px;--track-px12:1.2px;--track-px13:1.4px;--track-px14:1.5px;
+  --track-px15:1.6px;--track-px16:2.5px;
+  /* colours — 24 keys, each named for the ROLE its selector gives it, because a theme
+     author filling the next set needs to know what a key IS. */
+  --accent-alt:#9b82ff;--bar-track:#94a3b8;--fade-null:rgba(0,0,0,0);--field-deep:#0a101e;
+  --field-night:#070b14;--filter-so:#b08cff;--gate-bg:#0f1730;--grab:#3a3a42;
+  --ink-strong:#e6edf7;--news-rule:#d9d6cc;--press-edge:#000;--row-detail-bg:#f6f8fb;
+  --scrollthumb:rgba(120,130,150,.4);--state-idle:#334155;--state-live:#34d399;
+  --state-live-bd:rgba(52,211,153,.45);--state-live-bg:rgba(52,211,153,.12);--state-off:#475569;
+  --state-stale-bd:rgba(251,191,36,.45);--state-stale-bg:rgba(251,191,36,.12);
+  --tab-on-ink:#151204;--veil:rgba(0,0,0,.55);--veil-overlay:rgba(5,9,18,.72);
+  --veil-sheet:rgba(4,8,18,.62);
+  /* the two repeated glow geometries — 15 of the 33 shadow declarations. The other 18
+     are composites of geometry + colour + spread; a composite is not a token, it is a
+     copy, so they stay literal and P7 handles them. */
+  --glow-10:0 0 10px;--glow-8:0 0 8px
+}
+
 body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;
  --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
  --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(90deg,#EAF0FA,transparent);
