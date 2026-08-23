@@ -53,9 +53,9 @@ body[data-theme]{
 /* APP_QA_R5 P1: the switch is HIDDEN, not removed. Markup and JS stay in place so the return
    next build is deleting this one declaration rather than rebuilding the control. */
 .tswitch{display:none !important}
-.tswitch{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line2);padding:3px;
+.tswitch{display:flex;gap:var(--space-4);background:var(--panel);border:var(--bw-1) solid var(--line2);padding:var(--space-3);
   clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
-.tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:13px;
+.tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:var(--type-13);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--mut);line-height:1}
 .tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
 
@@ -74,23 +74,23 @@ body[data-theme]{
    goldnight, so these rules ask for the token rather than restating a hex (section D forbids
    touching token values). */
 /* THE BOOK — stat values 18px, gold-deep keys */
-.st{padding:12px 11px}
-.st .k{font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--t-label,var(--dim))}
-.st .v{font-size:18px}
-.trio .st .v{font-size:18px}
+.st{padding:var(--space-12) var(--space-11)}
+.st .k{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--t-label,var(--dim))}
+.st .v{font-size:var(--type-18)}
+.trio .st .v{font-size:var(--type-18)}
 /* MY PORTFOLIO — 13px symbol, 12.5px values, 48px min row */
 .pfrow{min-height:48px}
-.pfrow .sym,.pfrow .s1{font-size:13px;font-weight:800;letter-spacing:.3px}
-.pfrow .v,.pfrow .pv{font-size:12.5px;font-weight:700}
+.pfrow .sym,.pfrow .s1{font-size:var(--type-13);font-weight:800;letter-spacing:var(--track-px5)}
+.pfrow .v,.pfrow .pv{font-size:var(--type-125);font-weight:700}
 /* LIVE NEWS — 13.5px headlines, gold-deep age stamps */
-.rnr .rnh,.news .h{font-size:13.5px;line-height:1.45}
-.rnr .rnage{font-size:9.5px;color:var(--t-label,var(--dim))}
+.rnr .rnh,.news .h{font-size:var(--type-135);line-height:1.45}
+.rnr .rnage{font-size:var(--type-95);color:var(--t-label,var(--dim))}
 /* TOOLS — 12px labels, 19px gold-glow icons */
-.tool{font-size:12px;padding:14px 6px}
-.tool span{font-size:19px;text-shadow:0 0 10px var(--brandglow)}
+.tool{font-size:var(--type-12);padding:var(--space-14) var(--space-6)}
+.tool span{font-size:var(--type-19);text-shadow:0 0 10px var(--brandglow)}
 /* BOTTOM NAV — 11px labels, gold active */
-.bnav .bn{font-size:11px}
-.bnav .bn .i{font-size:16px}
+.bnav .bn{font-size:var(--type-11)}
+.bnav .bn .i{font-size:var(--type-16)}
 .bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
 /* APP_QA_R5 P3 · VIX chip chrome — FLAT, identical to a sibling chip, colour in text only.
    The boxed treatment (tinted background + coloured border) is what made a green chip read as a
@@ -139,7 +139,7 @@ body[data-theme]{
    content box is ~25px, so padding and border have no say. Horizontally .slab's border is 1.5px
    against .hc's 1px, so the padding drops 9px to 8.5px and the border box comes out identical.
    Same widths, same wrap, same card height. */
-.hchips .hc.slab{padding:5px 8.5px;--panel:transparent;--line:var(--line2)}
+.hchips .hc.slab{padding:var(--space-5) var(--space-85);--panel:transparent;--line:var(--line2)}
 .hchips .hc.slab.ok{--panel:var(--grn-d);--line:rgba(47,212,139,.45)}
 .hchips .hc.slab.bad{--panel:rgba(255,92,108,.10);--line:rgba(255,92,108,.45)}
 .hchips .hc.slab.vixc{--panel:transparent;--line:var(--line2)}
@@ -161,15 +161,15 @@ body[data-theme]{
    SYMBOL + %CHANGE only (founder: "symbol and change") — the price column is dropped; the
    tape reads direction at a glance, exact levels live in the cards below. Marquee behaviour
    (cc#896 batch 3: doubled track, -50% seamless loop, hold to pause) unchanged. */
-.tkr{overflow:hidden;padding:8px 0;margin:0 -12px;border-bottom:1px solid var(--line);background:var(--panel2)}
-.tkr-track{display:flex;gap:8px;width:max-content;padding:0 12px;animation:tkrMove var(--tkr-dur,40s) linear infinite}
+.tkr{overflow:hidden;padding:var(--space-8) 0;margin:0 var(--space-n12);border-bottom:var(--bw-1) solid var(--line);background:var(--panel2)}
+.tkr-track{display:flex;gap:var(--space-8);width:max-content;padding:0 var(--space-12);animation:tkrMove var(--tkr-dur,40s) linear infinite}
 .tkr:active .tkr-track,.tkr:hover .tkr-track{animation-play-state:paused}
 @keyframes tkrMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
-.tk{flex:none;display:flex;align-items:baseline;gap:6px;padding:4px 9px;border-radius:8px;
-  background:var(--panel);border:1px solid var(--line)}
+.tk{flex:none;display:flex;align-items:baseline;gap:var(--space-6);padding:var(--space-4) var(--space-9);border-radius:var(--radius-8);
+  background:var(--panel);border:var(--bw-1) solid var(--line)}
 .tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
-.tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;white-space:nowrap}
+.tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:700;white-space:nowrap}
 /* cc#1123: volatility's neutral tier on the tape. #FF9F45 is not a new amber — it is the exact
    value this page already gives an index NAME (.ibk-id .sym below, cc#1158) and the
    exact value --amber holds on the Digest, so the neutral VIX reads the same on both screens.
@@ -179,7 +179,7 @@ body[data-theme]{
 .tk .d.neu{color:#FF9F45}
 /* cc#1139 · the Market Today footer strip. No box on the cells — a hairline divider above is the
    whole separation, so it reads as the card's footer rather than a second row of metric chips. */
-.ixrow{display:flex;gap:7px;padding-top:9px;border-top:1px solid var(--line)}
+.ixrow{display:flex;gap:var(--space-7);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line)}
 /* cc#1159: the cell is a BUTTON now — it opens a chart, so it should be reachable by keyboard
    and announced as pressable. font/background/border/padding are reset because a button inherits
    none of them, and text-align:left because a button centres by default.
@@ -187,7 +187,7 @@ body[data-theme]{
    card height, and padding cannot give you both — it would push the row taller by however much it
    added. An absolutely-positioned ::after takes no space in the flow at all, so the touchable
    region grows to 40px while the card measures exactly what it measured before. */
-.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:var(--space-6);flex-wrap:wrap;
   position:relative;background:none;border:0;padding:0;font:inherit;color:inherit;
   text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
 /* VERTICAL ONLY. This bled 4px past the cell on each side at first, and render_check called it:
@@ -198,9 +198,9 @@ body[data-theme]{
   height:40px;transform:translateY(-50%)}
 .ixcell:active .ixlv{color:var(--blu,#4D7CFE)}
 .ixcell:active .ixgl{color:var(--blu,#4D7CFE)}
-.ixnm{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.ixnm{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em11);color:var(--dim);text-transform:uppercase}
 /* the dashed underline is this page's existing "you can tap this" grammar, per the ref */
-.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:700;
+.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:700;
   font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB);
   /* DASHED UNDERLINE THAT COSTS NO HEIGHT. The obvious border-bottom:1px dashed plus a 1px
      padding was written first and measured: it grew .ixrow from 41px to 42px at 360 and 24 to 25
@@ -213,19 +213,19 @@ body[data-theme]{
      declaration down with it. The neighbouring --txt carries a fallback for the same reason. */
   background-image:linear-gradient(to right,var(--line2,rgba(148,166,210,.26)) 55%,transparent 55%);
   background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%}
-.ixgl{font-size:9px;color:var(--dim);margin-left:1px}
-.ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+.ixgl{font-size:var(--type-9);color:var(--dim);margin-left:var(--space-1)}
+.ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
   font-variant-numeric:tabular-nums}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
    value/date on the right, which updates under the finger. Only the SECOND grows; the title
    stays small so the header does not turn into two competing headlines. Scoped here rather than
    in the shared sheet because .trendhd renders on this page only. */
-.trendhd span:last-child{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
+.trendhd span:last-child{font-size:var(--type-15);font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
 /* cc#1183 — the same readout, addressed by class. The header gained a third child (the close
    button) on the chip panel, so the value span is no longer :last-child there. Both rules carry
    the same declarations and the old one is untouched, so the tape charts and every path without
    a close button render exactly as before. */
-.trendhd .trd-v{font-size:15px;font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
+.trendhd .trd-v{font-size:var(--type-15);font-weight:800;color:var(--txt,#E9EEFB);letter-spacing:0}
 /* The title takes the slack, so the value and the X sit together on the right rather than being
    spread apart by the shared sheet's justify-content:space-between. */
 .trendhd .trd-t{margin-right:auto;min-width:0}
@@ -234,52 +234,52 @@ body[data-theme]{
    glyph is 28px but the TAP TARGET is 44px, given by a transparent ::after box centred on the
    button — the same trick the .ixcell row uses, because a 28px control fails the touch minimum
    and growing the visible button would push the header taller. */
-.trendx{position:relative;flex:0 0 auto;width:28px;height:28px;margin:-4px -6px -4px 8px;
-  display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;
+.trendx{position:relative;flex:0 0 auto;width:28px;height:28px;margin:var(--space-n4) var(--space-n6) var(--space-n4) var(--space-8);
+  display:flex;align-items:center;justify-content:center;font-size:var(--type-19);line-height:1;
   font-family:inherit;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer}
 .trendx::after{content:'';position:absolute;top:50%;left:50%;width:44px;height:44px;
   transform:translate(-50%,-50%)}
 .trendx:active{color:var(--txt,#E9EEFB)}
 /* cc#905 range pills */
-.rgs{display:flex;gap:6px;margin:6px 0 8px}
-.rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;
-  font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+.rgs{display:flex;gap:var(--space-6);margin:var(--space-6) 0 var(--space-8)}
+.rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);
+  font-weight:800;letter-spacing:var(--track-em9);color:var(--mut);background:var(--panel);
+  border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .rg.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 /* cc#904 full-screen Market Tape overlay */
 .tpo{position:fixed;inset:0;z-index:60;background:var(--bg,#0A0F1E);display:none;
   flex-direction:column;overscroll-behavior:contain}
 .tpo.open{display:flex}
-.tpo-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 10px;border-bottom:1px solid var(--line)}
-.tpo-hd h2{font-size:17px;font-weight:800;flex:1}
-.tpo-x{min-width:44px;min-height:44px;font-size:20px;color:var(--mut);background:none;
+.tpo-hd{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-14) var(--space-14) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
+.tpo-hd h2{font-size:var(--type-17);font-weight:800;flex:1}
+.tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--mut);background:none;
   border:0;cursor:pointer;font-family:inherit}
-.tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 24px}
-.tpr{display:flex;align-items:center;gap:9px;padding:11px 2px;border-bottom:1px solid var(--line);min-height:52px}
+.tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 var(--space-12) var(--space-24)}
+.tpr{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-11) var(--space-2);border-bottom:var(--bw-1) solid var(--line);min-height:52px}
 .tpr .nm2{flex:1;min-width:0}
-.tpr .s1{font-size:13.5px;font-weight:800}
-.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:2px}
-.tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;text-align:right}
-.tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:800;
+.tpr .s1{font-size:var(--type-135);font-weight:800}
+.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);margin-top:var(--space-2)}
+.tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;text-align:right}
+.tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:800;
   text-align:right;min-width:64px}
 .tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu,#4D7CFE);
-  font-size:15px;cursor:pointer;font-family:inherit}
+  font-size:var(--type-15);cursor:pointer;font-family:inherit}
 /* cc#939: sortable header. It reuses .tpr's flex geometry EXACTLY (same gap, same .nm2/.lv/.cg
    widths, same trailing 44px slot) so a header cell can never drift out of line with the column
    it labels. Sticky, because the founder sorts and then scrolls. Tap targets are the full cell,
    not the glyph — 44px min-height, per MOBILE_APP_FRAMEWORK_V1. */
-.tph{display:flex;align-items:center;gap:9px;padding:6px 2px;min-height:38px;position:sticky;top:0;
-  z-index:2;background:var(--bg,#0A0F1E);border-bottom:1px solid var(--line)}
-.tph button{background:none;border:0;padding:8px 0;font-family:inherit;font-size:10.5px;
-  font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);cursor:pointer;
-  display:flex;align-items:center;gap:3px;min-height:38px}
+.tph{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-6) var(--space-2);min-height:38px;position:sticky;top:0;
+  z-index:2;background:var(--bg,#0A0F1E);border-bottom:var(--bw-1) solid var(--line)}
+.tph button{background:none;border:0;padding:var(--space-8) 0;font-family:inherit;font-size:var(--type-105);
+  font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;color:var(--dim);cursor:pointer;
+  display:flex;align-items:center;gap:var(--space-3);min-height:38px}
 .tph button.on{color:var(--txt,#E8EDF7)}
 .tph .h-nm{flex:1;min-width:0}
 .tph .h-lv{justify-content:flex-end;text-align:right}
 .tph .h-cg{justify-content:flex-end;text-align:right;min-width:64px}
 .tph .h-sp{min-width:44px}
-.tph .ar{font-size:9px;opacity:.9}
-.tpchart{padding:2px 2px 12px}
+.tph .ar{font-size:var(--type-9);opacity:.9}
+.tpchart{padding:var(--space-2) var(--space-2) var(--space-12)}
 /* cc#910: the tape table reads its direction. The tint is deliberately faint (7% alpha) — it
    has to survive next to 15 other rows without turning the sheet into a traffic light, and the
    coloured value + % still carry the precise reading. A row with a null change gets no tint at
@@ -288,44 +288,44 @@ body[data-theme]{
 .tpr.dn{background:rgba(255,92,108,.07)}
 /* ── cc#906: V10 trade-log chart ─────────────────────────────────────────────────────────── */
 /* cc#1158: .v10ic went with v10Icon(), its only caller. */
-.v10tg{display:flex;gap:6px;margin:10px 0 6px}
+.v10tg{display:flex;gap:var(--space-6);margin:var(--space-10) 0 var(--space-6)}
 .v10tg button{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10.5px;font-weight:800;letter-spacing:.05em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
+  font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em8);color:var(--mut);background:var(--panel);
+  border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .v10tg button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
-.v10st{display:flex;gap:10px;flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;color:var(--dim);margin:2px 0 8px}
+.v10st{display:flex;gap:var(--space-10);flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-10);color:var(--dim);margin:var(--space-2) 0 var(--space-8)}
 /* ── cc#928: chart window + panned history ─────────────────────────────────────────────────── */
 .v10cv{position:relative}
 /* cc#949: the paging strip — a slim shimmer while a page is in flight, and a tappable chip for
    the retry and the daily handoff. Both are 30px tall so a thumb can hit them without the strip
    becoming a second toolbar under the chart. */
-.v10shim{display:inline-block;width:26px;height:6px;border-radius:3px;vertical-align:middle;
+.v10shim{display:inline-block;width:26px;height:6px;border-radius:var(--radius-3);vertical-align:middle;
   background:linear-gradient(90deg,var(--line) 25%,var(--line2,rgba(148,166,210,.35)) 50%,var(--line) 75%);
-  background-size:200% 100%;animation:v10sh 1.1s linear infinite;margin-right:5px}
+  background-size:200% 100%;animation:v10sh 1.1s linear infinite;margin-right:var(--space-5)}
 @keyframes v10sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
-.v10rty{background:none;border:1px solid var(--line);color:var(--blu,#4D7CFE);border-radius:7px;
-  padding:5px 9px;min-height:30px;font-family:inherit;font-size:9.5px;font-weight:700;cursor:pointer}
-.v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
-  text-align:center;padding:3px 0 2px;opacity:.8}
+.v10rty{background:none;border:var(--bw-1) solid var(--line);color:var(--blu,#4D7CFE);border-radius:var(--radius-7);
+  padding:var(--space-5) var(--space-9);min-height:30px;font-family:inherit;font-size:var(--type-95);font-weight:700;cursor:pointer}
+.v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
+  text-align:center;padding:var(--space-3) 0 var(--space-2);opacity:.8}
 /* ── cc#928: trade log — F/O tabs, month headers, row anatomy ──────────────────────────────── */
-.lgtabs{display:flex;gap:6px;margin:2px 0 4px}
-.lgt{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;
-  font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
-.lgt i{font-style:normal;color:var(--dim);margin-left:3px}
+.lgtabs{display:flex;gap:var(--space-6);margin:var(--space-2) 0 var(--space-4)}
+.lgt{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);
+  font-weight:800;letter-spacing:var(--track-em10);color:var(--mut);background:var(--panel);
+  border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
+.lgt i{font-style:normal;color:var(--dim);margin-left:var(--space-3)}
 .lgt.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .lgt.on i{color:var(--blu,#4D7CFE)}
 /* ── cc#941: paired trade card + summary strip ─────────────────────────────────────────────
    The card keeps the 3px result rail the leg rows used (green win / red loss / blue open) so the
    log still scans by colour down the left edge, and reuses .pill for direction. What changes is
    that ONE card is ONE trade: four lines instead of two rows on two price scales. */
-.v10sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 2px 8px;
-  border-bottom:1px solid var(--line);margin-bottom:2px}
+.v10sum{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-8);padding:var(--space-10) var(--space-2) var(--space-8);
+  border-bottom:var(--bw-1) solid var(--line);margin-bottom:var(--space-2)}
 .v10sum div{text-align:center}
-.v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800}
-.v10sum span{display:block;font-size:9.5px;color:var(--dim);text-transform:uppercase;
-  letter-spacing:.4px;margin-top:2px}
+.v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800}
+.v10sum span{display:block;font-size:var(--type-95);color:var(--dim);text-transform:uppercase;
+  letter-spacing:var(--track-px6);margin-top:var(--space-2)}
 /* cc#948 — TWO-ZONE ANATOMY, restoring what the old .tr2 row had and cc#941 lost.
    The founder's complaint is that results no longer SCAN: cc#941 put the net P&L on line 3 on the
    LEFT, so every card's headline number sits at a different x depending on how long the line
@@ -333,74 +333,74 @@ body[data-theme]{
    the log and the eye could run the column without reading anything else. That column is back:
    .v10cb is the flexible left zone, .v10rt is a fixed, right-aligned, vertically centred column.
    Line 1 is nowrap + truncate — never two lines at 360px (item 2). */
-.v10c{display:flex;align-items:stretch;gap:9px;padding:9px 3px;border-bottom:1px solid var(--line)}
-.v10c .rl{width:3px;border-radius:2px;flex:none;background:var(--mut)}
+.v10c{display:flex;align-items:stretch;gap:var(--space-9);padding:var(--space-9) var(--space-3);border-bottom:var(--bw-1) solid var(--line)}
+.v10c .rl{width:3px;border-radius:var(--radius-2);flex:none;background:var(--mut)}
 .v10c.wn .rl{background:var(--volt, #2FD48B)} .v10c.ls .rl{background:var(--heat, #FF5C6C)} .v10c.op .rl{background:var(--pulse, #4D7CFE)}
 .v10c.sel{background:rgba(77,124,254,.10)}
-.v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:var(--space-3)}
 .v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
-.v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;
+.v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800;
   white-space:nowrap}   /* cc#953 item 1: nowrap belt-and-braces behind the compaction */
-.v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
-  margin-top:2px;white-space:nowrap}
-.v10c .c1{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0}
-.v10c .sym{font-size:13px;font-weight:800;letter-spacing:.2px;overflow:hidden;
+.v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim);
+  margin-top:var(--space-2);white-space:nowrap}
+.v10c .c1{display:flex;align-items:center;gap:var(--space-6);flex-wrap:nowrap;min-width:0}
+.v10c .sym{font-size:var(--type-13);font-weight:800;letter-spacing:var(--track-px4);overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .v10c .c1 > *{flex:none}
 .v10c .c1 .sym{flex:0 1 auto}
-.v10c .rsn2{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:5px;
+.v10c .rsn2{font-size:var(--type-95);font-weight:800;letter-spacing:var(--track-px7);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5);
   text-transform:uppercase;white-space:nowrap}
 .v10c .rsn2.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
 .v10c .rsn2.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
 .v10c .rsn2.open{background:rgba(77,124,254,.16);color:var(--pulse, #4D7CFE)}
 .v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--dim)}
-.v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;white-space:nowrap;
+.v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-.v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
+.v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* cc#948 item 3: the OPT line was a 10.5px wall of text. Structured now — an OPT tag, the
    contract, the premium leg, and its own P&L pushed to the right edge so it lands UNDER the net
    column and the two numbers share one vertical rule. */
-.v10c .c4{margin-top:6px;padding-top:5px;border-top:1px dashed var(--line);
-  display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
+.v10c .c4{margin-top:var(--space-6);padding-top:var(--space-5);border-top:var(--bw-1) dashed var(--line);
+  display:flex;align-items:center;gap:var(--space-6);font-size:var(--type-11);color:var(--dim);
   font-family:'IBM Plex Mono',ui-monospace,monospace}
-.v10c .c4 .htag{font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 5px;
-  border-radius:4px;background:rgba(255,255,255,.06);color:var(--mut);flex:none}
+.v10c .c4 .htag{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-5);
+  border-radius:var(--radius-4);background:rgba(255,255,255,.06);color:var(--mut);flex:none}
 .v10c .c4 .hmid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v10c .c4 em{font-style:normal;font-weight:700;flex:none}
 /* item 4: nothing in the log below 9.5px */
-.mhd .mn{font-size:10.5px!important}
-.v10sum span{font-size:10px!important}
-.mhd{display:flex;align-items:center;gap:8px;padding:10px 2px 5px;margin-top:4px;
-  border-bottom:1px solid var(--line);cursor:pointer}
-.mhd .mn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.13em;text-transform:uppercase;color:var(--dim);flex:1}
-.mhd .mp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:800}
-.mhd .mc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
-.mhd .mx{font-size:10px;color:var(--dim);min-width:12px;text-align:right}
+.mhd .mn{font-size:var(--type-105)!important}
+.v10sum span{font-size:var(--type-10)!important}
+.mhd{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-10) var(--space-2) var(--space-5);margin-top:var(--space-4);
+  border-bottom:var(--bw-1) solid var(--line);cursor:pointer}
+.mhd .mn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;
+  letter-spacing:var(--track-em15);text-transform:uppercase;color:var(--dim);flex:1}
+.mhd .mp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:800}
+.mhd .mc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim)}
+.mhd .mx{font-size:var(--type-10);color:var(--dim);min-width:12px;text-align:right}
 .mhd.op .mn{color:var(--amber,#F5B94A)}
-.tr2{display:flex;align-items:stretch;gap:9px;padding:8px 3px;border-bottom:1px solid var(--line);
+.tr2{display:flex;align-items:stretch;gap:var(--space-9);padding:var(--space-8) var(--space-3);border-bottom:var(--bw-1) solid var(--line);
   min-height:54px;cursor:pointer}
 .tr2.sel{background:rgba(77,124,254,.10)}
-.tr2 .rl{width:3px;border-radius:2px;flex:none;background:var(--line2)}
+.tr2 .rl{width:3px;border-radius:var(--radius-2);flex:none;background:var(--line2)}
 .tr2.wn .rl{background:var(--grn,#2FD48B)}
 .tr2.ls .rl{background:var(--red,#FF5C6C)}
 .tr2.op .rl{background:var(--amber,#F5B94A)}
-.tr2 .mid{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
-.tr2 .l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
-.tr2 .pill{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
-  letter-spacing:.06em;padding:2px 6px;border-radius:5px}
+.tr2 .mid{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:var(--space-3)}
+.tr2 .l1{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap}
+.tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim)}
+.tr2 .pill{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
+  letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5)}
 .tr2 .pill.lg{color:var(--grn,#2FD48B);background:rgba(47,212,139,.13)}
 .tr2 .pill.sh{color:var(--red,#FF5C6C);background:rgba(255,92,108,.13)}
-.tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--mut)}
-.tr2 .pr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:700}
-.tr2 .l2{display:flex;gap:7px;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9px;color:var(--dim)}
-.tr2 .rsn{border:1px solid var(--line2);border-radius:4px;padding:1px 5px;font-weight:700}
+.tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--mut)}
+.tr2 .pr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-115);font-weight:700}
+.tr2 .l2{display:flex;gap:var(--space-7);align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-9);color:var(--dim)}
+.tr2 .rsn{border:var(--bw-1) solid var(--line2);border-radius:var(--radius-4);padding:var(--space-1) var(--space-5);font-weight:700}
 .tr2 .rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
-.tr2 .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800}
-.tr2 .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);margin-top:2px}
+.tr2 .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:800}
+.tr2 .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);margin-top:var(--space-2)}
 /* ── cc#907: the V8 Open Book trio overflowed its card on the founder's phone ────────────────
    TWO fixes, because they solve two different halves and either alone still breaks.
    STRUCTURE: a grid item's automatic minimum is its min-content width, so a 1fr track GROWS to
@@ -421,18 +421,18 @@ body[data-theme]{
    narrower 360px phone (~82px). That headroom is what let the font go back UP from 12.5 to 13.5px
    rather than shrinking further. The old full-digit "Rs.1,42,76,194" was 14 characters, ~118px.
    Scoped to .trio so only this card changes; .st is shared CSS used elsewhere. */
-.trio .st{min-width:0;padding:9px 6px}
-.trio .st .v{font-size:13.5px;white-space:nowrap}
+.trio .st{min-width:0;padding:var(--space-9) var(--space-6)}
+.trio .st .v{font-size:var(--type-135);white-space:nowrap}
 /* ── cc#911: My Portfolio is no longer one big link ──────────────────────────────────────────
    The whole card used to be wrapped in <a class="card-link" href="/m/holdings">, so every tap
    inside it navigated away — including a tap on a holding. The expand control below is now the
    ONLY thing that opens /m/holdings; a row tap opens the shared C·A·R·D strip in place.
    44px target per framework 15913 core rule 5. */
 .h-exp{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;
-  color:var(--mut);font-size:15px;text-decoration:none}
+  color:var(--mut);font-size:var(--type-15);text-decoration:none}
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
-.pfcard{padding:4px 2px 10px}
+.pfcard{padding:var(--space-4) var(--space-2) var(--space-10)}
 /* cc#929: raw news rows — headline + source + time, two lines at most, dividers not boxes. The
    tag/category line is gone entirely, which is what buys the space back. */
 /* ── cc#966: LIVE NEWS COMPACT ────────────────────────────────────────────────────────────────
@@ -451,9 +451,9 @@ body[data-theme]{
    them without changing the clamp, the count per page or the payload. Row height goes 50px ->
    60px, which is why .rnlist's reservation below moves with it — they are one measurement, and
    cc#971/cc#974 are both notes about what happens when they drift apart. */
-.rnr{display:flex;align-items:flex-end;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.rnr{display:flex;align-items:flex-end;gap:var(--space-8);padding:var(--space-12) 0;border-bottom:var(--bw-1) solid var(--line)}
 .rnr:last-child{border-bottom:0}
-.rnr .h{flex:1;min-width:0;font-size:12.5px;line-height:1.4;color:var(--txt,#E9EEFB);
+.rnr .h{flex:1;min-width:0;font-size:var(--type-125);line-height:1.4;color:var(--txt,#E9EEFB);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 /* cc#974: RENAMED from `.a`. mobile_app.css owns a generic `.a` action-button class
    (min-height:44px, 1px blue border, border-radius:10px, centred flex) and cc#966's `.rnr .a`
@@ -462,7 +462,7 @@ body[data-theme]{
    box on purpose. Resetting border/radius/min-height would have worked today and broken again
    the next time a rule lands on `.a`, so the class is namespaced instead. Fourth time this file
    has collided with a short app class name (cc#964 .v/.m, cc#966 .m, cc#967 .v). */
-.rnr .rnage{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
+.rnr .rnage{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
   color:var(--dim);white-space:nowrap;line-height:1.4}
 /* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
    passes straight through instead of being captured by a 300px window. */
@@ -471,13 +471,13 @@ body[data-theme]{
    Founder QA 17-Aug 15:33, built to design_refs/scorr_home_news_R1.html @ ec9df19.
    POLISH is the default tab: the polished cards are the product, raw is the firehose behind it.
    Each tab carries its own live count so the denominator is on screen, not implied. */
-.nwtabs{display:flex;background:var(--t-sunk,#0E0E11);border:1px solid var(--line);border-radius:9px;
-  padding:3px;margin:2px 0 10px}
-.nwtab{flex:1;text-align:center;padding:7px 0;border-radius:7px;font-size:10.5px;font-weight:800;
-  letter-spacing:.12em;color:var(--dim);background:none;border:0;font-family:inherit;cursor:pointer}
+.nwtabs{display:flex;background:var(--t-sunk,#0E0E11);border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);
+  padding:var(--space-3);margin:var(--space-2) 0 var(--space-10)}
+.nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
+  letter-spacing:var(--track-em14);color:var(--dim);background:none;border:0;font-family:inherit;cursor:pointer}
 .nwtab.on{background:var(--gold,#D4AF37);color:#151204}
 .nwtab small{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
-  margin-left:4px;font-size:9px}
+  margin-left:var(--space-4);font-size:var(--type-9)}
 /* The WHOLE row is the tap target (44px floor, Apple/Android minimum). The chevron only
    ANNOUNCES that the row opens something — it is not the hit area. A 13px glyph as the only
    target is the thing that makes a phone feel broken. */
@@ -499,20 +499,20 @@ body[data-theme]{
    which lands on 59px. It is a token so the clamp, the row and the pad row cannot drift apart -
    three places that must agree, one number. */
 :root{--news-row-h:59px}
-.nwrow{display:flex;align-items:center;gap:10px;padding:11px 2px;
+.nwrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-11) var(--space-2);
   height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
-  border:0;border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;
+  border:0;border-bottom:var(--bw-1) solid var(--line);background:none;width:100%;text-align:left;
   font-family:inherit;color:inherit;cursor:pointer}
 .nwrow:last-of-type{border-bottom:0}
 /* TWO LINES, THEN AN ELLIPSIS. The clamp is what makes the fixed height honest: without it a
    three-line headline would be cut mid-sentence by overflow:hidden with no sign it was cut.
    The full text is never lost - the row is a button and nwOpen() puts the whole headline in the
    sheet, which is verified rather than assumed. */
-.nwrow .h{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--txt,#E9EEFB);
+.nwrow .h{flex:1;min-width:0;font-size:var(--type-125);line-height:1.45;color:var(--txt,#E9EEFB);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 /* FIXED WIDTH ON THE RIGHT COLUMN, so the headline column is the same width on every row and a
    long timestamp cannot make one row wrap where its neighbour did not. */
-.nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
+.nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
   white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
 /* The pad row holds the last page open to six. It is inert - no button, no tap target, no
    divider under the final one - so the card keeps its height without inventing a row that looks
@@ -534,41 +534,41 @@ body[data-theme]{
    fillers now take the same basis and centre inside it, so the headline keeps one width. */
 .nwrow .nwchev,.nwrow .nwcat{flex:0 0 46px;min-width:0;overflow:hidden;
   display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
-.nwrow .nwchev{color:var(--gold,#D4AF37);font-size:13px;flex-shrink:0;
+.nwrow .nwchev{color:var(--gold,#D4AF37);font-size:var(--type-13);flex-shrink:0;
   background:none;border:0;border-radius:0;padding:0;margin:0}
 .nwrow .nwchev::before{content:none}
 /* cc#1120: the category chip occupies the chevron's slot. flex-shrink:0 and nowrap so it can
    never be squeezed into two lines or push the headline into wrapping; the headline keeps flex:1
    and gives up nothing, because the chip is narrower than the box it replaces. */
 .nwrow .nwcat{flex-shrink:0;white-space:nowrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:8.5px;font-weight:800;letter-spacing:.1em;padding:3px 6px;border-radius:5px;
-  color:var(--gold,#D4AF37);border:1px solid var(--line2);background:var(--panel2)}
+  font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-6);border-radius:var(--radius-5);
+  color:var(--gold,#D4AF37);border:var(--bw-1) solid var(--line2);background:var(--panel2)}
 /* THE SHEET IS A PRESSED CONTAINER (scorr_card_pressed_R1 @ 1221452): it SINKS and it has NO
    press state, because a well is not a button. Depth encodes affordance — the rows above rise
    and are tappable, this holds content and is not. */
 .nwveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
 .nwsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
-  z-index:81;background:var(--t-sunk,#0E0E11);border-top:1px solid #000;border-radius:18px 18px 0 0;
+  z-index:81;background:var(--t-sunk,#0E0E11);border-top:var(--bw-1) solid #000;border-radius:var(--radius-18) var(--radius-18) 0 0;
   box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),
              0 -1px 0 rgba(255,255,255,.06);
   animation:nwup .22s cubic-bezier(.2,.9,.3,1)}
 @keyframes nwup{from{transform:translateY(100%)}}
-.nwgrab{width:38px;height:4px;border-radius:2px;background:#3A3A42;margin:9px auto 6px;flex-shrink:0}
+.nwgrab{width:38px;height:4px;border-radius:var(--radius-2);background:#3A3A42;margin:var(--space-9) auto var(--space-6);flex-shrink:0}
 /* The sheet body is the ONLY vertical scroller on screen while it is open — the page behind is
    locked — so APP_MOTION_MODEL_V1's no-nested-vertical-scroll rule is not violated. A modal
    owns the gesture; it does not compete for it. */
-.nwsb{overflow-y:auto;padding:4px 18px 26px;-webkit-overflow-scrolling:touch}
-.nwsh{font-size:15px;line-height:1.35;font-weight:800;margin-bottom:7px;color:var(--txt,#E9EEFB)}
-.nwsm{display:flex;gap:8px;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:9.5px;color:var(--dim);margin-bottom:11px;flex-wrap:wrap}
-.nwchip{font-size:8px;font-weight:800;letter-spacing:.1em;padding:2px 7px;border-radius:3px}
+.nwsb{overflow-y:auto;padding:var(--space-4) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
+.nwsh{font-size:var(--type-15);line-height:1.35;font-weight:800;margin-bottom:var(--space-7);color:var(--txt,#E9EEFB)}
+.nwsm{display:flex;gap:var(--space-8);align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-95);color:var(--dim);margin-bottom:var(--space-11);flex-wrap:wrap}
+.nwchip{font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-2) var(--space-7);border-radius:var(--radius-3)}
 .nwchip.up{background:rgba(200,245,66,.14);color:var(--grn,#C8F542);border:1px solid rgba(200,245,66,.3)}
 .nwchip.dn{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:1px solid rgba(255,77,109,.3)}
-.nwchip.hi{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:1px solid rgba(255,77,109,.3)}
-.nwchip.nt{background:rgba(255,255,255,.06);color:var(--dim);border:1px solid var(--line)}
-.nwbd{font-size:12.5px;line-height:1.66;color:#D9D6CC}
-.nwbd p{margin:0 0 9px}
-.nwnone{font-size:12px;line-height:1.6;color:var(--dim);font-style:italic}
+.nwchip.hi{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:var(--bw-1) solid rgba(255,77,109,.3)}
+.nwchip.nt{background:rgba(255,255,255,.06);color:var(--dim);border:var(--bw-1) solid var(--line)}
+.nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
+.nwbd p{margin:0 0 var(--space-9)}
+.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--dim);font-style:italic}
 /* ── cc#971 paging ──────────────────────────────────────────────────────────────────────────
    min-height reserves SIX rows. The last page usually holds fewer, and without this the section
    would shrink the moment you reached it — pulling the Tools grid up and moving the Next button
@@ -589,7 +589,7 @@ body[data-theme]{
    --gold) do not exist in this file; these are the app's equivalents, checked one by one. The
    amber is the same #FF9F45 the old index line used for an index NAME, so the colour still
    means the same thing here as it did there. */
-.ibk{background:var(--panel);border:1px solid var(--line);margin-top:10px;
+.ibk{background:var(--panel);border:var(--bw-1) solid var(--line);margin-top:var(--space-10);
   clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
 /* a row is a BUTTON, not a div with onclick: it is a tap target that opens a chart, so it should
    be reachable by keyboard and announced as pressable. font/color/background are reset because a
@@ -600,24 +600,24 @@ body[data-theme]{
    so it refused to shrink below its content, and .ibk-pnl is flex:0 0 auto and got pushed off.
    flex-wrap lets the P&L drop under the identity at big text instead of leaving the card. */
 .ibk-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
-  gap:8px 12px;padding:15px 16px;min-height:44px;width:100%;text-align:left;cursor:pointer;
+  gap:var(--space-8) var(--space-12);padding:var(--space-15) var(--space-16);min-height:44px;width:100%;text-align:left;cursor:pointer;
   background:none;border:0;font:inherit;color:inherit}
-.ibk-row + .ibk-row{border-top:1px solid var(--line)}
+.ibk-row + .ibk-row{border-top:var(--bw-1) solid var(--line)}
 .ibk-row:active{background:var(--panel2)}
 .ibk-l{flex:1 1 58%;min-width:0}
-.ibk-id{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
-.ibk-id .sym{font-size:14px;font-weight:700;letter-spacing:.04em;color:#FF9F45}
-.ibk-dir{font-size:10.5px;font-weight:800;letter-spacing:.1em;padding:3px 8px;border:1px solid}
+.ibk-id{display:flex;align-items:center;gap:var(--space-10);min-width:0;flex-wrap:wrap}
+.ibk-id .sym{font-size:var(--type-14);font-weight:700;letter-spacing:var(--track-em7);color:#FF9F45}
+.ibk-dir{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-8);border:var(--bw-1) solid}
 .ibk-dir.long{color:var(--grn);border-color:var(--grn)}
 .ibk-dir.short{color:var(--red);border-color:var(--red)}
-.ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim);
-  letter-spacing:.06em;margin-top:3px;overflow-wrap:anywhere}
-.ibk-pnl{display:flex;align-items:center;gap:12px;flex:0 0 auto}
-.ibk-pnl .v{font-size:16px;font-weight:800}
+.ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);
+  letter-spacing:var(--track-em9);margin-top:var(--space-3);overflow-wrap:anywhere}
+.ibk-pnl{display:flex;align-items:center;gap:var(--space-12);flex:0 0 auto}
+.ibk-pnl .v{font-size:var(--type-16);font-weight:800}
 .ibk-pnl .v.pos{color:var(--grn)}
 .ibk-pnl .v.neg{color:var(--red)}
-.ibk-pnl .v.na{color:var(--mut);font-size:13px}
-.ibk-pnl .arrow{color:var(--dim);font-size:14px}
+.ibk-pnl .v.na{color:var(--mut);font-size:var(--type-13)}
+.ibk-pnl .arrow{color:var(--dim);font-size:var(--type-14)}
 /* cc#1181 — .ibk-cap is deleted. The founder removed the caption note off two live renders
    (28349), and the single Index Intel entry point below the strip replaces the "TAP FOR CHART +
    TRADES" half of what it said. The other half was already true without being written down: the
@@ -638,12 +638,12 @@ body[data-theme]{
    THE LEDGE NEEDS SOMEWHERE TO LAND. .slab paints a 5px shadow BELOW the border box, and a shadow
    takes no space in flow, so the next section would otherwise measure its margin from a line the
    ledge is still painting on. The 5px bottom margin is that reserve, written to match the ledge. */
-.ibk-intel{display:block;width:100%;box-sizing:border-box;margin:10px 0 5px;text-align:center;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
-  letter-spacing:.14em;color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
+.ibk-intel{display:block;width:100%;box-sizing:border-box;margin:var(--space-10) 0 var(--space-5);text-align:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
+  letter-spacing:var(--track-em16);color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
   line-height:20px}
-.ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.1em;
-  color:var(--mut);text-align:center;padding:18px 16px}
+.ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-em12);
+  color:var(--mut);text-align:center;padding:var(--space-18) var(--space-16)}
 /* cc#1204: EXACT, not a floor. min-height:360px reserved six rows and then let any page that
    needed more simply take more - which is the whole defect. Six rows at the token is the height,
    full stop, so a page that tried to exceed it would show up as a clipped row in the harness
@@ -651,14 +651,14 @@ body[data-theme]{
 .rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
 @keyframes rnfade{from{opacity:.35}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
-.rnpg{display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding-top:8px;border-top:1px solid var(--line)}
-.rnb{min-height:44px;min-width:88px;padding:0 12px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
+  padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line)}
+.rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--mut);background:var(--panel);
+  border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);cursor:pointer}
 .rnb:disabled{opacity:.35;cursor:default}
-.rnp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
-  color:var(--dim);letter-spacing:.06em}
+.rnp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
+  color:var(--dim);letter-spacing:var(--track-em9)}
 /* cc#1158: the cc#919 .v10b / .v10i rules are removed with the INDEX SIGNALS markup they
    styled. Nothing in the repo selects them any more - checked against every .py, .js and
    .html, including the pwa enhancer, where the only remaining mentions are comments. */
@@ -669,7 +669,7 @@ body[data-theme]{
    ITEMS ARE UNIQUE, per the instruction: nothing on card 2 repeats card 1. PCR in particular
    stays a chip on card 1 only — it already opens a real chart with 1D/7D/15D/30D ranges and a
    scrub readout, which is strictly more than a static sparkline would add here. */
-.swipe{margin-bottom:9px}
+.swipe{margin-bottom:var(--space-9)}
 /* cc#1122 item 4 — THE EMPTY BLOCK UNDER THE CHECK CHIPS. It is not padding and it is not a
    min-height, so neither of the two fixes the card proposes is the right one. The deck is a flex
    row at the default align-items:stretch, and card 2 (MARKET MOOD / PCR: header, mood, two index
@@ -681,7 +681,7 @@ body[data-theme]{
    as tall as the tallest of them and the page below never shifts. The gap simply moves out of
    the hero card and into the track, where there is no border to make it read as unfinished.
    No content was invented to fill the space, because there was none to add. */
-.swipe-t{display:flex;align-items:flex-start;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;
+.swipe-t{display:flex;align-items:flex-start;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;
   -webkit-overflow-scrolling:touch;scrollbar-width:none}
 /* cc#1125 — THIS SUPERSEDES MY OWN cc#1122 ITEM 4 ON THE HERO DECK, and the founder is right.
    cc#1122 read the void as "card 1's border sits far below its last chip" and fixed it by letting
@@ -718,7 +718,7 @@ body[data-theme]{
    The card lists an accent bar between the tagline and the chips. There is no such element in
    this markup — the swoosh it refers to was the r5 mood signature withdrawn in cc#1116 — so the
    four blocks that exist are ordered as ruled and none was invented to fill the slot. */
-#heroTrack > .c:first-child{gap:13px}
+#heroTrack > .c:first-child{gap:var(--space-13)}
 #heroTrack > .c:first-child > *{margin-top:0;margin-bottom:0}
 /* an empty popup host would otherwise buy itself a 13px gap it does not need */
 #heroTrack > .c:first-child > #chiptrend:empty{display:none}
@@ -741,7 +741,7 @@ body[data-theme]{
    52px on a large phone — close to the 56px scale the founder responded to, without betting the
    layout on a font I cannot see. If he wants it bigger still on his device, raise the 52px cap;
    that is one number and it is safe to move once someone can look at the real screen. */
-.hero-mood{font-size:clamp(40px,13vw,52px);text-transform:uppercase;line-height:1.02}
+.hero-mood{font-size:clamp(var(--type-40),13vw,var(--type-52));text-transform:uppercase;line-height:1.02}
 .swipe-t::-webkit-scrollbar{display:none}
 .swipe-t > .c{flex:0 0 100%;scroll-snap-align:center;margin-bottom:0}
 /* cc#955 — THE cc#950 DECK RENDERED BOTH FACES SIDE BY SIDE, and this one missing rule is why.
@@ -786,18 +786,18 @@ body[data-theme]{
    edge is ZERO with overflow visible and ZERO with it hidden, and the card height is identical to
    the pixel (322/327 closed, 453/458 open). The rule is doing no work, so it goes with the button
    that brought it, and the card gets exactly the pre-cc#1160 geometry it asked for. */
-.dots{display:flex;justify-content:center;gap:6px;margin-top:7px}
+.dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
-.dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:3px}
-.irow{display:flex;align-items:baseline;gap:8px;margin-top:calc(11px * var(--rh,1))}
-.irow .inm{font-size:10px;font-weight:800;letter-spacing:.08em;color:#FF9F45;flex:1}
-.irow .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:16px;font-weight:800}
-.irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--mut)}
-.ibar{position:relative;height:4px;border-radius:2px;background:var(--panel2);
-  border:1px solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
-.ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
-  border-radius:50%;background:var(--amber,#F5B94A);border:2px solid var(--panel)}
-.isr{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
+.dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:var(--radius-3)}
+.irow{display:flex;align-items:baseline;gap:var(--space-8);margin-top:calc(11px * var(--rh,1))}
+.irow .inm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:#FF9F45;flex:1}
+.irow .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-16);font-weight:800}
+.irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut)}
+.ibar{position:relative;height:4px;border-radius:var(--radius-2);background:var(--panel2);
+  border:var(--bw-1) solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
+.ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:var(--space-n45) 0 0 var(--space-n45);
+  border-radius:50%;background:var(--amber,#F5B94A);border:var(--bw-2) solid var(--panel)}
+.isr{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim)}
 .isr span:last-child{margin-left:auto}
 /* ── cc#1182 · CARD 2'S RHYTHM IS ONE RATIO, AND THE CTA IS ANCHORED TO THE FLOOR ────────────
    THE HEIGHT INVARIANT IS NOT ARITHMETIC HERE, IT IS STRUCTURAL, and that is the only reason
@@ -827,7 +827,7 @@ body[data-theme]{
    the button would sit flush against the S/R line. A real margin on the previous sibling is a
    gap that exists whether or not there is surplus to distribute. :nth-last-child(2) rather than
    a class, so it stays the block before the CTA whatever that block turns out to be. */
-#heroTrack > .c:nth-child(2) > :nth-last-child(2){margin-bottom:14px}
+#heroTrack > .c:nth-child(2) > :nth-last-child(2){margin-bottom:var(--space-14)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
    .dense. It keeps its own blue: the card asks for the bevel FAMILY, and the Digest doorway has
@@ -840,23 +840,23 @@ body[data-theme]{
    1134 chased around card 1. The 5px ledge lands inside .c's own 13px padding-bottom, so no
    bottom reserve is needed here and .c's overflow:hidden cannot clip it. */
 .digl{display:block;width:100%;box-sizing:border-box;margin-top:auto;text-align:center;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
-  letter-spacing:.14em;color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
+  letter-spacing:var(--track-em16);color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
   line-height:20px}
 /* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
 .pmood{margin-bottom:calc(4px * var(--rh,1))}
-.pmood .pw{font-size:21px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
-.pmeter{display:flex;gap:4px;margin:calc(8px * var(--rh,1)) 0 calc(5px * var(--rh,1))}
-.pmeter i{flex:1;height:5px;border-radius:3px;background:var(--line2);opacity:.45}
+.pmood .pw{font-size:var(--type-21);font-weight:800;letter-spacing:var(--track-em3);line-height:1.15}
+.pmeter{display:flex;gap:var(--space-4);margin:calc(8px * var(--rh,1)) 0 calc(5px * var(--rh,1))}
+.pmeter i{flex:1;height:5px;border-radius:var(--radius-3);background:var(--line2);opacity:.45}
 .pmeter i.on{opacity:1}
-.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim)}
-.v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:800;
-  letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
-.v10r{display:flex;align-items:center;gap:8px;min-height:32px}
-.v10r .nm{flex:1;min-width:0;font-size:11.5px;font-weight:700;color:#FF9F45;
+.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim)}
+.v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
+  letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--dim);margin-bottom:var(--space-3)}
+.v10r{display:flex;align-items:center;gap:var(--space-8);min-height:32px}
+.v10r .nm{flex:1;min-width:0;font-size:var(--type-115);font-weight:700;color:#FF9F45;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.v10r .stt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
-  letter-spacing:.04em;white-space:nowrap;color:var(--dim)}
+.v10r .stt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
+  letter-spacing:var(--track-em7);white-space:nowrap;color:var(--dim)}
 .v10r .stt.long{color:var(--grn)}
 .v10r .stt.short{color:var(--red)}
 
@@ -865,7 +865,7 @@ body[data-theme]{
    (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a) because mobile_app.css owns one-letter classes;
    a bare `.r` here would have been the sixth. The rail itself reuses .rail/.rail-* from
    mobile_app.css — no new badge styling is invented. */
-.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none}
+.hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-5);flex:none}
 .hdr-r .s{margin-top:0;white-space:nowrap}
 .hdr-r .rail{white-space:nowrap}
 </style>
