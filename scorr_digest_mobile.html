@@ -999,23 +999,48 @@ function iChart(s){
      matching the colour rule the headline number already uses. Runs of the same side are emitted
      as one polyline, and the crossing point belongs to both runs so the stroke stays joined. */
   var step=(W/n)/78, brk=step*2.5;      /* 78 five-min bars fill one session slot */
+  /* cc#1236 · EDGE is the most missing session edge an overnight join is allowed to span, ~60 min
+     of the 375-min slot. It exists because the real series does NOT run the full session: measured
+     on adr_intraday 12-Aug to 20-Aug, every day stores 68-72 bars running 09:20 to 15:15, so a
+     normal boundary already carries 15 min of tail plus 5 min of head. That is 4.2 five-minute
+     steps — past brk (2.5) — so a plain distance test can never join a normal night, which is why
+     the boundary needs its own rule rather than a looser brk. 60 min separates that ordinary
+     short close from a genuine outage by a wide margin: 17-Aug's feed stopped at 11:20, leaving a
+     tail of 250 min, and that one still breaks. */
+  var EDGE=12/78;
   var pxs=s.points.map(function(p){
     var clipped=(p.v>top||p.v<bot);
     /* f is clamped just under 1: a 15:30 bar comes through as f=1.0, which lands on the exact
        leading edge of the NEXT session's slot. Harmless most days, wrong on the day after is
        empty — the closing bar would draw inside the tinted hole and look like data in a session
        that has none. A slot covers [s, s+1), so the last bar belongs at its end, not past it. */
-    return {x:(p.s+Math.min(p.f,0.995))/n*W, y:y(p.v), s:p.s, up:(p.v>=base), clipped:clipped, v:p.v};
+    /* cc#1236 carries f through: the boundary rule asks how much of a SESSION is missing at each
+       side of the night, which x cannot answer once it has been folded into slot coordinates. */
+    var f=Math.min(p.f,0.995);
+    return {x:(p.s+f)/n*W, y:y(p.v), s:p.s, f:f, up:(p.v>=base), clipped:clipped, v:p.v};
   });
   var runs=[], cur=null;
   pxs.forEach(function(q,i){
     var prev=i?pxs[i-1]:null;
-    /* EVERY SESSION IS ITS OWN STROKE. A distance test alone is not enough: the last bar of one
-       session sits at f=1.0 and the first of the next at f=0.0, which land on the SAME x, so the
-       overnight gap measured as zero and the line ran straight through 15:30 into the next
-       09:15 — drawing a continuous market across a closed one. The session index is the
-       authority; the distance test then catches holes INSIDE a session. */
-    var gap=prev&&(q.s!==prev.s||q.x-prev.x>brk);
+    /* cc#1128 SAID EVERY SESSION IS ITS OWN STROKE. That is now WRONG, by founder ruling
+       (INTRADAY_CHART_SESSION_JOIN_RULE_V1, session_log 29510) — consecutive sessions abut, the
+       line runs through the divider, and the divider alone says where the night was. The old
+       reasoning is kept because the trap it names is real: the last bar of a session and the
+       first of the next land at almost the same x, so a distance test cannot tell an overnight
+       gap from a five-minute one. The answer is not to break on every boundary, it is to STOP
+       ASKING x AT A BOUNDARY.
+       SO THE TEST SPLITS IN TWO, one question per kind of gap.
+       INSIDE a session the distance test is the whole authority and is unchanged: a hole between
+       bars is real missing data and is never bridged (17-Aug NIFTY stops 11:20, resumes 14:00).
+       ACROSS a boundary x is meaningless, so it is not consulted. Two things break the line
+       instead: a SKIPPED session (s jumps by more than one — a dead day sits in between, already
+       tinted, and a stroke across it would draw a market that did not trade), or a session EDGE
+       so ragged that the join would span an outage rather than a night (EDGE above).
+       WHAT THIS DOES NOT DO: it never interpolates. A joined boundary draws one segment between
+       two bars that were both recorded. Nothing is invented at either end. */
+    var gap = !prev ? false
+            : (q.s===prev.s) ? (q.x-prev.x>brk)
+            : (q.s-prev.s>1 || (1-prev.f)>EDGE || q.f>EDGE);
     if(!cur||gap){                       /* first point, or the data genuinely stopped */
       cur={up:q.up,pts:[[q.x,q.y]]}; runs.push(cur); return;
     }
