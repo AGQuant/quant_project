@@ -124,7 +124,7 @@
   <header>
     <div>
       <div class="logo">TC <b>Scanner</b><span class="ibtn" onclick="openInfo()" title="How this works">i</span></div>
-      <div class="tag">13-Check Binary &middot; n-1 &middot; 15-min &middot; Full Futures Universe</div>
+      <div class="tag" id="hdrTag">Full Futures Universe</div>
     </div>
     <div class="spacer"></div>
     <div class="clock" id="clock">—</div>
@@ -141,8 +141,6 @@
   <div class="tabs" style="align-items:center">
     <div class="tab active" id="tabBUY" onclick="selectTab('BUY')">▲ Buy</div>
     <div class="tab" id="tabSELL" onclick="selectTab('SELL')">▼ Sell</div>
-    <div class="tab" id="tabORB" onclick="selectTab('ORB')">◆ ORB AG</div>
-    <div class="tab" id="tabRADAR" onclick="selectTab('RADAR')">◎ Result Radar</div>
     <!-- cc#772: page-level quick-switch across every registered scanner strategy (reads /api/scanners/registry) -->
     <button id="otherStratBtn" onclick="openStrategies()" title="Jump to another scanner strategy"
             style="margin-left:auto;margin-bottom:6px;font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -152,11 +150,9 @@
 
   <div class="panel active" id="panelBUY"></div>
   <div class="panel" id="panelSELL"></div>
-  <div class="panel" id="panelORB"></div>
-  <div class="panel" id="panelRADAR"></div>
 
   <footer>
-    <span id="footerLegend">TC Scanner &middot; full futures universe &middot; 13-check binary bucket (id=399/400), pass &ge;12/13 &middot; target +3% / SL -3% &middot; latch-once-per-symbol-per-day &middot; screener only, not a live signal</span>
+    <span id="footerLegend">TC Scanner &middot; full futures universe &middot; screener only, not a live signal</span>
     <span id="footerRefresh">Auto-refresh 30s</span>
   </footer>
 </div>
@@ -223,12 +219,9 @@ async function openInfo(){
   const body=document.getElementById('infoBody');
   if(tcSpecCache){ body.innerHTML=renderInfoBody(tcSpecCache); return; }
   body.innerHTML='Loading…';
-  try{
-    const r=await fetchWithTimeout('/api/scanners/tc/spec');
-    const s=await r.json();
-    tcSpecCache=s;
-    body.innerHTML=renderInfoBody(s);
-  }catch(e){ body.innerHTML='<span style="color:var(--red)">Spec unavailable: '+e+'</span>'; }
+  const s = await loadSpec();
+  body.innerHTML = s ? renderInfoBody(s)
+    : '<span style="color:var(--red)">Spec unavailable</span>';
 }
 function closeInfo(){document.getElementById('infoOv').classList.remove('open');}
 
@@ -241,24 +234,51 @@ function exitBadge(reason){
   return `<span class="badge b-open">OPEN</span>`;
 }
 
+/* cc#1226: two tabs. ORB AG and Result Radar are gone from the STRIP only - their endpoints,
+   tables and scheduler jobs are untouched, and loadOrb/loadRadar still run below so both
+   observation studies keep writing. They can no longer reach a panel, because currentSide can
+   never be ORB or RADAR once the tabs are gone, and every DOM write in those loaders is already
+   guarded on currentSide. */
 function selectTab(side){
   currentSide = side;
-  ['BUY','SELL','ORB','RADAR'].forEach(s=>{
+  ['BUY','SELL'].forEach(s=>{
     document.getElementById('tab'+s).className = 'tab' + (side===s?' active':'');
     document.getElementById('panel'+s).className = 'panel' + (side===s?' active':'');
   });
-  document.getElementById('footerLegend').textContent =
-      side==='RADAR' ? 'Result Radar · pre-results OI-positioning quadrant for next-day F&O reporters · observation study (8 samples), NOT a trade signal'
-    : side==='ORB'   ? 'ORB AG · full futures universe · 6-condition strategy (20-DMA, 9-DMA, PP-R1 band, sector month, 09:15-10:00 opening-range breakout, 1.2x time-proportional volume) · target +3% / SL -3% · screener only, not a live signal'
-    :                  'TC Scanner · full futures universe · 13-check binary bucket (id=399/400), pass ≥12/13 · target +3% / SL -3% · latch-once-per-symbol-per-day · screener only, not a live signal';
-  if(side==='ORB'){
-    if(orbData) document.getElementById('panelORB').innerHTML = renderOrbPanel();
-    else loadOrb(false);
-  }
-  if(side==='RADAR'){
-    if(radarData) document.getElementById('panelRADAR').innerHTML = renderRadarPanel();
-    else loadRadar(false);
-  }
+  paintSpecText();
+}
+
+/* cc#1226: the header sub-line and the footer legend are RENDERED FROM /api/scanners/tc/spec,
+   which cc#465 already generates from the engine's own live constants (TOTAL_CHECKS, N_MINUS,
+   TARGET_PCT, SL_PCT in tc_scanner_endpoints.py). They used to be hand-typed prose repeating the
+   check count and the pass bar as literals - true today, but a second copy of numbers that
+   live in the engine, and a second copy is what drifts. Now there is one copy. (The old wording
+   named the check count, the tolerance and the pass bar as literals; those figures now arrive
+   from the endpoint, so this file states none of them.)
+
+   THE PLACEHOLDERS CARRY NO NUMBERS ON PURPOSE. If the spec fetch fails, the page shows what it
+   still knows to be true and nothing more - it never leaves a typed figure on screen claiming to
+   be the engine's. */
+function paintSpecText(){
+  const s = tcSpecCache; if(!s) return;
+  const tag = document.getElementById('hdrTag');
+  if(tag) tag.textContent = s.total_checks + '-Check Binary · n-' +
+      (s.qualify_rule && s.qualify_rule.match(/evaluated - (\d+)/) ? s.qualify_rule.match(/evaluated - (\d+)/)[1] : '?') +
+      ' · ' + s.cadence_min + '-min · Full Futures Universe';
+  const leg = document.getElementById('footerLegend');
+  if(leg) leg.textContent = 'TC Scanner · ' + s.universe + ' · ' + s.total_checks +
+      '-check binary bucket, ' + s.qualify_rule + ' · target +' + s.target_pct + '% / SL -' +
+      s.sl_pct + '% · latch-once-per-symbol-per-day · screener only, not a live signal';
+}
+
+async function loadSpec(){
+  if(tcSpecCache){ paintSpecText(); return tcSpecCache; }
+  try{
+    const r = await fetchWithTimeout('/api/scanners/tc/spec');
+    tcSpecCache = await r.json();
+    paintSpecText();
+  }catch(e){ /* placeholders stay; they assert nothing the page cannot back up */ }
+  return tcSpecCache;
 }
 
 function renderSummary(){
@@ -529,6 +549,7 @@ async function openStrategies(){
 function closeStrat(){ document.getElementById('stratOv').classList.remove('open'); }
 
 load(false);
+loadSpec();          // cc#1226: header + footer text from the engine's own constants
 loadOrb(false);
 loadRadar(false);
 setInterval(()=>{ load(true); loadOrb(true); loadRadar(true); }, AUTO_MS);
