@@ -58,6 +58,7 @@ from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
 from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
 from v10_page_endpoints import router as v10_page_router   # cc#1069 GET /m/v10
+from github_ops import router as github_ops_router        # cc#1249: was never imported
 from mobile_cards_endpoints import router as mobile_cards_router   # cc#1090 P0: GET /m/cards
 from gvm_twopager import router as gvm_twopager_router   # cc#1085 R6-P1: GET /gvm/2pager/{symbol}
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
@@ -642,6 +643,8 @@ app.include_router(v8_backfill_router)
 app.include_router(v8_gapfill_router)   # cc#1048: POST /api/v8/backfill/metrics_gapfill
 app.include_router(index_tape_router)   # cc#1054: GET /api/index/tape
 app.include_router(v10_page_router)     # cc#1069: GET /m/v10 (mobile V10 signal view)
+app.include_router(github_ops_router)   # cc#1249: /api/admin/github_* — the extraction from
+                                       # File 5/5 that was never actually wired
 app.include_router(mobile_cards_router)  # cc#1090 P0: card depth prototype (own router, wiring only)
 app.include_router(gvm_twopager_router)   # cc#1085 R6-P1: GVM 2-Pager print route (own router, wiring only)
 app.include_router(mcp_router)
@@ -2055,97 +2058,21 @@ async def fetch_global_intraday_now(x_admin_token: Optional[str] = Header(None))
     with global_indices.get_conn_from_env() as conn:
         res = await global_indices.fetch_global_intraday(conn); global_indices.prune_global_intraday(conn, days=7); return res
 
-GITHUB_API = "https://api.github.com"
-
-def _gh_headers():
-    if not GITHUB_TOKEN: raise HTTPException(500,"GITHUB_TOKEN not configured")
-    return {"Authorization":f"Bearer {GITHUB_TOKEN}","Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}
-
+# ── cc#1249 · THE GITHUB ENDPOINTS MOVED OUT, AND THEY SHOULD HAVE BEEN OUT ALREADY ────────────
+# github_ops.py opens with "Extracted from main.py (File 5/5 split)". The extraction was DONE and
+# the wiring never happened: main.py kept its own copy of all four handlers and github_ops was
+# never imported, so for months there were two implementations and the dead one was the one being
+# improved. cc#1185 P8 wired the theme gate into github_ops.github_push and reported it as live on
+# "the one push path this app owns" — it was not live at all, because that function was never
+# reachable. That claim was wrong and this is where it gets corrected.
+# The router is included with the others; the duplicates below are deleted rather than left to rot,
+# because a second copy is exactly how this happened. _check_admin STAYS here — it is used by ~30
+# other admin endpoints in this file and has nothing to do with GitHub.
 def _check_admin(token):
     if not ADMIN_TOKEN: return True
     if token != ADMIN_TOKEN: raise HTTPException(403,"Invalid admin token")
     return True
 
-def _check_deploy_guard():
-    if not DEPLOY_GUARD: raise HTTPException(403,"DEPLOY_GUARD is off")
-
-async def _gh_get_file(filepath):
-    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, headers=_gh_headers())
-        if r.status_code == 404: return {"exists":False,"content":None,"sha":None,"size":0}
-        r.raise_for_status(); data = r.json()
-        content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
-        return {"exists":True,"content":content,"sha":data["sha"],"size":data["size"]}
-
-async def _gh_put_file(filepath, new_content, commit_message, sha=None):
-    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
-    payload = {"message":commit_message,"content":base64.b64encode(new_content.encode("utf-8")).decode("ascii"),"branch":"main"}
-    if sha: payload["sha"] = sha
-    async with httpx.AsyncClient(timeout=60) as c:
-        r = await c.put(url, headers=_gh_headers(), json=payload)
-        if r.status_code not in (200,201): raise HTTPException(r.status_code, f"GitHub error: {r.text[:300]}")
-        return r.json()
-
-async def _gh_delete_file(filepath, commit_message, sha):
-    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.request("DELETE", url, headers=_gh_headers(), json={"message":commit_message,"sha":sha,"branch":"main"})
-        if r.status_code != 200: raise HTTPException(r.status_code, f"GitHub delete error: {r.text[:300]}")
-        return r.json()
-
-async def _gh_list_tree(path_prefix=""):
-    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path_prefix}"
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, headers=_gh_headers()); r.raise_for_status(); data = r.json()
-        if isinstance(data,dict): data = [data]
-        return [{"name":x["name"],"path":x["path"],"type":x["type"],"size":x.get("size",0)} for x in data]
-
-@app.get("/api/admin/github_read")
-async def github_read(filepath: str, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
-    info = await _gh_get_file(filepath)
-    if not info["exists"]: raise HTTPException(404,f"File not found: {filepath}")
-    return {"filepath":filepath,"size":info["size"],"sha":info["sha"],"content":info["content"],"lines":info["content"].count("\n")+1}
-
-@app.get("/api/admin/github_list")
-async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
-    files = await _gh_list_tree(path)
-    return {"path":path or "/","items":files,"count":len(files)}
-
-@app.post("/api/admin/github_push")
-async def github_push(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token); _check_deploy_guard()
-    if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
-    body = await req.json()
-    filepath = body.get("filepath"); new_content = body.get("new_content")
-    commit_message = body.get("commit_message", f"chore: update {filepath}")
-    create_if_missing = body.get("create_if_missing", True)
-    if not filepath or new_content is None: raise HTTPException(400,"filepath and new_content required")
-    existing = await _gh_get_file(filepath)
-    if not existing["exists"] and not create_if_missing: raise HTTPException(404,f"File {filepath} does not exist")
-    if existing["exists"] and existing["content"] == new_content:
-        return {"status":"noop","message":"Content identical","filepath":filepath}
-    sha = existing["sha"] if existing["exists"] else None
-    result = await _gh_put_file(filepath, new_content, commit_message, sha)
-    return {"status":"ok","filepath":filepath,"action":"updated" if existing["exists"] else "created",
-            "commit_sha":result.get("commit",{}).get("sha"),"commit_url":result.get("commit",{}).get("html_url"),
-            "old_size":existing["size"],"new_size":len(new_content)}
-
-@app.post("/api/admin/github_delete")
-async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token); _check_deploy_guard()
-    if not GITHUB_REPO: raise HTTPException(500,"GITHUB_REPO not configured")
-    body = await req.json()
-    filepath = body.get("filepath"); commit_message = body.get("commit_message",f"chore: delete {filepath}")
-    if not filepath: raise HTTPException(400,"filepath required")
-    existing = await _gh_get_file(filepath)
-    if not existing["exists"]: raise HTTPException(404,f"File not found: {filepath}")
-    result = await _gh_delete_file(filepath, commit_message, existing["sha"])
-    return {"status":"ok","filepath":filepath,"action":"deleted","commit_sha":result.get("commit",{}).get("sha")}
 
 _oauth_codes = {}; _oauth_tokens = {}
 
