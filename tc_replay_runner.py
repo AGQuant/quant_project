@@ -69,6 +69,12 @@ def _walk(phase):
         # questions the founder asked separately. Ask for it by name.
         if phase == "portfolio":
             out["port_trades"] = R.portfolio()
+        # cc#1224: the gated companion. Also NOT part of `all`, for the cc#1221 reason above and
+        # one more: it is the run that decides whether the locked config gets armed, so it should
+        # be fired deliberately and its result read on purpose, never as a side effect of a
+        # routine re-score.
+        if phase == "portfolio_gated":
+            out["gated"] = R.portfolio_gated()
     except Exception as e:
         err = "%s: %s" % (type(e).__name__, e)
         out["traceback"] = traceback.format_exc().splitlines()[-12:]
@@ -83,8 +89,8 @@ def _walk(phase):
 def start(phase="all"):
     """Kick a replay. Returns immediately; poll status()."""
     phase = str(phase or "all").lower().strip()
-    if phase not in ("all", "score", "sweep", "portfolio"):
-        return {"error": "phase must be one of all, score, sweep, portfolio — got %r" % phase}
+    if phase not in ("all", "score", "sweep", "portfolio", "portfolio_gated"):
+        return {"error": "phase must be one of all, score, sweep, portfolio, portfolio_gated — got %r" % phase}
     with _LOCK:
         if _STATE["running"]:
             return {"busy": True, "phase": _STATE["phase"], "run_id": _STATE["run_id"],
@@ -162,6 +168,15 @@ def status(selfcheck=True):
         out["portfolio"] = R.portfolio_summary()
     except Exception as e:
         out["portfolio"] = {"error": "%s: %s" % (type(e).__name__, e)}
+
+    # cc#1224: the gated book and the side-by-side. EXTENDED here rather than forked into a second
+    # status tool, as the card asks - one place to look, so nobody compares a fresh gated run
+    # against a stale memory of the ungated one.
+    try:
+        out["gated"] = R.gated_summary()
+        out["compare"] = R.portfolio_compare()
+    except Exception as e:
+        out["gated"] = {"error": "%s: %s" % (type(e).__name__, e)}
 
     # The selfcheck is the only test that catches the as-of loader having drifted from the live
     # scorer, so it rides along with the status rather than waiting to be asked for separately.

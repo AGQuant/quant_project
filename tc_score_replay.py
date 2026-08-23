@@ -390,6 +390,32 @@ CREATE TABLE IF NOT EXISTS tc_score_replay_port_trades (
   PRIMARY KEY (symbol, entry_ts)
 );
 CREATE INDEX IF NOT EXISTS tc_srpt_ts ON tc_score_replay_port_trades (entry_ts);
+
+-- cc#1224 GATED PORTFOLIO. A SEPARATE table again, for the reason cc#1221 already wrote down one
+-- block up: the gated run answers a different question from the ungated one, and mixing them
+-- would make every future query specify which it meant. It is also the reason there is no ALTER
+-- here — a config column on the existing table is exactly the lock-taking change
+-- MAINTENANCE_LOCK_RULE reserves for the Railway console on a propose-first basis, and a second
+-- CREATE TABLE IF NOT EXISTS needs no lock at all. The table name IS the config label.
+CREATE TABLE IF NOT EXISTS tc_score_replay_port_gated (
+  symbol      text   NOT NULL,
+  bucket      text   NOT NULL,
+  side        text   NOT NULL,
+  entry_ts    timestamp NOT NULL,
+  entry_px    numeric,
+  entry_src   text,
+  score100    numeric,
+  bar         numeric,
+  slot_rank   int,
+  bucket_rank int,
+  open_book_size int,
+  exit_ts     timestamp,
+  exit_px     numeric,
+  exit_reason text,
+  pnl_pct     numeric,
+  PRIMARY KEY (symbol, entry_ts)
+);
+CREATE INDEX IF NOT EXISTS tc_srpg_ts ON tc_score_replay_port_gated (entry_ts);
 """
 
 SESSIONS = ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"]
@@ -850,3 +876,224 @@ def bucket_breakdown(threshold, hold):
         L.append("| %s | %d | %d | %.1f | %+.3f | %+.2f |"
                  % (b, n, w, (100.0 * w / n) if n else 0, float(avg or 0), float(tot or 0)))
     return "\n".join(L)
+
+
+# ══ cc#1224 · GATED PORTFOLIO ═════════════════════════════════════════════════════════════════
+# THE QUESTION THIS ANSWERS, and why it is not the one cc#1221 answered. The ungated run took the
+# top-ranked names above a FLAT bar of 80 and made +0.145 per trade. The founder then locked an
+# asymmetric config — different bars per bucket, sector and monthly-RSI gates per side, five per
+# bucket per day (session_log 29447). This runs that config over the SAME stored ticks so the two
+# can be read side by side. Same ticks, same barriers, same exit engine; only the ENTRY TEST moves.
+#
+# ONE CONFIG, IMPORTED. The bars, the gate bounds and the per-bucket cap come from
+# tc_scanner_config.TC_SCANNER_CONFIG — the same dict cc#1222 renders on the scanner. A study that
+# re-typed the thresholds would be measuring a config nobody is running.
+#
+# OBSERVATION MODE IS IGNORED HERE, DELIBERATELY. That flag governs the live SCANNER SURFACE, which
+# shows everything this week. session_log 29448 is explicit that the replay still runs BOTH the V1
+# config run and the unfiltered one — this file is the offline study, and a study that stopped
+# filtering because a display flag was set would answer nothing.
+#
+# NO LOOK-AHEAD ON THE GATES. The gate inputs are sector_week, sector_month and rsi_month, read
+# from v8_metrics with score_date STRICTLY BEFORE the tick's own session date — the same bound the
+# as-of loader uses, and for the same reason: the day's own row is written by the 15:45 EOD engine
+# and did not exist when the tick happened.
+#
+# AN UNMEASURED GATE IS NOT A PASS. If a symbol has no monthly RSI on the prior close, it has not
+# been shown to clear the gate, so it does not enter. That is the strict reading, it matches the
+# would_qualify test on the scanner, and it is the right way round for a run whose whole purpose is
+# to decide whether to ARM these gates. The count of candidates dropped that way is reported
+# separately rather than buried, so nobody has to guess how much of the filtering was ignorance.
+
+
+def _asof_gate_inputs(cur, session_date):
+    """{symbol: {sector_week, sector_month, rsi_month}} as of the close BEFORE session_date."""
+    cur.execute("""
+        SELECT DISTINCT ON (symbol) symbol, sector_week, sector_month, rsi_month
+        FROM v8_metrics WHERE score_date < %s
+        ORDER BY symbol, score_date DESC
+    """, (session_date,))
+    return {r[0]: {"sector_week": _f(r[1]), "sector_month": _f(r[2]), "rsi_month": _f(r[3])}
+            for r in cur.fetchall()}
+
+
+def portfolio_gated(cap=BOOK_CAP, max_hold=MAX_HOLD_SESS):
+    """The cc#1221 walk with the locked config as the entry test. Returns (trades, drop_reasons)."""
+    from tc_scanner_config import TC_SCANNER_CONFIG, gate_status
+
+    bars_by_bucket = TC_SCANNER_CONFIG["score_thresholds"]
+    per_bucket_day = TC_SCANNER_CONFIG["caps"]["per_bucket_per_day"]
+    made = 0
+    drops = {"below_bar": 0, "gate_failed": 0, "gate_unmeasured": 0,
+             "bucket_cap": 0, "book_full": 0, "no_bars": 0}
+
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(DDL)
+        cur.execute("DELETE FROM tc_score_replay_port_gated")
+        conn.commit()
+
+        # EVERY stored tick, not just those over 80 — the bars are per bucket now and BUY-REV's is
+        # 60, so a filter at 80 in the SQL would silently pre-empt the config being tested.
+        cur.execute("""SELECT ts, symbol, bucket, score100 FROM tc_score_replay_ticks
+                       WHERE score100 IS NOT NULL ORDER BY ts, score100 DESC""")
+        by_tick = {}
+        for ts, sym, bucket, sc in cur.fetchall():
+            by_tick.setdefault(ts, []).append((float(sc), sym, bucket))
+
+        gates_cache = {}
+        book, traded_today, bucket_day = {}, set(), {}
+        rows = []
+
+        for ts in sorted(by_tick):
+            day = ts.date()
+            if day not in gates_cache:
+                gates_cache[day] = _asof_gate_inputs(cur, day)
+            gin = gates_cache[day]
+
+            for s in [s for s, x in book.items() if x is not None and x <= ts]:
+                del book[s]
+            slots = cap - len(book)
+
+            # ONE CANDIDATE PER SYMBOL, highest-scoring bucket wins — same rule as the ungated run.
+            # Applied BEFORE the gate tests so a symbol is judged on the bucket it would actually
+            # be taken in, not on whichever of its buckets happens to pass.
+            best = {}
+            for sc, sym, bucket in by_tick[ts]:
+                if sym in book or (sym, day) in traded_today:
+                    continue
+                if sym not in best or sc > best[sym][0]:
+                    best[sym] = (sc, bucket)
+
+            eligible = []
+            for sym, (sc, bucket) in best.items():
+                bar = bars_by_bucket.get(bucket)
+                if bar is None or sc < bar:
+                    drops["below_bar"] += 1
+                    continue
+                gs = gate_status(gin.get(sym) or {}, bucket)
+                if gs["passed"] is False:
+                    drops["gate_failed"] += 1
+                    continue
+                if gs["passed"] is None:
+                    drops["gate_unmeasured"] += 1
+                    continue
+                eligible.append((sc, sym, bucket, bar))
+
+            eligible.sort(key=lambda e: (-e[0], e[1]))
+            rank = 0
+            for sc, sym, bucket, bar in eligible:
+                rank += 1
+                if slots <= 0:
+                    drops["book_full"] += 1
+                    continue
+                bcount = bucket_day.get((bucket, day), 0)
+                if bcount >= per_bucket_day:
+                    drops["bucket_cap"] += 1
+                    continue
+                side = bucket.split("-")[0]
+                deadline = datetime.combine(
+                    _nth_session(day, max_hold), datetime.min.time()
+                ).replace(hour=SQUAREOFF[0], minute=SQUAREOFF[1])
+                fbars, src = _fut_bars(cur, sym, ts, deadline)
+                if not fbars:
+                    drops["no_bars"] += 1
+                    continue
+                entry_px = fbars[0]["close"]
+                if not entry_px:
+                    drops["no_bars"] += 1
+                    continue
+                x_ts, x_px, why = _walk(fbars[1:], side, entry_px, deadline)
+                if x_ts is None:
+                    drops["no_bars"] += 1
+                    continue
+                pnl = ((x_px / entry_px - 1) * 100) if side == "BUY" \
+                    else ((entry_px / x_px - 1) * 100)
+                book[sym] = x_ts
+                traded_today.add((sym, day))
+                bucket_day[(bucket, day)] = bcount + 1
+                slots -= 1
+                rows.append((sym, bucket, side, ts, entry_px, src, round(sc, 2), bar,
+                             rank, bcount + 1, len(book), x_ts, x_px, why, round(pnl, 4)))
+
+        if rows:
+            cur.executemany(
+                """INSERT INTO tc_score_replay_port_gated
+                   (symbol,bucket,side,entry_ts,entry_px,entry_src,score100,bar,slot_rank,
+                    bucket_rank,open_book_size,exit_ts,exit_px,exit_reason,pnl_pct)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT DO NOTHING""", rows)
+            conn.commit()
+            made = len(rows)
+    return {"trades": made, "dropped": drops}
+
+
+def _book_stats(cur, table):
+    """The same summary block for either book table. One definition, so gated and ungated cannot
+    drift into being computed two different ways and then compared as if they had not."""
+    cur.execute("SELECT count(*) FROM " + table)
+    if not cur.fetchone()[0]:
+        return None
+    cur.execute("""SELECT count(*), count(*) FILTER (WHERE pnl_pct>0), avg(pnl_pct), sum(pnl_pct),
+                          avg(open_book_size), max(open_book_size), avg(slot_rank), min(score100)
+                   FROM """ + table)
+    n, w, avg, tot, abook, mbook, arank, minsc = cur.fetchone()
+    cur.execute("""SELECT bucket, count(*), count(*) FILTER (WHERE pnl_pct>0),
+                          avg(pnl_pct), sum(pnl_pct) FROM """ + table + " GROUP BY bucket ORDER BY 1")
+    buckets = [{"bucket": b, "trades": c, "wins": ww, "acc": round(100.0 * ww / c, 1) if c else 0,
+                "avg": round(float(a or 0), 3), "sum": round(float(s or 0), 2)}
+               for b, c, ww, a, s in cur.fetchall()]
+    cur.execute("""SELECT entry_ts::date, count(*), avg(pnl_pct), sum(pnl_pct)
+                   FROM """ + table + " GROUP BY 1 ORDER BY 1")
+    days = [{"day": str(d), "trades": c, "avg": round(float(a or 0), 3),
+             "sum": round(float(s or 0), 2)} for d, c, a, s in cur.fetchall()]
+    cur.execute("SELECT exit_reason, count(*) FROM " + table + " GROUP BY 1 ORDER BY 2 DESC")
+    exits = {r[0]: r[1] for r in cur.fetchall()}
+    return {"trades": n, "wins": w, "acc": round(100.0 * w / n, 1) if n else 0,
+            "avg_pnl_pct": round(float(avg or 0), 3), "total_pnl_pct": round(float(tot or 0), 2),
+            "avg_open_book": round(float(abook or 0), 1), "max_open_book": int(mbook or 0),
+            "slot_utilisation_pct": round(100.0 * float(abook or 0) / BOOK_CAP, 1),
+            "avg_slot_rank": round(float(arank or 0), 2), "min_score_taken": float(minsc or 0),
+            "by_bucket": buckets, "by_day": days, "exits": exits,
+            "merit": bool(float(avg or 0) >= MERIT_AVG and (100.0 * w / n if n else 0) >= MERIT_ACC)}
+
+
+def gated_summary():
+    """The gated book, or None when it has never run — an ABSENCE, never a block of zeros."""
+    from tc_scanner_config import TC_SCANNER_CONFIG
+    with _conn() as conn, conn.cursor() as cur:
+        st = _book_stats(cur, "tc_score_replay_port_gated")
+        if st is None:
+            return None
+        st["config"] = {"version": TC_SCANNER_CONFIG["version"],
+                        "score_thresholds": TC_SCANNER_CONFIG["score_thresholds"],
+                        "gates": TC_SCANNER_CONFIG["gates"],
+                        "per_bucket_per_day": TC_SCANNER_CONFIG["caps"]["per_bucket_per_day"],
+                        "book_cap": BOOK_CAP,
+                        "source": TC_SCANNER_CONFIG["source"]}
+        return st
+
+
+def portfolio_compare():
+    """GATED vs UNGATED over the same stored ticks, in one payload.
+
+    Both sides come from _book_stats, so a difference between them is a difference in the RUNS and
+    never in how they were counted. Either side can be None, and None means that run has not
+    happened — reported as an absence rather than as a row of zeros a reader would take for a
+    result of nothing.
+    """
+    with _conn() as conn, conn.cursor() as cur:
+        ung = _book_stats(cur, "tc_score_replay_port_trades")
+        gat = _book_stats(cur, "tc_score_replay_port_gated")
+    out = {"ungated": ung, "gated": gat,
+           "same_ticks": "both runs re-walk tc_score_replay_ticks; neither re-scores"}
+    if ung and gat:
+        out["delta"] = {
+            "trades": gat["trades"] - ung["trades"],
+            "acc_pp": round(gat["acc"] - ung["acc"], 1),
+            "avg_pnl_pct": round(gat["avg_pnl_pct"] - ung["avg_pnl_pct"], 3),
+            "total_pnl_pct": round(gat["total_pnl_pct"] - ung["total_pnl_pct"], 2),
+        }
+    else:
+        out["note"] = ("one side has not run yet — %s missing. This is an ABSENCE, not a result."
+                       % ("gated" if ung else "ungated"))
+    return out
