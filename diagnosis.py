@@ -688,6 +688,35 @@ def _section_scheduler(cur) -> Dict:
 def _section_infrastructure(cur) -> Dict:
     checks = []
 
+    # cc#1246 · IS THE ASSET CACHE-BUST ACTUALLY BUSTING? This is the one fact that decides whether
+    # a deploy reaches a phone, and until now nothing reported it. Every stamped asset is served
+    # Cache-Control: public, max-age=86400, so a returning client holds mobile.css, the theme
+    # sheet and every shared JS bundle for a FULL DAY unless the ?v= stamp changes. The stamp is
+    # BUILD_ID, which prefers the Railway commit SHA, falls back to APP_VERSION, then to a
+    # process-start epoch. Only the middle case is broken — APP_VERSION is a hand-bumped constant,
+    # so it is IDENTICAL across deploys and the assets never bust. That is indistinguishable, from
+    # the outside, from a phone showing hours-old CSS, which is exactly what cc#1225, cc#1240 and
+    # cc#1255 were all opened against before being closed as cache ghosts.
+    # BUILD_ID is IMPORTED, never recomputed — recomputing the fallback chain in a second place is
+    # the cc#821 bug, where main.py and pwa_endpoints claimed one source and had two.
+    # Nothing secret is exposed: this value is already public in every asset URL on every page and
+    # in the service-worker cache name. Only which ENV VAR won is reported, never its contents.
+    from pwa_endpoints import BUILD_ID as _BUILD_ID          # single source (cc#821)
+    _sha = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")
+    _appv = os.getenv("APP_VERSION", "")
+    if _sha:
+        _src, _ok, _note = 'RAILWAY_GIT_COMMIT_SHA', True, 'changes every deploy — assets bust correctly'
+    elif _appv:
+        _src, _ok, _note = ('APP_VERSION', False,
+                            'FROZEN — a hand-bumped constant is identical across deploys, so every '
+                            'max-age=86400 asset is held for 24h and pushes do not reach phones')
+    else:
+        _src, _ok, _note = ('process-start epoch', True,
+                            'changes every deploy (and every restart), so assets bust — but it is '
+                            'the last-resort fallback, not the intended source')
+    checks.append(_chk('Asset build stamp', _BUILD_ID, ok=_ok, warn=False,
+                       detail=f'source: {_src} · {_note}'))
+
     # DB size
     cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()))")
     db_size = cur.fetchone()[0]
