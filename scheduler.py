@@ -108,12 +108,16 @@ class _Skip:
       CONDITIONAL — a gate or a precondition said no. That MIGHT be correct and might be a fault,
                     and the row cannot tell which, so it stays AMBER with the reason printed.
 
-    THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". Of 102 sites, 63 now
-    carry a token and 39 do not. Those 39 are guards whose family is a genuine judgement call — a
-    session-live check, a data-freshness probe, a multi-condition arming flag — and they are
-    deliberately NOT relabelled by pattern match: a wrongly EXPECTED token would grade a real
-    fault GREEN, which is worse than the amber it replaces and is the exact rule-9 failure this
-    card exists to prevent. An unknown reason stays amber. They get classified one at a time.
+    THE BARE _SKIPPED SENTINEL STILL WORKS AND STILL MEANS "REASON UNKNOWN". Of 102 sites, 93 now
+    carry a token and 9 do not. An unknown reason grades amber, never green.
+
+    WHAT THE LAST 9 HAVE IN COMMON is that the guard cannot say WHICH condition fired. Seven are
+    `A or B` where A and B are different families — `_eod_ran_today == today or _eod_running` is
+    already_ran OR already_running, and one of those is healthy while the other is how a wedged
+    job looks from outside. Labelling the pair with either token would state something the code
+    does not know. They can be split into two ifs, which changes nothing about WHETHER a job
+    skips, but that is a deliberate edit to job control flow and belongs on its own card rather
+    than folded into a labelling pass. The remaining two do not sit directly under an `if` at all.
 
     HOW THE 63 WERE PICKED — structurally, never by eye. An ast walk finds the nearest enclosing
     `if` for each `return`, so the token comes from the guard that actually produced the skip and
@@ -161,6 +165,13 @@ class _Skip:
     # from market_closed, which is about the MARKET's state rather than the job's own window.
     @staticmethod
     def outside_window():  return _Skip("outside_window", _SKIP_EXPECTED)
+
+    # cc#1256: the market session is LIVE and this job deliberately stays parked until it is not.
+    # The backfills and the OI probe are built to run off-market so they never compete with the
+    # live 5-min path, so declining during the session is the job doing exactly its job. EXPECTED
+    # for that reason, and NOT market_closed — it is the mirror image of it.
+    @staticmethod
+    def session_live():    return _Skip("session_live", _SKIP_EXPECTED)
 
     @staticmethod
     def disabled():        return _Skip("disabled", _SKIP_EXPECTED)
@@ -781,7 +792,7 @@ def _bg_signal_writer():
             # cc#1194: was a bare `return`, which stamped last_status='ok' on a tick that did
             # nothing because the previous one was still in flight. Same class as the _SKIPPED
             # sentinel it now uses — a no-op tick must not report success.
-            return _SKIPPED
+            return _Skip.already_running()
         # exceeded timeout → previous tick is hung; abandon it and start fresh
         _log_alert("signal_writer_timeout",
                    f"previous tick hung >{SIGNAL_WRITER_TIMEOUT} (since {_signal_writer_started_at}) — starting fresh")
@@ -817,7 +828,7 @@ def _bg_signal_writer():
         if isinstance(r, dict) and r.get("skipped"):
             _why = r["skipped"]
             if _why == "nontrading_day":
-                return _SKIPPED
+                return _Skip.not_trading_day()
             return _Empty(
                 "wrote 0 rows on a trading day (%s) — v8_metrics, v8_qualified, "
                 "v8_funnel_counts and adr_intraday all skipped this tick" % _why)
@@ -971,7 +982,7 @@ def _bg_v8_paper_exit_eod():
                 cur.execute("SELECT MAX(price_date) FROM raw_prices")
                 d = cur.fetchone()[0]
             if d is None:
-                return _SKIPPED
+                return _Skip.precondition_missing('no raw_prices session yet')
             res = v8_paper.run_paper_exits(conn, target_date=d, mode="eod")
         _v8_paper_exit_eod_ran = today
         with _conn() as _c:   # cc#255: write a ran-ok health row regardless of close count
@@ -1040,7 +1051,7 @@ def _bg_pcr_intraday():
                 return None                      # real work landed — 'ok' is the truth
             now = _ist_now()
             if not (_is_trading_day(now.date()) and _is_market_hours(now)):
-                return _SKIPPED
+                return _Skip.market_closed()
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM pcr_intraday WHERE ts::date = %s", (now.date(),))
                 today_rows = cur.fetchone()[0] or 0
@@ -1557,7 +1568,7 @@ def _bg_gate_rebalance():
             _log_alert("gate_rebalance_stale_mood",
                        f"skipped 15:20 gate rebalance — adr_intraday stale "
                        f"(last={last_ts}, age={round(age_min,1) if age_min is not None else 'n/a'} min)")
-            return _SKIPPED
+            return _Skip.precondition_missing('adr_intraday stale')
 
         import v8_endpoints, v8_paper
         mood = v8_endpoints.market_mood()
@@ -1565,7 +1576,7 @@ def _bg_gate_rebalance():
         if buy_slots is None or sell_slots is None:
             _log_alert("gate_rebalance_no_mood",
                        f"skipped 15:20 gate rebalance — mood missing slots (mood={mood.get('mood')})")
-            return _SKIPPED
+            return _Skip.precondition_missing('mood missing slots')
 
         with _conn() as conn:
             res = v8_paper.run_gate_rebalance(conn, buy_slots, sell_slots)
@@ -2151,7 +2162,7 @@ def _bg_ops_polish_detector(scheduled=False):
         except Exception:
             on_demand = False
         if not on_demand:
-            return _SKIPPED
+            return _Skip.gate_closed('not on-demand')
     else:
         if _ops_polish_detect_ran_today == today:
             return _Skip.already_ran()
@@ -2307,14 +2318,14 @@ def _bg_gvm_backfill():
         return
     now = _ist_now()
     if _is_session_live(now):   # cc#855: never compete with the live 5-min path (to 15:40)
-        return _SKIPPED
+        return _Skip.session_live()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT value FROM app_config WHERE key='gvm_backfill_run'")
             r = cur.fetchone()
         flag = (r[0] if r else None)
         if flag == "done":
-            return _SKIPPED
+            return _Skip.gate_closed('already done')
         _gvm_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -2355,15 +2366,15 @@ def _bg_gvm_backfill_ext():
         return
     now = _ist_now()
     if _is_session_live(now):   # cc#855: off-market means past 15:40 now, not 15:30
-        return _SKIPPED
+        return _Skip.session_live()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT key, value FROM app_config WHERE key IN ('gvm_backfill_run','gvm_backfill_ext_run')")
             flags = {k: v for k, v in cur.fetchall()}
         if flags.get('gvm_backfill_run') != 'done':   # sequence: main run first
-            return _SKIPPED
+            return _Skip.gate_closed('main run not done')
         if flags.get('gvm_backfill_ext_run') == 'done':
-            return _SKIPPED
+            return _Skip.gate_closed('already done')
         _gvm_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -2404,14 +2415,14 @@ def _bg_bt14_fut_oi():
     if _bt14_fut_oi_running:
         return
     if _is_session_live(_ist_now()):   # cc#855: futures tick to 15:40 — stay parked till then
-        return _SKIPPED
+        return _Skip.session_live()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT value FROM app_config WHERE key='bt14_fut_oi_run'")
             r = cur.fetchone()
         flag = (r[0] if r else None)
         if flag not in ("probe", "backfill"):
-            return _SKIPPED
+            return _Skip.gate_closed('flag not set to probe or backfill')
         _bt14_fut_oi_running = True
         import bt14_fut_oi
         if flag == "probe":
@@ -2424,7 +2435,7 @@ def _bg_bt14_fut_oi():
                             "FROM ops_log WHERE title='BT14_FUT_OI_PROBE'")
                 age = cur.fetchone()[0]
             if age is not None and age < 1800:
-                return _SKIPPED
+                return _Skip.already_ran()
             res = bt14_fut_oi.run_probe()
             verdict = res.get("verdict")
             log.info(f"bt14_fut_oi probe: verdict={verdict}")
@@ -2470,7 +2481,7 @@ def _bg_yahoo_new_listings():
             cur.execute("SELECT value FROM app_config WHERE key='yahoo_new_listings_run'")
             r = cur.fetchone()
         if (r[0] if r else None) != "pending":
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _yahoo_new_listings_running = True
         import json as _json
         with _conn() as conn, conn.cursor() as cur:
@@ -2536,7 +2547,7 @@ def _bg_yahoo_symbol_resolve():
 
     nightly = (now.hour == 20 and now.minute < 10 and _yahoo_resolve_ran_day != today)
     if not armed and not nightly:
-        return _SKIPPED
+        return _Skip.gate_closed('not armed')
 
     _yahoo_resolve_running = True
     try:
@@ -2810,7 +2821,7 @@ def _bg_feed_deadman():
     global _deadman_last_alert
     now = _ist_now()
     if now.weekday() >= 5 or not _is_trading_day(now.date()):
-        return _SKIPPED
+        return _Skip.not_trading_day()
     # 09:45 floor, not 09:15: the first 5m bars need time to land, and a 30-min threshold at 09:20
     # would fire every single morning.
     if not (dt_time(9, 45) <= now.time() <= dt_time(15, 30)):
@@ -3516,7 +3527,7 @@ def _bg_mf_returns_backfill():
             cur.execute("SELECT value FROM app_config WHERE key='mf_returns_backfill_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _mf_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','running',NOW()) "
@@ -3551,7 +3562,7 @@ def _bg_mf_v15_wiring():
             cur.execute("SELECT value FROM app_config WHERE key='mf_v15_wiring_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _mf_wiring_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_v15_wiring_run','running',NOW()) "
@@ -3602,7 +3613,7 @@ def _bg_mf_weekly_manual():
             cur.execute("SELECT value FROM app_config WHERE key='mf_weekly_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _mf_weekly_manual_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','running',NOW()) "
@@ -3670,7 +3681,7 @@ def _bg_mf_mc_discover():
             cur.execute("SELECT value FROM app_config WHERE key='mf_mc_discover_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _mc_discover_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','running',NOW()) "
@@ -3718,7 +3729,7 @@ def _bg_mf_mc_oneshot():
             cur.execute("SELECT value FROM app_config WHERE key='mf_mc_oneshot_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         _mc_oneshot_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','running',NOW()) "
@@ -3788,7 +3799,7 @@ def _bg_ops_metrics_backfill():
     is_pending = (val == 'pending')
     is_stale_running = (val == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN)
     if not (is_run_now or is_pending or is_stale_running):
-        return _SKIPPED
+        return _Skip.precondition_missing('nothing queued')
     # window gate applies to the SCHEDULED path only (pending / stale-resume); run_now is clock-free.
     if not is_run_now and not (1 <= now_ist.hour < 6):
         return _SKIPPED
@@ -3850,7 +3861,7 @@ def _bg_ops_text_fetch():
     now_ist = datetime.now(IST)
     in_window = now_ist.hour >= 23 or now_ist.hour < 6
     if not in_window:
-        return _SKIPPED
+        return _Skip.outside_window()
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""SELECT value, EXTRACT(EPOCH FROM (NOW()-updated_at))/60.0
@@ -3860,7 +3871,7 @@ def _bg_ops_text_fetch():
         is_pending = r and r[0] == 'pending'
         is_stale_running = r and r[0] == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN
         if not (is_pending or is_stale_running):
-            return _SKIPPED
+            return _Skip.precondition_missing('nothing pending')
         if is_stale_running:
             log.warning(f"_bg_ops_text_fetch: flag stuck at 'running' for {r[1]:.0f} min -- "
                         f"treating as an orphaned run and resuming")
@@ -3983,7 +3994,7 @@ def _bg_result_analysis_weekly_sweep():
     if not (now.weekday() == 6 and now.hour == 5 and now.minute < 15):   # cc#622 C: Sun sweep 09:00 -> 05:00 (clear 06:00-09:10)
         return _Skip.outside_window()
     if _result_analysis_sweep_ran_on == now.date():
-        return _SKIPPED
+        return _Skip.already_ran()
     _result_analysis_sweep_ran_on = now.date()
     try:
         import result_analysis_gen
@@ -4083,13 +4094,13 @@ def _bg_v9_paper_monthly():
     today = now.date()
     first_td = _first_trading_day_of_month(today)
     if first_td != today:
-        return _SKIPPED
+        return _Skip.outside_window()
     if now.hour < 1 or (now.hour == 1 and now.minute < 50):
         return _Skip.outside_window()                      # at-or-AFTER 01:50, never exactly-at
     try:
         import v9_paper_engine
         if v9_paper_engine.ran_this_month(asof=today):
-            return _SKIPPED
+            return _Skip.already_ran()
         res = v9_paper_engine.run_monthly()
         log.info(f"_bg_v9_paper_monthly: {res}")
     except Exception as e:
@@ -4133,7 +4144,7 @@ def _bg_shareholding_quarterly():
     global _shareholding_q_running, _shareholding_q_ran_on
     now_ist = datetime.now(IST)
     if now_ist.month not in (1, 4, 7, 10) or now_ist.day < 25:
-        return _SKIPPED
+        return _Skip.outside_window()
     today = now_ist.date()
     if _shareholding_q_ran_on == today or _shareholding_q_running:
         return _SKIPPED
