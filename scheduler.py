@@ -2547,8 +2547,24 @@ def _bg_yahoo_symbol_resolve():
                 r2 = cur.fetchone()
                 syms = [x.strip().upper() for x in ((r2[0] if r2 else "") or "").replace(",", " ").split() if x.strip()]
     except Exception as e:
+        # cc#1270 · A FAILED READ IS NOT A SKIP. This handler returned the bare sentinel, so a
+        # config read that THREW was recorded as last_status='skipped' with no reason — a row that
+        # reads as a job which correctly chose not to work, when what actually happened is that it
+        # could not find out whether it was supposed to. Same class as the cc#1194 silent-ok: a
+        # status running ahead of what happened.
+        #
+        # RECORDED AS A CONDITIONAL SKIP, NOT RE-RAISED, and that is a deliberate choice between
+        # two honest options. Letting it propagate would stamp 'error', which is arguably the truer
+        # word — but it also starts a failure streak and wakes any restart ladder watching this
+        # job, and that is a real behaviour change on a job that has never once been seen to throw.
+        # CONDITIONAL puts it at AMBER with the reason printed, which is strictly better than the
+        # silent green-looking skip it replaces and escalates nothing. If the founder wants a
+        # failed read to go red, that is a one-word change from here.
+        #
+        # Verified one-off before choosing: an AST walk over every .py in the repo root and
+        # worker/ found exactly one Return-of-a-skip inside an ExceptHandler — this one.
         log.warning(f"yahoo_symbol_resolve flag read: {e}")
-        return _SKIPPED
+        return _Skip.precondition_missing("app_config read failed: %s" % str(e)[:80])
 
     nightly = (now.hour == 20 and now.minute < 10 and _yahoo_resolve_ran_day != today)
     if not armed and not nightly:
