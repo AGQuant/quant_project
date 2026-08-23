@@ -95,6 +95,20 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  white-space:nowrap;transform:translateX(-50%);pointer-events:none}
 .oiwall.cw{top:0;color:var(--heat)}
 .oiwall.pw{bottom:0;color:var(--volt)}
+/* cc#1261 · STRIKE LABELS UNDER THE BARS. The CALL WALL / PUT WALL tags above name WHICH bar
+   matters; these name WHAT IT IS, so the x-axis reads without hunting back to the readout line.
+   Same absolute positioning and the same (i+0.5)/count centring the wall tags use, so a number
+   sits on the column it belongs to rather than half a column off. Sparse by construction: only
+   the three strikes that carry meaning, deduped and thinned — see the builder. */
+.oixs{position:relative;height:12px;margin-top:var(--space-3)}
+.oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+ font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
+ pointer-events:none}
+.oix.pw{color:var(--volt)}                 /* the same colours the bars and wall tags already use, */
+.oix.cw{color:var(--heat)}                 /* so a label needs no legend to say what it names */
+.oix.mp{color:var(--amber)}
+.oix.lo{transform:none;left:0}             /* clamped: an edge strike cannot hang off the card */
+.oix.hi{transform:none;left:auto;right:0}
 .oird{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);margin-top:var(--space-10);
  line-height:1.6}
 .oird b{color:var(--chalk)}
@@ -476,19 +490,53 @@ function oiCard(name, oi, mp){
   var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
   if(cwI >= 0) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
   if(pwI >= 0) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
+  /* cc#1261 · the three strikes that carry meaning, printed under the bars they belong to.
+     TWO WAYS THIS GETS UGLY AND BOTH ARE HANDLED. The max pain strike is very often ALSO the call
+     or put wall, which would stack two labels on one column — so a strike already claimed is
+     skipped rather than drawn twice. And when two of the three sit on neighbouring columns the
+     numbers collide into an unreadable smear, so a label closer than 18% of the track to the one
+     before it is dropped. Fewer, legible labels beat three that overlap; the readout line below
+     still carries all three numbers, so nothing is lost by dropping one from the axis. */
+  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
+  var picked = [], xs = '';
+  [[pwI, 'pw'], [mpI, 'mp'], [cwI, 'cw']].forEach(function(p){
+    if(p[0] < 0) return;
+    var v = Number(rows[p[0]].strike);
+    for(var k = 0; k < picked.length; k++) if(picked[k].v === v) return;   /* same strike twice */
+    picked.push({ i: p[0], v: v, cls: p[1] });
+  });
+  picked.sort(function(a, b){ return a.i - b.i; });
+  var lastPct = null;
+  picked.forEach(function(q){
+    var pct = Number(colPct(q.i));
+    if(lastPct != null && Math.abs(pct - lastPct) < 18) return;            /* too close to read */
+    lastPct = pct;
+    var edge = pct < 8 ? ' lo' : (pct > 92 ? ' hi' : '');
+    var pos = edge ? '' : ' style="left:' + pct.toFixed(2) + '%"';
+    xs += '<span class="oix ' + q.cls + edge + '"' + pos + '>' + num(q.v) + '</span>';
+  });
+  xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
   var ao = chainAsOf(oi.chain_tick);
   var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
     + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(ao.txt) + '</span></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + xs
+    /* cc#1261 · NUMBERS ONLY, ONE LINE. The commentary sentence is gone and the <br> that split
+       the readout in two goes with it: the founder asked for the key numbers, not a paragraph
+       under them, and MP / spot / put wall / call wall / expiry is the whole of what he reads.
+       THE STALENESS SIGNAL DID NOT NEED BUILDING - the as-of stamp top-right already carries
+       .stale, and .asof.stale is already amber, so removing the sentence loses no information at
+       all. It was saying in a sentence what the stamp beside it was already saying in a colour,
+       and the sentence additionally hardcoded a date ("21-Aug has no rows at all") that would
+       have gone stale and started lying on its own. */
     + '<div class="oird">'
     + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
-    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span><br>'
-    + 'put wall <b class="num">' + num(putWall.strike) + '</b>'
+    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span>'
+    + ' · put wall <b class="num">' + num(putWall.strike) + '</b>'
     + ' · call wall <b class="num">' + num(callWall.strike) + '</b>'
     + ' · expiry <b>' + esc(oi.expiry || '—') + '</b>'
-    + (ao.stale ? '<br><span style="color:var(--amber)">Chain is older than the last session — 21-Aug has no rows at all.</span>' : '')
     + '</div></div></div>';
 }
 
