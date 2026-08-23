@@ -37,7 +37,18 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    off what adopted and leaves it on anything that has not. */
 .card{background:var(--panel);border:var(--bw-1) solid var(--edge);margin:0 var(--space-14) var(--space-12);padding:var(--space-16);position:relative;
  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
-.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:5px;border-radius:var(--radius-4);background:var(--rc,var(--amber))}
+/* cc#1234 · ONE SENTIMENT LINE, AND IT IS THICKER. Founder: "2 green lines not required, one
+   bigger green line is enough." 5px -> 8px, which is 1.6x and inside the 1.5-2x the card asks for.
+   The bar is absolutely positioned, so its width takes no layout space and nothing shifts.
+   WHAT THE SECOND LINE ACTUALLY WAS. The card describes it as a full-viewport-height rail on the
+   page edge. There is no such rule — I swept this page's own <style>, scorr_themes.css and
+   scorr_appshell.css and `.rail::before` is the ONLY left-edge bar any of them define, then
+   rendered the page and looked for any element narrower than 14px and taller than 300px: zero.
+   The two green lines are TWO CARDS both carrying .rail — MARKET READ and THE CLOSE OF THE READ —
+   sitting at the same left offset with a card between them, which on a scrolling phone reads as
+   one long rail broken by a gap. So the fix is to drop the second card's rail, not to hunt a
+   page-edge element that does not exist. */
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:var(--space-8);border-radius:var(--radius-4);background:var(--rc,var(--amber))}
 .chip{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px10);border:var(--bw-1) solid var(--edge);
  background:var(--hi);padding:var(--space-4) var(--space-9);display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 .w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
@@ -1216,7 +1227,11 @@ async function boot(){
   <div class="eyebrow">GLOBAL EVENTS</div>
   <div class="card slab">${newsRows(ge,'Global')}</div>
 
-  <div class="card slab rail" style="--rc:${railC}">
+  <!-- cc#1234: this card's own .rail is REMOVED — it was the second green line. The Market Read
+       card above keeps the single, thicker sentiment bar. Nothing else changes here: the verdict
+       text, the bias word and its colour are untouched, and the bar took no layout space, so the
+       content sits exactly where it did. -->
+  <div class="card slab">
     <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
