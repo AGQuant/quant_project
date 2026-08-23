@@ -627,8 +627,15 @@ def results_table():
     with _conn() as conn, conn.cursor() as cur:
         cov = coverage(cur)
         cells = _cells(cur)
+        # DATE %s IS A SYNTAX ERROR AND ONLY SHOWS UP AT RUN TIME. The DATE prefix form is a
+        # type-prefixed LITERAL — `DATE '2026-08-21'` — so it takes a quoted constant and nothing
+        # else. psycopg sends %s as a bind parameter, Postgres sees `DATE $1`, and it fails to
+        # parse. Nothing catches that before the query runs: the module imports fine, the scoring
+        # and the sweep both ran to completion (99,840 ticks, 4,988 trades), and the failure
+        # surfaced only when results_table() was finally called on real data. A cast does the same
+        # job and accepts a parameter.
         cur.execute("""SELECT threshold, hold_days, count(*) FROM tc_score_replay_trades
-                       WHERE entry_ts::date > (DATE %s - hold_days + 1)
+                       WHERE entry_ts::date > (%s::date - hold_days + 1)
                        GROUP BY threshold, hold_days""", (SESSIONS[-1],))
         clamped = {(t, h): n for t, h, n in cur.fetchall()}
 
