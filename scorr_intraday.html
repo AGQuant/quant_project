@@ -131,11 +131,17 @@
     <div class="live-pill"><span class="live-dot"></span><span id="liveTs">—</span></div>
   </header>
 
+  <!-- cc#1229: the tiles are SCAN-SHAPED now, and that is a deliberate change of meaning.
+       The old four came from the TC13 PAPER BOOK - open holds, closed trades, win rate, net points.
+       The score100 gated engine this page now reads is a SCREENER: it has no book, no entries, no
+       exits and no closed trades. Keeping a Win Rate tile would have meant computing a rate from
+       nothing and printing it next to real scan counts, which is the one thing a surface must
+       never do. So the tiles report what a screener actually knows. -->
   <div class="cards" id="summaryCards">
-    <div class="card"><div class="k">Open Positions</div><div class="v" id="sOpen">—</div></div>
-    <div class="card"><div class="k">Trades Today</div><div class="v" id="sTrades">—</div></div>
-    <div class="card"><div class="k">Win Rate</div><div class="v pos" id="sWR">—</div><div class="vs" id="sWins">—</div></div>
-    <div class="card"><div class="k">Net Pts</div><div class="v" id="sNet">—</div></div>
+    <div class="card"><div class="k">Scanned</div><div class="v" id="sScanned">—</div><div class="vs" id="sUniverse">—</div></div>
+    <div class="card"><div class="k">Qualified</div><div class="v pos" id="sQual">—</div><div class="vs" id="sQualOf">—</div></div>
+    <div class="card"><div class="k">Buy Qualified</div><div class="v" id="sBuyQ">—</div></div>
+    <div class="card"><div class="k">Sell Qualified</div><div class="v" id="sSellQ">—</div></div>
   </div>
 
   <div class="tabs" style="align-items:center">
@@ -192,30 +198,31 @@ function tick(){
 }
 setInterval(tick, 1000); tick();
 
-// cc#465: modal content is FETCHED from /api/scanners/tc/spec — generated server-side from
-// the engine's own live constants (tc_scanner_endpoints.py), so this can never drift from
-// the actual thresholds. No hand-typed numbers here.
+// cc#465, re-pointed by cc#1229: modal and header content is FETCHED, never typed, so it cannot
+// drift from the thresholds the page actually applies. The SOURCE moved with the engine — it was
+// /api/scanners/tc/spec while TC13 ran this page; it is now /api/tc-scanner/config, the one
+// TC_SCANNER_CONFIG dict that /check reads too. The rule is the same: no hand-typed numbers here.
 let tcSpecCache = null;
-function _checkRow(c){
-  return '<div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid var(--line)">'
-    +'<span style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;color:var(--cyan);flex:none;width:30px">'+c.id+'</span>'
-    +'<span><b>'+c.label+'</b> — '+c.rule+(c.note?'<div style="color:var(--dim);font-size:11px;margin-top:2px">'+c.note+'</div>':'')+'</span></div>';
+/* cc#1229: the modal renders the config's OWN sheet - the same lines /check shows - instead of
+   the TC13 check list. tc_scanner_config.rules_sheet() builds those lines from the config dict,
+   so this function formats and never states. */
+function renderInfoBody(j){
+  const sh = (j && j.sheet) || null;
+  if(!sh) return '<span style="color:var(--red)">Rules unavailable</span>';
+  return sh.lines.map(function(L){
+      return '<div style="margin-bottom:11px">'
+        + (L.k ? '<div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);margin-bottom:4px">'+esc(L.k)+'</div>' : '')
+        + '<div style="font-size:12.5px;line-height:1.55;color:var(--txt)">'+esc(L.v)+'</div></div>';
+    }).join('')
+    + '<div style="margin-top:12px;color:var(--dim);font-size:11px">'+esc(sh.footer)+'</div>';
 }
-function renderInfoBody(s){
-  return 'Every '+s.cadence_min+' minutes during market hours, the full '+s.universe+' is scored '
-    +'against a '+s.total_checks+'-check binary bucket, independently for BUY and SELL.'
-    +'<br><br><b>Qualify:</b> '+s.qualify_rule+'.<br><b>NULL handling:</b> '+s.null_handling+'.'
-    +'<br><b>Latch:</b> '+s.latch_rule+'.<br><b>Entry:</b> '+s.entry_definition+'.'
-    +'<br><b>Target / SL:</b> +'+s.target_pct+'% / -'+s.sl_pct+'% from entry. '+s.target_sl_note+'.'
-    +'<br><br><div style="font-weight:700;color:var(--grn);margin-bottom:2px">BUY checks</div>'
-    +(s.buy_checks||[]).map(_checkRow).join('')
-    +'<br><br><div style="font-weight:700;color:var(--red);margin-bottom:2px">SELL checks</div>'
-    +(s.sell_checks||[]).map(_checkRow).join('')
-    +'<div style="margin-top:12px;color:var(--dim);font-size:11px">Screener only — no paper engine, no auto-exits, not a live trading signal.</div>';
-}
+
+function esc(x){ return String(x==null?'':x)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 async function openInfo(){
   document.getElementById('infoOv').classList.add('open');
-  document.getElementById('infoTitle').textContent = 'TC Scanner · how it works';
+  document.getElementById('infoTitle').textContent = 'How these signals are picked';
   const body=document.getElementById('infoBody');
   if(tcSpecCache){ body.innerHTML=renderInfoBody(tcSpecCache); return; }
   body.innerHTML='Loading…';
@@ -228,11 +235,6 @@ function closeInfo(){document.getElementById('infoOv').classList.remove('open');
 function num(v, d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toFixed(d); }
 function pct(v, d=2){ if(v==null||isNaN(v)) return '—'; const n=Number(v); return (n>=0?'+':'')+n.toFixed(d)+'%'; }
 function cls(v){ return Number(v)>=0 ? 'pos' : 'neg'; }
-function exitBadge(reason){
-  if(reason==='TARGET') return `<span class="badge b-target">TARGET</span>`;
-  if(reason==='SL') return `<span class="badge b-sl">SL</span>`;
-  return `<span class="badge b-open">OPEN</span>`;
-}
 
 /* cc#1226: two tabs. ORB AG and Result Radar are gone from the STRIP only - their endpoints,
    tables and scheduler jobs are untouched, and loadOrb/loadRadar still run below so both
@@ -248,135 +250,170 @@ function selectTab(side){
   paintSpecText();
 }
 
-/* cc#1226: the header sub-line and the footer legend are RENDERED FROM /api/scanners/tc/spec,
-   which cc#465 already generates from the engine's own live constants (TOTAL_CHECKS, N_MINUS,
-   TARGET_PCT, SL_PCT in tc_scanner_endpoints.py). They used to be hand-typed prose repeating the
-   check count and the pass bar as literals - true today, but a second copy of numbers that
-   live in the engine, and a second copy is what drifts. Now there is one copy. (The old wording
-   named the check count, the tolerance and the pass bar as literals; those figures now arrive
-   from the endpoint, so this file states none of them.)
+/* cc#1226 established the mechanism and cc#1229 re-pointed its source: the header sub-line and
+   the footer legend are RENDERED, never typed. They were hand-written prose repeating the check
+   count and the pass bar as literals — true at the time, but a second copy of numbers that lived
+   in the engine, and a second copy is what drifts.
 
-   THE PLACEHOLDERS CARRY NO NUMBERS ON PURPOSE. If the spec fetch fails, the page shows what it
-   still knows to be true and nothing more - it never leaves a typed figure on screen claiming to
-   be the engine's. */
+   The engine changed under this page, so the source changed with it. cc#1226 read the TC13 spec
+   endpoint; cc#1229 reads /api/tc-scanner/config. One copy either way, which is the whole point of
+   doing it this way rather than editing the sentence each time the config moves. */
+/* cc#1229: the header sub-line and footer legend are RENDERED FROM /api/tc-scanner/config -
+   the single TC_SCANNER_CONFIG dict, the same one /check reads. cc#1226 pointed this at the TC13
+   spec endpoint because TC13 was the engine; the engine changed, so the source changed with it.
+   The MECHANISM is unchanged and that is the point: no number is typed into this file, so the
+   text cannot drift from the config the page is actually applying.
+
+   PLACEHOLDERS STILL CARRY NO NUMBERS. A failed fetch leaves only what the page can back up. */
 function paintSpecText(){
-  const s = tcSpecCache; if(!s) return;
+  const j = tcSpecCache; if(!j || !j.config) return;
+  const c = j.config, t = c.score_thresholds || {};
+  const bars = (j.buckets||Object.keys(t)).map(b => b + ' ' + t[b]).join(' · ');
   const tag = document.getElementById('hdrTag');
-  if(tag) tag.textContent = s.total_checks + '-Check Binary · n-' +
-      (s.qualify_rule && s.qualify_rule.match(/evaluated - (\d+)/) ? s.qualify_rule.match(/evaluated - (\d+)/)[1] : '?') +
-      ' · ' + s.cadence_min + '-min · Full Futures Universe';
+  if (tag) tag.textContent = 'Score /100 · Gated · Config ' + c.version + ' · Full Futures Universe';
   const leg = document.getElementById('footerLegend');
-  if(leg) leg.textContent = 'TC Scanner · ' + s.universe + ' · ' + s.total_checks +
-      '-check binary bucket, ' + s.qualify_rule + ' · target +' + s.target_pct + '% / SL -' +
-      s.sl_pct + '% · latch-once-per-symbol-per-day · screener only, not a live signal';
+  if (leg) leg.textContent = 'TC Scanner · full futures universe · score /100 per bucket, bars ' +
+      bars + ' · entry gates on sector and monthly RSI · max ' + (c.caps||{}).per_bucket_per_day +
+      ' per bucket per day · target +' + (c.exit||{}).target_pct + '% / SL ' + (c.exit||{}).stop_pct +
+      '% · screener only, not a live signal';
 }
 
 async function loadSpec(){
   if(tcSpecCache){ paintSpecText(); return tcSpecCache; }
   try{
-    const r = await fetchWithTimeout('/api/scanners/tc/spec');
+    const r = await fetchWithTimeout('/api/tc-scanner/config');
     tcSpecCache = await r.json();
     paintSpecText();
   }catch(e){ /* placeholders stay; they assert nothing the page cannot back up */ }
   return tcSpecCache;
 }
 
+/* ══ cc#1229 · THE PAGE READS THE SCORE100 GATED ENGINE ════════════════════════════════════════
+   Founder option B (session_log 29504). /intraday stops presenting the TC13 binary bucket and
+   becomes a SECOND SURFACE of the engine /check already runs.
+
+   NO SCORING LIVES HERE. Every number on this page arrives from GET /api/trade-check/v4/scan -
+   the same endpoint /check Future Scans calls, unchanged. score100, the per-bucket bar, the gate
+   results, the rank in bucket and would_qualify are all computed server-side in tc_v4_scan.py via
+   tc_scanner_config.annotate(). This file formats them and does no arithmetic of its own. That is
+   the "one engine, one truth, no fork" the card asks for, and it is why the same symbol must read
+   identically on both pages: there is only one place the number can come from.
+
+   QUALIFIED MEANS BOTH, and the row says which half failed. A symbol qualifies only when it
+   clears its bucket's score bar AND passes all three entry gates for its side AND sits inside the
+   per-bucket daily cap. Anything else renders in NEAR MISS with the failing condition named, so a
+   row that just missed is readable rather than merely absent. */
+
 function renderSummary(){
-  if(!data) return;
-  const bS = data.buy_stats||{}, sS = data.sell_stats||{};
-  const open = (bS.open||0)+(sS.open||0);
-  const closed = (bS.closed||0)+(sS.closed||0);
-  const wins = (bS.wins||0)+(sS.wins||0);
-  const wr = closed ? (wins/closed*100).toFixed(1) : null;
-  const net = (bS.net_pts_pct||0)+(sS.net_pts_pct||0);
-  document.getElementById('sOpen').textContent = open;
-  document.getElementById('sTrades').textContent = closed;
-  document.getElementById('sWR').textContent = wr!=null ? wr+'%' : '—';
-  document.getElementById('sWR').className = 'v ' + (wr!=null&&Number(wr)>=50?'pos':'neg');
-  document.getElementById('sWins').textContent = closed ? `${wins}W / ${closed-wins}L` : '—';
-  document.getElementById('sNet').textContent = closed ? pct(net) : '—';
-  document.getElementById('sNet').className = 'v ' + (closed?cls(net):'');
-  document.getElementById('liveTs').textContent = data.date || '—';
+  const cfg = (data && data.tc_config) || null;
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  if (!cfg || cfg.error) {
+    ['sScanned','sQual','sBuyQ','sSellQ'].forEach(id => set(id, '—'));
+    set('sUniverse', cfg && cfg.error ? 'annotation unavailable' : '—');
+    set('sQualOf', '—');
+    return;
+  }
+  const bb = cfg.by_bucket || {};
+  const q = b => ((bb[b] || {}).would_qualify || 0);
+  set('sScanned', cfg.total);
+  set('sUniverse', 'of ' + (data.universe || '—') + ' in universe');
+  set('sQual', cfg.would_qualify);
+  set('sQualOf', 'of ' + cfg.total + ' scored');
+  set('sBuyQ', q('BUY-MOM') + q('BUY-REV'));
+  set('sSellQ', q('SELL-MOM') + q('SELL-REV'));
+  set('liveTs', data.as_of || data.computed_at || '—');
+}
+
+const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI' };
+
+function gateStrip(x){
+  const g = x && x.gate;
+  if (!g || !g.gates || !g.gates.length) return '<span style="color:var(--dim)">—</span>';
+  return g.gates.map(function(one){
+    const col = one.pass === true ? 'var(--grn)' : (one.pass === false ? 'var(--red)' : 'var(--dim)');
+    const sh  = GATE_SHORT[one.key] || String(one.key || '?').slice(0,3).toUpperCase();
+    return '<span title="' + esc(one.text) + '" style="display:inline-block;min-width:20px;padding:0 3px;'
+         + 'margin-right:3px;border-radius:4px;border:1px solid var(--line2);font-size:8.5px;'
+         + 'font-weight:800;color:' + col + '">' + sh + '</span>';
+  }).join('');
+}
+
+/* The reason a row is not qualified, in the order the engine applies the tests. Reported from the
+   server's own flags - never re-derived here, or the page could disagree with the engine about a
+   row while showing the engine's own numbers beside it. */
+function missReason(x){
+  if (x.bar_met === false) return 'score ' + Number(x.best_score100).toFixed(1) + ' under bar ' + x.bar;
+  if (x.bar_met === null)  return 'no score';
+  const g = x.gate || {};
+  if (g.passed === false)  return 'gate: ' + (g.failing || []).join(', ');
+  if (g.passed === null)   return 'gate not measured';
+  if (x.within_cap === false) return 'rank ' + x.rank_in_bucket + ', beyond the daily cap';
+  return 'not qualified';
+}
+
+function scoreCell(x){
+  if (x.best_score100 == null) return '<span style="color:var(--dim)">—</span>';
+  const col = x.bar_met === true ? 'var(--grn)' : (x.bar_met === false ? 'var(--mut)' : 'var(--dim)');
+  return '<b style="color:' + col + '">' + Number(x.best_score100).toFixed(1) + '</b>'
+       + '<span style="color:var(--dim);font-size:10px"> / ' + (x.bar != null ? x.bar : '—') + '</span>';
 }
 
 function renderPanel(side){
-  if(!data) return '<div class="empty">No data</div>';
-  const rows = side==='BUY' ? (data.buy||[]) : (data.sell||[]);
-  const stats = side==='BUY' ? (data.buy_stats||{}) : (data.sell_stats||{});
-  const isSell = side==='SELL';
+  if (!data) return '<div class="empty">No data</div>';
+  const all = (data.results || []).filter(r => String(r.best_label || '').indexOf(side) === 0);
+  const qual = all.filter(r => r.would_qualify);
+  const miss = all.filter(r => !r.would_qualify)
+                  .sort((a,b) => (b.best_score100 || 0) - (a.best_score100 || 0)).slice(0, 25);
 
-  const summary = `
-    <div class="ptitle">${side} &middot; TC13 <span class="ct">${rows.length} qualified today &middot; WR ${stats.wr_pct!=null?stats.wr_pct+'%':'—'} &middot; net ${stats.net_pts_pct!=null?pct(stats.net_pts_pct):'—'}</span></div>`;
+  const head = '<div class="ptitle">' + side + ' &middot; score /100 gated '
+    + '<span class="ct">' + qual.length + ' qualified &middot; ' + all.length + ' scored on this side</span></div>';
 
-  const open = rows.filter(r=>r.exit_reason==='OPEN');
-  const openRows = open.map(p=>{
-    // cc#463 convention: side ALWAYS read from the row's own data, never assumed from the tab.
-    const sideCls = p.side==='SELL' ? 'b-sell':'b-buy';
-    return `<tr>
-    <td class="sym">${p.symbol}</td>
-    <td><span class="badge ${sideCls}">${p.side}</span></td>
-    <td>${p.score}/${p.evaluated}</td>
-    <td>${num(p.entry_price)}</td>
-    <td>${num(p.cmp)}</td>
-    <td class="${p.pnl_pct!=null?cls(p.pnl_pct):''}">${pct(p.pnl_pct)}</td>
-    <td class="pos">${num(p.target)}</td>
-    <td class="neg">${num(p.sl)}</td>
-  </tr>`;}).join('');
-  const openMob = open.map(p=>`<div class="mob-card">
-    <div class="mob-card-head"><span class="mob-sym">${p.symbol}</span><span class="badge ${p.side==='SELL'?'b-sell':'b-buy'}">${p.side} ${p.score}/${p.evaluated}</span></div>
-    <div class="mob-chips">
-      <span class="mob-chip">Entry ${num(p.entry_price)}</span>
-      <span class="mob-chip">CMP ${num(p.cmp)}</span>
-      <span class="mob-chip ${p.pnl_pct!=null?cls(p.pnl_pct):''}">${pct(p.pnl_pct)}</span>
-      <span class="mob-chip" style="color:var(--grn)">Tgt ${num(p.target)}</span>
-      <span class="mob-chip" style="color:var(--red)">SL ${num(p.sl)}</span>
-    </div></div>`).join('');
-  const openSection = `
-    <div class="ptitle" style="margin-top:18px">Open Holds <span class="ct">${open.length}</span></div>
-    <div class="scroll desktop-tbl">
-      <table><thead><tr>
-        <th>Symbol</th><th>Side</th><th>Score</th><th>Entry</th><th>CMP</th><th>P&amp;L%</th><th>Target</th><th>Stop</th>
-      </tr></thead><tbody>
-        ${openRows||`<tr><td colspan="8" class="empty">No open ${side} holds &middot; scans every 15 min, market hours</td></tr>`}
-      </tbody></table>
-    </div>
-    <div class="mob-cards">${open.length?openMob:'<div class="empty">No open holds</div>'}</div>`;
+  const row = x => '<tr>'
+    + '<td class="sym">' + esc(x.symbol) + '</td>'
+    + '<td><span class="badge ' + (side === 'SELL' ? 'b-sell' : 'b-buy') + '">' + esc(x.best_label) + '</span></td>'
+    + '<td>' + scoreCell(x) + '</td>'
+    + '<td>' + gateStrip(x) + '</td>'
+    + '<td>' + (x.rank_in_bucket != null ? '#' + x.rank_in_bucket : '—') + '</td>'
+    + '<td>' + num(x.cmp) + '</td>'
+    + '<td class="' + (x.day_chg != null ? cls(x.day_chg) : '') + '">' + pct(x.day_chg) + '</td>'
+    + '<td style="font-size:11px;color:var(--dim)">' + esc(x.segment || '—') + '</td>'
+    + '</tr>';
 
-  const closed = rows.filter(r=>r.exit_reason!=='OPEN');
-  const closedRows = closed.map(t=>{
-    const sideCls = t.side==='SELL' ? 'b-sell':'b-buy';
-    return `<tr class="${(t.pnl_pct||0)>0?'row-win':(t.pnl_pct||0)<0?'row-loss':''}">
-    <td class="sym">${t.symbol}</td>
-    <td><span class="badge ${sideCls}">${t.side}</span></td>
-    <td>${num(t.entry_price)}</td>
-    <td>${num(t.exit_price)}</td>
-    <td class="${t.pnl_pct!=null?cls(t.pnl_pct):''}">${pct(t.pnl_pct)}</td>
-    <td>${exitBadge(t.exit_reason)}</td>
-    <td style="font-size:11px;color:var(--dim)">${t.exit_ts?t.exit_ts.slice(11,16):''}</td>
-  </tr>`;}).join('');
-  const closedMob = closed.map(t=>`<div class="mob-card">
-    <div class="mob-card-head">
-      <span class="mob-sym">${t.symbol}</span>
-      <div style="display:flex;gap:6px">${exitBadge(t.exit_reason)}</div>
-    </div>
-    <div class="mob-chips">
-      <span class="mob-chip">In ${num(t.entry_price)}</span>
-      <span class="mob-chip">Out ${num(t.exit_price)}</span>
-      <span class="mob-chip ${t.pnl_pct!=null?cls(t.pnl_pct):''}">${pct(t.pnl_pct)}</span>
-      <span class="mob-chip" style="color:var(--dim)">${t.exit_ts?t.exit_ts.slice(11,16):''}</span>
-    </div></div>`).join('');
-  const closedSection = `
-    <div class="ptitle" style="margin-top:18px">Closed &middot; Today <span class="ct">${closed.length}</span></div>
-    <div class="scroll desktop-tbl">
-      <table><thead><tr>
-        <th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>P&amp;L%</th><th>Result</th><th>Time</th>
-      </tr></thead><tbody>
-        ${closedRows||`<tr><td colspan="7" class="empty">No closed holds today</td></tr>`}
-      </tbody></table>
-    </div>
-    <div class="mob-cards">${closed.length?closedMob:'<div class="empty">No closed holds today</div>'}</div>`;
+  const missRow = x => '<tr>'
+    + '<td class="sym">' + esc(x.symbol) + '</td>'
+    + '<td><span class="badge ' + (side === 'SELL' ? 'b-sell' : 'b-buy') + '">' + esc(x.best_label) + '</span></td>'
+    + '<td>' + scoreCell(x) + '</td>'
+    + '<td>' + gateStrip(x) + '</td>'
+    + '<td colspan="4" style="font-size:11px;color:var(--dim)">' + esc(missReason(x)) + '</td>'
+    + '</tr>';
 
-  return summary + openSection + closedSection;
+  const qualSection = '<div class="scroll desktop-tbl"><table><thead><tr>'
+    + '<th>Symbol</th><th>Bucket</th><th>Score / bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th>'
+    + '</tr></thead><tbody>'
+    + (qual.map(row).join('') || '<tr><td colspan="8" class="empty">No ' + side
+       + ' signal clears both its score bar and its gates right now</td></tr>')
+    + '</tbody></table></div>';
+
+  const missSection = '<div class="ptitle" style="margin-top:18px">Near miss <span class="ct">'
+    + miss.length + ' shown, strongest first</span></div>'
+    + '<div class="scroll desktop-tbl"><table><thead><tr>'
+    + '<th>Symbol</th><th>Bucket</th><th>Score / bar</th><th>Gates</th><th>Why not</th>'
+    + '</tr></thead><tbody>'
+    + (miss.map(missRow).join('') || '<tr><td colspan="5" class="empty">Nothing scored on this side</td></tr>')
+    + '</tbody></table></div>';
+
+  const mob = qual.map(x => '<div class="mob-card">'
+    + '<div class="mob-card-head"><span class="mob-sym">' + esc(x.symbol) + '</span>'
+    + '<span class="badge ' + (side === 'SELL' ? 'b-sell' : 'b-buy') + '">' + esc(x.best_label) + '</span></div>'
+    + '<div class="mob-chips"><span class="mob-chip">' + scoreCell(x) + '</span>'
+    + '<span class="mob-chip">' + gateStrip(x) + '</span>'
+    + '<span class="mob-chip">CMP ' + num(x.cmp) + '</span>'
+    + '<span class="mob-chip ' + (x.day_chg != null ? cls(x.day_chg) : '') + '">' + pct(x.day_chg) + '</span>'
+    + '</div></div>').join('');
+
+  return head + qualSection
+       + '<div class="mob-cards">' + (qual.length ? mob : '<div class="empty">No qualified ' + side + ' signal</div>') + '</div>'
+       + missSection;
 }
 
 function render(){
@@ -395,7 +432,12 @@ async function load(silent){
     });
   }
   try{
-    const r = await fetchWithTimeout('/api/scanners/tc/holds');
+    /* cc#1229: THE SAME ENDPOINT /check Future Scans calls, unextended. Everything this page
+       shows - score100, the bucket bar, the gate results, rank in bucket, would_qualify - is
+       computed there by tc_scanner_config.annotate(). Pointing a second surface at the identical
+       call is what makes "same symbol, same number on both pages" true by construction rather
+       than by a check somebody has to remember to run. */
+    const r = await fetchWithTimeout('/api/trade-check/v4/scan?side=ALL&limit=250');
     if(!r.ok){ if(!silent) console.error('TC Scanner', r.status); return; }
     data = await r.json();
     render();
