@@ -85,7 +85,9 @@ def _day_return(cur, sym):
     if not rows:
         return None, "no_eod_closes"
     last_close, last_date = _f(rows[0][0]), rows[0][1]
-    cur.execute("""SELECT price, updated_at FROM cmp_prices WHERE symbol=%s
+    # column is `cmp` (checked information_schema before the fix — `price` raised on every
+    # evaluation and would have killed each rules run at the first entry candidate)
+    cur.execute("""SELECT cmp, updated_at FROM cmp_prices WHERE symbol=%s
                    ORDER BY updated_at DESC LIMIT 1""", (sym,))
     c = cur.fetchone()
     if c and c[0] is not None and c[1] is not None and c[1].date() > last_date:
