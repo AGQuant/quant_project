@@ -63,8 +63,13 @@
 </head>
 <body>
 
+<!-- cc#1277 scope 1-2: the nav placeholder was INSIDE .wrap{max-width:1240px;padding:16px}, the
+     only page reviewed this session that boxed it. pwa.js's .scorr-cnav gives every link
+     flex-shrink:1 with nowrap text, so in a 1208px box the items compress and their text paints
+     over the neighbour ("Adaptive DashboardOMax", "Fable Roon"). Every working page ships the
+     placeholder directly under <body> at full viewport width — matched here, nothing invented. -->
+<div id="scorr-nav"></div>
 <div class="wrap">
-  <div id="scorr-nav"></div>
   <h1>Wall of Trades</h1>
   <div class="sub">
     Every entry and every exit, newest first, <b>since 10 Aug 2026</b> — the four live engines:
@@ -102,7 +107,12 @@
     * V14's P&L is a PERCENT and its table has no rupee column, so its exits leave the P&L cell
       empty and carry the labelled "% net" in Detail. A percent in a rupee column is a false
       number, and this table has a rupee column. */
-var STATE = { events: [], counts: {}, total: null, filter: 'ALL', instruments: ['EQUITY','FUTURES','OPTIONS'] };
+/* cc#1277: STATE.event is the ENTRY/EXIT display filter. It is CLIENT-SIDE ONLY — /api/tradewall
+   has no event param and the page's own contract says it computes nothing, so this filters what
+   is already loaded rather than forking the query. ENTRY is the fresh-load default (founder
+   ask); an explicit EXIT selection survives instrument-tab switches because pick() never
+   touches it. */
+var STATE = { events: [], counts: {}, total: null, filter: 'ALL', event: 'ENTRY', instruments: ['EQUITY','FUTURES','OPTIONS'] };
 var PAGE  = { cursor: null, more: true, busy: false };
 var LIMIT = 100;
 
@@ -160,11 +170,21 @@ function tabsHtml(){
   STATE.instruments.forEach(function(k){
     defs.push({k:k, label: k.charAt(0) + k.slice(1).toLowerCase(), n: (STATE.counts || {})[k]});
   });
-  return defs.map(function(d){
-    /* whole-wall counts from the server, never a count of what happens to be loaded */
+  var h = defs.map(function(d){
+    /* whole-wall counts from the server, never a count of what happens to be loaded.
+       cc#1277 scope 5, stated: these stay TOTAL counts (entries + exits combined) whichever
+       Entry/Exit button is active — the number a tab shows never jumps on a toggle. */
     return '<button class="tab' + (d.k === STATE.filter ? ' on' : '') + '" onclick="pick(\'' + d.k + '\')">'
       + esc(d.label) + (d.n == null ? '' : ' <span class="n">' + d.n + '</span>') + '</button>';
   }).join('');
+  /* cc#1277 scope 3: the EVENT dimension, same row, same tab grammar, after a thin divider.
+     Filters by the ENTRY/EXIT pill each row already carries — not a new instrument type. */
+  h += '<span style="flex:0 0 auto;width:1px;background:var(--line);margin:4px 2px"></span>';
+  ['ENTRY','EXIT'].forEach(function(k){
+    h += '<button class="tab' + (k === STATE.event ? ' on' : '') + '" onclick="pickEv(\'' + k + '\')">'
+      + k.charAt(0) + k.slice(1).toLowerCase() + '</button>';
+  });
+  return h;
 }
 
 function moreHtml(){
@@ -175,13 +195,20 @@ function moreHtml(){
 
 function render(){
   document.getElementById('tabs').innerHTML = tabsHtml();
+  /* cc#1277 scopes 3+6: the table shows the loaded rows that match the EVENT filter; the meta
+     line counts THAT set and says which half it is showing. The denominator stays the server's
+     whole-wall instrument count — there is no server-side entry/exit count to quote, and the
+     "· entries only" qualifier keeps the line honest instead of implying the filtered X is
+     climbing toward the combined Y. */
+  var view = STATE.events.filter(function(e){ return e.event === STATE.event; });
   var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
   document.getElementById('meta').textContent =
-    'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of) + ' events'
+    'showing ' + view.length + ' of ' + (of == null ? '--' : of) + ' events'
+    + ' · ' + (STATE.event === 'ENTRY' ? 'entries' : 'exits') + ' only'
     + ' · ' + (STATE.scope || 'since 10 Aug 2026')
     + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
-  document.getElementById('body').innerHTML = STATE.events.length
-    ? rowsHtml(STATE.events, null)
+  document.getElementById('body').innerHTML = view.length
+    ? rowsHtml(view, null)
     : '<tr><td colspan="11" class="empty">No trade events for this filter.</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
 }
@@ -207,15 +234,15 @@ function loadMore(){
          row is the one failure a reader would actually see */
       var seen = {};
       STATE.events.forEach(function(e){ seen[e.id] = 1; });
-      var last = STATE.events.length ? STATE.events[STATE.events.length - 1].day : null;
       var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
-      document.getElementById('body').insertAdjacentHTML('beforeend', rowsHtml(fresh, last));
       STATE.events = STATE.events.concat(fresh);
       PAGE.busy = false;
-      var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
-      document.getElementById('meta').textContent =
-        'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of) + ' events';
-      document.getElementById('more').innerHTML = moreHtml();
+      /* cc#1277: full re-render instead of the old incremental append. With the EVENT filter in
+         play an append would need its own filtered day-header continuity logic; render() already
+         has it, the set is a few hundred rows at most, and one code path cannot drift from the
+         other. The old path also rebuilt the meta line by hand without the scope/as-of suffix —
+         that inconsistency goes with it. */
+      render();
     })
     .catch(function(e){
       PAGE.busy = false;
@@ -226,9 +253,19 @@ function loadMore(){
 
 function pick(k){
   if (k === STATE.filter) return;
+  /* cc#1277 scope 4: STATE.event deliberately untouched — an explicit Exit selection survives
+     instrument-tab switches; only a fresh page load resets to Entry. */
   STATE.filter = k; STATE.events = [];
   PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   boot(true);
+}
+
+function pickEv(k){
+  if (k === STATE.event) return;
+  /* display-only toggle over what is already loaded — no refetch, no cursor reset; Load more
+     keeps paging the same server stream whichever half is showing */
+  STATE.event = k;
+  render();
 }
 
 function boot(keepCounts){
