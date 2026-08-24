@@ -140,6 +140,56 @@ def _expectations(cur, sym, actual_sales=None, actual_profit=None):
     return out or None
 
 
+# ── cc#1268 · RESULT DOT V3 (RESULT_DOT_RULE_V3, session_log 29790) ──────────────────────────────
+# Supersedes V2 (29672) and the cc#1238 V1 compute. Basis = the company's OWN pre-result estimate,
+# resolved as the latest fundamentals_history quarterly snapshot with scraped_at < the result date,
+# carrying BOTH expected_qtr_sales and expected_quarterly_net_profit. NEVER live screener_raw for
+# an already-reported quarter — its expected fields roll forward after the result posts, which was
+# V2 Check B's actual defect (it read screener_raw current-value, drifting the moment the result
+# landed). ONE function, consumed by both the digest deck rows and the result sheet, so the two
+# surfaces cannot compute two different colours for the same symbol.
+#
+# THE STRUCTURAL FINDING THIS FUNCTION SHIPS WITH (measured 24-Aug, re-verified before this push):
+# fundamentals_history holds ZERO rows carrying either expected_* field — the scrape has only ever
+# written ACTUALS (Sales, Net Profit, OPM, ...) per quarter, never a captured pre-result estimate.
+# screener_raw_bak_cc804 (the one candidate historical fallback) carries neither column either. So
+# no valid pre-result snapshot survives ANYWHERE for Q1FY27, and this function returns dotless for
+# every symbol until a forward-only snapshot job (its own card, not yet filed) has captured at
+# least one pre-result reading across a future season. That is the honest V3 contract working as
+# specced — "NULL/no-dot when no valid pre-result estimate" — not a bug in this code.
+def _result_dot_v3(cur, sym, result_date, actual_sales=None, actual_profit=None):
+    """{dot, basis:'own_estimate', est_sales, est_pat, snapshot_date} or {dot: None} when no
+    pre-result snapshot exists. green = actual_sales>=est_sales AND actual_pat>=est_pat;
+    amber = exactly one; red = neither; dotless when either actual or the snapshot is missing."""
+    if not sym or not result_date:
+        return {"dot": None, "basis": None}
+    try:
+        cur.execute("""
+            SELECT metrics, scraped_at FROM fundamentals_history
+            WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
+              AND scraped_at < %s
+              AND metrics ? 'expected_qtr_sales' AND metrics ? 'expected_quarterly_net_profit'
+            ORDER BY scraped_at DESC LIMIT 1
+        """, (sym, result_date))
+        row = cur.fetchone()
+    except Exception as e:
+        log.warning(f"_result_dot_v3 {sym}: {e}")
+        return {"dot": None, "basis": None}
+    if not row:
+        return {"dot": None, "basis": None}
+    metrics, snap_ts = row
+    est_sales = _f(str(metrics.get("expected_qtr_sales") or "").replace(",", ""))
+    est_pat = _f(str(metrics.get("expected_quarterly_net_profit") or "").replace(",", ""))
+    if est_sales is None or est_pat is None or actual_sales is None or actual_profit is None:
+        return {"dot": None, "basis": None, "est_sales": est_sales, "est_pat": est_pat,
+                "snapshot_date": str(snap_ts.date()) if snap_ts else None}
+    sales_ok = actual_sales >= est_sales
+    pat_ok = actual_profit >= est_pat
+    dot = "green" if (sales_ok and pat_ok) else ("amber" if (sales_ok or pat_ok) else "red")
+    return {"dot": dot, "basis": "own_estimate", "est_sales": est_sales, "est_pat": est_pat,
+            "snapshot_date": str(snap_ts.date()) if snap_ts else None}
+
+
 # ── cc#797 BASIC POLISH L1 (design BASIC_POLISH_L1_CARD_DESIGN_V1, session_log 13551) ────────────
 # Block 1 is ABSOLUTES FIRST: Sales / PAT with QoQ and YoY, margin latest vs last year, PE vs industry.
 #
@@ -971,6 +1021,11 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         expectations = _expectations(cur, sym, _act_sales, _act_pat)
         l1 = _l1_quarter(cur, sym)                      # cc#797 block 1
         auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
+        # cc#1268 RESULT_DOT_RULE_V3: own-estimate dot, struck against the SAME actuals block
+        # above and gated on ex_dt (the result date the snapshot must predate). Dotless when no
+        # pre-result snapshot survives — see _result_dot_v3's docstring for why that is currently
+        # every symbol, not a bug in this call.
+        result_dot = _result_dot_v3(cur, sym, ex_dt, _act_sales, _act_pat)
         # cc#858: news also moves to the context call. cc#847 note preserved — _raw_news still
         # reads position_news and that dependency is unchanged, it simply runs on the other endpoint.
         raw_news = _raw_news(cur, sym, hours=168) if _want_ctx else None   # cc#650: 7-day window
@@ -979,7 +1034,8 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         def _sections(base):
             base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
                          "expectations": expectations,    # cc#796: None -> card omits the line
-                         "l1": l1, "auto_verdict": auto_verdict})   # cc#797
+                         "l1": l1, "auto_verdict": auto_verdict,   # cc#797
+                         "result_dot": result_dot})   # cc#1268: {dot, basis, est_sales, est_pat, snapshot_date}
             return _with_peer(base)
 
         cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))

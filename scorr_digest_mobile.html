@@ -1008,6 +1008,13 @@ function raFullSheetHtml(d){
   if(d.ex_date){
     html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-11);color:var(--amber)">RESULT DATE · '+esc(d.ex_date)+'</div>';
   }
+  /* cc#1268 RESULT_DOT_RULE_V3: the basis line, plain words, only when a real pre-result
+     snapshot struck the dot. Dotless symbols (no snapshot survives) print nothing here — the
+     rule is silence over a fabricated basis, never an empty-state placeholder. */
+  if(d.result_dot && d.result_dot.dot && d.result_dot.snapshot_date){
+    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-10);color:var(--muted);margin-top:2px">'
+      +'vs its own expected quarter (estimate of '+esc(d.result_dot.snapshot_date)+')</div>';
+  }
 
   /* RESULT ANALYSIS section */
   if(d.l1){
