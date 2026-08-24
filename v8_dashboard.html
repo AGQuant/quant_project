@@ -563,8 +563,40 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .mp-edge{display:flex;align-items:center;gap:8px;margin-top:9px;padding:5px 11px;width:max-content;max-width:100%;
     background:var(--amber-bg);border:1px dashed var(--amber-bd);border-radius:6px;
     font-family:var(--mono);font-size:9.5px;color:var(--amber)}
-#pane-index .spine-hd{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px}
+#pane-index .spine-hd{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:10px;color:var(--dim)}
 #pane-index .spine-hd .big2{font-size:19px;font-weight:700;color:var(--txt)}
+#pane-index .spine-hd .cap{font-size:10px;color:var(--dim)}
+/* cc#1300: PP + MAX PAIN promoted next to the price, bigger font than the old inline chart tags
+   (was 10px/11.5px on the axis; now 13px, matching "bigger fonts" from the founder directly). */
+#pane-index .spine-hd-top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+#pane-index .ppmax{display:flex;gap:16px;flex-wrap:wrap}
+#pane-index .ppmax-item{font-size:13px;font-weight:600}
+#pane-index .ppmax-item .l{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.04em;margin-right:3px}
+#pane-index .ppmax-item .px{font-weight:700}
+#pane-index .ppmax-item .d{font-size:11px;margin-left:3px}
+#pane-index .ppmax-item.pp{color:var(--amber)}
+#pane-index .ppmax-item.mp{color:var(--amber)}
+#pane-index .ppmax-item.na{color:var(--dim);font-weight:400;font-size:11px}
+/* cc#1300: the horizontal ladder replacing the vertical spine axis — S2 S1 CMP PP R1 R2 MAX PAIN,
+   one row of chips instead of a 330px vertical bar. CMP gets its own highlighted chip since it is
+   the live anchor everything else is measured from. */
+#pane-index .hladder{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 2px}
+#pane-index .hl-item{flex:1 1 90px;min-width:82px;text-align:center;padding:8px 6px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--card2);font-family:var(--mono)}
+#pane-index .hl-item .l{display:block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--dim)}
+#pane-index .hl-item .px{display:block;font-size:14px;font-weight:700;color:var(--txt);margin-top:2px}
+#pane-index .hl-item .d{display:block;font-size:9.5px;margin-top:1px;color:var(--dim)}
+#pane-index .hl-item.s1 .px,#pane-index .hl-item.s2 .px{color:var(--red)}
+#pane-index .hl-item.r1 .px,#pane-index .hl-item.r2 .px{color:var(--grn)}
+#pane-index .hl-item.pp{border-color:var(--amber-bd,var(--amber));background:var(--amber-bg)}
+#pane-index .hl-item.pp .px,#pane-index .hl-item.pp .l{color:var(--amber)}
+#pane-index .hl-item.mp{border-style:dashed;border-color:var(--amber)}
+#pane-index .hl-item.mp .l,#pane-index .hl-item.mp .px{color:var(--amber)}
+#pane-index .hl-item.cmp{border-color:var(--spotc);background:var(--spot-chip-bg,var(--card2));box-shadow:0 0 0 1px var(--spot-ring,transparent)}
+#pane-index .hl-item.cmp .l,#pane-index .hl-item.cmp .px{color:var(--spotc)}
+#pane-index .hl-item.cmp.stale .l,#pane-index .hl-item.cmp.stale .px{color:var(--mut)}
+@media(max-width:560px){#pane-index .hl-item{flex-basis:74px;padding:6px 4px}
+  #pane-index .hl-item .px{font-size:12px}}
 #pane-index .r-levels{grid-template-columns:1fr 1fr}
 @media(max-width:920px){#pane-index .r-levels{grid-template-columns:1fr}}
 /* the pulsing spot dot is decorative; the dot must still be findable without it */
@@ -6194,76 +6226,67 @@ function wallLevels(strikes){
 }
 const oiLakh = v => (Number(v)/100000);
 
+/* cc#1300 (founder direct 24-Aug): "instead of showing PP and Max pain inside chart show it on
+   top adjacent to nifty bank nifty price bigger fonts and followed by a horizontal ladder
+   positioning s1 s2 cmp pp r1 r2 and max pain followed by vertical ladder spine not required."
+   Replaces the vertical price-axis spine (R2/R1/PP/S1/S2 + OI walls, positioned by percentage on
+   a 330px axis) with: (1) PP + MAX PAIN promoted next to the spot price, bigger font, and (2) a
+   single horizontal row of chips — S2, S1, CMP, PP, R1, R2, MAX PAIN — in ascending price order
+   (S1/S2 as literally typed would put S1 above S2 on the low side, which does not match either
+   number; ascending order is what the two values themselves require, CMP/PP sit in the middle
+   near each other, MAX PAIN keeps the founder's trailing position since it is not a pivot and its
+   price can land anywhere in the range). OI walls are DROPPED from this view — not lost: the
+   card's own OI-strike LADDER toggle already shows every put/call wall in full, untouched by this
+   card. spinePos()/spinePosRaw()/nudgeTags()/wallLevels() above are no longer called from here
+   (kept only because fitSpineTags()'s .spine selector is now permanently empty and harmless) —
+   flagged for whoever next touches this file, not deleted here to keep this diff to the redesign
+   itself. */
 function rSpine(key, name){
   const pvt = D.pivots[key];
   const oi  = D.strikeOI[key];
   const mp  = D.maxpainAll[key];
   if(!pvt || !(pvt.r2>pvt.s2))
-    return `<div class="mp-pending">Pivots pending for ${esc(name)} — the spine needs R2 and S2 to have a scale at all.</div>`;
+    return `<div class="mp-pending">Pivots pending for ${esc(name)} — the ladder needs R2 and S2 at minimum.</div>`;
   const {r2,s2,r1,pp,s1} = pvt;
-  /* spot: the chain's own spot first, because the walls come from the same read and mixing two
-     price sources on one axis is the class of bug cc#1141 just fixed on the basket tabs.
-     cc#1167: the endpoint now STATES its basis. It used to serve the previous daily close with no
-     label, and this card printed it as "SPOT 24,078" while the index card two rows above showed
-     the live 24,217.9 — stale data wearing a live label, on the founder's screen. If the basis is
-     anything other than live, the tag and the caption say so rather than letting the reader assume. */
+  /* spot: the chain's own spot first, same source discipline as before (cc#1141/cc#1167) — one
+     price, stated basis, never a live number sitting beside a stale one with no distinction. */
   const spot = Number(oi&&oi.spot) || Number(D.idx[key]&&D.idx[key].cmp) || 0;
   const spotBasis = (oi && oi.spot_basis) || null;
   const spotLive = spotBasis === 'live';
-  const spotTag = spotLive ? 'SPOT' : (spotBasis === 'prev_close' ? 'PREV CLOSE' : 'SPOT');
-  const dpc  = v => spot&&v ? ((v-spot)/spot*100) : null;
-  const sgn  = v => v==null ? '' : (v>=0?'+':'') + v.toFixed(2) + '%';
+  const dpc = v => spot&&v ? ((v-spot)/spot*100) : null;
+  const sgn = v => v==null ? '' : (v>=0?'+':'') + v.toFixed(2) + '%';
 
-  const L = [];
-  [['R2',r2],['R1',r1],['PP',pp],['S1',s1],['S2',s2]].forEach(([nm,v])=>{
-    if(!v) return;
-    L.push({side:'R', cls:'piv'+(nm==='PP'?' pp':''), pos:spinePos(v,r2,s2),
-            tag:`${nm} <span class="px">${num(v)}</span> ${sgn(dpc(v))}`});
-  });
-  wallLevels(oi&&oi.strikes).forEach(w=>{
-    const p = spinePos(w.strike,r2,s2); if(p==null) return;
-    L.push({side:'L', cls:'wall '+w.side, pos:p, w:w.w,
-            tag:`${w.both?'WALL ×2':oiLakh(w.oi).toFixed(0)+'L '+w.side.toUpperCase()} <span class="px">${num(w.strike)}</span>`});
-  });
-  /* max pain: on the axis only when it is genuinely inside [S2,R2]. Outside, it gets the .mp-edge
-     chip that says which way and how far - never a clamped notch pretending to be a level. */
   const mpS = (mp&&mp.status==='ok'&&mp.max_pain_strike!=null)?Number(mp.max_pain_strike):null;
-  const mpRaw = mpS!=null ? spinePosRaw(mpS,r2,s2) : null;
-  const mpOn = mpRaw!=null && mpRaw>=0 && mpRaw<=100;
-  if(mpOn) L.push({side:'R', cls:'mpl', pos:spinePos(mpS,r2,s2),
-                   tag:`MAX PAIN <span class="px">${num(mpS)}</span> ${sgn(dpc(mpS))}`});
 
-  nudgeTags(L, 330);
-  const spotPos = spinePos(spot,r2,s2);
-  const html = L.map(l=>{
-    const tagStyle = l.nudge ? ` style="margin-top:${l.nudge}px"` : '';
-    const ln = l.cls.indexOf('wall')===0 ? `<span class="ln" style="width:${l.w.toFixed(0)}%"></span>` : '<span class="ln"></span>';
-    return `<div class="lvl ${l.cls}" style="top:${l.pos}%">${ln}<span class="tag"${tagStyle}>${l.tag}</span></div>`;
+  // headline chips, bigger font, next to the price — PP and MAX PAIN only, per the ask.
+  const headline = (label,v,cls)=> v==null ? '' :
+    `<span class="ppmax-item ${cls}"><span class="l">${label}</span> <span class="px">${num(v)}</span> <span class="d">${sgn(dpc(v))}</span></span>`;
+  const headlineHtml = mpS!=null
+    ? headline('PP',pp,'pp') + headline('MAX PAIN',mpS,'mp')
+    : headline('PP',pp,'pp') + '<span class="ppmax-item mp na">MAX PAIN unavailable</span>';
+
+  // the horizontal ladder itself, ascending price order, CMP visually distinct.
+  const rungs = [
+    ['S2', s2, 's2'], ['S1', s1, 's1'], ['CMP', spot, 'cmp'], ['PP', pp, 'pp'],
+    ['R1', r1, 'r1'], ['R2', r2, 'r2'],
+  ];
+  if(mpS!=null) rungs.push(['MAX PAIN', mpS, 'mp']);
+  const ladderHtml = rungs.map(([label,v,cls])=>{
+    if(v==null) return '';
+    const d = label==='CMP' ? '' : `<span class="d">${sgn(dpc(v))}</span>`;
+    const live = label==='CMP' && !spotLive ? ' stale' : '';
+    return `<div class="hl-item ${cls}${live}"><span class="l">${label}</span><span class="px">${num(v)}</span>${d}</div>`;
   }).join('');
-  const spotHtml = spotPos==null ? '' :
-    `<div class="lvl spotl${spotLive?'':' stale'}" style="top:${spotPos}%"><span class="ln"></span><span class="spotdot"></span><span class="tag">${spotTag} ${num(spot)}</span></div>`;
 
-  let edge = '';
-  if(mpS!=null && !mpOn){
-    const above = mpRaw < 0;   /* pos runs downward: below 0 means ABOVE R2 */
-    const dist  = sgn(dpc(mpS));
-    const lo = oi&&oi.strikes&&oi.strikes.length ? Math.min(...oi.strikes.map(s=>Number(s.strike))) : null;
-    const hi = oi&&oi.strikes&&oi.strikes.length ? Math.max(...oi.strikes.map(s=>Number(s.strike))) : null;
-    const outsideChain = lo!=null && (mpS<lo || mpS>hi);
-    edge = `<div class="mp-edge">${above?'▴':'▾'} MAX PAIN ${num(mpS)} · ${above?'above':'below'} scale · ${dist} from spot`
-         + (outsideChain?' · outside the chain window — cc#1155 audits this':'') + `</div>`;
-  }else if(mpS==null){
-    edge = `<div class="mp-edge">MAX PAIN unavailable — endpoint returned no strike</div>`;
-  }
   const expTxt = (mp&&mp.expiry)?' · EXP '+esc(String(mp.expiry)):'';
-  /* cc#1167: the caption carries the spot basis and its as-of. A distance like "+2.10%" is only
-     meaningful against a stated price, and every level on this axis is measured from spot. */
   const basisTxt = spotLive
     ? (oi&&oi.spot_asof ? ' · spot live '+esc(String(oi.spot_asof).slice(11,16))+' IST' : ' · spot live')
     : (spotBasis ? ' · spot = PREVIOUS CLOSE'+(oi&&oi.spot_asof?' '+esc(String(oi.spot_asof)):'')+', distances measured from it' : '');
-  return `<div class="spine-hd"><span class="big2">${spot?num(spot):'—'}</span>
-      <span>rolling-5d pivots · walls from the ATM±7 chain${expTxt}${basisTxt}</span></div>
-    <div class="spine"><div class="axis"></div>${html}${spotHtml}</div>${edge}`;
+
+  return `<div class="spine-hd">
+      <div class="spine-hd-top"><span class="big2">${spot?num(spot):'—'}</span><span class="ppmax">${headlineHtml}</span></div>
+      <span class="cap">rolling-5d pivots${expTxt}${basisTxt}</span></div>
+    <div class="hladder">${ladderHtml}</div>`;
 }
 
 /* cc#1167: POST-LAYOUT tag fitting. nudgeTags() runs while the HTML is still a string, so it is
@@ -6350,7 +6373,7 @@ function rLevelsCard(key, name){
                               : oiLadder(name, D.strikeOI[key], D.maxpainAll[key]);   /* cc#1152 */
   return `<div class="card">
     <div class="card-hd"><div><div class="t">Levels · ${esc(name)}</div>
-      <div class="s">${view==='spine'?'pivots + OI walls + spot · one price axis':'strike-wise OI · ATM ±7'}</div></div>
+      <div class="s">${view==='spine'?'pivots + max pain · S1&rarr;R2 ladder':'strike-wise OI · ATM ±7'}</div></div>
       <div class="vsw">
         <button class="${view==='spine'?'on':''}" onclick="idxSetLevelsView('${key}','spine')">SPINE</button>
         <button class="${view==='ladder'?'on':''}" onclick="idxSetLevelsView('${key}','ladder')">LADDER</button>
