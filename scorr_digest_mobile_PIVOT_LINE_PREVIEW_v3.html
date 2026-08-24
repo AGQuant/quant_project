@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pivot Line — Preview v3 (SVG text, sample + stress data, not live)</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--amber:#FF9F45}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;padding:16px 0 60px}
+.banner{margin:0 14px 16px;padding:12px 14px;background:#0e2412;border:1px solid var(--volt);
+ border-radius:8px;font-family:'JetBrains Mono';font-size:11px;color:var(--volt);line-height:1.6}
+.banner b{color:#fff}
+.eyebrow{margin:20px 18px 10px;font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--aqua);
+ text-transform:uppercase}
+.lad-ix{background:var(--hi);border:1px solid var(--edge);padding:9px 12px 12px;margin:0 14px 12px;border-radius:6px}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:2px 10px}
+.grp h3{font-size:14px;color:var(--chalk);font-weight:700}
+.grp .note{font-family:'JetBrains Mono';font-size:9.5px;color:var(--muted)}
+.grp .note .up{color:var(--volt)} .grp .note .dn{color:var(--heat)}
+.pline{display:block;width:100%;height:auto}
+.ptrk{stroke:var(--edge);stroke-width:1}
+.ptick{fill:var(--hi);stroke:var(--muted);stroke-width:1}
+.ptick.s{stroke:var(--heat)}
+.ptick.r{stroke:var(--volt)}
+.ptick.pp{stroke:var(--amber);fill:var(--amber)}
+.plab{font-family:'JetBrains Mono',monospace;font-size:7.6px;letter-spacing:.02em;fill:var(--muted)}
+.pval{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:8.6px;fill:var(--chalk)}
+.pval.pp{fill:var(--amber)}
+.plab.cmp,.pval.cmp{fill:var(--aqua)}
+.pval.cmp{font-size:9.4px}
+.pdot.grn{fill:var(--volt);stroke:var(--volt);animation:pBlinkG 1.5s ease-in-out infinite}
+.pdot.red{fill:var(--heat);stroke:var(--heat);animation:pBlinkR 1.5s ease-in-out infinite}
+.pdot.amb{fill:var(--amber);stroke:var(--amber)}
+@keyframes pBlinkG{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes pBlinkR{0%,100%{opacity:1}50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.pdot.grn,.pdot.red{animation:none}}
+.pdaylbl{font-family:'JetBrains Mono',monospace;font-size:7.6px;fill:var(--muted)}
+.pdaydot{fill:var(--muted)}
+.pdaystem{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 2;opacity:.55}
+.legend{margin:0 14px;padding:12px 14px;font-family:'JetBrains Mono';font-size:10px;color:var(--muted);line-height:1.7}
+.legend b{color:var(--chalk)}
+.legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="banner"><b>PREVIEW v3 — WHY THIS ROUND IS DIFFERENT.</b> The last two rounds used live HTML/CSS
+  text (div/span with font-size in px) and broke on your phone with the font rendering far larger than
+  specified — twice, with identical CSS to a version that looked fine elsewhere. That points at your
+  device/PWA applying OS-level font-boosting to page text in a way this environment cannot reproduce or
+  predict. This version draws every label and value as SVG &lt;text&gt;, not HTML text — SVG text sizes
+  itself against the SVG's own internal coordinate system, not the page's font scale, so it is not subject
+  to that boost. Please open this on your actual phone (not a desktop) before I touch the live file again.
+  Includes: 2 normal samples, PLUS the exact numbers that broke live (CMP 6 points from PP), PLUS a 3-value
+  cluster stress case.</div>
+
+  <div class="eyebrow">Today's Map · Pivot Ladders (proposed v3, SVG text)</div>
+  <div id="app"></div>
+
+  <div class="legend">
+    <div><span class="dot" style="background:var(--volt)"></span><b>Blinking green</b> — day change positive AND CMP above PP</div>
+    <div><span class="dot" style="background:var(--heat)"></span><b>Blinking red</b> — day change negative AND CMP below PP</div>
+    <div><span class="dot" style="background:var(--amber)"></span><b>Static amber</b> — disagreement, or no day figure on file</div>
+    <div style="margin-top:6px">Dashed stem — Day High / Day Low, same scale as the pivot line, own row</div>
+    <div style="margin-top:6px">Minimum-gap rule — two close values (e.g. CMP vs PP) nudge apart so they never overlap; the printed number is always the true value, never the nudged one</div>
+  </div>
+</div>
+
+<script>
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const num=(v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+const W=340,H=76,TRK_Y=38,PAD=6;
+const xOf=pct=>PAD+(pct/100)*(W-2*PAD);
+
+function ladder(ix){
+  const rungs=ix.rungs||[];
+  const cmp=ix.cmp!=null?Number(ix.cmp):null;
+  const bp=rungs.find(r=>r.label==='PP');
+  const side=(cmp!=null&&bp)?(cmp>bp.value?'above':'below'):null;
+  const sideTxt=side?`<span class="${side==='above'?'up':'dn'}">${side} PP ${bp.dist_pct!=null?Math.abs(bp.dist_pct).toFixed(2)+'%':''}</span>`:'';
+
+  const dayChg=ix.day_chg_pct!=null?Number(ix.day_chg_pct):null;
+  const dayUp=dayChg!=null?dayChg>=0:null;
+  const aboveP=side==='above'?true:(side==='below'?false:null);
+  const dotState=(dayUp===true&&aboveP===true)?'grn':(dayUp===false&&aboveP===false)?'red':'amb';
+
+  const coreRungs=rungs.filter(r=>r.label!=='DAY HIGH'&&r.label!=='DAY LOW');
+  const dayRungs=rungs.filter(r=>r.label==='DAY HIGH'||r.label==='DAY LOW');
+  const rvals=coreRungs.map(r=>r.value).filter(v=>v!=null);
+  const minV=rvals.length?Math.min.apply(null,rvals):null, maxV=rvals.length?Math.max.apply(null,rvals):null;
+  const spanV=(minV!=null&&maxV!=null&&maxV>minV)?(maxV-minV):null;
+  const posOf=v=>spanV==null?50:Math.max(0,Math.min(100,((v-minV)/spanV)*100));
+  const hlCls=r=>r.label==='PP'?'pp':(/^S/.test(r.label)?'s':'r');
+
+  const MIN_GAP=9;
+  function declutter(arr){
+    const pts=arr.filter(it=>it.pos!=null);
+    for(let i=1;i<pts.length;i++){ if(pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i].pos=pts[i-1].pos+MIN_GAP; }
+    for(let i=pts.length-1;i>=0;i--){
+      if(pts[i].pos>100)pts[i].pos=100;
+      if(i>0&&pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i-1].pos=pts[i].pos-MIN_GAP;
+    }
+    for(let i=0;i<pts.length;i++)pts[i].pos=Math.max(0,Math.min(100,pts[i].pos));
+  }
+
+  const coreSlot=coreRungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
+  let items=[];
+  coreRungs.forEach((r,i)=>{
+    if(cmp!=null&&i===coreSlot)items.push({cmp:true,value:cmp});
+    items.push({label:r.label,value:r.value,cls:hlCls(r)});
+  });
+  if(cmp!=null&&coreSlot>=coreRungs.length)items.push({cmp:true,value:cmp});
+  items.forEach(it=>{it.pos=it.value!=null?posOf(it.value):null;});
+  declutter(items);
+  const n=items.length;
+
+  let svg='';
+  svg+=`<line class="ptrk" x1="${PAD}" y1="${TRK_Y}" x2="${W-PAD}" y2="${TRK_Y}"/>`;
+  items.forEach((it,i)=>{
+    const x=xOf(it.pos!=null?it.pos:50);
+    const half=(i%2===0)?'above':'below';
+    const labY=half==='above'?TRK_Y-22:TRK_Y+18;
+    const valY=half==='above'?TRK_Y-11:TRK_Y+29;
+    const anchor=(i===0)?'start':(i===n-1?'end':'middle');
+    const tx=(i===0)?x+2:(i===n-1?x-2:x);
+    if(it.cmp){
+      svg+=`<circle class="pdot ${dotState}" cx="${x}" cy="${TRK_Y}" r="4.4"/>`;
+      svg+=`<text class="plab cmp" x="${tx}" y="${labY}" text-anchor="${anchor}">CMP</text>`;
+      svg+=`<text class="pval cmp" x="${tx}" y="${valY}" text-anchor="${anchor}">${esc(num(it.value))}</text>`;
+    }else{
+      svg+=`<circle class="ptick ${it.cls}" cx="${x}" cy="${TRK_Y}" r="2.6"/>`;
+      svg+=`<text class="plab" x="${tx}" y="${labY}" text-anchor="${anchor}">${esc(it.label)}</text>`;
+      svg+=`<text class="pval ${it.cls==='pp'?'pp':''}" x="${tx}" y="${valY}" text-anchor="${anchor}">${it.value!=null?esc(num(it.value)):'—'}</text>`;
+    }
+  });
+
+  const dayItems=dayRungs.map(r=>({r:r,pos:r.value!=null?posOf(r.value):null}));
+  declutter(dayItems);
+  dayItems.forEach(function(di,i){
+    const r=di.r; if(r.value==null)return;
+    const x=xOf(di.pos);
+    const short=r.label==='DAY HIGH'?'H':'L';
+    const anchor=(x<PAD+14)?'start':(x>W-PAD-14?'end':'middle');
+    svg+=`<line class="pdaystem" x1="${x}" y1="8" x2="${x}" y2="${TRK_Y-5}"/>`;
+    svg+=`<circle class="pdaydot" cx="${x}" cy="10" r="1.6"/>`;
+    svg+=`<text class="pdaylbl" x="${x}" y="6" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
+  });
+
+  return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
+    <span class="note">${sideTxt}</span></div>
+    <svg class="pline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${svg}</svg></div>`;
+}
+
+const samples=[
+  { symbol:'NIFTY50 — normal spread', day_chg_pct:0.45, cmp:24280,
+    rungs:[{label:'S2',value:23878.13},{label:'S1',value:24065.07},{label:'DAY LOW',value:24152},
+            {label:'PP',value:24212.58},{label:'DAY HIGH',value:24308},{label:'R1',value:24399.52},{label:'R2',value:24547}] },
+  { symbol:'BANKNIFTY — normal spread, down', day_chg_pct:-0.61, cmp:57400,
+    rungs:[{label:'S2',value:56741.35},{label:'S1',value:57251.65},{label:'DAY LOW',value:57261},
+            {label:'PP',value:57512.05},{label:'DAY HIGH',value:57850},{label:'R1',value:58020},{label:'R2',value:58283}] },
+  { symbol:'NIFTY50 — EXACT LIVE-BREAK DATA (CMP 6pts from PP)', day_chg_pct:0.03, cmp:24219,
+    rungs:[{label:'S2',value:23878},{label:'S1',value:24065},{label:'DAY LOW',value:24152},
+            {label:'PP',value:24213},{label:'DAY HIGH',value:24308},{label:'R1',value:24400},{label:'R2',value:24547}] },
+  { symbol:'STRESS — 3 values within 0.4 of each other', day_chg_pct:0.1, cmp:100.4,
+    rungs:[{label:'S2',value:90},{label:'S1',value:95},{label:'PP',value:100},{label:'R1',value:100.3},{label:'R2',value:110}] },
+  { symbol:'SAMPLE — disagreement (day down, CMP above PP)', day_chg_pct:-0.30, cmp:112,
+    rungs:[{label:'S2',value:100},{label:'S1',value:105},{label:'DAY LOW',value:103},
+            {label:'PP',value:110},{label:'DAY HIGH',value:116},{label:'R1',value:115},{label:'R2',value:120}] }
+];
+document.getElementById('app').innerHTML=samples.map(ladder).join('');
+</script>
+</body>
+</html>
