@@ -380,42 +380,64 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .lrow.cmprow .ll{color:var(--aqua)}
 .lrow.cmprow .lbar{background:var(--aqua);opacity:.8}
 /* cc#1187: .rung/.rung b retired — the ladder is vertical rows now (see .lrow above) */
-/* ══ cc#1306 · THE LADDER GOES HORIZONTAL AGAIN, founder ruling, over cc#1187's own vertical
-   verdict. cc#1187 went vertical because five FULL Indian-format numbers in one horizontal row
-   kept overflowing the phone width under device text scaling (four rounds, cc#1096 through
-   cc#1186, all failed the same way). This round does not repeat that fight: WRAP, NOT SCROLL.
-   Every previous attempt (grid tracks, measured scrollmode, a scroll fade) tried to keep the row
-   on ONE line and kept losing a level off the edge. flex-wrap simply lets a chip that does not fit
-   drop to a second line — nothing can go off-screen or under a fade, because there is no fixed
-   row to overflow. That is the actual fix cc#1187 needed and did not have: not vertical vs
-   horizontal, but wrap vs a single forced line.
-   .hlad replaces .ladder's cell list; DAY HIGH/DAY LOW are two more chips in the SAME sorted band
-   digest_v3._ladders now returns (cc#1306 backend change — sorted once, at the source, same rule
-   cc#1257 set for S/R/PP), so no ordering logic is duplicated here. */
-.hlad{display:flex;flex-wrap:wrap;gap:var(--space-8);margin-top:var(--space-8)}
-.hl{flex:1 1 64px;min-width:60px;text-align:center;padding:var(--space-6) var(--space-4);
- border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi)}
-.hl .hll{display:block;font-family:'JetBrains Mono';font-size:8.5px;font-weight:700;
- letter-spacing:var(--track-px10);color:var(--muted)}
-.hl .hlv{display:block;font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);
- font-variant-numeric:tabular-nums;color:var(--chalk);margin-top:2px}
-.hl.s .hlv{color:var(--heat)}
-.hl.r .hlv{color:var(--volt)}
-.hl.pp{border-color:var(--amber);background:rgba(212,168,66,.1)}
-.hl.pp .hll,.hl.pp .hlv{color:var(--amber)}
-.hl.dh,.hl.dl{border-style:dashed}
-.hl.dh .hll,.hl.dh .hlv,.hl.dl .hll,.hl.dl .hlv{color:var(--muted)}
-/* CMP is the one chip that MOVES on every tick, so it is the one chip that should look alive —
-   the founder's own words were "red or green blink if day positive". up = day_chg_pct>=0, per the
-   header side/sideTxt convention this card already uses (var(--volt) up, var(--heat) down).
-   prefers-reduced-motion gets the colour with no animation — the information survives, the motion
-   does not, same guard the rest of this app family already uses on decorative motion. */
-.hl.cmp{border-width:calc(var(--bw-1) * 2);animation:hlBlinkUp 1.6s ease-in-out infinite}
-.hl.cmp.dn{animation-name:hlBlinkDn}
-.hl.cmp .hll,.hl.cmp .hlv{color:var(--aqua)}
-@keyframes hlBlinkUp{0%,100%{border-color:var(--volt);box-shadow:0 0 0 0 rgba(76,201,133,.35)}50%{border-color:var(--volt);box-shadow:0 0 6px 1px rgba(76,201,133,.5)}}
-@keyframes hlBlinkDn{0%,100%{border-color:var(--heat);box-shadow:0 0 0 0 rgba(224,84,84,.35)}50%{border-color:var(--heat);box-shadow:0 0 6px 1px rgba(224,84,84,.5)}}
-@media (prefers-reduced-motion:reduce){.hl.cmp{animation:none;border-color:var(--volt)}.hl.cmp.dn{border-color:var(--heat)}}
+/* ══ cc#1314 · THE LADDER BECOMES A PROPORTIONAL LINE — v2, founder-supplied preview
+   (scorr_digest_mobile_PIVOT_LINE_PREVIEW_V2.html), superseding both cc#1306's chip-wrap and this
+   card's own first pline attempt. Two design decisions the preview settled that v1 did not:
+   (1) THE CORE SCALE IS S2/S1/PP/R1/R2 + CMP ONLY. DAY HIGH/DAY LOW are pulled OUT of minV/maxV
+   and out of the above/below rotation entirely — v1 folded them into the same sorted band as the
+   pivots, so a day range wider than the pivot spread compressed every pivot tick toward the
+   middle and the day-range days looked cramped. They render instead as their own dashed-stem
+   satellite markers, floating above the core line at the SAME proportional position (posOf is one
+   function, read by both), honest but never competing for scale or a rotation slot.
+   (2) SPACING IS HAND-VERIFIED PIXELS, not the token scale. The preview's own banner states every
+   label/value box was checked for clearance from the tick/dot circles — these are exact tuned
+   offsets (26/36/78/88/64/104), not proportions, and are kept as literal px so that tuning is not
+   silently rounded away by a token substitution. Colour/font tokens (var(--volt)/--heat/--aqua/
+   --amber/--muted/--chalk/JetBrains Mono) are this file's own — the preview already used them by
+   name, so nothing here is invented. */
+.pline{position:relative;height:104px;margin-top:22px}
+.pline .ptrk{position:absolute;left:2%;right:2%;top:64px;height:2px;border-radius:var(--radius-2);
+ background:var(--edge)}
+.ptick{position:absolute;top:64px;width:8px;height:8px;border-radius:50%;transform:translate(-50%,-50%);
+ background:var(--hi);border:var(--bw-1) solid var(--muted);z-index:2}
+.ptick.s{border-color:var(--heat)}
+.ptick.r{border-color:var(--volt)}
+.ptick.pp{border-color:var(--amber);background:var(--amber)}
+.plab{position:absolute;transform:translateX(-50%);font-family:'JetBrains Mono';white-space:nowrap;
+ font-size:8px;letter-spacing:.4px;color:var(--muted);z-index:2}
+.plab.lo{transform:none;left:0!important}
+.plab.hi{transform:none;left:auto!important;right:0}
+.plab.above{top:26px}
+.plab.below{top:78px}
+.pval{position:absolute;transform:translateX(-50%);font-family:'JetBrains Mono';white-space:nowrap;
+ font-weight:800;font-size:9px;font-variant-numeric:tabular-nums;color:var(--chalk);z-index:2}
+.pval.lo{transform:none;left:0!important}
+.pval.hi{transform:none;left:auto!important;right:0}
+.pval.above{top:36px}
+.pval.below{top:88px}
+.pval.pp{color:var(--amber)}
+.plab.cmp,.pval.cmp{color:var(--aqua)}
+.pval.cmp{font-size:10px}
+.pdot{position:absolute;top:64px;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);
+ z-index:3;border-width:calc(var(--bw-1) * 2);border-style:solid}
+.pdot.grn{background:var(--volt);border-color:var(--volt);animation:pBlinkG 1.5s ease-in-out infinite}
+.pdot.red{background:var(--heat);border-color:var(--heat);animation:pBlinkR 1.5s ease-in-out infinite}
+.pdot.amb{background:var(--amber);border-color:var(--amber)}
+@keyframes pBlinkG{0%,100%{box-shadow:0 0 0 0 rgba(200,245,66,.4)}50%{box-shadow:0 0 8px 2px rgba(200,245,66,.55)}}
+@keyframes pBlinkR{0%,100%{box-shadow:0 0 0 0 rgba(255,77,109,.4)}50%{box-shadow:0 0 8px 2px rgba(255,77,109,.55)}}
+@media (prefers-reduced-motion:reduce){.pdot.grn,.pdot.red{animation:none}}
+/* DAY HIGH / DAY LOW satellites — own row above the core line, own dashed stem down to the track,
+   same posOf scale as the core rungs (computed from S2..R2 only, per the design decision above),
+   clamped honestly to the edge if a day extreme falls outside that range (the same rule the core
+   CMP dot already follows for an out-of-range price). */
+.pdaylbl{position:absolute;top:0;transform:translateX(-50%);font-family:'JetBrains Mono';font-size:8px;
+ letter-spacing:.3px;color:var(--muted);white-space:nowrap;z-index:2}
+.pdaylbl.lo{transform:none;left:0!important}
+.pdaylbl.hi{transform:none;left:auto!important;right:0}
+.pdaydot{position:absolute;top:16px;width:5px;height:5px;border-radius:50%;background:var(--muted);
+ transform:translate(-50%,-50%);z-index:2}
+.pdaystem{position:absolute;top:19px;width:0;height:41px;border-left:1px dashed var(--muted);
+ opacity:.55;transform:translateX(-50%);z-index:0}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
    one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
@@ -575,22 +597,98 @@ function ladder(ix){
      given — one sort, at the source, per scope 3.
      The local fallback exists only for a payload that predates the sort (a client holding an old
      bundle mid-deploy); it computes the same slot from the values rather than guessing. */
-  const slot=(ix.cmp_slot!=null)?ix.cmp_slot
-             :rungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
-  /* cc#1306: horizontal chips replace the vertical rows. dayChg decides the CMP blink colour —
-     >=0 is up/green, <0 is down/red, and null (no prior close on file) falls back to up's colour
-     rather than guessing a direction, matching this file's existing null-is-neutral convention. */
+  /* cc#1314 v2 · dotState is the colour rule verbatim, per the founder's own reviewed preview:
+     dayUp/aboveP are each tri-state (true/false/null) so a missing day figure or a PP-less rung
+     set falls through to amber rather than being coerced into a direction. GREEN only when both
+     are true (day up AND cmp above PP — agreement); RED only when both are false (day down AND
+     cmp below PP — agreement); every other combination, including either being null, is amber. */
   const dayChg=ix.day_chg_pct!=null?Number(ix.day_chg_pct):null;
-  const cmpDn=dayChg!=null&&dayChg<0;
-  const cmpChip=`<div class="hl cmp${cmpDn?' dn':''}"><span class="hll">CMP</span><span class="hlv">${num(cmp)}</span></div>`;
-  const hlCls=r=>r.label==='PP'?'pp':(r.label==='DAY HIGH'?'dh':(r.label==='DAY LOW'?'dl':(/^S/.test(r.label)?'s':'r')));
-  let rows=[];
-  rungs.forEach((r,i)=>{
-    if(cmp!=null&&i===slot)rows.push(cmpChip);
-    rows.push(`<div class="hl ${hlCls(r)}"><span class="hll">${esc(r.label)}</span><span class="hlv">${r.value!=null?num(r.value):'—'}</span></div>`);
+  const dayUp=dayChg!=null?dayChg>=0:null;
+  const aboveP=side==='above'?true:(side==='below'?false:null);
+  const dotState=(dayUp===true&&aboveP===true)?'grn':(dayUp===false&&aboveP===false)?'red':'amb';
+  /* CORE vs SATELLITE split, per the preview: DAY HIGH/DAY LOW are pulled out of the scale and the
+     rotation entirely, so a wide day range can never compress the S2..R2 spacing and never steals
+     an above/below slot from a real pivot level. posOf is the ONE scale function, shared by both
+     the core row and the day-range satellites below it, computed from core values only. */
+  const coreRungs=rungs.filter(r=>r.label!=='DAY HIGH'&&r.label!=='DAY LOW');
+  const dayRungs=rungs.filter(r=>r.label==='DAY HIGH'||r.label==='DAY LOW');
+  const rvals=coreRungs.map(r=>r.value).filter(v=>v!=null);
+  const minV=rvals.length?Math.min.apply(null,rvals):null, maxV=rvals.length?Math.max.apply(null,rvals):null;
+  const spanV=(minV!=null&&maxV!=null&&maxV>minV)?(maxV-minV):null;
+  const posOf=v=>spanV==null?50:Math.max(0,Math.min(100,((v-minV)/spanV)*100));
+  const hlCls=r=>r.label==='PP'?'pp':(/^S/.test(r.label)?'s':'r');
+  /* cmp_slot from the payload is computed against the FULL rungs list (cc#1257); recomputed here
+     against coreRungs only so the insertion index matches the core-only array being iterated —
+     same fallback-math pattern the top of this function already uses for `slot`. */
+  const coreSlot=coreRungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
+  let items=[];
+  coreRungs.forEach((r,i)=>{
+    if(cmp!=null&&i===coreSlot)items.push({cmp:true,value:cmp});
+    items.push({label:r.label,value:r.value,cls:hlCls(r)});
   });
-  if(cmp!=null&&slot>=rungs.length)rows.push(cmpChip);
-  const cells=rows.join('');
+  if(cmp!=null&&coreSlot>=coreRungs.length)items.push({cmp:true,value:cmp});
+  /* cc#1314 · MINIMUM-GAP DECLUTTER — the fix for the founder's live break. The preview's own
+     sample data kept every level ~10%+ apart on the track, so it never exercised the real
+     failure: CMP landing a few points from PP (a NORMAL market state, not an edge case) puts
+     their dot/label almost exactly on top of each other. posOf alone has no defence against
+     that — proportional-by-value says nothing about proportional-by-READABILITY.
+     declutter() runs the SAME honesty convention this ladder already uses for an out-of-range
+     value: the POSITION nudges, the printed number never does. Two passes — forward then
+     backward — because a single forward sweep can push the last item past 100% when three or
+     more items cluster inside one small span; the backward sweep pulls everything back inside
+     [0,100] without reopening a gap the forward pass already closed. MIN_GAP is a flat percent
+     of track width, not measured against font/device — deliberately, per this ladder's own
+     history (label_collision_avoidance in the card): a measured-overlap approach has failed on
+     this exact ladder four times before pushing the founder to a structural rule instead. */
+  const MIN_GAP=9;
+  function declutter(arr){
+    const pts=arr.filter(it=>it.pos!=null);
+    for(let i=1;i<pts.length;i++){
+      if(pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i].pos=pts[i-1].pos+MIN_GAP;
+    }
+    for(let i=pts.length-1;i>=0;i--){
+      if(pts[i].pos>100)pts[i].pos=100;
+      if(i>0&&pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i-1].pos=pts[i].pos-MIN_GAP;
+    }
+    for(let i=0;i<pts.length;i++)pts[i].pos=Math.max(0,Math.min(100,pts[i].pos));
+  }
+  items.forEach(it=>{it.pos=it.value!=null?posOf(it.value):null;});
+  declutter(items);
+  const n=items.length;
+  const coreCells=items.map(function(it,i){
+    const pos=it.pos!=null?it.pos:50;
+    const edge=i===0?' lo':(i===n-1?' hi':'');
+    const half=(i%2===0)?'above':'below';
+    const posStyle='left:'+pos.toFixed(2)+'%';
+    if(it.cmp){
+      return '<div class="pdot '+dotState+'" style="'+posStyle+'"></div>'
+        + '<div class="plab cmp '+half+edge+'" style="'+posStyle+'">CMP</div>'
+        + '<div class="pval cmp '+half+edge+'" style="'+posStyle+'">'+num(it.value)+'</div>';
+    }
+    return '<div class="ptick '+it.cls+'" style="'+posStyle+'"></div>'
+      + '<div class="plab '+half+edge+'" style="'+posStyle+'">'+esc(it.label)+'</div>'
+      + '<div class="pval '+(it.cls==='pp'?'pp':'')+' '+half+edge+'" style="'+posStyle+'">'
+      + (it.value!=null?num(it.value):'—')+'</div>';
+  }).join('')+'<div class="ptrk"></div>';
+  /* Day High/Day Low satellites: same posOf scale, same declutter pass against EACH OTHER (two
+     satellites can crowd on a narrow-range day the same way two core rungs can), clamped
+     honestly to the edge if a day extreme falls outside the core range — the same off-scale
+     rule the core CMP dot already follows. Short H/L prefix keeps the satellite label compact
+     against the core row's own labels. */
+  const dayItems=dayRungs.map(r=>({r:r,pos:r.value!=null?posOf(r.value):null}));
+  declutter(dayItems);
+  const dayCells=dayItems.map(function(di,i){
+    const r=di.r;
+    if(r.value==null)return '';
+    const pos=di.pos;
+    const edge=(i===0&&dayRungs.length>1)?' lo':(i===dayRungs.length-1&&dayRungs.length>1?' hi':'');
+    const short=r.label==='DAY HIGH'?'H':'L';
+    const cls=r.label==='DAY HIGH'?'high':'low';
+    const posStyle='left:'+pos.toFixed(2)+'%';
+    return '<div class="pdaystem" style="'+posStyle+'"></div>'
+      + '<div class="pdaydot" style="'+posStyle+'"></div>'
+      + '<div class="pdaylbl '+cls+edge+'" style="'+posStyle+'">'+short+' '+num(r.value)+'</div>';
+  }).join('');
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
      now follows d.market.state, the SAME composer the header chip already reads, via window.__MK:
@@ -601,7 +699,7 @@ function ladder(ix){
   const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
   return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
     <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
-    <div class="hlad">${cells}</div></div>`;
+    <div class="pline">${dayCells}${coreCells}</div></div>`;
 }
 
 /* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
