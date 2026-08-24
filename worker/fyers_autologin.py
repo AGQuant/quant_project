@@ -520,13 +520,13 @@ def save_token(conn, access, refresh):
     with conn.cursor() as cur:
         cur.execute("""INSERT INTO fyers_tokens
                          (id, access_token, refresh_token, access_created, refresh_created, updated_at)
-                       VALUES (1, %s, %s, %s, %s, NOW())
+                       VALUES (1, %s, %s, %s, %s, (NOW() AT TIME ZONE 'Asia/Kolkata'))
                        ON CONFLICT (id) DO UPDATE SET
                          access_token   = EXCLUDED.access_token,
                          refresh_token  = EXCLUDED.refresh_token,
                          access_created = EXCLUDED.access_created,
                          refresh_created= EXCLUDED.refresh_created,
-                         updated_at     = NOW()""",
+                         updated_at     = (NOW() AT TIME ZONE 'Asia/Kolkata')""",
                     (access, refresh, now, now))
     if not conn.autocommit:
         conn.commit()

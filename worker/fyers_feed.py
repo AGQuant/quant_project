@@ -526,14 +526,16 @@ def save_tokens(conn, access=None, refresh=None, new_refresh=False):
         if cur.fetchone():
             if new_refresh:
                 cur.execute("""UPDATE fyers_tokens SET access_token=%s, refresh_token=%s,
-                               access_created=%s, refresh_created=%s, updated_at=NOW() WHERE id=1""",
+                               access_created=%s, refresh_created=%s,
+                               updated_at=(NOW() AT TIME ZONE 'Asia/Kolkata') WHERE id=1""",
                             (access, refresh, now, now))
             else:
-                cur.execute("UPDATE fyers_tokens SET access_token=%s, access_created=%s, updated_at=NOW() WHERE id=1",
+                cur.execute("UPDATE fyers_tokens SET access_token=%s, access_created=%s, "
+                            "updated_at=(NOW() AT TIME ZONE 'Asia/Kolkata') WHERE id=1",
                             (access, now))
         else:
             cur.execute("""INSERT INTO fyers_tokens (id,access_token,refresh_token,access_created,refresh_created,updated_at)
-                           VALUES (1,%s,%s,%s,%s,NOW())""", (access, refresh, now, now))
+                           VALUES (1,%s,%s,%s,%s,(NOW() AT TIME ZONE 'Asia/Kolkata'))""", (access, refresh, now, now))
     conn.commit()
 
 def bootstrap_from_authcode(conn, auth_code):
