@@ -6124,25 +6124,40 @@ async function loadV10Chart(){
   }
   if(!window.LightweightCharts){ box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart library unavailable</div>'; return; }
   if(!candles.length){ box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">No candle data for '+_v10sym+'</div>'; return; }
+  // cc#1302 (founder direct 24-Aug): "click chart icon, blank screen, renders nothing". Root
+  // cause: box.innerHTML was cleared to '' right below, then chart construction / setData /
+  // marker-building / fitContent ran with NO try/catch — any throw in that block (a malformed
+  // candle, an unexpected open/closed trade shape hitting buildV10Markers' .filter/.map) left the
+  // box permanently empty with no error text and no way to tell what happened. Wrapped so a
+  // failure here degrades to an honest message instead of a blank overlay, same discipline this
+  // file already applies everywhere else (guarded renders, never a silent blank pane).
   box.innerHTML='';
-  const chart=LightweightCharts.createChart(box,{
-    width:box.clientWidth, height:box.clientHeight,
-    /* cc#1149: lightweight-charts takes plain colour strings and cannot follow a CSS variable,
-       so it is read from the tokens at construction and rebuilt by iiRepaintCharts on toggle. */
-    layout:{background:{type:'solid',color:C.bg},textColor:C.mut,fontSize:11,fontFamily:"'Sora',system-ui,sans-serif"},
-    grid:{vertLines:{color:'rgba(148,166,210,.06)'},horzLines:{color:'rgba(148,166,210,.06)'}},
-    rightPriceScale:{borderColor:'rgba(148,166,210,.14)'},
-    timeScale:{borderColor:'rgba(148,166,210,.14)',timeVisible:true,secondsVisible:false},
-    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-  });
-  const series=chart.addCandlestickSeries({upColor:UP,downColor:DN,borderVisible:false,wickUpColor:UP,wickDownColor:DN});
-  series.setData(candles); _v10chart=chart; _v10series=series;
-  const markers=buildV10Markers(candles, open, closed);
-  if(markers.length) series.setMarkers(markers);
-  chart.timeScale().fitContent();
-  if(_v10pendingScroll){var _sb=_v10SnapBar(candles,_v10pendingScroll);if(_sb){try{chart.timeScale().setVisibleRange({from:_sb.time-5400,to:_sb.time+5400});}catch(e){}}_v10pendingScroll=null;}
-  _v10ro=new ResizeObserver(()=>{ if(_v10chart) _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); });
-  _v10ro.observe(box);
+  try{
+    const chart=LightweightCharts.createChart(box,{
+      width:box.clientWidth, height:box.clientHeight,
+      /* cc#1149: lightweight-charts takes plain colour strings and cannot follow a CSS variable,
+         so it is read from the tokens at construction and rebuilt by iiRepaintCharts on toggle. */
+      layout:{background:{type:'solid',color:C.bg},textColor:C.mut,fontSize:11,fontFamily:"'Sora',system-ui,sans-serif"},
+      grid:{vertLines:{color:'rgba(148,166,210,.06)'},horzLines:{color:'rgba(148,166,210,.06)'}},
+      rightPriceScale:{borderColor:'rgba(148,166,210,.14)'},
+      timeScale:{borderColor:'rgba(148,166,210,.14)',timeVisible:true,secondsVisible:false},
+      crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    });
+    const series=chart.addCandlestickSeries({upColor:UP,downColor:DN,borderVisible:false,wickUpColor:UP,wickDownColor:DN});
+    series.setData(candles); _v10chart=chart; _v10series=series;
+    let markers=[];
+    try{ markers=buildV10Markers(candles, open, closed); }
+    catch(me){ console.warn('[v10chart] markers',me&&me.message); }   // a bad trade row must not cost the whole chart
+    if(markers.length) series.setMarkers(markers);
+    chart.timeScale().fitContent();
+    if(_v10pendingScroll){var _sb=_v10SnapBar(candles,_v10pendingScroll);if(_sb){try{chart.timeScale().setVisibleRange({from:_sb.time-5400,to:_sb.time+5400});}catch(e){}}_v10pendingScroll=null;}
+    _v10ro=new ResizeObserver(()=>{ if(_v10chart) _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); });
+    _v10ro.observe(box);
+  }catch(e){
+    if(_v10chart){try{_v10chart.remove();}catch(e2){} _v10chart=null;_v10series=null;}
+    console.warn('[v10chart] render failed',e&&e.message);
+    box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart failed to render — '+esc(String(e&&e.message||e))+'</div>';
+  }
 }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document.getElementById('v10ChartOv'); if(ov&&ov.style.display!=='none') closeV10Chart(); } });
 
