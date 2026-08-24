@@ -336,12 +336,22 @@ PWA_JS = """
   // direct (was /filters redirect); old screener renamed "Screener" -> /screener; every orphan route
   // (TC Scan, Intraday, Structure, Performance, Ask) added so no page is typed-URL-only.
   var NAV = [
+    // cc#1290 (founder 24-Aug): top-nav reorder — Home/V8/Invest Scan/GVM/Results/Sector/QB/
+    // Adaptive Dashboard lead; everything else keeps its exact prior relative order. Comments
+    // below moved WITH the entry each one precedes; none rewritten, none dropped.
     ['/', '\\u2302', 'Home'],
     ['/dashboard', '\\u26a1', 'V8'],
+    // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
+    // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
+    // /dashboard#digest). Nav removal only; no route changed, nothing retired.
+    // cc#1286: Investment Scanner — new standing surface (NAV-COMPLETE 2987).
+    ['/inv-scanner', '\\u2316', 'Invest Scan'],
     ['/cio2?model=gvm', '\\u25c9', 'GVM'],
-    ['/sector', '\\u2297', 'Sector'],
-    ['/check', '\\u2713', 'Check'],
     ['/result-corner', '\\u2263', 'Results'],
+    ['/sector', '\\u2297', 'Sector'],
+    ['/quant-basket', '\\u25eb', 'QB'],
+    ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
+    ['/check', '\\u2713', 'Check'],
     // cc#824 (founder 02-Aug): Screeners — the 8 predefined screens as a standing destination.
     // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile
     // "More" sheet), so a single entry appears in both automatically — a second entry would double
@@ -356,17 +366,10 @@ PWA_JS = """
     // immediately after V6 BT (v8_dashboard.html). Exactly ONE Digest entry app-wide — this line
     // is deliberately not an entry. cc#846 had re-added it here; the founder has since placed it.
     ['/news', '\\ud83d\\udcf0', 'Intel'],
-    // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
-    // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
-    // /dashboard#digest). Nav removal only; no route changed, nothing retired.
-    // cc#1286: Investment Scanner — new standing surface (NAV-COMPLETE 2987).
-    ['/inv-scanner', '\\u2316', 'Invest Scan'],
     ['/v13', '\\u25a4', 'V13'],
     ['/health', '\\u2695', 'Health'],
-    ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
-    ['/quant-basket', '\\u25eb', 'QB'],
     // cc#822: Holdings REMOVED from the nav. The /holdings route is UNCHANGED and still loads by
     // typed URL — this is the one entry here that is a real page rather than a tab, so it is the
     // one that becomes typed-URL-only. Recorded as such in main.py NAV_REGISTRY (rule id=2987).
