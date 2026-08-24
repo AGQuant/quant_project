@@ -1142,7 +1142,12 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
     <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')"
             id="v14tab" style="display:none">V14 Intraday</button>
     <button class="v8toptab" data-pane="tcscan" onclick="showV8Pane('tcscan')">TC Scanner</button>
-    <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
+    <!-- cc#1293 (founder 24-Aug): V6 BT is HIDDEN, not removed, same precedent as V14 above
+         (cc#1207) — the run-history fetch on this pane is hitting a plain-text 500 instead of
+         JSON (a separate, out-of-scope defect), so founder wants it off the nav for now. Route,
+         pane and showV8Pane('bt') all still work; /dashboard#bt still opens it. -->
+    <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')"
+            id="bttab" style="display:none">V6 BT</button>
     <!-- cc#853 (founder 04-Aug): Digest belongs in THIS row, immediately after V6 BT, and NOT in
          the main site nav. It NAVIGATES to /digest rather than swapping in a pane: cc#851
          established one digest renderer, and V3 is a full page with its own :root token block and
@@ -6906,6 +6911,8 @@ function showV8Pane(name){
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
   if(h==='v14'){var _vt=document.getElementById('v14tab'); if(_vt) _vt.style.display='';}
+  // cc#1293: same reveal-on-direct-link pattern for the now-hidden V6 BT tab.
+  if(h==='bt'){var _bt=document.getElementById('bttab'); if(_bt) _bt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
 window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades'];var h=(location.hash||'').replace('#','');
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
