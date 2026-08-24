@@ -3314,6 +3314,21 @@ def _bg_cleanup_perf_log():
     except Exception as e:
         log.error(f"perf_cleanup: {e}")
 
+def _bg_inv_scanner_universe():
+    """cc#1283: INVESTMENT SCANNER universe builder (spec 30129) — tagged 3-leg union of basket
+    opens + momentum screen + gv_rising screen, one row per symbol per run_date. Runs nightly
+    AFTER the 01:30 GVM recompute so the deltas read tonight's pillars. Logic lives entirely in
+    inv_scanner_universe.BUILD_SQL (one statement, one truth)."""
+    try:
+        import inv_scanner_universe
+        res = inv_scanner_universe.build()
+        if res.get("status") == "skip":
+            return _Skip.precondition_missing(res.get("reason", ""))
+        log.info(f"inv_scanner_universe: {res}")
+    except Exception as e:
+        log.error(f"inv_scanner_universe: {e}")
+        raise
+
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News -> raw_news (source_type='company'
     + symbol), alias-filtered at ingest. Single funnel with market news; supersedes the
@@ -4608,6 +4623,7 @@ async def _scheduler_loop():
         if h == 19 and m == 10: _spawn(_bg_v9_paper_mtm)   # cc#840: nightly MTM on open V9 pairs
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 2 and m == 10:  _spawn(_bg_rvol_profiles)  # cc#674: nightly RVOL cum-vol profiles (after universe_technicals)
+        if h == 2 and m == 20:  _spawn(_bg_inv_scanner_universe)  # cc#1283: investment scanner universe, after the 01:30 GVM write
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
         # the scrape build was a one-time model exercise, go-forward = data vendor. The three
         # UNCONDITIONAL jobs below (no flag gate -- they ran on their timer regardless of any human

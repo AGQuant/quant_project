@@ -144,6 +144,7 @@ from tc_screener_v2 import router as tc_screener_v2_router   # cc#1172: four-buc
 from tc_position_stars_v2 import router as tc_position_stars_v2_router   # cc#1172: four-bucket position stars
 from tc_score_replay_endpoints import router as tc_score_replay_router   # cc#1211: TC score entry replay
 from basket_rebalance_endpoints import router as basket_rebalance_router  # cc#1273: per-client basket subscriptions + repair
+from inv_scanner_universe import router as inv_scanner_router  # cc#1283: investment scanner universe (engine 1/3)
 import v8_paper
 import global_indices
 import v8_signal_writer
@@ -769,6 +770,7 @@ app.include_router(tc_screener_v2_router)   # cc#1172: /api/trade-check/screen-v
 app.include_router(tc_position_stars_v2_router)   # cc#1172: /api/trade-check/position-stars-v2 + admin run
 app.include_router(tc_score_replay_router)   # cc#1211: /api/tc/replay/* + one-shot /api/admin/run-tc-replay
 app.include_router(basket_rebalance_router)  # cc#1273: /api/adaptive/baskets/* (available/subscribe/repair)
+app.include_router(inv_scanner_router)  # cc#1283: /api/inv-scanner/universe + admin one-shot
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
