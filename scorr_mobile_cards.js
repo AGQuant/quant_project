@@ -186,6 +186,20 @@
   'use strict';
   if (window.__r5sig) return; window.__r5sig = 1;
 
+  /* cc#1278 — APP SURFACES ONLY. main.py injects this file on every _PWA_INJECT_PATHS page, so
+     without a gate the content sweep below runs on the WEB dashboards too — and content matching
+     cannot tell /m/home's mood hero from a 9px VIX band chip on /dashboard#index. That is exactly
+     what the founder photographed (24-Aug): .vix-band CALM and both PCR NEUTRAL/BULLISH chips
+     blown up to 42px chalk Archivo Black with a swoosh, near-invisible on the light theme, plus
+     the r5 rail and big-mono inflation on those cards. The Market Gate word survived only because
+     it has a child span and fails the leaf test. Third occurrence of this mechanism (cc#1108 bare
+     .mood selector, cc#1122 W/L letters, now the web sweep) — the fix this time is the gate the
+     enhancer always described: it exists for the LIVE WIRED HOME and the app screens, so it runs
+     on /m/* and /preview/* and nowhere else. Web pages style their own mood words in their own
+     scope. */
+  var _p = (location && location.pathname) || '';
+  if (!(_p === '/m' || _p.indexOf('/m/') === 0 || _p === '/preview' || _p.indexOf('/preview/') === 0)) return;
+
   var CSS = ''
     + '.r5-mood{font-family:"Archivo Black","Space Grotesk",sans-serif!important;color:#EAF0FA!important;'
     +   'font-size:42px!important;line-height:.95!important;letter-spacing:1px;'
