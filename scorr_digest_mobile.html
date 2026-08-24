@@ -380,42 +380,44 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .lrow.cmprow .ll{color:var(--aqua)}
 .lrow.cmprow .lbar{background:var(--aqua);opacity:.8}
 /* cc#1187: .rung/.rung b retired — the ladder is vertical rows now (see .lrow above) */
-/* ══ cc#1306 · THE LADDER GOES HORIZONTAL AGAIN, founder ruling, over cc#1187's own vertical
-   verdict. cc#1187 went vertical because five FULL Indian-format numbers in one horizontal row
-   kept overflowing the phone width under device text scaling (four rounds, cc#1096 through
-   cc#1186, all failed the same way). This round does not repeat that fight: WRAP, NOT SCROLL.
-   Every previous attempt (grid tracks, measured scrollmode, a scroll fade) tried to keep the row
-   on ONE line and kept losing a level off the edge. flex-wrap simply lets a chip that does not fit
-   drop to a second line — nothing can go off-screen or under a fade, because there is no fixed
-   row to overflow. That is the actual fix cc#1187 needed and did not have: not vertical vs
-   horizontal, but wrap vs a single forced line.
-   .hlad replaces .ladder's cell list; DAY HIGH/DAY LOW are two more chips in the SAME sorted band
-   digest_v3._ladders now returns (cc#1306 backend change — sorted once, at the source, same rule
-   cc#1257 set for S/R/PP), so no ordering logic is duplicated here. */
-.hlad{display:flex;flex-wrap:wrap;gap:var(--space-8);margin-top:var(--space-8)}
-.hl{flex:1 1 64px;min-width:60px;text-align:center;padding:var(--space-6) var(--space-4);
- border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi)}
-.hl .hll{display:block;font-family:'JetBrains Mono';font-size:8.5px;font-weight:700;
- letter-spacing:var(--track-px10);color:var(--muted)}
-.hl .hlv{display:block;font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);
- font-variant-numeric:tabular-nums;color:var(--chalk);margin-top:2px}
-.hl.s .hlv{color:var(--heat)}
-.hl.r .hlv{color:var(--volt)}
-.hl.pp{border-color:var(--amber);background:rgba(212,168,66,.1)}
-.hl.pp .hll,.hl.pp .hlv{color:var(--amber)}
-.hl.dh,.hl.dl{border-style:dashed}
-.hl.dh .hll,.hl.dh .hlv,.hl.dl .hll,.hl.dl .hlv{color:var(--muted)}
-/* CMP is the one chip that MOVES on every tick, so it is the one chip that should look alive —
-   the founder's own words were "red or green blink if day positive". up = day_chg_pct>=0, per the
-   header side/sideTxt convention this card already uses (var(--volt) up, var(--heat) down).
-   prefers-reduced-motion gets the colour with no animation — the information survives, the motion
-   does not, same guard the rest of this app family already uses on decorative motion. */
-.hl.cmp{border-width:calc(var(--bw-1) * 2);animation:hlBlinkUp 1.6s ease-in-out infinite}
-.hl.cmp.dn{animation-name:hlBlinkDn}
-.hl.cmp .hll,.hl.cmp .hlv{color:var(--aqua)}
-@keyframes hlBlinkUp{0%,100%{border-color:var(--volt);box-shadow:0 0 0 0 rgba(76,201,133,.35)}50%{border-color:var(--volt);box-shadow:0 0 6px 1px rgba(76,201,133,.5)}}
-@keyframes hlBlinkDn{0%,100%{border-color:var(--heat);box-shadow:0 0 0 0 rgba(224,84,84,.35)}50%{border-color:var(--heat);box-shadow:0 0 6px 1px rgba(224,84,84,.5)}}
-@media (prefers-reduced-motion:reduce){.hl.cmp{animation:none;border-color:var(--volt)}.hl.cmp.dn{border-color:var(--heat)}}
+/* ══ cc#1314 · THE LADDER IS AN SVG NOW, founder-approved v3 — over TWO live breaks with cc#1306's
+   HTML chips replaced by an HTML/CSS proportional line (v1, v2). Both v1 and v2 used ordinary DOM
+   text (div/span, font-size in px) and both rendered numbers far larger than specified on the
+   founder's real device, even AFTER a minimum-gap fix closed the collision hole v1 had — same CSS
+   that looked correct in every other context. That is Android OS-level font-boosting applied to
+   page text, which text-size-adjust does not stop in his PWA (cc#1136, and now confirmed a second
+   time). SVG <text> sizes itself against the SVG's own internal viewBox coordinate system, not the
+   page's font scale — it is a different rendering pipeline the OS boost does not reach. Approved
+   on-device via scorr_digest_mobile_PIVOT_LINE_PREVIEW_v3.html (SVG text, includes the exact
+   numbers that broke live + a worse cluster) before this landed here.
+   .pline is now an <svg>, not a flex/grid container — ticks, the CMP dot, Day High/Low satellites
+   and every label are SVG shapes/text drawn in ladder(ix)'s own JS, not HTML markup this CSS lays
+   out. What stays CSS: colour tokens and the blink animation (opacity, not border/box-shadow,
+   since SVG shapes take fill/stroke, not a CSS border). */
+.pline{display:block;width:100%;height:auto}
+.ptrk{stroke:var(--edge);stroke-width:1}
+.ptick{fill:var(--hi);stroke:var(--muted);stroke-width:1}
+.ptick.s{stroke:var(--heat)}
+.ptick.r{stroke:var(--volt)}
+.ptick.pp{stroke:var(--amber);fill:var(--amber)}
+.plab{font-family:'JetBrains Mono',monospace;font-size:7.6px;letter-spacing:.02em;fill:var(--muted)}
+.pval{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:8.6px;fill:var(--chalk)}
+.pval.pp{fill:var(--amber)}
+.plab.cmp,.pval.cmp{fill:var(--aqua)}
+.pval.cmp{font-size:9.4px}
+/* CMP is the one marker that MOVES on every tick, so it is the one marker that should look
+   alive — the founder's own words (cc#1306) were "red or green blink if day positive", refined
+   into the two-signal agreement rule verbatim in ladder(ix). opacity-blink, not the border-glow
+   cc#1306's HTML chip used, because an SVG circle takes fill/stroke rather than a CSS border. */
+.pdot.grn{fill:var(--volt);stroke:var(--volt);animation:pBlinkG 1.5s ease-in-out infinite}
+.pdot.red{fill:var(--heat);stroke:var(--heat);animation:pBlinkR 1.5s ease-in-out infinite}
+.pdot.amb{fill:var(--amber);stroke:var(--amber)}
+@keyframes pBlinkG{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes pBlinkR{0%,100%{opacity:1}50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.pdot.grn,.pdot.red{animation:none}}
+.pdaylbl{font-family:'JetBrains Mono',monospace;font-size:7.6px;fill:var(--muted)}
+.pdaydot{fill:var(--muted)}
+.pdaystem{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 2;opacity:.55}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
    one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
@@ -575,22 +577,90 @@ function ladder(ix){
      given — one sort, at the source, per scope 3.
      The local fallback exists only for a payload that predates the sort (a client holding an old
      bundle mid-deploy); it computes the same slot from the values rather than guessing. */
-  const slot=(ix.cmp_slot!=null)?ix.cmp_slot
-             :rungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
-  /* cc#1306: horizontal chips replace the vertical rows. dayChg decides the CMP blink colour —
-     >=0 is up/green, <0 is down/red, and null (no prior close on file) falls back to up's colour
-     rather than guessing a direction, matching this file's existing null-is-neutral convention. */
+  /* cc#1314 v3 · dotState is the colour rule verbatim, unchanged from v2: GREEN only when the day
+     is up AND cmp is above PP (agreement), RED only when the day is down AND cmp is below PP
+     (agreement), AMBER otherwise — a null day_chg_pct or a disagreement never gets rounded toward
+     a direction. */
   const dayChg=ix.day_chg_pct!=null?Number(ix.day_chg_pct):null;
-  const cmpDn=dayChg!=null&&dayChg<0;
-  const cmpChip=`<div class="hl cmp${cmpDn?' dn':''}"><span class="hll">CMP</span><span class="hlv">${num(cmp)}</span></div>`;
-  const hlCls=r=>r.label==='PP'?'pp':(r.label==='DAY HIGH'?'dh':(r.label==='DAY LOW'?'dl':(/^S/.test(r.label)?'s':'r')));
-  let rows=[];
-  rungs.forEach((r,i)=>{
-    if(cmp!=null&&i===slot)rows.push(cmpChip);
-    rows.push(`<div class="hl ${hlCls(r)}"><span class="hll">${esc(r.label)}</span><span class="hlv">${r.value!=null?num(r.value):'—'}</span></div>`);
+  const dayUp=dayChg!=null?dayChg>=0:null;
+  const aboveP=side==='above'?true:(side==='below'?false:null);
+  const dotState=(dayUp===true&&aboveP===true)?'grn':(dayUp===false&&aboveP===false)?'red':'amb';
+  /* CORE vs SATELLITE split (unchanged from v2): DAY HIGH/DAY LOW sit off the S2..R2 scale and
+     the above/below rotation entirely, so a wide day range can never compress the pivot spacing. */
+  const coreRungs=rungs.filter(r=>r.label!=='DAY HIGH'&&r.label!=='DAY LOW');
+  const dayRungs=rungs.filter(r=>r.label==='DAY HIGH'||r.label==='DAY LOW');
+  const rvals=coreRungs.map(r=>r.value).filter(v=>v!=null);
+  const minV=rvals.length?Math.min.apply(null,rvals):null, maxV=rvals.length?Math.max.apply(null,rvals):null;
+  const spanV=(minV!=null&&maxV!=null&&maxV>minV)?(maxV-minV):null;
+  const posOf=v=>spanV==null?50:Math.max(0,Math.min(100,((v-minV)/spanV)*100));
+  const hlCls=r=>r.label==='PP'?'pp':(/^S/.test(r.label)?'s':'r');
+  /* MIN_GAP declutter (unchanged from the take-2 fix): forward-then-backward pass so two
+     proportionally-close values (CMP landing a few points from PP is a NORMAL market state, not
+     an edge case — this is what actually broke live, twice, before this rule existed) never stack
+     their tick/dot on top of each other. Position nudges, the printed number never does. */
+  const MIN_GAP=9;
+  function declutter(arr){
+    const pts=arr.filter(it=>it.pos!=null);
+    for(let i=1;i<pts.length;i++){ if(pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i].pos=pts[i-1].pos+MIN_GAP; }
+    for(let i=pts.length-1;i>=0;i--){
+      if(pts[i].pos>100)pts[i].pos=100;
+      if(i>0&&pts[i].pos-pts[i-1].pos<MIN_GAP)pts[i-1].pos=pts[i].pos-MIN_GAP;
+    }
+    for(let i=0;i<pts.length;i++)pts[i].pos=Math.max(0,Math.min(100,pts[i].pos));
+  }
+  const coreSlot=coreRungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
+  let items=[];
+  coreRungs.forEach((r,i)=>{
+    if(cmp!=null&&i===coreSlot)items.push({cmp:true,value:cmp});
+    items.push({label:r.label,value:r.value,cls:hlCls(r)});
   });
-  if(cmp!=null&&slot>=rungs.length)rows.push(cmpChip);
-  const cells=rows.join('');
+  if(cmp!=null&&coreSlot>=coreRungs.length)items.push({cmp:true,value:cmp});
+  items.forEach(it=>{it.pos=it.value!=null?posOf(it.value):null;});
+  declutter(items);
+  const n=items.length;
+  /* cc#1314 v3 · THE LINE IS AN SVG NOW, founder-approved after two live breaks with HTML/CSS text
+     (see the CSS block above for why). W/H/TRK_Y/PAD are the SVG's own internal viewBox units, not
+     page pixels — the viewBox scales to whatever width the card actually has, same as this file's
+     other inline SVGs (iChart). xOf converts a 0-100 declutter position into an x coordinate
+     inside that viewBox. */
+  const W=340,H=76,TRK_Y=38,PAD=6;
+  const xOf=pct=>PAD+(pct/100)*(W-2*PAD);
+  let svg=`<line class="ptrk" x1="${PAD}" y1="${TRK_Y}" x2="${W-PAD}" y2="${TRK_Y}"/>`;
+  items.forEach(function(it,i){
+    const x=xOf(it.pos!=null?it.pos:50);
+    const half=(i%2===0)?'above':'below';
+    const labY=half==='above'?TRK_Y-22:TRK_Y+18;
+    const valY=half==='above'?TRK_Y-11:TRK_Y+29;
+    /* text-anchor keeps the first/last item's text INSIDE the viewBox instead of centring off the
+       edge — the SVG equivalent of v1/v2's .lo/.hi classes, same structural (not measured) rule. */
+    const anchor=(i===0)?'start':(i===n-1?'end':'middle');
+    const tx=(i===0)?x+2:(i===n-1?x-2:x);
+    if(it.cmp){
+      svg+=`<circle class="pdot ${dotState}" cx="${x}" cy="${TRK_Y}" r="4.4"/>`
+        + `<text class="plab cmp" x="${tx}" y="${labY}" text-anchor="${anchor}">CMP</text>`
+        + `<text class="pval cmp" x="${tx}" y="${valY}" text-anchor="${anchor}">${esc(num(it.value))}</text>`;
+    }else{
+      svg+=`<circle class="ptick ${it.cls}" cx="${x}" cy="${TRK_Y}" r="2.6"/>`
+        + `<text class="plab" x="${tx}" y="${labY}" text-anchor="${anchor}">${esc(it.label)}</text>`
+        + `<text class="pval ${it.cls==='pp'?'pp':''}" x="${tx}" y="${valY}" text-anchor="${anchor}">`
+        + (it.value!=null?esc(num(it.value)):'—')+'</text>';
+    }
+  });
+  /* Day High/Day Low satellites: same posOf scale, same declutter pass against EACH OTHER, drawn
+     above the core row with a dashed stem down to the track — clamped honestly to the edge if a
+     day extreme falls outside the core range, same off-scale rule the core CMP dot follows. */
+  const dayItems=dayRungs.map(r=>({r:r,pos:r.value!=null?posOf(r.value):null}));
+  declutter(dayItems);
+  dayItems.forEach(function(di,i){
+    const r=di.r;
+    if(r.value==null)return;
+    const x=xOf(di.pos);
+    const short=r.label==='DAY HIGH'?'H':'L';
+    const anchor=(x<PAD+14)?'start':(x>W-PAD-14?'end':'middle');
+    svg+=`<line class="pdaystem" x1="${x}" y1="8" x2="${x}" y2="${TRK_Y-5}"/>`
+      + `<circle class="pdaydot" cx="${x}" cy="10" r="1.6"/>`
+      + `<text class="pdaylbl" x="${x}" y="6" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
+  });
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
      now follows d.market.state, the SAME composer the header chip already reads, via window.__MK:
@@ -601,7 +671,7 @@ function ladder(ix){
   const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
   return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
     <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
-    <div class="hlad">${cells}</div></div>`;
+    <svg class="pline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${svg}</svg></div>`;
 }
 
 /* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
