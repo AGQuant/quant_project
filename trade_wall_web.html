@@ -19,9 +19,10 @@
   body{margin:0;background:var(--bg);color:var(--txt);
        font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
   .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
-  h1{font-size:19px;font-weight:800;margin:4px 0 2px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px;display:inline-block}
+  .hd-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
-  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:12px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:10px}
   .tabs::-webkit-scrollbar{display:none}
   .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
        background:var(--panel);color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;
@@ -29,6 +30,13 @@
   .tab:hover{border-color:var(--blu)}
   .tab.on{background:var(--blu);border-color:var(--blu);color:#fff}
   .tab .n{font-size:10.5px;font-weight:800;opacity:.72}
+  /* cc#1295: three-level hierarchy — status (bigger, primary) -> instrument -> engine bucket. */
+  .tabs.lvl1 .tab{font-size:13.5px;padding:9px 16px}
+  .tabs.lvl3 .tab{font-size:11.5px;padding:6px 11px;min-height:32px}
+  .ibtn{flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);
+        background:var(--panel);color:var(--mut);font-size:13px;font-weight:800;cursor:pointer;
+        display:inline-flex;align-items:center;justify-content:center;font-style:italic;font-family:Georgia,serif}
+  .ibtn:hover{border-color:var(--blu);color:var(--blu)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
   .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
@@ -41,20 +49,25 @@
   .num{text-align:right;font-variant-numeric:tabular-nums}
   .sym{font-weight:800}
   .pos{color:var(--grn)} .neg{color:var(--red)}
+  .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
-  /* tw- prefixed, same discipline as the mobile page */
-  .tw-ev{font-family:ui-monospace,monospace;font-size:9.5px;font-weight:800;letter-spacing:.09em;
-         padding:2px 7px;border-radius:5px}
-  .tw-in{color:var(--grn);background:rgba(15,157,88,.12)}
-  .tw-out-up{color:var(--grn);background:rgba(15,157,88,.12)}
-  .tw-out-dn{color:var(--red);background:rgba(208,67,59,.12)}
-  .tw-out-flat{color:var(--mut);background:var(--card2)}
   .tw-tag{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut)}
   .tw-day{font-family:ui-monospace,monospace;font-size:10px;font-weight:800;letter-spacing:.12em;
           text-transform:uppercase;color:var(--dim);background:var(--card2)}
   .tw-more{padding:16px;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:var(--mut)}
   .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
           color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
+  .ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.55);z-index:9998;
+      align-items:center;justify-content:center;padding:20px}
+  .ov.open{display:flex}
+  .ov-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:420px;
+          width:100%;padding:18px}
+  .ov-box h2{font-size:14px;margin:0 0 4px}
+  .ov-box .s{font-size:11px;color:var(--mut);margin-bottom:12px}
+  .ov-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;
+          border-bottom:1px solid var(--line2);font-size:12.5px}
+  .ov-row:last-child{border-bottom:none}
+  .ov-close{margin-top:14px;width:100%}
   @media(max-width:760px){
     .wrap{padding:12px 10px 64px}
     thead th,tbody td{padding:7px 6px;font-size:12px}
@@ -70,49 +83,64 @@
      placeholder directly under <body> at full viewport width — matched here, nothing invented. -->
 <div id="scorr-nav"></div>
 <div class="wrap">
-  <h1>Wall of Trades</h1>
-  <div class="sub">
-    Every entry and every exit, newest first, <b>since 10 Aug 2026</b> — the four live engines:
-    <b>V8 Futures</b>, <b>Index</b>, <b>Quant Basket</b> and <b>Equity Screener</b>. This page
-    computes nothing of its own — it renders <b>/api/tradewall</b>, the same endpoint the app
-    reads, so the two surfaces cannot disagree about a trade.
+  <div class="hd-row">
+    <h1>Wall of Trades</h1>
+    <button class="ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i</button>
+  </div>
+  <div class="sub" id="subline">
+    Every position across the live engines, <b>since 10 Aug 2026</b>. This page computes nothing
+    of its own — it renders <b>/api/tradewall</b>, the same endpoint the app reads, so the two
+    surfaces cannot disagree about a trade.
   </div>
 
-  <div class="tabs" id="tabs"></div>
+  <!-- level 1: status -->
+  <div class="tabs lvl1" id="tabsStatus"></div>
+  <!-- level 2: instrument -->
+  <div class="tabs" id="tabsInstrument"></div>
+  <!-- level 3: engine bucket -->
+  <div class="tabs lvl3" id="tabsBucket"></div>
+
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
     <div class="scroll"><table id="tbl">
-      <thead><tr>
-        <th>Event</th><th>Time</th><th>Symbol</th><th>Side</th><th>Engine</th>
-        <th>Instrument</th><th class="num">Price</th><th class="num">Qty</th>
-        <th class="num">P&amp;L</th><th>Result</th><th>Detail</th>
-      </tr></thead>
+      <thead id="thead"></thead>
       <tbody id="body"></tbody>
     </table></div>
     <div class="tw-more" id="more"></div>
   </div>
 </div>
 
+<div class="ov" id="otherOv" onclick="if(event.target===this)closeOther()">
+  <div class="ov-box">
+    <h2>Other engines</h2>
+    <div class="s">Engines with a real trade book that are not one of the 5 primary buckets above.</div>
+    <div id="otherBody">Loading…</div>
+    <button class="tw-btn ov-close" onclick="closeOther()">Close</button>
+  </div>
+</div>
+
 <script src="/scorr_card_common.js"></script>
 <script>
-/* cc#991 — the WEB renderer of the Wall of Trades.
+/* cc#991/cc#1295 — the WEB renderer of the Wall of Trades.
 
    ONE COMPUTATION, TWO RENDERERS. The app screen (/m/trades) and this page both read
    /api/tradewall. Nothing about a trade is derived here; the union, the engine labels, the
-   instrument classes and the timestamp handling all live in trade_wall_endpoints.py.
+   instrument classes, side mapping and the timestamp handling all live in trade_wall_endpoints.py.
 
-   THE TWO HONESTY RULES CARRY OVER FROM THE APP PAGE:
-    * a DAY-PRECISION event (quant baskets, options exits — DATE columns with no time) prints its
-      date and the word "date only", never a fabricated 00:00 clock time;
-    * V14's P&L is a PERCENT and its table has no rupee column, so its exits leave the P&L cell
-      empty and carry the labelled "% net" in Detail. A percent in a rupee column is a false
-      number, and this table has a rupee column. */
-/* cc#1277: STATE.event is the ENTRY/EXIT display filter. It is CLIENT-SIDE ONLY — /api/tradewall
-   has no event param and the page's own contract says it computes nothing, so this filters what
-   is already loaded rather than forking the query. ENTRY is the fresh-load default (founder
-   ask); an explicit EXIT selection survives instrument-tab switches because pick() never
-   touches it. */
-var STATE = { events: [], counts: {}, total: null, filter: 'ALL', event: 'ENTRY', instruments: ['EQUITY','FUTURES','OPTIONS'] };
+   cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): the wall moved
+   from four flat groups + an Entry/Exit event toggle to a three-level hierarchy — STATUS (Open |
+   Closed, default Open) -> INSTRUMENT (Futures | Equity) -> tagged ENGINE BUCKETS. Every row now
+   represents one POSITION (entry+exit together when closed), not a flat entry/exit event, so a
+   Closed row always carries its realised P&L in the same row as its entry.
+
+   THE DAY-PRECISION HONESTY RULE CARRIES OVER: a day-precision event (quant baskets, investment
+   scanner — DATE columns with no time) prints its date only, never a fabricated clock time. */
+var BUCKETS = {
+  FUTURES: ['V8', 'TC Scanner', 'Index Intel'],
+  EQUITY: ['QB Basket', 'Investment Scanner'],
+};
+var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
+              status: 'open', instrument: 'FUTURES', bucket: 'V8' };
 var PAGE  = { cursor: null, more: true, busy: false };
 var LIMIT = 100;
 
@@ -123,6 +151,11 @@ function inr(v){
   var x = Number(v);
   return (x < 0 ? '−' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
 }
+function pctFmt(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '';
+  var x = Number(v);
+  return (x >= 0 ? '+' : '') + x.toFixed(2) + '%';
+}
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
@@ -132,90 +165,116 @@ function qty(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '';
   return Math.round(Number(v)).toLocaleString('en-IN');
 }
-function evCls(e){
-  if (e.event === 'ENTRY') return 'tw-in';
-  if (e.pnl === null || e.pnl === undefined) return 'tw-out-flat';
-  return Number(e.pnl) > 0 ? 'tw-out-up' : (Number(e.pnl) < 0 ? 'tw-out-dn' : 'tw-out-flat');
+function sideCls(s){ return s === 'SHORT' ? 'short' : 'long'; }
+
+/* cc#1295 verify 5: Closed rows always show realised P&L — pnl (rupees) when the engine sizes
+   positions, else pnl_pct (percent) for a signal-only engine like TC Scanner / Investment
+   Scanner. Never both blank on a genuinely closed row with real prices; an em-dash only appears
+   when the source data itself is incomplete (never fabricated). */
+function pnlCell(e){
+  if (e.pnl !== null && e.pnl !== undefined){
+    var cls = Number(e.pnl) >= 0 ? 'pos' : 'neg';
+    return '<td class="num ' + cls + '">' + inr(e.pnl) + '</td>';
+  }
+  if (e.pnl_pct !== null && e.pnl_pct !== undefined){
+    var cls2 = Number(e.pnl_pct) >= 0 ? 'pos' : 'neg';
+    return '<td class="num ' + cls2 + '">' + pctFmt(e.pnl_pct) + '</td>';
+  }
+  return '<td class="num">--</td>';
 }
 
-function rowsHtml(list, startDay){
-  var h = '', day = startDay;
+function rowsHtml(list){
+  var h = '', day = null;
   list.forEach(function(e){
     if (e.day !== day){
       day = e.day;
-      h += '<tr class="tw-day"><td colspan="11">' + esc(day || 'undated') + '</td></tr>';
+      h += '<tr class="tw-day"><td colspan="10">' + esc(day || 'undated') + '</td></tr>';
     }
-    var pnlCls = (e.pnl == null) ? '' : (Number(e.pnl) >= 0 ? 'pos' : 'neg');
     h += '<tr>'
-      + '<td><span class="tw-ev ' + evCls(e) + '">' + esc(e.event) + '</span></td>'
-      /* when_full already reflects precision: a day event has no clock time in it */
-      + '<td class="tw-tag">' + esc(e.when_full || '--') + '</td>'
       + '<td class="sym">' + esc(e.symbol) + '</td>'
-      + '<td>' + esc(e.side || '') + '</td>'
+      + '<td class="' + sideCls(e.side) + '">' + esc(e.side || '') + '</td>'
       + '<td>' + esc(e.engine) + '</td>'
-      + '<td>' + esc(e.instrument) + '</td>'
-      + '<td class="num">' + px(e.price) + '</td>'
-      + '<td class="num">' + qty(e.qty) + '</td>'
-      + '<td class="num ' + pnlCls + '">' + (e.event === 'EXIT' ? inr(e.pnl) : '') + '</td>'
-      + '<td class="tw-tag">' + esc(e.result || '') + '</td>'
-      + '<td class="tw-tag">' + esc(e.note || '')
-        + (e.prec === 'day' ? (e.note ? ' · ' : '') + 'date only' : '') + '</td>'
+      + '<td class="tw-tag">' + esc(e.entry.when_full || '--') + '</td>'
+      + '<td class="num">' + px(e.entry_price) + '</td>'
+      + (STATE.status === 'closed'
+          ? '<td class="tw-tag">' + esc(e.exit.when_full || '--') + '</td>'
+            + '<td class="num">' + px(e.exit_price) + '</td>'
+          : '<td class="num">' + qty(e.qty) + '</td><td></td>')
+      + pnlCell(e)
+      + '<td class="tw-tag">' + esc(e.result || '')
+        + (e.note ? (e.result ? ' · ' : '') + esc(e.note) : '') + '</td>'
       + '</tr>';
   });
   return h;
 }
 
-function tabsHtml(){
-  var defs = [{k:'ALL', label:'All', n: STATE.total}];
-  STATE.instruments.forEach(function(k){
-    defs.push({k:k, label: k.charAt(0) + k.slice(1).toLowerCase(), n: (STATE.counts || {})[k]});
-  });
-  var h = defs.map(function(d){
-    /* whole-wall counts from the server, never a count of what happens to be loaded.
-       cc#1277 scope 5, stated: these stay TOTAL counts (entries + exits combined) whichever
-       Entry/Exit button is active — the number a tab shows never jumps on a toggle. */
-    return '<button class="tab' + (d.k === STATE.filter ? ' on' : '') + '" onclick="pick(\'' + d.k + '\')">'
-      + esc(d.label) + (d.n == null ? '' : ' <span class="n">' + d.n + '</span>') + '</button>';
+function theadHtml(){
+  return STATE.status === 'closed'
+    ? '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
+      + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L</th><th>Detail</th></tr>'
+    : '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
+      + '<th class="num">Qty</th><th></th><th class="num">P&amp;L</th><th>Detail</th></tr>';
+}
+
+function statusTabsHtml(){
+  return ['open','closed'].map(function(k){
+    var n = (STATE.statusCounts || {})[k];
+    return '<button class="tab' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
+      + (k === 'open' ? 'Open' : 'Closed') + (n == null ? '' : ' <span class="n">' + n + '</span>') + '</button>';
   }).join('');
-  /* cc#1277 scope 3: the EVENT dimension, same row, same tab grammar, after a thin divider.
-     Filters by the ENTRY/EXIT pill each row already carries — not a new instrument type. */
-  h += '<span style="flex:0 0 auto;width:1px;background:var(--line);margin:4px 2px"></span>';
-  ['ENTRY','EXIT'].forEach(function(k){
-    h += '<button class="tab' + (k === STATE.event ? ' on' : '') + '" onclick="pickEv(\'' + k + '\')">'
-      + k.charAt(0) + k.slice(1).toLowerCase() + '</button>';
-  });
-  return h;
+}
+
+function instrumentTabsHtml(){
+  return ['FUTURES','EQUITY'].map(function(k){
+    return '<button class="tab' + (k === STATE.instrument ? ' on' : '') + '" onclick="pickInstrument(\'' + k + '\')">'
+      + (k.charAt(0) + k.slice(1).toLowerCase()) + '</button>';
+  }).join('');
+}
+
+function bucketTabsHtml(){
+  var list = BUCKETS[STATE.instrument] || [];
+  return list.map(function(eng){
+    var n = ((STATE.byEngine || {})[eng] || {})[STATE.status] || 0;
+    return '<button class="tab' + (eng === STATE.bucket ? ' on' : '') + '" onclick="pickBucket(\'' + eng + '\')">'
+      + esc(eng) + ' <span class="n">' + n + '</span></button>';
+  }).join('');
 }
 
 function moreHtml(){
   if (PAGE.busy) return 'Loading…';
-  if (!PAGE.more) return 'That is the whole wall.';
+  if (!PAGE.more) return 'That is the whole wall for this filter.';
   return '<button class="tw-btn" onclick="loadMore()">Load more</button>';
 }
 
 function render(){
-  document.getElementById('tabs').innerHTML = tabsHtml();
-  /* cc#1277 scopes 3+6: the table shows the loaded rows that match the EVENT filter; the meta
-     line counts THAT set and says which half it is showing. The denominator stays the server's
-     whole-wall instrument count — there is no server-side entry/exit count to quote, and the
-     "· entries only" qualifier keeps the line honest instead of implying the filtered X is
-     climbing toward the combined Y. */
-  var view = STATE.events.filter(function(e){ return e.event === STATE.event; });
-  var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
+  document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
+  document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
+  document.getElementById('tabsBucket').innerHTML = bucketTabsHtml();
+  document.getElementById('thead').innerHTML = theadHtml();
+
+  var view = STATE.events.filter(function(e){ return e.engine === STATE.bucket; });
+  var bucketTotal = ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
   document.getElementById('meta').textContent =
-    'showing ' + view.length + ' of ' + (of == null ? '--' : of) + ' events'
-    + ' · ' + (STATE.event === 'ENTRY' ? 'entries' : 'exits') + ' only'
-    + ' · ' + (STATE.scope || 'since 10 Aug 2026')
+    'showing ' + view.length + ' of ' + (bucketTotal == null ? '--' : bucketTotal) + ' ' + STATE.status + ' positions'
+    + ' · ' + STATE.bucket
+    + ' · since 10 Aug 2026'
     + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
+
+  var emptyMsg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket) + '.';
+  /* cc#1295 verify 7: Investment Scanner's Closed bucket is expected to render empty for some
+     time (the engine landed its first signal today, no exits proven yet) — honest, not an error. */
+  if (STATE.bucket === 'Investment Scanner' && STATE.status === 'closed' && !view.length){
+    emptyMsg = 'No Investment Scanner exits yet — the engine landed its first signal today and has not closed a position.';
+  }
   document.getElementById('body').innerHTML = view.length
-    ? rowsHtml(view, null)
-    : '<tr><td colspan="11" class="empty">No trade events for this filter.</td></tr>';
+    ? rowsHtml(view)
+    : '<tr><td colspan="9" class="empty">' + emptyMsg + '</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
 }
 
 function url(cursor){
-  var u = '/api/tradewall?limit=' + LIMIT;
-  if (STATE.filter !== 'ALL') u += '&instrument=' + encodeURIComponent(STATE.filter);
+  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(STATE.instrument)
+        + '&status=' + encodeURIComponent(STATE.status);
   if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
   return u;
 }
@@ -230,18 +289,11 @@ function loadMore(){
       if (d.error) throw new Error(d.error);
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
-      /* de-dupe by id even though a keyset cursor should make repeats impossible — a duplicate
-         row is the one failure a reader would actually see */
       var seen = {};
       STATE.events.forEach(function(e){ seen[e.id] = 1; });
       var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
       STATE.events = STATE.events.concat(fresh);
       PAGE.busy = false;
-      /* cc#1277: full re-render instead of the old incremental append. With the EVENT filter in
-         play an append would need its own filtered day-header continuity logic; render() already
-         has it, the set is a few hundred rows at most, and one code path cannot drift from the
-         other. The old path also rebuilt the meta line by hand without the scope/as-of suffix —
-         that inconsistency goes with it. */
       render();
     })
     .catch(function(e){
@@ -251,20 +303,23 @@ function loadMore(){
     });
 }
 
-function pick(k){
-  if (k === STATE.filter) return;
-  /* cc#1277 scope 4: STATE.event deliberately untouched — an explicit Exit selection survives
-     instrument-tab switches; only a fresh page load resets to Entry. */
-  STATE.filter = k; STATE.events = [];
+function pickStatus(k){
+  if (k === STATE.status) return;
+  STATE.status = k; STATE.events = [];
   PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   boot(true);
 }
-
-function pickEv(k){
-  if (k === STATE.event) return;
-  /* display-only toggle over what is already loaded — no refetch, no cursor reset; Load more
-     keeps paging the same server stream whichever half is showing */
-  STATE.event = k;
+function pickInstrument(k){
+  if (k === STATE.instrument) return;
+  STATE.instrument = k; STATE.bucket = (BUCKETS[k] || [])[0];
+  STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
+  boot(true);
+}
+function pickBucket(eng){
+  if (eng === STATE.bucket) return;
+  /* engine bucket is a display filter over what is already loaded for this instrument+status —
+     no refetch, since the server call is already scoped to the instrument, not a single engine */
+  STATE.bucket = eng;
   render();
 }
 
@@ -276,10 +331,10 @@ function boot(keepCounts){
       STATE.events = d.events || [];
       if (!keepCounts || STATE.total == null){
         STATE.counts = d.counts || {};
+        STATE.statusCounts = d.status_counts || {};
         STATE.total  = d.total;
-        if (d.instruments) STATE.instruments = d.instruments;
-        STATE.scope = d.scope || null;   /* cc#1000: today-onwards scope for the meta line */
       }
+      STATE.byEngine = d.by_engine || {};
       STATE.asOf  = d.as_of;
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
@@ -288,10 +343,38 @@ function boot(keepCounts){
     .catch(function(e){
       document.getElementById('meta').textContent = 'Could not load the wall — ' + e.message;
       document.getElementById('body').innerHTML =
-        '<tr><td colspan="11" class="empty">Could not load the wall.</td></tr>';
+        '<tr><td colspan="9" class="empty">Could not load the wall.</td></tr>';
       document.getElementById('more').innerHTML = '';
     });
 }
+
+/* cc#1295: the i-button — engines with a real book that are not one of the 5 primary buckets
+   (QSR today, any future minor engine the same way). Loaded lazily on first open, not on boot. */
+var OTHER_LOADED = false;
+function openOther(){
+  document.getElementById('otherOv').classList.add('open');
+  if (OTHER_LOADED) return;
+  fetchWithTimeout('/api/tradewall/other-engines')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      OTHER_LOADED = true;
+      var list = d.engines || [];
+      document.getElementById('otherBody').innerHTML = list.length
+        ? list.map(function(e){
+            return '<div class="ov-row"><span>' + esc(e.name) + '</span>'
+              + '<span>' + e.open + ' open &middot; ' + e.closed + ' closed</span></div>';
+          }).join('')
+        : '<div class="empty">No other engines with a trade book right now.</div>';
+    })
+    .catch(function(e){
+      document.getElementById('otherBody').innerHTML =
+        '<div class="empty">Could not load — ' + esc(e.message) + '</div>';
+    });
+}
+function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') closeOther();
+});
 
 boot(false);
 </script>

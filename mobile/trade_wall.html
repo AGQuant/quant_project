@@ -40,22 +40,34 @@
   font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .tw-sent{padding:18px 2px;text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:10px;color:var(--dim)}
+/* cc#1295: i-button (other engines not in the 5 primary buckets — QSR today). */
+.tw-ibtn{margin:0 12px 10px;padding:8px 12px;border-radius:9px;border:1px solid var(--line);
+  background:var(--panel);color:var(--mut);font-size:11px;font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.tw-ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.6);z-index:9998;
+  align-items:center;justify-content:center;padding:20px}
+.tw-ov.open{display:flex}
+.tw-ov-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:380px;
+  width:100%;padding:16px}
+.tw-ov-h{font-size:14px;font-weight:800;margin-bottom:2px}
+.tw-ov-s{font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.5}
+.tw-ov-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line2);
+  font-size:12px}
+.tw-ov-row:last-child{border-bottom:none}
+.tw-ov-close{margin-top:12px;width:100%}
 </style>
 </head>
 <body>
 <!--
-  cc#991 — WALL OF TRADES. One chronological feed of every entry and every exit across every
-  engine that keeps a trade log. Read-only display over /api/tradewall; this page computes no
-  money of its own.
+  cc#991/cc#1295 — WALL OF TRADES. Every position across the live engines, read-only display over
+  /api/tradewall; this page computes no money of its own.
 
-  TWO HONESTY RULES THIS PAGE OBEYS AND THE READER CAN CHECK:
-   * A DAY-PRECISION EVENT NEVER SHOWS A CLOCK TIME. Quant baskets and the options exits are
-     stored as DATE columns with no time. The endpoint says so per event (`prec`), and a
-     day-precision card prints the date alone rather than a fabricated 00:00 on a market that
-     opens at 09:15.
-   * V14 P&L IS A PERCENT, NOT RUPEES. Its table has no rupee column, so those exits show no
-     rupee figure at all and carry the labelled "% net" in the note line instead. A percent
-     rendered in the rupee slot would be a false number.
+  cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): STATUS (Open|Closed,
+  default Open) -> INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is one POSITION
+  (entry+exit together when closed), not a flat entry/exit event.
+
+  THE HONESTY RULE THIS PAGE OBEYS AND THE READER CAN CHECK: a day-precision position (quant
+  baskets, investment scanner — DATE columns with no time) prints its date alone, never a
+  fabricated clock time the database does not hold.
 -->
 <div class="screen">
 
@@ -64,13 +76,25 @@
     <div class="s" id="sub">loading…</div>
   </div>
 
-  <div class="chips" id="chips"></div>
+  <div class="chips" id="chipsStatus"></div>
+  <div class="chips" id="chipsInstrument"></div>
+  <div class="chips" id="chipsBucket"></div>
+  <button class="tw-ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i &middot; other engines</button>
 
   <div class="body" id="body">
     <div class="loading">Loading every trade…</div>
   </div>
 
   <div class="cover" id="cover"></div>
+</div>
+
+<div class="tw-ov" id="otherOv" onclick="if(event.target===this)closeOther()">
+  <div class="tw-ov-box">
+    <div class="tw-ov-h">Other engines</div>
+    <div class="tw-ov-s">Engines with a real trade book that are not one of the 5 primary buckets above.</div>
+    <div id="otherBody">Loading…</div>
+    <button class="chip tw-ov-close" onclick="closeOther()">Close</button>
+  </div>
 </div>
 
 <nav class="bnav">
@@ -85,7 +109,13 @@
 /* The bottom nav stays FIVE items (card do_not_touch). This page is reached from the home tools
    grid and the /m/v8 More stack, so no tab is marked active — marking one would tell the reader
    they are somewhere they are not. */
-var STATE = { events: [], counts: {}, total: null, filter: 'ALL', asOf: null, byEngine: null };
+/* cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): the wall moved from
+   four flat groups + an Entry/Exit event toggle to STATUS (Open|Closed, default Open) ->
+   INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is now one POSITION (entry+
+   exit together when closed), not a flat entry/exit event — see trade_wall_endpoints.py for why. */
+var BUCKETS = { FUTURES: ['V8', 'TC Scanner', 'Index Intel'], EQUITY: ['QB Basket', 'Investment Scanner'] };
+var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
+              status: 'open', instrument: 'FUTURES', bucket: 'V8', asOf: null };
 var PAGE  = { cursor: null, more: true, busy: false, obs: null };
 var LIMIT = 40;
 
@@ -96,6 +126,11 @@ function inr(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
   var x = Number(v);
   return (x < 0 ? '−' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+}
+function pctFmt(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  var x = Number(v);
+  return (x >= 0 ? '+' : '') + x.toFixed(2) + '%';
 }
 function px(v){
   if (v === null || v === undefined || isNaN(Number(v))) return '--';
@@ -108,40 +143,51 @@ function qty(v){
 }
 
 function evClass(e){
-  if (e.event === 'ENTRY') return 'tw-in';
-  if (e.pnl === null || e.pnl === undefined) return 'tw-out-flat';
+  if (e.status === 'open') return 'tw-in';
+  if (e.pnl === null || e.pnl === undefined) {
+    if (e.pnl_pct === null || e.pnl_pct === undefined) return 'tw-out-flat';
+    return Number(e.pnl_pct) > 0 ? 'tw-out-up' : (Number(e.pnl_pct) < 0 ? 'tw-out-dn' : 'tw-out-flat');
+  }
   return Number(e.pnl) > 0 ? 'tw-out-up' : (Number(e.pnl) < 0 ? 'tw-out-dn' : 'tw-out-flat');
 }
 
 function card(e){
-  var sideCls = (e.side === 'SHORT' || e.side === 'SELL') ? 'tw-short' : 'tw-long';
-  /* cc#1090 P7 dense sweep: the wall pages 40 events at a time and scrolls on. */
+  var sideCls = e.side === 'SHORT' ? 'tw-short' : 'tw-long';
+  var isClosed = e.status === 'closed';
+  /* cc#1295 verify 5: Closed cards always carry realised P&L — pnl (rupees) when the engine
+     sizes positions, else pnl_pct for a signal-only engine (TC Scanner/Investment Scanner).
+     An em-dash appears only when the source data itself is incomplete, never fabricated. */
+  var pnlHtml = '';
+  if (isClosed){
+    if (e.pnl !== null && e.pnl !== undefined)
+      pnlHtml = '<span class="tw-pnl ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '">' + inr(e.pnl) + '</span>';
+    else if (e.pnl_pct !== null && e.pnl_pct !== undefined)
+      pnlHtml = '<span class="tw-pnl ' + (Number(e.pnl_pct) >= 0 ? 'pos' : 'neg') + '">' + pctFmt(e.pnl_pct) + '</span>';
+    else
+      pnlHtml = '<span class="tw-pnl">--</span>';
+  }
   var h = '<div class="tw-card slab dense">'
     + '<div class="tw-top">'
-      + '<span class="tw-ev ' + evClass(e) + '">' + esc(e.event) + '</span>'
+      + '<span class="tw-ev ' + evClass(e) + '">' + esc(e.status.toUpperCase()) + '</span>'
       + '<span class="tw-sym">' + esc(e.symbol) + '</span>'
-      /* A day-precision event prints its DATE here and nothing else. The clock time it would
-         otherwise show does not exist in the database. */
-      + '<span class="tw-when">' + esc(e.when || '--') + '</span>'
+      /* day-precision (quant baskets, investment scanner) prints a date only, no invented clock time */
+      + '<span class="tw-when">' + esc(isClosed ? (e.exit.when_full || '--') : (e.entry.when_full || '--')) + '</span>'
     + '</div>'
     + '<div class="tw-meta">'
       + '<span class="tw-chip ' + sideCls + '">' + esc(e.side || '--') + '</span>'
       + '<span class="tw-chip">' + esc(e.engine) + '</span>'
-      + '<span class="tw-chip">' + esc(e.instrument) + '</span>'
       + (e.result ? '<span class="tw-chip">' + esc(e.result) + '</span>' : '')
     + '</div>'
-    + '<div class="tw-px"><span>@ <b>' + px(e.price) + '</b></span>'
-      + (qty(e.qty) ? '<span>qty <b>' + qty(e.qty) + '</b></span>' : '')
-      /* Rupee P&L appears ONLY on an exit that has one. V14 has no rupee column, so its exits
-         show no rupee figure rather than a percent dressed up as money. */
-      + ((e.event === 'EXIT' && e.pnl !== null && e.pnl !== undefined)
-          ? '<span class="tw-pnl ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '">' + inr(e.pnl) + '</span>'
-          : '')
+    + '<div class="tw-px"><span>entry <b>' + px(e.entry_price) + '</b></span>'
+      + (isClosed ? '<span>exit <b>' + px(e.exit_price) + '</b></span>' : (qty(e.qty) ? '<span>qty <b>' + qty(e.qty) + '</b></span>' : ''))
+      + pnlHtml
     + '</div>';
-  if (e.note) h += '<div class="tw-note">' + esc(e.note)
-    + (e.prec === 'day' ? ' · date only, this engine logs no clock time' : '') + '</div>';
-  else if (e.prec === 'day') h += '<div class="tw-note">date only, this engine logs no clock time</div>';
+  if (e.note) h += '<div class="tw-note">' + esc(e.note) + '</div>';
   return h + '</div>';
+}
+
+function bucketView(){
+  return STATE.events.filter(function(e){ return e.engine === STATE.bucket; });
 }
 
 function feedHtml(list){
@@ -153,38 +199,52 @@ function feedHtml(list){
   return h;
 }
 
-function chipsHtml(){
-  var c = STATE.counts || {};
-  var all = STATE.total;
-  var defs = [{k:'ALL', label:'All', n: all}];
-  (STATE.instruments || ['EQUITY','FUTURES','OPTIONS']).forEach(function(k){
-    defs.push({k:k, label: k.charAt(0) + k.slice(1).toLowerCase(), n: c[k]});
-  });
-  return defs.map(function(d){
-    /* The count is the SERVER's count over the whole wall, not over what has scrolled into view.
-       A chip counting only the loaded page tells the reader the wall is smaller than it is. */
-    return '<button class="chip' + (d.k === STATE.filter ? ' on' : '') + '"'
-      + ' onclick="pick(\'' + d.k + '\')">' + esc(d.label)
-      + (d.n == null ? '' : ' <span class="n">' + d.n + '</span>') + '</button>';
+function statusChipsHtml(){
+  return ['open','closed'].map(function(k){
+    var n = (STATE.statusCounts || {})[k];
+    return '<button class="chip' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
+      + (k === 'open' ? 'Open' : 'Closed') + (n == null ? '' : ' <span class="n">' + n + '</span>') + '</button>';
+  }).join('');
+}
+function instrumentChipsHtml(){
+  return ['FUTURES','EQUITY'].map(function(k){
+    return '<button class="chip' + (k === STATE.instrument ? ' on' : '') + '" onclick="pickInstrument(\'' + k + '\')">'
+      + (k.charAt(0) + k.slice(1).toLowerCase()) + '</button>';
+  }).join('');
+}
+function bucketChipsHtml(){
+  var list = BUCKETS[STATE.instrument] || [];
+  return list.map(function(eng){
+    var n = ((STATE.byEngine || {})[eng] || {})[STATE.status] || 0;
+    return '<button class="chip' + (eng === STATE.bucket ? ' on' : '') + '" onclick="pickBucket(\'' + eng + '\')">'
+      + esc(eng) + ' <span class="n">' + n + '</span></button>';
   }).join('');
 }
 
 function sentinelHtml(){
-  if (!PAGE.more) return '<div class="tw-sent" id="sentinel">That is the whole wall.</div>';
-  return '<div class="tw-sent" id="sentinel">' + (PAGE.busy ? 'Loading more…' : ' ') + '</div>';
+  if (!PAGE.more) return '<div class="tw-sent" id="sentinel">That is the whole wall for this filter.</div>';
+  return '<div class="tw-sent" id="sentinel">' + (PAGE.busy ? 'Loading more…' : ' ') + '</div>';
 }
 
 function render(){
   document.getElementById('sub').textContent =
-    (STATE.total == null ? '--' : STATE.total) + ' events · ' + (STATE.scope || 'since 10 Aug 2026')
-    + ' · every entry and exit · newest first';
-  document.getElementById('chips').innerHTML = chipsHtml();
+    (STATE.total == null ? '--' : STATE.total) + ' positions since 10 Aug 2026, '
+    + STATE.status + ', ' + STATE.bucket;
+  document.getElementById('chipsStatus').innerHTML = statusChipsHtml();
+  document.getElementById('chipsInstrument').innerHTML = instrumentChipsHtml();
+  document.getElementById('chipsBucket').innerHTML = bucketChipsHtml();
   var body = document.getElementById('body');
-  if (!STATE.events.length){
-    body.innerHTML = '<div class="empty"><b>Nothing here yet</b>'
-      + 'No trade events for this filter.</div>' + sentinelHtml();
+  var view = bucketView();
+  if (!view.length){
+    /* cc#1295 verify 7: Investment Scanner's Closed bucket is expected to render empty for some
+       time — the engine landed its first signal today, no exits proven yet. Honest, not an error. */
+    var msg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket) + '.';
+    if (STATE.bucket === 'Investment Scanner' && STATE.status === 'closed'){
+      msg = 'The engine landed its first signal today and has not closed a position yet.';
+    }
+    body.innerHTML = '<div class="empty"><b>Nothing here yet</b>' + msg + '</div>' + sentinelHtml();
   } else {
-    body.innerHTML = feedHtml(STATE.events) + sentinelHtml();
+    body.innerHTML = feedHtml(view) + sentinelHtml();
   }
   updateCover();
   armSentinel();
@@ -193,19 +253,19 @@ function render(){
 function updateCover(){
   var el = document.getElementById('cover');
   if (!el) return;
-  var of = (STATE.filter === 'ALL') ? STATE.total : (STATE.counts || {})[STATE.filter];
-  el.textContent = 'showing ' + STATE.events.length + ' of ' + (of == null ? '--' : of);
+  var view = bucketView();
+  var of = ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
+  el.textContent = 'showing ' + view.length + ' of ' + (of == null ? '--' : of);
 }
 
 /* ══ INFINITE SCROLL — cc#983's pattern, reused, not reinvented ══════════════════════════════
    Keyset cursor, IntersectionObserver with a 400px rootMargin so the wait is invisible, and an
    APPEND rather than a re-render so a scroll never throws away the DOM under the reader's thumb.
 
-   ONE DELIBERATE DIFFERENCE FROM INTEL. Intel pages the FULL set and filters client-side, which
-   leaves a chip reading 95 above a list showing 2. Here the filter is applied SERVER-side and
-   paging continues inside it, so the chip count and the list agree at every scroll depth. That
-   is only safe because the chip counts come from the server over the whole wall in one grouped
-   query — they are never derived from the loaded page. */
+   The server call is scoped to (instrument, status); the ENGINE BUCKET is a display filter over
+   what that call already returned (cc#1295 — one instrument holds 2-3 buckets, not worth a
+   separate fetch per bucket). appendCards() below filters fresh rows by bucket the same way
+   render() does, so a scroll and a bucket switch never disagree about what should be on screen. */
 function armSentinel(){
   if (PAGE.obs){ PAGE.obs.disconnect(); PAGE.obs = null; }
   var el = document.getElementById('sentinel');
@@ -218,8 +278,8 @@ function armSentinel(){
 }
 
 function url(cursor){
-  var u = '/api/tradewall?limit=' + LIMIT;
-  if (STATE.filter !== 'ALL') u += '&instrument=' + encodeURIComponent(STATE.filter);
+  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(STATE.instrument)
+        + '&status=' + encodeURIComponent(STATE.status);
   if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
   return u;
 }
@@ -236,11 +296,11 @@ function loadMore(){
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
       /* de-dupe by id even though a keyset cursor should make repeats impossible — a duplicate
-         event is the one failure a reader would actually SEE, so it is cheap insurance. */
+         card is the one failure a reader would actually SEE, so it is cheap insurance. */
       var seen = {};
       STATE.events.forEach(function(e){ seen[e.id] = 1; });
       var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
-      appendCards(fresh);
+      appendCards(fresh.filter(function(e){ return e.engine === STATE.bucket; }));
       STATE.events = STATE.events.concat(fresh);
       PAGE.busy = false;
       var s2 = document.getElementById('sentinel');
@@ -262,7 +322,8 @@ function appendCards(fresh){
   var sent = document.getElementById('sentinel');
   /* the day heading only repeats when the day actually changes across the join, so an appended
      page cannot print a second heading for the day already on screen */
-  var lastDay = STATE.events.length ? STATE.events[STATE.events.length - 1].day : null;
+  var view = bucketView();
+  var lastDay = view.length ? view[view.length - 1].day : null;
   var h = '', day = lastDay;
   fresh.forEach(function(e){
     if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
@@ -273,14 +334,25 @@ function appendCards(fresh){
   while (frag.firstChild) body.insertBefore(frag.firstChild, sent);
 }
 
-function pick(k){
-  if (k === STATE.filter) return;
-  STATE.filter = k;
-  STATE.events = [];
+function pickStatus(k){
+  if (k === STATE.status) return;
+  STATE.status = k; STATE.events = [];
   PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   document.getElementById('body').innerHTML = '<div class="loading">Loading…</div>';
-  document.getElementById('chips').innerHTML = chipsHtml();
   boot(true);
+}
+function pickInstrument(k){
+  if (k === STATE.instrument) return;
+  STATE.instrument = k; STATE.bucket = (BUCKETS[k] || [])[0];
+  STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
+  document.getElementById('body').innerHTML = '<div class="loading">Loading…</div>';
+  boot(true);
+}
+function pickBucket(eng){
+  if (eng === STATE.bucket) return;
+  /* display filter over what is already loaded for this instrument+status — no refetch */
+  STATE.bucket = eng;
+  render();
 }
 
 function boot(keepCounts){
@@ -289,15 +361,15 @@ function boot(keepCounts){
     .then(function(d){
       if (d.error) throw new Error(d.error);
       STATE.events = d.events || [];
-      /* counts and total are head-of-feed values and are WHOLE-WALL regardless of the filter, so
-         a filter switch keeps the ones it already has rather than blanking the chips. */
-      if (!keepCounts || !STATE.total){
+      /* counts are head-of-feed values over the WHOLE wall, so a filter switch keeps the ones
+         it already has rather than blanking the chips. by_engine is refreshed every call since
+         it is what each bucket chip needs for its own live count under the active status. */
+      if (!keepCounts || STATE.total == null){
         STATE.counts = d.counts || {};
+        STATE.statusCounts = d.status_counts || {};
         STATE.total  = d.total;
-        STATE.instruments = d.instruments;
-        STATE.byEngine = d.by_engine || null;
-        STATE.scope = d.scope || null;   /* cc#1000: today-onwards scope for the header */
       }
+      STATE.byEngine = d.by_engine || {};
       STATE.asOf  = d.as_of;
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
@@ -310,6 +382,34 @@ function boot(keepCounts){
       document.getElementById('sub').textContent = 'failed to load';
     });
 }
+
+/* cc#1295: the i-button — engines with a real book that are not one of the 5 primary buckets
+   (QSR today, any future minor engine the same way). Loaded lazily on first open, not on boot. */
+var OTHER_LOADED = false;
+function openOther(){
+  document.getElementById('otherOv').classList.add('open');
+  if (OTHER_LOADED) return;
+  fetchWithTimeout('/api/tradewall/other-engines')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      OTHER_LOADED = true;
+      var list = d.engines || [];
+      document.getElementById('otherBody').innerHTML = list.length
+        ? list.map(function(e){
+            return '<div class="tw-ov-row"><span>' + esc(e.name) + '</span>'
+              + '<span>' + e.open + ' open &middot; ' + e.closed + ' closed</span></div>';
+          }).join('')
+        : '<div class="empty">No other engines with a trade book right now.</div>';
+    })
+    .catch(function(e){
+      document.getElementById('otherBody').innerHTML =
+        '<div class="empty">Could not load — ' + esc(e.message) + '</div>';
+    });
+}
+function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') closeOther();
+});
 
 boot(false);
 </script>
