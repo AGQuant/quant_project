@@ -78,6 +78,17 @@ body[data-theme]{
 .st .k{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--t-label,var(--dim))}
 .st .v{font-size:var(--type-18)}
 .trio .st .v{font-size:var(--type-18)}
+/* cc#1305 — V8 Closed Book's 3 pills sit in one .trio grid row, but "Realised" is one word and
+   "Win Rate Long" / "Win Rate Short" wrap to two, so those two .k labels are taller than the
+   first and push their .v/.p underneath down by a line — the row reads staggered, not parallel.
+   Grid cells do not equalise their children's height on their own; the fix is to reserve the SAME
+   vertical space for every .k regardless of whether its own label wraps, so .v starts at the same
+   baseline in all three columns. 2 lines at the label's own line-height, flexed to the bottom edge
+   so a one-line label still sits flush against .v instead of floating in the reserved space.
+   SCOPED TO .cbtrio (bookFace2 only) — bookFace1's Unrealised/Long Unrl/Short Unrl labels are all
+   one line already and do not have this defect; widening the fix to every .trio would add dead
+   space to a card that was never misaligned. */
+.cbtrio .st .k{min-height:2.6em;line-height:1.3;display:flex;align-items:flex-end}
 /* MY PORTFOLIO — 13px symbol, 12.5px values, 48px min row */
 .pfrow{min-height:48px}
 .pfrow .sym,.pfrow .s1{font-size:var(--type-13);font-weight:800;letter-spacing:var(--track-px5)}
@@ -661,6 +672,26 @@ body[data-theme]{
   line-height:20px}
 .ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-em12);
   color:var(--mut);text-align:center;padding:var(--space-18) var(--space-16)}
+/* cc#1304 — INDEX BOOK becomes 4 swipable per-LEG cards (Nifty Fut/Opt, BankNifty Fut/Opt),
+   founder ask, superseding the cc#1158 single paired row for this strip. cc#941's paired endpoint
+   (/api/v10/positions/paired) still exists and still owns netted book P&L wherever that number is
+   shown — this reads the RAW per-leg /api/v10/positions instead, because the founder explicitly
+   wants each leg on its own face, not the fut+hedge net. Four fixed slots, always painted, so a
+   flat leg says FLAT in its own slot rather than the whole deck collapsing when one leg is empty —
+   the same "flat must say flat, never nothing" rule cc#1158 set for the row list.
+   .ibk2 reuses .c/.slab for the card chrome (SHARED_CSS_RULE_V1 — one bevel grammar) and only adds
+   the layout this deck needs. */
+.ibk2{padding:var(--space-14) var(--space-16)}
+.ibk2-hd{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-10)}
+.ibk2-t{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em9);color:#FF9F45}
+.ibk2-leg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);
+  letter-spacing:var(--track-em9);margin-bottom:var(--space-8)}
+.ibk2-pnl{display:flex;align-items:baseline;gap:var(--space-8)}
+.ibk2-pnl .v{font-size:var(--type-18);font-weight:800}
+.ibk2-pnl .v.pos{color:var(--grn)}
+.ibk2-pnl .v.neg{color:var(--red)}
+.ibk2-pnl .v.na{color:var(--mut);font-size:var(--type-13)}
+.ibk2-pnl .lbl{font-size:var(--type-9);letter-spacing:var(--track-em9);color:var(--mut)}
 /* cc#1204: EXACT, not a floor. min-height:360px reserved six rows and then let any page that
    needed more simply take more - which is the whole defect. Six rows at the token is the height,
    full stop, so a page that tried to exceed it would show up as a clipped row in the harness
@@ -1739,48 +1770,75 @@ function ibkLegs(p){
   }
   return out + ' · ' + p.legs + ' leg' + (p.legs === 1 ? '' : 's');
 }
-function renderIndexBook(d){
-  var box = document.getElementById('ibkBox');
-  if (!box) return 0;
-  var rows = (d && d.positions) || [];
-  if (!rows.length){
-    box.innerHTML = '<div class="ibk-flat">FLAT · NO OPEN INDEX POSITIONS</div>';
-    return 1;
+/* cc#1304 — the four fixed slots this deck always shows, in this order. NIFTY50 is the feed key
+   (matches openV10's expected argument and ibkSigned/label convention already set by cc#1158);
+   BANKNIFTY is already the feed key as-is. */
+var IBK_SLOTS = [
+  {symbol:'NIFTY50',   leg:'FUT', label:'NIFTY FUTURE'},
+  {symbol:'NIFTY50',   leg:'OPT', label:'NIFTY OPTION'},
+  {symbol:'BANKNIFTY', leg:'FUT', label:'BANKNIFTY FUTURE'},
+  {symbol:'BANKNIFTY', leg:'OPT', label:'BANKNIFTY OPTION'}
+];
+function ibkLegText(slot, p){
+  if (slot.leg === 'OPT'){
+    if (p.opt_strike == null) return 'OPTION';
+    return Math.round(Number(p.opt_strike)).toLocaleString('en-IN') + ' ' + esc(String(p.opt_type || ''));
   }
-  var h = rows.map(function(p){
-    var pos = p.net_pnl === null || p.net_pnl === undefined;
-    /* NIFTY50 is the feed key; NIFTY is what the ref and the founder call it. The label is
-       shortened and the KEY is what gets handed to openV10, so no display name is ever mapped
-       back to a feed key. */
-    var label = p.symbol === 'NIFTY50' ? 'NIFTY' : p.symbol;
-    var dir = (p.direction === 'LONG') ? 'long' : 'short';
-    return '<button class="ibk-row" onclick="openV10(event,\'' + esc(p.symbol) + '\')"'
-      + ' aria-label="' + esc(label) + ' ' + esc(p.direction) + ', open chart with trades">'
-      + '<span class="ibk-l"><span class="ibk-id"><span class="sym">' + esc(label) + '</span>'
-      + '<span class="ibk-dir ' + dir + '">' + esc(p.direction) + '</span></span>'
-      + '<span class="ibk-legs">' + ibkLegs(p) + '</span></span>'
-      + '<span class="ibk-pnl" style="margin-left:auto"><span class="v ' + (pos ? 'na' : (p.net_pnl >= 0 ? 'pos' : 'neg')) + '">'
-      + (pos ? 'P&L PENDING' : ibkSigned(p.net_pnl)) + '</span>'
-      + '<span class="arrow">›</span></span>'
-      + '</button>';
-  }).join('');
-  /* cc#1181: the caption line is gone (founder 28349). ibkAsOf is deliberately left in the file
-     and not deleted with it — the stamp is a question in the room, not a settled removal, and
-     deleting the helper would make putting it back a rewrite instead of one line. */
-  box.innerHTML = h;
-  return rows.length;
+  return 'ENTRY ' + (p.entry_price != null ? Math.round(Number(p.entry_price)).toLocaleString('en-IN') : '--');
+}
+function ibkCardInner(slot, p){
+  if (!p){
+    return '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label) + '</span></div>'
+      + '<div class="ibk-flat" style="padding:var(--space-10) 0">FLAT · NO OPEN POSITION</div>';
+  }
+  var dir = (p.side === 'BUY') ? 'long' : 'short';
+  var dirTxt = (p.side === 'BUY') ? 'LONG' : 'SHORT';
+  var pnl = p.unrealised_pnl;
+  var pos = pnl === null || pnl === undefined;
+  return '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label) + '</span>'
+    + '<span class="ibk-dir ' + dir + '">' + dirTxt + '</span></div>'
+    + '<div class="ibk2-leg">' + ibkLegText(slot, p)
+    + (p.cmp != null ? ' · CMP ' + Math.round(Number(p.cmp)).toLocaleString('en-IN') : '') + '</div>'
+    + '<div class="ibk2-pnl"><span class="v ' + (pos ? 'na' : (pnl >= 0 ? 'pos' : 'neg')) + '">'
+    + (pos ? 'P&L PENDING' : ibkSigned(pnl)) + '</span><span class="lbl">UNREALISED</span></div>';
+}
+function renderIndexBook(d){
+  var rows = (d && d.open_positions) || [];
+  var openCount = 0;
+  IBK_SLOTS.forEach(function(slot, i){
+    var el = document.getElementById('ibkSlot' + i);
+    if (!el) return;
+    var p = rows.filter(function(r){ return r.symbol === slot.symbol && r.leg === slot.leg; })[0];
+    if (p) openCount++;
+    el.innerHTML = ibkCardInner(slot, p);
+    el.onclick = p ? (function(sym){ return function(ev){ openV10(ev, sym); }; })(slot.symbol) : null;
+    el.style.cursor = p ? 'pointer' : 'default';
+  });
+  return openCount;
 }
 function loadIndexBook(){
-  var box = document.getElementById('ibkBox');
-  if (!box) return;
-  fetchWithTimeout('/api/v10/positions/paired')
+  fetchWithTimeout('/api/v10/positions')
     .then(function(r){ return r.json(); })
     .then(function(d){ renderIndexBook(d); })
     .catch(function(){
-      /* NOT the flat state. A book that could not load is not a flat book, and printing FLAT
-         here would be the page inventing a fact about the founder's money. */
-      box.innerHTML = '<div class="ibk-flat">INDEX BOOK UNAVAILABLE</div>';
+      /* NOT the flat state on any slot. A book that could not load is not a flat book, and
+         printing FLAT here would be the page inventing a fact about the founder's money. */
+      IBK_SLOTS.forEach(function(slot, i){
+        var el = document.getElementById('ibkSlot' + i);
+        if (el) el.innerHTML = '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label)
+          + '</span></div><div class="ibk-flat" style="padding:var(--space-10) 0">UNAVAILABLE</div>';
+      });
     });
+}
+/* cc#1304 — same dot-sync template as bookDots()/heroDots(), scoped to the new #ibkTrack deck. */
+function ibkDots(){
+  var tr = document.getElementById('ibkTrack'), dots = document.getElementById('ibkDots');
+  if (!tr || !dots) return;
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(dots.children, function(el, j){
+    el.className = (j === i ? 'on' : '');
+    el.onclick = function(){ tr.scrollTo({ left: j * tr.clientWidth, behavior: 'smooth' }); };
+  });
 }
 
 function openV10(ev, sym){
@@ -3395,7 +3453,7 @@ Promise.all([
     return '<a class="card-link" href="/m/v8"><div class="c slab"><div class="chd">'
       + '<div class="t">V8 Closed Book</div>'
       + '<div class="rgt">' + (bk.trades || 0) + ' trades <span class="h-chev">\u203a</span></div></div>'
-      + '<div class="trio">'
+      + '<div class="trio cbtrio">'
       + '<div class="st"><div class="k">Realised</div>'
       +   '<div class="v ' + cls(bk.realised) + '" title="' + esc(inr(bk.realised)) + '">'
       +   inrShort(bk.realised) + '</div>'
@@ -3427,8 +3485,18 @@ Promise.all([
      box's whole innerHTML. A single entry point that disappears on the days the book is empty or
      the endpoint is down is not a single entry point, it is an intermittent one. Out here it is
      painted with the section and never depends on a fetch. */
+  /* cc#1304: the single-row .ibk box becomes a 4-card swipe deck, one fixed slot per leg \u2014 same
+     .swipe/.swipe-t/.dots mechanism as the hero deck and THE BOOK deck below, so this is the
+     THIRD deck on the page using the identical scroll-snap + dot-sync pattern rather than a new
+     one. Each slot is painted with its own "Loading..." card immediately (same always-rendered
+     rule as before) and loadIndexBook() fills all four after paint. */
   h += '<div class="sect">INDEX BOOK \u00b7 OPEN</div>'
-    + '<div class="ibk" id="ibkBox"><div class="ibk-flat">Loading index book\u2026</div></div>'
+    + '<div class="swipe"><div class="swipe-t" id="ibkTrack" onscroll="ibkDots()">'
+    + IBK_SLOTS.map(function(slot, i){
+        return '<div class="c slab ibk2" id="ibkSlot' + i + '"><div class="ibk2-hd"><span class="ibk2-t">'
+          + esc(slot.label) + '</span></div><div class="ibk-flat" style="padding:var(--space-10) 0">Loading\u2026</div></div>';
+      }).join('')
+    + '</div><div class="dots" id="ibkDots"><i class="on"></i><i></i><i></i><i></i></div></div>'
     + '<a class="ibk-intel slab" href="/m/v10">INDEX INTEL \u203a</a>';
 
   h += '<div class="sect">THE BOOK</div>'
@@ -3466,7 +3534,7 @@ Promise.all([
   h += '<div class="sect">TOOLS</div>';
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
-  loadIndexBook();    /* cc#1158: #ibkBox only exists after this paint, same as the mood letters */
+  loadIndexBook();    /* cc#1304: #ibkSlot0..3 only exist after this paint, same as the mood letters */
 
   var tools = document.createElement('div');
   tools.className = 'tools';

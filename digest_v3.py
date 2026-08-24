@@ -208,12 +208,35 @@ def _ladders(cur) -> Dict[str, Any]:
             # cc#1228: the tick's AGE decides the badge, not the mere existence of a row.
             cmp_v, as_of = _f(iv[0]), str(iv[1])
             tier = freshness_tier(as_of)
+        # cc#1306: day high/low + day change, for the horizontal ladder's two outer rungs and the
+        # CMP blink. Cash leg only (same not_fut() filter as the live CMP tick above, for the same
+        # cc#1053 reason — BANKNIFTY carries both legs under one symbol) and IST wall-clock "today"
+        # (intraday_prices.ts is naive IST per the module note above; CURRENT_DATE is UTC-anchored
+        # in Postgres and would clip the first ~5.5 hours of an IST session near midnight).
+        _today = _ist_now().date()
+        cur.execute("""SELECT MAX(high), MIN(low) FROM intraday_prices
+                       WHERE symbol=%s AND ts::date=%s
+                         AND COALESCE(source,'') <> ALL(%s)""", (sym, _today, not_fut()))
+        hl = cur.fetchone()
+        day_high, day_low = (_f(hl[0]), _f(hl[1])) if hl else (None, None)
+        cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date < %s
+                       ORDER BY price_date DESC LIMIT 1""", (sym, _today))
+        pcr = cur.fetchone()
+        prev_close = _f(pcr[0]) if pcr else None
+        day_chg_pct = _pct(cmp_v, prev_close)
         if not p:
             out.append({"symbol": sym, "cmp": cmp_v, "as_of": as_of, "tier": tier,
+                        "day_high": day_high, "day_low": day_low, "day_chg_pct": day_chg_pct,
                         "rungs": [], "reason": "no stored pivots"})
             continue
         pp, r1, r2, s1, s2, pdate = (_f(p[0]), _f(p[1]), _f(p[2]), _f(p[3]), _f(p[4]), p[5])
-        rungs = [("R2", r2), ("R1", r1), ("PP", pp), ("S1", s1), ("S2", s2)]
+        # cc#1306: DAY HIGH / DAY LOW ride the same sorted band as S/R/PP rather than being pinned
+        # to the two ends by assumption — a session high can sit inside R1/R2 on a quiet day, and
+        # forcing it to the visual edge would misstate where it actually falls relative to the
+        # pivot levels. One sort (line below), one source of order, same as cc#1257 already
+        # established for S/R/PP.
+        rungs = [("R2", r2), ("R1", r1), ("PP", pp), ("S1", s1), ("S2", s2),
+                 ("DAY HIGH", day_high), ("DAY LOW", day_low)]
         # Distance % on every rung, and the CMP's true position between them — the ladder must show
         # WHERE price sits, not just list levels.
         band = [{"label": k, "value": v,
@@ -237,6 +260,7 @@ def _ladders(cur) -> Dict[str, Any]:
         below = [b for b in band if b["value"] < (cmp_v or 0)]
         out.append({"symbol": sym, "cmp": cmp_v, "as_of": as_of, "tier": tier,
                     "pivot_date": str(pdate) if pdate else None,
+                    "day_high": day_high, "day_low": day_low, "day_chg_pct": day_chg_pct,
                     "rungs": band, "cmp_slot": len(below)})
     reads = []
     for l in out:
@@ -496,6 +520,14 @@ WITH latest_gvm AS (
     -- reproduces 4 exactly, so that is the source the card meant.
     SELECT symbol, RANK() OVER (ORDER BY market_cap DESC NULLS LAST) AS mcap_rank
     FROM latest_gvm WHERE market_cap IS NOT NULL
+-- cc#1310: the founder wants the result DATE on every card in this list, not just the quarter
+-- label. reported-status only, latest ex_date per symbol — the same "reported" gate results_card
+-- uses for the same field elsewhere, so a symbol never shows a rescheduled/upcoming date here.
+), ex AS (
+    SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS symbol, ex_date
+    FROM earnings_calendar
+    WHERE status = 'reported'
+    ORDER BY UPPER(ticker), ex_date DESC
 )
 SELECT r.symbol,
        s.company_name,
@@ -505,11 +537,13 @@ SELECT r.symbol,
        r.polished_at,
        btrim(split_part(
            regexp_replace(r.analysis_text, '^\\s*(verdict|headline)\\s*:\\s*', '', 'i'),
-           E'\\n', 1)) AS verdict
+           E'\\n', 1)) AS verdict,
+       e.ex_date
 FROM result_analysis_v2 r
 LEFT JOIN screener_raw s ON s.nse_code = r.symbol
 LEFT JOIN latest_gvm    g ON g.symbol  = r.symbol
 LEFT JOIN ranked        k ON k.symbol  = r.symbol
+LEFT JOIN ex            e ON e.symbol  = r.symbol
 ORDER BY r.polished_at DESC, r.symbol
 """
 
@@ -651,7 +685,7 @@ def _results_analysed(cur) -> Dict[str, Any]:
     out, tiers = [], {"LARGE": 0, "MID": 0, "SMALL": 0}
     unranked = 0
     seen = {}
-    for sym, company, rank, segment, quarter, polished, verdict in rows:
+    for sym, company, rank, segment, quarter, polished, verdict, ex_date in rows:
         tier = _tier(rank)
         if tier:
             tiers[tier] += 1
@@ -672,6 +706,10 @@ def _results_analysed(cur) -> Dict[str, Any]:
             "polished_at": polished.astimezone(IST).isoformat() if polished else None,
             "polished_ist": polished.astimezone(IST).strftime("%d %b") if polished else None,
             "verdict": v,
+            # cc#1310: result date capsule chip. ex_date is a date, not a timestamp — no tz
+            # conversion needed. None when the symbol has no reported ex_date on file (never
+            # fabricated); the row renders without the chip rather than a guessed date.
+            "ex_date": ex_date.isoformat() if ex_date else None,
         })
         # The dot is attached ONLY when the quarter it was computed for is the quarter this row is
         # about. See _fq_label for why that guard exists rather than a plain symbol lookup.

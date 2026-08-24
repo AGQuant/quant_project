@@ -203,7 +203,7 @@ def _result_dot_v3(cur, sym, result_date, actual_sales=None, actual_profit=None)
 #   has 'OPM %'              -> non-BFSI, show the OPM pair
 #   has 'Financing Margin %' -> Bank/NBFC, relabel the row "Financing Margin"
 #   neither                  -> Insurer, hide the margin row entirely
-def _l1_quarter(cur, sym):
+def _l1_quarter(cur, sym, segment=None):
     try:
         cur.execute("""SELECT period_end, period_label, metrics FROM fundamentals_history
                        WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
@@ -245,14 +245,37 @@ def _l1_quarter(cur, sym):
     pe_self = pe_ind = None
     is_insurer = False
     try:
-        cur.execute("""SELECT pe, segment_pe, industry_group FROM screener_raw
+        cur.execute("""SELECT pe, industry_group FROM screener_raw
                        WHERE UPPER(nse_code)=UPPER(%s)""", (sym,))
         r = cur.fetchone()
         if r:
-            pe_self, pe_ind = _f(r[0]), _f(r[1])
-            is_insurer = (str(r[2] or "").strip().lower() == "insurance")
+            pe_self = _f(r[0])
+            is_insurer = (str(r[1] or "").strip().lower() == "insurance")
     except Exception:
         pass
+
+    # cc#1311: screener_raw.segment_pe used to feed "industry" PE and is dead — 0 of 1870 rows have
+    # ever carried it, so this line always rendered as an em-dash. Founder: derive it from GVM segment
+    # peers instead. Reusing the EXACT top-3-by-GVM-desc, self-excluded peer set _peer_comparison and
+    # _peer_results already use for Sales/PAT — one peer basis for the whole card, not a second one
+    # invented just for this row. "Industry" here means those three peers' own PE, averaged; a peer
+    # with no PE (loss-making, or not in screener_raw) is dropped rather than counted as 0.
+    try:
+        if segment:
+            cur.execute("""SELECT g.symbol FROM gvm_scores g
+                           WHERE g.segment=%s AND g.symbol<>%s AND g.gvm_score IS NOT NULL
+                             AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                           ORDER BY g.gvm_score DESC LIMIT 3""", (segment, sym))
+            peer_syms = [row[0] for row in cur.fetchall()]
+            if peer_syms:
+                cur.execute("""SELECT pe FROM screener_raw WHERE UPPER(nse_code) = ANY(%s)""",
+                            ([s.upper() for s in peer_syms],))
+                peer_pes = [_f(row[0]) for row in cur.fetchall()]
+                peer_pes = [p for p in peer_pes if p is not None]
+                if peer_pes:
+                    pe_ind = round(sum(peer_pes) / len(peer_pes), 1)
+    except Exception as e:
+        log.warning(f"_l1_quarter industry_pe {sym}: {e}")
 
     # Insurers must be checked EXPLICITLY, not inferred from the metric keys. Screener publishes an
     # "OPM %" for them (verified: SBILIFE, CANHLIFE, ICICIPRULI, GODIGIT, STARHEALTH, NIACL all carry
@@ -362,6 +385,12 @@ def _polished_by_symbol(cur, sym, days=30):
     # `category IN (...)` that used to sit here was the copy that would have drifted.
     from news_endpoints import polished_company_filter
     _scope_sql, _scope_params = polished_company_filter(headline_col="headline_clean")
+    # cc#1309: the result-sheet COMPANY NEWS block is narrower than the general company filter —
+    # founder wants Domestic + AI Editorial only here, Stock Views excluded. Overriding the
+    # category list AFTER the call rather than editing polished_company_filter/
+    # POLISHED_COMPANY_CATEGORIES, which is shared with the GVM page's Latest News block and other
+    # callers this card has no business narrowing.
+    _scope_params[0] = ["Domestic", "AI Editorial"]
     cur.execute(f"""
         SELECT headline_clean, COALESCE(full_summary, summary) AS summary, source, published_time,
                category, summary AS short_summary
@@ -370,8 +399,12 @@ def _polished_by_symbol(cur, sym, days=30):
         {_scope_sql}
         ORDER BY published_time DESC, id DESC
         LIMIT 15""", [sym, days] + _scope_params)
-    return [{"headline": r[0], "summary": r[1], "source": r[2],
-             "published_time": r[3].isoformat() if r[3] else None,
+    # cc#1309: `source` is dropped from the returned shape entirely — it carries whatever outlet
+    # ingest recorded (an outside wire name, or an internal tag like analyst_desk, inconsistently),
+    # and the founder's ruling is that this card never names an outside agency. `category` is the
+    # one field this card is allowed to show, and it is already constrained to Domestic/AI
+    # Editorial by the query above, so nothing here can leak a source name by omission.
+    return [{"headline": r[0], "summary": r[1], "published_time": r[3].isoformat() if r[3] else None,
              "category": r[4], "short_summary": r[5]} for r in cur.fetchall()]
 
 
@@ -1019,7 +1052,7 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         except Exception as e:
             log.warning(f"cc#796 actuals {sym}: {e}")
         expectations = _expectations(cur, sym, _act_sales, _act_pat)
-        l1 = _l1_quarter(cur, sym)                      # cc#797 block 1
+        l1 = _l1_quarter(cur, sym, segment)              # cc#797 block 1; cc#1311: segment for industry PE
         auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
         # cc#1268 RESULT_DOT_RULE_V3: own-estimate dot, struck against the SAME actuals block
         # above and gated on ex_dt (the result date the snapshot must predate). Dotless when no

@@ -51,6 +51,19 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:var(--space-8);border-radius:var(--radius-4);background:var(--rc,var(--amber))}
 .chip{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px10);border:var(--bw-1) solid var(--edge);
  background:var(--hi);padding:var(--space-4) var(--space-9);display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+/* cc#1308 — the peer BEAT/MISS badge (raBeatMissBlock) was riding .chip, and .chip's own
+   box-sizing:border-box plus a run of var()-driven padding on a badge sitting inline between two
+   other spans rendered several times its text size on the founder's phone — a box, not a pill.
+   A DEDICATED CLASS rather than patching .chip: .chip is the page's general tappable-tag look
+   (clipped corner, border-box) and is used elsewhere on this page too (SHARED_CSS_RULE_V1) — a fix
+   aimed at "make this one badge small" has no business changing every other chip's shape.
+   inline-flex + fixed px padding (not the space-* scale) + line-height:1 + width/height:auto is
+   the small-capsule contract: nothing here can be stretched wide by an inherited box model, a flex
+   parent, or a token that resolves oddly, because none of those degrees of freedom are open to it. */
+.pchip{font-family:'JetBrains Mono';font-size:11px;font-weight:800;letter-spacing:var(--track-px10);
+ display:inline-flex;align-items:center;justify-content:center;width:auto;height:auto;line-height:1;
+ white-space:nowrap;padding:3px 8px;border-radius:10px;border:var(--bw-1) solid var(--edge);
+ background:var(--hi);vertical-align:middle}
 .w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
 .l{border-color:#5A2634;background:#241019;color:#FF8FA5}
 .n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
@@ -227,6 +240,9 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rptab tr.un td{color:var(--muted);opacity:.65}
 .rptab tr.tap{cursor:pointer}
 .rpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* cc#1309: the only markup that ever carried .rfoot (the VIEW DETAIL footer) is removed from
+   raPaint. Left here rather than deleted — a future footer action would want this exact look and
+   the class name is still checked defensively at the click-delegation guard below. */
 .rfoot{display:flex;gap:var(--space-8);margin-top:var(--space-14);flex-wrap:wrap}
 .rfoot a{flex:1;min-width:130px;min-height:44px;display:flex;align-items:center;justify-content:center;
  text-decoration:none;font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px13);
@@ -364,6 +380,42 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .lrow.cmprow .ll{color:var(--aqua)}
 .lrow.cmprow .lbar{background:var(--aqua);opacity:.8}
 /* cc#1187: .rung/.rung b retired — the ladder is vertical rows now (see .lrow above) */
+/* ══ cc#1306 · THE LADDER GOES HORIZONTAL AGAIN, founder ruling, over cc#1187's own vertical
+   verdict. cc#1187 went vertical because five FULL Indian-format numbers in one horizontal row
+   kept overflowing the phone width under device text scaling (four rounds, cc#1096 through
+   cc#1186, all failed the same way). This round does not repeat that fight: WRAP, NOT SCROLL.
+   Every previous attempt (grid tracks, measured scrollmode, a scroll fade) tried to keep the row
+   on ONE line and kept losing a level off the edge. flex-wrap simply lets a chip that does not fit
+   drop to a second line — nothing can go off-screen or under a fade, because there is no fixed
+   row to overflow. That is the actual fix cc#1187 needed and did not have: not vertical vs
+   horizontal, but wrap vs a single forced line.
+   .hlad replaces .ladder's cell list; DAY HIGH/DAY LOW are two more chips in the SAME sorted band
+   digest_v3._ladders now returns (cc#1306 backend change — sorted once, at the source, same rule
+   cc#1257 set for S/R/PP), so no ordering logic is duplicated here. */
+.hlad{display:flex;flex-wrap:wrap;gap:var(--space-8);margin-top:var(--space-8)}
+.hl{flex:1 1 64px;min-width:60px;text-align:center;padding:var(--space-6) var(--space-4);
+ border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi)}
+.hl .hll{display:block;font-family:'JetBrains Mono';font-size:8.5px;font-weight:700;
+ letter-spacing:var(--track-px10);color:var(--muted)}
+.hl .hlv{display:block;font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);
+ font-variant-numeric:tabular-nums;color:var(--chalk);margin-top:2px}
+.hl.s .hlv{color:var(--heat)}
+.hl.r .hlv{color:var(--volt)}
+.hl.pp{border-color:var(--amber);background:rgba(212,168,66,.1)}
+.hl.pp .hll,.hl.pp .hlv{color:var(--amber)}
+.hl.dh,.hl.dl{border-style:dashed}
+.hl.dh .hll,.hl.dh .hlv,.hl.dl .hll,.hl.dl .hlv{color:var(--muted)}
+/* CMP is the one chip that MOVES on every tick, so it is the one chip that should look alive —
+   the founder's own words were "red or green blink if day positive". up = day_chg_pct>=0, per the
+   header side/sideTxt convention this card already uses (var(--volt) up, var(--heat) down).
+   prefers-reduced-motion gets the colour with no animation — the information survives, the motion
+   does not, same guard the rest of this app family already uses on decorative motion. */
+.hl.cmp{border-width:calc(var(--bw-1) * 2);animation:hlBlinkUp 1.6s ease-in-out infinite}
+.hl.cmp.dn{animation-name:hlBlinkDn}
+.hl.cmp .hll,.hl.cmp .hlv{color:var(--aqua)}
+@keyframes hlBlinkUp{0%,100%{border-color:var(--volt);box-shadow:0 0 0 0 rgba(76,201,133,.35)}50%{border-color:var(--volt);box-shadow:0 0 6px 1px rgba(76,201,133,.5)}}
+@keyframes hlBlinkDn{0%,100%{border-color:var(--heat);box-shadow:0 0 0 0 rgba(224,84,84,.35)}50%{border-color:var(--heat);box-shadow:0 0 6px 1px rgba(224,84,84,.5)}}
+@media (prefers-reduced-motion:reduce){.hl.cmp{animation:none;border-color:var(--volt)}.hl.cmp.dn{border-color:var(--heat)}}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
    shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
    one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
@@ -525,13 +577,19 @@ function ladder(ix){
      bundle mid-deploy); it computes the same slot from the values rather than guessing. */
   const slot=(ix.cmp_slot!=null)?ix.cmp_slot
              :rungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
-  const cmpRow=`<div class="lrow cmprow"><span class="ll">CMP</span><span class="lbar"></span><span class="lv" style="color:var(--aqua)">${num(cmp)}</span></div>`;
+  /* cc#1306: horizontal chips replace the vertical rows. dayChg decides the CMP blink colour —
+     >=0 is up/green, <0 is down/red, and null (no prior close on file) falls back to up's colour
+     rather than guessing a direction, matching this file's existing null-is-neutral convention. */
+  const dayChg=ix.day_chg_pct!=null?Number(ix.day_chg_pct):null;
+  const cmpDn=dayChg!=null&&dayChg<0;
+  const cmpChip=`<div class="hl cmp${cmpDn?' dn':''}"><span class="hll">CMP</span><span class="hlv">${num(cmp)}</span></div>`;
+  const hlCls=r=>r.label==='PP'?'pp':(r.label==='DAY HIGH'?'dh':(r.label==='DAY LOW'?'dl':(/^S/.test(r.label)?'s':'r')));
   let rows=[];
   rungs.forEach((r,i)=>{
-    if(cmp!=null&&i===slot)rows.push(cmpRow);
-    rows.push(`<div class="lrow${r.label==='PP'?' pp':''}"><span class="ll">${esc(r.label)}</span><span class="lbar"></span><span class="lv">${r.value!=null?num(r.value):'—'}</span></div>`);
+    if(cmp!=null&&i===slot)rows.push(cmpChip);
+    rows.push(`<div class="hl ${hlCls(r)}"><span class="hll">${esc(r.label)}</span><span class="hlv">${r.value!=null?num(r.value):'—'}</span></div>`);
   });
-  if(cmp!=null&&slot>=rungs.length)rows.push(cmpRow);
+  if(cmp!=null&&slot>=rungs.length)rows.push(cmpChip);
   const cells=rows.join('');
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
@@ -543,7 +601,7 @@ function ladder(ix){
   const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
   return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
     <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
-    <div class="ladder">${cells}</div></div>`;
+    <div class="hlad">${cells}</div></div>`;
 }
 
 /* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
@@ -733,6 +791,35 @@ function raTally(t){
   if (nd && nd * 20 >= (b + o + x + nd)) s += ' · <b style="color:var(--muted)">' + nd + ' no dot</b>';
   return s;
 }
+/* cc#1310 — result date capsule, shown next to quarter/tier on every card in this list. Reads
+   c.ex_date (yyyy-mm-dd, the reported date from earnings_calendar — never fabricated) and prints
+   it as "12 Aug", the same short form the rest of this page already uses for dates. A symbol with
+   no ex_date on file (should not happen for a row that has been analysed, but the payload can be
+   ahead of the calendar) renders no chip rather than a blank or invented one. */
+/* cc#1309 — COMPANY NEWS click-to-expand. RA_NEWS holds the currently open sheet's polished_news
+   array (set in raFullSheetHtml, the only place items are rendered); RA_NEWS_OPEN tracks which
+   indices are expanded so re-rendering the same sheet does not reset a tap the reader just made.
+   textContent, not innerHTML, on the way back in — the toggle never needs esc() because it never
+   parses what it writes. */
+var RA_NEWS=[], RA_NEWS_OPEN={};
+function raNewsTeaser(n){
+  var s=(n&&(n.short_summary||n.summary))||'';
+  return s.length>120?s.substring(0,120)+'…':s;
+}
+function raNewsToggle(i){
+  var n=RA_NEWS[i]; if(!n)return;
+  RA_NEWS_OPEN[i]=!RA_NEWS_OPEN[i];
+  var el=document.getElementById('rn-body-'+i);
+  if(!el)return;
+  el.textContent=RA_NEWS_OPEN[i]?(n.summary||raNewsTeaser(n)):raNewsTeaser(n);
+}
+function raDateChip(c){
+  if(!c||!c.ex_date)return '';
+  var d=new Date(c.ex_date+'T00:00:00');
+  if(isNaN(d.getTime()))return '';
+  var mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  return '<span class="pchip mu">'+d.getDate()+' '+mon+'</span>';
+}
 function raDot(c){
   var k=RA_DOTCLS[c&&c.dot];
   if(!k)return '';
@@ -778,6 +865,7 @@ function raDeck(){
             + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
             + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
             + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
+            + raDateChip(c)
             + '</div></div>'
             + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
         }).join('')
@@ -987,11 +1075,11 @@ function raBeatMissBlock(pc){
   var html='<div style="margin:var(--space-10) 0;font-size:var(--type-12)"><div style="color:var(--aqua);font-family:JetBrains Mono;font-weight:700;margin-bottom:var(--space-5)">vs top 3 peers</div>';
   if(pc.sales){
     html+='<div style="margin-bottom:var(--space-4)">Sales: <span style="color:var(--chalk)">'+esc(pc.sales.stock==null?'—':pc.sales.stock.toFixed(1))+'%'
-      +'</span> <span class="chip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
+      +'</span> <span class="pchip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
   }
   if(pc.profit){
     html+='<div>PAT: <span style="color:var(--chalk)">'+esc(pc.profit.stock==null?'—':pc.profit.stock.toFixed(1))+'%'
-      +'</span> <span class="chip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
+      +'</span> <span class="pchip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
   }
   if(pc.peer_basis){
     html+='<div style="font-size:var(--type-95);color:var(--muted);margin-top:var(--space-5)">'+esc(pc.peer_basis)+'</div>';
@@ -1090,14 +1178,20 @@ function raFullSheetHtml(d){
     html+='</div>';
   }
 
-  /* COMPANY NEWS section */
+  /* COMPANY NEWS section — cc#1309. Polished-only, Domestic/AI Editorial tagged (the backend
+     query already narrows to that; d.polished_news never carries anything else), no source line
+     (backend no longer even sends n.source — see _polished_by_symbol), and tapping a headline
+     expands it to the full article text in place via raNewsToggle. RA_NEWS is the click handler's
+     only way to reach the full text, so it is stashed here on every open and nowhere else. */
   if(d.polished_news&&d.polished_news.length){
+    RA_NEWS=d.polished_news; RA_NEWS_OPEN={};
     html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">COMPANY NEWS</div>';
-    d.polished_news.slice(0,10).forEach(function(n){
-      html+='<div class="rsp" style="margin-bottom:var(--space-10)"><div style="color:var(--chalk);font-weight:600;font-size:var(--type-12);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.headline)+'</div>';
-      if(n.summary){html+='<div style="color:var(--muted);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.summary.substring(0,120))+'…</div>';}
-      if(n.source){html+='<div style="font-size:var(--type-95);color:var(--muted)">'+esc(n.source)+'</div>';}
-      html+='</div>';
+    d.polished_news.slice(0,10).forEach(function(n,i){
+      html+='<div class="rsp" style="margin-bottom:var(--space-10);cursor:pointer" onclick="raNewsToggle('+i+')">'
+        + '<div style="color:var(--chalk);font-weight:600;font-size:var(--type-12);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.headline)+'</div>'
+        + '<div id="rn-body-'+i+'" style="color:var(--muted);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(raNewsTeaser(n))+'</div>'
+        + (n.category?'<span class="pchip mu">'+esc(n.category)+'</span>':'')
+        + '</div>';
     });
     html+='</div>';
   }
@@ -1126,9 +1220,10 @@ function raPaint(r,d){
     + (when?'<span>polished '+esc(when)+'</span>':'')+'</div></div>'
     + '<div class="rsb" id="rsb">'
     + bodyHtml
-    + '<div class="rfoot">'
-    + '<a href="/m/results?symbol='+encodeURIComponent(d.symbol||r.symbol||'')+'">VIEW DETAIL</a>'
-    + '</div></div>';
+    /* cc#1309: the VIEW DETAIL footer link is removed — founder ruling. The sheet already carries
+       DETAILED ANALYSIS inline (raBody(d.analysis) above) and COMPANY NEWS now expands its own
+       full text in place, so there was nothing left behind this link worth a second navigation. */
+    + '</div>';
   }, esc(d.symbol||r.symbol||'This result could not be opened.'));
 }
 function raBack(){ var prev=RA_SEEN.pop(); if(prev)raOpen(prev,false); }
@@ -1219,7 +1314,25 @@ function iChart(s){
     hosts.forEach(function(h){h.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';});
     return;
   }
-  var W=100, H=72, n=Math.max(1,(s.sessions||[]).length);
+  /* cc#1307 · NO GAP BETWEEN DAYS, founder ruling over the cc#1121/cc#1236 "enumerate the full
+     calendar so a feed hole reads as a hole" design. That design is not wrong about the DATA — a
+     day with zero bars really is missing and _internals_series still reports it, unnamed nowhere
+     — it was wrong about the SPACE: reserving a full session-width slot for a day with nothing in
+     it draws a blank rectangle between two real trading days, which is exactly the "dark blank
+     rectangle between 20 Aug and 21 Aug" the founder photographed.
+     THE FIX IS COMPRESSION, NOT DELETION. liveSessions drops empty_sessions from the x-axis
+     entirely — every index below is computed against liveSessions.length, never s.sessions.length
+     — so days with data sit adjacent with the line running straight through, and a day with none
+     simply consumes no width. s.points never carries a session index that IS empty (the backend
+     only emits a point where a bar exists), so `remap` always has an entry for every p.s used
+     below; nothing here can look up a hole that was never indexed. The `holes` rectangle this
+     used to draw for empty_sessions is removed with the slot it was drawn into — there is no
+     longer an x position for it to occupy. */
+  var emptySet={}; (s.empty_sessions||[]).forEach(function(d){emptySet[d]=true;});
+  var liveSessions=(s.sessions||[]).filter(function(d){return !emptySet[d];});
+  var remap={};
+  (s.sessions||[]).forEach(function(d,i){if(!emptySet[d])remap[i]=liveSessions.indexOf(d);});
+  var W=100, H=72, n=Math.max(1,liveSessions.length);
   var base=(s.key==='breadth')?0:1;
   var vs=s.points.map(function(p){return p.v;});
   /* ROBUST SCALE, AND THE CLIPPING IS SHOWN RATHER THAN HIDDEN. Measured on the live series before
@@ -1279,7 +1392,10 @@ function iChart(s){
     /* cc#1236 carries f through: the boundary rule asks how much of a SESSION is missing at each
        side of the night, which x cannot answer once it has been folded into slot coordinates. */
     var f=Math.min(p.f,0.995);
-    return {x:(p.s+f)/n*W, y:y(p.v), s:p.s, f:f, up:(p.v>=base), clipped:clipped, v:p.v};
+    /* cc#1307: p.s is the ORIGINAL (uncompressed) session index the backend sent; remap[p.s] is
+       always defined because points only ever exist for sessions that have data. */
+    var s2=remap[p.s];
+    return {x:(s2+f)/n*W, y:y(p.v), s:s2, f:f, up:(p.v>=base), clipped:clipped, v:p.v};
   });
   var runs=[], cur=null;
   pxs.forEach(function(q,i){
@@ -1334,14 +1450,10 @@ function iChart(s){
   }
   marks+='<line x1="0" y1="'+yb.toFixed(2)+'" x2="'+W+'" y2="'+yb.toFixed(2)
        +'" stroke="var(--muted)" stroke-width=".3" stroke-dasharray="1.5 1.5" opacity=".7"/>';
-  var holes=(s.empty_sessions||[]).map(function(d){
-    var i=(s.sessions||[]).indexOf(d);
-    if(i<0)return '';
-    return '<rect x="'+(i/n*W).toFixed(2)+'" y="0" width="'+(W/n).toFixed(2)+'" height="'+H
-      +'" fill="var(--heat)" opacity=".09"/>';
-  }).join('');
+  /* cc#1307: the empty_sessions tinted rect is gone — liveSessions above already dropped those
+     days from the x-axis, so there is no slot left for a hole rectangle to occupy. */
   var svg='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
-    +holes+marks+body+'</svg>';
+    +marks+body+'</svg>';
   /* cc#1258 · SPARSE DATE/TIME TICKS, sharing the x-space the chart already uses.
      A date tick sits at the START of each session, which is the SAME x the cc#1236 day divider is
      drawn at (i/n*W), so the label and the line cannot drift apart — they are computed from the
@@ -1360,7 +1472,10 @@ function iChart(s){
     if(p.length<3)return '';
     return String(Number(p[2]))+' '+(MON[Number(p[1])-1]||'');
   }
-  var sess=s.sessions||[], ticks=[];
+  /* cc#1307: date ticks are placed against liveSessions, the same compressed axis the line and
+     the day-divider marks now use — s.sessions (the full calendar, holes included) would put a
+     tick at an x no longer occupied by anything. */
+  var sess=liveSessions, ticks=[];
   var stepS=Math.ceil(sess.length/4)||1;
   for(var si=0; si<sess.length; si+=stepS){
     ticks.push({x:si/n*W, t:dlab(sess[si]), day:true});
