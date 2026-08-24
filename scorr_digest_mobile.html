@@ -955,52 +955,174 @@ function raOpen(sym,push){
   if(push&&RA_OPEN&&RA_OPEN!==sym)RA_SEEN.push(RA_OPEN);
   RA_OPEN=sym; RA_PEERS=null; RA_PSHOW=false;
   sheetEnsure();
-  raPaint(r,'<div class="rsp" style="color:var(--muted)">Loading the analysis…</div>');
-  fetch('/api/results/v2/'+encodeURIComponent(sym)).then(function(x){return x.json();})
-    .then(function(d){
-      if(RA_OPEN!==sym)return;                       /* a faster second tap already won */
-      if(d&&d.has_analysis){
-        raPaint(r,raBody(d.analysis),d);
-      }else{
-        /* the card's own wording for a peer with numbers but no written piece */
-        raPaint(r,'<div class="rsp" style="color:var(--muted)">No written analysis yet.</div>',d);
-      }
-    })
-    .catch(function(){
-      if(RA_OPEN!==sym)return;
-      raPaint(r,'<div class="rsp" style="color:var(--heat)">The analysis did not load. '
-        + 'Nothing is invented in its place.</div>');
-    });
+  raPaint(r,{});  /* passing empty object triggers full card load */
+  /* Fetch all three data sources in parallel: core card data, context (peers/news), and v2 analysis */
+  Promise.all([
+    fetch('/api/results/card?symbol='+encodeURIComponent(sym)).then(function(x){return x.json();}),
+    fetch('/api/results/card/context?symbol='+encodeURIComponent(sym)).then(function(x){return x.json();}),
+    fetch('/api/results/v2/'+encodeURIComponent(sym)).then(function(x){return x.json();})
+  ]).then(function(results){
+    if(RA_OPEN!==sym)return;  /* faster tap won */
+    var cardData=results[0], contextData=results[1], v2Data=results[2];
+    var fullData=Object.assign({}, cardData, contextData, v2Data);
+    raPaint(r, fullData);
+  }).catch(function(){
+    if(RA_OPEN!==sym)return;
+    raPaint(r, {error: 'Data did not load. Nothing is invented in its place.'});
+  });
 }
-function raPaint(r,bodyHtml,d){
+function raFormat(v,dp){
+  if(v==null)return'—';
+  var n=Number(v);
+  return isNaN(n)?'—':(n>0?'+':'')+n.toFixed(dp||1);
+}
+function raChipClass(v){
+  if(!v||v==='IN-LINE'||v==='IN_LINE')return '';
+  if(v==='BEAT')return'w';
+  if(v==='MISS')return'l';
+  return'';
+}
+function raBeatMissBlock(pc){
+  if(!pc)return'';
+  var html='<div style="margin:var(--space-10) 0;font-size:var(--type-12)"><div style="color:var(--aqua);font-family:JetBrains Mono;font-weight:700;margin-bottom:var(--space-5)">vs top 3 peers</div>';
+  if(pc.sales){
+    html+='<div style="margin-bottom:var(--space-4)">Sales: <span style="color:var(--chalk)">'+esc(pc.sales.stock==null?'—':pc.sales.stock.toFixed(1))+'%'
+      +'</span> <span class="chip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
+  }
+  if(pc.profit){
+    html+='<div>PAT: <span style="color:var(--chalk)">'+esc(pc.profit.stock==null?'—':pc.profit.stock.toFixed(1))+'%'
+      +'</span> <span class="chip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
+  }
+  if(pc.peer_basis){
+    html+='<div style="font-size:var(--type-95);color:var(--muted);margin-top:var(--space-5)">'+esc(pc.peer_basis)+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
+function raFullSheetHtml(d){
+  if(d.error)return'<div class="rsp" style="color:var(--heat)">'+esc(d.error)+'</div>';
+  if(!d.symbol)return'<div class="rsp" style="color:var(--muted)">No result data.</div>';
+
+  var html='';
+  /* RESULT DATE */
+  if(d.ex_date){
+    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-11);color:var(--amber)">RESULT DATE · '+esc(d.ex_date)+'</div>';
+  }
+
+  /* RESULT ANALYSIS section */
+  if(d.l1){
+    html+='<div style="margin-top:var(--space-12)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">RESULT ANALYSIS</div>';
+
+    /* Colored bullet lines for Sales, PAT, Margins, PE */
+    var l1=d.l1;
+    if(l1.sales){
+      var s=l1.sales;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--volt);min-width:8px;height:8px;border-radius:50%;background:var(--volt)"></span>'
+        +'<span>Sales: <span style="color:var(--chalk)">'+esc(s.value==null?'—':s.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(s.yoy)+'% QoQ '+raFormat(s.qoq)+'%</span></span></div>';
+    }
+    if(l1.pat){
+      var p=l1.pat;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--aqua);min-width:8px;height:8px;border-radius:50%;background:var(--aqua)"></span>'
+        +'<span>PAT: <span style="color:var(--chalk)">'+esc(p.value==null?'—':p.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(p.yoy)+'% QoQ '+raFormat(p.qoq)+'%</span></span></div>';
+    }
+    if(l1.margin){
+      var m=l1.margin;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--heat);min-width:8px;height:8px;border-radius:50%;background:var(--heat)"></span>'
+        +'<span>'+esc(m.label||'Margins')+': <span style="color:var(--chalk)">'+esc(m.now==null?'—':m.now.toFixed(1)+'%')+'</span> <span style="color:var(--muted)">'+(m.pp!=null?(m.pp>0?'+':'')+m.pp.toFixed(1)+'pp vs LY':'—')+'</span></span></div>';
+    }
+    if(l1.valuation){
+      var v=l1.valuation;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8);font-size:var(--type-12)"><span style="color:var(--pulse);min-width:8px;height:8px;border-radius:50%;background:var(--pulse)"></span>'
+        +'<span>PE: <span style="color:var(--chalk)">'+esc(v.pe==null?'—':v.pe.toFixed(1))+'</span> <span style="color:var(--muted)">industry '+esc(v.industry_pe==null?'—':v.industry_pe.toFixed(1))+'</span></span></div>';
+    }
+
+    /* Peer BEAT/MISS block */
+    html+=raBeatMissBlock(d.peer_comparison);
+
+    /* Expectations line */
+    if(d.expectations){
+      var e=d.expectations;
+      if(e.sales||e.profit){
+        html+='<div style="font-size:var(--type-11);color:var(--muted);margin-top:var(--space-10)">vs est. <span style="color:var(--chalk)">'+
+          (e.sales?' Sales '+esc(e.sales.tag)+' '+e.sales.dev_pct+'%':'')+(e.sales&&e.profit?' · ':'')+
+          (e.profit?' Profit '+esc(e.profit.tag)+' '+e.profit.dev_pct+'%':'')+'</span></div>';
+      }
+    }
+    html+='</div>';
+  }
+
+  /* QUARTER section */
+  if(d.l1){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">QUARTER '+esc(d.l1.quarter_label||'')+'</div>';
+    if(d.auto_verdict){
+      html+='<div class="rsp" style="color:var(--muted);margin-bottom:var(--space-10)">'+esc(d.auto_verdict)+'</div>';
+    }
+    if(d.l1.sales){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>Sales</span><span style="color:var(--chalk)">'+esc(d.l1.sales.value==null?'—':d.l1.sales.value.toFixed(0))+'</span></div>';
+    }
+    if(d.l1.pat){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>PAT</span><span style="color:var(--chalk)">'+esc(d.l1.pat.value==null?'—':d.l1.pat.value.toFixed(0))+'</span></div>';
+    }
+    if(d.l1.margin&&d.l1.margin.label){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>'+esc(d.l1.margin.label)+'</span><span style="color:var(--chalk)">'+esc(d.l1.margin.now==null?'—':d.l1.margin.now.toFixed(1)+'%')+'</span></div>';
+    }
+    if(d.l1.valuation){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;font-size:var(--type-12)"><span>P/E</span><span style="color:var(--chalk)">'+esc(d.l1.valuation.pe==null?'—':d.l1.valuation.pe.toFixed(1))+'</span></div>';
+    }
+    html+='</div>';
+  }
+
+  /* DETAILED ANALYSIS section */
+  if(d.has_analysis){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">DETAILED ANALYSIS</div>';
+    html+=raBody(d.analysis);
+    html+='</div>';
+  }else if(d.result_analysis){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">ANALYSIS</div>';
+    html+=raBody(d.result_analysis);
+    html+='</div>';
+  }
+
+  /* COMPANY NEWS section */
+  if(d.polished_news&&d.polished_news.length){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">COMPANY NEWS</div>';
+    d.polished_news.slice(0,10).forEach(function(n){
+      html+='<div class="rsp" style="margin-bottom:var(--space-10)"><div style="color:var(--chalk);font-weight:600;font-size:var(--type-12);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.headline)+'</div>';
+      if(n.summary){html+='<div style="color:var(--muted);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.summary.substring(0,120))+'…</div>';}
+      if(n.source){html+='<div style="font-size:var(--type-95);color:var(--muted)">'+esc(n.source)+'</div>';}
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+
+  return html;
+}
+function raPaint(r,d){
   var s=document.getElementById('rsheet'); if(!s)return;
   /* cc#1260: the results sheet gets the same guard as the news sheet. It is the more exposed of
      the two — raOpen paints once for "Loading…" and again inside a .then, and a throw in that
      second paint is swallowed by the promise chain, which is precisely how a veil ends up over a
      sheet still saying Loading with nothing more ever coming. */
   sheetPaint(function(){
+  var bodyHtml = (d && Object.keys(d).length) ? raFullSheetHtml(d) : '<div class="rsp" style="color:var(--muted)">Loading…</div>';
   var q=(d&&d.quarter)||r.quarter||'', when=r.polished_ist||'';
   var back=RA_SEEN.length?'<button class="rsx" style="left:8px;right:auto" onclick="raBack()" '
       + 'aria-label="back">&#8592;</button>':'';
   return '<div class="rgrab"></div>'
     + '<div class="rshd" style="position:relative">'+back
     + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
-    + '<div class="sy">'+esc(r.symbol||'')+'</div>'
-    + (r.company?'<div class="co">'+esc(r.company)+'</div>':'')
-    + '<div class="meta">'+(r.segment?'<span>'+esc(r.segment)+'</span>':'')
+    + '<div class="sy">'+esc(d.symbol||r.symbol||'')+'</div>'
+    + (d.company?'<div class="co">'+esc(d.company)+'</div>':(r.company?'<div class="co">'+esc(r.company)+'</div>':''))
+    + '<div class="meta">'+(d.segment?'<span>'+esc(d.segment)+'</span>':(r.segment?'<span>'+esc(r.segment)+'</span>':''))
+    + (d.gvm_verdict?'<span title="GVM">'+esc(d.gvm_verdict)+'</span>':'')
     + (q?'<span>'+esc(q)+'</span>':'')
     + (when?'<span>polished '+esc(when)+'</span>':'')+'</div></div>'
     + '<div class="rsb" id="rsb">'
-    + (raBasisText(r)?'<div class="rbasis">'+raBasisText(r)+'</div>':'')
     + bodyHtml
-    + raPeerBlock(r)
     + '<div class="rfoot">'
-    /* /m/results IS the mobile Result Corner (mobile_endpoints.py:1066). It does not read
-       location.search today, so ?symbol= is inert — the link carries it anyway so it works the
-       day the page honours it, and the gap is logged rather than silently dropped. */
-    + '<a href="/m/results?symbol='+encodeURIComponent(r.symbol||'')+'">VIEW DETAIL</a>'
+    + '<a href="/m/results?symbol='+encodeURIComponent(d.symbol||r.symbol||'')+'">VIEW DETAIL</a>'
     + '</div></div>';
-  }, esc(r.symbol||'This result could not be opened.'));
+  }, esc(d.symbol||r.symbol||'This result could not be opened.'));
 }
 function raBack(){ var prev=RA_SEEN.pop(); if(prev)raOpen(prev,false); }
 
