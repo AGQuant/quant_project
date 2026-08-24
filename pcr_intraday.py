@@ -140,28 +140,36 @@ def _compute_one(conn, underlying, ts):
         pcr_total = round(put_total / call_total, 4) if call_total else None
         pcr_atm5 = (round(put_atm / call_atm, 4) if (call_atm and put_atm is not None) else None)
 
+        # cc#1315: last KNOWN-GOOD bar (today), fetched up front — used both by the one-sided-
+        # collapse heuristic below and, if this tick turns out bad, as the CARRY-FORWARD value.
+        # Founder ruling 24-Aug: a degraded/partial subscription (a WS drop leaves calls flowing
+        # and puts mostly gone, or vice versa) must not blank the chart — assume the PCR held
+        # roughly constant since the last trustworthy read, same "stale-carry" convention this
+        # file already uses for individual strikes' OI (cc#591 fix_1). This is an assumption, not
+        # a measurement, and is stated as one in the log line below — never silently indistinguishable
+        # from a fresh, real computation.
+        cur.execute("""
+            SELECT put_oi_total, call_oi_total, pcr_total, pcr_atm5 FROM pcr_intraday
+            WHERE underlying=%s AND ts < %s AND pcr_total IS NOT NULL
+              AND put_oi_total IS NOT NULL AND call_oi_total IS NOT NULL
+            ORDER BY ts DESC LIMIT 1
+        """, (underlying, ts))
+        last_good = cur.fetchone()
+
         # cc#292: bad/partial options-chain fetch guard. put_atm5==0 AND call_atm5==0 is the
         # reliable tell (observed on EVERY bad tick 02-Jul): the ATM±5 strikes didn't load, and the
         # total-band figures are unreliable too — call_oi_total froze at 80,015 while put stayed
         # ~normal, producing an impossible pcr_total=25.95 (normal NIFTY PCR is 0.5-2.0). Secondary
         # heuristic: a one-sided >75% total-OI collapse vs the last good tick (the other side steady)
-        # is the same corruption without the ATM=0 signature. On a bad tick, null pcr_total (and
-        # pcr_atm5) — extending the pipeline's existing pcr_atm5 null-on-bad-tick behavior — so the
-        # impossible spike never enters the series/chart. Raw OI is still stored for forensics.
+        # is the same corruption without the ATM=0 signature — a 24-Aug incident replayed this
+        # exact shape at the TOTAL-band level (60 calls, 2 puts) with the ATM=0 tell absent, which
+        # is why this heuristic reads pcr_total's own put/call totals, not just the ATM band.
         bad_tick = (put_atm == 0 and call_atm == 0)
-        if not bad_tick and pcr_total is not None:
-            cur.execute("""
-                SELECT put_oi_total, call_oi_total FROM pcr_intraday
-                WHERE underlying=%s AND ts < %s AND pcr_total IS NOT NULL
-                  AND put_oi_total IS NOT NULL AND call_oi_total IS NOT NULL
-                ORDER BY ts DESC LIMIT 1
-            """, (underlying, ts))
-            pr = cur.fetchone()
-            if pr and pr[0] and pr[1]:
-                p_drop = put_total  < pr[0] * 0.25
-                c_drop = call_total < pr[1] * 0.25
-                if p_drop != c_drop:   # exactly one side collapsed — one-sided corruption
-                    bad_tick = True
+        if not bad_tick and pcr_total is not None and last_good and last_good[0] and last_good[1]:
+            p_drop = put_total  < last_good[0] * 0.25
+            c_drop = call_total < last_good[1] * 0.25
+            if p_drop != c_drop:   # exactly one side collapsed — one-sided corruption
+                bad_tick = True
         # cc#292: hard sanity bound — a total-band PCR outside [0.1, 5] is implausible for
         # NIFTY/BANKNIFTY (normal 0.5-2.0) and only arises from a corrupt/partial OI fetch (a
         # one-sided collapse, or a put/call side reading 0). Catch-all guaranteeing no impossible
@@ -169,8 +177,21 @@ def _compute_one(conn, underlying, ts):
         # anchor at 09:05 leaves ATM null while call_oi_total collapsed → pcr_total=26).
         if pcr_total is not None and (pcr_total > 5 or pcr_total < 0.1):
             bad_tick = True
+        # cc#1315: CARRY-FORWARD, not null, on a bad tick — founder ruling 24-Aug. Raw OI (put_total/
+        # call_total) is still stored as computed, real and unmodified, for forensics; only the
+        # DERIVED pcr_total/pcr_atm5 the chart and the mood-gate read are replaced with the last
+        # trustworthy value. First bad tick of the day (no prior good value yet) has nothing to
+        # carry and stays null — carrying forward nothing would be inventing a number, not
+        # assuming one.
+        carried = False
         if bad_tick:
-            pcr_total = None   # null pcr_total (extends the existing pcr_atm5 null-on-bad-tick pattern)
+            if last_good and last_good[2] is not None:
+                pcr_total = last_good[2]
+                pcr_atm5 = last_good[3]
+                carried = True
+            else:
+                pcr_total = None
+                pcr_atm5 = None
 
         cur.execute("""
             INSERT INTO pcr_intraday
@@ -188,6 +209,26 @@ def _compute_one(conn, underlying, ts):
               pcr_atm5, put_atm, call_atm,
               pcr_total, put_total, call_total))
     conn.commit()
+
+    # cc#1315: the carry IS the auditable fact — schema changes are Railway-console-only per
+    # MAINTENANCE_LOCK_RULE, so this is not a stored column, but a silent carry defeats its own
+    # purpose (a reader must be able to tell "PCR held" from "PCR was actually recomputed and
+    # happened to match"). Logged, not raised — a carried tick is expected/handled behaviour on a
+    # degraded feed, not an incident on its own; the underlying feed gap already alerts elsewhere.
+    if bad_tick and carried:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO ops_log (category, title, details)
+                               VALUES ('info','pcr_carried_forward', %s::jsonb)""",
+                            (json.dumps({"ts": str(ts), "underlying": underlying,
+                                         "pcr_total": pcr_total, "pcr_atm5": pcr_atm5,
+                                         "raw_put_oi_total": put_total, "raw_call_oi_total": call_total,
+                                         "msg": f"{underlying} {ts}: bad/lopsided tick "
+                                                f"(put {put_total} vs call {call_total}) — carried "
+                                                "last known-good PCR forward rather than nulling"}),))
+            conn.commit()
+        except Exception:
+            pass   # a logging failure must never break PCR computation
 
     # cc#591 fix_3: live stale-put-OI alert. The put-leg OI feed intermittently zeroes (BANKNIFTY-
     # weighted, 20-Jul) and silently corrupts/nulls the PCR mood-gate (id=1916). Fire ONE ops_log
