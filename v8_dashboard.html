@@ -5336,11 +5336,20 @@ async function loadIdx(){
   /* cc#434 fix_2: CMP + day change from /api/v8/live_metrics (LAST-TICK anchored, cc#424 — Friday
      close off-market, live from 09:16) instead of domestic_live (which is CURRENT_DATE-only and
      goes blank on weekends, the "--" the founder saw). domestic_live kept as a secondary fallback. */
-  const [pv,lm,dl] = await Promise.all([
+  /* cc#1281: the two per-index v8_metrics rows ride the same parallel fetch — week_return /
+     month_return for the D/W/M strip under each tape. Single-symbol endpoint, not metrics/all:
+     this card needs two rows, not 328. */
+  const [pv,lm,dl,mN,mB] = await Promise.all([
     getJSON('/api/paper/pivots?limit=300').catch(()=>null),
     getJSON('/api/v8/live_metrics').catch(()=>null),
     getJSON('/api/v8/domestic_live').catch(()=>null),
+    getJSON('/api/v8/metrics/NIFTY50').catch(()=>null),
+    getJSON('/api/v8/metrics/BANKNIFTY').catch(()=>null),
   ]);
+  D.idxWM = {
+    NIFTY50:   mN ? {wk:mN.week_return!=null?Number(mN.week_return):null, mo:mN.month_return!=null?Number(mN.month_return):null} : null,
+    BANKNIFTY: mB ? {wk:mB.week_return!=null?Number(mB.week_return):null, mo:mB.month_return!=null?Number(mB.month_return):null} : null,
+  };
   const pvRows = rowsOf(pv);
   const lmRows = (lm&&lm.rows)||[];
   const map = { NIFTY:'NIFTY50', BANKNIFTY:'BANKNIFTY' };
@@ -5603,6 +5612,14 @@ function rIdxSpark(){
     // cc#1059: the header is a click target too, alongside the tape itself. No C button —
     // founder amendment 16-Aug: for an index the CHART is the affordance, so this just gives
     // the name and price the same behaviour rather than adding a control.
+    /* cc#1281 (founder direct 24-Aug): D/W/M strip under the tape. D is the SAME number the
+       header shows (one live source, the card cannot disagree with itself); W/M come from
+       v8_metrics week_return/month_return — the engine the mood gate chips already read. A side
+       missing its metrics row renders an em-dash, never 0. */
+    const dwm = D.idxWM && D.idxWM[tapeKey];
+    const seg=(l,v)=>`<span style="color:var(--dim)">${l}</span> <span style="font-weight:700;color:${v==null?'var(--mut)':cx(v)}">${v==null?'—':sgn(v,2)+'%'}</span>`;
+    const dwmRow = `<div style="display:flex;gap:14px;margin-top:5px;font-family:var(--mono);font-size:10px">
+        ${seg('D', d?chg:null)}${seg('W', dwm?dwm.wk:null)}${seg('M', dwm?dwm.mo:null)}</div>`;
     return `<div style="flex:1;min-width:0">
       <div onclick="openIdxChart('${tapeKey}')" style="cursor:pointer"
            title="Open the ${name} chart">
@@ -5612,6 +5629,7 @@ function rIdxSpark(){
           <span style="font-size:12px;font-weight:700;color:${col}">${d?sgn(chg,2)+'%':''}</span></div>
       </div>
       ${tape}
+      ${dwmRow}
     </div>`;
   };
   return `<div class="card">
