@@ -5504,12 +5504,18 @@ function rMood(){
   /* cc#238: after 15:30 the frozen banner is showing and this hero must not read as live. The
      .frozen class kills the breathing glow and drops the word to --mut. */
   const frozen = !isMarketHours();
+  /* cc#1274 scope 4: "N of 4 failing" carries severity and names the gates. Colour follows the
+     pane's own gate convention (.gate.no red / amber for partial), never dim gray — a reader
+     should not have to hover to know 3 failing is bad. The tooltip lists WHICH gates, from the
+     same gates array the chips render from, so the two can never disagree. */
+  const failNames = gates.filter(g=>!g[2]).map(g=>g[0]);
+  const failCol = fails>=3?'var(--red)':fails>=1?'var(--amber)':'var(--grn)';
   return `<div class="mood${frozen?' frozen':''}">
     <span class="word"><span class="l">MARKET GATE</span>${esc(gate)}</span>
     <span class="gates">${gateHtml}</span>
     <span class="sp"></span>
     <span class="slots">BUY SLOTS <b>${bSlots??'—'}</b> · SELL SLOTS <b>${sSlots??'—'}</b>
-      <span style="color:var(--dim)">· ${fails} of 4 failing</span></span></div>`;
+      <span style="color:${failCol};font-weight:700" title="Failing gates: ${failNames.length?failNames.join(', '):'none'} — engine takes no new entries while a gate fails">· ${fails} of 4 failing</span></span></div>`;
 }
 
 function sigCol(sym, s, ix){
@@ -5643,8 +5649,12 @@ function rVix(){
   const has = data && data.length;
   const band = vixBand(cur);
   const vc = band.col();
+  /* cc#1274 scope 3: the dot at the line's right end is sparkline({liveLast:true}) — the latest
+     reading's marker, real data, not decorative. The PCR card's header already legends its own
+     dot ("● = live"); this card never did, so the founder met an unlabeled black dot. Same
+     legend grammar as rPCR, and the dot itself is untouched. */
   return `<div class="card">
-    <div class="card-hd"><div class="t">${esc(label||'India VIX')}</div></div>
+    <div class="card-hd"><div><div class="t">${esc(label||'India VIX')}</div><div class="s">● = latest reading</div></div></div>
     <div style="margin-bottom:6px">
       <span class="vix-big" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
       <span class="vix-band ${band.cls}">${band.label}</span>
