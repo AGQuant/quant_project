@@ -234,12 +234,18 @@ SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 OPTION_RETENTION_DAYS = 7      # option_chain stays lean (heaviest churn, not used by sim)
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
-N_STRIKES             = 30     # cc#320: INDEX options ATM±30 (61 strikes, was ±10/21) — fixes the
-                               # PCR window-drift bias where strikes exited the tracked band as spot
-                               # moved and silently dropped their OI from the PCR sums. Index only
-                               # (NIFTY/BANKNIFTY); STOCK options stay STOCK_N_STRIKES=3. 7d retention
-                               # (purge_old_bars) already covers the wider band. Capacity: index
-                               # 84->244 contracts, feed total ~4170->~4330 (< ~5000 WS budget).
+N_STRIKES             = 20     # cc#1315: narrowed from ±30 (cc#320), founder ruling after the 24-Aug
+                               # feed incident (WS repeatedly dropped/reconnected for hours; options,
+                               # the largest single subscription group, were the first thing to go
+                               # dark). ±20 (41 strikes/side, 164 index contracts) is still far wider
+                               # than the ORIGINAL ±10/21 that cc#320 fixed — that regression was
+                               # strikes drifting OUT of a too-narrow band as spot moved and silently
+                               # dropping their OI from the PCR sums. ±20 keeps a real safety margin
+                               # against that same drift while cutting ~80 fewer symbols to keep alive
+                               # per index. This narrows blast radius / OI-poll load; it does NOT by
+                               # itself fix the WS reconnect double-subscription bug found in cc#1315
+                               # (still open, unrelated to strike count) — that is separate follow-up.
+                               # Index only (NIFTY/BANKNIFTY); STOCK options stay STOCK_N_STRIKES=3.
 # cc#189 (founder redesign 04-Jul): options subscribe ONLY when live prices are
 # fresh. No boot/REST hydration — a cold-boot/pre-market restart just waits for
 # the market + a fresh cmp_prices tick set, then computes ATM from LIVE prices.
@@ -1820,7 +1826,7 @@ class OptionBarStore:
         # WS strips OI (Fyers SDK pops it) -> fall back to the DEPTH-poll value.
         oi = bar['oi'] if bar.get('oi') is not None else self.last_oi.get(fsym)
         # cc#591 fix_1: NEVER write a NULL option OI. A strike freshly subscribed after an ATM-roll
-        # (or one the DEPTH-poll cycle hasn't reached yet — BANKNIFTY ATM±30 is a wide band) has no
+        # (or one the DEPTH-poll cycle hasn't reached yet — BANKNIFTY ATM±20 is still a wide band) has no
         # WS-OI and no last_oi -> NULL, and NULL PE rows sum to 0 -> put_oi_total=0 -> the PCR
         # mood-gate (id=1916) corrupts/nulls (the 20-Jul 13:30 put-leg drop). Carry the symbol's last
         # known OI from option_chain (stale-carry, queried only on the rare None) and seed last_oi so
