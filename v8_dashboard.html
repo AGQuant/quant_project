@@ -532,8 +532,15 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .lvl.piv .tag{left:calc(50% + 94px);color:var(--mut)}
 #pane-index .lvl.piv.pp .ln{background:var(--amber);opacity:.7}
 #pane-index .lvl.piv.pp .tag,#pane-index .lvl.piv.pp .px{color:var(--amber)}
-#pane-index .lvl.wall .ln{right:50%;background:currentColor;height:7px;top:-3px;border-radius:2px;opacity:.85}
-#pane-index .lvl.wall .tag{right:calc(50% + 12px);text-align:right;color:currentColor}
+/* cc#1280 (founder 24-Aug): the wall bar spanned the whole left half as a SOLID strip, and the
+   tag paints on top of it — dark price text on a red bar (founder screenshot, both indices).
+   The bar now anchors solid at the axis (where the strike lives) and fades toward its outer end,
+   so the tag sits over the faded zone; the tag itself becomes a small chip so it is readable over
+   anything. Geometry, values and colours-by-side unchanged. */
+#pane-index .lvl.wall .ln{right:50%;height:8px;top:-4px;border-radius:4px 0 0 4px;opacity:.9;
+    background:linear-gradient(90deg,transparent 0%,currentColor 45%,currentColor 100%)}
+#pane-index .lvl.wall .tag{right:calc(50% + 12px);text-align:right;color:currentColor;top:-9px;
+    background:var(--card2);border:1px solid var(--line2);border-radius:4px;padding:1px 7px}
 #pane-index .lvl.wall.put{color:var(--grn)}
 #pane-index .lvl.wall.call{color:var(--red)}
 #pane-index .lvl.mpl .ln{left:50%;width:84px;background:var(--amber)}
@@ -6450,12 +6457,14 @@ function render(){
        grid-template written on the ADR/PCR row. Same intent, but declared once in CSS with the
        ref's ratios and its 920px breakpoint, instead of two different numbers in two places. */
     `<div class="row r-idxvix">${rIdxSpark()}${rVix()}</div>` +
-    `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
     /* cc#1279 (founder direct 24-Aug 12:48): PCR sits UNDER the index day-change charts and ADR
        under the VIX gauge — index reads stack over index PCR, the vol gauge over breadth. Order
        swap here plus the row's columns matching r-idxvix (1.6/1) so the two rows read as two
        aligned columns, not four unrelated cards. */
     `<div class="row r-adrpcr">${rPCR()}${rADR()}</div>` +
+    /* cc#1280 (founder direct 24-Aug 12:57): the F&O ban strip drops BELOW the PCR/ADR row — the
+       two aligned index/breadth rows stay together, the ban list reads as a footnote to them. */
+    `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
     /* cc#1151 verify E: the old pivots list card and the standalone strike-OI card are REPLACED,
        not duplicated. One row, one card per index, each holding both views behind the SPINE|LADDER
        switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
