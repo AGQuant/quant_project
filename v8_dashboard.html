@@ -731,7 +731,9 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .sp-note{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:5px}
 #pane-index .axis-t{font-family:var(--mono);font-size:8.5px;fill:var(--dim)}
 #pane-index .r-idxvix{grid-template-columns:1.6fr 1fr}
-#pane-index .r-adrpcr{grid-template-columns:1fr 1.4fr}
+/* cc#1279: was 1fr 1.4fr with ADR left. PCR now leads and the ratio mirrors r-idxvix above, so
+   PCR aligns under the index charts and ADR under VIX as two continuous columns. */
+#pane-index .r-adrpcr{grid-template-columns:1.6fr 1fr}
 @media(max-width:920px){#pane-index .r-idxvix,#pane-index .r-adrpcr{grid-template-columns:1fr}}
 #pane-index .pvt-row{display:flex;justify-content:space-between;align-items:center;
     padding:3px 5px;border-radius:4px;margin-bottom:2px}
@@ -6449,7 +6451,11 @@ function render(){
        ref's ratios and its 920px breakpoint, instead of two different numbers in two places. */
     `<div class="row r-idxvix">${rIdxSpark()}${rVix()}</div>` +
     `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
-    `<div class="row r-adrpcr">${rADR()}${rPCR()}</div>` +
+    /* cc#1279 (founder direct 24-Aug 12:48): PCR sits UNDER the index day-change charts and ADR
+       under the VIX gauge — index reads stack over index PCR, the vol gauge over breadth. Order
+       swap here plus the row's columns matching r-idxvix (1.6/1) so the two rows read as two
+       aligned columns, not four unrelated cards. */
+    `<div class="row r-adrpcr">${rPCR()}${rADR()}</div>` +
     /* cc#1151 verify E: the old pivots list card and the standalone strike-OI card are REPLACED,
        not duplicated. One row, one card per index, each holding both views behind the SPINE|LADDER
        switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
