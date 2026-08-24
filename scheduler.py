@@ -3375,10 +3375,30 @@ def _bg_inv_scanner_catchup():
             import inv_scanner_scoring
             res = inv_scanner_scoring.compute()
             log.info(f"inv_scanner_catchup scored: {res}")
+        # cc#1285: the chain's third link rides the same sweep — rules are idempotent per
+        # run_date, so this is a no-op on a night already judged.
+        import inv_scanner_rules
+        rr = inv_scanner_rules.run()
+        if rr.get("status") == "ok":
+            log.info(f"inv_scanner_catchup rules: buys={len(rr.get('buys',[]))} exits={len(rr.get('exits',[]))}")
             return
-        return _Skip.already_ran()
+        if n > 0:
+            return _Skip.already_ran()
     except Exception as e:
         log.error(f"inv_scanner_catchup: {e}")
+        raise
+
+def _bg_inv_scanner_rules():
+    """cc#1285: entry/exit evaluation over tonight's scores (spec 30147 entry/exit rules).
+    Idempotent per run_date — the module skips a night it has already judged."""
+    try:
+        import inv_scanner_rules
+        res = inv_scanner_rules.run()
+        if res.get("status") == "skip":
+            return _Skip.already_ran() if "already" in res.get("reason","") else _Skip.precondition_missing(res.get("reason",""))
+        log.info(f"inv_scanner_rules: {res}")
+    except Exception as e:
+        log.error(f"inv_scanner_rules: {e}")
         raise
 
 def _bg_fetch_stock_news():
@@ -4677,6 +4697,7 @@ async def _scheduler_loop():
         if h == 2 and m == 10:  _spawn(_bg_rvol_profiles)  # cc#674: nightly RVOL cum-vol profiles (after universe_technicals)
         if h == 2 and m == 20:  _spawn(_bg_inv_scanner_universe)  # cc#1283: investment scanner universe, after the 01:30 GVM write
         if h == 2 and m == 30:  _spawn(_bg_inv_scanner_scoring)   # cc#1284: two-track scoring, after the 02:20 universe build
+        if h == 2 and m == 40:  _spawn(_bg_inv_scanner_rules)     # cc#1285: entry/exit judgement, after the 02:30 scoring
         if m % 15 == 7:         _spawn(_bg_inv_scanner_catchup)   # cc#1284: restart-proof chain catch-up (cc#841 pattern)
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
         # the scrape build was a one-time model exercise, go-forward = data vendor. The three
