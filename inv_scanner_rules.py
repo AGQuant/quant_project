@@ -32,6 +32,8 @@ from psycopg.types.json import Json
 from fastapi import APIRouter, Header, HTTPException
 
 from invest_check_v2 import _segment_month   # IC's own segment-month arithmetic, not a copy
+import price_resolver   # cc#1297: the ONE canonical price path (cc#343/717/811/1291) — never a
+                         # second lookup, the exact mistake cc#1291 fixed elsewhere tonight.
 
 log = logging.getLogger("scorr.inv_scanner_rules")
 router = APIRouter(tags=["investment_scanner"])
@@ -73,6 +75,11 @@ CREATE TABLE IF NOT EXISTS investment_scanner_signals (
     score NUMERIC,
     gates JSONB
 );
+-- cc#1297: the engine had NO price columns at all (verified against the live schema before
+-- writing this card) -- score-decay exits only, deliberately, per this file's own docstring. Day
+-- P&L / Net P&L on the page need a captured entry/exit price, so it is added here.
+ALTER TABLE investment_scanner_state ADD COLUMN IF NOT EXISTS entry_price NUMERIC;
+ALTER TABLE investment_scanner_state ADD COLUMN IF NOT EXISTS exit_price NUMERIC;
 """
 
 
@@ -142,9 +149,13 @@ def run(conn=None) -> dict:
                             dead.append(f"reversal {rev} < {EXIT_REV}")
                     if len(dead) == len(tracks):        # ALL entered tracks decayed
                         reason = "; ".join(dead)
+                        # cc#1297: capture exit_price via the canonical resolver — same source
+                        # every other surface's CMP comes from, never a second lookup path.
+                        exit_r = price_resolver.resolve_price(cur, sym)
+                        exit_px = _f(exit_r.get("price")) if exit_r else None
                         cur.execute("""UPDATE investment_scanner_state
-                                       SET status='exited', exited_at=%s, exit_reason=%s
-                                       WHERE symbol=%s""", (d, reason, sym))
+                                       SET status='exited', exited_at=%s, exit_reason=%s, exit_price=%s
+                                       WHERE symbol=%s""", (d, reason, exit_px, sym))
                         cur.execute("""INSERT INTO investment_scanner_signals
                                        (event, run_date, symbol, track, score, gates)
                                        VALUES ('EXIT', %s, %s, %s, %s, %s)""",
@@ -179,14 +190,20 @@ def run(conn=None) -> dict:
                 score = mom if "momentum" in tracks else rev
                 if all_pass:
                     track = "+".join(tracks)
+                    # cc#1297: capture entry_price via the canonical resolver. day_return above
+                    # already resolves a price for the gate check but does not persist it — this
+                    # is a fresh, current-at-signal-time resolve, not a reuse of a stale gate value.
+                    entry_r = price_resolver.resolve_price(cur, sym)
+                    entry_px = _f(entry_r.get("price")) if entry_r else None
                     cur.execute("""INSERT INTO investment_scanner_state
-                                   (symbol, entered_at, entry_track, entry_score, status)
-                                   VALUES (%s,%s,%s,%s,'open')
+                                   (symbol, entered_at, entry_track, entry_score, status, entry_price)
+                                   VALUES (%s,%s,%s,%s,'open',%s)
                                    ON CONFLICT (symbol) DO UPDATE SET
                                      entered_at=EXCLUDED.entered_at, entry_track=EXCLUDED.entry_track,
                                      entry_score=EXCLUDED.entry_score, status='open',
-                                     exited_at=NULL, exit_reason=NULL""",
-                                (sym, d, track, score))
+                                     exited_at=NULL, exit_reason=NULL,
+                                     entry_price=EXCLUDED.entry_price, exit_price=NULL""",
+                                (sym, d, track, score, entry_px))
                     cur.execute("""INSERT INTO investment_scanner_signals
                                    (event, run_date, symbol, track, score, gates)
                                    VALUES ('BUY', %s, %s, %s, %s, %s)""",
@@ -227,12 +244,41 @@ def get_signals(limit: int = 100):
 
 @router.get("/api/inv-scanner/state")
 def get_state():
-    """Open scanner positions (score-decay book, V1)."""
+    """Open + closed scanner positions (score-decay book, V1). cc#1297: adds entry/exit price and
+    P&L, all computed HERE from stored prices + a live resolve — the page computes nothing, same
+    discipline as every other surface in this codebase. Long-only (V1 writes BUY only, cc#1295)."""
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("""SELECT symbol, entered_at, entry_track, entry_score, status, exited_at, exit_reason
+        # cc#1297: self-healing schema-ensure, same as run() — this endpoint can be hit by the
+        # page before the nightly job (02:40 IST) has run DDL even once post-deploy.
+        cur.execute(DDL)
+        conn.commit()
+        cur.execute("""SELECT symbol, entered_at, entry_track, entry_score, status, exited_at,
+                              exit_reason, entry_price, exit_price
                        FROM investment_scanner_state ORDER BY status, entered_at DESC""")
-        rows = [{"symbol": r[0], "entered_at": str(r[1]), "entry_track": r[2],
-                 "entry_score": _f(r[3]), "status": r[4],
-                 "exited_at": str(r[5]) if r[5] else None, "exit_reason": r[6]}
-                for r in cur.fetchall()]
+        raw = cur.fetchall()
+        rows = []
+        for r in raw:
+            symbol, entered_at, entry_track, entry_score, status, exited_at, exit_reason, entry_price, exit_price = r
+            entry_price, exit_price = _f(entry_price), _f(exit_price)
+            row = {"symbol": symbol, "entered_at": str(entered_at), "entry_track": entry_track,
+                   "entry_score": _f(entry_score), "status": status,
+                   "exited_at": str(exited_at) if exited_at else None, "exit_reason": exit_reason,
+                   "entry_price": entry_price, "exit_price": exit_price,
+                   "cmp": None, "day_pnl_pct": None, "net_pnl_pct": None}
+            if status == "open":
+                # cc#1291-style: the ONE resolver, at request time, never stored/stale.
+                pr = price_resolver.resolve_price(cur, symbol)
+                cmp_v = _f(pr.get("price")) if pr else None
+                row["cmp"] = cmp_v
+                prev_px, _prev_date = price_resolver.latest_completed_close(cur, symbol)
+                if cmp_v is not None and prev_px:
+                    row["day_pnl_pct"] = round((cmp_v / prev_px - 1) * 100.0, 2)
+                # cc#1297 schema_gap_flagged_first: the one legacy row (LGBBROSLTD, entered before
+                # this card) predates price capture and has no entry_price. NOT backfilled with a
+                # reconstructed guess — net_pnl_pct stays None (renders em-dash) until it exits.
+                if cmp_v is not None and entry_price:
+                    row["net_pnl_pct"] = round((cmp_v / entry_price - 1) * 100.0, 2)
+            elif status == "exited" and entry_price and exit_price:
+                row["net_pnl_pct"] = round((exit_price / entry_price - 1) * 100.0, 2)
+            rows.append(row)
     return {"count": len(rows), "rows": rows}
