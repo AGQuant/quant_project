@@ -5628,11 +5628,12 @@ function rIdxSpark(){
     // innerHTML, which is what left this pane on "Loading…" in production. Degrade in steps:
     // interactive slot -> static cc#1054 tape -> plain text. A stale asset must cost features,
     // never the whole pane.
+    // cc#1300 (founder direct 24-Aug): "slightly bigger, optimise box space" — 46 -> 58.
     const _T=window.ScorrIndexTape;
     const tape=(_T&&typeof _T.placeholder==='function')
-      ? _T.placeholder(tapeKey,col,46)
+      ? _T.placeholder(tapeKey,col,58)
       : (_T&&typeof _T.svg==='function'&&ent)
-        ? _T.svg(ent,col,{h:46,w:320})
+        ? _T.svg(ent,col,{h:58,w:320})
         : '<div style="font-size:8px;color:var(--dim)">no intraday</div>';
     // cc#1059: the header is a click target too, alongside the tape itself. No C button —
     // founder amendment 16-Aug: for an index the CHART is the affordance, so this just gives
@@ -5711,7 +5712,8 @@ function rVix(){
       <span class="vix-big" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
       <span class="vix-band ${band.cls}">${band.label}</span>
       <span class="big-chg" style="color:${cx(chg)};margin-left:10px" title="VIX: falling = cooling fear (calm); coloured by sign (down = red, up = green)">${has?sgn(chg,2):''}</span></div>
-    ${has?sparkline(data, vc, {liveLast:true,h:55}):'<div class="sp-note">no VIX feed yet</div>'}
+    <!-- cc#1300: 55 -> 62, matching the tape's size bump so all 3 charts in this row grow together. -->
+    ${has?sparkline(data, vc, {liveLast:true,h:62}):'<div class="sp-note">no VIX feed yet</div>'}
   </div>`;
 }
 
@@ -5739,8 +5741,18 @@ function rPCR(){
   // cc#1061: every band test now runs on an EXPLICIT null check first. `null < 0.7` is true in
   // JS — null coerces to 0 — so an unguarded band would have labelled a missing day BEARISH and
   // painted it red, which is the same lie as plotting 0.00, just in words.
-  const pc = v=>v==null?C.mut:v<0.7?DN:v<0.9?UP:v<1.1?C.amber:DN;
-  const pl = v=>v==null?'NO DATA':v<0.7?'BEARISH':v<0.9?'BULLISH':v<1.1?'NEUTRAL':'BEARISH';
+  // Founder direct (24-Aug), live correction: BANKNIFTY 0.71 was reading BULLISH while NIFTY 0.68
+  // read BEARISH, three cents apart. The old scheme was a HUMP, not a scale: <0.7 BEARISH,
+  // 0.7-0.9 BULLISH, 0.9-1.1 NEUTRAL, >=1.1 BEARISH again — bearish at BOTH tails with a bullish
+  // island in between, mixing two different readings of PCR (contrarian-extreme at the low end,
+  // direct-fear at the high end) in one function. That is exactly the open QUESTION this file's
+  // own comment above flagged at cc#1153 scope 6 ("shipping a green number beside a BEARISH chip
+  // would be a contradiction... logged as a QUESTION") — this is that ruling. Replaced with a
+  // single monotonic scale: more puts relative to calls reads MORE bullish (more hedging/put-
+  // writing demand, the standard NSE retail reading), not a hump. 0.68 stays BEARISH; 0.71 now
+  // correctly joins it instead of flipping to BULLISH three cents later.
+  const pc = v=>v==null?C.mut:v<0.9?DN:v<1.1?C.amber:UP;
+  const pl = v=>v==null?'NO DATA':v<0.9?'BEARISH':v<1.1?'NEUTRAL':'BULLISH';
   const one=(name,key,d)=>{
     const cur=d?d.cur:null, col=pc(cur);
     const chart = (d&&d.days&&d.days.length&&window.ScorrPcrTrend)

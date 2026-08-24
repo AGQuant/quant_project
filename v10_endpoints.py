@@ -507,25 +507,42 @@ def v10_performance():
 
 @router.get("/vix")
 def v10_vix():
-    """India VIX — live LTP (cmp_prices) + last ~7 trading-day closes from the
-    5-min intraday feed (symbol INDIAVIX, fed by Fyers INDEX_LTP_SYMBOLS).
-    NOT US VIX — global_indices only carries ^VIX which is the US index."""
+    """India VIX — live LTP (cmp_prices) + last ~100 5-min bars for the chart (symbol INDIAVIX,
+    fed by Fyers INDEX_LTP_SYMBOLS), day-over-day chg vs the prior trading day's close.
+    NOT US VIX — global_indices only carries ^VIX which is the US index.
+
+    Founder direct (24-Aug): "show vix chart just like Nifty bank nifty chart" — the chart data
+    was ONE point per day (DISTINCT ON ts::date, ~8 dots over 8 days), which is why the card
+    showed a bare dot with no visible line. The real 5-min ticks were sitting in this same table
+    the whole time (confirmed live: 75 rows in the last 3 days alone) — NIFTY/BANKNIFTY's own
+    tape reads 100 bars of 5-min intraday from this same intraday_prices table (/api/index/tape);
+    VIX now gets the same treatment instead of a near-empty daily-close chart. day-over-day chg
+    is UNCHANGED — still computed from distinct trading-day closes, kept as its own query so
+    widening the chart window does not also change what the +/- delta means."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ts, close::numeric AS vix
+                FROM intraday_prices
+                WHERE symbol='INDIAVIX' AND ts >= NOW() - INTERVAL '6 days'
+                ORDER BY ts DESC LIMIT 100
+            """)
+            bars = list(reversed(cur.fetchall()))
+            data = [float(r[1]) for r in bars if r[1] is not None]
             cur.execute("""
                 SELECT DISTINCT ON (ts::date) ts::date AS day, close::numeric AS vix
                 FROM intraday_prices
                 WHERE symbol='INDIAVIX' AND ts >= NOW() - INTERVAL '8 days'
                 ORDER BY ts::date ASC, ts DESC
             """)
-            data = [float(r[1]) for r in cur.fetchall() if r[1] is not None]
+            daily = [float(r[1]) for r in cur.fetchall() if r[1] is not None]
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol='INDIAVIX'")
             lr = cur.fetchone()
             live = float(lr[0]) if lr and lr[0] is not None else None
         cur_v = live if live is not None else (data[-1] if data else 0.0)
-        prev = data[-2] if len(data) >= 2 else cur_v
+        prev = daily[-2] if len(daily) >= 2 else cur_v
         return {"label": "India VIX", "cur": cur_v, "chg": round(cur_v - prev, 2),
-                "data": data, "source": "intraday INDIAVIX + cmp_prices live"}
+                "data": data, "source": "intraday INDIAVIX (100x5min) + cmp_prices live"}
     except Exception as e:
         raise HTTPException(500, f"v10_vix failed: {e}")
 
