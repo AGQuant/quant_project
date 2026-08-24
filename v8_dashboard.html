@@ -5990,17 +5990,30 @@ function buildupTable(title, rows, accent, pending){
     <div class="tbl-hold"><div class="tbl-scroll"><table class="bld-tbl"><thead><tr>${head.map(h=>`<th${h==='SIGNAL'?' class="th-sig"':''}>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
   </div>`;
 }
+// cc#1303 (founder direct 24-Aug): "too much data in 1 table instead of show long and short
+// build up parallel show in switch button and keep default long build up" — was rendering BOTH
+// tables side by side (8 columns x ~15 rows each, twice) in one card. Default LONG per the ask.
+D.buildupView = 'long';
+function setBuildupView(v){ D.buildupView = (v==='short') ? 'short' : 'long'; try{ render(); }catch(e){} }
+window.setBuildupView = setBuildupView;
 function rBuildup(){
   const b=D.buildup;
   const note = b.pending
     ? `<div class="note" style="color:var(--amber)">⚠ OI data not available — showing price direction only. Signal classification disabled.</div>`
     : '';
+  const view = D.buildupView==='short' ? 'short' : 'long';
+  const table = view==='long'
+    ? buildupTable('▲ Long Buildup', b.long, UP, b.pending)
+    : buildupTable('▼ Short Buildup', b.short, DN, b.pending);
   return `<div class="card">
     <div class="card-hd"><div><div class="t">Futures Buildup — Stock F&O</div>
-      <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div></div>
+      <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div>
+      <div class="vsw">
+        <button class="${view==='long'?'on':''}" onclick="setBuildupView('long')">LONG</button>
+        <button class="${view==='short'?'on':''}" onclick="setBuildupView('short')">SHORT</button>
+      </div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
-      ${buildupTable('▲ Long Buildup', b.long, UP, b.pending)}
-      ${buildupTable('▼ Short Buildup', b.short, DN, b.pending)}
+      ${table}
     </div>
     ${note}
   </div>`;
