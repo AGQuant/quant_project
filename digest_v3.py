@@ -793,9 +793,10 @@ def build_digest(cur) -> Dict[str, Any]:
             "bias": bias,
             "bias_source": bias_source,
             "support": bias_bits,
+            # cc#1276 scope 3: the note is founder-facing page copy — internal ids (session_log
+            # 965, cc#1109) stay in code comments, never on the live page.
             "note": bias_note or ("Bias word from the shared market mood; support numbers "
-                                  "composed only from what is shown above "
-                                  "(965 MARKET_READ_FRAMEWORK, amended by cc#1109)."),
+                                  "composed only from what is shown above."),
         },
         "spec": "cc#846 V3 · binding content spec session_log 965 v2.3",
     }
