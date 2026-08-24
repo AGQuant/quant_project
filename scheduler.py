@@ -3329,6 +3329,58 @@ def _bg_inv_scanner_universe():
         log.error(f"inv_scanner_universe: {e}")
         raise
 
+def _bg_inv_scanner_scoring():
+    """cc#1284: two-track /100 scoring over the cc#1283 universe (spec 30147 verbatim). Runs
+    after the 02:20 universe build so it scores tonight's pond. S1 leg is IC-V2's own
+    _s1_reclaim, imported not copied."""
+    try:
+        import inv_scanner_scoring
+        res = inv_scanner_scoring.compute()
+        if res.get("status") == "skip":
+            return _Skip.precondition_missing(res.get("reason", ""))
+        log.info(f"inv_scanner_scoring: {res}")
+    except Exception as e:
+        log.error(f"inv_scanner_scoring: {e}")
+        raise
+
+def _bg_inv_scanner_catchup():
+    """cc#1284: restart-proof catch-up for the scanner chain (cc#841 pattern). A deploy crossing
+    the 02:20/02:30 window must not eat a night, and the chain's FIRST run must not wait for
+    tomorrow. Every 15 min: if the latest GVM date has no universe, build it; if the latest
+    universe run has no scores, score it; else already_ran."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+            gd = cur.fetchone()[0]
+            if gd is None:
+                return _Skip.precondition_missing("gvm_scores empty")
+            cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='investment_scanner_universe'")
+            has_u = cur.fetchone()[0] > 0
+            ud = None
+            if has_u:
+                cur.execute("SELECT MAX(run_date) FROM investment_scanner_universe")
+                ud = cur.fetchone()[0]
+        if ud is None or ud < gd:
+            import inv_scanner_universe
+            inv_scanner_universe.build()
+            ud = gd
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='investment_scanner_scores'")
+            has_s = cur.fetchone()[0] > 0
+            n = 0
+            if has_s:
+                cur.execute("SELECT COUNT(*) FROM investment_scanner_scores WHERE run_date=%s", (ud,))
+                n = cur.fetchone()[0]
+        if n == 0:
+            import inv_scanner_scoring
+            res = inv_scanner_scoring.compute()
+            log.info(f"inv_scanner_catchup scored: {res}")
+            return
+        return _Skip.already_ran()
+    except Exception as e:
+        log.error(f"inv_scanner_catchup: {e}")
+        raise
+
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News -> raw_news (source_type='company'
     + symbol), alias-filtered at ingest. Single funnel with market news; supersedes the
@@ -4624,6 +4676,8 @@ async def _scheduler_loop():
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 2 and m == 10:  _spawn(_bg_rvol_profiles)  # cc#674: nightly RVOL cum-vol profiles (after universe_technicals)
         if h == 2 and m == 20:  _spawn(_bg_inv_scanner_universe)  # cc#1283: investment scanner universe, after the 01:30 GVM write
+        if h == 2 and m == 30:  _spawn(_bg_inv_scanner_scoring)   # cc#1284: two-track scoring, after the 02:20 universe build
+        if m % 15 == 7:         _spawn(_bg_inv_scanner_catchup)   # cc#1284: restart-proof chain catch-up (cc#841 pattern)
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
         # the scrape build was a one-time model exercise, go-forward = data vendor. The three
         # UNCONDITIONAL jobs below (no flag gate -- they ran on their timer regardless of any human
