@@ -41,6 +41,36 @@ def inv_scanner_page():
         return f.read()
 
 
+@router.get("/api/inv-scanner/symbol/{symbol}")
+def symbol_card(symbol: str):
+    """cc#1287: one symbol's scanner standing for the /check INVEST mode section. Honest
+    absence when the name is not in the universe — never a fake score."""
+    sym = (symbol or "").strip().upper()
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT MAX(run_date) FROM investment_scanner_scores")
+        r = cur.fetchone()
+        d = r[0] if r else None
+        if d is None:
+            return {"symbol": sym, "in_universe": False, "run_date": None}
+        cur.execute("""
+            SELECT s.mom_score, s.band_mom, s.rev_score, s.band_rev,
+                   u.tags, u.insufficient_history, st.status, st.entry_track, st.entered_at
+            FROM investment_scanner_scores s
+            JOIN investment_scanner_universe u ON u.symbol=s.symbol AND u.run_date=s.run_date
+            LEFT JOIN investment_scanner_state st ON st.symbol=s.symbol
+            WHERE s.run_date=%s AND s.symbol=%s""", (d, sym))
+        row = cur.fetchone()
+    if not row:
+        return {"symbol": sym, "in_universe": False, "run_date": str(d)}
+    mom, bm, rev, br, tags, insuff, st_status, st_track, st_at = row
+    return {"symbol": sym, "in_universe": True, "run_date": str(d),
+            "mom_score": _f(mom), "band_mom": bm,
+            "rev_score": _f(rev), "band_rev": br,
+            "tags": tags or [], "insufficient_history": bool(insuff),
+            "state": ({"status": st_status, "track": st_track, "entered_at": str(st_at)}
+                      if st_status else None)}
+
+
 @router.get("/api/inv-scanner/board")
 def board(track: str = "momentum", limit: int = 100):
     """Ranked board for one track. Every row carries everything the table renders — the page

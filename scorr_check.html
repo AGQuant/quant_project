@@ -756,6 +756,15 @@
       <div class="icv2-rows" id="icv2Rows"></div>
       <div class="icv2-foot" id="icv2Foot"></div>
     </div>
+    <!-- cc#1287: SCANNER section — additive, beside the IC-V2 card which is untouched.
+         Filled by loadInvScan(); hidden until a check runs. Reads scores/state read-only. -->
+    <div class="card" id="invScanCard" style="padding:14px 18px;display:none">
+      <div class="tier-label">
+        <span>Investment <b>Scanner</b> &mdash; two-track /100, EOD</span>
+        <span class="tier-score" id="invScanAsOf" style="font-size:11px;color:var(--mut)"></span>
+      </div>
+      <div id="invScanBody" style="font-size:12.5px;line-height:1.7"></div>
+    </div>
     <div class="card" style="padding:14px 18px">
       <div class="tier-label">
         <span><span class="icv2-vtag">V1</span> Investment Check v3.0 &mdash; 3 Gates + 12 Conviction Filters</span>
@@ -1702,6 +1711,56 @@ async function runInvestCheck(sym){
   if(d.error){showErr(d.error);return;}
   renderInvest(d);
   loadInvestV2(sym);   // cc#1174: independent — a V2 failure must never blank the v1 report
+  loadInvScan(sym);    // cc#1287: independent for the same reason — scanner section is additive
+}
+
+/* cc#1287: the SCANNER section beside the IC-V2 card. Two /100 scores with bands when the
+   symbol is in the scanner universe; the honest absence line with the three leg rules when it
+   is not. Never a fake score. IC-V2's own card is untouched. */
+async function loadInvScan(sym){
+  const card=document.getElementById('invScanCard'); if(!card)return;
+  card.style.display='none';
+  let d=null;
+  try{
+    const r=await fetchWithTimeout('/api/inv-scanner/symbol/'+encodeURIComponent(sym));
+    if(!r.ok)return;
+    d=await r.json();
+  }catch(e){return;}
+  if(!d)return;
+  const body=document.getElementById('invScanBody');
+  document.getElementById('invScanAsOf').textContent=d.run_date?('as of '+d.run_date):'';
+  if(!d.in_universe){
+    body.innerHTML='<div style="color:var(--mut)">Not in the scanner universe. A name enters via any of the three legs:</div>'
+      +'<div style="color:var(--dim);font-size:11.5px;margin-top:4px">'
+      +'&bull; held by a quant basket (open, non-cash) &nbsp;'
+      +'&bull; GVM &gt; 7.8 with 1-month &Delta;M &ge; +0.25 &nbsp;'
+      +'&bull; GVM &gt; 7 with 90-day &Delta;G &gt; 0 and &Delta;V &gt; 0</div>';
+    card.style.display='';
+    return;
+  }
+  const bandChip=(b)=>b?('<span style="font-size:9px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:5px;border:1px solid;'
+    +(b==='STRONG_BUY'?'color:var(--grn);border-color:var(--grn);background:var(--grn-d)'
+     :b==='ACCUMULATE'?'color:var(--blu);border-color:var(--blu)'
+     :b==='WATCH'?'color:var(--amber);border-color:var(--amber)':'color:var(--mut);border-color:var(--line2)')
+    +'">'+b.replace('_',' ')+'</span>'):'';
+  const s1=(v)=>v==null?'—':Number(v).toFixed(1);
+  const tags=(d.tags||[]).map(t=>{
+    const lbl=t.indexOf('basket:')===0?t.slice(7):(t==='screen:momentum'?'momentum':'gv rising');
+    return '<span style="font-family:ui-monospace,monospace;font-size:9px;font-weight:700;padding:2px 6px;'
+      +'border-radius:4px;border:1px solid var(--line2);color:var(--mut);margin-right:4px">'+lbl+'</span>';
+  }).join('');
+  body.innerHTML=
+    '<div style="display:flex;gap:26px;flex-wrap:wrap;align-items:baseline">'
+    +'<span>Momentum <b style="font-size:16px">'+s1(d.mom_score)+'</b>/100 '+bandChip(d.band_mom)+'</span>'
+    +'<span>Reversal <b style="font-size:16px">'+s1(d.rev_score)+'</b>/100 '+bandChip(d.band_rev)+'</span>'
+    +'</div>'
+    +'<div style="margin-top:6px">'+tags
+    +(d.insufficient_history?' <span style="color:var(--amber);font-style:italic;font-size:10.5px">insufficient history — some legs excluded, score renormalized</span>':'')
+    +'</div>'
+    +(d.state&&d.state.status==='open'
+      ?'<div style="margin-top:6px;color:var(--grn);font-weight:700;font-size:11.5px">SCANNER POSITION OPEN &middot; '+d.state.track+' &middot; since '+d.state.entered_at+'</div>'
+      :(d.state&&d.state.status==='exited'?'<div style="margin-top:6px;color:var(--mut);font-size:11px">last scanner position exited</div>':''));
+  card.style.display='';
 }
 
 // ── cc#1174 push 5 · Investment Check V2 ──────────────────────────────────────────────────
