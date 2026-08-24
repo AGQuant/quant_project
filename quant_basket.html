@@ -550,9 +550,15 @@ async function showHoldings(body){
       </div>`;
     }
     if(!Array.isArray(data)||!data.length){body.innerHTML=sum+'<div class="msg">No open positions.</div>';return;}
+    // cc#1299: Weight % = row's current_value / basket total market_value. Client-side only, no
+    // backend change — both figures already come back from the two calls above. Guarded against
+    // a zero/null basket total (empty basket) rather than dividing by zero. No special-case for
+    // NIFTYBEES cash-residual rows — they get the same weight math as every other row.
+    const mktVal=summ&&!summ.error?+summ.market_value:null;
+    const weight=(v)=>(mktVal&&v!=null)?(+v/mktVal*100).toFixed(1)+'%':'—';
     body.innerHTML=sum+`<div class="tbl-wrap"><table>
       <thead><tr>
-        <th>Symbol</th><th>Entry ₹</th><th>CMP ₹</th><th>Qty</th><th>Cost</th><th>Value</th><th>P&amp;L</th><th>%</th><th>GVM</th><th>Stop ₹</th>
+        <th>Symbol</th><th>Entry ₹</th><th>CMP ₹</th><th>Qty</th><th>Cost</th><th>Value</th><th>Weight %</th><th>P&amp;L</th><th>%</th><th>GVM</th><th>Stop ₹</th>
       </tr></thead>
       <tbody>${data.map(r=>`<tr>
         <td><strong>${r.symbol}</strong>${window.ScorrCardRow?ScorrCardRow(r.symbol):''}</td>
@@ -561,6 +567,7 @@ async function showHoldings(body){
         <td>${r.qty||'—'}</td>
         <td>${r.cost_basis!=null?'₹'+(+r.cost_basis/1000).toFixed(1)+'K':'—'}</td>
         <td>${r.current_value!=null?'₹'+(+r.current_value/1000).toFixed(1)+'K':'—'}</td>
+        <td>${weight(r.current_value)}</td>
         <td class="${c(r.pnl)}">${r.pnl!=null?(+r.pnl>=0?'+':'')+'₹'+Math.abs(+r.pnl).toLocaleString('en-IN'):'—'}</td>
         <td class="${c(r.pnl_pct)}">${pct(r.pnl_pct)}</td>
         <td>${r.gvm!=null?(+r.gvm).toFixed(1):'—'}</td>
