@@ -147,6 +147,7 @@ from basket_rebalance_endpoints import router as basket_rebalance_router  # cc#1
 from inv_scanner_universe import router as inv_scanner_router  # cc#1283: investment scanner universe (engine 1/3)
 from inv_scanner_scoring import router as inv_scanner_scoring_router  # cc#1284: two-track scoring (engine 2/3)
 from inv_scanner_rules import router as inv_scanner_rules_router  # cc#1285: entry/exit rules (engine 3/3)
+from inv_scanner_endpoints import router as inv_scanner_page_router  # cc#1286: /inv-scanner page + board feed
 import v8_paper
 import global_indices
 import v8_signal_writer
@@ -246,6 +247,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/intraday", "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
                      "/screeners",   # cc#824
+                     "/inv-scanner", # cc#1286: Investment Scanner tab
                      "/digest",      # cc#846
                      "/trades",      # cc#991: Wall of Trades (web renderer)
                      "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
@@ -256,6 +258,7 @@ PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
 PROTECTED.add("/adaptive")   # cc#651: Adaptive Dashboard (client report shelf) — gate + no-store
 PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 PROTECTED.add("/screeners")   # cc#824: gate + no-store
+PROTECTED.add("/inv-scanner")   # cc#1286: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 # cc#1086: the room carries internal engineering discussion and unreleased spec detail. Gated for
@@ -775,6 +778,7 @@ app.include_router(basket_rebalance_router)  # cc#1273: /api/adaptive/baskets/* 
 app.include_router(inv_scanner_router)  # cc#1283: /api/inv-scanner/universe + admin one-shot
 app.include_router(inv_scanner_scoring_router)  # cc#1284: /api/inv-scanner/scores + admin one-shot
 app.include_router(inv_scanner_rules_router)  # cc#1285: /api/inv-scanner/signals + /state + admin one-shot
+app.include_router(inv_scanner_page_router)  # cc#1286: /inv-scanner page + /api/inv-scanner/board
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -1333,6 +1337,7 @@ NAV_REGISTRY = {
     # stays at five items per the card's do_not_touch. Both are injected + PROTECTED above.
     "/m/trades":     ("Wall of Trades (mobile)", "grid+more-stack"),
     "/trades":       ("Wall of Trades (web)",    "v8-tab-row"),
+    "/inv-scanner":  ("Invest Scan",              "nav"),   # cc#1286
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
     # accounts for every /m/ route rather than only the navigable ones.

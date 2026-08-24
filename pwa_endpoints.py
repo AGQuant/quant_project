@@ -359,6 +359,8 @@ PWA_JS = """
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
     // /dashboard#digest). Nav removal only; no route changed, nothing retired.
+    // cc#1286: Investment Scanner — new standing surface (NAV-COMPLETE 2987).
+    ['/inv-scanner', '\\u2316', 'Invest Scan'],
     ['/v13', '\\u25a4', 'V13'],
     ['/health', '\\u2695', 'Health'],
     ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],

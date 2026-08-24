@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Investment Scanner · Scorr</title>
+<style>
+  /* cc#1286 — colours ride the injected token contract (cc#1203); this page declares shape
+     only, like /trades and /intraday. Layout pattern: the TC Scanner tab's stat-tiles +
+     tabbed table, rebuilt for the two-track board. */
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px}
+  .sub{font-size:11px;color:var(--mut);letter-spacing:.14em;text-transform:uppercase;margin-bottom:14px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .tile .l{font-size:9.5px;font-weight:700;letter-spacing:.12em;color:var(--mut);text-transform:uppercase}
+  .tile .v{font-size:22px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
+  .tile .s{font-size:10px;color:var(--dim);margin-top:1px}
+  .bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .tab{padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
+       color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
+  .tab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  select,label.ck{font-size:11.5px;color:var(--mut)}
+  select{padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--txt)}
+  label.ck{display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:0 4px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .meta{font-size:11px;color:var(--dim);padding:12px 16px 0}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:900px}
+  thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;font-size:10px;
+           font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);
+           border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;vertical-align:middle}
+  tbody tr:hover{background:var(--card2)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .sym{font-weight:800}
+  .score{font-weight:800;font-size:14px}
+  .band{font-size:9px;font-weight:800;letter-spacing:.08em;padding:2px 7px;border-radius:5px;border:1px solid}
+  .band.SB{color:var(--grn);background:var(--grn-d);border-color:var(--grn)}
+  .band.AC{color:var(--blu);background:var(--blu-row,rgba(77,124,254,.12));border-color:var(--blu)}
+  .band.WA{color:var(--amber);background:var(--amber-bg,rgba(255,159,69,.12));border-color:var(--amber)}
+  .band.AV{color:var(--mut);border-color:var(--line2)}
+  .tag{font-family:ui-monospace,monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;
+       margin-right:4px;display:inline-block;margin-bottom:2px}
+  .tag.b{color:var(--pulse,#7A5CFF);background:rgba(122,92,255,.12);border:1px solid rgba(122,92,255,.4)}
+  .tag.m{color:var(--grn);background:var(--grn-d);border:1px solid var(--grn)}
+  .tag.g{color:var(--cyan,#22d3ee);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.45)}
+  .inpos{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--grn);border:1px solid var(--grn);
+         background:var(--grn-d);padding:2px 7px;border-radius:5px}
+  .trig{font-size:10.5px}
+  .trig b{font-weight:700}
+  .trig .ok{color:var(--grn)} .trig .pend{color:var(--amber)} .trig .none{color:var(--mut)}
+  .ih{font-size:10px;color:var(--amber);font-style:italic}
+  .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px}
+  .q{color:var(--dim);font-size:10.5px}
+  @media(max-width:760px){.wrap{padding:12px 10px 64px} thead th,tbody td{padding:7px 6px;font-size:12px}}
+</style>
+</head>
+<body>
+<div id="scorr-nav"></div>
+<div class="wrap">
+  <h1>Investment Scanner</h1>
+  <div class="sub">TWO-TRACK /100 · GATED ENTRIES · GVM UNIVERSE + BASKETS · EOD</div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="bar">
+    <button class="tab on" id="tabMom" onclick="pick('momentum')">▲ Momentum</button>
+    <button class="tab" id="tabRev" onclick="pick('reversal')">↻ Reversal</button>
+    <span style="flex:1"></span>
+    <select id="fBand" onchange="render()">
+      <option value="">All bands</option><option>STRONG_BUY</option>
+      <option>ACCUMULATE</option><option>WATCH</option><option>AVOID</option>
+    </select>
+    <select id="fTag" onchange="render()"><option value="">All legs</option></select>
+    <label class="ck"><input type="checkbox" id="fIn" onchange="render()"> entered only</label>
+  </div>
+
+  <div class="card">
+    <div class="meta" id="meta">Loading…</div>
+    <div class="scroll"><table>
+      <thead id="thead"></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<script src="/scorr_card_common.js"></script>
+<script>
+var TRACK='momentum', DATA={momentum:null, reversal:null};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function n1(v){return v==null?'—':Number(v).toFixed(1);}
+function n2(v){return v==null?'—':Number(v).toFixed(2);}
+
+function bandCls(b){return b==='STRONG_BUY'?'SB':b==='ACCUMULATE'?'AC':b==='WATCH'?'WA':'AV';}
+function tagHtml(t){
+  var cls=t.indexOf('basket:')===0?'b':t==='screen:momentum'?'m':'g';
+  var label=t.indexOf('basket:')===0?t.slice(7):t==='screen:momentum'?'momentum':'gv rising';
+  return '<span class="tag '+cls+'">'+esc(label)+'</span>';
+}
+/* cc#1286 scope 3: the reversal trigger state in words, from the score row's own S1 component.
+   90+ = confirmed turn is the DESIGN — say it, don't imply it. */
+function trigHtml(s1){
+  if(!s1) return '<span class="trig none">S1 · insufficient history</span>';
+  var t=s1.touched_sessions_ago;
+  if(t==null) return '<span class="trig none">S1 not touched (7 sessions)</span>';
+  if(s1.credit>0) return '<span class="trig ok"><b>S1 reclaim confirmed</b> · touched '+t+'s ago · above PP</span>';
+  return '<span class="trig pend"><b>reclaim pending</b> · S1 touched '+t+'s ago · '+(s1.above_pp?'above':'below')+' PP</span>';
+}
+
+function tiles(){
+  var d=DATA[TRACK]; if(!d) return;
+  var rows=d.rows||[];
+  var sb=rows.filter(function(r){return r.band==='STRONG_BUY';}).length;
+  var inpos=rows.filter(function(r){return r.state&&r.state.status==='open';}).length;
+  var ih=rows.filter(function(r){return r.insufficient_history;}).length;
+  document.getElementById('tiles').innerHTML=
+    '<div class="tile"><div class="l">Universe scored</div><div class="v">'+rows.length+'</div><div class="s">'+esc(d.run_date||'—')+'</div></div>'
+   +'<div class="tile"><div class="l">Strong buy</div><div class="v">'+sb+'</div><div class="s">score ≥ 84</div></div>'
+   +'<div class="tile"><div class="l">Entered</div><div class="v">'+inpos+'</div><div class="s">open scanner positions</div></div>'
+   +'<div class="tile"><div class="l">Insufficient history</div><div class="v">'+ih+'</div><div class="s">deltas honestly absent</div></div>';
+}
+
+function fillTagFilter(){
+  var d=DATA[TRACK]; if(!d) return;
+  var seen={}, sel=document.getElementById('fTag'), cur=sel.value;
+  (d.rows||[]).forEach(function(r){(r.tags||[]).forEach(function(t){seen[t]=1;});});
+  var opts='<option value="">All legs</option>';
+  Object.keys(seen).sort().forEach(function(t){opts+='<option'+(t===cur?' selected':'')+'>'+esc(t)+'</option>';});
+  sel.innerHTML=opts;
+}
+
+function render(){
+  var d=DATA[TRACK];
+  if(!d){document.getElementById('body').innerHTML='<tr><td colspan="9" class="empty">Loading…</td></tr>';return;}
+  var band=document.getElementById('fBand').value,
+      tag=document.getElementById('fTag').value,
+      only=document.getElementById('fIn').checked;
+  var rows=(d.rows||[]).filter(function(r){
+    if(band && r.band!==band) return false;
+    if(tag && (r.tags||[]).indexOf(tag)<0) return false;
+    if(only && !(r.state&&r.state.status==='open')) return false;
+    return true;
+  });
+  var rev=TRACK==='reversal';
+  document.getElementById('thead').innerHTML='<tr><th>#</th><th>Symbol</th><th class="num">Score /100</th><th>Band</th>'
+    +'<th class="num">G · V · M</th><th class="num">'+(rev?'52w pos':'52w pos')+'</th>'
+    +(rev?'<th>Trigger</th>':'<th class="num">RSI(m) · Vol×</th>')
+    +'<th>Legs</th><th>Position</th></tr>';
+  document.getElementById('body').innerHTML=rows.length?rows.map(function(r,i){
+    var pillars=r.insufficient_history
+      ? n1(r.g)+' · '+n1(r.v)+' · '+n1(r.m)+' <span class="ih">insufficient history</span>'
+      : n1(r.g)+' · '+n1(r.v)+' · '+n1(r.m);
+    return '<tr>'
+      +'<td class="q">#'+(i+1)+'</td>'
+      +'<td class="sym">'+esc(r.symbol)+'</td>'
+      +'<td class="num score">'+n1(r.score)+'</td>'
+      +'<td><span class="band '+bandCls(r.band)+'">'+esc((r.band||'').replace('_',' '))+'</span></td>'
+      +'<td class="num">'+pillars+'</td>'
+      +'<td class="num">'+n1(r.wk52)+'</td>'
+      +(rev?'<td>'+trigHtml(r.s1)+'</td>'
+           :'<td class="num">'+n1(r.rsi_month)+' · '+n2(r.vol_ratio_21)+'</td>')
+      +'<td>'+(r.tags||[]).map(tagHtml).join('')+'</td>'
+      +'<td>'+(r.state&&r.state.status==='open'
+              ?'<span class="inpos">IN · '+esc(r.state.track)+' · '+esc(r.state.entered_at)+'</span>'
+              :'<span class="q">—</span>')+'</td>'
+      +'</tr>';
+  }).join(''):'<tr><td colspan="9" class="empty">No rows for this filter.</td></tr>';
+  document.getElementById('meta').textContent='showing '+rows.length+' of '+(d.rows||[]).length
+    +' · '+TRACK+' track · as of '+(d.run_date||'—')+' · EOD, refreshed nightly after the GVM write';
+  tiles();
+}
+
+function pick(t){
+  TRACK=t;
+  document.getElementById('tabMom').classList.toggle('on',t==='momentum');
+  document.getElementById('tabRev').classList.toggle('on',t==='reversal');
+  if(DATA[t]){fillTagFilter();render();} else load(t);
+}
+function load(t){
+  (window.fetchWithTimeout||fetch)('/api/inv-scanner/board?track='+t+'&limit=150')
+    .then(function(r){return r.json();})
+    .then(function(d){DATA[t]=d; if(TRACK===t){fillTagFilter();render();}})
+    .catch(function(e){document.getElementById('meta').textContent='Could not load — '+e.message;});
+}
+function boot(){load('momentum');load('reversal');}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+</script>
+</body>
+</html>
