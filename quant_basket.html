@@ -86,6 +86,9 @@
   .bc-divider{border:none;border-top:1px solid var(--line);margin:10px 0}
   .bc-foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
   .bc-info{font-size:10px;color:var(--mut)}
+  /* cc#1298: dedicated Reb trigger, separate from the whole-card click (opens Holdings). */
+  .bc-reb-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+  .bc-reb-link:hover{color:var(--txt)}
   .bc-info b{color:var(--txt);font-weight:600}
   .bc-badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;border:1px solid;white-space:nowrap}
   .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:var(--grn-bd)}
@@ -205,6 +208,10 @@
     <div class="modal-tabs">
       <div class="mtab active" id="tab-holdings" onclick="switchTab('holdings')">Holdings</div>
       <div class="mtab" id="tab-rebalance" onclick="switchTab('rebalance')">Rebalance History</div>
+      <!-- cc#1298: per-symbol Buy/Sell ledger (entry+exit price/date/qty, realised/unrealised
+           P&L, exit reason) — distinct from Rebalance History above, which is per-EVENT
+           (stocks in/out counts per rebalance run), not per-symbol. -->
+      <div class="mtab" id="tab-ledger" onclick="switchTab('ledger')">Buy/Sell Ledger</div>
     </div>
     <div class="modal-body" id="modal-body">
       <div class="msg">Loading…</div>
@@ -271,6 +278,7 @@ const f = (n,pre='₹') => {
 };
 const pct=(n,d=2)=>n==null?'—':(+n>=0?'+':'')+((+n).toFixed(d))+'%';
 const c=(n)=>+n>0?'pos':+n<0?'neg':'neu';
+const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
 
 async function init(){
   try{
@@ -341,7 +349,7 @@ async function init(){
         </div>
         <hr class="bc-divider">
         <div class="bc-foot">
-          <div class="bc-info">${pos} positions &nbsp;·&nbsp; Reb <b>${reb}</b></div>
+          <div class="bc-info">${pos} positions &nbsp;·&nbsp; <span class="bc-reb-link">Reb <b>${reb}</b></span></div>
           ${badge}
         </div>
         <div class="bc-criteria">
@@ -359,6 +367,11 @@ async function init(){
       // cc#839: the chart button must not also open the holdings modal the card is bound to.
       const cb=card.querySelector('.bc-chart');
       if(cb) cb.onclick=(e)=>{ e.stopPropagation(); toggleNavChart(key,card); };
+      // cc#1298: the founder wants a dedicated trigger on the "Reb <date>" line that opens
+      // straight to the Buy/Sell Ledger tab, distinct from clicking the rest of the card (which
+      // opens on Holdings, cc#839's existing behaviour, untouched).
+      const rl=card.querySelector('.bc-reb-link');
+      if(rl) rl.onclick=(e)=>{ e.stopPropagation(); openModal(key,card,'ledger'); };
     });
 
     // cc#561: per-basket exit thresholds — HS1 Breakout −15% (tighter), rest −20%; HS2 only mid/small.
@@ -492,14 +505,14 @@ function navChartHtml(key,d){
   </div>`;
 }
 
-function openModal(key,card){
+function openModal(key,card,tab){
   curBasket=key;
   document.querySelectorAll('.bcard').forEach(c=>c.classList.remove('active'));
   card.classList.add('active');
   document.getElementById('modal-title').textContent=BNAMES[key];
   document.getElementById('modal-sub').textContent=BRULE[key];
   document.getElementById('overlay').classList.add('open');
-  switchTab('holdings');
+  switchTab(tab||'holdings');
 }
 
 function closeModal(e){
@@ -511,13 +524,14 @@ function closeModal(e){
 
 async function switchTab(tab){
   curTab=tab;
-  ['holdings','rebalance'].forEach(t=>{
+  ['holdings','rebalance','ledger'].forEach(t=>{
     document.getElementById('tab-'+t).classList.toggle('active',t===tab);
   });
   const body=document.getElementById('modal-body');
   body.innerHTML='<div class="msg">Loading…</div>';
   if(tab==='holdings') await showHoldings(body);
-  else await showRebalance(body);
+  else if(tab==='rebalance') await showRebalance(body);
+  else await showLedger(body);
 }
 
 async function showHoldings(body){
@@ -570,6 +584,34 @@ async function showRebalance(body){
         <td class="neg">−${r.stocks_out||0}</td>
         <td>${r.stocks_held||0}</td>
         <td>${r.total_portfolio_value!=null?'₹'+(+r.total_portfolio_value/100000).toFixed(2)+'L':'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}
+}
+
+// cc#1298: per-symbol Buy/Sell ledger — every position this basket has EVER held, open or
+// exited, one row per symbol. entry_date/exit_date are DATE columns only (no time-of-day
+// stored anywhere in quant_paper_positions) — never fabricate a clock time onto them.
+async function showLedger(body){
+  try{
+    const data=await fetchWithTimeout(`/api/qb/ledger?basket_name=${curBasket}`).then(r=>r.json());
+    if(data&&data.error){body.innerHTML=`<div class="err-msg">Error: ${esc(data.error)}</div>`;return;}
+    if(!Array.isArray(data)||!data.length){body.innerHTML='<div class="msg">No positions yet.</div>';return;}
+    body.innerHTML=`<div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Symbol</th><th>Entry Date</th><th>Entry ₹</th><th>Qty</th><th>Exit Date</th>
+        <th>Exit ₹</th><th>Status</th><th>P&amp;L %</th><th>Exit Reason</th>
+      </tr></thead>
+      <tbody>${data.map(r=>`<tr>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td>${r.entry_date||'—'}</td>
+        <td>${r.entry_price!=null?(+r.entry_price).toFixed(2):'—'}</td>
+        <td>${r.qty||'—'}</td>
+        <td>${r.exit_date||'—'}</td>
+        <td>${r.exit_price!=null?(+r.exit_price).toFixed(2):'—'}</td>
+        <td>${r.status==='open'?'<span class="pos">Open</span>':'<span class="neg">Closed</span>'}</td>
+        <td class="${c(r.pnl_pct)}">${pct(r.pnl_pct)}</td>
+        <td style="font-size:11px;color:var(--dim,#8a97b0)">${r.exit_reason?esc(r.exit_reason):'—'}</td>
       </tr>`).join('')}</tbody>
     </table></div>`;
   }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}

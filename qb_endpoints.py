@@ -192,6 +192,48 @@ def qb_positions(basket_name: str = "large_cap", status: str = "open"):
     """, (basket_name, status))
 
 
+@router.get("/ledger")
+def qb_ledger(basket_name: str = "large_cap"):
+    """cc#1298: the full per-symbol Buy/Sell ledger for a basket — BOTH open and every exited-
+    status row (status='open' OR status LIKE 'exited%', not just 'exited_stop', matching the
+    pattern /summary already uses for future exit-reason variants), newest entry first.
+    Read-only, no new engine logic, no schema change — brings together data that already exists
+    across quant_paper_positions and quant_rebalance_log.
+    quant_paper_positions.notes is the inception-seed note (unchanged since entry), NOT a human
+    exit reason — the real one lives in quant_rebalance_log.actions.positions[].exit_reason,
+    logged on the rebalance_date that matches the exit. Resolved here per exited row so the page
+    renders it directly rather than guessing at a column that does not carry it."""
+    rows = api_query("""
+        SELECT symbol, entry_price, entry_date, qty, status, exit_price, exit_date, notes, pnl, pnl_pct
+        FROM quant_paper_positions
+        WHERE basket_name=%s AND (status='open' OR status LIKE 'exited%%')
+        ORDER BY entry_date DESC
+    """, (basket_name,))
+    if isinstance(rows, dict) and rows.get("error"):
+        return rows
+    exit_dates = sorted({r["exit_date"] for r in rows if r.get("exit_date")})
+    reason_map = {}
+    if exit_dates:
+        log_rows = api_query(
+            "SELECT rebalance_date, actions FROM quant_rebalance_log "
+            "WHERE basket_name=%s AND rebalance_date = ANY(%s)",
+            (basket_name, exit_dates))
+        if isinstance(log_rows, list):
+            for lr in log_rows:
+                actions = lr.get("actions") or {}
+                for p in (actions.get("positions") or []):
+                    if p.get("exit_reason"):
+                        reason_map[(str(lr["rebalance_date"]), p.get("symbol"))] = p["exit_reason"]
+    for r in rows:
+        # NOT falling back to r["notes"] here — verified live that notes on every row in this
+        # basket is the inception-seed line ("cc#838 inception seed | ..."), unchanged since
+        # entry, not an exit reason. Rendering that as "why it exited" would be worse than an
+        # honest blank. reason_map (quant_rebalance_log) is the only real source.
+        r["exit_reason"] = reason_map.get((str(r["exit_date"]), r["symbol"])) if r.get("exit_date") else None
+        r.pop("notes", None)
+    return rows
+
+
 @router.get("/summary")
 def qb_summary(basket_name: str = "large_cap"):
     open_pos   = api_query(
