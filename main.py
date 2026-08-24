@@ -607,6 +607,34 @@ async def auth_gate(request: Request, call_next):
 # keep their no-store cache-control (set in auth_gate); gzip only touches content-encoding/length.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+@app.middleware("http")
+async def perf_request_log_middleware(request: Request, call_next):
+    """cc#1272 scope 1: log request performance metrics (path, method, status, response time).
+    Async logging via asyncio.create_task() to avoid blocking response times.
+    Table: perf_request_log(id, path, method, status_code, response_time_ms, user_agent, created_at)."""
+    start_time = time.time()
+    path = request.url.path
+    method = request.method
+    user_agent = request.headers.get("user-agent", "")
+    response = await call_next(request)
+    duration_ms = (time.time() - start_time) * 1000
+    status_code = response.status_code
+    asyncio.create_task(_log_perf(path, method, status_code, duration_ms, user_agent))
+    return response
+
+async def _log_perf(path, method, status_code, duration_ms, user_agent):
+    """Non-blocking database insert for performance metrics. Errors logged but never raised."""
+    try:
+        with psycopg.connect(os.getenv("DATABASE_URL")) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO perf_request_log (path, method, status_code, response_time_ms, user_agent) VALUES (%s, %s, %s, %s, %s)",
+                    (path, method, status_code, duration_ms, user_agent)
+                )
+            conn.commit()
+    except Exception as e:
+        logging.warning(f"Failed to log perf data: {e}")
+
 # cc#712: serve HTML pages from an in-memory cache — read each file once, then from the dict. A new
 # deploy is a fresh process, so it naturally reloads (no TTL needed). Removes per-request disk reads.
 _HTML_CACHE = {}

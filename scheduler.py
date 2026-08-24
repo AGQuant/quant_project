@@ -3298,6 +3298,22 @@ def _bg_data_retention():
     except Exception as e:
         log.error(f"data_retention: {e}")
 
+def _bg_cleanup_perf_log():
+    """cc#1272 scope 1: 7-day retention for perf_request_log (performance metrics table).
+    Idempotent; runs nightly. Logs deletion count to ops_log(category=perf_cleanup)."""
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM perf_request_log WHERE created_at < NOW() - INTERVAL '7 days'")
+                n_deleted = cur.rowcount
+                cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                            "VALUES (CURRENT_DATE, NOW(), 'perf_cleanup', '7d_purge', %s)",
+                            (Json({"deleted": n_deleted, "retention_days": 7}),))
+                conn.commit()
+        log.info(f"perf_cleanup: {n_deleted} rows deleted (>7d)")
+    except Exception as e:
+        log.error(f"perf_cleanup: {e}")
+
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News -> raw_news (source_type='company'
     + symbol), alias-filtered at ingest. Single funnel with market news; supersedes the
@@ -4583,6 +4599,7 @@ async def _scheduler_loop():
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 1 and m == 51:  _spawn(_bg_cleanup_perf_log)  # cc#1272: 7-day perf request log purge
         # cc#840: polled every 10 min instead of at an exact minute — the job self-gates on the
         # first trading day + at-or-after 01:50 + a DB month check, so a deploy crossing the
         # window can no longer eat a whole month.
