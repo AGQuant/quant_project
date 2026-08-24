@@ -7083,11 +7083,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-datepick{margin-left:auto;display:flex;align-items:center;gap:6px}
 .tc13-datepick input{font-family:var(--mono,inherit);font-size:11.5px;padding:5px 8px;border-radius:6px;
   border:1px solid var(--line);background:var(--card);color:var(--txt)}
-.tc13-sides{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
-@media(max-width:900px){.tc13-sides{grid-template-columns:1fr}}
-.tc13-side .sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.tc13-side .sh .l{font-size:12.5px;font-weight:800}
-.tc13-side .sh .l.buy{color:var(--grn)} .tc13-side .sh .l.sell{color:var(--red)}
+/* cc#1296 scope 3: was a 2-col BUY/SELL grid (.tc13-sides), now two full-width STACKED tables
+   split by status (Open then Closed) instead, each mixing both sides with a per-row side badge. */
+.tc13-block{margin-top:16px}
+.tc13-block .sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.tc13-block .sh .t{font-size:12.5px;font-weight:800;color:var(--txt)}
+.tc13-side-badge{font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid}
+.tc13-side-badge.buy{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
+.tc13-side-badge.sell{color:var(--red);border-color:var(--red);background:var(--red-d)}
 .tc13-stats{display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono,inherit);font-size:10px;color:var(--mut)}
 .tc13-stats b{color:var(--txt);font-weight:700}
 .tc13-tbl{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
@@ -7116,42 +7119,76 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return '<span class="tc13-pill open">OPEN</span>';
   }
 
-  function sideBlock(label,cls,rows,stats){
-    var stripHtml='<div class="tc13-stats">'
-      +'<span>Open <b>'+(stats?stats.open:'—')+'</b></span>'
-      +'<span>Closed <b>'+(stats?stats.closed:'—')+'</b></span>'
-      +'<span>Wins <b>'+(stats?stats.wins:'—')+'</b></span>'
-      +'<span>WR <b>'+(stats&&stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
-      +'<span>Net <b class="'+pnlCls(stats?stats.net_pts_pct:null)+'">'
-        +(stats&&stats.net_pts_pct!=null?(stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%':'—')+'</b></span></div>';
-    var body=(rows||[]).length ? rows.map(function(r){
+  function sideBadge(side){
+    return '<span class="tc13-side-badge '+(side==='SELL'?'sell':'buy')+'">'+esc(side)+'</span>';
+  }
+
+  // cc#1296 scope 3: closed-bucket stats (Closed/Wins/WR%/Net%) computed client-side over the
+  // MERGED buy+sell rows, using the identical formula tc_scanner_endpoints.py's own _stats() runs
+  // server-side per-side — not a third set of numbers, the same math over the combined row set the
+  // endpoint already sends down (both d.buy and d.sell arrive as full rows, not pre-aggregated-only).
+  function closedStats(rows){
+    var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
+    var wins=closed.filter(function(r){return r.exit_reason==='TARGET';});
+    var net=Math.round(closed.reduce(function(s,r){return s+(r.pnl_pct||0);},0)*100)/100;
+    var wr=closed.length?Math.round(wins.length/closed.length*1000)/10:null;
+    return {closed:closed.length,wins:wins.length,wr_pct:wr,net_pts_pct:net};
+  }
+
+  function openTable(rows){
+    var stripHtml='<div class="tc13-stats"><span>Open <b>'+rows.length+'</b></span></div>';
+    var body=rows.length ? rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+        +'<td>'+sideBadge(r.side)+'</td>'
         +'<td class="num">'+n2(r.entry_price)+'</td>'
         +'<td class="num">'+n2(r.target)+'</td>'
         +'<td class="num">'+n2(r.sl)+'</td>'
-        +'<td class="num">'+(r.exit_reason==='OPEN'?n2(r.cmp):n2(r.exit_price))+'</td>'
+        +'<td class="num">'+n2(r.cmp)+'</td>'
+        +'<td class="num '+pnlCls(r.pnl_pct)+'">'+(r.pnl_pct!=null?(r.pnl_pct>=0?'+':'')+r.pnl_pct+'%':'—')+'</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="tc13-empty">No open TC13 positions</td></tr>';
+    return '<div class="tc13-block"><div class="sh"><span class="t">Open Positions</span></div>'
+      +stripHtml
+      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Entry</th>'
+      +'<th class="num">Target</th><th class="num">SL</th><th class="num">CMP</th><th class="num">P&amp;L %</th></tr></thead>'
+      +'<tbody>'+body+'</tbody></table></div>';
+  }
+
+  function closedTable(rows){
+    var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
+    var stats=closedStats(rows);
+    var stripHtml='<div class="tc13-stats">'
+      +'<span>Closed <b>'+stats.closed+'</b></span>'
+      +'<span>Wins <b>'+stats.wins+'</b></span>'
+      +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
+      +'<span>Net <b class="'+pnlCls(stats.net_pts_pct)+'">'
+        +(stats.closed?(stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%':'—')+'</b></span></div>';
+    var body=closed.length ? closed.map(function(r){
+      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+        +'<td>'+sideBadge(r.side)+'</td>'
+        +'<td class="num">'+n2(r.entry_price)+'</td>'
+        +'<td class="num">'+n2(r.exit_price)+'</td>'
         +'<td>'+pill(r.exit_reason)+'</td>'
         +'<td class="num '+pnlCls(r.pnl_pct)+'">'+(r.pnl_pct!=null?(r.pnl_pct>=0?'+':'')+r.pnl_pct+'%':'—')+'</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="tc13-empty">No '+label.toLowerCase()+' holds for this date</td></tr>';
-    return '<div class="tc13-side">'
-      +'<div class="sh"><span class="l '+cls+'">'+label+'</span></div>'
+    }).join('') : '<tr><td colspan="6" class="tc13-empty">No closed TC13 positions for this date</td></tr>';
+    return '<div class="tc13-block"><div class="sh"><span class="t">Closed Positions</span></div>'
       +stripHtml
-      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th class="num">Entry</th><th class="num">Target</th>'
-      +'<th class="num">SL</th><th class="num">Exit / CMP</th><th>Result</th><th class="num">P&amp;L %</th></tr></thead>'
+      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Entry</th>'
+      +'<th class="num">Exit</th><th>Result</th><th class="num">P&amp;L %</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div>';
   }
 
   function render(d){
     var box=document.getElementById('tc13Box'); if(!box)return;
+    var allRows=(d.buy||[]).concat(d.sell||[]);
+    var openRows=allRows.filter(function(r){return r.exit_reason==='OPEN';});
     box.innerHTML='<div class="tc13-wrap">'
       +'<div class="tc13-hd"><span class="t">TC13 &middot; Open &amp; Closed Positions</span>'
       +'<span class="sub">13-check binary scanner &mdash; a separate engine from the V1.1 gated scanner above</span>'
       +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--mut)">Date</label>'
       +'<input type="date" id="tc13Date" value="'+esc(d.date)+'"></span></div>'
-      +'<div class="tc13-sides">'
-        +sideBlock('BUY','buy',d.buy,d.buy_stats)
-        +sideBlock('SELL','sell',d.sell,d.sell_stats)
-      +'</div></div>';
+      +openTable(openRows)
+      +closedTable(allRows)
+      +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
   }
 
