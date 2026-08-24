@@ -1325,6 +1325,14 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
        auth_gate skip the injected site nav so there is no double nav. -->
   <div id="pane-tcscan" style="display:none">
     <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <!-- cc#1289 (founder ask 24-Aug): the iframe above is the V1.1 GATED score/100 scanner.
+         TC13 is a DIFFERENT engine (the 13-check binary scanner, tc_scanner_holds table) with no
+         page anywhere rendering it — founder confusion between the two engines is exactly what
+         this session surfaced, so the label below is deliberately loud about which engine this
+         is. Pure render: the payload from /api/scanners/tc/holds already carries entry/target/
+         sl/exit/pnl/stats, this box computes nothing (one-computation-two-renderers, same
+         discipline as Wall of Trades). Read-only; tc_scanner_endpoints.py is untouched. -->
+    <div id="tc13Box" style="padding:16px 2px 30px"></div>
   </div>
   <!-- cc#1282 (founder 24-Aug): Digest and Wall of Trades join the shell the same way TC Scanner
        did in cc#740 — an embed=1 iframe pane, lazy-loaded on first open. embed=1 strips every
@@ -6887,6 +6895,7 @@ function showV8Pane(name){
   if(name==='v14'&&window.v14Boot)window.v14Boot();
   if(name==='bt'&&window.btBoot)window.btBoot();
   if(name==='tcscan'){var f=document.getElementById('tcscanFrame');if(f&&!f.src)f.src='/intraday?embed=1';}  // cc#740: lazy-load the embedded scanner once
+  if(name==='tcscan'&&window.tc13Boot)window.tc13Boot();  // cc#1289: TC13 open/closed box, lazy on first open
   if(name==='digest'){var fd=document.getElementById('digestFrame');if(fd&&!fd.src)fd.src='/digest?embed=1';}  // cc#1282
   if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
 }
@@ -7056,6 +7065,104 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // definitions exist if the BT pane is already visible.
   var _bp=document.getElementById('pane-bt');
   if(_bp && _bp.style.display!=='none') btBoot();
+})();
+</script>
+<style>
+/* cc#1289 — TC13 open/closed box. Own namespace, theme-token colours only (push gate ratchet). */
+.tc13-wrap{border-top:1px solid var(--line);padding-top:16px;margin-top:4px}
+.tc13-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
+.tc13-hd .t{font-size:15px;font-weight:800;color:var(--txt)}
+.tc13-hd .sub{font-size:10.5px;color:var(--mut)}
+.tc13-datepick{margin-left:auto;display:flex;align-items:center;gap:6px}
+.tc13-datepick input{font-family:var(--mono,inherit);font-size:11.5px;padding:5px 8px;border-radius:6px;
+  border:1px solid var(--line);background:var(--card);color:var(--txt)}
+.tc13-sides{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+@media(max-width:900px){.tc13-sides{grid-template-columns:1fr}}
+.tc13-side .sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.tc13-side .sh .l{font-size:12.5px;font-weight:800}
+.tc13-side .sh .l.buy{color:var(--grn)} .tc13-side .sh .l.sell{color:var(--red)}
+.tc13-stats{display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono,inherit);font-size:10px;color:var(--mut)}
+.tc13-stats b{color:var(--txt);font-weight:700}
+.tc13-tbl{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
+.tc13-tbl th{text-align:left;padding:6px 7px;font-size:9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+  color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
+.tc13-tbl td{padding:6px 7px;border-bottom:1px solid var(--line2);white-space:nowrap;font-family:var(--mono,inherit)}
+.tc13-tbl .sym{font-weight:800;font-family:inherit}
+.tc13-tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+.tc13-pos{color:var(--grn)} .tc13-neg{color:var(--red)}
+.tc13-pill{font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid}
+.tc13-pill.target{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
+.tc13-pill.sl{color:var(--red);border-color:var(--red);background:var(--red-d)}
+.tc13-pill.open{color:var(--blu);border-color:var(--blu);background:var(--blu-row,rgba(77,124,254,.12))}
+.tc13-empty{padding:16px;text-align:center;color:var(--mut);font-size:11.5px}
+</style>
+<script>
+(function(){
+  'use strict';
+  var _booted=false;
+  function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&lt;','<':'&lt;','>':'&gt;'}[c]||c;});}
+  function n2(v){return v==null?'—':Number(v).toFixed(2);}
+  function pnlCls(v){return v==null?'':(v>=0?'tc13-pos':'tc13-neg');}
+  function pill(reason){
+    if(reason==='TARGET')return '<span class="tc13-pill target">TARGET</span>';
+    if(reason==='SL')return '<span class="tc13-pill sl">SL</span>';
+    return '<span class="tc13-pill open">OPEN</span>';
+  }
+
+  function sideBlock(label,cls,rows,stats){
+    var stripHtml='<div class="tc13-stats">'
+      +'<span>Open <b>'+(stats?stats.open:'—')+'</b></span>'
+      +'<span>Closed <b>'+(stats?stats.closed:'—')+'</b></span>'
+      +'<span>Wins <b>'+(stats?stats.wins:'—')+'</b></span>'
+      +'<span>WR <b>'+(stats&&stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
+      +'<span>Net <b class="'+pnlCls(stats?stats.net_pts_pct:null)+'">'
+        +(stats&&stats.net_pts_pct!=null?(stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%':'—')+'</b></span></div>';
+    var body=(rows||[]).length ? rows.map(function(r){
+      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+        +'<td class="num">'+n2(r.entry_price)+'</td>'
+        +'<td class="num">'+n2(r.target)+'</td>'
+        +'<td class="num">'+n2(r.sl)+'</td>'
+        +'<td class="num">'+(r.exit_reason==='OPEN'?n2(r.cmp):n2(r.exit_price))+'</td>'
+        +'<td>'+pill(r.exit_reason)+'</td>'
+        +'<td class="num '+pnlCls(r.pnl_pct)+'">'+(r.pnl_pct!=null?(r.pnl_pct>=0?'+':'')+r.pnl_pct+'%':'—')+'</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="tc13-empty">No '+label.toLowerCase()+' holds for this date</td></tr>';
+    return '<div class="tc13-side">'
+      +'<div class="sh"><span class="l '+cls+'">'+label+'</span></div>'
+      +stripHtml
+      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th class="num">Entry</th><th class="num">Target</th>'
+      +'<th class="num">SL</th><th class="num">Exit / CMP</th><th>Result</th><th class="num">P&amp;L %</th></tr></thead>'
+      +'<tbody>'+body+'</tbody></table></div>';
+  }
+
+  function render(d){
+    var box=document.getElementById('tc13Box'); if(!box)return;
+    box.innerHTML='<div class="tc13-wrap">'
+      +'<div class="tc13-hd"><span class="t">TC13 &middot; Open &amp; Closed Positions</span>'
+      +'<span class="sub">13-check binary scanner &mdash; a separate engine from the V1.1 gated scanner above</span>'
+      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--mut)">Date</label>'
+      +'<input type="date" id="tc13Date" value="'+esc(d.date)+'"></span></div>'
+      +'<div class="tc13-sides">'
+        +sideBlock('BUY','buy',d.buy,d.buy_stats)
+        +sideBlock('SELL','sell',d.sell,d.sell_stats)
+      +'</div></div>';
+    document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
+  }
+
+  function load(dateStr){
+    var box=document.getElementById('tc13Box');
+    if(box && !box.querySelector('.tc13-wrap'))box.innerHTML='<div class="tc13-empty">Loading TC13 holds…</div>';
+    var url='/api/scanners/tc/holds'+(dateStr?('?date_='+encodeURIComponent(dateStr)):'');
+    (window.fetchWithTimeout||fetch)(url).then(function(r){return r.json();})
+      .then(function(d){render(d);})
+      .catch(function(e){box.innerHTML='<div class="tc13-empty">Could not load TC13 holds — '+esc(e.message||e)+'</div>';});
+  }
+
+  window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null); };
+
+  // Same self-boot-on-deep-link guard as the BT module above: a direct #tcscan link can show the
+  // pane before this script (loaded later in document order) has defined tc13Boot.
+  var _tp=document.getElementById('pane-tcscan');
+  if(_tp && _tp.style.display!=='none') tc13Boot();
 })();
 </script>
 <script>
