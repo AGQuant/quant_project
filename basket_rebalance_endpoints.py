@@ -230,8 +230,12 @@ async def get_repair_sheet(portfolio_id: int = Query(...), basket_name: str = Qu
                 target_symbols = {row[0] for row in target_positions}
 
                 # Get actual holdings from hr_holdings for this portfolio (only for target symbols)
+                # cc#1291: was `quantity`, a column that does not exist on hr_holdings (the real
+                # column is `qty` — confirmed via information_schema). This endpoint has been
+                # throwing a 500 on every single call since cc#1273 shipped; caught while running
+                # the card's own mandated end-to-end verification pass.
                 cur.execute("""
-                    SELECT symbol, quantity
+                    SELECT symbol, qty
                     FROM hr_holdings
                     WHERE portfolio_id=%s AND symbol=ANY(%s)
                     ORDER BY symbol
