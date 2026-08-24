@@ -45,26 +45,19 @@ class RepairRow(BaseModel):
     indicative_value: float
 
 
-def _get_current_price(symbol: str) -> float:
-    """Fetch live CMP for a symbol. Returns 0 if not found."""
+def _get_current_price(cur, symbol: str) -> float:
+    """cc#1291: was a third ad-hoc price path hitting v8_metrics_live, a table that does not
+    exist in this database (confirmed via information_schema — zero rows, every call fell
+    through to the try/except and a hand-rolled intraday_prices fallback, silently, since
+    cc#1273 shipped). The app already has ONE canonical resolver, built specifically because
+    two independent price-lookup paths once caused a real production bug (RAMCOIND showing two
+    different prices on two surfaces at once — cc#343/717/811, history is in price_resolver.py).
+    This now delegates to it instead of reinventing a third opinion. Takes the caller's own
+    cursor (already open at the one call site) rather than a fresh connection."""
     try:
-        with _conn() as conn:
-            with conn.cursor() as cur:
-                # Try to get live price from v8_metrics_live, fallback to last_price
-                cur.execute(
-                    "SELECT ltp FROM v8_metrics_live WHERE symbol=%s LIMIT 1",
-                    (symbol,)
-                )
-                row = cur.fetchone()
-                if row and row[0]:
-                    return float(row[0])
-                # Fallback to any recent intraday price
-                cur.execute(
-                    "SELECT close FROM intraday_prices WHERE symbol=%s AND source IN ('fyers_eq','yahoo') ORDER BY ts DESC LIMIT 1",
-                    (symbol,)
-                )
-                row = cur.fetchone()
-                return float(row[0]) if row and row[0] else 0.0
+        import price_resolver
+        r = price_resolver.resolve_price(cur, symbol)
+        return float(r["price"]) if r and r.get("price") is not None else 0.0
     except Exception as e:
         log.warning(f"Failed to fetch CMP for {symbol}: {e}")
         return 0.0
@@ -259,8 +252,8 @@ async def get_repair_sheet(portfolio_id: int = Query(...), basket_name: str = Qu
                     else:
                         action = "HOLD"
 
-                    # Get live CMP
-                    cmp = _get_current_price(symbol)
+                    # Get live CMP (cc#1291: canonical resolver, caller's own cursor)
+                    cmp = _get_current_price(cur, symbol)
                     indicative_value = abs(diff_qty) * cmp
 
                     rows.append({
