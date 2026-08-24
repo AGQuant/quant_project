@@ -512,89 +512,97 @@ async def auth_gate(request: Request, call_next):
             # threw TypeError inside the template string, and render() died BEFORE assigning
             # #idx-app.innerHTML — so the pane sat on "Loading Index Intelligence…" forever. This is
             # the identical failure the cc#1021 note above predicts, one file later.
-            for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
-                        b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js",
-                        b"v8_ladder_v2.js", b"index_tape_card.js",
-                        # cc#1061: added WITH their script tags, in the same commit, so the
-                        # cc#1060 failure cannot repeat for these two.
-                        b"scrub_layer.js", b"pcr_trend_card.js",
-                        # cc#1129: the shared news row. Hardcoded as a blocking tag in BOTH
-                        # mobile/home.html and scorr_digest_mobile.html and served max-age=86400,
-                        # so it is added here in the SAME change as those tags — the cc#1060
-                        # lesson, applied at the time rather than after the outage.
-                        b"scorr_news_row.js",
-                        # cc#1191: added WITH its script tag in the same commit. This file is
-                        # served max-age=86400 like its neighbours, so without the stamp a reader
-                        # who loaded a page before this deploy keeps the old bundle for a day —
-                        # which for a brand-new file means the segment chip does nothing when
-                        # clicked, with no error to explain it. The cc#1060 failure, pre-empted.
-                        b"scorr_segment_results.js"):
-                body = body.replace(b'src="/' + _js + b'"',
-                                    b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
-            # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
-            # and the loop above only rewrites src= attributes. /static/scorr_themes.css is
-            # served max-age=86400, so without a stamp a returning phone could hold yesterday's
-            # palette for a full day — the cc#1060 failure exactly, one asset later.
-            for _css in (b"scorr_themes.css", b"scorr_appshell.css"):
-                body = body.replace(b'href="/static/' + _css + b'"',
-                                    b'href="/static/' + _css + b'?v=' + _BUILD_B + b'"')
-            # cc#1066 · THE SAME HOLE, ON THE JS SIDE OF /static. The loop above stamps
-            # /static/*.css and the loop before it stamps root-relative /*.js — but NOTHING stamped
-            # /static/*.js, and scorr_appshell.js is served with max-age=86400 from an unchanging
-            # URL. That is the cc#1060 failure exactly: a returning phone keeps yesterday's file for
-            # a full day after a deploy. It is hardcoded as a blocking tag in three templates
-            # (scorr_digest_mobile, scorr_v10_signal, scorr_gvm_fightcard) and it is the file that
-            # carries cc#1119's theme switcher and the back control, so a stale copy means the
-            # founder deploys a theme row and does not see one.
-            # This is a REAL cause of "deploys do not reach my phone" and it is NOT the service
-            # worker — see the cc#1066 result for why the SW was already correct.
-            for _sjs in (b"scorr_appshell.js",):
-                body = body.replace(b'src="/static/' + _sjs + b'"',
-                                    b'src="/static/' + _sjs + b'?v=' + _BUILD_B + b'"')
-            # cc#327: shared mobile design system into <head> (fallback: end of document)
-            # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
-            # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal
-            # string. The test matched it, and all six shared tags plus the mobile.css link were
-            # injected INSIDE that comment, where they are inert. One cause, all three reported
-            # symptoms: no mobile.css so the light theme never applied; no scorr_card_strip/chart/
-            # analysis/cockpit so C fell back to the page-local overlay while A/R/D opened nothing
-            # (their local definitions having moved out in cc#805); and it is why cc#816's stamp
-            # changed nothing — a commented-out tag cannot be cache-busted.
-            # Matches inside HTML comments are now skipped, so no future comment can disable the
-            # entire shared-asset layer by mentioning a tag name.
-            # cc#914: was a bare `not in body` test — see _present_in_markup for what that cost.
-            if not _present_in_markup(body, b'href="/static/mobile.css"'):
-                _at = _find_outside_comments(body, b"</head>")
-                if _at < 0:
-                    _at = _find_outside_comments(body, b"</body>")
-                if _at >= 0:
-                    _head = _MOBILE_HEAD
-                    # cc#1203: the WEB token contract + the theme boot, on WEB PATHS ONLY.
-                    # /m/* and /preview/* are the app's black-and-gold contract (cc#1193) and are
-                    # pinned dark by _MOBILE_APP_DARK below — giving them a light-capable boot
-                    # would be two rules fighting over one attribute on every app page load.
-                    #
-                    # ORDER MATTERS TWICE OVER. The stylesheet goes in BEFORE the boot so the
-                    # tokens exist when the attribute lands, and both go in before the page's own
-                    # <style>, so a page can still override a token locally while it is being
-                    # migrated in pushes 5-14 and simply stops needing to.
-                    if _web:
-                        _head = _head + _WEB_TOKENS_LINK + _THEME_BOOT
-                    # cc#1193 SHARED_CSS_RULE_V1: the app-only half of the R5 theme, injected on
-                    # APP SURFACES ONLY. It must come AFTER _MOBILE_HEAD, which is where
-                    # scorr_theme_r5.css is linked — same rules, same specificity, later sheet.
-                    #
-                    # /preview/* is included alongside /m/* deliberately. Previews are live mobile
-                    # review screens served by preview_endpoints and given this same PWA injection
-                    # a few lines up (`do_pwa = path in _PWA_INJECT_PATHS or _prev`), and two of
-                    # the moved selectors — .chd and .ix — render there. Injecting only on /m/
-                    # would have left previews/home_v2.html and previews/digest.html unstyled,
-                    # which is the one visible way this change could have gone wrong.
-                    if path.startswith("/m/") or _prev:
-                        _head = _head + _THEME_MOBILE_LINK + _APP_THEME_RESOLVE
-                    if path.startswith("/m/"):
-                        _head = _head + _MOBILE_APP_DARK   # cc#1064: dark-only surface, stamped honestly
-                    body = body[:_at] + _head + body[_at:]
+        # cc#1282: everything from HERE runs for EMBEDDED pages too. The embed guard above now
+        # covers only the CHROME (logout pill, theme button, pwa.js nav) — an iframed page must
+        # not carry a second navbar, but it absolutely needs the token stylesheets and the theme
+        # boot, which this block injects. Before this change embed=1 stripped the ENTIRE shared
+        # head, so every embedded surface (the cc#740 TC Scanner frame since day one) rendered
+        # token-less — var(--bg)/var(--panel) unresolved, pages passing on browser defaults and
+        # inline fallbacks alone. Found while embedding /digest and /trades, whose palettes live
+        # entirely in the injected contract and would have arrived blank.
+        for _js in (b"scorr_card_common.js", b"scorr_card_strip.js", b"scorr_chart_card.js",
+                    b"scorr_analysis_card.js", b"results_card.js", b"scorr_cockpit_card.js",
+                    b"v8_ladder_v2.js", b"index_tape_card.js",
+                    # cc#1061: added WITH their script tags, in the same commit, so the
+                    # cc#1060 failure cannot repeat for these two.
+                    b"scrub_layer.js", b"pcr_trend_card.js",
+                    # cc#1129: the shared news row. Hardcoded as a blocking tag in BOTH
+                    # mobile/home.html and scorr_digest_mobile.html and served max-age=86400,
+                    # so it is added here in the SAME change as those tags — the cc#1060
+                    # lesson, applied at the time rather than after the outage.
+                    b"scorr_news_row.js",
+                    # cc#1191: added WITH its script tag in the same commit. This file is
+                    # served max-age=86400 like its neighbours, so without the stamp a reader
+                    # who loaded a page before this deploy keeps the old bundle for a day —
+                    # which for a brand-new file means the segment chip does nothing when
+                    # clicked, with no error to explain it. The cc#1060 failure, pre-empted.
+                    b"scorr_segment_results.js"):
+            body = body.replace(b'src="/' + _js + b'"',
+                                b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
+        # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
+        # and the loop above only rewrites src= attributes. /static/scorr_themes.css is
+        # served max-age=86400, so without a stamp a returning phone could hold yesterday's
+        # palette for a full day — the cc#1060 failure exactly, one asset later.
+        for _css in (b"scorr_themes.css", b"scorr_appshell.css"):
+            body = body.replace(b'href="/static/' + _css + b'"',
+                                b'href="/static/' + _css + b'?v=' + _BUILD_B + b'"')
+        # cc#1066 · THE SAME HOLE, ON THE JS SIDE OF /static. The loop above stamps
+        # /static/*.css and the loop before it stamps root-relative /*.js — but NOTHING stamped
+        # /static/*.js, and scorr_appshell.js is served with max-age=86400 from an unchanging
+        # URL. That is the cc#1060 failure exactly: a returning phone keeps yesterday's file for
+        # a full day after a deploy. It is hardcoded as a blocking tag in three templates
+        # (scorr_digest_mobile, scorr_v10_signal, scorr_gvm_fightcard) and it is the file that
+        # carries cc#1119's theme switcher and the back control, so a stale copy means the
+        # founder deploys a theme row and does not see one.
+        # This is a REAL cause of "deploys do not reach my phone" and it is NOT the service
+        # worker — see the cc#1066 result for why the SW was already correct.
+        for _sjs in (b"scorr_appshell.js",):
+            body = body.replace(b'src="/static/' + _sjs + b'"',
+                                b'src="/static/' + _sjs + b'?v=' + _BUILD_B + b'"')
+        # cc#327: shared mobile design system into <head> (fallback: end of document)
+        # cc#821 P0 — this used a bare `b"</head>" in body` substring test. v8_dashboard.html has
+        # no closing-head tag, but a cc#805 COMMENT explaining that fact contained the literal
+        # string. The test matched it, and all six shared tags plus the mobile.css link were
+        # injected INSIDE that comment, where they are inert. One cause, all three reported
+        # symptoms: no mobile.css so the light theme never applied; no scorr_card_strip/chart/
+        # analysis/cockpit so C fell back to the page-local overlay while A/R/D opened nothing
+        # (their local definitions having moved out in cc#805); and it is why cc#816's stamp
+        # changed nothing — a commented-out tag cannot be cache-busted.
+        # Matches inside HTML comments are now skipped, so no future comment can disable the
+        # entire shared-asset layer by mentioning a tag name.
+        # cc#914: was a bare `not in body` test — see _present_in_markup for what that cost.
+        if not _present_in_markup(body, b'href="/static/mobile.css"'):
+            _at = _find_outside_comments(body, b"</head>")
+            if _at < 0:
+                _at = _find_outside_comments(body, b"</body>")
+            if _at >= 0:
+                _head = _MOBILE_HEAD
+                # cc#1203: the WEB token contract + the theme boot, on WEB PATHS ONLY.
+                # /m/* and /preview/* are the app's black-and-gold contract (cc#1193) and are
+                # pinned dark by _MOBILE_APP_DARK below — giving them a light-capable boot
+                # would be two rules fighting over one attribute on every app page load.
+                #
+                # ORDER MATTERS TWICE OVER. The stylesheet goes in BEFORE the boot so the
+                # tokens exist when the attribute lands, and both go in before the page's own
+                # <style>, so a page can still override a token locally while it is being
+                # migrated in pushes 5-14 and simply stops needing to.
+                if _web:
+                    _head = _head + _WEB_TOKENS_LINK + _THEME_BOOT
+                # cc#1193 SHARED_CSS_RULE_V1: the app-only half of the R5 theme, injected on
+                # APP SURFACES ONLY. It must come AFTER _MOBILE_HEAD, which is where
+                # scorr_theme_r5.css is linked — same rules, same specificity, later sheet.
+                #
+                # /preview/* is included alongside /m/* deliberately. Previews are live mobile
+                # review screens served by preview_endpoints and given this same PWA injection
+                # a few lines up (`do_pwa = path in _PWA_INJECT_PATHS or _prev`), and two of
+                # the moved selectors — .chd and .ix — render there. Injecting only on /m/
+                # would have left previews/home_v2.html and previews/digest.html unstyled,
+                # which is the one visible way this change could have gone wrong.
+                if path.startswith("/m/") or _prev:
+                    _head = _head + _THEME_MOBILE_LINK + _APP_THEME_RESOLVE
+                if path.startswith("/m/"):
+                    _head = _head + _MOBILE_APP_DARK   # cc#1064: dark-only surface, stamped honestly
+                body = body[:_at] + _head + body[_at:]
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"

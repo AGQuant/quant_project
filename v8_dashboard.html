@@ -1149,13 +1149,15 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          nav injection — hosting it in a pane would either duplicate the renderer or nest a second
          navbar inside this one. So this is the single Digest ENTRY app-wide, styled identically to
          its siblings. -->
-    <button class="v8toptab" data-pane="digest" onclick="location.href='/digest'">Digest</button>
+    <button class="v8toptab" data-pane="digest" onclick="showV8Pane('digest')">Digest</button>  <!-- cc#1282: in-shell pane, was location.href -->
+
     <!-- cc#991 (founder 10-Aug): Wall of Trades sits in THIS row, alongside Index Intel and TC
          Scanner, exactly as the amendment asked. It NAVIGATES rather than swapping in a pane, for
          the same reason cc#853 gave for Digest: /trades is a full page with its own token block
          and its own nav injection, so hosting it in a pane would nest a second navbar inside this
          one. One entry app-wide. -->
-    <button class="v8toptab" data-pane="trades" onclick="location.href='/trades'">Wall of Trades</button>
+    <button class="v8toptab" data-pane="trades" onclick="showV8Pane('trades')">Wall of Trades</button>  <!-- cc#1282: in-shell pane, was location.href -->
+
     <!-- cc#1149: theme switch. Sits in the tabs row exactly where the ref puts it, pushed right by
          the spacer so it never crowds the tabs when they wrap. -->
     <span class="v8sp"></span>
@@ -1323,6 +1325,16 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
        auth_gate skip the injected site nav so there is no double nav. -->
   <div id="pane-tcscan" style="display:none">
     <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+  </div>
+  <!-- cc#1282 (founder 24-Aug): Digest and Wall of Trades join the shell the same way TC Scanner
+       did in cc#740 — an embed=1 iframe pane, lazy-loaded on first open. embed=1 strips every
+       injection (nav, pills, pwa.js) server-side, so the framed page carries no second navbar.
+       The standalone /digest and /trades URLs are untouched and still serve the full pages. -->
+  <div id="pane-digest" style="display:none">
+    <iframe id="digestFrame" title="Daily Digest" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+  </div>
+  <div id="pane-trades" style="display:none">
+    <iframe id="tradesFrame" title="Wall of Trades" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#544: V6 BT playground pane (read-mostly wrapper over the existing bt6 engine) -->
   <div id="pane-bt" style="display:none">
@@ -6864,7 +6876,9 @@ window.v14Boot=function(){
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
 function showV8Pane(name){
-  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt'};   // cc#851: digest pane removed
+  /* cc#1282: digest + trades join the pane map as embed frames (cc#740 tcscan pattern). */
+  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',
+             digest:'pane-digest',trades:'pane-trades'};
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
@@ -6872,19 +6886,19 @@ function showV8Pane(name){
   if(name==='index'&&window.idxBoot)window.idxBoot();
   if(name==='v14'&&window.v14Boot)window.v14Boot();
   if(name==='bt'&&window.btBoot)window.btBoot();
-  // cc#851: digest pane retired — see the #digest redirect below.
   if(name==='tcscan'){var f=document.getElementById('tcscanFrame');if(f&&!f.src)f.src='/intraday?embed=1';}  // cc#740: lazy-load the embedded scanner once
+  if(name==='digest'){var fd=document.getElementById('digestFrame');if(fd&&!fd.src)fd.src='/digest?embed=1';}  // cc#1282
+  if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
 }
-/* cc#851: a saved /dashboard#digest bookmark must not dead-end. It redirects to the V3 page
-   rather than silently opening Master, so the link keeps meaning what it meant. */
-(function(){var TABS=['index','v14','tcscan','bt'];var h=(location.hash||'').replace('#','');
-  if(h==='digest'){location.replace('/digest');return;}
+/* cc#851 kept its promise a different way now: a saved /dashboard#digest bookmark opens the
+   digest INSIDE the shell (cc#1282) instead of redirecting away — the link still means "the
+   digest", it just no longer costs the V8 nav to follow it. */
+(function(){var TABS=['index','v14','tcscan','bt','digest','trades'];var h=(location.hash||'').replace('#','');
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
   if(h==='v14'){var _vt=document.getElementById('v14tab'); if(_vt) _vt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt'];var h=(location.hash||'').replace('#','');
-  if(h==='digest'){location.replace('/digest');return;}
+window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades'];var h=(location.hash||'').replace('#','');
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 </script>
 <style>
