@@ -1,1 +1,1725 @@
-FILE_CONTENT_PLACEHOLDER
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAILY DIGEST</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<!-- APP_QA_R4 P4: same two shared assets P3 links — one theme layer, one shell, no copies. -->
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<!-- cc#1129: the shared news row, used here and on /m/home so the two read as one family.
+     Linked directly rather than via _MOBILE_HEAD: /m/digest is deliberately NOT in
+     _PWA_INJECT_PATHS. It IS in PROTECTED, so main.py's middleware still rewrites this src with
+     the ?v= build stamp, which the 1-day cache header on the route depends on. -->
+<script src="/scorr_news_row.js"></script>
+<style>
+/* DAILY DIGEST — implements design_refs/scorr_digest_mobile_R1.html (b8949f6), R5.1 tokens */
+:root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
+--volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+.phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:var(--space-70);
+ background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.num{font-family:'JetBrains Mono',monospace}
+.skew{font-family:'Archivo Black';transform:skewX(-6deg);display:inline-block;transform-origin:left center;text-transform:uppercase}
+.eyebrow{display:flex;align-items:center;gap:var(--space-10);margin:var(--space-20) var(--space-18) var(--space-10);font-size:var(--type-11);font-weight:700;
+ letter-spacing:var(--track-px16);color:var(--aqua);text-shadow:0 0 12px rgba(53,224,255,.4)}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--edge),transparent)}
+/* cc#1090 P4 then P6 · ALL TWELVE .card BLOCKS NOW TAKE .slab, and it took both pushes to get
+   there honestly. P4 adopted ten and left GLOBAL TAPE and INTERNALS flat, because "tape blocks
+   stay flat" and because raising a block whose whole content is already raised tiles is the mud
+   the nesting rule warns about. P6 is the push that owns exactly that pair — raised tiles .slab,
+   inner readouts .well — so the two blocks raise HERE and their .tile children sink to .well at
+   the same time. Neither half works alone: a slab full of raised tiles is the violation, and a
+   well inside a flat card is a hole in nothing.
+   This rule is left standing rather than deleted: the ruling-1 override at (0,3,0) takes the cut
+   off what adopted and leaves it on anything that has not. */
+.card{background:var(--panel);border:var(--bw-1) solid var(--edge);margin:0 var(--space-14) var(--space-12);padding:var(--space-16);position:relative;
+ clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+/* cc#1234 · ONE SENTIMENT LINE, AND IT IS THICKER. Founder: "2 green lines not required, one
+   bigger green line is enough." 5px -> 8px, which is 1.6x and inside the 1.5-2x the card asks for.
+   The bar is absolutely positioned, so its width takes no layout space and nothing shifts.
+   WHAT THE SECOND LINE ACTUALLY WAS. The card describes it as a full-viewport-height rail on the
+   page edge. There is no such rule — I swept this page's own <style>, scorr_themes.css and
+   scorr_appshell.css and `.rail::before` is the ONLY left-edge bar any of them define, then
+   rendered the page and looked for any element narrower than 14px and taller than 300px: zero.
+   The two green lines are TWO CARDS both carrying .rail — MARKET READ and THE CLOSE OF THE READ —
+   sitting at the same left offset with a card between them, which on a scrolling phone reads as
+   one long rail broken by a gap. So the fix is to drop the second card's rail, not to hunt a
+   page-edge element that does not exist. */
+.rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:var(--space-8);border-radius:var(--radius-4);background:var(--rc,var(--amber))}
+.chip{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px10);border:var(--bw-1) solid var(--edge);
+ background:var(--hi);padding:var(--space-4) var(--space-9);display:inline-block;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+/* cc#1308 — the peer BEAT/MISS badge (raBeatMissBlock) was riding .chip, and .chip's own
+   box-sizing:border-box plus a run of var()-driven padding on a badge sitting inline between two
+   other spans rendered several times its text size on the founder's phone — a box, not a pill.
+   A DEDICATED CLASS rather than patching .chip: .chip is the page's general tappable-tag look
+   (clipped corner, border-box) and is used elsewhere on this page too (SHARED_CSS_RULE_V1) — a fix
+   aimed at "make this one badge small" has no business changing every other chip's shape.
+   inline-flex + fixed px padding (not the space-* scale) + line-height:1 + width/height:auto is
+   the small-capsule contract: nothing here can be stretched wide by an inherited box model, a flex
+   parent, or a token that resolves oddly, because none of those degrees of freedom are open to it. */
+.pchip{font-family:'JetBrains Mono';font-size:11px;font-weight:800;letter-spacing:var(--track-px10);
+ display:inline-flex;align-items:center;justify-content:center;width:auto;height:auto;line-height:1;
+ white-space:nowrap;padding:3px 8px;border-radius:10px;border:var(--bw-1) solid var(--edge);
+ background:var(--hi);vertical-align:middle}
+.w{border-color:#3E5A18;background:#18240E;color:var(--volt)}
+.l{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
+/* cc#1109: CLOSED is not a warning. The state chip was permanently amber, which read as
+   "something needs attention" on every evening and all weekend. */
+.mu{border-color:var(--edge);background:var(--hi);color:var(--muted)}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-10);
+ flex-wrap:wrap;gap:var(--space-2) var(--space-10)}
+.grp h3{font-family:'Archivo Black';font-size:var(--type-15);transform:skewX(-6deg);color:var(--chalk)}
+.grp .note{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px10);text-align:right}
+/* cc#1111 item 1: the CMP note is one SENTENCE — "CMP 24,078 · LIVE · below PP 0.76%". As a bare
+   flex item with no width control it wrapped wherever it ran out of room, and on a 390px screen
+   that landed mid-phrase: "below PP" on one line and a naked "0.76%" on the next, disconnected
+   from the words that give it meaning. Two rules fix it and neither changes a value. The note is
+   allowed to take the WHOLE next line under the symbol (flex-wrap on .grp above, plus flex-basis
+   here once it cannot sit alongside), and each clause inside it is unbreakable, so a wrap can
+   only ever fall on a separator. */
+.grp .note{white-space:normal}
+.grp .note .cl{white-space:nowrap}
+@media (max-width:430px){
+  .grp{align-items:flex-start}
+  .grp .note{flex:1 0 100%;text-align:left}
+}
+.tile{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-9);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+/* APP_QA_R5 P5 · ref design_refs/scorr_digest_mobile_R2.html @ c77cae9.
+   9.5px is the FLOOR — the tile label and the wk line were at 9px, which is the drift R2 names. */
+.tile .lb{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-14);margin-top:var(--space-3)}
+.tile .wk{font-family:'JetBrains Mono';font-weight:700;font-size:var(--type-12);color:var(--muted);margin-top:var(--space-1)}
+/* the DAY|WEEK switch — ref .gsw/.ghd, 52x30 chips, in-memory state, default DAY */
+.ghd{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-10)}
+.gsw{display:flex;gap:var(--space-3);background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-2);
+ clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.gsw button{min-width:52px;min-height:30px;border:0;background:transparent;cursor:pointer;
+ font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px14);color:var(--muted)}
+.gsw button.on{background:var(--panel);color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
+.mrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-9) 0;border-top:var(--bw-1) solid var(--edge);font-size:var(--type-125)}
+.mrow:first-of-type{border-top:none}
+/* cc#1190 · LATEST RESULT ANALYSIS. GOLD NIGHT tokens only — every colour here is a var already
+   declared at the top of this file, no new literal. */
+/* cc#1237 scope 3 · FOUR EQUAL CHIPS IN ONE ROW, per design ref scorr_digest_results_R1
+   (design_refs/scorr_digest_results_R1.html, 09bc13a). The ref's .tiers is flex with .tier{flex:1},
+   i.e. the four tiers split the width evenly and the row NEVER wraps. flex-wrap:wrap was the old
+   behaviour and it is what let SMALL drop to a second line on a narrow phone, which is half of why
+   the block read as untidy. min-width:0 goes with flex:1 or a long label refuses to shrink and
+   pushes the row wider than the card. */
+.rchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:nowrap}
+.rchip{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden}
+.rchip{min-height:34px;padding:var(--space-5) var(--space-4);cursor:pointer;font-family:'JetBrains Mono';font-size:var(--type-10);
+ font-weight:800;letter-spacing:var(--track-px12);color:var(--muted);background:var(--hi);
+ border:var(--bw-1) solid var(--edge);clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
+.rchip .num{color:var(--chalk);font-weight:800}
+.rchip.on .num{color:var(--aqua)}
+/* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
+   that count, not guessed: without it a final short page collapses and the deck jumps height
+   mid-swipe, which reads as a broken carousel rather than a short page. */
+/* cc#1252 · min-width:0 IS LOad-BEARING, not tidiness. flex:0 0 100% asks for exactly the track
+   width, but a flex item still cannot shrink below its CONTENT minimum, and one unbreakable token
+   in one row is enough to override the basis. Measured at 360px with a 60-character token in a
+   single news row: this page went 298px -> 711.281px while its siblings stayed 307px, so the deck
+   no longer had one pitch at all, and deckPark missed its target by 1653px — it opened on the
+   wrong page. min-width:0 lets the page shrink to the basis it already asked for, so an
+   over-long token wraps or clips inside the page instead of resizing it. */
+.rpage{flex:0 0 100%;min-width:0;scroll-snap-align:start;min-height:212px;display:flex;flex-direction:column;gap:var(--space-8)}
+/* cc#1237 · THE ROW IS A GRID NOW, AND THAT IS THE WHOLE FIX FOR THE OVERLAP.
+   The founder's 16:24 screenshot showed the verdict banner sitting on top of the symbol name and
+   the summary cut mid-word. The old row was ONE flex line — .rmain took the remaining width and
+   the read chip was a sibling competing for the same axis, so a long symbol and a wide banner had
+   nothing arbitrating between them. R1's answer is two columns and two rows: the name block and
+   the pill each own a cell on row 1, and the summary spans both on row 2. Overlap stops being
+   unlikely and becomes impossible — grid cells do not intersect.
+   Each row also gets its own surface and border per the ref (.r) instead of the shared .mrow
+   top-border, which is what makes four rows read as four cards rather than one ruled list. */
+.rrow{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;
+ column-gap:var(--space-10);row-gap:var(--space-5);align-items:center;
+ background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);
+ padding:var(--space-11) var(--space-12)}
+.rmain{grid-column:1;grid-row:1;min-width:0}
+.rtop{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
+.rtop b{font-size:var(--type-14);white-space:nowrap}
+.rq{font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px9);white-space:nowrap}
+.rt{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-px11);color:var(--aqua);
+ font-family:'JetBrains Mono';white-space:nowrap}
+/* cc#1255 · THE VERDICT PILL AND ITS RULES ARE DELETED, not left orphaned. RESULT_ROW_DOTS_ONLY
+   (29663) retires the three words, so .rvd has nothing left to paint — and dead CSS for a class
+   nobody emits is how a later render check ends up proving a rule that is no longer on the page.
+   The .w/.l/.mu chip classes it borrowed are the page's own and stay where they are; only the
+   pill geometry goes. The row's second column is now empty, and the grid keeps its `1fr auto`
+   because `auto` collapses to nothing when there is nothing in it. */
+/* cc#1238 · RESULT TRAFFIC DOT (RESULT_DOT_RULE_V1, session_log 29519). Deliberately the SAME
+   7px circle and the SAME three tokens as scorr_news_row.js's .nrdot, because the card asks for
+   the news dots' visual language rather than a new one — up/ct/dn are that module's own class
+   names and reusing them keeps the two readable as one system. It sits INSIDE .rtop, which is a
+   flex row, so the R1 grid is untouched: the dot costs the name cell a few pixels and no column.
+   Named .rtdot and not .rdot on purpose — #rdots is the pager, and two things called rdot on one
+   page is the collision this file has already had five times on short class names. */
+.rtdot{width:7px;height:7px;border-radius:50%;flex:none;align-self:center}
+.rtdot.up{background:var(--volt)}
+.rtdot.ct{background:var(--amber)}
+.rtdot.dn{background:var(--heat)}
+/* the sheet's one-line note when only one of the two checks could be computed */
+.rbasis{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-8);line-height:1.5}
+/* The verdict is one sentence but the source is prose and the longest measured is 987 characters,
+   so it is clamped to two lines. Unclamped, one long row would push the other three off its page
+   and the "4 rows per page" the card asks for would quietly stop being true.
+   cc#1237 MOVES IT TO ONE LINE AND SPANS IT ACROSS BOTH COLUMNS, per R1's .line. Two lines was
+   the right call while the summary shared a flex line with the pill; on the grid it has the full
+   row width to itself, so one line carries as much text as two used to and every row on a page is
+   now the same height — which is what stops the "summary cut mid-word" reading, because the clamp
+   ends at a line boundary rather than at whatever the flex box happened to leave. */
+.rv{grid-column:1 / -1;grid-row:2;font-size:var(--type-11);line-height:1.45;color:var(--muted);
+ display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+/* cc#1255 · TWO LINES, using the space the verdict pill vacated. The sentence stopped being a
+   caption under a headline word and became the row's actual content, so one line was no longer
+   enough — a one-line clamp cut most of these verdicts mid-clause. Three would push four rows off
+   a phone screen and turn a deck into a scroll, so two is the ruling's number and it is enough for
+   the sentences result_analysis_v2 actually holds. Kept as a MODIFIER rather than changed on .rv,
+   because .rv is shared and the other users of it still want one line. */
+.rv2{-webkit-line-clamp:2}
+.rrow{cursor:pointer}
+/* cc#1237 · THE CHEVRON IS GONE. R1 has no affordance glyph on the row: the whole row is the tap
+   target and it already was (the onclick has been on .rrow since cc#1190). The chevron occupied a
+   third flex cell that the grid has no column for, and keeping it would have re-introduced the
+   width competition the grid exists to end. Nothing about the tap changes. */
+/* cc#1237 · THE PAGER IS ONE ROW AT THE FOOT, dots plus "1 OF N", per R1's .pager. It replaces the
+   per-page "1 of 5" caption that sat ABOVE each slide (.rpg) — that caption was inside the scroll
+   track, so on a narrow phone it clipped at the track edge, which is the third defect in the
+   founder's screenshot. The label is a SIBLING of #rdots, never a child: deckDots() rewrites
+   className on every child of the dots element, so a label inside it would be turned into a dot. */
+.rpager{display:flex;align-items:center;justify-content:center;gap:var(--space-8)}
+.rpager .idots{margin-top:0}
+.rplbl{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);
+ letter-spacing:var(--track-px12);white-space:nowrap}
+/* ── cc#1190 scope 3/4 · THE SHEET ───────────────────────────────────────────────────────────
+   MIRRORS /m/home's news sheet — same veil, same 78vh ceiling, same grab handle, same slide-up,
+   same body lock — but it is NOT the same CSS, and that is a finding rather than a shortcut.
+   The card says "the SAME bottom-sheet component the news rows use". There is no such component:
+   scorr_news_row.js ships a stylesheet for the ROW only, and home's sheet is page-local CSS in
+   mobile/home.html built on that page's token set (--t-sunk, --txt). This page's tokens are
+   --hi/--edge/--chalk/--muted, so copying those rules would resolve half of them to nothing.
+   Extracting the sheet into a real shared component is the right fix and it is a bigger change
+   than this card scopes, on a second surface — logged for its own card. */
+.rveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
+.rsheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;
+ z-index:81;background:var(--panel);border-top:var(--bw-1) solid var(--edge);border-radius:var(--radius-16) var(--radius-16) 0 0;
+ box-shadow:0 -12px 34px rgba(0,0,0,.6);animation:rup .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes rup{from{transform:translateY(100%)}}
+@media (prefers-reduced-motion:reduce){.rsheet{animation:none}}
+.rgrab{width:38px;height:4px;border-radius:var(--radius-2);background:var(--edge);margin:var(--space-9) auto var(--space-4);flex:none}
+.rshd{padding:var(--space-4) var(--space-18) var(--space-10);border-bottom:var(--bw-1) solid var(--edge);flex:none}
+.rshd .sy{font-family:'Archivo Black';font-size:var(--type-17);transform:skewX(-6deg);display:inline-block}
+.rshd .co{font-size:var(--type-125);color:var(--chalk);margin-top:var(--space-2)}
+.rshd .meta{font-family:'JetBrains Mono';font-size:var(--type-95);letter-spacing:var(--track-px10);color:var(--muted);
+ margin-top:var(--space-5);display:flex;gap:var(--space-8);flex-wrap:wrap}
+.rsb{overflow-y:auto;padding:var(--space-12) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
+.rsp{font-size:var(--type-13);line-height:1.6;color:var(--chalk);margin-bottom:var(--space-10)}
+.rsp.hd{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-px15);
+ color:var(--aqua);margin:var(--space-16) 0 var(--space-6)}
+.rsx{min-width:44px;min-height:44px;position:absolute;right:8px;top:6px;background:none;border:0;
+ color:var(--muted);font-size:var(--type-22);cursor:pointer;line-height:1}
+/* the peers button takes the page's own bevel language — .chip is what every other tappable
+   thing here uses, at full width and tap height */
+.rpeer{display:block;width:100%;box-sizing:border-box;min-height:44px;margin:var(--space-14) 0 var(--space-4);
+ cursor:pointer;text-align:center;font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:800;
+ letter-spacing:var(--track-px15);color:var(--aqua);background:var(--hi);border:var(--bw-1) solid var(--aqua);
+ clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.rptab{width:100%;border-collapse:collapse;margin-top:var(--space-10);font-family:'JetBrains Mono';font-size:var(--type-10)}
+.rptab th{text-align:right;padding:var(--space-5) var(--space-4);color:var(--muted);font-size:var(--type-85);letter-spacing:var(--track-px10);
+ border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}
+.rptab th:first-child,.rptab td:first-child{text-align:left}
+.rptab td{text-align:right;padding:var(--space-7) var(--space-4);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}
+.rptab tr.self td{background:var(--hi);color:var(--chalk);font-weight:800}
+.rptab tr.un td{color:var(--muted);opacity:.65}
+.rptab tr.tap{cursor:pointer}
+.rpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* cc#1309: the only markup that ever carried .rfoot (the VIEW DETAIL footer) is removed from
+   raPaint. Left here rather than deleted — a future footer action would want this exact look and
+   the class name is still checked defensively at the click-delegation guard below. */
+.rfoot{display:flex;gap:var(--space-8);margin-top:var(--space-14);flex-wrap:wrap}
+.rfoot a{flex:1;min-width:130px;min-height:44px;display:flex;align-items:center;justify-content:center;
+ text-decoration:none;font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px13);
+ color:var(--pulse);background:var(--hi);border:var(--bw-1) solid var(--edge);
+ clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.rmore{display:block;width:100%;box-sizing:border-box;min-height:44px;margin-top:var(--space-10);text-align:center;
+ line-height:44px;text-decoration:none;font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;
+ letter-spacing:var(--track-px15);color:var(--pulse);background:var(--hi);border:var(--bw-1) solid var(--edge);
+ clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.sdot{width:7px;height:7px;border-radius:50%;flex:none}
+.plink{color:var(--pulse);font-weight:700;font-size:var(--type-125);text-decoration:none}
+.foot{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px8);margin:var(--space-6) var(--space-18) var(--space-20)}
+/* cc#1096 R7-D2 · THE PIVOT ROW COULD NOT HOLD ITS COLUMNS. Founder frame 1:44: BANKNIFTY read
+   56,69757,09457,55557,952 as one string, with the last value clipped mid-digit at the card edge.
+
+   WHAT WAS ACTUALLY WRONG, and it is three things stacked, not one:
+     gap:0        there was NO column separation at all. Five numbers sat shoulder to shoulder and
+                  the only thing keeping them apart was slack inside each cell — luck, not layout.
+     flex:1 with the default min-width:auto means a cell can never shrink below its own text, so
+                  the moment a value is wider than its share the row grows past the card instead
+                  of the columns giving way.
+     nothing capped the overflow, so the spill landed under .card's clip-path and lost digits.
+   At default text scale on a 360px viewport the values measure 28px in a 60px cell and it looks
+   fine, which is why this survived review. It is one text-width step from breaking, and Chrome
+   for Android's text scaling is exactly that step.
+
+   THE FIX IS THE GRID, so the columns are declared instead of emergent: five equal tracks, a real
+   6px gutter, min-width:0 so tracks share fairly, and overflow-x:auto so that if the content
+   genuinely cannot fit, the row SCROLLS rather than hiding a digit. Nothing here touches a pivot
+   value or the maths behind it — the numbers are rendered exactly as before. */
+/* cc#1111 item 2: the wrap exists ONLY to carry the edge fade. .ladder is the scroller and an
+   ::after on it would scroll away with the content instead of sitting at the clipped edge. */
+/* cc#1124: the fade DID ship in cc#1111 (b254a91) — it was there and it did nothing, for two
+   reasons that had to be fixed together.
+   ONE, it faded to the wrong colour. The gradient ended at var(--bg), the PAGE background, but the
+   ladder sits inside a .card whose surface is var(--panel). Fading a panel toward the page colour
+   is a smear, not an edge — over the card it was very close to invisible, which is exactly what
+   the founder reported: clipped flush, no cue. It now ends at var(--panel), the surface it is
+   actually drawn on.
+   TWO, and this is the real fix, the ladder should not need to scroll at all. The tracks were
+   minmax(max-content,1fr): the MINIMUM of every track was its own content width, so five columns
+   each demanded their full number and the grid overflowed by construction on any phone — the
+   min-width:0 on .rung could never help, because the floor was on the TRACK, not the item.
+   minmax(0,1fr) makes five EQUAL tracks that share whatever the card gives them (founder-approved
+   revision: cells fill the width evenly rather than each holding out for a fixed minimum). On a
+   360px phone that is ~61px a column against ~54px of "24,712.55" at 10px mono, so all five fit
+   and there is nothing to scroll. The scroller and the fade both stay as the FALLBACK for a
+   narrower screen or a longer number. No pivot value, no dist_pct maths and no column order is
+   touched here — this is width and colour only. */
+.ladwrap{position:relative}
+.ladwrap::after{content:'';position:absolute;right:0;top:0;bottom:0;width:26px;pointer-events:none;
+ opacity:0;transition:opacity .15s;
+ background:linear-gradient(to right,rgba(0,0,0,0),var(--panel))}
+.ladwrap.hasmore::after{opacity:1}
+/* cc#1186 · each index gets its own .well-grammar sub-tile so NIFTY50 and BANKNIFTY read as two
+   instruments, not one run-on block — same raised-tile language as the GLOBAL TAPE tiles. */
+/* cc#1235: the tile's own padding comes in with the rows — 11/10 top and bottom against a block
+   that is now 30px shorter was the wrapper still sized for the old ladder. Left/right stays 12px
+   so the value column keeps the same distance from the tile edge it always had. */
+.lad-ix{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-9) var(--space-12) var(--space-9);margin-top:var(--space-10);
+ clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.lad-ix:first-child{margin-top:0}
+.lad-ix .ladwrap::after{background:linear-gradient(to right,rgba(0,0,0,0),var(--hi))}
+/* cc#1127 — THIRD ATTEMPT, AND THE FIRST ONE WITH A STRUCTURAL GUARANTEE. cc#1111 and cc#1124
+   (mine) both made the numbers USUALLY fit. Neither made overlap IMPOSSIBLE, which is why it came
+   back as glyph soup on his phone while every measurement here said fine.
+   WHAT ACTUALLY HAPPENED. The grid was never wrong: five equal tracks, no container overflow,
+   measured clean at 320/360/390/412px. The value text was held off its neighbours only by being
+   narrower than its track, and four things conspire the moment it is not — .rung b is nowrap so
+   it cannot wrap, .rung had no overflow containment so it painted outside its track,
+   text-align:center threw that overflow BOTH ways so one value hit both neighbours at once, and
+   the text width depends on the FONT and the DEVICE TEXT SCALE, neither of which this page
+   controlled. Reproduced with a real monospace face at 2x text scaling: the value overflows a
+   54.8px cell by 17.5px and all four adjacent pairs overlap.
+   THE GUARANTEE IS overflow:hidden ON THE CELL. A cell's text can no longer paint outside its own
+   grid track under ANY font, any text scale, any language — the geometry forbids it, rather than
+   the arithmetic happening to work out. That is the structural property the previous two fixes
+   lacked, and it is why this one cannot regress the same way.
+   THE OTHER TWO RULES STOP IT EVER NEEDING TO CLIP. text-size-adjust:100% neutralises mobile text
+   inflation, which is the input that broke the arithmetic. And the value size is now tied to the
+   viewport instead of pinned at 10px, so it shrinks with the cell: at 320px it is 8.3px against a
+   46.8px cell (a 6-char value needs ~30px, 36% headroom), at 412px 10.7px against 65.2px.
+   ellipsis is the last-resort cue if a value somehow still cannot fit — a clipped number that
+   says it is clipped, never one silently painted over its neighbour. */
+/* cc#1136 · ROUND 4 — the ellipsis clause above is WITHDRAWN, and both reasons are mine to own.
+   ONE: that "last resort" fired on every value on his phone. Device font scaling in the founder's
+   PWA browser defeats text-size-adjust, so the clamp could not shrink far enough, every .rung b
+   overflowed, and the whole ladder rendered as 23,… — a number that has lost its digits is worse
+   than one that needs a swipe. TWO: the scroll fallback I described in the cc#1127 result as the
+   live safety net was DEAD CODE. minmax(0,1fr) tracks cannot exceed their container, so
+   overflow-x:auto had nothing to scroll and .hasmore could never fire. I stated it as a working
+   fallback and it was not one.
+   THE RULING: numbers are NEVER ellipsized. Either five full columns fit, or the row becomes a
+   real scroller with the edge fade. Transplanted verbatim from the approved design ref
+   ladder_scrollmode_R1 per APPROVED_REF_EXACT_SPEC_RULE_V1 — three CSS changes and nothing else.
+   WHY THE MEASUREMENT CANNOT BE FOOLED: scrollWidth vs clientWidth is the BROWSER reporting its
+   own rendering after whatever font scale the device applied. It is not a prediction from font
+   metrics, which is what every previous round got wrong. overflow:hidden on .rung stays, so the
+   cc#1127 anti-overlap guarantee is untouched — the two rules cover different failures. */
+/* cc#1187 · THE LADDER IS NOW VERTICAL, and this is a surrender that should have come two rounds
+   ago. Four fixes (cc#1096/1111/1124/1127) plus two honest fallbacks (cc#1136 measured scroll,
+   cc#1186 fixed sizes) all fought the same fight: five full Indian-format index values across a
+   phone width the page does not control, under a device text scale it also does not control.
+   Founder's 17:38 screenshot: Samsung text scaling inflates even fixed px, R2 off the edge again.
+   A pivot ladder's five levels are REFERENCE data — all five must be visible at once, and a level
+   you have to swipe for is a level you will not check at a glance. Vertical rows are immune by
+   construction: one level per row, the value right-aligned with the whole card width to itself.
+   It is also the shape traders already read — a ladder. R2 at the top, S2 at the floor.
+   The grid, scrollmode, fade and measurement below are all retired WITH their failure mode. */
+/* cc#1235 · THE LADDER GETS SMALLER, AND THE LABEL SHRINKS WITH IT. cc#1187 won the fight over
+   whether all five levels are visible; it left them at headline weight. Six rows of 14px number
+   on a 26px pitch made one index tile 223px, so the two tiles plus the card ran 495px — the
+   ladder read like the page's headline when it is REFERENCE data you glance at.
+   WHAT MOVED AND WHY EACH ONE. The value drops 14px -> 10px. The label drops WITH it, 10px ->
+   8.5px, and that second move is the one that matters: the card asked for 55-65% of the old
+   value size, which is 7.7-9.1px, and at that size the value would have been AT OR UNDER the
+   10px label and stopped being the dominant thing in its own row. Shrinking the label first is
+   what buys the value room to come down at all. 10px against 8.5px keeps the value ahead by the
+   same ratio the old 14/10 pair had, so the eye still lands on the number, not its name.
+   Row padding 5px -> 4px and the ladder's top gap 8px -> 6px close the rhythm so six rows read as
+   one block rather than six separate lines.
+   HIERARCHY IS UNTOUCHED — every cue below this comment is the same rule it was: CMP keeps its
+   aqua label and aqua bar, PP keeps amber on both label and value, the label column keeps its
+   fixed 26px track, and the above/below-PP subline and the CLOSED/WEEKEND clause live in .grp,
+   which this change does not reach. Only sizes moved. */
+.ladder{margin-top:var(--space-6)}
+.lrow{display:flex;align-items:baseline;gap:var(--space-10);padding:var(--space-4) 0;border-top:var(--bw-1) solid var(--edge)}
+.lrow:first-child{border-top:none}
+.lrow .ll{font-family:'JetBrains Mono';font-size:var(--type-85);font-weight:700;letter-spacing:var(--track-px14);
+ color:var(--muted);flex:none;width:26px}
+.lrow .lbar{flex:1;height:2px;border-radius:var(--radius-2);background:var(--edge);opacity:.55}
+.lrow .lv{font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);letter-spacing:0;
+ font-variant-numeric:tabular-nums;color:var(--chalk);flex:none}
+.lrow.pp .ll,.lrow.pp .lv{color:var(--amber)}
+.lrow.cmprow .ll{color:var(--aqua)}
+.lrow.cmprow .lbar{background:var(--aqua);opacity:.8}
+/* cc#1187: .rung/.rung b retired — the ladder is vertical rows now (see .lrow above) */
+/* ══ cc#1306 · THE LADDER GOES HORIZONTAL AGAIN, founder ruling, over cc#1187's own vertical
+   verdict. cc#1187 went vertical because five FULL Indian-format numbers in one horizontal row
+   kept overflowing the phone width under device text scaling (four rounds, cc#1096 through
+   cc#1186, all failed the same way). This round does not repeat that fight: WRAP, NOT SCROLL.
+   Every previous attempt (grid tracks, measured scrollmode, a scroll fade) tried to keep the row
+   on ONE line and kept losing a level off the edge. flex-wrap simply lets a chip that does not fit
+   drop to a second line — nothing can go off-screen or under a fade, because there is no fixed
+   row to overflow. That is the actual fix cc#1187 needed and did not have: not vertical vs
+   horizontal, but wrap vs a single forced line.
+   .hlad replaces .ladder's cell list; DAY HIGH/DAY LOW are two more chips in the SAME sorted band
+   digest_v3._ladders now returns (cc#1306 backend change — sorted once, at the source, same rule
+   cc#1257 set for S/R/PP), so no ordering logic is duplicated here. */
+.hlad{display:flex;flex-wrap:wrap;gap:var(--space-8);margin-top:var(--space-8)}
+.hl{flex:1 1 64px;min-width:60px;text-align:center;padding:var(--space-6) var(--space-4);
+ border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi)}
+.hl .hll{display:block;font-family:'JetBrains Mono';font-size:8.5px;font-weight:700;
+ letter-spacing:var(--track-px10);color:var(--muted)}
+.hl .hlv{display:block;font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-10);
+ font-variant-numeric:tabular-nums;color:var(--chalk);margin-top:2px}
+.hl.s .hlv{color:var(--heat)}
+.hl.r .hlv{color:var(--volt)}
+.hl.pp{border-color:var(--amber);background:rgba(212,168,66,.1)}
+.hl.pp .hll,.hl.pp .hlv{color:var(--amber)}
+.hl.dh,.hl.dl{border-style:dashed}
+.hl.dh .hll,.hl.dh .hlv,.hl.dl .hll,.hl.dl .hlv{color:var(--muted)}
+/* CMP is the one chip that MOVES on every tick, so it is the one chip that should look alive —
+   the founder's own words were "red or green blink if day positive". up = day_chg_pct>=0, per the
+   header side/sideTxt convention this card already uses (var(--volt) up, var(--heat) down).
+   prefers-reduced-motion gets the colour with no animation — the information survives, the motion
+   does not, same guard the rest of this app family already uses on decorative motion. */
+.hl.cmp{border-width:calc(var(--bw-1) * 2);animation:hlBlinkUp 1.6s ease-in-out infinite}
+.hl.cmp.dn{animation-name:hlBlinkDn}
+.hl.cmp .hll,.hl.cmp .hlv{color:var(--aqua)}
+@keyframes hlBlinkUp{0%,100%{border-color:var(--volt);box-shadow:0 0 0 0 rgba(76,201,133,.35)}50%{border-color:var(--volt);box-shadow:0 0 6px 1px rgba(76,201,133,.5)}}
+@keyframes hlBlinkDn{0%,100%{border-color:var(--heat);box-shadow:0 0 0 0 rgba(224,84,84,.35)}50%{border-color:var(--heat);box-shadow:0 0 6px 1px rgba(224,84,84,.5)}}
+@media (prefers-reduced-motion:reduce){.hl.cmp{animation:none;border-color:var(--volt)}.hl.cmp.dn{border-color:var(--heat)}}
+/* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
+   shared with /m/v10 and the other shell pages, and this is a digest layout decision, not a shell
+   one. WHY IT CANNOT OVERLAP: the subtitle and the chip are flex SIBLINGS in a row. Flex items do
+   not overlap — the chip is flex:none so it keeps its full label, the subtitle takes what is left
+   with min-width:0 and ellipsises instead of wrapping, and if the chip ever grows wider than the
+   whole row the wrap sends it to its own line rather than on top of anything. Three outcomes, all
+   legible, none overlapping. Chip logic and countdown text are untouched — this is layout only. */
+.dg-hdr{flex-wrap:wrap;row-gap:var(--space-5)}
+.dg-hdr .as-pg{flex:1 1 auto;min-width:0}
+.dg-sub{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-10);min-width:0}
+/* flex-basis 0, NOT auto. With basis:auto the subtitle's base size is its full content width, so
+   it and the chip together exceeded the row and the chip wrapped to a THIRD line — a 116px sticky
+   header on a phone. Basis 0 makes the subtitle grow into whatever the chip leaves and ellipsise
+   instead of forcing a wrap. The DATE survives every truncation because it is at the start of the
+   string; "the morning read" is the decorative half and is the part that goes. */
+.dg-sub .s{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dg-sub .as-slot{flex:none;margin-left:auto}
+.unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
+/* cc#1121 · the INTERNALS deck. Same mechanism as mobile/home.html's hero deck — a scroll-snap
+   flex track and a dot row — so the swipe feels identical to the one already on Home rather than
+   being a second implementation with its own quirks. align-items:flex-start for the reason spelled
+   out on .swipe-t there: a shorter card should end at its own content, not stretch to the tallest. */
+.iswipe{margin:var(--space-2) 0 0}
+.iswipe-t{display:flex;align-items:flex-start;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;
+ -webkit-overflow-scrolling:touch;scrollbar-width:none}
+.iswipe-t::-webkit-scrollbar{display:none}
+.ic{flex:0 0 100%;min-width:0;scroll-snap-align:center;background:var(--hi);border:var(--bw-1) solid var(--edge);
+ padding:var(--space-14) var(--space-15) var(--space-13);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.ichd{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8)}
+.ichd .lb{font-family:'JetBrains Mono';font-size:var(--type-105);letter-spacing:var(--track-px15);color:var(--muted)}
+.ibars{font-family:'JetBrains Mono';font-size:var(--type-85);letter-spacing:var(--track-px9);color:var(--dim,var(--muted));white-space:nowrap}
+/* cc#1188: the value is the headline of the card and now sizes like one; the 86A/120D sub-line is
+   REMOVED by founder ruling (22-Aug) — the split lives in the ADR maths, not on the face. */
+.ic .vv{font-family:'JetBrains Mono';font-size:var(--type-34);font-weight:700;line-height:1.1;margin-top:var(--space-5)}
+/* Fixed height so swiping between cards never resizes the deck under the finger.
+   cc#1188: doubled — the founder asked for a larger card and the chart is what earns the space. */
+/* cc#1258 · height is AUTO now, not 72px. The svg keeps its own 72px; the axis row below adds its
+   own height, and a fixed 72px on the wrapper would have clipped the labels away entirely. */
+.ichart{margin-top:var(--space-12)}
+.isvg{display:block;width:100%;height:72px;overflow:visible}
+/* cc#1258 · THE TICK LABELS LIVE IN HTML, NOT IN THE SVG, and that is not a style preference.
+   .isvg is preserveAspectRatio="none" so the viewBox is stretched horizontally to whatever width
+   the card happens to be — which is exactly what makes the chart resolution-independent, and
+   exactly what would smear <text> into distorted glyphs. Positioning the labels in HTML over the
+   same 0-100 coordinate space keeps the type upright at every width. */
+.ixax{position:relative;height:12px;margin-top:var(--space-4)}
+.ixt{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+ font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px9);
+ color:var(--dim,var(--muted))}
+.ixt.d{color:var(--muted)}          /* a day boundary reads a shade stronger than a time inside one */
+.ixt.lo{transform:none;left:0}      /* clamped so an edge tick cannot hang off the card */
+.ixt.hi{transform:none;left:auto;right:0}
+.idots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
+.idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
+.idots i.on{background:var(--amber);width:15px;border-radius:var(--radius-3)}
+</style>
+</head>
+<body data-theme="goldnight" class="as-shell">
+<!-- APP_QA_R5 P6 (was R4 P4): goldnight FORCED this sprint; stored theme read and kept, not applied. Original note: stored theme applied as the first statement inside <body>, before paint. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
+     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
+     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
+<div class="phone">
+<!-- APP_QA_R4 P4 · SHELL VARIANT A (tool page), ref design_refs/scorr_appshell_R1.html @ a20ae0d.
+     #dd-date and #dd-state move into the shell's slot with their ids intact — the page still
+     fills them, the shell only defines where they sit (ref rule 6). Nothing below this header
+     changed and no loader was touched (rule 5). -->
+<!-- cc#1126: TWO ROWS. As one row this was wordmark + title/subtitle + state chip all competing
+     for 332px, and the chip is the widest thing in it ("PRE-OPEN · 2h 40m TO BELL"). .as-slot is
+     flex:none so the chip took what it needed and .as-pg absorbed the loss — about 90px, which is
+     why the subtitle wrapped one word per line and collided with the chip.
+     Row 1 is identity: wordmark and page title. Row 2 is the state line: date/subtitle on the
+     left, chip right-aligned. Markup only — .as-hdr, .as-wm, .as-pg and .as-slot keep their
+     shared classes, so the appshell's wordmark menu and back control are untouched, and the two
+     ids the page fills keep their names. -->
+<div class="as-hdr dg-hdr">
+  <a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a>
+  <div class="as-pg"><span class="t">Daily Digest</span></div>
+  <div class="dg-sub">
+    <div class="s" id="dd-date">THE MORNING READ</div>
+    <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
+  </div>
+</div>
+<div id="app"><div class="card slab"><div class="unavail">Building the read…</div></div></div>
+<div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
+</div>
+
+<script>
+/* ONE payload: /api/digest/v3 (digest_v3.py, binding spec 965 v2.3). cc#1114 removed the second
+   read (/api/v10/trades/paired, for ENGINE YESTERDAY) along with the section it fed, so this page
+   now makes exactly one request. APP_SECTION_DISTRIBUTION_V1 still holds: positions live on Index
+   Intel, the digest tells what happened. */
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const num=(v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+const sgn=(n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d);
+const cx=n=>n>=0?'var(--volt)':'var(--heat)';
+const senti=s=>{const t=String(s||'').toLowerCase();
+  return /bull|posi/.test(t)?'var(--volt)':/bear|nega/.test(t)?'var(--heat)':/caut/.test(t)?'var(--amber)':'var(--muted)';};
+
+/* APP_QA_R5 P5 · in-memory only, per the ref: the choice lasts the visit and is deliberately
+   NOT persisted — the digest is a morning read, and a stale WEEK selection from yesterday would
+   silently change what the founder thinks he is looking at. Default DAY. */
+var TAPE_MODE='day';
+function tile(t){
+  const d=t.day_chg_pct!=null?Number(t.day_chg_pct):null;
+  /* week comes from the PAYLOAD (global_heatstrip computes close vs close 5 of the symbol's OWN
+     sessions back and nulls under 6 sessions) — never recomputed here, never defaulted to 0. */
+  const w=t.week_chg_pct!=null?Number(t.week_chg_pct):(t.wk_chg_pct!=null?Number(t.wk_chg_pct):null);
+  const v=TAPE_MODE==='week'?w:d;
+  /* cc#1109 INVERTED TILES. Colour used to be the sign of the number, which is wrong for any
+     symbol whose direction is inverted — INDIA VIX falls when the market calms, and a falling
+     VIX was painting red. The payload ALREADY carries day_band / week_band with the inversion
+     applied (global_heatstrip sets inverted:true on INDIAVIX), so the band is read, never
+     recomputed here — one composer, same rule as the week number above. Sign is the fallback
+     only when a tile ships no band. */
+  /* cc#1123: "mid" is the volatility middle tier — a VIX move smaller than 5% either way. It is
+     amber, matching the --amber this page already uses (#FF9F45, the same value as the NIFTY name
+     on the Home hero's index line), so neutral reads as neutral rather than as a muted non-answer.
+     Everything else about this mapping is unchanged, and the thresholds themselves are NOT decided
+     here — global_heatstrip._band() is the single composer, per cc#1123 task 4. */
+  const band=TAPE_MODE==='week'?t.week_band:t.day_band;
+  const col=v==null?'var(--muted)'
+           :(band?(String(band)==='mid'?'var(--amber)'
+                  :(String(band).indexOf('up')===0?'var(--volt)':(String(band).indexOf('down')===0?'var(--heat)':'var(--muted)')))
+                 :cx(v));
+  return `<div class="tile well"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
+    <div class="vv" style="color:${col}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
+}
+/* re-renders the grid IN PLACE: same cells, same order, only the % swaps (ref). */
+function setTapeMode(m){
+  if(m===TAPE_MODE)return;
+  TAPE_MODE=m;
+  var g=document.getElementById('gtiles');
+  if(g&&window.__TILES)g.innerHTML=window.__TILES.map(tile).join('');
+  var bs=document.querySelectorAll('#gsw button');
+  for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-v')===m);
+}
+function ladder(ix){
+  const rungs=ix.rungs||[];
+  if(!rungs.length)return `<div class="unavail">${esc(ix.reason||'no pivot ladder')}</div>`;
+  const cmp=ix.cmp!=null?Number(ix.cmp):null;
+  const order=['S2','S1','PP','R1','R2'];
+  const bp=rungs.find(r=>r.label==='PP');
+  const side=(cmp!=null&&bp)?(cmp>bp.value?'above':'below'):null;
+  /* cc#1111: .cl marks a clause that must not break. "below PP 0.76%" is one phrase — the number
+     means nothing on a line of its own. */
+  const sideTxt=side?`<span class="cl" style="color:${side==='above'?'var(--volt)':'var(--heat)'}">${side} PP ${bp.dist_pct!=null?Math.abs(bp.dist_pct).toFixed(2)+'%':''}</span>`:'';
+  /* cc#1257 · RENDERED IN PAYLOAD ORDER, and that is the whole point of this change.
+     cc#1187 put R2 at the top "the way a ladder hangs"; rule 29630 overrules it — people read the
+     lower number on top, so supports come first. But the ORDER IS NOT FLIPPED HERE. This function
+     used to carry its own ['R2','R1','PP','S1','S2'] and look each level up by label, which made
+     it a SECOND copy of the ordering that could silently disagree with the web digest rendering
+     the same payload. It is deleted. digest_v3 now sorts the rungs ascending by value and hands
+     back cmp_slot as the insertion index, and both digest surfaces simply render what they are
+     given — one sort, at the source, per scope 3.
+     The local fallback exists only for a payload that predates the sort (a client holding an old
+     bundle mid-deploy); it computes the same slot from the values rather than guessing. */
+  const slot=(ix.cmp_slot!=null)?ix.cmp_slot
+             :rungs.filter(r=>r.value!=null&&cmp!=null&&Number(r.value)<cmp).length;
+  /* cc#1306: horizontal chips replace the vertical rows. dayChg decides the CMP blink colour —
+     >=0 is up/green, <0 is down/red, and null (no prior close on file) falls back to up's colour
+     rather than guessing a direction, matching this file's existing null-is-neutral convention. */
+  const dayChg=ix.day_chg_pct!=null?Number(ix.day_chg_pct):null;
+  const cmpDn=dayChg!=null&&dayChg<0;
+  const cmpChip=`<div class="hl cmp${cmpDn?' dn':''}"><span class="hll">CMP</span><span class="hlv">${num(cmp)}</span></div>`;
+  const hlCls=r=>r.label==='PP'?'pp':(r.label==='DAY HIGH'?'dh':(r.label==='DAY LOW'?'dl':(/^S/.test(r.label)?'s':'r')));
+  let rows=[];
+  rungs.forEach((r,i)=>{
+    if(cmp!=null&&i===slot)rows.push(cmpChip);
+    rows.push(`<div class="hl ${hlCls(r)}"><span class="hll">${esc(r.label)}</span><span class="hlv">${r.value!=null?num(r.value):'—'}</span></div>`);
+  });
+  if(cmp!=null&&slot>=rungs.length)rows.push(cmpChip);
+  const cells=rows.join('');
+  /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
+     (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
+     now follows d.market.state, the SAME composer the header chip already reads, via window.__MK:
+     tier prints only while the market is OPEN; otherwise the market label (CLOSED / PRE-OPEN /
+     CAS) prints, muted. One composer, no second clock, and the card can no longer disagree with
+     the chip above it. */
+  const mk=window.__MK||{};
+  const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
+  return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
+    <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
+    <div class="hlad">${cells}</div></div>`;
+}
+
+/* cc#1111 item 2: .ladder has overflow-x:auto, but a clipped column with no scrollbar and no fade
+   gives a reader no reason to believe a fifth column exists — on the founder's screenshot R2 was
+   simply cut flush at the screen edge. This is the same fade-when-scrollable rule the chip bar and
+   the mobile nav already use: the cue appears only while there IS more to the right, and clears at
+   the end, because a fade over nothing is a hint that lies. Bound per ladder, and re-bound after
+   every boot render since the nodes are replaced. */
+/* ── cc#1121 · INTERNALS becomes a four-card swipe deck with 5-min history ────────────────────
+   Four cards, not three: BREADTH earns its own because advances and declines are stored in
+   adr_intraday alongside adr, at the same 5-min cadence and the same depth — so there is a real
+   series behind it, not a single number with a chart bolted on.
+   The swipe is the deck pattern this app family already uses (mobile/home.html's hero deck):
+   CSS scroll-snap on a flex track plus a dot row that follows the finger. No new gesture code and
+   nothing to fight the page's own vertical scroll.
+   TODAY'S NUMBER STAYS THE HEADLINE. The chart sits under it, and neither the value nor its
+   colour rule changed — both still come from the daily payload exactly as the three tiles did. */
+function intCard(key, label, val, col, sub, stale){
+  /* cc#1188: `sub` is accepted and DROPPED — founder ruling 22-Aug removed the 86A/120D line from
+     the face. Kept in the signature so no call site changes and the split stays one edit from
+     returning if he ever wants it back. data-ib/data-ic instead of ids: the loop track clones
+     this markup and ids must stay unique. */
+  return `<div class="ic"><div class="ichd"><span class="lb">${label}${stale?' · STALE':''}</span>
+      <span class="ibars" data-ib="${key}">…</span></div>
+    <div class="vv" style="color:${col}">${val}</div>
+    <div class="ichart" data-ic="${key}"></div></div>`;
+}
+/* cc#1188 · CONTINUOUS SWIPE. The track renders the card set THREE times and starts the view on
+   the middle set. Whenever a snap settles inside the first or last set, the view is jumped one
+   whole set toward the middle with behavior:'auto' — the clone under the finger is pixel-identical
+   (iChart draws into every clone), so the jump cannot be seen and the swipe never hits a wall in
+   either direction. Dots read index modulo the real count. */
+/* cc#1190 · THE HELPERS TAKE A DECK ID NOW, because this page has TWO decks.
+   They were written for the internals deck and hardcoded #itrack, #idots and a single IN_N.
+   A second deck reusing them would have driven the internals track from the results track's
+   scroll and read both dot rows off one count. Forking them into iDots2/iWrap2 was the other
+   option and it is the wrong one - one continuous-swipe implementation, parameterised, is the
+   rule this app already follows for scorr_mobile_cards.js.
+   iDots() and iWrap() survive as the internals deck's own names so every existing call site,
+   including the onscroll= attribute in the markup, is untouched. DECKS holds the REAL card count
+   per track, replacing the single IN_N. */
+var DECKS={}, DECK_TMR={};
+/* THE PITCH IS THE SLIDE WIDTH PLUS THE GAP, NOT clientWidth, and that was wrong before this card
+   touched it. .iswipe-t is a flex row with gap:9px, so a slide advances by width+9 while the
+   helpers stepped by clientWidth — 9px short per slide, compounding across a set. On the
+   internals deck (6 cards) scroll-snap mandatory drags it back onto a snap point each time, which
+   is why it has never looked broken; on a deck with more slides per set the dots start reading the
+   wrong index. Measured here rather than hardcoded, so a future gap change cannot desync it. */
+/* cc#1239 · A REGISTRY, NOT A GROWING TERNARY. deckPark resolved its dots element with
+   `trackId==='itrack'?'idots':'rdots'`, which silently made every future deck the results deck's.
+   This card adds two more (Domestic and Global news), so the mapping is declared once here and a
+   new deck registers itself rather than editing a conditional that already had the shape of a bug. */
+var DECK_DOTS={itrack:'idots',rtrack:'rdots',nwdtrack:'nwddots',nwgtrack:'nwgdots'};
+/* cc#1252 · PITCH COMES FROM THE LAYOUT, NOT FROM A RECT. This is the cc#1245 fix ported from
+   scorr_v10_signal.html, where the same helper reported 333.484 against a true pitch of 333 and
+   left every deck 29px short over 11 pages. getBoundingClientRect().width is sub-pixel, and the
+   error is multiplied by the page index at every call site. The delta between two consecutive
+   children is the pitch the browser actually laid out, with no rounding to accumulate.
+   The rect path is KEPT as the single-child fallback, because with one child there is no delta to
+   take and a deck of one page has no drift to suffer. */
+function deckPitch(tr){
+  var k=tr.children;
+  if(k.length>1)return Math.max(1,k[1].offsetLeft-k[0].offsetLeft);
+  if(!k.length)return Math.max(1,tr.clientWidth);
+  var cs=getComputedStyle(tr);
+  var gap=parseFloat(cs.columnGap||cs.gap||0)||0;
+  return Math.max(1,k[0].getBoundingClientRect().width+gap);
+}
+/* cc#1252 · offsetLeft is relative to the OFFSET PARENT, not the scroll container, so it carries a
+   constant ancestor offset. The DELTA between two pages is exact — that is what deckPitch uses —
+   but the absolute value is not a scroll position until the first page's offset is subtracted.
+   Scrolling to a page by its OWN offset, rather than by index times pitch, is what makes the rest
+   position exactly where the browser put that page. Same shape as v10's dkAt. */
+function deckAt(tr,i){
+  var k=tr.children;
+  if(!k.length)return 0;
+  return k[i]?(k[i].offsetLeft-k[0].offsetLeft):i*deckPitch(tr);
+}
+function deckDots(trackId,dotsId){
+  var tr=document.getElementById(trackId), dots=document.getElementById(dotsId), n=DECKS[trackId];
+  if(!tr||!dots||!n)return;
+  var w=deckPitch(tr);
+  var i=Math.round(tr.scrollLeft/w)%n;
+  Array.prototype.forEach.call(dots.children,function(el,j){
+    el.className=(j===i?'on':'');
+    el.onclick=function(){
+      var cur=Math.round(tr.scrollLeft/w);
+      tr.scrollTo({left:deckAt(tr,cur-(cur%n)+j),behavior:'smooth'});
+    };
+  });
+  /* cc#1237: hand the resolved page index back. The results pager prints "1 OF N" beside these
+     dots and it must never disagree with which dot is lit, so it reads THIS number rather than
+     recomputing scrollLeft/pitch itself. Additive - iDots()/iWrap() ignore the return value. */
+  return i;
+}
+function deckWrap(trackId,dotsId){
+  deckDots(trackId,dotsId);
+  if(DECK_TMR[trackId])clearTimeout(DECK_TMR[trackId]);
+  DECK_TMR[trackId]=setTimeout(function(){
+    var tr=document.getElementById(trackId), n=DECKS[trackId];
+    if(!tr||!n)return;
+    var w=deckPitch(tr), i=Math.round(tr.scrollLeft/w);
+    var to=(i<n)?i+n:(i>=2*n)?i-n:-1;
+    if(to>=0)tr.scrollTo({left:deckAt(tr,to),behavior:'auto'});
+  },90);
+}
+/* park a freshly rendered deck on the MIDDLE set, instantly, before it is ever seen */
+function deckPark(trackId){
+  var tr=document.getElementById(trackId), n=DECKS[trackId];
+  /* cc#1252: park ON the middle set's first page by its own offsetLeft rather than by arithmetic,
+     so the rest position is exactly where the browser laid that page out. */
+  if(tr&&n)tr.scrollTo({left:deckAt(tr,n),behavior:'auto'});
+  var i=deckDots(trackId,DECK_DOTS[trackId]);
+  if(trackId==='rtrack')raPagerLabel(i);
+}
+function iDots(){ deckDots('itrack','idots'); }
+function iWrap(){ deckWrap('itrack','idots'); }
+/* cc#1237 · the results deck's own wrappers keep the pager label in step with the dots. This is
+   why cc#1190 gave this deck named wrappers rather than calling deckDots directly everywhere: the
+   shared helpers stay shared, and anything specific to THIS deck lives here. */
+function raPagerLabel(i){
+  var el=document.getElementById('rplbl');
+  if(el&&RA_PAGES)el.textContent=((i||0)+1)+' OF '+RA_PAGES;
+}
+function rDots(){ raPagerLabel(deckDots('rtrack','rdots')); }
+function rWrap(){ deckWrap('rtrack','rdots'); raPagerLabel(deckDots('rtrack','rdots')); }
+
+/* ══ cc#1190 · LATEST RESULT ANALYSIS DECK ═══════════════════════════════════════════════════
+   Replaces YESTERDAY'S RESULTS · SCORED. That card read one session of earnings_calendar and
+   matched it against news headlines, so on a thin day it said "Top 2 of 2 · 2 awaiting desk" and
+   showed nothing worth reading. This reads result_analysis_v2 — 633 rows of written analysis.
+
+   RA_MAX IS A JUDGEMENT CALL AND IT IS ONE CONSTANT SO IT COSTS ONE LINE TO CHANGE. The card
+   specifies 4 rows per page, a modulo loop, "p of N", and a sub-line reading "n of total
+   analysed" — the n-of-total wording is what says the deck shows a SUBSET, but it never says how
+   big. All 633 would be 159 pages, which is not a swipe, and SHOW MORE exists precisely to hand
+   the full list to Result Corner. 20 (five pages) is the default; the question is logged. */
+var RA=null, RA_TIER='ALL', RA_PAGES=0;
+var RA_PAGE=4, RA_MAX=20;
+var RA_TIERS=['ALL','LARGE','MID','SMALL'];
+
+function raList(){
+  var all=(RA&&RA.companies)||[];
+  var f=(RA_TIER==='ALL')?all:all.filter(function(c){return c.tier===RA_TIER;});
+  return {shown:f.slice(0,RA_MAX), matched:f.length};
+}
+function raPick(t){
+  if(RA_TIERS.indexOf(t)<0)return;
+  RA_TIER=t;
+  var host=document.getElementById('rawrap');
+  if(!host)return;
+  /* THE CHIPS RE-RENDER WITH THE DECK, and they have to. The first build put raChips() in the
+     section template and only re-rendered the deck here: the rows filtered correctly and the
+     ACTIVE CHIP NEVER MOVED, so the screen showed LARGE-only rows under a highlighted ALL. The
+     filter was working and the page was lying about which filter was on. Caught by a headless
+     click, not by reading — the rows were visibly right. */
+  host.innerHTML=raChips()+raDeck();
+  deckPark('rtrack');            /* a filter change resets to page 1, per the card */
+}
+/* cc#1238 · the dot is READ, never computed here. digest_v3._result_dots strikes both checks
+   server-side so one place owns the rule and any future surface reads the same field. A row with
+   no dot renders NOTHING rather than a grey placeholder — 29519 is explicit that an absent dot is
+   absent, not a fabricated neutral. */
+var RA_DOTCLS={green:'up',amber:'ct',red:'dn'};
+/* cc#1255 · THE TALLY IS DOT COUNTS NOW (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663), and it reads in
+   the same three colours the dots themselves use, so the strip and the rows below it are visibly
+   one system rather than two vocabularies stacked.
+
+   THE NO-DOT COUNT IS SHOWN WHEN IT IS MATERIAL AND HIDDEN WHEN IT IS NOT — the ruling's word.
+   Material is taken as 1 in 20 of the rows the strip covers: below that it is a footnote that
+   costs a phone line, above it the three counts no longer describe the deck and saying so is the
+   honest thing. It is drawn muted, never as a fourth outcome, because "no dot" means neither
+   check could be computed and NOT that the company missed both — folding it into "neither" would
+   state a miss that never happened.
+
+   Numbers come from the payload and nothing is recomputed here. If the tally is absent the strip
+   renders nothing rather than four zeros, which would read as a deck of companies that all
+   missed. */
+function raTally(t){
+  t = t || {};
+  var n = function(k){ return Number(t[k]) || 0; };
+  var b = n('beat_both'), o = n('beat_one'), x = n('beat_neither'), nd = n('no_dot');
+  if (!(b || o || x || nd)) return '';
+  var s = '<b style="color:var(--volt)">' + b + ' beat both</b>'
+        + ' · <b style="color:var(--amber)">' + o + ' beat one</b>'
+        + ' · <b style="color:var(--heat)">' + x + ' beat neither</b>';
+  if (nd && nd * 20 >= (b + o + x + nd)) s += ' · <b style="color:var(--muted)">' + nd + ' no dot</b>';
+  return s;
+}
+/* cc#1310 — result date capsule, shown next to quarter/tier on every card in this list. Reads
+   c.ex_date (yyyy-mm-dd, the reported date from earnings_calendar — never fabricated) and prints
+   it as "12 Aug", the same short form the rest of this page already uses for dates. A symbol with
+   no ex_date on file (should not happen for a row that has been analysed, but the payload can be
+   ahead of the calendar) renders no chip rather than a blank or invented one. */
+/* cc#1309 — COMPANY NEWS click-to-expand. RA_NEWS holds the currently open sheet's polished_news
+   array (set in raFullSheetHtml, the only place items are rendered); RA_NEWS_OPEN tracks which
+   indices are expanded so re-rendering the same sheet does not reset a tap the reader just made.
+   textContent, not innerHTML, on the way back in — the toggle never needs esc() because it never
+   parses what it writes. */
+var RA_NEWS=[], RA_NEWS_OPEN={};
+function raNewsTeaser(n){
+  var s=(n&&(n.short_summary||n.summary))||'';
+  return s.length>120?s.substring(0,120)+'…':s;
+}
+function raNewsToggle(i){
+  var n=RA_NEWS[i]; if(!n)return;
+  RA_NEWS_OPEN[i]=!RA_NEWS_OPEN[i];
+  var el=document.getElementById('rn-body-'+i);
+  if(!el)return;
+  el.textContent=RA_NEWS_OPEN[i]?(n.summary||raNewsTeaser(n)):raNewsTeaser(n);
+}
+function raDateChip(c){
+  if(!c||!c.ex_date)return '';
+  var d=new Date(c.ex_date+'T00:00:00');
+  if(isNaN(d.getTime()))return '';
+  var mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  return '<span class="pchip mu">'+d.getDate()+' '+mon+'</span>';
+}
+function raDot(c){
+  var k=RA_DOTCLS[c&&c.dot];
+  if(!k)return '';
+  return '<span class="rtdot '+k+'" title="'+esc(raBasisText(c)||'')+'"></span>';
+}
+/* The wording the sheet shows when only ONE check was computable. Both-checks rows say nothing —
+   the dot means what the rule says it means and does not need explaining every time. */
+function raBasisText(c){
+  if(!c||!c.dot)return '';
+  if(c.dot_basis==='peers')
+    return 'Dot from the peer comparison only \u2014 no run-rate estimate on file for this quarter.';
+  if(c.dot_basis==='estimate')
+    return 'Dot from the estimate comparison only \u2014 no segment median available for this quarter.';
+  return '';
+}
+function raDeck(){
+  var L=raList(), rows=L.shown;
+  if(!rows.length){
+    var what=(RA_TIER==='ALL')?'No result analysis yet this season.'
+                              :('No '+RA_TIER.toLowerCase()+' names analysed yet.');
+    DECKS.rtrack=0;
+    return '<div class="unavail">'+esc(what)+'</div>';
+  }
+  var pages=[];
+  for(var i=0;i<rows.length;i+=RA_PAGE)pages.push(rows.slice(i,i+RA_PAGE));
+  DECKS.rtrack=pages.length;
+  var set=pages.map(function(pg,pi){
+    /* cc#1190 scope 3: the tap and its chevron arrive together with the sheet they open, which is
+       why push 2 shipped these rows deliberately inert. */
+    /* cc#1237 scope 2 · R1 ROW ANATOMY. The row is a grid: name block left on row 1, verdict pill
+       right on row 1, one-line summary spanning row 2. `mrow` is dropped from the class list --
+       it is the page's shared ruled-list row (display:flex) and leaving it on would have fought
+       the grid for the same element. The tint classes stay the page's own w/l/mu. */
+    return '<div class="rpage">'
+      + pg.map(function(c){
+          /* cc#1255 · THE VERDICT PILL IS GONE (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663). The row is
+             now the DOT and the analyst's own sentence — the same sentence the web R button
+             shows, which is why the two surfaces now agree by construction rather than by two
+             derivations being kept in step. The sentence takes the space the pill vacated and
+             clamps to TWO lines instead of one: it is the row's content now, not a caption under
+             a headline word. */
+          return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
+            + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
+            + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
+            + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
+            + raDateChip(c)
+            + '</div></div>'
+            + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
+        }).join('')
+      + '</div>';
+  }).join('');
+  var dots=Array.from({length:pages.length},function(_,j){
+    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+  RA_PAGES=pages.length;
+  return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
+       + set+set+set+'</div><div class="rpager"><div class="idots" id="rdots">'+dots+'</div>'
+       + '<span class="rplbl" id="rplbl">1 OF '+pages.length+'</span></div></div>'
+       /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
+       + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
+}
+/* ══ cc#1239 · DOMESTIC + GLOBAL NEWS DECKS ════════════════════════════════════
+   WHAT WAS ACTUALLY WRONG, because it is not what the card's title says. These rows were ALREADY
+   polished-only: digest_v3._news has only ever read polished_news. There was no raw feed item to
+   remove. What the founder photographed was the OUTLET LABEL riding on a polished row —
+   scorr_news_row.js prints `n.source` when the payload carries one. So the fix is at the payload:
+   _news no longer selects source, the shared component's `if (n.source)` is simply false, and the
+   component is not edited for the surfaces still using it.
+
+   FOUR ROWS A PAGE, SAME AS THE RESULTS DECK, and the same helpers drive it — deckDots, deckWrap,
+   deckPark, the triple set for the infinite wrap. 20 rows is 5 pages. The gesture is the one this
+   page already teaches twice.
+
+   EXPANSION CANNOT LEAK ACROSS A SWIPE HERE, and it is worth saying why rather than claiming it:
+   there is no inline expansion to leak. The detail opens in the MODAL sheet, which locks body
+   scroll while it is open, so the deck cannot be swiped underneath it, and nwOpen paints from the
+   tapped index every time rather than from a deck-level flag. That is the cc#1232 defect made
+   structurally absent rather than fixed. */
+var NW={};
+function nwDeck(items,cat,key){
+  var rows=items||[];
+  if(!rows.length)return '<div class="unavail">No items.</div>';
+  var tid='nw'+key+'track', did='nw'+key+'dots';
+  var pages=[];
+  for(var i=0;i<rows.length;i+=4)pages.push(rows.slice(i,i+4));
+  DECKS[tid]=pages.length;
+  var set=pages.map(function(pg,pi){
+    return '<div class="rpage">'+pg.map(function(n,j){
+      var idx=pi*4+j;
+      /* chevron:false and no source on the payload — the row shows the sentiment dot, the
+         headline, its category tag and the time-ago, and nothing about which outlet filed it. */
+      return window.ScorrNewsRow
+        ? ScorrNewsRow.render(n,{category:cat,chevron:false,
+            onclick:"nwOpen('"+cat+"',"+idx+")"})
+        : '<div class="mrow" onclick="nwOpen(\''+cat+'\','+idx+')"><span class="sdot" style="background:'
+          + senti(n.sentiment)+'"></span><span style="flex:1">'+esc(n.headline||'')+'</span></div>';
+    }).join('')+'</div>';
+  }).join('');
+  var dots=Array.from({length:pages.length},function(_,j){
+    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+  return '<div class="iswipe"><div class="iswipe-t" id="'+tid+'" onscroll="deckWrap(\''+tid+'\',\''+did+'\')">'
+       + set+set+set+'</div><div class="rpager"><div class="idots" id="'+did+'">'+dots+'</div></div></div>';
+}
+function newsDeck(items,cat){ return nwDeck(items,cat,cat==='Domestic'?'d':'g'); }
+
+/* The polished piece, in the SAME sheet the results rows open. headline, the full body, the
+   sentiment/impact line and the mentioned symbols as chips — nothing else, and explicitly no
+   outlet. There is no VIEW DETAIL foot: the polished piece IS the detail, so a link promising more
+   would be a link to nothing. */
+function nwOpen(cat,i){
+  var n=(NW[cat]||[])[i]; if(!n)return;
+  sheetEnsure();
+  var sh=document.getElementById('rsheet'); if(!sh)return;
+  /* cc#1260: the whole build runs inside sheetPaint, so a throw anywhere below — a payload field
+     that is not the shape this expects, a helper that is not loaded yet — ends in the minimal
+     view with the headline still on it, never in a veil over nothing. */
+  sheetPaint(function(){
+  var meta=[];
+  if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
+  if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
+  if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
+  var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
+    t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
+    || '<div class="rsp" style="color:var(--muted)">No polished body on this item.</div>';
+  var chips=(n.symbols||[]).map(function(x){
+    return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
+  return '<div class="rgrab"></div>'
+    + '<div class="rshd" style="position:relative">'
+    + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+    + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
+    + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
+    + '<div class="rsb">'+body
+    + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
+  }, esc(n.headline||'This item could not be opened.'));
+}
+/* time-ago, borrowed from the shared row component so the deck and the sheet cannot disagree. */
+function ago(t){ return window.ScorrNewsRow&&ScorrNewsRow.ago?ScorrNewsRow.ago(t):''; }
+
+/* ── cc#1190 scope 3/4/5 · THE SHEET ─────────────────────────────────────────────────────────
+   RA_SEEN is the back-stack for peer hops. Tapping a peer swaps the sheet to that symbol, and
+   without a stack the only way back was to close and re-find the row you came from. */
+var RA_OPEN=null, RA_SEEN=[], RA_PEERS=null, RA_PSHOW=false;
+
+function raClose(){
+  var v=document.getElementById('rveil'), s=document.getElementById('rsheet');
+  if(v)v.remove(); if(s)s.remove();
+  document.body.style.overflow='';
+  RA_OPEN=null; RA_SEEN=[]; RA_PEERS=null; RA_PSHOW=false;
+}
+/* cc#1239 · THE SHEET SHELL, LIFTED OUT OF raOpen SO NEWS CAN USE IT. The card says extend the
+   sheet the app already uses and never fork it, and this is the literal form of that: one veil,
+   one #rsheet element, one body-scroll lock, one close path. Results and news differ only in what
+   they paint INTO it. Lifted verbatim from raOpen — no behaviour changed for results. */
+function sheetEnsure(){
+  if(document.getElementById('rsheet'))return;
+  var v=document.createElement('div'); v.id='rveil'; v.className='rveil'; v.onclick=raClose;
+  var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
+  document.body.appendChild(v); document.body.appendChild(s);
+  document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
+}
+/* ── cc#1260 · A FAILED SHEET MUST NEVER LEAVE A BLOCKING OVERLAY ────────────────────────────
+   The reported symptom is the shape of this bug class exactly: sheetEnsure() mounts the veil
+   FIRST, and every painter runs after it. Any throw between those two points leaves a full-screen
+   veil over an empty, zero-height sheet — the page looks dead, and the only reason it is not
+   permanently dead is that the veil happens to carry an onclick.
+   That is one unguarded expression away at all times, on every surface that uses this sheet, so
+   the guard belongs at the seam rather than on whichever painter is suspected today. sheetPaint
+   runs the build inside try/catch: on a throw it paints the honest minimal view the card asks for
+   instead of nothing, and if even that fails it tears the whole thing down. There is no path left
+   where an exception can end with a veil and no way out. */
+function sheetPaint(build, minimal){
+  var s=document.getElementById('rsheet');
+  if(!s){ raClose(); return false; }
+  try{
+    s.innerHTML=build();
+    return true;
+  }catch(e){
+    try{ if(window.console&&console.error)console.error('cc#1260 sheet render failed', e); }catch(_){}
+    try{
+      /* The honest minimal view: whatever the caller could still say about the item. Never a
+         fabricated body — an empty sheet that says it is empty beats a blank one that looks
+         broken, and both beat a silent overlay. */
+      s.innerHTML='<div class="rgrab"></div>'
+        + '<div class="rshd" style="position:relative">'
+        + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+        + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'
+        + (minimal||'This item could not be opened.') + '</div></div>'
+        + '<div class="rsb"><div class="rsp" style="color:var(--muted)">'
+        + 'The detail failed to render. Nothing is invented in its place.</div></div>';
+      return false;
+    }catch(e2){ raClose(); return false; }
+  }
+}
+/* cc#1260 scope 4 · the overlay comes down on a back gesture and on a bfcache restore, not only
+   on a tap. Both are pure teardown — no pushState, no history of our own — so page navigation is
+   completely unchanged and there is no back-button trap to get wrong. Without these, a back
+   gesture with the sheet open, or a return to a frozen page, can restore the veil with nothing
+   behind it, which is the same dead screen arriving by a different road. */
+addEventListener('popstate', function(){ if(document.getElementById('rveil'))raClose(); });
+addEventListener('pageshow', function(e){ if(e.persisted&&document.getElementById('rveil'))raClose(); });
+function raRow(sym){
+  var all=(RA&&RA.companies)||[];
+  for(var i=0;i<all.length;i++)if(all[i].symbol===sym)return all[i];
+  return null;
+}
+/* ALL-CAPS LINES ARE HEADERS. The analysis is written as "FINANCIAL GLIMPSE." over a paragraph.
+   The test is on the LETTERS only — a line like "Revenue Rs 1,278 Cr, +50% YoY" is full of digits
+   and punctuation, so a naive uppercase check on the whole string would promote data to a heading.
+   Short line, has letters, and every letter is uppercase. */
+function raIsHead(line){
+  var letters=line.replace(/[^A-Za-z]/g,'');
+  return letters.length>1 && line.length<=60 && letters===letters.toUpperCase();
+}
+function raBody(text){
+  return String(text||'').split(/\n+/).map(function(p){
+    p=p.trim(); if(!p)return '';
+    return '<div class="rsp'+(raIsHead(p)?' hd':'')+'">'+esc(p)+'</div>';
+  }).join('');
+}
+function raOpen(sym,push){
+  var r=raRow(sym)||{symbol:sym};
+  if(push&&RA_OPEN&&RA_OPEN!==sym)RA_SEEN.push(RA_OPEN);
+  RA_OPEN=sym; RA_PEERS=null; RA_PSHOW=false;
+  sheetEnsure();
+  raPaint(r,{});  /* passing empty object triggers full card load */
+  /* Fetch all three data sources in parallel: core card data, context (peers/news), and v2 analysis */
+  Promise.all([
+    fetch('/api/results/card?symbol='+encodeURIComponent(sym)).then(function(x){return x.json();}),
+    fetch('/api/results/card/context?symbol='+encodeURIComponent(sym)).then(function(x){return x.json();}),
+    fetch('/api/results/v2/'+encodeURIComponent(sym)).then(function(x){return x.json();})
+  ]).then(function(results){
+    if(RA_OPEN!==sym)return;  /* faster tap won */
+    var cardData=results[0], contextData=results[1], v2Data=results[2];
+    var fullData=Object.assign({}, cardData, contextData, v2Data);
+    raPaint(r, fullData);
+  }).catch(function(){
+    if(RA_OPEN!==sym)return;
+    raPaint(r, {error: 'Data did not load. Nothing is invented in its place.'});
+  });
+}
+function raFormat(v,dp){
+  if(v==null)return'—';
+  var n=Number(v);
+  return isNaN(n)?'—':(n>0?'+':'')+n.toFixed(dp||1);
+}
+function raChipClass(v){
+  if(!v||v==='IN-LINE'||v==='IN_LINE')return '';
+  if(v==='BEAT')return'w';
+  if(v==='MISS')return'l';
+  return'';
+}
+function raBeatMissBlock(pc){
+  if(!pc)return'';
+  var html='<div style="margin:var(--space-10) 0;font-size:var(--type-12)"><div style="color:var(--aqua);font-family:JetBrains Mono;font-weight:700;margin-bottom:var(--space-5)">vs top 3 peers</div>';
+  if(pc.sales){
+    html+='<div style="margin-bottom:var(--space-4)">Sales: <span style="color:var(--chalk)">'+esc(pc.sales.stock==null?'—':pc.sales.stock.toFixed(1))+'%'
+      +'</span> <span class="pchip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
+  }
+  if(pc.profit){
+    html+='<div>PAT: <span style="color:var(--chalk)">'+esc(pc.profit.stock==null?'—':pc.profit.stock.toFixed(1))+'%'
+      +'</span> <span class="pchip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
+  }
+  if(pc.peer_basis){
+    html+='<div style="font-size:var(--type-95);color:var(--muted);margin-top:var(--space-5)">'+esc(pc.peer_basis)+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
+function raFullSheetHtml(d){
+  if(d.error)return'<div class="rsp" style="color:var(--heat)">'+esc(d.error)+'</div>';
+  if(!d.symbol)return'<div class="rsp" style="color:var(--muted)">No result data.</div>';
+
+  var html='';
+  /* RESULT DATE */
+  if(d.ex_date){
+    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-11);color:var(--amber)">RESULT DATE · '+esc(d.ex_date)+'</div>';
+  }
+  /* cc#1268 RESULT_DOT_RULE_V3: the basis line, plain words, only when a real pre-result
+     snapshot struck the dot. Dotless symbols (no snapshot survives) print nothing here — the
+     rule is silence over a fabricated basis, never an empty-state placeholder. */
+  if(d.result_dot && d.result_dot.dot && d.result_dot.snapshot_date){
+    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-10);color:var(--muted);margin-top:2px">'
+      +'vs its own expected quarter (estimate of '+esc(d.result_dot.snapshot_date)+')</div>';
+  }
+
+  /* RESULT ANALYSIS section */
+  if(d.l1){
+    html+='<div style="margin-top:var(--space-12)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">RESULT ANALYSIS</div>';
+
+    /* Colored bullet lines for Sales, PAT, Margins, PE */
+    var l1=d.l1;
+    if(l1.sales){
+      var s=l1.sales;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--volt);min-width:8px;height:8px;border-radius:50%;background:var(--volt)"></span>'
+        +'<span>Sales: <span style="color:var(--chalk)">'+esc(s.value==null?'—':s.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(s.yoy)+'% QoQ '+raFormat(s.qoq)+'%</span></span></div>';
+    }
+    if(l1.pat){
+      var p=l1.pat;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--aqua);min-width:8px;height:8px;border-radius:50%;background:var(--aqua)"></span>'
+        +'<span>PAT: <span style="color:var(--chalk)">'+esc(p.value==null?'—':p.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(p.yoy)+'% QoQ '+raFormat(p.qoq)+'%</span></span></div>';
+    }
+    if(l1.margin){
+      var m=l1.margin;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--heat);min-width:8px;height:8px;border-radius:50%;background:var(--heat)"></span>'
+        +'<span>'+esc(m.label||'Margins')+': <span style="color:var(--chalk)">'+esc(m.now==null?'—':m.now.toFixed(1)+'%')+'</span> <span style="color:var(--muted)">'+(m.pp!=null?(m.pp>0?'+':'')+m.pp.toFixed(1)+'pp vs LY':'—')+'</span></span></div>';
+    }
+    if(l1.valuation){
+      var v=l1.valuation;
+      html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8);font-size:var(--type-12)"><span style="color:var(--pulse);min-width:8px;height:8px;border-radius:50%;background:var(--pulse)"></span>'
+        +'<span>PE: <span style="color:var(--chalk)">'+esc(v.pe==null?'—':v.pe.toFixed(1))+'</span> <span style="color:var(--muted)">industry '+esc(v.industry_pe==null?'—':v.industry_pe.toFixed(1))+'</span></span></div>';
+    }
+
+    /* Peer BEAT/MISS block */
+    html+=raBeatMissBlock(d.peer_comparison);
+
+    /* Expectations line */
+    if(d.expectations){
+      var e=d.expectations;
+      if(e.sales||e.profit){
+        html+='<div style="font-size:var(--type-11);color:var(--muted);margin-top:var(--space-10)">vs est. <span style="color:var(--chalk)">'+
+          (e.sales?' Sales '+esc(e.sales.tag)+' '+e.sales.dev_pct+'%':'')+(e.sales&&e.profit?' · ':'')+
+          (e.profit?' Profit '+esc(e.profit.tag)+' '+e.profit.dev_pct+'%':'')+'</span></div>';
+      }
+    }
+    html+='</div>';
+  }
+
+  /* QUARTER section */
+  if(d.l1){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">QUARTER '+esc(d.l1.quarter_label||'')+'</div>';
+    if(d.auto_verdict){
+      html+='<div class="rsp" style="color:var(--muted);margin-bottom:var(--space-10)">'+esc(d.auto_verdict)+'</div>';
+    }
+    if(d.l1.sales){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>Sales</span><span style="color:var(--chalk)">'+esc(d.l1.sales.value==null?'—':d.l1.sales.value.toFixed(0))+'</span></div>';
+    }
+    if(d.l1.pat){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>PAT</span><span style="color:var(--chalk)">'+esc(d.l1.pat.value==null?'—':d.l1.pat.value.toFixed(0))+'</span></div>';
+    }
+    if(d.l1.margin&&d.l1.margin.label){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>'+esc(d.l1.margin.label)+'</span><span style="color:var(--chalk)">'+esc(d.l1.margin.now==null?'—':d.l1.margin.now.toFixed(1)+'%')+'</span></div>';
+    }
+    if(d.l1.valuation){
+      html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;font-size:var(--type-12)"><span>P/E</span><span style="color:var(--chalk)">'+esc(d.l1.valuation.pe==null?'—':d.l1.valuation.pe.toFixed(1))+'</span></div>';
+    }
+    html+='</div>';
+  }
+
+  /* DETAILED ANALYSIS section */
+  if(d.has_analysis){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">DETAILED ANALYSIS</div>';
+    html+=raBody(d.analysis);
+    html+='</div>';
+  }else if(d.result_analysis){
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">ANALYSIS</div>';
+    html+=raBody(d.result_analysis);
+    html+='</div>';
+  }
+
+  /* COMPANY NEWS section — cc#1309. Polished-only, Domestic/AI Editorial tagged (the backend
+     query already narrows to that; d.polished_news never carries anything else), no source line
+     (backend no longer even sends n.source — see _polished_by_symbol), and tapping a headline
+     expands it to the full article text in place via raNewsToggle. RA_NEWS is the click handler's
+     only way to reach the full text, so it is stashed here on every open and nowhere else. */
+  if(d.polished_news&&d.polished_news.length){
+    RA_NEWS=d.polished_news; RA_NEWS_OPEN={};
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">COMPANY NEWS</div>';
+    d.polished_news.slice(0,10).forEach(function(n,i){
+      html+='<div class="rsp" style="margin-bottom:var(--space-10);cursor:pointer" onclick="raNewsToggle('+i+')">'
+        + '<div style="color:var(--chalk);font-weight:600;font-size:var(--type-12);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.headline)+'</div>'
+        + '<div id="rn-body-'+i+'" style="color:var(--muted);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(raNewsTeaser(n))+'</div>'
+        + (n.category?'<span class="pchip mu">'+esc(n.category)+'</span>':'')
+        + '</div>';
+    });
+    html+='</div>';
+  }
+
+  return html;
+}
+function raPaint(r,d){
+  var s=document.getElementById('rsheet'); if(!s)return;
+  /* cc#1260: the results sheet gets the same guard as the news sheet. It is the more exposed of
+     the two — raOpen paints once for "Loading…" and again inside a .then, and a throw in that
+     second paint is swallowed by the promise chain, which is precisely how a veil ends up over a
+     sheet still saying Loading with nothing more ever coming. */
+  sheetPaint(function(){
+  var bodyHtml = (d && Object.keys(d).length) ? raFullSheetHtml(d) : '<div class="rsp" style="color:var(--muted)">Loading…</div>';
+  var q=(d&&d.quarter)||r.quarter||'', when=r.polished_ist||'';
+  var back=RA_SEEN.length?'<button class="rsx" style="left:8px;right:auto" onclick="raBack()" '
+      + 'aria-label="back">&#8592;</button>':'';
+  return '<div class="rgrab"></div>'
+    + '<div class="rshd" style="position:relative">'+back
+    + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+    + '<div class="sy">'+esc(d.symbol||r.symbol||'')+'</div>'
+    + (d.company?'<div class="co">'+esc(d.company)+'</div>':(r.company?'<div class="co">'+esc(r.company)+'</div>':''))
+    + '<div class="meta">'+(d.segment?'<span>'+esc(d.segment)+'</span>':(r.segment?'<span>'+esc(r.segment)+'</span>':''))
+    + (d.gvm_verdict?'<span title="GVM">'+esc(d.gvm_verdict)+'</span>':'')
+    + (q?'<span>'+esc(q)+'</span>':'')
+    + (when?'<span>polished '+esc(when)+'</span>':'')+'</div></div>'
+    + '<div class="rsb" id="rsb">'
+    + bodyHtml
+    /* cc#1309: the VIEW DETAIL footer link is removed — founder ruling. The sheet already carries
+       DETAILED ANALYSIS inline (raBody(d.analysis) above) and COMPANY NEWS now expands its own
+       full text in place, so there was nothing left behind this link worth a second navigation. */
+    + '</div>';
+  }, esc(d.symbol||r.symbol||'This result could not be opened.'));
+}
+function raBack(){ var prev=RA_SEEN.pop(); if(prev)raOpen(prev,false); }
+
+function raPeerBlock(r){
+  if(!r.segment)return '';                 /* no segment = no peer set; the button is hidden */
+  if(!RA_PSHOW)
+    return '<button class="rpeer" onclick="raPeerToggle()">SEE '+esc(r.segment.toUpperCase())+' PEERS</button>';
+  var out='<button class="rpeer" onclick="raPeerToggle()">HIDE PEERS</button>';
+  if(RA_PEERS==='loading')return out+'<div class="rsp" style="color:var(--muted)">Loading peers…</div>';
+  if(!RA_PEERS||!RA_PEERS.peers||!RA_PEERS.peers.length)
+    return out+'<div class="rsp" style="color:var(--muted)">No segment peer has reported yet.</div>';
+  var rows=RA_PEERS.peers.map(function(p){
+    var cls=(p.is_self?'self ':'')+(p.reported?'tap':'un');
+    if(!p.reported)
+      return '<tr class="'+cls+'"><td>'+esc(p.symbol)+'</td>'
+        + '<td colspan="5">not reported'+(p.expected_date?' · expected '+esc(p.expected_date):'')+'</td></tr>';
+    var f=function(v,suf){return v==null?'—':(v>0?'+':'')+Number(v).toFixed(1)+(suf||'');};
+    return '<tr class="'+cls+'"'+(p.is_self?'':' onclick="raOpen(\''+esc(p.symbol)+'\',1)"')+'>'
+      + '<td>'+esc(p.symbol)+'</td><td>'+esc(p.result_date||'—')+'</td>'
+      + '<td>'+f(p.sales_yoy,'%')+'</td><td>'+f(p.pat_yoy,'%')+'</td>'
+      + '<td>'+(p.margin==null?'—':Number(p.margin).toFixed(1)+'%')+'</td>'
+      + '<td>'+f(p.move_pct,'%')+'</td></tr>';
+  }).join('');
+  return out+'<div class="rpwrap"><table class="rptab"><thead><tr><th>SYMBOL</th><th>RESULT DATE</th>'
+    + '<th>SALES YOY</th><th>PAT YOY</th><th>MARGIN</th><th>MOVE</th></tr></thead>'
+    + '<tbody>'+rows+'</tbody></table></div>';
+}
+function raPeerToggle(){
+  RA_PSHOW=!RA_PSHOW;
+  var r=raRow(RA_OPEN)||{symbol:RA_OPEN};
+  if(RA_PSHOW&&RA_PEERS===null){
+    RA_PEERS='loading';
+    var sym=RA_OPEN;
+    fetch('/api/results/peers/'+encodeURIComponent(sym)).then(function(x){return x.json();})
+      .then(function(d){ if(RA_OPEN!==sym)return; RA_PEERS=(d&&d.peers)?d:{peers:[]}; raRepaint(); })
+      .catch(function(){ if(RA_OPEN!==sym)return; RA_PEERS={peers:[]}; raRepaint(); });
+  }
+  raRepaint();
+}
+/* Repaint keeps the body text that is already on screen rather than refetching it — toggling the
+   peer table must not make the analysis flicker back to "Loading". */
+function raRepaint(){
+  var sb=document.getElementById('rsb'); if(!sb)return;
+  var keep=[]; var kids=sb.children;
+  for(var i=0;i<kids.length;i++){
+    var c=kids[i];
+    if(c.className==='rfoot'||c.classList.contains('rpeer')||c.classList.contains('rpwrap'))break;
+    keep.push(c.outerHTML);
+  }
+  raPaint(raRow(RA_OPEN)||{symbol:RA_OPEN},keep.join(''));
+}
+function raChips(){
+  return '<div class="rchips">'+RA_TIERS.map(function(t){
+    var n=(t==='ALL')?((RA&&RA.total)||0):(((RA&&RA.tiers)||{})[t]||0);
+    return '<button class="rchip'+(t===RA_TIER?' on':'')+'" onclick="raPick(\''+t+'\')">'
+         + esc(t)+' <span class="num">'+n+'</span></button>';
+  }).join('')+'</div>';
+}
+/* THE X AXIS IS TIME, NOT BAR INDEX, and that is load-bearing rather than pedantic. NIFTY PCR has
+   ZERO rows for 18-Aug while BANKNIFTY has 71. Drawn by index, 17-Aug would sit flush against
+   19-Aug and a missing session would read as a continuous market. The server sends every TRADING
+   date in the span (weekdays minus nse_holidays) and each point's session slot plus its fraction
+   through that session, so a session with no data keeps its slot and shows up as a gap — tinted,
+   counted underneath, and named in the payload as empty_sessions.
+   BASELINE. 1.00 for ADR and both PCRs, 0 for BREADTH A-D. These are not arbitrary: 1.00 is the
+   line the tile's own colour rule already turns on (advances beating declines, put writers over
+   call writers), so a bar above the baseline is green for the same reason the big number is. */
+function iChart(s){
+  /* cc#1188: hosts are matched by data attribute, PLURAL, because the loop track renders the card
+     set three times (see the deck note) and an id may only exist once. Every clone gets the same
+     drawing, so the wrap jump lands on pixels identical to the ones it left. */
+  var hosts=document.querySelectorAll('[data-ic="'+s.key+'"]');
+  if(!hosts.length)return;
+  /* cc#1258 · the header answers WHEN, not HOW MANY. "200 BARS" told the reader the size of an
+     internal window, which is implementation detail; "5-MIN · 21 AUG 15:15" tells them the
+     resolution and how fresh the last bar is, which is the thing a stale chart hides.
+     THE TIMESTAMP COMES FROM THE DATA, NEVER THE CLIENT CLOCK. s.last is formatted server-side
+     from the series' own last row, and adr_intraday.ts is a naive column carrying IST, so that
+     string is already IST wall time with no conversion to get wrong. Reading a phone's clock here
+     would print the reader's timezone over Indian market data — the exact naive-column trap this
+     card warns about. Only the presentation changes: "21-Aug 15:15" -> "21 AUG 15:15". */
+  var stamp=String(s.last||'').replace('-',' ').toUpperCase();
+  document.querySelectorAll('[data-ib="'+s.key+'"]').forEach(function(bl){
+    bl.textContent=s.bars?('5-MIN'+(stamp?' · '+stamp:'')):'NO HISTORY';
+  });
+  if(!s.bars){
+    hosts.forEach(function(h){h.innerHTML='<div class="unavail">'+esc(s.note||'no intraday history stored')+'</div>';});
+    return;
+  }
+  /* cc#1307 · NO GAP BETWEEN DAYS, founder ruling over the cc#1121/cc#1236 "enumerate the full
+     calendar so a feed hole reads as a hole" design. That design is not wrong about the DATA — a
+     day with zero bars really is missing and _internals_series still reports it, unnamed nowhere
+     — it was wrong about the SPACE: reserving a full session-width slot for a day with nothing in
+     it draws a blank rectangle between two real trading days, which is exactly the "dark blank
+     rectangle between 20 Aug and 21 Aug" the founder photographed.
+     THE FIX IS COMPRESSION, NOT DELETION. liveSessions drops empty_sessions from the x-axis
+     entirely — every index below is computed against liveSessions.length, never s.sessions.length
+     — so days with data sit adjacent with the line running straight through, and a day with none
+     simply consumes no width. s.points never carries a session index that IS empty (the backend
+     only emits a point where a bar exists), so `remap` always has an entry for every p.s used
+     below; nothing here can look up a hole that was never indexed. The `holes` rectangle this
+     used to draw for empty_sessions is removed with the slot it was drawn into — there is no
+     longer an x position for it to occupy. */
+  var emptySet={}; (s.empty_sessions||[]).forEach(function(d){emptySet[d]=true;});
+  var liveSessions=(s.sessions||[]).filter(function(d){return !emptySet[d];});
+  var remap={};
+  (s.sessions||[]).forEach(function(d,i){if(!emptySet[d])remap[i]=liveSessions.indexOf(d);});
+  var W=100, H=72, n=Math.max(1,liveSessions.length);
+  var base=(s.key==='breadth')?0:1;
+  var vs=s.points.map(function(p){return p.v;});
+  /* ROBUST SCALE, AND THE CLIPPING IS SHOWN RATHER THAN HIDDEN. Measured on the live series before
+     choosing this: NIFTY PCR's last 200 bars run 0.631 to 3.255, but the 95th percentile is 0.979
+     and the median 0.928 — ONE bar carries that top. On a full-range axis the other 199 sit inside
+     the bottom eighth of the card and the chart says nothing. The axis is therefore the 2nd-98th
+     percentile, and any bar outside it is drawn to the edge with an amber cap and COUNTED in the
+     line underneath, with the true extreme printed. A silent truncation would be the dishonest
+     version of this; a chart that cannot be read is the useless one. */
+  var iq=function(a,q){
+    var b=a.slice().sort(function(x,y){return x-y;});
+    var i=(b.length-1)*q, lo=Math.floor(i), hi=Math.ceil(i);
+    return lo===hi?b[lo]:b[lo]+(b[hi]-b[lo])*(i-lo);
+  };
+  /* CLIP ONLY THE SIDE THAT ACTUALLY NEEDS IT. A flat 2nd-98th window clips both ends whether or
+     not there is anything extreme there, and the first version of this said "5 bars off-scale" on
+     the NIFTY series when exactly ONE bar is an outlier — the other four were ordinary low bars
+     sitting just under the 2nd percentile. Lumping them together makes the caption misleading in
+     the direction that matters. A side is clipped only when its tail runs more than two
+     inter-quantile spans past the window; otherwise the real extreme is kept. */
+  var q02=iq(vs,0.02), q98=iq(vs,0.98), iqr=(q98-q02)||Math.abs(base)||1;
+  var vmin=Math.min.apply(null,vs), vmax=Math.max.apply(null,vs);
+  var top=Math.max((vmax-q98>2*iqr)?q98:vmax, base);
+  var bot=Math.min((q02-vmin>2*iqr)?q02:vmin, base);
+  var span=(top-bot)||1;
+  var y=function(v){return H-(Math.max(bot,Math.min(top,v))-bot)/span*H;};
+  /* cc#1137: over/omin/omax are gone with the caption they existed to write. `clipped` STAYS —
+     it is what draws the amber clamped-point marker, and the in-chart honesty is not negotiable. */
+  var yb=y(base);
+  /* cc#1128 — A LINE, NOT BARS (founder ruling on the cc#1121 output: 200 dense bars read as a
+     solid block, which is true — at ~0.5px a bar there is no shape left to see).
+     THE LINE BREAKS RATHER THAN LYING. It is not one continuous stroke: a segment ends wherever
+     the data actually stops. Two kinds of break, both real — the overnight boundary between
+     sessions, and a hole inside a session (17-Aug's NIFTY feed stops at 11:20 and resumes at
+     14:00). Detected from the x distance between consecutive points against the nominal 5-minute
+     step, so a gap is never interpolated across. That is the same honesty rule as the empty
+     session slots: nothing is drawn where nothing was recorded.
+     COLOUR FOLLOWS THE READ, so the stroke turns at the baseline — green above 1.00, red below —
+     matching the colour rule the headline number already uses. Runs of the same side are emitted
+     as one polyline, and the crossing point belongs to both runs so the stroke stays joined. */
+  var step=(W/n)/78, brk=step*2.5;      /* 78 five-min bars fill one session slot */
+  /* cc#1236 · EDGE is the most missing session edge an overnight join is allowed to span, ~60 min
+     of the 375-min slot. It exists because the real series does NOT run the full session: measured
+     on adr_intraday 12-Aug to 20-Aug, every day stores 68-72 bars running 09:20 to 15:15, so a
+     normal boundary already carries 15 min of tail plus 5 min of head. That is 4.2 five-minute
+     steps — past brk (2.5) — so a plain distance test can never join a normal night, which is why
+     the boundary needs its own rule rather than a looser brk. 60 min separates that ordinary
+     short close from a genuine outage by a wide margin: 17-Aug's feed stopped at 11:20, leaving a
+     tail of 250 min, and that one still breaks. */
+  var EDGE=12/78;
+  var pxs=s.points.map(function(p){
+    var clipped=(p.v>top||p.v<bot);
+    /* f is clamped just under 1: a 15:30 bar comes through as f=1.0, which lands on the exact
+       leading edge of the NEXT session's slot. Harmless most days, wrong on the day after is
+       empty — the closing bar would draw inside the tinted hole and look like data in a session
+       that has none. A slot covers [s, s+1), so the last bar belongs at its end, not past it. */
+    /* cc#1236 carries f through: the boundary rule asks how much of a SESSION is missing at each
+       side of the night, which x cannot answer once it has been folded into slot coordinates. */
+    var f=Math.min(p.f,0.995);
+    /* cc#1307: p.s is the ORIGINAL (uncompressed) session index the backend sent; remap[p.s] is
+       always defined because points only ever exist for sessions that have data. */
+    var s2=remap[p.s];
+    return {x:(s2+f)/n*W, y:y(p.v), s:s2, f:f, up:(p.v>=base), clipped:clipped, v:p.v};
+  });
+  var runs=[], cur=null;
+  pxs.forEach(function(q,i){
+    var prev=i?pxs[i-1]:null;
+    /* cc#1128 SAID EVERY SESSION IS ITS OWN STROKE. That is now WRONG, by founder ruling
+       (INTRADAY_CHART_SESSION_JOIN_RULE_V1, session_log 29510) — consecutive sessions abut, the
+       line runs through the divider, and the divider alone says where the night was. The old
+       reasoning is kept because the trap it names is real: the last bar of a session and the
+       first of the next land at almost the same x, so a distance test cannot tell an overnight
+       gap from a five-minute one. The answer is not to break on every boundary, it is to STOP
+       ASKING x AT A BOUNDARY.
+       SO THE TEST SPLITS IN TWO, one question per kind of gap.
+       INSIDE a session the distance test is the whole authority and is unchanged: a hole between
+       bars is real missing data and is never bridged (17-Aug NIFTY stops 11:20, resumes 14:00).
+       ACROSS a boundary x is meaningless, so it is not consulted. Two things break the line
+       instead: a SKIPPED session (s jumps by more than one — a dead day sits in between, already
+       tinted, and a stroke across it would draw a market that did not trade), or a session EDGE
+       so ragged that the join would span an outage rather than a night (EDGE above).
+       WHAT THIS DOES NOT DO: it never interpolates. A joined boundary draws one segment between
+       two bars that were both recorded. Nothing is invented at either end. */
+    var gap = !prev ? false
+            : (q.s===prev.s) ? (q.x-prev.x>brk)
+            : (q.s-prev.s>1 || (1-prev.f)>EDGE || q.f>EDGE);
+    if(!cur||gap){                       /* first point, or the data genuinely stopped */
+      cur={up:q.up,pts:[[q.x,q.y]]}; runs.push(cur); return;
+    }
+    if(q.up!==cur.up){                   /* crossed the baseline: both runs share this point */
+      cur.pts.push([q.x,q.y]);
+      cur={up:q.up,pts:[[prev.x,prev.y],[q.x,q.y]]}; runs.push(cur); return;
+    }
+    cur.pts.push([q.x,q.y]);
+  });
+  var body=runs.filter(function(r){return r.pts.length>1;}).map(function(r){
+    return '<polyline fill="none" stroke="'+(r.up?'var(--volt)':'var(--heat)')
+      +'" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="'
+      +r.pts.map(function(p){return p[0].toFixed(2)+','+p[1].toFixed(2);}).join(' ')+'"/>';
+  }).join('')
+  /* a single stored bar with no neighbour to join has no line to be part of, so it is drawn as a
+     dot rather than dropped — one reading is still a reading. */
+  + runs.filter(function(r){return r.pts.length===1;}).map(function(r){
+      return '<circle cx="'+r.pts[0][0].toFixed(2)+'" cy="'+r.pts[0][1].toFixed(2)+'" r=".7" fill="'
+        +(r.up?'var(--volt)':'var(--heat)')+'"/>';
+    }).join('')
+  /* off-scale points are CLAMPED and MARKED, never quietly flattened into the line */
+  + pxs.filter(function(q){return q.clipped;}).map(function(q){
+      return '<circle cx="'+q.x.toFixed(2)+'" cy="'+q.y.toFixed(2)+'" r="1.1" fill="var(--amber)"/>';
+    }).join('');
+  var marks='';
+  for(var i=1;i<n;i++){
+    var xd=(i/n*W).toFixed(2);
+    marks+='<line x1="'+xd+'" y1="0" x2="'+xd+'" y2="'+H+'" stroke="var(--edge)" stroke-width=".3"/>';
+  }
+  marks+='<line x1="0" y1="'+yb.toFixed(2)+'" x2="'+W+'" y2="'+yb.toFixed(2)
+       +'" stroke="var(--muted)" stroke-width=".3" stroke-dasharray="1.5 1.5" opacity=".7"/>';
+  /* cc#1307: the empty_sessions tinted rect is gone — liveSessions above already dropped those
+     days from the x-axis, so there is no slot left for a hole rectangle to occupy. */
+  var svg='<svg class="isvg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+    +marks+body+'</svg>';
+  /* cc#1258 · SPARSE DATE/TIME TICKS, sharing the x-space the chart already uses.
+     A date tick sits at the START of each session, which is the SAME x the cc#1236 day divider is
+     drawn at (i/n*W), so the label and the line cannot drift apart — they are computed from the
+     one session index, not measured against each other.
+     THINNED, because clutter is the failure mode on a phone: at most four date ticks, taking every
+     k-th session; and only when that leaves three or fewer does a TIME tick get added, inside the
+     last session, so the axis shows both kinds without ever crowding. That keeps the total in the
+     3-5 the card asks for whether the window holds three sessions or ten.
+     THE DATE IS PARSED BY SPLITTING THE STRING, NOT BY new Date(). '2026-08-21' goes through
+     Date.parse as UTC midnight, and formatting that back in a browser west of Greenwich returns
+     the 20th — a silent off-by-one-day on a chart axis, which is worse than no axis. Splitting the
+     ISO string cannot move the date, whatever timezone the reader is in. */
+  var MON=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function dlab(iso){
+    var p=String(iso||'').split('-');
+    if(p.length<3)return '';
+    return String(Number(p[2]))+' '+(MON[Number(p[1])-1]||'');
+  }
+  /* cc#1307: date ticks are placed against liveSessions, the same compressed axis the line and
+     the day-divider marks now use — s.sessions (the full calendar, holes included) would put a
+     tick at an x no longer occupied by anything. */
+  var sess=liveSessions, ticks=[];
+  var stepS=Math.ceil(sess.length/4)||1;
+  for(var si=0; si<sess.length; si+=stepS){
+    ticks.push({x:si/n*W, t:dlab(sess[si]), day:true});
+  }
+  if(ticks.length<=3 && sess.length){
+    /* 12:00 placed at its TRUE fraction of the session, the same (mins-open)/375 the points use,
+       so the label lands where a 12:00 bar actually is rather than at a convenient midpoint. */
+    /* 555 = 09:15 and 375 = the session length in minutes, mirroring digest_v3's
+       _SESSION_OPEN_MIN and _SESSION_MIN — the same two numbers that produced every point's f, so
+       the tick is placed on the identical scale rather than an approximation of it. */
+    var f12=(720-555)/375;
+    ticks.push({x:(sess.length-1+f12)/n*W, t:'12:00', day:false});
+  }
+  ticks.sort(function(a,b){return a.x-b.x;});
+  var ax='<div class="ixax">'+ticks.filter(function(t){return t.t;}).map(function(t){
+    var cls='ixt'+(t.day?' d':'')+(t.x<8?' lo':(t.x>92?' hi':''));
+    var pos=(t.x<8||t.x>92)?'':'left:'+t.x.toFixed(2)+'%';
+    return '<span class="'+cls+'"'+(pos?' style="'+pos+'"':'')+'>'+t.t+'</span>';
+  }).join('')+'</div>';
+  hosts.forEach(function(h){h.innerHTML=svg+ax;});
+}
+/* Fetched separately from the digest payload and only after the page has painted — four series of
+   200 points is not something the first render should wait on. A failure costs the charts and
+   nothing else: the numbers above them are already on screen from /api/digest/v3. */
+function loadInternals(){
+  fetch('/api/digest/internals/series')
+    .then(function(r){return r.json();})
+    .then(function(d){(d.series||[]).forEach(iChart);})
+    .catch(function(){});
+}
+
+/* cc#1136 · fitLadders — transplanted from design ref ladder_scrollmode_R1, which merges the
+   cc#1111 fade binding into the measurement (an allowed seam; the fade behaviour is identical).
+   THE MEASUREMENT IS THE WHOLE POINT. Every previous round PREDICTED whether the numbers would
+   fit, from font metrics I could not see. This asks the browser what it actually rendered:
+   b.scrollWidth > b.clientWidth means this value is wider than its cell, right now, on this
+   device, after whatever font scale the user set. No device font scaling can defeat it, because
+   it is not a prediction — it is the browser reporting itself.
+   Equal tracks are tried FIRST and scrollmode is entered only when a value genuinely does not
+   fit, so a normal phone still gets five clean columns and nothing to swipe. */
+function fitLadders(){
+  /* cc#1187: NO-OP by design, kept so the cc#1161 font hooks and boot() call sites stay valid.
+     Vertical rows have nothing to measure — a row cannot overflow sideways — and deleting the
+     hooks would be a wider diff for zero behaviour. If the ladder ever goes horizontal again
+     (it should not), the hooks are already wired. */
+}
+/* Re-measure when the box changes under the content. One debounced listener for both events —
+   an orientation change is a resize the layout has to survive, and a rotation into portrait is
+   exactly where five columns stop fitting. */
+var LAD_RAF=null;
+function fitLaddersSoon(){
+  if(LAD_RAF) return;
+  LAD_RAF=requestAnimationFrame(function(){ LAD_RAF=null; fitLadders(); });
+}
+addEventListener('resize', fitLaddersSoon);
+addEventListener('orientationchange', fitLaddersSoon);
+/* cc#1161 · A FONT LOAD IS A RESIZE THAT FIRES NO RESIZE EVENT, and that is the whole bug.
+   fitLadders() measured once at boot paint. JetBrains Mono arrives async from Google Fonts, so on
+   a real phone the measurement ran against the FALLBACK face — narrower — decided the values fit,
+   left equal-track mode on, and then the real font painted wider and .rung's overflow:hidden (the
+   cc#1127 anti-overlap guarantee, which stays) clipped the digits with no ellipsis. Nothing
+   re-measured, because a font swap is not a resize and not an orientation change. That is exactly
+   what the founder photographed at 16:07 on 20-Aug.
+   NOTHING ABOUT THE MEASUREMENT CHANGES HERE. Same function, same scrollWidth-vs-clientWidth
+   question, same CSS, same tracks, same fade. This card adds WHEN it measures and never HOW.
+   THREE HOOKS, because they fail in different ways and none of them is reliable alone.
+   fonts.ready settles once after the initial font set resolves. loadingdone also fires for a face
+   that arrives LATER — a second weight, a slow retry — which fonts.ready has already stopped
+   caring about. window load is the belt for a browser with no Font Loading API at all, where the
+   other two simply never run.
+   THEY CANNOT STACK. Every one of them goes through fitLaddersSoon, which is already rAF-debounced
+   and returns early while a frame is pending, so three hooks firing in the same frame do one
+   measurement between them. The existing resize and orientationchange listeners are untouched. */
+if (document.fonts) {
+  if (document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(fitLaddersSoon);
+  if (document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fitLaddersSoon);
+}
+addEventListener('load', fitLaddersSoon);
+
+async function boot(){
+  let d=null;
+  try{ d=await (await fetch('/api/digest/v3')).json(); }catch(e){}
+  /* cc#1114: the ENGINE YESTERDAY · V10 section is GONE by founder decision — on a day with no
+     exits it was a one-line empty state and a link to a page the closing paragraph already links
+     to. The /api/v10/trades/paired fetch went with it rather than being left running for a
+     section that no longer renders; nothing else on this page read its result. The cc#1109 fix
+     that put this filter on the server's prev_trading_date is not lost — the basis still ships in
+     the payload and /m/v8 is where the book lives. */
+  if(!d||d.error||!d.sections){
+    document.getElementById('app').innerHTML=`<div class="card slab"><div class="unavail">Digest payload unavailable${d&&d.error?': '+esc(d.error):''}. /api/digest/v3 did not answer — nothing is invented in its place.</div></div>`;
+    return;
+  }
+  const S=d.sections, mr=d.market_read||{};
+  document.getElementById('dd-date').textContent=(d.date_ist||'')+' · the morning read';
+  /* cc#1109: the chip follows market.state instead of sitting on a static amber. OPEN reads as
+     live, CLOSED reads as quiet, PRE-OPEN and CAS keep the amber that means "not yet / not any
+     more". The label text is unchanged. */
+  const st=document.getElementById('dd-state'); st.textContent=(d.market&&d.market.label)||'—';
+  const mst=(d.market&&d.market.state)||'';
+  st.className='chip '+(mst==='OPEN'?'w':(mst==='CLOSED'?'mu':(mst?'n':'n')));
+  window.__MK={state:mst,label:(d.market&&d.market.label)||''};   /* cc#1186: the ladder state
+     clause reads this — set before the render below, same payload, same composer as the chip */
+
+  const tiles=(S.global_tape&&S.global_tape.tiles)||[];
+  window.__TILES=tiles;   /* APP_QA_R5 P5: kept so the switch re-renders without a refetch */
+  const eodNote=S.global_tape&&S.global_tape.eod_note;
+  const lad=(S.ladders&&S.ladders.indexes)||[];
+  const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
+  const rep=S.reporting_today||{};
+  const wm=(S.what_moved&&S.what_moved.items)||[], ge=(S.global_events&&S.global_events.items)||[];
+  /* cc#1190: the results card now reads results_analysed. RA is a module-level global on purpose
+     — the tier chips re-render the deck on tap, outside this render pass, and they need the list.
+     yesterday_results is still ON the payload and still read by the WEB digest; this page simply
+     stopped being its consumer. */
+  RA = S.results_analysed || {};
+  const ra = RA, raT = ra.tally || {};
+  const raLatest = (ra.companies && ra.companies[0] && ra.companies[0].polished_ist) || '';
+
+  const bias=(mr.bias||'—').toUpperCase();
+  const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
+
+  /* cc#1190: the yrRows builder is DELETED with the card it fed. Its cc#1096 D3 BSE-code
+     resolution is not lost — result_analysis_v2 is keyed on NSE symbols, so there is no numeric
+     code to resolve on this deck. */
+
+  /* cc#1129: WHAT MOVED and GLOBAL EVENTS now use the shared row (scorr_news_row.js), the same
+     one /m/home's LIVE NEWS uses. The old row was a dot plus a wrapped headline in a plain box —
+     no category, no time, no hierarchy. The category comes from the SECTION, not from a per-row
+     field, because digest_v3._news queries one category at a time and the caller therefore knows
+     it exactly; nothing is inferred. Time-ago is computed from polished_news.published_time, the
+     POLISH time, which is what _news already selects — POLISH_LANDING_RULE, never published_at.
+     No chevron and no onclick: these rows do not open anything on this page, and an affordance
+     that leads nowhere is worse than none. Ordering is untouched — the payload arrives sorted on
+     polish time and is rendered in the order it arrives. */
+  /* cc#1239 · the two feeds are decks now, and the tap opens the polished piece in the sheet.
+     NW holds the rows so nwOpen can find one by index without re-reading the payload. */
+  NW.Domestic=wm; NW.Global=ge;
+  const newsRows=(items,cat)=>newsDeck(items,cat);
+
+  document.getElementById('app').innerHTML=`
+  <div class="card slab rail" style="--rc:${railC};margin-top:12px">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">MARKET READ</div>
+    <span class="skew" style="font-size:36px;line-height:.95">${esc(mr.bias||'—')}</span>
+    <div style="height:6px;width:150px;background:linear-gradient(90deg,var(--chalk),transparent);transform:skewX(-24deg);margin:6px 0 10px;opacity:.85"></div>
+    <div class="num" style="font-size:12px;color:var(--muted)">${(mr.support||[]).map(esc).join(' · ')||'—'}</div>
+  </div>
+
+  <div class="eyebrow">GLOBAL TAPE${S.global_tape&&S.global_tape.tier?' · '+esc(S.global_tape.tier):''}</div>
+  <div class="card slab">
+    <div class="ghd"><span style="font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted)">CHANGE</span>
+      <div class="gsw" id="gsw"><button type="button" data-v="day" class="on" onclick="setTapeMode('day')">DAY</button><button type="button" data-v="week" onclick="setTapeMode('week')">WEEK</button></div></div>
+    ${tiles.length?`<div id="gtiles" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
+    ${eodNote?`<div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">${esc(eodNote)}</div>`:''}
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · WEEK = close vs close 5 sessions back, from the payload · no history shows an em-dash, never 0</div>
+  </div>
+
+  <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
+  <div class="card slab">${lad.length?lad.map(ladder).join(''):'<div class="unavail">No ladder data.</div>'}
+    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+  </div>
+
+  <div class="eyebrow">INTERNALS</div>
+  <div class="card slab">
+    ${(()=>{const cards=[
+      intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
+                adr&&adr.adr!=null?(adr.adr>=1?'var(--volt)':'var(--heat)'):'var(--muted)',
+                null, itl.adr_stale)
+      /* cc#1250 · BREADTH A-D pane removed from this deck by founder order (23-Aug 18:32). It is
+         a DISPLAY removal and nothing else: adr.advances / adr.declines still arrive in the same
+         payload, the breadth series is still computed, still stored, and still served by
+         /api/digest/internals/series, and the web digest's Advance/Decline tile is untouched.
+         The pager needs no edit — DECKS.itrack is cards.length, so it counts what is actually
+         here and drops from four to three on its own. */
+      ].concat(pcr.slice(0,2).map(p=>intCard('pcr_'+String(p.underlying||'').toLowerCase(),
+                'PCR '+esc(p.underlying), p.pcr!=null?Number(p.pcr).toFixed(2):'—',
+                p.pcr!=null?(p.pcr>1?'var(--volt)':'var(--amber)'):'var(--muted)',
+                null, itl.pcr_stale)));
+      DECKS.itrack=cards.length;
+      const set=cards.join('');
+      /* three sets — see the continuous-swipe note on iWrap. The footer read line that sat under
+         the dots is REMOVED (founder ruling 22-Aug), and the .wk sub-lines went with it, so the
+         deck is the whole card now. */
+      return `<div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iWrap()">${set}${set}${set}</div><div class="idots" id="idots">${
+        Array.from({length:DECKS.itrack},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
+      }</div></div>`;})()}
+  </div>
+
+  <div class="eyebrow">REPORTING TODAY</div>
+  <div class="card slab">
+    <div class="grp"><h3>${rep.count!=null?rep.count+' companies':'—'}</h3><span class="note">TOP BY MARKET CAP</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:7px">
+      ${/* cc#1096 D3: label, never the raw ticker. The payload resolves a BSE-only reporter to its
+             company name server-side (digest_v3._label) and marks it is_symbol:false, so a bare
+             scrip code can no longer reach a chip. Falls back to the ticker only if an older
+             payload has no label at all. */''}
+      ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip"${c.is_symbol===false?' title="BSE-listed, no NSE symbol"':''}>${esc(c.label||c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
+      ${rep.count>6?`<span class="chip" style="color:var(--muted)">+${rep.count-6} more</span>`:''}</div>
+  </div>
+
+  <div class="eyebrow">LATEST RESULT ANALYSIS</div>
+  <div class="card slab">
+    <div class="grp"><h3>${raList().shown.length} of ${ra.total!=null?ra.total:'—'} analysed</h3>
+      <span class="note">${raTally(raT)}${raLatest?` · latest ${esc(raLatest)}`:''}</span></div>
+    <div id="rawrap">${raChips()}${raDeck()}</div>
+  </div>
+
+  <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
+  <div class="card slab">${newsRows(wm,'Domestic')}</div>
+
+  <div class="eyebrow">GLOBAL EVENTS</div>
+  <div class="card slab">${newsRows(ge,'Global')}</div>
+
+  <!-- cc#1234: this card's own .rail is REMOVED — it was the second green line. The Market Read
+       card above keeps the single, thicker sentiment bar. Nothing else changes here: the verdict
+       text, the bias word and its colour are untouched, and the bar took no layout space, so the
+       content sits exactly where it did. -->
+  <div class="card slab">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
+    <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+  </div>`;
+  fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
+  /* cc#1188: start each deck on the MIDDLE set, instantly, before its first paint — the user
+     never sees the parking move. cc#1190: two decks now, one call each. deckPark also refreshes
+     the dots, which is what the separate iDots() here used to do (cc#1121: the deck's nodes are
+     replaced on every render, so the dot handlers must be rebound). */
+  deckPark('itrack');
+  deckPark('rtrack');
+  /* cc#1239: the news decks park on the middle set like the other two, so the first swipe LEFT
+     wraps instead of hitting a wall. Guarded on DECKS because a feed with no rows renders the
+     empty state and has no track to park. */
+  if(DECKS.nwdtrack)deckPark('nwdtrack');
+  if(DECKS.nwgtrack)deckPark('nwgtrack');
+  loadInternals();
+}
+boot();
+</script>
+
+<!-- APP_QA_R4 P4 · 5-slot nav, variant A: nothing highlighted — /m/digest is a tool page. -->
+<nav class="as-nav">
+  <a class="as-bn" href="/m/home"><span>&#9703;</span>Home</a>
+  <a class="as-bn" href="/m/gvm"><span>&#9672;</span>GVM</a>
+  <a class="as-bn" href="/m/check"><span>&#9678;</span>Check</a>
+  <a class="as-bn" href="/m/intel"><span>&#9636;</span>Intel</a>
+  <a class="as-bn" href="/m/models"><span>&#9677;</span>Models</a>
+</nav>
+</body>
+</html>
