@@ -184,6 +184,19 @@
 let data = null;
 let currentSide = 'BUY';
 const AUTO_MS = 30000;
+// cc#1292: same embedded-check this file already runs at the bottom for hiding .model-nav.
+// #tc13Box only exists in the PARENT page (v8_dashboard.html #pane-tcscan) — never render the
+// jump button when this page is opened standalone (direct /intraday URL, not the iframe).
+const IS_EMBEDDED = (window.self !== window.top) || new URLSearchParams(location.search).has('embed');
+
+function jumpToTc13(){
+  try{
+    if (window.parent && window.parent !== window) {
+      var el = window.parent.document.getElementById('tc13Box');
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+  }catch(e){ /* chrome must never break the page under it */ }
+}
 
 function tick(){
   const ist = new Date(Date.now() + (5*60+30)*60000);
@@ -411,8 +424,18 @@ function renderPanel(side){
     + '<span class="mob-chip ' + (x.day_chg != null ? cls(x.day_chg) : '') + '">' + pct(x.day_chg) + '</span>'
     + '</div></div>').join('');
 
+  // cc#1292: jump button to the TC13 Open/Closed Positions box in the parent page. Same style as
+  // #otherStratBtn (cc#772). Only rendered when embedded — #tc13Box does not exist standalone.
+  const tc13JumpBtn = IS_EMBEDDED
+    ? '<button onclick="jumpToTc13()" title="Jump to TC13 Open &amp; Closed Positions"'
+      + ' style="margin:10px 0;font-family:var(--mono);font-size:11.5px;font-weight:600;'
+      + 'color:var(--mut);background:var(--panel2);border:1px solid var(--line2);border-radius:7px;'
+      + 'padding:5px 11px;cursor:pointer">TC13 Open/Closed &darr;</button>'
+    : '';
+
   return head + qualSection
        + '<div class="mob-cards">' + (qual.length ? mob : '<div class="empty">No qualified ' + side + ' signal</div>') + '</div>'
+       + tc13JumpBtn
        + missSection;
 }
 
