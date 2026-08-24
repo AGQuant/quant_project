@@ -31,12 +31,17 @@ First qualification per symbol/side/day LATCHES (UNIQUE constraint, ON
 CONFLICT DO NOTHING — never re-evaluated or overwritten same day).
 
 Cadence: every 15 min during market hours (shares the qb_intraday_mark slot).
-Position tracking: entry = futures CMP at the qualifying tick. target=+3%/
-SL=-3% from entry (SELL mirrored). Checked each subsequent 15-min tick vs
+Position tracking: entry = futures CMP at the qualifying tick. target=+2%/
+SL=-2% from entry (SELL mirrored). Checked each subsequent 15-min tick vs
 live futures LTP; an EOD sweep does one final check against the last
 available price so a touch between polls is not missed. Still-open positions
 after the EOD sweep remain exit_reason=OPEN (screener-only — no forced close,
 no paper engine).
+
+24-Aug-2026: TARGET_PCT/SL_PCT revised from 3% to 2% (founder request, chat
+session same date) to match the TC_SCANNER_CONFIG exit convention
+(tc_scanner_config.py: target_pct 2 / stop_pct -2) used by the sibling TC v4
+scanner, so the two "TC scanner" surfaces quote the same exit band.
 """
 
 import os
@@ -57,8 +62,8 @@ router = APIRouter()
 IST = ZoneInfo("Asia/Kolkata")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-TARGET_PCT = 0.03
-SL_PCT = 0.03
+TARGET_PCT = 0.02
+SL_PCT = 0.02
 
 # ── cc#465: named spec constants. The check functions below reference THESE
 # (never a bare literal), and /api/scanners/tc/spec renders the info-modal
@@ -107,7 +112,7 @@ def ensure_schema(cur):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tc_scanner_holds_date ON tc_scanner_holds(scan_date, side)")
 
 
-# ── 13-check evaluation ───────────────────────────────────────────────────
+# ── 13-check evaluation ──────────────────────────────────────────────────
 def _tc13_buy(row: dict, adr: Optional[float]) -> dict:
     cmp = _f(row.get("live_close"))
     pp, r1 = _f(row.get("pp")), _f(row.get("r1"))
@@ -184,10 +189,10 @@ def _target_sl(entry, side):
     return round(entry * (1 + TARGET_PCT), 2), round(entry * (1 - SL_PCT), 2)
 
 
-# ── scan + record (LATCH via UNIQUE, ON CONFLICT DO NOTHING) ────────────────
+# ── scan + record (LATCH via UNIQUE, ON CONFLICT DO NOTHING) ──────────────
 def run_scan():
-    """Full-universe scan, both sides. Records new qualifiers only — first
-    qualification per symbol/side/day latches (existing rows never overwritten)."""
+    """Full-universe scan, both sides. Records new qualifiers only —
+    first qualification per symbol/side/day latches (existing rows never overwritten)."""
     now = _ist_now()
     today = now.date()
     with _conn() as conn, conn.cursor() as cur:
@@ -287,7 +292,7 @@ def eod_sweep():
     return res
 
 
-# ── cc#465: info-modal spec, generated FROM the constants above ─────────────
+# ── cc#465: info-modal spec, generated FROM the constants above ──────────
 def _check_defs(side):
     """The 13 checks for one side, described using the ACTUAL live constants —
     never a hand-typed number, so this can never drift from the engine."""
@@ -335,7 +340,7 @@ def tc_scanner_spec():
     }
 
 
-# ── read endpoint ────────────────────────────────────────────────────────────
+# ── read endpoint ──────────────────────────────────────────────────────
 @router.get("/api/scanners/tc/holds")
 def tc_scanner_holds(date_: Optional[str] = None):
     """BUY + SELL, open + closed, for the page's two-table view. WR% + net pts computed here."""
