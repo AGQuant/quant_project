@@ -69,11 +69,11 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .n{border-color:#5A4218;background:#241D0E;color:var(--amber)}
 /* cc#1109: CLOSED is not a warning. The state chip was permanently amber, which read as
    "something needs attention" on every evening and all weekend. */
-.mu{border-color:var(--edge);background:var(--hi);color:var(--muted)}
+.mu{border-color:var(--edge);background:var(--hi);color:var(--chalk)}
 .grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-10);
  flex-wrap:wrap;gap:var(--space-2) var(--space-10)}
 .grp h3{font-family:'Archivo Black';font-size:var(--type-15);transform:skewX(-6deg);color:var(--chalk)}
-.grp .note{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px10);text-align:right}
+.grp .note{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--chalk);letter-spacing:var(--track-px10);text-align:right}
 /* cc#1111 item 1: the CMP note is one SENTENCE — "CMP 24,078 · LIVE · below PP 0.76%". As a bare
    flex item with no width control it wrapped wherever it ran out of room, and on a 390px screen
    that landed mid-phrase: "below PP" on one line and a naked "0.76%" on the next, disconnected
@@ -90,15 +90,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .tile{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-9);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
 /* APP_QA_R5 P5 · ref design_refs/scorr_digest_mobile_R2.html @ c77cae9.
    9.5px is the FLOOR — the tile label and the wk line were at 9px, which is the drift R2 names. */
-.tile .lb{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .lb{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tile .vv{font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-14);margin-top:var(--space-3)}
-.tile .wk{font-family:'JetBrains Mono';font-weight:700;font-size:var(--type-12);color:var(--muted);margin-top:var(--space-1)}
+.tile .wk{font-family:'JetBrains Mono';font-weight:700;font-size:var(--type-12);color:var(--chalk);margin-top:var(--space-1)}
 /* the DAY|WEEK switch — ref .gsw/.ghd, 52x30 chips, in-memory state, default DAY */
 .ghd{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-10)}
 .gsw{display:flex;gap:var(--space-3);background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-2);
  clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
 .gsw button{min-width:52px;min-height:30px;border:0;background:transparent;cursor:pointer;
- font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px14);color:var(--muted)}
+ font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-px14);color:var(--chalk)}
 .gsw button.on{background:var(--panel);color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .mrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-9) 0;border-top:var(--bw-1) solid var(--edge);font-size:var(--type-125)}
 .mrow:first-of-type{border-top:none}
@@ -113,7 +113,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:nowrap}
 .rchip{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden}
 .rchip{min-height:34px;padding:var(--space-5) var(--space-4);cursor:pointer;font-family:'JetBrains Mono';font-size:var(--type-10);
- font-weight:800;letter-spacing:var(--track-px12);color:var(--muted);background:var(--hi);
+ font-weight:800;letter-spacing:var(--track-px12);color:var(--chalk);background:var(--hi);
  border:var(--bw-1) solid var(--edge);clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 .rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .rchip .num{color:var(--chalk);font-weight:800}
@@ -145,7 +145,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rmain{grid-column:1;grid-row:1;min-width:0}
 .rtop{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
 .rtop b{font-size:var(--type-14);white-space:nowrap}
-.rq{font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px9);white-space:nowrap}
+.rq{font-size:var(--type-9);color:var(--chalk);letter-spacing:var(--track-px9);white-space:nowrap}
 .rt{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-px11);color:var(--aqua);
  font-family:'JetBrains Mono';white-space:nowrap}
 /* cc#1255 · THE VERDICT PILL AND ITS RULES ARE DELETED, not left orphaned. RESULT_ROW_DOTS_ONLY
@@ -166,7 +166,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rtdot.ct{background:var(--amber)}
 .rtdot.dn{background:var(--heat)}
 /* the sheet's one-line note when only one of the two checks could be computed */
-.rbasis{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-8);line-height:1.5}
+.rbasis{font-size:var(--type-95);color:var(--chalk);margin-top:var(--space-8);line-height:1.5}
 /* The verdict is one sentence but the source is prose and the longest measured is 987 characters,
    so it is clamped to two lines. Unclamped, one long row would push the other three off its page
    and the "4 rows per page" the card asks for would quietly stop being true.
@@ -175,7 +175,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    row width to itself, so one line carries as much text as two used to and every row on a page is
    now the same height — which is what stops the "summary cut mid-word" reading, because the clamp
    ends at a line boundary rather than at whatever the flex box happened to leave. */
-.rv{grid-column:1 / -1;grid-row:2;font-size:var(--type-11);line-height:1.45;color:var(--muted);
+.rv{grid-column:1 / -1;grid-row:2;font-size:var(--type-11);line-height:1.45;color:var(--chalk);
  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 /* cc#1255 · TWO LINES, using the space the verdict pill vacated. The sentence stopped being a
    caption under a headline word and became the row's actual content, so one line was no longer
@@ -196,7 +196,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    className on every child of the dots element, so a label inside it would be turned into a dot. */
 .rpager{display:flex;align-items:center;justify-content:center;gap:var(--space-8)}
 .rpager .idots{margin-top:0}
-.rplbl{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);
+.rplbl{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--chalk);
  letter-spacing:var(--track-px12);white-space:nowrap}
 /* ── cc#1190 scope 3/4 · THE SHEET ───────────────────────────────────────────────────────────
    MIRRORS /m/home's news sheet — same veil, same 78vh ceiling, same grab handle, same slide-up,
@@ -217,14 +217,14 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rshd{padding:var(--space-4) var(--space-18) var(--space-10);border-bottom:var(--bw-1) solid var(--edge);flex:none}
 .rshd .sy{font-family:'Archivo Black';font-size:var(--type-17);transform:skewX(-6deg);display:inline-block}
 .rshd .co{font-size:var(--type-125);color:var(--chalk);margin-top:var(--space-2)}
-.rshd .meta{font-family:'JetBrains Mono';font-size:var(--type-95);letter-spacing:var(--track-px10);color:var(--muted);
+.rshd .meta{font-family:'JetBrains Mono';font-size:var(--type-95);letter-spacing:var(--track-px10);color:var(--chalk);
  margin-top:var(--space-5);display:flex;gap:var(--space-8);flex-wrap:wrap}
 .rsb{overflow-y:auto;padding:var(--space-12) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
 .rsp{font-size:var(--type-13);line-height:1.6;color:var(--chalk);margin-bottom:var(--space-10)}
 .rsp.hd{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-px15);
  color:var(--aqua);margin:var(--space-16) 0 var(--space-6)}
 .rsx{min-width:44px;min-height:44px;position:absolute;right:8px;top:6px;background:none;border:0;
- color:var(--muted);font-size:var(--type-22);cursor:pointer;line-height:1}
+ color:var(--chalk);font-size:var(--type-22);cursor:pointer;line-height:1}
 /* the peers button takes the page's own bevel language — .chip is what every other tappable
    thing here uses, at full width and tap height */
 .rpeer{display:block;width:100%;box-sizing:border-box;min-height:44px;margin:var(--space-14) 0 var(--space-4);
@@ -232,12 +232,12 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  letter-spacing:var(--track-px15);color:var(--aqua);background:var(--hi);border:var(--bw-1) solid var(--aqua);
  clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .rptab{width:100%;border-collapse:collapse;margin-top:var(--space-10);font-family:'JetBrains Mono';font-size:var(--type-10)}
-.rptab th{text-align:right;padding:var(--space-5) var(--space-4);color:var(--muted);font-size:var(--type-85);letter-spacing:var(--track-px10);
+.rptab th{text-align:right;padding:var(--space-5) var(--space-4);color:var(--chalk);font-size:var(--type-85);letter-spacing:var(--track-px10);
  border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}
 .rptab th:first-child,.rptab td:first-child{text-align:left}
 .rptab td{text-align:right;padding:var(--space-7) var(--space-4);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}
 .rptab tr.self td{background:var(--hi);color:var(--chalk);font-weight:800}
-.rptab tr.un td{color:var(--muted);opacity:.65}
+.rptab tr.un td{color:var(--chalk);opacity:.65}
 .rptab tr.tap{cursor:pointer}
 .rpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 /* cc#1309: the only markup that ever carried .rfoot (the VIEW DETAIL footer) is removed from
@@ -254,7 +254,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 .sdot{width:7px;height:7px;border-radius:50%;flex:none}
 .plink{color:var(--pulse);font-weight:700;font-size:var(--type-125);text-decoration:none}
-.foot{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px8);margin:var(--space-6) var(--space-18) var(--space-20)}
+.foot{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--chalk);letter-spacing:var(--track-px8);margin:var(--space-6) var(--space-18) var(--space-20)}
 /* cc#1096 R7-D2 · THE PIVOT ROW COULD NOT HOLD ITS COLUMNS. Founder frame 1:44: BANKNIFTY read
    56,69757,09457,55557,952 as one string, with the last value clipped mid-digit at the card edge.
 
@@ -400,7 +400,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .ptick.s{stroke:var(--heat)}
 .ptick.r{stroke:var(--volt)}
 .ptick.pp{stroke:var(--amber);fill:var(--amber)}
-.plab{font-family:'JetBrains Mono',monospace;font-size:7.6px;letter-spacing:.02em;fill:var(--muted)}
+.plab{font-family:'JetBrains Mono',monospace;font-size:7.6px;letter-spacing:.02em;fill:var(--chalk)}
 .pval{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:8.6px;fill:var(--chalk)}
 .pval.pp{fill:var(--amber)}
 .plab.cmp,.pval.cmp{fill:var(--aqua)}
@@ -415,7 +415,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 @keyframes pBlinkG{0%,100%{opacity:1}50%{opacity:.55}}
 @keyframes pBlinkR{0%,100%{opacity:1}50%{opacity:.55}}
 @media (prefers-reduced-motion:reduce){.pdot.grn,.pdot.red{animation:none}}
-.pdaylbl{font-family:'JetBrains Mono',monospace;font-size:7.6px;fill:var(--muted)}
+.pdaylbl{font-family:'JetBrains Mono',monospace;font-size:7.6px;fill:var(--chalk)}
 .pdaydot{fill:var(--muted)}
 .pdaystem{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 2;opacity:.55}
 /* cc#1126 · the digest header's second row. PAGE-SCOPED under .dg-hdr: scorr_appshell.css is
@@ -435,7 +435,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    string; "the morning read" is the decorative half and is the part that goes. */
 .dg-sub .s{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dg-sub .as-slot{flex:none;margin-left:auto}
-.unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
+.unavail{font-size:var(--type-11);color:var(--chalk);font-family:'JetBrains Mono'}
 /* cc#1121 · the INTERNALS deck. Same mechanism as mobile/home.html's hero deck — a scroll-snap
    flex track and a dot row — so the swipe feels identical to the one already on Home rather than
    being a second implementation with its own quirks. align-items:flex-start for the reason spelled
@@ -447,7 +447,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .ic{flex:0 0 100%;min-width:0;scroll-snap-align:center;background:var(--hi);border:var(--bw-1) solid var(--edge);
  padding:var(--space-14) var(--space-15) var(--space-13);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .ichd{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8)}
-.ichd .lb{font-family:'JetBrains Mono';font-size:var(--type-105);letter-spacing:var(--track-px15);color:var(--muted)}
+.ichd .lb{font-family:'JetBrains Mono';font-size:var(--type-105);letter-spacing:var(--track-px15);color:var(--chalk)}
 .ibars{font-family:'JetBrains Mono';font-size:var(--type-85);letter-spacing:var(--track-px9);color:var(--dim,var(--muted));white-space:nowrap}
 /* cc#1188: the value is the headline of the card and now sizes like one; the 86A/120D sub-line is
    REMOVED by founder ruling (22-Aug) — the split lives in the ADR maths, not on the face. */
@@ -467,7 +467,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .ixt{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
  font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px9);
  color:var(--dim,var(--muted))}
-.ixt.d{color:var(--muted)}          /* a day boundary reads a shade stronger than a time inside one */
+.ixt.d{color:var(--chalk)}          /* a day boundary reads a shade stronger than a time inside one */
 .ixt.lo{transform:none;left:0}      /* clamped so an edge tick cannot hang off the card */
 .ixt.hi{transform:none;left:auto;right:0}
 .idots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
@@ -668,7 +668,7 @@ function ladder(ix){
      CAS) prints, muted. One composer, no second clock, and the card can no longer disagree with
      the chip above it. */
   const mk=window.__MK||{};
-  const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--muted)">${esc(mk.label||'')}</span>`;
+  const stTxt=mk.state==='OPEN'?esc(ix.tier||''):`<span style="color:var(--chalk)">${esc(mk.label||'')}</span>`;
   return `<div class="lad-ix"><div class="grp"><h3>${esc(ix.symbol)}</h3>
     <span class="note"><span class="cl">${stTxt}</span> · ${sideTxt}</span></div>
     <svg class="pline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${svg}</svg></div>`;
@@ -858,7 +858,7 @@ function raTally(t){
   var s = '<b style="color:var(--volt)">' + b + ' beat both</b>'
         + ' · <b style="color:var(--amber)">' + o + ' beat one</b>'
         + ' · <b style="color:var(--heat)">' + x + ' beat neither</b>';
-  if (nd && nd * 20 >= (b + o + x + nd)) s += ' · <b style="color:var(--muted)">' + nd + ' no dot</b>';
+  if (nd && nd * 20 >= (b + o + x + nd)) s += ' · <b style="color:var(--chalk)">' + nd + ' no dot</b>';
   return s;
 }
 /* cc#1310 — result date capsule, shown next to quarter/tier on every card in this list. Reads
@@ -1012,7 +1012,7 @@ function nwOpen(cat,i){
   if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
   var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
     t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
-    || '<div class="rsp" style="color:var(--muted)">No polished body on this item.</div>';
+    || '<div class="rsp" style="color:var(--chalk)">No polished body on this item.</div>';
   var chips=(n.symbols||[]).map(function(x){
     return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
   return '<div class="rgrab"></div>'
@@ -1083,7 +1083,7 @@ function sheetPaint(build, minimal){
         + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
         + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'
         + (minimal||'This item could not be opened.') + '</div></div>'
-        + '<div class="rsb"><div class="rsp" style="color:var(--muted)">'
+        + '<div class="rsb"><div class="rsp" style="color:var(--chalk)">'
         + 'The detail failed to render. Nothing is invented in its place.</div></div>';
       return false;
     }catch(e2){ raClose(); return false; }
@@ -1152,21 +1152,21 @@ function raBeatMissBlock(pc){
   var html='<div style="margin:var(--space-10) 0;font-size:var(--type-12)"><div style="color:var(--aqua);font-family:JetBrains Mono;font-weight:700;margin-bottom:var(--space-5)">vs top 3 peers</div>';
   if(pc.sales){
     html+='<div style="margin-bottom:var(--space-4)">Sales: <span style="color:var(--chalk)">'+esc(pc.sales.stock==null?'—':pc.sales.stock.toFixed(1))+'%'
-      +'</span> <span class="pchip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
+      +'</span> <span class="pchip '+(pc.sales.beat?'w':'l')+'">'+esc(pc.sales.beat?'BEAT':'MISS')+'</span> <span style="color:var(--chalk)">vs '+esc(pc.sales.peer==null?'—':pc.sales.peer.toFixed(1)+'%')+'</span></div>';
   }
   if(pc.profit){
     html+='<div>PAT: <span style="color:var(--chalk)">'+esc(pc.profit.stock==null?'—':pc.profit.stock.toFixed(1))+'%'
-      +'</span> <span class="pchip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--muted)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
+      +'</span> <span class="pchip '+(pc.profit.beat?'w':'l')+'">'+esc(pc.profit.beat?'BEAT':'MISS')+'</span> <span style="color:var(--chalk)">vs '+esc(pc.profit.peer==null?'—':pc.profit.peer.toFixed(1)+'%')+'</span></div>';
   }
   if(pc.peer_basis){
-    html+='<div style="font-size:var(--type-95);color:var(--muted);margin-top:var(--space-5)">'+esc(pc.peer_basis)+'</div>';
+    html+='<div style="font-size:var(--type-95);color:var(--chalk);margin-top:var(--space-5)">'+esc(pc.peer_basis)+'</div>';
   }
   html+='</div>';
   return html;
 }
 function raFullSheetHtml(d){
   if(d.error)return'<div class="rsp" style="color:var(--heat)">'+esc(d.error)+'</div>';
-  if(!d.symbol)return'<div class="rsp" style="color:var(--muted)">No result data.</div>';
+  if(!d.symbol)return'<div class="rsp" style="color:var(--chalk)">No result data.</div>';
 
   var html='';
   /* RESULT DATE */
@@ -1177,7 +1177,7 @@ function raFullSheetHtml(d){
      snapshot struck the dot. Dotless symbols (no snapshot survives) print nothing here — the
      rule is silence over a fabricated basis, never an empty-state placeholder. */
   if(d.result_dot && d.result_dot.dot && d.result_dot.snapshot_date){
-    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-10);color:var(--muted);margin-top:2px">'
+    html+='<div class="rsp" style="font-family:JetBrains Mono;font-size:var(--type-10);color:var(--chalk);margin-top:2px">'
       +'vs its own expected quarter (estimate of '+esc(d.result_dot.snapshot_date)+')</div>';
   }
 
@@ -1190,22 +1190,22 @@ function raFullSheetHtml(d){
     if(l1.sales){
       var s=l1.sales;
       html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--volt);min-width:8px;height:8px;border-radius:50%;background:var(--volt)"></span>'
-        +'<span>Sales: <span style="color:var(--chalk)">'+esc(s.value==null?'—':s.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(s.yoy)+'% QoQ '+raFormat(s.qoq)+'%</span></span></div>';
+        +'<span>Sales: <span style="color:var(--chalk)">'+esc(s.value==null?'—':s.value.toFixed(0))+'</span> <span style="color:var(--chalk)">YoY '+raFormat(s.yoy)+'% QoQ '+raFormat(s.qoq)+'%</span></span></div>';
     }
     if(l1.pat){
       var p=l1.pat;
       html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--aqua);min-width:8px;height:8px;border-radius:50%;background:var(--aqua)"></span>'
-        +'<span>PAT: <span style="color:var(--chalk)">'+esc(p.value==null?'—':p.value.toFixed(0))+'</span> <span style="color:var(--muted)">YoY '+raFormat(p.yoy)+'% QoQ '+raFormat(p.qoq)+'%</span></span></div>';
+        +'<span>PAT: <span style="color:var(--chalk)">'+esc(p.value==null?'—':p.value.toFixed(0))+'</span> <span style="color:var(--chalk)">YoY '+raFormat(p.yoy)+'% QoQ '+raFormat(p.qoq)+'%</span></span></div>';
     }
     if(l1.margin){
       var m=l1.margin;
       html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6);font-size:var(--type-12)"><span style="color:var(--heat);min-width:8px;height:8px;border-radius:50%;background:var(--heat)"></span>'
-        +'<span>'+esc(m.label||'Margins')+': <span style="color:var(--chalk)">'+esc(m.now==null?'—':m.now.toFixed(1)+'%')+'</span> <span style="color:var(--muted)">'+(m.pp!=null?(m.pp>0?'+':'')+m.pp.toFixed(1)+'pp vs LY':'—')+'</span></span></div>';
+        +'<span>'+esc(m.label||'Margins')+': <span style="color:var(--chalk)">'+esc(m.now==null?'—':m.now.toFixed(1)+'%')+'</span> <span style="color:var(--chalk)">'+(m.pp!=null?(m.pp>0?'+':'')+m.pp.toFixed(1)+'pp vs LY':'—')+'</span></span></div>';
     }
     if(l1.valuation){
       var v=l1.valuation;
       html+='<div style="display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8);font-size:var(--type-12)"><span style="color:var(--pulse);min-width:8px;height:8px;border-radius:50%;background:var(--pulse)"></span>'
-        +'<span>PE: <span style="color:var(--chalk)">'+esc(v.pe==null?'—':v.pe.toFixed(1))+'</span> <span style="color:var(--muted)">industry '+esc(v.industry_pe==null?'—':v.industry_pe.toFixed(1))+'</span></span></div>';
+        +'<span>PE: <span style="color:var(--chalk)">'+esc(v.pe==null?'—':v.pe.toFixed(1))+'</span> <span style="color:var(--chalk)">industry '+esc(v.industry_pe==null?'—':v.industry_pe.toFixed(1))+'</span></span></div>';
     }
 
     /* Peer BEAT/MISS block */
@@ -1215,7 +1215,7 @@ function raFullSheetHtml(d){
     if(d.expectations){
       var e=d.expectations;
       if(e.sales||e.profit){
-        html+='<div style="font-size:var(--type-11);color:var(--muted);margin-top:var(--space-10)">vs est. <span style="color:var(--chalk)">'+
+        html+='<div style="font-size:var(--type-11);color:var(--chalk);margin-top:var(--space-10)">vs est. <span style="color:var(--chalk)">'+
           (e.sales?' Sales '+esc(e.sales.tag)+' '+e.sales.dev_pct+'%':'')+(e.sales&&e.profit?' · ':'')+
           (e.profit?' Profit '+esc(e.profit.tag)+' '+e.profit.dev_pct+'%':'')+'</span></div>';
       }
@@ -1227,7 +1227,7 @@ function raFullSheetHtml(d){
   if(d.l1){
     html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">QUARTER '+esc(d.l1.quarter_label||'')+'</div>';
     if(d.auto_verdict){
-      html+='<div class="rsp" style="color:var(--muted);margin-bottom:var(--space-10)">'+esc(d.auto_verdict)+'</div>';
+      html+='<div class="rsp" style="color:var(--chalk);margin-bottom:var(--space-10)">'+esc(d.auto_verdict)+'</div>';
     }
     if(d.l1.sales){
       html+='<div style="display:flex;justify-content:space-between;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--edge);font-size:var(--type-12)"><span>Sales</span><span style="color:var(--chalk)">'+esc(d.l1.sales.value==null?'—':d.l1.sales.value.toFixed(0))+'</span></div>';
@@ -1266,7 +1266,7 @@ function raFullSheetHtml(d){
     d.polished_news.slice(0,10).forEach(function(n,i){
       html+='<div class="rsp" style="margin-bottom:var(--space-10);cursor:pointer" onclick="raNewsToggle('+i+')">'
         + '<div style="color:var(--chalk);font-weight:600;font-size:var(--type-12);line-height:1.4;margin-bottom:var(--space-4)">'+esc(n.headline)+'</div>'
-        + '<div id="rn-body-'+i+'" style="color:var(--muted);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(raNewsTeaser(n))+'</div>'
+        + '<div id="rn-body-'+i+'" style="color:var(--chalk);font-size:var(--type-11);line-height:1.4;margin-bottom:var(--space-4)">'+esc(raNewsTeaser(n))+'</div>'
         + (n.category?'<span class="pchip mu">'+esc(n.category)+'</span>':'')
         + '</div>';
     });
@@ -1282,7 +1282,7 @@ function raPaint(r,d){
      second paint is swallowed by the promise chain, which is precisely how a veil ends up over a
      sheet still saying Loading with nothing more ever coming. */
   sheetPaint(function(){
-  var bodyHtml = (d && Object.keys(d).length) ? raFullSheetHtml(d) : '<div class="rsp" style="color:var(--muted)">Loading…</div>';
+  var bodyHtml = (d && Object.keys(d).length) ? raFullSheetHtml(d) : '<div class="rsp" style="color:var(--chalk)">Loading…</div>';
   var q=(d&&d.quarter)||r.quarter||'', when=r.polished_ist||'';
   var back=RA_SEEN.length?'<button class="rsx" style="left:8px;right:auto" onclick="raBack()" '
       + 'aria-label="back">&#8592;</button>':'';
@@ -1310,9 +1310,9 @@ function raPeerBlock(r){
   if(!RA_PSHOW)
     return '<button class="rpeer" onclick="raPeerToggle()">SEE '+esc(r.segment.toUpperCase())+' PEERS</button>';
   var out='<button class="rpeer" onclick="raPeerToggle()">HIDE PEERS</button>';
-  if(RA_PEERS==='loading')return out+'<div class="rsp" style="color:var(--muted)">Loading peers…</div>';
+  if(RA_PEERS==='loading')return out+'<div class="rsp" style="color:var(--chalk)">Loading peers…</div>';
   if(!RA_PEERS||!RA_PEERS.peers||!RA_PEERS.peers.length)
-    return out+'<div class="rsp" style="color:var(--muted)">No segment peer has reported yet.</div>';
+    return out+'<div class="rsp" style="color:var(--chalk)">No segment peer has reported yet.</div>';
   var rows=RA_PEERS.peers.map(function(p){
     var cls=(p.is_self?'self ':'')+(p.reported?'tap':'un');
     if(!p.reported)
@@ -1694,24 +1694,24 @@ async function boot(){
 
   document.getElementById('app').innerHTML=`
   <div class="card slab rail" style="--rc:${railC};margin-top:12px">
-    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">MARKET READ</div>
+    <div style="font-size:10px;letter-spacing:2px;color:var(--chalk);margin-bottom:6px">MARKET READ</div>
     <span class="skew" style="font-size:36px;line-height:.95">${esc(mr.bias||'—')}</span>
     <div style="height:6px;width:150px;background:linear-gradient(90deg,var(--chalk),transparent);transform:skewX(-24deg);margin:6px 0 10px;opacity:.85"></div>
-    <div class="num" style="font-size:12px;color:var(--muted)">${(mr.support||[]).map(esc).join(' · ')||'—'}</div>
+    <div class="num" style="font-size:12px;color:var(--chalk)">${(mr.support||[]).map(esc).join(' · ')||'—'}</div>
   </div>
 
   <div class="eyebrow">GLOBAL TAPE${S.global_tape&&S.global_tape.tier?' · '+esc(S.global_tape.tier):''}</div>
   <div class="card slab">
-    <div class="ghd"><span style="font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--muted)">CHANGE</span>
+    <div class="ghd"><span style="font-family:'JetBrains Mono';font-size:10.5px;font-weight:700;letter-spacing:1.2px;color:var(--chalk)">CHANGE</span>
       <div class="gsw" id="gsw"><button type="button" data-v="day" class="on" onclick="setTapeMode('day')">DAY</button><button type="button" data-v="week" onclick="setTapeMode('week')">WEEK</button></div></div>
     ${tiles.length?`<div id="gtiles" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
     ${eodNote?`<div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">${esc(eodNote)}</div>`:''}
-    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · WEEK = close vs close 5 sessions back, from the payload · no history shows an em-dash, never 0</div>
+    <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · WEEK = close vs close 5 sessions back, from the payload · no history shows an em-dash, never 0</div>
   </div>
 
   <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
   <div class="card slab">${lad.length?lad.map(ladder).join(''):'<div class="unavail">No ladder data.</div>'}
-    <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+    <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>
 
   <div class="eyebrow">INTERNALS</div>
@@ -1749,7 +1749,7 @@ async function boot(){
              scrip code can no longer reach a chip. Falls back to the ticker only if an older
              payload has no label at all. */''}
       ${(rep.companies||[]).slice(0,6).map(c=>`<span class="chip"${c.is_symbol===false?' title="BSE-listed, no NSE symbol"':''}>${esc(c.label||c.ticker)}</span>`).join('')||'<span class="unavail">No scheduled reporters today.</span>'}
-      ${rep.count>6?`<span class="chip" style="color:var(--muted)">+${rep.count-6} more</span>`:''}</div>
+      ${rep.count>6?`<span class="chip" style="color:var(--chalk)">+${rep.count-6} more</span>`:''}</div>
   </div>
 
   <div class="eyebrow">LATEST RESULT ANALYSIS</div>
@@ -1770,7 +1770,7 @@ async function boot(){
        text, the bias word and its colour are untouched, and the bar took no layout space, so the
        content sits exactly where it did. -->
   <div class="card slab">
-    <div style="font-size:10px;letter-spacing:2px;color:var(--muted);margin-bottom:6px">THE CLOSE OF THE READ</div>
+    <div style="font-size:10px;letter-spacing:2px;color:var(--chalk);margin-bottom:6px">THE CLOSE OF THE READ</div>
     <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
   fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
