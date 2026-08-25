@@ -118,6 +118,14 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .rchip .num{color:var(--chalk);font-weight:800}
 .rchip.on .num{color:var(--aqua)}
+/* cc#1321 · WHAT MOVED chips reuse .rchip verbatim (same visual language as RA_TIERS, per the
+   card) but WRAP instead of squeezing five chips into one nowrap row — RA_TIERS only ever has
+   four short words (ALL/LARGE/MID/SMALL) and fits one line; this set can carry five including
+   "AI Editorial" and "Stock Views", which clipped unreadably under the shared .rchip's flex:1
+   nowrap sizing. Scoped as a descendant override so the bare .rchip/.rchips RA_TIERS uses is
+   untouched. */
+.wmchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:wrap}
+.wmchips .rchip{flex:0 0 auto;min-width:0}
 /* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
    that count, not guessed: without it a final short page collapses and the deck jumps height
    mid-swipe, which reads as a broken carousel rather than a short page. */
@@ -812,6 +820,39 @@ function rWrap(){ deckWrap('rtrack','rdots'); raPagerLabel(deckDots('rtrack','rd
 var RA=null, RA_TIER='ALL', RA_PAGES=0;
 var RA_PAGE=4, RA_MAX=20;
 var RA_TIERS=['ALL','LARGE','MID','SMALL'];
+
+/* ── cc#1321 · WHAT MOVED chip filter ─────────────────────────────────────────────────────────
+   Same pattern as RA_TIER/raList/raChips above and mobile/intel.html's chipsHtml (cc#1001):
+   server sends the combined feed plus per-category counts once, ALL chips filter client-side over
+   what already loaded. WM_CATS is the founder's exact order, not count-sorted like Intel -- a chip
+   with a zero count for today still doesn't render, same as Intel, but the order among the
+   nonzero ones is fixed rather than ranked. */
+var WM=null, WM_CAT='ALL';
+var WM_CATS=['Domestic','AI Editorial','IPO','Stock Views'];
+
+function wmList(){
+  var all=(WM&&WM.items)||[];
+  return (WM_CAT==='ALL')?all:all.filter(function(n){return n.category===WM_CAT;});
+}
+function wmChips(){
+  var cc=(WM&&WM.category_counts)||{};
+  var total=(WM&&WM.items&&WM.items.length)||0;
+  var cats=[{t:'ALL',n:total}].concat(WM_CATS.filter(function(c){return cc[c]>0;})
+    .map(function(c){return {t:c,n:cc[c]};}));
+  return '<div class="wmchips">'+cats.map(function(c){
+    return '<button class="rchip'+(c.t===WM_CAT?' on':'')+'" onclick="wmPick(\''+esc(c.t).replace(/'/g,"\\'")+'\')">'
+         + esc(c.t)+' <span class="num">'+c.n+'</span></button>';
+  }).join('')+'</div>';
+}
+function wmPick(cat){
+  WM_CAT=cat;
+  var host=document.getElementById('wmwrap');
+  if(!host)return;
+  var filtered=wmList();
+  NW.Domestic=filtered;
+  host.innerHTML=wmChips()+newsDeck(filtered,'Domestic');
+  deckPark('nwdtrack');
+}
 
 function raList(){
   var all=(RA&&RA.companies)||[];
@@ -1662,7 +1703,11 @@ async function boot(){
   const lad=(S.ladders&&S.ladders.indexes)||[];
   const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
   const rep=S.reporting_today||{};
-  const wm=(S.what_moved&&S.what_moved.items)||[], ge=(S.global_events&&S.global_events.items)||[];
+  /* cc#1321: WM is a module-level global for the same reason RA is below -- wmPick() re-renders
+     the chip row outside this render pass and needs the loaded set. what_moved (Domestic-only) is
+     untouched and still feeds nothing on this page; what_moved_all is the new combined key. */
+  WM=S.what_moved_all||{items:[],category_counts:{}};
+  const ge=(S.global_events&&S.global_events.items)||[];
   /* cc#1190: the results card now reads results_analysed. RA is a module-level global on purpose
      — the tier chips re-render the deck on tap, outside this render pass, and they need the list.
      yesterday_results is still ON the payload and still read by the WEB digest; this page simply
@@ -1689,7 +1734,10 @@ async function boot(){
      polish time and is rendered in the order it arrives. */
   /* cc#1239 · the two feeds are decks now, and the tap opens the polished piece in the sheet.
      NW holds the rows so nwOpen can find one by index without re-reading the payload. */
-  NW.Domestic=wm; NW.Global=ge;
+  /* cc#1321: NW.Domestic now holds whatever the active chip filters to (default ALL = every
+     category combined), not literally Domestic-only rows any more -- the key name is unchanged so
+     nwOpen('Domestic', i)'s existing lookup keeps working without touching that function. */
+  NW.Domestic=wmList(); NW.Global=ge;
   const newsRows=(items,cat)=>newsDeck(items,cat);
 
   document.getElementById('app').innerHTML=`
@@ -1759,8 +1807,8 @@ async function boot(){
     <div id="rawrap">${raChips()}${raDeck()}</div>
   </div>
 
-  <div class="eyebrow">WHAT MOVED · DOMESTIC</div>
-  <div class="card slab">${newsRows(wm,'Domestic')}</div>
+  <div class="eyebrow">WHAT MOVED</div>
+  <div class="card slab"><div id="wmwrap">${wmChips()}${newsRows(NW.Domestic,'Domestic')}</div></div>
 
   <div class="eyebrow">GLOBAL EVENTS</div>
   <div class="card slab">${newsRows(ge,'Global')}</div>

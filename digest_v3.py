@@ -371,6 +371,43 @@ def _reporting_today(cur) -> Dict[str, Any]:
                      if rows else "No scheduled reporters today.")}
 
 
+# cc#1321: WHAT MOVED chip filter, mobile digest only. Domestic/AI Editorial/IPO/Stock Views --
+# founder's exact list, verbatim. GLOBAL is deliberately excluded here: global_events already has
+# its own separate section on the same page, and mixing it in would double-count it under a chip.
+# "Stock Views" (plural) is the real polished_news.category value -- confirmed live (5 rows/60d)
+# and confirmed in code: news_endpoints.py's own comment says AI Editorial and Stock Views "ride
+# the same stream, tagged" as ordinary headline+summary articles. It is NOT the separate ranked-list
+# stock_views_shortlist pipeline (STOCK_VIEWS_FRAMEWORK_V1) -- that pipeline's output never lands in
+# polished_news, so there is no ranked-list shape to reconcile here; a Stock Views row from _news()
+# renders through the exact same card template as every other category.
+_WHAT_MOVED_CATEGORIES = ["Domestic", "AI Editorial", "IPO", "Stock Views"]
+
+
+def _what_moved_all(cur, limit_per_cat: int = 20) -> Dict[str, Any]:
+    """Combined WHAT MOVED feed across all four categories, each row carrying its own `category`
+    so the client can filter, plus category_counts for the chip labels -- the same convention
+    mobile/intel.html already ships (cc#1001's category_counts + tagged-item pattern), not a
+    second implementation of the same idea.
+
+    A NEW key, not a change to `what_moved` -- scorr_digest_v3.html's secNews() reads
+    what_moved.items and its own cc#1239 comment pins it to "same six items, same order, same
+    everything" as the app. Mixing in AI Editorial/IPO/Stock Views there would silently change
+    what the web digest's WHAT MOVED section shows, which nothing asked for. This card's chips are
+    mobile-only, so they get their own key and `what_moved` stays exactly as it always has.
+    """
+    items, counts = [], {}
+    for cat in _WHAT_MOVED_CATEGORIES:
+        rows = _news(cur, cat, limit_per_cat)
+        counts[cat] = len(rows)
+        for r in rows:
+            r["category"] = cat
+        items.extend(rows)
+    # one combined feed reads chronologically, not grouped by category -- the per-category limit
+    # above still applies per category, so a quiet category cannot crowd out a busy one.
+    items.sort(key=lambda r: r["published"] or "", reverse=True)
+    return {"items": items, "category_counts": counts, "tier": "LIVE"}
+
+
 def _news(cur, category: str, limit: int = 20) -> List[Dict[str, Any]]:
     # cc#853: sentiment added so the R3 news rows can carry their .sdot colour and .nsent label.
     # It is READ from polished_news, never inferred here — the column is populated but its
@@ -828,6 +865,9 @@ def build_digest(cur) -> Dict[str, Any]:
             "internals": internals,
             "reporting_today": _reporting_today(cur),
             "what_moved": {"items": _news(cur, "Domestic"), "tier": "LIVE"},
+            # cc#1321: mobile-only combined feed for the new chip filter -- see _what_moved_all's
+            # own docstring for why this is a new key and not a change to what_moved above.
+            "what_moved_all": _what_moved_all(cur),
             "global_events": {"items": _news(cur, "Global"), "tier": "LIVE"},
             "yesterday_results": _yesterday_results(cur, prev_trading),
             # cc#1190: ADDED beside yesterday_results, not in place of it. The web digest reads
