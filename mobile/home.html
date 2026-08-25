@@ -56,7 +56,7 @@ body[data-theme]{
 .tswitch{display:flex;gap:var(--space-4);background:var(--panel);border:var(--bw-1) solid var(--line2);padding:var(--space-3);
   clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:var(--type-13);
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--mut);line-height:1}
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--txt,#E9EEFB);line-height:1}
 .tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
 
 /* ══ APP_QA_R5 P2 · GOLD NIGHT RAISED SCALE ═══════════════════════════════════════════════════
@@ -196,7 +196,7 @@ body[data-theme]{
 @media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
 .tk{flex:none;display:flex;align-items:baseline;gap:var(--space-6);padding:var(--space-4) var(--space-9);border-radius:var(--radius-8);
   background:var(--panel);border:var(--bw-1) solid var(--line)}
-.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--txt,#E9EEFB);text-transform:uppercase;white-space:nowrap}
 .tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:700;white-space:nowrap}
 /* cc#1123: volatility's neutral tier on the tape. #FF9F45 is not a new amber — it is the exact
    value this page already gives an index NAME (.ibk-id .sym below, cc#1158) and the
@@ -226,7 +226,7 @@ body[data-theme]{
   height:40px;transform:translateY(-50%)}
 .ixcell:active .ixlv{color:var(--blu,#4D7CFE)}
 .ixcell:active .ixgl{color:var(--blu,#4D7CFE)}
-.ixnm{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em11);color:var(--dim);text-transform:uppercase}
+.ixnm{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em11);color:var(--txt,#E9EEFB);text-transform:uppercase}
 /* the dashed underline is this page's existing "you can tap this" grammar, per the ref */
 .ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:700;
   font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB);
@@ -241,7 +241,7 @@ body[data-theme]{
      declaration down with it. The neighbouring --txt carries a fallback for the same reason. */
   background-image:linear-gradient(to right,var(--line2,rgba(148,166,210,.26)) 55%,transparent 55%);
   background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%}
-.ixgl{font-size:var(--type-9);color:var(--dim);margin-left:var(--space-1)}
+.ixgl{font-size:var(--type-9);color:var(--txt,#E9EEFB);margin-left:var(--space-1)}
 .ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
   font-variant-numeric:tabular-nums}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
@@ -264,14 +264,14 @@ body[data-theme]{
    and growing the visible button would push the header taller. */
 .trendx{position:relative;flex:0 0 auto;width:28px;height:28px;margin:var(--space-n4) var(--space-n6) var(--space-n4) var(--space-8);
   display:flex;align-items:center;justify-content:center;font-size:var(--type-19);line-height:1;
-  font-family:inherit;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer}
+  font-family:inherit;color:var(--txt,#E9EEFB);background:transparent;border:0;padding:0;cursor:pointer}
 .trendx::after{content:'';position:absolute;top:50%;left:50%;width:44px;height:44px;
   transform:translate(-50%,-50%)}
 .trendx:active{color:var(--txt,#E9EEFB)}
 /* cc#905 range pills */
 .rgs{display:flex;gap:var(--space-6);margin:var(--space-6) 0 var(--space-8)}
 .rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);
-  font-weight:800;letter-spacing:var(--track-em9);color:var(--mut);background:var(--panel);
+  font-weight:800;letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .rg.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 /* cc#904 full-screen Market Tape overlay */
@@ -280,13 +280,13 @@ body[data-theme]{
 .tpo.open{display:flex}
 .tpo-hd{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-14) var(--space-14) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
 .tpo-hd h2{font-size:var(--type-17);font-weight:800;flex:1}
-.tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--mut);background:none;
+.tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--txt,#E9EEFB);background:none;
   border:0;cursor:pointer;font-family:inherit}
 .tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 var(--space-12) var(--space-24)}
 .tpr{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-11) var(--space-2);border-bottom:var(--bw-1) solid var(--line);min-height:52px}
 .tpr .nm2{flex:1;min-width:0}
 .tpr .s1{font-size:var(--type-135);font-weight:800}
-.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);margin-top:var(--space-2)}
+.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);margin-top:var(--space-2)}
 .tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;text-align:right}
 .tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:800;
   text-align:right;min-width:64px}
@@ -299,7 +299,7 @@ body[data-theme]{
 .tph{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-6) var(--space-2);min-height:38px;position:sticky;top:0;
   z-index:2;background:var(--bg,#0A0F1E);border-bottom:var(--bw-1) solid var(--line)}
 .tph button{background:none;border:0;padding:var(--space-8) 0;font-family:inherit;font-size:var(--type-105);
-  font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;color:var(--dim);cursor:pointer;
+  font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;color:var(--txt,#E9EEFB);cursor:pointer;
   display:flex;align-items:center;gap:var(--space-3);min-height:38px}
 .tph button.on{color:var(--txt,#E8EDF7)}
 .tph .h-nm{flex:1;min-width:0}
@@ -318,11 +318,11 @@ body[data-theme]{
 /* cc#1158: .v10ic went with v10Icon(), its only caller. */
 .v10tg{display:flex;gap:var(--space-6);margin:var(--space-10) 0 var(--space-6)}
 .v10tg button{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em8);color:var(--mut);background:var(--panel);
+  font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em8);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .v10tg button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .v10st{display:flex;gap:var(--space-10);flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-10);color:var(--dim);margin:var(--space-2) 0 var(--space-8)}
+  font-size:var(--type-10);color:var(--txt,#E9EEFB);margin:var(--space-2) 0 var(--space-8)}
 /* ── cc#928: chart window + panned history ─────────────────────────────────────────────────── */
 .v10cv{position:relative}
 /* cc#949: the paging strip — a slim shimmer while a page is in flight, and a tappable chip for
@@ -334,14 +334,14 @@ body[data-theme]{
 @keyframes v10sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
 .v10rty{background:none;border:var(--bw-1) solid var(--line);color:var(--blu,#4D7CFE);border-radius:var(--radius-7);
   padding:var(--space-5) var(--space-9);min-height:30px;font-family:inherit;font-size:var(--type-95);font-weight:700;cursor:pointer}
-.v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
+.v10hint{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB);
   text-align:center;padding:var(--space-3) 0 var(--space-2);opacity:.8}
 /* ── cc#928: trade log — F/O tabs, month headers, row anatomy ──────────────────────────────── */
 .lgtabs{display:flex;gap:var(--space-6);margin:var(--space-2) 0 var(--space-4)}
 .lgt{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);
-  font-weight:800;letter-spacing:var(--track-em10);color:var(--mut);background:var(--panel);
+  font-weight:800;letter-spacing:var(--track-em10);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
-.lgt i{font-style:normal;color:var(--dim);margin-left:var(--space-3)}
+.lgt i{font-style:normal;color:var(--txt,#E9EEFB);margin-left:var(--space-3)}
 .lgt.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
 .lgt.on i{color:var(--blu,#4D7CFE)}
 /* ── cc#941: paired trade card + summary strip ─────────────────────────────────────────────
@@ -352,7 +352,7 @@ body[data-theme]{
   border-bottom:var(--bw-1) solid var(--line);margin-bottom:var(--space-2)}
 .v10sum div{text-align:center}
 .v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800}
-.v10sum span{display:block;font-size:var(--type-95);color:var(--dim);text-transform:uppercase;
+.v10sum span{display:block;font-size:var(--type-95);color:var(--txt,#E9EEFB);text-transform:uppercase;
   letter-spacing:var(--track-px6);margin-top:var(--space-2)}
 /* cc#948 — TWO-ZONE ANATOMY, restoring what the old .tr2 row had and cc#941 lost.
    The founder's complaint is that results no longer SCAN: cc#941 put the net P&L on line 3 on the
@@ -369,7 +369,7 @@ body[data-theme]{
 .v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
 .v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800;
   white-space:nowrap}   /* cc#953 item 1: nowrap belt-and-braces behind the compaction */
-.v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim);
+.v10rt span{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--txt,#E9EEFB);
   margin-top:var(--space-2);white-space:nowrap}
 .v10c .c1{display:flex;align-items:center;gap:var(--space-6);flex-wrap:nowrap;min-width:0}
 .v10c .sym{font-size:var(--type-13);font-weight:800;letter-spacing:var(--track-px4);overflow:hidden;
@@ -381,19 +381,19 @@ body[data-theme]{
 .v10c .rsn2.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
 .v10c .rsn2.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
 .v10c .rsn2.open{background:rgba(77,124,254,.16);color:var(--pulse, #4D7CFE)}
-.v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--dim)}
+.v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--txt,#E9EEFB)}
 .v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-.v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim);
+.v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--txt,#E9EEFB);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* cc#948 item 3: the OPT line was a 10.5px wall of text. Structured now — an OPT tag, the
    contract, the premium leg, and its own P&L pushed to the right edge so it lands UNDER the net
    column and the two numbers share one vertical rule. */
 .v10c .c4{margin-top:var(--space-6);padding-top:var(--space-5);border-top:var(--bw-1) dashed var(--line);
-  display:flex;align-items:center;gap:var(--space-6);font-size:var(--type-11);color:var(--dim);
+  display:flex;align-items:center;gap:var(--space-6);font-size:var(--type-11);color:var(--txt,#E9EEFB);
   font-family:'IBM Plex Mono',ui-monospace,monospace}
 .v10c .c4 .htag{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-5);
-  border-radius:var(--radius-4);background:rgba(255,255,255,.06);color:var(--mut);flex:none}
+  border-radius:var(--radius-4);background:rgba(255,255,255,.06);color:var(--txt,#E9EEFB);flex:none}
 .v10c .c4 .hmid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v10c .c4 em{font-style:normal;font-weight:700;flex:none}
 /* item 4: nothing in the log below 9.5px */
@@ -402,10 +402,10 @@ body[data-theme]{
 .mhd{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-10) var(--space-2) var(--space-5);margin-top:var(--space-4);
   border-bottom:var(--bw-1) solid var(--line);cursor:pointer}
 .mhd .mn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;
-  letter-spacing:var(--track-em15);text-transform:uppercase;color:var(--dim);flex:1}
+  letter-spacing:var(--track-em15);text-transform:uppercase;color:var(--txt,#E9EEFB);flex:1}
 .mhd .mp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:800}
-.mhd .mc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim)}
-.mhd .mx{font-size:var(--type-10);color:var(--dim);min-width:12px;text-align:right}
+.mhd .mc{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB)}
+.mhd .mx{font-size:var(--type-10);color:var(--txt,#E9EEFB);min-width:12px;text-align:right}
 .mhd.op .mn{color:var(--amber,#F5B94A)}
 .tr2{display:flex;align-items:stretch;gap:var(--space-9);padding:var(--space-8) var(--space-3);border-bottom:var(--bw-1) solid var(--line);
   min-height:54px;cursor:pointer}
@@ -416,19 +416,19 @@ body[data-theme]{
 .tr2.op .rl{background:var(--amber,#F5B94A)}
 .tr2 .mid{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:var(--space-3)}
 .tr2 .l1{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap}
-.tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim)}
+.tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--txt,#E9EEFB)}
 .tr2 .pill{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
   letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5)}
 .tr2 .pill.lg{color:var(--grn,#2FD48B);background:rgba(47,212,139,.13)}
 .tr2 .pill.sh{color:var(--red,#FF5C6C);background:rgba(255,92,108,.13)}
-.tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--mut)}
+.tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB)}
 .tr2 .pr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-115);font-weight:700}
 .tr2 .l2{display:flex;gap:var(--space-7);align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-9);color:var(--dim)}
+  font-size:var(--type-9);color:var(--txt,#E9EEFB)}
 .tr2 .rsn{border:var(--bw-1) solid var(--line2);border-radius:var(--radius-4);padding:var(--space-1) var(--space-5);font-weight:700}
 .tr2 .rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
 .tr2 .p1{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:800}
-.tr2 .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);margin-top:var(--space-2)}
+.tr2 .p2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB);margin-top:var(--space-2)}
 /* ── cc#907: the V8 Open Book trio overflowed its card on the founder's phone ────────────────
    TWO fixes, because they solve two different halves and either alone still breaks.
    STRUCTURE: a grid item's automatic minimum is its min-content width, so a 1fr track GROWS to
@@ -457,7 +457,7 @@ body[data-theme]{
    ONLY thing that opens /m/holdings; a row tap opens the shared C·A·R·D strip in place.
    44px target per framework 15913 core rule 5. */
 .h-exp{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;
-  color:var(--mut);font-size:var(--type-15);text-decoration:none}
+  color:var(--txt,#E9EEFB);font-size:var(--type-15);text-decoration:none}
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
 .pfcard{padding:var(--space-4) var(--space-2) var(--space-10)}
@@ -491,7 +491,7 @@ body[data-theme]{
    the next time a rule lands on `.a`, so the class is namespaced instead. Fourth time this file
    has collided with a short app class name (cc#964 .v/.m, cc#966 .m, cc#967 .v). */
 .rnr .rnage{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
-  color:var(--dim);white-space:nowrap;line-height:1.4}
+  color:var(--txt,#E9EEFB);white-space:nowrap;line-height:1.4}
 /* no inner scroll region: the section renders a fixed count in page flow, so a fast page scroll
    passes straight through instead of being captured by a 300px window. */
 .newslist{max-height:none;overflow:visible}
@@ -502,7 +502,7 @@ body[data-theme]{
 .nwtabs{display:flex;background:var(--t-sunk,#0E0E11);border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);
   padding:var(--space-3);margin:var(--space-2) 0 var(--space-10)}
 .nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
-  letter-spacing:var(--track-em14);color:var(--dim);background:none;border:0;font-family:inherit;cursor:pointer}
+  letter-spacing:var(--track-em14);color:var(--txt,#E9EEFB);background:none;border:0;font-family:inherit;cursor:pointer}
 .nwtab.on{background:var(--gold,#D4AF37);color:#151204}
 .nwtab small{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
   margin-left:var(--space-4);font-size:var(--type-9)}
@@ -540,7 +540,7 @@ body[data-theme]{
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 /* FIXED WIDTH ON THE RIGHT COLUMN, so the headline column is the same width on every row and a
    long timestamp cannot make one row wrap where its neighbour did not. */
-.nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
+.nwrow .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB);
   white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
 /* The pad row holds the last page open to six. It is inert - no button, no tap target, no
    divider under the final one - so the card keeps its height without inventing a row that looks
@@ -588,15 +588,15 @@ body[data-theme]{
 .nwsb{overflow-y:auto;padding:var(--space-4) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
 .nwsh{font-size:var(--type-15);line-height:1.35;font-weight:800;margin-bottom:var(--space-7);color:var(--txt,#E9EEFB)}
 .nwsm{display:flex;gap:var(--space-8);align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-95);color:var(--dim);margin-bottom:var(--space-11);flex-wrap:wrap}
+  font-size:var(--type-95);color:var(--txt,#E9EEFB);margin-bottom:var(--space-11);flex-wrap:wrap}
 .nwchip{font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-2) var(--space-7);border-radius:var(--radius-3)}
 .nwchip.up{background:rgba(200,245,66,.14);color:var(--grn,#C8F542);border:1px solid rgba(200,245,66,.3)}
 .nwchip.dn{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:1px solid rgba(255,77,109,.3)}
 .nwchip.hi{background:rgba(255,77,109,.12);color:var(--red,#FF4D6D);border:var(--bw-1) solid rgba(255,77,109,.3)}
-.nwchip.nt{background:rgba(255,255,255,.06);color:var(--dim);border:var(--bw-1) solid var(--line)}
+.nwchip.nt{background:rgba(255,255,255,.06);color:var(--txt,#E9EEFB);border:var(--bw-1) solid var(--line)}
 .nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
 .nwbd p{margin:0 0 var(--space-9)}
-.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--dim);font-style:italic}
+.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--txt,#E9EEFB);font-style:italic}
 /* ── cc#971 paging ──────────────────────────────────────────────────────────────────────────
    min-height reserves SIX rows. The last page usually holds fewer, and without this the section
    would shrink the moment you reached it — pulling the Tools grid up and moving the Next button
@@ -638,14 +638,14 @@ body[data-theme]{
 .ibk-dir{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-8);border:var(--bw-1) solid}
 .ibk-dir.long{color:var(--grn);border-color:var(--grn)}
 .ibk-dir.short{color:var(--red);border-color:var(--red)}
-.ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);
+.ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);
   letter-spacing:var(--track-em9);margin-top:var(--space-3);overflow-wrap:anywhere}
 .ibk-pnl{display:flex;align-items:center;gap:var(--space-12);flex:0 0 auto}
 .ibk-pnl .v{font-size:var(--type-16);font-weight:800}
 .ibk-pnl .v.pos{color:var(--grn)}
 .ibk-pnl .v.neg{color:var(--red)}
-.ibk-pnl .v.na{color:var(--mut);font-size:var(--type-13)}
-.ibk-pnl .arrow{color:var(--dim);font-size:var(--type-14)}
+.ibk-pnl .v.na{color:var(--txt,#E9EEFB);font-size:var(--type-13)}
+.ibk-pnl .arrow{color:var(--txt,#E9EEFB);font-size:var(--type-14)}
 /* cc#1181 — .ibk-cap is deleted. The founder removed the caption note off two live renders
    (28349), and the single Index Intel entry point below the strip replaces the "TAP FOR CHART +
    TRADES" half of what it said. The other half was already true without being written down: the
@@ -671,7 +671,7 @@ body[data-theme]{
   letter-spacing:var(--track-em16);color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
   line-height:20px}
 .ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-em12);
-  color:var(--mut);text-align:center;padding:var(--space-18) var(--space-16)}
+  color:var(--txt,#E9EEFB);text-align:center;padding:var(--space-18) var(--space-16)}
 /* cc#1304 — INDEX BOOK becomes 4 swipable per-LEG cards (Nifty Fut/Opt, BankNifty Fut/Opt),
    founder ask, superseding the cc#1158 single paired row for this strip. cc#941's paired endpoint
    (/api/v10/positions/paired) still exists and still owns netted book P&L wherever that number is
@@ -684,14 +684,14 @@ body[data-theme]{
 .ibk2{padding:var(--space-14) var(--space-16)}
 .ibk2-hd{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-10)}
 .ibk2-t{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em9);color:#FF9F45}
-.ibk2-leg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim);
+.ibk2-leg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);
   letter-spacing:var(--track-em9);margin-bottom:var(--space-8)}
 .ibk2-pnl{display:flex;align-items:baseline;gap:var(--space-8)}
 .ibk2-pnl .v{font-size:var(--type-18);font-weight:800}
 .ibk2-pnl .v.pos{color:var(--grn)}
 .ibk2-pnl .v.neg{color:var(--red)}
-.ibk2-pnl .v.na{color:var(--mut);font-size:var(--type-13)}
-.ibk2-pnl .lbl{font-size:var(--type-9);letter-spacing:var(--track-em9);color:var(--mut)}
+.ibk2-pnl .v.na{color:var(--txt,#E9EEFB);font-size:var(--type-13)}
+.ibk2-pnl .lbl{font-size:var(--type-9);letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB)}
 /* cc#1204: EXACT, not a floor. min-height:360px reserved six rows and then let any page that
    needed more simply take more - which is the whole defect. Six rows at the token is the height,
    full stop, so a page that tried to exceed it would show up as a clipped row in the harness
@@ -702,11 +702,11 @@ body[data-theme]{
 .rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
   padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line)}
 .rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--mut);background:var(--panel);
+  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);cursor:pointer}
 .rnb:disabled{opacity:.35;cursor:default}
 .rnp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
-  color:var(--dim);letter-spacing:var(--track-em9)}
+  color:var(--txt,#E9EEFB);letter-spacing:var(--track-em9)}
 /* cc#1158: the cc#919 .v10b / .v10i rules are removed with the INDEX SIGNALS markup they
    styled. Nothing in the repo selects them any more - checked against every .py, .js and
    .html, including the pwa enhancer, where the only remaining mentions are comments. */
@@ -878,7 +878,7 @@ body[data-theme]{
 .irow{display:flex;align-items:baseline;gap:var(--space-8);margin-top:calc(11px * var(--rh,1))}
 .irow .inm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:#FF9F45;flex:1}
 .irow .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-16);font-weight:800}
-.irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut)}
+.irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
 .ibar{position:relative;height:4px;border-radius:var(--radius-2);background:var(--panel2);
   border:var(--bw-1) solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
 .ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:var(--space-n45) 0 0 var(--space-n45);
@@ -935,14 +935,14 @@ body[data-theme]{
 .pmeter{display:flex;gap:var(--space-4);margin:calc(8px * var(--rh,1)) 0 calc(5px * var(--rh,1))}
 .pmeter i{flex:1;height:5px;border-radius:var(--radius-3);background:var(--line2);opacity:.45}
 .pmeter i.on{opacity:1}
-.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim)}
+.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
-  letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--dim);margin-bottom:var(--space-3)}
+  letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--txt,#E9EEFB);margin-bottom:var(--space-3)}
 .v10r{display:flex;align-items:center;gap:var(--space-8);min-height:32px}
 .v10r .nm{flex:1;min-width:0;font-size:var(--type-115);font-weight:700;color:#FF9F45;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .v10r .stt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
-  letter-spacing:var(--track-em7);white-space:nowrap;color:var(--dim)}
+  letter-spacing:var(--track-em7);white-space:nowrap;color:var(--txt,#E9EEFB)}
 .v10r .stt.long{color:var(--grn)}
 .v10r .stt.short{color:var(--red)}
 
@@ -2447,7 +2447,7 @@ function v10OptCard(t){
       + '<span class="pill ' + (buy ? 'lg' : 'sh') + '">' + (buy ? 'BUY' : 'SELL') + '</span>'
       + '<span class="rsn2 ' + v10ReasonCls(t.reason) + '">' + esc(t.reason || 'EXIT') + '</span></div>'
     + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price))
-      + ' <span style="color:var(--dim)">premium</span></div>'
+      + ' <span style="color:var(--txt,#E9EEFB)">premium</span></div>'
     + '<div class="c3">' + esc(dlab(t.entry_d || '')) + (t.exit_d ? ' \u2192 ' + esc(dlab(t.exit_d)) : '')
       + '</div></span>'
     + '<span class="v10rt"><b class="' + cls(t.pnl) + '">' + pnl + '</b>'
