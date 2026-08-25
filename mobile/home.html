@@ -482,9 +482,8 @@ body[data-theme]{
 .ibk-l{flex:1 1 58%;min-width:0}
 .ibk-id{display:flex;align-items:center;gap:var(--space-10);min-width:0;flex-wrap:wrap}
 .ibk-id .sym{font-size:var(--type-14);font-weight:700;letter-spacing:var(--track-em7);color:#FF9F45}
-.ibk-dir{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-8);border:var(--bw-1) solid}
-.ibk-dir.long{color:var(--grn);border-color:var(--grn)}
-.ibk-dir.short{color:var(--red);border-color:var(--red)}
+/* cc#1328: .ibk-dir (the old LONG/SHORT badge) removed with ibkCardInner, its only caller —
+   see the cc#1328 block below .ibk-intel for its replacement, .bkside. */
 .ibk-legs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);
   letter-spacing:var(--track-em9);margin-top:var(--space-3);overflow-wrap:anywhere}
 .ibk-pnl{display:flex;align-items:center;gap:var(--space-12);flex:0 0 auto}
@@ -517,28 +516,105 @@ body[data-theme]{
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
   letter-spacing:var(--track-em16);color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
   line-height:20px}
-.ibk-flat{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-em12);
-  color:var(--txt,#E9EEFB);text-align:center;padding:var(--space-18) var(--space-16)}
-/* cc#1304 — INDEX BOOK becomes 4 swipable per-LEG cards (Nifty Fut/Opt, BankNifty Fut/Opt),
-   founder ask, superseding the cc#1158 single paired row for this strip. cc#941's paired endpoint
-   (/api/v10/positions/paired) still exists and still owns netted book P&L wherever that number is
-   shown — this reads the RAW per-leg /api/v10/positions instead, because the founder explicitly
-   wants each leg on its own face, not the fut+hedge net. Four fixed slots, always painted, so a
-   flat leg says FLAT in its own slot rather than the whole deck collapsing when one leg is empty —
-   the same "flat must say flat, never nothing" rule cc#1158 set for the row list.
-   .ibk2 reuses .c/.slab for the card chrome (SHARED_CSS_RULE_V1 — one bevel grammar) and only adds
-   the layout this deck needs. */
-.ibk2{padding:var(--space-14) var(--space-16)}
-.ibk2-hd{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-10)}
-.ibk2-t{font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em9);color:#FF9F45}
-.ibk2-leg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);
-  letter-spacing:var(--track-em9);margin-bottom:var(--space-8)}
-.ibk2-pnl{display:flex;align-items:baseline;gap:var(--space-8)}
-.ibk2-pnl .v{font-size:var(--type-18);font-weight:800}
-.ibk2-pnl .v.pos{color:var(--grn)}
-.ibk2-pnl .v.neg{color:var(--red)}
-.ibk2-pnl .v.na{color:var(--txt,#E9EEFB);font-size:var(--type-13)}
-.ibk2-pnl .lbl{font-size:var(--type-9);letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB)}
+/* cc#1328: .ibk-flat and .ibk2* (the old 4-slot swipe deck's card chrome, cc#1304) are removed
+   with ibkCardInner/renderIndexBook, their only callers. Replaced below by a full port of
+   scorr_v10_signal.html's "THE BOOK · V10" section — the OI wall chart (oiCard) and the
+   Open/Options book cards (bookRow/bookDir/bookCard) — reusing THIS page's existing .swipe/
+   .swipe-t/.dots outer deck (same #ibkTrack/#ibkDots ids the old deck used) rather than porting
+   Index Intel's own .vswipe/.vdots + DK infinite-carousel module, which this page has no use for:
+   Home's deck is a plain finite scroll-snap strip (4 fixed pages, no wraparound), matching how the
+   4-slot deck it replaces already behaved, so porting a second carousel dialect in alongside it
+   would be the "own devices" drift this codebase's comments elsewhere warn against.
+
+   ═══ TOKEN MAPPING — Index Intel (scorr_v10_signal.html :root, line 17) → Home (.screen bridge,
+   dark theme, resolved through body[data-theme="dark"] in scorr_themes.css) — CONFIRMED BY REAL
+   HEX VALUE, not by name, per the house rule. Both sides read verbatim from the two files:
+     --field  #0D1322  →  --bg     #0D1322   (--t-field → --field, scorr_themes.css line 136)
+     --panel  #161F33  →  --panel  #161F33   (--t-panel → --panel)
+     --hi     #1C2740  →  --panel2 #1C2740   (--t-hi → --hi)
+     --edge   #26334F  →  --line / --line2   #26334F   (--t-edge → --edge)
+     --chalk  #EAF0FA  →  --txt    #EAF0FA   (--t-ink → --ink)
+     --muted  #8A97B0  →  --mut / --dim      #8A97B0   (--t-muted → --muted)
+     --volt   #C8F542  →  --grn    #C8F542   (--t-win → --win — CONFIRMS the cc#1322 precedent)
+     --heat   #FF4D6D  →  --red    #FF4D6D   (--t-loss → --loss)
+     --aqua   #35E0FF  →  --cyan   #35E0FF   (--t-brand → --brand)
+     --pulse  #7C5CFF  →  --blu    #7C5CFF   (--t-accent → --accent)
+   --amber #FF9F45 has NO clean equivalent: Home's own var(--amber) is #F5B94A (declared straight
+   on .screen,.bnav in mobile_endpoints.py's MOBILE_CSS, never overridden by Home's own bridge) —
+   a DIFFERENT colour, already spoken for as Home's VIX/PCR "neutral" amber (matching the Digest,
+   see the .tk .d.neu comment above). #FF9F45 is instead the literal hex Home already hardcodes
+   for INDEX-NAME amber everywhere on this page (.ibk-id .sym, and originally .ibk2-t) — same value,
+   confirmed by grep, not assumed — so the ported code uses that same literal #FF9F45 rather than
+   var(--amber), which would silently repaint every max-pain/wall label the wrong amber.
+   Fonts: Index Intel loads 'Archivo Black' (skewed h3) and 'JetBrains Mono' (all mono/numeric
+   text) via its own Google Fonts link, which Home does not load. Rather than add a second display
+   font for one skewed heading, the ported .grp h3 uses Home's own Sora/800 weight (unskewed) and
+   every 'JetBrains Mono' becomes Home's already-loaded 'IBM Plex Mono' — visual substitution, not
+   a guess: every other mono numeral on this page already uses IBM Plex Mono, so this keeps the
+   ported section visually consistent with the rest of Home rather than introducing a mismatched
+   third typeface (or invisible fallback text) into a shared file.
+   Chip collision: Index Intel's own .chip/.w/.l/.n are page-scoped there, but Home's shared
+   mobile_app.css ALREADY defines a bare .chip (filter chips, the Retry button) and this file
+   already has unrelated bare-class elements (a "l" div for a tape row, an "n" span for a ticker
+   name — see cc#900/cc#1123 above) that a bare .w/.l/.n here would silently repaint. So bookRow's
+   direction badge is ported as one self-contained class, .bkside, with .bull/.bear modifiers
+   instead of the source's .chip.w/.chip.l — same look, zero shared-class risk. */
+.card{background:var(--panel);border:var(--bw-1) solid var(--line);margin:0;padding:var(--space-16);
+  position:relative;--cut:16px;clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+.vpage{flex:0 0 100%;min-width:0;scroll-snap-align:start}
+.grp{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-10)}
+.grp h3{font-size:var(--type-15);font-weight:800;color:var(--txt,#E9EEFB)}
+.grp .note{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut);
+  letter-spacing:var(--track-px10);text-align:right}
+.unavail{font-size:var(--type-11);color:var(--mut);font-family:'IBM Plex Mono',ui-monospace,monospace}
+/* ── the OI histogram, ported verbatim from oiCard()'s markup (scorr_v10_signal.html ~L669) ──
+   Call OI grows UP in red (resistance overhead), Put OI grows DOWN in green (support beneath) —
+   the spec's convention, unchanged; only the two tokens carrying those colours are remapped. */
+.oib{position:relative;display:flex;align-items:stretch;gap:var(--space-2);height:132px;margin-top:var(--space-10);padding:var(--space-11) 0}
+.oic{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.oic .up{flex:1;display:flex;align-items:flex-end}
+.oic .dn{flex:1;display:flex;align-items:flex-start}
+.oic .up i,.oic .dn i{display:block;width:100%;background:var(--red);opacity:.85}
+.oic .dn i{background:var(--grn)}
+.oic.mp .up i,.oic.mp .dn i{background:#FF9F45;opacity:1}
+.oiax{height:var(--bw-1);background:var(--line)}
+.oispot{position:absolute;top:0;bottom:0;width:0;border-left:var(--bw-1) dashed var(--cyan);pointer-events:none}
+.oiwall{position:absolute;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
+  letter-spacing:var(--track-px8);white-space:nowrap;transform:translateX(-50%);pointer-events:none}
+.oiwall.cw{top:0;color:var(--red)}
+.oiwall.pw{bottom:0;color:var(--grn)}
+.oixs{position:relative;height:12px;margin-top:var(--space-3)}
+.oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);letter-spacing:var(--track-px8);
+  pointer-events:none}
+.oix.pw{color:var(--grn)}
+.oix.cw{color:var(--red)}
+.oix.mp{color:#FF9F45}
+.oix.lo{transform:none;left:0}
+.oix.hi{transform:none;left:auto;right:0}
+.oird{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut);
+  margin-top:var(--space-10);line-height:1.6}
+.oird b{color:var(--txt,#E9EEFB)}
+.asof{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--mut)}
+.asof.stale{color:#FF9F45}
+/* ── the open book cards, ported verbatim from bookRow()/bookCard() (scorr_v10_signal.html ~L1178) ── */
+.bkrow{padding:var(--space-10) 0;border-top:var(--bw-1) solid var(--line);cursor:pointer}
+.bkrow:first-of-type{border-top:none}
+.bkrow:active{background:var(--panel2)}
+.bk1{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap}
+.bk1 b{font-size:var(--type-125)}
+.bkleg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut)}
+/* .bkside is the direction badge — see the collision note above for why this is one self-contained
+   class (with .bull/.bear modifiers) rather than the source's .chip + .w/.l pair. */
+.bkside{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:700;
+  letter-spacing:var(--track-px10);border:var(--bw-1) solid;padding:var(--space-2) var(--space-6);
+  border-radius:var(--radius-10);line-height:1.35;display:inline-block}
+.bkside.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
+.bkside.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
+.bkpnl{margin-left:auto;font-weight:800;font-size:var(--type-125);white-space:nowrap}
+.bk2{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-12);margin-top:var(--space-8);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-px8);color:var(--mut)}
+.bk2 b{color:var(--txt,#E9EEFB);font-weight:800;font-size:var(--type-14)}
 /* cc#1158: the cc#919 .v10b / .v10i rules are removed with the INDEX SIGNALS markup they
    styled. Nothing in the repo selects them any more - checked against every .py, .js and
    .html, including the pwa enhancer, where the only remaining mentions are comments. */
@@ -1559,25 +1635,13 @@ var V10 = { sym: 'NIFTY50', data: null, sel: null,
    still looks like a live affordance. openV10 stays and now has a new caller: the Index Book rows.
    The .v10ic rule it used is removed from the stylesheet for the same reason. */
 
-/* ══ cc#1158 · INDEX BOOK STRIP ══════════════════════════════════════════════════════════════
-   Reads /api/v10/positions/paired — the cc#941 pairing rule applied to the OPEN book, added
-   server-side in the same sprint so the app and the web can never disagree about a net P&L.
-   The app does NO pairing of its own; if it did, that would be the second copy cc#941 exists
-   to prevent.
-
-   THREE STATES, ALL OF THEM SPOKEN. Positions, flat, and could-not-load are different facts and
-   each gets its own words. The card is explicit that flat must say FLAT and must never hide.
-
-   AS-OF IS NOT DECORATION. The endpoint returns the OLDEST stamp across the legs, and this
-   prints the DATE too whenever that stamp is not today. Right now the whole book is priced off
-   yesterday's 15:35 close, and "AS-OF 15:35 IST" on its own would read as fifteen minutes ago.  */
-function ibkSigned(v){
-  /* inr() already prints a minus for negatives; positives need the plus so a gain reads as one.
-     Reusing inr rather than writing a second money formatter — the page has two already and a
-     third is how they drift. */
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  return (Number(v) >= 0 ? '+' : '') + inr(v);
-}
+/* ══ cc#1158 · INDEX BOOK STRIP (historical) ═══════════════════════════════════════════════════
+   The original cc#1158 single paired-row design read /api/v10/positions/paired; cc#1304 replaced
+   it with the 4-slot leg deck, and cc#1328 replaced that in turn with the ported OI-wall + book
+   deck above. ibkSigned(), the paired-row money formatter, went with it — its only caller was
+   ibkCardInner (removed at cc#1328) — checked with a grep, zero remaining references.
+   ibkAsOf() below is kept: it is pre-existing, already-unreferenced code from that same lineage,
+   out of this task's scope to clean up. */
 function ibkAsOf(iso){
   if (!iso) return 'AS-OF UNKNOWN';
   var d = new Date(iso);
@@ -1602,65 +1666,187 @@ function ibkLegs(p){
   }
   return out + ' · ' + p.legs + ' leg' + (p.legs === 1 ? '' : 's');
 }
-/* cc#1304 — the four fixed slots this deck always shows, in this order. NIFTY50 is the feed key
-   (matches openV10's expected argument and ibkSigned/label convention already set by cc#1158);
-   BANKNIFTY is already the feed key as-is. */
-var IBK_SLOTS = [
-  {symbol:'NIFTY50',   leg:'FUT', label:'NIFTY FUTURE'},
-  {symbol:'NIFTY50',   leg:'OPT', label:'NIFTY OPTION'},
-  {symbol:'BANKNIFTY', leg:'FUT', label:'BANKNIFTY FUTURE'},
-  {symbol:'BANKNIFTY', leg:'OPT', label:'BANKNIFTY OPTION'}
-];
-function ibkLegText(slot, p){
-  if (slot.leg === 'OPT'){
-    if (p.opt_strike == null) return 'OPTION';
-    return Math.round(Number(p.opt_strike)).toLocaleString('en-IN') + ' ' + esc(String(p.opt_type || ''));
-  }
-  return 'ENTRY ' + (p.entry_price != null ? Math.round(Number(p.entry_price)).toLocaleString('en-IN') : '--');
+/* ══ cc#1328 · INDEX BOOK becomes a full port of scorr_v10_signal.html's "THE BOOK · V10" +
+   "VOLATILITY & FLOW" OI-wall content, replacing the cc#1304 4-slot deck (IBK_SLOTS/ibkCardInner,
+   removed with this block). Deck stays 4 pages so #ibkTrack/#ibkDots and ibkDots() below need no
+   change: [NIFTY OI wall, BANKNIFTY OI wall, FUTURES book, OPTIONS book]. Token mapping and every
+   naming-collision decision are documented in the CSS block above (search cc#1328). */
+
+/* Index Intel's own tiny helpers (scorr_v10_signal.html L472-478), ported. esc() is NOT
+   redeclared — this page's existing esc() (escapes &<>" vs the source's &<> only) is a strict
+   superset and is reused as-is, one function doing the job rather than two that could drift.
+   cx() is renamed bkCx() on the way in: nothing here collides with it (the only other `cx` in
+   this file is a `var cx` local to wireScrub(), function-scoped and unrelated), but the source's
+   one-letter name reads as a coordinate next to that unrelated local, so it is spelled out. */
+function num(v, d){
+  d = (d == null) ? 0 : d;
+  return (typeof v === 'number' ? v : Number(v) || 0).toLocaleString('en-IN', {maximumFractionDigits: d});
 }
-function ibkCardInner(slot, p){
-  if (!p){
-    return '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label) + '</span></div>'
-      + '<div class="ibk-flat" style="padding:var(--space-10) 0">FLAT · NO OPEN POSITION</div>';
-  }
-  var dir = (p.side === 'BUY') ? 'long' : 'short';
-  var dirTxt = (p.side === 'BUY') ? 'LONG' : 'SHORT';
-  var pnl = p.unrealised_pnl;
-  var pos = pnl === null || pnl === undefined;
-  return '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label) + '</span>'
-    + '<span class="ibk-dir ' + dir + '">' + dirTxt + '</span></div>'
-    + '<div class="ibk2-leg">' + ibkLegText(slot, p)
-    + (p.cmp != null ? ' · CMP ' + Math.round(Number(p.cmp)).toLocaleString('en-IN') : '') + '</div>'
-    + '<div class="ibk2-pnl"><span class="v ' + (pos ? 'na' : (pnl >= 0 ? 'pos' : 'neg')) + '">'
-    + (pos ? 'P&L PENDING' : ibkSigned(pnl)) + '</span><span class="lbl">UNREALISED</span></div>';
+function bkCx(n){ return (Number(n) >= 0) ? 'var(--grn)' : 'var(--red)'; }
+/* IST(): scorr_v10_signal.html L478, verbatim — this page had no equivalent (ibkAsOf() above uses
+   client-local time directly and is untouched; this is a new, separate need for chainAsOf()). */
+function IST(){ return new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Kolkata'})); }
+
+/* ── as-of honesty, ported verbatim (scorr_v10_signal.html L656-661) — no tokens inside to remap. */
+function chainAsOf(tick){
+  if (!tick) return {txt: 'chain tick unknown', stale: true};
+  var d = String(tick).slice(0, 10), t = String(tick).slice(11, 16);
+  var today = IST().toISOString().slice(0, 10);
+  return {txt: 'OI as of ' + d + (t ? ' ' + t : '') + ' IST', stale: (d < today), day: d};
 }
-function renderIndexBook(d){
-  var rows = (d && d.open_positions) || [];
-  var openCount = 0;
-  IBK_SLOTS.forEach(function(slot, i){
-    var el = document.getElementById('ibkSlot' + i);
-    if (!el) return;
-    var p = rows.filter(function(r){ return r.symbol === slot.symbol && r.leg === slot.leg; })[0];
-    if (p) openCount++;
-    el.innerHTML = ibkCardInner(slot, p);
-    el.onclick = p ? (function(sym){ return function(ev){ openV10(ev, sym); }; })(slot.symbol) : null;
-    el.style.cursor = p ? 'pointer' : 'default';
+function oiUnavail(name, why){
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3></div>'
+    + '<div class="unavail">' + esc(why) + '</div></div></div>';
+}
+/* ── the OI wall histogram, ported verbatim from oiCard() (scorr_v10_signal.html L669-746) —
+   logic and structure untouched, only the colour tokens are remapped per the CSS-block table. */
+function oiCard(name, oi, mp){
+  if (!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
+    return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.');
+  var rows = oi.strikes, mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
+  var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
+  var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
+  var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
+  var cols = rows.map(function(r){
+    var isMp = (mpStrike != null && Number(r.strike) === mpStrike);
+    return '<div class="oic' + (isMp ? ' mp' : '') + '" title="' + r.strike + '">'
+      + '<div class="up"><i style="height:' + (100 * (r.call_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '<div class="oiax"></div>'
+      + '<div class="dn"><i style="height:' + (100 * (r.put_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '</div>';
+  }).join('');
+  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '';
+  if (oi.spot != null && hi > lo){
+    var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
+    spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+  }
+  var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
+  var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
+  if (cwI >= 0) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
+  if (pwI >= 0) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
+  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
+  var picked = [], xs = '';
+  [[pwI, 'pw'], [mpI, 'mp'], [cwI, 'cw']].forEach(function(p){
+    if (p[0] < 0) return;
+    var v = Number(rows[p[0]].strike);
+    for (var k = 0; k < picked.length; k++) if (picked[k].v === v) return;
+    picked.push({i: p[0], v: v, cls: p[1]});
   });
-  return openCount;
+  picked.sort(function(a, b){ return a.i - b.i; });
+  var lastPct = null;
+  picked.forEach(function(q){
+    var pct = Number(colPct(q.i));
+    if (lastPct != null && Math.abs(pct - lastPct) < 18) return;
+    lastPct = pct;
+    var edge = pct < 8 ? ' lo' : (pct > 92 ? ' hi' : '');
+    var pos = edge ? '' : ' style="left:' + pct.toFixed(2) + '%"';
+    xs += '<span class="oix ' + q.cls + edge + '"' + pos + '>' + num(q.v) + '</span>';
+  });
+  xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
+  var ao = chainAsOf(oi.chain_tick);
+  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
+    + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(ao.txt) + '</span></div>'
+    + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + xs
+    + '<div class="oird">'
+    + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
+    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span>'
+    + ' · put wall <b class="num">' + num(putWall.strike) + '</b>'
+    + ' · call wall <b class="num">' + num(callWall.strike) + '</b>'
+    + ' · expiry <b>' + esc(oi.expiry || '—') + '</b>'
+    + '</div></div></div>';
+}
+
+/* ── the open book cards, ported verbatim from posSide()/bookDir()/bookRow()/bookCard()
+   (scorr_v10_signal.html L1151-1213) — bookDir/posSide are the cc#1327 fix, current file state,
+   NOT the earlier SHORT/LONG version. Only additions: bookRow's row is made tappable (openV10),
+   which the source page has no need for (it IS the chart destination) but this page's predecessor
+   card (ibkCardInner) always was — dropping that silently would strand openV10()/loadV10()/#v10ov
+   as dead code and remove an existing way to reach the chart, so the tap is kept. */
+function posSide(p){
+  var d = p && (p.direction || p.side);
+  if (!d) return null;
+  d = String(d).toUpperCase();
+  if (d === 'SHORT' || d === 'SELL') return 'SHORT';
+  if (d === 'LONG'  || d === 'BUY')  return 'LONG';
+  return d;
+}
+function bookDir(p){
+  /* cc#1327's fix, ported as-is: the badge says the VIEW the leg expresses (Bullish/Bearish), not
+     the raw buy/sell mechanics posSide() reports — a written PUT is a bullish position, and
+     posSide() alone would call it SHORT next to a LONG futures leg expressing the same view. */
+  var side = posSide(p);
+  if (!side) return null;
+  var long = side === 'LONG';
+  var pe = p.opt_type && String(p.opt_type).toUpperCase() === 'PE';
+  return (pe ? !long : long) ? 'Bullish' : 'Bearish';
+}
+function bookRow(p){
+  var dirv = bookDir(p), pn = Number(p.unrealised_pnl) || 0;
+  var leg = p.opt_type
+    ? esc(String(p.opt_strike || '')) + ' ' + esc(p.opt_type) + '·wrt'
+    : 'FUT';
+  var lv = function(v){ return (v === null || v === undefined || v === '') ? '—' : num(v); };
+  return '<div class="bkrow" onclick="openV10(event,\'' + esc(p.symbol) + '\')">'
+    + '<div class="bk1"><b>' + esc(p.symbol) + '</b> <span class="bkleg">' + leg + '</span>'
+    + (dirv ? '<span class="bkside ' + (dirv === 'Bearish' ? 'bear' : 'bull') + '">' + dirv + '</span>' : '')
+    + '<span class="bkpnl num" style="color:' + bkCx(pn) + '">₹' + num(pn) + '</span></div>'
+    + '<div class="bk2">'
+    + '<span>OPEN <b class="num">' + esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—') + '</b></span>'
+    + '<span>ENTRY <b class="num">' + lv(p.entry_price) + '</b></span>'
+    + '<span>CMP <b class="num">' + lv(p.cmp) + '</b></span>'
+    + (p.opt_type ? ''
+        : '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
+        + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>')
+    + '</div></div>';
+}
+function bookCard(label, rows){
+  if (!rows.length)
+    return '<div class="vpage"><div class="card"><div class="grp"><h3>' + esc(label) + '</h3></div>'
+         + '<div class="unavail">No open ' + esc(label.toLowerCase()) + ' leg.</div></div></div>';
+  var tot = rows.reduce(function(a, p){ return a + (Number(p.unrealised_pnl) || 0); }, 0);
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>' + esc(label) + '</h3>'
+    + '<span class="num" style="font-weight:800;color:' + bkCx(tot) + '">₹' + num(tot) + '</span></div>'
+    + rows.map(bookRow).join('') + '</div></div>';
+}
+
+/* ── data + assembly. Reuses fetchWithTimeout (this page's own fetch helper, not Index Intel's
+   gj()) and the exact same endpoints loadAll() calls for D.oi/D.mp/D.mpB/D.open (verified above,
+   in scorr_v10_signal.html L490-508): strike_oi/maxpain take symbol=NIFTY|BANKNIFTY, positions
+   takes the DIFFERENT feed keys NIFTY50/BANKNIFTY — both kept exactly as the source has them,
+   not unified into one. Each fetch is caught independently, same resilience as loadAll(), so one
+   failing endpoint degrades its own card (oiUnavail / bookCard's "No open ... leg") rather than
+   blanking the whole deck. */
+function renderIbkDeck(oiN, oiB, mpN, mpB, open){
+  var futs = open.filter(function(p){ return !p.opt_type; });
+  var opts = open.filter(function(p){ return !!p.opt_type; });
+  var pages = [
+    oiCard('NIFTY', oiN, mpN),
+    oiCard('BANKNIFTY', oiB, mpB),
+    bookCard('FUTURES', futs),
+    bookCard('OPTIONS', opts)
+  ];
+  var tr = document.getElementById('ibkTrack');
+  if (tr) tr.innerHTML = pages.join('');
 }
 function loadIndexBook(){
-  fetchWithTimeout('/api/v10/positions')
-    .then(function(r){ return r.json(); })
-    .then(function(d){ renderIndexBook(d); })
-    .catch(function(){
-      /* NOT the flat state on any slot. A book that could not load is not a flat book, and
-         printing FLAT here would be the page inventing a fact about the founder's money. */
-      IBK_SLOTS.forEach(function(slot, i){
-        var el = document.getElementById('ibkSlot' + i);
-        if (el) el.innerHTML = '<div class="ibk2-hd"><span class="ibk2-t">' + esc(slot.label)
-          + '</span></div><div class="ibk-flat" style="padding:var(--space-10) 0">UNAVAILABLE</div>';
-      });
-    });
+  var oiN = null, oiB = null, mpN = null, mpB = null, open = [];
+  Promise.all([
+    fetchWithTimeout('/api/v10/strike_oi?symbol=NIFTY&n=7').then(function(r){ return r.json(); })
+      .then(function(d){ oiN = d; }).catch(function(){ oiN = null; }),
+    fetchWithTimeout('/api/v10/strike_oi?symbol=BANKNIFTY&n=7').then(function(r){ return r.json(); })
+      .then(function(d){ oiB = d; }).catch(function(){ oiB = null; }),
+    fetchWithTimeout('/api/v10/maxpain?symbol=NIFTY').then(function(r){ return r.json(); })
+      .then(function(d){ mpN = d; }).catch(function(){ mpN = null; }),
+    fetchWithTimeout('/api/v10/maxpain?symbol=BANKNIFTY').then(function(r){ return r.json(); })
+      .then(function(d){ mpB = d; }).catch(function(){ mpB = null; }),
+    fetchWithTimeout('/api/v10/positions').then(function(r){ return r.json(); })
+      .then(function(d){ open = (d && (d.open_positions || d.rows)) || []; }).catch(function(){ open = []; })
+  ]).then(function(){ renderIbkDeck(oiN, oiB, mpN, mpB, open); });
 }
 /* cc#1304 — same dot-sync template as bookDots()/heroDots(), scoped to the new #ibkTrack deck. */
 function ibkDots(){
@@ -2918,16 +3104,18 @@ Promise.all([
      box's whole innerHTML. A single entry point that disappears on the days the book is empty or
      the endpoint is down is not a single entry point, it is an intermittent one. Out here it is
      painted with the section and never depends on a fetch. */
-  /* cc#1304: the single-row .ibk box becomes a 4-card swipe deck, one fixed slot per leg \u2014 same
-     .swipe/.swipe-t/.dots mechanism as the hero deck and THE BOOK deck below, so this is the
-     THIRD deck on the page using the identical scroll-snap + dot-sync pattern rather than a new
-     one. Each slot is painted with its own "Loading..." card immediately (same always-rendered
-     rule as before) and loadIndexBook() fills all four after paint. */
+  /* cc#1328: the 4-slot leg deck (cc#1304) becomes a full port of scorr_v10_signal.html's
+     "THE BOOK \u00b7 V10" + OI-wall content \u2014 see the cc#1328 comment above oiCard()/bookRow() for the
+     token mapping and every naming-collision call. Still the SAME .swipe/.swipe-t/.dots mechanism
+     and the SAME #ibkTrack/#ibkDots ids and 4-dot count as the deck it replaces, so nothing about
+     the outer scaffold (or ibkDots() below) needed to change \u2014 only what fills the 4 pages did.
+     Each page is painted with its own "Loading\u2026" card immediately (same always-rendered rule as
+     before) and loadIndexBook() replaces all four with real content after paint. */
   h += '<div class="sect">INDEX BOOK \u00b7 OPEN</div>'
     + '<div class="swipe"><div class="swipe-t" id="ibkTrack" onscroll="ibkDots()">'
-    + IBK_SLOTS.map(function(slot, i){
-        return '<div class="c slab ibk2" id="ibkSlot' + i + '"><div class="ibk2-hd"><span class="ibk2-t">'
-          + esc(slot.label) + '</span></div><div class="ibk-flat" style="padding:var(--space-10) 0">Loading\u2026</div></div>';
+    + ['NIFTY OI WALL', 'BANKNIFTY OI WALL', 'FUTURES', 'OPTIONS'].map(function(lbl){
+        return '<div class="vpage"><div class="card"><div class="grp"><h3>' + lbl + '</h3></div>'
+          + '<div class="unavail">Loading\u2026</div></div></div>';
       }).join('')
     + '</div><div class="dots" id="ibkDots"><i class="on"></i><i></i><i></i><i></i></div></div>'
     + '<a class="ibk-intel slab" href="/m/v10">INDEX INTEL \u203a</a>';
@@ -2948,7 +3136,7 @@ Promise.all([
   /* 4 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
-  loadIndexBook();    /* cc#1304: #ibkSlot0..3 only exist after this paint, same as the mood letters */
+  loadIndexBook();    /* cc#1328: #ibkTrack only exists after this paint, same as the mood letters */
 
   var tools = document.createElement('div');
   tools.className = 'tools';
