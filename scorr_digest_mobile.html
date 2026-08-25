@@ -8,10 +8,12 @@
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<!-- cc#1129: the shared news row, used here and on /m/home so the two read as one family.
-     Linked directly rather than via _MOBILE_HEAD: /m/digest is deliberately NOT in
-     _PWA_INJECT_PATHS. It IS in PROTECTED, so main.py's middleware still rewrites this src with
-     the ?v= build stamp, which the 1-day cache header on the route depends on. -->
+<!-- cc#1129: the shared news row. /m/home dropped its own use of this (cc#1322 moved LIVE NEWS
+     off that page); this page's LIVE NEWS card (cc#1325) is now its only consumer, alongside
+     scorr_v10_signal.html's separate copy. Linked directly rather than via _MOBILE_HEAD: /m/digest
+     is deliberately NOT in _PWA_INJECT_PATHS. It IS in PROTECTED, so main.py's middleware still
+     rewrites this src with the ?v= build stamp, which the 1-day cache header on the route depends
+     on. -->
 <script src="/scorr_news_row.js"></script>
 <style>
 /* DAILY DIGEST — implements design_refs/scorr_digest_mobile_R1.html (b8949f6), R5.1 tokens */
@@ -118,14 +120,6 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rchip.on{color:var(--aqua);border-color:var(--aqua);text-shadow:0 0 8px rgba(53,224,255,.4)}
 .rchip .num{color:var(--chalk);font-weight:800}
 .rchip.on .num{color:var(--aqua)}
-/* cc#1321 · WHAT MOVED chips reuse .rchip verbatim (same visual language as RA_TIERS, per the
-   card) but WRAP instead of squeezing five chips into one nowrap row — RA_TIERS only ever has
-   four short words (ALL/LARGE/MID/SMALL) and fits one line; this set can carry five including
-   "AI Editorial" and "Stock Views", which clipped unreadably under the shared .rchip's flex:1
-   nowrap sizing. Scoped as a descendant override so the bare .rchip/.rchips RA_TIERS uses is
-   untouched. */
-.wmchips{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:wrap}
-.wmchips .rchip{flex:0 0 auto;min-width:0}
 /* Each page is one snap slide and every page holds exactly RA_PAGE rows. min-height is set from
    that count, not guessed: without it a final short page collapses and the deck jumps height
    mid-swipe, which reads as a broken carousel rather than a short page. */
@@ -481,6 +475,69 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .idots{display:flex;justify-content:center;gap:var(--space-5);margin-top:var(--space-8)}
 .idots i{width:5px;height:5px;border-radius:50%;background:var(--edge);transition:.2s;cursor:pointer}
 .idots i.on{background:var(--amber);width:15px;border-radius:var(--radius-3)}
+
+/* ══ cc#1325 · LIVE NEWS — ported verbatim from scorr_v10_signal.html (cc#1322), replacing WHAT
+   MOVED + GLOBAL EVENTS entirely, per the founder's decision after three unresolved rounds on
+   this page's OWN news-sheet bug (cc#1312/cc#1323). No colour remapping needed this time — the
+   two files' :root blocks are byte-identical (checked, not assumed: diffed to zero). */
+:root{--news-row-h:59px}
+.nwtabs{display:flex;background:var(--field);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);
+  padding:var(--space-3);margin:var(--space-2) 0 var(--space-10)}
+.nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
+  letter-spacing:var(--track-em14);color:var(--chalk);background:none;border:0;font-family:inherit;cursor:pointer}
+.nwtab.on{background:#D4AF37;color:#151204}
+.nwtab small{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
+  margin-left:var(--space-4);font-size:var(--type-9)}
+.nwrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-11) var(--space-2);
+  height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
+  border:0;border-bottom:var(--bw-1) solid var(--edge);background:none;width:100%;text-align:left;
+  font-family:inherit;color:inherit;cursor:pointer}
+.nwrow:last-of-type{border-bottom:0}
+.nwrow .h{flex:1;min-width:0;font-size:var(--type-125);line-height:1.45;color:var(--chalk);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.nwrow .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--chalk);
+  white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
+.nwrow.nwpad{cursor:default;pointer-events:none}
+.nwrow .nwchev,.nwrow .nwcat{flex:0 0 46px;min-width:0;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.nwrow .nwchev{color:#D4AF37;font-size:var(--type-13);flex-shrink:0;
+  background:none;border:0;border-radius:0;padding:0;margin:0}
+.nwrow .nwchev::before{content:none}
+.nwrow .nwcat{flex-shrink:0;white-space:nowrap;font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-6);border-radius:var(--radius-5);
+  color:#D4AF37;border:var(--bw-1) solid var(--edge);background:var(--hi)}
+.nwveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
+.nwsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
+  z-index:81;background:var(--panel);border-top:var(--bw-1) solid #000;border-radius:var(--radius-18) var(--radius-18) 0 0;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),
+             0 -1px 0 rgba(255,255,255,.06);
+  animation:nwup .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes nwup{from{transform:translateY(100%)}}
+.nwgrab{width:38px;height:4px;border-radius:var(--radius-2);background:#3A3A42;margin:var(--space-9) auto var(--space-6);flex-shrink:0}
+.nwsb{overflow-y:auto;padding:var(--space-4) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
+.nwsh{font-size:var(--type-15);line-height:1.35;font-weight:800;margin-bottom:var(--space-7);color:var(--chalk)}
+.nwsm{display:flex;gap:var(--space-8);align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-95);color:var(--chalk);margin-bottom:var(--space-11);flex-wrap:wrap}
+.nwchip{font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-2) var(--space-7);border-radius:var(--radius-3)}
+.nwchip.up{background:rgba(200,245,66,.14);color:var(--volt);border:1px solid rgba(200,245,66,.3)}
+.nwchip.dn{background:rgba(255,77,109,.12);color:var(--heat);border:1px solid rgba(255,77,109,.3)}
+.nwchip.hi{background:rgba(255,77,109,.12);color:var(--heat);border:var(--bw-1) solid rgba(255,77,109,.3)}
+.nwchip.nt{background:rgba(255,255,255,.06);color:var(--chalk);border:var(--bw-1) solid var(--edge)}
+.nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
+.nwbd p{margin:0 0 var(--space-9)}
+.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
+.newslist{max-height:none;overflow:visible}
+.rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
+@keyframes rnfade{from{opacity:.35}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
+.rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
+  padding-top:var(--space-8);border-top:var(--bw-1) solid var(--edge)}
+.rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--panel);
+  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);cursor:pointer}
+.rnb:disabled{opacity:.35;cursor:default}
+.rnp{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
+  color:var(--chalk);letter-spacing:var(--track-em9)}
 </style>
 </head>
 <body data-theme="goldnight" class="as-shell">
@@ -829,39 +886,6 @@ var RA=null, RA_TIER='ALL', RA_PAGES=0;
 var RA_PAGE=4, RA_MAX=20;
 var RA_TIERS=['ALL','LARGE','MID','SMALL'];
 
-/* ── cc#1321 · WHAT MOVED chip filter ─────────────────────────────────────────────────────────
-   Same pattern as RA_TIER/raList/raChips above and mobile/intel.html's chipsHtml (cc#1001):
-   server sends the combined feed plus per-category counts once, ALL chips filter client-side over
-   what already loaded. WM_CATS is the founder's exact order, not count-sorted like Intel -- a chip
-   with a zero count for today still doesn't render, same as Intel, but the order among the
-   nonzero ones is fixed rather than ranked. */
-var WM=null, WM_CAT='ALL';
-var WM_CATS=['Domestic','AI Editorial','IPO','Stock Views'];
-
-function wmList(){
-  var all=(WM&&WM.items)||[];
-  return (WM_CAT==='ALL')?all:all.filter(function(n){return n.category===WM_CAT;});
-}
-function wmChips(){
-  var cc=(WM&&WM.category_counts)||{};
-  var total=(WM&&WM.items&&WM.items.length)||0;
-  var cats=[{t:'ALL',n:total}].concat(WM_CATS.filter(function(c){return cc[c]>0;})
-    .map(function(c){return {t:c,n:cc[c]};}));
-  return '<div class="wmchips">'+cats.map(function(c){
-    return '<button class="rchip'+(c.t===WM_CAT?' on':'')+'" onclick="wmPick(\''+esc(c.t).replace(/'/g,"\\'")+'\')">'
-         + esc(c.t)+' <span class="num">'+c.n+'</span></button>';
-  }).join('')+'</div>';
-}
-function wmPick(cat){
-  WM_CAT=cat;
-  var host=document.getElementById('wmwrap');
-  if(!host)return;
-  var filtered=wmList();
-  NW.Domestic=filtered;
-  host.innerHTML=wmChips()+newsDeck(filtered,'Domestic');
-  deckPark('nwdtrack');
-}
-
 function raList(){
   var all=(RA&&RA.companies)||[];
   var f=(RA_TIER==='ALL')?all:all.filter(function(c){return c.tier===RA_TIER;});
@@ -999,92 +1023,282 @@ function raDeck(){
        /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
        + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
 }
-/* ══ cc#1239 · DOMESTIC + GLOBAL NEWS DECKS ════════════════════════════════════
-   WHAT WAS ACTUALLY WRONG, because it is not what the card's title says. These rows were ALREADY
-   polished-only: digest_v3._news has only ever read polished_news. There was no raw feed item to
-   remove. What the founder photographed was the OUTLET LABEL riding on a polished row —
-   scorr_news_row.js prints `n.source` when the payload carries one. So the fix is at the payload:
-   _news no longer selects source, the shared component's `if (n.source)` is simply false, and the
-   component is not edited for the surfaces still using it.
 
-   FOUR ROWS A PAGE, SAME AS THE RESULTS DECK, and the same helpers drive it — deckDots, deckWrap,
-   deckPark, the triple set for the infinite wrap. 20 rows is 5 pages. The gesture is the one this
-   page already teaches twice.
 
-   EXPANSION CANNOT LEAK ACROSS A SWIPE HERE, and it is worth saying why rather than claiming it:
-   there is no inline expansion to leak. The detail opens in the MODAL sheet, which locks body
-   scroll while it is open, so the deck cannot be swiped underneath it, and nwOpen paints from the
-   tapped index every time rather than from a deck-level flag. That is the cc#1232 defect made
-   structurally absent rather than fixed. */
-var NW={};
-function nwDeck(items,cat,key){
-  var rows=items||[];
-  if(!rows.length)return '<div class="unavail">No items.</div>';
-  var tid='nw'+key+'track', did='nw'+key+'dots';
-  var pages=[];
-  for(var i=0;i<rows.length;i+=4)pages.push(rows.slice(i,i+4));
-  DECKS[tid]=pages.length;
-  var set=pages.map(function(pg,pi){
-    return '<div class="rpage">'+pg.map(function(n,j){
-      var idx=pi*4+j;
-      /* chevron:false and no source on the payload — the row shows the sentiment dot, the
-         headline, its category tag and the time-ago, and nothing about which outlet filed it. */
-      return window.ScorrNewsRow
-        ? ScorrNewsRow.render(n,{category:cat,chevron:false,
-            onclick:"nwOpen('"+cat+"',"+idx+")"})
-        : '<div class="mrow" onclick="nwOpen(\''+cat+'\','+idx+')"><span class="sdot" style="background:'
-          + senti(n.sentiment)+'"></span><span style="flex:1">'+esc(n.headline||'')+'</span></div>';
-    }).join('')+'</div>';
-  }).join('');
-  var dots=Array.from({length:pages.length},function(_,j){
-    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
-  return '<div class="iswipe"><div class="iswipe-t" id="'+tid+'" onscroll="deckWrap(\''+tid+'\',\''+did+'\')">'
-       + set+set+set+'</div><div class="rpager"><div class="idots" id="'+did+'">'+dots+'</div></div></div>';
+/* ══ cc#1325 · LIVE NEWS — ported verbatim from scorr_v10_signal.html (cc#1322), which itself was
+   ported from mobile/home.html. Founder decision: stop debugging this page's own news-sheet
+   implementation (cc#1312/cc#1323, two unresolved rounds) and replace it with the component
+   already proven working end to end on Index Intel. WHAT MOVED/GLOBAL EVENTS and the cc#1321 chip
+   filter are gone with it, not kept alongside -- the category tag on each row is the filter now
+   (POLISH/RAW tabs + an inline DOM/GLB/AI-ED/IPO/VIEW tag per row), same as Index Intel.
+   ONE adaptation from the v10_signal.html copy: that file uses its own gj() get-JSON helper for
+   loadRawNews(); this page has no such wrapper anywhere (raOpen above calls fetch() directly), so
+   loadRawNews() here does the same -- plain fetch().then(r=>r.json()), matching this file's own
+   idiom rather than importing a helper it has never had. Everything else, including the cc#1312
+   round-2 sheet-close-race fix inside nwOpen, is unchanged. */
+function rnAgo(ts){
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  var m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
+  var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
 }
-function newsDeck(items,cat){ return nwDeck(items,cat,cat==='Domestic'?'d':'g'); }
+var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
 
-/* The polished piece, in the SAME sheet the results rows open. headline, the full body, the
-   sentiment/impact line and the mentioned symbols as chips — nothing else, and explicitly no
-   outlet. There is no VIEW DETAIL foot: the polished piece IS the detail, so a link promising more
-   would be a link to nothing. */
-function nwOpen(cat,i){
-  /* cc#1323 · BELT-AND-BRACES, on top of cc#1260's guard inside sheetPaint. That guard only
-     covers the build() callback; this covers everything else in this function too (the NW[cat][i]
-     lookup, sheetEnsure() itself) even though re-reading found no throw source there today — a
-     future edit to either could reintroduce exactly the "veil with nothing behind it" shape this
-     card was filed over, and this makes that impossible rather than merely unlikely. */
-  try{
-    var n=(NW[cat]||[])[i]; if(!n)return;
-    sheetEnsure();
-    var sh=document.getElementById('rsheet'); if(!sh)return;
-    /* cc#1260: the whole build runs inside sheetPaint, so a throw anywhere below — a payload field
-       that is not the shape this expects, a helper that is not loaded yet — ends in the minimal
-       view with the headline still on it, never in a veil over nothing. */
-    sheetPaint(function(){
-    var meta=[];
-    if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
-    if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
-    if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
-    var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
-      t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
-      || '<div class="rsp" style="color:var(--chalk)">No polished body on this item.</div>';
-    var chips=(n.symbols||[]).map(function(x){
-      return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
-    return '<div class="rgrab"></div>'
-      + '<div class="rshd" style="position:relative">'
-      + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
-      + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
-      + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
-      + '<div class="rsb">'+body
-      + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
-    }, esc(n.headline||'This item could not be opened.'));
-  }catch(e){
-    try{ if(window.console&&console.error)console.error('cc#1323 nwOpen failed, tearing down', e); }catch(_){}
-    raClose();
+function nwSetMode(m){
+  if (RN.mode === m) return;
+  RN.mode = m;
+  RN.items = (m === 'polish') ? RN.polish : RN.raw;
+  RN.page = 0;
+  rnPaint();
+}
+
+function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
+
+function rnGo(ev, delta){
+  if (ev){
+    if (ev.preventDefault) ev.preventDefault();
+    if (ev.stopPropagation) ev.stopPropagation();
+  }
+  var last = rnPages() - 1;
+  var next = Math.min(last, Math.max(0, RN.page + delta));
+  if (next === RN.page) return;
+  RN.page = next;
+  rnPaint();
+}
+
+var RN_SW = { x:0, y:0, armed:false, just:false };
+
+function rnBindSwipe(){
+  var box = document.getElementById('rnBox');
+  if (!box || box._rnSwipeBound) return;
+  box._rnSwipeBound = true;
+
+  box.addEventListener('touchstart', function(e){
+    if (!e.touches || e.touches.length !== 1){ RN_SW.armed = false; return; }
+    RN_SW.x = e.touches[0].clientX; RN_SW.y = e.touches[0].clientY; RN_SW.armed = true;
+  }, { passive:true });
+
+  box.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length > 1) RN_SW.armed = false;
+  }, { passive:true });
+
+  box.addEventListener('touchend', function(e){
+    if (!RN_SW.armed) return;
+    RN_SW.armed = false;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - RN_SW.x, dy = t.clientY - RN_SW.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= 2 * Math.abs(dy)) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    RN_SW.just = true;
+    setTimeout(function(){ RN_SW.just = false; }, 400);
+    rnGo(null, dx < 0 ? 1 : -1);
+  }, { passive:false });
+
+  box.addEventListener('click', function(e){
+    if (!RN_SW.just) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+  }, true);
+}
+
+function rnCatShort(c){
+  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : '';
+}
+
+function rnPaint(){
+  var box = document.getElementById('rnBox');
+  if (!box) return;
+  if (window.ScorrNewsRow) ScorrNewsRow.injectCss();
+  nwPaintTabs();
+  if (!RN.items.length){
+    box.innerHTML = '<div class="unavail" style="padding:8px 0">No '
+      + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.</div>';
+    return;
+  }
+  var pages = rnPages(), p = RN.page;
+  var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
+  var rows = slice.map(function(n, i){
+    var idx = p * RN.per + i;
+    var tag = n.polished && n.category
+      ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>'
+      : '<span class="nwchev">⌄</span>';
+    var dot = window.ScorrNewsRow
+      ? '<span class="nrdot ' + ScorrNewsRow.sentiClass(n.sentiment) + '"></span>' : '';
+    return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
+      + dot
+      + '<span class="h">' + esc(n.headline) + '</span>'
+      + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
+      + tag + '</button>';
+  }).join('');
+  for (var _pad = slice.length; _pad < RN.per; _pad++)
+    rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
+  var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
+    + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
+    + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
+    + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
+    + '</div>';
+  box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
+  nwPaintTabs();
+}
+
+function nwPaintTabs(){
+  var el = document.getElementById('nwTabs');
+  if (!el) return;
+  function tab(mode, label, n){
+    return '<button type="button" class="nwtab' + (RN.mode === mode ? ' on' : '') + '"'
+      + ' onclick="nwSetMode(\'' + mode + '\')">' + label
+      + '<small>' + n + '</small></button>';
+  }
+  el.innerHTML = '<div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
+    + tab('raw', 'RAW', RN.raw.length) + '</div>';
+}
+
+function loadRawNews(){
+  var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
+  if (!box) return;
+  fetch('/api/news/live?hours=48&per_cat=300').then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var arr = (d.domestic || []).concat(d.company || []);
+      arr.sort(function(a, b){
+        return new Date(b.published_at || 0) - new Date(a.published_at || 0);
+      });
+      if (cnt) cnt.textContent = arr.length + ' raw headlines ›';
+      var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
+      RN.raw = items;
+      if (RN.mode === 'raw' || !RN.polish.length){ RN.items = items; RN.page = 0; }
+      rnPaint();
+      rnBindSwipe();
+    })
+    .catch(function(e){
+      if (cnt) cnt.textContent = 'unavailable ›';
+      box.innerHTML = '<div class="unavail" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
+    });
+  fetch('/api/news/polished?category=all&limit=100').then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var cutoff = Date.now() - 48 * 3600 * 1000;
+      RN.polish = (d.articles || [])
+        .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
+        .filter(function(a){
+          var t = new Date(a.published_time || 0).getTime();
+          return isFinite(t) && t >= cutoff;
+        })
+        .map(function(a){
+          return { headline: a.headline_clean, published_at: a.published_time,
+                   sentiment: a.sentiment, impact: a.impact,
+                   category: a.category || '',
+                   body: a.full_summary || a.summary || '', polished: true };
+        });
+      if (RN.mode === 'polish'){ RN.items = RN.polish; RN.page = 0; }
+      rnPaint();
+      rnBindSwipe();
+    })
+    .catch(function(){
+      RN.polish = [];
+      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.items = RN.raw; RN.page = 0; }
+      rnPaint();
+    });
+}
+
+var NW = { open: false, y: 0, scrollY: 0 };
+
+function nwMd(txt){
+  var safe = esc(String(txt == null ? '' : txt));
+  return safe.split(/\n\s*\n/).map(function(para){
+    var t = para.trim();
+    if (!t) return '';
+    return '<p>' + t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function nwChip(v, kind){
+  if (!v) return '';
+  var t = String(v).toUpperCase();
+  var cls = kind === 'impact'
+    ? (t === 'HIGH' ? 'hi' : 'nt')
+    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
+  return '<span class="nwchip ' + cls + '">' + esc(kind === 'impact' ? t + ' IMPACT' : t) + '</span>';
+}
+
+function nwOpen(idx){
+  var n = RN.items[idx];
+  if (!n) return;
+  nwClose();
+  NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+
+  var meta = '';
+  var ago = rnAgo(n.published_at);
+  if (ago) meta += '<span>' + esc(ago) + '</span>';
+  meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
+
+  var body = String(n.body || '').trim()
+    ? '<div class="nwbd">' + nwMd(n.body) + '</div>'
+    : '<div class="nwnone">raw feed item — polished version not yet available.</div>';
+
+  var veil = document.createElement('div');
+  veil.className = 'nwveil';
+
+  var sheet = document.createElement('div');
+  sheet.className = 'nwsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="nwgrab"></div>'
+    + '<div class="nwsb"><div class="nwsh">' + esc(n.headline) + '</div>'
+    + '<div class="nwsm">' + meta + '</div>' + body + '</div>';
+
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  NW.open = true;
+  nwBindSheet(sheet);
+  /* cc#1312 round 2 · THE SAME FIX THAT LANDED ON HOME AND INDEX INTEL, travelling WITH the
+     ported code again rather than getting silently dropped. veil.onclick bound synchronously here
+     would be live for the SAME tap that opened the sheet -- a full-screen element inserted under
+     the finger mid-event can pick up the browser's synthesized click, closing the sheet before it
+     is ever seen. Binding one requestAnimationFrame later keeps it closable on every genuine tap
+     after this one, not the tap that created it. */
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = nwClose;
+    var grab = sheet.querySelector('.nwgrab');
+    if (grab) grab.onclick = nwClose;
+  });
+}
+
+function nwClose(){
+  var v = document.querySelector('.nwveil'), s = document.querySelector('.nwsheet');
+  if (v) v.remove();
+  if (s) s.remove();
+  if (NW.open){
+    document.body.style.overflow = '';
+    window.scrollTo(0, NW.scrollY);
+    NW.open = false;
   }
 }
-/* time-ago, borrowed from the shared row component so the deck and the sheet cannot disagree. */
-function ago(t){ return window.ScorrNewsRow&&ScorrNewsRow.ago?ScorrNewsRow.ago(t):''; }
+
+function nwBindSheet(sheet){
+  var sb = sheet.querySelector('.nwsb');
+  sheet.addEventListener('touchstart', function(e){
+    NW.y = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
+  }, { passive: true });
+  sheet.addEventListener('touchend', function(e){
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t || !sb) return;
+    if (sb.scrollTop > 4) return;
+    if (t.clientY - NW.y > 60) nwClose();
+  }, { passive: true });
+}
+
+document.addEventListener('keydown', function(e){
+  if (NW.open && (e.key === 'Escape' || e.keyCode === 27)) nwClose();
+});
 
 /* ── cc#1190 scope 3/4/5 · THE SHEET ─────────────────────────────────────────────────────────
    RA_SEEN is the back-stack for peer hops. Tapping a peer swaps the sheet to that symbol, and
@@ -1738,11 +1952,6 @@ async function boot(){
   const lad=(S.ladders&&S.ladders.indexes)||[];
   const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
   const rep=S.reporting_today||{};
-  /* cc#1321: WM is a module-level global for the same reason RA is below -- wmPick() re-renders
-     the chip row outside this render pass and needs the loaded set. what_moved (Domestic-only) is
-     untouched and still feeds nothing on this page; what_moved_all is the new combined key. */
-  WM=S.what_moved_all||{items:[],category_counts:{}};
-  const ge=(S.global_events&&S.global_events.items)||[];
   /* cc#1190: the results card now reads results_analysed. RA is a module-level global on purpose
      — the tier chips re-render the deck on tap, outside this render pass, and they need the list.
      yesterday_results is still ON the payload and still read by the WEB digest; this page simply
@@ -1757,23 +1966,6 @@ async function boot(){
   /* cc#1190: the yrRows builder is DELETED with the card it fed. Its cc#1096 D3 BSE-code
      resolution is not lost — result_analysis_v2 is keyed on NSE symbols, so there is no numeric
      code to resolve on this deck. */
-
-  /* cc#1129: WHAT MOVED and GLOBAL EVENTS now use the shared row (scorr_news_row.js), the same
-     one /m/home's LIVE NEWS uses. The old row was a dot plus a wrapped headline in a plain box —
-     no category, no time, no hierarchy. The category comes from the SECTION, not from a per-row
-     field, because digest_v3._news queries one category at a time and the caller therefore knows
-     it exactly; nothing is inferred. Time-ago is computed from polished_news.published_time, the
-     POLISH time, which is what _news already selects — POLISH_LANDING_RULE, never published_at.
-     No chevron and no onclick: these rows do not open anything on this page, and an affordance
-     that leads nowhere is worse than none. Ordering is untouched — the payload arrives sorted on
-     polish time and is rendered in the order it arrives. */
-  /* cc#1239 · the two feeds are decks now, and the tap opens the polished piece in the sheet.
-     NW holds the rows so nwOpen can find one by index without re-reading the payload. */
-  /* cc#1321: NW.Domestic now holds whatever the active chip filters to (default ALL = every
-     category combined), not literally Domestic-only rows any more -- the key name is unchanged so
-     nwOpen('Domestic', i)'s existing lookup keeps working without touching that function. */
-  NW.Domestic=wmList(); NW.Global=ge;
-  const newsRows=(items,cat)=>newsDeck(items,cat);
 
   document.getElementById('app').innerHTML=`
   <div class="card slab rail" style="--rc:${railC};margin-top:12px">
@@ -1842,11 +2034,12 @@ async function boot(){
     <div id="rawrap">${raChips()}${raDeck()}</div>
   </div>
 
-  <div class="eyebrow">WHAT MOVED</div>
-  <div class="card slab"><div id="wmwrap">${wmChips()}${newsRows(NW.Domestic,'Domestic')}</div></div>
-
-  <div class="eyebrow">GLOBAL EVENTS</div>
-  <div class="card slab">${newsRows(ge,'Global')}</div>
+  <div class="eyebrow">LIVE NEWS</div>
+  <div class="card slab">
+    <div class="grp"><h3>Live News</h3><a class="plink" id="rnCount" href="/m/intel" style="font-size:var(--type-95)">loading…</a></div>
+    <div id="nwTabs"></div>
+    <div class="newslist" id="rnBox"><div class="unavail">Loading headlines…</div></div>
+  </div>
 
   <!-- cc#1234: this card's own .rail is REMOVED — it was the second green line. The Market Read
        card above keeps the single, thicker sentiment bar. Nothing else changes here: the verdict
@@ -1863,12 +2056,10 @@ async function boot(){
      replaced on every render, so the dot handlers must be rebound). */
   deckPark('itrack');
   deckPark('rtrack');
-  /* cc#1239: the news decks park on the middle set like the other two, so the first swipe LEFT
-     wraps instead of hitting a wall. Guarded on DECKS because a feed with no rows renders the
-     empty state and has no track to park. */
-  if(DECKS.nwdtrack)deckPark('nwdtrack');
-  if(DECKS.nwgtrack)deckPark('nwgtrack');
   loadInternals();
+  /* cc#1325: LIVE NEWS paints its placeholder in the template above; loadRawNews() fills it in
+     after, same sequencing this component already used on Index Intel (cc#1322). */
+  loadRawNews();
 }
 boot();
 </script>
