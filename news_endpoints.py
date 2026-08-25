@@ -392,13 +392,18 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
     """Polished news for the /news redesign (cc_task #79, spec 636).
     category = all | ai_editorial | company_updates | global | ipo (strict exact match).
     Sorted polished_at DESC (newest first, all categories interleaved on 'all').
-    limit (default 20, max 100) + offset paginate. Returns category_counts for tab badges.
+    limit (default 20, max 300) + offset paginate. Returns category_counts for tab badges.
     cc#160: endpoint-level auth (this route was reachable with no cookie, bypassing
-    the /news page's login gate) — same _is_authed() check as the page, 401 not redirect."""
+    the /news page's login gate) — same _is_authed() check as the page, 401 not redirect.
+    cc#1331: ceiling raised 100->300, matching /api/news/live's per_cat=300 ceiling. Confirmed
+    live before the raise, not guessed: 133 polished_news rows exist within 48h alone, so a
+    caller asking for limit=300 (the Live News POLISH tab, both scorr_v10_signal.html and
+    scorr_digest_mobile.html) was being silently truncated to 100 by THIS clamp — the request
+    already asked for 300, hours/volume were never the limiter."""
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     cat = (category or "all").lower()
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 300))
     offset = max(0, offset)
     where, params = "", []
     if cat in _CANON_CAT:

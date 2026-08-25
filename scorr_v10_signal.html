@@ -1456,7 +1456,7 @@ function nwPaintTabs(){
 function loadRawNews(){
   var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
   if (!box) return;
-  gj('/api/news/live?hours=48&per_cat=300')
+  gj('/api/news/live?hours=72&per_cat=300')  /* cc#1331: founder-direct, 48->72 */
     .then(function(d){
       if (!d || d.error) throw new Error((d && d.error) || 'no data');
       var arr = (d.domestic || []).concat(d.company || []);
@@ -1474,7 +1474,7 @@ function loadRawNews(){
       if (cnt) cnt.textContent = 'unavailable ›';
       box.innerHTML = '<div class="unavail" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
     });
-  gj('/api/news/polished?category=all&limit=100')
+  gj('/api/news/polished?category=all&limit=300')  /* cc#1331: backend cap was 100, raised to 300 */
     .then(function(d){
       if (!d || d.error) throw new Error((d && d.error) || 'no data');
       var cutoff = Date.now() - 48 * 3600 * 1000;
