@@ -342,13 +342,32 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    replaced them years before this move; nothing there emits class="rnr" any more) -- not ported,
    same call as cc#1318's .lrow/.ll on the digest page earlier tonight. */
 :root{--news-row-h:59px}
-.nwtabs{display:flex;background:var(--field);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);
-  padding:var(--space-3);margin:var(--space-2) 0 var(--space-10)}
+/* cc#1326: .nwtabsrow wraps the tabs strip + the filter icon side by side; the bottom margin that
+   used to live on .nwtabs itself moves here so both line up on the row's own baseline. */
+.nwtabsrow{display:flex;align-items:flex-start;gap:var(--space-6);margin:var(--space-2) 0 var(--space-10)}
+.nwtabs{display:flex;flex:1;background:var(--field);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);
+  padding:var(--space-3)}
 .nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
   letter-spacing:var(--track-em14);color:var(--chalk);background:none;border:0;font-family:inherit;cursor:pointer}
 .nwtab.on{background:#D4AF37;color:#151204}
 .nwtab small{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
   margin-left:var(--space-4);font-size:var(--type-9)}
+/* cc#1326: POLISH-only category filter, an ICON per the founder's own word rather than a chip
+   row -- cc#1321 already taught this codebase what 5 chips do to a narrow phone width. */
+.nwfilter{position:relative;flex:none}
+.nwfico{min-width:38px;min-height:38px;border-radius:var(--radius-9);background:var(--field);
+  border:var(--bw-1) solid var(--edge);color:var(--chalk);font-size:var(--type-15);cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.nwfico.on{border-color:var(--pulse);color:var(--pulse)}
+.nwfmenu{position:absolute;top:calc(100% + var(--space-4));right:0;z-index:10;background:var(--panel);
+  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);padding:var(--space-4);
+  display:flex;flex-direction:column;gap:var(--space-2);min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.nwfitem{text-align:left;padding:var(--space-6) var(--space-8);border-radius:var(--radius-5);background:none;
+  border:0;color:var(--chalk);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-10);
+  cursor:pointer;display:flex;justify-content:space-between;gap:var(--space-8);white-space:nowrap}
+.nwfitem:active,.nwfitem.on{background:var(--hi);color:var(--aqua)}
+.nwfitem .n{color:var(--muted)}
+.nwfitem.on .n{color:var(--aqua)}
 .nwrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-11) var(--space-2);
   height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
   border:0;border-bottom:var(--bw-1) solid var(--edge);background:none;width:100%;text-align:left;
@@ -389,8 +408,19 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
 .newslist{max-height:none;overflow:visible}
 .rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
+/* cc#1326: RAW rows are variable-height now (the headline wraps to its full length instead of
+   the old 2-line clamp fighting a sibling timestamp column), so the fixed six-row reservation
+   that keeps POLISH from jumping the pager under the thumb (cc#1204) does not apply here -- there
+   is no single row height to multiply by six any more. auto is the honest height for a page whose
+   rows are already not uniform. */
+.rnlist.raw{height:auto}
 @keyframes rnfade{from{opacity:.35}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
+.nwrow.nwraw{height:auto;min-height:var(--news-row-h);align-items:flex-start;cursor:default;
+  padding-top:var(--space-13);padding-bottom:var(--space-13)}
+.nwrawbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--space-4)}
+.nwrow.nwraw .nwrawbody .h{display:block;-webkit-line-clamp:unset;overflow:visible;white-space:normal}
+.nwrawbody .t2{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--muted)}
 .rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
   padding-top:var(--space-8);border-top:var(--bw-1) solid var(--edge)}
 .rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'JetBrains Mono',ui-monospace,monospace;
@@ -1227,14 +1257,49 @@ function rnAgo(ts){
   return Math.floor(h / 24) + 'd ago';
 }
 var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
+/* cc#1326 · POLISH-only category filter, by icon rather than a chip row (founder's own word).
+   RAW carries no category on the payload at all (founder confirmed directly) so the icon only
+   ever shows on the POLISH tab. RN.polish/RN.raw stay the FULL unfiltered sets from the fetch;
+   RN.items is always the derived, currently-visible slice -- rnApplyMode() is the one place that
+   decides it, so a mode switch, a filter pick and a fresh fetch can never compute it three
+   different ways. */
+var RN_CAT = 'ALL';
+var RN_CATS = ['AI Editorial','Domestic','Global','IPO','Stock Views'];
+var RN_FILTER_OPEN = false;
+
+function rnApplyMode(){
+  var src = (RN.mode === 'polish') ? RN.polish : RN.raw;
+  RN.items = (RN.mode === 'polish' && RN_CAT !== 'ALL')
+    ? src.filter(function(n){ return n.category === RN_CAT; }) : src;
+}
 
 function nwSetMode(m){
   if (RN.mode === m) return;
   RN.mode = m;
-  RN.items = (m === 'polish') ? RN.polish : RN.raw;
   RN.page = 0;
+  RN_FILTER_OPEN = false;
+  rnApplyMode();
   rnPaint();
 }
+
+function nwFilterToggle(ev){
+  if (ev){ ev.preventDefault(); ev.stopPropagation(); }
+  RN_FILTER_OPEN = !RN_FILTER_OPEN;
+  nwPaintTabs();
+}
+function nwFilterPick(cat){
+  RN_CAT = cat;
+  RN.page = 0;
+  RN_FILTER_OPEN = false;
+  rnApplyMode();
+  rnPaint();
+}
+/* click-outside-closes, bound once. .nwfilter wraps both the icon and its open menu, so a tap
+   anywhere else in the document (including the tabs, the deck, another card) closes it -- the
+   same "does this belong to the control" test rnBindSwipe's capture listener uses below. */
+document.addEventListener('click', function(e){
+  if (RN_FILTER_OPEN && !e.target.closest('.nwfilter')){ RN_FILTER_OPEN = false; nwPaintTabs(); }
+});
 
 function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
 
@@ -1303,28 +1368,53 @@ function rnPaint(){
   }
   var pages = rnPages(), p = RN.page;
   var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
+  var isRaw = RN.mode === 'raw';
   var rows = slice.map(function(n, i){
     var idx = p * RN.per + i;
-    var tag = n.polished && n.category
-      ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>'
-      : '<span class="nwchev">⌄</span>';
     var dot = window.ScorrNewsRow
       ? '<span class="nrdot ' + ScorrNewsRow.sentiClass(n.sentiment) + '"></span>' : '';
+    /* cc#1326 · RAW rows are NOT tappable — founder confirmed directly: a raw item has no
+       polished body behind it, so a peek sheet would have nothing real to open (nwOpen's own
+       fallback already said as much: "polished version not yet available"). A <div>, not a
+       <button>, and no onclick at all, rather than a button that quietly does nothing. Full row
+       width for the headline (no sibling timestamp column to share it with) and the age moves to
+       its own line below in smaller/lighter text — the founder's own layout ask, 25-Aug. */
+    if (isRaw){
+      var ago2 = esc(rnAgo(n.published_at) || '');
+      return '<div class="nwrow nwraw">' + dot
+        + '<div class="nwrawbody"><span class="h">' + esc(n.headline) + '</span>'
+        + (ago2 ? '<span class="t2">' + ago2 + '</span>' : '') + '</div></div>';
+    }
+    var tag = n.category ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>' : '';
     return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
       + dot
       + '<span class="h">' + esc(n.headline) + '</span>'
       + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
       + tag + '</button>';
   }).join('');
-  for (var _pad = slice.length; _pad < RN.per; _pad++)
+  /* the fixed six-row reservation (cc#1204) only makes sense for POLISH's fixed-height rows —
+     padding an auto-height RAW row with an empty filler achieves nothing, so RAW skips it. */
+  if (!isRaw) for (var _pad = slice.length; _pad < RN.per; _pad++)
     rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
   var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
     + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
     + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
     + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
     + '</div>';
-  box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
+  box.innerHTML = '<div class="rnlist' + (isRaw ? ' raw' : '') + '">' + rows + '</div>' + ctl;
   nwPaintTabs();
+}
+
+function nwFilterMenuHtml(){
+  if (RN.mode !== 'polish' || !RN_FILTER_OPEN) return '';
+  var counts = {};
+  RN.polish.forEach(function(n){ if (n.category) counts[n.category] = (counts[n.category] || 0) + 1; });
+  var opts = [{ t:'ALL', n: RN.polish.length }].concat(
+    RN_CATS.filter(function(c){ return counts[c] > 0; }).map(function(c){ return { t:c, n:counts[c] }; }));
+  return '<div class="nwfmenu">' + opts.map(function(o){
+    return '<button type="button" class="nwfitem' + (o.t === RN_CAT ? ' on' : '') + '" onclick="nwFilterPick(\''
+      + o.t.replace(/'/g,"\\'") + '\')">' + esc(o.t) + ' <span class="n">' + o.n + '</span></button>';
+  }).join('') + '</div>';
 }
 
 function nwPaintTabs(){
@@ -1335,8 +1425,15 @@ function nwPaintTabs(){
       + ' onclick="nwSetMode(\'' + mode + '\')">' + label
       + '<small>' + n + '</small></button>';
   }
-  el.innerHTML = '<div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
-    + tab('raw', 'RAW', RN.raw.length) + '</div>';
+  /* cc#1326: the filter icon lives next to the tabs, POLISH-only, per the founder's own word
+     "icon" (not another chip row like cc#1321's, which this exact class of crowding problem
+     already taught this codebase to avoid on a 5-option set). */
+  var filterBtn = (RN.mode === 'polish')
+    ? '<button type="button" class="nwfico' + (RN_CAT !== 'ALL' ? ' on' : '') + '" onclick="nwFilterToggle(event)" aria-label="Filter by category">⚙</button>'
+    : '';
+  el.innerHTML = '<div class="nwtabsrow"><div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
+    + tab('raw', 'RAW', RN.raw.length) + '</div>'
+    + (filterBtn ? '<div class="nwfilter">' + filterBtn + nwFilterMenuHtml() + '</div>' : '') + '</div>';
 }
 
 function loadRawNews(){
@@ -1352,7 +1449,7 @@ function loadRawNews(){
       if (cnt) cnt.textContent = arr.length + ' raw headlines ›';
       var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
       RN.raw = items;
-      if (RN.mode === 'raw' || !RN.polish.length){ RN.items = items; RN.page = 0; }
+      if (RN.mode === 'raw' || !RN.polish.length){ RN.page = 0; rnApplyMode(); }
       rnPaint();
       rnBindSwipe();
     })
@@ -1376,13 +1473,13 @@ function loadRawNews(){
                    category: a.category || '',
                    body: a.full_summary || a.summary || '', polished: true };
         });
-      if (RN.mode === 'polish'){ RN.items = RN.polish; RN.page = 0; }
+      if (RN.mode === 'polish'){ RN.page = 0; rnApplyMode(); }
       rnPaint();
       rnBindSwipe();
     })
     .catch(function(){
       RN.polish = [];
-      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.items = RN.raw; RN.page = 0; }
+      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.page = 0; rnApplyMode(); }
       rnPaint();
     });
 }
