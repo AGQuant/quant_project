@@ -390,29 +390,31 @@ html,body{margin:0;padding:0;background:var(--bg);}
               ['xirr','XIRR','right'],['alpha_xirr','XIRR alpha','right']];
     var COLLAPSE={payin_total:1,payout_total:1,xirr:1,alpha_xirr:1};
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
-    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
+    /* cc#1332: header font-size 11px->10px, part of the Table-view density pass -- header
+       padding (9px 8px) is untouched, the card only asked for font-size here. */
+    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
           pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)')),
           acol=(p.alpha_pct==null?'var(--muted)':(p.alpha_pct>=0?'var(--grn)':'var(--red)'));
       return '<tr onclick="location.href=\'/health?pid='+p.id+'&wl=1\'" style="cursor:pointer;border-bottom:1px solid var(--rule,#eef1f5);">'
-        + '<td style="padding:10px 12px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
+        + '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
         /* cc#1098: same guard as the cards — an em-dash when there is no tracking_date, never
            created_at wearing a "From" label. dmy() already returns an em-dash for null, so the
            guard is startDate() supplying null rather than a fallback date. */
-        + '<td style="padding:10px 8px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;">'+(p.n_holdings||0)+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;">'+inr(p.invested)+'</td>'
+        + '<td style="padding:7px 6px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;">'+(p.n_holdings||0)+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;">'+inr(p.invested)+'</td>'
         /* cc#1215: the three ledger columns. An em-dash with a tooltip when there is no ledger,
            never a zero - the same distinction the cards make.
            NET PAY-IN is a link into the cc#1212 sheet via the SAME delegated [data-lgpid]
            handler the cards use. The card says do not fork it, so it is not forked: this is a
            second trigger on one handler, not a second sheet. The row itself navigates to the
            report, so this cell stops the click reaching it. */
-        + '<td class="lg" style="padding:10px 8px;text-align:right;">'
+        + '<td class="lg" style="padding:7px 6px;text-align:right;">'
           + (p.payin_total==null?'<span title="no ledger on record">—</span>':inr(p.payin_total))+'</td>'
-        + '<td class="lg" style="padding:10px 8px;text-align:right;">'
+        + '<td class="lg" style="padding:7px 6px;text-align:right;">'
           + (p.payout_total==null?'<span title="no ledger on record">—</span>':inr(p.payout_total))+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;">'
+        + '<td style="padding:7px 6px;text-align:right;">'
           + (p.net_payin==null
               ? '<span title="no ledger on record">—</span>'
               : '<span data-lgpid="'+esc(p.id)+'" data-lgname="'+esc(clientName(p))+'"'
@@ -422,23 +424,34 @@ html,body{margin:0;padding:0;background:var(--bg);}
                     ? ' <span title="Invested is set manually for this account" style="color:var(--faint)">*</span>'
                     : ''))
           + '</td>'
-        + '<td style="padding:10px 8px;text-align:right;">'+inr(p.current)+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
-        + '<td style="padding:10px 8px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;">'+inr(p.current)+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
         /* cc#1216: em-dash with the reason as a tooltip, never a zero - a client whose ledger is
            not loaded has not returned nothing. */
-        + '<td class="lg" style="padding:10px 8px;text-align:right;font-weight:600;color:'
+        + '<td class="lg" style="padding:7px 6px;text-align:right;font-weight:600;color:'
           +(p.xirr==null?'var(--muted)':(p.xirr>=0?'var(--grn)':'var(--red)'))+'"'
           +(p.xirr==null?' title="needs a dated pay-in / payout ledger"':'')+'>'
           +(p.xirr==null?'—':(p.xirr>=0?'+':'−')+Math.abs(p.xirr).toFixed(1)+'%')+'</td>'
-        + '<td class="lg" style="padding:10px 8px;text-align:right;font-weight:600;color:'
+        + '<td class="lg" style="padding:7px 6px;text-align:right;font-weight:600;color:'
           +(p.alpha_xirr==null?'var(--muted)':(p.alpha_xirr>=0?'var(--grn)':'var(--red)'))+'"'
           +(p.alpha_xirr==null?' title="needs a dated pay-in / payout ledger"':' title="XIRR minus Nifty 50 XIRR on the same dated flows"')+'>'
           +(p.alpha_xirr==null?'—':(p.alpha_xirr>=0?'+':'−')+Math.abs(p.alpha_xirr).toFixed(1)+'%')+'</td>'
-        + '<td style="padding:10px 12px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">View →</td></tr>';
+        /* cc#1332: renderTable() had ZERO references to data-rbpid -- the Rebalance/Repair
+           feature (cc#1273) was wired into renderCards() only, and boot() picks table view by
+           default once ALL.length>6, so this made the feature unreachable by default. Same
+           trigger shape as the NET PAY-IN [data-lgpid] span above (span + data-attrs + the same
+           blue link styling), landing in the trailing View cell per the card. The row's own
+           onclick still navigates to /health -- nothing here needs its own stopPropagation
+           because the delegated listener in boot() already runs in the CAPTURE phase and
+           intercepts [data-rbpid] before the row ever sees the click (same as [data-lgpid]). */
+        + '<td style="padding:7px 10px;text-align:right;color:var(--grn,#0b6e42);white-space:nowrap;">'
+          + '<span data-rbpid="'+esc(p.id)+'" data-rbname="'+esc(clientName(p))+'" style="color:var(--blu);cursor:pointer;margin-right:10px;" title="Rebalance / Repair baskets">Rebalance</span>'
+          + 'View →</td></tr>';
     }).join('');
-    listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:13.5px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
+    /* cc#1332: body row font-size 13.5px->12px, the third leg of the density pass. */
+    listEl.innerHTML='<div style="overflow-x:auto;border:1px solid var(--rule,#dfe3ea);border-radius:10px;background:var(--bg,#fff);"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
     listEl.querySelectorAll('th[data-k]').forEach(function(th){ th.addEventListener('click',function(){
       var k=th.getAttribute('data-k');
       if(SORT.key===k) SORT.dir*=-1; else { SORT.key=k; SORT.dir=(k==='client'||k==='asof')?1:-1; }
