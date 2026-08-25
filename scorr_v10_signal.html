@@ -1158,8 +1158,25 @@ function posSide(p){
   if (d === 'LONG'  || d === 'BUY')  return 'LONG';
   return d;
 }
+function bookDir(p){
+  /* cc#1327 — the badge must say the VIEW the leg expresses (Bullish/Bearish), not the raw
+     buy/sell mechanics posSide() reports. A written PUT is a bullish position; posSide() calls
+     it SHORT, which next to a LONG futures leg expressing that SAME view reads as a reversal —
+     the exact "shown as peers they read as two separate trades" bug v10_endpoints.py's paired_
+     trades() doctrine (cc#941/1158) already fixed once, resurfacing here on a different card.
+     Per-leg opt_type+side is the classifier: /api/v10/positions serves raw legs with no parent-
+     signal direction field reachable per row, so there is nothing more reliable to read.
+     FUT and a bought CALL follow side directly (LONG=Bullish, SHORT=Bearish); a PUT flips it
+     (LONG a put=Bearish, a WRITTEN/SHORT put=Bullish) since selling downside protection is the
+     bullish side of that contract. */
+  var side = posSide(p);
+  if (!side) return null;
+  var long = side === 'LONG';
+  var pe = p.opt_type && String(p.opt_type).toUpperCase() === 'PE';
+  return (pe ? !long : long) ? 'Bullish' : 'Bearish';
+}
 function bookRow(p){
-  var side = posSide(p), pn = Number(p.unrealised_pnl) || 0;
+  var dirv = bookDir(p), pn = Number(p.unrealised_pnl) || 0;
   var leg = p.opt_type
     ? esc(String(p.opt_strike || '')) + ' ' + esc(p.opt_type) + '·wrt'
     : 'FUT';
@@ -1168,7 +1185,7 @@ function bookRow(p){
   var lv = function(v){ return (v === null || v === undefined || v === '') ? '—' : num(v); };
   return '<div class="bkrow">'
     + '<div class="bk1"><b>' + esc(p.symbol) + '</b> <span class="bkleg">' + leg + '</span>'
-    + (side ? '<span class="chip ' + (side === 'SHORT' ? 'l' : 'w') + ' bkside">' + side + '</span>' : '')
+    + (dirv ? '<span class="chip ' + (dirv === 'Bearish' ? 'l' : 'w') + ' bkside">' + dirv + '</span>' : '')
     + '<span class="bkpnl num" style="color:' + cx(pn) + '">₹' + num(pn) + '</span></div>'
     + '<div class="bk2">'
     + '<span>OPEN <b class="num">' + esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—') + '</b></span>'
