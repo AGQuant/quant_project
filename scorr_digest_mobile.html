@@ -1044,10 +1044,17 @@ function raClose(){
    they paint INTO it. Lifted verbatim from raOpen — no behaviour changed for results. */
 function sheetEnsure(){
   if(document.getElementById('rsheet'))return;
-  var v=document.createElement('div'); v.id='rveil'; v.className='rveil'; v.onclick=raClose;
+  var v=document.createElement('div'); v.id='rveil'; v.className='rveil';
   var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
   document.body.appendChild(v); document.body.appendChild(s);
   document.body.style.overflow='hidden';   /* the sheet owns the gesture while it is open */
+  /* cc#1312: the veil's close handler used to bind right here, synchronously, which put it live
+     for the SAME tap that opened the sheet. A full-screen element inserted under the finger
+     mid-event can pick up the synthesized click meant for the row that opened it — mobile Chrome
+     composes that click from the touch's final on-screen point, and elementFromPoint there is now
+     the veil, not the row, once it is in the DOM. Binding one frame later leaves the veil closable
+     on every genuine tap AFTER this one, but not on the tap that created it. */
+  requestAnimationFrame(function(){ if(v.parentNode)v.onclick=raClose; });
 }
 /* ── cc#1260 · A FAILED SHEET MUST NEVER LEAVE A BLOCKING OVERLAY ────────────────────────────
    The reported symptom is the shape of this bug class exactly: sheetEnsure() mounts the veil
