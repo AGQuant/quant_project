@@ -899,8 +899,10 @@ function raPagerLabel(i){
   var el=document.getElementById('rplbl');
   if(el&&RA_PAGES)el.textContent=((i||0)+1)+' OF '+RA_PAGES;
 }
-function rDots(){ raPagerLabel(deckDots('rtrack','rdots')); }
-function rWrap(){ deckWrap('rtrack','rdots'); raPagerLabel(deckDots('rtrack','rdots')); }
+/* cc#1330 · rDots()/rWrap() (the deckDots/deckWrap-based pair) are RETIRED for this deck along
+   with the shared DECKS/deckPark triple-buffer approach — see the RA_WIN* block below raDeck()
+   for why and what replaces them. raPagerLabel() itself is untouched and still shared: the
+   windowed renderer calls it directly. */
 
 /* ══ cc#1190 · LATEST RESULT ANALYSIS DECK ═══════════════════════════════════════════════════
    Replaces YESTERDAY'S RESULTS · SCORED. That card read one session of earnings_calendar and
@@ -939,7 +941,7 @@ function raPick(t){
      filter was working and the page was lying about which filter was on. Caught by a headless
      click, not by reading — the rows were visibly right. */
   host.innerHTML=raChips()+raDeck();
-  deckPark('rtrack');            /* a filter change resets to page 1, per the card */
+  raWinInit();                   /* a filter change resets to page 1, per the card */
 }
 /* cc#1238 · the dot is READ, never computed here. digest_v3._result_dots strikes both checks
    server-side so one place owns the rule and any future surface reads the same field. A row with
@@ -1015,47 +1017,58 @@ function raBasisText(c){
     return 'Dot from the estimate comparison only \u2014 no segment median available for this quarter.';
   return '';
 }
+/* cc#1190 scope 3: the tap and its chevron arrive together with the sheet they open, which is
+   why push 2 shipped these rows deliberately inert. */
+/* cc#1237 scope 2 · R1 ROW ANATOMY. The row is a grid: name block left on row 1, verdict pill
+   right on row 1, one-line summary spanning row 2. `mrow` is dropped from the class list --
+   it is the page's shared ruled-list row (display:flex) and leaving it on would have fought
+   the grid for the same element. The tint classes stay the page's own w/l/mu. */
+function raPageHtml(pg){
+  return '<div class="rpage">'
+    + pg.map(function(c){
+        /* cc#1255 · THE VERDICT PILL IS GONE (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663). The row is
+           now the DOT and the analyst's own sentence — the same sentence the web R button
+           shows, which is why the two surfaces now agree by construction rather than by two
+           derivations being kept in step. The sentence takes the space the pill vacated and
+           clamps to TWO lines instead of one: it is the row's content now, not a caption under
+           a headline word. */
+        return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
+          + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
+          + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
+          + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
+          + raDateChip(c)
+          + '</div></div>'
+          + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
+      }).join('')
+    + '</div>';
+}
+/* cc#1330 · pure JS pagination, no DOM. Cheap at any RA_MAX — it is only ever array slicing over
+   already-fetched rows, never innerHTML/parse work, so recomputing it on every render call (tier
+   switch, window rebuild) costs nothing measurable even at 633 rows / 159 pages. */
+function raPagesArr(){
+  var rows=raList().shown, pages=[];
+  for(var i=0;i<rows.length;i+=RA_PAGE)pages.push(rows.slice(i,i+RA_PAGE));
+  return pages;
+}
 function raDeck(){
-  var L=raList(), rows=L.shown;
-  if(!rows.length){
+  var pages=raPagesArr();
+  if(!pages.length){
     var what=(RA_TIER==='ALL')?'No result analysis yet this season.'
                               :('No '+RA_TIER.toLowerCase()+' names analysed yet.');
-    DECKS.rtrack=0;
     return '<div class="unavail">'+esc(what)+'</div>';
   }
-  var pages=[];
-  for(var i=0;i<rows.length;i+=RA_PAGE)pages.push(rows.slice(i,i+RA_PAGE));
-  DECKS.rtrack=pages.length;
-  var set=pages.map(function(pg,pi){
-    /* cc#1190 scope 3: the tap and its chevron arrive together with the sheet they open, which is
-       why push 2 shipped these rows deliberately inert. */
-    /* cc#1237 scope 2 · R1 ROW ANATOMY. The row is a grid: name block left on row 1, verdict pill
-       right on row 1, one-line summary spanning row 2. `mrow` is dropped from the class list --
-       it is the page's shared ruled-list row (display:flex) and leaving it on would have fought
-       the grid for the same element. The tint classes stay the page's own w/l/mu. */
-    return '<div class="rpage">'
-      + pg.map(function(c){
-          /* cc#1255 · THE VERDICT PILL IS GONE (RESULT_ROW_DOTS_ONLY_RULE_V1, 29663). The row is
-             now the DOT and the analyst's own sentence — the same sentence the web R button
-             shows, which is why the two surfaces now agree by construction rather than by two
-             derivations being kept in step. The sentence takes the space the pill vacated and
-             clamps to TWO lines instead of one: it is the row's content now, not a caption under
-             a headline word. */
-          return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
-            + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
-            + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
-            + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
-            + raDateChip(c)
-            + '</div></div>'
-            + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
-        }).join('')
-      + '</div>';
-  }).join('');
+  /* cc#1330 · dots are still built for every REAL page up front — that part was never the
+     problem (159 tiny <i> elements is nothing next to ~1,900 nested row divs) — but #rtrack
+     itself starts EMPTY. raWinInit() (called by whoever inserts this HTML, same call-site
+     pattern the old deckPark('rtrack') used) fills it with the initial 1-3-page window. Doing
+     that here instead would mean rendering into an element that is not attached to the document
+     yet, which is exactly the ordering rule the surrounding decks (iDots/deckPark) already
+     follow for the same reason. */
   var dots=Array.from({length:pages.length},function(_,j){
-    return '<i class="'+(j?'':'on')+'"></i>';}).join('');
+    return '<i class="'+(j?'':'on')+'" onclick="raWinRender('+j+')"></i>';}).join('');
   RA_PAGES=pages.length;
-  return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
-       + set+set+set+'</div><div class="rpager"><div class="idots" id="rdots">'+dots+'</div>'
+  return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="raWinScroll()"></div>'
+       + '<div class="rpager"><div class="idots" id="rdots">'+dots+'</div>'
        + '<span class="rplbl" id="rplbl">1 OF '+pages.length+'</span></div></div>'
        /* cc#1329 \u2014 SHOW MORE retired: RA_MAX is uncapped above, so this deck already paginates
           through the full analysed list and there is nothing more to "show". The freed slot
@@ -1069,6 +1082,84 @@ function raDeck(){
        + '<a class="rmore" href="/m/results">UPCOMING RESULTS \u2192</a>';
 }
 
+/* ══ cc#1330 · WINDOWED RENDERING FOR THE RESULTS DECK ══════════════════════════════════════
+   ROOT CAUSE, confirmed by reading the live post-cc#1329 code, not guessed: raDeck() used to
+   build the swipe track as set+set+set — the full page-set rendered THREE TIMES in the DOM, the
+   technique every other deck on this page (itrack, nwdtrack, nwgtrack, via the shared deckPark/
+   deckWrap/deckDots trio) still uses to fake an infinite loop: park on the middle copy, and
+   silently re-center by exactly one copy-width whenever a scroll settles near either outer copy.
+   That is fine at the scale those decks stay at. It was fine here too when RA_MAX capped this
+   deck at 5 pages (15 page-divs, ~60 rows). cc#1329 uncapped RA_MAX — a deliberate, correct
+   founder decision, kept as-is, NOT reverted here — and nobody re-checked whether tripling still
+   scaled at the new page counts. ALL tier is now ~159 pages × 3 = ~477 page-divs, up to ~1,900
+   row elements rebuilt via host.innerHTML on every tier switch. That synchronous DOM replacement
+   immediately followed by deckPark's scrollTo is what read as the shake and the scroll-jump.
+
+   THE FIX IS A DIFFERENT RENDERING STRATEGY FOR THIS DECK, not a timing patch on the old one — a
+   delay before scrollTo would only mask the shake without touching the DOM-scale problem underneath.
+   This deck now renders a WINDOW of at most 3 real page-divs at a time (the current page plus one
+   buffer page on each side, fewer at the first/last page), never a copy of anything. Swiping to
+   the end of a window settles, then rebuilds the window around the new center — same technique in
+   spirit, sized to 1-3 real pages instead of the entire filtered set. This is applied uniformly
+   at every tier/page-count rather than only above some threshold: one code path is one thing to
+   verify, and the spec's own two suggested directions both leave that choice to CC/Fable.
+
+   TRADE-OFF, STATED PLAINLY: this deck no longer loops infinitely — swiping past the last real
+   page (or before the first) just stops, the same as any ordinary paginated list, rather than
+   wrapping back around. The founder's card explicitly authorises exactly this ("abandoning the
+   infinite-loop triple-buffer illusion for large counts specifically"). itrack/nwdtrack/nwgtrack
+   are UNTOUCHED — they stay small enough that the old shared triple-buffer approach is correct
+   for them, and this card is scoped to the deck that actually broke.
+
+   The shared deckAt()/deckPitch() helpers ARE reused below — they only ever read whatever is
+   currently in the DOM (children[0]/children[1] offsets), so they work identically whether that
+   DOM holds 3 copies of everything or 3 real neighbouring pages. deckPark/deckWrap/deckDots
+   themselves are NOT reused, because their re-centering logic assumes copy-identical content,
+   which a real 3-page window does not have. */
+var RA_WIN_LO=0, RA_WIN_CENTER=0, RA_WIN_TMR=null;
+function raWinDotsSync(center){
+  var dots=document.getElementById('rdots');
+  if(!dots)return;
+  Array.prototype.forEach.call(dots.children,function(el,j){el.className=(j===center?'on':'');});
+}
+/* Renders pages[center-1..center+1] (clamped at the real ends) into #rtrack and parks on the
+   centre page's own offset, instantly — same "park by the child's actual offsetLeft, not by
+   arithmetic" discipline deckAt already uses, so the rest position is exactly where the browser
+   laid that child out rather than a computed guess that can drift by a pixel. Called on first
+   paint (center 0), on a tier switch (center 0, "reset to page 1" per the card), on a dot tap
+   (jump straight to that page), and from raWinScroll below (settle after a swipe). */
+function raWinRender(center){
+  var pages=raPagesArr();
+  if(!pages.length)return;
+  center=Math.max(0,Math.min(center,pages.length-1));
+  var lo=Math.max(0,center-1), hi=Math.min(pages.length-1,center+1);
+  var tr=document.getElementById('rtrack');
+  if(!tr)return;
+  var html='';
+  for(var i=lo;i<=hi;i++)html+=raPageHtml(pages[i]);
+  tr.innerHTML=html;
+  RA_WIN_LO=lo; RA_WIN_CENTER=center;
+  tr.scrollTo({left:deckAt(tr,center-lo),behavior:'auto'});
+  raWinDotsSync(center);
+  raPagerLabel(center);
+}
+function raWinInit(){ raWinRender(0); }
+/* Debounced settle handler, same 90ms shape as deckWrap's — long enough that mid-swipe scroll
+   events do not each trigger a rebuild, short enough that it still reads as instant once the
+   swipe stops. Maps the settled scroll position back to a REAL page index (RA_WIN_LO + which
+   child is centred) and, only if that differs from the page already centred, rebuilds the
+   window there. Landing back on the same centre (a swipe that snapped back, or a stray scroll
+   event) does nothing — there is nothing stale to refresh. */
+function raWinScroll(){
+  if(RA_WIN_TMR)clearTimeout(RA_WIN_TMR);
+  RA_WIN_TMR=setTimeout(function(){
+    var tr=document.getElementById('rtrack');
+    if(!tr)return;
+    var w=deckPitch(tr), childIdx=Math.round(tr.scrollLeft/w);
+    var newCenter=RA_WIN_LO+childIdx;
+    if(newCenter!==RA_WIN_CENTER)raWinRender(newCenter);
+  },90);
+}
 
 /* ══ cc#1325 · LIVE NEWS — ported verbatim from scorr_v10_signal.html (cc#1322), which itself was
    ported from mobile/home.html. Founder decision: stop debugging this page's own news-sheet
@@ -2167,7 +2258,7 @@ async function boot(){
      the dots, which is what the separate iDots() here used to do (cc#1121: the deck's nodes are
      replaced on every render, so the dot handlers must be rebound). */
   deckPark('itrack');
-  deckPark('rtrack');
+  raWinInit();      /* cc#1330: rtrack no longer uses deckPark — see the RA_WIN* block */
   loadInternals();
   /* cc#1325: LIVE NEWS paints its placeholder in the template above; loadRawNews() fills it in
      after, same sequencing this component already used on Index Intel (cc#1322). */
