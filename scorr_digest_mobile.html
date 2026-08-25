@@ -910,10 +910,17 @@ function rWrap(){ deckWrap('rtrack','rdots'); raPagerLabel(deckDots('rtrack','rd
    RA_MAX IS A JUDGEMENT CALL AND IT IS ONE CONSTANT SO IT COSTS ONE LINE TO CHANGE. The card
    specifies 4 rows per page, a modulo loop, "p of N", and a sub-line reading "n of total
    analysed" — the n-of-total wording is what says the deck shows a SUBSET, but it never says how
-   big. All 633 would be 159 pages, which is not a swipe, and SHOW MORE exists precisely to hand
-   the full list to Result Corner. 20 (five pages) is the default; the question is logged. */
+   big. All 633 would be 159 pages, which is not a swipe. 20 (five pages) was the default while
+   the question was open, and SHOW MORE handed the escape hatch to Result Corner.
+
+   cc#1329 — founder answers the logged question: UNCAPPED. The deck paginates through the FULL
+   tier-filtered set (up to 633 for ALL, ~159 pages, and whatever the real count is for LARGE/MID/
+   SMALL) — accepted as the founder's explicit choice, not a regression. raList() still filters by
+   tier before slicing, so this one change also uncaps every tier tab, not just ALL. With no cap
+   left, "show more of this same list" is no longer a needed escape hatch, which is what frees the
+   footer slot below for UPCOMING RESULTS instead (a genuinely different, complementary list). */
 var RA=null, RA_TIER='ALL', RA_PAGES=0;
-var RA_PAGE=4, RA_MAX=20;
+var RA_PAGE=4, RA_MAX=Infinity;
 var RA_TIERS=['ALL','LARGE','MID','SMALL'];
 
 function raList(){
@@ -1050,8 +1057,16 @@ function raDeck(){
   return '<div class="iswipe"><div class="iswipe-t" id="rtrack" onscroll="rWrap()">'
        + set+set+set+'</div><div class="rpager"><div class="idots" id="rdots">'+dots+'</div>'
        + '<span class="rplbl" id="rplbl">1 OF '+pages.length+'</span></div></div>'
-       /* scope 5: the deck is the latest RA_MAX; the full list lives in the mobile Result Corner */
-       + '<a class="rmore" href="/m/results">SHOW MORE \u2192</a>';
+       /* cc#1329 \u2014 SHOW MORE retired: RA_MAX is uncapped above, so this deck already paginates
+          through the full analysed list and there is nothing more to "show". The freed slot
+          points at a genuinely different list instead: companies about to report, not ones that
+          already have. /m/results (mobile/results.html, /api/mobile/results) already IS that
+          view \u2014 checked live before building anything new: it reads earnings_calendar WHERE
+          ex_date is in the next N days, and confirmed against real rows that every row in that
+          window today carries status='upcoming' (11/11) \u2014 the same table+column the founder
+          named as the source, reached through the page that already exists rather than a new
+          one. No new endpoint, no new page. */
+       + '<a class="rmore" href="/m/results">UPCOMING RESULTS \u2192</a>';
 }
 
 
