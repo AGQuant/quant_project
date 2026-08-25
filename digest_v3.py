@@ -544,7 +544,11 @@ LEFT JOIN screener_raw s ON s.nse_code = r.symbol
 LEFT JOIN latest_gvm    g ON g.symbol  = r.symbol
 LEFT JOIN ranked        k ON k.symbol  = r.symbol
 LEFT JOIN ex            e ON e.symbol  = r.symbol
-ORDER BY r.polished_at DESC, r.symbol
+-- cc#1319: ex_date descending is the deck's actual order now — latest result first, per the
+-- founder's screenshot (was accidentally polished_at order, which reads as alphabetical-by-symbol
+-- whenever a batch polishes together). polished_at stays as the tiebreak for same-date rows (or
+-- rows with no ex_date on file), so the order is still fully deterministic; symbol closes it out.
+ORDER BY e.ex_date DESC NULLS LAST, r.polished_at DESC, r.symbol
 """
 
 
@@ -740,7 +744,11 @@ def _results_analysed(cur) -> Dict[str, Any]:
         "duplicate_symbols": dupes,
         "tiers": tiers,
         "unranked": unranked,
-        "latest_polished": out[0]["polished_at"] if out else None,
+        # cc#1319: no longer out[0] -- the deck is sorted by ex_date now, not polished_at, so the
+        # first row is not necessarily the most recently polished one any more. polished_at is
+        # astimezone(IST).isoformat() with a fixed offset on every row, so a plain string max()
+        # is a correct chronological max without re-parsing back to a datetime.
+        "latest_polished": max((c["polished_at"] for c in out if c["polished_at"]), default=None),
         # cc#1255 · THE TALLY IS NOW DOT COUNTS, and every number in it comes off the dot table
         # rather than off a second reading of prose. green = beat BOTH checks, amber = beat one,
         # red = beat neither, exactly the rule-29519 meaning and nothing new invented.
