@@ -380,64 +380,81 @@ html,body{margin:0;padding:0;background:var(--bg);}
     /* cc#1098: the visible header becomes "From" — it is a tracking start, not a freshness stamp.
        The sort KEY stays the literal 'asof' on purpose: sortRows() switches on it, and renaming
        the key would silently break the column sort while looking like a copy edit. */
-    /* cc#1215: three ledger columns after Invested. The `lg` class is what the 1024px rule
-       below hides - Pay-in and Payout collapse away and Net pay-in stays, because on a narrow
-       screen the net is the number worth keeping. */
-    var cols=[['client','Client','left'],['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],['payin_total','Pay-in','right'],['payout_total','Payout','right'],['net_payin','Net pay-in','right'],['current','Current','right'],['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right'],['alpha_pct','Alpha vs N50','right'],
-              /* cc#1216: XIRR and its alpha are ADDED after the existing alpha column, which
-                 keeps its meaning untouched. Both collapse below 1024px alongside Pay-in and
-                 Payout - on a narrow screen the simple figures are the ones that survive. */
-              ['xirr','XIRR','right'],['alpha_xirr','XIRR alpha','right']];
-    var COLLAPSE={payin_total:1,payout_total:1,xirr:1,alpha_xirr:1};
+    /* cc#1334 · founder's 25-Aug column rework, on top of cc#1332/cc#1333. Final left-to-right
+       order (verified against the card's own verify checklist): Client, XIRR, XIRR alpha, From,
+       Holdings, Invested, Net pay-in, Current, P&L (₹), P&L (%), then the trailing action cell.
+       Pay-in/Payout/Alpha-vs-N50 are gone as COLUMNS here — Pay-in/Payout still live in the
+       ledger sheet's own footer (unchanged, cc#1212), reached from Net pay-in's new View
+       trigger below; alpha_pct's API field and sortRows() case are left in place, just no
+       longer rendered, per the card's "harmless, do not rip out sort logic other views might
+       reuse" note. XIRR/XIRR alpha are front-loaded right after Client and DROP OUT of
+       COLLAPSE — they are primary figures now, not narrow-screen casualties. */
+    var cols=[['client','Client','left'],['xirr','XIRR','right'],['alpha_xirr','XIRR alpha','right'],
+              ['asof','From','left'],['holdings','Holdings','right'],['invested','Invested','right'],
+              ['net_payin','Net pay-in','right'],['current','Current','right'],
+              ['pnl','P&L (₹)','right'],['pnl_pct','P&L (%)','right']];
+    var COLLAPSE={};   /* cc#1334: nothing left to collapse below 1024px -- Pay-in/Payout (the
+                          only columns the old rule hid alongside xirr/alpha_xirr) are gone as
+                          columns, and xirr/alpha_xirr are explicitly meant to stay visible now. */
     function arrow(k){ return SORT.key===k?(SORT.dir<0?' ▾':' ▴'):''; }
     /* cc#1332: header font-size 11px->10px, part of the Table-view density pass -- header
-       padding (9px 8px) is untouched, the card only asked for font-size here. */
-    var thead='<tr>'+cols.map(function(c){ return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);">'+c[1]+arrow(c[0])+'</th>'; }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
+       padding (9px 8px) is untouched, the card only asked for font-size here.
+       cc#1334: the Client header ALSO gets the sticky treatment below, matching the sticky
+       Client td in every row — a frozen column needs both ends pinned or the header drifts out
+       of alignment with its own data the moment the table scrolls horizontally. */
+    var thead='<tr>'+cols.map(function(c){
+      var sticky=c[0]==='client'
+        ? 'position:sticky;left:0;z-index:2;background:var(--bg,#fff);'
+        : '';
+      return '<th data-k="'+c[0]+'"'+(COLLAPSE[c[0]]?' class="lg"':'')+' style="text-align:'+c[2]+';padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted,#667085);cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--rule,#dfe3ea);'+sticky+'">'+c[1]+arrow(c[0])+'</th>';
+    }).join('')+'<th style="border-bottom:1px solid var(--rule,#dfe3ea);"></th></tr>';
     var tbody=rows.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)')),
-          pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)')),
-          acol=(p.alpha_pct==null?'var(--muted)':(p.alpha_pct>=0?'var(--grn)':'var(--red)'));
+          /* cc#1334: acol (alpha_pct's colour) is gone with the column it coloured — alpha_pct
+             itself stays computed in the API response and in sortRows()' val(), per the card's
+             "don't rip out sort logic other views might reuse" note; only this dead render-time
+             local is removed, since nothing here reads p.alpha_pct any more. */
+          pcol=(p.pnl_pct==null?'var(--muted)':(p.pnl_pct>=0?'var(--grn)':'var(--red)'));
       return '<tr onclick="location.href=\'/health?pid='+p.id+'&wl=1\'" style="cursor:pointer;border-bottom:1px solid var(--rule,#eef1f5);">'
-        + '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;">'+esc(clientName(p))+'</td>'
+        /* cc#1334: Client is now the frozen column — position:sticky;left:0 with a SOLID
+           background (not transparent, or the columns scrolling underneath would show through
+           the text, per the card's own warning). Same z-index as the sticky header th above so
+           the pinned cell always sits above the scrolling columns, never under them. */
+        + '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;background:var(--bg,#fff);">'+esc(clientName(p))+'</td>'
+        /* cc#1334: XIRR / XIRR alpha front-loaded right after Client (were columns 12-13, now
+           2-3) and no longer carry class="lg" — they are primary figures now, visible at every
+           width. Cell content and colour logic are untouched, only position + the dropped class. */
+        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'
+          +(p.xirr==null?'var(--muted)':(p.xirr>=0?'var(--grn)':'var(--red)'))+'"'
+          +(p.xirr==null?' title="needs a dated pay-in / payout ledger"':'')+'>'
+          +(p.xirr==null?'—':(p.xirr>=0?'+':'−')+Math.abs(p.xirr).toFixed(1)+'%')+'</td>'
+        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'
+          +(p.alpha_xirr==null?'var(--muted)':(p.alpha_xirr>=0?'var(--grn)':'var(--red)'))+'"'
+          +(p.alpha_xirr==null?' title="needs a dated pay-in / payout ledger"':' title="XIRR minus Nifty 50 XIRR on the same dated flows"')+'>'
+          +(p.alpha_xirr==null?'—':(p.alpha_xirr>=0?'+':'−')+Math.abs(p.alpha_xirr).toFixed(1)+'%')+'</td>'
         /* cc#1098: same guard as the cards — an em-dash when there is no tracking_date, never
            created_at wearing a "From" label. dmy() already returns an em-dash for null, so the
            guard is startDate() supplying null rather than a fallback date. */
         + '<td style="padding:7px 6px;color:var(--muted,#667085);white-space:nowrap;">'+dmy(startDate(p))+'</td>'
         + '<td style="padding:7px 6px;text-align:right;">'+(p.n_holdings||0)+'</td>'
         + '<td style="padding:7px 6px;text-align:right;">'+inr(p.invested)+'</td>'
-        /* cc#1215: the three ledger columns. An em-dash with a tooltip when there is no ledger,
-           never a zero - the same distinction the cards make.
-           NET PAY-IN is a link into the cc#1212 sheet via the SAME delegated [data-lgpid]
-           handler the cards use. The card says do not fork it, so it is not forked: this is a
-           second trigger on one handler, not a second sheet. The row itself navigates to the
-           report, so this cell stops the click reaching it. */
-        + '<td class="lg" style="padding:7px 6px;text-align:right;">'
-          + (p.payin_total==null?'<span title="no ledger on record">—</span>':inr(p.payin_total))+'</td>'
-        + '<td class="lg" style="padding:7px 6px;text-align:right;">'
-          + (p.payout_total==null?'<span title="no ledger on record">—</span>':inr(p.payout_total))+'</td>'
+        /* cc#1334: Pay-in and Payout are no longer columns here — both still live in the ledger
+           sheet's own footer (cc#1212, unchanged), reached via this cell's View trigger exactly
+           as before. Net pay-in no longer PRINTS the number in the row; the sort key (SORT.key
+           ===net_payin) still works because the header th click-to-sort reads SORT state, not
+           cell content, so sorting by net pay-in is unaffected even though the number itself no
+           longer appears here. The manual-set asterisk that used to ride on the printed number
+           is dropped with it — nothing left in-row for it to annotate; the ledger sheet is the
+           place that number (and any discrepancy) is seen now. Same no-ledger guard as before:
+           null still renders a plain em-dash, never a dead trigger. */
         + '<td style="padding:7px 6px;text-align:right;">'
           + (p.net_payin==null
               ? '<span title="no ledger on record">—</span>'
               : '<span data-lgpid="'+esc(p.id)+'" data-lgname="'+esc(clientName(p))+'"'
-                + ' style="color:var(--blu);cursor:pointer;" title="Open the ledger">'
-                + inr(p.net_payin)+'</span>'
-                + (Math.abs((p.net_payin||0)-(p.invested||0))>1000
-                    ? ' <span title="Invested is set manually for this account" style="color:var(--faint)">*</span>'
-                    : ''))
+                + ' style="color:var(--blu);cursor:pointer;" title="Open the ledger">View</span>')
           + '</td>'
         + '<td style="padding:7px 6px;text-align:right;">'+inr(p.current)+'</td>'
         + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+col+'">'+(p.pnl==null?'—':(p.pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(p.pnl)).toLocaleString('en-IN'))+'</td>'
         + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+pcol+'">'+(p.pnl_pct==null?'—':(p.pnl_pct>=0?'+':'−')+Math.abs(p.pnl_pct).toFixed(1)+'%')+'</td>'
-        + '<td style="padding:7px 6px;text-align:right;font-weight:600;color:'+acol+'" title="P&amp;L % minus Nifty 50 return since start date">'+(p.alpha_pct==null?'—':(p.alpha_pct>=0?'+':'−')+Math.abs(p.alpha_pct).toFixed(1)+'%')+'</td>'
-        /* cc#1216: em-dash with the reason as a tooltip, never a zero - a client whose ledger is
-           not loaded has not returned nothing. */
-        + '<td class="lg" style="padding:7px 6px;text-align:right;font-weight:600;color:'
-          +(p.xirr==null?'var(--muted)':(p.xirr>=0?'var(--grn)':'var(--red)'))+'"'
-          +(p.xirr==null?' title="needs a dated pay-in / payout ledger"':'')+'>'
-          +(p.xirr==null?'—':(p.xirr>=0?'+':'−')+Math.abs(p.xirr).toFixed(1)+'%')+'</td>'
-        + '<td class="lg" style="padding:7px 6px;text-align:right;font-weight:600;color:'
-          +(p.alpha_xirr==null?'var(--muted)':(p.alpha_xirr>=0?'var(--grn)':'var(--red)'))+'"'
-          +(p.alpha_xirr==null?' title="needs a dated pay-in / payout ledger"':' title="XIRR minus Nifty 50 XIRR on the same dated flows"')+'>'
-          +(p.alpha_xirr==null?'—':(p.alpha_xirr>=0?'+':'−')+Math.abs(p.alpha_xirr).toFixed(1)+'%')+'</td>'
         /* cc#1332: renderTable() had ZERO references to data-rbpid -- the Rebalance/Repair
            feature (cc#1273) was wired into renderCards() only, and boot() picks table view by
            default once ALL.length>6, so this made the feature unreachable by default. Same
