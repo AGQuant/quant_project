@@ -540,6 +540,26 @@ html,body{margin:0;padding:0;background:var(--bg);}
     document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeRepairSheet(); });
     loadRepair(basket);
   }
+  /* cc#1333 — four functions in this closure are called from a dynamically-generated OR static
+     onclick="..." STRING attribute, which resolves in global scope, not the scope of the script
+     that wrote it. Confirmed live before fixing (window.saveMultiplier etc were all undefined;
+     real clicks threw ReferenceError and did nothing, silently, since cc#1273 first shipped
+     this): saveMultiplier and openRepairSheet from loadBaskets()'s generated Save/Repair buttons,
+     and — found on a second pass, not caught by the first check, which only looked at the
+     programmatic addEventListener binds these two ALSO carry and wrongly assumed that was the
+     whole story — closeBasketsSheet and closeRepairSheet from the STATIC '.x' close buttons in
+     this page's own markup (`<button class="x" ... onclick="closeBasketsSheet()">`). Those two
+     sheets close correctly anyway because openBasketsSheet()/openRepairSheet() ALSO bind the same
+     .x with addEventListener each time the sheet opens — that closure-scoped bind is what
+     actually closes the sheet — but the inline attribute fires on the same click and throws
+     regardless, so every close was silently logging a ReferenceError until now.
+     loadRepair does NOT need this: it is only ever called as a plain closure-scoped function
+     call, never through a string attribute. Exposed the same way this file already exposes
+     openLedger/closeLedger via window.ScorrLedger (see above). */
+  window.saveMultiplier=saveMultiplier;
+  window.openRepairSheet=openRepairSheet;
+  window.closeBasketsSheet=closeBasketsSheet;
+  window.closeRepairSheet=closeRepairSheet;
   function loadRepair(basket){
     fetch('/api/adaptive/baskets/repair?portfolio_id='+encodeURIComponent(currentPortfolioId)+'&basket_name='+encodeURIComponent(basket))
       .then(function(r){ return r.json(); })
