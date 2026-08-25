@@ -2956,13 +2956,16 @@ function nwOpen(idx){
 
   var veil = document.createElement('div');
   veil.className = 'nwveil';
-  veil.onclick = nwClose;
 
   var sheet = document.createElement('div');
   sheet.className = 'nwsheet';
   sheet.setAttribute('role', 'dialog');
   sheet.setAttribute('aria-modal', 'true');
-  sheet.innerHTML = '<div class="nwgrab" onclick="nwClose()"></div>'
+  /* cc#1312 round 2 · no inline onclick on the grab handle any more — see the comment below on
+     why the veil's close binding moved off the same tick. The grab handle sits at the very top of
+     the sheet, close to where the veil's own top edge is, and an inline onclick="" attribute is
+     live the instant this string is parsed, same exposure as the veil used to have. */
+  sheet.innerHTML = '<div class="nwgrab"></div>'
     + '<div class="nwsb"><div class="nwsh">' + esc(n.headline) + '</div>'
     + '<div class="nwsm">' + meta + '</div>' + body + '</div>';
 
@@ -2971,6 +2974,21 @@ function nwOpen(idx){
   document.body.style.overflow = 'hidden';
   NW.open = true;
   nwBindSheet(sheet);
+  /* cc#1312 round 2 · THE ACTUAL APP SURFACE FOR THIS BUG. Round 1 fixed the same race in
+     scorr_digest_mobile.html's sheetEnsure() but never checked this file's own separate nwOpen(),
+     which has the identical anti-pattern: veil.onclick was bound synchronously, live for the SAME
+     tap that opened the sheet. On mobile, inserting a full-screen clickable element under the
+     finger mid-event lets the browser's synthesized click (composed from the touch's final
+     on-screen point) land on the new veil instead of the row that opened it, closing the sheet
+     before it is ever seen — exactly "opens then immediately closes" from a single tap. Binding
+     both close handlers one requestAnimationFrame later keeps them live for every genuine tap
+     AFTER this one, but not for the tap that created them. */
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = nwClose;
+    var grab = sheet.querySelector('.nwgrab');
+    if (grab) grab.onclick = nwClose;
+  });
 }
 
 function nwClose(){
