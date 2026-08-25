@@ -1040,30 +1040,40 @@ function newsDeck(items,cat){ return nwDeck(items,cat,cat==='Domestic'?'d':'g');
    outlet. There is no VIEW DETAIL foot: the polished piece IS the detail, so a link promising more
    would be a link to nothing. */
 function nwOpen(cat,i){
-  var n=(NW[cat]||[])[i]; if(!n)return;
-  sheetEnsure();
-  var sh=document.getElementById('rsheet'); if(!sh)return;
-  /* cc#1260: the whole build runs inside sheetPaint, so a throw anywhere below — a payload field
-     that is not the shape this expects, a helper that is not loaded yet — ends in the minimal
-     view with the headline still on it, never in a veil over nothing. */
-  sheetPaint(function(){
-  var meta=[];
-  if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
-  if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
-  if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
-  var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
-    t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
-    || '<div class="rsp" style="color:var(--chalk)">No polished body on this item.</div>';
-  var chips=(n.symbols||[]).map(function(x){
-    return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
-  return '<div class="rgrab"></div>'
-    + '<div class="rshd" style="position:relative">'
-    + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
-    + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
-    + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
-    + '<div class="rsb">'+body
-    + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
-  }, esc(n.headline||'This item could not be opened.'));
+  /* cc#1323 · BELT-AND-BRACES, on top of cc#1260's guard inside sheetPaint. That guard only
+     covers the build() callback; this covers everything else in this function too (the NW[cat][i]
+     lookup, sheetEnsure() itself) even though re-reading found no throw source there today — a
+     future edit to either could reintroduce exactly the "veil with nothing behind it" shape this
+     card was filed over, and this makes that impossible rather than merely unlikely. */
+  try{
+    var n=(NW[cat]||[])[i]; if(!n)return;
+    sheetEnsure();
+    var sh=document.getElementById('rsheet'); if(!sh)return;
+    /* cc#1260: the whole build runs inside sheetPaint, so a throw anywhere below — a payload field
+       that is not the shape this expects, a helper that is not loaded yet — ends in the minimal
+       view with the headline still on it, never in a veil over nothing. */
+    sheetPaint(function(){
+    var meta=[];
+    if(n.sentiment)meta.push('<span>'+esc(String(n.sentiment).toUpperCase())+'</span>');
+    if(n.impact)meta.push('<span>'+esc(String(n.impact).toUpperCase())+' IMPACT</span>');
+    if(n.published)meta.push('<span>'+esc(ago(n.published))+'</span>');
+    var body=String(n.full_summary||n.summary||'').split(/\n+/).map(function(t){
+      t=t.trim(); return t?'<div class="rsp">'+esc(t)+'</div>':'';}).join('')
+      || '<div class="rsp" style="color:var(--chalk)">No polished body on this item.</div>';
+    var chips=(n.symbols||[]).map(function(x){
+      return '<span class="chip mu" style="margin:0 6px 6px 0">'+esc(x)+'</span>';}).join('');
+    return '<div class="rgrab"></div>'
+      + '<div class="rshd" style="position:relative">'
+      + '<button class="rsx" onclick="raClose()" aria-label="close">&times;</button>'
+      + '<div class="co" style="font-size:var(--type-14);line-height:1.35">'+esc(n.headline||'')+'</div>'
+      + (meta.length?'<div class="meta">'+meta.join('')+'</div>':'')+'</div>'
+      + '<div class="rsb">'+body
+      + (chips?'<div style="margin-top:12px">'+chips+'</div>':'')+'</div>';
+    }, esc(n.headline||'This item could not be opened.'));
+  }catch(e){
+    try{ if(window.console&&console.error)console.error('cc#1323 nwOpen failed, tearing down', e); }catch(_){}
+    raClose();
+  }
 }
 /* time-ago, borrowed from the shared row component so the deck and the sheet cannot disagree. */
 function ago(t){ return window.ScorrNewsRow&&ScorrNewsRow.ago?ScorrNewsRow.ago(t):''; }
@@ -1084,7 +1094,24 @@ function raClose(){
    one #rsheet element, one body-scroll lock, one close path. Results and news differ only in what
    they paint INTO it. Lifted verbatim from raOpen — no behaviour changed for results. */
 function sheetEnsure(){
-  if(document.getElementById('rsheet'))return;
+  /* cc#1323 · SELF-HEALING GUARD, not a re-attempt of the cc#1312 rAF fix. Two rounds of static
+     reading could not construct or explain the reported shape — a blurred veil PERSISTING with no
+     sheet content, outlasting the tap that opened it — through the ghost-click race (that removes
+     veil+sheet TOGETHER, a flash, not a lingering half-open state) or through an async exception
+     (nwOpen has no async code at all; raOpen's is already caught by its own .then().catch() chain,
+     verified by re-reading it). Whatever the root cause turns out to be, this makes the DESCRIBED
+     STATE impossible to get stuck in: the old guard only ever checked #rsheet, so if #rveil ever
+     existed WITHOUT a matching #rsheet (exactly the reported shape) sheetEnsure() would see no
+     #rsheet and try to create a SECOND veil on top of the orphaned one, doing nothing to clear it.
+     Now it checks BOTH and tears down whatever is there — the orphan or a mismatched pair — before
+     building fresh, so the next tap on a row self-heals instead of staying stuck. */
+  var exSheet=document.getElementById('rsheet'), exVeil=document.getElementById('rveil');
+  if(exSheet&&exVeil)return;   /* normal case: sheet already open, caller swaps its content in place */
+  if(exSheet||exVeil){
+    if(exSheet)exSheet.remove();
+    if(exVeil)exVeil.remove();
+    document.body.style.overflow='';
+  }
   var v=document.createElement('div'); v.id='rveil'; v.className='rveil';
   var s=document.createElement('div'); s.id='rsheet'; s.className='rsheet';
   document.body.appendChild(v); document.body.appendChild(s);
