@@ -9,6 +9,9 @@
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
+<!-- cc#1322: LIVE NEWS ported from mobile/home.html reuses the shared row's sentiment/category
+     helpers (sentiClass, catShort) and its self-guarded stylesheet injection for .nrdot. -->
+<script src="/scorr_news_row.js"></script>
 <style>
 /* INDEX INTEL — implements design_refs/scorr_indexintel_mobile_R1.html (bb2fde7), R5.1 tokens */
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
@@ -309,6 +312,93 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
+
+/* ══ cc#1322 · LIVE NEWS, moved off Home onto this page as the last section (founder 25-Aug) ═══
+   Ported from mobile/home.html verbatim in behaviour — RAW/POLISH tabs (cc#1092), paging (cc#971),
+   fixed row height (cc#1204), category tag in the chevron's slot (cc#1120), the bottom-sheet peek
+   with the cc#1312 round-2 close-race fix intact. NOT a copy-paste of the CSS: home.html and this
+   page are on two different token systems (see the card). Every colour below is re-pointed at this
+   file's own R5.1 tokens, checked one by one against home.html's --root chain rather than guessed:
+     home --txt          (-> --t-ink, bright text)      -> this page's --chalk
+     home --mut / --dim  (both -> --t-muted)             -> this page's --muted
+     home --panel2       (-> --t-hi)                     -> this page's --hi
+     home --line/--line2 (both -> --t-edge)               -> this page's --edge
+     home --grn (fallback #C8F542, -> --t-win)  -> this page's --volt (--volt is #C8F542 too — the
+                                                    fallback hex and this page's real token AGREE,
+                                                    which is what confirms the mapping rather than a
+                                                    guess at "green means green somewhere").
+     home --red (fallback #FF4D6D, -> --t-loss) -> this page's --heat (#FF4D6D here too, same check)
+     home --gold and --t-sunk carry NO real token on home.html either — both only ever resolved via
+     their hardcoded fallback (#D4AF37, #0E0E11) because neither name is defined anywhere reachable
+     from that page. There is no equivalent token in THIS page's R5.1 set either (no gold accent,
+     no separate "sunk" tone from --panel), so those two stay the literal hex they were already
+     rendering as — carrying the exact live colour forward is more honest than inventing a mapping
+     to a token that would shift the look. .nwsheet's background does move off that literal
+     though: --panel is what this family's own sibling sheet (scorr_digest_mobile.html's .rsheet)
+     uses for a bottom sheet, so it takes the real token where a real sibling precedent exists.
+     .nwtabs keeps --field for its recessed strip -- this page's own darkest/page-level tone, the
+     same role home's --t-sunk played (a shade behind --panel), just under this family's own name.
+   home.html's OLD .rnr/.rnr .h/.rnr .rnage rules are dead CSS on that page too (cc#1092's .nwrow
+   replaced them years before this move; nothing there emits class="rnr" any more) -- not ported,
+   same call as cc#1318's .lrow/.ll on the digest page earlier tonight. */
+:root{--news-row-h:59px}
+.nwtabs{display:flex;background:var(--field);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);
+  padding:var(--space-3);margin:var(--space-2) 0 var(--space-10)}
+.nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
+  letter-spacing:var(--track-em14);color:var(--chalk);background:none;border:0;font-family:inherit;cursor:pointer}
+.nwtab.on{background:#D4AF37;color:#151204}
+.nwtab small{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
+  margin-left:var(--space-4);font-size:var(--type-9)}
+.nwrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-11) var(--space-2);
+  height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
+  border:0;border-bottom:var(--bw-1) solid var(--edge);background:none;width:100%;text-align:left;
+  font-family:inherit;color:inherit;cursor:pointer}
+.nwrow:last-of-type{border-bottom:0}
+.nwrow .h{flex:1;min-width:0;font-size:var(--type-125);line-height:1.45;color:var(--chalk);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.nwrow .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--chalk);
+  white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
+.nwrow.nwpad{cursor:default;pointer-events:none}
+.nwrow .nwchev,.nwrow .nwcat{flex:0 0 46px;min-width:0;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.nwrow .nwchev{color:#D4AF37;font-size:var(--type-13);flex-shrink:0;
+  background:none;border:0;border-radius:0;padding:0;margin:0}
+.nwrow .nwchev::before{content:none}
+.nwrow .nwcat{flex-shrink:0;white-space:nowrap;font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-6);border-radius:var(--radius-5);
+  color:#D4AF37;border:var(--bw-1) solid var(--edge);background:var(--hi)}
+.nwveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
+.nwsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
+  z-index:81;background:var(--panel);border-top:var(--bw-1) solid #000;border-radius:var(--radius-18) var(--radius-18) 0 0;
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),
+             0 -1px 0 rgba(255,255,255,.06);
+  animation:nwup .22s cubic-bezier(.2,.9,.3,1)}
+@keyframes nwup{from{transform:translateY(100%)}}
+.nwgrab{width:38px;height:4px;border-radius:var(--radius-2);background:#3A3A42;margin:var(--space-9) auto var(--space-6);flex-shrink:0}
+.nwsb{overflow-y:auto;padding:var(--space-4) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
+.nwsh{font-size:var(--type-15);line-height:1.35;font-weight:800;margin-bottom:var(--space-7);color:var(--chalk)}
+.nwsm{display:flex;gap:var(--space-8);align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-95);color:var(--chalk);margin-bottom:var(--space-11);flex-wrap:wrap}
+.nwchip{font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-2) var(--space-7);border-radius:var(--radius-3)}
+.nwchip.up{background:rgba(200,245,66,.14);color:var(--volt);border:1px solid rgba(200,245,66,.3)}
+.nwchip.dn{background:rgba(255,77,109,.12);color:var(--heat);border:1px solid rgba(255,77,109,.3)}
+.nwchip.hi{background:rgba(255,77,109,.12);color:var(--heat);border:var(--bw-1) solid rgba(255,77,109,.3)}
+.nwchip.nt{background:rgba(255,255,255,.06);color:var(--chalk);border:var(--bw-1) solid var(--edge)}
+.nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
+.nwbd p{margin:0 0 var(--space-9)}
+.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
+.newslist{max-height:none;overflow:visible}
+.rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
+@keyframes rnfade{from{opacity:.35}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
+.rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
+  padding-top:var(--space-8);border-top:var(--bw-1) solid var(--edge)}
+.rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'JetBrains Mono',ui-monospace,monospace;
+  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--panel);
+  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);cursor:pointer}
+.rnb:disabled{opacity:.35;cursor:default}
+.rnp{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
+  color:var(--chalk);letter-spacing:var(--track-em9)}
 </style>
 </head>
 <body data-theme="goldnight" class="as-shell">
@@ -1117,6 +1207,279 @@ function sigCard(name,key){
   </div>`;
 }
 
+/* ══ cc#1322 · LIVE NEWS — ported from mobile/home.html, last section on this page ═══════════════
+   Behaviour is unchanged from Home: same endpoints, same RAW/POLISH split, same paging, same
+   bottom-sheet peek including the cc#1312 round-2 fix (search that marker below). The only
+   adaptation beyond colour tokens (see the CSS block's own note) is the fetch call: home.html uses
+   fetchWithTimeout() from /scorr_card_common.js, which this page does not load -- that file is a
+   1000+ line shared component library with its own nav-ownership and card-sheet singletons, and
+   pulling in all of it just for one timeout wrapper would be a bigger blast-radius risk than the
+   thing it fixes. This page already has its own get-JSON helper (gj, used by every other loader
+   above) and uses that instead -- same endpoints, same params, same error handling, no import. */
+function rnAgo(ts){
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  var m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
+  var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
+
+function nwSetMode(m){
+  if (RN.mode === m) return;
+  RN.mode = m;
+  RN.items = (m === 'polish') ? RN.polish : RN.raw;
+  RN.page = 0;
+  rnPaint();
+}
+
+function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
+
+function rnGo(ev, delta){
+  if (ev){
+    if (ev.preventDefault) ev.preventDefault();
+    if (ev.stopPropagation) ev.stopPropagation();
+  }
+  var last = rnPages() - 1;
+  var next = Math.min(last, Math.max(0, RN.page + delta));
+  if (next === RN.page) return;
+  RN.page = next;
+  rnPaint();
+}
+
+var RN_SW = { x:0, y:0, armed:false, just:false };
+
+function rnBindSwipe(){
+  var box = document.getElementById('rnBox');
+  if (!box || box._rnSwipeBound) return;
+  box._rnSwipeBound = true;
+
+  box.addEventListener('touchstart', function(e){
+    if (!e.touches || e.touches.length !== 1){ RN_SW.armed = false; return; }
+    RN_SW.x = e.touches[0].clientX; RN_SW.y = e.touches[0].clientY; RN_SW.armed = true;
+  }, { passive:true });
+
+  box.addEventListener('touchmove', function(e){
+    if (e.touches && e.touches.length > 1) RN_SW.armed = false;
+  }, { passive:true });
+
+  box.addEventListener('touchend', function(e){
+    if (!RN_SW.armed) return;
+    RN_SW.armed = false;
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - RN_SW.x, dy = t.clientY - RN_SW.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= 2 * Math.abs(dy)) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    RN_SW.just = true;
+    setTimeout(function(){ RN_SW.just = false; }, 400);
+    rnGo(null, dx < 0 ? 1 : -1);
+  }, { passive:false });
+
+  box.addEventListener('click', function(e){
+    if (!RN_SW.just) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+  }, true);
+}
+
+function rnCatShort(c){
+  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : '';
+}
+
+function rnPaint(){
+  var box = document.getElementById('rnBox');
+  if (!box) return;
+  if (window.ScorrNewsRow) ScorrNewsRow.injectCss();
+  nwPaintTabs();
+  if (!RN.items.length){
+    box.innerHTML = '<div class="unavail" style="padding:8px 0">No '
+      + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.</div>';
+    return;
+  }
+  var pages = rnPages(), p = RN.page;
+  var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
+  var rows = slice.map(function(n, i){
+    var idx = p * RN.per + i;
+    var tag = n.polished && n.category
+      ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>'
+      : '<span class="nwchev">⌄</span>';
+    var dot = window.ScorrNewsRow
+      ? '<span class="nrdot ' + ScorrNewsRow.sentiClass(n.sentiment) + '"></span>' : '';
+    return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
+      + dot
+      + '<span class="h">' + esc(n.headline) + '</span>'
+      + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
+      + tag + '</button>';
+  }).join('');
+  for (var _pad = slice.length; _pad < RN.per; _pad++)
+    rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
+  var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
+    + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
+    + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
+    + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
+    + '</div>';
+  box.innerHTML = '<div class="rnlist">' + rows + '</div>' + ctl;
+  nwPaintTabs();
+}
+
+function nwPaintTabs(){
+  var el = document.getElementById('nwTabs');
+  if (!el) return;
+  function tab(mode, label, n){
+    return '<button type="button" class="nwtab' + (RN.mode === mode ? ' on' : '') + '"'
+      + ' onclick="nwSetMode(\'' + mode + '\')">' + label
+      + '<small>' + n + '</small></button>';
+  }
+  el.innerHTML = '<div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
+    + tab('raw', 'RAW', RN.raw.length) + '</div>';
+}
+
+function loadRawNews(){
+  var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
+  if (!box) return;
+  gj('/api/news/live?hours=48&per_cat=300')
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var arr = (d.domestic || []).concat(d.company || []);
+      arr.sort(function(a, b){
+        return new Date(b.published_at || 0) - new Date(a.published_at || 0);
+      });
+      if (cnt) cnt.textContent = arr.length + ' raw headlines ›';
+      var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
+      RN.raw = items;
+      if (RN.mode === 'raw' || !RN.polish.length){ RN.items = items; RN.page = 0; }
+      rnPaint();
+      rnBindSwipe();
+    })
+    .catch(function(e){
+      if (cnt) cnt.textContent = 'unavailable ›';
+      box.innerHTML = '<div class="unavail" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
+    });
+  gj('/api/news/polished?category=all&limit=100')
+    .then(function(d){
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var cutoff = Date.now() - 48 * 3600 * 1000;
+      RN.polish = (d.articles || [])
+        .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
+        .filter(function(a){
+          var t = new Date(a.published_time || 0).getTime();
+          return isFinite(t) && t >= cutoff;
+        })
+        .map(function(a){
+          return { headline: a.headline_clean, published_at: a.published_time,
+                   sentiment: a.sentiment, impact: a.impact,
+                   category: a.category || '',
+                   body: a.full_summary || a.summary || '', polished: true };
+        });
+      if (RN.mode === 'polish'){ RN.items = RN.polish; RN.page = 0; }
+      rnPaint();
+      rnBindSwipe();
+    })
+    .catch(function(){
+      RN.polish = [];
+      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.items = RN.raw; RN.page = 0; }
+      rnPaint();
+    });
+}
+
+var NW = { open: false, y: 0, scrollY: 0 };
+
+function nwMd(txt){
+  var safe = esc(String(txt == null ? '' : txt));
+  return safe.split(/\n\s*\n/).map(function(para){
+    var t = para.trim();
+    if (!t) return '';
+    return '<p>' + t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function nwChip(v, kind){
+  if (!v) return '';
+  var t = String(v).toUpperCase();
+  var cls = kind === 'impact'
+    ? (t === 'HIGH' ? 'hi' : 'nt')
+    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
+  return '<span class="nwchip ' + cls + '">' + esc(kind === 'impact' ? t + ' IMPACT' : t) + '</span>';
+}
+
+function nwOpen(idx){
+  var n = RN.items[idx];
+  if (!n) return;
+  nwClose();
+  NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+
+  var meta = '';
+  var ago = rnAgo(n.published_at);
+  if (ago) meta += '<span>' + esc(ago) + '</span>';
+  meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
+
+  var body = String(n.body || '').trim()
+    ? '<div class="nwbd">' + nwMd(n.body) + '</div>'
+    : '<div class="nwnone">raw feed item — polished version not yet available.</div>';
+
+  var veil = document.createElement('div');
+  veil.className = 'nwveil';
+
+  var sheet = document.createElement('div');
+  sheet.className = 'nwsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="nwgrab"></div>'
+    + '<div class="nwsb"><div class="nwsh">' + esc(n.headline) + '</div>'
+    + '<div class="nwsm">' + meta + '</div>' + body + '</div>';
+
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  NW.open = true;
+  nwBindSheet(sheet);
+  /* cc#1312 round 2 · THE SAME FIX THAT LANDED ON HOME, travelling WITH the ported code rather
+     than getting silently dropped. veil.onclick bound synchronously here would be live for the
+     SAME tap that opened the sheet -- a full-screen element inserted under the finger mid-event
+     can pick up the browser's synthesized click, closing the sheet before it is ever seen. Binding
+     one requestAnimationFrame later keeps it closable on every genuine tap after this one, not the
+     tap that created it. */
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = nwClose;
+    var grab = sheet.querySelector('.nwgrab');
+    if (grab) grab.onclick = nwClose;
+  });
+}
+
+function nwClose(){
+  var v = document.querySelector('.nwveil'), s = document.querySelector('.nwsheet');
+  if (v) v.remove();
+  if (s) s.remove();
+  if (NW.open){
+    document.body.style.overflow = '';
+    window.scrollTo(0, NW.scrollY);
+    NW.open = false;
+  }
+}
+
+function nwBindSheet(sheet){
+  var sb = sheet.querySelector('.nwsb');
+  sheet.addEventListener('touchstart', function(e){
+    NW.y = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
+  }, { passive: true });
+  sheet.addEventListener('touchend', function(e){
+    var t = e.changedTouches && e.changedTouches[0];
+    if (!t || !sb) return;
+    if (sb.scrollTop > 4) return;
+    if (t.clientY - NW.y > 60) nwClose();
+  }, { passive: true });
+}
+
+document.addEventListener('keydown', function(e){
+  if (NW.open && (e.key === 'Escape' || e.keyCode === 27)) nwClose();
+});
+
 function render(){
   const m=D.mood||{};
   const gate=(m.mood||'—').toUpperCase(), fails=m.fails!=null?m.fails:'—';
@@ -1185,10 +1548,17 @@ function render(){
   <div class="eyebrow">ENGINE</div>
   <div class="card" style="padding:12px 16px">
     <span style="font-size:12.5px;color:var(--muted)">V10 config · ST 150/3·10m · EMA 3/10·30m · FUT + ATM write · entry 09:20–15:20 IST · locked 16-Jun</span>
+  </div>
+
+  <div class="eyebrow">LIVE NEWS</div>
+  <div class="card">
+    <div class="grp"><h3>Live News</h3><a class="plink" id="rnCount" href="/m/intel" style="font-size:var(--type-95)">loading…</a></div>
+    <div id="nwTabs"></div>
+    <div class="newslist" id="rnBox"><div class="unavail">Loading headlines…</div></div>
   </div>`;
 }
 
-async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); uPark(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall */
+async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); uPark(); loadRawNews(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1322: LIVE NEWS paints its placeholder with render() above, loadRawNews() fills it after, same sequencing as it had on Home. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
