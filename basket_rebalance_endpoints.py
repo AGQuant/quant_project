@@ -291,3 +291,124 @@ async def get_repair_sheet(portfolio_id: int = Query(...), basket_name: str = Qu
     except Exception as e:
         log.error(f"get_repair_sheet: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/adaptive/baskets/repair_all")
+async def get_repair_all(portfolio_id: int = Query(...)):
+    """GET /api/adaptive/baskets/repair_all?portfolio_id={id}
+    cc#1335: consolidated repair across EVERY basket this portfolio is actively subscribed to.
+    Unlike /repair (one basket at a time), this sums target_qty for a symbol across all
+    subscribed baskets it appears in, then diffs the SINGLE combined target against
+    hr_holdings ONCE per symbol — one row per symbol, not one row per (basket, symbol) pair.
+    Same row shape as /repair ({symbol, target_qty, actual_qty, diff_qty, action, cmp,
+    indicative_value}) under the same "rows" key, so the existing #adx-repair-sheet table
+    markup renders it with zero changes.
+    """
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                # Validate portfolio exists
+                cur.execute("SELECT id FROM hr_portfolios WHERE id=%s", (portfolio_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found")
+
+                # Every basket this portfolio is actively subscribed to, with its multiplier
+                cur.execute("""
+                    SELECT basket_name, multiplier
+                    FROM client_basket_subscription
+                    WHERE portfolio_id=%s AND status='active'
+                """, (portfolio_id,))
+                subs = cur.fetchall()
+
+                if not subs:
+                    # No active subscriptions: a valid empty state, not an error.
+                    return {
+                        "note": "Indicative only — not an order. Reconfirm price before dealing.",
+                        "portfolio_id": portfolio_id,
+                        "basket_name": "CONSOLIDATED",
+                        "rows": []
+                    }
+
+                # Accumulate target_qty per symbol across ALL subscribed baskets. If a symbol
+                # appears in two subscribed baskets, its target quantities SUM — the whole point
+                # of "consolidated" is one combined target per symbol, not a list per basket.
+                target_qty_by_symbol = {}
+                for basket_name, multiplier in subs:
+                    cur.execute("""
+                        SELECT symbol
+                        FROM quant_paper_positions
+                        WHERE basket_name=%s AND status='open' AND notes NOT ILIKE 'Cash residual%'
+                    """, (basket_name,))
+                    for (symbol,) in cur.fetchall():
+                        target_qty_by_symbol[symbol] = target_qty_by_symbol.get(symbol, 0) + multiplier
+
+                if not target_qty_by_symbol:
+                    return {
+                        "note": "Indicative only — not an order. Reconfirm price before dealing.",
+                        "portfolio_id": portfolio_id,
+                        "basket_name": "CONSOLIDATED",
+                        "rows": []
+                    }
+
+                symbols = sorted(target_qty_by_symbol.keys())
+
+                # Diff the accumulated target against hr_holdings ONCE per symbol.
+                cur.execute("""
+                    SELECT symbol, qty
+                    FROM hr_holdings
+                    WHERE portfolio_id=%s AND symbol=ANY(%s)
+                """, (portfolio_id, symbols))
+                actual_holdings = {row[0]: row[1] for row in cur.fetchall()}
+
+                rows = []
+                for symbol in symbols:
+                    target_qty = target_qty_by_symbol[symbol]
+                    actual_qty = actual_holdings.get(symbol, 0)
+                    diff_qty = target_qty - actual_qty
+
+                    if diff_qty > 0:
+                        action = "BUY"
+                    elif diff_qty < 0:
+                        action = "SELL"
+                    else:
+                        action = "HOLD"
+
+                    cmp = _get_current_price(cur, symbol)
+                    indicative_value = abs(diff_qty) * cmp
+
+                    rows.append({
+                        "symbol": symbol,
+                        "target_qty": target_qty,
+                        "actual_qty": actual_qty,
+                        "diff_qty": diff_qty,
+                        "action": action,
+                        "cmp": round(cmp, 2),
+                        "indicative_value": round(indicative_value, 2)
+                    })
+
+                    # Audit row. Schema is unchanged (do not alter client_basket_repair_log) —
+                    # basket_name='CONSOLIDATED' marks this as a cross-basket repair, one row
+                    # per symbol with the SUMMED target_qty, not one row per contributing basket.
+                    # multiplier_used carries target_qty: with no single per-basket multiplier
+                    # left to record here, the combined target quantity is the meaningful figure
+                    # for this audit trail (it equals multiplier_used in the single-basket
+                    # endpoint above, since there 1x = 1 share per symbol too).
+                    cur.execute("""
+                        INSERT INTO client_basket_repair_log
+                        (portfolio_id, basket_name, symbol, target_qty, actual_qty, diff_qty, action, multiplier_used)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (portfolio_id, "CONSOLIDATED", symbol, target_qty, actual_qty, diff_qty, action, target_qty))
+
+                conn.commit()
+
+                return {
+                    "note": "Indicative only — not an order. Reconfirm price before dealing.",
+                    "portfolio_id": portfolio_id,
+                    "basket_name": "CONSOLIDATED",
+                    "rows": rows
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"get_repair_all: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

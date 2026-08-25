@@ -85,7 +85,29 @@ html,body{margin:0;padding:0;background:var(--bg);}
         font-size:10.5px;font-weight:700;letter-spacing:.3px;color:var(--blu);border:1px solid var(--rule);
         border-radius:8px;cursor:pointer;font-family:inherit;background:transparent;}
 .adx .lgbtn:hover{border-color:var(--blu);background:var(--hover);}
-@media(max-width:600px){.adx-lx .pan{max-height:92vh;}}
+/* cc#1335 — two-column basket sheet: live per-basket + across-baskets rupee figures, pure
+   client-side arithmetic (no network call on keystroke). Desktop: list LEFT, live panel RIGHT,
+   panel pinned via position:sticky while the shared .bd (#adx-basket-list, overflow:auto
+   already) scrolls underneath it. Below 600px (this file's own existing adx-lx breakpoint) the
+   columns stack, list on top: editing multipliers is the primary action on this sheet, the
+   summary panel is the secondary/confirming figure that reads naturally right after it. */
+.adx-bsk-grid{display:flex;align-items:flex-start;}
+.adx-bsk-left{flex:1 1 60%;min-width:0;padding:16px 18px;}
+.adx-bsk-right{flex:0 0 240px;border-left:1px solid var(--rule);padding:16px 18px;
+        display:flex;flex-direction:column;gap:16px;background:var(--hover);
+        position:sticky;top:0;align-self:flex-start;}
+.adx-bsk-figure .l{font-size:9px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);}
+.adx-bsk-figure .v{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-top:4px;}
+.adx-bsk-figure .sub{font-size:10px;color:var(--muted);margin-top:3px;}
+.adx-repair-all-btn{margin-top:16px;width:100%;min-height:40px;padding:0 12px;font-size:10.5px;
+        font-weight:700;letter-spacing:.3px;border:1px solid var(--grn);border-radius:8px;
+        background:transparent;color:var(--grn);cursor:pointer;font-family:inherit;}
+.adx-repair-all-btn:hover{background:var(--hover);}
+@media(max-width:600px){
+  .adx-lx .pan{max-height:92vh;}
+  .adx-bsk-grid{flex-direction:column;}
+  .adx-bsk-right{border-left:none;border-top:1px solid var(--rule);position:static;flex:none;width:100%;}
+}
 .adx .empty a{color:var(--blu);font-weight:600;}
 @media print{ .no-print,#scorr-lo,#scorr-th{display:none !important;} }
 @media (max-width:767px){
@@ -514,25 +536,76 @@ html,body{margin:0;padding:0;background:var(--bg);}
   function closeRepairSheet(){
     document.getElementById('adx-repair-sheet').classList.remove('open');
   }
+  /* cc#1335 — live basket-value arithmetic. CURRENT_BASKETS is the last /available payload
+     (min_value_1x + current_multiplier per basket, already loaded — no extra fetch to compute
+     either figure). LAST_FOCUSED_BASKET tracks whichever multiplier <input> the reader most
+     recently focused or edited, per the card; "THIS BASKET AT Nx" reads that input's LIVE typed
+     value on every keystroke, purely client-side. "TOTAL ACROSS SAVED BASKETS" only ever reads
+     b.current_multiplier (the server's own idea of what is actually subscribed), never the
+     unsaved input values, and is recomputed at the end of loadBaskets()'s own render path so a
+     successful Save (which already triggers a loadBaskets() refresh) updates it for free. */
+  var CURRENT_BASKETS=[], LAST_FOCUSED_BASKET=null;
+  function basketMinVal1x(name){
+    for(var i=0;i<CURRENT_BASKETS.length;i++){ if(CURRENT_BASKETS[i].basket_name===name) return CURRENT_BASKETS[i].min_value_1x||0; }
+    return 0;
+  }
+  function updateThisBasketFigure(){
+    var v=document.getElementById('adx-bsk-thisval'), s=document.getElementById('adx-bsk-thisname');
+    if(!v) return;
+    if(!LAST_FOCUSED_BASKET){ v.textContent='₹—'; if(s) s.textContent='Type a multiplier to see live value'; return; }
+    var input=document.querySelector('#adx-bsk-left input[data-basket="'+LAST_FOCUSED_BASKET+'"]');
+    var mult=input?parseFloat(input.value):NaN;
+    v.textContent=(isNaN(mult)||mult<0) ? '₹—' : inr(basketMinVal1x(LAST_FOCUSED_BASKET)*mult);
+    if(s) s.textContent=LAST_FOCUSED_BASKET;
+  }
+  function onMultInput(input){
+    LAST_FOCUSED_BASKET=input.getAttribute('data-basket');
+    updateThisBasketFigure();
+  }
+  window.onMultInput=onMultInput;
+  function updateTotalFigure(){
+    var el=document.getElementById('adx-bsk-totalval');
+    if(!el) return;
+    var total=0;
+    CURRENT_BASKETS.forEach(function(b){ if(b.current_multiplier!=null) total+=(b.min_value_1x||0)*b.current_multiplier; });
+    el.textContent=inr(total);
+  }
   function loadBaskets(){
     fetch('/api/adaptive/baskets/available?portfolio_id='+encodeURIComponent(currentPortfolioId))
       .then(function(r){ return r.json(); })
       .then(function(baskets){
-        var html='<div style="padding:16px 18px;">';
-        baskets.forEach(function(b){
-          html+='<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--rule);">'
+        CURRENT_BASKETS=baskets||[];
+        var left='';
+        CURRENT_BASKETS.forEach(function(b){
+          left+='<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--rule);">'
             +'<div style="font-weight:600;margin-bottom:6px;">'+esc(b.basket_name)+'</div>'
             +'<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">'+b.cap_type+' · '+b.n_positions+' positions · ₹'+Math.round(b.min_value_1x).toLocaleString('en-IN')+' at 1x</div>'
             +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
             +'<label style="font-size:10px;">Multiplier:</label>'
-            +'<input type="number" min="1" data-basket="'+esc(b.basket_name)+'" value="'+(b.current_multiplier||1)+'" style="width:60px;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;font-size:12px;">'
+            +'<input type="number" min="1" data-basket="'+esc(b.basket_name)+'" value="'+(b.current_multiplier||1)+'" oninput="onMultInput(this)" onfocus="onMultInput(this)" style="width:60px;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;font-size:12px;">'
             +'</div>'
             +'<button type="button" onclick="saveMultiplier(this)" data-basket="'+esc(b.basket_name)+'" style="padding:6px 12px;font-size:10px;font-weight:600;border:1px solid var(--blu);border-radius:6px;background:transparent;color:var(--blu);cursor:pointer;">Save</button>'
-            +(b.current_multiplier ? '<button type="button" onclick="openRepairSheet(\''+esc(b.basket_name)+'\')" style="margin-left:8px;padding:6px 12px;font-size:10px;font-weight:600;border:1px solid var(--grn);border-radius:6px;background:transparent;color:var(--grn);cursor:pointer;">Repair</button>' : '')
             +'</div>';
         });
-        html+='</div>';
-        document.getElementById('adx-basket-list').innerHTML=html;
+        /* cc#1335: the ONE consolidated Repair trigger, placed after the last basket block —
+           per-basket Repair buttons (cc#1273) are gone; this is the only Repair entry point now. */
+        left+='<button type="button" class="adx-repair-all-btn" onclick="openRepairAll()">Repair all subscribed baskets</button>';
+
+        var right='<div class="adx-bsk-figure"><div class="l">This basket at N&times;</div>'
+          +'<div class="v" id="adx-bsk-thisval">₹—</div>'
+          +'<div class="sub" id="adx-bsk-thisname">Type a multiplier to see live value</div></div>'
+          +'<div class="adx-bsk-figure"><div class="l">Total across saved baskets</div>'
+          +'<div class="v" id="adx-bsk-totalval">₹0</div></div>';
+
+        document.getElementById('adx-basket-list').innerHTML=
+          '<div class="adx-bsk-grid">'
+          +'<div class="adx-bsk-left" id="adx-bsk-left">'+left+'</div>'
+          +'<div class="adx-bsk-right">'+right+'</div>'
+          +'</div>';
+
+        LAST_FOCUSED_BASKET=null;
+        updateThisBasketFigure();
+        updateTotalFigure();
       })
       .catch(function(e){ alert('Failed to load baskets: '+e.message); });
   }
@@ -577,26 +650,51 @@ html,body{margin:0;padding:0;background:var(--bg);}
   window.openRepairSheet=openRepairSheet;
   window.closeBasketsSheet=closeBasketsSheet;
   window.closeRepairSheet=closeRepairSheet;
-  function loadRepair(basket){
-    fetch('/api/adaptive/baskets/repair?portfolio_id='+encodeURIComponent(currentPortfolioId)+'&basket_name='+encodeURIComponent(basket))
+  /* cc#1335 — shared row-HTML builder, factored out of loadRepair() so the new consolidated
+     path (openRepairAll -> loadRepairAll) renders the exact same row markup instead of a second
+     hand-copied template. fetchRepairInto() does the fetch+render for either URL; loadRepair()
+     and loadRepairAll() each just build the URL and call it. #adx-repair-sheet's table markup
+     itself (thead/columns) is untouched — only this row-population logic moved. */
+  function repairRowHtml(r){
+    var actionClass=r.action==='BUY'?'color:var(--grn)':r.action==='SELL'?'color:var(--red)':'color:var(--muted)';
+    return '<tr style="border-bottom:1px solid var(--rule);">'
+      +'<td style="padding:9px 12px;white-space:nowrap;">'+esc(r.symbol)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;">'+r.target_qty+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;">'+r.actual_qty+'</td>'
+      +'<td style="padding:9px 12px;text-align:center;font-weight:600;'+actionClass+'">'+r.action+(r.action==='HOLD'?'':' '+Math.abs(r.diff_qty))+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;">'+Math.abs(r.diff_qty)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;font-weight:600;">₹'+Math.round(r.indicative_value).toLocaleString('en-IN')+'</td>'
+      +'</tr>';
+  }
+  function fetchRepairInto(url){
+    fetch(url)
       .then(function(r){ return r.json(); })
       .then(function(d){
-        var html='';
-        d.rows.forEach(function(r){
-          var actionClass=r.action==='BUY'?'color:var(--grn)':r.action==='SELL'?'color:var(--red)':'color:var(--muted)';
-          html+='<tr style="border-bottom:1px solid var(--rule);">'
-            +'<td style="padding:9px 12px;white-space:nowrap;">'+esc(r.symbol)+'</td>'
-            +'<td style="padding:9px 12px;text-align:right;">'+r.target_qty+'</td>'
-            +'<td style="padding:9px 12px;text-align:right;">'+r.actual_qty+'</td>'
-            +'<td style="padding:9px 12px;text-align:center;font-weight:600;'+actionClass+'">'+r.action+(r.action==='HOLD'?'':' '+Math.abs(r.diff_qty))+'</td>'
-            +'<td style="padding:9px 12px;text-align:right;">'+Math.abs(r.diff_qty)+'</td>'
-            +'<td style="padding:9px 12px;text-align:right;font-weight:600;">₹'+Math.round(r.indicative_value).toLocaleString('en-IN')+'</td>'
-            +'</tr>';
-        });
-        document.getElementById('adx-repair-rows').innerHTML=html;
+        document.getElementById('adx-repair-rows').innerHTML=(d.rows||[]).map(repairRowHtml).join('');
       })
       .catch(function(e){ alert('Failed to load repair sheet: '+e.message); });
   }
+  function loadRepair(basket){
+    fetchRepairInto('/api/adaptive/baskets/repair?portfolio_id='+encodeURIComponent(currentPortfolioId)+'&basket_name='+encodeURIComponent(basket));
+  }
+  function loadRepairAll(){
+    fetchRepairInto('/api/adaptive/baskets/repair_all?portfolio_id='+encodeURIComponent(currentPortfolioId));
+  }
+  /* cc#1335 — the ONE consolidated Repair entry point (replaces the per-basket Repair button
+     removed from loadBaskets()). Same sheet-open wiring as openRepairSheet() above: same
+     .classList.add('open'), same .x addEventListener bind, same click-outside-to-close, same
+     Escape-to-close — copied deliberately, not reinvented. Called via inline onclick, so per the
+     cc#1333 lesson it is exposed on window right here. */
+  function openRepairAll(){
+    document.getElementById('adx-repair-sub').textContent=currentPortfolioName+' · All subscribed baskets';
+    var el=document.getElementById('adx-repair-sheet');
+    el.classList.add('open');
+    el.querySelector('.x').addEventListener('click',closeRepairSheet);
+    el.addEventListener('click',function(e){ if(e.target===el) closeRepairSheet(); },true);
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeRepairSheet(); });
+    loadRepairAll();
+  }
+  window.openRepairAll=openRepairAll;
   function boot(){
   (window.fetchWithTimeout || fetch)('/api/health/portfolios').then(function(r){
     return r.text().then(function(t){
