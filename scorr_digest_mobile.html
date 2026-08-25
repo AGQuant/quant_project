@@ -630,15 +630,23 @@ function ladder(ix){
      (see the CSS block above for why). W/H/TRK_Y/PAD are the SVG's own internal viewBox units, not
      page pixels — the viewBox scales to whatever width the card actually has, same as this file's
      other inline SVGs (iChart). xOf converts a 0-100 declutter position into an x coordinate
-     inside that viewBox. */
-  const W=340,H=76,TRK_Y=38,PAD=6;
+     inside that viewBox.
+     cc#1324 · H 76->94, TRK_Y 38->50: the founder could not see the Day High/Low label — measured
+     why, headlessly, rather than eyeballing it. getBBox() on .pdaylbl at the old y=6 baseline
+     returned bbox.y = -1.21, i.e. the glyph itself started 1.2 viewBox units ABOVE y=0 and was
+     genuinely clipped by the SVG's own bounds, not merely cramped. Pushing TRK_Y down gives the
+     day band real headroom above it (checked post-fix: bbox.y = +2.79, comfortably inside), and
+     the taller H is the "more vertical space" the founder asked for directly — both from one
+     change. Below-track spacing (TRK_Y+18/+29) is untouched and still clears H's bottom edge with
+     room to spare. */
+  const W=340,H=94,TRK_Y=50,PAD=6;
   const xOf=pct=>PAD+(pct/100)*(W-2*PAD);
   let svg=`<line class="ptrk" x1="${PAD}" y1="${TRK_Y}" x2="${W-PAD}" y2="${TRK_Y}"/>`;
   items.forEach(function(it,i){
     const x=xOf(it.pos!=null?it.pos:50);
     const half=(i%2===0)?'above':'below';
-    const labY=half==='above'?TRK_Y-22:TRK_Y+18;
-    const valY=half==='above'?TRK_Y-11:TRK_Y+29;
+    const labY=half==='above'?TRK_Y-28:TRK_Y+18;
+    const valY=half==='above'?TRK_Y-17:TRK_Y+29;
     /* text-anchor keeps the first/last item's text INSIDE the viewBox instead of centring off the
        edge — the SVG equivalent of v1/v2's .lo/.hi classes, same structural (not measured) rule. */
     const anchor=(i===0)?'start':(i===n-1?'end':'middle');
@@ -665,9 +673,9 @@ function ladder(ix){
     const x=xOf(di.pos);
     const short=r.label==='DAY HIGH'?'H':'L';
     const anchor=(x<PAD+14)?'start':(x>W-PAD-14?'end':'middle');
-    svg+=`<line class="pdaystem" x1="${x}" y1="8" x2="${x}" y2="${TRK_Y-5}"/>`
-      + `<circle class="pdaydot" cx="${x}" cy="10" r="1.6"/>`
-      + `<text class="pdaylbl" x="${x}" y="6" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
+    svg+=`<line class="pdaystem" x1="${x}" y1="12" x2="${x}" y2="${TRK_Y-5}"/>`
+      + `<circle class="pdaydot" cx="${x}" cy="14" r="1.6"/>`
+      + `<text class="pdaylbl" x="${x}" y="10" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
   });
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
