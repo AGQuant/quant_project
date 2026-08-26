@@ -666,9 +666,19 @@ html,body{margin:0;padding:0;background:var(--bg);}
       ? subs.map(function(b){ return '<div class="adx-bsk-sub-row">'+esc(b.basket_name)+' ×'+b.current_multiplier+'</div>'; }).join('')
       : '<div class="adx-bsk-sub-empty">No baskets subscribed yet</div>';
   }
+  /* cc#1340 — checked this one too, per the card. Unlike fetchRepairInto's SILENT empty render,
+     an error object here already surfaces via the .catch below today (baskets.forEach is not a
+     function on a {"detail":...} body — not undefined-rows quietly rendering nothing), but the
+     message a reader would see was a confusing JS internals error rather than the server's own
+     one. Same r.ok-then-throw fix, for a genuinely readable message instead of an accidental one. */
   function loadBaskets(){
     fetch('/api/adaptive/baskets/available?portfolio_id='+encodeURIComponent(currentPortfolioId))
-      .then(function(r){ return r.json(); })
+      .then(function(r){
+        return r.json().catch(function(){ return null; }).then(function(d){
+          if(!r.ok) throw new Error((d&&d.detail)||('server returned '+r.status));
+          return d;
+        });
+      })
       .then(function(baskets){
         CURRENT_BASKETS=baskets||[];
         /* cc#1336 — a fresh render means every input is rebuilt at its own current baseline, so
@@ -779,13 +789,28 @@ html,body{margin:0;padding:0;background:var(--bg);}
       +'<td style="padding:9px 12px;text-align:right;font-weight:600;">₹'+Math.round(r.indicative_value).toLocaleString('en-IN')+'</td>'
       +'</tr>';
   }
+  /* cc#1340 — r.ok was never checked here. A server error (any status, including the 500 the
+     Decimal/float bug above was throwing on every real portfolio) still returns a JSON body
+     ({"detail": "..."}), so r.json() succeeded and d.rows was simply undefined -> (d.rows||[])
+     silently rendered as an empty table, INDISTINGUISHABLE from "nothing needs repairing". Same
+     r.ok-then-throw shape openLedger() already uses above, and the same "never leave the sheet
+     looking like a false empty state" rule it follows — a genuine error now replaces the row
+     list with a visible, readable message instead of quietly rendering nothing. */
   function fetchRepairInto(url){
     fetch(url)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        document.getElementById('adx-repair-rows').innerHTML=(d.rows||[]).map(repairRowHtml).join('');
+      .then(function(r){
+        return r.json().catch(function(){ return null; }).then(function(d){
+          if(!r.ok) throw new Error((d&&d.detail)||('server returned '+r.status));
+          return d;
+        });
       })
-      .catch(function(e){ alert('Failed to load repair sheet: '+e.message); });
+      .then(function(d){
+        document.getElementById('adx-repair-rows').innerHTML=((d&&d.rows)||[]).map(repairRowHtml).join('');
+      })
+      .catch(function(e){
+        document.getElementById('adx-repair-rows').innerHTML=
+          '<tr><td colspan="6" style="padding:16px 12px;color:var(--red);">Could not load the repair sheet ('+esc(e.message)+').</td></tr>';
+      });
   }
   function loadRepair(basket){
     fetchRepairInto('/api/adaptive/baskets/repair?portfolio_id='+encodeURIComponent(currentPortfolioId)+'&basket_name='+encodeURIComponent(basket));

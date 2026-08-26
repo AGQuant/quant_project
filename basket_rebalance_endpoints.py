@@ -246,7 +246,18 @@ async def get_repair_sheet(portfolio_id: int = Query(...), basket_name: str = Qu
                 rows = []
                 for symbol, current_price in target_positions:
                     target_qty = multiplier  # 1x = 1 share per symbol
-                    actual_qty = actual_holdings.get(symbol, 0)
+                    # cc#1340: hr_holdings.qty is NUMERIC -> psycopg hands it back as a Decimal.
+                    # Left as Decimal, diff_qty below inherits that type, and
+                    # `abs(diff_qty) * cmp` (cmp is a plain float from _get_current_price) then
+                    # raises "TypeError: unsupported operand type(s) for *: 'decimal.Decimal' and
+                    # 'float'" — unconditionally, Python never coerces the two automatically. This
+                    # fired on EVERY portfolio that already holds any symbol its basket targets
+                    # (portfolio 182 holds ADANIPORTS, alphabetically first among its 27 repair
+                    # symbols, so it crashed on iteration 1 — zero rows ever got built). A whole
+                    # share count is an int by definition, so normalising here is correct, not a
+                    # workaround: the DB column itself (client_basket_repair_log.actual_qty) is
+                    # INTEGER, and this makes that true in Python too, not just on the wire.
+                    actual_qty = int(actual_holdings.get(symbol) or 0)
                     diff_qty = target_qty - actual_qty
 
                     if diff_qty > 0:
@@ -363,7 +374,11 @@ async def get_repair_all(portfolio_id: int = Query(...)):
                 rows = []
                 for symbol in symbols:
                     target_qty = target_qty_by_symbol[symbol]
-                    actual_qty = actual_holdings.get(symbol, 0)
+                    # cc#1340: same Decimal/float fix as get_repair_sheet above — see that
+                    # comment for the full root-cause story (confirmed live: portfolio 182 holds
+                    # ADANIPORTS, sorted first among its 27 repair symbols, so this crashed on
+                    # the very first loop iteration, before any row was ever built).
+                    actual_qty = int(actual_holdings.get(symbol) or 0)
                     diff_qty = target_qty - actual_qty
 
                     if diff_qty > 0:
