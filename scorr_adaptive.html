@@ -531,6 +531,12 @@ html,body{margin:0;padding:0;background:var(--bg);}
     loadBaskets();
   }
   function closeBasketsSheet(){
+    /* cc#1336 — the ONE place this check needs to live: all three close triggers (the X button's
+       addEventListener, the backdrop click, and the Escape keydown, all wired in
+       openBasketsSheet() above) already funnel through this single function, so checking here
+       once covers all three rather than repeating the check at each call site. */
+    var dirty=Object.keys(DIRTY_BASKETS);
+    if(dirty.length && !confirm('Unsaved multiplier changes: '+dirty.join(', ')+'. Close anyway?')) return;
     document.getElementById('adx-basket-sheet').classList.remove('open');
   }
   function closeRepairSheet(){
@@ -545,6 +551,25 @@ html,body{margin:0;padding:0;background:var(--bg);}
      unsaved input values, and is recomputed at the end of loadBaskets()'s own render path so a
      successful Save (which already triggers a loadBaskets() refresh) updates it for free. */
   var CURRENT_BASKETS=[], LAST_FOCUSED_BASKET=null;
+  /* cc#1336 — dirty-edit tracking. ROOT CAUSE (confirmed by reading the live sha, not guessed):
+     a bare focus/blur between multiplier fields loses nothing — the DOM keeps whatever was
+     typed until something re-renders. The two REAL loss vectors are both re-renders:
+     saveMultiplier() succeeding on basket B calls loadBaskets(), which rebuilds every input from
+     the server's own current_multiplier — silently discarding an untouched, unsaved edit on
+     basket A. And closeBasketsSheet() (X / backdrop / Esc, all three funnel through this one
+     function) had no unsaved-state check at all. Fix keeps the existing per-basket Save (no
+     auto-save, no save-all, per the founder's own choice) and warns before either loss vector
+     fires instead of silently discarding.
+     BASKET_BASELINE holds the SAME value each input is initialised to (b.current_multiplier||1),
+     captured once per basket at render time. DIRTY_BASKETS is the live set of basket names whose
+     input currently differs from that baseline — reset wholesale every loadBaskets() render
+     (a fresh render means every input is back at its own fresh baseline, so nothing can still be
+     dirty from before; this is also what makes a close-then-reopen a clean state reset). */
+  var BASKET_BASELINE={}, DIRTY_BASKETS={};
+  function setDirtyMarker(basket, dirty){
+    var m=document.querySelector('[data-dirty-marker="'+basket+'"]');
+    if(m) m.style.display=dirty?'inline':'none';
+  }
   function basketMinVal1x(name){
     for(var i=0;i<CURRENT_BASKETS.length;i++){ if(CURRENT_BASKETS[i].basket_name===name) return CURRENT_BASKETS[i].min_value_1x||0; }
     return 0;
@@ -559,7 +584,16 @@ html,body{margin:0;padding:0;background:var(--bg);}
     if(s) s.textContent=LAST_FOCUSED_BASKET;
   }
   function onMultInput(input){
-    LAST_FOCUSED_BASKET=input.getAttribute('data-basket');
+    var basket=input.getAttribute('data-basket');
+    LAST_FOCUSED_BASKET=basket;
+    /* cc#1336 — same handler, extended, not a second listener (oninput AND onfocus both already
+       called this for the cc#1335 live figure). Comparing against BASKET_BASELINE on every call
+       — whether triggered by typing or by a mere focus change — is what makes a bare focus/blur
+       into another field harmless: focus alone never changes input.value, so it can never differ
+       from its own baseline and can never mark itself dirty. Only an actual edit does. */
+    var dirty=String(input.value)!==String(BASKET_BASELINE[basket]);
+    if(dirty) DIRTY_BASKETS[basket]=true; else delete DIRTY_BASKETS[basket];
+    setDirtyMarker(basket, dirty);
     updateThisBasketFigure();
   }
   window.onMultInput=onMultInput;
@@ -575,8 +609,14 @@ html,body{margin:0;padding:0;background:var(--bg);}
       .then(function(r){ return r.json(); })
       .then(function(baskets){
         CURRENT_BASKETS=baskets||[];
+        /* cc#1336 — a fresh render means every input is rebuilt at its own current baseline, so
+           nothing can still be dirty from before this render. Reset wholesale here, not
+           per-basket, so a reload (successful save, or any future refresh path) can never leave
+           a stale dirty flag pointing at an input that no longer exists in this shape. */
+        DIRTY_BASKETS={}; BASKET_BASELINE={};
         var left='';
         CURRENT_BASKETS.forEach(function(b){
+          BASKET_BASELINE[b.basket_name]=String(b.current_multiplier||1);
           left+='<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--rule);">'
             +'<div style="font-weight:600;margin-bottom:6px;">'+esc(b.basket_name)+'</div>'
             +'<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">'+b.cap_type+' · '+b.n_positions+' positions · ₹'+Math.round(b.min_value_1x).toLocaleString('en-IN')+' at 1x</div>'
@@ -585,6 +625,9 @@ html,body{margin:0;padding:0;background:var(--bg);}
             +'<input type="number" min="1" data-basket="'+esc(b.basket_name)+'" value="'+(b.current_multiplier||1)+'" oninput="onMultInput(this)" onfocus="onMultInput(this)" style="width:60px;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;font-size:12px;">'
             +'</div>'
             +'<button type="button" onclick="saveMultiplier(this)" data-basket="'+esc(b.basket_name)+'" style="padding:6px 12px;font-size:10px;font-weight:600;border:1px solid var(--blu);border-radius:6px;background:transparent;color:var(--blu);cursor:pointer;">Save</button>'
+            /* cc#1336 — passive, always-on marker, never itself a warning. Hidden by default;
+               onMultInput() toggles it purely from the dirty check, on every keystroke/focus. */
+            +'<span data-dirty-marker="'+esc(b.basket_name)+'" style="display:none;margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--amber);">Unsaved</span>'
             +'</div>';
         });
         /* cc#1335: the ONE consolidated Repair trigger, placed after the last basket block —
@@ -614,11 +657,18 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var input=btn.parentElement.querySelector('input[data-basket="'+basket+'"]');
     var mult=parseInt(input.value);
     if(isNaN(mult)||mult<1){ alert('Multiplier must be a whole number, 1 or more'); return; }
+    /* cc#1336 — saving basket B triggers loadBaskets() below, which rebuilds every input from
+       the server, silently wiping any OTHER basket's unsaved edit. Warn before that happens
+       rather than after — Cancel aborts the save entirely (no fetch fires), so the reader can go
+       save the other basket first instead of losing it. */
+    var otherDirty=Object.keys(DIRTY_BASKETS).filter(function(k){ return k!==basket; });
+    if(otherDirty.length && !confirm('Saving '+basket+' will also discard your unsaved change to '
+        +otherDirty.join(', ')+'. Continue?')) return;
     fetch('/api/adaptive/baskets/subscribe',{method:'POST',credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({portfolio_id:currentPortfolioId,basket_name:basket,multiplier:mult})
     }).then(function(r){ return r.json(); })
-    .then(function(d){ if(d.id) loadBaskets(); })
+    .then(function(d){ if(d.id){ delete DIRTY_BASKETS[basket]; loadBaskets(); } })
     .catch(function(e){ alert('Failed to save: '+e.message); });
   }
   function openRepairSheet(basket){
