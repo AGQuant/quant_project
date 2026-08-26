@@ -183,6 +183,27 @@ html,body{margin:0;padding:0;background:var(--bg);}
     </div>
   </div>
 </div>
+<!-- cc#1338: Broker & account sheet. Same .adx-lx pattern as the two sheets above — reused, not
+     reinvented. -->
+<div id="adx-broker-sheet" class="adx-lx" style="z-index:9999;">
+  <div class="pan" style="max-width:420px;">
+    <div class="hd">
+      <div><h3>Broker &amp; account</h3><div class="sb" id="adx-broker-sub"></div></div>
+      <button class="x" type="button" aria-label="Close" onclick="closeBrokerSheet()">✕</button>
+    </div>
+    <div class="bd" style="padding:18px;">
+      <label style="display:block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Broker</label>
+      <input id="adx-broker-input" type="text" placeholder="e.g. Zerodha" autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:9px 12px;font-size:13px;border:1px solid var(--rule);border-radius:8px;background:var(--bg,#fff);color:inherit;margin-bottom:14px;font-family:inherit;">
+      <label style="display:block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Account ID</label>
+      <input id="adx-account-input" type="text" placeholder="Account / client ID" autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:9px 12px;font-size:13px;border:1px solid var(--rule);border-radius:8px;background:var(--bg,#fff);color:inherit;margin-bottom:16px;font-family:inherit;">
+      <button id="adx-broker-save" type="button"
+        style="width:100%;min-height:44px;padding:0 12px;font-size:12px;font-weight:700;letter-spacing:.3px;border:none;border-radius:8px;background:var(--grn,#0b6e42);color:#fff;cursor:pointer;font-family:inherit;">Save</button>
+      <div id="adx-broker-err" style="display:none;font-size:10.5px;color:var(--red);margin-top:10px;"></div>
+    </div>
+  </div>
+</div>
 <script>
 (function(){
   "use strict";
@@ -302,7 +323,24 @@ html,body{margin:0;padding:0;background:var(--bg);}
     return (pnl>=0?'+':'−')+'₹'+Math.abs(Math.round(pnl)).toLocaleString('en-IN')
       +(pc==null?'':' ('+(pc>=0?'+':'−')+Math.abs(pc).toFixed(1)+'%)'); }
   var ALL=[], VIEW='cards', SORT={key:'pnl_pct',dir:-1};
-  function clientName(p){ return (p.client&&p.client.name)||p.name||('Portfolio '+p.id); }
+  /* cc#1338: shortened display name. DISPLAY-ONLY — hr_portfolios.name is never edited; this just
+     trims what renders. A name carrying " - " (a broker suffix, e.g. "Seema Rajesh Gupta -
+     ProfitMart") shows only the text before the FIRST occurrence; anything without it is
+     unchanged. Call-site audit (every clientName( in this file, per the card's own instruction):
+     every consumer keys off p.id for links/data-attrs (the /health?pid= href, data-lgpid,
+     data-rbpid, and the new data-ibpid below all use p.id, never the name string), and the two
+     places the RETURNED STRING itself is used elsewhere — the ledger sheet title and the
+     Rebalance sheet subtitle (data-lgname/data-rbname) — are both just display labels, so the
+     shortened form is correct there too. The one behavioural side-effect: filtered()'s search box
+     matches against clientName(), so a broker suffix ("ProfitMart") is no longer searchable text
+     once it is trimmed from display — noted in the task report, not treated as a bug to route
+     around, since the search box searching only what is visibly shown is arguably the more
+     correct behaviour, not the wrong one. */
+  function clientName(p){
+    var raw=(p.client&&p.client.name)||p.name||('Portfolio '+p.id);
+    var i=raw.indexOf(' - ');
+    return i>-1 ? raw.slice(0,i) : raw;
+  }
   function asOf(p){ return (p.client&&p.client.tracking_date)||p.created_at; }
   /* cc#1098 — THE TRACKING START DATE, AND ONLY THAT. asOf() above falls back to created_at when
      tracking_date is NULL, which is fine for a freshness stamp and WRONG under a "from" label: it
@@ -329,7 +367,11 @@ html,body{margin:0;padding:0;background:var(--bg);}
     if(!ps.length){ listEl.innerHTML='<div class="empty">No matching clients.</div>'; return; }
     var cards=ps.map(function(p){ var col=(p.pnl==null?'var(--muted)':(p.pnl>=0?'var(--grn)':'var(--red)'));
       return '<a class="card" href="/health?pid='+p.id+'&wl=1">'
-        + '<div class="nm">'+esc(clientName(p))+'</div>'
+        + '<div class="nm">'+esc(clientName(p))
+          /* cc#1338: (i) trigger, same delegated-listener trigger shape as data-lgpid/data-rbpid
+             just below — a data attribute, not an inline onclick, per boot()'s existing pattern. */
+          + ' <span data-ibpid="'+esc(p.id)+'" data-ibname="'+esc(clientName(p))+'" title="Broker & account"'
+          + ' style="cursor:pointer;color:var(--muted);font-size:12px;font-weight:400;vertical-align:middle;">&#9432;</span></div>'
         /* cc#1098: client id · tracking start · holdings, on ONE line. The "from" segment is
            dropped entirely when there is no tracking_date, so the line reads "#181 · 25 holdings"
            rather than carrying an empty or invented date. Same .meta class, same font size. */
@@ -450,7 +492,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
            background (not transparent, or the columns scrolling underneath would show through
            the text, per the card's own warning). Same z-index as the sticky header th above so
            the pinned cell always sits above the scrolling columns, never under them. */
-        + '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;background:var(--bg,#fff);">'+esc(clientName(p))+'</td>'
+        /* cc#1338: (i) trigger sits inside the same sticky td, right after the name text — it
+           does not get its own cell (that would need a second sticky column and a second
+           left-offset). Same z-index/background as the td itself, so it rides with the frozen
+           column exactly as the name text does. */
+        + '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;background:var(--bg,#fff);">'+esc(clientName(p))
+          + ' <span data-ibpid="'+esc(p.id)+'" data-ibname="'+esc(clientName(p))+'" title="Broker & account"'
+          + ' style="cursor:pointer;color:var(--muted);font-size:11px;font-weight:400;vertical-align:middle;">&#9432;</span></td>'
         /* cc#1334: XIRR / XIRR alpha front-loaded right after Client (were columns 12-13, now
            2-3) and no longer carry class="lg" — they are primary figures now, visible at every
            width. Cell content and colour logic are untouched, only position + the dropped class. */
@@ -760,6 +808,58 @@ html,body{margin:0;padding:0;background:var(--bg);}
     loadRepairAll();
   }
   window.openRepairAll=openRepairAll;
+
+  /* ── cc#1338 BROKER & ACCOUNT SHEET ───────────────────────────────────────────────────────
+     Same .adx-lx pattern as the ledger/basket/repair sheets above — reused, not reinvented.
+     Pre-fills from the in-memory ALL array (already loaded for the shelf, no extra fetch to
+     open the sheet). null -> empty field, never the string "null". */
+  var currentBrokerPid=null;
+  function openBrokerSheet(pid, pname){
+    currentBrokerPid=pid;
+    document.getElementById('adx-broker-sub').textContent=pname||'Client';
+    var p=ALL.find(function(x){ return String(x.id)===String(pid); });
+    document.getElementById('adx-broker-input').value=(p&&p.broker)||'';
+    document.getElementById('adx-account-input').value=(p&&p.account_id)||'';
+    document.getElementById('adx-broker-err').style.display='none';
+    var el=document.getElementById('adx-broker-sheet');
+    el.classList.add('open');
+    el.querySelector('.x').addEventListener('click',closeBrokerSheet);
+    el.addEventListener('click',function(e){ if(e.target===el) closeBrokerSheet(); },true);
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeBrokerSheet(); });
+  }
+  function closeBrokerSheet(){
+    document.getElementById('adx-broker-sheet').classList.remove('open');
+  }
+  /* Save posts to the new endpoint, then updates the in-memory ALL entry and re-renders — the
+     same established idiom as saveMultiplier() above (which calls loadBaskets() to refresh
+     rather than reloading the page), just without a second fetch since the endpoint already
+     returns the saved values. */
+  function saveBroker(){
+    var broker=document.getElementById('adx-broker-input').value.trim();
+    var account_id=document.getElementById('adx-account-input').value.trim();
+    var errEl=document.getElementById('adx-broker-err');
+    errEl.style.display='none';
+    fetch('/api/health/portfolio_broker',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({portfolio_id:currentBrokerPid, broker:broker||null, account_id:account_id||null})
+    }).then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error){ errEl.textContent=d.error; errEl.style.display='block'; return; }
+      var p=ALL.find(function(x){ return String(x.id)===String(currentBrokerPid); });
+      if(p){ p.broker=d.broker; p.account_id=d.account_id; }
+      render();
+      closeBrokerSheet();
+    }).catch(function(e){ errEl.textContent='Failed to save: '+e.message; errEl.style.display='block'; });
+  }
+  /* Bound ONCE here, not inside openBrokerSheet() — unlike the .x close button (idempotent to
+     rebind; closing twice is harmless), rebinding Save on every open would fire one POST per
+     past open the next time it's clicked. The static #adx-broker-save button exists in the DOM
+     from page load, so a one-time bind is enough. */
+  document.getElementById('adx-broker-save').addEventListener('click', saveBroker);
+  /* Called via the static markup's inline onclick="closeBrokerSheet()" on the .x button — per
+     the cc#1333 lesson, that requires window exposure or it throws ReferenceError on click. */
+  window.closeBrokerSheet=closeBrokerSheet;
+
   function boot(){
   (window.fetchWithTimeout || fetch)('/api/health/portfolios').then(function(r){
     return r.text().then(function(t){
@@ -791,6 +891,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
       var rb=e.target.closest && e.target.closest('[data-rbpid]');
       if(rb){ e.preventDefault(); e.stopPropagation();
         openBasketsSheet(rb.getAttribute('data-rbpid'), rb.getAttribute('data-rbname'));
+      }
+      /* cc#1338: THIRD trigger on this same delegated listener, not a new listener — matches
+         [data-lgpid]/[data-rbpid] exactly (capture phase, preventDefault+stopPropagation before
+         the table row's own onclick navigation can fire). */
+      var ib=e.target.closest && e.target.closest('[data-ibpid]');
+      if(ib){ e.preventDefault(); e.stopPropagation();
+        openBrokerSheet(ib.getAttribute('data-ibpid'), ib.getAttribute('data-ibname'));
       }
     }, true);
     tabCards.addEventListener('click',function(){ setView('cards'); });

@@ -851,6 +851,12 @@ def create_tables():
         invested_amount NUMERIC, cash NUMERIC DEFAULT 0, tracking_date DATE,
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+    -- cc#1338: broker/account id per portfolio, for the /adaptive shelf's (i) button. Same
+    -- side-table shape as hr_portfolio_meta just above; CREATE only, never ALTER hr_*.
+    CREATE TABLE IF NOT EXISTS hr_portfolio_broker (
+        portfolio_id INTEGER PRIMARY KEY REFERENCES hr_portfolios(id) ON DELETE CASCADE,
+        broker TEXT, account_id TEXT, updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
     -- cc#654: realised (sold) lots for a portfolio -> realised P&L in the Health Report. Populated
     -- externally (Claude web); CREATE IF NOT EXISTS here so build_report's SUM never fails on a fresh DB.
     CREATE TABLE IF NOT EXISTS hr_realised (

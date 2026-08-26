@@ -475,6 +475,36 @@ def health_toggle_active(pid: int):
     return {"portfolio_id": pid, "source": new_source, "active": new_active}
 
 
+class HRBrokerReq(BaseModel):
+    portfolio_id: int
+    broker: Optional[str] = None
+    account_id: Optional[str] = None
+
+
+@router.post("/api/health/portfolio_broker")
+def health_portfolio_broker(body: HRBrokerReq):
+    """cc#1338: save broker/account id for one portfolio — /adaptive shelf's (i) button.
+
+    Same upsert shape as hr_portfolio_meta's (cc#1013, in health_generate): only the fields
+    supplied are written, COALESCE keeps the rest, so saving just the broker never nulls out an
+    account id that was already saved (and vice-versa)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM hr_portfolios WHERE id=%s", (body.portfolio_id,))
+        if not cur.fetchone():
+            return {"error": f"portfolio {body.portfolio_id} not found"}
+        cur.execute("""INSERT INTO hr_portfolio_broker (portfolio_id, broker, account_id, updated_at)
+                       VALUES (%s,%s,%s,NOW())
+                       ON CONFLICT (portfolio_id) DO UPDATE SET
+                         broker     = COALESCE(EXCLUDED.broker, hr_portfolio_broker.broker),
+                         account_id = COALESCE(EXCLUDED.account_id, hr_portfolio_broker.account_id),
+                         updated_at = NOW()
+                       RETURNING broker, account_id""",
+                    (body.portfolio_id, body.broker, body.account_id))
+        broker, account_id = cur.fetchone()
+        conn.commit()
+    return {"portfolio_id": body.portfolio_id, "broker": broker, "account_id": account_id}
+
+
 def _cmp_map(cur, syms):
     """symbol -> price for portfolio valuation (/health shelf + /adaptive client cards).
 
@@ -710,6 +740,15 @@ def _health_portfolios_inner():
         meta_map = {r[0]: (float(r[1]) if r[1] is not None else None, float(r[2] or 0)) for r in _meta_rows}
         # cc#1205: the START column's second choice, kept separate so the fallback ORDER is visible.
         meta_track = {r[0]: r[3] for r in _meta_rows if r[3] is not None}
+        # cc#1338: broker/account id per portfolio, for the /adaptive shelf's (i) button. Null for
+        # every portfolio until the founder saves one — same "table may not exist yet mid-deploy"
+        # guard as the other optional side-tables read here.
+        broker_map = {}
+        try:
+            cur.execute("SELECT portfolio_id, broker, account_id FROM hr_portfolio_broker")
+            broker_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        except Exception:
+            broker_map = {}   # table absent (pre-migration) -> the shelf renders without broker/account_id
         # cc#756: client_index metadata via created_by=account_id. SELECT ONLY non-secret columns —
         # password/totp_key are NEVER read here (cc#758 denylist honoured by hand-picking columns).
         ci = {}
@@ -825,6 +864,10 @@ def _health_portfolios_inner():
                     "alpha_pct": (round(pnl_pct - _npct, 1)
                                   if (pnl_pct is not None and _npct is not None) else None),
                     "client": ci.get(created_by),
+                    # cc#1338: broker/account id for the (i) button — null together when nothing
+                    # has been saved yet, never a fabricated pair.
+                    "broker": (broker_map.get(id_) or (None, None))[0],
+                    "account_id": (broker_map.get(id_) or (None, None))[1],
                     # cc#1212: ledger figures ride along so the shelf needs no second call. All
                     # five are None together when there is no ledger - a partly-filled set would
                     # let a card render a payout with no pay-in beside it.
