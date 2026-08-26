@@ -271,12 +271,20 @@ def news_unpolished(sample: int = 20):
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
         """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + _SUPPRESSED_CLAUSE)
         pending = cur.fetchone()[0]
+        # cc#1343: this call passes a params tuple (sample,) below, which makes psycopg3 scan the
+        # whole query text for %s/%b/%t placeholders -- and _QUALITY_CLAUSE carries several literal
+        # NOT LIKE '%...%' wildcards that are not any of those three, exactly the bug cc#1341 fixed
+        # in basket_rebalance_endpoints.py. The COUNT(*) query two statements up reuses the SAME
+        # _QUALITY_CLAUSE constant but takes no params argument, so it is never scanned and stays
+        # untouched -- same safe/unsafe split cc#1341 found between get_available_baskets and
+        # get_repair_sheet. Escaped here, at this one call site, rather than in the shared constant
+        # itself, since the constant is not universally unsafe -- only this use of it is.
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
                    r.source_name, r.url, r.published_at, r.relevance_score
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _CANON + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + _RECO + _SUPPRESSED_CLAUSE + """
+        """ + _CANON + _QUALITY_CLAUSE.replace('%', '%%') + _POSITION_POLISH_CLAUSE + _RECO + _SUPPRESSED_CLAUSE + """
             ORDER BY r.relevance_score DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))
