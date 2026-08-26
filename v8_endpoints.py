@@ -33,7 +33,11 @@ synthetic v8_metrics.rsi_weekly column (cc#353: ~16pt off).
 Generic funnel_detail stages emit survivors/killed (dashboard aliases for passes/fails).
 Slot architecture (cc#502, 18-Jul-2026) SLOT_ARCHITECTURE_V3.0.0: ring-fenced SO/S1B pools removed,
 standard pool only, 20 total slots:
-  Strong Bullish 15B/5S | Bullish 14B/6S | Neutral 12B/8S | Bearish 8B/13S
+  Bullish (0 fails) 15B/5S | Bullish (1 fail) 14B/6S | Neutral 12B/8S | Bearish 8B/13S
+  (cc#1346: the 0-fails tier's LABEL was "Strong Bullish" until 26-Aug -- founder wants it plain
+  "Bullish". The slot numbers on both tiers are unchanged; only the 0-fails string changed, so
+  the two tiers now share one label and are distinguished by slot count alone. See market_mood()
+  below.)
 """
 
 from fastapi import APIRouter, HTTPException, Response
@@ -993,7 +997,12 @@ def market_mood():
             # cc#719: an INDETERMINATE ADR (feed dead) is neither pass nor fail — never inflate the
             # fail count (and thus flip the mood bearish) on missing breadth data.
             fails = sum(1 for c in checks if not c["pass"] and not c.get("indeterminate"))
-            if fails == 0:   buy_slots, sell_slots, mood = 15, 5,  "Strong Bullish"
+            # cc#1346 (founder direct 26-Aug): "when all checks pass do not say Strong Bullish,
+            # just say Bullish". Label-only -- buy_slots/sell_slots unchanged at 15/5. This now
+            # shares its label with the fails==1 tier below (14/6) -- both display "Bullish",
+            # distinguished only by slot count from here on. Flagged to the founder, not resolved
+            # here (would need a separate call on relabeling fails==1, e.g. "Mildly Bullish").
+            if fails == 0:   buy_slots, sell_slots, mood = 15, 5,  "Bullish"
             elif fails == 1: buy_slots, sell_slots, mood = 14, 6,  "Bullish"
             elif fails == 2: buy_slots, sell_slots, mood = 12, 8,  "Neutral"
             else:            buy_slots, sell_slots, mood = 8,  13, "Bearish"

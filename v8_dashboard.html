@@ -1931,7 +1931,7 @@ function openInfo(basket){
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Market mood gate · slot allocation</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
-    ${[['Strong Bullish','0 fails','15B/5S'],['Bullish','1 fail','14B/6S'],['Neutral','2 fails','12B/8S'],['Bearish','3+ fails','8B/13S']].map(([mood,f,s])=>`
+    ${[['Bullish','0 fails','15B/5S'],['Bullish','1 fail','14B/6S'],['Neutral','2 fails','12B/8S'],['Bearish','3+ fails','8B/13S']].map(([mood,f,s])=>`
       <div style="background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 6px;text-align:center">
         <div style="font-size:10px;font-weight:700;color:var(--txt)">${mood}</div>
         <div style="font-size:9px;color:var(--dim);margin:2px 0">${f}</div>
@@ -3067,7 +3067,12 @@ function renderMood(m){
   const _op=(cache.paper&&cache.paper.open_positions)||[];
   const _lo=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length:'--';
   const _so=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length:'--';
-  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['rgba(245,185,74,.12)','var(--amber)'],Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
+  /* cc#1346: the API stopped ever returning "Strong Bullish" (26-Aug founder rename) -- 0-fails
+     and 1-fail now both arrive as the string "Bullish", so this map can only hold one colour for
+     that key. Keeps the stronger/more-saturated green (was the 0-fails colour) rather than the
+     1-fail cyan, since 0-fails is still the objectively better state even though the label no
+     longer says so -- CC call, flagged in the founder-facing result. */
+  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['rgba(245,185,74,.12)','var(--amber)'],Bullish:['var(--grn-d)','var(--grn)']};
   const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
   const short=s=>String(s||'').replace(/^Nifty\s+/i,'');   // "Nifty Day" -> "Day"
   // cc#129 bug_1: show the numeric value driving each gate, not just Y/N.

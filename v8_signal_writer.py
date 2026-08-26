@@ -52,8 +52,11 @@ strict-intersection survivors.
 
 Slot architecture (cc#502): SO/S1B ring-fenced pools removed -- ONE standard pool, 20 slots
 total (was 24; the 4 freed slots are NOT redistributed):
-    Strong Bullish: 15B / 5S  | Bullish:  14B / 6S
-    Neutral:        12B / 8S  | Bearish:   8B / 13S
+    Bullish (0 fails): 15B / 5S  | Bullish (1 fail): 14B / 6S
+    Neutral:            12B / 8S  | Bearish:           8B / 13S
+    (cc#1346: the 0-fails tier's LABEL was "Strong Bullish" until 26-Aug, founder-renamed to
+    plain "Bullish". Label only, in v8_endpoints.market_mood() -- this function below carries no
+    label string of its own, only the slot numbers, and is unaffected.)
 
 Sector aggregates (REDEFINED by cc#1102, founder ruling 19-Aug-2026):
   sector_day / sector_week / sector_month are the EQUAL-WEIGHT average across the ACTIVE FUTURES
@@ -1263,10 +1266,11 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
             checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0]
             return sum(1 for c in checks if not c)
     except Exception as e:
-        # cc#216: fail CONSERVATIVE, never aggressive. Returning 0 fails = Strong Bullish
+        # cc#216: fail CONSERVATIVE, never aggressive. Returning 0 fails = Bullish (was labelled
+        # "Strong Bullish" until cc#1346, 26-Aug -- same tier, slot numbers unchanged)
         # = max buy aggression (15B/5S) on an ERROR — exactly backwards. Return 2 (Neutral,
         # 12B/8S) and make the degraded mood loud in ops_log.
-        log.warning(f"_market_gate_fails: {e} — defaulting to Neutral (2 fails), not Strong Bullish")
+        log.warning(f"_market_gate_fails: {e} — defaulting to Neutral (2 fails), not Bullish")
         try:
             _ops_log(conn, "alert", "market_gate_fails_error",
                      {"message": f"market-mood gate errored ({e}) — defaulted to Neutral (2 fails) "
