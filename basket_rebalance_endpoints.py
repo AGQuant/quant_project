@@ -125,10 +125,15 @@ async def subscribe_basket(req: SubscribeRequest):
     """
     try:
         # Validate inputs
-        if req.multiplier < 1 or not isinstance(req.multiplier, int):
+        # cc#1339: floor moved 1 -> 0, not removed. 0 is a valid target (target_qty=0 in /repair
+        # and /repair_all already turns into SELL <full holding> for every symbol in that basket
+        # via the existing diff_qty = target_qty - actual_qty formula, no new branch needed) —
+        # this doubles as the exit-this-basket path cc#1335/1336 left out of scope for lack of a
+        # dedicated unsubscribe control. Negative multipliers are still rejected.
+        if req.multiplier < 0 or not isinstance(req.multiplier, int):
             raise HTTPException(
                 status_code=400,
-                detail="multiplier must be a whole number, 1 or more"
+                detail="multiplier must be a whole number, 0 or more"
             )
 
         with _conn() as conn:

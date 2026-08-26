@@ -617,8 +617,11 @@ html,body{margin:0;padding:0;background:var(--bg);}
      function) had no unsaved-state check at all. Fix keeps the existing per-basket Save (no
      auto-save, no save-all, per the founder's own choice) and warns before either loss vector
      fires instead of silently discarding.
-     BASKET_BASELINE holds the SAME value each input is initialised to (b.current_multiplier||1),
-     captured once per basket at render time. DIRTY_BASKETS is the live set of basket names whose
+     BASKET_BASELINE holds the SAME value each input is initialised to (cc#1339: a null-check, not
+     b.current_multiplier||1 — that fallback made a genuinely-saved 0 baseline as 1, since 0||1
+     evaluates to 1 in JS, so a 0x basket would show correctly as 0 in the input yet be flagged
+     dirty immediately on load against the wrong baseline), captured once per basket at render
+     time. DIRTY_BASKETS is the live set of basket names whose
      input currently differs from that baseline — reset wholesale every loadBaskets() render
      (a fresh render means every input is back at its own fresh baseline, so nothing can still be
      dirty from before; this is also what makes a close-then-reopen a clean state reset). */
@@ -688,13 +691,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
         DIRTY_BASKETS={}; BASKET_BASELINE={};
         var left='';
         CURRENT_BASKETS.forEach(function(b){
-          BASKET_BASELINE[b.basket_name]=String(b.current_multiplier||1);
+          /* cc#1339: null-check, not ||1 — a saved 0 must baseline as 0, not fall through to 1. */
+          var mult0=(b.current_multiplier!=null?b.current_multiplier:1);
+          BASKET_BASELINE[b.basket_name]=String(mult0);
           left+='<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--rule);">'
             +'<div style="font-weight:600;margin-bottom:6px;">'+esc(b.basket_name)+'</div>'
             +'<div style="font-size:10px;color:var(--muted);margin-bottom:8px;">'+b.cap_type+' · '+b.n_positions+' positions · ₹'+Math.round(b.min_value_1x).toLocaleString('en-IN')+' at 1x</div>'
             +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
             +'<label style="font-size:10px;">Multiplier:</label>'
-            +'<input type="number" min="1" data-basket="'+esc(b.basket_name)+'" value="'+(b.current_multiplier||1)+'" oninput="onMultInput(this)" onfocus="onMultInput(this)" style="width:60px;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;font-size:12px;">'
+            +'<input type="number" min="0" data-basket="'+esc(b.basket_name)+'" value="'+mult0+'" oninput="onMultInput(this)" onfocus="onMultInput(this)" style="width:60px;padding:4px 6px;border:1px solid var(--rule);border-radius:4px;font-size:12px;">'
             +'</div>'
             +'<button type="button" onclick="saveMultiplier(this)" data-basket="'+esc(b.basket_name)+'" style="padding:6px 12px;font-size:10px;font-weight:600;border:1px solid var(--blu);border-radius:6px;background:transparent;color:var(--blu);cursor:pointer;">Save</button>'
             /* cc#1336 — passive, always-on marker, never itself a warning. Hidden by default;
@@ -729,7 +734,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var basket=btn.getAttribute('data-basket');
     var input=btn.parentElement.querySelector('input[data-basket="'+basket+'"]');
     var mult=parseInt(input.value);
-    if(isNaN(mult)||mult<1){ alert('Multiplier must be a whole number, 1 or more'); return; }
+    if(isNaN(mult)||mult<0){ alert('Multiplier must be a whole number, 0 or more'); return; }
     /* cc#1336 — saving basket B triggers loadBaskets() below, which rebuilds every input from
        the server, silently wiping any OTHER basket's unsaved edit. Warn before that happens
        rather than after — Cancel aborts the save entirely (no fetch fires), so the reader can go
