@@ -99,6 +99,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
 .adx-bsk-figure .l{font-size:9px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);}
 .adx-bsk-figure .v{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-top:4px;}
 .adx-bsk-figure .sub{font-size:10px;color:var(--muted);margin-top:3px;}
+/* cc#1337 — SUBSCRIBED BASKETS list, replacing the single This-basket-at-Nx figure. 10.5px is
+   visibly smaller than the 19px Total figure above (the card's own requirement) while staying
+   readable — matches this sheet's existing small-metadata size (the basket meta line under each
+   name uses the same 10px/10.5px family). max-height 120px (~4-5 rows before scrolling) keeps a
+   long subscription list from growing the sticky right panel taller than the left column; own
+   overflow-y so the basket list underneath keeps scrolling independently. */
+.adx-bsk-sublist{max-height:120px;overflow-y:auto;margin-top:4px;}
+.adx-bsk-sub-row{font-size:10.5px;padding:3px 0;color:var(--txt);}
+.adx-bsk-sub-empty{font-size:10.5px;color:var(--muted);padding:3px 0;}
 .adx-repair-all-btn{margin-top:16px;width:100%;min-height:40px;padding:0 12px;font-size:10.5px;
         font-weight:700;letter-spacing:.3px;border:1px solid var(--grn);border-radius:8px;
         background:transparent;color:var(--grn);cursor:pointer;font-family:inherit;}
@@ -544,13 +553,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
   }
   /* cc#1335 — live basket-value arithmetic. CURRENT_BASKETS is the last /available payload
      (min_value_1x + current_multiplier per basket, already loaded — no extra fetch to compute
-     either figure). LAST_FOCUSED_BASKET tracks whichever multiplier <input> the reader most
-     recently focused or edited, per the card; "THIS BASKET AT Nx" reads that input's LIVE typed
-     value on every keystroke, purely client-side. "TOTAL ACROSS SAVED BASKETS" only ever reads
+     any of the right-panel figures below. "TOTAL ACROSS SAVED BASKETS" only ever reads
      b.current_multiplier (the server's own idea of what is actually subscribed), never the
      unsaved input values, and is recomputed at the end of loadBaskets()'s own render path so a
-     successful Save (which already triggers a loadBaskets() refresh) updates it for free. */
-  var CURRENT_BASKETS=[], LAST_FOCUSED_BASKET=null;
+     successful Save (which already triggers a loadBaskets() refresh) updates it for free.
+     cc#1337 — LAST_FOCUSED_BASKET is retired along with This-basket-at-Nx, the figure it only
+     ever existed to drive; nothing else read it. */
+  var CURRENT_BASKETS=[];
   /* cc#1336 — dirty-edit tracking. ROOT CAUSE (confirmed by reading the live sha, not guessed):
      a bare focus/blur between multiplier fields loses nothing — the DOM keeps whatever was
      typed until something re-renders. The two REAL loss vectors are both re-renders:
@@ -570,31 +579,23 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var m=document.querySelector('[data-dirty-marker="'+basket+'"]');
     if(m) m.style.display=dirty?'inline':'none';
   }
-  function basketMinVal1x(name){
-    for(var i=0;i<CURRENT_BASKETS.length;i++){ if(CURRENT_BASKETS[i].basket_name===name) return CURRENT_BASKETS[i].min_value_1x||0; }
-    return 0;
-  }
-  function updateThisBasketFigure(){
-    var v=document.getElementById('adx-bsk-thisval'), s=document.getElementById('adx-bsk-thisname');
-    if(!v) return;
-    if(!LAST_FOCUSED_BASKET){ v.textContent='₹—'; if(s) s.textContent='Type a multiplier to see live value'; return; }
-    var input=document.querySelector('#adx-bsk-left input[data-basket="'+LAST_FOCUSED_BASKET+'"]');
-    var mult=input?parseFloat(input.value):NaN;
-    v.textContent=(isNaN(mult)||mult<0) ? '₹—' : inr(basketMinVal1x(LAST_FOCUSED_BASKET)*mult);
-    if(s) s.textContent=LAST_FOCUSED_BASKET;
-  }
+  /* cc#1337 — This-basket-at-Nx (the single live figure, cc#1335) is retired: the founder wants
+     EVERY subscribed basket listed instead, not just whichever field was last touched.
+     updateThisBasketFigure() and its two DOM ids are gone; basketMinVal1x() went with it —
+     confirmed via grep that figure was its only caller, so it is genuinely dead now, not left
+     dangling on the "don't rip out logic other views might reuse" caution some other cards on
+     this queue invoke (that caution applies when something ELSE still reads the value; here
+     nothing does). cc#1336's dirty-tracking call in onMultInput below is untouched, per this
+     card's own coordination note (1336 landed first, sha 6dc941a). */
   function onMultInput(input){
     var basket=input.getAttribute('data-basket');
-    LAST_FOCUSED_BASKET=basket;
-    /* cc#1336 — same handler, extended, not a second listener (oninput AND onfocus both already
-       called this for the cc#1335 live figure). Comparing against BASKET_BASELINE on every call
-       — whether triggered by typing or by a mere focus change — is what makes a bare focus/blur
-       into another field harmless: focus alone never changes input.value, so it can never differ
-       from its own baseline and can never mark itself dirty. Only an actual edit does. */
+    /* cc#1336 — comparing against BASKET_BASELINE on every call, whether triggered by typing or
+       by a mere focus change, is what makes a bare focus/blur into another field harmless: focus
+       alone never changes input.value, so it can never differ from its own baseline and can
+       never mark itself dirty. Only an actual edit does. */
     var dirty=String(input.value)!==String(BASKET_BASELINE[basket]);
     if(dirty) DIRTY_BASKETS[basket]=true; else delete DIRTY_BASKETS[basket];
     setDirtyMarker(basket, dirty);
-    updateThisBasketFigure();
   }
   window.onMultInput=onMultInput;
   function updateTotalFigure(){
@@ -603,6 +604,19 @@ html,body{margin:0;padding:0;background:var(--bg);}
     var total=0;
     CURRENT_BASKETS.forEach(function(b){ if(b.current_multiplier!=null) total+=(b.min_value_1x||0)*b.current_multiplier; });
     el.textContent=inr(total);
+  }
+  /* cc#1337 — driven by the SAME already-loaded CURRENT_BASKETS the Total figure reads (no new
+     fetch), recomputed at the same point updateTotalFigure() already recomputes: the end of
+     loadBaskets()'s own render, never on a keystroke. Reflects SAVED state only (current_
+     multiplier not null), same distinction the Total figure already makes — an unsaved edit in
+     the left column never appears here. */
+  function updateSubscribedList(){
+    var el=document.getElementById('adx-bsk-sublist');
+    if(!el) return;
+    var subs=CURRENT_BASKETS.filter(function(b){ return b.current_multiplier!=null; });
+    el.innerHTML=subs.length
+      ? subs.map(function(b){ return '<div class="adx-bsk-sub-row">'+esc(b.basket_name)+' ×'+b.current_multiplier+'</div>'; }).join('')
+      : '<div class="adx-bsk-sub-empty">No baskets subscribed yet</div>';
   }
   function loadBaskets(){
     fetch('/api/adaptive/baskets/available?portfolio_id='+encodeURIComponent(currentPortfolioId))
@@ -634,9 +648,11 @@ html,body{margin:0;padding:0;background:var(--bg);}
            per-basket Repair buttons (cc#1273) are gone; this is the only Repair entry point now. */
         left+='<button type="button" class="adx-repair-all-btn" onclick="openRepairAll()">Repair all subscribed baskets</button>';
 
-        var right='<div class="adx-bsk-figure"><div class="l">This basket at N&times;</div>'
-          +'<div class="v" id="adx-bsk-thisval">₹—</div>'
-          +'<div class="sub" id="adx-bsk-thisname">Type a multiplier to see live value</div></div>'
+        /* cc#1337 — SUBSCRIBED BASKETS sits above Total, same right column, filled by
+           updateSubscribedList() below (same two-step pattern Total already uses: a placeholder
+           container in the template, a function that fills it once the container is in the DOM). */
+        var right='<div class="adx-bsk-figure"><div class="l">Subscribed baskets</div>'
+          +'<div class="adx-bsk-sublist" id="adx-bsk-sublist"></div></div>'
           +'<div class="adx-bsk-figure"><div class="l">Total across saved baskets</div>'
           +'<div class="v" id="adx-bsk-totalval">₹0</div></div>';
 
@@ -646,8 +662,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
           +'<div class="adx-bsk-right">'+right+'</div>'
           +'</div>';
 
-        LAST_FOCUSED_BASKET=null;
-        updateThisBasketFigure();
+        updateSubscribedList();
         updateTotalFigure();
       })
       .catch(function(e){ alert('Failed to load baskets: '+e.message); });
