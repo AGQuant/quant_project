@@ -577,26 +577,38 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .ppmax-item.pp{color:var(--amber)}
 #pane-index .ppmax-item.mp{color:var(--amber)}
 #pane-index .ppmax-item.na{color:var(--dim);font-weight:400;font-size:11px}
-/* cc#1300: the horizontal ladder replacing the vertical spine axis — S2 S1 CMP PP R1 R2 MAX PAIN,
-   one row of chips instead of a 330px vertical bar. CMP gets its own highlighted chip since it is
-   the live anchor everything else is measured from. */
-#pane-index .hladder{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 2px}
-#pane-index .hl-item{flex:1 1 90px;min-width:82px;text-align:center;padding:8px 6px;border-radius:8px;
-    border:1px solid var(--line2);background:var(--card2);font-family:var(--mono)}
-#pane-index .hl-item .l{display:block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--dim)}
-#pane-index .hl-item .px{display:block;font-size:14px;font-weight:700;color:var(--txt);margin-top:2px}
-#pane-index .hl-item .d{display:block;font-size:9.5px;margin-top:1px;color:var(--dim)}
-#pane-index .hl-item.s1 .px,#pane-index .hl-item.s2 .px{color:var(--red)}
-#pane-index .hl-item.r1 .px,#pane-index .hl-item.r2 .px{color:var(--grn)}
-#pane-index .hl-item.pp{border-color:var(--amber-bd,var(--amber));background:var(--amber-bg)}
-#pane-index .hl-item.pp .px,#pane-index .hl-item.pp .l{color:var(--amber)}
-#pane-index .hl-item.mp{border-style:dashed;border-color:var(--amber)}
-#pane-index .hl-item.mp .l,#pane-index .hl-item.mp .px{color:var(--amber)}
-#pane-index .hl-item.cmp{border-color:var(--spotc);background:var(--spot-chip-bg,var(--card2));box-shadow:0 0 0 1px var(--spot-ring,transparent)}
-#pane-index .hl-item.cmp .l,#pane-index .hl-item.cmp .px{color:var(--spotc)}
-#pane-index .hl-item.cmp.stale .l,#pane-index .hl-item.cmp.stale .px{color:var(--mut)}
-@media(max-width:560px){#pane-index .hl-item{flex-basis:74px;padding:6px 4px}
-  #pane-index .hl-item .px{font-size:12px}}
+/* cc#1344 (founder direct 26-Aug, replacing cc#1300's chip-row ladder — see the long comment
+   above rSpine()'s ladder-building code for why): one continuous horizontal line spanning the
+   card width, with 6 small dots positioned along it in ascending price order S2→R2. Dot role
+   sets the style — S1/S2 hollow red (support), R1/R2 hollow green (resistance), PP solid amber,
+   CMP the LARGEST solid dot, the you-are-here marker. Labels alternate above/below the line
+   (set per-dot in the JS, matching the mobile reference) so two adjacent labels never collide. */
+#pane-index .spine-line-wrap{position:relative;height:2px;margin:34px 6px 40px}
+#pane-index .spine-line{position:absolute;left:0;right:0;top:0;height:2px;background:var(--line2);border-radius:1px}
+#pane-index .spine-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;
+    border-radius:50%;z-index:1}
+#pane-index .spine-dot.hollow{background:var(--card2,var(--bg));border:2px solid var(--line2)}
+#pane-index .spine-dot.s1,#pane-index .spine-dot.s2{border-color:var(--red)}
+#pane-index .spine-dot.r1,#pane-index .spine-dot.r2{border-color:var(--grn)}
+#pane-index .spine-dot.pp{background:var(--amber);border:none}
+/* CMP is the you-are-here marker — largest dot on the line, on purpose, and never hollow. */
+#pane-index .spine-dot.cmp{background:var(--spotc,var(--grn));border:none;width:16px;height:16px;
+    box-shadow:0 0 0 4px var(--spot-ring,transparent)}
+#pane-index .spine-dot.cmp.stale{background:var(--mut);box-shadow:none}
+#pane-index .spine-lbl{position:absolute;top:50%;transform:translate(-50%,-50%);text-align:center;
+    font-family:var(--mono);white-space:nowrap;pointer-events:none}
+#pane-index .spine-lbl.above{margin-top:-26px}
+#pane-index .spine-lbl.below{margin-top:26px}
+#pane-index .spine-lbl .c{display:block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--dim)}
+#pane-index .spine-lbl .v{display:block;font-size:12.5px;font-weight:700;color:var(--txt);margin-top:1px}
+#pane-index .spine-lbl.s1 .v,#pane-index .spine-lbl.s2 .v{color:var(--red)}
+#pane-index .spine-lbl.r1 .v,#pane-index .spine-lbl.r2 .v{color:var(--grn)}
+#pane-index .spine-lbl.pp .v{color:var(--amber)}
+#pane-index .spine-lbl.cmp .v{color:var(--spotc)}
+#pane-index .spine-lbl.cmp.stale .v{color:var(--mut)}
+@media(max-width:560px){#pane-index .spine-line-wrap{margin:30px 4px 36px}
+  #pane-index .spine-lbl .v{font-size:11px}
+  #pane-index .spine-lbl.above{margin-top:-22px} #pane-index .spine-lbl.below{margin-top:22px}}
 #pane-index .r-levels{grid-template-columns:1fr 1fr}
 @media(max-width:920px){#pane-index .r-levels{grid-template-columns:1fr}}
 /* the pulsing spot dot is decorative; the dot must still be findable without it */
@@ -6326,28 +6338,58 @@ function rSpine(key, name){
     ? headline('PP',pp,'pp') + headline('MAX PAIN',mpS,'mp')
     : headline('PP',pp,'pp') + '<span class="ppmax-item mp na">MAX PAIN unavailable</span>';
 
-  // the horizontal ladder itself, ascending price order, CMP visually distinct.
-  const rungs = [
-    ['S2', s2, 's2'], ['S1', s1, 's1'], ['CMP', spot, 'cmp'], ['PP', pp, 'pp'],
-    ['R1', r1, 'r1'], ['R2', r2, 'r2'],
+  /* cc#1344 (founder direct 26-Aug, mobile app screenshot as reference): the cc#1300 chip-row
+     ladder (.hladder/.hl-item) WRAPPED onto multiple lines at desktop width — a grid of boxes,
+     not the single connected line the founder actually wanted (his verbal ask both times was
+     "horizontal ladder"; the wrapping row is what produced the "not this" screenshot). Replaced
+     with one line + 6 positioned dots, in ascending price order S2→R2 left to right, per the
+     mobile reference. MAX PAIN is NOT one of the 6 — the reference shows exactly six points —
+     it stays in the headline chips above, untouched. A 7th max-pain marker ON this line, when it
+     falls inside S2..R2, is flagged in the card as a lower-priority bonus; left out here so the
+     primary six-point layout ships correct and uncomplicated, not to save time.
+     Positioning reuses spinePos()'s existing clamped-percentage math (defined above, kept alive
+     since cc#1300 specifically for this future reuse) — but INVERTED. spinePos() was built for a
+     vertical axis with R2 at the TOP (0%) and S2 at the BOTTOM (100%); used as-is for a
+     horizontal `left` position that would put R2 on the LEFT and S2 on the RIGHT, backwards from
+     the ascending left-to-right order the reference explicitly shows. 100-spinePos(...) restores
+     ascending order (S2 near 0%, R2 near 100%) while keeping the identical clamped linear
+     interpolation. */
+  const leftPct = v => { const p = spinePos(v, r2, s2); return p==null ? null : 100 - p; };
+  // label sits ABOVE for S2/PP/R1, BELOW for S1/CMP/R2 — alternating, per the reference, so
+  // adjacent labels never collide on one row. hollow=true draws an outline-only marker (support/
+  // resistance); false draws a solid filled dot (PP, and CMP largest of all six).
+  const dots = [
+    ['S2', s2, 's2', 'above', true], ['S1', s1, 's1', 'below', true],
+    ['PP', pp, 'pp', 'above', false], ['CMP', spot, 'cmp', 'below', false],
+    ['R1', r1, 'r1', 'above', true], ['R2', r2, 'r2', 'below', true],
   ];
-  if(mpS!=null) rungs.push(['MAX PAIN', mpS, 'mp']);
-  const ladderHtml = rungs.map(([label,v,cls])=>{
+  const lineHtml = dots.map(([label,v,cls,labelPos,hollow])=>{
     if(v==null) return '';
-    const d = label==='CMP' ? '' : `<span class="d">${sgn(dpc(v))}</span>`;
+    const pct = leftPct(v); if(pct==null) return '';
     const live = label==='CMP' && !spotLive ? ' stale' : '';
-    return `<div class="hl-item ${cls}${live}"><span class="l">${label}</span><span class="px">${num(v)}</span>${d}</div>`;
+    return `<div class="spine-dot ${cls}${hollow?' hollow':''}${live}" style="left:${pct}%"></div>`
+      + `<div class="spine-lbl ${cls} ${labelPos}${live}" style="left:${pct}%">`
+      +   `<span class="c">${label}</span><span class="v">${num(v)}</span></div>`;
   }).join('');
 
   const expTxt = (mp&&mp.expiry)?' · EXP '+esc(String(mp.expiry)):'';
   const basisTxt = spotLive
     ? (oi&&oi.spot_asof ? ' · spot live '+esc(String(oi.spot_asof).slice(11,16))+' IST' : ' · spot live')
     : (spotBasis ? ' · spot = PREVIOUS CLOSE'+(oi&&oi.spot_asof?' '+esc(String(oi.spot_asof)):'')+', distances measured from it' : '');
+  /* cc#1344: "relative position vs PP as a coloured percentage" from the reference — the ONE new
+     fact this caption line did not already carry. No countdown-to-bell exists anywhere in this
+     file (grepped for one before writing this — the closest things are a static "figures frozen
+     until 09:15" string and the Replay Day RP_START/RP_END constants, neither is a live timer),
+     so the reference's "2h 42m TO BELL" is deliberately NOT reproduced here rather than invented
+     — this caption keeps the live/previous-close state it already had instead. */
+  const vsPpPct = (spot && pp) ? ((spot-pp)/pp*100) : null;
+  const vsPpHtml = vsPpPct==null ? '' :
+    ` · <span style="color:${vsPpPct>=0?'var(--grn)':'var(--red)'}">${vsPpPct>=0?'above':'below'} PP ${Math.abs(vsPpPct).toFixed(2)}%</span>`;
 
   return `<div class="spine-hd">
       <div class="spine-hd-top"><span class="big2">${spot?num(spot):'—'}</span><span class="ppmax">${headlineHtml}</span></div>
-      <span class="cap">rolling-5d pivots${expTxt}${basisTxt}</span></div>
-    <div class="hladder">${ladderHtml}</div>`;
+      <span class="cap">rolling-5d pivots${expTxt}${basisTxt}${vsPpHtml}</span></div>
+    <div class="spine-line-wrap"><div class="spine-line"></div>${lineHtml}</div>`;
 }
 
 /* cc#1167: POST-LAYOUT tag fitting. nudgeTags() runs while the HTML is still a string, so it is
