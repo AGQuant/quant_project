@@ -225,10 +225,14 @@ async def get_repair_sheet(portfolio_id: int = Query(...), basket_name: str = Qu
                 multiplier = sub_row[0]
 
                 # Get basket's target list (live open positions, excluding cash residual)
+                # cc#1341: literal % must be doubled (%%) whenever a params tuple is also passed --
+                # psycopg scans the query string for %s/%b/%t placeholders in that case, and a bare
+                # % that isn't one of those three is a parse error. get_available_baskets' identical
+                # 'Cash residual%' literal is fine because that call takes no params argument.
                 cur.execute("""
                     SELECT symbol, current_price
                     FROM quant_paper_positions
-                    WHERE basket_name=%s AND status='open' AND notes NOT ILIKE 'Cash residual%'
+                    WHERE basket_name=%s AND status='open' AND notes NOT ILIKE 'Cash residual%%'
                     ORDER BY symbol
                 """, (basket_name,))
                 target_positions = cur.fetchall()
@@ -350,10 +354,12 @@ async def get_repair_all(portfolio_id: int = Query(...)):
                 # of "consolidated" is one combined target per symbol, not a list per basket.
                 target_qty_by_symbol = {}
                 for basket_name, multiplier in subs:
+                    # cc#1341: same %% escaping as get_repair_sheet above -- this call also passes
+                    # a params tuple, so the literal % must be doubled.
                     cur.execute("""
                         SELECT symbol
                         FROM quant_paper_positions
-                        WHERE basket_name=%s AND status='open' AND notes NOT ILIKE 'Cash residual%'
+                        WHERE basket_name=%s AND status='open' AND notes NOT ILIKE 'Cash residual%%'
                     """, (basket_name,))
                     for (symbol,) in cur.fetchall():
                         target_qty_by_symbol[symbol] = target_qty_by_symbol.get(symbol, 0) + multiplier
