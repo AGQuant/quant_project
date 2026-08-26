@@ -2036,15 +2036,23 @@ function renderIdxPos(rows){
   tot.innerHTML = anyPnl ? ('TOTAL P&amp;L <span style="color:'+(total>=0?'var(--grn)':'var(--red)')+'">'+inr(total)+'</span>') : '';
   const L='style="text-align:left"';
   const sideChip=s=>{const isL=(s||'').toUpperCase()==='BUY';return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;background:'+(isL?'var(--grn-d)':'var(--red-d)')+';color:'+(isL?'var(--grn)':'var(--red)')+'">'+(isL?'LONG':'SHORT')+'</span>';};
-  const engChip='<span style="font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line2);color:var(--mut)">V10</span>';
   const pnlCell=v=>{ if(v===null||v===undefined||isNaN(v))return '<td>--</td>'; return '<td style="color:'+(v>=0?'var(--grn)':'var(--red)')+'">'+inr(v)+'</td>'; };
   const pctCell=p=>{ const e=p.entry_price,l=p.lot_size,v=p.unrealised_pnl; if([e,l,v].some(x=>x===null||x===undefined||isNaN(x))||!e||!l)return '<td>--</td>'; const pct=(Number(v)/(Number(e)*Number(l)))*100; return '<td style="color:'+(pct>=0?'var(--grn)':'var(--red)')+'">'+pct.toFixed(2)+'%</td>'; };
   const trs=rows.map(p=>{
     const isFut=(p.leg||'').toUpperCase()==='FUT';
     const symLabel=isFut?p.symbol:(p.symbol+'  '+(p.opt_strike!=null?p.opt_strike:'')+' '+(p.opt_type||'')+' wrt');
     const typeLabel=isFut?'FUT':'OPT&middot;wrt';
+    /* cc#1342: the ENG column used to show a hardcoded, useless "V10" badge on every row. This
+       reuses the SAME chart-icon trigger the file already has, live in two other places
+       (v10ChartIcon() at line ~6058, inside the separate IIFE at the bottom of this document) —
+       p.symbol is already the bare underlying index name (NIFTY50/BANKNIFTY) even on OPT-wrt rows,
+       confirmed two lines up via symLabel's own construction, so no new field is needed.
+       v10ChartIcon lives in a DIFFERENT <script> tag's closure (the file has no window.BASKETS-style
+       cross-script leak protection by default, per the cc#805 note a few hundred lines up), so it
+       is called here as window.v10ChartIcon — exported once, right beside window.openV10Chart, in
+       that IIFE — rather than assuming a same-file function is automatically reachable. */
     return '<tr>'
-      +'<td>'+engChip+'</td>'
+      +'<td>'+(window.v10ChartIcon?window.v10ChartIcon(p.symbol):'')+'</td>'
       +'<td '+L+'><span class="sym">'+symLabel+'</span></td>'
       +'<td '+L+'>'+sideChip(p.side)+'</td>'
       +'<td '+L+' style="color:var(--mut);font-size:11px;text-align:left">'+typeLabel+'</td>'
@@ -6172,6 +6180,31 @@ async function loadV10Chart(){
     box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart failed to render — '+esc(String(e&&e.message||e))+'</div>';
   }
 }
+/* cc#1342: SAFETY NET for an exception the chart library throws ASYNCHRONOUSLY — e.g. from its own
+   internal requestAnimationFrame-scheduled paint, which runs after createChart() has already
+   returned — which the try/catch above cannot reach, since that catch only covers the SYNCHRONOUS
+   construction call. Reproduced directly: an empty/invalid theme-token colour reaching createChart
+   throws "Cannot parse color" from inside the library on its first internal paint frame, fully
+   outside that try/catch's stack — console-only, no visible text, a genuinely blank overlay under
+   a correctly-populated title bar. That is exactly the founder's reported shape (title bar fine,
+   pane below it blank, nothing the founder would see to report). A full live-data reproduction
+   (real theme CSS in both themes, the exact pinned LightweightCharts build, real v10_positions/
+   v10_trades/candle rows, all three chart entry points) could not reproduce the founder's report
+   through any other path, so this is the one confirmed gap: this file's own "guarded renders,
+   never a silent blank pane" discipline had no coverage for an async throw from a THIRD-PARTY
+   library, whatever triggers it. Scoped to fire only while a V10 chart session is actually open
+   (_v10chart truthy + the overlay visible) so it cannot misfire against unrelated page errors —
+   registered once, not per-open. */
+window.addEventListener('error', function(ev){
+  if(!_v10chart) return;
+  const ov=document.getElementById('v10ChartOv');
+  if(!ov || ov.style.display==='none') return;
+  const box=document.getElementById('v10ChartBox'); if(!box) return;
+  if(_v10ro){try{_v10ro.disconnect();}catch(e2){} _v10ro=null;}
+  try{_v10chart.remove();}catch(e2){}
+  _v10chart=null; _v10series=null;
+  box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart failed to render — '+esc(String((ev&&ev.message)||'unknown error'))+'</div>';
+});
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document.getElementById('v10ChartOv'); if(ov&&ov.style.display!=='none') closeV10Chart(); } });
 
 
@@ -6651,6 +6684,10 @@ window.iiRepaintCharts=function(){
 
 /* expose handlers used by inline onclick (global scope) */
 window.openV10Chart=openV10Chart;
+/* cc#1342: renderIdxPos() (the Open Positions modal row builder) lives in the file's OTHER,
+   earlier <script> tag -- a separate top-level scope from this IIFE, so v10ChartIcon needs the
+   same window export openV10Chart already gets here, not just its own local declaration. */
+window.v10ChartIcon=v10ChartIcon;
 window.idxSetLevelsView=idxSetLevelsView;   // cc#1151: SPINE|LADDER switch, called from inline onclick
 window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values, inline onclick
 /* cc#1167: the fit depends on rendered text size, so it must re-run when that can change.
