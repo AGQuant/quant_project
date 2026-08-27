@@ -774,6 +774,12 @@ body[data-theme]{
    that is one number and it is safe to move once someone can look at the real screen. */
 .hero-mood{font-size:clamp(var(--type-40),13vw,var(--type-52));text-transform:uppercase;line-height:1.02}
 .swipe-t::-webkit-scrollbar{display:none}
+/* cc#1350 · ONE CARD PER SWIPE. mandatory snap alone lets a hard fling sail past pages —
+   momentum picks the final snap point, so a strong swipe on the 4-page Index Book deck could
+   land 2-3 pages away. scroll-snap-stop:always forbids the scroller from passing a snap point
+   mid-gesture: every fling, however hard, stops at the NEXT card. Pure CSS, no JS, applies to
+   all three Home decks (hero, Index Book, The Book) so one gesture means one thing everywhere. */
+.swipe-t > .c,.swipe-t > a,.swipe-t > .vpage{scroll-snap-stop:always}
 .swipe-t > .c{flex:0 0 100%;scroll-snap-align:center;margin-bottom:0}
 /* cc#955 — THE cc#950 DECK RENDERED BOTH FACES SIDE BY SIDE, and this one missing rule is why.
    The rule above is a CHILD combinator. The market-mood deck's faces are `.c` divs sitting
