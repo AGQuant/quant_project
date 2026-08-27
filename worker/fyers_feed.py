@@ -1397,6 +1397,12 @@ class OptionSymbolManager:
         with self.lock:
             return self.sym_map.get(fsym)
 
+    def syms_for_underlying(self, name):
+        """cc#1353: full currently-built ladder (both sides) for one underlying — the side-heal
+        re-subscribe path. Snapshot under the lock so a concurrent roll can't tear the list."""
+        with self.lock:
+            return [s for s, v in self.sym_map.items() if v[0] == name]
+
 
 # ── bar aggregator ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -2374,6 +2380,48 @@ def _batched_subscribe(ws, symbols, action='sub', label=''):
         log.info(f"{verb} batch {i // WS_SUB_BATCH + 1}: {len(batch)} symbols "
                  f"({min(i + WS_SUB_BATCH, len(symbols))}/{len(symbols)})")
         time.sleep(WS_SUB_BATCH_SLEEP_SEC)
+
+
+def _index_one_sided_unders(minutes=15):
+    """cc#1353: index underlyings whose LATEST option_chain tick (within the last `minutes`)
+    wrote exactly one side — CE rows but zero PE, or the mirror. This is the signature of the
+    26-Aug incident: the 13:15 ATM roll's bulk re-subscribe silently dropped the PE half of
+    NIFTY (adds are ordered CE-then-PE, so a dropped tail is always one whole side) and the
+    chain half-lived for 2h15m with nothing complaining. Returns [(underlying, ce_n, pe_n)].
+
+    Self-gating: pre-open / feed-down there is no tick inside the window at all, so nothing
+    matches and the check never fires a false heal. Uses its OWN short-lived connection like
+    _recent_symbol_counts_by_source (cc#497: a dead shared conn must not blind a health read).
+    Returns [] on DB error — no false action on a bad read."""
+    hc = None
+    try:
+        cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
+        hc = get_db()
+        with hc.cursor() as cur:
+            cur.execute("""
+                WITH latest AS (
+                    SELECT underlying, MAX(ts) AS ts
+                    FROM option_chain
+                    WHERE underlying = ANY(%s) AND ts >= %s
+                    GROUP BY underlying
+                )
+                SELECT l.underlying,
+                       COUNT(*) FILTER (WHERE oc.option_type = 'CE') AS ce_n,
+                       COUNT(*) FILTER (WHERE oc.option_type = 'PE') AS pe_n
+                FROM latest l
+                JOIN option_chain oc ON oc.underlying = l.underlying AND oc.ts = l.ts
+                GROUP BY l.underlying
+            """, (list(INDEX_OPTION_UNDERLYINGS.keys()), cutoff))
+            return [(u, ce, pe) for u, ce, pe in cur.fetchall()
+                    if (ce == 0) != (pe == 0)]
+    except Exception as e:
+        log.warning(f"_index_one_sided_unders: {e}")
+        return []
+    finally:
+        try:
+            if hc: hc.close()
+        except Exception:
+            pass
 
 
 # ── cold-boot CMP seed (cc#352, id166 family) ───────────────────────────────────
@@ -4168,15 +4216,50 @@ def run(auth_code=None):
                     try:
                         add_syms, rem_syms = opt_mgr.check_atm_drift()
                         if add_syms or rem_syms:
-                            if rem_syms: fyers_ws.unsubscribe(symbols=rem_syms)
+                            # cc#1353 (26-Aug incident: NIFTY PE dead 13:20-15:35). This path fired
+                            # raw bulk subscribe/unsubscribe, bypassing _batched_subscribe — the one
+                            # choke point built (cc#151) precisely because Fyers silently drops
+                            # symbols under bulk load. The dropped tail of the CE-then-PE ordered
+                            # add list was the entire PE half. Two changes:
+                            #   1. both calls go through _batched_subscribe;
+                            #   2. a symbol present in BOTH lists (the rolled windows overlap on
+                            #      most strikes) is never bounced through unsub->sub — subscribe
+                            #      runs first and only the truly-departed strikes unsubscribe.
+                            keep = set(add_syms)
+                            rem_only = [s for s in rem_syms if s not in keep]
                             if add_syms:
-                                fyers_ws.subscribe(symbols=add_syms, data_type="SymbolUpdate")
+                                _batched_subscribe(fyers_ws, add_syms, action='sub', label='atm-drift')
                                 option_syms.extend(add_syms)
-                            log.info(f"ATM rebalance: +{len(add_syms)} -{len(rem_syms)}")
+                            if rem_only:
+                                _batched_subscribe(fyers_ws, rem_only, action='unsub', label='atm-drift')
+                            log.info(f"ATM rebalance: +{len(add_syms)} -{len(rem_only)} "
+                                     f"({len(rem_syms) - len(rem_only)} overlap kept subscribed)")
                     except Exception as e:
                         if not _mark_db_error(e, 'ATM drift check'):
                             log.warning(f"ATM drift check failed: {e}")
                     last_atm_check = now_dt
+
+                    # cc#1353 side-liveness verify — same 15-min cadence as the drift check, and
+                    # unconditional (not only after a roll), so ANY silent one-sided death heals
+                    # within one cycle whatever caused it. LOUD by design: log.error + ops_log
+                    # incident row per occurrence, then a batched re-subscribe of the full ladder
+                    # (idempotent — the live side re-subscribing is a no-op at Fyers).
+                    try:
+                        for _und, _ce_n, _pe_n in _index_one_sided_unders():
+                            _heal = opt_mgr.syms_for_underlying(_und)
+                            if not _heal:
+                                continue
+                            _dead = 'PE' if _pe_n == 0 else 'CE'
+                            log.error(f"OPTION SIDE DEAD: {_und} latest tick CE={_ce_n} PE={_pe_n} "
+                                      f"— {_dead} leg silent; re-subscribing full ladder "
+                                      f"({len(_heal)} syms) (cc#1353)")
+                            _log_feed_incident("option_side_dead_resubscribe",
+                                f"{_und}: CE={_ce_n} PE={_pe_n} at latest tick — {_dead} side dead; "
+                                f"re-subscribed {len(_heal)} ladder symbols (cc#1353)")
+                            _batched_subscribe(fyers_ws, _heal, action='sub',
+                                               label=f'{_und}-side-heal')
+                    except Exception as e:
+                        log.warning(f"cc#1353 side-liveness check failed: {e}")
 
                 # ── feed watchdog (cc#489 WATCHDOG_SIMPLIFICATION, ARPIT DIRECTIVE) ──
                 # ONE linear model, every HEALTH_LOG_MINS: check per-source counts ->
