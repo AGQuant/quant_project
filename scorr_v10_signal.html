@@ -81,7 +81,8 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    resistance overhead, a put wall is support beneath, so the colour marks WHERE the writers are,
    not whether the news is welcome. Bars are % heights against the largest OI on the card, so the
    two halves share one scale and a tall put bar and a tall call bar mean the same quantity. */
-.oib{position:relative;display:flex;align-items:stretch;gap:var(--space-2);height:132px;margin-top:var(--space-10);padding:var(--space-11) 0}
+.oib{position:relative;display:flex;align-items:stretch;gap:var(--space-2);height:132px;margin-top:var(--space-10);padding:26px 0}
+/* cc#1355 · the reserved strips grow 11→26px so the mover delta labels fit beside the wall tags */
 .oic{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
 .oic .up{flex:1;display:flex;align-items:flex-end}
 .oic .dn{flex:1;display:flex;align-items:flex-start}
@@ -98,6 +99,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  white-space:nowrap;transform:translateX(-50%);pointer-events:none}
 .oiwall.cw{top:0;color:var(--heat)}
 .oiwall.pw{bottom:0;color:var(--volt)}
+.oichg{position:absolute;transform:translateX(-50%);font-family:'JetBrains Mono';font-size:var(--type-8);
+  letter-spacing:var(--track-px8);white-space:nowrap;pointer-events:none}
+.oichg.ce{top:13px;color:var(--heat)}
+.oichg.pe{bottom:13px;color:var(--volt)}
 /* cc#1261 · STRIKE LABELS UNDER THE BARS. The CALL WALL / PUT WALL tags above name WHICH bar
    matters; these name WHAT IT IS, so the x-axis reads without hunting back to the readout line.
    Same absolute positioning and the same (i+0.5)/count centring the wall tags use, so a number
@@ -675,15 +680,37 @@ function oiCard(name, oi, mp){
      footer value (they would be fabricated — the wall reduce() lands on rows[0] when a side
      is all zeros), and states the gap in one line. Identical in both oiCard twins. */
   var peDead = oi.one_sided === 'PE_MISSING', ceDead = oi.one_sided === 'CE_MISSING';
+  /* cc#1355 · change since open + PCR (session_log 32043). Bar HEIGHT stays the OI level;
+     BRIGHTNESS carries the change: building = full + glow, quiet = .55, unwinding = .35. A bar
+     with no delta (no 09:20 baseline row, or a side dead in either tick) keeps the stylesheet
+     default — no signal is not a signal. Delta labels go only on the top 3 movers per side over
+     a threshold chosen from live data (26-Aug session: median |chg| 325 = noise, top real mover
+     42.5k, walls at 55L): label th = max(25k, 2% of side max OI), classify th = max(10k, 0.5%). */
+  var CE_COL = 'var(--heat)', PE_COL = 'var(--volt)';
+  var hasCh = rows.some(function(r){ return r.ce_chg != null || r.pe_chg != null; });
+  var maxCe = Math.max.apply(null, rows.map(function(r){ return r.call_oi || 0; })) || 1;
+  var maxPe = Math.max.apply(null, rows.map(function(r){ return r.put_oi || 0; })) || 1;
+  var thLab = { ce: Math.max(25000, .02 * maxCe), pe: Math.max(25000, .02 * maxPe) };
+  var thCls = { ce: Math.max(10000, .005 * maxCe), pe: Math.max(10000, .005 * maxPe) };
+  var bri = function(chg, th, glow){
+    if(!hasCh || chg == null) return '';
+    if(chg >= th)  return 'opacity:1;box-shadow:0 0 8px ' + glow + ';';
+    if(chg <= -th) return 'opacity:.35;';
+    return 'opacity:.55;';
+  };
+  var fCh = function(v){ var a = Math.abs(v), s = v > 0 ? '+' : '-';
+    return s + (a >= 1e5 ? (a / 1e5).toFixed(1) + 'L' : a >= 1e3 ? Math.round(a / 1e3) + 'k' : String(a)); };
   var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
   var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
   var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
   var cols = rows.map(function(r){
     var isMp = (mpStrike != null && Number(r.strike) === mpStrike);
     return '<div class="oic' + (isMp ? ' mp' : '') + '" title="' + r.strike + '">'
-      + '<div class="up"><i style="height:' + (100 * (r.call_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '<div class="up"><i style="height:' + (100 * (r.call_oi || 0) / peak).toFixed(1) + '%;'
+      +   (isMp ? '' : bri(r.ce_chg, thCls.ce, CE_COL)) + '"></i></div>'
       + '<div class="oiax"></div>'
-      + '<div class="dn"><i style="height:' + (100 * (r.put_oi || 0) / peak).toFixed(1) + '%"></i></div>'
+      + '<div class="dn"><i style="height:' + (100 * (r.put_oi || 0) / peak).toFixed(1) + '%;'
+      +   (isMp ? '' : bri(r.pe_chg, thCls.pe, PE_COL)) + '"></i></div>'
       + '</div>';
   }).join('');
   /* the dashed spot line, placed by interpolating spot across the rendered strike span rather than
@@ -698,8 +725,26 @@ function oiCard(name, oi, mp){
      left of the bar it names. */
   var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
   var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
-  if(cwI >= 0 && !ceDead) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
-  if(pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
+  /* cc#1355 · one word of change on the wall itself, and delta labels on the top movers */
+  var wallWord = function(w, key, th){
+    if(!hasCh || !w || w[key] == null) return '';
+    return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
+  };
+  if(cwI >= 0 && !ceDead) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL'
+    + wallWord(callWall, 'ce_chg', thCls.ce) + '</div>';
+  if(pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL'
+    + wallWord(putWall, 'pe_chg', thCls.pe) + '</div>';
+  if(hasCh){
+    [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
+      rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
+          .filter(function(m){ return m.c != null && Math.abs(m.c) >= sd[1]; })
+          .sort(function(a, b){ return Math.abs(b.c) - Math.abs(a.c); })
+          .slice(0, 3)
+          .forEach(function(m){
+            tags += '<span class="oichg ' + sd[2] + '" style="left:' + colPct(m.i) + '%">' + fCh(m.c) + '</span>';
+          });
+    });
+  }
   /* cc#1261 · the three strikes that carry meaning, printed under the bars they belong to.
      TWO WAYS THIS GETS UGLY AND BOTH ARE HANDLED. The max pain strike is very often ALSO the call
      or put wall, which would stack two labels on one column — so a strike already claimed is
@@ -727,14 +772,40 @@ function oiCard(name, oi, mp){
   });
   xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
   var ao = chainAsOf(oi.chain_tick);
+  /* cc#1355 · the as-of line carries the whole context: tick · vs open · PCR (32043) */
+  var aoTxt = ao.txt
+    + (oi.baseline_tick && hasCh ? ' · vs open ' + String(oi.baseline_tick).slice(11, 16) : '')
+    + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
+  var story = '';
+  if(hasCh){
+    var sideStory = function(label, key, wall, th){
+      var mv = rows.filter(function(r){ return r[key] != null; });
+      if(!mv.length) return '';
+      var bld = mv.reduce(function(a, b){ return b[key] > a[key] ? b : a; });
+      var unw = mv.reduce(function(a, b){ return b[key] < a[key] ? b : a; });
+      var bits = [];
+      if(bld[key] >= th) bits.push('build ' + num(bld.strike) + ' ' + fCh(bld[key]));
+      if(unw[key] <= -th) bits.push('unwind ' + num(unw.strike) + ' ' + fCh(unw[key])
+        + (wall && Number(unw.strike) === Number(wall.strike) ? ' — wall weakening' : ''));
+      return bits.length ? label + ' ' + bits.join(' · ') : '';
+    };
+    var st = [sideStory('calls', 'ce_chg', ceDead ? null : callWall, thCls.ce),
+              sideStory('puts', 'pe_chg', peDead ? null : putWall, thCls.pe)]
+             .filter(Boolean).join(' &nbsp;·&nbsp; ');
+    if(st) story = '<div class="oird">' + st + '</div>';
+  } else if(oi.baseline_tick == null && !oi.one_sided){
+    /* 32043 honesty rule 3: no baseline -> deltas omitted AND the card says so */
+    story = '<div class="oird">no 09:20 baseline this session — OI change hidden</div>';
+  }
   var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-    + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(ao.txt) + '</span></div>'
+    + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + xs
     + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
         + (peDead ? 'put' : 'call') + ' OI absent this tick — feed gap</div>' : '')
+    + story
     /* cc#1261 · NUMBERS ONLY, ONE LINE. The commentary sentence is gone and the <br> that split
        the readout in two goes with it: the founder asked for the key numbers, not a paragraph
        under them, and MP / spot / put wall / call wall / expiry is the whole of what he reads.
