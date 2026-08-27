@@ -397,7 +397,7 @@ _CANON_CAT = {
 
 @router.get("/api/news/polished")
 def news_polished(request: Request, category: str = "all", limit: int = 20, offset: int = 0,
-                  cursor: str = ""):
+                  cursor: str = "", q: str = ""):
     """Polished news for the /news redesign (cc_task #79, spec 636).
     category = all | ai_editorial | company_updates | global | ipo (strict exact match).
     Sorted polished_at DESC (newest first, all categories interleaved on 'all').
@@ -414,6 +414,70 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
     cat = (category or "all").lower()
     limit = max(1, min(limit, 300))
     offset = max(0, offset)
+    # ── cc#1366: FULL-ARCHIVE SEARCH — its own self-contained branch, so the plain listing path
+    # below stays byte-for-byte what cc#1365 shipped. Semantics: a symbol containment match
+    # (unnest(mentioned_symbols) s WHERE s ILIKE %q%) ranks ABOVE a free-text hit (headline /
+    # full_summary / summary ILIKE %q%), newest first within rank. The keyset follows the SAME
+    # (sym_rank DESC, time DESC, id DESC) order it pages — a search cursor is 3-part
+    # "<rank>|<iso>|<id>". All placeholders positional, ordered by appearance.
+    q = (q or "").strip()
+    if q:
+        like = f"%{q}%"
+        sym_exists = ("EXISTS (SELECT 1 FROM unnest(COALESCE(mentioned_symbols, "
+                      "ARRAY[]::text[])) s WHERE s ILIKE %s)")
+        inner_where = f"""({sym_exists}
+                    OR headline ILIKE %s
+                    OR COALESCE(full_summary, summary, '') ILIKE %s)"""
+        inner_params = [like, like, like, like]   # rank CASE in the SELECT list, then the three predicate legs
+        cat_sql = ""
+        if cat in _CANON_CAT:
+            cat_sql = "AND category = %s"
+            inner_params.append(_CANON_CAT[cat])
+        else:
+            cat = "all"
+        outer_where, outer_params = "", []
+        if cursor:
+            try:
+                _r, _t, _i = str(cursor).split("|", 2)
+                _rank, _id = int(_r), int(_i)
+            except Exception:
+                return {"error": "bad cursor", "articles": [], "count": 0}
+            outer_where = ("WHERE (sym_rank < %s OR (sym_rank = %s AND "
+                           "(published_time < %s::timestamptz OR "
+                           "(published_time = %s::timestamptz AND id < %s))))")
+            outer_params = [_rank, _rank, _t, _t, _id]
+        sql = f"""
+            SELECT * FROM (
+                SELECT polished_id AS id, raw_news_id,
+                       headline AS headline_clean,
+                       summary, full_summary, category, sentiment, impact,
+                       mentioned_symbols, source_name AS source,
+                       display_time AS published_time, polished_at,
+                       CASE WHEN {sym_exists} THEN 1 ELSE 0 END AS sym_rank
+                FROM v_polished_articles
+                WHERE {inner_where} {cat_sql}
+            ) t
+            {outer_where}
+            ORDER BY sym_rank DESC, published_time DESC NULLS LAST, id DESC
+            LIMIT %s
+        """
+        # placeholder order by appearance: rank CASE (SELECT list), 3 predicate legs, cat?,
+        # keyset, limit — inner_params already carries all four likes plus the category.
+        exec_params = inner_params + outer_params + [limit + 1]
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, exec_params)
+            articles = _rows(cur)
+        has_more = len(articles) > limit
+        if has_more:
+            articles = articles[:limit]
+        next_cursor = None
+        if articles and has_more:
+            _last = articles[-1]
+            _lt = _last.get("published_time")
+            next_cursor = (f"{_last.get('sym_rank')}|"
+                           f"{_lt.isoformat() if hasattr(_lt, 'isoformat') else _lt}|{_last.get('id')}")
+        return {"category": cat, "q": q, "limit": limit, "count": len(articles),
+                "articles": articles, "has_more": has_more, "next_cursor": next_cursor}
     where, params = "", []
     if cat in _CANON_CAT:
         where = "WHERE category = %s"
@@ -472,6 +536,62 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
     return {"category": cat, "limit": limit, "offset": offset,
             "count": len(articles), "category_counts": counts, "articles": articles,
             "has_more": has_more, "next_cursor": next_cursor, "total": total}
+
+
+@router.get("/api/news/raw_search")
+def news_raw_search(request: Request, q: str = "", limit: int = 60, cursor: str = ""):
+    """cc#1366: RAW-tab twin of the polished archive search — raw_news over ALL time, symbol
+    column match ranked above headline/description text, newest first within rank, 3-part keyset
+    ("<rank>|<iso>|<id>") identical to the polished search. The 15 rows (of 4,953) with a NULL
+    published_at are EXCLUDED — a NULL sort key cannot keyset honestly, and 0.3%% undated rows
+    are stated here rather than silently stranded at an unreachable tail."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
+    q = (q or "").strip()
+    if not q:
+        return {"items": [], "count": 0, "has_more": False, "next_cursor": None}
+    limit = max(1, min(limit, 300))
+    like = f"%{q}%"
+    outer_where, outer_params = "", []
+    if cursor:
+        try:
+            _r, _t, _i = str(cursor).split("|", 2)
+            _rank, _id = int(_r), int(_i)
+        except Exception:
+            return {"error": "bad cursor", "items": [], "count": 0}
+        outer_where = ("WHERE (sym_rank < %s OR (sym_rank = %s AND "
+                       "(published_at < %s::timestamptz OR "
+                       "(published_at = %s::timestamptz AND id < %s))))")
+        outer_params = [_rank, _rank, _t, _t, _id]
+    sql = f"""
+        SELECT * FROM (
+            SELECT id, headline, description, source_name, source_type, symbol, published_at,
+                   CASE WHEN COALESCE(symbol, '') ILIKE %s THEN 1 ELSE 0 END AS sym_rank
+            FROM raw_news
+            WHERE published_at IS NOT NULL
+              AND (COALESCE(symbol, '') ILIKE %s
+                   OR headline ILIKE %s
+                   OR COALESCE(description, '') ILIKE %s)
+        ) t
+        {outer_where}
+        ORDER BY sym_rank DESC, published_at DESC, id DESC
+        LIMIT %s
+    """
+    params = [like, like, like, like] + outer_params + [limit + 1]
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        items = _rows(cur)
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = None
+    if items and has_more:
+        _last = items[-1]
+        _lt = _last.get("published_at")
+        next_cursor = (f"{_last.get('sym_rank')}|"
+                       f"{_lt.isoformat() if hasattr(_lt, 'isoformat') else _lt}|{_last.get('id')}")
+    return {"q": q, "count": len(items), "items": items,
+            "has_more": has_more, "next_cursor": next_cursor}
 
 
 def stock_views_shortlist_data(hours: int = 48):

@@ -519,6 +519,15 @@ html,body{overflow-x:hidden;max-width:100%}
   border:var(--bw-1) solid var(--edge);color:var(--chalk);font-size:var(--type-15);cursor:pointer;
   display:flex;align-items:center;justify-content:center}
 .nwfico.on{border-color:var(--pulse);color:var(--pulse)}
+/* cc#1366 · the archive search row: the magnifier opens an inline input; clearing restores the
+   list at the reader's saved page. Tokens only. */
+.nwsrow{display:flex;align-items:center;gap:var(--space-6);margin:0 0 var(--space-8)}
+.nwsrow input{flex:1;min-width:0;background:var(--field);border:var(--bw-1) solid var(--edge);
+  border-radius:var(--radius-9);color:var(--chalk);font:inherit;font-size:var(--type-125);
+  padding:var(--space-7) var(--space-10);outline:none}
+.nwsrow input:focus{border-color:var(--pulse)}
+.nwsx{min-width:38px;min-height:38px;flex:none;border-radius:var(--radius-9);background:var(--field);
+  border:var(--bw-1) solid var(--edge);color:var(--chalk);font-size:var(--type-15);cursor:pointer}
 .nwfmenu{position:absolute;top:calc(100% + var(--space-4));right:0;z-index:10;background:var(--panel);
   border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);padding:var(--space-4);
   display:flex;flex-direction:column;gap:var(--space-2);min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
@@ -1209,6 +1218,12 @@ var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
    the first Next-past-the-end serves them with no network call; the server cursor continues from
    the last row of the raw response, so nothing is skipped or refetched. */
 RN.polishCursor = null; RN.polishHasMore = false; RN.polishOverflow = []; RN.polishLoading = false;
+/* cc#1366 · archive search state. While a query is live RN.items serves the SEARCH results
+   (server rank order: symbol match above text match, newest within rank); the reader's page is
+   saved on entry and restored exactly on clear. Search runs server-side over the FULL store —
+   polished via /api/news/polished?q=, raw via /api/news/raw_search — never over loaded pages. */
+var RN_SEARCH = { open: false, q: '', items: [], cursor: null, hasMore: false,
+                  loading: false, timer: null, savedPage: 0 };
 /* cc#1365 · founder order: AI Editorial first, then every domestic category, then global.
    Mapping from the REAL stored categories (counts 27-Aug): group 1 = 'AI Editorial' (584);
    group 2 = 'Domestic' (2,499), 'IPO' (273), 'Stock Views' (5) — the domestic market categories;
@@ -1246,6 +1261,7 @@ var RN_CATS = ['AI Editorial','Domestic','Global','IPO','Stock Views'];
 var RN_FILTER_OPEN = false;
 
 function rnApplyMode(){
+  if (RN_SEARCH.q.trim()){ RN.items = RN_SEARCH.items; return; }   /* cc#1366 */
   var src = (RN.mode === 'polish') ? RN.polish : RN.raw;
   RN.items = (RN.mode === 'polish' && RN_CAT !== 'ALL')
     ? src.filter(function(n){ return n.category === RN_CAT; }) : src;
@@ -1287,8 +1303,13 @@ function rnGo(ev, delta){
     if (ev.stopPropagation) ev.stopPropagation();
   }
   var last = rnPages() - 1;
+  /* cc#1366: a live search pages its own result set first */
+  if (delta > 0 && RN.page >= last && RN_SEARCH.q.trim() && RN_SEARCH.hasMore){
+    nwSearchRun(true);
+    return;
+  }
   /* cc#1365: Next on the last loaded POLISH page reaches into history instead of dying there */
-  if (delta > 0 && RN.page >= last && RN.mode === 'polish'
+  if (delta > 0 && RN.page >= last && !RN_SEARCH.q.trim() && RN.mode === 'polish'
       && (RN.polishOverflow.length || RN.polishHasMore)){
     rnLoadOlder();
     return;
@@ -1339,6 +1360,69 @@ function rnLoadOlder(){
     });
 }
 
+/* cc#1366 · archive search: 300ms debounce, server-side over the FULL store, same row renderer
+   and pager. A stale response (an older query answering after a newer one was typed) is dropped.
+   Clear restores the reader's list and page exactly. */
+function nwSearchToggle(ev){
+  if (ev){ ev.preventDefault(); ev.stopPropagation(); }
+  if (RN_SEARCH.open){ nwSearchClear(); return; }
+  RN_SEARCH.open = true;
+  RN_SEARCH.savedPage = RN.page;
+  nwPaintTabs();
+  var i = document.getElementById('nwsq');
+  if (i) i.focus();
+}
+function nwSearchClear(ev){
+  if (ev){ ev.preventDefault(); ev.stopPropagation(); }
+  if (RN_SEARCH.timer) clearTimeout(RN_SEARCH.timer);
+  RN_SEARCH.open = false; RN_SEARCH.q = ''; RN_SEARCH.items = [];
+  RN_SEARCH.cursor = null; RN_SEARCH.hasMore = false; RN_SEARCH.loading = false;
+  rnApplyMode();
+  RN.page = Math.min(RN_SEARCH.savedPage, rnPages() - 1);
+  rnPaint();
+}
+function nwSearchInput(v){
+  RN_SEARCH.q = String(v || '');
+  if (RN_SEARCH.timer) clearTimeout(RN_SEARCH.timer);
+  if (!RN_SEARCH.q.trim()){
+    RN_SEARCH.items = []; RN_SEARCH.cursor = null; RN_SEARCH.hasMore = false;
+    rnApplyMode();
+    RN.page = Math.min(RN_SEARCH.savedPage, rnPages() - 1);
+    rnPaint();
+    return;
+  }
+  RN_SEARCH.timer = setTimeout(function(){ nwSearchRun(false); }, 300);
+}
+function nwSearchRun(more){
+  var qq = RN_SEARCH.q.trim();
+  if (!qq) return;
+  RN_SEARCH.loading = true;
+  rnPaint();
+  var isRaw = RN.mode === 'raw';
+  var url = (isRaw ? '/api/news/raw_search?limit=60&q=' : '/api/news/polished?category=all&limit=60&q=')
+    + encodeURIComponent(qq)
+    + (more && RN_SEARCH.cursor ? '&cursor=' + encodeURIComponent(RN_SEARCH.cursor) : '');
+  fetch(url).then(function(r){ return r.json(); })
+    .then(function(d){
+      RN_SEARCH.loading = false;
+      if (RN_SEARCH.q.trim() !== qq) return;   /* stale — a newer query is live */
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var arts = d.articles || d.items || [];
+      var mapped = isRaw
+        ? arts.map(function(a){ return { headline: a.headline, published_at: a.published_at,
+            sentiment: null, impact: null, category: '', body: '', polished: false }; })
+        : arts.filter(function(a){ return a && String(a.headline_clean || '').trim(); })
+              .map(rnMapArticle);
+      RN_SEARCH.items = more ? RN_SEARCH.items.concat(mapped) : mapped;
+      RN_SEARCH.cursor = d.next_cursor || null;
+      RN_SEARCH.hasMore = !!d.has_more;
+      rnApplyMode();
+      RN.page = more ? Math.min(RN.page + 1, rnPages() - 1) : 0;
+      rnPaint();
+    })
+    .catch(function(){ RN_SEARCH.loading = false; rnPaint(); });
+}
+
 var RN_SW = { x:0, y:0, armed:false, just:false };
 
 function rnBindSwipe(){
@@ -1386,8 +1470,12 @@ function rnPaint(){
   if (window.ScorrNewsRow) ScorrNewsRow.injectCss();
   nwPaintTabs();
   if (!RN.items.length){
-    box.innerHTML = '<div class="unavail" style="padding:8px 0">No '
-      + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.</div>';
+    box.innerHTML = '<div class="unavail" style="padding:8px 0">'
+      + (RN_SEARCH.q.trim()
+          ? (RN_SEARCH.loading ? 'Searching the archive…'
+             : 'No stories for \u201c' + esc(RN_SEARCH.q.trim()) + '\u201d in the archive.')
+          : 'No ' + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.')
+      + '</div>';
     return;
   }
   var pages = rnPages(), p = RN.page;
@@ -1422,13 +1510,14 @@ function rnPaint(){
     rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
   /* cc#1365: Next stays live on the last page while history remains (overflow or server
      has_more); it only disables at the TRUE end, where the page count is the true total. */
-  var canMore = !isRaw && (RN.polishOverflow.length > 0 || RN.polishHasMore);
-  var nextDis = RN.polishLoading || (p >= pages - 1 && !canMore);
+  var canMore = RN_SEARCH.q.trim() ? RN_SEARCH.hasMore
+    : (!isRaw && (RN.polishOverflow.length > 0 || RN.polishHasMore));
+  var nextDis = RN.polishLoading || RN_SEARCH.loading || (p >= pages - 1 && !canMore);
   var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
     + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
     + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
     + '<button class="rnb" onclick="rnGo(event,1)"' + (nextDis ? ' disabled' : '')
-    + '>' + (RN.polishLoading ? 'Loading…' : 'Next ›') + '</button>'
+    + '>' + ((RN.polishLoading || RN_SEARCH.loading) ? 'Loading…' : 'Next ›') + '</button>'
     + '</div>';
   box.innerHTML = '<div class="rnlist' + (isRaw ? ' raw' : '') + '">' + rows + '</div>' + ctl;
   nwPaintTabs();
@@ -1460,9 +1549,28 @@ function nwPaintTabs(){
   var filterBtn = (RN.mode === 'polish')
     ? '<button type="button" class="nwfico' + (RN_CAT !== 'ALL' ? ' on' : '') + '" onclick="nwFilterToggle(event)" aria-label="Filter by category">⚙</button>'
     : '';
+  /* cc#1366 · the magnifier sits beside the gear on both tabs; the inline input renders under
+     the tab row while open. The input is rebuilt on every paint, so focus and caret are captured
+     first and restored after — typing must never lose the cursor mid-word. */
+  var searchBtn = '<button type="button" class="nwfico' + (RN_SEARCH.open || RN_SEARCH.q ? ' on' : '')
+    + '" onclick="nwSearchToggle(event)" aria-label="Search all stored news">⌕</button>';
+  var srow = RN_SEARCH.open
+    ? '<div class="nwsrow"><input id="nwsq" type="search" placeholder="search stock or keyword — full archive"'
+      + ' value="' + esc(RN_SEARCH.q) + '" oninput="nwSearchInput(this.value)"'
+      + ' onclick="event.stopPropagation()">'
+      + '<button type="button" class="nwsx" onclick="nwSearchClear(event)" aria-label="Clear search">×</button></div>'
+    : '';
+  var hadFocus = document.activeElement && document.activeElement.id === 'nwsq';
+  var caret = hadFocus ? document.activeElement.selectionStart : null;
   el.innerHTML = '<div class="nwtabsrow"><div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
     + tab('raw', 'RAW', RN.raw.length) + '</div>'
-    + (filterBtn ? '<div class="nwfilter">' + filterBtn + nwFilterMenuHtml() + '</div>' : '') + '</div>';
+    + '<div class="nwfilter">' + searchBtn + '</div>'
+    + (filterBtn ? '<div class="nwfilter">' + filterBtn + nwFilterMenuHtml() + '</div>' : '') + '</div>'
+    + srow;
+  if (RN_SEARCH.open && hadFocus){
+    var _sq = document.getElementById('nwsq');
+    if (_sq){ _sq.focus(); try{ _sq.setSelectionRange(caret, caret); }catch(e){} }
+  }
 }
 
 function loadRawNews(){
