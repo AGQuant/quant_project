@@ -9,9 +9,6 @@
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<!-- cc#1322: LIVE NEWS ported from mobile/home.html reuses the shared row's sentiment/category
-     helpers (sentiClass, catShort) and its self-guarded stylesheet injection for .nrdot. -->
-<script src="/scorr_news_row.js"></script>
 <style>
 /* INDEX INTEL — implements design_refs/scorr_indexintel_mobile_R1.html (bb2fde7), R5.1 tokens */
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
@@ -44,7 +41,6 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .grp h3{font-family:'Archivo Black';font-size:var(--type-15);transform:skewX(-6deg);color:var(--chalk)}
 .grp .note{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px10);text-align:right}
 .foot{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px8);margin:var(--space-6) var(--space-18) var(--space-20)}
-.plink{color:var(--pulse);font-weight:700;font-size:var(--type-125);cursor:pointer;text-decoration:none}
 .tbl{width:100%;font-size:var(--type-115);font-family:'JetBrains Mono'}
 .tbl td{padding:var(--space-6) var(--space-4);border-top:var(--bw-1) solid var(--edge)}
 .tbl tr:first-child td{border-top:none}
@@ -321,122 +317,44 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
 
-/* ══ cc#1322 · LIVE NEWS, moved off Home onto this page as the last section (founder 25-Aug) ═══
-   Ported from mobile/home.html verbatim in behaviour — RAW/POLISH tabs (cc#1092), paging (cc#971),
-   fixed row height (cc#1204), category tag in the chevron's slot (cc#1120), the bottom-sheet peek
-   with the cc#1312 round-2 close-race fix intact. NOT a copy-paste of the CSS: home.html and this
-   page are on two different token systems (see the card). Every colour below is re-pointed at this
-   file's own R5.1 tokens, checked one by one against home.html's --root chain rather than guessed:
-     home --txt          (-> --t-ink, bright text)      -> this page's --chalk
-     home --mut / --dim  (both -> --t-muted)             -> this page's --muted
-     home --panel2       (-> --t-hi)                     -> this page's --hi
-     home --line/--line2 (both -> --t-edge)               -> this page's --edge
-     home --grn (fallback #C8F542, -> --t-win)  -> this page's --volt (--volt is #C8F542 too — the
-                                                    fallback hex and this page's real token AGREE,
-                                                    which is what confirms the mapping rather than a
-                                                    guess at "green means green somewhere").
-     home --red (fallback #FF4D6D, -> --t-loss) -> this page's --heat (#FF4D6D here too, same check)
-     home --gold and --t-sunk carry NO real token on home.html either — both only ever resolved via
-     their hardcoded fallback (#D4AF37, #0E0E11) because neither name is defined anywhere reachable
-     from that page. There is no equivalent token in THIS page's R5.1 set either (no gold accent,
-     no separate "sunk" tone from --panel), so those two stay the literal hex they were already
-     rendering as — carrying the exact live colour forward is more honest than inventing a mapping
-     to a token that would shift the look. .nwsheet's background does move off that literal
-     though: --panel is what this family's own sibling sheet (scorr_digest_mobile.html's .rsheet)
-     uses for a bottom sheet, so it takes the real token where a real sibling precedent exists.
-     .nwtabs keeps --field for its recessed strip -- this page's own darkest/page-level tone, the
-     same role home's --t-sunk played (a shade behind --panel), just under this family's own name.
-   home.html's OLD .rnr/.rnr .h/.rnr .rnage rules are dead CSS on that page too (cc#1092's .nwrow
-   replaced them years before this move; nothing there emits class="rnr" any more) -- not ported,
-   same call as cc#1318's .lrow/.ll on the digest page earlier tonight. */
-:root{--news-row-h:59px}
-/* cc#1326: .nwtabsrow wraps the tabs strip + the filter icon side by side; the bottom margin that
-   used to live on .nwtabs itself moves here so both line up on the row's own baseline. */
-.nwtabsrow{display:flex;align-items:flex-start;gap:var(--space-6);margin:var(--space-2) 0 var(--space-10)}
-.nwtabs{display:flex;flex:1;background:var(--field);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);
-  padding:var(--space-3)}
-.nwtab{flex:1;text-align:center;padding:var(--space-7) 0;border-radius:var(--radius-7);font-size:var(--type-105);font-weight:800;
-  letter-spacing:var(--track-em14);color:var(--chalk);background:none;border:0;font-family:inherit;cursor:pointer}
-.nwtab.on{background:#D4AF37;color:#151204}
-.nwtab small{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:700;opacity:.75;
-  margin-left:var(--space-4);font-size:var(--type-9)}
-/* cc#1326: POLISH-only category filter, an ICON per the founder's own word rather than a chip
-   row -- cc#1321 already taught this codebase what 5 chips do to a narrow phone width. */
-.nwfilter{position:relative;flex:none}
-.nwfico{min-width:38px;min-height:38px;border-radius:var(--radius-9);background:var(--field);
-  border:var(--bw-1) solid var(--edge);color:var(--chalk);font-size:var(--type-15);cursor:pointer;
-  display:flex;align-items:center;justify-content:center}
-.nwfico.on{border-color:var(--pulse);color:var(--pulse)}
-.nwfmenu{position:absolute;top:calc(100% + var(--space-4));right:0;z-index:10;background:var(--panel);
-  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-9);padding:var(--space-4);
-  display:flex;flex-direction:column;gap:var(--space-2);min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.nwfitem{text-align:left;padding:var(--space-6) var(--space-8);border-radius:var(--radius-5);background:none;
-  border:0;color:var(--chalk);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-10);
-  cursor:pointer;display:flex;justify-content:space-between;gap:var(--space-8);white-space:nowrap}
-.nwfitem:active,.nwfitem.on{background:var(--hi);color:var(--aqua)}
-.nwfitem .n{color:var(--muted)}
-.nwfitem.on .n{color:var(--aqua)}
-.nwrow{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-11) var(--space-2);
-  height:var(--news-row-h);min-height:var(--news-row-h);box-sizing:border-box;
-  border:0;border-bottom:var(--bw-1) solid var(--edge);background:none;width:100%;text-align:left;
-  font-family:inherit;color:inherit;cursor:pointer}
-.nwrow:last-of-type{border-bottom:0}
-.nwrow .h{flex:1;min-width:0;font-size:var(--type-125);line-height:1.45;color:var(--chalk);
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.nwrow .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--chalk);
-  white-space:nowrap;flex:0 0 34px;min-width:0;overflow:hidden;text-align:right}
-.nwrow.nwpad{cursor:default;pointer-events:none}
-.nwrow .nwchev,.nwrow .nwcat{flex:0 0 46px;min-width:0;overflow:hidden;
-  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
-.nwrow .nwchev{color:#D4AF37;font-size:var(--type-13);flex-shrink:0;
-  background:none;border:0;border-radius:0;padding:0;margin:0}
-.nwrow .nwchev::before{content:none}
-.nwrow .nwcat{flex-shrink:0;white-space:nowrap;font-family:'JetBrains Mono',ui-monospace,monospace;
-  font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-3) var(--space-6);border-radius:var(--radius-5);
-  color:#D4AF37;border:var(--bw-1) solid var(--edge);background:var(--hi)}
-.nwveil{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:80}
-.nwsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;
-  z-index:81;background:var(--panel);border-top:var(--bw-1) solid #000;border-radius:var(--radius-18) var(--radius-18) 0 0;
-  box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.08),
-             0 -1px 0 rgba(255,255,255,.06);
-  animation:nwup .22s cubic-bezier(.2,.9,.3,1)}
-@keyframes nwup{from{transform:translateY(100%)}}
-.nwgrab{width:38px;height:4px;border-radius:var(--radius-2);background:#3A3A42;margin:var(--space-9) auto var(--space-6);flex-shrink:0}
-.nwsb{overflow-y:auto;padding:var(--space-4) var(--space-18) 26px;-webkit-overflow-scrolling:touch}
-.nwsh{font-size:var(--type-15);line-height:1.35;font-weight:800;margin-bottom:var(--space-7);color:var(--chalk)}
-.nwsm{display:flex;gap:var(--space-8);align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;
-  font-size:var(--type-95);color:var(--chalk);margin-bottom:var(--space-11);flex-wrap:wrap}
-.nwchip{font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em12);padding:var(--space-2) var(--space-7);border-radius:var(--radius-3)}
-.nwchip.up{background:rgba(200,245,66,.14);color:var(--volt);border:1px solid rgba(200,245,66,.3)}
-.nwchip.dn{background:rgba(255,77,109,.12);color:var(--heat);border:1px solid rgba(255,77,109,.3)}
-.nwchip.hi{background:rgba(255,77,109,.12);color:var(--heat);border:var(--bw-1) solid rgba(255,77,109,.3)}
-.nwchip.nt{background:rgba(255,255,255,.06);color:var(--chalk);border:var(--bw-1) solid var(--edge)}
-.nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
-.nwbd p{margin:0 0 var(--space-9)}
-.nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
-.newslist{max-height:none;overflow:visible}
-.rnlist{height:calc(var(--news-row-h) * 6);animation:rnfade .18s ease-out}
-/* cc#1326: RAW rows are variable-height now (the headline wraps to its full length instead of
-   the old 2-line clamp fighting a sibling timestamp column), so the fixed six-row reservation
-   that keeps POLISH from jumping the pager under the thumb (cc#1204) does not apply here -- there
-   is no single row height to multiply by six any more. auto is the honest height for a page whose
-   rows are already not uniform. */
-.rnlist.raw{height:auto}
-@keyframes rnfade{from{opacity:.35}to{opacity:1}}
-@media (prefers-reduced-motion:reduce){.rnlist{animation:none}}
-.nwrow.nwraw{height:auto;min-height:var(--news-row-h);align-items:flex-start;cursor:default;
-  padding-top:var(--space-13);padding-bottom:var(--space-13)}
-.nwrawbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--space-4)}
-.nwrow.nwraw .nwrawbody .h{display:block;-webkit-line-clamp:unset;overflow:visible;white-space:normal}
-.nwrawbody .t2{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--muted)}
-.rnpg{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);
-  padding-top:var(--space-8);border-top:var(--bw-1) solid var(--edge)}
-.rnb{min-height:44px;min-width:88px;padding:0 var(--space-12);font-family:'JetBrains Mono',ui-monospace,monospace;
-  font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--panel);
-  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);cursor:pointer}
-.rnb:disabled{opacity:.35;cursor:default}
-.rnp{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
-  color:var(--chalk);letter-spacing:var(--track-em9)}
+/* ══ cc#1368 · VOLUME FLOW — green-bar volume vs red-bar volume, replacing LIVE NEWS ═══════════
+   The news section moved to the Daily Digest (cc#1365/1366 gave it ordering, history paging and
+   archive search there); a second copy here was pure duplication — founder 27-Aug. In its place:
+   two stacked cards ranking the F&O universe by where the VOLUME traded over the last N 5-min
+   ticks — on rising bars (accumulation) or falling bars (distribution). It is a VOLUME read and
+   is labelled VOLUME FLOW, nothing stronger: we do not capture the order book, so no name here
+   may claim to read it.
+   The row table reuses .butbl wholesale — same six columns, same explicit widths, same ellipsis
+   behaviour the F&O radar already proved at 360px — rather than inventing a third table dialect.
+   The bottom sheet is the same anatomy the news sheet had, re-pointed at this page's own tokens
+   where the news copy carried literal hex (its grab-handle grey, its border black) — those
+   literals leave with it and do not come back. */
+.vfhd{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-10)}
+.vfhd h3{font-family:'Archivo Black';font-size:var(--type-15);transform:skewX(-6deg);color:var(--chalk)}
+.vfhd .sp{flex:1}
+.vfib{min-width:30px;min-height:30px;border-radius:50%;background:var(--hi);border:var(--bw-1) solid var(--edge);
+ color:var(--aqua);font-family:'JetBrains Mono';font-weight:800;font-size:var(--type-115);cursor:pointer;
+ display:inline-flex;align-items:center;justify-content:center}
+.vfchips{display:flex;gap:var(--space-5);margin-bottom:var(--space-10)}
+.vfchip{flex:1;min-height:32px;font-family:'JetBrains Mono';font-size:var(--type-95);font-weight:700;
+ letter-spacing:var(--track-px8);background:var(--hi);color:var(--muted);border:var(--bw-1) solid var(--edge);
+ border-radius:var(--radius-5);cursor:pointer}
+.vfchip.on{border-color:var(--aqua);color:var(--aqua)}
+.vfasof{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px8);
+ margin-top:var(--space-8)}
+.vfmore{width:100%;min-height:40px;margin-top:var(--space-8);font-family:'JetBrains Mono';font-size:var(--type-10);
+ font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--hi);
+ border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);cursor:pointer}
+.vfveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.vfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
+ background:var(--panel);border-top:var(--bw-1) solid var(--edge);border-radius:var(--radius-18) var(--radius-18) 0 0}
+.vfgrab{width:38px;height:4px;border-radius:var(--radius-2);background:var(--edge);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
+.vfsb{overflow-y:auto;padding:var(--space-4) var(--space-16) 26px;-webkit-overflow-scrolling:touch}
+.vfsh{font-family:'Archivo Black';font-size:var(--type-14);transform:skewX(-6deg);color:var(--chalk);
+ margin-bottom:var(--space-10);text-transform:uppercase}
+.vfg{font-size:var(--type-125);line-height:1.6;color:var(--chalk)}
+.vfg p{margin:0 0 var(--space-9)}
+.vfg b{color:var(--aqua)}
 </style>
 </head>
 <body data-theme="goldnight" class="as-shell">
@@ -1374,345 +1292,157 @@ function sigCard(name,key){
   </div>`;
 }
 
-/* ══ cc#1322 · LIVE NEWS — ported from mobile/home.html, last section on this page ═══════════════
-   Behaviour is unchanged from Home: same endpoints, same RAW/POLISH split, same paging, same
-   bottom-sheet peek including the cc#1312 round-2 fix (search that marker below). The only
-   adaptation beyond colour tokens (see the CSS block's own note) is the fetch call: home.html uses
-   fetchWithTimeout() from /scorr_card_common.js, which this page does not load -- that file is a
-   1000+ line shared component library with its own nav-ownership and card-sheet singletons, and
-   pulling in all of it just for one timeout wrapper would be a bigger blast-radius risk than the
-   thing it fixes. This page already has its own get-JSON helper (gj, used by every other loader
-   above) and uses that instead -- same endpoints, same params, same error handling, no import. */
-function rnAgo(ts){
-  if (!ts) return '';
-  var d = new Date(ts);
-  if (isNaN(d.getTime())) return '';
-  var s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60) return 'just now';
-  var m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
-  var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
-  return Math.floor(h / 24) + 'd ago';
-}
-var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
-/* cc#1326 · POLISH-only category filter, by icon rather than a chip row (founder's own word).
-   RAW carries no category on the payload at all (founder confirmed directly) so the icon only
-   ever shows on the POLISH tab. RN.polish/RN.raw stay the FULL unfiltered sets from the fetch;
-   RN.items is always the derived, currently-visible slice -- rnApplyMode() is the one place that
-   decides it, so a mode switch, a filter pick and a fresh fetch can never compute it three
-   different ways. */
-var RN_CAT = 'ALL';
-var RN_CATS = ['AI Editorial','Domestic','Global','IPO','Stock Views'];
-var RN_FILTER_OPEN = false;
+/* ══ cc#1368 · VOLUME FLOW — replaces LIVE NEWS (the news lives in the Daily Digest now) ════════
+   One fetch per filter change, painted into the two card shells render() lays down. VF.data is
+   the whole endpoint payload and vfPaint() derives BOTH cards from it, so a tick change, a fresh
+   fetch and the 5-min refresh can never disagree about what is on screen. The endpoint excludes
+   thin windows and zero-volume symbols server-side and stamps as_of from the latest tick it
+   actually used; the card face repeats that stamp verbatim, so this surface cannot present stale
+   as live. The tick chips live on the top card and drive both lists — two synced chip rows would
+   be two controls for one state, which is how surfaces drift apart. */
+var VF = { ticks: 100, data: null, err: null, loading: false };
+var VF_TICKS = [25, 50, 100, 500];
 
-function rnApplyMode(){
-  var src = (RN.mode === 'polish') ? RN.polish : RN.raw;
-  RN.items = (RN.mode === 'polish' && RN_CAT !== 'ALL')
-    ? src.filter(function(n){ return n.category === RN_CAT; }) : src;
+function vfLoad(){
+  VF.loading = true; VF.err = null;
+  gj('/api/volume-flow?ticks=' + VF.ticks)
+    .then(function(d){ VF.data = d; VF.loading = false; vfPaint(); })
+    .catch(function(e){ VF.err = e.message; VF.loading = false; vfPaint(); });
 }
 
-function nwSetMode(m){
-  if (RN.mode === m) return;
-  RN.mode = m;
-  RN.page = 0;
-  RN_FILTER_OPEN = false;
-  rnApplyMode();
-  rnPaint();
+function vfSetTicks(n){
+  if (VF.ticks === n || VF.loading) return;
+  VF.ticks = n;
+  vfPaint();     /* the chip flips .on immediately… */
+  vfLoad();      /* …and exactly ONE fetch follows per change (spec 3) */
 }
 
-function nwFilterToggle(ev){
-  if (ev){ ev.preventDefault(); ev.stopPropagation(); }
-  RN_FILTER_OPEN = !RN_FILTER_OPEN;
-  nwPaintTabs();
-}
-function nwFilterPick(cat){
-  RN_CAT = cat;
-  RN.page = 0;
-  RN_FILTER_OPEN = false;
-  rnApplyMode();
-  rnPaint();
-}
-/* click-outside-closes, bound once. .nwfilter wraps both the icon and its open menu, so a tap
-   anywhere else in the document (including the tabs, the deck, another card) closes it -- the
-   same "does this belong to the control" test rnBindSwipe's capture listener uses below. */
-document.addEventListener('click', function(e){
-  if (RN_FILTER_OPEN && !e.target.closest('.nwfilter')){ RN_FILTER_OPEN = false; nwPaintTabs(); }
-});
-
-function rnPages(){ return Math.max(1, Math.ceil(RN.items.length / RN.per)); }
-
-function rnGo(ev, delta){
-  if (ev){
-    if (ev.preventDefault) ev.preventDefault();
-    if (ev.stopPropagation) ev.stopPropagation();
-  }
-  var last = rnPages() - 1;
-  var next = Math.min(last, Math.max(0, RN.page + delta));
-  if (next === RN.page) return;
-  RN.page = next;
-  rnPaint();
+function vfAsof(){
+  var d = VF.data;
+  if (!d || !d.as_of) return 'no tick yet';
+  var t = String(d.as_of);   /* intraday ts are IST-naive — slice, never re-zone */
+  return 'as of ' + t.slice(11, 16) + ' IST · ' + t.slice(8, 10) + '/' + t.slice(5, 7)
+       + ' · ' + d.shown + ' of ' + d.universe + ' scanned';
 }
 
-var RN_SW = { x:0, y:0, armed:false, just:false };
-
-function rnBindSwipe(){
-  var box = document.getElementById('rnBox');
-  if (!box || box._rnSwipeBound) return;
-  box._rnSwipeBound = true;
-
-  box.addEventListener('touchstart', function(e){
-    if (!e.touches || e.touches.length !== 1){ RN_SW.armed = false; return; }
-    RN_SW.x = e.touches[0].clientX; RN_SW.y = e.touches[0].clientY; RN_SW.armed = true;
-  }, { passive:true });
-
-  box.addEventListener('touchmove', function(e){
-    if (e.touches && e.touches.length > 1) RN_SW.armed = false;
-  }, { passive:true });
-
-  box.addEventListener('touchend', function(e){
-    if (!RN_SW.armed) return;
-    RN_SW.armed = false;
-    var t = e.changedTouches && e.changedTouches[0];
-    if (!t) return;
-    var dx = t.clientX - RN_SW.x, dy = t.clientY - RN_SW.y;
-    if (Math.abs(dx) < 50 || Math.abs(dx) <= 2 * Math.abs(dy)) return;
-    if (e.preventDefault) e.preventDefault();
-    if (e.stopPropagation) e.stopPropagation();
-    RN_SW.just = true;
-    setTimeout(function(){ RN_SW.just = false; }, 400);
-    rnGo(null, dx < 0 ? 1 : -1);
-  }, { passive:false });
-
-  box.addEventListener('click', function(e){
-    if (!RN_SW.just) return;
-    if (e.preventDefault) e.preventDefault();
-    if (e.stopPropagation) e.stopPropagation();
-  }, true);
+function vfCell(v, pct){
+  if (v == null) return '<td class="am">—</td>';
+  if (pct) return '<td class="' + (v >= 0 ? 'up' : 'dn') + '">' + sgn(v) + '%</td>';
+  return '<td>' + Number(v).toFixed(2) + 'x</td>';
 }
 
-function rnCatShort(c){
-  return window.ScorrNewsRow ? ScorrNewsRow.catShort(c) : '';
-}
-
-function rnPaint(){
-  var box = document.getElementById('rnBox');
-  if (!box) return;
-  if (window.ScorrNewsRow) ScorrNewsRow.injectCss();
-  nwPaintTabs();
-  if (!RN.items.length){
-    box.innerHTML = '<div class="unavail" style="padding:8px 0">No '
-      + (RN.mode === 'polish' ? 'polished articles' : 'headlines') + ' in the last 48 hours.</div>';
-    return;
-  }
-  var pages = rnPages(), p = RN.page;
-  var slice = RN.items.slice(p * RN.per, p * RN.per + RN.per);
-  var isRaw = RN.mode === 'raw';
-  var rows = slice.map(function(n, i){
-    var idx = p * RN.per + i;
-    var dot = window.ScorrNewsRow
-      ? '<span class="nrdot ' + ScorrNewsRow.sentiClass(n.sentiment) + '"></span>' : '';
-    /* cc#1326 · RAW rows are NOT tappable — founder confirmed directly: a raw item has no
-       polished body behind it, so a peek sheet would have nothing real to open (nwOpen's own
-       fallback already said as much: "polished version not yet available"). A <div>, not a
-       <button>, and no onclick at all, rather than a button that quietly does nothing. Full row
-       width for the headline (no sibling timestamp column to share it with) and the age moves to
-       its own line below in smaller/lighter text — the founder's own layout ask, 25-Aug. */
-    if (isRaw){
-      var ago2 = esc(rnAgo(n.published_at) || '');
-      return '<div class="nwrow nwraw">' + dot
-        + '<div class="nwrawbody"><span class="h">' + esc(n.headline) + '</span>'
-        + (ago2 ? '<span class="t2">' + ago2 + '</span>' : '') + '</div></div>';
-    }
-    var tag = n.category ? '<span class="nwcat">' + esc(rnCatShort(n.category)) + '</span>' : '';
-    return '<button type="button" class="nwrow" onclick="nwOpen(' + idx + ')">'
-      + dot
-      + '<span class="h">' + esc(n.headline) + '</span>'
-      + '<span class="t">' + esc(rnAgo(n.published_at) || '') + '</span>'
-      + tag + '</button>';
+function vfRows(list, n){
+  var rows = (n ? list.slice(0, n) : list).map(function(r){
+    return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+      + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1) + vfCell(r.fut_chg_pct, 1)
+      + vfCell(r.vol_x, 0) + vfCell(r.vol_d, 0) + '</tr>';
   }).join('');
-  /* the fixed six-row reservation (cc#1204) only makes sense for POLISH's fixed-height rows —
-     padding an auto-height RAW row with an empty filler achieves nothing, so RAW skips it. */
-  if (!isRaw) for (var _pad = slice.length; _pad < RN.per; _pad++)
-    rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
-  var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
-    + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
-    + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
-    + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
-    + '</div>';
-  box.innerHTML = '<div class="rnlist' + (isRaw ? ' raw' : '') + '">' + rows + '</div>' + ctl;
-  nwPaintTabs();
+  return '<table class="butbl"><thead><tr><th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th>'
+    + '<th>VOLX</th><th>VOLD</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
-function nwFilterMenuHtml(){
-  if (RN.mode !== 'polish' || !RN_FILTER_OPEN) return '';
-  var counts = {};
-  RN.polish.forEach(function(n){ if (n.category) counts[n.category] = (counts[n.category] || 0) + 1; });
-  var opts = [{ t:'ALL', n: RN.polish.length }].concat(
-    RN_CATS.filter(function(c){ return counts[c] > 0; }).map(function(c){ return { t:c, n:counts[c] }; }));
-  return '<div class="nwfmenu">' + opts.map(function(o){
-    return '<button type="button" class="nwfitem' + (o.t === RN_CAT ? ' on' : '') + '" onclick="nwFilterPick(\''
-      + o.t.replace(/'/g,"\\'") + '\')">' + esc(o.t) + ' <span class="n">' + o.n + '</span></button>';
+function vfChips(){
+  return '<div class="vfchips">' + VF_TICKS.map(function(n){
+    return '<button type="button" class="vfchip' + (n === VF.ticks ? ' on' : '')
+      + '" onclick="vfSetTicks(' + n + ')">' + n + '</button>';
   }).join('') + '</div>';
 }
 
-function nwPaintTabs(){
-  var el = document.getElementById('nwTabs');
-  if (!el) return;
-  function tab(mode, label, n){
-    return '<button type="button" class="nwtab' + (RN.mode === mode ? ' on' : '') + '"'
-      + ' onclick="nwSetMode(\'' + mode + '\')">' + label
-      + '<small>' + n + '</small></button>';
-  }
-  /* cc#1326: the filter icon lives next to the tabs, POLISH-only, per the founder's own word
-     "icon" (not another chip row like cc#1321's, which this exact class of crowding problem
-     already taught this codebase to avoid on a 5-option set). */
-  var filterBtn = (RN.mode === 'polish')
-    ? '<button type="button" class="nwfico' + (RN_CAT !== 'ALL' ? ' on' : '') + '" onclick="nwFilterToggle(event)" aria-label="Filter by category">⚙</button>'
-    : '';
-  el.innerHTML = '<div class="nwtabsrow"><div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
-    + tab('raw', 'RAW', RN.raw.length) + '</div>'
-    + (filterBtn ? '<div class="nwfilter">' + filterBtn + nwFilterMenuHtml() + '</div>' : '') + '</div>';
-}
-
-function loadRawNews(){
-  var box = document.getElementById('rnBox'), cnt = document.getElementById('rnCount');
+function vfCard(side){
+  var box = document.getElementById(side === 'bullish' ? 'vfBull' : 'vfBear');
   if (!box) return;
-  gj('/api/news/live?hours=72&per_cat=300')  /* cc#1331: founder-direct, 48->72 */
-    .then(function(d){
-      if (!d || d.error) throw new Error((d && d.error) || 'no data');
-      var arr = (d.domestic || []).concat(d.company || []);
-      arr.sort(function(a, b){
-        return new Date(b.published_at || 0) - new Date(a.published_at || 0);
-      });
-      if (cnt) cnt.textContent = arr.length + ' raw headlines ›';
-      var items = arr.filter(function(n){ return n && String(n.headline || '').trim(); });
-      RN.raw = items;
-      if (RN.mode === 'raw' || !RN.polish.length){ RN.page = 0; rnApplyMode(); }
-      rnPaint();
-      rnBindSwipe();
-    })
-    .catch(function(e){
-      if (cnt) cnt.textContent = 'unavailable ›';
-      box.innerHTML = '<div class="unavail" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
-    });
-  gj('/api/news/polished?category=all&limit=300')  /* cc#1331: backend cap was 100, raised to 300 */
-    .then(function(d){
-      if (!d || d.error) throw new Error((d && d.error) || 'no data');
-      var cutoff = Date.now() - 48 * 3600 * 1000;
-      RN.polish = (d.articles || [])
-        .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
-        .filter(function(a){
-          var t = new Date(a.published_time || 0).getTime();
-          return isFinite(t) && t >= cutoff;
-        })
-        .map(function(a){
-          return { headline: a.headline_clean, published_at: a.published_time,
-                   sentiment: a.sentiment, impact: a.impact,
-                   category: a.category || '',
-                   body: a.full_summary || a.summary || '', polished: true };
-        });
-      if (RN.mode === 'polish'){ RN.page = 0; rnApplyMode(); }
-      rnPaint();
-      rnBindSwipe();
-    })
-    .catch(function(){
-      RN.polish = [];
-      if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.page = 0; rnApplyMode(); }
-      rnPaint();
-    });
+  var head = '<div class="vfhd"><h3>' + (side === 'bullish' ? 'Bullish Flow' : 'Bearish Flow')
+    + '</h3><span class="sp"></span>'
+    + '<button type="button" class="vfib" onclick="vfGuide()" aria-label="How to read this card">i</button></div>'
+    + (side === 'bullish' ? vfChips() : '');
+  var body;
+  if (VF.err){
+    body = '<div class="unavail">Volume flow unavailable: ' + esc(VF.err) + '</div>';
+  } else if (!VF.data){
+    body = '<div class="unavail">Loading volume flow…</div>';
+  } else {
+    var list = VF.data[side] || [];
+    if (!list.length){
+      body = '<div class="unavail">No symbol has 60%+ of its volume on '
+        + (side === 'bullish' ? 'green' : 'red') + ' ticks in this window.</div>';
+    } else {
+      body = vfRows(list, 5)
+        + (list.length > 5
+           ? '<button type="button" class="vfmore" onclick="vfMore(\'' + side + '\')">VIEW MORE · '
+             + list.length + ' QUALIFY</button>'
+           : '');
+    }
+  }
+  box.innerHTML = head + body
+    + '<div class="vfasof">' + esc(vfAsof()) + (VF.loading ? ' · updating…' : '') + '</div>';
 }
 
-var NW = { open: false, y: 0, scrollY: 0 };
+function vfPaint(){ vfCard('bullish'); vfCard('bearish'); }
 
-function nwMd(txt){
-  var safe = esc(String(txt == null ? '' : txt));
-  return safe.split(/\n\s*\n/).map(function(para){
-    var t = para.trim();
-    if (!t) return '';
-    return '<p>' + t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>') + '</p>';
-  }).join('');
-}
+var VF_SHEET = { open: false, scrollY: 0 };
 
-function nwChip(v, kind){
-  if (!v) return '';
-  var t = String(v).toUpperCase();
-  var cls = kind === 'impact'
-    ? (t === 'HIGH' ? 'hi' : 'nt')
-    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
-  return '<span class="nwchip ' + cls + '">' + esc(kind === 'impact' ? t + ' IMPACT' : t) + '</span>';
-}
-
-function nwOpen(idx){
-  var n = RN.items[idx];
-  if (!n) return;
-  nwClose();
-  NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
-
-  var meta = '';
-  var ago = rnAgo(n.published_at);
-  if (ago) meta += '<span>' + esc(ago) + '</span>';
-  meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
-
-  var body = String(n.body || '').trim()
-    ? '<div class="nwbd">' + nwMd(n.body) + '</div>'
-    : '<div class="nwnone">raw feed item — polished version not yet available.</div>';
-
+function vfSheet(html){
+  vfSheetClose();
+  VF_SHEET.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
   var veil = document.createElement('div');
-  veil.className = 'nwveil';
-
+  veil.className = 'vfveil';
   var sheet = document.createElement('div');
-  sheet.className = 'nwsheet';
+  sheet.className = 'vfsheet';
   sheet.setAttribute('role', 'dialog');
   sheet.setAttribute('aria-modal', 'true');
-  sheet.innerHTML = '<div class="nwgrab"></div>'
-    + '<div class="nwsb"><div class="nwsh">' + esc(n.headline) + '</div>'
-    + '<div class="nwsm">' + meta + '</div>' + body + '</div>';
-
+  sheet.innerHTML = '<div class="vfgrab"></div><div class="vfsb">' + html + '</div>';
   document.body.appendChild(veil);
   document.body.appendChild(sheet);
   document.body.style.overflow = 'hidden';
-  NW.open = true;
-  nwBindSheet(sheet);
-  /* cc#1312 round 2 · THE SAME FIX THAT LANDED ON HOME, travelling WITH the ported code rather
-     than getting silently dropped. veil.onclick bound synchronously here would be live for the
-     SAME tap that opened the sheet -- a full-screen element inserted under the finger mid-event
-     can pick up the browser's synthesized click, closing the sheet before it is ever seen. Binding
-     one requestAnimationFrame later keeps it closable on every genuine tap after this one, not the
-     tap that created it. */
+  VF_SHEET.open = true;
+  /* cc#1312's close-race fix travels with the pattern it fixed: a full-screen veil inserted under
+     the finger mid-event can catch the SAME tap's synthesized click and close the sheet before it
+     is ever seen — bind the close one frame later, so every tap AFTER this one closes it. */
   requestAnimationFrame(function(){
     if (!veil.parentNode) return;
-    veil.onclick = nwClose;
-    var grab = sheet.querySelector('.nwgrab');
-    if (grab) grab.onclick = nwClose;
+    veil.onclick = vfSheetClose;
+    var g = sheet.querySelector('.vfgrab');
+    if (g) g.onclick = vfSheetClose;
   });
 }
 
-function nwClose(){
-  var v = document.querySelector('.nwveil'), s = document.querySelector('.nwsheet');
+function vfSheetClose(){
+  var v = document.querySelector('.vfveil'), s = document.querySelector('.vfsheet');
   if (v) v.remove();
   if (s) s.remove();
-  if (NW.open){
+  if (VF_SHEET.open){
     document.body.style.overflow = '';
-    window.scrollTo(0, NW.scrollY);
-    NW.open = false;
+    window.scrollTo(0, VF_SHEET.scrollY);
+    VF_SHEET.open = false;
   }
 }
 
-function nwBindSheet(sheet){
-  var sb = sheet.querySelector('.nwsb');
-  sheet.addEventListener('touchstart', function(e){
-    NW.y = (e.touches && e.touches[0]) ? e.touches[0].clientY : 0;
-  }, { passive: true });
-  sheet.addEventListener('touchend', function(e){
-    var t = e.changedTouches && e.changedTouches[0];
-    if (!t || !sb) return;
-    if (sb.scrollTop > 4) return;
-    if (t.clientY - NW.y > 60) nwClose();
-  }, { passive: true });
+document.addEventListener('keydown', function(e){
+  if (VF_SHEET.open && (e.key === 'Escape' || e.keyCode === 27)) vfSheetClose();
+});
+
+function vfMore(side){
+  if (!VF.data) return;
+  var list = VF.data[side] || [];
+  if (!list.length) return;
+  vfSheet('<div class="vfsh">' + (side === 'bullish' ? 'Bullish' : 'Bearish') + ' Flow · '
+    + list.length + ' qualify · ' + VF.ticks + ' ticks</div>'
+    + vfRows(list, 0)
+    + '<div class="vfasof">' + esc(vfAsof()) + '</div>');
 }
 
-document.addEventListener('keydown', function(e){
-  if (NW.open && (e.key === 'Escape' || e.keyCode === 27)) nwClose();
-});
+function vfGuide(){
+  vfSheet('<div class="vfsh">How to read Volume Flow</div><div class="vfg">'
+    + '<p><b>The idea.</b> Every 5 minutes is one tick. A green tick closes above its open. A red tick closes below. We add up the traded volume on each side.</p>'
+    + '<p><b>Flow ratio.</b> Green volume as a share of green + red volume. 0.70 means 70% of the volume traded on rising ticks — buyers were doing the volume. The lists are ranked by this.</p>'
+    + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks. Bearish = 60% or more on red ticks. Names in between are noise and are left out.</p>'
+    + '<p><b>DAY / WK / FUT.</b> Price change vs yesterday\'s close, vs the close 5 trading days back, and the same day change on the stock\'s futures.</p>'
+    + '<p><b>VOLX.</b> Today\'s volume so far vs yesterday\'s volume up to the same clock time. 2.00x means twice the usual pace.</p>'
+    + '<p><b>VOLD.</b> Yesterday\'s full-day volume vs the day before. Above 1.00x means volume was already building.</p>'
+    + '<p><b>Ticks filter.</b> How far back we look: 25 ≈ 2 hours, 50 ≈ 4 hours, 100 ≈ 1.3 trading days, 500 ≈ 1 week. The filter on the top card drives both lists.</p>'
+    + '<p><b>Honesty.</b> This is a volume read only — we do not see the order book, so it is never called order flow. A dash means the data is missing; we never fill it in.</p>'
+    + '</div>');
+}
 
 function render(){
   const m=D.mood||{};
@@ -1784,18 +1514,18 @@ function render(){
     <span style="font-size:12.5px;color:var(--muted)">V10 config · ST 150/3·10m · EMA 3/10·30m · FUT + ATM write · entry 09:20–15:20 IST · locked 16-Jun</span>
   </div>
 
-  <div class="eyebrow">LIVE NEWS</div>
-  <div class="card">
-    <div class="grp"><h3>Live News</h3><a class="plink" id="rnCount" href="/m/intel" style="font-size:var(--type-95)">loading…</a></div>
-    <div id="nwTabs"></div>
-    <div class="newslist" id="rnBox"><div class="unavail">Loading headlines…</div></div>
-  </div>`;
+  <div class="eyebrow">VOLUME FLOW · GREEN vs RED</div>
+  <div class="card" id="vfBull"><div class="unavail">Loading volume flow…</div></div>
+  <div class="card" id="vfBear"><div class="unavail">Loading volume flow…</div></div>`;
+  /* render() rebuilds #app wholesale every 5 minutes, which wipes the two flow shells — repaint
+     them from VF.data straight away so a refresh never blanks the cards while the fetch is out. */
+  vfPaint();
 }
 
-async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); uPark(); loadRawNews(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1322: LIVE NEWS paints its placeholder with render() above, loadRawNews() fills it after, same sequencing as it had on Home. */
+async function boot(){ await loadAll(); render(); vPark(); bPark(); cPark(); uPark(); vfLoad(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
-  if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); } },300000);
+  if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
 </script>
 
 <!-- APP_QA_R4 P3 · 5-slot bottom nav, ref variant A: NOTHING highlighted. /m/v10 is a tool page,

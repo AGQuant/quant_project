@@ -58,6 +58,7 @@ from v8_backfill_endpoints import router as v8_backfill_router
 from v8_metrics_gapfill import router as v8_gapfill_router   # cc#1048 full-universe v8_metrics gapfill
 from index_tape import router as index_tape_router   # cc#1054 index 100-bar cash tape
 from v10_page_endpoints import router as v10_page_router   # cc#1069 GET /m/v10
+from volume_flow_endpoints import router as volume_flow_router   # cc#1368 GET /api/volume-flow
 from github_ops import router as github_ops_router        # cc#1249: was never imported
 from mobile_cards_endpoints import router as mobile_cards_router   # cc#1090 P0: GET /m/cards
 from gvm_twopager import router as gvm_twopager_router   # cc#1085 R6-P1: GET /gvm/2pager/{symbol}
@@ -686,6 +687,7 @@ app.include_router(v8_backfill_router)
 app.include_router(v8_gapfill_router)   # cc#1048: POST /api/v8/backfill/metrics_gapfill
 app.include_router(index_tape_router)   # cc#1054: GET /api/index/tape
 app.include_router(v10_page_router)     # cc#1069: GET /m/v10 (mobile V10 signal view)
+app.include_router(volume_flow_router)  # cc#1368: GET /api/volume-flow (green vs red bar volume)
 app.include_router(github_ops_router)   # cc#1249: /api/admin/github_* — the extraction from
                                        # File 5/5 that was never actually wired
 app.include_router(mobile_cards_router)  # cc#1090 P0: card depth prototype (own router, wiring only)
