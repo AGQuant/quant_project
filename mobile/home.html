@@ -697,7 +697,11 @@ body[data-theme]{
    Card 1 becomes a column with the chip row pushed to the foot by margin-top:auto, so the card
    reads as headline at the top and metrics at the bottom instead of a block of content with dead
    space hanging under it. */
-#heroTrack{align-items:stretch}
+/* cc#1359 · flex-start supersedes the stretch: HERO_COMPACT_V1 wants each face to hug its own
+   content, so the shorter face no longer inherits the taller face's height and there is no
+   surplus to distribute. Comments elsewhere in this file that still describe the stretch are
+   historical narrative, not live rules. */
+#heroTrack{align-items:flex-start}
 #heroTrack > .c{display:flex;flex-direction:column}
 /* cc#1134 · FINAL RULING, and it supersedes the space distribution I chose in cc#1125.
    Three attempts on this one card, each satisfying its own spec text and opening a new gap,
@@ -752,8 +756,12 @@ body[data-theme]{
    payload where card 1 becomes the taller face again these rules contribute nothing at all and
    the deck is exactly the height its content asks for. The only unconditional spend is the chip
    padding and the chip gap, and both were measured against the 11px available at 360. */
+/* cc#1359 · the cc#1230 stretch-fill is retired with the stretch itself: margin-top:auto existed
+   to spend surplus height the flex-start deck no longer creates. The lines now sit at the card's
+   own gap rhythm — the founder's 'vertically integrated' — with the meter, chips and index footer
+   stacked directly under the verdict. */
 #heroTrack > .c:first-child > .hchips,
-#heroTrack > .c:first-child > .ixrow{margin-top:auto}
+#heroTrack > .c:first-child > .ixrow{margin-top:0}
 /* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
    surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
    SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
