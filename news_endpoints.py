@@ -396,7 +396,8 @@ _CANON_CAT = {
 
 
 @router.get("/api/news/polished")
-def news_polished(request: Request, category: str = "all", limit: int = 20, offset: int = 0):
+def news_polished(request: Request, category: str = "all", limit: int = 20, offset: int = 0,
+                  cursor: str = ""):
     """Polished news for the /news redesign (cc_task #79, spec 636).
     category = all | ai_editorial | company_updates | global | ipo (strict exact match).
     Sorted polished_at DESC (newest first, all categories interleaved on 'all').
@@ -419,6 +420,23 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
         params.append(_CANON_CAT[cat])
     else:
         cat = "all"   # unknown / 'all' -> no category filter
+    # cc#1365: KEYSET CURSOR into full history — the cc#983 intel pattern. Format "<iso>|<id>",
+    # opaque to the client (it echoes back what the previous response handed it). When present it
+    # replaces OFFSET entirely: offset paging skips/repeats rows the moment a new story is
+    # polished mid-scroll. display_time is NEVER NULL in v_polished_articles (verified: 0 of
+    # 4,483), so the two-comparison keyset cannot strand a tail. A malformed cursor is an error,
+    # not a silent page 1 — an infinite scroll that never advances looks like duplicate content.
+    cur_time = cur_id = None
+    if cursor:
+        try:
+            _t, _i = str(cursor).rsplit("|", 1)
+            cur_time, cur_id = _t, int(_i)
+        except Exception:
+            return {"error": "bad cursor", "articles": [], "count": 0}
+        where = (where + " AND " if where else "WHERE ")
+        where += "(display_time < %s::timestamptz OR (display_time = %s::timestamptz AND polished_id < %s))"
+        params.extend([cur_time, cur_time, cur_id])
+        offset = 0
     # cc#322: read v_polished_articles. Was aliasing r.published_at AS published_time — actively
     # discarding the REAL polish time and showing the raw source date under a polish-time name.
     # Now published_time = display_time (the canonical polish timestamp), sorted by it too.
@@ -433,14 +451,27 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
         ORDER BY display_time DESC NULLS LAST, polished_id DESC
         LIMIT %s OFFSET %s
     """
-    params.extend([limit, offset])
+    # cc#1365: limit+1 probe answers has_more without a second COUNT; the extra row is dropped.
+    params.extend([limit + 1, offset])
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         articles = _rows(cur)
         cur.execute("SELECT category, COUNT(*) FROM polished_news GROUP BY category")
         counts = {row[0]: row[1] for row in cur.fetchall()}
+    has_more = len(articles) > limit
+    if has_more:
+        articles = articles[:limit]
+    # cc#1365: next_cursor from the last row actually returned; total states the true archive
+    # size for the caller's footer. Both additive — existing callers see the same rows as before.
+    next_cursor = None
+    if articles and has_more:
+        _last = articles[-1]
+        _lt = _last.get("published_time")
+        next_cursor = f"{_lt.isoformat() if hasattr(_lt, 'isoformat') else _lt}|{_last.get('id')}"
+    total = sum(counts.values()) if cat == "all" else counts.get(_CANON_CAT.get(cat, ""), 0)
     return {"category": cat, "limit": limit, "offset": offset,
-            "count": len(articles), "category_counts": counts, "articles": articles}
+            "count": len(articles), "category_counts": counts, "articles": articles,
+            "has_more": has_more, "next_cursor": next_cursor, "total": total}
 
 
 def stock_views_shortlist_data(hours: int = 48):

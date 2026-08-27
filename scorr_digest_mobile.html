@@ -1204,6 +1204,37 @@ function rnAgo(ts){
   return Math.floor(h / 24) + 'd ago';
 }
 var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
+/* cc#1365 · POLISH history paging state (the cc#983 intel keyset pattern) + the founder's group
+   order. polishOverflow holds first-response rows OLDER than the 48h window — already fetched, so
+   the first Next-past-the-end serves them with no network call; the server cursor continues from
+   the last row of the raw response, so nothing is skipped or refetched. */
+RN.polishCursor = null; RN.polishHasMore = false; RN.polishOverflow = []; RN.polishLoading = false;
+/* cc#1365 · founder order: AI Editorial first, then every domestic category, then global.
+   Mapping from the REAL stored categories (counts 27-Aug): group 1 = 'AI Editorial' (584);
+   group 2 = 'Domestic' (2,499), 'IPO' (273), 'Stock Views' (5) — the domestic market categories;
+   group 3 = 'Global' (1,124), the only world category stored. An unknown future string lands in
+   group 2 rather than vanishing. Newest-first inside each group; each loaded slice is grouped
+   WITHIN itself and appended below the pages already read (never re-sorted under the reader —
+   the cc#983 discipline). */
+function rnGroup(n){
+  var c = String(n.category || '');
+  if (c === 'AI Editorial') return 1;
+  if (c === 'Global') return 3;
+  return 2;
+}
+function rnGroupSort(arr){
+  return arr.slice().sort(function(a, b){
+    var g = rnGroup(a) - rnGroup(b);
+    if (g) return g;
+    return new Date(b.published_at || 0) - new Date(a.published_at || 0);
+  });
+}
+function rnMapArticle(a){
+  return { headline: a.headline_clean, published_at: a.published_time,
+           sentiment: a.sentiment, impact: a.impact,
+           category: a.category || '',
+           body: a.full_summary || a.summary || '', polished: true };
+}
 /* cc#1326 · POLISH-only category filter, by icon rather than a chip row (founder's own word).
    RAW carries no category on the payload at all (founder confirmed directly) so the icon only
    ever shows on the POLISH tab. RN.polish/RN.raw stay the FULL unfiltered sets from the fetch;
@@ -1256,10 +1287,56 @@ function rnGo(ev, delta){
     if (ev.stopPropagation) ev.stopPropagation();
   }
   var last = rnPages() - 1;
+  /* cc#1365: Next on the last loaded POLISH page reaches into history instead of dying there */
+  if (delta > 0 && RN.page >= last && RN.mode === 'polish'
+      && (RN.polishOverflow.length || RN.polishHasMore)){
+    rnLoadOlder();
+    return;
+  }
   var next = Math.min(last, Math.max(0, RN.page + delta));
   if (next === RN.page) return;
   RN.page = next;
   rnPaint();
+}
+
+/* cc#1365 · one older slice per tap: the overflow buffer first (already fetched), then the server
+   keyset. Every slice is group-ordered within itself and APPENDED below the held pages — the
+   reader's position and everything already read stay put. Exhaustion = no overflow, has_more
+   false: Next disables at the true end and the footer's page count is then the true total. */
+function rnLoadOlder(){
+  if (RN.polishLoading) return;
+  if (RN.polishOverflow.length){
+    RN.polish = RN.polish.concat(rnGroupSort(RN.polishOverflow));
+    RN.polishOverflow = [];
+    rnApplyMode();
+    RN.page = Math.min(RN.page + 1, rnPages() - 1);
+    rnPaint();
+    return;
+  }
+  if (!RN.polishHasMore || !RN.polishCursor) return;
+  RN.polishLoading = true;
+  rnPaint();
+  fetch('/api/news/polished?category=all&limit=60&cursor=' + encodeURIComponent(RN.polishCursor))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      RN.polishLoading = false;
+      if (!d || d.error) throw new Error((d && d.error) || 'no data');
+      var slice = (d.articles || [])
+        .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
+        .map(rnMapArticle);
+      RN.polishCursor = d.next_cursor || null;
+      RN.polishHasMore = !!d.has_more;
+      if (slice.length){
+        RN.polish = RN.polish.concat(rnGroupSort(slice));
+        rnApplyMode();
+        RN.page = Math.min(RN.page + 1, rnPages() - 1);
+      }
+      rnPaint();
+    })
+    .catch(function(){
+      RN.polishLoading = false;
+      rnPaint();
+    });
 }
 
 var RN_SW = { x:0, y:0, armed:false, just:false };
@@ -1343,10 +1420,15 @@ function rnPaint(){
      padding an auto-height RAW row with an empty filler achieves nothing, so RAW skips it. */
   if (!isRaw) for (var _pad = slice.length; _pad < RN.per; _pad++)
     rows += '<div class="nwrow nwpad" aria-hidden="true"></div>';
+  /* cc#1365: Next stays live on the last page while history remains (overflow or server
+     has_more); it only disables at the TRUE end, where the page count is the true total. */
+  var canMore = !isRaw && (RN.polishOverflow.length > 0 || RN.polishHasMore);
+  var nextDis = RN.polishLoading || (p >= pages - 1 && !canMore);
   var ctl = '<div class="rnpg" onclick="event.preventDefault();event.stopPropagation()">'
     + '<button class="rnb" onclick="rnGo(event,-1)"' + (p === 0 ? ' disabled' : '') + '>‹ Prev</button>'
     + '<span class="rnp">' + (p + 1) + ' / ' + pages + '</span>'
-    + '<button class="rnb" onclick="rnGo(event,1)"' + (p >= pages - 1 ? ' disabled' : '') + '>Next ›</button>'
+    + '<button class="rnb" onclick="rnGo(event,1)"' + (nextDis ? ' disabled' : '')
+    + '>' + (RN.polishLoading ? 'Loading…' : 'Next ›') + '</button>'
     + '</div>';
   box.innerHTML = '<div class="rnlist' + (isRaw ? ' raw' : '') + '">' + rows + '</div>' + ctl;
   nwPaintTabs();
@@ -1408,18 +1490,21 @@ function loadRawNews(){
     .then(function(d){
       if (!d || d.error) throw new Error((d && d.error) || 'no data');
       var cutoff = Date.now() - 48 * 3600 * 1000;
-      RN.polish = (d.articles || [])
+      /* cc#1365: the 48h window is the OPENING view, not the archive's edge. This response's rows
+         beyond the window become the first history slice (polishOverflow) instead of being thrown
+         away — dropping them while cursoring past them would punch a hole in the archive. */
+      var all = (d.articles || [])
         .filter(function(a){ return a && String(a.headline_clean || '').trim(); })
-        .filter(function(a){
-          var t = new Date(a.published_time || 0).getTime();
-          return isFinite(t) && t >= cutoff;
-        })
-        .map(function(a){
-          return { headline: a.headline_clean, published_at: a.published_time,
-                   sentiment: a.sentiment, impact: a.impact,
-                   category: a.category || '',
-                   body: a.full_summary || a.summary || '', polished: true };
-        });
+        .map(rnMapArticle);
+      var win = [], over = [];
+      all.forEach(function(n){
+        var t = new Date(n.published_at || 0).getTime();
+        (isFinite(t) && t >= cutoff ? win : over).push(n);
+      });
+      RN.polish = rnGroupSort(win);
+      RN.polishOverflow = over;
+      RN.polishCursor = d.next_cursor || null;
+      RN.polishHasMore = !!d.has_more;
       if (RN.mode === 'polish'){ RN.page = 0; rnApplyMode(); }
       rnPaint();
       rnBindSwipe();
