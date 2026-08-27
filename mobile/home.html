@@ -772,7 +772,23 @@ body[data-theme]{
    52px on a large phone — close to the 56px scale the founder responded to, without betting the
    layout on a font I cannot see. If he wants it bigger still on his device, raise the 52px cap;
    that is one number and it is safe to move once someone can look at the real screen. */
-.hero-mood{font-size:clamp(var(--type-40),13vw,var(--type-52));text-transform:uppercase;line-height:1.02}
+/* cc#1352 · COMPACT HERO (founder-approved mock, 27-Aug 07:5x). SUPERSEDES the cc#1122 clamp on
+   size only: the mood word drops from clamp(40,13vw,52) to clamp(26px,8vw,32px) and takes the
+   skew as its style accent. THE SWEEP IS UNTOUCHED — the effect lives on the .mlt spans and
+   their keyframes, which do not know the font size; founder ruled the effect must not go.
+   The verdict becomes one flex row (word + why side by side), the r5 fail meter wraps to a
+   full-width line under it, and the check chips go FLAT AND DENSE — which supersedes the
+   cc#1184 bevel ruling on these six chips, by founder-approved mock. Tap targets stay 44px via
+   the ::after expansion this page already uses on .ixcell. */
+.hero-mood{font-size:clamp(26px,8vw,32px);text-transform:uppercase;line-height:1.02;
+  transform:skewX(-6deg);transform-origin:left center;display:inline-block}
+.hero-verdict{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap}
+.hero-verdict .hero-why{font-size:var(--type-11);line-height:1.35;margin:0}
+.hero-verdict .r5-meter{flex:1 1 100%;margin:var(--space-8) 0 0}
+#heroTrack > .c:first-child > .hchips .hc.slab.dense{position:relative;padding:var(--space-3) var(--space-8);
+  min-height:0;border-radius:var(--radius-2);clip-path:none;box-shadow:none;font-size:var(--type-11)}
+#heroTrack > .c:first-child > .hchips .hc.slab.dense::after{content:'';position:absolute;
+  left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
 .swipe-t::-webkit-scrollbar{display:none}
 /* cc#1350 · ONE CARD PER SWIPE. mandatory snap alone lets a hard fling sail past pages —
    momentum picks the final snap point, so a strong swipe on the 4-page Index Book deck could
@@ -857,7 +873,11 @@ body[data-theme]{
    11px, which is the delta this card forbids. The headroom is deliberate: card 1's height moves
    with its chip count, and a ratio that fits with nothing to spare is a defect waiting for a
    payload with one chip fewer. */
-#heroTrack > .c:nth-child(2){--rh:1.35}
+/* cc#1352 · card 2 takes the same compact language: rhythm multiplier back to 1 (supersedes the
+   cc#1182 1.35 — both faces shrink together so the deck height falls with them), and the PCR
+   mood word takes the same skew accent as the hero word. */
+#heroTrack > .c:nth-child(2){--rh:1}
+.pmood .pw{transform:skewX(-6deg);transform-origin:left center;display:inline-block}
 #heroTrack > .c:nth-child(2) > .chd{margin-bottom:calc(6px * var(--rh,1))}
 /* The block above the CTA carries the minimum clearance. margin-top:auto takes all the surplus
    but it cannot promise a floor — if card 2 ever became the taller face, auto resolves to 0 and
@@ -3020,8 +3040,10 @@ Promise.all([
   h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
     + '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
-    + '<div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
-    + '<div class="hero-why">' + esc(hero.why || '') + '</div>'
+    /* cc#1352: word and why share one flex row (.hero-verdict); the enhancer's fail meter is
+       inserted after .hero-why and wraps to its own full-width line via the CSS above. */
+    + '<div class="hero-verdict"><div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
+    + '<div class="hero-why">' + esc(hero.why || '') + '</div></div>'
     /* cc#1068 moved the V10 index line out of this scoreboard into its own INDEX SIGNALS card
        below the carousel. cc#1158 then replaced that card with the INDEX BOOK strip on founder
        ruling, so the line and its `v10` builder are gone from this page entirely. Left as a note
@@ -3034,12 +3056,16 @@ Promise.all([
         // tapKind ADDS the .tap affordance + togTrend handler; the pass/fail class `k` is untouched.
         var isNifty = /nifty/i.test(String(c.label));
         var tapKind = isAdr ? 'adr' : (isNifty ? 'nifty' : '');
+        /* cc#1352: display-only shorthand — the payload label is untouched (tapKind above reads
+           the original), only the printed text compacts. DAY/WK/MO per the approved mock. */
+        var lbl = String(c.label || '').replace(/^Nifty\s+Day$/i, 'DAY')
+                    .replace(/^Nifty\s+Week$/i, 'WK').replace(/^Nifty\s+Month$/i, 'MO');
         var val = (c.value == null) ? '--'
                 : (isAdr ? Number(c.value).toFixed(2) : pct(c.value));
         // cc#1184: `slab dense` carries the bevel; `k` and the state CSS carry the colours.
         return '<button class="hc slab dense' + k
           + (tapKind ? ' tap" onclick="togTrend(event,\'' + tapKind + '\')"' : '"') + '>'
-          + esc(c.label) + ' ' + esc(val) + '</button>';
+          + esc(lbl) + ' ' + esc(val) + '</button>';
       }).join('')
     /* founder 08-Aug batch 3: PCR/VIX chips carry colour. PCR >= 1.0 = puts heavy = supportive
        (green), < 1.0 = red. VIX <= 14 = calm (green), >= 17 = elevated (red), between = neutral.
