@@ -1981,15 +1981,19 @@ function bookRange(p){
   var dT = Math.abs(tg - cm), dS = Math.abs(cm - st);
   var pastT = (tg >= st) ? cm > tg : cm < tg;
   var pastS = (tg >= st) ? cm < st : cm > st;
-  var f1 = num(Math.round(dT)) + (pastT ? ' pts past target' : ' pts to target');
-  var f2 = num(Math.round(dS)) + (pastS ? ' pts past stop' : ' pts from stop');
+  var fT = num(Math.round(dT)) + (pastT ? ' pts past target' : ' pts to target');
+  var fS = num(Math.round(dS)) + (pastS ? ' pts past stop' : ' pts from stop');
+  /* cc#1362 · each fact sits under the end it describes: order follows the bar's own computed
+     positions (pt/ps), so a bearish row mirrors automatically — no direction branch to get wrong.
+     Bullish reads from-stop LEFT, to-target RIGHT (the exact swap of the first build). */
+  var fL = (pt < ps) ? fT : fS, fR = (pt < ps) ? fS : fT;
   return '<div class="bkbar">'
     + '<i class="zr" style="left:' + rL.toFixed(1) + '%;width:' + rW.toFixed(1) + '%"></i>'
     + '<i class="zg" style="left:' + gL.toFixed(1) + '%;width:' + gW.toFixed(1) + '%"></i>'
     + '<i class="ben" style="left:' + pe.toFixed(1) + '%"></i>'
     + '<i class="bdot" style="left:' + pc.toFixed(1) + '%"></i>'
     + '</div><div class="bklb">' + labels + '</div>'
-    + '<div class="bkfoot"><span>' + f1 + '</span><span>' + f2 + '</span></div>';
+    + '<div class="bkfoot"><span>' + fL + '</span><span>' + fR + '</span></div>';
 }
 function bookRow(p){
   var dirv = bookDir(p), pn = Number(p.unrealised_pnl) || 0;
@@ -2020,10 +2024,19 @@ function bookCard(label, rows){
     return '<div class="vpage"><div class="card"><div class="grp"><h3>' + esc(label) + '</h3></div>'
          + '<div class="unavail">No open ' + esc(label.toLowerCase()) + ' leg.</div></div></div>';
   var tot = rows.reduce(function(a, p){ return a + (Number(p.unrealised_pnl) || 0); }, 0);
+  /* cc#1362 · absence stated (founder 08:55): a card listing NIFTY50 alone said nothing about
+     BANKNIFTY being flat. An index with no leg in THIS card gets one quiet mono line; an index
+     with a row never gets it; the empty-card unavail state above is unchanged. */
+  var kind = label.toLowerCase();
+  var flat = ['NIFTY50', 'BANKNIFTY'].filter(function(ix){
+    return !rows.some(function(p){ return p.symbol === ix; });
+  }).map(function(ix){
+    return '<div class="bkleg" style="margin-top:var(--space-8)">' + esc(ix) + ' · no open ' + esc(kind) + ' leg</div>';
+  }).join('');
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>' + esc(label) + '</h3>'
     + '<span class="num" style="font-weight:800;color:' + bkCx(tot) + '">₹' + num(tot) + '</span></div>'
-    + rows.map(bookRow).join('') + '</div></div>';
+    + rows.map(bookRow).join('') + flat + '</div></div>';
 }
 
 /* ── data + assembly. Reuses fetchWithTimeout (this page's own fetch helper, not Index Intel's
