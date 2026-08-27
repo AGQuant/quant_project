@@ -1768,6 +1768,11 @@ function oiCard(name, oi, mp){
   if (!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
     return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.');
   var rows = oi.strikes, mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
+  /* cc#1354 · one-sided tick (26-Aug: NIFTY PE feed gap). The server flags it; the card
+     keeps drawing the side that exists, suppresses the dead side's WALL tag, axis label and
+     footer value (they would be fabricated — the wall reduce() lands on rows[0] when a side
+     is all zeros), and states the gap in one line. Identical in both oiCard twins. */
+  var peDead = oi.one_sided === 'PE_MISSING', ceDead = oi.one_sided === 'CE_MISSING';
   var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
   var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
   var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
@@ -1786,11 +1791,11 @@ function oiCard(name, oi, mp){
   }
   var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
   var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
-  if (cwI >= 0) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
-  if (pwI >= 0) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
+  if (cwI >= 0 && !ceDead) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL</div>';
+  if (pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL</div>';
   var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
   var picked = [], xs = '';
-  [[pwI, 'pw'], [mpI, 'mp'], [cwI, 'cw']].forEach(function(p){
+  [[peDead ? -1 : pwI, 'pw'], [mpI, 'mp'], [ceDead ? -1 : cwI, 'cw']].forEach(function(p){
     if (p[0] < 0) return;
     var v = Number(rows[p[0]].strike);
     for (var k = 0; k < picked.length; k++) if (picked[k].v === v) return;
@@ -1814,11 +1819,13 @@ function oiCard(name, oi, mp){
     + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(ao.txt) + '</span></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + xs
+    + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
+        + (peDead ? 'put' : 'call') + ' OI absent this tick — feed gap</div>' : '')
     + '<div class="oird">'
     + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
     + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span>'
-    + ' · put wall <b class="num">' + num(putWall.strike) + '</b>'
-    + ' · call wall <b class="num">' + num(callWall.strike) + '</b>'
+    + ' · put wall <b class="num">' + (peDead ? '—' : num(putWall.strike)) + '</b>'
+    + ' · call wall <b class="num">' + (ceDead ? '—' : num(callWall.strike)) + '</b>'
     + ' · expiry <b>' + esc(oi.expiry || '—') + '</b>'
     + '</div></div></div>';
 }
