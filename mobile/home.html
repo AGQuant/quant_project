@@ -203,7 +203,10 @@ body[data-theme]{
 .tk .d.neu{color:#FF9F45}
 /* cc#1139 · the Market Today footer strip. No box on the cells — a hairline divider above is the
    whole separation, so it reads as the card's footer rather than a second row of metric chips. */
-.ixrow{display:flex;gap:var(--space-7);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line)}
+/* cc#1364 · founder 09:07: one index per FULL-WIDTH row — at the cc#1360 type-15 the two-up
+   cells wrapped BANKNIFTY's % onto a second line. A fact line never wraps; a full-width row is
+   the guarantee it never needs to. */
+.ixrow{display:flex;flex-direction:column;row-gap:var(--space-6);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line)}
 /* cc#1159: the cell is a BUTTON now — it opens a chart, so it should be reachable by keyboard
    and announced as pressable. font/background/border/padding are reset because a button inherits
    none of them, and text-align:left because a button centres by default.
@@ -211,7 +214,7 @@ body[data-theme]{
    card height, and padding cannot give you both — it would push the row taller by however much it
    added. An absolutely-positioned ::after takes no space in the flow at all, so the touchable
    region grows to 40px while the card measures exactly what it measured before. */
-.ixcell{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:var(--space-6);flex-wrap:wrap;
+.ixcell{width:100%;min-width:0;display:flex;align-items:baseline;gap:var(--space-6);flex-wrap:nowrap;white-space:nowrap;
   position:relative;background:none;border:0;padding:0;font:inherit;color:inherit;
   text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
 /* VERTICAL ONLY. This bled 4px past the cell on each side at first, and render_check called it:
