@@ -615,6 +615,43 @@ body[data-theme]{
 .bk2{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-12);margin-top:var(--space-8);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:var(--track-px8);color:var(--mut)}
 .bk2 b{color:var(--txt,#E9EEFB);font-weight:800;font-size:var(--type-14)}
+/* ── FABLE 27-Aug · INDEX POSITION RANGE BAR (founder-approved mock, this session) ─────────────
+   One glanceable stop→entry→cmp→target bar replaces the flat TGT/STOP span row on FUT rows.
+   ASSUMPTIONS STATED (founder did not rule, so they are written down rather than silent):
+     · the CMP dot is a snapshot per Index Book load — it moves when loadIndexBook() repaints,
+       same cadence as every number on this deck, never a second timer;
+     · a losing position keeps the fixed zones (red stop→entry, green entry→target); the amber
+       dot inside the red zone plus the red P&L is the losing read — the bar never recolours;
+     · any of entry/cmp/target/stop missing → the row falls back to the old flat span layout,
+       because a bar drawn to a guessed level is a fabricated shape (idxRow precedent);
+     · OPTIONS legs keep the flat layout — they carry no target/stop.
+   TOKENS ONLY. Zones are var(--red)/var(--grn) at element opacity (fills, not text), the dot is
+   var(--amber) (declared on .screen by MOBILE_CSS), tick var(--mut), dot ring var(--panel).
+   Zero new raw hex primitives, so the P8 theme token-lock ratchet stays level on this file. */
+.bkbar{position:relative;height:6px;margin:var(--space-10) var(--space-2) var(--space-4);
+  border-radius:var(--radius-3);background:var(--panel2)}
+.bkbar i{position:absolute;top:0;height:100%;display:block}
+.bkbar .zr{background:var(--red);opacity:.32}
+.bkbar .zg{background:var(--grn);opacity:.32}
+.bkbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
+.bkbar .bdot{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;
+  border-radius:50%;background:var(--amber);border:var(--bw-2) solid var(--panel)}
+.bklb{position:relative;height:32px;margin:0 var(--space-2);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10)}
+.bklb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;text-align:center}
+.bklb span.lbL{transform:none;text-align:left}
+.bklb span.lbR{transform:translateX(-100%);text-align:right}
+.bklb b{display:block;font-weight:800;font-size:var(--type-11)}
+.bklb em{display:block;font-style:normal;font-size:var(--type-8);color:var(--mut);
+  letter-spacing:var(--track-px8);text-transform:uppercase;margin-top:1px}
+.bklb .lb-stop b{color:var(--red)}
+.bklb .lb-entry b{color:var(--mut);font-weight:700}
+.bklb .lb-cmp b{color:var(--amber);font-size:var(--type-115)}
+.bklb .lb-tgt b{color:var(--grn)}
+.bkopen{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--mut);
+  letter-spacing:var(--track-px8);margin-top:var(--space-2)}
+.bkfoot{display:flex;justify-content:space-between;margin-top:var(--space-3);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut)}
 /* cc#1158: the cc#919 .v10b / .v10i rules are removed with the INDEX SIGNALS markup they
    styled. Nothing in the repo selects them any more - checked against every .py, .js and
    .html, including the pwa enhancer, where the only remaining mentions are comments. */
@@ -1784,24 +1821,70 @@ function bookDir(p){
   var pe = p.opt_type && String(p.opt_type).toUpperCase() === 'PE';
   return (pe ? !long : long) ? 'Bullish' : 'Bearish';
 }
+/* ── FABLE 27-Aug · the range bar for a FUT row — see the CSS block's assumption notes. ──
+   Returns null when any level is missing, and the caller falls back to the flat span row:
+   a bar is only ever drawn between four real numbers. Position is computed BY VALUE
+   (lo = min(stop,target), hi = max), so a bearish row mirrors itself — target lands left,
+   stop right — with no direction-specific branch to get wrong. */
+function bookRange(p){
+  /* null-safe: Number(null) is 0, and a stop of 0 drawn on the bar would be a fabricated level */
+  var L = function(v){ return (v === null || v === undefined || v === '') ? NaN : Number(v); };
+  var en = L(p.entry_price), cm = L(p.cmp), tg = L(p.target), st = L(p.stop);
+  if (!isFinite(en) || !isFinite(cm) || !isFinite(tg) || !isFinite(st)) return null;
+  var lo = Math.min(st, tg), hi = Math.max(st, tg);
+  if (hi === lo) return null;
+  var P = function(v){ return Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100)); };
+  var pe = P(en), pt = P(tg), ps = P(st), pc = P(cm);
+  var gL = Math.min(pe, pt), gW = Math.abs(pt - pe);
+  var rL = Math.min(pe, ps), rW = Math.abs(ps - pe);
+  /* labels: stop and target pin to their computed sides; cmp always renders; entry drops when it
+     would sit under cmp or an edge label — its tick on the bar still marks the level. */
+  var lb = function(cls, pos, val, key){
+    var edge = pos < 10 ? ' lbL' : (pos > 90 ? ' lbR' : '');
+    var left = pos < 10 ? '0' : (pos > 90 ? '100%' : pos.toFixed(1) + '%');
+    return '<span class="' + cls + edge + '" style="left:' + left + '">'
+      + '<b>' + num(Math.round(val)) + '</b><em>' + key + '</em></span>';
+  };
+  var labels = lb('lb-stop', ps, st, 'stop') + lb('lb-tgt', pt, tg, 'tgt')
+    + (Math.abs(pe - pc) >= 12 && pe >= 10 && pe <= 90 ? lb('lb-entry', pe, en, 'entry') : '')
+    + lb('lb-cmp', pc, cm, 'cmp');
+  /* footer facts — absolute points, direction-aware wording, never a percentage of a guess */
+  var dT = Math.abs(tg - cm), dS = Math.abs(cm - st);
+  var pastT = (tg >= st) ? cm > tg : cm < tg;
+  var pastS = (tg >= st) ? cm < st : cm > st;
+  var f1 = num(Math.round(dT)) + (pastT ? ' pts past target' : ' pts to target');
+  var f2 = num(Math.round(dS)) + (pastS ? ' pts past stop' : ' pts from stop');
+  return '<div class="bkbar">'
+    + '<i class="zr" style="left:' + rL.toFixed(1) + '%;width:' + rW.toFixed(1) + '%"></i>'
+    + '<i class="zg" style="left:' + gL.toFixed(1) + '%;width:' + gW.toFixed(1) + '%"></i>'
+    + '<i class="ben" style="left:' + pe.toFixed(1) + '%"></i>'
+    + '<i class="bdot" style="left:' + pc.toFixed(1) + '%"></i>'
+    + '</div><div class="bklb">' + labels + '</div>'
+    + '<div class="bkfoot"><span>' + f1 + '</span><span>' + f2 + '</span></div>';
+}
 function bookRow(p){
   var dirv = bookDir(p), pn = Number(p.unrealised_pnl) || 0;
   var leg = p.opt_type
     ? esc(String(p.opt_strike || '')) + ' ' + esc(p.opt_type) + '·wrt'
     : 'FUT';
   var lv = function(v){ return (v === null || v === undefined || v === '') ? '—' : num(v); };
+  var opened = esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—');
+  var bar = p.opt_type ? null : bookRange(p);
+  var body = bar
+    ? '<div class="bkopen">OPENED ' + opened + '</div>' + bar
+    : '<div class="bk2">'
+      + '<span>OPEN <b class="num">' + opened + '</b></span>'
+      + '<span>ENTRY <b class="num">' + lv(p.entry_price) + '</b></span>'
+      + '<span>CMP <b class="num">' + lv(p.cmp) + '</b></span>'
+      + (p.opt_type ? ''
+          : '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
+          + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>')
+      + '</div>';
   return '<div class="bkrow" onclick="openV10(event,\'' + esc(p.symbol) + '\')">'
     + '<div class="bk1"><b>' + esc(p.symbol) + '</b> <span class="bkleg">' + leg + '</span>'
     + (dirv ? '<span class="bkside ' + (dirv === 'Bearish' ? 'bear' : 'bull') + '">' + dirv + '</span>' : '')
     + '<span class="bkpnl num" style="color:' + bkCx(pn) + '">₹' + num(pn) + '</span></div>'
-    + '<div class="bk2">'
-    + '<span>OPEN <b class="num">' + esc(String(p.entry_ts || p.entry_ist || '').slice(0, 10) || '—') + '</b></span>'
-    + '<span>ENTRY <b class="num">' + lv(p.entry_price) + '</b></span>'
-    + '<span>CMP <b class="num">' + lv(p.cmp) + '</b></span>'
-    + (p.opt_type ? ''
-        : '<span>TGT <b class="num">' + lv(p.target) + '</b></span>'
-        + '<span>STOP <b class="num">' + lv(p.stop) + '</b></span>')
-    + '</div></div>';
+    + body + '</div>';
 }
 function bookCard(label, rows){
   if (!rows.length)
