@@ -788,20 +788,49 @@ function oiCard(name, oi, mp){
     + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
   var story = '';
   if(hasCh){
-    var sideStory = function(label, key, wall, th){
+    /* cc#1363 · plain-words read after the fact (session_log 32095, phrases VERBATIM). A read is
+       flow description, never prediction, and it gates harder than the fact: the fact renders at
+       the classify threshold, the read only at the LABEL threshold (thLab), only when the side's
+       deltas exist at all (hasCh/one_sided already decide that), and a BUILD read additionally
+       needs its strike on the writers' side of spot — CE above, PE below; 32095 defines no phrase
+       for the other positions, so none is invented. When BOTH outer builds earn their read in one
+       tick, the two reads collapse into the single range read at the line's end. */
+    var READS = { ceB: 'resistance forming — cautious', peB: 'support forming — bullish',
+                  ceU: 'ceiling weakening — bullish tilt', peU: 'floor weakening — bearish tilt',
+                  range: 'range forming — sellers boxing both sides' };
+    var spotN = oi.spot != null ? Number(oi.spot) : null;
+    var sideBits = function(key, wall, thC, thL, isCe){
       var mv = rows.filter(function(r){ return r[key] != null; });
-      if(!mv.length) return '';
+      if(!mv.length) return null;
       var bld = mv.reduce(function(a, b){ return b[key] > a[key] ? b : a; });
       var unw = mv.reduce(function(a, b){ return b[key] < a[key] ? b : a; });
+      var o = { bTxt: '', uTxt: '', bRead: false, uRead: false };
+      if(bld[key] >= thC){
+        o.bTxt = 'build ' + num(bld.strike) + ' ' + fCh(bld[key]);
+        o.bRead = bld[key] >= thL && spotN != null
+          && (isCe ? Number(bld.strike) > spotN : Number(bld.strike) < spotN);
+      }
+      if(unw[key] <= -thC){
+        o.uTxt = 'unwind ' + num(unw.strike) + ' ' + fCh(unw[key])
+          + (wall && Number(unw.strike) === Number(wall.strike) ? ' — wall weakening' : '');
+        o.uRead = -unw[key] >= thL;
+      }
+      return (o.bTxt || o.uTxt) ? o : null;
+    };
+    var ce = ceDead ? null : sideBits('ce_chg', callWall, thCls.ce, thLab.ce, true);
+    var pe = peDead ? null : sideBits('pe_chg', putWall, thCls.pe, thLab.pe, false);
+    var rangeOn = !!(ce && pe && ce.bRead && pe.bRead);
+    var sideTxt = function(label, o, bWord, uWord){
+      if(!o) return '';
       var bits = [];
-      if(bld[key] >= th) bits.push('build ' + num(bld.strike) + ' ' + fCh(bld[key]));
-      if(unw[key] <= -th) bits.push('unwind ' + num(unw.strike) + ' ' + fCh(unw[key])
-        + (wall && Number(unw.strike) === Number(wall.strike) ? ' — wall weakening' : ''));
+      if(o.bTxt) bits.push(o.bTxt + (o.bRead && !rangeOn ? ' · ' + bWord : ''));
+      if(o.uTxt) bits.push(o.uTxt + (o.uRead ? ' · ' + uWord : ''));
       return bits.length ? label + ' ' + bits.join(' · ') : '';
     };
-    var st = [sideStory('calls', 'ce_chg', ceDead ? null : callWall, thCls.ce),
-              sideStory('puts', 'pe_chg', peDead ? null : putWall, thCls.pe)]
-             .filter(Boolean).join(' &nbsp;·&nbsp; ');
+    var st = [sideTxt('calls', ce, READS.ceB, READS.ceU),
+              sideTxt('puts', pe, READS.peB, READS.peU)]
+             .filter(Boolean).join(' &nbsp;·&nbsp; ')
+             + (rangeOn ? ' &nbsp;·&nbsp; ' + READS.range : '');
     if(st) story = '<div class="oird">' + st + '</div>';
   } else if(oi.baseline_tick == null && !oi.one_sided){
     /* 32043 honesty rule 3: no baseline -> deltas omitted AND the card says so */
