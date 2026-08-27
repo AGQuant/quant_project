@@ -2464,7 +2464,43 @@ async function boot(){
        content sits exactly where it did. -->
   <div class="card slab">
     <div style="font-size:10px;letter-spacing:2px;color:var(--chalk);margin-bottom:6px">THE CLOSE OF THE READ</div>
-    <div style="font-size:13px;line-height:1.55">Bias <b style="color:${railC}">${esc(mr.bias||'—')}</b> — ${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}. Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
+    <div style="font-size:10px;letter-spacing:1.5px;color:var(--muted)">BIAS</div>
+    <div style="font-size:24px;font-weight:800;line-height:1.1;color:${railC};margin:2px 0 12px">${esc(mr.bias||'—')}</div>
+    <div style="font-size:13px;line-height:1.55">${(mr.support||[]).map(esc).join(' · ')||'no supporting numbers available'}.</div>
+    ${(() => {
+      /* cc#1367 · closing insights — every sentence is tied to a number ALREADY SHOWN above:
+         the pivot ladder card (cmp vs PP rung), the INTERNALS ADR pane, the INTERNALS PCR
+         panes. A missing or stale number silently drops its sentence — the close shrinks
+         rather than fabricates, per the footer covenant. */
+      const L = [];
+      const inr = v => Number(v).toLocaleString('en-IN', {maximumFractionDigits: 0});
+      const pv = lad.map(ix => {
+        const pp = (ix.rungs || []).find(r => r.label === 'PP');
+        if (!pp || ix.cmp == null || pp.value == null) return null;
+        const d = Math.abs(ix.cmp / pp.value - 1) * 100;
+        const nm = ix.symbol === 'NIFTY50' ? 'NIFTY' : esc(ix.symbol);
+        return nm + ' sits ' + d.toFixed(1) + '% ' + (ix.cmp < pp.value ? 'below' : 'above')
+          + ' its pivot (' + inr(ix.cmp) + ' vs ' + inr(pp.value) + ')';
+      }).filter(Boolean);
+      if (pv.length) L.push(pv.join('; ') + '.');
+      if (adr && adr.adr != null && !itl.adr_stale){
+        /* ratio only — the advancer/decliner COUNTS are not shown anywhere above (the A-D pane
+           was removed by cc#1250), and the hard rule ties every stated number to one on the page */
+        L.push('Breadth leans with the ' + (adr.adr >= 1 ? 'buyers' : 'sellers')
+          + ' at ' + Number(adr.adr).toFixed(2) + ' advancers per decliner.');
+      }
+      const pcs = (pcr || []).filter(p => p.pcr != null).slice(0, 2);
+      if (pcs.length && !itl.pcr_stale){
+        const nums = pcs.map(p => esc(p.underlying) + ' ' + Number(p.pcr).toFixed(2)).join(' · ');
+        const allUp = pcs.every(p => p.pcr > 1), allDn = pcs.every(p => p.pcr < 1);
+        L.push('PCR reads ' + nums + (allUp
+          ? ' — more puts than calls are written, a supportive lean.'
+          : allDn ? ' — more calls than puts are written, a capped lean.' : '.'));
+      }
+      return L.length
+        ? '<div style="font-size:13px;line-height:1.6;margin-top:10px">' + L.join(' ') + '</div>' : '';
+    })()}
+    <div style="font-size:13px;line-height:1.55;margin-top:10px">Levels above are the day's map; the live desk owns the positions. <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>`;
   fitLadders();    /* cc#1136: measure-then-fit; the ladders only exist after this paint */
   /* cc#1188: start each deck on the MIDDLE set, instantly, before its first paint — the user
