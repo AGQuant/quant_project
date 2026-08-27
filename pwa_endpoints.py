@@ -1431,9 +1431,18 @@ RESULTS_CARD_JS = """
     + '.rcard{background:var(--card,#fff);color:var(--txt,#101828);border:1px solid var(--line,rgba(148,166,210,.2));'
     + 'border-radius:16px;max-width:620px;width:100%;max-height:88vh;overflow:auto;'   /* cc#679: unified 620/88vh/16 modal footprint */
     + 'box-shadow:0 24px 64px rgba(0,0,0,.22);padding:18px}'
-    + '.rcard-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}'
+    /* cc#1357: the header is STICKY inside the scrolling .rcard (full-bleed via negative margins
+       over the card's 18px padding), so the close button stays reachable however far the sheet is
+       scrolled. The button itself gets visible chrome — the old bare dim glyph was the same
+       invisibility defect the founder reported on the digest sheet. Fallbacks are rgba/inherit,
+       never a new hex (theme ratchet). */
+    + '.rcard-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;'
+    + 'position:sticky;top:-18px;z-index:3;background:inherit;'
+    + 'margin:-18px -18px 8px;padding:18px 18px 8px;border-radius:16px 16px 0 0}'
     + '.rcard-sym{font:800 16px/1.1 Sora,sans-serif}'
-    + '.rcard-x{border:none;background:none;color:var(--dim,#8892a6);font-size:22px;cursor:pointer;line-height:1}'
+    + '.rcard-x{flex:none;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;'
+    + 'background:var(--hi,rgba(148,166,210,.14));border:1px solid var(--line,rgba(148,166,210,.25));'
+    + 'border-radius:10px;color:var(--txt,inherit);font-size:22px;cursor:pointer;line-height:1}'
     /* cc#1191: the segment chip. Link-styled because it OPENS something — every other chip in
        this header is a passive state badge, so it must not look like one, or nobody will click
        it. Sits inline after the status chip.

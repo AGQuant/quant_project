@@ -225,8 +225,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .rsp{font-size:var(--type-13);line-height:1.6;color:var(--chalk);margin-bottom:var(--space-10)}
 .rsp.hd{font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-px15);
  color:var(--aqua);margin:var(--space-16) 0 var(--space-6)}
-.rsx{min-width:44px;min-height:44px;position:absolute;right:8px;top:6px;background:none;border:0;
- color:var(--chalk);font-size:var(--type-22);cursor:pointer;line-height:1}
+/* cc#1357 · the close button was RENDERED but invisible: --type-22 is defined nowhere, so the
+   font-size fell back to the inherited body size, leaving a small bare chalk glyph with no button
+   chrome floating beside the Archivo Black symbol — the founder's "no way to close". It now looks
+   like a button: the page's own chip chrome (--hi fill, --edge border), a literal 22px glyph
+   (no phantom token), same 44px target, same absolute spot. The back (←) variant shares it. */
+.rsx{min-width:44px;min-height:44px;position:absolute;right:8px;top:6px;
+ display:flex;align-items:center;justify-content:center;
+ background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);
+ color:var(--chalk);font-size:22px;cursor:pointer;line-height:1}
 /* the peers button takes the page's own bevel language — .chip is what every other tappable
    thing here uses, at full width and tap height */
 .rpeer{display:block;width:100%;box-sizing:border-box;min-height:44px;margin:var(--space-14) 0 var(--space-4);
