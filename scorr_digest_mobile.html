@@ -21,6 +21,17 @@
 --volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+/* cc#1345 · THE PAGE MUST NEVER LAY OUT WIDER THAN THE PHONE. Root cause of the founder's
+   "wide horizontal screen" on Result Analysis / News: the RA deck's pager renders one dot per
+   analysed company (159 today), and that centered flex row overflowed BOTH edges of the
+   viewport. On mobile Chrome a page wider than the device expands the LAYOUT viewport, and
+   position:fixed elements — the #rsheet result/news sheet — span that wider viewport: its text
+   then wraps at ~628px and every line runs past the visible screen, cut on both edges. Fixed at
+   the defect (the .idots clamp below) AND at the class: this page has grown a too-wide element
+   three separate times (the 223px index tile, the .rpg caption, now the pager), so the layout
+   viewport is clamped here once. Inner scrollers (.iswipe-t, .rpwrap) are untouched — they clip
+   their own overflow already. */
+html,body{overflow-x:hidden;max-width:100%}
 .phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:var(--space-70);
  background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
 .num{font-family:'JetBrains Mono',monospace}
@@ -196,8 +207,11 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    track, so on a narrow phone it clipped at the track edge, which is the third defect in the
    founder's screenshot. The label is a SIBLING of #rdots, never a child: deckDots() rewrites
    className on every child of the dots element, so a label inside it would be turned into a dot. */
-.rpager{display:flex;align-items:center;justify-content:center;gap:var(--space-8)}
-.rpager .idots{margin-top:0}
+.rpager{display:flex;align-items:center;justify-content:center;gap:var(--space-8);max-width:100%}
+/* cc#1345 · the dot row shrinks and CLIPS instead of overflowing the page (159 dots ≈ 628px).
+   min-width:0 lets the flex item actually shrink; the clipped far dots lose nothing — the
+   "N OF 159" label beside them (cc#1330) is the position signal, and it stays visible. */
+.rpager .idots{margin-top:0;flex:0 1 auto;min-width:0;overflow:hidden}
 .rplbl{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--chalk);
  letter-spacing:var(--track-px12);white-space:nowrap}
 /* ── cc#1190 scope 3/4 · THE SHEET ───────────────────────────────────────────────────────────
