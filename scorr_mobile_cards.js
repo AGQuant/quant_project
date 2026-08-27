@@ -292,7 +292,16 @@
          42px, railed its card and inflated every number leaf inside — the founder's 27-Aug 07:44
          screenshot. Fourth occurrence of the content-match collision (cc#1108, cc#1122 x2, now
          this); same fix as .hero-mood: an element that styles its own word is skipped by class. */
+      /* cc#1356 · .pmood is hero card 2's own mood block (MARKET MOOD · PCR, mobile/home.html).
+         Its word ('Greed'/'Fear'...) is a leaf, so this sweep matched it and re-applied the OLD
+         16-Aug spacious treatment — 42px word, rail, number inflation — over the top of the
+         HERO_COMPACT_V1 styling (session_log 32026), and the stretched card 2 dragged card 1 tall
+         with it (#heroTrack is align-items:stretch). The compact ruling supersedes the old one, so
+         the card styles its own word in its own scope, same rule as .hero-mood and .bkside.
+         Fifth occurrence of the content-match collision. closest() because the guard must also
+         cover any child the page wraps the word in later. */
       if (e2.classList && (e2.classList.contains('hero-mood') || e2.classList.contains('bkside'))) continue;
+      if (e2.closest && e2.closest('.pmood')) continue;
       if (e2.children.length === 0 && MOODS.test((e2.textContent || '').trim())) moodEls.push(e2);
     }
     for (var im = 0; im < moodEls.length; im++) {
