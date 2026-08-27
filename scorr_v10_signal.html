@@ -122,6 +122,9 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .oird b{color:var(--chalk)}
 .asof{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--muted)}
 .asof.stale{color:var(--amber)}
+/* cc#1361 · this card's own text chrome, one type step up from the shared classes */
+.oiasof{font-size:var(--type-10)}
+.oird.oifacts{font-size:var(--type-105)}
 /* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
 .plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
 .prg{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-5) var(--space-8);
@@ -773,8 +776,15 @@ function oiCard(name, oi, mp){
   xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
   var ao = chainAsOf(oi.chain_tick);
   /* cc#1355 · the as-of line carries the whole context: tick · vs open · PCR (32043) */
-  var aoTxt = ao.txt
-    + (oi.baseline_tick && hasCh ? ' · vs open ' + String(oi.baseline_tick).slice(11, 16) : '')
+  /* cc#1361 · short stamp: '26-Aug 15:35 · vs 09:20 · PCR 1.05' (founder 08:43) — falls back to
+     the long chainAsOf text only when the tick is missing entirely. */
+  var aoTxt = (function(){
+    var t = String(oi.chain_tick || '');
+    if(t.length < 16) return ao.txt;
+    var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
+  })()
+    + (oi.baseline_tick && hasCh ? ' · vs ' + String(oi.baseline_tick).slice(11, 16) : '')
     + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
   var story = '';
   if(hasCh){
@@ -800,12 +810,9 @@ function oiCard(name, oi, mp){
   var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-    + '<span class="asof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>'
+    + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + xs
-    + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
-        + (peDead ? 'put' : 'call') + ' OI absent this tick — feed gap</div>' : '')
-    + story
     /* cc#1261 · NUMBERS ONLY, ONE LINE. The commentary sentence is gone and the <br> that split
        the readout in two goes with it: the founder asked for the key numbers, not a paragraph
        under them, and MP / spot / put wall / call wall / expiry is the whole of what he reads.
@@ -814,13 +821,19 @@ function oiCard(name, oi, mp){
        all. It was saying in a sentence what the stamp beside it was already saying in a colour,
        and the sentence additionally hardcoded a date ("21-Aug has no rows at all") that would
        have gone stale and started lying on its own. */
-    + '<div class="oird">'
+    /* cc#1361 · footer, founder 08:43: line 1 = the facts one step larger (expiry dropped from
+       the card face — it lives in Index Intel), line 2 = the cc#1355 story, then the shortened
+       gap note only on a one-sided tick. Em-dash honesty (cc#1354) unchanged. */
+    + '<div class="oird oifacts">'
     + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
-    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b> <span>(' + basis + ')</span>'
-    + ' · put wall <b class="num">' + (peDead ? '—' : num(putWall.strike)) + '</b>'
-    + ' · call wall <b class="num">' + (ceDead ? '—' : num(callWall.strike)) + '</b>'
-    + ' · expiry <b>' + esc(oi.expiry || '—') + '</b>'
-    + '</div></div></div>';
+    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b><span style="font-size:.8em"> (' + basis + ')</span>'
+    + ' · PW <b class="num">' + (peDead ? '—' : num(putWall.strike)) + '</b>'
+    + ' · CW <b class="num">' + (ceDead ? '—' : num(callWall.strike)) + '</b>'
+    + '</div>'
+    + story
+    + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
+        + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '')
+    + '</div></div>';
 }
 
 /* ── the pivot ladder ───────────────────────────────────────────────────────────────────── */
