@@ -222,9 +222,11 @@ body[data-theme]{
   height:40px;transform:translateY(-50%)}
 .ixcell:active .ixlv{color:var(--blu,#4D7CFE)}
 .ixcell:active .ixgl{color:var(--blu,#4D7CFE)}
-.ixnm{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em11);color:var(--txt,#E9EEFB);text-transform:uppercase}
+.ixnm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:var(--txt,#E9EEFB);text-transform:uppercase}
 /* the dashed underline is this page's existing "you can tap this" grammar, per the ref */
-.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:700;
+/* cc#1360 · founder 08:41: the index level is the footer's money number — one size class up. The
+   dashed-underline background trick below is size-independent and untouched. */
+.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:700;
   font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB);
   /* DASHED UNDERLINE THAT COSTS NO HEIGHT. The obvious border-bottom:1px dashed plus a 1px
      padding was written first and measured: it grew .ixrow from 41px to 42px at 360 and 24 to 25
@@ -237,7 +239,7 @@ body[data-theme]{
      declaration down with it. The neighbouring --txt carries a fallback for the same reason. */
   background-image:linear-gradient(to right,var(--line2,rgba(148,166,210,.26)) 55%,transparent 55%);
   background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%}
-.ixgl{font-size:var(--type-9);color:var(--txt,#E9EEFB);margin-left:var(--space-1)}
+.ixgl{font-size:var(--type-11);color:var(--txt,#E9EEFB);margin-left:var(--space-1)}
 .ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
   font-variant-numeric:tabular-nums}
 /* cc#902 — the scrub readout. .trendhd holds two spans: the title on the left and the live
@@ -798,8 +800,10 @@ body[data-theme]{
 .hero-verdict{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap}
 .hero-verdict .hero-why{font-size:var(--type-11);line-height:1.35;margin:0}
 .hero-verdict .r5-meter{flex:1 1 100%;margin:var(--space-8) 0 0}
-#heroTrack > .c:first-child > .hchips .hc.slab.dense{position:relative;padding:var(--space-3) var(--space-8);
-  min-height:0;border-radius:var(--radius-2);clip-path:none;box-shadow:none;font-size:var(--type-11)}
+/* cc#1360 · founder 08:41: the flat capsules read too thin — taller and one type step up, still
+   flat and dense per HERO_COMPACT_V1. The 44px ::after tap expansion below is unchanged. */
+#heroTrack > .c:first-child > .hchips .hc.slab.dense{position:relative;padding:var(--space-6) var(--space-10);
+  min-height:0;border-radius:var(--radius-2);clip-path:none;box-shadow:none;font-size:var(--type-12)}
 #heroTrack > .c:first-child > .hchips .hc.slab.dense::after{content:'';position:absolute;
   left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
 .swipe-t::-webkit-scrollbar{display:none}
