@@ -675,6 +675,7 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
                     spot_asof = str(sr[1]) if sr[1] else None
             rows = []
             chain_tick = None
+            base_map, baseline_tick = {}, None
             if expiry is not None:
                 # cc#1167: ONE latest-chain query, shared with max pain, so the two cannot drift.
                 cur.execute(max_pain_mod.LATEST_CHAIN_SQL, {"u": underlying})
@@ -682,6 +683,31 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
                 rows = [(r[0], r[1], r[2]) for r in raw]
                 if raw:
                     chain_tick = raw[0][4]
+                if chain_tick is not None:
+                    # cc#1355: the session's 09:20 BASELINE — a SECOND, clearly separate
+                    # single-tick read of the same chain (same underlying+expiry, the latest
+                    # tick's own date, first tick at/after 09:20). LATEST_CHAIN_SQL's
+                    # single-tick semantics are untouched; the two ticks are never merged.
+                    # A strike absent from the baseline (window roll) simply has no base_map
+                    # entry -> its delta is served NULL, never 0 (session_log 32043).
+                    cur.execute("""
+                        WITH bt AS (
+                            SELECT MIN(ts) AS t FROM option_chain
+                            WHERE underlying = %(u)s AND expiry = %(e)s
+                              AND ts::date = %(d)s AND ts::time >= time '09:20'
+                        )
+                        SELECT strike,
+                               SUM(CASE WHEN option_type = 'CE' THEN oi ELSE 0 END) AS ce,
+                               SUM(CASE WHEN option_type = 'PE' THEN oi ELSE 0 END) AS pe,
+                               (SELECT t FROM bt) AS tick
+                        FROM option_chain
+                        WHERE underlying = %(u)s AND expiry = %(e)s
+                          AND ts = (SELECT t FROM bt) AND oi IS NOT NULL
+                        GROUP BY strike
+                    """, {"u": underlying, "e": expiry, "d": chain_tick.date()})
+                    for br in cur.fetchall():
+                        base_map[float(br[0])] = (int(br[1] or 0), int(br[2] or 0))
+                        baseline_tick = br[3]
         strikes = [{"strike": float(r[0]), "call_oi": int(r[1] or 0), "put_oi": int(r[2] or 0)} for r in rows]
         atm_strike, window = None, strikes
         if spot is not None and strikes:
@@ -693,11 +719,30 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
         # card draws), via the same max_pain.one_sided helper the MP guard uses — one definition.
         one_sided_flag = max_pain_mod.one_sided(
             {x["strike"]: (x["call_oi"], x["put_oi"]) for x in window}) if window else None
+        # cc#1355: per-strike change since the 09:20 baseline. A side dead in EITHER tick (the
+        # cc#1354 class of gap) nulls that whole side's deltas — a delta measured against or
+        # from a silent side would fabricate an unwind/build the size of the real book.
+        chain_side = max_pain_mod.one_sided(
+            {float(r[0]): (r[1] or 0, r[2] or 0) for r in rows}) if rows else None
+        base_side = max_pain_mod.one_sided(base_map) if base_map else None
+        ce_ok = baseline_tick is not None and chain_side != "CE_MISSING" and base_side != "CE_MISSING"
+        pe_ok = baseline_tick is not None and chain_side != "PE_MISSING" and base_side != "PE_MISSING"
+        for x in strikes:
+            b = base_map.get(x["strike"])
+            x["ce_chg"] = (x["call_oi"] - b[0]) if (b and ce_ok) else None
+            x["pe_chg"] = (x["put_oi"] - b[1]) if (b and pe_ok) else None
+        # cc#1355: chain-wide PCR at the latest tick (32043: the whole chain, not the window).
+        # Guarded by the sums themselves: a one-sided chain has no PCR, it has a gap.
+        tot_ce = sum(int(r[1] or 0) for r in rows)
+        tot_pe = sum(int(r[2] or 0) for r in rows)
+        pcr = round(tot_pe / tot_ce, 4) if (tot_ce > 0 and tot_pe > 0) else None
         return {"status": "ok" if window else "no_data", "symbol": underlying, "spot": spot,
                 # cc#1167: the basis travels WITH the number. A surface that shows spot must be
                 # able to say whether it is live or a previous close, without guessing.
                 "spot_basis": spot_basis, "spot_asof": spot_asof,
                 "chain_tick": str(chain_tick) if chain_tick else None,
+                "baseline_tick": str(baseline_tick) if baseline_tick else None,
+                "pcr": pcr,
                 "expiry": str(expiry) if expiry is not None else None, "atm_strike": atm_strike,
                 "n": n, "one_sided": one_sided_flag, "strikes": window}
     except Exception as e:
