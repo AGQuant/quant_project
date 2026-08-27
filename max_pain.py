@@ -85,6 +85,11 @@ def max_pain(strikes: Dict[float, Tuple[float, float]], top_n: int = 3):
     usable = {s: v for s, v in usable.items() if (v[0] or v[1])}
     if len(usable) < 3:
         return None, []
+    if one_sided(usable) is not None:
+        # cc#1354: a one-sided chain (26-Aug: the NIFTY PE feed leg died 13:20-15:35 while CE kept
+        # writing) is half a writers' book. A calls-only "max pain" is just the OI-weighted bottom
+        # of the call curve — a plausible wrong number, the exact thing this file exists to refuse.
+        return None, []
     lo, hi = min(usable), max(usable)
     curve = sorted(((k, payout_at(usable, k)) for k in usable), key=lambda x: x[1])
     best = curve[0][0]
@@ -93,6 +98,19 @@ def max_pain(strikes: Dict[float, Tuple[float, float]], top_n: int = 3):
         # Kept because the guard must survive a future change that widens the candidate set.
         return None, curve[:top_n]
     return best, curve[:top_n]
+
+
+def one_sided(strikes: Dict[float, Tuple[float, float]]) -> Optional[str]:
+    """cc#1354: 'PE_MISSING' when the chain carries call OI but zero put OI anywhere,
+    'CE_MISSING' for the mirror, None for a two-sided (or empty) chain. ONE implementation,
+    shared by max_pain()'s guard and the /strike_oi payload flag, so the two cannot drift."""
+    total_ce = sum(float(ce or 0) for ce, _pe in strikes.values())
+    total_pe = sum(float(pe or 0) for _ce, pe in strikes.values())
+    if total_ce and not total_pe:
+        return 'PE_MISSING'
+    if total_pe and not total_ce:
+        return 'CE_MISSING'
+    return None
 
 
 def chain_bounds(strikes: Iterable[float]) -> Tuple[Optional[float], Optional[float]]:

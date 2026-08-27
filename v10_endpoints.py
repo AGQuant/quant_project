@@ -586,16 +586,25 @@ def v10_maxpain(symbol: str = "NIFTY"):
         lo, hi = max_pain_mod.chain_bounds(chain.keys())
         if strike is None:
             # Data honesty: absent beats wrong. The card renders an "MP unavailable" note.
+            # cc#1354: when the guard tripped because the chain is ONE-SIDED (26-Aug: NIFTY PE
+            # leg dead, calls-only chain), the payload says so specifically — the card can name
+            # the feed gap instead of a generic guard message.
+            side = max_pain_mod.one_sided(chain)
             log.warning(
                 "v10_maxpain GUARD TRIPPED underlying=%s expiry=%s tick=%s strikes=%d "
-                "chain=[%s, %s] best_candidate=%s — refusing to serve a number",
-                underlying, expiry, tick, len(chain), lo, hi,
+                "chain=[%s, %s] one_sided=%s best_candidate=%s — refusing to serve a number",
+                underlying, expiry, tick, len(chain), lo, hi, side,
                 curve[0][0] if curve else None,
             )
+            note = ("Put OI absent across the chain this tick — refusing a calls-only max pain"
+                    if side == "PE_MISSING" else
+                    "Call OI absent across the chain this tick — refusing a puts-only max pain"
+                    if side == "CE_MISSING" else
+                    "Max pain failed its own chain-range guard this tick")
             return {"status": "unavailable", "symbol": underlying,
                     "max_pain_strike": None, "expiry": str(expiry) if expiry else None,
                     "chain_min": lo, "chain_max": hi, "strikes": len(chain),
-                    "note": "Max pain failed its own chain-range guard this tick"}
+                    "one_sided": side, "note": note}
         spot = float(sr[0]) if (sr and sr[0] is not None) else None
         dist = (strike - spot) if spot is not None else None
         dist_pct = round(dist / spot * 100, 2) if (spot and dist is not None) else None
@@ -680,13 +689,17 @@ def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
             idx = next((i for i, x in enumerate(strikes) if x["strike"] == atm_strike), None)
             if idx is not None:
                 window = strikes[max(0, idx - n): idx + n + 1]
+        # cc#1354: one-sided flag computed from the SERVED window's sums (the window is what the
+        # card draws), via the same max_pain.one_sided helper the MP guard uses — one definition.
+        one_sided_flag = max_pain_mod.one_sided(
+            {x["strike"]: (x["call_oi"], x["put_oi"]) for x in window}) if window else None
         return {"status": "ok" if window else "no_data", "symbol": underlying, "spot": spot,
                 # cc#1167: the basis travels WITH the number. A surface that shows spot must be
                 # able to say whether it is live or a previous close, without guessing.
                 "spot_basis": spot_basis, "spot_asof": spot_asof,
                 "chain_tick": str(chain_tick) if chain_tick else None,
                 "expiry": str(expiry) if expiry is not None else None, "atm_strike": atm_strike,
-                "n": n, "strikes": window}
+                "n": n, "one_sided": one_sided_flag, "strikes": window}
     except Exception as e:
         raise HTTPException(500, f"v10_strike_oi failed: {e}")
 
