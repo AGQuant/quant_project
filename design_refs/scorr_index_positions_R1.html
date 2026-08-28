@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DESIGN REF · merged Index Positions card (Cards 4+5 → 1)</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=IBM+Plex+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+.screen{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+  --gold-hi:#F0D67A;--gold-lo:#7A6320;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#050810;color:var(--txt);font-family:'Sora',sans-serif}
+.screen{max-width:412px;margin:0 auto;padding:24px 16px}
+.note{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);
+  border:1px dashed var(--line2);padding:10px 12px;border-radius:8px;margin-bottom:16px}
+.note b{color:var(--txt)}
+
+.c{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;overflow:hidden}
+.chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;
+  margin-bottom:6px;gap:8px}
+.chd .t{font-weight:800;font-size:14px}
+.chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut);flex-shrink:0}
+
+.pstg{display:flex;gap:1px;background:var(--panel2);border:1px solid var(--line2);
+  border-radius:8px;padding:1px;flex-shrink:0}
+.pstg button{border:0;background:transparent;border-radius:7px;padding:2px 5px;color:var(--mut);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7px;font-weight:800;
+  letter-spacing:.1px;white-space:nowrap;cursor:pointer}
+.pstg button.on{background:var(--gold-hi);color:#3D2E0A}
+
+.legwrap{margin-top:12px}
+.legwrap:first-of-type{margin-top:12px}
+.leghd{display:flex;justify-content:space-between;align-items:center}
+.leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
+  letter-spacing:1px;color:var(--txt)}
+.dirbadge{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:1px;border:1px solid;padding:2px 7px;border-radius:9px}
+.dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
+.dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
+
+.posbar{position:relative;height:6px;margin:12px 2px 4px;border-radius:3px;background:var(--panel2)}
+.posbar i{position:absolute;top:0;height:100%}
+.posbar .zr{background:var(--red);opacity:.32}
+.posbar .zg{background:var(--grn);opacity:.32}
+.posbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
+.posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
+  border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
+.poslb{position:relative;height:26px;margin:0 2px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:9px}
+.poslb span{position:absolute;top:0;text-align:center}
+.poslb b{display:block;font-weight:800;font-size:10px;color:var(--txt)}
+.poslb em{display:block;font-style:normal;font-size:8px;color:var(--mut);letter-spacing:.5px}
+
+.decwrap{margin:12px 2px 4px}
+.decbar{position:relative;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.decbar i{display:block;height:100%;background:var(--grn)}
+.decbar.loss i{background:var(--red)}
+.declb{display:flex;justify-content:space-between;margin-top:5px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--mut)}
+.declb b{color:var(--txt);font-weight:800}
+
+.legfoot{text-align:right;margin-top:6px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10px}
+.legdiv{border-top:1px solid var(--line);margin-top:14px}
+
+.digl{display:block;width:100%;box-sizing:border-box;text-align:center;margin-top:14px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:800;
+  letter-spacing:.14em;color:var(--blu);text-decoration:none;min-height:44px;line-height:20px;
+  background:none;border:0;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="screen">
+
+<div class="note"><b>DESIGN REF · scorr_index_positions_R1</b> — replaces heroCard4()/heroCard5()
+with ONE merged card. Real data used below: NIFTY50 FUT long 24155→stop 24055/target 24355;
+NIFTY50 OPT sold 24150 PE @189.65. These are today's actual v10_positions rows, read this
+session, not invented.<br><br>
+<b>TWO REAL DATA GAPS, resolved below — read before building:</b><br>
+1) FUT leg's live CMP is NOT in /api/mobile/v10chart's trades[]. It IS already in the SAME
+`ticker` array this page already fetches (d.ticker, name NIFTY/BANKNIFTY) — reuse that, no new
+query.<br>
+2) OPT leg's live premium exists NOWHERE currently exposed to the frontend. Real source: table
+`option_chain(underlying, strike, option_type, expiry, ltp, ts)`, 5-min updated. JOIN v10_positions
+(status='OPEN', leg='OPT') on strike/option_type/expiry, latest ts. <b>NAMING MISMATCH</b>:
+v10_positions.symbol='NIFTY50' but option_chain.underlying='NIFTY' — BANKNIFTY matches as-is.
+This needs a small backend addition (extend mobile_v10chart's open-OPT trade dict with a
+`live_premium` field, or a new lightweight endpoint) — CC's own call which, stated in the result.
+</div>
+
+<div class="c">
+<div class="chd"><div class="t">INDEX POSITIONS</div>
+<div class="pstg"><button class="on">NIFTY</button><button>BANK NIFTY</button></div></div>
+
+<div class="legwrap">
+<div class="leghd"><span class="nm">FUTURES</span><span class="dirbadge bull">LONG</span></div>
+<div class="posbar">
+<i class="zr" style="left:0;width:38%"></i>
+<i class="zg" style="left:38%;width:62%"></i>
+<i class="ben" style="left:38%"></i>
+<i class="bdot" style="left:58%"></i>
+</div>
+<div class="poslb">
+<span style="left:0"><b>24,055</b><em>stop</em></span>
+<span style="left:38%;transform:translateX(-50%)"><b>24,155</b><em>entry</em></span>
+<span style="left:58%;transform:translateX(-50%)"><b>24,176</b><em>cmp</em></span>
+<span style="right:0;text-align:right"><b>24,355</b><em>target</em></span>
+</div>
+<div class="legfoot" style="text-align:left;display:flex;justify-content:space-between">
+<span style="color:var(--mut)">+21 pts from entry</span>
+<span style="color:var(--grn)">+&#8377;1,365</span>
+</div>
+</div>
+
+<div class="legdiv"></div>
+
+<div class="legwrap">
+<div class="leghd"><span class="nm">OPTIONS</span>
+<span class="dirbadge bear">24150 PE &middot; wrt</span></div>
+<div class="decwrap">
+<div class="decbar"><i style="width:4%"></i></div>
+<div class="declb"><span><b>189.65</b> written</span><span>4% decayed</span><span><b>181.25</b> now</span></div>
+</div>
+<div class="legfoot" style="color:var(--grn)">+&#8377;546</div>
+</div>
+
+<button type="button" class="digl">PAST SIGNALS &#8594;</button>
+</div>
+
+<div class="note" style="margin-top:16px">Second state below: BANKNIFTY, selected via the toggle.
+FUT is SHORT (dirbadge flips to bear/red) — proves the badge direction and bar orientation both
+follow the real position, not a hardcoded LONG assumption. OPT premium ROSE since writing
+(947.6→987.8) — a genuine loss for the seller, so the decay bar must render red/loss when premium
+moves the wrong way, never always green.</div>
+
+<div class="c">
+<div class="chd"><div class="t">INDEX POSITIONS</div>
+<div class="pstg"><button>NIFTY</button><button class="on">BANK NIFTY</button></div></div>
+
+<div class="legwrap">
+<div class="leghd"><span class="nm">FUTURES</span><span class="dirbadge bear">SHORT</span></div>
+<div class="posbar">
+<i class="zg" style="left:0;width:66.7%"></i>
+<i class="zr" style="left:66.7%;width:33.3%"></i>
+<i class="ben" style="left:66.7%"></i>
+<i class="bdot" style="left:100%"></i>
+</div>
+<div class="poslb">
+<span style="left:0"><b>57,104</b><em>target</em></span>
+<span style="left:66.7%;transform:translateX(-50%)"><b>57,404</b><em>entry</em></span>
+<span style="right:0;text-align:right"><b>57,554</b><em>stop</em></span>
+</div>
+<div class="legfoot" style="text-align:left;display:flex;justify-content:space-between">
+<span style="color:var(--red)">cmp 57,860 &middot; stop breached</span>
+<span style="color:var(--red)">-&#8377;13,680</span>
+</div>
+</div>
+
+<div class="legdiv"></div>
+
+<div class="legwrap">
+<div class="leghd"><span class="nm">OPTIONS</span>
+<span class="dirbadge bear">57400 CE &middot; wrt</span></div>
+<div class="decwrap">
+<div class="decbar loss"><i style="width:4%"></i></div>
+<div class="declb"><span><b>947.60</b> written</span><span>4% grown (loss)</span><span><b>987.80</b> now</span></div>
+</div>
+<div class="legfoot" style="color:var(--red)">-&#8377;1,206</div>
+</div>
+
+<button type="button" class="digl">PAST SIGNALS &#8594;</button>
+</div>
+
+</div>
+</body>
+</html>
