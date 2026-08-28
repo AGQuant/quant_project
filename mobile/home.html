@@ -1043,6 +1043,21 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   padding:var(--space-2) var(--space-6);cursor:pointer;white-space:nowrap}
 #heroCard3Toggle button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);
   background:rgba(77,124,254,.12)}
+/* cc#1385 · CARD 3 INTERNAL TRIM, per the founder's own hard constraint ("card height will remain
+   fixed... only internal items size and weight should manage"). Measured before trimming, not
+   guessed: adding adrBar's block made Card 3's own natural height exactly 30.00px taller at every
+   width tested (320/390/430px alike, since the added content is fixed-px, not vw-scaled) — enough
+   to overtake the deck's previous governing height and stretch all 5 cards by that same 30px.
+   Every rule below is scoped to Card 3 ALONE (#heroTrack > .c:nth-child(3)) so Cards 1/2/4/5 keep
+   their existing spacing untouched, and none of them touches adrBar()'s own rule (.adrwrap) — the
+   trim comes entirely from the OI histogram's own vertical rhythm and this card's own header/CTA
+   floor margins, the same class of adjustment cc#1373/1375 already made elsewhere on this deck.
+   Re-measured after applying: Card 3's natural height returns to the pre-cc#1385 governing value
+   at every width — see this task's own result for the exact before/after numbers. */
+#heroTrack > .c:nth-child(3) .oib{margin-top:var(--space-4);padding:20px 0}
+#heroTrack > .c:nth-child(3) .oird{margin-top:var(--space-4)}
+#heroTrack > .c:nth-child(3) > .c2body > .chd{margin-bottom:var(--space-3)}
+#heroTrack > .c:nth-child(3) > :nth-last-child(2){margin-bottom:var(--space-5)}
 /* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
    because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
    the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
@@ -1089,7 +1104,15 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    with a void of its own; see pcrGaugeSvg()'s own comment for the full account and the residual
    that remains even after capping the SVG's own max-width.) */
 .pcr-gauge{margin:calc(5px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
-.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
+/* cc#1385: .pcite (the "PCR 0.94 · 10:30 LIVE" citation line) is Card 2's new visual anchor once
+   the ADV/DECL block moves out — 9.5px (--type-95) read as a footnote under the gauge, too small
+   to carry that role alone. Sized up to --type-15 (15px), the SAME step this file already uses
+   for comparable bold data readouts (.ixlv's index level, .v10sum b's trade stats, .grp h3's card
+   sub-heading) — a real existing rung on the --type-* ramp (scorr_themes.css), not a number picked
+   fresh. Centred (was left-aligned, inherited from .pmood's block flow) so it reads as a
+   deliberate second focal point under the gauge rather than a stray line drifting left. */
+.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);
+  color:var(--txt,#E9EEFB);text-align:center}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
   letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--txt,#E9EEFB);margin-bottom:var(--space-3)}
 .v10r{display:flex;align-items:center;gap:var(--space-8);min-height:32px}
@@ -3406,19 +3429,20 @@ function idxFooter(d){
 }
 
 function heroCard2(d){
-  /* cc#1376: header/mood/ADR wrapped in .c2body, a flex:1 sub-column that fills whatever slack
-     cc#1374's height sync leaves in this card and spreads it as EVEN gaps between its own three
-     children (justify-content:space-between) instead of the old margin-top:auto on the button,
-     which dumped 100% of the surplus into one gap right above DAILY DIGEST. See the .c2body CSS
-     for the mechanics and why the existing floor margins are kept, not replaced. */
+  /* cc#1376: header/mood wrapped in .c2body, a flex:1 sub-column that fills whatever slack
+     cc#1374's height sync leaves in this card and spreads its own surplus as an even gap
+     (chd↔pmood) instead of the old margin-top:auto on the button, which dumped 100% of the
+     surplus into one gap right above DAILY DIGEST. See the .c2body CSS for the mechanics and why
+     the existing floor margins are kept, not replaced.
+     cc#1385: adrBar(d.hero) MOVES OUT of this card — founder ask, relocated to the bottom of
+     Card 3 instead (see heroCard3() below), below whatever cc#1384's toggle shows there. .c2body
+     drops from three children to two (chd/pmood) — the shared space-between rule still works
+     with two, it just has one gap to spread instead of two; re-measured, not assumed, see this
+     task's own result for the before/after deck-height numbers (unchanged, per the founder's hard
+     constraint). adrBar()'s own function body is untouched, only this call site moved. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
     + pcrMood(d.hero || {})
-    /* cc#1374: the NIFTY/BANKNIFTY pair (cc#1369's idxRowPair) is REMOVED from this card —
-       founder correction, 28-Aug: it duplicated Card 1's own index footer. adrBar(d.hero) MOVES
-       BACK here from Card 1 (cc#1372 had moved it the other way) — this card now focuses on
-       the PCR mood word and breadth, ahead of the Digest button. */
-    + adrBar(d.hero || {})
     + '</div>'
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
        one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
@@ -3442,9 +3466,18 @@ function heroCard2(d){
    before: oiCard()'s bare-mode body carries its own .asof.oiasof line once the fetch fills
    #heroCard3Body in -- untouched by this task. */
 function heroCard3(d){
+  /* cc#1385: adrBar(d.hero) lands here — moved OUT of Card 2, unchanged internally, only the
+     call site is new. It is Card 3's THIRD .c2body child now (chd, #heroCard3Body, adrwrap), so
+     the shared space-between rule spreads its own surplus the same three-child way Card 2 used to
+     (cc#1376) rather than Cards 4/5's two-child flex-start special case (cc#1383) — no override
+     needed here, confirmed by measurement not assumed. Sits AFTER #heroCard3Body, i.e. below
+     whatever cc#1384's NIFTY/BankNifty toggle + OI content renders, in both toggle states — it
+     reads from d.hero, which does not change with IBK.sym, so its own numbers are symbol-agnostic
+     by construction. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t" id="heroCard3Title">Max Pain NIFTY</div>'
     + '<div class="rgt ibktg" id="heroCard3Toggle">' + ibkToggleHtml() + '</div></div>'
     + '<div id="heroCard3Body"><div class="unavail">Loading&hellip;</div></div>'
+    + adrBar(d.hero || {})
     + '</div>'
     + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
     + '</div>';
