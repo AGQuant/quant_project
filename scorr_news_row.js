@@ -105,7 +105,10 @@
     var shortCat = catShort(cat);
     if (shortCat) meta.push('<span class="nrtag">' + esc(shortCat) + '</span>');
     if (t) meta.push('<span class="nrago">' + esc(t) + '</span>');
-    if (n.source) meta.push('<span class="nrsrc">' + esc(n.source) + '</span>');
+    /* cc#1370: the raw third-party source/wire-agency name is DROPPED, universal across every
+       news-card surface (founder screenshot feedback 28-Aug) — this row keeps only the category
+       tag and the polish-time age. .nrsrc had no dedicated rule (it inherited .nrmeta span's
+       styling), so the branch removal here is the whole of the change. */
     return '<div class="nrow' + (opts.onclick ? ' tap' : '') + '"' + tap + '>'
       + '<span class="nrdot ' + sentiClass(n.sentiment) + '"></span>'
       + '<div class="nrbody">'

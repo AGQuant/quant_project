@@ -606,6 +606,9 @@ function artFull(a, isLead){
   </article>`;
 }
 
+// cc#1370: the raw third-party source/wire-agency name (a.source) is DROPPED from the foot row,
+// universal rule across every news-card surface — founder screenshot feedback 28-Aug. artFull()
+// already carries a fixed "Source AI CIO" label instead of the raw agency name; that stays as is.
 function artCompact(a, showPill){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
@@ -624,8 +627,7 @@ function artCompact(a, showPill){
     <div class="art-foot">
       ${pill}
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
-      <span>·</span>${sym}<span>${esc(a.source||"")}</span>
-      <span>·</span><span>${timeAgo(a.published_time)}</span>
+      <span>·</span>${sym}<span>${timeAgo(a.published_time)}</span>
     </div>
   </article>`;
 }
