@@ -524,10 +524,12 @@ body[data-theme]{
    THE LEDGE NEEDS SOMEWHERE TO LAND. .slab paints a 5px shadow BELOW the border box, and a shadow
    takes no space in flow, so the next section would otherwise measure its margin from a line the
    ledge is still painting on. The 5px bottom margin is that reserve, written to match the ledge. */
-.ibk-intel{display:block;width:100%;box-sizing:border-box;margin:var(--space-10) 0 var(--space-5);text-align:center;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
-  letter-spacing:var(--track-em16);color:var(--cyan,#37D3E8);text-decoration:none;min-height:44px;
-  line-height:20px}
+/* cc#1382: .ibk-intel is REMOVED -- its only consumer, the standalone section's INDEX INTEL
+   button, is gone with cc#1381's section (folded into Card 3, which reuses .digl.slab verbatim
+   per the founder's literal "just like Daily Digest" ask, not this class). Confirmed via grep
+   before removing -- the rationale above this rule (why a .slab, why the 5px ledge margin) is
+   left as historical record of a decision that still applies to every OTHER .slab button on this
+   page, matching this file's own convention elsewhere. */
 /* cc#1328: .ibk-flat and .ibk2* (the old 4-slot swipe deck's card chrome, cc#1304) are removed
    with ibkCardInner/renderIndexBook, their only callers. Replaced below by a full port of
    scorr_v10_signal.html's "THE BOOK · V10" section — the OI wall chart (oiCard) and the
@@ -1006,15 +1008,21 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    resync (data refresh, resize, a chip chart opening/closing) since it is pure CSS, not a
    snapshot number. min-height:0 overrides the flex item's default min-height:auto floor so the
    grow can actually reach its target size. */
-#heroTrack > .c:nth-child(2) > .c2body{display:flex;flex-direction:column;
+/* cc#1382: both rules GENERALIZED from #heroTrack > .c:nth-child(2) to a bare #heroTrack > .c —
+   the flex:1/space-between mechanism is pattern-generic (bottom-anchor a button under a block of
+   content), not specific to card 2's own content, so Card 3 (cc#1382, Max Pain) reuses the exact
+   same CSS instead of a duplicate nth-child(3) copy. Card 1 has no .c2body element at all (its
+   own top-anchored fixed-gap model, cc#1134/1359, is untouched), so the wider selector changes
+   nothing there. var(--rh,1)'s fallback is 1 -- the same effective value card 2's own explicit
+   --rh:1 sets -- so Card 3, which never declares --rh, inherits identical spacing math for free. */
+#heroTrack > .c > .c2body{display:flex;flex-direction:column;
   justify-content:space-between;flex:1 1 auto;min-height:0}
-#heroTrack > .c:nth-child(2) > .c2body > .chd{margin-bottom:calc(6px * var(--rh,1))}
-/* .c2body is now the block above the CTA — :nth-last-child(2) still finds it without a name
-   change, because .c:nth-child(2) has exactly two children now (.c2body, .digl) and the rule was
-   always structural on purpose (see cc#1182). This is card 2's OWN minimum CTA clearance floor,
-   same role it played before cc#1376, just landing on the wrapper instead of directly on
-   adrwrap. */
-#heroTrack > .c:nth-child(2) > :nth-last-child(2){margin-bottom:var(--space-14)}
+#heroTrack > .c > .c2body > .chd{margin-bottom:calc(6px * var(--rh,1))}
+/* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
+   because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
+   the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
+   clearance floor. */
+#heroTrack > .c > :nth-last-child(2){margin-bottom:var(--space-14)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
    .dense. It keeps its own blue: the card asks for the bevel FAMILY, and the Digest doorway has
@@ -1928,16 +1936,22 @@ function chainAsOf(tick){
   var today = IST().toISOString().slice(0, 10);
   return {txt: 'OI as of ' + d + (t ? ' ' + t : '') + ' IST', stale: (d < today), day: d};
 }
-function oiUnavail(name, why){
+/* cc#1382: bare param added, default false/undefined -- unchanged for the only existing caller
+   (renderIbkDeck's old standalone-section path, now itself replaced by the bare path, but the
+   parameter is additive so nothing upstream had to change to keep working). bare=true drops the
+   .vpage/.card wrapper AND the .grp/h3 title row entirely, for embedding inside heroCard3's own
+   .chd/.rgt header instead of duplicating one. */
+function oiUnavail(name, why, bare){
+  if (bare) return '<div class="unavail">' + esc(why) + '</div>';
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3></div>'
     + '<div class="unavail">' + esc(why) + '</div></div></div>';
 }
 /* ── the OI wall histogram, ported verbatim from oiCard() (scorr_v10_signal.html L669-746) —
    logic and structure untouched, only the colour tokens are remapped per the CSS-block table. */
-function oiCard(name, oi, mp){
+function oiCard(name, oi, mp, bare){
   if (!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
-    return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.');
+    return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.', bare);
   var rows = oi.strikes, mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
   /* cc#1354 · one-sided tick (26-Aug: NIFTY PE feed gap). The server flags it; the card
      keeps drawing the side that exists, suppresses the dead side's WALL tag, axis label and
@@ -2086,9 +2100,16 @@ function oiCard(name, oi, mp){
     story = '<div class="oird">no 09:20 baseline this session — OI change hidden</div>';
   }
   var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
-  return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-    + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>'
+  /* cc#1382: bare mode drops .vpage/.card AND the .grp/h3 title row (the caller supplies its own
+     .chd header, so a second title row here would duplicate it) -- but the .asof freshness stamp
+     is real information (the OI CHAIN's own as-of time, distinct from anything Card 1/2's header
+     shows), so it is NOT dropped, just relocated: it renders as its own standalone line, first in
+     the body, still carrying the identical .asof.oiasof class and stale styling. */
+  var header = bare
+    ? '<div class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</div>'
+    : '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
+      + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>';
+  var body = header
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + xs
     /* cc#1361 · footer, founder 08:43: line 1 = the facts one step larger (expiry dropped from
@@ -2102,8 +2123,8 @@ function oiCard(name, oi, mp){
     + '</div>'
     + story
     + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
-        + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '')
-    + '</div></div>';
+        + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '');
+  return bare ? body : '<div class="vpage"><div class="card">' + body + '</div></div>';
 }
 
 /* cc#1381 · posSide()/bookDir()/bookRange()/bookRow()/bookCard() are REMOVED with the FUTURES/
@@ -2123,10 +2144,19 @@ function oiCard(name, oi, mp){
 
 /* ── data + assembly. NIFTY only, per the founder's direct choice (28-Aug ~21:21 IST): BankNifty
    OI wall, Futures and Options pages are dropped from Home's Index Book section -- all three stay
-   fully available on /m/v10, unchanged, via the INDEX INTEL button below this card. */
+   fully available on /m/v10, unchanged, via the INDEX INTEL button on Card 3.
+   cc#1382 · Card 3 IS the Index Book now (folded into #heroTrack, see heroCard3() below) --
+   #ibkHost (cc#1381's standalone section) is gone, this targets #heroCard3Body, the placeholder
+   host inside Card 3's own .c2body. bare=true (oiCard's new 4th param) drops the .vpage/.card/
+   .grp/h3 wrapper Card 3's own .chd header already supplies. */
 function renderIbkDeck(oiN, mpN){
-  var host = document.getElementById('ibkHost');
-  if (host) host.innerHTML = oiCard('NIFTY', oiN, mpN);
+  var host = document.getElementById('heroCard3Body');
+  if (host) host.innerHTML = oiCard('NIFTY', oiN, mpN, true);
+  /* cc#1382, same lesson as cc#1377: this swap can SHRINK Card 3's content (Loading -> a shorter
+     real card, or a real card -> a shorter one on refresh), and ResizeObserver does not fire when
+     a shrinking box stays pinned at its old min-height floor -- explicit resync, rAF-wrapped so
+     the innerHTML write commits before syncHeroCardHeights measures. */
+  requestAnimationFrame(syncHeroCardHeights);
 }
 function loadIndexBook(){
   var oiN = null, mpN = null;
@@ -3257,7 +3287,28 @@ function heroCard2(d){
     + '<a class="digl slab" href="/m/digest">DAILY DIGEST &#8594;</a>'
     + '</div>';
 }
-/* the deck: two cards, snap-scrolled, with a dot that follows the finger */
+/* cc#1382 · CARD 3 — NIFTY MAX PAIN, folded into #heroTrack from cc#1381's standalone section
+   (founder-direct, 28-Aug ~22:0x IST: same size as Cards 1/2 via cc#1374's live sync, an INDEX
+   INTEL button styled and positioned exactly like Card 2's DAILY DIGEST). Same .c/.c2body shell
+   Card 2 uses — NOT the old .vpage/.card wrapper oiCard() normally emits, which would double-
+   border a card already living inside .c (oiCard's bare=true param strips that, see its own
+   comment). #heroCard3Body is the placeholder host loadIndexBook()/renderIbkDeck() (unchanged
+   names/wiring from cc#1381, just re-targeted) replace after paint, same always-rendered-then-
+   filled pattern as Card 1/2's own content.
+   .rgt is deliberately EMPTY at paint time — unlike Card 1's hero.as_of or Card 2's PIV.__date,
+   there is no OI-chain freshness figure available before the fetch resolves, and this file's own
+   rule is absence over a guess. The real freshness stamp still reaches the screen: oiCard()'s
+   bare-mode body carries its own .asof.oiasof line (see that function's comment) once the fetch
+   fills #heroCard3Body in. */
+function heroCard3(d){
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Max Pain NIFTY</div>'
+    + '<div class="rgt"></div></div>'
+    + '<div id="heroCard3Body"><div class="unavail">Loading&hellip;</div></div>'
+    + '</div>'
+    + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
+    + '</div>';
+}
+/* the deck: three cards, snap-scrolled, with a dot that follows the finger */
 /* cc#950: the book deck's dot updater. Same shape as heroDots below — one function per deck
    because each owns its own track and dot row, and the two decks are never on screen together
    in the same scroll position. Tapping a dot scrolls the track, so the dots are a control and
@@ -3327,12 +3378,21 @@ var HERO_RO = null;
 var HERO_SYNC_GUARD = false;
 var HERO_LAST_MAX = null;
 
+/* cc#1382 · GENERALIZED TO N CARDS. Card 3 (Max Pain) makes the hero deck a 3-card track, and
+   both functions below hardcoded exactly track.children[0]/[1] (c1, c2) throughout -- a real
+   prerequisite to fix before Card 3 could exist, not decoration. Both now loop over ALL of
+   #heroTrack's current children: clear every card's inline min-height, measure every card, take
+   the overall max, apply it to every card, observe every card. Nothing about the GUARD mechanics
+   below changed -- the reentrancy problem and its fix (observer attached once, guard released via
+   a double rAF) are unrelated to how many cards there are, so cc#1374's own settle-count target
+   (2-3 calls, no runaway) and cc#1377's resync-on-content-change fix both carry over unchanged,
+   just now iterating N elements instead of 2 named variables. */
 function syncHeroCardHeights(){
   if (HERO_SYNC_GUARD) return;
   var track = document.getElementById('heroTrack');
   if (!track) return;
-  var c1 = track.children[0], c2 = track.children[1];
-  if (!c1 || !c2) return;
+  var cards = Array.prototype.slice.call(track.children);
+  if (cards.length < 2) return;
 
   /* FIRST DRAFT DISCONNECTED/RECONNECTED THE OBSERVER HERE, EVERY CALL, AND THAT WAS THE LOOP —
      measured at ~180 calls in a 3s idle window against a target of 2-3. ResizeObserver's spec
@@ -3341,24 +3401,20 @@ function syncHeroCardHeights(){
      notification every single time — the exact loop item 4 asked to be guarded against. The
      observer is now attached ONCE, in heroSetupHeightSync(), and never touched again here. */
 
-  /* item 2: clear any prior inline min-height on BOTH cards before measuring, so a stale value
+  /* item 2: clear any prior inline min-height on EVERY card before measuring, so a stale value
      from the last run can never bias this one — a card can only report its true natural height
-     with nothing already forcing it taller. Clearing the shorter card is itself a real resize
+     with nothing already forcing it taller. Clearing a shorter card is itself a real resize
      (forced height -> smaller natural height), which is genuine ResizeObserver input, not noise —
      the guard below is what stops that from cascading into a second full pass. */
   HERO_SYNC_GUARD = true;
-  c1.style.minHeight = '';
-  c2.style.minHeight = '';
-  var h1 = c1.getBoundingClientRect().height;
-  var h2 = c2.getBoundingClientRect().height;
-  var max = Math.max(h1, h2);
+  cards.forEach(function(c){ c.style.minHeight = ''; });
+  var max = cards.reduce(function(m, c){ return Math.max(m, c.getBoundingClientRect().height); }, 0);
   HERO_LAST_MAX = max;
-  c1.style.minHeight = max + 'px';
-  c2.style.minHeight = max + 'px';
+  cards.forEach(function(c){ c.style.minHeight = max + 'px'; });
 
   /* THE GUARD MUST OUTLIVE THIS FUNCTION, not just its synchronous body — clearing then
-     re-applying min-height above is a real resize on whichever card was shorter, and the
-     ResizeObserver notification for it is queued by the browser, not delivered synchronously.
+     re-applying min-height above is a real resize on whichever cards were shorter, and the
+     ResizeObserver notification for them is queued by the browser, not delivered synchronously.
      Releasing the guard here (before that notification arrives) is what let the RO callback see
      guard=false and start a whole new pass, which itself resizes and requeues, forever. Two
      rAFs is the same margin cc#1312's veil-click race already uses in this file for "let the
@@ -3373,8 +3429,8 @@ function syncHeroCardHeights(){
 function heroSetupHeightSync(){
   var track = document.getElementById('heroTrack');
   if (!track) return;
-  var c1 = track.children[0], c2 = track.children[1];
-  if (!c1 || !c2) return;
+  var cards = Array.prototype.slice.call(track.children);
+  if (cards.length < 2) return;
 
   /* item 3: first paint is already correct — rAF so the browser has committed the layout this
      render() pass just injected before the first measurement reads it. */
@@ -3383,14 +3439,13 @@ function heroSetupHeightSync(){
   /* item 4: the font-swap gap cc#1369 flagged and never closed. FOUT/FOIT on a real device
      reflows hero-mood/hero-why/the chip grid/idxFooter's price text AFTER this first paint —
      exactly the scenario a static px number computed pre-font-swap cannot see coming. A
-     ResizeObserver on both cards' natural content box catches that reflow whenever it lands,
+     ResizeObserver on every card's natural content box catches that reflow whenever it lands,
      with no dependency on knowing WHEN a given browser finishes swapping in Space Grotesk /
      IBM Plex Mono. Old browsers without ResizeObserver simply keep today's first-paint numbers —
      no crash, no regression, just no live re-sync on those. */
   if (typeof ResizeObserver === 'function'){
     HERO_RO = new ResizeObserver(function(){ syncHeroCardHeights(); });
-    HERO_RO.observe(c1);
-    HERO_RO.observe(c2);
+    cards.forEach(function(c){ HERO_RO.observe(c); });
   }
 
   /* item 5: window resize (debounced) and orientation change — a rotated phone or a resized
@@ -3469,6 +3524,15 @@ Promise.all([
      payload field hero.v10 is left alone - that is backend, nothing else on this page reads it,
      and removing a payload field is not what this card asked for. The .v10b / .v10i rules go
      from the stylesheet with the markup they styled. */
+  /* cc#1382: ONE declaration of the hero deck's card count, used to generate the dot row below
+     instead of hardcoding "<i></i>" N times in a second place that could drift from the actual
+     card count. heroDots()/glitterSync() (cc#1378) already loop over track.children/dots.children
+     generically and need no change -- confirmed by reading them, not assumed. */
+  var HERO_CARD_COUNT = 3;
+  var heroDotsHtml = '';
+  for (var hdi = 0; hdi < HERO_CARD_COUNT; hdi++){
+    heroDotsHtml += '<i class="' + (hdi === 0 ? 'on' : '') + '"></i>';
+  }
   h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
     + '<div class="c"><div class="chd"><div class="t">The market today</div>'
     + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
@@ -3549,7 +3613,8 @@ Promise.all([
        The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
     + '</div>'
     + heroCard2(d)
-    + '</div><div class="dots" id="heroDots"><i class="on"></i><i></i></div></div>';
+    + heroCard3(d)
+    + '</div><div class="dots" id="heroDots">' + heroDotsHtml + '</div></div>';
 
   /* 2 · V8 OPEN BOOK — unrealised split with % of capital deployed (founder 08-Aug) */
   var bk = d.book || {};
@@ -3655,20 +3720,15 @@ Promise.all([
      box's whole innerHTML. A single entry point that disappears on the days the book is empty or
      the endpoint is down is not a single entry point, it is an intermittent one. Out here it is
      painted with the section and never depends on a fetch. */
-  /* cc#1381 \u00b7 SINGLE NIFTY MAX PAIN CARD, founder-direct (28-Aug ~21:21 IST): asked which of
-     the 4 pages to keep, the founder chose NIFTY only over merging in index price or keeping
-     all four with NIFTY defaulted first. BankNifty/Futures/Options are still fully available
-     on /m/v10 via the INDEX INTEL button below, unchanged -- this trims what HOME shows, not
-     the app.
-     The old .swipe/.swipe-t/.dots/#ibkTrack/#ibkDots scaffold (cc#1304/cc#1328) is GONE with
-     it -- a single page needs no scroll-snap track or dot indicator. #ibkHost is a plain
-     static host, painted with its own "Loading\u2026" card immediately (same always-rendered
-     rule as before: ALWAYS RENDERED, NEVER CONDITIONAL, per cc#1158 above) and
-     loadIndexBook()/renderIbkDeck() replace it with the real NIFTY card after paint. */
-  h += '<div class="sect">INDEX BOOK \u00b7 OPEN</div>'
-    + '<div id="ibkHost"><div class="vpage"><div class="card"><div class="grp"><h3>Max Pain NIFTY</h3></div>'
-    + '<div class="unavail">Loading\u2026</div></div></div></div>'
-    + '<a class="ibk-intel slab" href="/m/v10">INDEX INTEL \u203a</a>';
+  /* cc#1382 \u00b7 SUPERSEDES cc#1381 ABOVE. The founder\u2019s standalone-section direction from
+     21:21 IST was itself superseded ~45 minutes later (22:0x IST): NIFTY Max Pain now lives as
+     Card 3 inside #heroTrack (heroCard3(), same size as Cards 1/2 via cc#1374\u2019s generalized
+     N-card sync, INDEX INTEL styled exactly like DAILY DIGEST) instead of this separate
+     \u201cINDEX BOOK \u00b7 OPEN\u201d section below the deck. The .sect header, #ibkHost and the
+     .ibk-intel button are REMOVED -- not hidden, not duplicated. loadIndexBook()/
+     renderIbkDeck() keep their names and their NIFTY-only fetches (cc#1381\u2019s own dead-code
+     audit stands) but now target #heroCard3Body inside the deck; see heroCard3()\u2019s own
+     comment for why its content host, not this section, is the paint-then-fill target. */
 
   h += '<div class="sect">THE BOOK</div>'
     + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
