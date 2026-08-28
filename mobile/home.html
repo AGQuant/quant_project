@@ -873,20 +873,11 @@ body[data-theme]{
 .dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:var(--radius-3)}
-/* cc#1369: .irow itself is gone — idxRow's caller is idxRowPair now, laying two columns side by
-   side instead of stacking two full-width rows. .icol carries the name/level/side line as a
-   column; everything below that isn't about the row's own axis is unchanged. */
-.irowpair{display:flex;gap:var(--space-14);margin-top:calc(11px * var(--rh,1))}
-.icol{flex:1;min-width:0}
-.icol .inm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:#FF9F45}
-.icol .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-16);font-weight:800}
-.icol .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
-.ibar{position:relative;height:4px;border-radius:var(--radius-2);background:var(--panel2);
-  border:var(--bw-1) solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
-.ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:var(--space-n45) 0 0 var(--space-n45);
-  border-radius:50%;background:var(--amber,#F5B94A);border:var(--bw-2) solid var(--panel)}
-.isr{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
-.isr span:last-child{margin-left:auto}
+/* cc#1374: .irowpair/.icol/.ibar/.isr REMOVED — idxRowPair no longer has a caller (see the
+   note by idxFooter/heroCard2). .ixpv below is the one line of this rule set still needed —
+   the pivot-side tag, now inline in Card 1's own index row instead of a column of its own. */
+.ixpv{font-size:var(--type-95);color:var(--txt,#E9EEFB);margin-left:auto;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:34vw}
 /* cc#1369 · the advance-decline bar — "a bordered rectangular pipe" in the founder's own words.
    .adrpipe is the pipe: a bordered rectangle, overflow hidden so the two fills can never bleed
    past its own outline whatever the two percentages round to. --grn/--red are the same tokens
@@ -953,7 +944,13 @@ body[data-theme]{
   line-height:20px}
 /* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
 .pmood{margin-bottom:calc(4px * var(--rh,1))}
-.pmood .pw{font-size:var(--type-21);font-weight:800;letter-spacing:var(--track-em3);line-height:1.15}
+/* cc#1374: SIZE PARITY WITH CARD 1 (founder correction, 28-Aug) — the PCR word (Greed / Caution
+   / etc) was var(--type-21), visibly smaller than Card 1's BEARISH, and mixed-case. This copies
+   Card 1's own cc#1352 override verbatim — same clamp(26px,8vw,32px), same forced uppercase —
+   rather than inventing a new size, so the two mood words carry one shared rule, not two numbers
+   that can drift apart later. */
+.pmood .pw{font-size:clamp(26px,8vw,32px);font-weight:800;letter-spacing:var(--track-em3);
+  line-height:1.02;text-transform:uppercase}
 .pmeter{display:flex;gap:var(--space-4);margin:calc(8px * var(--rh,1)) 0 calc(5px * var(--rh,1))}
 .pmeter i{flex:1;height:5px;border-radius:var(--radius-3);background:var(--line2);opacity:.45}
 .pmeter i.on{opacity:1}
@@ -2990,27 +2987,14 @@ var PIV = null;   // symbol -> {pp,r1,s1,...} from /api/paper/pivots
    in ONE row instead. idxCol keeps every number idxRow showed (nothing dropped, per the same
    "no bar drawn to a guess" rule above) — identical math in a narrower column; idxRowPair lays
    two columns out in parallel so the pair now costs one stack's height, not two. */
-function idxCol(name, sym, level){
-  var pv = PIV && PIV[sym];
-  var s1 = pv ? Number(pv.s1) : null, r1 = pv ? Number(pv.r1) : null,
-      pp = pv ? Number(pv.pp) : null;
-  var pos = null;
-  if (level != null && s1 != null && r1 != null && r1 !== s1)
-    pos = Math.max(0, Math.min(1, (Number(level) - s1) / (r1 - s1)));
-  var side = (level == null || pp == null) ? ''
-    : (Number(level) >= pp ? 'above pivot' : 'below pivot');
-  return '<div class="icol"><div class="inm">' + esc(name) + '</div>'
-    + '<div class="ilv">' + px(level) + '</div>'
-    + (side ? '<div class="ipp">' + side + '</div>' : '')
-    + (pos == null
-        ? '<div class="isr"><span>levels pending</span></div>'
-        : '<div class="ibar"><div class="idot" style="left:' + (pos * 100).toFixed(1) + '%"></div></div>'
-          + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>')
-    + '</div>';
-}
-function idxRowPair(nameA, symA, levelA, nameB, symB, levelB){
-  return '<div class="irowpair">' + idxCol(nameA, symA, levelA) + idxCol(nameB, symB, levelB) + '</div>';
-}
+/* cc#1374 · idxCol/idxRowPair REMOVED (founder redesign, 28-Aug): the side-by-side NIFTY/
+   BANKNIFTY pair that lived on Card 2 is gone -- Card 2 was duplicating Card 1's own index
+   footer, and the founder's ruling keeps the index numbers on Card 1 only, enriched with the
+   pivot-side tag these two functions used to compute (that math now lives inline in idxFooter
+   below, same PIV lookup, nothing recomputed differently). Per this file's own cc#1158 lesson --
+   "a builder whose only consumer is gone is dead code that still reads as live" -- both
+   functions are deleted with their call site, not left behind. The .icol/.irowpair/.ibar/.isr
+   CSS they styled is removed below for the same reason. */
 
 /* cc#1369: the advance-decline breadth bar — "a bordered rectangular pipe" in the founder's own
    words, a horizontal bar/tube with a visible outline. It fills the space idxRowPair just gave
@@ -3118,29 +3102,41 @@ function idxFooter(d){
      same shape as nifty (1,296 BANKNIFTY closes against NIFTY50's 1,297, verified before wiring).
      The chart lands in the shared #chiptrend host below the chips, exactly where a chip tap puts
      it, so tapping a footer index and tapping a Nifty chip behave identically. */
-  var cell = function(label, key, kind){
+  /* cc#1374 · pivot-side tag, ADJACENT on the same row (founder correction, 28-Aug -- the first
+     pass put it on its own line under the level, which the founder circled as wrong). Same PIV
+     lookup and >=/< pp math idxCol used to compute this for Card 2 before that card lost the
+     index pair -- nothing recomputed differently, just inlined here since idxCol is gone.
+     `sym` is the PIV/pivots key (NIFTY50 / BANKNIFTY), separate from `key` because the ticker
+     array names NIFTY 'NIFTY' but the pivots endpoint names it 'NIFTY50' -- same mismatch idxCol
+     handled by taking both a name and a sym. Null pivot data prints nothing, never a guess. */
+  var cell = function(label, key, kind, sym){
     var r = t[key] || {};
     var lvl = (r.price == null) ? '\u2014' : px(r.price);
     var chg = (r.chg_pct == null) ? '' :
       '<span class="ixch ' + cls(r.chg_pct) + '">' + pct(r.chg_pct) + '</span>';
+    var pv = PIV && PIV[sym];
+    var pp = pv ? Number(pv.pp) : null;
+    var side = (r.price == null || pp == null) ? ''
+      : (Number(r.price) >= pp ? 'above pivot' : 'below pivot');
     return '<button class="ixcell" onclick="togTrend(event,\'' + kind + '\')"'
       + ' aria-label="' + esc(label) + ', open chart"><span class="ixnm">' + esc(label) + '</span>'
       + '<span class="ixlv">' + esc(lvl) + '</span>' + chg
+      + (side ? '<span class="ixpv">' + side + '</span>' : '')
       + '<span class="ixgl">\u25a6</span></button>';
   };
-  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY', 'nifty')
-       + cell('BANKNIFTY', 'BANKNIFTY', 'banknifty') + '</div>';
+  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY', 'nifty', 'NIFTY50')
+       + cell('BANKNIFTY', 'BANKNIFTY', 'banknifty', 'BANKNIFTY') + '</div>';
 }
 
 function heroCard2(d){
-  var t = {};
-  (d.ticker || []).forEach(function(x){ t[x.name] = x.price; });
   return '<div class="c"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
     + pcrMood(d.hero || {})
-    + idxRowPair('NIFTY 50', 'NIFTY50', t['NIFTY'], 'BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
-    /* cc#1372: adrBar(d.hero) MOVED off this card, to Card 1 (The market today) — founder
-       correction, 28-Aug. Card 2 keeps pcrMood + the NIFTY/BANKNIFTY pair + the Digest button. */
+    /* cc#1374: the NIFTY/BANKNIFTY pair (cc#1369's idxRowPair) is REMOVED from this card —
+       founder correction, 28-Aug: it duplicated Card 1's own index footer. adrBar(d.hero) MOVES
+       BACK here from Card 1 (cc#1372 had moved it the other way) — this card now focuses on
+       the PCR mood word and breadth, ahead of the Digest button. */
+    + adrBar(d.hero || {})
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
        one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
        palette or depth change moves this button with the Index Intel one. */
@@ -3316,12 +3312,11 @@ Promise.all([
         : (hero.vix_chg_pct != null ? ' vixmid' : '')))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
+    /* cc#1374: adrBar(hero) MOVES BACK to Card 2 (heroCard2) — founder correction, 28-Aug,
+       reversing cc#1372. idxFooter is now the LAST block in the cc#1134 column, carrying the
+       inline pivot tag it gained this same round. Still top-anchored, same fixed row-gap, no
+       stretch, no auto margins. */
     + idxFooter(d)
-    /* cc#1372: adrBar(hero) MOVED here from Card 2 (heroCard2) — founder correction, 28-Aug.
-       Now the LAST block in the cc#1134 column, after idxFooter, top-anchored with the same
-       fixed row-gap the rest of this column uses (no stretch, no auto margins). hero is already
-       in scope (the same var hchips/hero-mood/hero-why read above). */
-    + adrBar(hero)
     /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
        28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
        The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
