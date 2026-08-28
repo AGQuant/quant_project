@@ -3131,7 +3131,8 @@ function heroCard2(d){
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
     + pcrMood(d.hero || {})
     + idxRowPair('NIFTY 50', 'NIFTY50', t['NIFTY'], 'BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
-    + adrBar(d.hero || {})
+    /* cc#1372: adrBar(d.hero) MOVED off this card, to Card 1 (The market today) — founder
+       correction, 28-Aug. Card 2 keeps pcrMood + the NIFTY/BANKNIFTY pair + the Digest button. */
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
        one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
        palette or depth change moves this button with the Index Intel one. */
@@ -3307,7 +3308,12 @@ Promise.all([
         : (hero.vix_chg_pct != null ? ' vixmid' : '')))
     + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
     + '</div><div id="chiptrend"></div>'
-    + idxFooter(d)          /* cc#1139: LAST block in the cc#1134 column, after the chip grid */
+    + idxFooter(d)
+    /* cc#1372: adrBar(hero) MOVED here from Card 2 (heroCard2) — founder correction, 28-Aug.
+       Now the LAST block in the cc#1134 column, after idxFooter, top-anchored with the same
+       fixed row-gap the rest of this column uses (no stretch, no auto margins). hero is already
+       in scope (the same var hchips/hero-mood/hero-why read above). */
+    + adrBar(hero)
     /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
        28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
        The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
