@@ -437,7 +437,8 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
         closed_rows = _rows(cur)
 
         cur.execute("""
-            SELECT id, side, leg, opt_strike, opt_type, entry_price, stop, target,
+            SELECT id, side, leg, opt_strike, opt_type, opt_expiry, entry_price, stop, target,
+                   lot_size,
                    (entry_ts AT TIME ZONE 'Asia/Kolkata')::date          AS ed,
                    to_char(entry_ts AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS et
             FROM v10_positions
@@ -445,6 +446,35 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
             ORDER BY entry_ts ASC
         """, (sym,))
         open_rows = _rows(cur)
+
+        # cc#1386 — OPT leg's live premium and both legs' lot_size, for the Home hero deck's
+        # merged Index Positions card (FUT range bar + OPT decay bar need real rupee P&L, which
+        # needs a real lot size; the decay bar also needs a CURRENT premium, which nothing in this
+        # payload carried before this task). Two real gaps, both confirmed by direct DB read this
+        # session, not assumed:
+        #   lot_size — already a column on v10_positions, just never selected above. No new query.
+        #   live_premium (OPT only) — NOT exposed anywhere on the frontend before this. Real
+        #   source: option_chain(underlying, strike, option_type, expiry, ltp, ts), refreshed
+        #   every 5 minutes. CC's own call on where this lands: extended here, on the SAME
+        #   open-trade dict this endpoint already builds, rather than a new endpoint — one extra
+        #   per-row lookup on an endpoint the card already fetches, versus a second round trip for
+        #   one field. NAMING MISMATCH, confirmed the same session: v10_positions.symbol=
+        #   'NIFTY50' but option_chain.underlying='NIFTY' — BANKNIFTY matches as-is in both. Same
+        #   swap this file's own ticker builder already makes (~line 845), not a new convention.
+        #   Looked up per open OPT row (normally 0 or 1 per symbol) rather than a bulk join.
+        opt_underlying = "NIFTY" if sym == "NIFTY50" else sym
+        live_premium = {}
+        for r in open_rows:
+            if (r["leg"] or "").upper() != "OPT" or r["opt_strike"] is None or not r["opt_type"] \
+               or not r["opt_expiry"]:
+                continue
+            cur.execute("""
+                SELECT ltp FROM option_chain
+                WHERE underlying = %s AND strike = %s AND option_type = %s AND expiry = %s
+                ORDER BY ts DESC LIMIT 1
+            """, (opt_underlying, r["opt_strike"], r["opt_type"], r["opt_expiry"]))
+            lp = _rows(cur)
+            live_premium[r["id"]] = float(lp[0]["ltp"]) if lp and lp[0]["ltp"] is not None else None
 
     def f(x):
         return None if x is None else float(x)
@@ -505,7 +535,12 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
              "entry_d": ed, "entry_t": r["et"],
              "entry_price": f(r["entry_price"]), "exit_d": None, "exit_t": None,
              "exit_price": None, "reason": "OPEN", "pnl": None, "points": None,
-             "win": None, "open": True, "stop": f(r["stop"]), "target": f(r["target"])}
+             "win": None, "open": True, "stop": f(r["stop"]), "target": f(r["target"]),
+             # cc#1386: lot_size on BOTH legs (real rupee P&L needs it either way); live_premium
+             # is OPT-only by construction (live_premium only ever has entries for OPT ids, see
+             # the lookup above) and is None for a FUT row or an OPT row option_chain has no
+             # matching snapshot for yet — absence over a guess, same rule as everywhere else.
+             "lot_size": r["lot_size"], "live_premium": live_premium.get(r["id"])}
         trades.append(t)
         if leg != "FUT":
             continue
