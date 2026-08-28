@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DESIGN REF · PCR speedometer gauge (cc#1379)</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@700;800&family=IBM+Plex+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── tokens, verbatim from mobile_endpoints.py MOBILE_CSS .screen block (read live this session,
+   NOT assumed) ── */
+.screen{
+  --bg:#0A0F1E;--panel:#121A33;--panel2:#182241;
+  --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+  --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+  --red:#FF5C6C;--blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#050810;color:var(--txt);font-family:'Sora',sans-serif}
+.screen{max-width:430px;margin:0 auto;padding:24px 16px}
+.note{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);
+  border:1px dashed var(--line2);padding:10px 12px;border-radius:8px;margin-bottom:16px}
+
+/* ── card shell — VERIFIED shape per cc#1378's own finding: plain border-radius:14px,
+   clip-path:none. Reproduced here byte-identical to mobile_endpoints.py's shared .c rule
+   (only .swipe-t/#heroTrack positioning overrides are omitted — not relevant standalone). ── */
+.c{position:relative;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:13px 13px 13px 17px;overflow:hidden}
+
+/* ── .chd / .rgt — from mobile_endpoints.py, unchanged, reproduced for shell context only ── */
+.chd{display:flex;align-items:center;justify-content:space-between;min-height:30px;margin-bottom:6px}
+.chd .t{font-weight:800;font-size:14px}
+.chd .rgt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--mut)}
+
+/* ══ WHAT THIS TASK ACTUALLY CHANGES STARTS HERE ══════════════════════════════════════════
+   Everything above this line is UNCHANGED production code, included only so the ref renders
+   in context. Everything below is the cc#1379 delta. ══════════════════════════════════════ */
+
+/* DELETE — dead the moment pcrMood() stops emitting a .pmeter div (grepped this session:
+   .pmeter has exactly one caller in the whole file, this is it):
+     .pmeter{display:flex;gap:var(--space-4);margin:calc(5px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
+     .pmeter i{flex:1;height:5px;border-radius:var(--radius-3);background:var(--line2);opacity:.45}
+     .pmeter i.on{opacity:1}
+   ADD — same margin rhythm the old .pmeter carried (calc(5px*--rh,1) / calc(3px*--rh,1)),
+   preserving cc#1182/cc#1375's existing --rh multiplier convention on this card. */
+.pcr-gauge{margin:calc(5px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
+
+/* UNCHANGED — .pmood / .pw / .pcite carry over byte-for-byte from the live file, reproduced
+   here only so the block renders correctly in this standalone ref. */
+.pmood{margin-bottom:calc(2px * var(--rh,1))}
+.pmood .pw{font-size:clamp(39px,12vw,48px);font-weight:800;letter-spacing:-0.01em;
+  line-height:1.02;text-transform:uppercase;transform:skewX(-6deg);transform-origin:left center;
+  display:inline-block}
+.pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--txt,#E9EEFB)}
+</style>
+</head>
+<body>
+<div class="screen">
+<div class="note">DESIGN REF · scorr_pcr_gauge_R1 · locks the .pmood internals only (Card 2).<br>
+Header / adrwrap / digl / card shell are shown for context, NOT in scope — do not port them.<br>
+Spec: cc#1379 · session_log 33334 (PCR_MOOD_MAPPING_V2)</div>
+
+<div class="c">
+<div class="chd"><div class="t">Market mood &middot; PCR</div><div class="rgt">08-28</div></div>
+<div id="pmoodHost"></div>
+</div>
+
+<div class="note" style="margin-top:16px">Second render, PCR 0.42 (Extreme Fear band) — proves the
+needle and band ring both track a very different value correctly, not just the one screenshot
+number.</div>
+<div class="c">
+<div class="chd"><div class="t">Market mood &middot; PCR</div><div class="rgt">08-28</div></div>
+<div id="pmoodHost2"></div>
+</div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════════════════════
+   EVERYTHING BELOW THIS LINE IS THE EXACT JS TO PORT INTO mobile/home.html.
+   Copy verbatim. Insertion points are marked BEFORE/AFTER against the live file's current
+   content (read this session, sha 5d11e63c).
+   ════════════════════════════════════════════════════════════════════════════════════════ */
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* ── BEFORE (live today) ──
+var PCR_BANDS = [
+  [-Infinity, 0.5, 'Extreme Fear', 'var(--red,#FF5C6C)'],
+  [0.5,       0.8, 'Fear',         'var(--red,#FF5C6C)'],
+  [0.8,       1.0, 'Caution',      'var(--amber,#F5B94A)'],
+  [1.0,       1.4, 'Greed',        'var(--grn,#2FD48B)'],
+  [1.4,  Infinity, 'Extreme Greed','var(--grn,#2FD48B)']
+];
+   ── AFTER (this task) — ONLY the two label strings change, per session_log 33334.
+   Numeric cutoffs and every colour value are byte-identical to today; pcrBand()'s threshold
+   logic below is completely untouched. ── */
+var PCR_BANDS = [
+  [-Infinity, 0.5, 'Extreme Fear', 'var(--red,#FF5C6C)'],
+  [0.5,       0.8, 'Cautious',     'var(--red,#FF5C6C)'],
+  [0.8,       1.0, 'Neutral',      'var(--amber,#F5B94A)'],
+  [1.0,       1.4, 'Greed',        'var(--grn,#2FD48B)'],
+  [1.4,  Infinity, 'Extreme Greed','var(--grn,#2FD48B)']
+];
+
+/* UNCHANGED — reproduced only because pcrGaugeSvg() below calls it. Do not re-paste over the
+   live file's copy, it is not being edited. */
+function pcrBand(v){
+  if (v == null || isNaN(Number(v))) return -1;
+  var x = Number(v);
+  if (x < 0.5)  return 0;
+  if (x < 0.8)  return 1;
+  if (x < 1.0)  return 2;
+  if (x <= 1.4) return 3;
+  return 4;
+}
+
+/* ── NEW FUNCTION — insert directly above pcrMood() in mobile/home.html.
+   Car-speedometer gauge, 0-200 scale (gaugeValue = pcr*100). Band boundaries and colours are
+   read straight off PCR_BANDS — ONE source of truth, so a future PCR_BANDS edit (another
+   relabel, or a threshold move) can never leave this gauge showing stale cutoffs. The two red
+   tiers and two green tiers share their hue's existing var() (byte-identical to what the mood
+   word already renders in, proven live today) and are told apart by stroke-opacity, not a new
+   hex — zero new raw colour primitives, so this clears the P8 theme_validate ratchet by
+   construction, not by counting afterwards. Needle position is a VISUAL clamp to [0,200] only:
+   the PCR figure printed in .pcite below the gauge is never touched by this function and never
+   scaled — a real reading above 2.00 pins the needle at the dial's edge like a physical
+   speedometer while the printed number stays exact (data-honesty requirement, not styling). */
+var PCR_GAUGE_OPACITY = [1, 0.55, 1, 0.55, 1];
+function pcrGaugeSvg(pcrRaw){
+  var cx = 150, cy = 150, R = 110, SW = 16;
+  function pt(val, r){
+    r = r || R;
+    var clamped = Math.min(200, Math.max(0, val));
+    var th = Math.PI * (1 - clamped / 200);
+    return { x: cx + r * Math.cos(th), y: cy - r * Math.sin(th) };
+  }
+  var bands = '';
+  PCR_BANDS.forEach(function(b, j){
+    var lo = (b[0] === -Infinity) ? 0   : b[0] * 100;
+    var hi = (b[1] ===  Infinity) ? 200 : b[1] * 100;
+    var p0 = pt(lo), p1 = pt(hi);
+    bands += '<path d="M' + p0.x.toFixed(1) + ',' + p0.y.toFixed(1)
+      + ' A' + R + ',' + R + ' 0 0 1 ' + p1.x.toFixed(1) + ',' + p1.y.toFixed(1) + '"'
+      + ' stroke="' + b[3] + '" stroke-opacity="' + PCR_GAUGE_OPACITY[j] + '"'
+      + ' stroke-width="' + SW + '" fill="none"/>';
+  });
+  var needle = '';
+  if (pcrRaw != null && !isNaN(Number(pcrRaw))){
+    var gv = Number(pcrRaw) * 100;                    // VISUAL scale only, clamped in pt()
+    var tip = pt(gv, R - SW / 2 - 8);
+    needle = '<line x1="' + cx + '" y1="' + cy + '" x2="' + tip.x.toFixed(1) + '" y2="' + tip.y.toFixed(1)
+      + '" stroke="var(--txt,#E9EEFB)" stroke-width="4" stroke-linecap="round"/>'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="var(--txt,#E9EEFB)"/>'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="3.5" fill="var(--panel,#121A33)"/>';
+  }
+  var ticks = [0, 50, 80, 100, 140, 200].map(function(v){
+    var p = pt(v, R + 16);
+    return '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + 3).toFixed(1) + '" font-size="9"'
+      + ' fill="var(--dim,#5E6B8F)" text-anchor="middle"'
+      + ' font-family="IBM Plex Mono,ui-monospace,monospace">' + v + '</text>';
+  }).join('');
+  return '<div class="pcr-gauge"><svg viewBox="0 0 300 160"'
+    + ' style="width:100%;max-width:280px;display:block;margin:0 auto" role="img"'
+    + ' aria-label="PCR gauge, 0 to 200 scale">' + bands + needle + ticks + '</svg></div>';
+}
+
+/* ── BEFORE (live today) ──
+function pcrMood(hero){
+  var i = pcrBand(hero.pcr);
+  if (i < 0) return '';
+  var b = PCR_BANDS[i];
+  return '<div class="pmood"><div class="pw" style="color:' + b[3] + '">' + esc(b[2]) + '</div>'
+    + '<div class="pmeter">' + PCR_BANDS.map(function(x, j){
+        return '<i class="' + (j === i ? 'on' : '') + '"'
+          + (j === i ? ' style="background:' + b[3] + '"' : '') + '></i>';
+      }).join('') + '</div>'
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
+    ... (as-of / LIVE / STALE / EOD suffix, unchanged) ...
+    + '</div></div>';
+}
+   ── AFTER — ONLY the .pmeter line is replaced with a pcrGaugeSvg(hero.pcr) call. Every other
+   line, including the entire as-of/LIVE/STALE/EOD suffix block, is byte-identical to today —
+   including the literal middle-dot character below (U+00B7 "·"), NOT an &middot; entity, which
+   is how the live file actually writes it. ── */
+function pcrMood(hero){
+  var i = pcrBand(hero.pcr);
+  if (i < 0) return '';
+  var b = PCR_BANDS[i];
+  return '<div class="pmood"><div class="pw" style="color:' + b[3] + '">' + esc(b[2]) + '</div>'
+    + pcrGaugeSvg(hero.pcr)
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
+    + (hero.pcr_basis === 'LIVE'
+        ? (hero.pcr_asof ? ' · ' + esc(hero.pcr_asof) : '')
+          + (hero.pcr_stale ? ' · <span style="color:var(--amber,#FF9F45)">STALE</span>' : ' · LIVE')
+        : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
+    + '</div></div>';
+}
+
+/* ── render this ref's two proof cards ── */
+document.getElementById('pmoodHost').innerHTML =
+  pcrMood({ pcr: 1.09, pcr_basis: 'LIVE', pcr_asof: '15:25' });
+document.getElementById('pmoodHost2').innerHTML =
+  pcrMood({ pcr: 0.42, pcr_basis: 'LIVE', pcr_asof: '11:05' });
+</script>
+</body>
+</html>
