@@ -1018,6 +1018,18 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 #heroTrack > .c > .c2body{display:flex;flex-direction:column;
   justify-content:space-between;flex:1 1 auto;min-height:0}
 #heroTrack > .c > .c2body > .chd{margin-bottom:calc(6px * var(--rh,1))}
+/* cc#1383 · CARDS 4/5 OVERRIDE, found by screenshot not assumed: space-between needs at least 3
+   children to spread surplus into more than one gap (Card 2 has chd/pmood/adrwrap; Card 3's body
+   is one dense block, so it barely has slack left to distribute at all, see cc#1382's own gap
+   numbers). Cards 4/5's .c2body has exactly TWO children (.chd, the stat-strip host) -- a
+   structural 2-child space-between ALWAYS puts 100% of the surplus in the one gap between them,
+   regardless of content, which measured as an enormous void between the title and the trades/win
+   rate/net/open row. flex-start reverts these two cards to the same top-anchored model Card 1
+   already uses (cc#1134/1359): header and stats read together near the top, and the surplus falls
+   after the stat block, above the CTA-clearance floor -- the same place cc#1134 always put it,
+   for the same reason (nowhere else for it to go without more content to spread it across). */
+#heroTrack > .c:nth-child(4) > .c2body,
+#heroTrack > .c:nth-child(5) > .c2body{justify-content:flex-start}
 /* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
    because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
    the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
@@ -2171,10 +2183,21 @@ function loadIndexBook(){
    (the swipe track's onscroll="ibkDots()") are gone with the multi-page deck. A single static
    card needs no dot indicator or scroll-position tracking. */
 
-function openV10(ev, sym){
+/* cc#1383: RESOLVES cc#1381's orphan flag above -- openV10() has real callers again, Card 4/5's
+   VIEW IN CHART buttons below. `leg` is a new optional 3rd param: when passed, it sets V10.leg
+   BEFORE loadV10()'s fetch even starts, so renderV10()/v10Log() (which read V10.leg to decide the
+   FUT/OPT tab) open on the requested tab with no extra tap. Omitted, V10.leg is left exactly as
+   it was (whatever the modal last had it set to, same persistence this state object already had
+   before this task) -- any future caller that does not care which tab opens keeps that behaviour
+   unchanged, which is why Card 4 still passes 'FUT' explicitly rather than relying on it: the
+   founder's own words were "FUT is already the modal's default", and passing it outright makes
+   that true regardless of whatever the modal's last-used tab happened to be, not just on a clean
+   load. */
+function openV10(ev, sym, leg){
   if (ev){ ev.stopPropagation(); ev.preventDefault(); }
   V10.sym = sym || 'NIFTY50';
   V10.win = null; V10.mfold = {};   // cc#928: fresh index, fresh window
+  if (leg) V10.leg = leg;
   var ov = document.getElementById('v10ov');
   if (ov) ov.classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -2227,6 +2250,75 @@ function loadV10(barsArg){
         + '<div class="empty"><b>Chart unavailable</b>' + esc(e.message) + '</div>';
     });
 }
+
+/* ══ cc#1383 · CARD 4/5 STATS (Index Future Position / Option Positions) ═══════════════════════
+   DATA SOURCE, decided by reading the server, not assumed from a comment: /api/mobile/v10chart's
+   d.paired.summary is what v10Log()'s own .v10sum strip already shows above the trade log -- but
+   read mobile_home2.mobile_v10chart (the endpoint itself, ~line 519-533) and it is SIGNAL-level,
+   netting BOTH legs together per paired trade, shown UNCHANGED regardless of which tab (FUT/OPT)
+   is open. Reusing it for both cards would print the IDENTICAL number on Card 4 and Card 5, which
+   is wrong -- confirmed before writing a line of markup, not discovered after shipping it wrong.
+   d.by_leg[leg] (trades/open/net_pnl) IS genuinely per-leg -- also confirmed in the same read --
+   and is what these two cards actually use. It carries no win/loss breakdown, though, so win_rate
+   is computed here from d.trades' own per-trade `win` flag (server-computed for EVERY closed
+   trade regardless of leg, verified at the same read), filtered to the leg and to closed trades.
+   This is an aggregation over already-real, already-shipped per-trade data -- the exact same kind
+   v10Log()'s own `opts.length` already does for its OPTIONS tab count -- never a guessed number,
+   and it inherits v10Log()'s own "no verdicts is not a 0% record" rule: 0 closed trades for a leg
+   is a dash, never 0%. */
+function v10LegStats(d, leg){
+  var bl = (d.by_leg && d.by_leg[leg]) || {};
+  var closed = (d.trades || []).filter(function(t){
+    return (t.leg || 'FUT') === leg && !t.open && t.win != null;
+  });
+  var wins = closed.filter(function(t){ return t.win; }).length;
+  return {
+    trades: bl.trades || 0, open: bl.open || 0,
+    net: (bl.net_pnl == null ? null : bl.net_pnl),
+    winRate: closed.length ? Math.round(wins / closed.length * 100) : null
+  };
+}
+/* Same four-cell layout .v10sum already renders inside the modal (trades/win rate/net/open) --
+   reused verbatim (class and all) rather than a second card-specific version of the same grid. */
+function v10CardStats(st){
+  return '<div class="v10sum">'
+    + '<div><b>' + st.trades + '</b><span>trades</span></div>'
+    + '<div><b>' + (st.winRate == null ? '&mdash;' : st.winRate + '%') + '</b><span>win rate</span></div>'
+    + '<div><b class="' + cls(st.net) + '">' + (st.net == null ? '&mdash;'
+        : (st.net >= 0 ? '+' : '−') + '₹' + Math.abs(Math.round(st.net)).toLocaleString('en-IN'))
+      + '</b><span>net</span></div>'
+    + '<div><b>' + st.open + '</b><span>open</span></div>'
+    + '</div>';
+}
+function renderHeroV10Cards(d){
+  var h4 = document.getElementById('heroCard4Body');
+  if (h4) h4.innerHTML = v10CardStats(v10LegStats(d, 'FUT'));
+  var h5 = document.getElementById('heroCard5Body');
+  if (h5) h5.innerHTML = v10CardStats(v10LegStats(d, 'OPT'));
+  /* cc#1377's lesson again: this swap can shrink either card, and ResizeObserver does not fire on
+     a shrink pinned at the old min-height -- explicit resync, rAF-wrapped so the write commits
+     before syncHeroCardHeights measures. */
+  requestAnimationFrame(syncHeroCardHeights);
+}
+/* Paint-then-fill, same pattern as loadIndexBook()/renderIbkDeck() (cc#1381/1382): bars=0 is the
+   cc#949 DAILY sentinel, the lightest payload the endpoint offers -- these two cards need summary
+   counts, not the 360-bar intraday series the modal's own chart view fetches on open. ONE fetch
+   serves BOTH cards (by_leg already carries every leg in one response), not two. */
+function loadHeroV10Cards(){
+  fetchWithTimeout('/api/mobile/v10chart?symbol=NIFTY50&bars=0')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d && d.error) throw new Error(d.error);
+      renderHeroV10Cards(d);
+    })
+    .catch(function(){
+      var msg = '<div class="unavail">Trade stats unavailable.</div>';
+      var h4 = document.getElementById('heroCard4Body'); if (h4) h4.innerHTML = msg;
+      var h5 = document.getElementById('heroCard5Body'); if (h5) h5.innerHTML = msg;
+      requestAnimationFrame(syncHeroCardHeights);
+    });
+}
+
 /* ══ cc#928: WINDOWED CHART + THUMB PAN ════════════════════════════════════════════════════
    64 sessions at once was too dense to read on a phone. The full series still loads once; the
    chart now shows a ONE MONTH window (22 sessions) and you drag it back through history with a
@@ -3308,7 +3400,36 @@ function heroCard3(d){
     + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
     + '</div>';
 }
-/* the deck: three cards, snap-scrolled, with a dot that follows the finger */
+/* cc#1383 · CARDS 4/5 — INDEX FUTURE POSITION / OPTION POSITIONS, per-leg summaries of the same
+   V10 trade log the /m/v10 modal on this page already shows in full (openV10/loadV10/v10Log,
+   founder's own reference screenshot of that exact modal). Same .c/.c2body/.chd shell as Cards
+   2/3; #heroCard4Body/#heroCard5Body are the paint-then-fill hosts loadHeroV10Cards() fills once
+   its fetch resolves (see that function's own comment for the data-source decision).
+   THE BUTTON — a <button>, not an <a> like Daily Digest/Index Intel: those two navigate to a real
+   destination page, this one opens the EXISTING in-page modal, so a button is the correct element
+   even though it reuses .digl.slab's exact class/colour/positioning verbatim, per the founder's
+   literal "just like Daily Digest" ask (visual parity, not element-type parity — nothing in that
+   ask was about the tag). Card 4 passes 'FUT' explicitly (openV10's new 3rd param) rather than
+   relying on the modal's own FUT default, so it opens on the right tab even if the modal's
+   internal state was last left on OPT from some other visit — see openV10()'s own comment. Card 5
+   passes 'OPT' the same way; that IS new behaviour openV10() needed (the modal's default is FUT). */
+function heroCard4(d){
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Future Position</div>'
+    + '<div class="rgt"></div></div>'
+    + '<div id="heroCard4Body"><div class="unavail">Loading&hellip;</div></div>'
+    + '</div>'
+    + '<button type="button" class="digl slab" onclick="openV10(event,\'NIFTY50\',\'FUT\')">VIEW IN CHART &#8594;</button>'
+    + '</div>';
+}
+function heroCard5(d){
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Option Positions</div>'
+    + '<div class="rgt"></div></div>'
+    + '<div id="heroCard5Body"><div class="unavail">Loading&hellip;</div></div>'
+    + '</div>'
+    + '<button type="button" class="digl slab" onclick="openV10(event,\'NIFTY50\',\'OPT\')">VIEW IN CHART &#8594;</button>'
+    + '</div>';
+}
+/* the deck: five cards, snap-scrolled, with a dot that follows the finger */
 /* cc#950: the book deck's dot updater. Same shape as heroDots below — one function per deck
    because each owns its own track and dot row, and the two decks are never on screen together
    in the same scroll position. Tapping a dot scrolls the track, so the dots are a control and
@@ -3527,8 +3648,12 @@ Promise.all([
   /* cc#1382: ONE declaration of the hero deck's card count, used to generate the dot row below
      instead of hardcoding "<i></i>" N times in a second place that could drift from the actual
      card count. heroDots()/glitterSync() (cc#1378) already loop over track.children/dots.children
-     generically and need no change -- confirmed by reading them, not assumed. */
-  var HERO_CARD_COUNT = 3;
+     generically and need no change -- confirmed by reading them, not assumed.
+     cc#1383: 3 -> 5 (Cards 4/5, Index Future Position / Option Positions). syncHeroCardHeights()/
+     heroSetupHeightSync() (generalized to N cards in cc#1382, the prerequisite this task's own
+     scope item 1 asked to confirm) need no further change -- re-verified with 5 cards below, not
+     assumed just because the mechanism is generic in principle. */
+  var HERO_CARD_COUNT = 5;
   var heroDotsHtml = '';
   for (var hdi = 0; hdi < HERO_CARD_COUNT; hdi++){
     heroDotsHtml += '<i class="' + (hdi === 0 ? 'on' : '') + '"></i>';
@@ -3614,6 +3739,8 @@ Promise.all([
     + '</div>'
     + heroCard2(d)
     + heroCard3(d)
+    + heroCard4(d)
+    + heroCard5(d)
     + '</div><div class="dots" id="heroDots">' + heroDotsHtml + '</div></div>';
 
   /* 2 · V8 OPEN BOOK — unrealised split with % of capital deployed (founder 08-Aug) */
@@ -3746,7 +3873,8 @@ Promise.all([
   /* 4 · TOOLS — 15 tiles (cc#991 appended the 15th), zero overlap with the five-slot nav */
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
-  loadIndexBook();    /* cc#1381: #ibkHost only exists after this paint, same as the mood letters */
+  loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
+  loadHeroV10Cards(); /* cc#1383: #heroCard4Body/#heroCard5Body, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
 
