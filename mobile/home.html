@@ -3176,6 +3176,99 @@ function heroDots(){
   if (TREND.open && i !== TREND.card) togTrend(null, TREND.open);
 }
 
+/* ══ cc#1374 · HERO CARD HEIGHT PARITY — MEASURED, NOT GUESSED ═════════════════════════════════
+   This is the 7th pass at the Card 1 / Card 2 height mismatch (cc#1125, 1230, 1359, 1369, 1372,
+   1373 all preceded it), and every one of those was a static per-breakpoint px trim, computed
+   against ONE payload and ONE font state (Playwright, fallback sans — Google Fonts is unreachable
+   from the build container) and against whichever content mix the two cards happened to carry
+   that day. Both inputs move: content has swapped between the cards three times in 24h, and a
+   real phone's actual font metrics were never in the loop at all. A trim that fits today's numbers
+   in this container is not a fix, it is a coincidence with an expiry date.
+   This replaces the static numbers with a live measurement: after paint, and again whenever
+   either card's natural content size changes (font swap included), read BOTH cards' natural
+   height and set BOTH to an explicit min-height equal to the taller one. Neither card is
+   "the stretched one" by construction — the mechanism does not know or care which card that is
+   on any given day, so a future content move (Fable's or CC's) does not silently invalidate it. */
+var HERO_RO = null;
+var HERO_SYNC_GUARD = false;
+var HERO_LAST_MAX = null;
+
+function syncHeroCardHeights(){
+  if (HERO_SYNC_GUARD) return;
+  var track = document.getElementById('heroTrack');
+  if (!track) return;
+  var c1 = track.children[0], c2 = track.children[1];
+  if (!c1 || !c2) return;
+
+  /* FIRST DRAFT DISCONNECTED/RECONNECTED THE OBSERVER HERE, EVERY CALL, AND THAT WAS THE LOOP —
+     measured at ~180 calls in a 3s idle window against a target of 2-3. ResizeObserver's spec
+     ALWAYS delivers one notification on a fresh observe(), whether or not the size actually
+     changed, so calling observe() again on every pass manufactured a guaranteed follow-up
+     notification every single time — the exact loop item 4 asked to be guarded against. The
+     observer is now attached ONCE, in heroSetupHeightSync(), and never touched again here. */
+
+  /* item 2: clear any prior inline min-height on BOTH cards before measuring, so a stale value
+     from the last run can never bias this one — a card can only report its true natural height
+     with nothing already forcing it taller. Clearing the shorter card is itself a real resize
+     (forced height -> smaller natural height), which is genuine ResizeObserver input, not noise —
+     the guard below is what stops that from cascading into a second full pass. */
+  HERO_SYNC_GUARD = true;
+  c1.style.minHeight = '';
+  c2.style.minHeight = '';
+  var h1 = c1.getBoundingClientRect().height;
+  var h2 = c2.getBoundingClientRect().height;
+  var max = Math.max(h1, h2);
+  HERO_LAST_MAX = max;
+  c1.style.minHeight = max + 'px';
+  c2.style.minHeight = max + 'px';
+
+  /* THE GUARD MUST OUTLIVE THIS FUNCTION, not just its synchronous body — clearing then
+     re-applying min-height above is a real resize on whichever card was shorter, and the
+     ResizeObserver notification for it is queued by the browser, not delivered synchronously.
+     Releasing the guard here (before that notification arrives) is what let the RO callback see
+     guard=false and start a whole new pass, which itself resizes and requeues, forever. Two
+     rAFs is the same margin cc#1312's veil-click race already uses in this file for "let the
+     browser finish this render step before I act again" — RO delivers at the end of a
+     rendering step, so by the second frame its notification for THIS write has already arrived
+     and been swallowed by the still-true guard. */
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){ HERO_SYNC_GUARD = false; });
+  });
+}
+
+function heroSetupHeightSync(){
+  var track = document.getElementById('heroTrack');
+  if (!track) return;
+  var c1 = track.children[0], c2 = track.children[1];
+  if (!c1 || !c2) return;
+
+  /* item 3: first paint is already correct — rAF so the browser has committed the layout this
+     render() pass just injected before the first measurement reads it. */
+  requestAnimationFrame(syncHeroCardHeights);
+
+  /* item 4: the font-swap gap cc#1369 flagged and never closed. FOUT/FOIT on a real device
+     reflows hero-mood/hero-why/the chip grid/idxFooter's price text AFTER this first paint —
+     exactly the scenario a static px number computed pre-font-swap cannot see coming. A
+     ResizeObserver on both cards' natural content box catches that reflow whenever it lands,
+     with no dependency on knowing WHEN a given browser finishes swapping in Space Grotesk /
+     IBM Plex Mono. Old browsers without ResizeObserver simply keep today's first-paint numbers —
+     no crash, no regression, just no live re-sync on those. */
+  if (typeof ResizeObserver === 'function'){
+    HERO_RO = new ResizeObserver(function(){ syncHeroCardHeights(); });
+    HERO_RO.observe(c1);
+    HERO_RO.observe(c2);
+  }
+
+  /* item 5: window resize (debounced) and orientation change — a rotated phone or a resized
+     webview reflows the same text at a new wrap width, which is a natural-height change the
+     ResizeObserver above already catches on the CARD box itself, but the debounce here keeps a
+     drag-resize from re-measuring on every intermediate frame. */
+  var resizeT = null;
+  function debouncedSync(){ clearTimeout(resizeT); resizeT = setTimeout(syncHeroCardHeights, 150); }
+  window.addEventListener('resize', debouncedSync);
+  window.addEventListener('orientationchange', debouncedSync);
+}
+
 /* pivots ride alongside the main call — the deck renders either way, and a pivot failure costs
    the bar, never the card (Promise.all would have let it take the whole screen down). */
 Promise.all([
@@ -3461,6 +3554,7 @@ Promise.all([
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1328: #ibkTrack only exists after this paint, same as the mood letters */
+  heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
 
   var tools = document.createElement('div');
   tools.className = 'tools';
