@@ -1030,6 +1030,19 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    for the same reason (nowhere else for it to go without more content to spread it across). */
 #heroTrack > .c:nth-child(4) > .c2body,
 #heroTrack > .c:nth-child(5) > .c2body{justify-content:flex-start}
+/* cc#1384 · CARD 3's NIFTY/BankNifty toggle, in .chd's own .rgt slot. Same visual language as the
+   V10 modal's .v10tg/v10Toggle() -- a bordered pill, blue border+tint when active -- scaled down
+   from .v10tg's full-width 34px-min-height modal row to fit inline in a 30px-min-height card
+   header instead of inventing a second toggle grammar. #heroCard3Toggle is IDed rather than a
+   bare .rgt rule so this can never leak onto Card 1/2's own .rgt (a plain date stamp, no buttons)
+   even though nothing about .rgt's own shared styling would collide either way. */
+#heroCard3Toggle{gap:var(--space-4)}
+#heroCard3Toggle button{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
+  font-weight:800;letter-spacing:var(--track-em7);color:var(--mut);background:transparent;
+  border:var(--bw-1) solid var(--line2);border-radius:var(--radius-5);
+  padding:var(--space-2) var(--space-6);cursor:pointer;white-space:nowrap}
+#heroCard3Toggle button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);
+  background:rgba(77,124,254,.12)}
 /* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
    because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
    the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
@@ -2154,30 +2167,64 @@ function oiCard(name, oi, mp, bare){
    initiative -- flagging it in the result for Arpit/Fable to decide, same as any other scope
    boundary this session. */
 
-/* ── data + assembly. NIFTY only, per the founder's direct choice (28-Aug ~21:21 IST): BankNifty
-   OI wall, Futures and Options pages are dropped from Home's Index Book section -- all three stay
-   fully available on /m/v10, unchanged, via the INDEX INTEL button on Card 3.
+/* ── data + assembly. cc#1384 · REINSTATES PART OF cc#1381's REMOVAL, ON PURPOSE: cc#1381's own
+   dead-code audit correctly found BankNifty's strike_oi/maxpain fetch had ZERO consumers at the
+   time and dropped it -- that call was right given what existed then. This toggle is a NEW
+   consumer, so those two endpoints come back. /api/v10/positions and the whole bookCard() chain
+   are NOT part of this -- they fed the separately-removed FUTURES/OPTIONS pages and stay gone;
+   confirmed nothing here touches them.
    cc#1382 · Card 3 IS the Index Book now (folded into #heroTrack, see heroCard3() below) --
    #ibkHost (cc#1381's standalone section) is gone, this targets #heroCard3Body, the placeholder
-   host inside Card 3's own .c2body. bare=true (oiCard's new 4th param) drops the .vpage/.card/
-   .grp/h3 wrapper Card 3's own .chd header already supplies. */
-function renderIbkDeck(oiN, mpN){
+   host inside Card 3's own .c2body. bare=true (oiCard's own 4th param) drops the .vpage/.card/
+   .grp/h3 wrapper Card 3's own .chd header already supplies -- which is also why the header TITLE
+   text is this file's own concern below (#heroCard3Title), not something oiCard()'s bare mode
+   ever prints; grepped its body to confirm `name` renders nowhere in that branch before relying
+   on a second update path for it. */
+var IBK = { sym: 'NIFTY', data: {} };   // cc#1384: which symbol Card 3 is currently showing
+function ibkToggleHtml(){
+  return ['NIFTY', 'BANKNIFTY'].map(function(s){
+    return '<button class="' + (IBK.sym === s ? 'on' : '') + '" onclick="ibkSetSym(\'' + s + '\')">'
+      + s + '</button>';
+  }).join('');
+}
+function renderIbkDeck(){
+  var rec = IBK.data[IBK.sym] || {};
   var host = document.getElementById('heroCard3Body');
-  if (host) host.innerHTML = oiCard('NIFTY', oiN, mpN, true);
-  /* cc#1382, same lesson as cc#1377: this swap can SHRINK Card 3's content (Loading -> a shorter
-     real card, or a real card -> a shorter one on refresh), and ResizeObserver does not fire when
-     a shrinking box stays pinned at its old min-height floor -- explicit resync, rAF-wrapped so
-     the innerHTML write commits before syncHeroCardHeights measures. */
+  if (host) host.innerHTML = oiCard(IBK.sym, rec.oi, rec.mp, true);
+  var t = document.getElementById('heroCard3Title');
+  if (t) t.textContent = 'Max Pain ' + IBK.sym;
+  var tg = document.getElementById('heroCard3Toggle');
+  if (tg) tg.innerHTML = ibkToggleHtml();
+  /* cc#1382, same lesson as cc#1377, cc#1384 re-verified rather than assumed inherited: this swap
+     can SHRINK Card 3's content -- Loading -> a shorter real card on first load, or NIFTY's card
+     -> a shorter BankNifty one on a toggle tap -- and ResizeObserver does not fire when a
+     shrinking box stays pinned at its old min-height floor. Explicit resync, rAF-wrapped so the
+     innerHTML write commits before syncHeroCardHeights measures. syncHeroCardHeights (cc#1382)
+     loops over every #heroTrack child, so this one call also re-levels Cards 1/2/4/5, not just
+     Card 3 -- confirmed in the task's own verification, not assumed from the function's name. */
   requestAnimationFrame(syncHeroCardHeights);
 }
+/* cc#1384: naming matches the V10 modal's own setV10(sym) for the same job on a sibling toggle,
+   per the card's own instruction -- a reader who already knows one knows the other. no-op guard
+   (IBK.sym === sym) mirrors setV10()'s own identical guard, same reason: a tap on the tab already
+   selected should not re-render or re-trigger a resync for nothing. */
+function ibkSetSym(sym){
+  if (IBK.sym === sym) return;
+  IBK.sym = sym;
+  renderIbkDeck();
+}
 function loadIndexBook(){
-  var oiN = null, mpN = null;
-  Promise.all([
-    fetchWithTimeout('/api/v10/strike_oi?symbol=NIFTY&n=7').then(function(r){ return r.json(); })
-      .then(function(d){ oiN = d; }).catch(function(){ oiN = null; }),
-    fetchWithTimeout('/api/v10/maxpain?symbol=NIFTY').then(function(r){ return r.json(); })
-      .then(function(d){ mpN = d; }).catch(function(){ mpN = null; })
-  ]).then(function(){ renderIbkDeck(oiN, mpN); });
+  function leg(symbol){
+    return Promise.all([
+      fetchWithTimeout('/api/v10/strike_oi?symbol=' + symbol + '&n=7').then(function(r){ return r.json(); })
+        .catch(function(){ return null; }),
+      fetchWithTimeout('/api/v10/maxpain?symbol=' + symbol).then(function(r){ return r.json(); })
+        .catch(function(){ return null; })
+    ]).then(function(res){ IBK.data[symbol] = { oi: res[0], mp: res[1] }; });
+  }
+  /* Both symbols fetched up front, before the toggle is ever tapped -- scope item 2's own words,
+     "no loading flicker on switch". ibkSetSym() only ever re-renders from what is already here. */
+  Promise.all([leg('NIFTY'), leg('BANKNIFTY')]).then(renderIbkDeck);
 }
 /* cc#1381: ibkDots() is REMOVED -- its only DOM targets (#ibkTrack/#ibkDots) and its only caller
    (the swipe track's onscroll="ibkDots()") are gone with the multi-page deck. A single static
@@ -3387,14 +3434,16 @@ function heroCard2(d){
    comment). #heroCard3Body is the placeholder host loadIndexBook()/renderIbkDeck() (unchanged
    names/wiring from cc#1381, just re-targeted) replace after paint, same always-rendered-then-
    filled pattern as Card 1/2's own content.
-   .rgt is deliberately EMPTY at paint time — unlike Card 1's hero.as_of or Card 2's PIV.__date,
-   there is no OI-chain freshness figure available before the fetch resolves, and this file's own
-   rule is absence over a guess. The real freshness stamp still reaches the screen: oiCard()'s
-   bare-mode body carries its own .asof.oiasof line (see that function's comment) once the fetch
-   fills #heroCard3Body in. */
+   .rgt used to be empty at paint time (no OI-chain freshness figure available before the fetch
+   resolves, and absence over a guess is this file's own rule) -- cc#1384 fills it with the
+   NIFTY/BankNifty toggle instead, seeded server-render-time with ibkToggleHtml() so the correct
+   button already reads "on" (NIFTY, the founder's explicit default) before any fetch completes,
+   never a flash of the wrong state. The freshness stamp itself still reaches the screen exactly as
+   before: oiCard()'s bare-mode body carries its own .asof.oiasof line once the fetch fills
+   #heroCard3Body in -- untouched by this task. */
 function heroCard3(d){
-  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Max Pain NIFTY</div>'
-    + '<div class="rgt"></div></div>'
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t" id="heroCard3Title">Max Pain NIFTY</div>'
+    + '<div class="rgt ibktg" id="heroCard3Toggle">' + ibkToggleHtml() + '</div></div>'
     + '<div id="heroCard3Body"><div class="unavail">Loading&hellip;</div></div>'
     + '</div>'
     + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
