@@ -718,6 +718,14 @@ body[data-theme]{
    historical narrative, not live rules. */
 #heroTrack{align-items:flex-start}
 #heroTrack > .c{display:flex;flex-direction:column}
+/* cc#1380 · SQUARE CORNERS, HERO DECK ONLY. Founder screenshot: cc#1378's glitter ring made the
+   rounded top-right corner read as a cut/notch. Scoped override on the shared .c{border-radius:
+   14px} (mobile_endpoints.py MOBILE_CSS) -- that rule still serves every other .c card on this
+   page (My Portfolio, V8 Open Book, etc.) and every other page; only these two hero faces go to
+   0. cc#1378's ::after ring uses border-radius:inherit, so it needs no change of its own to pick
+   this up -- confirmed by screenshot, not assumed (see the task result). */
+#heroTrack > .c:first-child,
+#heroTrack > .c:nth-child(2){border-radius:0}
 /* ══ cc#1378 · ANIMATED AQUA GLITTER BORDER — Card 1 + Card 2 ONLY ═══════════════════════════
    Founder ask: a sparkling aqua line travelling around the edge of a box, scoped to just these
    two cards after being shown the perf/battery cost of running it on every card on the page.
