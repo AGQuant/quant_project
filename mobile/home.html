@@ -206,7 +206,12 @@ body[data-theme]{
 /* cc#1364 · founder 09:07: one index per FULL-WIDTH row — at the cc#1360 type-15 the two-up
    cells wrapped BANKNIFTY's % onto a second line. A fact line never wraps; a full-width row is
    the guarantee it never needs to. */
-.ixrow{display:flex;flex-direction:column;row-gap:var(--space-6);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line)}
+/* cc#1373 · row-gap 6->4, padding-top 9->6: Card 1 now carries a fifth block (cc#1372's
+   adrBar) the column didn't have when these numbers were set, and measured against Card 2 it
+   was running 26-60px taller across 320-430px. The 40px tap target is UNCHANGED — it is the
+   .ixcell::after overlay above, position:absolute, out of flow — so this loses no touch area
+   and no information, only the padding/gap around two rows that were already tight. */
+.ixrow{display:flex;flex-direction:column;row-gap:var(--space-4);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--line)}
 /* cc#1159: the cell is a BUTTON now — it opens a chart, so it should be reachable by keyboard
    and announced as pressable. font/background/border/padding are reset because a button inherits
    none of them, and text-align:left because a button centres by default.
@@ -773,7 +778,10 @@ body[data-theme]{
 /* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
    surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
    SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
-#heroTrack > .c:first-child > .hchips{gap:var(--space-9)}
+/* cc#1373: gap 9->6 — a chip's own padding/border still carries the tap affordance; this is the
+   air between rows when the six chips wrap to 2 (or 3, on the narrowest phones) lines, one more
+   small saving toward Card 1 matching Card 2's height now that Card 1 carries a fifth block. */
+#heroTrack > .c:first-child > .hchips{gap:var(--space-6)}
 /* cc#1122 item 3 — the mood word is UPPERCASE and large by decision now, not by accident.
    PAGE-SCOPED ON PURPOSE. mobile.css sets .hero-mood at 32px for every /m/* page; this rule
    lives in home.html's own <style> so it reaches the Home hero and nothing else. That is the
