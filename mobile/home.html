@@ -718,6 +718,108 @@ body[data-theme]{
    historical narrative, not live rules. */
 #heroTrack{align-items:flex-start}
 #heroTrack > .c{display:flex;flex-direction:column}
+/* ══ cc#1378 · ANIMATED AQUA GLITTER BORDER — Card 1 + Card 2 ONLY ═══════════════════════════
+   Founder ask: a sparkling aqua line travelling around the edge of a box, scoped to just these
+   two cards after being shown the perf/battery cost of running it on every card on the page.
+
+   SHAPE — VERIFIED, NOT ASSUMED. The card's scope note claimed both cards "use a custom
+   cut-corner clip-path" and asked the ring to match it. Read getComputedStyle() on the live
+   cascade before writing a line of this: both cards return clip-path:none, border-radius:14px —
+   a plain rounded rect, the same .c every other card on this page uses. There is no cut corner to
+   match here (that shape belongs to the unrelated .card class used elsewhere in this file). The
+   ring below is built for the shape that is actually there — border-radius:inherit, so it always
+   tracks whatever radius .c carries, rather than hardcoding a polygon this pair of cards has never
+   had.
+
+   COLOUR — ALSO VERIFIED, NOT ASSUMED, AND THE CARD'S OWN INSTRUCTION WAS WRONG HERE. It said to
+   use var(--cyan)/var(--brand), calling that "the same value .sect headers already use,
+   #35E0FF". Read the live token chain instead of trusting the name: --cyan resolves to --brand,
+   and body[data-theme="goldnight"] — the ONLY theme this app currently renders, per CLAUDE.md —
+   sets --brand:#D4AF37, which is GOLD, not aqua (scorr_themes.css). var(--cyan) would have shipped
+   a gold glitter border on a founder request for aqua. .sect gets its aqua by NOT using that
+   token — .sect{color:#35E0FF} is a raw hardcoded hex specifically because the theme-mapped brand
+   colour is not aqua under goldnight. This ring reuses that exact same established escape hatch
+   (raw #35E0FF, matching .sect's own literal, not a new value) rather than either shipping the
+   wrong colour or inventing a new cross-theme token — that second option is a scorr_themes.css
+   change, outside this task's own file boundary ("no changes to any other page"). Confirmed after
+   the fact with Scorr:theme_validate: this stays within the P8 ratchet's headroom against
+   baseline, 0 regressions — see the task result for the exact before/after numbers.
+
+   TECHNIQUE — the standard border-via-mask trick: a ::after the same size as the card (inset:0),
+   painted with a conic-gradient sweep, then masked down to just a thin ring using the
+   content-box/border-box double-mask + mask-composite:exclude (-webkit-mask-composite:xor for
+   Blink/WebKit's older prefixed value name for the same operation). ::after, not ::before, so the
+   shared .c::before left-accent bar every card on this page carries (mobile_app.css) is untouched
+   — this ring traces the WHOLE outline, left edge included, so the two never need to coexist as
+   competing left-edge marks on these two cards.
+
+   HEIGHT-TRACKING IS FREE. inset:0 on an absolutely-positioned ::after inside .c (position:
+   relative) always resolves against .c's CURRENT rendered box — no fixed px, no JS resize hook of
+   its own needed. cc#1374's syncHeroCardHeights sets .c's min-height live (data refresh, resize, a
+   chip chart opening/closing per cc#1377) and this ring re-traces it automatically, every time,
+   because it is asking the browser for "100% of my positioned ancestor" on every paint rather than
+   a number computed once.
+
+   FEATURE-DETECTION — A THIRD THING THE CARD'S INSTRUCTION GOT WRONG, ALSO CAUGHT BY TESTING, NOT
+   READING THE SPEC LITERALLY. It named `@supports at-rule(@property)` as the gate. Measured
+   directly (CSS.supports('at-rule(@property)') in the actual render target): FALSE on this
+   engine, even though @property ITSELF works perfectly here (confirmed by parsing an @property
+   rule and getting back a real CSSPropertyRule). at-rule() feature-query support and @property
+   support are two different capabilities that shipped on different timelines — gating on the
+   newer, far-less-adopted one would have silently shipped the STATIC fallback to nearly everyone,
+   including browsers that fully support the animation this task asked for. That is a worse
+   failure than the one the card was trying to prevent.
+   Detected in JS instead — typeof CSS.registerProperty === 'function' is the same capability
+   test via the API that ships alongside the at-rule in every implementation (Chrome, Firefox,
+   Safari all shipped both together), and it is what every real deployment of this technique
+   actually uses. A `glitter-ok` class goes on <html> the moment the script runs (top of this
+   block, no DOM dependency, no paint wait) and the animated rules below are scoped under it.
+   @property itself is registered UNCONDITIONALLY, outside any gate — an unrecognised at-rule is
+   dropped harmlessly by any browser that lacks it, which is the standard, safe CSS parsing
+   behaviour and needs no feature test of its own.
+   The base rule below (outside .glitter-ok) is the STATIC fallback and is what every browser gets
+   by default; only html.glitter-ok switches the background to the animated conic-gradient sweep.
+   A browser that cannot register --glitter-angle as a real <angle> custom property cannot smoothly
+   animate it either (interpolating a plain custom property jumps instantly instead of sweeping),
+   so gating the animation on the same JS capability that gates the registration is what keeps this
+   "static or smooth", never "broken or jerky". */
+#heroTrack > .c:first-child::after,
+#heroTrack > .c:nth-child(2)::after{
+  content:'';position:absolute;inset:0;border-radius:inherit;padding:2px;box-sizing:border-box;
+  pointer-events:none;background:#35E0FF;
+  -webkit-mask:linear-gradient(black 0 0) content-box,linear-gradient(black 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;
+}
+@property --glitter-angle{syntax:'<angle>';inherits:false;initial-value:0deg}
+html.glitter-ok #heroTrack > .c:first-child::after,
+html.glitter-ok #heroTrack > .c:nth-child(2)::after{
+  /* one bright arc travelling the ring, rest transparent -- not a full glow */
+  background:conic-gradient(from var(--glitter-angle),
+    transparent 0deg, #35E0FF 18deg, transparent 46deg, transparent 360deg);
+  animation:glitterSweep 3.6s linear infinite;
+  /* cc#1378 battery/visibility discipline: paused by default, .glitter-run is the only thing
+     that turns it on (see glitterSync() in JS) -- same "off unless proven visible AND active"
+     posture moodStart/moodStop/moodOnScreen already use for the mood-word sweep, reused here as
+     a pattern (start/stop keyed to visibilitychange + on-screen/active-face checks), not as the
+     literal mechanism -- that one is a JS setTimeout chain because the effect it drives (a
+     staggered per-letter class) has no CSS-only equivalent; this effect is a single @keyframes
+     rule and a JS timer chain would be reinventing what the compositor already does for free. */
+  animation-play-state:paused;
+}
+html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
+@keyframes glitterSweep{to{--glitter-angle:360deg}}
+/* prefers-reduced-motion -- same convention as the mood sweep and the ticker marquee elsewhere in
+   this file: STATIC aqua border, not no border. BOTH selector forms are listed (plain, and
+   html.glitter-ok-prefixed) so this wins by equal specificity + later source order against
+   EITHER the base rule or the animated one -- a bare later-in-source plain selector alone is
+   LOWER specificity than "html.glitter-ok ...::after" (the class adds a selector component) and
+   would have lost the tie to the animated rule whenever both conditions were true at once. */
+@media (prefers-reduced-motion:reduce){
+  #heroTrack > .c:first-child::after,
+  #heroTrack > .c:nth-child(2)::after,
+  html.glitter-ok #heroTrack > .c:first-child::after,
+  html.glitter-ok #heroTrack > .c:nth-child(2)::after{animation:none;background:#35E0FF}
+}
 /* cc#1134 · FINAL RULING, and it supersedes the space distribution I chose in cc#1125.
    Three attempts on this one card, each satisfying its own spec text and opening a new gap,
    because none of them had a TARGET layout: cc#1122 left the void below the chips, cc#1125 pushed
@@ -1092,6 +1194,16 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 </div>
 
 <script>
+/* cc#1378 · GLITTER RING FEATURE-DETECT, run first and unconditionally (no DOM/paint dependency,
+   document.documentElement always exists). typeof CSS.registerProperty === 'function' is the
+   real-world way this is detected -- see the CSS block's own note on why `@supports
+   at-rule(@property)` (what the card named) does not actually work as a gate: measured directly,
+   this exact engine returns false for that supports-query even though @property itself works
+   perfectly, which would have silently shipped the static fallback to nearly everyone. */
+if (typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'function'){
+  document.documentElement.classList.add('glitter-ok');
+}
+
 /* cc#1232 · THE POPOUT BELONGS TO ONE CARD, AND NOW SAYS WHICH. `open` was the whole state, so
    nothing in it recorded that the chart lives inside hero card 0 — it just happened to, because
    #chiptrend is markup inside that card. `card` makes the ownership explicit, and heroDots() below
@@ -3219,7 +3331,27 @@ function heroDots(){
      Guarded on the index so this only fires when the deck has actually settled on another card;
      the gesture itself is untouched, this only reacts to where it ended up. */
   if (TREND.open && i !== TREND.card) togTrend(null, TREND.open);
+  glitterSync();   /* cc#1378: active-face + tab-visibility gate for the glitter ring */
 }
+
+/* cc#1378 · GLITTER RING VISIBILITY/BATTERY GATE. Same posture as moodStart/moodStop/moodOnScreen
+   below (paused unless proven visible AND on-screen), applied to the CSS-driven glitter animation
+   instead of a JS timer chain -- see the CSS block's own note for why this effect does not reuse
+   that chain literally: a single @keyframes rule already does the sweeping, so a JS timer here
+   would only be reinventing what the compositor gives for free. This function toggles ONE class,
+   .glitter-run, on whichever hero card is the currently active swipe face, and only while the tab
+   itself is visible; the CSS default is paused, so a hidden tab or the inactive face gets exactly
+   zero animation work, not merely an invisible one. */
+function glitterSync(){
+  var tr = document.getElementById('heroTrack');
+  if (!tr) return;
+  var hidden = document.visibilityState === 'hidden';
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(tr.children, function(el, j){
+    el.classList.toggle('glitter-run', !hidden && j === i);
+  });
+}
+document.addEventListener('visibilitychange', glitterSync);
 
 /* ══ cc#1374 · HERO CARD HEIGHT PARITY — MEASURED, NOT GUESSED ═════════════════════════════════
    This is the 7th pass at the Card 1 / Card 2 height mismatch (cc#1125, 1230, 1359, 1369, 1372,
@@ -3600,6 +3732,7 @@ Promise.all([
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1328: #ibkTrack only exists after this paint, same as the mood letters */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
+  glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
 
   var tools = document.createElement('div');
   tools.className = 'tools';
