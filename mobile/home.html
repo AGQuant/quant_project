@@ -865,16 +865,36 @@ body[data-theme]{
 .dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:var(--radius-3)}
-.irow{display:flex;align-items:baseline;gap:var(--space-8);margin-top:calc(11px * var(--rh,1))}
-.irow .inm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:#FF9F45;flex:1}
-.irow .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-16);font-weight:800}
-.irow .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
+/* cc#1369: .irow itself is gone — idxRow's caller is idxRowPair now, laying two columns side by
+   side instead of stacking two full-width rows. .icol carries the name/level/side line as a
+   column; everything below that isn't about the row's own axis is unchanged. */
+.irowpair{display:flex;gap:var(--space-14);margin-top:calc(11px * var(--rh,1))}
+.icol{flex:1;min-width:0}
+.icol .inm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:#FF9F45}
+.icol .ilv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-16);font-weight:800}
+.icol .ipp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
 .ibar{position:relative;height:4px;border-radius:var(--radius-2);background:var(--panel2);
   border:var(--bw-1) solid var(--line);margin:calc(6px * var(--rh,1)) 0 calc(3px * var(--rh,1))}
 .ibar .idot{position:absolute;top:50%;width:9px;height:9px;margin:var(--space-n45) 0 0 var(--space-n45);
   border-radius:50%;background:var(--amber,#F5B94A);border:var(--bw-2) solid var(--panel)}
 .isr{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB)}
 .isr span:last-child{margin-left:auto}
+/* cc#1369 · the advance-decline bar — "a bordered rectangular pipe" in the founder's own words.
+   .adrpipe is the pipe: a bordered rectangle, overflow hidden so the two fills can never bleed
+   past its own outline whatever the two percentages round to. --grn/--red are the same tokens
+   the P&L figures elsewhere on this page already colour by — advancers read the same green a
+   profit does, decliners the same red a loss does, no new colour invented. */
+.adrwrap{margin-top:calc(11px * var(--rh,1))}
+.adrhd{display:flex;justify-content:space-between;font-size:var(--type-9);font-weight:800;
+  letter-spacing:var(--track-em11);color:var(--txt)}
+.adrn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;letter-spacing:0}
+.adrpipe{position:relative;display:flex;height:10px;border-radius:var(--radius-5);
+  border:var(--bw-1) solid var(--line);background:var(--panel2);overflow:hidden;
+  margin-top:calc(5px * var(--rh,1))}
+.adrpipe .adv{background:var(--grn)}
+.adrpipe .dec{background:var(--red)}
+.adrempty{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);
+  color:var(--txt);opacity:.6;padding-left:var(--space-6);line-height:10px}
 /* ── cc#1182 · CARD 2'S RHYTHM IS ONE RATIO, AND THE CTA IS ANCHORED TO THE FLOOR ────────────
    THE HEIGHT INVARIANT IS NOT ARITHMETIC HERE, IT IS STRUCTURAL, and that is the only reason
    this change is safe. #heroTrack is align-items:stretch, so the deck's height is the TALLER
@@ -2956,7 +2976,13 @@ function renderPortfolio(){
    at all rather than a bar drawn to a guess. */
 var PIV = null;   // symbol -> {pp,r1,s1,...} from /api/paper/pivots
 
-function idxRow(name, sym, level){
+/* cc#1369: idxRow's two calls used to stack as two full-width blocks — name+level+side line,
+   bar, S/R line, repeated for NIFTY then again for BANKNIFTY, so the pair cost two of those
+   three-line stacks top to bottom. Founder screenshot feedback (28-Aug): put them side by side
+   in ONE row instead. idxCol keeps every number idxRow showed (nothing dropped, per the same
+   "no bar drawn to a guess" rule above) — identical math in a narrower column; idxRowPair lays
+   two columns out in parallel so the pair now costs one stack's height, not two. */
+function idxCol(name, sym, level){
   var pv = PIV && PIV[sym];
   var s1 = pv ? Number(pv.s1) : null, r1 = pv ? Number(pv.r1) : null,
       pp = pv ? Number(pv.pp) : null;
@@ -2965,13 +2991,39 @@ function idxRow(name, sym, level){
     pos = Math.max(0, Math.min(1, (Number(level) - s1) / (r1 - s1)));
   var side = (level == null || pp == null) ? ''
     : (Number(level) >= pp ? 'above pivot' : 'below pivot');
-  return '<div class="irow"><span class="inm">' + esc(name) + '</span>'
-    + '<span class="ilv">' + px(level) + '</span>'
-    + (side ? '<span class="ipp">' + side + '</span>' : '') + '</div>'
+  return '<div class="icol"><div class="inm">' + esc(name) + '</div>'
+    + '<div class="ilv">' + px(level) + '</div>'
+    + (side ? '<div class="ipp">' + side + '</div>' : '')
     + (pos == null
         ? '<div class="isr"><span>levels pending</span></div>'
         : '<div class="ibar"><div class="idot" style="left:' + (pos * 100).toFixed(1) + '%"></div></div>'
-          + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>');
+          + '<div class="isr"><span>S ' + px(s1) + '</span><span>R ' + px(r1) + '</span></div>')
+    + '</div>';
+}
+function idxRowPair(nameA, symA, levelA, nameB, symB, levelB){
+  return '<div class="irowpair">' + idxCol(nameA, symA, levelA) + idxCol(nameB, symB, levelB) + '</div>';
+}
+
+/* cc#1369: the advance-decline breadth bar — "a bordered rectangular pipe" in the founder's own
+   words, a horizontal bar/tube with a visible outline. It fills the space idxRowPair just gave
+   back (one stack, not two) and sits right where the founder's screenshot marked the empty area
+   on this card, ahead of the DAILY DIGEST button.
+   REAL DATA, NO NEW QUERY: hero.adr_detail is market_mood()'s own adr_detail, already fetched to
+   build the ADR check chip on card 1 — mobile_home2.py just started exposing the field (cc#1369).
+   Null advances/declines (breadth feed dead — the same condition that sends the ADR chip
+   indeterminate) draws NO bar, same "never a guess" rule idxCol above already lives by. */
+function adrBar(hero){
+  var d = (hero && hero.adr_detail) || {};
+  var adv = d.advances, dec = d.declines;
+  var have = adv != null && dec != null && (adv + dec) > 0;
+  var advPct = have ? (adv / (adv + dec) * 100) : null;
+  return '<div class="adrwrap"><div class="adrhd"><span>ADVANCE / DECLINE</span>'
+    + '<span class="adrn">' + (have ? (adv + ' / ' + dec) : '—') + '</span></div>'
+    + '<div class="adrpipe">' + (have
+        ? ('<div class="adv" style="width:' + advPct.toFixed(1) + '%"></div>'
+           + '<div class="dec" style="width:' + (100 - advPct).toFixed(1) + '%"></div>')
+        : '<span class="adrempty">breadth pending</span>')
+    + '</div></div>';
 }
 
 /* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
@@ -3078,8 +3130,8 @@ function heroCard2(d){
   return '<div class="c"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
     + pcrMood(d.hero || {})
-    + idxRow('NIFTY 50', 'NIFTY50', t['NIFTY'])
-    + idxRow('BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
+    + idxRowPair('NIFTY 50', 'NIFTY50', t['NIFTY'], 'BANKNIFTY', 'BANKNIFTY', t['BANKNIFTY'])
+    + adrBar(d.hero || {})
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
        one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
        palette or depth change moves this button with the Index Intel one. */

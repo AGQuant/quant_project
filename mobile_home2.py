@@ -883,6 +883,14 @@ def mobile_home2(request: Request):
         })
     fails = (mood or {}).get("fails")
 
+    # cc#1369: the breadth counts market_mood() already computed for the ADR check (adr_detail —
+    # advances/declines/unchanged) exposed on hero for the Home advance-decline bar. No new query:
+    # this is the SAME call that built `chips` above, just a field of it nobody read yet. The ratio
+    # itself is not recomputed either — it is the ADR chip's own value, found by label so a change
+    # to checks[] ordering can never desync the two.
+    adr_detail = (mood or {}).get("adr_detail") or {}
+    adr_ratio = next((c["value"] for c in chips if c["label"] == "ADR"), None)
+
     signals = []
     for s in sig_rows:
         since = None
@@ -960,6 +968,15 @@ def mobile_home2(request: Request):
             "vix_chg_pct": vix_chg_pct,   # cc#1123: the same move in percent, for the tier rule
             "v10": v10,
             "as_of": (mood or {}).get("checked_at"),
+            # cc#1369: advance-decline for the Home mood card's breadth bar. advances/declines/
+            # unchanged null together when the breadth feed is dead (same condition the ADR check
+            # already goes indeterminate on) — the client draws no bar rather than a guessed one.
+            "adr_detail": {
+                "advances": adr_detail.get("advances"),
+                "declines": adr_detail.get("declines"),
+                "unchanged": adr_detail.get("unchanged"),
+                "ratio": adr_ratio,
+            },
         },
         "signals": {
             "today": sig_head["n"],
