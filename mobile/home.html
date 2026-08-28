@@ -1487,17 +1487,21 @@ function renderChart(key){
       el.innerHTML = '<div class="trendbox">' + head('') + rangePills(key)
         + '<div class="sum" style="padding:6px 0 0">Not enough history for this window.</div>'
         + note + '</div>';
-      return;
+      requestAnimationFrame(syncHeroCardHeights);   // cc#1377: this branch can be shorter than
+      return;                                       // whatever was showing before a range switch
     }
     var last = s[s.length - 1];
     el.innerHTML = '<div class="trendbox">'
       + head(esc(Number(last.v).toFixed(2)) + ' · ' + esc(dlab(last.d)))
       + rangePills(key) + trendSvg(s, key, c.markers) + note + '</div>';
     wireScrub(key, s);   // rebound on every redraw — a new SVG needs a new binding
+    requestAnimationFrame(syncHeroCardHeights);   // cc#1377: covers both the open path (togTrend)
+    // and a range switch (setRange) landing a shorter chart than the one it replaced
   }).catch(function(e){
     if (CHART[key] !== c || !c.live()) return;
     el.innerHTML = '<div class="trendbox">' + head('') + rangePills(key)
       + '<div class="sum" style="padding:6px 0 0">Chart failed: ' + esc(e.message) + '</div></div>';
+    requestAnimationFrame(syncHeroCardHeights);   // cc#1377: the error line is shorter too
   });
 }
 
@@ -1690,7 +1694,13 @@ function togTrend(ev, kind){
   if (ev) ev.stopPropagation();
   var el = document.getElementById('chiptrend');
   if (!el) return;
-  if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; delete CHART[kind]; return; }
+  /* cc#1377: closing a chart shrinks #chiptrend's natural content, but the hero cards' own
+     min-height (set by syncHeroCardHeights while the chart was open) is a CSS floor, not the
+     card's actual box size -- ResizeObserver only fires on a real box-size change, and a floor
+     that stays taller than the new, shorter content means the box genuinely does NOT change size,
+     so the observer stays silent and the stale (too-tall) min-height survives. rAF-wrapped so the
+     innerHTML='' mutation is committed before syncHeroCardHeights measures. */
+  if (TREND.open === kind){ TREND.open = null; el.innerHTML = ''; delete CHART[kind]; requestAnimationFrame(syncHeroCardHeights); return; }
   TREND.open = kind;
   /* cc#1231 · NO 1D TAB ON A DAILY-ONLY SERIES. This was `ranges: RANGES_ALL` for every kind, so
      India VIX offered a 1D pill it has no data for; the endpoint fell back to the daily line and
