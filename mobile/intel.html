@@ -137,6 +137,12 @@ function ncCopyBtn(a){
 
 /* mode: 'open' = primary editorial with body; 'folded' = editorial as headline+summary+Read;
    'feed' = agency item. Preview grammar exactly. */
+/* cc#1371 item 1 (sentiment capsule) — CHECKED, no change made here. The .tag.bull/.tag.bear/
+   .tag.caut/.tag.neut rules (mobile_endpoints.py MOBILE_CSS ~line 1325-1334) already give the
+   sentiment tag the EXACT SAME small-pill base as .tag.cat/.tag.edt/.tag.hi (8.5px mono,
+   3px/7px padding, one bordered pill), all three sitting in the same .meta flex row. There is no
+   oversized standalone banner here to shrink — logged as a QUESTION rather than guessed, since
+   the founder screenshot that drove cc#1370/1371 may have been a different surface. */
 function card(a, mode){
   var edge = sentClass(a.sentiment);
   var isEd = (mode === 'open' || mode === 'folded');
@@ -191,7 +197,11 @@ function card(a, mode){
     + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
     + '<div class="hl">' + esc(a.headline) + '</div>'
     + bodyHtml + syms
-    + '<div class="src">' + esc(a.source || '--') + (a.when_full ? ' \u00b7 ' + esc(a.when_full) : '')
+    /* cc#1371: the raw third-party source/wire-agency name (a.source) is DROPPED \u2014 universal
+       across every news-card surface (founder screenshot feedback 28-Aug, applied here as the
+       remainder of cc#1370's web/shared-component pass, commit 78410b0). Keeps only the polish
+       timestamp (a.when_full). */
+    + '<div class="src">' + (a.when_full ? esc(a.when_full) : '')
     + ncCopyBtn(a) + '</div>'
     + '</div>';
 }
