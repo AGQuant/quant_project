@@ -932,12 +932,27 @@ body[data-theme]{
    mood word takes the same skew accent as the hero word. */
 #heroTrack > .c:nth-child(2){--rh:1}
 .pmood .pw{transform:skewX(-6deg);transform-origin:left center;display:inline-block}
-#heroTrack > .c:nth-child(2) > .chd{margin-bottom:calc(6px * var(--rh,1))}
-/* The block above the CTA carries the minimum clearance. margin-top:auto takes all the surplus
-   but it cannot promise a floor — if card 2 ever became the taller face, auto resolves to 0 and
-   the button would sit flush against the S/R line. A real margin on the previous sibling is a
-   gap that exists whether or not there is surplus to distribute. :nth-last-child(2) rather than
-   a class, so it stays the block before the CTA whatever that block turns out to be. */
+/* cc#1376 · CARD 2 INTERNAL DISTRIBUTION. Founder screenshot: header/mood/PCR/ADR stayed
+   packed in the top ~35-40% of the card once cc#1374's height sync stretched it to match Card 1,
+   dumping the whole leftover height as one blank gap above DAILY DIGEST (the old margin-top:auto
+   on .digl below). .c2body wraps just those three blocks (chd/pmood/adrwrap) in their own
+   flex:1 sub-column: it grows to absorb whatever slack the outer sync leaves, and its own
+   justify-content:space-between splits THAT slack into two even gaps (chd↔pmood, pmood↔adrwrap)
+   instead of leaving it all at the bottom. The chd/adrwrap margins below are the FLOOR, not the
+   whole gap — they still guarantee a minimum rhythm on a day card 2 has zero slack to spread
+   (natively the taller face), same invariant cc#1182 established; space-between only adds
+   whatever real surplus is left on top of that floor, and recomputes automatically on every
+   resync (data refresh, resize, a chip chart opening/closing) since it is pure CSS, not a
+   snapshot number. min-height:0 overrides the flex item's default min-height:auto floor so the
+   grow can actually reach its target size. */
+#heroTrack > .c:nth-child(2) > .c2body{display:flex;flex-direction:column;
+  justify-content:space-between;flex:1 1 auto;min-height:0}
+#heroTrack > .c:nth-child(2) > .c2body > .chd{margin-bottom:calc(6px * var(--rh,1))}
+/* .c2body is now the block above the CTA — :nth-last-child(2) still finds it without a name
+   change, because .c:nth-child(2) has exactly two children now (.c2body, .digl) and the rule was
+   always structural on purpose (see cc#1182). This is card 2's OWN minimum CTA clearance floor,
+   same role it played before cc#1376, just landing on the wrapper instead of directly on
+   adrwrap. */
 #heroTrack > .c:nth-child(2) > :nth-last-child(2){margin-bottom:var(--space-14)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
@@ -946,11 +961,13 @@ body[data-theme]{
    THE HAIRLINE AND ITS PADDING ARE GONE. They existed to make a text link read as a card footer
    strip; a raised slab with a gold ledge separates itself, and keeping both would have stacked
    two separators on one element.
-   margin-top:auto is what "anchored at the card bottom" means literally — it also closes the
-   120px void that has sat under this link since the deck shipped, the same void cc#1122/1125/
-   1134 chased around card 1. The 5px ledge lands inside .c's own 13px padding-bottom, so no
-   bottom reserve is needed here and .c's overflow:hidden cannot clip it. */
-.digl{display:block;width:100%;box-sizing:border-box;margin-top:auto;text-align:center;
+   cc#1376: margin-top:auto REMOVED. .c2body's own flex-grow now claims 100% of card 2's surplus
+   height before .digl is ever laid out, so an auto margin here would always resolve to 0 —
+   dead weight, not a second effect stacking on the first. "Anchored at the card bottom" is now
+   .c2body's own margin-bottom floor above (this rule) plus this element's natural size; the 5px
+   ledge still lands inside .c's own 13px padding-bottom, so no bottom reserve is needed here and
+   .c's overflow:hidden still cannot clip it. */
+.digl{display:block;width:100%;box-sizing:border-box;text-align:center;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
   letter-spacing:var(--track-em16);color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
   line-height:20px}
@@ -3151,7 +3168,12 @@ function idxFooter(d){
 }
 
 function heroCard2(d){
-  return '<div class="c"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
+  /* cc#1376: header/mood/ADR wrapped in .c2body, a flex:1 sub-column that fills whatever slack
+     cc#1374's height sync leaves in this card and spreads it as EVEN gaps between its own three
+     children (justify-content:space-between) instead of the old margin-top:auto on the button,
+     which dumped 100% of the surplus into one gap right above DAILY DIGEST. See the .c2body CSS
+     for the mechanics and why the existing floor margins are kept, not replaced. */
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
     + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
     + pcrMood(d.hero || {})
     /* cc#1374: the NIFTY/BANKNIFTY pair (cc#1369's idxRowPair) is REMOVED from this card —
@@ -3159,6 +3181,7 @@ function heroCard2(d){
        BACK here from Card 1 (cc#1372 had moved it the other way) — this card now focuses on
        the PCR mood word and breadth, ahead of the Digest button. */
     + adrBar(d.hero || {})
+    + '</div>'
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
        one class added — .slab brings the face, border, radius, ledge and 5px press, so a future
        palette or depth change moves this button with the Index Intel one. */
