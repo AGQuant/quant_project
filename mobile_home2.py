@@ -337,6 +337,97 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
             "latest": series[-1]["v"] if series else None}
 
 
+# ── cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE, behind Card 1's adrBar() ──────────────────────
+@router.get("/api/mobile/breadth")
+@_json_safe
+def mobile_breadth(request: Request):
+    """Per-symbol day-change + sector breakdown behind Card 1's ADVANCE/DECLINE bar (adrBar()).
+
+    SAME UNIVERSE AS THE CARD'S OWN 85/123 COUNT, RECONCILED NOT ASSUMED. adrBar()'s advances/
+    declines is market_mood()'s adr_detail, which reads the LATEST adr_intraday row
+    (v8_endpoints._read_adr — WHERE universe_count >= 50 ORDER BY ts DESC LIMIT 1). That row was
+    written by _write_adr_intraday (v8_signal_writer.py) from a point-in-time JOIN between
+    intraday_prices (today's last CASH tick per symbol, futures/auction excluded) and raw_prices
+    (each symbol's own prior close) — a query that has NO reference to futures_universe at all.
+
+    Checked directly against the live DB before writing this (not assumed): futures_universe.
+    is_active also happens to hold 208 rows today, the SAME count as the latest adr_intraday row
+    — but the two SETS are not identical. NIFTY500 (a broad index, not an individual F&O stock)
+    is IN the adr_intraday universe (it has both an intraday tick and a raw_prices row) and is
+    NOT in futures_universe. NIFTY (the futures root symbol) is the reverse — it IS in
+    futures_universe but has no raw_prices row of its own (its cash leg is filed under NIFTY50,
+    price_sources.py's own documented Nifty exception), so the adr_intraday join never picks it
+    up. The counts match today by coincidence, not because the sets agree.
+
+    RESOLUTION, per this task's own instruction to reconcile rather than ship two numbers that
+    can disagree: the adr_intraday/(intraday_prices JOIN raw_prices) universe is AUTHORITATIVE
+    for this table's rows and its own advances/declines/total, because that is the number already
+    on screen. Anchored to the SAME adr_intraday row market_mood() is currently serving (not a
+    fresh independent computation that could tick over mid-request and disagree with the card by
+    a few seconds) — re-running the identical li/pc join bounded to that row's own `ts` reproduces
+    that exact snapshot, verified this session to return the identical 85/123/0/208.
+    futures_universe is then LEFT JOINed in ONLY to attach the theme (sector) label — a symbol
+    with no match (NIFTY500) gets 'Unclassified' rather than being dropped, which would break the
+    count-match guarantee above.
+
+    SECTOR AGGREGATE: a SIMPLE AVERAGE of the theme's member symbols' own day_chg_pct — a new
+    derived figure, so stated explicitly per this task's own instruction. Matches this codebase's
+    own precedent for a per-sector average (gvm_market_endpoints.get_sectors() /api/sectors
+    already exposes sector_ratings.simple_avg_gvm alongside its cap-weighted figure). NOT
+    cap-weighted: that would need a verified per-symbol market-cap join this task's own scope
+    does not ask for and this session has not checked for this specific use — not used
+    speculatively."""
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT ts FROM adr_intraday WHERE universe_count >= 50 ORDER BY ts DESC LIMIT 1")
+        anchor = cur.fetchone()
+        if not anchor:
+            return {"rows": [], "advances": None, "declines": None, "unchanged": None,
+                    "as_of": None, "note": "breadth pending"}
+        anchor_ts = anchor[0]
+        cur.execute("""
+            WITH li AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS cmp
+                FROM intraday_prices WHERE ts::date = %(d)s AND ts <= %(cut)s
+                  AND COALESCE(source,'') NOT IN ('fyers_eq_auction','auction')
+                  AND COALESCE(source,'') NOT IN ('fyers_fut', 'fyers_fut_rest')
+                ORDER BY symbol, ts DESC
+            ),
+            pc AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS pclose
+                FROM raw_prices WHERE price_date < %(d)s
+                ORDER BY symbol, price_date DESC
+            ),
+            base AS (
+                SELECT li.symbol,
+                       ROUND(((li.cmp - pc.pclose) / NULLIF(pc.pclose, 0) * 100)::numeric, 2) AS day_chg_pct
+                FROM li JOIN pc ON pc.symbol = li.symbol
+            ),
+            themed AS (
+                SELECT b.symbol, b.day_chg_pct, COALESCE(fu.theme, 'Unclassified') AS theme
+                FROM base b LEFT JOIN futures_universe fu ON fu.symbol = b.symbol
+            )
+            SELECT symbol, day_chg_pct, theme,
+                   ROUND(AVG(day_chg_pct) OVER (PARTITION BY theme)::numeric, 2) AS sector_day_chg_pct
+            FROM themed ORDER BY symbol
+        """, {"d": anchor_ts.date(), "cut": anchor_ts})
+        rows = _rows(cur)
+    advances = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] > 0)
+    declines = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] < 0)
+    unchanged = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] == 0)
+    return {
+        "rows": [{"symbol": r["symbol"],
+                  "day_chg_pct": float(r["day_chg_pct"]) if r["day_chg_pct"] is not None else None,
+                  "theme": r["theme"],
+                  "sector_day_chg_pct": float(r["sector_day_chg_pct"]) if r["sector_day_chg_pct"] is not None else None}
+                 for r in rows],
+        "advances": advances, "declines": declines, "unchanged": unchanged,
+        "as_of": str(anchor_ts),
+    }
+
+
 # ── cc#906: V10 trade-log chart ───────────────────────────────────────────────────────────────
 # Table chosen by LOOKUP, never by string-building from the query param — a user-supplied symbol
 # never reaches the SQL text.
