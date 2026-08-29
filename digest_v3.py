@@ -530,6 +530,11 @@ def _yesterday_results(cur, basis) -> Dict[str, Any]:
 # reading. result_analysis_v2 holds 633 rows of written analysis. This builds a payload from
 # THAT, as a NEW key. _yesterday_results is not touched and the web page keeps reading it.
 #
+# cc#1414 · THE DECK IS NO LONGER RA2-ONLY. This SQL still supplies the written-analysis half,
+# unchanged; _RESULTS_L1_SQL below supplies the rest of the reported GVM universe as L1 rows, and
+# _results_analysed() merges the two — expand, never shrink: every row this query ships today
+# still ships, the founder's ask ADDS the reported names that have no written entry yet.
+#
 # THE VERDICT LINE HAS THREE SHAPES, NOT ONE, AND I ONLY KNOW THAT BECAUSE I COUNTED. The card
 # says "after VERDICT: to first newline". Measured across all 633 rows:
 #     511  start "VERDICT:"  or "Verdict:"   <- BOTH casings, 248 upper and 263 mixed
@@ -595,6 +600,90 @@ def _tier(rank) -> Optional[str]:
         return None
     r = int(rank)
     return "LARGE" if r <= 100 else ("MID" if r <= 250 else "SMALL")
+
+
+# ── cc#1414 · L1 ROWS FOR THE REST OF THE REPORTED UNIVERSE ───────────────────────────────────
+# Founder: the deck's universe is the FULL GVM-scored universe (1796), not the ~632 with a written
+# result_analysis_v2 entry. This query is the OTHER HALF of that deck: every symbol that is
+# (a) in the live GVM universe, (b) reported this quarter per earnings_calendar (status='reported',
+# verified<>'false', ex_date >= the completed quarter end — the SAME three-part gate
+# results_endpoints._SEGMENT_RESULTS_SQL already uses, per the card), and (c) has NO
+# result_analysis_v2 row. The RA2 half keeps _RESULTS_ANALYSED_SQL above, untouched.
+#
+# WHAT THE DATA ACTUALLY SUPPORTS, measured before writing this rather than taken from the card's
+# own optimistic note: fundamentals_history quarters covers 837 symbols, NOT the full 1796 — so of
+# the ~998 reported-no-RA2 names, only ~184 can carry real L1 numbers and a computed sentence.
+# The rest ship as name/segment/tier/date rows with verdict NULL — present in the deck per the
+# founder's explicit "do not omit the company", never a fabricated sentence.
+#
+# THE INPUT DERIVATIONS MIRROR THE CARD'S OWN, deliberately:
+#   pat_yoy   — (now-was)/abs(was)*100, was<>0 — _l1_quarter.pct()'s own formula (abs base,
+#               negative year-ago allowed), NOT the dot SQL's positive-base guard, because the
+#               sentence must match what the R-card's own L1 block shows for the same symbol.
+#   margin    — "OPM percent" first, else "Financing Margin percent" (the literal % in the SQL
+#               below is doubled to %% for psycopg2's param mode — that is escaping, not a
+#               different key name), key-PRESENCE tested on the CURRENT
+#               quarter's metrics (jsonb ?), insurers excluded via screener_raw.industry_group —
+#               each rule lifted from _l1_quarter, stated there with its own evidence.
+#   vs-est    — expected_quarterly_net_profit with the +/-2% bands — the set-based restatement
+#               _segment_results already made of _expectations' bands (cc#1192: "the SAME bands,
+#               not a second set"), reused here on the same precedent.
+# The SENTENCE itself is NOT re-derived: _results_analysed() feeds these inputs to the real
+# results_endpoints._auto_verdict(), so the deck row and the R-card cannot disagree on wording.
+_RESULTS_L1_SQL = """
+WITH latest_gvm AS (
+    SELECT DISTINCT ON (symbol) symbol, segment, market_cap
+    FROM gvm_scores ORDER BY symbol, score_date DESC
+), ranked AS (
+    SELECT symbol, RANK() OVER (ORDER BY market_cap DESC NULLS LAST) AS mcap_rank
+    FROM latest_gvm WHERE market_cap IS NOT NULL
+), rep AS (
+    SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS sym, ex_date
+    FROM earnings_calendar
+    WHERE status = 'reported' AND verified <> 'false' AND ex_date >= %(q_start)s
+    ORDER BY UPPER(ticker), ex_date DESC
+), tgt AS (
+    SELECT r.sym, r.ex_date FROM rep r JOIN latest_gvm g ON g.symbol = r.sym
+    WHERE NOT EXISTS (SELECT 1 FROM result_analysis_v2 a WHERE a.symbol = r.sym)
+), q AS (
+    SELECT UPPER(f.symbol) AS sym, f.period_end, f.metrics,
+           NULLIF(replace(f.metrics->>'Net Profit', ',', ''), '')::numeric AS pat
+    FROM fundamentals_history f
+    WHERE f.section='quarters' AND f.period_type='quarter'
+      AND UPPER(f.symbol) IN (SELECT sym FROM tgt)
+), latest AS (
+    SELECT sym, period_end, metrics, pat, MAX(period_end) OVER (PARTITION BY sym) AS max_pe FROM q
+), calc AS (
+    SELECT c.sym, c.period_end,
+           CASE WHEN p.pat IS NOT NULL AND p.pat <> 0
+                THEN (c.pat - p.pat) / abs(p.pat) * 100 END AS pat_yoy,
+           c.pat AS act_pat,
+           CASE WHEN (c.metrics::jsonb ? 'OPM %%')
+                THEN NULLIF(replace(replace(c.metrics->>'OPM %%',',',''),'%%',''),'')::numeric
+                WHEN (c.metrics::jsonb ? 'Financing Margin %%')
+                THEN NULLIF(replace(replace(c.metrics->>'Financing Margin %%',',',''),'%%',''),'')::numeric
+           END AS m_now,
+           CASE WHEN (c.metrics::jsonb ? 'OPM %%')
+                THEN NULLIF(replace(replace(y.metrics->>'OPM %%',',',''),'%%',''),'')::numeric
+                WHEN (c.metrics::jsonb ? 'Financing Margin %%')
+                THEN NULLIF(replace(replace(y.metrics->>'Financing Margin %%',',',''),'%%',''),'')::numeric
+           END AS m_yr
+    FROM latest c
+    LEFT JOIN q p ON p.sym = c.sym AND p.period_end = (c.period_end - INTERVAL '1 year')::date
+    LEFT JOIN q y ON y.sym = c.sym AND y.period_end = (c.period_end - INTERVAL '1 year')::date
+    WHERE c.period_end = c.max_pe
+)
+SELECT t.sym, s.company_name, k.mcap_rank, g.segment, t.ex_date,
+       c.period_end, c.pat_yoy, c.m_now, c.m_yr, c.act_pat,
+       NULLIF(replace(s.expected_quarterly_net_profit::text, ',', ''), '')::numeric AS exp_pat,
+       lower(btrim(COALESCE(s.industry_group,''))) = 'insurance' AS is_insurer
+FROM tgt t
+LEFT JOIN latest_gvm g ON g.symbol = t.sym
+LEFT JOIN ranked k ON k.symbol = t.sym
+LEFT JOIN screener_raw s ON UPPER(s.nse_code) = t.sym
+LEFT JOIN calc c ON c.sym = t.sym
+ORDER BY t.ex_date DESC NULLS LAST, t.sym
+"""
 
 
 # ── cc#1238 · RESULT TRAFFIC DOT (RESULT_DOT_RULE_V1, session_log 29519) ──────────────────────
@@ -726,6 +815,26 @@ def _results_analysed(cur) -> Dict[str, Any]:
     out, tiers = [], {"LARGE": 0, "MID": 0, "SMALL": 0}
     unranked = 0
     seen = {}
+
+    # cc#1414: the dot-attach block, hoisted into ONE helper so the RA2 loop and the new L1 loop
+    # below cannot drift on the quarter-match guard. Semantics byte-identical to the inline block
+    # it replaces. The dot is attached ONLY when the quarter it was computed for is the quarter
+    # this row is about — see _fq_label for why that guard exists rather than a plain lookup.
+    def _attach_dot(rowd, quarter):
+        d = dots.get(rowd["symbol"])
+        if d and d["quarter"] and quarter and d["quarter"] == quarter and d["dot"]:
+            rowd["dot"] = d["dot"]
+            rowd["dot_basis"] = d["dot_basis"]
+            rowd["dot_inputs"] = {k: d[k] for k in
+                                  ("pat_yoy", "seg_median_pat_yoy", "seg_n", "act_pat", "exp_pat")}
+            dot_cov[d["dot"]] += 1
+            if d["dot_basis"] != "both":
+                dot_cov["single_check"] += 1
+            if d["seg_n"] is not None and d["seg_n"] <= 2:
+                dot_cov["median_from_2_or_fewer"] += 1
+        else:
+            dot_cov["no_dot"] += 1
+
     for sym, company, rank, segment, quarter, polished, verdict, ex_date in rows:
         tier = _tier(rank)
         if tier:
@@ -751,22 +860,67 @@ def _results_analysed(cur) -> Dict[str, Any]:
             # conversion needed. None when the symbol has no reported ex_date on file (never
             # fabricated); the row renders without the chip rather than a guessed date.
             "ex_date": ex_date.isoformat() if ex_date else None,
+            "l2": True,   # cc#1414: written long-form exists for this row
         })
-        # The dot is attached ONLY when the quarter it was computed for is the quarter this row is
-        # about. See _fq_label for why that guard exists rather than a plain symbol lookup.
-        d = dots.get(sym)
-        if d and d["quarter"] and quarter and d["quarter"] == quarter and d["dot"]:
-            out[-1]["dot"] = d["dot"]
-            out[-1]["dot_basis"] = d["dot_basis"]
-            out[-1]["dot_inputs"] = {k: d[k] for k in
-                                     ("pat_yoy", "seg_median_pat_yoy", "seg_n", "act_pat", "exp_pat")}
-            dot_cov[d["dot"]] += 1
-            if d["dot_basis"] != "both":
-                dot_cov["single_check"] += 1
-            if d["seg_n"] is not None and d["seg_n"] <= 2:
-                dot_cov["median_from_2_or_fewer"] += 1
+        _attach_dot(out[-1], quarter)
+
+    # ── cc#1414 · THE REST OF THE REPORTED UNIVERSE, as L1 rows ──────────────────────────────
+    # Everything reported this quarter in the GVM universe with NO result_analysis_v2 row. The
+    # sentence is the REAL results_endpoints._auto_verdict() — imported here, at the call site,
+    # never re-derived (do-not-touch) — fed set-based inputs whose derivations mirror the card's
+    # own (see _RESULTS_L1_SQL's header). A symbol with no computable PAT YoY ships with
+    # verdict "" — present in the deck per the founder's explicit "do not omit the company",
+    # never a fabricated sentence. q_start reuses _completed_quarter_end, the same gate
+    # _segment_results uses (the card's own named pattern).
+    from results_endpoints import _auto_verdict, _completed_quarter_end
+    cur.execute(_RESULTS_L1_SQL, {"q_start": _completed_quarter_end(datetime.now(IST).date())})
+    l1_raw = cur.fetchall()
+    l1_with_sentence = 0
+    for (sym, company, rank, segment, ex_date, pe, pat_yoy, m_now, m_yr,
+         act_pat, exp_pat, is_insurer) in l1_raw:
+        tier = _tier(rank)
+        if tier:
+            tiers[tier] += 1
         else:
-            dot_cov["no_dot"] += 1
+            unranked += 1
+        quarter = _fq_label(pe)   # the FILED quarter — the chip states which quarter the numbers
+        #                           describe, so a scrape-lagged symbol is labelled, never passed
+        #                           off as the just-reported quarter
+        pp = None
+        if (not is_insurer) and m_now is not None and m_yr is not None:
+            pp = round(float(m_now) - float(m_yr), 1)   # _l1_quarter's own margin delta
+        band = None
+        if act_pat is not None and exp_pat is not None and float(exp_pat) != 0:
+            dev = (float(act_pat) - float(exp_pat)) / abs(float(exp_pat)) * 100.0
+            band = "BEAT" if dev > 2 else ("MISS" if dev < -2 else "IN-LINE")
+        verdict = _auto_verdict(
+            {"pat": {"yoy": None if pat_yoy is None else float(pat_yoy)},
+             "margin": ({"pp": pp} if pp is not None else None)},
+            ({"profit": {"tag": band}} if band else None))
+        if verdict:
+            l1_with_sentence += 1
+        seen[sym] = seen.get(sym, 0) + 1
+        out.append({
+            "symbol": sym,
+            "company": company,
+            "tier": tier,
+            "segment": segment,
+            "quarter": quarter,
+            "polished_at": None, "polished_ist": None,   # nothing was polished — never faked
+            "verdict": verdict or "",
+            "ex_date": ex_date.isoformat() if ex_date else None,
+            "l2": False,   # cc#1414: L1/structured row — the card renders Not Available for L2
+        })
+        _attach_dot(out[-1], quarter)
+
+    # cc#1414: ONE deck order across both halves — the same ex_date DESC NULLS LAST,
+    # polished_at DESC, symbol ASC the SQL used when the deck was RA2-only (cc#1319's latest-
+    # result-first ruling), applied to the merged list via stable multi-pass sorts. Within one
+    # result date, polished (L2) rows sort ahead of L1 rows, which is the right read: the
+    # written analysis is the richer row for the same day.
+    out.sort(key=lambda r: r["symbol"])
+    out.sort(key=lambda r: r.get("polished_at") or "", reverse=True)
+    out.sort(key=lambda r: r.get("ex_date") or "", reverse=True)
 
     # KIMS carries TWO rows, Q4FY26 and Q1FY27, so 633 rows are 632 companies. The card says "all
     # result_analysis_v2 rows" and its verify pins total to COUNT(*), so all 633 ship and total is
@@ -781,6 +935,16 @@ def _results_analysed(cur) -> Dict[str, Any]:
         "duplicate_symbols": dupes,
         "tiers": tiers,
         "unranked": unranked,
+        # cc#1414: composition of the expanded deck, so the strip (and any audit) can say what
+        # portion is written analysis vs computed L1 vs name-and-date-only. l2_rows + l1_rows ==
+        # total by construction; l1_with_sentence <= l1_rows because a symbol outside the
+        # fundamentals scrape has no computable YoY and ships with an empty verdict rather than
+        # a fabricated one. NOTE the tiers/tally denominators above now cover this FULL merged
+        # deck, not the old RA2-only 633 — the universe expansion changes those denominators by
+        # construction, stated here per the card's own do-not-touch clause.
+        "l2_rows": len(rows),
+        "l1_rows": len(l1_raw),
+        "l1_with_sentence": l1_with_sentence,
         # cc#1319: no longer out[0] -- the deck is sorted by ex_date now, not polished_at, so the
         # first row is not necessarily the most recently polished one any more. polished_at is
         # astimezone(IST).isoformat() with a fixed offset on every row, so a plain string max()
