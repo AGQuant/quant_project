@@ -3088,26 +3088,37 @@ function v10Svg(d){
     + ' fill="var(--dim,#5E6B8F)" font-family="IBM Plex Mono,monospace">' + esc(dlab(s[n - 1].d)) + '</text>');
 
   var more = w.from > 0;
+  /* cc#1405: v10HintText() now returns '' in its resting/informational states (the text this
+     task removed) -- wrap it conditionally so an empty hint leaves NO residual .v10hint padding
+     strip (space-3 top + space-2 bottom) where the removed line used to sit, per this task's own
+     "no leftover empty space" verify requirement. */
+  var hint = v10HintText(d, n, all.length, more);
   return '<div class="v10cv" id="v10cv">'
     + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"'
     + ' style="width:100%;height:' + H + 'px;display:block;touch-action:pan-y">' + out.join('') + '</svg>'
-    + '<div class="v10hint">' + v10HintText(d, n, all.length, more) + '</div></div>';
+    + (hint ? '<div class="v10hint">' + hint + '</div>' : '') + '</div>';
 }
 
 /* cc#949 item 2/3: the strip under the chart is the paging state — loading, a retry after a
    failed fetch, or the terminal marker at the floor. It is never silently blank at the end of
-   history: a pan that stops working with no explanation reads as a bug. */
+   history: a pan that stops working with no explanation reads as a bug.
+   cc#1405: the founder's screenshot struck through the RESTING-state text of this strip
+   ("← drag right for older · showing 360 of 360 bars" / "start of history" / "start of 5-min
+   history") -- those informational branches are removed, returning '' instead. The FUNCTIONAL
+   branches (loading shimmer, the Retry button after a failed page fetch, the "Older history in
+   Daily view" handoff button) are NOT part of what was struck through and are load-bearing UX,
+   not caption text -- do_not_touch says leave the pan-back mechanism's own logic alone unless a
+   genuine bug is found (none was, see this task's own result), so removing a user's only way to
+   retry a failed fetch would be an unscoped behaviour change, not a text trim. Kept as-is. */
 function v10HintText(d, n, total, more){
-  if (!v10Bars(d))
-    return (more ? '← drag right for older' : 'start of history') + ' · showing ' + n + ' of ' + total + ' sessions';
+  if (!v10Bars(d)) return '';
   if (V10.loading)
     return '<span class="v10shim"></span> loading older bars…';
   if (V10.pageErr)
     return 'Could not load older bars · <button class="v10rty" onclick="v10Retry()">Retry</button>';
   if (d.has_more === false && (V10.win || 0) === 0)
     return '<button class="v10rty" onclick="v10ToDaily()">Older history in Daily view →</button>';
-  return (d.has_more === false ? 'start of 5-min history' : '← drag right for older')
-       + ' · showing ' + n + ' of ' + total + ' bars';
+  return '';
 }
 
 /* ── drag: horizontal only, and only once the gesture proves itself horizontal ── */
@@ -3440,9 +3451,12 @@ function renderV10(){
   var t = document.getElementById('v10ttl');
   if (t) t.textContent = d.label + ' · V10 trades';
   var st = d.stats || {};
+  /* cc#1405: the date-range + count/resolution spans ("08-20 15:10 -> 08-28 15:10 · 360 bars ·
+     5-min") are removed per the founder's struck-through screenshot. The OTHER two spans here
+     (closed/win-loss/open, Net P&L) are a different line -- not marked in that screenshot, not
+     named in this task's own scope -- left exactly as they were. */
   bd.innerHTML = v10Toggle()
-    + '<div class="v10st"><span>' + esc(dlab(d.from || '')) + ' → ' + esc(dlab(d.to || ''))
-    + '</span><span>' + (d.count || 0) + (v10Bars(d) ? ' bars · 5-min' : ' sessions · daily') + '</span>'
+    + '<div class="v10st">'
     + '<span>' + (st.closed || 0) + ' closed · ' + (st.wins || 0) + 'W/' + (st.losses || 0) + 'L'
     + (st.open ? ' · ' + st.open + ' open' : '') + '</span>'
     + (st.net_pnl == null ? '' : '<span class="' + cls(st.net_pnl) + '">Net ' + inrShort(st.net_pnl) + '</span>')
