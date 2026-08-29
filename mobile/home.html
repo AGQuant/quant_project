@@ -2717,7 +2717,7 @@ function loadV10(barsArg){
    removed together, replaced by the Index Positions set below. */
 var POS_SYMS = [
   { key: 'NIFTY50', label: 'NIFTY' },
-  { key: 'BANKNIFTY', label: 'BANK NIFTY' }
+  { key: 'BANKNIFTY', label: 'BANKNIFTY' }   // cc#1422: was 'BANK NIFTY' -- one word, matching NIFTY's own pill styling and the symbol everywhere else on this card
 ];
 var POS = { sym: 'NIFTY50', data: {} };   // cc#1386: which symbol the merged card is showing
 function posToggleHtml(){
