@@ -897,26 +897,31 @@ def mobile_home2(request: Request):
     #                The tape shows a value; the table has to say WHEN, or a five-day-old Nikkei
     #                print reads as this morning's.
     #   has_series — whether a per-name chart is actually reachable, decided HERE from real data
-    #                rather than guessed in the template. /api/global/history/{name} reads
-    #                global_indices, and NIFTY/BANKNIFTY are not in that table, so those two get
-    #                no chart icon. The card is explicit: never a dead button.
+    #                rather than guessed in the template. NIFTY/BANKNIFTY have always been True
+    #                here (their intraday session always gave them a chart) — cc#1408 is what
+    #                changed daily_series below, not this flag. The card is explicit: never a
+    #                dead button.
     ticker = []
     for k, v in (idx.get("indices") or {}).items():
         if isinstance(v, dict):
-            # cc#940 task 3: NIFTY and BANKNIFTY had NO chart at all — cc#904 set has_series False
-            # because /api/global/history reads global_indices and they are not in it, which is
-            # still true. What IS available is their 5-min session in intraday_prices, so they now
-            # get an INTRADAY-ONLY chart: the 1D pill and nothing else. daily_series=False is the
-            # flag the template reads to build a one-pill range bar instead of offering 7D/15D/30D
-            # windows that would resolve to an empty daily series. Never a dead button (cc#904),
-            # and never a pill that leads nowhere either.
+            # cc#940 task 3 (ORIGINAL STATE, superseded by cc#1408 below): NIFTY and BANKNIFTY had
+            # NO chart at all because /api/global/history read global_indices and they are not in
+            # it. What WAS available was their 5-min session in intraday_prices, so they got an
+            # INTRADAY-ONLY chart: the 1D pill and nothing else, daily_series=False.
+            # cc#1408: daily_series is now True. /api/global/history/{name} (gvm_market_endpoints)
+            # gained a NIFTY/BANKNIFTY path reading raw_prices directly — the same table
+            # domestic_live() (this tile) and v10_maxpain() (Max Pain's spot) already read for
+            # these two symbols, so the daily series here cannot drift from what those two
+            # surfaces already show. The tape template reads this flag to build the intraday+daily
+            # 1D/15D/30D/1Y range set (cc#1407's TAPE_RANGES_ALL) instead of the one-pill bar —
+            # never a dead button (cc#904), and never a pill that leads nowhere either.
             ticker.append({"name": "NIFTY" if k == "NIFTY50" else "BANKNIFTY",
                            "price": v.get("close"), "chg_pct": v.get("chg_pct"),
                            "category": "domestic",
                            "as_of": v.get("price_date"),
                            "live": v.get("source") == "live_intraday",
                            "has_series": True,
-                           "daily_series": False,
+                           "daily_series": True,
                            "intraday_name": k})
     _pos = {n: i for i, n in enumerate(_TICKER_NAME_ORDER)}
     for r in sorted(glob_rows, key=lambda r: (_pos.get(r["name"], 99), r["name"])):
