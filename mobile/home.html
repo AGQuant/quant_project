@@ -728,6 +728,46 @@ body[data-theme]{
    (it already has, twice, since cc#1380 shipped) -- the exact class of lesson cc#1382's own
    N-card generalization of syncHeroCardHeights() already applied elsewhere on this deck. */
 #heroTrack > .c{border-radius:0}
+/* cc#1416 · CORNER, NOT EDGE — the fold LIVE-INSPECTED TO ITS REAL SOURCE.
+   cc#1380/cc#1392 both measured getComputedStyle() on `.c` and got clip-path:none -- true only
+   of this file's OWN <style> and mobile_app.css (mobile_endpoints.py MOBILE_CSS), neither of
+   which has ever declared a clip-path on `.c`. Neither prior check loaded the THIRD sheet that
+   is on every live page: scorr_theme_r5.css, injected by main.py into every PWA path as a
+   <link> after this file's own <style>. Its Pass-1 geometry block -- `.c,.card,.m{border-
+   radius:0; clip-path:polygon(0 0, calc(100% - var(--r5-cut)) 0, 100% var(--r5-cut), 100% 100%,
+   0 100%)}`, --r5-cut:16px -- is the real, live, deliberate source: a genuine diagonal running
+   16px along BOTH the top edge and the right edge, exactly the "edge cut" shape the founder is
+   asking to replace with a corner accent. CONFIRMED BY LIVE INSPECTION (elementsFromPoint +
+   getComputedStyle on the rendered page, not source-reading alone -- the card's own
+   instruction): Card 1's `.c` computed clip-path matched scorr_theme_r5.css's polygon
+   character-for-character. This is also why the cut and the date text were related but never
+   literally overlapping -- .rgt (the date) sits ~22px below the card's top edge, outside the
+   old 16px diagonal's band, so nothing was ever clipped; 16px simply reached far enough toward
+   the header row to read as intruding on it.
+   THE FIX STAYS INSIDE THIS FILE, same technique cc#1380 already used for border-radius: an
+   #heroTrack > .c override beats the shared rule on SPECIFICITY ALONE -- #heroTrack is an ID,
+   which outranks any number of classes/pseudo-classes, and scorr_theme_r5.css's selector
+   (:root:root:not([data-theme="light"]) .c) is four class-level selectors and zero IDs. Nothing
+   in scorr_theme_r5.css is touched -- it keeps serving every other .c/.card/.m card on every
+   other page exactly as before ("no changes to any other page").
+   SIZE: reused var(--r5-cut-sm) -- the app's OWN existing "small corner accent" token (6px,
+   already used for every pill/chip/badge cut) -- instead of inventing a new number. At 6px the
+   diagonal band ends by local y=6, clear of .chd's own top edge (y=14) and further still of
+   .rgt (y=22) -- confined to the corner with real margin, not just barely missing the text the
+   way the old 16px cut did.
+   SCOPE: applied to the bare '#heroTrack > .c' -- every card in the deck, not Card 1 alone,
+   matching cc#1389's own precedent (that card reversed a Card1+2-only fix to all cards for the
+   same "one swipeable deck, one corner geometry" reason). Cards 2-4 get the smaller corner too;
+   verification below covers all four.
+   NOT TOUCHED: .card (used elsewhere on THIS page, by the V10 Trade-Check .vpage sheets around
+   L2317/2498 -- a different surface, not what the founder circled) and scorr_theme_r5.css
+   itself (shared site-wide) are both left exactly as they were.
+   THE GLITTER RING NEEDS NO CHANGE OF ITS OWN, RE-VERIFIED not just re-assumed from cc#1380's
+   note: `.c::after` is position:absolute;inset:0 inside a position:relative ancestor that now
+   carries this clip-path, and CSS clip-path constrains the painted region of an element's
+   whole subtree, so the ring is clipped to the SAME diagonal its parent now draws automatically
+   -- confirmed by screenshot at the new 6px size, not assumed. */
+#heroTrack > .c{clip-path:polygon(0 0, calc(100% - var(--r5-cut-sm,6px)) 0, 100% var(--r5-cut-sm,6px), 100% 100%, 0 100%)}
 /* ══ cc#1378 · ANIMATED AQUA GLITTER BORDER — cc#1389: EVERY heroTrack CARD ═══════════════════
    Founder ask, originally: a sparkling aqua line travelling around the edge of a box, scoped to
    just Card 1+2 after being shown the perf/battery cost of running it on every card on the page.
