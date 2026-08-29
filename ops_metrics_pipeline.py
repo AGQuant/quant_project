@@ -701,6 +701,18 @@ def _fetch_pdf_text(url, doc_type):
         text = "\n".join(text_parts).strip()
         if not text:
             return None
+        # cc#1421: some PDFs (confirmed: OLAELEC, recurring 15/22/29-Aug Saturday-retry cycles)
+        # decode through pdfplumber's extract_text() with a literal NUL (0x00) byte embedded --
+        # a known pdfplumber quirk on malformed/embedded-font PDFs. Postgres text columns
+        # HARD-REJECT NUL specifically (DataError, not merely unusual) -- every retry of the
+        # SAME broken extraction reproduces the SAME NUL byte, so retrying alone can never fix
+        # it (confirmed: 9 consecutive failures on OLAELEC before this fix). Stripped here, at
+        # the single point text is captured, so every caller of this shared function (both the
+        # T+1 staging path and run_company_depth) is covered -- not a per-symbol patch.
+        # Also strips other C0 control characters (keeping tab/newline/CR, which are legitimate
+        # in extracted document text) -- Postgres itself only hard-rejects NUL, but a PDF
+        # extraction has no legitimate reason to carry raw control bytes either way.
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
         return text[:_MAX_DOC_CHARS.get(doc_type, 15000)]
     except Exception as e:
         log.warning(f"_fetch_pdf_text failed for {url}: {e}")
