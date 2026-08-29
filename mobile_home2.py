@@ -143,8 +143,8 @@ _VIX_NO_INTRADAY = ("India VIX has no intraday feed — it is not one of the 15 
 
 # ── cc#1231 · THE INTRADAY COVERAGE SET, NAMED ONCE ────────────────────────────────────────────
 # This tuple was written inline in mobile_trends as `kind in ("adr", "pcr")` and it is the ONLY
-# place the platform records which chip series have a 5-minute source. India VIX is not in it
-# because there is no intraday India VIX anywhere — global_intraday carries 15 names and VIX is not
+# place the platform records which chip series have a 5-minute source. India VIX was not in it
+# because there was no intraday India VIX anywhere — global_intraday carries 15 names and VIX is not
 # one of them — and nifty/banknifty are daily close series by the same reasoning (cc#998).
 #
 # It is hoisted and EXPORTED because the client needs the same answer. The Home chip popout was
@@ -153,7 +153,16 @@ _VIX_NO_INTRADAY = ("India VIX has no intraday feed — it is not one of the 15 
 # contradicting the honest caption printed beneath it. The fix is not a second list in JavaScript:
 # the page reads THIS set, so there is exactly one definition and the chart cannot disagree with the
 # caption again.
-_INTRADAY_KINDS = ("adr", "pcr")
+#
+# cc#1398 · VIX ADDED, on a source cc#1231 never checked. cc#1231's own finding above is UNCHANGED
+# and still true of global_intraday — VIX genuinely is not among its 15 names. What changed is a
+# DIFFERENT table: intraday_prices carries a real 5-min INDIAVIX feed (symbol='INDIAVIX',
+# timeframe='5m') that this session found and verified directly — 76 bars/session, full
+# 09:15-15:30 coverage, checked across 10+ trading days with zero gaps. This is not "the old
+# source finally got populated"; it is a second source cc#1231 had no reason to look for at the
+# time. The constraint the comment above describes still holds for global_intraday; it no longer
+# gates VIX's own 1D tab, because VIX's 1D tab reads intraday_prices now, not global_intraday.
+_INTRADAY_KINDS = ("adr", "pcr", "vix")
 
 
 @router.get("/api/mobile/trends")
@@ -171,8 +180,10 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
              and the mood-gate use — an ungated pre-open tick on a thin universe is not breadth)
       pcr -> pcr_intraday.pcr_total, underlying = 'NIFTY'  (the total-PCR series the web
              /api/pcr/intraday serves; ATM+-5 is a different question and stays on the web)
-      vix -> NO intraday source exists, so this falls back to the daily line and SAYS so in
-             `note`. The chart is never given a shape the data cannot support.
+      vix -> intraday_prices.close, symbol='INDIAVIX', timeframe='5m' (cc#1398 — a real 5-min
+             feed, verified this session: 76 bars/session, 09:15-15:30, no gaps in 10+ days.
+             Different table from adr/pcr's own intraday sources, and different from
+             global_indices' daily line above; the daily VIX view is unaffected.)
 
     SESSION ANCHOR: the intraday day is MAX(ts)::date of the source table, NOT CURRENT_DATE.
     Anchoring on today would render an empty chart every weekend and every holiday; rolling
@@ -206,6 +217,19 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
                 WHERE adr IS NOT NULL AND universe_count >= 50
                   AND ts::date = (SELECT MAX(ts)::date FROM adr_intraday
                                   WHERE adr IS NOT NULL AND universe_count >= 50)
+                ORDER BY ts ASC
+            """)
+            rows = _rows(cur)
+        elif intraday and kind == "vix":
+            # cc#1398: intraday_prices, NOT global_intraday — a different table from the one
+            # cc#1231 checked (see the _INTRADAY_KINDS comment above). symbol/timeframe verified
+            # this session: 'INDIAVIX'/'5m' is real, 76 bars/session, 09:15-15:30, no gaps.
+            cur.execute("""
+                SELECT to_char(ts, 'HH24:MI') AS d, close AS v, ts::date AS sd
+                FROM intraday_prices
+                WHERE symbol = 'INDIAVIX' AND timeframe = '5m' AND close IS NOT NULL
+                  AND ts::date = (SELECT MAX(ts)::date FROM intraday_prices
+                                  WHERE symbol = 'INDIAVIX' AND timeframe = '5m' AND close IS NOT NULL)
                 ORDER BY ts ASC
             """)
             rows = _rows(cur)
@@ -255,8 +279,12 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
                     ORDER BY price_date DESC LIMIT %s
                 """, (dd,))
             rows = list(reversed(_rows(cur)))
-            if want == 1 and kind == "vix":
-                note = _VIX_NO_INTRADAY
+            # cc#1398: `if want == 1 and kind == "vix": note = _VIX_NO_INTRADAY` REMOVED — it is
+            # unreachable now. `intraday` is True whenever want==1 and kind=='vix' (vix is in
+            # _INTRADAY_KINDS above), so that combination takes the elif branch above and never
+            # reaches this else at all. _VIX_NO_INTRADAY itself and its own comment are left in
+            # place, untouched, as the historical record (do-not-touch) — only this now-dead call
+            # site is removed.
 
     series = [{"d": str(r["d"]), "v": float(r["v"])} for r in rows if r["v"] is not None]
     as_of = None
