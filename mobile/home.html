@@ -1171,7 +1171,10 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
 .dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
 .dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
-.posbar{position:relative;height:6px;margin:var(--space-12) 2px var(--space-4);border-radius:3px;
+/* cc#1404 · posbar's own margin-bottom is the "range bar -> label row" breathing-room gap the
+   founder asked for (4px -> 20px). Everything else about this rule (position/height/zone bars)
+   is do-not-touch per the task's own scope -- untouched. */
+.posbar{position:relative;height:6px;margin:var(--space-12) 2px var(--space-20);border-radius:3px;
   background:var(--panel2)}
 .posbar i{position:absolute;top:0;height:100%}
 .posbar .zr{background:var(--red);opacity:.32}
@@ -1179,10 +1182,15 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 .posbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
 .posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
   border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
-.poslb{position:relative;height:26px;margin:0 2px;
+/* cc#1404 · height 26px -> 34px: room for .poslb b's own +2-notch bump (below) without crowding
+   .poslb em, which stays at its existing literal 8px -- not on the file's --type-* scale, so it
+   is outside this task's own "on the existing --type-* scale" instruction and is left alone. */
+.poslb{position:relative;height:34px;margin:0 2px;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9)}
 .poslb span{position:absolute;top:0;text-align:center}
-.poslb b{display:block;font-weight:800;font-size:var(--type-10);color:var(--txt,#E9EEFB)}
+/* cc#1404 · +2 notches on the round --type-* steps, read from the file before guessing:
+   --type-10 (10px) -> --type-12 (12px). */
+.poslb b{display:block;font-weight:800;font-size:var(--type-12);color:var(--txt,#E9EEFB)}
 .poslb em{display:block;font-style:normal;font-size:8px;color:var(--mut);letter-spacing:.5px}
 .decwrap{margin:var(--space-12) 2px var(--space-4)}
 .decbar{position:relative;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
@@ -1191,8 +1199,16 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 .declb{display:flex;justify-content:space-between;margin-top:var(--space-5);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--mut)}
 .declb b{color:var(--txt,#E9EEFB);font-weight:800}
+/* .legfoot is SHARED with the OPTIONS decay bar's own P&L line (posDecayBar(), out of this
+   task's scope) -- left completely unchanged so Options is not affected. */
 .legfoot{text-align:right;margin-top:var(--space-6);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10)}
+/* cc#1404 · .posfoot is the FUTURES-only override (posRangeBar() alone renders it, see
+   renderHeroPositions()) for the "label row -> cmp summary row" breathing-room gap (6px -> 20px)
+   and the same +2-notch font bump (--type-10 -> --type-12) as .poslb b, above. Placed after
+   .legfoot in source order so the cascade tie (equal 0,1,0 specificity) resolves in its favour
+   for elements carrying both classes, without touching the shared .legfoot rule itself. */
+.posfoot{margin-top:var(--space-20);font-size:var(--type-12)}
 .legdiv{border-top:var(--bw-1) solid var(--line);margin-top:var(--space-14)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
@@ -2564,8 +2580,15 @@ function posRangeBar(fut, cmp){
         14% separation to clear each other at this card's narrowest tested width (320px, ~280px
         usable), so MIN_LABEL_GAP is set from that measurement, not guessed. Checked against ALL
         three other labels (stop/entry/target), not just entry, since cmp can in principle land
-        near any of them. */
-  var MIN_LABEL_GAP = 14;
+        near any of them.
+     cc#1404 RE-DERIVED, same method: the +2-notch font bump on .poslb b (--type-10 -> --type-12,
+     this same task) widened each label from ~36px to ~43px, which made 14 genuinely unsafe --
+     re-measured at 320px (~260px usable in this build) found real overlap at gap=16 (-1.77px)
+     and only a wafer-thin 0.54px clearance at gap=17, both confirmed by rendering the exact
+     boundary case, not estimated. 19 is the new value: comfortably clear (6.32px) at the tightest
+     boundary tested, same relative safety margin cc#1386's own 14 carried over its computed
+     12.86 minimum. */
+  var MIN_LABEL_GAP = 19;
   var tooClose = cmpRaw != null && [stopPct, entryPct, targetPct].some(function(p){
     return Math.abs(cmpClamped - p) < MIN_LABEL_GAP;
   });
@@ -2596,7 +2619,9 @@ function posRangeBar(fut, cmp){
     + (cmpClamped == null ? '' : '<i class="bdot" style="left:' + cmpClamped.toFixed(2) + '%"></i>')
     + '</div>'
     + '<div class="poslb">' + labels + '</div>'
-    + '<div class="legfoot" style="text-align:left;display:flex;justify-content:space-between">'
+    /* cc#1404: posfoot is the FUT-only breathing-room/font override -- posDecayBar() below (the
+       OPT leg's own .legfoot P&L line) does not carry it, so that line is unaffected. */
+    + '<div class="legfoot posfoot" style="text-align:left;display:flex;justify-content:space-between">'
     + footLeft + footRight + '</div>';
 }
 /* cc#1386 · OPT LEG -- theta-decay bar (written premium -> live premium). live_premium is this
