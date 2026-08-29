@@ -1051,6 +1051,21 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
                 _act_pat = _f(str(_mm.get("Net Profit") or "").replace(",", ""))
         except Exception as e:
             log.warning(f"cc#796 actuals {sym}: {e}")
+        # cc#1427: a Basic/CSV-only name (no fundamentals_history quarters scraped yet — the
+        # result_analysis_gen.py "(limited review)" case) has NO stale-vs-current basis to worry
+        # about (cc#796's concern above): there is exactly ONE basis, the CSV, or none at all. Fall
+        # back to the same screener_raw absolutes result_corner.py's CSV layer already reads, so
+        # vs-est (block_2) renders for these names instead of silently degrading to "omitted".
+        if _act_sales is None and _act_pat is None:
+            try:
+                cur.execute("""SELECT sales_latest_quarter, profit_after_tax_latest_quarter
+                               FROM screener_raw WHERE UPPER(nse_code)=UPPER(%s) LIMIT 1""", (sym,))
+                _cr = cur.fetchone()
+                if _cr:
+                    _act_sales = _f(_cr[0])
+                    _act_pat = _f(_cr[1])
+            except Exception as e:
+                log.warning(f"cc#1427 CSV actuals fallback {sym}: {e}")
         expectations = _expectations(cur, sym, _act_sales, _act_pat)
         l1 = _l1_quarter(cur, sym, segment)              # cc#797 block 1; cc#1311: segment for industry PE
         auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
