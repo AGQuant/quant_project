@@ -20,14 +20,21 @@ This module makes it self-refreshing: after each T+1 fundamentals re-scrape (and
 one-shot when the latest card is older than the newest reported quarter), every announced company
 whose fundamentals_history now carries the just-reported quarter gets a freshly-computed card with
 last_result_analysis_updated=NOW(). Numbers are computed from fundamentals_history (Sales / Net
-Profit / OPM %) + gvm_scores (pe_raw, pe_peer) — never invented; a company without the new quarter
-in fundamentals_history is skipped (regenerates on a later cycle once its scrape lands).
+Profit / OPM %) + screener_raw (pe) + gvm_scores (segment, for the cc#1426 peer-avg PE fallback) —
+never invented; a company without the new quarter in fundamentals_history is skipped (regenerates
+on a later cycle once its scrape lands).
 """
 import logging
 from datetime import date, datetime
 
 from fastapi import APIRouter, Header, HTTPException
 from typing import Optional
+
+# cc#1426: screener_raw.segment_pe ("Industry PE") is a dead column (0/1872 rows, CSV export
+# dropped it) — this card's PE line now falls back to Scorr's own peer-segment PE instead of
+# always printing "n/a sector". See segment_pe_fallback.py for the batched computation + honesty
+# labelling rule.
+from segment_pe_fallback import segment_pe_map, lookup as _pe_lookup
 
 log = logging.getLogger("scorr.result_analysis_gen")
 router = APIRouter(prefix="/api/admin/result_analysis", tags=["result_analysis_gen"])
@@ -119,12 +126,14 @@ def _reported_qend(cur, symbol: str):
     return max(ends) if ends else date(ex.year - 1, 12, 31)
 
 
-def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
+def _screener_fallback_card(cur, symbol: str, qend: date, pe_map: dict = None) -> Optional[str]:
     """cc#692 fallback: when fundamentals_history quarters is stale vs the reported quarter, render the
     Result Analysis card from the alternate-day screener_raw export instead of sitting on the prior
     quarter. The export carries GROWTH + MARGIN only (no absolute quarterly Sales/PAT) — Screener
     semantics: qoq_sales_growth / qoq_profit_growth = latest-Q vs year-ago-Q (YoY); opm_latest_q vs
-    opm_prev_year_q = margin latest-Q vs LY-Q. Tagged '(limited review)' with the reported quarter."""
+    opm_prev_year_q = margin latest-Q vs LY-Q. Tagged '(limited review)' with the reported quarter.
+    pe_map: cc#1426 — the caller's ONE batched segment_pe_map(cur) result, reused here rather than
+    queried per symbol."""
     cur.execute('''SELECT qoq_sales_growth, qoq_profit_growth, opm_latest_q, opm_prev_year_q,
                           "Sales growth", pe, segment_pe FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1''', (symbol,))
     r = cur.fetchone()
@@ -137,10 +146,19 @@ def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
     rr = cur.fetchone()
     company = (rr[0] if rr and rr[0] else None) or symbol
     qlabel = _fq_label(qend) or "Latest"
+    # cc#1426: screener_raw.segment_pe is a dead column (always None) — fall back to Scorr's own
+    # segment peer-avg PE, and relabel the row so it is never presented as Screener's Industry PE.
+    pe_disp, pe_label = pe_peer, "sector"
+    if pe_disp is None and pe_map is not None:
+        cur.execute("SELECT segment FROM gvm_scores WHERE symbol=%s ORDER BY score_date DESC LIMIT 1", (symbol,))
+        gseg = cur.fetchone()
+        fb_val, _basis = _pe_lookup(pe_map, gseg[0] if gseg else None)
+        if fb_val is not None:
+            pe_disp, pe_label = fb_val, "peer avg"
     e_sales = _G if (s_yoy is not None and s_yoy > 0) else _Y
     e_pat = _G if (p_yoy is not None and p_yoy > 0) else _Y
     e_marg = _G if (opm is not None and opm_ly is not None and opm >= opm_ly) else _Y
-    e_pe = _Y if (pe_raw is None or pe_peer is None) else (_G if pe_raw <= pe_peer else _R)
+    e_pe = _Y if (pe_raw is None or pe_disp is None) else (_G if pe_raw <= pe_disp else _R)
     strong = sum(1 for x in (s_yoy, p_yoy) if x is not None and x > 0)
     verdict_line = ("Strong quarter; sales and PAT both up YoY." if strong == 2
                     else ("Soft quarter; growth down YoY." if strong == 0 else "Mixed quarter."))
@@ -149,17 +167,20 @@ def _screener_fallback_card(cur, symbol: str, qend: date) -> Optional[str]:
         f"{e_sales} Sales    {_sign(s_yoy) if s_yoy is not None else 'n/a'} YoY",
         f"{e_pat} PAT      {_sign(p_yoy) if p_yoy is not None else 'n/a'} YoY",
         f"{e_marg} Margins  {_lvl(opm, '%')} vs {_lvl(opm_ly, '%')} LY",              # cc#823: levels -> integer
-        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_peer, 'x')} sector",           # cc#823: levels -> integer
+        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_disp, 'x')} {pe_label}",       # cc#823: levels -> integer
         "", verdict_line,
         "Limited review. Detailed review available once concall and investor presentation are updated.",
     ]
     return "\n".join(parts)
 
 
-def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
+def build_card(cur, symbol: str, min_quarter_end: date = None, pe_map: dict = None) -> Optional[str]:
     """Compute the result-analysis card for one symbol from fundamentals_history + gvm_scores.
     Returns the card text, or None when the symbol has no quarter >= min_quarter_end (so it is
-    skipped until its scrape lands). Sector figures = segment peer averages over the latest quarter."""
+    skipped until its scrape lands). Sector figures = segment peer averages over the latest quarter.
+    pe_map: cc#1426 — pass the caller's ONE batched segment_pe_map(cur) result so the PE line's
+    dead-column fallback never re-queries per symbol; a caller that omits it just gets no fallback
+    for this one card (still degrades to 'n/a', never fabricates)."""
     cur.execute("""SELECT period_end, metrics FROM fundamentals_history
                    WHERE symbol=%s AND section='quarters' AND period_type='quarter' AND period_end IS NOT NULL
                    ORDER BY period_end DESC LIMIT 6""", (symbol,))
@@ -167,7 +188,7 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     if not rows:
         # cc#692: no fundamentals quarters at all — still try the screener_raw export for a reported name.
         rq0 = _reported_qend(cur, symbol)
-        return _screener_fallback_card(cur, symbol, rq0) if rq0 else None
+        return _screener_fallback_card(cur, symbol, rq0, pe_map=pe_map) if rq0 else None
     latest_end = rows[0][0]
     # cc#765 GUARD 2: rq = the company's latest VALIDATED reported quarter-end. Post-cc#765-GUARD-1 the
     # earnings_calendar 'reported' status is authoritative (news leads land as 'upcoming'; only the
@@ -179,7 +200,7 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     # so the card never sits on the prior quarter. Label comes from rq (the actual reporting period,
     # exchange/evidence-validated), never run-date fiscal math.
     if rq and rq > latest_end:
-        fb = _screener_fallback_card(cur, symbol, rq)
+        fb = _screener_fallback_card(cur, symbol, rq, pe_map=pe_map)
         if fb:
             return fb
     if min_quarter_end and latest_end < min_quarter_end:
@@ -209,10 +230,17 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
                 "ORDER BY score_date DESC LIMIT 1", (symbol,))
     g = cur.fetchone()
     segment, verdict = (g[0], g[1]) if g else (None, None)
-    # PE from screener_raw (pe/segment_pe are live; gvm_scores.pe_raw is null for ~all rows)
+    # PE from screener_raw. cc#1426: segment_pe is a dead column (0/1872 rows) — pe_raw (the
+    # company's own PE) is still live and used as-is; pe_disp/pe_label below fall back to Scorr's
+    # own segment peer-avg PE and relabel the row honestly when the raw column is null (now: always).
     cur.execute("SELECT pe, segment_pe FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
     pr = cur.fetchone()
     pe_raw, pe_peer = (_num(pr[0]), _num(pr[1])) if pr else (None, None)
+    pe_disp, pe_label = pe_peer, "sector"
+    if pe_disp is None and pe_map is not None:
+        fb_val, _basis = _pe_lookup(pe_map, segment)
+        if fb_val is not None:
+            pe_disp, pe_label = fb_val, "peer avg"
 
     # sector sales/PAT YoY = median of SAME-QUARTER same-segment reporters (cc#625 fix_3: never blend
     # quarters mid-season — an unreported peer must NOT fold its prior-quarter YoY into a current-quarter
@@ -273,7 +301,7 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     e_sales = _emoji_vs(s_yoy if s_yoy is not None else s_qoq, sec_sales, True)
     e_pat = _emoji_vs(p_yoy if p_yoy is not None else p_qoq, sec_pat, True)
     e_marg = _G if (opm is not None and opm_ly is not None and opm >= opm_ly) else (_Y if opm is not None else _Y)
-    e_pe = _Y if (pe_raw is None or pe_peer is None) else (_G if pe_raw <= pe_peer else _R)
+    e_pe = _Y if (pe_raw is None or pe_disp is None) else (_G if pe_raw <= pe_disp else _R)
 
     # narrative (templated from the pattern)
     if s_yoy is not None and sec_sales is not None and s_yoy >= sec_sales:
@@ -311,7 +339,7 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
         line(e_sales, "Sales", s_qoq, s_yoy, "YoY", sec_sales),
         line(e_pat, "PAT", p_qoq, p_yoy, "YoY", sec_pat),
         f"{e_marg} Margins  {_lvl(opm, '%')} vs {_lvl(opm_ly, '%')} LY",              # cc#823: levels -> integer
-        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_peer, 'x')} sector",           # cc#823: levels -> integer
+        f"{e_pe} PE       {_lvl(pe_raw, 'x')} vs {_lvl(pe_disp, 'x')} {pe_label}",       # cc#823: levels -> integer
         "", verdict_line, rev_line, marg_line,
     ]
     return "\n".join(parts)
@@ -347,10 +375,13 @@ def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
     written = unchanged = skipped = skipped_downgrade = 0
     with conn.cursor() as cur:
         syms = _regen_symbols(cur, since)
+        # cc#1426: ONE batched segment_pe_map query for this whole regen run, reused by every
+        # symbol's build_card below — not a per-symbol query in this loop.
+        pe_map = segment_pe_map(cur)
     for sym in syms:
         with conn.cursor() as cur:
             try:
-                card = build_card(cur, sym, min_quarter_end=min_quarter_end)
+                card = build_card(cur, sym, min_quarter_end=min_quarter_end, pe_map=pe_map)
             except Exception as e:
                 log.warning(f"result_analysis build failed for {sym}: {e}")
                 card = None

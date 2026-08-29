@@ -18,6 +18,11 @@ from datetime import date, timedelta
 import psycopg
 from fastapi import APIRouter
 
+# cc#1426: screener_raw.segment_pe ("Industry PE") is a dead column (0/1872 rows, CSV export
+# dropped it) — falls back to Scorr's own segment peer-avg PE, honestly labelled. See
+# segment_pe_fallback.py.
+from segment_pe_fallback import segment_pe_map, lookup as _pe_lookup
+
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
 
@@ -337,6 +342,9 @@ def build_report(cur, pid):
     scr = _load_screener(cur, syms)
     inp = _load_input(cur, syms)
     ath = _load_ath(cur, syms)
+    # cc#1426: ONE batched segment_pe_map query for this whole report, reused per holding below —
+    # a portfolio-sized loop, never a per-symbol query.
+    pe_map = segment_pe_map(cur)
 
     # ---- per-holding assembly (current-value weighted) ----
     holdings = []
@@ -356,17 +364,24 @@ def build_report(cur, pid):
         from_ath = round((c - a) / a * 100, 1) if (c and a and a > 0) else None
         pnl_pct = round((c - avg) / avg * 100, 2) if (c and avg and avg > 0) else None
         verdict = g.get("verdict")
+        _segment = g.get("segment") or i.get("segment")
+        # cc#1426: screener_raw.segment_pe is dead — fall back to Scorr's own peer-avg PE for this
+        # holding's segment, and carry the basis label so the report never claims it as Screener's
+        # Industry PE.
+        _seg_pe, _seg_pe_basis = s.get("segment_pe"), None
+        if _seg_pe is None:
+            _seg_pe, _seg_pe_basis = _pe_lookup(pe_map, _segment)
         holdings.append({
             "symbol": sym, "company_name": i.get("company_name") or cname,
             "cmp": _r(c), "qty": qty, "avg_price": _r(avg),
             "invested": _r(invested), "current": _r(current),
             "pnl_pct": pnl_pct, "pnl_abs": _r(current - invested),
-            "segment": g.get("segment") or i.get("segment"),
+            "segment": _segment,
             "cap": (i.get("cap") or "").title() or None,
             "g": g.get("g"), "v": g.get("v"), "m": g.get("m"), "gvm": g.get("gvm"),
             "verdict": verdict, "action": _action_for(verdict),
             "gvm_trend": g.get("gvm_trend"), "gvm_trend_delta": g.get("gvm_trend_delta"),
-            "pe": s.get("pe"), "segment_pe": s.get("segment_pe"), "yield": s.get("yield"),
+            "pe": s.get("pe"), "segment_pe": _seg_pe, "segment_pe_basis": _seg_pe_basis, "yield": s.get("yield"),
             "return_1y": s.get("return_1y"), "from_ath": from_ath,
             "fwd_growth": i.get("fy27_growth"),
             "result_analysis": i.get("result_analysis"),

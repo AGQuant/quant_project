@@ -34,6 +34,9 @@ from fastapi import APIRouter, Header, HTTPException
 from typing import Dict, Optional, Tuple
 
 from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700/814: top-750 NSE scrape gate
+# cc#1426: screener_raw.segment_pe ("Industry PE") is a dead column — falls back to Scorr's own
+# segment peer-avg PE, honestly labelled. See segment_pe_fallback.py.
+from segment_pe_fallback import segment_pe_map, lookup as _pe_lookup
 
 log = logging.getLogger("scorr.result_corner")
 router = APIRouter(prefix="/api/admin/result_corner", tags=["result_corner"])
@@ -599,9 +602,18 @@ def result_corner_v2():
         # ── section 03 companies: same-quarter reporters (numbers) + reported-but-unscraped (dashes) ──
         season_win = date.today() - timedelta(days=45)
         listed = set(same) | {s for s, d in repdate.items() if s in uni and d and d >= season_win}
+        # cc#1426: ONE batched segment_pe_map query for this whole page, reused per company below —
+        # not a per-symbol query in this loop.
+        pe_map = segment_pe_map(cur)
         companies = []
         for s in listed:
             u = uni[s]; f = fund.get(s); is_same = s in fund and fund[s]["latest_q"] == season_end
+            # cc#1426: screener_raw.segment_pe is a dead column — fall back to Scorr's own segment
+            # peer-avg PE (basis carried alongside so it's never presented as Screener's Industry PE).
+            _seg_pe = f.get("segment_pe") if (is_same and f) else None
+            _seg_pe_basis = None
+            if _seg_pe is None:
+                _seg_pe, _seg_pe_basis = _pe_lookup(pe_map, u["segment"])
             companies.append({
                 "symbol": s, "company": u["company"], "segment": u["segment"], "tier": u["tier"],
                 "gvm": u["gvm"], "verdict": u["verdict"],
@@ -620,7 +632,7 @@ def result_corner_v2():
                 "opm": (f.get("opm") if is_same else None),
                 "opm_ly": (f.get("opm_ly") if is_same else None),
                 "pe": (f.get("pe") if is_same else None),
-                "segment_pe": (f.get("segment_pe") if is_same else None),
+                "segment_pe": _seg_pe, "segment_pe_basis": _seg_pe_basis,
             })
         companies.sort(key=lambda c: (c["reported_date"] is None, c["reported_date"] or "", ), reverse=True)
         return {"season": {"quarter": _fq_label(season_end), "quarter_end": str(season_end)},
