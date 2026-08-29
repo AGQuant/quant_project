@@ -755,7 +755,11 @@ html,body{margin:0;padding:0;background:var(--bg);}
     if(htb){ htb.innerHTML=(d.holdings||[]).map(function(h){
       var tr = h.gvm_trend==='up' ? '<span class="pos">▲ '+pct(h.gvm_trend_delta,2)+'</span>'
              : h.gvm_trend==='down' ? '<span class="neg">▼ '+pctPlain(h.gvm_trend_delta,2)+'</span>' : '—';
-      var peSeg=(h.pe!=null?Number(h.pe).toFixed(1):'—')+' / '+(h.segment_pe!=null?Number(h.segment_pe).toFixed(1):'—');
+      // cc#1426: segment_pe_basis is set only when this is Scorr's own peer-avg fallback (the raw
+      // Screener "Industry PE" column is dead) — surfaced as a tooltip so the number is never read
+      // as an external Industry PE it isn't.
+      var peSegTitle = h.segment_pe_basis ? ' title="'+esc(h.segment_pe_basis)+'"' : '';
+      var peSeg='<span'+peSegTitle+'>'+(h.pe!=null?Number(h.pe).toFixed(1):'—')+' / '+(h.segment_pe!=null?Number(h.segment_pe).toFixed(1):'—')+'</span>';
       var upside=(h.fwd_growth!=null?Math.round(h.fwd_growth)+'%':'—');
       var pnlCls=(h.pnl_pct!=null && h.pnl_pct<0)?'neg':'pos';
       return '<tr><td style="font-weight:700;padding-left:24px;">'+esc(h.symbol)+'</td>'

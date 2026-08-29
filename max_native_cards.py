@@ -26,6 +26,10 @@ from typing import Optional, Dict, Any, List
 import psycopg2
 from fastapi import APIRouter
 
+# cc#1426: screener_raw.segment_pe ("Industry PE") is a dead column — falls back to Scorr's own
+# segment peer-avg PE, honestly labelled. See segment_pe_fallback.py.
+from segment_pe_fallback import segment_pe_map, lookup as _pe_lookup
+
 log = logging.getLogger("scorr.max_cards")
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
@@ -183,6 +187,13 @@ def fin_snapshot(cur, p):
         return _empty(f"{sym} · Financials", f"{sym} is not in gvm_scores and has no quarterly series.",
                       "fundamentals_history + screener_raw")
     pe, opm, roce, roe, seg_pe, seg, gvm = (r or (None,) * 7)
+    # cc#1426: screener_raw.segment_pe is a dead column (always None) — fall back to Scorr's own
+    # segment peer-avg PE, and relabel the row honestly so it is never read as Screener's Industry PE.
+    seg_pe_label = "Segment PE"
+    if seg_pe is None:
+        seg_pe, basis = _pe_lookup(segment_pe_map(cur), seg)
+        if basis:
+            seg_pe_label = f"Segment PE · {basis}"   # e.g. "Segment PE · peer avg PE (n=13)"
     rows = [
         ("TTM sales growth", _sgn(ttm_s)),
         ("TTM profit growth", _sgn(ttm_p)),
@@ -190,7 +201,7 @@ def fin_snapshot(cur, p):
         ("ROCE", _n(roce, 1, "%")),
         ("ROE", _n(roe, 1, "%")),
         ("PE", _n(pe, 1)),
-        (f"Segment PE ({seg or '—'})", _n(seg_pe, 1)),
+        (f"{seg_pe_label} ({seg or '—'})", _n(seg_pe, 1)),
         ("GVM", _n(gvm, 2)),
     ]
     body = _tbl(["Metric", "Value"], rows)
