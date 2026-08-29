@@ -2416,7 +2416,27 @@ async function boot(){
      stopped being its consumer. */
   RA = S.results_analysed || {};
   const ra = RA, raT = ra.tally || {};
-  const raLatest = (ra.companies && ra.companies[0] && ra.companies[0].polished_ist) || '';
+  /* cc#1425: was ra.companies[0].polished_ist -- WRONG. companies[] is sorted for the DECK's own
+     display order (cc#1414's stable multi-pass: symbol asc -> polished_at desc -> ex_date desc,
+     so ex_date DESC is the dominant/final key), not by recency of analysis -- position 0 is the
+     company with the newest REPORTED result date, which is not necessarily the company whose
+     analysis was most recently WRITTEN. Those can and do diverge (a company can report today but
+     have been analysed days ago; another can report earlier and be analysed just now) -- exactly
+     the founder's screenshot: latest showed a stale date while later list rows carried newer
+     ones. Fixed per this card's own instruction (cc#1264's own precedent: the strip and the list
+     cannot disagree, by construction) -- scan the SAME companies[] the deck renders for the real
+     max polished_at (the sortable ISO timestamp, not the "DD Mon" display string -- string-
+     comparing "05 Aug" against "27 Jul" would sort wrong across months), then show THAT row's
+     own polished_ist for display. Guaranteed to match whatever the deck's own newest-analysed
+     row actually is, regardless of what order companies[] happens to be sorted in. */
+  const raLatest = (function(){
+    var rows = ra.companies || [], best = null;
+    for (var i = 0; i < rows.length; i++){
+      var r = rows[i];
+      if (r.polished_at && (!best || r.polished_at > best.polished_at)) best = r;
+    }
+    return best ? best.polished_ist : '';
+  })();
 
   const bias=(mr.bias||'—').toUpperCase();
   const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
