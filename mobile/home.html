@@ -1022,6 +1022,13 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    into ONE card with a different internal shape (two .legwrap blocks + a divider, not a single
    stat-strip host), so its own justify-content need is decided fresh below rather than assumed
    to be the old two-card case. */
+/* cc#1388 · CARD 2's OWN flex-start override -- the IDENTICAL bug cc#1383 diagnosed for Cards 4/5
+   (a structural 2-child space-between ALWAYS puts 100% of the surplus in the one gap between
+   them), just never reapplied here when Card 2 dropped from three .c2body children to two (chd,
+   pmood) once cc#1385 moved adrBar() out. Confirmed by reading the live rule before writing this,
+   not guessed. flex-start pulls the mood word tight under the header, same as Cards 4/5's own
+   fix. */
+#heroTrack > .c:nth-child(2) > .c2body{justify-content:flex-start}
 /* cc#1384 · CARD 3's NIFTY/BankNifty toggle, in .chd's own .rgt slot. Same visual language as the
    V10 modal's .v10tg/v10Toggle() -- a bordered pill, blue border+tint when active -- scaled down
    from .v10tg's full-width 34px-min-height modal row to fit inline in a 30px-min-height card
@@ -3496,8 +3503,17 @@ function pcrBand(v){
    bands, no needle, no ticks — never anything that could be read as a real mood the server never
    sent — so a future second caller cannot accidentally guess one. */
 var PCR_GAUGE_OPACITY = [1, 0.55, 1, 0.55, 1];
+/* cc#1388 · RICHER GAUGE — new coordinate system from design_refs/scorr_card2_gauge_richer_R1.html
+   (cx/cy/R/SW below, the tick radius R+27, the needle/circle sizes), carried through this file's
+   OWN formula-driven pt()/needle/tick math rather than the ref's hand-placed coordinates — checked
+   against the ref's own worked example (PCR 1.09) point by point before trusting the formula:
+   needle tip (186.9,61.2), tick "50" (53.3,63.3), "80" (119,23.1), "140" (267,46.5) all reproduce
+   EXACTLY from pt(v, R+27) and pt(gv, R-SW/2-8) with the new R/SW/cx/cy, so nothing here is a new
+   derivation, only the ref's own math read back out of its hand-placed numbers. Tick anchor is
+   'start' at 0 and 'end' at 200 (matching the ref) so the widened 13px bold labels don't run past
+   the viewBox edge at the two horizontal extremes — 'middle' for the rest, same as before. */
 function pcrGaugeSvg(pcrRaw){
-  var cx = 150, cy = 150, R = 110, SW = 16;
+  var cx = 170, cy = 180, R = 138, SW = 20;
   function pt(val, r){
     r = r || R;
     var clamped = Math.min(200, Math.max(0, val));
@@ -3520,13 +3536,17 @@ function pcrGaugeSvg(pcrRaw){
     var gv = Number(pcrRaw) * 100;                    // VISUAL scale only, clamped in pt()
     var tip = pt(gv, R - SW / 2 - 8);
     needle = '<line x1="' + cx + '" y1="' + cy + '" x2="' + tip.x.toFixed(1) + '" y2="' + tip.y.toFixed(1)
-      + '" stroke="var(--txt,#E9EEFB)" stroke-width="4" stroke-linecap="round"/>'
-      + '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="var(--txt,#E9EEFB)"/>'
-      + '<circle cx="' + cx + '" cy="' + cy + '" r="3.5" fill="var(--panel,#121A33)"/>';
+      + '" stroke="var(--txt,#E9EEFB)" stroke-width="5" stroke-linecap="round"/>'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="var(--txt,#E9EEFB)"/>'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="var(--panel,#121A33)"/>';
     ticks = [0, 50, 80, 100, 140, 200].map(function(v){
-      var p = pt(v, R + 16);
-      return '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + 3).toFixed(1) + '" font-size="9"'
-        + ' fill="var(--dim,#5E6B8F)" text-anchor="middle"'
+      var p = pt(v, R + 27);
+      var anchor = v === 0 ? 'start' : (v === 200 ? 'end' : 'middle');
+      // cc#1388: 100 highlighted in --txt per the founder's ask, everything else stays --mut
+      // (the ref's own tick fill, #8C99BD — a different token than cc#1379's original --dim).
+      var fill = v === 100 ? 'var(--txt,#E9EEFB)' : 'var(--mut)';
+      return '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + 3).toFixed(1) + '" font-size="13"'
+        + ' font-weight="800" fill="' + fill + '" text-anchor="' + anchor + '"'
         + ' font-family="IBM Plex Mono,ui-monospace,monospace">' + v + '</text>';
     }).join('');
   } else {
@@ -3539,19 +3559,10 @@ function pcrGaugeSvg(pcrRaw){
       + ' stroke="var(--line2,#2A2A32)" stroke-width="' + SW + '" fill="none"/>';
   }
 
-  /* cc#1379: max-width capped well below the ref's own 280px. The ref is a standalone preview,
-     rendered outside #heroTrack and never measured against cc#1374's live height-sync or cc#1376's
-     Card 2 redistribution -- integrating it at 280px (~149px tall at that width) was measured here,
-     not assumed, to push Card 2 far enough past Card 1's natural height that cc#1374 stretches
-     Card 1 to match and leaves it with a bare void of its own (Card 1 is explicitly out of this
-     task's scope, so that isn't fixable here). 200px keeps the void in the same range an earlier,
-     smaller from-scratch draft of this dial already measured and reported as a residual -- see the
-     task result for the exact before/after numbers. Everything ABOVE this comment (the SVG's own
-     internal coordinate system, cx/cy/R/SW, the band/needle/tick math) is untouched from the ref;
-     only this outer CSS constraint is a deviation, and it is disclosed as one rather than silently
-     resized. */
-  return '<div class="pcr-gauge"><svg viewBox="0 0 300 160"'
-    + ' style="width:100%;max-width:200px;display:block;margin:0 auto" role="img"'
+  /* cc#1388: max-width, MEASURED not assumed from the ref's illustrative 260px -- see this task's
+     own result for the exact before/after governing-height numbers this was tuned against. */
+  return '<div class="pcr-gauge"><svg viewBox="0 0 340 200"'
+    + ' style="width:100%;max-width:260px;display:block;margin:0 auto" role="img"'
     + ' aria-label="PCR gauge' + (hasPcr ? ', ' + Number(pcrRaw).toFixed(2) : ', no data') + '">'
     + bands + needle + ticks + '</svg></div>';
 }
