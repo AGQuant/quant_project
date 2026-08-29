@@ -1109,8 +1109,24 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    it — true for Cards 2/3, no longer true for Card 4. Left unset here, that 14px becomes dead
    space between the card's real content and .c's own padding-bottom: nth-child(4) zeroes it back
    out for this one card, same per-card override convention the deck already uses elsewhere
-   (nth-child(2)/nth-child(3) above). */
-#heroTrack > .c:nth-child(4) > .c2body{margin-bottom:0}
+   (nth-child(2)/nth-child(3) above).
+   cc#1395 · justify-content:flex-start ADDED to the same override, same reason cc#1388 added it
+   for Card 2: the shared .c2body rule's default (space-between, cc#1382) has exactly two children
+   here too (.chd, #heroPositionsBody) and dumps 100% of the deck's real surplus into the ONE gap
+   between them — the founder's own circled "too much empty space right after the header" report.
+   flex-start pins .chd to its natural top position; #heroPositionsBody (below) is what now claims
+   the freed space directly, the same division of labour cc#1390 established for Card 2's .chd/
+   .pmood pair. */
+#heroTrack > .c:nth-child(4) > .c2body{margin-bottom:0;justify-content:flex-start}
+/* cc#1395 · EVEN SPACE DISTRIBUTION, Card 4's own version of cc#1390's Card 2 fix. #heroPositionsBody
+   holds the card's only real content (FUTURES legwrap, the divider, OPTIONS legwrap) and is
+   .c2body's second child now that .chd is pinned above — flex:1 lets it claim 100% of whatever
+   surplus .chd's own natural size leaves, and justify-content:center centres its three children
+   as one block within that claimed space rather than leaving them jammed at the top with the old
+   single gap now living below them instead of above. Reused verbatim, not reinvented: same
+   flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center shape
+   cc#1390 wrote for .pmood. */
+#heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
    tokens wherever an equivalent already exists (--grn/--red/--mut/--amber/--panel2/--line2/
