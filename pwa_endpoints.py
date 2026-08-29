@@ -2023,7 +2023,16 @@ RESULTS_CARD_JS = """
       var tag = cat === 'AI Editorial' ? '<span class=\"rcard-cat rcard-cat-ai\">AI EDITORIAL</span>'
               : cat === 'Stock Views'  ? '<span class=\"rcard-cat rcard-cat-sv\">STOCK VIEW</span>' : '';
       h += '<div class=\"rcard-pol-item\" style=\"margin-bottom:11px\">'
-        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+tag+'</div>';
+        // cc#1415: 12.5px -> 14px. The card's own finding: the body text directly beneath this
+        // headline (.rcard-body, next line) is 13px/1.55 -- the SAME class Detailed Analysis uses,
+        // deliberately unchanged (shared, already correct). A bold headline smaller than its own
+        // body read as backwards, not as a headline at all. 14px is the smallest step that clears
+        // 13px with real margin (not a 0.5px non-difference) while staying in the same visual
+        // register as the rest of this card's text -- no other size in this file's R-card system
+        // sits between 13px body and the next real jump (.rcard-lbl's 10.5px eyebrow is a
+        // different tier entirely, all-caps and far smaller by design). line-height kept at 1.4 --
+        // already tuned for a short 1-2 line headline and suits 14px exactly as well as 12.5px.
+        + '<div style=\"font-size:14px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+tag+'</div>';
       if (sum){
         h += '<div class=\"rcard-pol-brief rcard-body\" style=\"margin-top:3px\">'+brief+'</div>';
         if (over){
