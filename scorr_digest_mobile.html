@@ -1072,13 +1072,19 @@ function raPageHtml(pg){
            derivations being kept in step. The sentence takes the space the pill vacated and
            clamps to TWO lines instead of one: it is the row's content now, not a caption under
            a headline word. */
+        /* cc#1414: the deck now carries the FULL reported GVM universe, not just written-analysis
+           rows. A row's sentence is (in coverage order) the analyst's own line (L2), the
+           deterministic auto-verdict (L1 — the SAME results_endpoints._auto_verdict sentence the
+           R-card shows, computed once server-side), or — for a reported name outside the
+           fundamentals scrape — nothing computable, which prints as an honest fixed line rather
+           than an empty slot that reads as a rendering bug. */
         return '<div class="rrow" onclick="raOpen(\''+esc(c.symbol)+'\')"><div class="rmain">'
           + '<div class="rtop">'+raDot(c)+'<b>'+esc(c.symbol||'')+'</b>'
           + (c.quarter?'<span class="rq num">'+esc(c.quarter)+'</span>':'')
           + (c.tier?'<span class="rt">'+esc(c.tier)+'</span>':'')
           + raDateChip(c)
           + '</div></div>'
-          + '<div class="rv rv2">'+esc(c.verdict||'')+'</div></div>';
+          + '<div class="rv rv2">'+esc(c.verdict||'Result analysis not available.')+'</div></div>';
       }).join('')
     + '</div>';
 }
@@ -1970,6 +1976,15 @@ function raFullSheetHtml(d){
     html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">ANALYSIS</div>';
     html+=raBody(d.result_analysis);
     html+='</div>';
+  }else if(d.status==='announced'||d.status==='announced_no_analysis'){
+    /* cc#1414 · founder ruling from the ICICIAMC review: a reported company whose long-form (L2)
+       has not been written gets an EXPLICIT Not Available under the same DETAILED ANALYSIS
+       header — never a silently omitted section that leaves the reader wondering whether the
+       sheet is broken — and the card proceeds straight to COMPANY NEWS below (already
+       independent of L2, from /api/results/card/context). Gated on announced states only:
+       an upcoming name has nothing due yet, and "Not Available" there would read as a miss. */
+    html+='<div style="margin-top:var(--space-14)"><div style="font-family:JetBrains Mono;font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--aqua);margin-bottom:var(--space-8)">DETAILED ANALYSIS</div>'
+      +'<div class="rsp" style="color:var(--chalk)">Not Available</div></div>';
   }
 
   /* COMPANY NEWS section — cc#1309. Polished-only, Domestic/AI Editorial tagged (the backend

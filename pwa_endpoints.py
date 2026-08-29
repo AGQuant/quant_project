@@ -2079,11 +2079,26 @@ RESULTS_CARD_JS = """
           + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
+        // cc#1414 scope 3: the vs-top-3-peers block was only ever rendered inside the
+        // result_analysis branch above, so a tier=pending card silently LOST its peer comparison
+        // even though peer_comparison arrives on the context call regardless of L2 — found by
+        // reading the branch, confirmed by rendering a pending symbol. Same helper, same data,
+        // same placement (merged into the result block, per cc#697); hidden-when-empty as always.
+        h += peerHtml(d && d.peer_comparison);
       }
       // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
       h += l1Html(d && d.l1, d && d.auto_verdict);   // cc#797 block 1: absolutes-first + deterministic verdict
       h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
-      h += viewDetailedHtml(d && d.v2, d && d.card_quarter);
+      // cc#1414 · founder ruling (ICICIAMC review): an announced card with NO matching V2 row
+      // used to omit the detailed-analysis section entirely (cc#788's hidden-when-empty rule).
+      // It now states Not Available explicitly in that slot, so the reader knows the long-form
+      // has not been written rather than wondering if the card failed to load — and the card
+      // proceeds to FY27/News below with no gap. The View Detailed button path is byte-identical
+      // for covered names (viewDetailedHtml itself is untouched). This branch only ever runs for
+      // announced cards — Branch B never calls it — so an upcoming name cannot show it.
+      var _det = viewDetailedHtml(d && d.v2, d && d.card_quarter);
+      h += _det || ('<div class=\"rcard-lbl\">Detailed analysis</div>'
+        + '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Not Available</div>');
       h += fy27Html(d && d.fy27_growth);   // cc#801 fix_2: standalone, no HIT/MISS
     } else {
       // BRANCH B order: expected date + FY27 -> LAST RESULT (prior quarter, explicit label) -> RAW -> POLISH.
