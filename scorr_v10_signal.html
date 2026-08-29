@@ -64,6 +64,15 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    cell (the symbol) takes the squeeze and ellipsises, which is what it is there for.
    The other two decks never showed this because their rows have no fixed-width cells. */
 .vpage{flex:0 0 100%;min-width:0;scroll-snap-align:start}
+/* cc#1401 · ONE CARD PER SWIPE, same fix cc#1350 shipped for Home's three decks — mandatory snap
+   alone lets a hard fling's momentum carry past the immediate next page to wherever it settles,
+   so a fast swipe on this page's own 4-page decks (Volatility & Flow, Stock F&O Radar) could skip
+   2-3 pages. scroll-snap-stop:always forbids the scroller from passing ANY snap point mid-gesture,
+   so every fling, however hard, stops at the next page. Reused verbatim, not reinvented: this page
+   was missing the companion rule entirely (grepped, confirmed absent) despite copying the same
+   .vswipe-t/scroll-snap-type:x mandatory deck pattern from mobile/home.html (cc#1242's own comment
+   above). Pure CSS, no JS — same as cc#1350's own precedent. */
+.vswipe-t > .vpage{scroll-snap-stop:always}
 /* a deck nested inside a .card must not re-apply the track's own page margin — the card already
    pads, and doubling it is what made this track narrower than its pages in the first place. */
 .card .vswipe{margin-left:0;margin-right:0}

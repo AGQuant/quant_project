@@ -467,6 +467,16 @@ html,body{overflow-x:hidden;max-width:100%}
 .iswipe-t{display:flex;align-items:flex-start;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;
  -webkit-overflow-scrolling:touch;scrollbar-width:none}
 .iswipe-t::-webkit-scrollbar{display:none}
+/* cc#1401 · ONE CARD PER SWIPE, same fix cc#1350 shipped for mobile/home.html's three decks —
+   mandatory snap alone lets a hard fling's momentum carry past the immediate next page, so a
+   fast swipe on either of THIS file's two mandatory-snap decks (#itrack's .ic cards, #rtrack's
+   .rpage cards — both share this one .iswipe-t track shape, per different page classes) could
+   skip 2-3 pages. scroll-snap-stop:always forbids the scroller from passing ANY snap point
+   mid-gesture, so every fling stops at the next page. Reused verbatim, not reinvented — this
+   file was missing the companion rule entirely (grepped, confirmed absent) despite being the
+   very file the .iswipe-t/scroll-snap deck pattern was itself ported FROM (cc#1242's own note
+   in mobile/home.html). Pure CSS, no JS. */
+.iswipe-t > .ic,.iswipe-t > .rpage{scroll-snap-stop:always}
 .ic{flex:0 0 100%;min-width:0;scroll-snap-align:center;background:var(--hi);border:var(--bw-1) solid var(--edge);
  padding:var(--space-14) var(--space-15) var(--space-13);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .ichd{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8)}
