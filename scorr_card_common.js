@@ -839,6 +839,11 @@
     + '  max-width:104px;overflow:hidden;text-overflow:ellipsis}'
     /* the rest of the R body is label:value rows already — they only need the phone type scale */
     + 'body.mcards .rcard-body{padding:14px 14px 22px}'
+    /* cc#1429: RESULT ANALYSIS block only (the 4-line Sales/PAT/Margins/PE metric header, .rcard-ra
+       marks that one rcard-body instance — see pwa_endpoints.py) — +2px on the base .rcard-body's
+       13px, mobile only. do_not_touch: l1Html/auto_verdict (.rcard-l1*), peerHtml, v2Html are
+       untouched; this selector matches none of them. */
+    + 'body.mcards .rcard-body.rcard-ra{font-size:15px}'
     + 'body.mcards .rcard-l1row, body.mcards .rcard-exp-row, body.mcards .rcard-peer-row{'
     + '  gap:8px}'
     + 'body.mcards .rcard-l1v, body.mcards .rcard-exp-v, body.mcards .rcard-peer-v,'
