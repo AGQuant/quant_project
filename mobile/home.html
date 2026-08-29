@@ -777,7 +777,7 @@ html.glitter-ok #heroTrack > .c::after{
   /* one bright arc travelling the ring, rest transparent -- not a full glow */
   background:conic-gradient(from var(--glitter-angle),
     transparent 0deg, #35E0FF 18deg, transparent 46deg, transparent 360deg);
-  animation:glitterSweep 3.6s linear infinite;
+  animation:glitterSweep 5s linear infinite;   /* cc#1400: 3.6s -> 5s, founder ask, speed only */
   /* cc#1378 battery/visibility discipline: paused by default, .glitter-run is the only thing
      that turns it on (see glitterSync() in JS) -- same "off unless proven visible AND active"
      posture moodStart/moodStop/moodOnScreen already use for the mood-word sweep, reused here as
