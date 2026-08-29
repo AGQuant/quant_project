@@ -1601,7 +1601,15 @@ function moodLetters(word){
   var w = String(word == null ? '--' : word);
   var sweep = !MOOD_SWEPT;
   MOOD_SWEPT = true;
-  if (!sweep) return esc(w);
+  /* cc#1411: the .mlt spans are emitted on EVERY render now, not just the first. The old
+     `if (!sweep) return esc(w);` early-out assumed this function ran once per page life; the
+     5-min auto-refresh re-renders the word, and a plain-text word has no .mlt spans, so
+     moodParts() returned null and the glimpse-and-still cycle (cc#1135/1178) died into a
+     permanent 1-second idle retry after the first background refresh. Re-emitting the spans
+     cannot replay the entrance flash: cc#1135 moved the animation off bare .mlt onto .mlt.run
+     (confirmed in MOBILE_CSS, not assumed), so markup-only spans are inert until the driver
+     classes them — MOOD_SWEPT now gates only the inline first-paint stagger below, keeping
+     cc#1178's first-wave semantics byte-identical on the true first paint. */
   var out = '', i = 0;
   for (var n = 0; n < w.length; n++){
     var ch = w.charAt(n);
@@ -1612,7 +1620,7 @@ function moodLetters(word){
        onward, so a value changed in one place and not the other shows up as a first wave that
        does not match every wave after it. cc#1178 moves it back to the ref R3 60ms with the
        driver. */
-    out += '<span class="mlt" style="animation-delay:' + (i * 60) + 'ms">' + esc(ch) + '</span>';
+    out += '<span class="mlt"' + (sweep ? ' style="animation-delay:' + (i * 60) + 'ms"' : '') + '>' + esc(ch) + '</span>';
     i++;
   }
   return out;
@@ -4184,6 +4192,10 @@ function heroSetupHeightSync(){
      with no dependency on knowing WHEN a given browser finishes swapping in Space Grotesk /
      IBM Plex Mono. Old browsers without ResizeObserver simply keep today's first-paint numbers —
      no crash, no regression, just no live re-sync on those. */
+  /* cc#1411: this function is RE-ENTRANT now — the auto-refresh re-runs the whole render, and
+     the innerHTML swap destroyed every node the previous observer was watching. Disconnect the
+     old one first, or each refresh leaks one more live ResizeObserver holding detached cards. */
+  if (HERO_RO){ HERO_RO.disconnect(); HERO_RO = null; }
   if (typeof ResizeObserver === 'function'){
     HERO_RO = new ResizeObserver(function(){ syncHeroCardHeights(); });
     cards.forEach(function(c){ HERO_RO.observe(c); });
@@ -4192,21 +4204,40 @@ function heroSetupHeightSync(){
   /* item 5: window resize (debounced) and orientation change — a rotated phone or a resized
      webview reflows the same text at a new wrap width, which is a natural-height change the
      ResizeObserver above already catches on the CARD box itself, but the debounce here keeps a
-     drag-resize from re-measuring on every intermediate frame. */
-  var resizeT = null;
-  function debouncedSync(){ clearTimeout(resizeT); resizeT = setTimeout(syncHeroCardHeights, 150); }
-  window.addEventListener('resize', debouncedSync);
-  window.addEventListener('orientationchange', debouncedSync);
+     drag-resize from re-measuring on every intermediate frame.
+     cc#1411: wired ONCE, guarded — unlike the observer above, window outlives every innerHTML
+     swap, so re-adding these on each refresh would stack N identical listeners. The handler
+     calls syncHeroCardHeights by NAME, which always measures the current cards, so the single
+     wiring stays correct across every repaint. */
+  if (!window.__HERO_WIN_WIRED){
+    window.__HERO_WIN_WIRED = true;
+    var resizeT = null;
+    var debouncedSync = function(){ clearTimeout(resizeT); resizeT = setTimeout(syncHeroCardHeights, 150); };
+    window.addEventListener('resize', debouncedSync);
+    window.addEventListener('orientationchange', debouncedSync);
+  }
 }
 
-/* pivots ride alongside the main call — the deck renders either way, and a pivot failure costs
-   the bar, never the card (Promise.all would have let it take the whole screen down). */
-Promise.all([
-  fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }),
-  fetchWithTimeout('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY')
-    .then(function(r){ return r.json(); }).catch(function(){ return null; })
-]).then(function(res){
-  var d = res[0], pv = res[1];
+/* cc#1411: the anonymous one-shot render body is now renderHome(d, pv) — same code, same order,
+   callable again by the 5-minute auto-refresh at the bottom of this file. pv=null (a refresh)
+   keeps the PIV map already loaded: pivots change once per session, not every 5 minutes, and the
+   Array.isArray guard below was already the pivot-failure path, so null rides it unchanged. */
+function renderHome(d, pv){
+  /* cc#1411 · REPEAT-RENDER STATE CAPTURE. A silent re-render every 5 minutes must not fight
+     the founder's own taps — the card's real risk. Captured here, restored at the bottom after
+     the paint. On the FIRST render none of these elements exist, every capture no-ops and
+     _repaint stays false. What needs NO capture, verified by reading each builder rather than
+     assumed: IBK.sym / POS.sym / V10.sym / PF.open are module globals their builders re-read on
+     every render (ibkToggleHtml / posToggleHtml / renderHeroPositions / renderPortfolio), so
+     toggle selections and the expanded portfolio row rebuild already-selected by construction;
+     the V10 modal, Market Tape and Breadth overlays live OUTSIDE #body entirely, so the
+     innerHTML swap never touches them. */
+  var _repaint = !!document.getElementById('heroTrack');
+  var _heroScroll = _repaint ? document.getElementById('heroTrack').scrollLeft : 0;
+  var _bookEl = document.getElementById('bookTrack');
+  var _bookScroll = _bookEl ? _bookEl.scrollLeft : 0;
+  var _openTrend = TREND.open;
+  var _pageY = window.pageYOffset || 0;
   if (Array.isArray(pv)){
     PIV = {};
     pv.forEach(function(r){ if (r && r.symbol) PIV[String(r.symbol).toUpperCase()] = r; });
@@ -4248,6 +4279,11 @@ Promise.all([
   }
 
   document.getElementById('sess').textContent = d.session.label;
+  /* cc#1411: the poll gate reads the SERVER's own market_open flag off this same payload — the
+     flag whose label ("Market open/closed · HH:MM IST") just painted one line above. The client
+     never derives open/closed from the phone's clock (the cc#984 rule, applied to the timer). */
+  HOME_POLL.marketOpen = !!(d.session && d.session.market_open);
+  HOME_POLL.lastFetch = Date.now();
   /* cc#984: feed freshness beside the clock. Server-computed — the client renders it, it never
      works it out. A payload without `feed` (cached shell mid-deploy) simply shows nothing rather
      than guessing a state. */
@@ -4576,6 +4612,107 @@ Promise.all([
   document.getElementById('body').appendChild(tools);
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
+
+  /* cc#1411 · REPEAT-RENDER STATE RESTORE (capture at the top of this function). Deck scroll
+     first — setting scrollLeft fires each track's own onscroll handler, so the dot rows
+     re-highlight the right card without being told twice. The open chip chart re-opens THROUGH
+     togTrend (TREND.open nulled first so its toggle-closed branch cannot fire): that re-fetches
+     the trend series, which is exactly what a refresh should do, and TREND_RANGE (cc#1231)
+     already remembers the founder's chosen window per kind, so the same range comes back. Page
+     scroll goes last, inside a rAF, after the browser has committed the new layout at full
+     height — restoring it earlier can clamp against a mid-layout shorter page. */
+  if (_repaint){
+    var _ht = document.getElementById('heroTrack');
+    if (_ht && _heroScroll) _ht.scrollLeft = _heroScroll;
+    var _bt = document.getElementById('bookTrack');
+    if (_bt && _bookScroll) _bt.scrollLeft = _bookScroll;
+    /* The reopen is DELAYED 150ms, and that number is load-bearing, found by measuring rather
+       than taste: reopening synchronously races cc#1374's HERO_SYNC_GUARD — this fresh paint's
+       own first sync sets the guard and releases it two rAFs later, and an instant reopen can
+       land its chart (and its own resync request) INSIDE that window, where the guard swallows
+       it. Result, reproduced in the harness before this delay existed: card 1 tall at 487px
+       with cards 2-4 stuck at ~400 — the deck never re-levelled. 150ms (the same settle
+       constant the resize debounce here already uses) puts the reopen safely after the release,
+       so it behaves exactly like the user tap it is standing in for — the path that provably
+       re-levels (baseline-verified: all four cards 487 on a plain tap). The guard clause covers
+       the human race: if the founder re-opened something themselves inside those 150ms, their
+       tap wins and this no-ops instead of toggle-closing it. cc#1374/1377's own mechanism is
+       untouched — this sequences NEW code around it, per the card's do-not-touch. */
+    if (_openTrend){
+      TREND.open = null;
+      setTimeout(function(){ if (!TREND.open) togTrend(null, _openTrend); }, 150);
+    }
+    if (_pageY) requestAnimationFrame(function(){ window.scrollTo(0, _pageY); });
+  }
+}
+
+/* ══ cc#1411 · AUTO-REFRESH ═══════════════════════════════════════════════════════════════════
+   The founder asked whether the PCR gauge moves every 5 minutes on its own. It did not — this
+   page fetched /api/mobile/home2 exactly ONCE, on load, and only a manual reload ever caught the
+   server's own 5-minute refresh. This closes that gap on this file's own established battery
+   discipline (moodStart/moodStop, glitterSync): NO timer exists while the tab is hidden —
+   cleared entirely on visibilitychange, never merely skipped inside a tick — and none while the
+   market is closed either (HOME_POLL.marketOpen, set in renderHome from d.session.market_open,
+   the server-computed flag; each refresh re-reads it off its own fresh payload, so the 15:30
+   open->closed transition shuts the timer down by itself within one tick).
+   ONE HONEST BOUNDARY, stated rather than papered over: a tab left open, visible and untouched
+   from before 09:15 will not self-start — nothing is polling while closed to notice the open
+   (the card explicitly ruled out polling outside market hours). The catch-up fetch on the next
+   visibilitychange, or any reload, picks it up — and that is the interaction pattern a phone
+   actually has.
+   A FAILED background refresh keeps the page exactly as it was: the initial load's error screen
+   is for having nothing to show at all; five minutes into a session it would replace a working
+   page with an error over one dropped request. The next tick simply tries again.
+   NO refresh spinner (scope 6, CC's call): the session clock, feed rail and every figure
+   repaint in place — that movement IS the acknowledgement, kept quiet per the card. */
+var HOME_POLL = { h: null, inflight: false, ms: 5 * 60 * 1000, marketOpen: false, lastFetch: 0 };
+function homeRefresh(){
+  if (HOME_POLL.inflight) return;                     /* scope 4: a slow network skips the tick,
+                                                         never stacks a second request */
+  if (document.visibilityState === 'hidden') return;  /* belt to the braces — the timer is
+                                                         already cleared on hide */
+  HOME_POLL.inflight = true;
+  fetchWithTimeout('/api/mobile/home2')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d && d.error) throw new Error(d.error);
+      renderHome(d, null);
+      homePollSync();
+    })
+    .catch(function(){ /* keep the page as it was — see the block comment above */ })
+    .then(function(){ HOME_POLL.inflight = false; });
+}
+function homePollStop(){
+  if (HOME_POLL.h){ clearInterval(HOME_POLL.h); HOME_POLL.h = null; }
+}
+function homePollSync(){
+  homePollStop();
+  if (document.visibilityState === 'hidden') return;
+  if (!HOME_POLL.marketOpen) return;
+  HOME_POLL.h = setInterval(homeRefresh, HOME_POLL.ms);
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible'){
+    /* One catch-up fetch if the data went stale while backgrounded — a single request on a real
+       user gesture, never a burst of missed ticks (the interval was cleared on hide, so none
+       queued). It runs even if the market has since closed, so the final EOD figures land;
+       homePollSync then decides on its own whether a timer is warranted at all. */
+    if (HOME_POLL.lastFetch && (Date.now() - HOME_POLL.lastFetch) >= HOME_POLL.ms) homeRefresh();
+    homePollSync();
+  } else {
+    homePollStop();   /* no timer at all while hidden — the moodStop/glitterSync discipline */
+  }
+});
+
+/* pivots ride alongside the main call — the deck renders either way, and a pivot failure costs
+   the bar, never the card (Promise.all would have let it take the whole screen down). */
+Promise.all([
+  fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }),
+  fetchWithTimeout('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY')
+    .then(function(r){ return r.json(); }).catch(function(){ return null; })
+]).then(function(res){
+  renderHome(res[0], res[1]);
+  homePollSync();   /* cc#1411: arm (or skip) the 5-min poll off the fresh payload's own flag */
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
