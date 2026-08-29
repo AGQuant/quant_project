@@ -1010,7 +1010,12 @@ function buildV10Markers(candles, open, closed){
     if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?'#2FD48B':'#FF5C6C',
       shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)});
     const xBar=_v10SnapBar(candles,r.exit_ts);
-    if(xBar){ const p=Number(r.pnl), win=!isNaN(p)&&p>=0, rsn=r.exit_reason||'EXIT';
+    if(xBar){ const p=Number(r.pnl), win=!isNaN(p)&&p>=0;
+      // cc#1419: same guard as v10_endpoints.reason_kw() -- exit_reason can carry a trailing
+      // audit annotation (e.g. cc#746's '[cc#746: ...]' note); take only the leading keyword.
+      const _raw=(r.exit_reason||'EXIT')+'', _sp=_raw.indexOf(' '), _br=_raw.indexOf('[');
+      const _cuts=[_sp,_br].filter(function(i){return i!==-1;});
+      const rsn=(_cuts.length?_raw.slice(0,Math.min.apply(null,_cuts)):_raw).toUpperCase();
       out.push({time:xBar.time,position:isLong?'aboveBar':'belowBar',color:win?'#2FD48B':'#FF5C6C',
         shape:isLong?'arrowDown':'arrowUp',text:rsn+(isNaN(p)?'':' '+(p>=0?'+':'')+num(p,0))}); }
   });
