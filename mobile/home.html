@@ -322,6 +322,42 @@ body[data-theme]{
    all: unknown is not flat. */
 .tpr.up{background:rgba(47,212,139,.07)}
 .tpr.dn{background:rgba(255,92,108,.07)}
+/* cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE. Own row/header classes rather than force-fitting
+   .tpr/.tph's 3-column geometry (Symbol/Last/Chg%) onto a genuinely 4-column shape (Symbol/Day%/
+   Sector/Sector Day%) — same visual language throughout (border-bottom rows, the sticky sortable
+   header with the identical arrow glyph, the same faint up/dn tint at 7% alpha), sized for a 4th
+   column instead of reused verbatim. */
+.brr{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-10) var(--space-2);
+  border-bottom:var(--bw-1) solid var(--line);min-height:46px}
+.brr .br-sym{flex:0 0 auto;min-width:78px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-11);font-weight:800}
+.brr .br-day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
+  font-weight:700;text-align:right;min-width:54px}
+.brr .br-sec{flex:1;min-width:0;font-size:var(--type-9);color:var(--txt,#E9EEFB);opacity:.85;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brr .br-sday{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
+  font-weight:700;text-align:right;min-width:54px}
+/* cls()'s own pos/neg classes have no colour rule anywhere else in this file (checked before
+   writing this — .tpr .lv.pos / .cg.pos are never actually styled, a pre-existing gap in Tape's
+   own CSS this task does not touch, per do_not_touch). A breadth table's whole point is reading
+   green/red at a glance, so these two ARE explicitly coloured, scoped to just these new cells. */
+.brr .br-day.pos, .brr .br-sday.pos{color:var(--grn)}
+.brr .br-day.neg, .brr .br-sday.neg{color:var(--red)}
+.brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
+  min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
+  border-bottom:var(--bw-1) solid var(--line)}
+.brh button{background:none;border:0;padding:var(--space-8) 0;font-family:inherit;
+  font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;
+  color:var(--txt,#E9EEFB);cursor:pointer;display:flex;align-items:center;gap:var(--space-3);
+  min-height:38px}
+.brh button.on{color:var(--txt,#E8EDF7)}
+.brh .h-bsym{flex:0 0 auto;min-width:78px}
+.brh .h-bday{justify-content:flex-end;text-align:right;min-width:54px}
+.brh .h-bsec{flex:1;min-width:0}
+.brh .h-bsday{justify-content:flex-end;text-align:right;min-width:54px}
+.brh .ar{font-size:var(--type-9);opacity:.9}
+.brr.up{background:rgba(47,212,139,.07)}
+.brr.dn{background:rgba(255,92,108,.07)}
 /* ── cc#906: V10 trade-log chart ─────────────────────────────────────────────────────────── */
 /* cc#1158: .v10ic went with v10Icon(), its only caller. */
 .v10tg{display:flex;gap:var(--space-6);margin:var(--space-10) 0 var(--space-6)}
@@ -1383,6 +1419,15 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
   <div class="tpo-bd" id="v10bd"></div>
 </div>
 
+<!-- cc#1410: Advance/Decline as a full-screen table, behind Card 1's ADVANCE/DECLINE bar.
+     Reuses the SAME .tpo overlay shell Market Tape (cc#904) and V10 Trades (cc#906) already use
+     -- one shell, three instances, never a fourth implementation of a full-screen popup. -->
+<div class="tpo" id="brov">
+  <div class="tpo-hd"><h2>Advance / Decline</h2>
+    <button class="tpo-x" onclick="closeBreadth()" aria-label="Close">&#10005;</button></div>
+  <div class="tpo-bd" id="brbd"></div>
+</div>
+
 <script>
 /* cc#1378 · GLITTER RING FEATURE-DETECT, run first and unconditionally (no DOM/paint dependency,
    document.documentElement always exists). typeof CSS.registerProperty === 'function' is the
@@ -1946,6 +1991,104 @@ function renderTape(){
   // re-draw any chart that is open \u2014 renderTape() rebuilds the DOM, so the hosts are new nodes
   Object.keys(TAPE.open).forEach(function(i){ if (TAPE.open[i]) renderChart('tp' + i); });
 }
+
+/* \u2550\u2550 cc#1410: ADVANCE/DECLINE FULL-SCREEN TABLE \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   Reuses Market Tape's own shape (cc#904/cc#939) rather than a second table implementation:
+   .tpo overlay shell (openBreadth/closeBreadth mirror openTape/closeTape exactly), the same
+   "sort by original-index order, never reorder the source array" rule tapeSortView() established
+   (nothing here is keyed by row index the way Tape's per-row chart toggles are, but the pattern
+   is kept anyway \u2014 one convention, not a different one for a table that happens not to need it),
+   and tapeNum()/esc()/px()/pct()/cls() reused directly, not retyped. Paint-then-fill: /api/mobile/
+   breadth is a real per-symbol query over the whole ~208-name universe, so it is fetched on the
+   tap that opens this table, not folded into the home2 payload every page load already pays for. */
+var BREADTH = { rows: [], view: [], loaded: false, loading: false };
+var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
+var BREADTH_COLS = [
+  { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
+  { key: 'day',  label: 'Day %',      cls: 'h-bday' },
+  { key: 'sec',  label: 'Sector',     cls: 'h-bsec' },
+  { key: 'sday', label: 'Sector Day', cls: 'h-bsday' }
+];
+function breadthSortView(){
+  var col = BREADTH_SORT.col, dir = BREADTH_SORT.dir;
+  var order = BREADTH.rows.map(function(_, i){ return i; });
+  order.sort(function(a, b){
+    var ra = BREADTH.rows[a], rb = BREADTH.rows[b];
+    if (col === 'sym' || col === 'sec'){
+      var f = col === 'sym' ? 'symbol' : 'theme';
+      var cmp = String(ra[f] || '').localeCompare(String(rb[f] || ''));
+      return cmp * dir || (a - b);
+    }
+    var field = col === 'day' ? 'day_chg_pct' : 'sector_day_chg_pct';
+    var va = tapeNum(ra[field]), vb = tapeNum(rb[field]);
+    if (va == null && vb == null) return a - b;
+    if (va == null) return 1;      // nulls last, whichever way the arrow points
+    if (vb == null) return -1;
+    if (va === vb) return a - b;   // stable: ties keep the payload's own order
+    return (va < vb ? -1 : 1) * dir;
+  });
+  BREADTH.view = order;
+}
+function breadthSort(col){
+  if (BREADTH_SORT.col === col) BREADTH_SORT.dir = -BREADTH_SORT.dir;
+  else { BREADTH_SORT.col = col; BREADTH_SORT.dir = -1; }
+  renderBreadth();
+}
+function breadthHead(){
+  return '<div class="brh">' + BREADTH_COLS.map(function(c){
+    var on = BREADTH_SORT.col === c.key;
+    return '<button class="' + c.cls + (on ? ' on' : '') + '"'
+      + ' aria-label="Sort by ' + esc(c.label) + '"'
+      + ' onclick="breadthSort(\'' + c.key + '\')">' + esc(c.label)
+      + (on ? '<span class="ar">' + (BREADTH_SORT.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '')
+      + '</button>';
+  }).join('') + '</div>';
+}
+function breadthRow(x){
+  // cc#910's own rule, reused: the row carries its direction as a faint tint; a null change gets
+  // neither tint nor colour \u2014 unknown is not flat.
+  var sgn = (x.day_chg_pct == null) ? '' : (Number(x.day_chg_pct) >= 0 ? ' up' : ' dn');
+  return '<div class="brr' + sgn + '">'
+    + '<span class="br-sym">' + esc(x.symbol) + '</span>'
+    + '<span class="br-day ' + cls(x.day_chg_pct) + '">' + pct(x.day_chg_pct) + '</span>'
+    + '<span class="br-sec">' + esc(x.theme) + '</span>'
+    + '<span class="br-sday ' + cls(x.sector_day_chg_pct) + '">' + pct(x.sector_day_chg_pct) + '</span>'
+    + '</div>';
+}
+function renderBreadth(){
+  var el = document.getElementById('brbd');
+  if (!el) return;
+  if (BREADTH.loading){ el.innerHTML = '<div class="loading">Loading breadth\u2026</div>'; return; }
+  if (!BREADTH.rows.length){ el.innerHTML = '<div class="empty"><b>No breadth data</b></div>'; return; }
+  breadthSortView();
+  var body = BREADTH.view.map(function(i){ return breadthRow(BREADTH.rows[i]); }).join('');
+  el.innerHTML = breadthHead() + body;
+}
+function openBreadth(){
+  var ov = document.getElementById('brov');
+  if (!ov) return;
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (BREADTH.loaded){ renderBreadth(); return; }   // cached for the rest of the visit
+  BREADTH.loading = true;
+  renderBreadth();
+  fetchWithTimeout('/api/mobile/breadth').then(function(r){ return r.json(); }).then(function(d){
+    if (d && d.error) throw new Error(d.error);
+    BREADTH.rows = d.rows || [];
+    BREADTH.loaded = true;
+  }).catch(function(){
+    BREADTH.rows = []; BREADTH.loaded = false;
+  }).then(function(){
+    BREADTH.loading = false;
+    renderBreadth();
+  });
+}
+function closeBreadth(){
+  var ov = document.getElementById('brov');
+  if (ov) ov.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
 /* cc#910: a tape chart is now a registered CHART, so it scrubs and switches range exactly like
    the ADR/PCR chips \u2014 same renderer, same typography, no second implementation. */
 function tapeChart(i){
@@ -3581,12 +3724,17 @@ var PIV = null;   // symbol -> {pp,r1,s1,...} from /api/paper/pivots
    build the ADR check chip on card 1 — mobile_home2.py just started exposing the field (cc#1369).
    Null advances/declines (breadth feed dead — the same condition that sends the ADR chip
    indeterminate) draws NO bar, same "never a guess" rule idxCol above already lives by. */
+/* cc#1410: the bar is now tappable -- opens the full-screen breadth table (openBreadth(),
+   Market Tape's own .tpo overlay pattern reused, see below). Same trigger shape as the ticker
+   marquee's own onclick="openTape()" (cc#904) -- a plain onclick + cursor:pointer, no new
+   tap-affordance convention invented. adrBar()'s own summary (the 85/123 count and the pipe
+   bar) is unchanged, per do_not_touch -- only the wrapper gained an onclick. */
 function adrBar(hero){
   var d = (hero && hero.adr_detail) || {};
   var adv = d.advances, dec = d.declines;
   var have = adv != null && dec != null && (adv + dec) > 0;
   var advPct = have ? (adv / (adv + dec) * 100) : null;
-  return '<div class="adrwrap"><div class="adrhd"><span>ADVANCE / DECLINE</span>'
+  return '<div class="adrwrap" onclick="openBreadth()" style="cursor:pointer"><div class="adrhd"><span>ADVANCE / DECLINE</span>'
     + '<span class="adrn">' + (have ? (adv + ' / ' + dec) : '—') + '</span></div>'
     + '<div class="adrpipe">' + (have
         ? ('<div class="adv" style="width:' + advPct.toFixed(1) + '%"></div>'
