@@ -685,6 +685,11 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
             return {"error": "%s: %s" % (type(e).__name__, str(e)[:120]),
                     "trades": [], "count": 0, "summary": {}}
 
+    # cc#1419: SAME derivation v10_endpoints.paired_trades()/closed_legs() now use — this
+    # function's own `trades`/`pins` below were a THIRD, undocumented site reading exit_reason
+    # raw (found reading this file directly for this task, not in the original audit's grep).
+    from v10_endpoints import reason_kw
+
     trades, pins, outside = [], [], 0
     for r in closed_rows:
         ed = str(r["ed"]) if r["ed"] else None
@@ -706,7 +711,7 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
              "opt_strike": f(r["opt_strike"]), "opt_type": r["opt_type"],
              "entry_d": ed, "entry_t": r["et"],
              "entry_price": f(r["entry_price"]), "exit_d": xd, "exit_t": r["xt"],
-             "exit_price": f(r["exit_price"]), "reason": r["exit_reason"] or "EXIT",
+             "exit_price": f(r["exit_price"]), "reason": reason_kw(r["exit_reason"], "EXIT"),
              "pnl": pnl, "points": f(r["points"]), "win": win, "open": False}
         trades.append(t)
         # cc#928: PINS STAY FUT-ONLY, deliberately. An option leg's price is a PREMIUM (220), not
@@ -720,7 +725,7 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
         if xd in in_win:
             pins.append({"d": xd, "id": r["id"], "kind": "exit", "side": side,
                          "price": f(r["exit_price"]), "t": r["xt"], "win": win,
-                         "reason": r["exit_reason"] or "EXIT", "pnl": pnl})
+                         "reason": reason_kw(r["exit_reason"], "EXIT"), "pnl": pnl})
 
     for r in open_rows:
         ed = str(r["ed"]) if r["ed"] else None

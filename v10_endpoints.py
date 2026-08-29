@@ -26,6 +26,22 @@ def _check_admin(token: Optional[str]):
     return True
 
 
+def reason_kw(raw, default):
+    """cc#1419: v10_trades.exit_reason can carry a trailing audit annotation appended by a data-
+    fix task (e.g. cc#746's '[cc#746: written-PE label corrected BUY->SELL; P&L unchanged]') --
+    this strips it so that shape can never leak onto a user-facing card again, whichever task
+    number appends the next one. Takes only the leading keyword, up to the first space or the
+    first '[', whichever comes first -- SL / TARGET / FLIP / GAP_EXIT are one word each, so this
+    never truncates a genuine reason, only an appended note. ONE derivation, three call sites
+    (paired_trades/closed_legs here, mobile_v10chart in mobile_home2.py) so a future annotation
+    of this shape needs exactly one fix, not a fourth place to remember."""
+    if not raw:
+        return default
+    s = raw.strip()
+    cut = min([i for i in (s.find(' '), s.find('[')) if i != -1] or [len(s)])
+    return s[:cut].upper()
+
+
 @router.get("/signal")
 def v10_signal(symbol: str = "NIFTY50"):
     """Current signal from the latest CLOSED 10m bar. symbol: NIFTY50 | BANKNIFTY."""
@@ -180,7 +196,7 @@ def paired_trades(symbol=None, limit=200):
             "direction": "LONG" if side == "BUY" else "SHORT",
             "entry_price": f(fut["entry_price"]), "exit_price": f(fut["exit_price"]),
             "points": f(fut["points"]), "lot_size": fut["lot_size"],
-            "reason": (fut["exit_reason"] or "OPEN").upper(),
+            "reason": reason_kw(fut["exit_reason"], "OPEN"),   # cc#1419
             "entry_ist": fut["entry_ist"], "exit_ist": fut["exit_ist"],
             "entry_date": fut["entry_date"], "exit_date": fut["exit_date"],
             "held": dur(f(fut["held_s"])),
@@ -285,7 +301,7 @@ def closed_legs(symbol=None, limit=1000):
                                   r["opt_type"] or "")).strip() if leg == "OPT" else "FUT"),
             "entry_price": f(r["entry_price"]), "exit_price": f(r["exit_price"]),
             "points": f(r["points"]), "pnl": pnl, "lot_size": r["lot_size"],
-            "reason": (r["exit_reason"] or "EXIT").upper(),
+            "reason": reason_kw(r["exit_reason"], "EXIT"),   # cc#1419
             "entry_ist": r["entry_ist"], "exit_ist": r["exit_ist"],
             "held": dur(f(r["held_s"])),
             "win": None if pnl is None else (pnl >= 0),
