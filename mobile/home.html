@@ -359,7 +359,15 @@ body[data-theme]{
 .v10sum{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-8);padding:var(--space-10) var(--space-2) var(--space-8);
   border-bottom:var(--bw-1) solid var(--line);margin-bottom:var(--space-2)}
 .v10sum div{text-align:center}
-.v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800}
+/* cc#1396: white-space:nowrap on the value line — the NET cell's sign+₹+comma-grouped number is
+   the widest of the four and was wrapping to 2 lines (3 with its own "NET" label below), while
+   TRADES/WIN RATE/OPEN never got long enough to. Same belt-and-braces nowrap .v10rt b already
+   carries for this exact currency-in-a-narrow-space shape (cc#953 item 1). Measured, not assumed:
+   Playwright-checked at 360/390/430px with the widest real NET seen (−₹1,32,970) — one line at
+   every width, and the strip's own scrollWidth never exceeds its container, so nothing overflows
+   the modal either; the grid's own `1fr` tracks simply grow to the nowrap content's width, which
+   at four short values (a rupee figure, a percent, two small integers) is well inside the strip. */
+.v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800;white-space:nowrap}
 .v10sum span{display:block;font-size:var(--type-95);color:var(--txt,#E9EEFB);text-transform:uppercase;
   letter-spacing:var(--track-px6);margin-top:var(--space-2)}
 /* cc#948 — TWO-ZONE ANATOMY, restoring what the old .tr2 row had and cc#941 lost.
@@ -3198,27 +3206,38 @@ function v10OptCard(t){
     + (pts ? '<span>' + esc(pts) + '</span>' : '') + '</span></div>';
 }
 
+/* cc#1396 · PER-LEG STRIP STATS, RECREATED FROM cc#1383. This is the exact formula cc#1383
+   wrote for Card 4/5's own preview boxes — read from git history (c985704^) rather than
+   reinvented, since cc#1386's dead-code audit removed the function along with its only caller at
+   the time (Cards 4/5 became a structurally different live-position UI that has no use for a
+   trades/win-rate/net aggregate). It is not stale to bring back: v10Log()'s own .v10sum strip
+   below is a genuine SECOND, independent need for the identical computation, confirmed by reading
+   the endpoint fresh this session — d.by_leg[leg] (trades/open/net_pnl) is real per-leg data, and
+   win_rate has no server equivalent so it is folded here over d.trades' own per-trade `win` flag,
+   filtered to the leg and to closed trades (0 closed trades is a dash, never a fabricated 0% —
+   the cc#912 rule, same as the original). ONE caller today (v10Log(), directly below) — kept as
+   its own named function rather than inlined, both because that is what the number IS (a leg's
+   trade/win-rate/net/open summary, a real concept worth naming) and because Card 4/5's own
+   preview box is exactly the kind of place a second caller could reappear if that UI ever needs
+   an aggregate view again; inlining would mean re-deriving this same formula a third time. */
+function v10LegStats(d, leg){
+  var bl = (d.by_leg && d.by_leg[leg]) || {};
+  var closed = (d.trades || []).filter(function(t){
+    return (t.leg || 'FUT') === leg && !t.open && t.win != null;
+  });
+  var wins = closed.filter(function(t){ return t.win; }).length;
+  return {
+    trades: bl.trades || 0, open: bl.open || 0,
+    net: (bl.net_pnl == null ? null : bl.net_pnl),
+    winRate: closed.length ? Math.round(wins / closed.length * 100) : null
+  };
+}
 function v10Log(d){
   var p = (d.paired) || {};
   if (p.error) return '<div class="sum" style="padding:10px 2px">Trade log unavailable: '
     + esc(p.error) + '</div>';
   var rows = p.trades || [];
   var sm = p.summary || {};
-  /* SUMMARY STRIP (card item 4). Every figure comes from the paired set, so the win rate is a
-     win rate on NET P&L — the whole point of pairing. A rate with no closed trades prints as a
-     dash, never as 0%: no trades is not a 0% record (the cc#912 rule). */
-  var h = '<div class="v10sum">'
-    + '<div><b>' + (sm.paired_trades || 0) + '</b><span>trades</span></div>'
-    + '<div><b>' + (sm.win_rate == null ? '&mdash;' : sm.win_rate + '%') + '</b><span>win rate</span></div>'
-    + '<div><b class="' + cls(sm.net_r) + '">' + (sm.net_r == null ? '&mdash;'
-        : (sm.net_r >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(sm.net_r).toLocaleString('en-IN'))
-      + '</b><span>net</span></div>'
-    + '<div><b>' + (d.stats && d.stats.open ? d.stats.open : 0) + '</b><span>open</span></div>'
-    + '</div>';
-  /* cc#953 item 2: the "36 hedged · 9 unhedged" sub-line is REMOVED. It was mine (cc#943 pattern,
-     carried into cc#941) and the founder does not want it — and cc#954 shows the framing behind it
-     was wrong anyway: nothing was ever hedged, so nothing was ever "unhedged". The honest version
-     of that fact now lives on the OPTIONS footer, worded correctly. The four-figure strip stays. */
   /* ══ cc#948 item 1 — QUICK ACCESS RESTORED ═══════════════════════════════════════════════
      I deleted these pills and v10SetLeg() in cc#941 as "dead code". They were not dead: they were
      founder-approved UI from cc#920/928, and NOTHING IN THE cc#941 SPEC ASKED FOR THEIR REMOVAL.
@@ -3232,16 +3251,41 @@ function v10Log(d){
      Data is the per-leg trades[] and by_leg the payload already carries; no endpoint change. */
   /* cc#953 item 3: TWO pills. ALL is gone — FUTURES already showed every trade (it is the paired
      list with the OPT sub-line hidden), so ALL and FUTURES differed by one line of detail and the
-     third button bought nothing. FUTURES is the default. */
+     third button bought nothing. FUTURES is the default.
+     cc#1396: `view` MOVES UP — the SUMMARY STRIP below now reads it too (see that comment), where
+     it used to be built before `view` existed at all. */
   var view = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
   var legs = d.trades || [];
+  /* SUMMARY STRIP (card item 4). cc#1396 · PER-LEG, NOT COMBINED. This used to build all four
+     figures from `sm` (p.summary) regardless of which tab was open — the paired/SIGNAL-level
+     view, netting both legs together — so switching FUTURES/OPTIONS never moved the numbers.
+     cc#1383's own comment (right above the OLD v10LegStats, before cc#1386 removed it along with
+     its old caller) already named this exact mismatch for the two Home cards; it was never fixed
+     here, in the one place that reads V10.leg to begin with. v10LegStats(d, view) — recreated
+     above — is now the single source for this strip, same formula, same "no verdicts is not a 0%
+     record" rule (cc#912) it always followed. */
+  var st = v10LegStats(d, view);
+  var h = '<div class="v10sum">'
+    + '<div><b>' + st.trades + '</b><span>trades</span></div>'
+    + '<div><b>' + (st.winRate == null ? '&mdash;' : st.winRate + '%') + '</b><span>win rate</span></div>'
+    + '<div><b class="' + cls(st.net) + '">' + (st.net == null ? '&mdash;'
+        : (st.net >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(Math.round(st.net)).toLocaleString('en-IN'))
+      + '</b><span>net</span></div>'
+    + '<div><b>' + st.open + '</b><span>open</span></div>'
+    + '</div>';
+  /* cc#953 item 2: the "36 hedged · 9 unhedged" sub-line is REMOVED. It was mine (cc#943 pattern,
+     carried into cc#941) and the founder does not want it — and cc#954 shows the framing behind it
+     was wrong anyway: nothing was ever hedged, so nothing was ever "unhedged". The honest version
+     of that fact now lives on the OPTIONS footer, worded correctly. The four-figure strip stays. */
   /* cc#973: CLOSED option legs only, so the two pills count the same KIND of thing. FUTURES is
      rows.length = the paired CLOSED trades (v10_trades); counting open legs here as well made
      OPTIONS read 19 against FUTURES 23 on a book with one open leg of each — two numbers that
      look comparable and are not. The open position is already stated by the OPEN stat cell and
      by the chart's own open marker, in both views. */
   var opts = legs.filter(function(x){ return (x.leg || 'FUT') === 'OPT' && !x.open; });
-  var bl = d.by_leg || {};
+  /* cc#1396: `var bl = d.by_leg || {};` REMOVED — grepped, it had zero reads anywhere in this
+     function even before today (dead since whatever commit last touched this block); v10LegStats
+     now does its own by_leg[leg] lookup, so there is nothing left that would have used it. */
   h += '<div class="lgtabs">' + [['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
       return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'
         + ' onclick="v10SetLeg(\'' + v[0] + '\')">' + v[1]
