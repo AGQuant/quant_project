@@ -1147,7 +1147,23 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   letter-spacing:var(--track-em16);color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
   line-height:20px}
 /* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
-.pmood{margin-bottom:calc(2px * var(--rh,1))}   /* cc#1375: 4->2, item-4 offset */
+/* cc#1390 · EVEN SPACE DISTRIBUTION. cc#1388's own #heroTrack > .c:nth-child(2) > .c2body{
+   justify-content:flex-start} correctly pulled the mood word tight under the header, but with the
+   deck's real governing height well above Card 2's own natural content (the gap-above-GREED
+   investigation, see the Playwright/service-worker findings in this task's own result), flex-start
+   dumps 100% of the real surplus into the ONE gap below .pcite -- top-jammed instead of jammed at
+   the bottom, the SAME single-concentrated-gap failure mode as space-between, just moved to the
+   opposite end. Fixed the way the task's own scope hinted: .pmood ITSELF becomes a flex:1 column
+   that claims 100% of whatever surplus .c2body's own flex-start leaves after .chd's natural size,
+   and centres its OWN three children (pw/gauge/pcite) within that claimed space -- .chd stays
+   pinned flush at the top (untouched, own natural size, not a flex-grow participant), the mood
+   word+gauge+citation block reads as one block vertically centred in the remaining room, and the
+   CTA button keeps its existing bottom anchor (the shared CTA-floor margin, untouched). c2body's
+   own justify-content:flex-start (cc#1388) is left in place as the base/fallback behaviour, not
+   removed -- it is simply no longer the thing doing the distribution once .pmood's own flex:1
+   claims the space directly. */
+.pmood{margin-bottom:calc(2px * var(--rh,1));flex:1 1 auto;min-height:0;
+  display:flex;flex-direction:column;justify-content:center}   /* cc#1375: 4->2, item-4 offset */
 /* cc#1374: SIZE PARITY WITH CARD 1 (founder correction, 28-Aug) — the PCR word (Greed / Caution
    / etc) was var(--type-21), visibly smaller than Card 1's BEARISH, and mixed-case. This copies
    Card 1's own cc#1352 override verbatim — same clamp(26px,8vw,32px), same forced uppercase —
@@ -3572,7 +3588,7 @@ function pcrGaugeSvg(pcrRaw){
   /* cc#1388: max-width, MEASURED not assumed from the ref's illustrative 260px -- see this task's
      own result for the exact before/after governing-height numbers this was tuned against. */
   return '<div class="pcr-gauge"><svg viewBox="0 0 340 200"'
-    + ' style="width:100%;max-width:260px;display:block;margin:0 auto" role="img"'
+    + ' style="width:100%;max-width:340px;display:block;margin:0 auto" role="img"'
     + ' aria-label="PCR gauge' + (hasPcr ? ', ' + Number(pcrRaw).toFixed(2) : ', no data') + '">'
     + bands + needle + ticks + '</svg></div>';
 }
@@ -3893,6 +3909,38 @@ Promise.all([
     if (dt) PIV.__date = String(dt).slice(5);
   }
   if (d.error) throw new Error(d.error);
+
+  /* cc#1390 · STALE-PAGE SELF-HEAL. window.__SCORR_BUILD (main.py's _MOBILE_HEAD, stamped into
+     THIS document when it was served) vs d.build_id (what the server answering THIS live,
+     no-store /api/mobile/home2 call is actually running RIGHT NOW). A mismatch means some layer
+     this app does not control (a CDN, a WebView-level cache, ...) served a stale copy of the page
+     despite every mechanism this app already has in place being correct -- confirmed by reading
+     the source, not assumed: /m/home itself is Cache-Control:no-store (mobile_endpoints._page()),
+     the service worker's own navigate handler is network-first, and every shared asset URL already
+     carries a build-stamped ?v= query. A mismatch here means one of those was bypassed by
+     something OUTSIDE this app's own control, not a defect in any of them.
+     ONE reload, cache-busted (a fresh query param -- a plain location.reload() can hit the exact
+     same stale layer again) -- guarded per build-id via sessionStorage so a genuine deploy this
+     tab has not seen yet gets its own fresh attempt, but a layer that is STUCK on one bad build
+     cannot loop this page forever. Existing query params (e.g. ?embed=1) are PRESERVED, not
+     dropped -- URLSearchParams merges _stale in rather than replacing the whole search string. */
+  if (window.__SCORR_BUILD && d.build_id && window.__SCORR_BUILD !== d.build_id){
+    // try/catch matches this file's own established storage-access pattern (main.py's
+    // _MOBILE_HEAD theme-boot script) -- a disabled/unavailable sessionStorage (private
+    // browsing, quota) must never crash the whole render over a spacing/cache nicety.
+    var already = true;
+    try {
+      var staleKey = 'scorr_stale_reload_' + d.build_id;
+      already = !!sessionStorage.getItem(staleKey);
+      if (!already) sessionStorage.setItem(staleKey, '1');
+    } catch (e) { already = true; }   // can't guard a loop -> don't reload, just proceed stale
+    if (!already){
+      var qs = new URLSearchParams(location.search);
+      qs.set('_stale', String(Date.now()));
+      location.replace(location.pathname + '?' + qs.toString());
+      return;
+    }
+  }
 
   document.getElementById('sess').textContent = d.session.label;
   /* cc#984: feed freshness beside the clock. Server-computed — the client renders it, it never

@@ -65,6 +65,11 @@ from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — 
 # cc#1123: the tape's colour band comes from the SAME function the Digest tile's does. Imported
 # rather than reimplemented so the VIX thresholds live in exactly one place (card task 4).
 from global_heatstrip import _band as _hs_band, INVERTED as _HS_INVERTED
+# cc#1390: the SAME single-source BUILD_ID main.py's _MOBILE_HEAD already stamps onto every
+# /m/* page as window.__SCORR_BUILD — imported here (not recomputed) so the client can compare
+# "what this page was served as" against "what the server answering THIS live, no-store call is
+# actually running" and self-heal if a layer this app does not control served a stale document.
+from pwa_endpoints import BUILD_ID
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -953,6 +958,12 @@ def mobile_home2(request: Request):
     # Home now consumes the figures; it does not produce them.
 
     return {
+        # cc#1390: what build IS ACTUALLY RUNNING right now, on this live no-store call — compared
+        # client-side against window.__SCORR_BUILD (the same BUILD_ID, stamped into the PAGE this
+        # response is feeding) to catch a stale-served document a caching layer this app does not
+        # control let through despite no-store/cache-busting already being correct everywhere this
+        # app itself controls. See mobile/home.html's own comment for the comparison + self-heal.
+        "build_id": BUILD_ID,
         "session": {
             "market_open": market_open,
             "time": now.strftime("%H:%M"),
