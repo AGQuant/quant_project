@@ -350,6 +350,17 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card (letter C)
     + b'<script src="/scorr_analysis_card.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared Analysis modal (letter A)
     + b'<script src="/scorr_cockpit_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#805: shared Derivative Cockpit (letter D)
+    # cc#1390: the SAME BUILD_ID every stamped URL above already carries (RAILWAY_GIT_COMMIT_SHA,
+    # pwa_endpoints.BUILD_ID, one source), now also exposed as a plain global so a page's own JS can
+    # compare "what I was served as" against "what the server is running right now" (read from a
+    # live, no-store endpoint's own response) and self-heal with a cache-busted reload if a layer
+    # this app does not control served it a stale document despite every no-store/cache-bust
+    # mechanism already in place here. Inlined, not a separate asset — nothing to cache-bust about
+    # a value that changes every time this very response is generated. App-wide (every /m/* page
+    # picks this up for free via _MOBILE_HEAD), even though the comparison+reload LOGIC that reads
+    # it is wired up on Home only for now (cc#1390's own scope) — see mobile/home.html's own use of
+    # it for the actual check.
+    + b"<script>window.__SCORR_BUILD='" + _BUILD_B + b"';</script>"
 )
 
 # cc#1064: the mobile app is DARK-ONLY — mobile_endpoints' mobile_app.css defines the dark tokens
