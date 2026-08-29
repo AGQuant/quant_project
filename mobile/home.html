@@ -1096,6 +1096,13 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    (e.g. cc#1382's card-count generalization) rather than a positional selector that can silently
    re-break the next time ANY card's own child list changes shape. */
 #heroTrack > .c > .c2body{margin-bottom:var(--space-14)}
+/* cc#1393 · CARD 4 LOSES ITS CTA (PAST SIGNALS removed, founder ask), so it loses the floor above.
+   The rule above is identity-matched to EVERY .c2body in the deck on the assumption a CTA follows
+   it — true for Cards 2/3, no longer true for Card 4. Left unset here, that 14px becomes dead
+   space between the card's real content and .c's own padding-bottom: nth-child(4) zeroes it back
+   out for this one card, same per-card override convention the deck already uses elsewhere
+   (nth-child(2)/nth-child(3) above). */
+#heroTrack > .c:nth-child(4) > .c2body{margin-bottom:0}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
    tokens wherever an equivalent already exists (--grn/--red/--mut/--amber/--panel2/--line2/
@@ -2602,11 +2609,9 @@ function renderHeroPositions(){
       + posDecayBar(opt) + '</div>';
   var tg = document.getElementById('heroPositionsToggle');
   if (tg) tg.innerHTML = posToggleHtml();
-  var btn = document.getElementById('heroPositionsBtn');
-  /* cc#1386 scope item 5: the card does not say which leg the founder was last looking at, so
-     PAST SIGNALS opens on FUT -- stated here as the assumption, same default openV10()/the modal
-     itself already carried before cc#1383 gave it an explicit-leg 3rd param. */
-  if (btn) btn.setAttribute('onclick', "openV10(event,'" + POS.sym + "','FUT')");
+  /* cc#1393: the #heroPositionsBtn onclick sync (PAST SIGNALS -> openV10()) is removed with the
+     button — cc#1386 scope item 5's own FUT-default note above it was about that button's own
+     target leg and no longer applies to anything on this card. */
   /* cc#1382's lesson again: this swap can shrink the card (Loading -> a real, possibly shorter,
      range/decay layout; a symbol toggle to a leg with no open position -> a much shorter unavail
      block), and ResizeObserver does not fire on a shrink pinned at the old min-height -- explicit
@@ -3746,19 +3751,22 @@ function heroCard3(d){
    see the CSS block for why .pstg is scoped by its own class rather than #heroCard3Toggle's
    ID-only approach: the design ref names .pstg directly and there is nothing else on this deck
    for it to collide with).
-   THE BUTTON — "PAST SIGNALS", a <button> not an <a> like Daily Digest/Index Intel, same reason
-   cc#1383's own Card 4/5 buttons were buttons: this opens the EXISTING in-page modal, not a
-   navigation, even though it reuses .digl.slab's class/colour/positioning verbatim. onclick is
-   set server-render-time to FUT for POS's default symbol and kept in sync by
-   renderHeroPositions() on every toggle tap (id="heroPositionsBtn"), since the modal's target
-   symbol tracks whichever side of the toggle is selected. */
+   cc#1393 · THE "PAST SIGNALS" BUTTON IS REMOVED (founder ask). id="heroPositionsBtn"'s onclick
+   sync in renderHeroPositions() (kept the target symbol in step with whichever side of the toggle
+   is selected) goes with it — see that function's own comment for the matching removal. .c2body
+   is now this card's ONLY child, not the first of a two-child .c2body+CTA pair every other card in
+   this deck still has, so it no longer carries the shared CTA-floor margin (#heroTrack > .c >
+   .c2body{margin-bottom:var(--space-14)}, cc#1391) meant to hold a fixed gap above a button that
+   is no longer there — left in place, that margin becomes a blank 14px strip below the card's own
+   content and above .c's own padding-bottom, exactly the leftover gap this task's own verify item
+   calls out. Zeroed for this card only, by nth-child(4) (this deck's own established per-card
+   override convention — cc#1384's nth-child(2), cc#1382's nth-child(3) — not a new pattern), so
+   Cards 2/3, which still end in a real CTA, are untouched. */
 function heroCardPositions(d){
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
     + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
     + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
-    + '</div>'
-    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'' + POS.sym + '\',\'FUT\')">PAST SIGNALS &#8594;</button>'
-    + '</div>';
+    + '</div></div>';
 }
 /* the deck: five cards, snap-scrolled, with a dot that follows the finger */
 /* cc#950: the book deck's dot updater. Same shape as heroDots below — one function per deck
