@@ -73,6 +73,12 @@ body{background:var(--field);color:var(--chalk);
   scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .deck::-webkit-scrollbar{display:none}
 .deck>.card{scroll-snap-align:center;flex:0 0 268px;position:relative}
+/* cc#1401 · ONE CARD PER SWIPE, same fix cc#1350 shipped for mobile/home.html's three decks —
+   mandatory snap alone lets a hard fling's momentum carry past the immediate next card (this
+   deck renders up to 5 slant cards from the live ladder, per the fetch below). Missing here too
+   (grepped, confirmed absent). scroll-snap-stop:always forbids the scroller from passing ANY
+   snap point mid-gesture, so every fling stops at the next card. Pure CSS, no JS. */
+.deck>.card{scroll-snap-stop:always}
 .slant{
   position:relative;background:var(--panel);padding:14px 16px 13px 20px;overflow:hidden;
   clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,18px 100%,0 calc(100% - 18px));
