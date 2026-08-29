@@ -2408,7 +2408,10 @@ async function boot(){
       <div class="gsw" id="gsw"><button type="button" data-v="day" class="on" onclick="setTapeMode('day')">DAY</button><button type="button" data-v="week" onclick="setTapeMode('week')">WEEK</button></div></div>
     ${tiles.length?`<div id="gtiles" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${tiles.map(tile).join('')}</div>`:'<div class="unavail">No live global tiles available.</div>'}
     ${eodNote?`<div style="font-size:9.5px;color:var(--amber);font-family:'JetBrains Mono';margin-top:8px">${esc(eodNote)}</div>`:''}
-    <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')} · WEEK = close vs close 5 sessions back, from the payload · no history shows an em-dash, never 0</div>
+    <!-- cc#1406: the two static clauses after S.global_tape.read (" · WEEK = close vs close 5
+         sessions back, from the payload · no history shows an em-dash, never 0") are removed per
+         the founder's struck-through screenshot -- dynamic tiles-higher text only, below. -->
+    <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')}</div>
   </div>
 
   <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
