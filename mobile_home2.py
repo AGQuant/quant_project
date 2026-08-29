@@ -162,7 +162,15 @@ _VIX_NO_INTRADAY = ("India VIX has no intraday feed — it is not one of the 15 
 # source finally got populated"; it is a second source cc#1231 had no reason to look for at the
 # time. The constraint the comment above describes still holds for global_intraday; it no longer
 # gates VIX's own 1D tab, because VIX's 1D tab reads intraday_prices now, not global_intraday.
-_INTRADAY_KINDS = ("adr", "pcr", "vix")
+#
+# cc#1409 · NIFTY/BANKNIFTY ADDED, same shape of gap. cc#998/cc#1159's own comment above was
+# right that raw_prices is DAILY-only — that constraint is unchanged and still governs 7D/15D/30D.
+# What was never checked is intraday_prices, which carries real 5-min NIFTY50 and BANKNIFTY feeds
+# (verified this session: 75-76 bars/session for NIFTY50, 09:15-15:30, no gaps in 5 sessions
+# checked) — the SAME table already driving Card 4's live futures CMP. BANKNIFTY specifically also
+# needed the NOT_FUT_SQL cash-leg filter (see the query itself) that VIX's own branch did not,
+# because BANKNIFTY (unlike VIX or NIFTY50) stores its futures leg under this same symbol.
+_INTRADAY_KINDS = ("adr", "pcr", "vix", "nifty", "banknifty")
 
 
 @router.get("/api/mobile/trends")
@@ -232,6 +240,33 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
                                   WHERE symbol = 'INDIAVIX' AND timeframe = '5m' AND close IS NOT NULL)
                 ORDER BY ts ASC
             """)
+            rows = _rows(cur)
+        elif intraday and kind in ("nifty", "banknifty"):
+            # cc#1409: same real 5-min intraday_prices feed that already drives Card 4's live
+            # futures CMP — same class of fix as cc#1398 (VIX): a wiring gap, not a data gap.
+            #
+            # NOT_FUT_SQL IS NOT OPTIONAL HERE, and this is the whole reason this is its own
+            # branch rather than a copy of VIX's. Checked before writing this query, not assumed:
+            # BANKNIFTY writes BOTH its cash leg (fyers_eq, 72-73 bars/session) AND its futures
+            # leg (fyers_fut/fyers_fut_rest, 77-78 bars/session) under the SAME symbol in
+            # intraday_prices — price_sources.py's own documented rule ("Bank Nifty stores both
+            # legs under BANKNIFTY, like every stock"). Without this filter the query would
+            # silently interleave two different instruments' closes into one line — exactly the
+            # bug domestic_live() (Card 1's own NIFTY/BankNifty tile, v8_endpoints.py) already had
+            # to fix once for this exact table (cc#1053). NIFTY50 has no futures rows under this
+            # symbol (its futures leg sits under the separate symbol 'NIFTY' — price_sources.py's
+            # own documented exception), so the filter is a no-op for it, not a behaviour change —
+            # applied to both anyway so one query cannot silently regress if that ever changes.
+            sym = {"nifty": "NIFTY50", "banknifty": "BANKNIFTY"}[kind]
+            cur.execute("""
+                SELECT to_char(ts, 'HH24:MI') AS d, close AS v, ts::date AS sd
+                FROM intraday_prices
+                WHERE symbol = %s AND timeframe = '5m' AND close IS NOT NULL AND """ + NOT_FUT_SQL + """
+                  AND ts::date = (SELECT MAX(ts)::date FROM intraday_prices
+                                  WHERE symbol = %s AND timeframe = '5m' AND close IS NOT NULL
+                                    AND """ + NOT_FUT_SQL + """)
+                ORDER BY ts ASC
+            """, (sym, sym))
             rows = _rows(cur)
         elif intraday:
             cur.execute("""
