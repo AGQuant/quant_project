@@ -1090,6 +1090,69 @@ def mobile_home2(request: Request):
     adr_detail = (mood or {}).get("adr_detail") or {}
     adr_ratio = next((c["value"] for c in chips if c["label"] == "ADR"), None)
 
+    # ── cc#1417: LIVE YAHOO FALLBACK, market-hours Fyers outages only ──────────────────────────
+    # Card 1's index tile (idx, above) and the ADR/breadth figures just above both ultimately read
+    # the fyers_eq cash leg -- domestic_live()'s intraday_prices scan, and _write_adr_intraday()'s
+    # identical table. ONE outage check for both, reusing feed_guardian's own per-leg staleness
+    # (not a second detector -- explicit instruction). Full design, the real (measured, not
+    # ~1800-assumed) universe size, and the honest not-live-tested-from-this-session disclosure on
+    # the batch quote endpoint itself are in yahoo_live_quote.py's module doc.
+    try:
+        from yahoo_live_quote import fyers_eq_outage, fetch_live_quotes
+        with _conn() as _yconn, _yconn.cursor() as _ycur:
+            _outage, _age = fyers_eq_outage(_ycur, now)
+        if _outage:
+            log.warning("home2: fyers_eq leg stale %.1fmin during market hours -- Yahoo live "
+                        "fallback engaged", _age)
+            # 1) INDICES -- NIFTY50 + BANKNIFTY, same shape domestic_live() already returns, so
+            # the template needs no branch of its own; only the "source" tag tells them apart.
+            for sym, q in fetch_live_quotes(["NIFTY50", "BANKNIFTY"]).items():
+                idx[sym] = {
+                    "price_date": now.date().isoformat(),
+                    "open": q["open"], "high": q["high"], "low": q["low"],
+                    "close": round(q["price"], 2), "prev_close": q["prev_close"],
+                    "chg_pct": round(q["chg_pct"], 2) if q["chg_pct"] is not None else None,
+                    "source": q["source"],
+                }
+            # 2) ADR/BREADTH -- the real universe (measured ~208-212 across 8 trading days, NOT
+            # the card's assumed ~1800), futures_universe(is_active) is the static candidate list
+            # an outage needs: _write_adr_intraday's own universe is "whatever has an
+            # intraday_prices row today", which is exactly what an outage leaves empty.
+            with _conn() as _uconn, _uconn.cursor() as _ucur:
+                _ucur.execute("SELECT symbol FROM futures_universe WHERE is_active=TRUE")
+                _universe = [r[0] for r in _ucur.fetchall()]
+                _uq = fetch_live_quotes(_universe)
+                _prev = {}
+                if _uq:
+                    _ucur.execute("""
+                        SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                        WHERE symbol = ANY(%s) AND price_date < CURRENT_DATE
+                        ORDER BY symbol, price_date DESC
+                    """, (list(_uq.keys()),))
+                    _prev = {r[0]: float(r[1]) for r in _ucur.fetchall() if r[1] is not None}
+            adv = dec = unc = 0
+            for sym, q in _uq.items():
+                pc = _prev.get(sym)
+                if pc is None or q["price"] is None:
+                    continue
+                if q["price"] > pc: adv += 1
+                elif q["price"] < pc: dec += 1
+                else: unc += 1
+            tot = adv + dec + unc
+            if tot >= 50:   # SAME floor _write_adr_intraday itself gates on -- a thin/partial
+                            # batch response must not silently overwrite a real reading with noise
+                adr_detail = {"advances": adv, "declines": dec, "unchanged": unc,
+                              "source": "yahoo_live_fallback"}
+                adr_ratio = round(adv / dec, 3) if dec else float(adv)
+            else:
+                log.warning("home2: Yahoo ADR fallback only resolved %d/%d symbols (<50 floor) "
+                            "-- keeping the last real adr_detail rather than a thin/noisy count",
+                            tot, len(_universe))
+    except Exception as e:
+        # a fallback failure must never break the page -- normal (possibly stale-flagged) values
+        # simply stand as they already were computed above.
+        log.warning("home2: yahoo live fallback failed, keeping normal values: %s", e)
+
     signals = []
     for s in sig_rows:
         since = None
