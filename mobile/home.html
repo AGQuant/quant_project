@@ -1308,10 +1308,29 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    .c2body's own margin-bottom floor above (this rule) plus this element's natural size; the 5px
    ledge still lands inside .c's own 13px padding-bottom, so no bottom reserve is needed here and
    .c's overflow:hidden still cannot clip it. */
+/* cc#1423: was color:var(--blu,#4D7CFE) -- traced live: --blu is remapped by scorr_theme_r5.css
+   to --r5-pulse (#7C5CFF, purple), the exact colour the founder screenshotted. That remap is
+   itself deliberate design intent (cc#1071: "pulse... stays on things you DO (Run Trade Check,
+   Read the Daily Digest, GO)"), not a stray hardcoded literal -- so this is a founder override
+   of that earlier classification for this element today, not a bug fix reverting an accident.
+   Founder's own words: match the UNREALISED label tone specifically, not just "some gold" --
+   traced that to .st .k's own var(--t-label,var(--dim)) (t-label -> --label, goldnight #8C7A3F,
+   confirmed untouched by the R5 remap layer). Reused verbatim rather than --accent (#D4AF37,
+   a visibly different, brighter gold) so DAILY DIGEST / INDEX INTEL / VIEW LOGS (all .digl,
+   the card's own found siblings) read as the SAME gold-brown as Unrealised, not a third value.
+   SPECIFICITY NOTE, confirmed via live getComputedStyle + matched-rules inspection (same
+   discipline cc#1416 already established for this file): a plain .digl{color:...} does NOT
+   win here even though it is correct -- scorr_theme_r5.css also carries a bare `a{color:var(
+   --r5-pulse)}` rule (`:root:root:not([data-theme="light"]) a`), which matches every anchor on
+   the page (.digl's DAILY DIGEST/INDEX INTEL links ARE <a> tags) at FAR higher specificity (3
+   pseudo-classes + a type selector vs. one class) and loads after this file's own <style>. The
+   selector below replicates that exact prefix -- same technique cc#1416 used, no !important,
+   no change to scorr_theme_r5.css or any other page's anchors. */
 .digl{display:block;width:100%;box-sizing:border-box;text-align:center;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:800;
-  letter-spacing:var(--track-em16);color:var(--blu,#4D7CFE);text-decoration:none;min-height:44px;
+  letter-spacing:var(--track-em16);color:var(--t-label,var(--dim));text-decoration:none;min-height:44px;
   line-height:20px}
+:root:root:not([data-theme="light"]) a.digl{color:var(--t-label,var(--dim))}
 /* cc#927: PCR mood label + 5-segment meter (PCR_MOOD_MAPPING_V1, session_log 18024) */
 /* cc#1390 · EVEN SPACE DISTRIBUTION. cc#1388's own #heroTrack > .c:nth-child(2) > .c2body{
    justify-content:flex-start} correctly pulled the mood word tight under the header, but with the
