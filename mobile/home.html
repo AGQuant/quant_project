@@ -1104,12 +1104,12 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    (e.g. cc#1382's card-count generalization) rather than a positional selector that can silently
    re-break the next time ANY card's own child list changes shape. */
 #heroTrack > .c > .c2body{margin-bottom:var(--space-14)}
-/* cc#1393 · CARD 4 LOSES ITS CTA (PAST SIGNALS removed, founder ask), so it loses the floor above.
-   The rule above is identity-matched to EVERY .c2body in the deck on the assumption a CTA follows
-   it — true for Cards 2/3, no longer true for Card 4. Left unset here, that 14px becomes dead
-   space between the card's real content and .c's own padding-bottom: nth-child(4) zeroes it back
-   out for this one card, same per-card override convention the deck already uses elsewhere
-   (nth-child(2)/nth-child(3) above).
+/* cc#1393 · CARD 4 LOST ITS CTA (PAST SIGNALS removed, founder ask), so this override ONCE also
+   zeroed the shared margin-bottom above — then cc#1403 brought the button back as VIEW LOGS, so
+   .c2body is a two-child .c2body+CTA pair again (same shape Cards 2/3 use) and inherits the shared
+   #heroTrack > .c > .c2body{margin-bottom:var(--space-14)} floor normally. The margin-bottom:0
+   clause is REMOVED from this rule for that reason — restoring it here would fight the floor the
+   button now needs. justify-content:flex-start stays: that part was never about the CTA.
    cc#1395 · justify-content:flex-start ADDED to the same override, same reason cc#1388 added it
    for Card 2: the shared .c2body rule's default (space-between, cc#1382) has exactly two children
    here too (.chd, #heroPositionsBody) and dumps 100% of the deck's real surplus into the ONE gap
@@ -1117,7 +1117,7 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    flex-start pins .chd to its natural top position; #heroPositionsBody (below) is what now claims
    the freed space directly, the same division of labour cc#1390 established for Card 2's .chd/
    .pmood pair. */
-#heroTrack > .c:nth-child(4) > .c2body{margin-bottom:0;justify-content:flex-start}
+#heroTrack > .c:nth-child(4) > .c2body{justify-content:flex-start}
 /* cc#1395 (SUPERSEDED BY cc#1402 BELOW, this same rule) · EVEN SPACE DISTRIBUTION, Card 4's own
    first version of cc#1390's Card 2 fix. #heroPositionsBody holds the card's only real content
    (FUTURES legwrap, the divider, OPTIONS legwrap) and is .c2body's second child now that .chd is
@@ -1135,7 +1135,15 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    AROUND THE DIVIDER in the middle, exactly where the founder's ask points it. One property
    changed from cc#1395's rule (center -> space-between); flex:1 1 auto;min-height:0;display:flex;
    flex-direction:column are untouched, same block, same claimed space. Card 2's own cc#1390
-   centred treatment is a SEPARATE rule (.pmood) and is completely unaffected by this change. */
+   centred treatment is a SEPARATE rule (.pmood) and is completely unaffected by this change.
+   cc#1403 · "OPTIONS flush at this block's OWN bottom edge" still holds unmodified, but that edge
+   moved: cc#1403 brought the VIEW LOGS button back as .c2body's own next sibling, restoring the
+   shared CTA-floor margin (#heroTrack > .c > .c2body{margin-bottom:14px}) above it — so .c2body's
+   own bottom (and #heroPositionsBody's claimed space inside it) now ends higher up, before that
+   floor and the button, not at .c's own edge. Options sits flush at the bottom of the CONTENT
+   block, with the button's own floor and the button itself below that — nothing about this rule
+   needed to change for that to be true, since #heroPositionsBody only ever claimed the space
+   between .chd and .c2body's own end, wherever that end currently is. */
 #heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-between}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
@@ -2643,9 +2651,12 @@ function renderHeroPositions(){
       + posDecayBar(opt) + '</div>';
   var tg = document.getElementById('heroPositionsToggle');
   if (tg) tg.innerHTML = posToggleHtml();
-  /* cc#1393: the #heroPositionsBtn onclick sync (PAST SIGNALS -> openV10()) is removed with the
-     button — cc#1386 scope item 5's own FUT-default note above it was about that button's own
-     target leg and no longer applies to anything on this card. */
+  var btn = document.getElementById('heroPositionsBtn');
+  /* cc#1403 · RESTORED (cc#1393 removed it with the button, now back as VIEW LOGS). cc#1386 scope
+     item 5's own note still applies unchanged: the card does not say which leg the founder was
+     last looking at, so VIEW LOGS opens on FUT — same default openV10()/the modal itself already
+     carried before cc#1383 gave it an explicit-leg 3rd param. */
+  if (btn) btn.setAttribute('onclick', "openV10(event,'" + POS.sym + "','FUT')");
   /* cc#1382's lesson again: this swap can shrink the card (Loading -> a real, possibly shorter,
      range/decay layout; a symbol toggle to a leg with no open position -> a much shorter unavail
      block), and ResizeObserver does not fire on a shrink pinned at the old min-height -- explicit
@@ -3825,22 +3836,22 @@ function heroCard3(d){
    see the CSS block for why .pstg is scoped by its own class rather than #heroCard3Toggle's
    ID-only approach: the design ref names .pstg directly and there is nothing else on this deck
    for it to collide with).
-   cc#1393 · THE "PAST SIGNALS" BUTTON IS REMOVED (founder ask). id="heroPositionsBtn"'s onclick
-   sync in renderHeroPositions() (kept the target symbol in step with whichever side of the toggle
-   is selected) goes with it — see that function's own comment for the matching removal. .c2body
-   is now this card's ONLY child, not the first of a two-child .c2body+CTA pair every other card in
-   this deck still has, so it no longer carries the shared CTA-floor margin (#heroTrack > .c >
-   .c2body{margin-bottom:var(--space-14)}, cc#1391) meant to hold a fixed gap above a button that
-   is no longer there — left in place, that margin becomes a blank 14px strip below the card's own
-   content and above .c's own padding-bottom, exactly the leftover gap this task's own verify item
-   calls out. Zeroed for this card only, by nth-child(4) (this deck's own established per-card
-   override convention — cc#1384's nth-child(2), cc#1382's nth-child(3) — not a new pattern), so
-   Cards 2/3, which still end in a real CTA, are untouched. */
+   cc#1393 · THE "PAST SIGNALS" BUTTON WAS REMOVED (founder ask), then cc#1403 · BROUGHT BACK
+   RENAMED "VIEW LOGS" (founder ask, reversed). Byte-identical to the pre-cc#1393 button — same
+   class="digl slab", same id="heroPositionsBtn", same onclick="openV10(event,POS.sym,'FUT')" —
+   only the visible text changed. Restored from cc#1393's own diff (git show e80b279), not
+   reconstructed from memory. The onclick-sync in renderHeroPositions() that keeps the target
+   symbol in step with the toggle is restored alongside it — see that function's own comment.
+   .c2body is back to being the first of a two-child .c2body+CTA pair (same shape Cards 2/3 use),
+   so it carries the shared CTA-floor margin again (#heroTrack > .c > .c2body{margin-bottom:
+   var(--space-14)}, cc#1391) — the nth-child(4) override below no longer zeroes it. */
 function heroCardPositions(d){
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
     + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
     + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
-    + '</div></div>';
+    + '</div>'
+    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'' + POS.sym + '\',\'FUT\')">VIEW LOGS &#8594;</button>'
+    + '</div>';
 }
 /* the deck: five cards, snap-scrolled, with a dot that follows the finger */
 /* cc#950: the book deck's dot updater. Same shape as heroDots below — one function per deck
