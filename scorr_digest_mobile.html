@@ -587,7 +587,14 @@ html,body{overflow-x:hidden;max-width:100%}
 .nwchip.dn{background:rgba(255,77,109,.12);color:var(--heat);border:1px solid rgba(255,77,109,.3)}
 .nwchip.hi{background:rgba(255,77,109,.12);color:var(--heat);border:var(--bw-1) solid rgba(255,77,109,.3)}
 .nwchip.nt{background:rgba(255,255,255,.06);color:var(--chalk);border:var(--bw-1) solid var(--edge)}
-.nwbd{font-size:var(--type-125);line-height:1.66;color:#D9D6CC}
+/* cc#1428: sentiment banner shrunk to roughly half its prior visual footprint — the MEDIUM IMPACT
+   chip below it (.nwchip without .sent) is untouched, per do_not_touch. Literal half of the base
+   8px/2px/7px would be 4px/1px/3.5px; 4px sits below any reasonable legible floor for a phone
+   screen, so this lands on 6px/1px/4px instead — padding halved as asked, font-size cut ~25% rather
+   than 50% to stay readable. Flagging for a live-screenshot confirm (CC is network-blocked from
+   scorr.in) rather than assuming the literal math reads right. */
+.nwchip.sent{font-size:6px;padding:var(--space-1) var(--space-4)}
+.nwbd{font-size:var(--type-135);line-height:1.66;color:#D9D6CC}
 .nwbd p{margin:0 0 var(--space-9)}
 .nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
 .newslist{max-height:none;overflow:visible}
@@ -1240,6 +1247,25 @@ function rnAgo(ts){
   var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
   return Math.floor(h / 24) + 'd ago';
 }
+/* cc#1428 · ABSOLUTE timestamp for the news DETAIL SHEET only (nwOpen below) — rnAgo above stays
+   untouched and keeps serving the compact list rows' relative m/h/d-ago labels exactly as before.
+   Same field the sheet already reads (n.published_at, itself sourced from polished_news
+   published_time — see line ~1300), just formatted "DD Mon, HH:MM IST" instead of relative. No new
+   timestamp source. Checked the column directly: polished_news.published_time is a real
+   timestamptz (e.g. "...18:23:30+00:00"), not a naive string — new Date() on a properly-offset
+   string auto-converts to the browser's local zone, which is IST for an Indian user's device, so a
+   plain read-back with no manual offset math already lands on the right wall-clock hour/minute; the
+   " IST" suffix is just the label, not a conversion this code performs. */
+function nwAbs(ts){
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var dd = String(d.getDate()).padStart(2, '0');
+  var hh = String(d.getHours()).padStart(2, '0');
+  var mm = String(d.getMinutes()).padStart(2, '0');
+  return dd + ' ' + M[d.getMonth()] + ', ' + hh + ':' + mm + ' IST';
+}
 var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
 /* cc#1365 · POLISH history paging state (the cc#983 intel keyset pattern) + the founder's group
    order. polishOverflow holds first-response rows OLDER than the 48h window — already fetched, so
@@ -1669,6 +1695,9 @@ function nwChip(v, kind){
   var cls = kind === 'impact'
     ? (t === 'HIGH' ? 'hi' : 'nt')
     : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
+  // cc#1428: 'sent' is a SIZE marker only (see .nwchip.sent below) — the impact chip's own size/
+  // markup is untouched, only the sentiment banner shrinks.
+  if (kind === 'sentiment') cls += ' sent';
   return '<span class="nwchip ' + cls + '">' + esc(kind === 'impact' ? t + ' IMPACT' : t) + '</span>';
 }
 
@@ -1679,7 +1708,7 @@ function nwOpen(idx){
   NW.scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
 
   var meta = '';
-  var ago = rnAgo(n.published_at);
+  var ago = nwAbs(n.published_at);   // cc#1428: absolute DD Mon, HH:MM IST, not relative "just now"
   if (ago) meta += '<span>' + esc(ago) + '</span>';
   meta += nwChip(n.sentiment, 'sentiment') + nwChip(n.impact, 'impact');
 
