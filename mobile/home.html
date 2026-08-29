@@ -1118,15 +1118,25 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    the freed space directly, the same division of labour cc#1390 established for Card 2's .chd/
    .pmood pair. */
 #heroTrack > .c:nth-child(4) > .c2body{margin-bottom:0;justify-content:flex-start}
-/* cc#1395 · EVEN SPACE DISTRIBUTION, Card 4's own version of cc#1390's Card 2 fix. #heroPositionsBody
-   holds the card's only real content (FUTURES legwrap, the divider, OPTIONS legwrap) and is
-   .c2body's second child now that .chd is pinned above — flex:1 lets it claim 100% of whatever
-   surplus .chd's own natural size leaves, and justify-content:center centres its three children
-   as one block within that claimed space rather than leaving them jammed at the top with the old
-   single gap now living below them instead of above. Reused verbatim, not reinvented: same
-   flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center shape
-   cc#1390 wrote for .pmood. */
-#heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:center}
+/* cc#1395 (SUPERSEDED BY cc#1402 BELOW, this same rule) · EVEN SPACE DISTRIBUTION, Card 4's own
+   first version of cc#1390's Card 2 fix. #heroPositionsBody holds the card's only real content
+   (FUTURES legwrap, the divider, OPTIONS legwrap) and is .c2body's second child now that .chd is
+   pinned above — flex:1 lets it claim 100% of whatever surplus .chd's own natural size leaves.
+   justify-content:center (cc#1395's own choice) centred the three children as one block, which
+   read right on paper but wrong on the actual card: founder feedback after cc#1395 landed said
+   Card 4's content is short enough (no PAST SIGNALS button any more, cc#1393) that centring left
+   visible voids at BOTH the top AND the bottom at once — worse than one gap in one place. Left
+   the account of what was tried and why here rather than deleting it, same as this session's
+   other superseded-in-place rules.
+   cc#1402 · EDGE-ANCHORED INSTEAD. justify-content:space-between across the SAME three children —
+   FUTURES lands flush at this block's own top edge (immediately under the header, only its own
+   normal margin-top), OPTIONS lands flush at this block's own bottom edge (only its own normal
+   margin-bottom), and the two space-between gaps concentrate whatever real leftover height exists
+   AROUND THE DIVIDER in the middle, exactly where the founder's ask points it. One property
+   changed from cc#1395's rule (center -> space-between); flex:1 1 auto;min-height:0;display:flex;
+   flex-direction:column are untouched, same block, same claimed space. Card 2's own cc#1390
+   centred treatment is a SEPARATE rule (.pmood) and is completely unaffected by this change. */
+#heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-between}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
    tokens wherever an equivalent already exists (--grn/--red/--mut/--amber/--panel2/--line2/
