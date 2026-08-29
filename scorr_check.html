@@ -1189,8 +1189,12 @@ const INVEST_RULE_DEFS={
     b:[['2','V ≥ 7.5'],['1','6.0 – 7.5'],['fail','< 6.0']]},
   F2:{n:'F2 · Growth score (G)',m:'GVM Growth pillar strength — graded, max 2.',s:'gvm_scores.g_score',w:'The growth pillar is the primary engine of a compounding hold.',
     b:[['2','G ≥ 7.5'],['1','6.0 – 7.5'],['fail','< 6.0']]},
-  F3:{n:'F3 · Latest result vs top-3 peers',m:'Most-recent QoQ sales AND profit vs the top-3-by-GVM segment leaders — max 2.',s:'screener_raw.qoq_sales_growth / qoq_profit_growth vs top-3 peer avg',w:'Beating the segment leaders on the latest print is real share-gain, not a rising tide.',
-    b:[['2','QoQ sales AND profit both > top-3 peer avg'],['1','one of the two beats'],['fail','neither']]},
+  F3:{n:'F3 · Latest result vs top-3 peers',m:'Most-recent YoY sales AND profit vs the top-3-by-GVM segment leaders — max 2.',s:'screener_raw.qoq_sales_growth / qoq_profit_growth vs top-3 peer avg',w:'Beating the segment leaders on the latest print is real share-gain, not a rising tide.',
+    // cc#1420: was labelled "QoQ" -- these columns are YoY (latest quarter vs the same quarter a
+    // year ago), per the founder's own 11-Aug-2026 basis change (cc#1005, gvm_company_report.py).
+    // Column NAMES stay qoq_sales_growth/qoq_profit_growth by that same explicit decision (no
+    // schema change) -- only this display label was wrong.
+    b:[['2','YoY sales AND profit both > top-3 peer avg'],['1','one of the two beats'],['fail','neither']]},
   F4:{n:'F4 · ROCE vs top-3 peers',m:'Return on capital vs the segment leaders — max 1 (BFSI exempt).',s:'screener_raw.roce vs top-3 peer avg',w:'Capital efficiency above the best peers is the core compounding edge.',
     b:[['1','ROCE > top-3 peer avg (or BFSI segment → exempt, credited)'],['fail','≤ top-3 peer avg']]},
   F5:{n:'F5 · OPM vs top-3 peers',m:'Operating margin vs the segment leaders — max 1.',s:'screener_raw.opm vs top-3 peer avg',w:'Above-leader margins signal pricing power or a structural cost edge.',
