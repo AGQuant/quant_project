@@ -539,9 +539,43 @@ def get_global():
     """)
 
 
+# cc#1408 — NIFTY/BANKNIFTY have no row in global_indices (never did, per the cc#904 comment on
+# the tape ticker builder) but DO have real daily OHLC in raw_prices — the SAME table domestic_live()
+# (Card 1's own NIFTY/BankNifty tile) and v10_maxpain() (Max Pain's spot) already read for these
+# two symbols. Aliased here, not recomputed: ONE_REGISTRY_ONE_DERIVATION_V1 — a second daily-close
+# derivation for the same two symbols is exactly the drift that principle exists to prevent.
+# Keyed on the TAPE's own display name ("NIFTY"), not the raw_prices symbol ("NIFTY50") — that is
+# what tapeLoader() actually sends in the URL (mobile/home.html), confirmed by reading it first.
+_TAPE_DOMESTIC_ALIAS = {"NIFTY": "NIFTY50", "BANKNIFTY": "BANKNIFTY"}
+
+
 @router.get("/api/global/history/{name}")
 def get_global_history(name: str, days: int = 1825):
     cutoff = (_ist_now().date() - timedelta(days=days))
+    sym = _TAPE_DOMESTIC_ALIAS.get(name.upper())
+    if sym:
+        rows = api_query(
+            """
+            SELECT price_date::text AS quote_date, close AS price,
+                   LAG(close) OVER (ORDER BY price_date) AS prev_close
+            FROM raw_prices WHERE symbol = %s AND price_date >= %s ORDER BY price_date ASC
+            """, (sym, cutoff))
+        if isinstance(rows, dict):   # {"error": ...} from api_query
+            return rows
+        out = []
+        for r in rows:
+            price = r.get("price")
+            prev = r.get("prev_close")
+            chg = None
+            if price is not None and prev not in (None, 0):
+                chg = round((float(price) - float(prev)) / float(prev) * 100, 4)
+            out.append({
+                "name": name.upper(), "symbol": sym, "category": "domestic",
+                "price": float(price) if price is not None else None,
+                "prev_close": float(prev) if prev is not None else None,
+                "chg_pct": chg, "quote_date": r.get("quote_date"),
+            })
+        return out
     return api_query("SELECT name,symbol,category,price,prev_close,chg_pct,quote_date::text FROM global_indices WHERE LOWER(name)=LOWER(%s) AND quote_date>=%s ORDER BY quote_date ASC", (name, cutoff))
 
 
