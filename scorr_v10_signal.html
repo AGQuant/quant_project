@@ -847,8 +847,37 @@ function buNum(v, dp, suffix, colour){
   var cls = colour ? (n > 0 ? ' class="up"' : n < 0 ? ' class="dn"' : '') : '';
   return '<td' + cls + '>' + (colour && n > 0 ? '+' : '') + n.toFixed(dp) + (suffix || '') + '</td>';
 }
+/* cc#1431: same shared sort core cc#1430 built (_sortByState/_sortTh above) — one sort state PER
+   BUILDUP STATE (BU_STATES' own .k, e.g. LONG_BUILD), since the 4 carousel pages are independent
+   lists. OI now sorts (and renders, see buCard below) by oi_chg_pct, not the raw absolute — the
+   founder asked for the DISPLAY to be percent, and sorting by the same field it displays is the
+   only reading that would not surprise a reader. SYMBOL defaults ascending; the numeric columns
+   default descending. */
+var BU_SORT = {};
+BU_STATES.forEach(function(st){ BU_SORT[st.k] = { key: null, dir: 1 }; });
+var BU_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  FUT:    function(r){ return r.price; },
+  DAY:    function(r){ return r.day_1d; },
+  OI:     function(r){ return r.oi_chg_pct; },
+  VOL:    function(r){ return r.vol_ratio; },
+  BASIS:  function(r){ return r.basis; },
+};
+var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, VOL: -1, BASIS: -1 };
+
+function buSort(k, key){
+  var s = BU_SORT[k];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = BU_SORT_DEFAULT_DIR[key]; }
+  buRepaint();
+}
+
+function buTh(label, key, k){
+  return _sortTh(label, key, BU_SORT[k], "buSort('" + k + "','" + key + "')");
+}
+
 function buCard(st){
-  var rows = buRows(st.k), bd = D.build || {};
+  var rows = _sortByState(buRows(st.k), BU_SORT[st.k], BU_SORT_GETTERS), bd = D.build || {};
   var body;
   if (bd.oi_feed_pending){
     /* the 6055 rule, literally: with OI pending there IS no buildup state, so nothing is classified
@@ -858,15 +887,17 @@ function buCard(st){
   } else if (!rows.length){
     body = '<div class="unavail">No ' + esc(st.t.toLowerCase()) + ' on this session.</div>';
   } else {
-    body = '<table class="butbl"><thead><tr><th>SYMBOL</th><th>FUT</th><th>DAY%</th>'
-      + '<th>OI Δ</th><th>VOL×</th><th>BASIS</th></tr></thead><tbody>'
+    body = '<table class="butbl"><thead><tr>'
+      + buTh('SYMBOL', 'SYMBOL', st.k) + buTh('FUT', 'FUT', st.k) + buTh('DAY%', 'DAY', st.k)
+      + buTh('OI Δ%', 'OI', st.k) + buTh('VOL×', 'VOL', st.k) + buTh('BASIS', 'BASIS', st.k)
+      + '</tr></thead><tbody>'
       + rows.map(function(r){
           return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
             + '<td>' + (r.price != null ? num(r.price) : '—') + '</td>'
             + buNum(r.day_1d, 2, '%', true)
-            + (r.oi_chg == null ? '<td>—</td>'
-               : '<td class="' + (r.oi_chg > 0 ? 'up' : r.oi_chg < 0 ? 'dn' : '') + '">'
-                 + (r.oi_chg > 0 ? '+' : '') + fK(r.oi_chg) + '</td>')
+            // cc#1431: OI Δ shown as % (oi_chg_pct — same formula scanner_endpoints.day_range_oi
+            // already uses off futures_basis.oi_chg/oi_prev), not the raw absolute contract count.
+            + buNum(r.oi_chg_pct, 3, '%', true)
             + (r.vol_ratio == null ? '<td>—</td>'
                : '<td class="am">' + Number(r.vol_ratio).toFixed(1) + '×</td>')
             + buNum(r.basis, 1, '', true)
@@ -890,6 +921,19 @@ function buildupDeck(){
   return '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
        + set + set + set + '</div><div class="rpager"><div class="vdots" id="udots">' + dots + '</div>'
        + '<span class="clpg" id="upg">1 / 4 · LONG BUILDUP</span></div></div>';
+}
+/* cc#1431: buildupDeck() is embedded once inside render()'s big template literal (the whole page's
+   render, not independently re-callable without re-rendering everything else on the page too) —
+   so a sort tap repaints just the #utrack track in place instead. Rebuilding the SAME tripled
+   content (buildupDeck's own infinite-scroll trick) leaves scrollLeft untouched: row COUNTS per
+   state are unchanged by a sort (only row ORDER within each already-selected 5), so the track's
+   scrollWidth is identical before and after — nothing for the browser to clamp scrollLeft against. */
+function buRepaint(){
+  var el = document.getElementById('utrack');
+  if (!el) return;
+  var cards = BU_STATES.map(buCard);
+  var set = cards.join('');
+  el.innerHTML = set + set + set;
 }
 function uLabel(i){
   var el = document.getElementById('upg'), st = BU_STATES[i || 0];
@@ -976,14 +1020,41 @@ function vfCell(v, pct){
   return '<td>' + Number(v).toFixed(2) + 'x</td>';
 }
 
-/* cc#1430 · TAP-TO-SORT — same visual convention scorr_result_corner.html's sector table already
-   uses (▲/▼ appended to the header label, click toggles direction, second column click flips from
-   the fresh column's default), reused rather than inventing a second pattern. One sort state PER
-   SIDE (bullish/bearish are independent lists), shared between the inline 5-row card and the
-   VIEW MORE sheet for that side — sorting inline and then opening VIEW MORE shows the same order,
-   not a reset back to the server's original ranking. SYMBOL defaults ascending on first tap
-   (alpha, like the result-corner table's own text column); the five numeric columns default
-   descending (highest first — the qualifying-flow reason the row is on the card at all). */
+/* cc#1430/1431 · TAP-TO-SORT — ONE shared sort mechanism (per cc#1431's own instruction: the two
+   cards "must end up sharing ONE sort mechanism, not two"), used by both Volume Flow's vf* table
+   below and Futures Buildup's bu* table further down. Same visual convention
+   scorr_result_corner.html's sector table already uses (▲/▼ appended to the header label, click
+   toggles direction, switching to a fresh column resets to THAT column's own default), reused
+   rather than inventing a second pattern.
+
+   _sortByState(list, state, getters) reorders a list per one {key, dir} state object — nulls
+   always sort last regardless of direction (never coerced to a fake zero). _sortTh(...) builds one
+   <th> with the ▲/▼ indicator and a caller-supplied onclick expression, so each card's own click
+   handler (vfSort/buSort below) can do its own repaint — the two cards' data and layout genuinely
+   differ, only the sort/compare/render-header logic is shared. */
+function _sortByState(list, state, getters){
+  if (!state || !state.key) return list;
+  var get = getters[state.key];
+  return list.slice().sort(function(a, b){
+    var av = get(a), bv = get(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;    // nulls sort last regardless of direction — never implies zero
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * state.dir;
+    return (av - bv) * state.dir;
+  });
+}
+function _sortTh(label, key, state, onclickExpr){
+  var on = state && state.key === key;
+  var arrow = on ? (state.dir === 1 ? ' ▲' : ' ▼') : '';
+  return '<th class="vfsort' + (on ? ' on' : '') + '" onclick="' + onclickExpr + '">' + label + arrow + '</th>';
+}
+
+/* Volume Flow (cc#1430): one sort state PER SIDE (bullish/bearish are independent lists), shared
+   between the inline 5-row card and the VIEW MORE sheet for that side — sorting inline and then
+   opening VIEW MORE shows the same order, not a reset back to the server's original ranking.
+   SYMBOL defaults ascending on first tap; the five numeric columns default descending (highest
+   first — the qualifying-flow reason the row is on the card at all). */
 var VF_SORT = { bullish: { key: null, dir: 1 }, bearish: { key: null, dir: 1 } };
 var VF_SORT_GETTERS = {
   SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
@@ -996,17 +1067,7 @@ var VF_SORT_GETTERS = {
 var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, VOLX: -1, VOLD: -1 };
 
 function vfSortList(list, side){
-  var s = VF_SORT[side];
-  if (!s || !s.key) return list;
-  var get = VF_SORT_GETTERS[s.key];
-  return list.slice().sort(function(a, b){
-    var av = get(a), bv = get(b);
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;    // nulls sort last regardless of direction — never implies zero
-    if (bv == null) return -1;
-    if (typeof av === 'string') return av.localeCompare(bv) * s.dir;
-    return (av - bv) * s.dir;
-  });
+  return _sortByState(list, VF_SORT[side], VF_SORT_GETTERS);
 }
 
 function vfSort(side, key){
@@ -1018,10 +1079,7 @@ function vfSort(side, key){
 }
 
 function vfTh(label, key, side){
-  var s = VF_SORT[side], on = s && s.key === key;
-  var arrow = on ? (s.dir === 1 ? ' ▲' : ' ▼') : '';
-  return '<th class="vfsort' + (on ? ' on' : '') + '" onclick="vfSort(\'' + side + '\',\'' + key + '\')">'
-    + label + arrow + '</th>';
+  return _sortTh(label, key, VF_SORT[side], "vfSort('" + side + "','" + key + "')");
 }
 
 function vfRows(list, n, side){

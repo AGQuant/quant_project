@@ -800,7 +800,7 @@ def v10_buildup(limit: int = 15):
                     ORDER BY symbol, ts DESC
                 ),
                 l AS (
-                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, basis
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, oi_prev, basis
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
@@ -815,7 +815,13 @@ def v10_buildup(limit: int = 15):
                 )
                 SELECT l.symbol, l.c AS price,
                        ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
-                       l.oi, l.oi_chg, l.basis, v.vol_ratio
+                       l.oi, l.oi_chg,
+                       -- cc#1431: SAME formula scanner_endpoints.day_range_oi already computes for
+                       -- the /filters screener (oi_chg_pct = oi_chg/NULLIF(oi_prev,0)*100, 3dp) — one
+                       -- derivation, reused verbatim, so the Futures Buildup card's OI% and the
+                       -- screener's OI% can never disagree for the same symbol on the same day.
+                       ROUND(l.oi_chg::numeric / NULLIF(l.oi_prev,0) * 100, 3) AS oi_chg_pct,
+                       l.basis, v.vol_ratio
                 FROM l JOIN pf USING(symbol)
                 LEFT JOIN v ON v.symbol = l.symbol
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
@@ -825,7 +831,7 @@ def v10_buildup(limit: int = 15):
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
-        sym, price, day_1d, oi, oi_chg, basis, vol_ratio = r
+        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis, vol_ratio = r
         day_1d = float(day_1d) if day_1d is not None else None
         oi_chg = int(oi_chg) if oi_chg is not None else None
         # true buildup needs price + OI; classify only when oi_chg is present
@@ -838,7 +844,9 @@ def v10_buildup(limit: int = 15):
                 sig = "SHORT_COVER" if up else "LONG_UNWIND"
         return {"symbol": sym, "price": float(price) if price is not None else None,
                 "day_1d": day_1d, "oi": int(oi) if oi is not None else None,
-                "oi_chg": oi_chg, "basis": float(basis) if basis is not None else None,
+                "oi_chg": oi_chg,
+                "oi_chg_pct": float(oi_chg_pct) if oi_chg_pct is not None else None,   # cc#1431
+                "basis": float(basis) if basis is not None else None,
                 "vol_ratio": float(vol_ratio) if vol_ratio is not None else None,   # cc#819 bug_2
                 "signal": sig}
 
