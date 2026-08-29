@@ -217,6 +217,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .butbl tr:last-child td{border-bottom:none}
 .butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif}
 .butbl .up{color:var(--volt)} .butbl .dn{color:var(--heat)} .butbl .am{color:var(--amber)}
+/* cc#1430: Volume Flow's own sort-header state — scoped to .vfsort so the Futures Buildup .butbl
+   (a plain, unsorted table sharing the same class for its column widths) is untouched. */
+.butbl th.vfsort{cursor:pointer;user-select:none}
+.butbl th.vfsort.on{color:var(--chalk)}
 .unavail{font-size:var(--type-11);color:var(--muted);font-family:'JetBrains Mono'}
 /* LABEL_AMBER_V1 (founder 09:05 17-Aug): index NAME labels are amber across the app. */
 .idxnm{color:var(--amber)}
@@ -972,14 +976,66 @@ function vfCell(v, pct){
   return '<td>' + Number(v).toFixed(2) + 'x</td>';
 }
 
-function vfRows(list, n){
-  var rows = (n ? list.slice(0, n) : list).map(function(r){
+/* cc#1430 · TAP-TO-SORT — same visual convention scorr_result_corner.html's sector table already
+   uses (▲/▼ appended to the header label, click toggles direction, second column click flips from
+   the fresh column's default), reused rather than inventing a second pattern. One sort state PER
+   SIDE (bullish/bearish are independent lists), shared between the inline 5-row card and the
+   VIEW MORE sheet for that side — sorting inline and then opening VIEW MORE shows the same order,
+   not a reset back to the server's original ranking. SYMBOL defaults ascending on first tap
+   (alpha, like the result-corner table's own text column); the five numeric columns default
+   descending (highest first — the qualifying-flow reason the row is on the card at all). */
+var VF_SORT = { bullish: { key: null, dir: 1 }, bearish: { key: null, dir: 1 } };
+var VF_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  DAY:    function(r){ return r.day_chg_pct; },
+  WK:     function(r){ return r.week_chg_pct; },
+  FUT:    function(r){ return r.fut_chg_pct; },
+  VOLX:   function(r){ return r.vol_x; },
+  VOLD:   function(r){ return r.vol_d; },
+};
+var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, VOLX: -1, VOLD: -1 };
+
+function vfSortList(list, side){
+  var s = VF_SORT[side];
+  if (!s || !s.key) return list;
+  var get = VF_SORT_GETTERS[s.key];
+  return list.slice().sort(function(a, b){
+    var av = get(a), bv = get(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;    // nulls sort last regardless of direction — never implies zero
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * s.dir;
+    return (av - bv) * s.dir;
+  });
+}
+
+function vfSort(side, key){
+  var s = VF_SORT[side];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = VF_SORT_DEFAULT_DIR[key]; }
+  vfCard(side);
+  if (VF_SHEET.open && VF_SHEET.side === side) vfMore(side);   // sheet is open on THIS side — re-render it sorted too
+}
+
+function vfTh(label, key, side){
+  var s = VF_SORT[side], on = s && s.key === key;
+  var arrow = on ? (s.dir === 1 ? ' ▲' : ' ▼') : '';
+  return '<th class="vfsort' + (on ? ' on' : '') + '" onclick="vfSort(\'' + side + '\',\'' + key + '\')">'
+    + label + arrow + '</th>';
+}
+
+function vfRows(list, n, side){
+  var sorted = side ? vfSortList(list, side) : list;
+  var rows = (n ? sorted.slice(0, n) : sorted).map(function(r){
     return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
       + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1) + vfCell(r.fut_chg_pct, 1)
       + vfCell(r.vol_x, 0) + vfCell(r.vol_d, 0) + '</tr>';
   }).join('');
-  return '<table class="butbl"><thead><tr><th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th>'
-    + '<th>VOLX</th><th>VOLD</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  var head = side
+    ? (vfTh('SYMBOL', 'SYMBOL', side) + vfTh('DAY', 'DAY', side) + vfTh('WK', 'WK', side)
+       + vfTh('FUT', 'FUT', side) + vfTh('VOLX', 'VOLX', side) + vfTh('VOLD', 'VOLD', side))
+    : '<th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th><th>VOLX</th><th>VOLD</th>';
+  return '<table class="butbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 function vfChips(){
@@ -1007,7 +1063,7 @@ function vfCard(side){
       body = '<div class="unavail">No symbol has 60%+ of its volume on '
         + (side === 'bullish' ? 'green' : 'red') + ' ticks in this window.</div>';
     } else {
-      body = vfRows(list, 5)
+      body = vfRows(list, 5, side)
         + (list.length > 5
            ? '<button type="button" class="vfmore" onclick="vfMore(\'' + side + '\')">VIEW MORE · '
              + list.length + ' QUALIFY</button>'
@@ -1055,6 +1111,7 @@ function vfSheetClose(){
     document.body.style.overflow = '';
     window.scrollTo(0, VF_SHEET.scrollY);
     VF_SHEET.open = false;
+    VF_SHEET.side = null;   // cc#1430: stale side must not make a later vfSort() try to re-render a closed sheet
   }
 }
 
@@ -1066,9 +1123,10 @@ function vfMore(side){
   if (!VF.data) return;
   var list = VF.data[side] || [];
   if (!list.length) return;
+  VF_SHEET.side = side;   // cc#1430: so vfSort() knows to re-render this sheet if its own side is re-sorted
   vfSheet('<div class="vfsh">' + (side === 'bullish' ? 'Bullish' : 'Bearish') + ' Flow · '
     + list.length + ' qualify · ' + VF.ticks + ' ticks</div>'
-    + vfRows(list, 0)
+    + vfRows(list, 0, side)
     + '<div class="vfasof">' + esc(vfAsof()) + '</div>');
 }
 
