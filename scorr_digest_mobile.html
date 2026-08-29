@@ -50,6 +50,11 @@ html,body{overflow-x:hidden;max-width:100%}
    off what adopted and leaves it on anything that has not. */
 .card{background:var(--panel);border:var(--bw-1) solid var(--edge);margin:0 var(--space-14) var(--space-12);padding:var(--space-16);position:relative;
  clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,0 100%)}
+/* cc#1424: fills the viewport while /api/digest/v3 is in flight, so the page never opens as one
+   short "Building the read…" box that then visibly grows once the real (and length-variable)
+   digest replaces it. boot() removes .loading in the same call that sets #app's real content, so
+   this never pins a short quiet-day digest open to a full screen of empty space afterward. */
+#app.loading{min-height:100vh}
 /* cc#1234 · ONE SENTIMENT LINE, AND IT IS THICKER. Founder: "2 green lines not required, one
    bigger green line is enough." 5px -> 8px, which is 1.6x and inside the 1.5-2x the card asks for.
    The bar is absolutely positioned, so its width takes no layout space and nothing shifts.
@@ -638,7 +643,14 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
     <div class="as-slot"><span id="dd-state" class="chip n">—</span></div>
   </div>
 </div>
-<div id="app"><div class="card slab"><div class="unavail">Building the read…</div></div></div>
+<!-- cc#1424: the digest is fully dynamic (a quiet day and a busy day render very different
+     lengths), so sizing the skeleton to the FINAL height per core rule 7 isn't achievable the way
+     a single bounded card's skeleton can be (pwa_endpoints._ctxSkeleton()'s per-block px heights).
+     The .loading class instead fills the viewport while boot() is in flight -- the container never
+     reads as a tiny box that then visibly grows; boot() drops the class the moment it replaces
+     #app's content, so a real (short OR long) digest still gets its own natural height, nothing
+     pinned open after load. -->
+<div id="app" class="loading"><div class="card slab"><div class="unavail">Building the read…</div></div></div>
 <div class="foot">DAILY DIGEST · every claim tied to a number shown above · research only</div>
 </div>
 
@@ -2367,6 +2379,10 @@ addEventListener('load', fitLaddersSoon);
 async function boot(){
   let d=null;
   try{ d=await (await fetch('/api/digest/v3')).json(); }catch(e){}
+  // cc#1424: drop the viewport-height skeleton the instant the fetch settles, BEFORE either
+  // branch below writes #app's real content -- covers the error path and the success path from
+  // one place, so a future third branch can't reintroduce the growth bug by forgetting this line.
+  document.getElementById('app').classList.remove('loading');
   /* cc#1114: the ENGINE YESTERDAY · V10 section is GONE by founder decision — on a day with no
      exits it was a one-line empty state and a link to a page the closing paragraph already links
      to. The /api/v10/trades/paired fetch went with it rather than being left running for a
