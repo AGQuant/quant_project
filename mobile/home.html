@@ -674,14 +674,28 @@ body[data-theme]{
 /* cc#1380 · SQUARE CORNERS, HERO DECK ONLY. Founder screenshot: cc#1378's glitter ring made the
    rounded top-right corner read as a cut/notch. Scoped override on the shared .c{border-radius:
    14px} (mobile_endpoints.py MOBILE_CSS) -- that rule still serves every other .c card on this
-   page (My Portfolio, V8 Open Book, etc.) and every other page; only these two hero faces go to
-   0. cc#1378's ::after ring uses border-radius:inherit, so it needs no change of its own to pick
-   this up -- confirmed by screenshot, not assumed (see the task result). */
-#heroTrack > .c:first-child,
-#heroTrack > .c:nth-child(2){border-radius:0}
-/* ══ cc#1378 · ANIMATED AQUA GLITTER BORDER — Card 1 + Card 2 ONLY ═══════════════════════════
-   Founder ask: a sparkling aqua line travelling around the edge of a box, scoped to just these
-   two cards after being shown the perf/battery cost of running it on every card on the page.
+   page (My Portfolio, V8 Open Book, etc.) and every other page; only the hero deck's own faces go
+   to 0. cc#1378's ::after ring uses border-radius:inherit, so it needs no change of its own to
+   pick this up -- confirmed by screenshot, not assumed (see the task result).
+   cc#1389: GENERALIZED from Card1+2-only (:first-child, :nth-child(2)) to a bare '#heroTrack > .c'
+   -- founder screenshot circled Card 3's still-rounded corner and asked for every card, explicitly
+   reversing the earlier Card1+2-only choice (not a bug in that choice, a new instruction). Bare
+   selector also means this never goes stale again the next time the deck's own card count changes
+   (it already has, twice, since cc#1380 shipped) -- the exact class of lesson cc#1382's own
+   N-card generalization of syncHeroCardHeights() already applied elsewhere on this deck. */
+#heroTrack > .c{border-radius:0}
+/* ══ cc#1378 · ANIMATED AQUA GLITTER BORDER — cc#1389: EVERY heroTrack CARD ═══════════════════
+   Founder ask, originally: a sparkling aqua line travelling around the edge of a box, scoped to
+   just Card 1+2 after being shown the perf/battery cost of running it on every card on the page.
+   cc#1389 REVERSES that scoping on explicit founder instruction (same screenshot as the square-
+   corner ask above) -- not a bug, a deliberate widening. glitterSync() (JS, below) already loops
+   over track.children generically and needed no change; only the four CSS selector groups this
+   comment block originally hardcoded to :first-child/:nth-child(2) are broadened here. The actual
+   battery-relevant behaviour is UNCHANGED either way: glitterSync() only ever adds .glitter-run to
+   whichever ONE card is the current active swipe face (`j === i`), so more cards being ELIGIBLE
+   for the ring does not mean more cards animating at once -- confirmed in this task's own
+   verification, not assumed from glitterSync()'s own code alone. The only added cost is N
+   pseudo-elements existing in the DOM instead of 2, negligible at this card count.
 
    SHAPE — VERIFIED, NOT ASSUMED. The card's scope note claimed both cards "use a custom
    cut-corner clip-path" and asked the ring to match it. Read getComputedStyle() on the live
@@ -744,16 +758,14 @@ body[data-theme]{
    animate it either (interpolating a plain custom property jumps instantly instead of sweeping),
    so gating the animation on the same JS capability that gates the registration is what keeps this
    "static or smooth", never "broken or jerky". */
-#heroTrack > .c:first-child::after,
-#heroTrack > .c:nth-child(2)::after{
+#heroTrack > .c::after{
   content:'';position:absolute;inset:0;border-radius:inherit;padding:2px;box-sizing:border-box;
   pointer-events:none;background:#35E0FF;
   -webkit-mask:linear-gradient(black 0 0) content-box,linear-gradient(black 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
 }
 @property --glitter-angle{syntax:'<angle>';inherits:false;initial-value:0deg}
-html.glitter-ok #heroTrack > .c:first-child::after,
-html.glitter-ok #heroTrack > .c:nth-child(2)::after{
+html.glitter-ok #heroTrack > .c::after{
   /* one bright arc travelling the ring, rest transparent -- not a full glow */
   background:conic-gradient(from var(--glitter-angle),
     transparent 0deg, #35E0FF 18deg, transparent 46deg, transparent 360deg);
@@ -776,10 +788,8 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    LOWER specificity than "html.glitter-ok ...::after" (the class adds a selector component) and
    would have lost the tie to the animated rule whenever both conditions were true at once. */
 @media (prefers-reduced-motion:reduce){
-  #heroTrack > .c:first-child::after,
-  #heroTrack > .c:nth-child(2)::after,
-  html.glitter-ok #heroTrack > .c:first-child::after,
-  html.glitter-ok #heroTrack > .c:nth-child(2)::after{animation:none;background:#35E0FF}
+  #heroTrack > .c::after,
+  html.glitter-ok #heroTrack > .c::after{animation:none;background:#35E0FF}
 }
 /* cc#1134 · FINAL RULING, and it supersedes the space distribution I chose in cc#1125.
    Three attempts on this one card, each satisfying its own spec text and opening a new gap,
