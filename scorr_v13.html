@@ -266,11 +266,14 @@ const REGISTRY=[
    ['Sales growth','TTM sales growth %','screener_raw','weekly',[]],
    ['sales_growth_3y','3-year sales CAGR %','screener_raw','weekly',[]],
    ['sales_growth_5y','5-year sales CAGR %','screener_raw','weekly',[]],
-   ['qoq_sales_growth','QoQ sales growth %','screener_raw','weekly',[]],
+   // cc#1420: was 'QoQ' -- this column holds YoY (latest quarter vs same quarter a year ago),
+   // per the founder's 11-Aug-2026 basis change (cc#1005). Column name stays qoq_sales_growth
+   // by that same decision (no schema change) -- only this label was wrong.
+   ['qoq_sales_growth','YoY sales growth %','screener_raw','weekly',[]],
    ['Operating profit growth','TTM operating-profit growth %','screener_raw','weekly',[]],
    ['profit_growth_3y','3-year profit CAGR %','screener_raw','weekly',[]],
    ['profit_growth_5y','5-year profit CAGR %','screener_raw','weekly',[]],
-   ['qoq_profit_growth','QoQ profit growth %','screener_raw','weekly',[]],
+   ['qoq_profit_growth','YoY profit growth %','screener_raw','weekly',[]],   // cc#1420: was 'QoQ'
    ['EPS growth 3/5/7/10Years','Multi-horizon EPS CAGR %','screener_raw','weekly',[]],
    ['fixed_asset_growth','Fixed-asset (capex) growth %','screener_raw','weekly',[]],
   ]},
@@ -303,7 +306,7 @@ const REGISTRY=[
   ]},
   {label:'Component ratings (peer-relative 0–10)',rows:[
    ['sales_5y/3y, profit_5y/3y rating','Growth ratings vs peers','gvm_scores','nightly',[]],
-   ['qoq_sales / qoq_profit rating','Sequential-growth ratings vs peers','gvm_scores','nightly',[]],
+   ['qoq_sales / qoq_profit rating','YoY-growth ratings vs peers','gvm_scores','nightly',[]],   // cc#1420: was 'Sequential-growth' -- same mislabel, GVM basis is YoY since 11-Aug (cc#1005)
    ['opm / opm_exp / roce / int_cov rating','Profitability & leverage ratings vs peers','gvm_scores','nightly',[]],
    ['pe / upside / div_yield rating','Valuation ratings vs peers','gvm_scores','nightly',[]],
    ['ret_1y/3y, dma_50/200, ret_52w_idx rating','Momentum ratings vs peers','gvm_scores','nightly',[]],
