@@ -1481,6 +1481,13 @@ RESULTS_CARD_JS = """
     + '.rcard-st-u{color:var(--amber, #c98a12);background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45)}'
     + '.rcard-st-t{color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3)}'
     + '.rcard-body{font-size:13px;line-height:1.55;white-space:pre-wrap;margin-top:6px}'
+    /* cc#1429: the RESULT ANALYSIS block's +2px lives in scorr_card_common.js's body.mcards scope
+       (mobile app only, /m/* — the founder's screenshot), not in this universal block. This shared
+       CSS also serves v8_dashboard.html's desktop R-card, and out_of_scope says desktop stays
+       untouched unless the rule truly cannot be scoped — body.mcards is the codebase's own
+       established mechanism for exactly that ("CSS below only applies under body.mcards, which only
+       /m/* gets"), so it can be, and is. The .rcard-ra marker class is added at the render site
+       below regardless — inert on desktop since no rule here reads it. */
     /* cc#676: SectionSeparator (UI pattern #12) — thin top rule + generous space + uppercase muted
        letter-spaced label, then ~11px before content. Every R-card section label is this component. */
     + '.rcard-lbl{font:700 10.5px/1.3 Sora,sans-serif;text-transform:uppercase;letter-spacing:.1em;color:var(--mut,#667085);margin:18px 0 11px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))}'
@@ -2084,7 +2091,7 @@ RESULTS_CARD_JS = """
         // cc#788 LEVEL 1: metric header + peer BEAT/MISS rows, exactly as they rendered before.
         // The long-form editorial no longer sits inline — it moved behind the Level-2 button below.
         h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
-          + '<div class=\"rcard-body\">'+esc(_metricHeader(d.result_analysis, d.v2))+'</div>'
+          + '<div class=\"rcard-body rcard-ra\">'+esc(_metricHeader(d.result_analysis, d.v2))+'</div>'   // cc#1429: +2px, scoped
           + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
