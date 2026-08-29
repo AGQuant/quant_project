@@ -635,6 +635,43 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
             lp = _rows(cur)
             live_premium[r["id"]] = float(lp[0]["ltp"]) if lp and lp[0]["ltp"] is not None else None
 
+        # ── cc#1418: HONEST "feed stopped" alert -- FUT + OPT legs, checked INDEPENDENTLY ──────
+        # FYERS_INTEGRATION_LEARNINGS.md rule #3 (incident 14-Jul): never pool legs into one
+        # health count -- a dead derivatives leg can hide behind a healthy other leg. FUT leg
+        # reuses feed_guardian's own per-leg staleness (fyers_fut, STALE_MIN) -- the SAME
+        # detector cc#1417 reused for fyers_eq, not a second mechanism. OPT leg has NO existing
+        # detector anywhere in this codebase to reuse -- confirmed by reading feed_guardian.py
+        # directly: its LEGS tuple is ("fyers_eq","fyers_fut") only, and option_chain (the table
+        # live_premium reads two lines above) is a THIRD table feed_guardian's _leg_ages() never
+        # queries. That gap is exactly incident #10's "staged leg invisible to health checks"
+        # class -- this adds the missing per-leg check rather than silently reusing a signal that
+        # cannot see this leg. Market-hours gated; option_chain legitimately writes to 15:40
+        # (cc#855, options are equity derivatives), so this window matches THAT table's own real
+        # write span, not PCR's derived 15:20 cutoff (a different, unrelated concern -- cc#1412).
+        from feed_guardian import _leg_ages, STALE_MIN
+        _now_fa = _ist_now()
+        _market_fa = (_now_fa.weekday() < 5 and dt_time(9, 15) <= _now_fa.time() <= dt_time(15, 40))
+        fut_stale = fut_age = opt_stale = opt_age = None
+        if _market_fa:
+            _fut_age = (_leg_ages(cur, _now_fa) or {}).get("fyers_fut")
+            fut_age = round(_fut_age, 1) if _fut_age is not None else None
+            fut_stale = fut_age is not None and fut_age > STALE_MIN
+            cur.execute("SELECT MAX(ts) FROM option_chain WHERE underlying=%s", (opt_underlying,))
+            _opt_last = cur.fetchone()[0]   # bare MAX() -- fetchone()[0], this file's own
+                                             # established convention (line ~1051), not _rows()
+            if _opt_last is not None:
+                opt_age = round((_now_fa - _opt_last).total_seconds() / 60.0, 1)
+                opt_stale = opt_age > STALE_MIN
+            else:
+                opt_stale = True   # no bar at all during market hours is the most severe state,
+                                   # never treated as merely "unknown" (FYERS_INTEGRATION_
+                                   # LEARNINGS.md: "null means dead, not unknown")
+        feed_alert = {
+            "fut_stale": bool(fut_stale), "fut_age_min": fut_age,
+            "opt_stale": bool(opt_stale), "opt_age_min": opt_age,
+            "market_hours": _market_fa,
+        }
+
     def f(x):
         return None if x is None else float(x)
 
@@ -747,6 +784,7 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
         "paired": _paired(sym),
         "trades": trades, "pins": pins, "by_leg": by_leg,
         "outside_window": outside,
+        "feed_alert": feed_alert,   # cc#1418: FUT/OPT per-leg staleness, market-hours only
         "stats": {"closed": len(closed), "open": len(open_rows),
                   "wins": sum(1 for t in closed if t["win"]),
                   "losses": sum(1 for t in closed if not t["win"]),

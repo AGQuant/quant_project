@@ -1238,6 +1238,15 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7px;font-weight:800;
   letter-spacing:.1px;white-space:nowrap;cursor:pointer}
 .pstg button.on{background:var(--gold-hi);color:#3D2E0A}
+/* cc#1418 · honest feed-stopped banner. Reuses the SAME amber token the PCR pcite STALE label
+   already uses (var(--amber,#FF9F45)) -- one "something is stale" colour across the app, not a
+   new one for this card. */
+.posalert{display:flex;align-items:flex-start;gap:var(--space-8);margin-bottom:var(--space-10);
+  padding:var(--space-8) var(--space-10);border:var(--bw-1) solid var(--amber,#FF9F45);
+  background:rgba(255,159,69,.08);border-radius:var(--radius-2)}
+.posalert-t{flex:1 1 auto;font-size:var(--type-12);line-height:1.4;color:var(--amber,#FF9F45)}
+.posalert-x{flex:0 0 auto;background:none;border:0;color:var(--amber,#FF9F45);font-size:var(--type-12);
+  min-width:24px;min-height:24px;cursor:pointer}
 .legwrap{margin-top:var(--space-12)}
 .leghd{display:flex;justify-content:space-between;align-items:center}
 .leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
@@ -2860,6 +2869,25 @@ function posDecayBar(opt){
 function dirBadge(side, text){
   return '<span class="dirbadge ' + (side === 'BUY' ? 'bull' : 'bear') + '">' + text + '</span>';
 }
+/* cc#1418 · HONEST FEED-STOPPED BANNER, FUT and OPT checked independently (never pooled --
+   FYERS_INTEGRATION_LEARNINGS.md rule #3). fa comes straight off the SAME /api/mobile/v10chart
+   response this card already fetches (mobile_home2.mobile_v10chart's feed_alert key) -- no new
+   endpoint, no client-side staleness math; the server states both legs' real age in minutes.
+   DISMISSIBLE, PERSISTS ACROSS VIEWS BY CONSTRUCTION, NOT BY A STORED FLAG: this function re-runs
+   on every symbol toggle and on the page's existing 5-min poll (cc#1411 HOME_POLL); a dismiss just
+   removes THIS element from the DOM, so the banner is simply absent until the next re-render, at
+   which point it reappears on its own if the outage is still live -- no localStorage, no timer of
+   its own, nothing to leak across a real recovery. */
+function posFeedAlertHtml(fa){
+  if (!fa || !fa.market_hours || (!fa.fut_stale && !fa.opt_stale)) return '';
+  var legs = [];
+  if (fa.fut_stale) legs.push('Futures CMP last updated ' + (fa.fut_age_min != null ? Math.round(fa.fut_age_min) + ' min ago' : 'a while ago'));
+  if (fa.opt_stale) legs.push('Options premium last updated ' + (fa.opt_age_min != null ? Math.round(fa.opt_age_min) + ' min ago' : 'a while ago'));
+  return '<div class="posalert" id="posFeedAlert">'
+    + '<span class="posalert-t">Live feed stopped. ' + esc(legs.join(' · ')) + '. Prices below are not current.</span>'
+    + '<button type="button" class="posalert-x" onclick="this.parentNode.remove()" aria-label="Dismiss">&#10005;</button>'
+    + '</div>';
+}
 function renderHeroPositions(){
   var rec = POS.data[POS.sym] || {};
   var cmp = posCmp(POS.sym);
@@ -2869,7 +2897,8 @@ function renderHeroPositions(){
       + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
   var body = document.getElementById('heroPositionsBody');
   if (body) body.innerHTML =
-      '<div class="legwrap"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
+      posFeedAlertHtml(rec.feed_alert)
+      + '<div class="legwrap"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
       + posRangeBar(fut, cmp) + '</div>'
       + '<div class="legdiv"></div>'
       + '<div class="legwrap"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
@@ -2903,7 +2932,8 @@ function loadHeroPositions(){
         var trades = d.trades || [];
         POS.data[symKey] = {
           fut: trades.filter(function(t){ return t.leg === 'FUT' && t.open; })[0] || null,
-          opt: trades.filter(function(t){ return t.leg === 'OPT' && t.open; })[0] || null
+          opt: trades.filter(function(t){ return t.leg === 'OPT' && t.open; })[0] || null,
+          feed_alert: d.feed_alert || null   // cc#1418
         };
       })
       .catch(function(){ POS.data[symKey] = { fut: null, opt: null, error: true }; });
