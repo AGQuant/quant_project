@@ -1753,6 +1753,13 @@ function tapeLoader(x){
 var RANGES_ALL = [[1, '1D'], [7, '7D'], [15, '15D'], [30, '30D']];
 var RANGES_DAILY = [[7, '7D'], [15, '15D'], [30, '30D']];
 var RANGES_INTRADAY = [[1, '1D']];
+/* cc#1407 · Market Tape's OWN range sets — never RANGES_ALL/RANGES_DAILY. togTrend() (Card 1's
+   chip popouts: ADR/PCR/VIX/NIFTY/BANKNIFTY) reads those two directly and is explicitly out of
+   scope; mutating them would have silently dropped 7D and added 1Y on the Home card chips too,
+   which nobody asked for. Same shape, 7D swapped for 1Y (365d) per the founder's ask — 1D/15D/30D
+   untouched so a remembered TREND_RANGE value or the 15D default still matches an existing pill. */
+var TAPE_RANGES_ALL = [[1, '1D'], [15, '15D'], [30, '30D'], [365, '1Y']];
+var TAPE_RANGES_DAILY = [[15, '15D'], [30, '30D'], [365, '1Y']];
 
 function setRange(ev, key, days){
   if (ev) ev.stopPropagation();
@@ -1950,9 +1957,11 @@ function tapeChart(i){
   /* cc#940: three shapes, decided by what the row actually has — intraday only (NIFTY/BANKNIFTY,
      one 1D pill, opens on 1D), intraday + daily (the global names), or daily only. */
   var intradayOnly = (x.daily_series === false && !!x.intraday_name);
+  /* cc#1407: TAPE_RANGES_ALL / TAPE_RANGES_DAILY (own arrays, 7D -> 1Y) — RANGES_INTRADAY is
+     untouched and still used for the intraday-only rows, which never had a 7D pill to drop. */
   CHART[key] = {
     host: 'tpc_' + i, title: x.name,
-    ranges: intradayOnly ? RANGES_INTRADAY : (x.intraday_name ? RANGES_ALL : RANGES_DAILY),
+    ranges: intradayOnly ? RANGES_INTRADAY : (x.intraday_name ? TAPE_RANGES_ALL : TAPE_RANGES_DAILY),
     days: intradayOnly ? 1 : 15, load: tapeLoader(x),
     live: function(){ return !!TAPE.open[i]; }
   };
