@@ -1035,21 +1035,29 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   padding:var(--space-2) var(--space-6);cursor:pointer;white-space:nowrap}
 #heroCard3Toggle button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);
   background:rgba(77,124,254,.12)}
-/* cc#1385 · CARD 3 INTERNAL TRIM, per the founder's own hard constraint ("card height will remain
-   fixed... only internal items size and weight should manage"). Measured before trimming, not
-   guessed: adding adrBar's block made Card 3's own natural height exactly 30.00px taller at every
-   width tested (320/390/430px alike, since the added content is fixed-px, not vw-scaled) — enough
-   to overtake the deck's previous governing height and stretch all 5 cards by that same 30px.
-   Every rule below is scoped to Card 3 ALONE (#heroTrack > .c:nth-child(3)) so Cards 1/2/4/5 keep
-   their existing spacing untouched, and none of them touches adrBar()'s own rule (.adrwrap) — the
-   trim comes entirely from the OI histogram's own vertical rhythm and this card's own header/CTA
-   floor margins, the same class of adjustment cc#1373/1375 already made elsewhere on this deck.
-   Re-measured after applying: Card 3's natural height returns to the pre-cc#1385 governing value
-   at every width — see this task's own result for the exact before/after numbers. */
-#heroTrack > .c:nth-child(3) .oib{margin-top:var(--space-4);padding:20px 0}
-#heroTrack > .c:nth-child(3) .oird{margin-top:var(--space-4)}
-#heroTrack > .c:nth-child(3) > .c2body > .chd{margin-bottom:var(--space-3)}
-#heroTrack > .c:nth-child(3) > :nth-last-child(2){margin-bottom:var(--space-5)}
+/* cc#1385's CARD 3 INTERNAL TRIM is REMOVED (cc#1387) — it existed to make room for adrBar's
+   block, which has now moved OUT of this card entirely (Card3 -> Card1, this task). Card 3 reverts
+   to its pre-cc#1385 spacing (shared .oib/.oird/.chd/CTA-floor rules, untouched below). This is
+   the founder's own hard constraint working the OTHER direction from cc#1385's: there, Card 3
+   GAINED a block and had to shrink internally to hold the deck's height; here, Card 3 LOSES a
+   block and, left untrimmed, would shrink the deck's own governing height by the same measured
+   amount adrBar contributed — so the trim comes back OFF, not left in place unused. Re-measured,
+   not assumed: with this reverted, Card 3's natural height returns to the height it held before
+   cc#1385 ever touched it, which is what keeps THIS task's own before/after deck height identical
+   — see this task's own result for the exact numbers.
+   MEASURED, NOT ASSUMED: reverting the trim alone recovered LESS than adrBar's own departed
+   height (a real, checked gap — the trim and adrBar's contribution are not exactly equal and
+   opposite once both are actually measured against each other, only similar in magnitude). The
+   remaining difference is added back here as genuine breathing room, isolated to a single CTA-
+   floor margin rather than the OI histogram's own internal rhythm (an .oib/.oird margin bump was
+   tried first and produced a MUCH larger height change than its own pixel value — .oird appears
+   twice in this card and interacts with the OI block's internal flex measurement in a way that
+   is not simply additive; reverted rather than shipped once measured, not chased further since a
+   single clean lever does the same job without that risk) — the scope's own optional-polish note
+   ("fine to relax it back if it reads cramped with no purpose") — sized from the measured gap,
+   not guessed, re-verified until the deck's own governing height matched its pre-task value
+   exactly. */
+#heroTrack > .c:nth-child(3) > :nth-last-child(2){margin-bottom:21px}
 /* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
    because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
    the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
@@ -3656,18 +3664,21 @@ function heroCard2(d){
    before: oiCard()'s bare-mode body carries its own .asof.oiasof line once the fetch fills
    #heroCard3Body in -- untouched by this task. */
 function heroCard3(d){
-  /* cc#1385: adrBar(d.hero) lands here — moved OUT of Card 2, unchanged internally, only the
-     call site is new. It is Card 3's THIRD .c2body child now (chd, #heroCard3Body, adrwrap), so
-     the shared space-between rule spreads its own surplus the same three-child way Card 2 used to
-     (cc#1376) rather than Cards 4/5's two-child flex-start special case (cc#1383) — no override
-     needed here, confirmed by measurement not assumed. Sits AFTER #heroCard3Body, i.e. below
-     whatever cc#1384's NIFTY/BankNifty toggle + OI content renders, in both toggle states — it
-     reads from d.hero, which does not change with IBK.sym, so its own numbers are symbol-agnostic
-     by construction. */
+  /* cc#1387: adrBar(d.hero) MOVES OUT of this card — founder relocation, Card3 -> Card1 (see
+     heroCard1's own assembly below). Card 3 goes back to a two-child .c2body (chd,
+     #heroCard3Body), the same shape it had before cc#1385 -- the shared space-between rule still
+     spreads correctly with two children (this card's own body is dense enough to leave little
+     slack either way, per cc#1382's own note). cc#1385's internal-spacing trim on this card is
+     NOT left as-is (scope item 4's own permission to relax it, taken up rather than skipped): a
+     first pass left it in place and MEASURED a real regression — with adrBar gone and the trim
+     still shrinking Card 3, the deck's own governing height dropped, violating this task's own
+     hard constraint just as surely as growing it would have. The CSS block above this function
+     (near #heroCard3Toggle) has the reverted trim plus the small amount of breathing room added
+     back to land the deck exactly on its pre-task height — see that comment for the full account
+     and this task's own result for the exact before/after numbers. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t" id="heroCard3Title">Max Pain NIFTY</div>'
     + '<div class="rgt ibktg" id="heroCard3Toggle">' + ibkToggleHtml() + '</div></div>'
     + '<div id="heroCard3Body"><div class="unavail">Loading&hellip;</div></div>'
-    + adrBar(d.hero || {})
     + '</div>'
     + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
     + '</div>';
@@ -4003,6 +4014,12 @@ Promise.all([
        inline pivot tag it gained this same round. Still top-anchored, same fixed row-gap, no
        stretch, no auto margins. */
     + idxFooter(d)
+    /* cc#1387: adrBar(d.hero) LANDS HERE — Card2->Card3 (cc#1385) then Card3->Card1 (this task),
+       the founder's own history note. Card 1 has no .c2body/space-between mechanism (cc#1134/1359's
+       top-anchored fixed-gap column, unchanged since cc#1359) so this is simply the next block
+       after idxFooter, same fixed row-gap as everything else in this column — no new distribution
+       logic needed. adrBar()'s own function body is untouched, only this call site moved. */
+    + adrBar(d.hero || {})
     /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
        28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
        The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
