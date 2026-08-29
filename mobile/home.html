@@ -2973,7 +2973,11 @@ function v10Svg(d){
         else if (!ent && r.p.kind !== 'exit' && r.p.kind !== 'open') ent = r;
         else rest.push(r);
       });
-      marks.push({x: ent.x, y: ent.y, p: ent.p, col: ent.col, code: 'FLIP', flip: true,
+      /* cc#1397: FLIP B / FLIP S, not a bare FLIP — the founder's own ask, and the reuse already
+         exists: pinCode(p) already returns B/S for every other entry marker on this chart, and
+         ent.p (the entry record this marker's own tap already selects, per the comment above) is
+         already in scope. No new direction logic — the same function, the same record. */
+      marks.push({x: ent.x, y: ent.y, p: ent.p, col: ent.col, code: 'FLIP ' + pinCode(ent.p), flip: true,
                   sel: (ent.sel || ex.sel), dim: (ent.dim && ex.dim), exCol: ex.col});
       rest.forEach(function(r){ marks.push(r); });
     } else {
