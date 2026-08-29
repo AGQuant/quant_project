@@ -1075,11 +1075,27 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    not guessed, re-verified until the deck's own governing height matched its pre-task value
    exactly. */
 #heroTrack > .c:nth-child(3) > :nth-last-child(2){margin-bottom:21px}
-/* .c2body is the block above the CTA — :nth-last-child(2) still finds it without a name change,
-   because any hero card using this pattern has exactly two children (.c2body, its CTA button) and
-   the rule was always structural on purpose (see cc#1182). This is that card's OWN minimum CTA
-   clearance floor. */
-#heroTrack > .c > :nth-last-child(2){margin-bottom:var(--space-14)}
+/* cc#1391 · REAL ROOT CAUSE FOUND, NOT A CACHING ISSUE. This rule used to read
+   #heroTrack > .c > :nth-last-child(2){...} — POSITIONAL, matching "whatever the second-to-last
+   child happens to be", on the assumption (true when written, cc#1182) that only cards using the
+   .c2body+CTA-button 2-child pattern (Cards 2/3/4) would ever have a second-to-last child at all.
+   cc#1387 (adrBar Card3->Card1) added .adrwrap as Card 1's own new LAST child, which — invisibly,
+   since Card 1's own diff never touched this rule — made .ixrow (the NIFTY/BANKNIFTY footer) BECOME
+   Card 1's new nth-last-child(2), silently inheriting a margin-bottom:14px floor meant only for a
+   .c2body element Card 1 has never had. That 14px stacked onto the existing 9px uniform gap
+   (#heroTrack > .c:first-child{gap:var(--space-9)}) is the exact 23px oversized gap reported —
+   confirmed by direct measurement on a genuinely fresh, uncached local render, not assumed from a
+   live-vs-source mismatch. The margin-reset rule and the 9px gap rule (cc#1391's own do-not-touch
+   list) were both already correct; THIS rule's own selector was the defect.
+   FIXED BY MATCHING WHAT THE ELEMENT IS, NOT WHERE IT SITS — .c2body, not :nth-last-child(2). Every
+   card actually using this pattern (2/3/4) has .c2body as its own nth-last-child(2) BY
+   CONSTRUCTION (exactly two children: .c2body, its CTA button), so this is a no-op for all three —
+   re-verified below, not assumed. Card 1 has no .c2body element at all, so it can never match this
+   rule again regardless of how many children get added to or removed from its own flat column in
+   the future — the same "match by identity, not position" fix this file already applies elsewhere
+   (e.g. cc#1382's card-count generalization) rather than a positional selector that can silently
+   re-break the next time ANY card's own child list changes shape. */
+#heroTrack > .c > .c2body{margin-bottom:var(--space-14)}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
    tokens wherever an equivalent already exists (--grn/--red/--mut/--amber/--panel2/--line2/
