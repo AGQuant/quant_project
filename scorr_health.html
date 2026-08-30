@@ -855,7 +855,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
       var legEl=$('hr-strip-legend');
       if(legEl){
         legEl.innerHTML=narrow.map(function(x){
-          return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 4px 0;font-size:10px;font-weight:600;color:#07111F;">'
+          return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 4px 0;font-size:10px;font-weight:600;color:var(--txt);">'
             +'<span style="width:9px;height:9px;border-radius:2px;background:'+x.color+';display:inline-block;"></span>'+esc(x.name)+' '+x.pct+'%</span>';
         }).join('');
       }
