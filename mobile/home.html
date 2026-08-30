@@ -910,6 +910,17 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 #heroTrack > .c:first-child > *{margin-top:0;margin-bottom:0}
 /* an empty popup host would otherwise buy itself a gap it does not need */
 #heroTrack > .c:first-child > #chiptrend:empty{display:none}
+/* cc#1435 · REDISTRIBUTE, NOT GROW — resolves the half of cc#1433 that was declined (sha 805db71)
+   because it would have grown Card 1 past its SWIPE_DECK_CONSISTENCY_V1 height sync with Card 2
+   (session_log 33550). The shared .c{padding-bottom:13px} (mobile_app.css) left visible slack
+   below adrBar() — Card 1's own last child — before the card's closing edge. Scoped here (not the
+   shared rule, which every other card in the app also uses) down to 6px, a real but non-zero
+   floor per this task's own "do not collapse it to zero" instruction. The 7px reclaimed is spent
+   as the exact same 7px on .hchips's own margin-bottom below (the gap cc#1433 wanted above the
+   separator) — a wash, not a net addition, so Card 1's total measured height is unchanged and the
+   deck's height-sync relationship with Card 2 is never touched. */
+#heroTrack > .c:first-child{padding-bottom:var(--space-6)}
+#heroTrack > .c:first-child > .hchips{margin-bottom:var(--space-7)}
 /* ── cc#1230 · THE DEAD TAIL UNDER CARD 1, AND WHY cc#1134's "NO AUTO MARGINS" NO LONGER HOLDS ──
    THE PREMISE cc#1134 WAS BUILT ON HAS BEEN FALSE SINCE cc#1182. It reasoned that leftover height
    "has nowhere to go except after the last child" and treated that as harmless, because at the
