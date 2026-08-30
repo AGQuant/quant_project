@@ -1224,7 +1224,7 @@ function vfGuide(){
   vfSheet('<div class="vfsh">How to read Volume Flow</div><div class="vfg">'
     + '<p><b>The idea.</b> Every 5 minutes is one tick. A green tick closes above its open. A red tick closes below. We add up the traded volume on each side.</p>'
     + '<p><b>Flow ratio.</b> Green volume as a share of green + red volume. 0.70 means 70% of the volume traded on rising ticks — buyers were doing the volume. The lists are ranked by this.</p>'
-    + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks. Bearish = 60% or more on red ticks. Names in between are noise and are left out.</p>'
+    + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks AND both the Day and Week returns positive. Bearish = 60% or more on red ticks AND both returns negative. The flow window can cross days, so the price returns must agree with the direction — a heavy-green name that is red today does not make the bullish list. Names in between are noise and are left out.</p>'
     + '<p><b>DAY / WK.</b> Price change vs yesterday\'s close, and vs the close 5 trading days back.</p>'
     + '<p><b>RVOL.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
     + '<p><b>VOL P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
