@@ -233,6 +233,9 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .butbl.b6tbl th:nth-child(1),.butbl.b6tbl td:nth-child(1){width:19%}
 .butbl.b6tbl th:nth-child(2),.butbl.b6tbl td:nth-child(2){width:25%}
 .butbl.b6tbl th:nth-child(n+3),.butbl.b6tbl td:nth-child(n+3){width:14%}
+/* cc#1466: the CMP cell's percent, one ramp step below the cell (--type-105) — an existing rung,
+   never an arbitrary size. */
+.b6tbl .cmpct{font-size:var(--type-10)}
 .butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
  font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .butbl tr:last-child td{border-bottom:none}
@@ -929,10 +932,16 @@ function buTable(rows, k){
     + buTh('Vol D', 'VOLD', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
-        var d = r.day_1d, cmp = (r.price != null ? num(r.price) : '—');
+        /* cc#1466: cc#1459's "price (+x.xx%)" truncated at F&O price magnitudes (APLAPOLLO
+           "2,285 (+4.2…"). The brackets, the leading + and the price comma bought nothing the
+           colour does not already say — all gone. The MINUS stays: dropping it too would be
+           ambiguous, not just undecorated. Percent drops one ramp step (.cmpct, --type-10
+           against the cell's --type-105). Widest real cell is now "58372 -13.35%" (BANKNIFTY
+           magnitude price + a circuit-band move) — Chromium-measured against the 25% column. */
+        var d = r.day_1d, cmp = (r.price != null ? String(Math.round(Number(r.price))) : '—');
         var dtxt = d == null ? ''
-          : ' (<span class="' + (d > 0 ? 'up' : d < 0 ? 'dn' : '') + '">'
-            + (d > 0 ? '+' : '') + Number(d).toFixed(2) + '%</span>)';
+          : ' <span class="cmpct ' + (d > 0 ? 'up' : d < 0 ? 'dn' : '') + '">'
+            + Number(d).toFixed(2) + '%</span>';
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
           + '<td>' + cmp + dtxt + '</td>'
           + buNum(r.oi_chg_pct, 1, '%', true)
@@ -997,7 +1006,7 @@ function buGuide(){
   vfSheet('<div class="vfsh">How to read Build Up</div><div class="vfg">'
     + '<p><b>The idea.</b> Price direction and open-interest direction together say WHO is acting. Four combinations, four states — each card is one of them.</p>'
     + '<p><b>Long Buildup.</b> Price up + OI up — fresh longs entering. <b>Short Covering.</b> Price up + OI down — shorts closing out. <b>Short Buildup.</b> Price down + OI up — fresh shorts entering. <b>Long Unwinding.</b> Price down + OI down — longs exiting.</p>'
-    + '<p><b>CMP.</b> The futures price at the last tick, with the day change vs yesterday\'s close beside it in parentheses.</p>'
+    + '<p><b>CMP.</b> The futures price at the last tick, with the day change vs yesterday\'s close beside it — green up, red down.</p>'
     + '<p><b>OI Δ%.</b> Open-interest change day-over-day — the last tick of this session vs the last tick of the prior one.</p>'
     + '<p><b>Vol R.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
     + '<p><b>Vol P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
