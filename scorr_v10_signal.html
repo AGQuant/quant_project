@@ -1046,7 +1046,13 @@ function _sortByState(list, state, getters){
 }
 function _sortTh(label, key, state, onclickExpr){
   var on = state && state.key === key;
-  var arrow = on ? (state.dir === 1 ? ' ▲' : ' ▼') : '';
+  // cc#1437: an unsorted header used to show no mark at all -- CSS cursor:pointer is the only
+  // other cue, and that has no touchscreen equivalent, so a phone reader had nothing telling them
+  // the header was tappable until they happened to try one. A persistent neutral ↕ replaces the
+  // empty string; the active column still gets the single ▲/▼ it already did. No new CSS needed --
+  // .vfsort (unsorted) already inherits .butbl th's own muted colour, .vfsort.on already brightens
+  // to --chalk, so the glyph is dim until tapped and bright once active, same as the label text.
+  var arrow = on ? (state.dir === 1 ? ' ▲' : ' ▼') : ' ↕';
   return '<th class="vfsort' + (on ? ' on' : '') + '" onclick="' + onclickExpr + '">' + label + arrow + '</th>';
 }
 
