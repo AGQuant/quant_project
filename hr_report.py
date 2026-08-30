@@ -441,14 +441,16 @@ def build_report(cur, pid):
     for h in holdings:
         h["weight"] = round((h["current"] or 0) / total_current * 100, 2) if total_current > 0 else 0.0
 
-    # ---- cc#1484: rating breakup (Breakup tab) — weight-desc, one entry per holding ----
+    # ---- cc#1484: rating breakup (Breakup tab) — weight-desc, TOP 25 holdings (amendment
+    # cc_task_logs 4131; the client renders the "+N more, W%" note from holdings[]). "rated"
+    # False = no gvm_scores row at all (ETFs — amendment 4134): not rated, never rated-zero. ----
     _rb = _load_rating_breakup(cur, syms)
     rating_breakup = []
-    for h in sorted(holdings, key=lambda x: x["weight"] or 0, reverse=True):
+    for h in sorted(holdings, key=lambda x: x["weight"] or 0, reverse=True)[:25]:
         e = _rb.get(h["symbol"])
         rating_breakup.append({
             "symbol": h["symbol"], "company_name": h["company_name"], "weight": h["weight"],
-            "bfsi": bool(e and e["bfsi"]), "params": e["params"] if e else {},
+            "rated": bool(e), "bfsi": bool(e and e["bfsi"]), "params": e["params"] if e else {},
         })
 
     def _wpairs(key):
