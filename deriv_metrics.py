@@ -1282,6 +1282,26 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             recent3d = _safe("recent3d_vol_ratio", lambda: _recent3d_vol_ratio(cur, sym))
             # cc#674: time-of-day-adjusted RVOL (today cum-vol / 21-session avg cum-vol at the same slot)
             rvol = _safe("rvol", lambda: __import__("rvol_engine").live_rvol(cur, sym))
+            # cc#1438 (VOLUME_METRICS_CANON_V1.1, session_log 33832/33833): the two new A-card tile
+            # reads. READS ONLY -- no engine writes, no recompute; both values already exist.
+            #   vol_p     = v8_metrics.vol_ratio at score_date T-1 (the row STRICTLY BEFORE the
+            #               latest row -- the latest row is refreshed intraday with today-so-far by
+            #               the live writer, so T-1 is the honest completed-day read; verified
+            #               against the canon's own CAMS spot-check: T 2.65 / T-1 0.63, 28-Aug).
+            #   vol_trend = momentum_scores.vol_trend latest row (20d avg vol / 60d avg vol, the
+            #               LOCKED GVM Momentum p8 input -- read, never recomputed here).
+            def _vol_p():
+                cur.execute("""SELECT score_date, vol_ratio FROM v8_metrics WHERE symbol=%s
+                               ORDER BY score_date DESC OFFSET 1 LIMIT 1""", (sym,))
+                r = cur.fetchone()
+                return {"value": float(r[1]), "asof": str(r[0])} if r and r[1] is not None else None
+            vol_p = _safe("vol_p", _vol_p)
+            def _vol_trend():
+                cur.execute("""SELECT score_date, vol_trend FROM momentum_scores WHERE symbol=%s
+                               ORDER BY score_date DESC LIMIT 1""", (sym,))
+                r = cur.fetchone()
+                return {"value": float(r[1]), "asof": str(r[0])} if r and r[1] is not None else None
+            vol_trend = _safe("vol_trend", _vol_trend)
             # cc#516 Part C.1b/C.2: EOD futures-OI fallback (cc#517's nightly bhavcopy job) --
             # forward-compatible no-op until that table exists / carries a row for this symbol.
             eod_fut_oi = _safe("eod_fut_oi", lambda: _eod_fut_oi_fallback(cur, sym))
@@ -1376,6 +1396,11 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                        "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None,
                        "recent3d_vol_ratio": recent3d,     # cc#516 Part D
                        "rvol": rvol,                       # cc#674: time-of-day-adjusted relative volume
+                       # cc#1438: canon tile reads. volx/recent3d_vol_ratio stay in the payload --
+                       # the composite READ, meanings, the V-card renderer (pwa_endpoints openV)
+                       # and result-corner's A-card still consume them; only the A-card TILES
+                       # switch to the canon in this push, per Sprint A's ordered-push scope.
+                       "vol_p": vol_p, "vol_trend": vol_trend,
                        "delivery": delivery},              # cc#517 Part A
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
