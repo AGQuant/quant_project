@@ -409,7 +409,29 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                         ladder_extra[s]["year_return"] = _r(m.get("year_return"), 1)
                     if s == symbol:
                         extras["tier1"] = t1
-                        extras["vol_ratio_10_30"] = _r(m.get("vol_ratio"))
+                        # cc#1452 push 5: vol_ratio_10_30 (legacy v8_metrics 10d ratio) RETIRED
+                        # from this payload — the VolumePanel now gets the FOUR canon metrics,
+                        # each via its one shared derivation (never recomputed here):
+                        # Vol R/Vol P from rvol_engine, Vol D from volume_flow_endpoints'
+                        # deliv_ratio_batch (cc#1444 form), Vol AD from the _ad_21d read the
+                        # A/D card already holds in ad_map.
+                        try:
+                            from rvol_engine import live_rvol, closing_rvol
+                            from volume_flow_endpoints import deliv_ratio_batch
+                            _lv = live_rvol(cur, symbol) or {}
+                            _vp = closing_rvol(cur, symbol) or {}
+                            _ad = ad_map.get(symbol) or {}
+                            extras["vol_canon"] = {
+                                "vol_r": _lv.get("rvol"),
+                                "vol_p": _vp.get("value"),
+                                "vol_p_asof": _vp.get("asof"),
+                                "vol_d": deliv_ratio_batch(cur, [symbol]).get(symbol),
+                                "vol_ad": _f(_ad.get("up_vol_pct")),
+                                "vol_ad_label": _ad.get("label"),
+                            }
+                        except Exception as e:
+                            log.warning(f"vol_canon failed {symbol}: {e}")
+                            extras["vol_canon"] = None
             except Exception as e:
                 log.warning(f"tier1 failed: {e}")
 

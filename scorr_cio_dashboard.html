@@ -598,7 +598,7 @@ function DelivSpark({ series }) {
   );
 }
 
-function VolumePanel({ va, volRatio, deliv }) {
+function VolumePanel({ va, vc, deliv }) {
   if (!va || !va.bars || !va.bars.length) return (
     <div style={{ fontSize: 13.5, color: C.muted, padding: 12 }}>No volume data.</div>
   );
@@ -619,8 +619,17 @@ function VolumePanel({ va, volRatio, deliv }) {
             Price {signFmt(tot, 2)}% over 21d
           </span>
         )}
-        {volRatio != null && <span style={{ fontSize: 13, color: C.muted, fontFamily: "monospace" }}>vol 10/30d {volRatio}×</span>}
       </div>
+      {/* cc#1452 push 5: the four canon volume metrics replace the retired vol 10/30d single
+          number — same shared derivations as Volume Flow / Deriv Cockpit / the A-card. */}
+      {vc && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 13, color: C.muted, fontFamily: "monospace", marginBottom: 8 }}>
+          <span>Vol R {vc.vol_r != null ? Number(vc.vol_r).toFixed(2) + "×" : "—"}</span>
+          <span>Vol P {vc.vol_p != null ? Number(vc.vol_p).toFixed(2) + "×" : "—"}</span>
+          <span>Vol D {vc.vol_d != null ? Number(vc.vol_d).toFixed(2) + "×" : "—"}</span>
+          <span>Vol AD {vc.vol_ad != null ? Math.round(vc.vol_ad) + "%" : "—"}</span>
+        </div>
+      )}
       <div style={{ position: "relative", height: 72, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: "100%", position: "absolute", inset: 0 }}>
           {va.bars.map((b, i) => (
@@ -2594,7 +2603,7 @@ function GvmReport({ r, hist }) {
         </div>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>21-Day Volume · Accumulation / Distribution</div>
-          <VolumePanel va={x.volume} volRatio={x.vol_ratio_10_30} deliv={x.delivery} />
+          <VolumePanel va={x.volume} vc={x.vol_canon} deliv={x.delivery} />
         </div>
       </div>
 
