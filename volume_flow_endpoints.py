@@ -53,10 +53,11 @@ def volume_flow(ticks: int = 100):
 
     Response: {as_of, ticks, universe, shown, excluded_thin, bullish: [...], bearish: [...]}
     Each row: {symbol, flow_ratio, day_chg_pct, week_chg_pct, fut_chg_pct, rvol, vol_p, deliv_ratio,
-               green_vol, red_vol}. Qualifiers: bullish flow_ratio >= 0.60 (desc),
-    bearish flow_ratio <= 0.40 (asc). Symbols between the bands are computed but not listed —
-    a 50/50 tape is noise, not signal. (cc#1438: vol_x/vol_d keys retired for rvol/deliv_ratio
-    per VOLUME_METRICS_CANON_V1.1; response shape otherwise unchanged.)
+               green_vol, red_vol}. Qualifiers (cc#1450): bullish = flow_ratio >= 0.60 AND day AND
+    week returns both POSITIVE (desc); bearish = flow_ratio <= 0.40 AND day AND week both NEGATIVE
+    (asc); a NULL day/week return excludes the row from either list. Symbols between the bands are
+    computed but not listed — a 50/50 tape is noise, not signal. (cc#1438: vol_x/vol_d keys retired
+    for rvol/deliv_ratio per VOLUME_METRICS_CANON_V1.1.)
     """
     if ticks not in _ALLOWED_TICKS:
         raise HTTPException(400, f"ticks must be one of {_ALLOWED_TICKS}")
@@ -200,9 +201,19 @@ def volume_flow(ticks: int = 100):
                 "green_vol": f["green"], "red_vol": f["red"],
             })
 
-        bullish = sorted((r for r in rows if r["flow_ratio"] >= 0.60),
+        # cc#1450 (founder, 30-Aug): the flow window spans 100 5-min bars and can cross calendar
+        # days, so a high green share could list a stock whose TODAY is red. Both lists now also
+        # require Day AND Week returns to agree with the direction; a NULL on either side excludes
+        # the row from BOTH lists (missing data never passes a filter). These rows are filtered,
+        # not "thin" — excluded_thin keeps counting data-quality exclusions only.
+        def _agree(r, up):
+            d, w = r["day_chg_pct"], r["week_chg_pct"]
+            if d is None or w is None:
+                return False
+            return (d > 0 and w > 0) if up else (d < 0 and w < 0)
+        bullish = sorted((r for r in rows if r["flow_ratio"] >= 0.60 and _agree(r, True)),
                          key=lambda r: -r["flow_ratio"])
-        bearish = sorted((r for r in rows if r["flow_ratio"] <= 0.40),
+        bearish = sorted((r for r in rows if r["flow_ratio"] <= 0.40 and _agree(r, False)),
                          key=lambda r: r["flow_ratio"])
         return {"as_of": as_of.isoformat() if as_of else None, "ticks": ticks,
                 "universe": len(syms), "shown": len(rows), "excluded_thin": thin,
