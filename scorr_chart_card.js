@@ -931,11 +931,10 @@ var _full = false;                // cc#779: fullscreen state
       var c = LightweightCharts.createChart(box, {
         width: box.clientWidth, height: 412,
         layout: { background: { color: "transparent" }, textColor: p.mut },
-        /* cc#988: horizontal gridlines OFF (founder: "the price lines are not required"). The
-           right-hand price AXIS labels and the CMP tag are untouched — it is the lines ACROSS the
-           plot that go. vertLines were already off. p.grid is left in the palette rather than
-           ripped out: it is a token, and a future overlay may want it. */
-        grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+        /* cc#1490 (session_log 34228) REVERSES cc#988: faint horizontal gridlines are BACK ON
+           (founder 30-Aug, matching the external Gold-chart reference). vertLines stay off.
+           p.grid — the per-theme token cc#988 deliberately kept — is exactly what colours them. */
+        grid: { vertLines: { visible: false }, horzLines: { visible: true, color: p.grid } },
         localization: { locale: "en-IN", timeFormatter: _istCross },
         timeScale: { timeVisible: isIntraday, borderVisible: false, tickMarkFormatter: _istTick },
         rightPriceScale: { borderVisible: false },
