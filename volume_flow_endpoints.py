@@ -47,6 +47,30 @@ def _conn():
 _ALLOWED_TICKS = (25, 50, 100, 500)
 
 
+def deliv_ratio_batch(cur, symbols):
+    """cc#1452 push 5: the cc#1444 Delivery Ratio derivation, extracted so other surfaces (the
+    GVM/CIO VolumePanel) reuse THIS function instead of growing a copy. {symbol: ratio-or-None} —
+    AVG(deliv_qty) over the most recent 3 trading days ÷ AVG over the 20 days immediately BEFORE
+    those 3 (rn 1..3 vs 4..23, non-overlapping; see module docstring). Null-safe both sides."""
+    cur.execute("""
+        SELECT symbol,
+               AVG(deliv_qty) FILTER (WHERE rn BETWEEN 1 AND 3)  AS d3avg,
+               AVG(deliv_qty) FILTER (WHERE rn BETWEEN 4 AND 23) AS d20avg
+        FROM (
+            SELECT symbol, deliv_qty,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
+            FROM delivery_eod
+            WHERE deliv_qty IS NOT NULL AND symbol = ANY(%(syms)s)
+        ) y WHERE rn <= 23 GROUP BY symbol
+    """, {"syms": list(symbols)})
+    out = {}
+    for r in cur.fetchall():
+        d3, d20 = (float(r[1]) if r[1] is not None else None,
+                   float(r[2]) if r[2] is not None else None)
+        out[r[0]] = round(d3 / d20, 2) if (d3 is not None and d20 and d20 > 0) else None
+    return out
+
+
 @router.get("/api/volume-flow")
 def volume_flow(ticks: int = 100):
     """Bullish/bearish volume-flow lists over the last `ticks` 5-min bars per symbol.
@@ -151,25 +175,9 @@ def volume_flow(ticks: int = 100):
             vpb = closing_rvol_batch(cur, syms)
             vpl = {s: (v["value"] if v else None) for s, v in vpb.items()}
 
-            # ── cc#1444 DELIV: 3-day avg deliv_qty ÷ the 20-day avg immediately BEFORE it
-            # (rn 1..3 vs rn 4..23, non-overlapping — see module docstring). AVG numerator, not
-            # SUM, so both sides stay unit-comparable. Replaces cc#1438's 1-day/rn 2..21 form.
-            cur.execute("""
-                SELECT symbol,
-                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 1 AND 3)  AS d3avg,
-                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 4 AND 23) AS d20avg
-                FROM (
-                    SELECT symbol, deliv_qty,
-                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
-                    FROM delivery_eod
-                    WHERE deliv_qty IS NOT NULL AND symbol = ANY(%(syms)s)
-                ) y WHERE rn <= 23 GROUP BY symbol
-            """, {"syms": syms})
-            dlv = {}
-            for r in cur.fetchall():
-                d3, d20 = (float(r[1]) if r[1] is not None else None,
-                           float(r[2]) if r[2] is not None else None)
-                dlv[r[0]] = round(d3 / d20, 2) if (d3 is not None and d20 and d20 > 0) else None
+            # ── cc#1444 DELIV via the shared deliv_ratio_batch above (cc#1452 extracted it so the
+            # VolumePanel reuses the same function — one derivation, no copies).
+            dlv = deliv_ratio_batch(cur, syms)
 
         rows, thin = [], 0
         for sym in syms:
