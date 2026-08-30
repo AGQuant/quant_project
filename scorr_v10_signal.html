@@ -1220,7 +1220,7 @@ function vfGuide(){
     + '<p><b>DAY / WK / FUT.</b> Price change vs yesterday\'s close, vs the close 5 trading days back, and the same day change on the stock\'s futures.</p>'
     + '<p><b>RVOL.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
     + '<p><b>VOL P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
-    + '<p><b>DELIV.</b> The latest day\'s delivered quantity vs its own 20-day average. Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
+    + '<p><b>DELIV.</b> The last 3 days\' average delivered quantity vs the 20 trading days before that (windows don\'t overlap, so a fresh spike can\'t hide inside its own baseline). Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
     + '<p><b>Ticks filter.</b> How far back we look: 25 ≈ 2 hours, 50 ≈ 4 hours, 100 ≈ 1.3 trading days, 500 ≈ 1 week. The filter on the top card drives both lists.</p>'
     + '<p><b>Honesty.</b> This is a volume read only — we do not see the order book, so it is never called order flow. A dash means the data is missing; we never fill it in.</p>'
     + '</div>');

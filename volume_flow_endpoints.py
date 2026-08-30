@@ -18,9 +18,11 @@ DATA HONESTY RULES BUILT IN:
     had to state.
   * vol_p (cc#1440, CANON V2): yesterday's RVOL at the closing slot — the same profile formula
     as rvol, read for the last completed session. Served by rvol_engine.closing_rvol_batch.
-  * deliv_ratio (cc#1438): latest delivery_eod.deliv_qty ÷ its trailing 20-day average — the
-    EXACT QSR vold derivation (qsr_engine dl CTE, extracted verbatim: rn=1 vs AVG rn 2..21),
-    not a third copy of the formula. Null when either side is absent.
+  * deliv_ratio (cc#1444, amends cc#1438): AVG(deliv_qty) over the most recent 3 trading days ÷
+    AVG(deliv_qty) over the 20 trading days immediately BEFORE those 3 (rn 4..23 —
+    NON-OVERLAPPING by design: if the baseline kept days 1-3, a genuine delivery spike would
+    inflate both sides at once and partially cancel itself). Null when either side is absent.
+    (The original 1-day/rn 2..21 form came from QSR's dl CTE; QSR itself is retired, cc#1442.)
   * (killed by cc#1438: vol_x same-clock pace vs yesterday, vol_d D-1/D-2 — both retired by
     VOLUME_METRICS_CANON_V1's kill list.)
   * as_of is the latest tick actually used, so a surface can never present stale as live.
@@ -148,24 +150,25 @@ def volume_flow(ticks: int = 100):
             vpb = closing_rvol_batch(cur, syms)
             vpl = {s: (v["value"] if v else None) for s, v in vpb.items()}
 
-            # ── cc#1438 DELIV: latest deliv_qty ÷ trailing 20-day avg — the EXACT QSR vold
-            # derivation (qsr_engine dl CTE, rn=1 vs AVG rn 2..21), extracted, not re-derived.
+            # ── cc#1444 DELIV: 3-day avg deliv_qty ÷ the 20-day avg immediately BEFORE it
+            # (rn 1..3 vs rn 4..23, non-overlapping — see module docstring). AVG numerator, not
+            # SUM, so both sides stay unit-comparable. Replaces cc#1438's 1-day/rn 2..21 form.
             cur.execute("""
                 SELECT symbol,
-                       MAX(CASE WHEN rn = 1 THEN deliv_qty END)::numeric AS d0,
-                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 2 AND 21)  AS d20avg
+                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 1 AND 3)  AS d3avg,
+                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 4 AND 23) AS d20avg
                 FROM (
                     SELECT symbol, deliv_qty,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
                     FROM delivery_eod
                     WHERE deliv_qty IS NOT NULL AND symbol = ANY(%(syms)s)
-                ) y WHERE rn <= 21 GROUP BY symbol
+                ) y WHERE rn <= 23 GROUP BY symbol
             """, {"syms": syms})
             dlv = {}
             for r in cur.fetchall():
-                d0, d20 = (float(r[1]) if r[1] is not None else None,
+                d3, d20 = (float(r[1]) if r[1] is not None else None,
                            float(r[2]) if r[2] is not None else None)
-                dlv[r[0]] = round(d0 / d20, 2) if (d0 is not None and d20 and d20 > 0) else None
+                dlv[r[0]] = round(d3 / d20, 2) if (d3 is not None and d20 and d20 > 0) else None
 
         rows, thin = [], 0
         for sym in syms:
