@@ -1,6 +1,6 @@
 /* scorr_analysis_card.js — cc#805 SHARED "A" (Analysis) card, site-wide, self-contained.
  * ==================================================================================
- * The canonical Analysis modal: GVM + sector rating/rank, Trajectory grid, Volume (RVOL/VolX/3D-21D),
+ * The canonical Analysis modal: GVM + sector rating/rank, Trajectory grid, Volume (RVOL/VOL P/VOL TREND),
  * Delivery (+ 30d sparkline), Performance heat grid, and the TC Trade/Investment Check footer.
  *
  * Until cc#805 this lived inside v8_dashboard.html, so scorr_card_strip.js could only offer A as a
@@ -182,12 +182,13 @@
       }
       // cc#630: TRAJECTORY block — score deltas + sector rank path (below the GVM pillars/sector box)
       if(g&&g.trajectory) h+=trajHtml(g.trajectory);
-      // (2) VOLUME — cc#674: three adjacent tiles RVOL | VolX | Vol 3D/21D (shared _volTilesHtml), each
-      // tap-to-explain. RVOL = time-of-day-adjusted relative volume (energy.rvol from rvol_profiles).
+      // (2) VOLUME — cc#674: three adjacent tiles via the shared _volTilesHtml, each tap-to-explain.
+      // cc#1438 (VOLUME_METRICS_CANON_V1.1): the shared tiles now render RVOL | VOL P | VOL TREND,
+      // so the no-data guard checks the fields the tiles actually read.
       const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
-      const vx=E.volx,r3=E.recent3d_vol_ratio,rv=E.rvol;
+      const vp=(E.vol_p||{}).value,vt=(E.vol_trend||{}).value,rv=E.rvol;
       h+=secLbl('Volume');
-      if(vx==null&&r3==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
+      if(vp==null&&vt==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
       else{ h+=_volTilesHtml(E,M); }
       // (3) DELIVERY — deliv% vs own 21d avg + conviction/churn + 30d sparkline
       const dv=E.delivery||{};

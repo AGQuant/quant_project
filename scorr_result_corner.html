@@ -475,9 +475,15 @@ async function rcCard(kind,sym){
           <div class="rc-tile"><div style="display:flex;gap:10px;font-size:12px"><div style="flex:1;min-width:0"><span style="color:var(--dim)">Segment</span><br><b>${esc(gv.segment||'—')}</b></div><div style="flex:1"><span style="color:var(--dim)">Sector</span><br><b>${gv.sector_rating==null?'—':Number(gv.sector_rating).toFixed(2)}</b></div><div style="flex:1"><span style="color:var(--dim)">Rank</span><br><b>${gv.segment_rank!=null?('#'+gv.segment_rank+' / '+gv.segment_total):'—'}</b></div></div></div>`; }
       if(gv&&gv.trajectory) h+=trajHtml(gv.trajectory);   // cc#630 trajectory block (below GVM box)
       const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
+      /* cc#1438 (VOLUME_METRICS_CANON_V1.1): this hand-rolled fork of the volume tiles swaps its
+         killed VolX / Vol 3D/21D pair for the canon reads the shared _volTilesHtml now shows —
+         VOL P (v8_metrics T-1: prev completed day vs its own 10d avg) and VOL TREND
+         (momentum_scores 20d/60d avg volume). Both arrive as {value, asof} on the same
+         /api/deriv-metrics energy block this card already fetches. */
+      const _vp=(E.vol_p||{}).value, _vt=(E.vol_trend||{}).value;
       h+=`<div class="rc-lbl">Volume</div><div style="display:flex;gap:6px">
-        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Rel Volume · VolX</div><div style="font-size:20px;font-weight:800;color:${E.volx>=1?'var(--grn)':'var(--txt)'}">${E.volx==null?'—':Number(E.volx).toFixed(1)}×</div></div>
-        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Vol 3D / 21D</div><div style="font-size:20px;font-weight:800">${E.recent3d_vol_ratio==null?'—':Number(E.recent3d_vol_ratio).toFixed(1)}×</div></div></div>`;
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">VOL P · prev day vs 10d</div><div style="font-size:20px;font-weight:800;color:${_vp>=1?'var(--grn)':'var(--txt)'}">${_vp==null?'—':Number(_vp).toFixed(1)}×</div></div>
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">VOL TREND · 20d/60d</div><div style="font-size:20px;font-weight:800">${_vt==null?'—':Number(_vt).toFixed(1)}×</div></div></div>`;
       const dv=E.delivery||{};
       if(dv.deliv_pct!=null){ const lc=dv.label==='conviction'?'var(--grn)':dv.label==='churn'?'var(--red)':'var(--mut)';
         h+=`<div class="rc-lbl">Delivery</div><div class="rc-tile"><span style="font-size:20px;font-weight:800">${Number(dv.deliv_pct).toFixed(1)}%</span> <span style="font-size:11px;color:var(--dim)">vs 21d ${dv.avg21==null?'—':Number(dv.avg21).toFixed(1)}%</span><span style="float:right;font-size:10px;font-weight:800;color:${lc}">${(dv.label||'neutral').toUpperCase()}</span></div>`; }
