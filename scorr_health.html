@@ -360,13 +360,13 @@ html,body{margin:0;padding:0;background:var(--bg);}
   <div style="overflow-x:auto;">
     <table id="hr-holdings">
       <thead>
-        <tr><th style="padding-left:24px;">Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>PE / Seg</th><th>GVM</th><th>Trend</th><th>From ATH</th><th>Upside</th><th style="padding-right:24px;">Verdict</th></tr>
+        <tr><th style="padding-left:24px;">Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>PE / Seg</th><th>GVM</th><th>Trend</th><th>Upside</th><th style="padding-right:24px;">Verdict</th></tr>
       </thead>
       <tbody>
-        <tr><td style="font-weight:700;padding-left:24px;">BAJFINANCE</td><td>7,015</td><td>40</td><td>19.8%</td><td class="pos">+11.5</td><td>36.9 / 28.2</td><td style="color:var(--grn);font-weight:700;">8.40</td><td class="pos">&#9650; +0.30</td><td>&#8722;12.8%</td><td>21%</td><td style="padding-right:24px;"><span class="chip g">Buy Systematically</span></td></tr>
-        <tr><td style="font-weight:700;padding-left:24px;">AXISBANK</td><td>967</td><td>200</td><td>13.7%</td><td class="pos">+8.9</td><td>13.0 / 23.8</td><td style="color:var(--grn);font-weight:700;">7.80</td><td class="pos">&#9650; +0.10</td><td>&#8722;1.4%</td><td>16%</td><td style="padding-right:24px;"><span class="chip b">Accumulate / Hold</span></td></tr>
-        <tr><td style="font-weight:700;padding-left:24px;">AARTIIND</td><td>515</td><td>200</td><td>7.3%</td><td class="neg">&#8722;0.3</td><td>34.3 / 50.0</td><td style="color:var(--amb);font-weight:700;">5.90</td><td class="neg">&#9660; &#8722;0.40</td><td>&#8722;51.4%</td><td>9%</td><td style="padding-right:24px;"><span class="chip a">Wait &amp; Watch</span></td></tr>
-        <tr><td style="font-weight:700;padding-left:24px;">ACC</td><td>1,827</td><td>50</td><td>6.5%</td><td class="pos">+0.8</td><td>56.1 / 52.7</td><td style="color:var(--red);font-weight:700;">4.10</td><td class="neg">&#9660; &#8722;0.20</td><td>&#8722;34.4%</td><td>6%</td><td style="padding-right:24px;"><span class="chip r">Avoid / Exit</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">BAJFINANCE</td><td>7,015</td><td>40</td><td>19.8%</td><td class="pos">+11.5</td><td>36.9 / 28.2</td><td style="color:var(--grn);font-weight:700;">8.40</td><td class="pos">&#9650; +0.30</td><td>21%</td><td style="padding-right:24px;"><span class="chip g">Buy Systematically</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">AXISBANK</td><td>967</td><td>200</td><td>13.7%</td><td class="pos">+8.9</td><td>13.0 / 23.8</td><td style="color:var(--grn);font-weight:700;">7.80</td><td class="pos">&#9650; +0.10</td><td>16%</td><td style="padding-right:24px;"><span class="chip b">Accumulate / Hold</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">AARTIIND</td><td>515</td><td>200</td><td>7.3%</td><td class="neg">&#8722;0.3</td><td>34.3 / 50.0</td><td style="color:var(--amb);font-weight:700;">5.90</td><td class="neg">&#9660; &#8722;0.40</td><td>9%</td><td style="padding-right:24px;"><span class="chip a">Wait &amp; Watch</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">ACC</td><td>1,827</td><td>50</td><td>6.5%</td><td class="pos">+0.8</td><td>56.1 / 52.7</td><td style="color:var(--red);font-weight:700;">4.10</td><td class="neg">&#9660; &#8722;0.20</td><td>6%</td><td style="padding-right:24px;"><span class="chip r">Avoid / Exit</span></td></tr>
       </tbody>
     </table>
   </div>
@@ -881,7 +881,7 @@ html,body{margin:0;padding:0;background:var(--bg);}
         + '<td>'+num(h.cmp)+'</td><td>'+num(h.qty)+'</td><td>'+pctPlain(h.weight)+'</td>'
         + '<td class="'+pnlCls+'">'+pctPlain(h.pnl_pct)+'</td><td>'+peSeg+'</td>'
         + '<td style="color:'+gvmColor(h.gvm)+';font-weight:700;">'+f2(h.gvm)+'</td>'
-        + '<td>'+tr+'</td><td>'+pctPlain(h.from_ath)+'</td><td>'+upside+'</td>'
+        + '<td>'+tr+'</td><td>'+upside+'</td>'
         + '<td style="padding-right:24px;"><span class="chip '+(CH[h.action]||'b')+'">'+esc(h.action)+'</span></td></tr>';
     }).join(''); }
 
