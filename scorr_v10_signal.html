@@ -192,9 +192,14 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    too — disclosed here as pre-existing dead, not created dead by today's removal. .vitals/.vital
    stay: SHOW_VOL_TILES's own tiles use that pair and are untouched by this task. */
 /* ── cc#1248 · the buildup state strip and its table ───────────────────────────────────── */
-.bustate{display:flex;align-items:baseline;gap:var(--space-8);margin:var(--space-8) 0 var(--space-10)}
-.bubadge{font-size:var(--type-105);padding:var(--space-4) var(--space-10)}
-.busub{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px8)}
+/* cc#1467: .bustate (the stacked descriptor row) and .bubadge (dead since cc#1460 removed the
+   badge chips) are gone — the descriptor now rides the .vfhd heading row itself, nowrap (a
+   descriptor wrapping mid-phrase would read as two fragments) with a small top tuck beside the
+   skewed h3. Size and tracking are UNCHANGED: the worst case — "▼ Long Unwinding" (128px) +
+   "PRICE DOWN · OI DOWN" (115px) + the 30px i, real Archivo Black + JetBrains Mono loaded —
+   renders one line at a 360px viewport with 48px of slack before the i, Chromium-measured. */
+.busub{font-family:'JetBrains Mono';font-size:var(--type-9);color:var(--muted);letter-spacing:var(--track-px8);
+  white-space:nowrap;margin-top:var(--space-3)}
 .butbl{width:100%;border-collapse:collapse;font-size:var(--type-105);table-layout:fixed}
 .butbl th{font-size:var(--type-85);color:var(--muted);letter-spacing:var(--track-px8);text-align:right;
  padding:var(--space-4) var(--space-3);border-bottom:var(--bw-1) solid var(--edge);font-weight:400}
@@ -988,13 +993,17 @@ function buCard(st){
   }
   /* cc#1460 (rewritten spec): ONE heading line — the full state name with its triangle + colour
      inline, in vfCard's .vfhd row (h3, spacer, i button) — replacing the old generic h3 +
-     badge-chip double heading the founder screenshotted. The PRICE UP · OI UP sub-text stays
-     under it; the session stamp lives on the bottom .vfasof line, same as Flow. */
+     badge-chip double heading the founder screenshotted. cc#1467 (founder follow-up): the
+     PRICE UP · OI UP descriptor no longer stacks below — it rides the SAME .vfhd row, right
+     after the heading, baseline-tucked ahead of the spacer. Longest combination measured, not
+     assumed: "▼ Long Unwinding" + "PRICE DOWN · OI DOWN" + the 30px i is one line at a 360px
+     viewport with 48px slack (real webfonts, Chromium). The stacked .bustate row is gone with
+     its only consumer. The session stamp lives on the bottom .vfasof line, same as Flow. */
   return '<div class="vpage"><div class="card">'
     + '<div class="vfhd"><h3><span style="color:' + (st.cls === 'w' ? 'var(--volt)' : 'var(--heat)') + '">'
-    + st.mark + '</span> ' + st.h + '</h3><span class="sp"></span>'
+    + st.mark + '</span> ' + st.h + '</h3>'
+    + '<span class="busub">' + st.sub + '</span><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="buGuide()" aria-label="How to read this card">i</button></div>'
-    + '<div class="bustate"><span class="busub">' + st.sub + '</span></div>'
     + body
     + '<div class="vfasof">' + esc(bd.session || 'LIVE 5-MIN') + '</div>'
     + '</div></div>';
