@@ -314,6 +314,90 @@ def _load_rating_breakup(cur, syms):
     return out
 
 
+# ── cc#1488: Portfolio Risk Metrics (session_log 34222) ──────────────────────────────────────────
+RISK_FREE_RATE = 7.0   # % — approx current 10Y India G-Sec. Shown on the card itself, never hidden.
+_RISK_MIN_RET_DAYS = 200   # a holding below this in the trailing window is EXCLUDED (named on card)
+
+
+def _risk_metrics(cur, holdings, port_1y):
+    """cc#1488: beta / annualised std-dev / sharpe / sortino / max-drawdown / r² vs NIFTY50 over
+    the trailing 1y. Portfolio daily return = sum(holding daily return × CURRENT weight) — the
+    same stated simplification the 1y benchmark comparison uses (current weights on each
+    holding's own history, no historical drift). Sharpe/Sortino reuse benchmark.portfolio_1y as
+    THE return figure — one return number everywhere it appears. Holdings with under
+    _RISK_MIN_RET_DAYS of usable returns are excluded BY NAME (never padded, never silent);
+    window_days is the aligned trading days actually used. Returns None when the series simply
+    isn't there — the card then says so instead of showing zeros."""
+    syms = [h["symbol"] for h in holdings]
+    cur.execute("""SELECT symbol, price_date, close FROM raw_prices
+                   WHERE (symbol = ANY(%s) OR symbol = 'NIFTY50')
+                     AND price_date >= CURRENT_DATE - INTERVAL '380 days'
+                   ORDER BY symbol, price_date""", (syms,))
+    series = {}
+    for sym, d, c in cur.fetchall():
+        series.setdefault(sym, []).append((d, _f(c)))
+
+    def _rets(rows):
+        out, prev = {}, None
+        for d, c in rows:
+            if c and prev:
+                out[d] = c / prev - 1.0
+            if c:
+                prev = c
+        return out
+
+    n_rets = _rets(series.get("NIFTY50", []))
+    if len(n_rets) < 30:
+        return None
+    weights = {h["symbol"]: (h["weight"] or 0) / 100.0 for h in holdings}
+    sym_rets, excluded = {}, []
+    for s in syms:
+        r = _rets(series.get(s, []))
+        if len(r) < _RISK_MIN_RET_DAYS:
+            excluded.append(s)
+        else:
+            sym_rets[s] = r
+    if not sym_rets:
+        return None
+    # aligned window: dates where NIFTY50 and EVERY included holding all have a return —
+    # a short-history (but included) holding shortens window_days honestly rather than
+    # contributing fabricated zeros.
+    dates = set(n_rets)
+    for r in sym_rets.values():
+        dates &= set(r)
+    dates = sorted(dates)
+    if len(dates) < 30:
+        return None
+    p = [sum(sym_rets[s][d] * weights.get(s, 0.0) for s in sym_rets) for d in dates]
+    n = [n_rets[d] for d in dates]
+    m = len(dates)
+    mp, mn = sum(p) / m, sum(n) / m
+    cov = sum((p[i] - mp) * (n[i] - mn) for i in range(m)) / (m - 1)
+    var_n = sum((x - mn) ** 2 for x in n) / (m - 1)
+    var_p = sum((x - mp) ** 2 for x in p) / (m - 1)
+    beta = cov / var_n if var_n > 0 else None
+    std_dev = (var_p ** 0.5) * (252 ** 0.5) * 100.0   # annualised, in %
+    downside = [x for x in p if x < 0]
+    dd_dev = None
+    if len(downside) >= 2:
+        mdn = sum(downside) / len(downside)
+        dd_dev = ((sum((x - mdn) ** 2 for x in downside) / (len(downside) - 1)) ** 0.5) * (252 ** 0.5) * 100.0
+    sharpe = ((port_1y - RISK_FREE_RATE) / std_dev) if (port_1y is not None and std_dev > 0) else None
+    sortino = ((port_1y - RISK_FREE_RATE) / dd_dev) if (port_1y is not None and dd_dev and dd_dev > 0) else None
+    curve, peak, mdd = 1.0, 1.0, 0.0
+    for r in p:
+        curve *= (1.0 + r)
+        peak = max(peak, curve)
+        mdd = min(mdd, (curve - peak) / peak)
+    corr = (cov / ((var_p ** 0.5) * (var_n ** 0.5))) if (var_p > 0 and var_n > 0) else None
+    return {
+        "beta": _r(beta), "std_dev": _r(std_dev), "sharpe": _r(sharpe), "sortino": _r(sortino),
+        "max_drawdown": _r(mdd * 100.0), "r_squared": _r(corr * corr) if corr is not None else None,
+        "risk_free_rate": RISK_FREE_RATE, "window_days": m,
+        "excluded": excluded,   # holdings left out for insufficient history — named, never silent
+    }
+
+
 def _replacements(cur, avoid_segments, held_syms):
     """Top-2 GVM peers per segment (latest gvm_history), excluding held names."""
     if not avoid_segments:
@@ -593,6 +677,14 @@ def build_report(cur, pid):
     # ---- (7) benchmark ----
     benchmark = {"portfolio_1y": _r(port_1y), "nifty50_1y": n50, "nifty500_1y": n500}
 
+    # ---- cc#1488: portfolio risk metrics (trailing 1y daily series vs NIFTY50) ----
+    try:
+        risk_metrics = _risk_metrics(cur, holdings, _f(port_1y))
+    except Exception as e:
+        risk_metrics = None   # the card states "unavailable" — never zeros that look like answers
+        import logging
+        logging.getLogger("scorr.hr_report").warning(f"cc#1488 risk_metrics: {e}")
+
     # ---- (8) valuation + (9) yield ----
     segs = sorted({h["segment"] for h in holdings if h["segment"]})
     seg_aggs = _segment_aggs(cur, segs)
@@ -737,6 +829,7 @@ def build_report(cur, pid):
         "cap_bands": {"counts": cap_bands, "weights": cap_w, "insight": cap_insight},
         "quality_bands": {"counts": q_bands, "weights": q_w, "insight": q_insight},
         "benchmark": benchmark,
+        "risk_metrics": risk_metrics,   # cc#1488 (None => card renders "unavailable")
         "valuation": valuation,
         "yield": yield_sec,
         "sector": {"strip": sector_strip, "table": sector_table, "insight": sector_insight},
