@@ -251,7 +251,10 @@ def quality_bullish_basis():
       then split by futures_basis latest-tick basis sign. basis NULL or exactly 0 joins NEITHER
       list (missing/flat never counts as a direction). A zero-row list is a legitimate outcome
       (basis_neg was 0 on the day this shipped) — the card renders that honestly.
-    Rows: {symbol, flow50, day_pct, month_return, sector_month, basis}."""
+    Rows (refinement, task log 11:39): DISPLAY columns cmp (futures close, Buildup's own CMP
+    framing) / day_pct / sector_day (v8_metrics live peer day) / oi_chg_pct (the EXACT Buildup
+    formula, session-last tick); the gating values (flow50, month_return, sector_month, basis)
+    ride along in the payload for transparency + the |basis| default sort but are not shown."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active ORDER BY symbol")
@@ -273,21 +276,38 @@ def quality_bullish_basis():
             """, {"syms": syms})
             prevs = {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
 
+            # cc#1455 refinement (task log 11:39): sector_day joins the read — it is a DISPLAY
+            # column now; month_return/sector_month stay filter-only.
             cur.execute("""
-                SELECT DISTINCT ON (symbol) symbol, month_return, sector_month
+                SELECT DISTINCT ON (symbol) symbol, month_return, sector_month, sector_day
                 FROM v8_metrics WHERE symbol = ANY(%(syms)s)
                 ORDER BY symbol, score_date DESC
             """, {"syms": syms})
             mets = {r[0]: {"mo": (float(r[1]) if r[1] is not None else None),
-                           "sec": (float(r[2]) if r[2] is not None else None)}
+                           "sec": (float(r[2]) if r[2] is not None else None),
+                           "secday": (float(r[3]) if r[3] is not None else None)}
                     for r in cur.fetchall()}
 
+            # cc#1455 refinement: CMP (futures close — the same framing Futures Buildup's FUT
+            # column uses), basis, and OI change %% (the EXACT Buildup formula:
+            # oi_chg/NULLIF(oi_prev,0)*100 at the session's last tick) in one session-bounded
+            # read, the same sess/l shape v10_buildup itself queries.
             cur.execute("""
-                SELECT DISTINCT ON (symbol) symbol, basis
-                FROM futures_basis WHERE symbol = ANY(%(syms)s)
+                WITH sess AS (
+                    SELECT MAX(ts::date) AS d FROM futures_basis
+                    WHERE ts::time BETWEEN '09:15' AND '15:30'
+                )
+                SELECT DISTINCT ON (symbol) symbol, basis, futures_close,
+                       ROUND(oi_chg::numeric / NULLIF(oi_prev, 0) * 100, 1) AS oi_chg_pct
+                FROM futures_basis, sess
+                WHERE symbol = ANY(%(syms)s) AND ts::date = sess.d
+                  AND ts::time BETWEEN '09:15' AND '15:30'
                 ORDER BY symbol, ts DESC
             """, {"syms": syms})
-            basis = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+            fut = {r[0]: {"basis": (float(r[1]) if r[1] is not None else None),
+                          "cmp": (float(r[2]) if r[2] is not None else None),
+                          "oi": (float(r[3]) if r[3] is not None else None)}
+                   for r in cur.fetchall()}
 
         pos, neg = [], []
         for sym in syms:
@@ -308,12 +328,19 @@ def quality_bullish_basis():
             m = mets.get(sym) or {}
             if m.get("mo") is None or m["mo"] <= 0 or m.get("sec") is None or m["sec"] <= 0:
                 continue
-            b = basis.get(sym)
+            fb = fut.get(sym) or {}
+            b = fb.get("basis")
             if b is None or b == 0:
                 continue
-            row = {"symbol": sym, "flow50": round(fr, 4), "day_pct": round(day, 2),
-                   "month_return": round(m["mo"], 2), "sector_month": round(m["sec"], 2),
-                   "basis": round(b, 2)}
+            # cc#1455 refinement: DISPLAY columns are cmp / day_pct / sector_day / oi_chg_pct;
+            # the gating values (flow50, month_return, sector_month, basis) stay in the payload
+            # for transparency and the |basis| default sort, but are not row columns any more.
+            row = {"symbol": sym,
+                   "cmp": fb.get("cmp"), "day_pct": round(day, 2),
+                   "sector_day": (round(m["secday"], 2) if m.get("secday") is not None else None),
+                   "oi_chg_pct": fb.get("oi"),
+                   "flow50": round(fr, 4), "month_return": round(m["mo"], 2),
+                   "sector_month": round(m["sec"], 2), "basis": round(b, 2)}
             (pos if b > 0 else neg).append(row)
 
         pos.sort(key=lambda r: -abs(r["basis"]))
