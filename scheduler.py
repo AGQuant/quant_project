@@ -1882,6 +1882,43 @@ def _bg_yahoo_daily_sync():
             log.error(f"ca forward_heal: {e}")
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result} | index_heal: {heal}")
+        # cc#1489 — HR HOLDINGS PRICE-COVERAGE GUARD, chained for the same reason the GVM coverage
+        # guard chains after the recompute (cc#1095): a wall-clock slot would race the EOD sync it
+        # depends on. The nightly universe is SELECT DISTINCT symbol FROM raw_prices, so a client
+        # holding with ZERO rows (the 30-Aug find: 4 ETFs) can never bootstrap itself — this guard
+        # backfills any such symbol (full 5y, NSE.NS then BSE.BO) and writes the find to
+        # ops_log(hr_holdings_price_gap). It measures and heals holdings coverage only; a guard
+        # failure must never mark the EOD sync bad. Recorded explicitly — a chained block never
+        # passes through _spawn, so record_run would otherwise never fire (cc#841 lesson).
+        _pg_t0 = time.time(); _pg_status, _pg_err = "ok", None
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute('''SELECT DISTINCT h.symbol, MAX(s."BSE Code") AS bse
+                               FROM hr_holdings h
+                               LEFT JOIN raw_prices r ON r.symbol = h.symbol
+                               LEFT JOIN screener_raw s ON s.nse_code = h.symbol
+                               WHERE r.symbol IS NULL GROUP BY h.symbol ORDER BY h.symbol''')
+                gaps = cur.fetchall()
+            if gaps:
+                specs = [{"nse": g[0], "bse": g[1]} for g in gaps]
+                rep = ydu.backfill_new_listings(specs, lookback="5y")
+                with _conn() as conn, conn.cursor() as cur:
+                    cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                                "VALUES (CURRENT_DATE, NOW(), 'hr_holdings_price_gap', "
+                                "'HR_HOLDINGS_PRICE_GAP', %s::jsonb)",
+                                (json.dumps({"missing": [g[0] for g in gaps], "report": rep},
+                                            default=str),))
+                    conn.commit()
+                log.info(f"hr_price_coverage_guard: backfilled {[g[0] for g in gaps]}")
+        except Exception as e:
+            _pg_status, _pg_err = "error", str(e)[:400]
+            log.error(f"cc#1489 hr_price_coverage_guard: {e}")
+        try:
+            import scheduler_master
+            scheduler_master.record_run("hr_price_coverage_guard", _pg_status, error=_pg_err,
+                                        duration_ms=int((time.time() - _pg_t0) * 1000))
+        except Exception as _re:
+            log.warning(f"record_run(hr_price_coverage_guard) failed: {_re}")
     except Exception as e: log.error(f"yahoo_daily: {e}")
     finally: _yahoo_daily_running = False
 
