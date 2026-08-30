@@ -426,7 +426,8 @@ var SHOW_VOL_TILES = false;
 /* cc#1393: btrack/ctrack are gone with THE BOOK · V10 and The Record, the two decks that used
    them — vtrack (VOLATILITY & FLOW) and utrack (buildup states) are untouched. */
 var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null},
-           qtrack:{dots:'qdots', n:0, tmr:null} };   /* cc#1455: Quality Bullish · Basis deck */
+           qtrack:{dots:'qdots', n:0, tmr:null},    /* cc#1455: Quality Bullish · Basis deck */
+           ftrack:{dots:'fdots', n:0, tmr:null} };  /* cc#1457: Volume Flow, stacked -> deck */
 var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
 /* PITCH COMES FROM LAYOUT OFFSETS, NOT FROM A MEASURED WIDTH PLUS THE GAP, and cc#1245 is where
    that stopped being academic. getBoundingClientRect().width returns a SUB-PIXEL number — 324.484
@@ -1272,7 +1273,7 @@ function vfSort(side, key){
   var s = VF_SORT[side];
   if (s.key === key) s.dir = -s.dir;
   else { s.key = key; s.dir = VF_SORT_DEFAULT_DIR[key]; }
-  vfCard(side);
+  vfPaint();   // cc#1457: repaint the whole deck (buSort -> buRepaint contract), not one fixed div
   if (VF_SHEET.open && VF_SHEET.side === side) vfMore(side);   // sheet is open on THIS side — re-render it sorted too
 }
 
@@ -1305,12 +1306,13 @@ function vfChips(){
 }
 
 function vfCard(side){
-  var box = document.getElementById(side === 'bullish' ? 'vfBull' : 'vfBear');
-  if (!box) return;
+  /* cc#1457: RETURNS the page html (the buCard/qbCard contract) instead of writing a fixed div —
+     the deck assembler owns the DOM now. The ticks chips MOVED OUT of the bullish head into
+     flowDeck()'s own row above the swipe: they drive BOTH pages' data, so they must stay visible
+     whichever page is in view. */
   var head = '<div class="vfhd"><h3>' + (side === 'bullish' ? 'Bullish Flow' : 'Bearish Flow')
     + '</h3><span class="sp"></span>'
-    + '<button type="button" class="vfib" onclick="vfGuide()" aria-label="How to read this card">i</button></div>'
-    + (side === 'bullish' ? vfChips() : '');
+    + '<button type="button" class="vfib" onclick="vfGuide()" aria-label="How to read this card">i</button></div>';
   var body;
   if (VF.err){
     body = '<div class="unavail">Volume flow unavailable: ' + esc(VF.err) + '</div>';
@@ -1329,11 +1331,40 @@ function vfCard(side){
            : '');
     }
   }
-  box.innerHTML = head + body
-    + '<div class="vfasof">' + esc(vfAsof()) + (VF.loading ? ' · updating…' : '') + '</div>';
+  return '<div class="vpage"><div class="card">' + head + body
+    + '<div class="vfasof">' + esc(vfAsof()) + (VF.loading ? ' · updating…' : '') + '</div>'
+    + '</div></div>';
 }
 
-function vfPaint(){ vfCard('bullish'); vfCard('bearish'); }
+function flowDeck(){
+  /* cc#1457: the same vswipe/triple-set/DK shape buildupDeck() and qbbDeck() use — Volume Flow
+     was the one deck on this page still stacked. Chips row sits ABOVE the swipe, outside it. */
+  var cards = ['bullish', 'bearish'].map(vfCard);
+  DK.ftrack.n = cards.length;
+  var set = cards.join('');
+  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  return '<div id="vfchiprow">' + vfChips() + '</div>'
+       + '<div class="vswipe"><div class="vswipe-t" id="ftrack" onscroll="fWrap()">'
+       + set + set + set + '</div><div class="rpager"><div class="vdots" id="fdots">' + dots + '</div>'
+       + '<span class="clpg" id="fpg">1 / 2 · BULLISH FLOW</span></div></div>';
+}
+
+function vfPaint(){
+  /* cc#1457: deck-rebuild (the buRepaint/qbRepaint contract) — track + chips row, both live. */
+  var el = document.getElementById('ftrack');
+  if (el){
+    var cards = ['bullish', 'bearish'].map(vfCard), set = cards.join('');
+    el.innerHTML = set + set + set;
+  }
+  var ch = document.getElementById('vfchiprow');
+  if (ch) ch.innerHTML = vfChips();
+}
+function fLabel(i){
+  var el = document.getElementById('fpg');
+  if (el) el.textContent = ((i || 0) + 1) + ' / 2 · ' + ((i || 0) === 0 ? 'BULLISH FLOW' : 'BEARISH FLOW');
+}
+function fWrap(){ dkWrap('ftrack'); fLabel(dkDots('ftrack')); }
+function fPark(){ dkPark('ftrack'); fLabel(dkDots('ftrack')); }
 
 var VF_SHEET = { open: false, scrollY: 0 };
 
@@ -1454,14 +1485,14 @@ function render(){
   </div>` : ''}
 
   <div class="eyebrow">VOLUME FLOW · GREEN vs RED</div>
-  <div class="card" id="vfBull"><div class="unavail">Loading volume flow…</div></div>
-  <div class="card" id="vfBear"><div class="unavail">Loading volume flow…</div></div>`;
-  /* render() rebuilds #app wholesale every 5 minutes, which wipes the two flow shells — repaint
-     them from VF.data straight away so a refresh never blanks the cards while the fetch is out. */
-  vfPaint();
+  ${flowDeck()}`;
+  /* cc#1457: flowDeck() renders from the current VF state directly inside the template, so a
+     5-minute render() rebuild never blanks the deck while a fetch is out; fPark() below re-parks
+     the fresh track on the middle set (render() reset its scroll). */
+  fPark();
 }
 
-async function boot(){ await loadAll(); render(); vPark(); uPark(); qPark(); vfLoad(); }   /* cc#1455: qPark parks the new deck */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
+async function boot(){ await loadAll(); render(); vPark(); uPark(); qPark(); fPark(); vfLoad(); }   /* cc#1455: qPark · cc#1457: fPark — every deck parks on the middle set */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
