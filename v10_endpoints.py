@@ -828,9 +828,14 @@ def v10_buildup(limit: int = 15):
             rows = cur.fetchall()
             # cc#1440: the RVOL/VOL P pair, both via rvol_engine's batch reads (one derivation).
             from rvol_engine import live_rvol_batch, closing_rvol_batch
+            # cc#1454: Vol D (Delivery Ratio) via the SAME shared function Volume Flow and the
+            # VolumePanel use (volume_flow_endpoints.deliv_ratio_batch, cc#1444 form) — never a
+            # third copy. Replaces BASIS in the card's display; basis stays in the payload.
+            from volume_flow_endpoints import deliv_ratio_batch
             _syms = [r[0] for r in rows]
             rvl = live_rvol_batch(cur, _syms) if _syms else {}
             vpb = closing_rvol_batch(cur, _syms) if _syms else {}
+            dlv = deliv_ratio_batch(cur, _syms) if _syms else {}
     except Exception as e:
         _log_buildup_error(e)   # cc#1448: capture the real traceback — see helper below
         raise HTTPException(500, f"v10_buildup failed: {e}")
@@ -855,6 +860,7 @@ def v10_buildup(limit: int = 15):
                 "basis": float(basis) if basis is not None else None,
                 "rvol": rvl.get(sym),                                # cc#1440: live RVOL
                 "vol_p": (_vp["value"] if _vp else None),            # cc#1440 (V2): yesterday's RVOL at close
+                "vol_d": dlv.get(sym),                               # cc#1454: Delivery Ratio (shared fn)
                 "signal": sig}
 
     # cc#1448: the post-query half now sits under the SAME labeled guard — before this, an
