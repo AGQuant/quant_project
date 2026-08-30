@@ -104,6 +104,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
  white-space:nowrap;transform:translateX(-50%);pointer-events:none}
 .oiwall.cw{top:0;color:var(--heat)}
 .oiwall.pw{bottom:0;color:var(--volt)}
+/* cc#1468: MAX PAIN rides the top strip in the bar's own amber; .stack is the collision rung
+   (top:13px, the ce-delta line) for when max pain sits beside the call wall — see the builder. */
+.oiwall.mpw{top:0;color:var(--amber,#f5b94a)}
+.oiwall.mpw.stack{top:13px}
 .oichg{position:absolute;transform:translateX(-50%);font-family:'JetBrains Mono';font-size:var(--type-8);
   letter-spacing:var(--track-px8);white-space:nowrap;pointer-events:none}
 .oichg.ce{top:13px;color:var(--heat)}
@@ -113,6 +117,14 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    Same absolute positioning and the same (i+0.5)/count centring the wall tags use, so a number
    sits on the column it belongs to rather than half a column off. Sparse by construction: only
    the three strikes that carry meaning, deduped and thinned — see the builder. */
+/* cc#1468: the Spot label's own row just under the bars — .oix's grammar (absolute, centred,
+   type-8 mono, edge-clamped) in the dashed line's aqua, anchored to the same interpolated x. */
+.oisplb{position:relative;height:12px;margin-top:var(--space-2)}
+.oisplb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+ font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
+ color:var(--aqua);pointer-events:none}
+.oisplb span.lo{transform:none;left:0}
+.oisplb span.hi{transform:none;left:auto;right:0}
 .oixs{position:relative;height:12px;margin-top:var(--space-3)}
 .oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
  font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
@@ -129,7 +141,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .asof.stale{color:var(--amber)}
 /* cc#1361 · this card's own text chrome, one type step up from the shared classes */
 .oiasof{font-size:var(--type-10)}
-.oird.oifacts{font-size:var(--type-105)}
+/* cc#1468: .oird.oifacts is gone with the footer it styled — the facts live on the chart now. */
 /* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
 .plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
 .prg{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-5) var(--space-8);
@@ -575,11 +587,19 @@ function oiCard(name, oi, mp){
       + '</div>';
   }).join('');
   /* the dashed spot line, placed by interpolating spot across the rendered strike span rather than
-     snapped to the nearest column — snapping would draw spot ON a strike it is not at. */
-  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '';
+     snapped to the nearest column — snapping would draw spot ON a strike it is not at.
+     cc#1468: the line gets a label on its own row just under the bars, anchored to the SAME
+     interpolated left% — and the (live)/(prev close) qualifier reuses the `basis` conditional
+     the old footer carried, never a hardcoded "(live)". Edge clamp mirrors .oix.lo/.hi. */
+  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '', spotLb = '';
   if(oi.spot != null && hi > lo){
     var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
     spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+    spotLb = '<div class="oisplb"><span'
+      + (f * 100 < 8 ? ' class="lo"' : f * 100 > 92 ? ' class="hi"'
+         : ' style="left:' + (f * 100).toFixed(2) + '%"')
+      + '>Spot ' + num(oi.spot) + ' (' + basis + ')</span></div>';
   }
   /* the two wall tags, placed on their own columns. The x of column i is the centre of its share
      of the track, which is (i + 0.5) / count — not i / count, or every tag would sit a half-column
@@ -595,10 +615,23 @@ function oiCard(name, oi, mp){
     + wallWord(callWall, 'ce_chg', thCls.ce) + '</div>';
   if(pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL'
     + wallWord(putWall, 'pe_chg', thCls.pe) + '</div>';
+  /* cc#1468: MAX PAIN tag above the amber bar — CALL WALL's own convention (colPct centring,
+     .oiwall grammar) in the bar's own amber. Max pain very often IS the call wall's neighbour,
+     so when the two top tags would land closer than the page's 18% legibility rule the MAX PAIN
+     tag drops to the second rung (the ce delta labels' top:13px), and any ce delta on that
+     column steps aside — one label per spot, same principle as the strike-label thinning. */
+  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
+  var mpTagStack = false;
+  if(mpI >= 0){
+    mpTagStack = (cwI >= 0 && !ceDead && Math.abs(Number(colPct(mpI)) - Number(colPct(cwI))) < 18);
+    tags += '<div class="oiwall mpw' + (mpTagStack ? ' stack' : '') + '" style="left:'
+      + colPct(mpI) + '%">MAX PAIN</div>';
+  }
   if(hasCh){
     [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
       rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
           .filter(function(m){ return m.c != null && Math.abs(m.c) >= sd[1]; })
+          .filter(function(m){ return !(sd[2] === 'ce' && mpTagStack && m.i === mpI); })
           .sort(function(a, b){ return Math.abs(b.c) - Math.abs(a.c); })
           .slice(0, 3)
           .forEach(function(m){
@@ -613,8 +646,7 @@ function oiCard(name, oi, mp){
      numbers collide into an unreadable smear, so a label closer than 18% of the track to the one
      before it is dropped. Fewer, legible labels beat three that overlap; the readout line below
      still carries all three numbers, so nothing is lost by dropping one from the axis. */
-  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
-  var picked = [], xs = '';
+  var picked = [], xs = '';   /* mpI already found above for the MAX PAIN tag (cc#1468) */
   [[peDead ? -1 : pwI, 'pw'], [mpI, 'mp'], [ceDead ? -1 : cwI, 'cw']].forEach(function(p){
     if(p[0] < 0) return;
     var v = Number(rows[p[0]].strike);
@@ -633,16 +665,16 @@ function oiCard(name, oi, mp){
   });
   xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
   var ao = chainAsOf(oi.chain_tick);
-  /* cc#1355 · the as-of line carries the whole context: tick · vs open · PCR (32043) */
-  /* cc#1361 · short stamp: '26-Aug 15:35 · vs 09:20 · PCR 1.05' (founder 08:43) — falls back to
-     the long chainAsOf text only when the tick is missing entirely. */
+  /* cc#1361 · short stamp (founder 08:43) — falls back to the long chainAsOf text only when the
+     tick is missing entirely. cc#1468: the '· vs 09:20' baseline segment is GONE from the stamp
+     — the founder finds it confusing — so it reads '28-Aug 15:35 · PCR 1.10'. Only the TEXT is
+     removed: baseline_tick and the brightness encoding it drives on the bars are untouched. */
   var aoTxt = (function(){
     var t = String(oi.chain_tick || '');
     if(t.length < 16) return ao.txt;
     var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
   })()
-    + (oi.baseline_tick && hasCh ? ' · vs ' + String(oi.baseline_tick).slice(11, 16) : '')
     + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
   var story = '';
   if(hasCh){
@@ -694,33 +726,41 @@ function oiCard(name, oi, mp){
     /* 32043 honesty rule 3: no baseline -> deltas omitted AND the card says so */
     story = '<div class="oird">no 09:20 baseline this session — OI change hidden</div>';
   }
-  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  /* cc#1468: the cc#1361 MP/spot/PW/CW facts footer is REMOVED — every number it carried now
+     lives ON the chart (MAX PAIN tag + amber strike label, the Spot label under the dashed line,
+     the wall tags with their strike labels), so the line had become a restatement. Grepped
+     before deleting: nothing else on this page read it. The header gains the page's vfib →
+     oiGuide() sheet, in the established .vfhd row; the as-of stamp stays, ahead of the i. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-    + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>'
+    + '<div class="vfhd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
+    + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
+    + '<button type="button" class="vfib" onclick="oiGuide()" aria-label="How to read this card">i</button></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + spotLb
     + xs
-    /* cc#1261 · NUMBERS ONLY, ONE LINE. The commentary sentence is gone and the <br> that split
-       the readout in two goes with it: the founder asked for the key numbers, not a paragraph
-       under them, and MP / spot / put wall / call wall / expiry is the whole of what he reads.
-       THE STALENESS SIGNAL DID NOT NEED BUILDING - the as-of stamp top-right already carries
-       .stale, and .asof.stale is already amber, so removing the sentence loses no information at
-       all. It was saying in a sentence what the stamp beside it was already saying in a colour,
-       and the sentence additionally hardcoded a date ("21-Aug has no rows at all") that would
-       have gone stale and started lying on its own. */
-    /* cc#1361 · footer, founder 08:43: line 1 = the facts one step larger (expiry dropped from
-       the card face — it lives in Index Intel), line 2 = the cc#1355 story, then the shortened
-       gap note only on a one-sided tick. Em-dash honesty (cc#1354) unchanged. */
-    + '<div class="oird oifacts">'
-    + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
-    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b><span style="font-size:.8em"> (' + basis + ')</span>'
-    + ' · PW <b class="num">' + (peDead ? '—' : num(putWall.strike)) + '</b>'
-    + ' · CW <b class="num">' + (ceDead ? '—' : num(callWall.strike)) + '</b>'
-    + '</div>'
     + story
     + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
         + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '')
     + '</div></div>';
+}
+
+/* cc#1468 · Max Pain's how-to-read sheet — the one vfSheet shell, same as Buildup/Basis/Flow.
+   The baseline/09:20 concept gets ONE clause (the founder had its stamp text removed as
+   confusing — re-explaining it at length here would rebuild the confusion one level down). */
+function oiGuide(){
+  vfSheet('<div class="vfsh">How to read Max Pain</div><div class="vfg">'
+    + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
+    + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
+    + 'brightness shows change since the morning\'s opening levels.</p>'
+    + '<p><b>MAX PAIN.</b> The amber bar and tag. The strike where an expiry right now would pay '
+    + 'option holders the least — the point of least total payout by option writers.</p>'
+    + '<p><b>CALL WALL / PUT WALL.</b> The single biggest open-interest strike on the call side '
+    + 'and on the put side.</p>'
+    + '<p><b>Spot.</b> The dashed line — where the index trades now, or the previous close when '
+    + 'the live feed is off. The label under it says which.</p>'
+    + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
+    + 'contracts are open than calls.</p>'
+    + '</div>');
 }
 
 /* ── the pivot ladder ───────────────────────────────────────────────────────────────────── */
