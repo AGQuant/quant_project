@@ -169,12 +169,12 @@
       +'<div style="font-size:22px;font-weight:800;font-family:\'Sora\',sans-serif;color:'+col+'">'+vs+'</div>'
       +'<div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.35">'+sub+'</div></button>';
   }
-  /* cc#1438 (VOLUME_METRICS_CANON_V1.1, session_log 33832/33833): tiles 2/3 swap to the canon.
-     VolX (5-session time-matched cum ratio) and Vol 3D/21D are KILLED as displayed tiles --
-     replaced by VOL P (v8_metrics vol_ratio at T-1: previous completed day vs its own trailing
-     10-day avg) and VOL TREND (momentum_scores 20d/60d avg volume, the GVM Momentum p8 input,
-     read never recomputed). RVOL (tile 1) is unchanged. E.vol_p/E.vol_trend arrive as
-     {value, asof} from /api/deriv-metrics (same push, backend half). */
+  /* cc#1438 swapped tiles 2/3 to the canon; cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843)
+     REDEFINES tile 2's VOL P: yesterday's RVOL at the closing slot (same profile formula as
+     tile 1's live RVOL, read once for the last completed session) -- no longer the v8_metrics T-1
+     vol_ratio row. Tile 3 VOL TREND (momentum_scores 20d/60d, GVM p8 input, read never
+     recomputed) and tile 1 RVOL are unchanged. E.vol_p/E.vol_trend arrive as {value, asof} from
+     /api/deriv-metrics. */
   function _volTilesHtml(E,M){
     E=E||{}; M=M||{}; var rv=E.rvol||{};
     var rvv=(rv&&rv.rvol!=null)?rv.rvol:null;
@@ -185,13 +185,13 @@
     var vp=E.vol_p||{}, vt=E.vol_trend||{};
     return '<div style="display:flex;gap:6px">'
       + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
-      + _volTile('VOL P',(vp.value!=null?vp.value:null),'prev day vs 10d avg'+(vp.asof?(' \u00b7 '+newsEsc(vp.asof)):''),'volp','')
+      + _volTile('VOL P',(vp.value!=null?vp.value:null),'prev close RVOL'+(vp.asof?(' \u00b7 '+newsEsc(vp.asof)):''),'volp','')
       + _volTile('VOL TREND',(vt.value!=null?vt.value:null),'20d vs 60d avg volume','voltrend','')
       + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
   }
   function qaVolExplain(k){
     var t={rvol:'RVOL = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
-           volp:'VOL P = the previous completed day\u2019s total volume \u00f7 its own trailing 10-day average. The honest completed-day read \u2014 never a partial intraday value.',
+           volp:'VOL P = yesterday\u2019s RVOL read at the close \u2014 the prior session\u2019s full-day volume \u00f7 the 21-session average full-day volume. One fixed number per day; same maths as RVOL, read at yesterday\u2019s close instead of live.',
            voltrend:'VOL TREND = 20-day average volume \u00f7 60-day average volume. Is participation building or fading over weeks \u2014 the same input GVM Momentum scores.'}[k]||'';
     var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
   }

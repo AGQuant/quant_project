@@ -10,13 +10,14 @@ DATA HONESTY RULES BUILT IN:
     (ENGINE_LIVENESS_RULE corollary).
   * A symbol with fewer than N/2 bars in the window, or zero total volume across it, is
     EXCLUDED — a flow ratio over a thin or dead window is a fabricated signal.
-  * rvol (cc#1438, VOLUME_METRICS_CANON_V1.1): today's cumulative volume at the symbol's latest
-    tick ÷ rvol_profiles.avg_cum_vol at that SAME slot — the rvol_engine profile read, batch
-    form. The profile math itself is NOT reimplemented (build_profiles owns it); a symbol whose
-    profile is missing or has < MIN_SESSIONS sessions is null — never a fake pace. One stated
-    deviation from live_rvol's per-symbol read: no per-symbol cumulative-counter detection here —
-    this endpoint's own existing volume maths already SUM per-bar fyers_eq volume, and the batch
-    read stays consistent with that.
+  * rvol (cc#1438, upgraded cc#1440): today's cumulative volume at the symbol's latest tick ÷
+    rvol_profiles.avg_cum_vol at that SAME slot — served by rvol_engine.live_rvol_batch. The
+    profile math is the engine's (build_profiles owns it); a symbol whose profile is missing or
+    has < MIN_SESSIONS sessions is null — never a fake pace. cc#1440 retired Sprint A's inline
+    SQL SUM here for the engine's cumulative-aware batch, removing the one deviation Sprint A
+    had to state.
+  * vol_p (cc#1440, CANON V2): yesterday's RVOL at the closing slot — the same profile formula
+    as rvol, read for the last completed session. Served by rvol_engine.closing_rvol_batch.
   * deliv_ratio (cc#1438): latest delivery_eod.deliv_qty ÷ its trailing 20-day average — the
     EXACT QSR vold derivation (qsr_engine dl CTE, extracted verbatim: rn=1 vs AVG rn 2..21),
     not a third copy of the formula. Null when either side is absent.
@@ -49,7 +50,7 @@ def volume_flow(ticks: int = 100):
     """Bullish/bearish volume-flow lists over the last `ticks` 5-min bars per symbol.
 
     Response: {as_of, ticks, universe, shown, excluded_thin, bullish: [...], bearish: [...]}
-    Each row: {symbol, flow_ratio, day_chg_pct, week_chg_pct, fut_chg_pct, rvol, deliv_ratio,
+    Each row: {symbol, flow_ratio, day_chg_pct, week_chg_pct, fut_chg_pct, rvol, vol_p, deliv_ratio,
                green_vol, red_vol}. Qualifiers: bullish flow_ratio >= 0.60 (desc),
     bearish flow_ratio <= 0.40 (asc). Symbols between the bands are computed but not listed —
     a 50/50 tape is noise, not signal. (cc#1438: vol_x/vol_d keys retired for rvol/deliv_ratio
@@ -137,32 +138,15 @@ def volume_flow(ticks: int = 100):
                 """, {"syms": syms, "today": today, "prev": prev_d})
                 fut = {r[0]: {"now": r[1], "prev": r[2]} for r in cur.fetchall()}
 
-            # ── cc#1438 RVOL: today's cum volume at each symbol's own latest slot ÷ the
-            # rvol_profiles avg at that SAME slot. Batch form of rvol_engine.live_rvol's read —
-            # the profile math is the engine's (read from its table), never recomputed here.
-            # MIN_SESSIONS is imported from the engine so the sufficiency gate cannot drift.
-            from rvol_engine import MIN_SESSIONS
-            rvl = {}
-            if today is not None:
-                cur.execute("""
-                    WITH cum AS (
-                        SELECT symbol, SUM(volume) AS today_cum, MAX(ts)::time AS slot
-                        FROM intraday_prices
-                        WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
-                          AND ts::date = %(today)s
-                        GROUP BY symbol
-                    )
-                    SELECT c.symbol, c.today_cum, p.avg_cum_vol, p.sessions_used
-                    FROM cum c
-                    LEFT JOIN rvol_profiles p
-                           ON p.symbol = c.symbol AND p.slot_time = c.slot
-                """, {"syms": syms, "today": today})
-                for r in cur.fetchall():
-                    _cumv, _avg, _sess = (float(r[1] or 0), float(r[2]) if r[2] is not None else None,
-                                          int(r[3] or 0))
-                    rvl[r[0]] = (round(_cumv / _avg, 2)
-                                 if (_avg and _avg > 0 and _sess >= MIN_SESSIONS and _cumv > 0)
-                                 else None)
+            # ── cc#1438 RVOL / cc#1440 VOL P: both read through rvol_engine's own batch forms
+            # (live_rvol_batch / closing_rvol_batch — CANON V2, session_log 33843: one formula,
+            # two read points). cc#1440 also RETIRES this endpoint's Sprint-A inline SQL (a plain
+            # SUM): the engine batch is cumulative-aware (cc#680), which removes the one deviation
+            # Sprint A had to state. Profile math stays the engine's; nothing recomputed here.
+            from rvol_engine import live_rvol_batch, closing_rvol_batch
+            rvl = live_rvol_batch(cur, syms)
+            vpb = closing_rvol_batch(cur, syms)
+            vpl = {s: (v["value"] if v else None) for s, v in vpb.items()}
 
             # ── cc#1438 DELIV: latest deliv_qty ÷ trailing 20-day avg — the EXACT QSR vold
             # derivation (qsr_engine dl CTE, rn=1 vs AVG rn 2..21), extracted, not re-derived.
@@ -208,6 +192,7 @@ def volume_flow(ticks: int = 100):
                 "week_chg_pct": round(week, 2) if week is not None else None,
                 "fut_chg_pct": round(fchg, 2) if fchg is not None else None,
                 "rvol": rvl.get(sym),               # cc#1438: canon metric 1 (was vol_x)
+                "vol_p": vpl.get(sym),              # cc#1440 (canon V2): yesterday's RVOL at close
                 "deliv_ratio": dlv.get(sym),        # cc#1438: canon metric 4 (was vol_d)
                 "green_vol": f["green"], "red_vol": f["red"],
             })
