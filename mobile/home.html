@@ -1317,27 +1317,8 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
 .dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
 .dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
-/* cc#1404 · posbar's own margin-bottom is the "range bar -> label row" breathing-room gap the
-   founder asked for (4px -> 20px). Everything else about this rule (position/height/zone bars)
-   is do-not-touch per the task's own scope -- untouched. */
-.posbar{position:relative;height:6px;margin:var(--space-12) 2px var(--space-20);border-radius:3px;
-  background:var(--panel2)}
-.posbar i{position:absolute;top:0;height:100%}
-.posbar .zr{background:var(--red);opacity:.32}
-.posbar .zg{background:var(--grn);opacity:.32}
-.posbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
-.posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
-  border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
-/* cc#1404 · height 26px -> 34px: room for .poslb b's own +2-notch bump (below) without crowding
-   .poslb em, which stays at its existing literal 8px -- not on the file's --type-* scale, so it
-   is outside this task's own "on the existing --type-* scale" instruction and is left alone. */
-.poslb{position:relative;height:34px;margin:0 2px;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9)}
-.poslb span{position:absolute;top:0;text-align:center}
-/* cc#1404 · +2 notches on the round --type-* steps, read from the file before guessing:
-   --type-10 (10px) -> --type-12 (12px). */
-.poslb b{display:block;font-weight:800;font-size:var(--type-12);color:var(--txt,#E9EEFB)}
-.poslb em{display:block;font-style:normal;font-size:8px;color:var(--mut);letter-spacing:.5px}
+/* cc#1477: .posbar/.poslb (the FUT range bar, cc#1386/cc#1404) removed with posRangeBar() —
+   the writing card shows options only. .decwrap onward is the OPTIONS decay bar, untouched. */
 .decwrap{margin:var(--space-12) 2px var(--space-4)}
 .decbar{position:relative;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
 .decbar i{display:block;height:100%;background:var(--grn)}
@@ -1349,12 +1330,7 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    task's scope) -- left completely unchanged so Options is not affected. */
 .legfoot{text-align:right;margin-top:var(--space-6);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10)}
-/* cc#1404 · .posfoot is the FUTURES-only override (posRangeBar() alone renders it, see
-   renderHeroPositions()) for the "label row -> cmp summary row" breathing-room gap (6px -> 20px)
-   and the same +2-notch font bump (--type-10 -> --type-12) as .poslb b, above. Placed after
-   .legfoot in source order so the cascade tie (equal 0,1,0 specificity) resolves in its favour
-   for elements carrying both classes, without touching the shared .legfoot rule itself. */
-.posfoot{margin-top:var(--space-20);font-size:var(--type-12)}
+/* cc#1477: .posfoot (the FUTURES-only footer override, cc#1404) removed with posRangeBar(). */
 .legdiv{border-top:var(--bw-1) solid var(--line);margin-top:var(--space-14)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
@@ -2796,11 +2772,15 @@ function loadIndexBook(){
    founder's own words were "FUT is already the modal's default", and passing it outright makes
    that true regardless of whatever the modal's last-used tab happened to be, not just on a clean
    load. */
-function openV10(ev, sym, leg){
+function openV10(ev, sym, leg, writingOnly){
   if (ev){ ev.stopPropagation(); ev.preventDefault(); }
   V10.sym = sym || 'NIFTY50';
   V10.win = null; V10.mfold = {};   // cc#928: fresh index, fresh window
   if (leg) V10.leg = leg;
+  /* cc#1477: VIEW LOGS on the writing card opens the OPTIONS log with the FUTURES/OPTIONS
+     switch hidden (v10Log reads this). Scoped to THIS open — cleared on close, so every other
+     path into the modal keeps its tabs exactly as before. */
+  V10.legLock = !!writingOnly;
   var ov = document.getElementById('v10ov');
   if (ov) ov.classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -2811,6 +2791,7 @@ function closeV10(){
   if (ov) ov.classList.remove('open');
   document.body.style.overflow = '';
   V10.data = null; V10.sel = null;
+  V10.legLock = false;   // cc#1477: the leg switch comes back for every other caller
 }
 function setV10(sym){
   if (V10.sym === sym) return;
@@ -2880,120 +2861,19 @@ var POS_SYMS = [
   { key: 'NIFTY50', label: 'NIFTY' },
   { key: 'BANKNIFTY', label: 'BANKNIFTY' }   // cc#1422: was 'BANK NIFTY' -- one word, matching NIFTY's own pill styling and the symbol everywhere else on this card
 ];
-var POS = { sym: 'NIFTY50', data: {} };   // cc#1386: which symbol the merged card is showing
-function posToggleHtml(){
-  return POS_SYMS.map(function(s){
-    return '<button class="' + (POS.sym === s.key ? 'on' : '') + '" onclick="posSetSym(\'' + s.key + '\')">'
-      + s.label + '</button>';
-  }).join('');
-}
-/* cc#1386: naming/no-op-guard mirrors ibkSetSym()'s own identical pattern (cc#1384), which itself
-   mirrors setV10()'s -- one reader who knows any of the three knows all of them. */
-function posSetSym(sym){
-  if (POS.sym === sym) return;
-  POS.sym = sym;
-  renderHeroPositions();
-}
-/* cc#1386: CMP for the FUT range bar -- confirmed by reading mobile_v10chart's own source this
-   session that it carries NO live index level anywhere in trades[]. TAPE.rows (the SAME d.ticker
-   array the top ticker strip and idxFooter() already read, set once at initial paint above --
-   "TAPE.rows = d.ticker || [];") already has it. Reused, not re-fetched. */
-function posCmp(symKey){
-  var name = symKey === 'NIFTY50' ? 'NIFTY' : symKey;
-  var row = (TAPE.rows || []).filter(function(x){ return x && x.name === name; })[0];
-  return (row && row.price != null) ? Number(row.price) : null;
-}
+var POS = { data: {} };   /* cc#1477: both indices render stacked now — no selected-symbol state.
+   posToggleHtml()/posSetSym() (the NIFTY/BANKNIFTY pills) and posCmp() (the FUT range bar's CMP
+   read) are REMOVED with their only consumers: the toggle is gone per the card (both blocks show
+   at once) and the FUTURES block is gone with posRangeBar() below. Grep-confirmed single callers
+   before removal — the cc#1386 dead-code-audit rule, applied the same way it was applied then. */
 function posPnl(v){
   if (v == null) return '&mdash;';
   return (v >= 0 ? '+' : '−') + '₹' + Math.abs(Math.round(v)).toLocaleString('en-IN');
 }
-/* cc#1386 · FUT LEG -- live open-position range bar (stop-entry-cmp-target). Zones are derived
-   from stop/target ALONE, never a hardcoded LONG/SHORT shape: for a LONG, lo=stop/hi=target, so
-   the loss zone touches stop (left) and the profit zone touches target (right); for a SHORT lo/hi
-   swap, so the SAME "loss zone touches stop, profit zone touches target" rule now draws them on
-   the opposite sides. Checked against BOTH of today's real open rows (NIFTY50 LONG, BANKNIFTY
-   SHORT) -- the SHORT geometry is what showed the design ref's own LONG-example percentages were
-   a hand approximation rather than exact proportional math (matches the ref's SHORT example to
-   the decimal place; does not match its LONG one). Implemented as real proportional math here,
-   not copied from either example -- see this task's own result for the numbers.
-   CMP is CLAMPED for the DOT's position only -- the real, unclamped value stays in the footer
-   text, same "visual clamp, real number in text" rule cc#1379's PCR gauge already established.
-   TODAY'S REAL EDGE CASE (BANKNIFTY SHORT, cmp past stop) is exactly what beyondStop below is
-   for -- confirmed against the live row, not just the ref's own worked illustration of it. */
-function posRangeBar(fut, cmp){
-  if (!fut || fut.stop == null || fut.target == null){
-    return '<div class="unavail">No open futures position for this symbol.</div>';
-  }
-  var isLong = fut.side === 'BUY';
-  var stop = Number(fut.stop), target = Number(fut.target), entry = Number(fut.entry_price);
-  var lo = isLong ? stop : target, hi = isLong ? target : stop;
-  var pct = function(x){ return hi === lo ? 50 : (x - lo) / (hi - lo) * 100; };
-  var stopPct = pct(stop), targetPct = pct(target), entryPct = pct(entry);
-  var redLeft = Math.min(stopPct, entryPct), redWidth = Math.abs(entryPct - stopPct);
-  var grnLeft = Math.min(entryPct, targetPct), grnWidth = Math.abs(targetPct - entryPct);
-  var cmpRaw = (cmp == null) ? null : pct(cmp);
-  var cmpClamped = (cmpRaw == null) ? null : Math.max(0, Math.min(100, cmpRaw));
-  var beyondStop = cmpRaw != null && ((stopPct === 0 && cmpRaw < 0) || (stopPct === 100 && cmpRaw > 100));
-  var beyondTarget = cmpRaw != null && ((targetPct === 0 && cmpRaw < 0) || (targetPct === 100 && cmpRaw > 100));
-  var lbl = function(pos, val, tag){
-    var style = (pos <= 0) ? 'left:0' : (pos >= 100) ? 'right:0;text-align:right'
-      : 'left:' + pos.toFixed(2) + '%;transform:translateX(-50%)';
-    return '<span style="' + style + '"><b>' + px(val) + '</b><em>' + tag + '</em></span>';
-  };
-  var labels = lbl(stopPct, stop, 'stop') + lbl(entryPct, entry, 'entry');
-  /* cmp's own label is DROPPED, never overlapped, in TWO cases -- the real value always still
-     reaches the screen via the footer line below, never silently lost:
-     1. the dot is clamped (existing rule, matches the design ref's own second state).
-     2. cmp sits too close to another label to fit without touching it -- a REAL collision found
-        by measuring rendered label rects on today's own NIFTY row (entry 33.33%, cmp 40.22% --
-        only 6.9 points apart), not a theoretical worry: two 36px-wide centred labels need roughly
-        14% separation to clear each other at this card's narrowest tested width (320px, ~280px
-        usable), so MIN_LABEL_GAP is set from that measurement, not guessed. Checked against ALL
-        three other labels (stop/entry/target), not just entry, since cmp can in principle land
-        near any of them.
-     cc#1404 RE-DERIVED, same method: the +2-notch font bump on .poslb b (--type-10 -> --type-12,
-     this same task) widened each label from ~36px to ~43px, which made 14 genuinely unsafe --
-     re-measured at 320px (~260px usable in this build) found real overlap at gap=16 (-1.77px)
-     and only a wafer-thin 0.54px clearance at gap=17, both confirmed by rendering the exact
-     boundary case, not estimated. 19 is the new value: comfortably clear (6.32px) at the tightest
-     boundary tested, same relative safety margin cc#1386's own 14 carried over its computed
-     12.86 minimum. */
-  var MIN_LABEL_GAP = 19;
-  var tooClose = cmpRaw != null && [stopPct, entryPct, targetPct].some(function(p){
-    return Math.abs(cmpClamped - p) < MIN_LABEL_GAP;
-  });
-  if (cmpRaw != null && !beyondStop && !beyondTarget && !tooClose) labels += lbl(cmpClamped, cmp, 'cmp');
-  labels += lbl(targetPct, target, 'target');
-  var points = (cmp == null) ? null : (isLong ? (cmp - entry) : (entry - cmp));
-  var pnl = (points == null || fut.lot_size == null) ? null : points * fut.lot_size;
-  var footLeft;
-  if (cmp == null){
-    footLeft = '<span style="color:var(--mut)">cmp unavailable</span>';
-  } else if (beyondStop){
-    footLeft = '<span style="color:var(--red)">cmp ' + px(cmp) + ' · stop breached</span>';
-  } else if (beyondTarget){
-    footLeft = '<span style="color:var(--grn)">cmp ' + px(cmp) + ' · target exceeded</span>';
-  } else {
-    // cc#1386: whenever the bar's own cmp label was dropped for crowding (not a breach), the
-    // number moves here instead of vanishing -- same rule as the breach cases above, just a
-    // different reason for the drop.
-    footLeft = '<span style="color:var(--mut)">' + (tooClose ? 'cmp ' + px(cmp) + ' · ' : '')
-      + (points >= 0 ? '+' : '−') + Math.abs(Math.round(points)) + ' pts from entry</span>';
-  }
-  var footRight = '<span style="color:' + (pnl == null ? 'var(--mut)' : (pnl >= 0 ? 'var(--grn)' : 'var(--red)'))
-    + '">' + posPnl(pnl) + '</span>';
-  return '<div class="posbar">'
-    + '<i class="zr" style="left:' + redLeft.toFixed(2) + '%;width:' + redWidth.toFixed(2) + '%"></i>'
-    + '<i class="zg" style="left:' + grnLeft.toFixed(2) + '%;width:' + grnWidth.toFixed(2) + '%"></i>'
-    + '<i class="ben" style="left:' + entryPct.toFixed(2) + '%"></i>'
-    + (cmpClamped == null ? '' : '<i class="bdot" style="left:' + cmpClamped.toFixed(2) + '%"></i>')
-    + '</div>'
-    + '<div class="poslb">' + labels + '</div>'
-    /* cc#1404: posfoot is the FUT-only breathing-room/font override -- posDecayBar() below (the
-       OPT leg's own .legfoot P&L line) does not carry it, so that line is unaffected. */
-    + '<div class="legfoot posfoot" style="text-align:left;display:flex;justify-content:space-between">'
-    + footLeft + footRight + '</div>';
-}
+/* cc#1477: posRangeBar() (the FUT stop-entry-cmp-target range bar, cc#1386/cc#1404) is
+   REMOVED with the FUTURES block — the card shows written-options positions only now. Its
+   .posbar/.poslb/.posfoot CSS goes with it. Client-side only: the endpoint still serves the
+   FUT rows and nothing backend changed. */
 /* cc#1386 · OPT LEG -- theta-decay bar (written premium -> live premium). live_premium is this
    task's own backend addition (mobile_home2.mobile_v10chart -- see that file's own comment for
    the data-gap this closes and why it landed there, not a new endpoint).
@@ -3040,44 +2920,47 @@ function dirBadge(side, text){
    which point it reappears on its own if the outage is still live -- no localStorage, no timer of
    its own, nothing to leak across a real recovery. */
 function posFeedAlertHtml(fa){
-  if (!fa || !fa.market_hours || (!fa.fut_stale && !fa.opt_stale)) return '';
-  var legs = [];
-  if (fa.fut_stale) legs.push('Futures CMP last updated ' + (fa.fut_age_min != null ? Math.round(fa.fut_age_min) + ' min ago' : 'a while ago'));
-  if (fa.opt_stale) legs.push('Options premium last updated ' + (fa.opt_age_min != null ? Math.round(fa.opt_age_min) + ' min ago' : 'a while ago'));
+  /* cc#1477: OPT staleness only — the FUTURES block is gone, so a futures-CMP outage no longer
+     describes anything on this card. The independent-legs rule (cc#1418) is untouched at the
+     server; this consumer just reads the one leg it still shows. */
+  if (!fa || !fa.market_hours || !fa.opt_stale) return '';
   return '<div class="posalert" id="posFeedAlert">'
-    + '<span class="posalert-t">Live feed stopped. ' + esc(legs.join(' · ')) + '. Prices below are not current.</span>'
+    + '<span class="posalert-t">Live feed stopped. Options premium last updated '
+    + (fa.opt_age_min != null ? Math.round(fa.opt_age_min) + ' min ago' : 'a while ago')
+    + '. Prices below are not current.</span>'
     + '<button type="button" class="posalert-x" onclick="this.parentNode.remove()" aria-label="Dismiss">&#10005;</button>'
     + '</div>';
 }
+/* cc#1477 (session_log 34185, HOME_INDEX_OPEN_WRITING_POSITIONS_CARD_V1): the card shows the
+   WRITTEN OPTIONS book only — NIFTY block then BANKNIFTY block, stacked, no toggle. Each block:
+   the strike/type pill (unchanged grammar), a BULLISH/BEARISH chip — written PE reads BULLISH,
+   written CE reads BEARISH (a bought leg flips: bought CE bullish, bought PE bearish — derived
+   from side+type, never hardcoded to SELL), and the untouched decay bar. An index with no open
+   written leg states it in one muted line. Terminology per 32076: this is a WRITING book. */
 function renderHeroPositions(){
-  var rec = POS.data[POS.sym] || {};
-  var cmp = posCmp(POS.sym);
-  var fut = rec.fut, opt = rec.opt;
-  var futBadge = fut ? dirBadge(fut.side, fut.side === 'BUY' ? 'LONG' : 'SHORT') : '';
-  var optBadge = opt ? dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
-      + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
   var body = document.getElementById('heroPositionsBody');
-  if (body) body.innerHTML =
-      posFeedAlertHtml(rec.feed_alert)
-      + '<div class="legwrap"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
-      + posRangeBar(fut, cmp) + '</div>'
-      + '<div class="legdiv"></div>'
-      + '<div class="legwrap"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
-      + posDecayBar(opt) + '</div>';
-  var tg = document.getElementById('heroPositionsToggle');
-  if (tg) tg.innerHTML = posToggleHtml();
-  var btn = document.getElementById('heroPositionsBtn');
-  /* cc#1403 · RESTORED (cc#1393 removed it with the button, now back as VIEW LOGS). cc#1386 scope
-     item 5's own note still applies unchanged: the card does not say which leg the founder was
-     last looking at, so VIEW LOGS opens on FUT — same default openV10()/the modal itself already
-     carried before cc#1383 gave it an explicit-leg 3rd param. */
-  if (btn) btn.setAttribute('onclick', "openV10(event,'" + POS.sym + "','FUT')");
-  /* cc#1382's lesson again: this swap can shrink the card (Loading -> a real, possibly shorter,
-     range/decay layout; a symbol toggle to a leg with no open position -> a much shorter unavail
-     block), and ResizeObserver does not fire on a shrink pinned at the old min-height -- explicit
-     resync, rAF-wrapped so the write commits before syncHeroCardHeights measures. Re-levels ALL 4
-     cards via cc#1382's generalized loop, not just this one -- confirmed in this task's own
-     verification, not assumed from the function's name. */
+  if (!body) return;
+  var alertRec = POS_SYMS.map(function(s){ return (POS.data[s.key] || {}).feed_alert; })
+                         .filter(Boolean)[0] || null;
+  body.innerHTML = posFeedAlertHtml(alertRec)
+    + POS_SYMS.map(function(s){
+        var opt = (POS.data[s.key] || {}).opt;
+        var pill = '', chip = '';
+        if (opt){
+          pill = dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
+            + (opt.side === 'SELL' ? ' · wrt' : ' · bot'));
+          var bullish = (opt.side === 'SELL') === (opt.opt_type === 'PE');
+          chip = '<span class="dirbadge ' + (bullish ? 'bull' : 'bear') + '">'
+            + (bullish ? 'BULLISH' : 'BEARISH') + '</span>';
+        }
+        return '<div class="legwrap"><div class="leghd"><span class="nm">' + s.label + '</span>'
+          + pill + chip + '</div>'
+          + (opt ? posDecayBar(opt)
+                 : '<div class="unavail">No open writing position</div>')
+          + '</div>';
+      }).join('<div class="legdiv"></div>');
+  /* cc#1382's lesson again: this swap can shrink the card, and ResizeObserver does not fire on a
+     shrink pinned at the old min-height -- explicit resync, rAF-wrapped. */
   requestAnimationFrame(syncHeroCardHeights);
 }
 /* Paint-then-fill, same pattern as loadIndexBook()/loadHeroV10Cards(). BOTH symbols fetched up
@@ -3092,12 +2975,13 @@ function loadHeroPositions(){
         if (d && d.error) throw new Error(d.error);
         var trades = d.trades || [];
         POS.data[symKey] = {
-          fut: trades.filter(function(t){ return t.leg === 'FUT' && t.open; })[0] || null,
+          /* cc#1477: fut extraction dropped with the FUTURES block — the endpoint still serves
+             the rows (do_not_touch: backend), this card just no longer reads them. */
           opt: trades.filter(function(t){ return t.leg === 'OPT' && t.open; })[0] || null,
           feed_alert: d.feed_alert || null   // cc#1418
         };
       })
-      .catch(function(){ POS.data[symKey] = { fut: null, opt: null, error: true }; });
+      .catch(function(){ POS.data[symKey] = { opt: null, error: true }; });
   }
   Promise.all([leg('NIFTY50'), leg('BANKNIFTY')]).then(renderHeroPositions);
 }
@@ -3858,11 +3742,14 @@ function v10Log(d){
   /* cc#1396: `var bl = d.by_leg || {};` REMOVED — grepped, it had zero reads anywhere in this
      function even before today (dead since whatever commit last touched this block); v10LegStats
      now does its own by_leg[leg] lookup, so there is nothing left that would have used it. */
-  h += '<div class="lgtabs">' + [['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
-      return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'
-        + ' onclick="v10SetLeg(\'' + v[0] + '\')">' + v[1]
-        + ' <i>' + (v[0] === 'OPT' ? opts.length : rows.length) + '</i></button>';
-    }).join('') + '</div>';
+  /* cc#1477: the FUT/OPT switch hides when the modal was opened from the writing card's VIEW
+     LOGS (V10.legLock — openV10's 4th param, cleared on close). Every other path keeps it. */
+  if (!V10.legLock)
+    h += '<div class="lgtabs">' + [['FUT','FUTURES'],['OPT','OPTIONS']].map(function(v){
+        return '<button class="lgt' + (view === v[0] ? ' on' : '') + '"'
+          + ' onclick="v10SetLeg(\'' + v[0] + '\')">' + v[1]
+          + ' <i>' + (v[0] === 'OPT' ? opts.length : rows.length) + '</i></button>';
+      }).join('') + '</div>';
 
   /* cc#953 item 4 + cc#954 item 2 — THE HONEST COUNT, computed, never padded.
      The two tabs CANNOT hold equal counts and must not be made to look as if they do: the option
@@ -4384,12 +4271,15 @@ function heroCard3(d){
    .c2body is back to being the first of a two-child .c2body+CTA pair (same shape Cards 2/3 use),
    so it carries the shared CTA-floor margin again (#heroTrack > .c > .c2body{margin-bottom:
    var(--space-14)}, cc#1391) — the nth-child(4) override below no longer zeroes it. */
+/* cc#1477: header renamed to the writing-book name, the NIFTY/BANKNIFTY toggle is GONE (both
+   blocks render stacked — see renderHeroPositions), and VIEW LOGS opens the trades view on the
+   OPTIONS leg with the FUT/OPT switch hidden (openV10's new 4th param). .pstg CSS stays — the
+   Max Pain card's own toggle (#heroCard3Toggle) still wears it. */
 function heroCardPositions(d){
-  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
-    + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Open Writing Positions</div></div>'
     + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
     + '</div>'
-    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'' + POS.sym + '\',\'FUT\')">VIEW LOGS &#8594;</button>'
+    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'NIFTY50\',\'OPT\',true)">VIEW LOGS &#8594;</button>'
     + '</div>';
 }
 /* the deck: five cards, snap-scrolled, with a dot that follows the finger */
