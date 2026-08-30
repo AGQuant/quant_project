@@ -1102,6 +1102,20 @@ def mobile_home2(request: Request):
                            "has_series": True,
                            "daily_series": True,
                            "intraday_name": k})
+    # cc#1469: Gold/Silver in the Indian retail convention — ₹ per 10g and ₹ per kg. Derived from
+    # the SAME latest prints this ticker already renders (glob_rows — each symbol's own latest
+    # global_indices row), USDINR being the INR=X row of that same read: the converted figure can
+    # never quote a different moment than the USD figure it sits beside. No conversion when either
+    # side is missing — absence over a guess. chg_pct is NOT recomputed: the conversion is linear,
+    # so the day% is the same number either way. Brent/NatGas stay in USD (no Indian retail unit
+    # exists for them the way ₹/10g and ₹/kg do for the metals).
+    TROY_OZ_GRAMS = 31.1034768   # grams per troy ounce — fixed physical constant
+    _INR_UNITS = {"GC=F": (10.0, "10g"), "SI=F": (1000.0, "kg")}
+    _usdinr = None
+    for r in glob_rows:
+        if r["symbol"] == "INR=X":
+            _usdinr = f(r["price"])
+            break
     _pos = {n: i for i, n in enumerate(_TICKER_NAME_ORDER)}
     for r in sorted(glob_rows, key=lambda r: (_pos.get(r["name"], 99), r["name"])):
         # cc#904: WTI drops off the tape — Brent already carries oil for an Indian investor, and
@@ -1115,14 +1129,21 @@ def mobile_home2(request: Request):
         # day, the template coloured by raw sign, and the first pill on the Home screen went red
         # while the Digest called the same move green. The template now prefers this band and only
         # falls back to the sign when a row ships none.
-        ticker.append({"name": r["name"], "price": f(r["price"]),
-                       "chg_pct": f(r["chg_pct"]), "category": r["category"],
-                       "band": _hs_band(f(r["chg_pct"]), r["symbol"] in _HS_INVERTED),
-                       "as_of": r["quote_date"].isoformat() if r["quote_date"] else None,
-                       "live": False,
-                       "has_series": True,
-                       "daily_series": True,
-                       "intraday_name": _intraday_name(r["name"], intraday_names)})
+        row = {"name": r["name"], "price": f(r["price"]),
+               "chg_pct": f(r["chg_pct"]), "category": r["category"],
+               "band": _hs_band(f(r["chg_pct"]), r["symbol"] in _HS_INVERTED),
+               "as_of": r["quote_date"].isoformat() if r["quote_date"] else None,
+               "live": False,
+               "has_series": True,
+               "daily_series": True,
+               "intraday_name": _intraday_name(r["name"], intraday_names)}
+        _u = _INR_UNITS.get(r["symbol"])
+        if _u and _usdinr and row["price"] is not None:
+            # (USD/troy oz) × USDINR ÷ 31.1034768 g/oz × grams-in-unit — cc#1469's formula
+            row["inr_price"] = round(row["price"] * _usdinr / TROY_OZ_GRAMS * _u[0], 2)
+            row["inr_unit"] = _u[1]
+            row["usd_ref"] = row["price"]   # the raw USD/oz print, kept as the secondary line
+        ticker.append(row)
 
     # hero chips straight from market_mood's own checks[] — value + pass, no invented names
     chips = []
