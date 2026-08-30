@@ -266,6 +266,10 @@ def quality_bullish_basis():
             flow = _flow_window(cur, syms, 50)
             as_of = max((v["last_ts"] for v in flow.values() if v["last_ts"]), default=None)
 
+            # cc#1462: Vol R rides on every row — rvol_engine's own batch read, never a new copy.
+            from rvol_engine import live_rvol_batch
+            rvl = live_rvol_batch(cur, syms)
+
             # prev-session close for day% — same anchor volume_flow's DAY column uses
             cur.execute("""
                 SELECT symbol, close FROM (
@@ -339,6 +343,7 @@ def quality_bullish_basis():
                    "cmp": fb.get("cmp"), "day_pct": round(day, 2),
                    "sector_day": (round(m["secday"], 2) if m.get("secday") is not None else None),
                    "oi_chg_pct": fb.get("oi"),
+                   "rvol": rvl.get(sym),                       # cc#1462: Vol R (shared derivation)
                    "flow50": round(fr, 4), "month_return": round(m["mo"], 2),
                    "sector_month": round(m["sec"], 2), "basis": round(b, 2)}
             (pos if b > 0 else neg).append(row)
