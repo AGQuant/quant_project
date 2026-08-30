@@ -28,8 +28,11 @@ import psycopg
 log = logging.getLogger("scorr.gvm_extras")
 
 BLACKOUT_DAYS = 5
-AD_ACCUM_RATIO = 1.30
-AD_DIST_RATIO = 0.77
+# cc#1443 (VOLUME_METRICS_CANON_V3, session_log 33849): the local 30-day up/down-vol ratio
+# implementation (AD_ACCUM_RATIO=1.30 / AD_DIST_RATIO=0.77 and _ad_verdict) is RETIRED. The
+# canonical A/D is deriv_metrics._ad_21d — 21 days, up-day volume as % of decided volume,
+# >=55% Accumulation / <=45% Distribution — already live on the Deriv Cockpit. This page now
+# reads THAT function; verdict text and thresholds come from it, never re-hardcoded here.
 
 
 def _conn():
@@ -48,7 +51,7 @@ def _r(v, d=2) -> Optional[float]:
     return round(f, d) if f is not None else None
 
 
-def _tier1_auto(m: Dict[str, Any], ad_ratio: Optional[float]) -> Dict[str, Any]:
+def _tier1_auto(m: Dict[str, Any], ad: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """7 Tier-1 rules computable per-symbol from v8_metrics + volume A/D.
     Manual chart-judgment rules (5M recovery, 1D pattern, reversal-only,
     market mood) are intentionally excluded so the count stays honest."""
@@ -80,21 +83,16 @@ def _tier1_auto(m: Dict[str, Any], ad_ratio: Optional[float]) -> Dict[str, Any]:
     dr = _f(m.get("daily_rsi"))
     add("Daily RSI < 80", None if dr is None else dr < 80)
 
-    add("Volume buying (A/D >= 1)",
-        None if ad_ratio is None else ad_ratio >= 1.0)
+    # cc#1443: input changed from an up/down RATIO to _ad_21d's up-day-volume PERCENTAGE. The
+    # old pass condition ratio >= 1.0 is ALGEBRAICALLY up/(up+dn) >= 50%, so up_vol_pct >= 50
+    # is the exact same test on the new shape — meaning preserved, only the window (30d -> 21d)
+    # follows the canon.
+    up_pct = _f((ad or {}).get("up_vol_pct"))
+    add("Volume buying (A/D >= 50%)",
+        None if up_pct is None else up_pct >= 50.0)
 
     passed = sum(1 for c in checks if c["pass"] is True)
     return {"passed": passed, "total": len(checks), "checks": checks}
-
-
-def _ad_verdict(ratio: Optional[float]) -> Optional[str]:
-    if ratio is None:
-        return None
-    if ratio >= AD_ACCUM_RATIO:
-        return "ACCUMULATION"
-    if ratio <= AD_DIST_RATIO:
-        return "DISTRIBUTION"
-    return "NEUTRAL"
 
 
 def _compute_upside(fy27, pe, hist_pe):
@@ -176,31 +174,15 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"trend failed {symbol}: {e}")
                 extras["trend"] = []
 
-            # ── 2. 30-day volume A/D for ALL ladder symbols (one query) ───
-            ad_map: Dict[str, Dict[str, float]] = {}
+            # ── 2. cc#1443: canonical 21-day A/D for ALL ladder symbols — deriv_metrics._ad_21d,
+            # the ONE shared function (Deriv Cockpit canon). One tiny indexed query per ladder
+            # symbol replaces the retired inline 30-day ratio SQL; values are
+            # {up_vol_pct, label, days} exactly as the cockpit serves them.
+            ad_map: Dict[str, Dict[str, Any]] = {}
             try:
-                cur.execute("""
-                    WITH r AS (
-                        SELECT symbol, price_date, close, volume,
-                               close - LAG(close) OVER
-                                   (PARTITION BY symbol ORDER BY price_date) AS chg,
-                               ROW_NUMBER() OVER
-                                   (PARTITION BY symbol ORDER BY price_date DESC) AS rn
-                        FROM raw_prices
-                        WHERE symbol = ANY(%s)
-                          AND price_date >= CURRENT_DATE - INTERVAL '75 days'
-                    )
-                    SELECT symbol,
-                           SUM(CASE WHEN chg > 0 THEN volume ELSE 0 END) AS up_vol,
-                           SUM(CASE WHEN chg < 0 THEN volume ELSE 0 END) AS down_vol
-                    FROM r
-                    WHERE rn <= 30 AND chg IS NOT NULL
-                    GROUP BY symbol
-                """, (syms,))
-                for s, up, dn in cur.fetchall():
-                    up, dn = _f(up) or 0.0, _f(dn) or 0.0
-                    ratio = round(up / dn, 2) if dn > 0 else (None if up == 0 else 99.0)
-                    ad_map[s] = {"up": up, "dn": dn, "ratio": ratio}
+                from deriv_metrics import _ad_21d
+                for s in syms:
+                    ad_map[s] = _ad_21d(cur, s) or {}
             except Exception as e:
                 log.warning(f"ad_map failed: {e}")
 
@@ -218,7 +200,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     )
                     SELECT price_date::text, close, volume, chg
                     FROM r WHERE chg IS NOT NULL
-                    ORDER BY price_date DESC LIMIT 30
+                    ORDER BY price_date DESC LIMIT 21
                 """, (symbol,))
                 rows = list(reversed(cur.fetchall()))
                 bars = []
@@ -232,10 +214,12 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 biggest = max(bars, key=lambda b: b["v"]) if bars else None
                 total_ret = (round((last_close / base_close - 1) * 100, 2)
                              if last_close and base_close else None)
+                # cc#1443: verdict text comes from _ad_21d's own label (uppercased for the
+                # existing frontend colour switch), thresholds live in that one function only.
                 vol_block = {
-                    "up_vol": ad.get("up"), "down_vol": ad.get("dn"),
-                    "ratio": ad.get("ratio"),
-                    "verdict": _ad_verdict(ad.get("ratio")),
+                    "up_vol_pct": _f(ad.get("up_vol_pct")),
+                    "days": ad.get("days"),
+                    "verdict": (ad.get("label") or "").upper() or None,
                     "bars": bars,
                     "total_return_pct": total_ret,
                     "biggest_day": ({"d": biggest["d"], "v": biggest["v"],
@@ -409,8 +393,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 for r in cur.fetchall():
                     m = dict(zip(cols, r))
                     s = m["symbol"]
-                    ad = ad_map.get(s, {})
-                    t1 = _tier1_auto(m, ad.get("ratio"))
+                    t1 = _tier1_auto(m, ad_map.get(s))   # cc#1443: passes the _ad_21d dict
                     ladder_extra.setdefault(s, {})
                     ladder_extra[s]["tier1_passed"] = t1["passed"]
                     ladder_extra[s]["tier1_total"] = t1["total"]

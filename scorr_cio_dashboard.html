@@ -453,7 +453,7 @@ function ActionStrip({ x }) {
   }
   if (x.volume && x.volume.verdict) {
     const vc = x.volume.verdict === "ACCUMULATION" ? C.green : x.volume.verdict === "DISTRIBUTION" ? C.red : C.gold;
-    chips.push({ label: `30D Vol: ${x.volume.verdict} ${x.volume.ratio != null ? x.volume.ratio + "×" : ""}`, color: vc });
+    chips.push({ label: `21D Vol: ${x.volume.verdict} ${x.volume.up_vol_pct != null ? x.volume.up_vol_pct + "%" : ""}`, color: vc });
   }
   if (x.earnings) {
     chips.push({
@@ -611,11 +611,12 @@ function VolumePanel({ va, volRatio, deliv }) {
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 15, fontWeight: 900, color: vc }}>{va.verdict || "—"}</span>
         <span style={{ fontSize: 13, color: C.muted, fontFamily: "monospace" }}>
-          A/D {va.ratio != null ? va.ratio + "×" : "—"} · up {fmt(va.up_vol)} / down {fmt(va.down_vol)}
+          {/* cc#1443: canonical _ad_21d — up-day volume as % of decided volume, 21 sessions */}
+          up-day vol {va.up_vol_pct != null ? va.up_vol_pct + "%" : "—"}{va.days ? " · " + va.days + "d" : ""}
         </span>
         {tot != null && (
           <span style={{ fontSize: 13.5, fontWeight: 800, color: totColor, fontFamily: "monospace", marginLeft: "auto" }}>
-            Price {signFmt(tot, 2)}% over 30d
+            Price {signFmt(tot, 2)}% over 21d
           </span>
         )}
         {volRatio != null && <span style={{ fontSize: 13, color: C.muted, fontFamily: "monospace" }}>vol 10/30d {volRatio}×</span>}
@@ -2592,7 +2593,7 @@ function GvmReport({ r, hist }) {
           <PivotLadder p={x.pivot} cmp={r.price} />
         </div>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>30-Day Volume · Accumulation / Distribution</div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>21-Day Volume · Accumulation / Distribution</div>
           <VolumePanel va={x.volume} volRatio={x.vol_ratio_10_30} deliv={x.delivery} />
         </div>
       </div>
