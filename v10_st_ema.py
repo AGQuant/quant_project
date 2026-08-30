@@ -57,20 +57,22 @@ TGT_PTS   = 200
 TABLE       = "nifty_5m_test_data"
 FEED_SYMBOL = "NIFTY50"
 
-# feed_symbol -> full per-index engine config (cc#1478, V10_BANKNIFTY_SPEC_V2_20M_LOCKED 34192):
-# the signal path (timeframes, SuperTrend, EMA gate) is now per index, not module-global.
-# NIFTY is UNCHANGED per 34179 (ST150/3.0 10m, EMA3/10 30m gate, SL100/T200 — byte-identical
-# signals, verified old-vs-new on the same data before shipping). BANKNIFTY cuts over DIRECT
-# (founder decision, no paper trial) to ST150/4.0 on 20m, EMA5/13 with the 30m gate, SL150/T150.
+# feed_symbol -> full per-index engine config (cc#1478 built the plumbing; cc#1482 amends the
+# BANKNIFTY values to session_log 34206, V10_BANKNIFTY_SPEC_V3_10M_250_LOCKED, superseding
+# 34192's 20m/EMA5-13/SL150-T150 before it ever traded a Monday tick). The signal path
+# (timeframes, SuperTrend, EMA gate) is per index, not module-global. NIFTY is UNCHANGED per
+# 34179 (ST150/3.0 10m, EMA3/10 30m gate, SL100/T200 — byte-identical signals, verified
+# old-vs-new on the same data). BANKNIFTY: ST150/4.0 on 10m, EMA3/10 with the 30m gate,
+# SL250/T250 — founder-locked knowing the Jun-Aug replay segment was negative.
 INDEX_CFG = {
     "NIFTY50":   {"table": "nifty_5m_test_data",     "lot": 65, "oc": "NIFTY",
                   "tf_main": "10min", "tf_gate": "30min",
                   "st_period": 150, "st_mult": 3.0, "ema_fast": 3, "ema_slow": 10,
                   "sl_pts": 100, "tgt_pts": 200},
     "BANKNIFTY": {"table": "banknifty_5m_test_data", "lot": 30, "oc": "BANKNIFTY",
-                  "tf_main": "20min", "tf_gate": "30min",
-                  "st_period": 150, "st_mult": 4.0, "ema_fast": 5, "ema_slow": 13,
-                  "sl_pts": 150, "tgt_pts": 150},
+                  "tf_main": "10min", "tf_gate": "30min",
+                  "st_period": 150, "st_mult": 4.0, "ema_fast": 3, "ema_slow": 10,
+                  "sl_pts": 250, "tgt_pts": 250},
 }
 
 
@@ -578,9 +580,9 @@ def get_summary():
         "backtest_nifty_fut": {"points": 4030, "win_rate": 42.6, "profit_factor": 1.48,
                                "trades": 148, "max_dd_pts": -778,
                                "note": "no-lookahead replay 28-Aug-25..28-Aug-26 (34179)"},
-        "backtest_bnf_fut": {"points": 5883, "win_rate": 59.2, "profit_factor": 2.05,
-                             "trades": 76, "max_dd_pts": -573,
-                             "note": "no-lookahead replay 28-Aug-25..28-Aug-26 (34192)"},
+        "backtest_bnf_fut": {"points": 8856, "win_rate": 55.0, "profit_factor": 1.46,
+                             "trades": 149, "max_dd_pts": -1248,
+                             "note": "no-lookahead replay 28-Aug-25..28-Aug-26 (session_log 34206)"},
     }
 
 
