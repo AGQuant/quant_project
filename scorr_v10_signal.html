@@ -425,9 +425,9 @@ var SHOW_VOL_TILES = false;
    wants a shared module. That is raised in the forum as its own card, not smuggled in here.) */
 /* cc#1393: btrack/ctrack are gone with THE BOOK · V10 and The Record, the two decks that used
    them — vtrack (VOLATILITY & FLOW) and utrack (buildup states) are untouched. */
-var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null},
-           qtrack:{dots:'qdots', n:0, tmr:null},    /* cc#1455: Quality Bullish · Basis deck */
-           ftrack:{dots:'fdots', n:0, tmr:null} };  /* cc#1457: Volume Flow, stacked -> deck */
+/* cc#1458: qtrack (cc#1455) and ftrack (cc#1457) are RETIRED as separate tracks — Buildup,
+   Volume Flow and Basis now share ONE 8-page deck on utrack. */
+var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null} };
 var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
 /* PITCH COMES FROM LAYOUT OFFSETS, NOT FROM A MEASURED WIDTH PLUS THE GAP, and cc#1245 is where
    that stopped being academic. getBoundingClientRect().width returns a SUB-PIXEL number — 324.484
@@ -962,22 +962,34 @@ function buCard(st){
          : '');
   }
   return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Futures Buildup</h3>'
+    + '<div class="grp"><h3>Build Up</h3>'   /* cc#1458: the badge chip carries the state name */
     + '<span class="asof">' + esc(bd.session || 'LIVE 5-MIN') + '</span></div>'
     + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' ' + st.t + '</span>'
     + '<span class="busub">' + st.sub + '</span></div>'
     + body + '</div></div>';
 }
+/* cc#1458: the ONE merged deck — Buildup's four states, then Bullish/Bearish Flow, then the two
+   Basis cards, in founder order. Each card family keeps its OWN pool/sort/table/sheet machinery
+   untouched; only the outer swipe merges. The ticks chips row rides ABOVE the track (it drives
+   the two Flow pages' data and must stay visible on all 8 pages). */
+var RADAR_PAGES = ['LONG BUILDUP', 'SHORT COVERING', 'SHORT BUILDUP', 'LONG UNWINDING',
+                   'BULLISH FLOW', 'BEARISH FLOW', 'BASIS POSITIVE', 'BASIS NEGATIVE'];
+function radarCards(){
+  return BU_STATES.map(buCard)
+    .concat([vfCard('bullish'), vfCard('bearish')])
+    .concat(QBB_STATES.map(qbCard));
+}
 function buildupDeck(){
-  var cards = BU_STATES.map(buCard);
+  var cards = radarCards();
   DK.utrack.n = cards.length;
   var set = cards.join('');
   var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
   /* the eyebrow stays in the page template where it always was — emitting it here as well is how
      the combined render came back with STOCK F&O RADAR twice. */
-  return '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
+  return '<div id="vfchiprow">' + vfChips() + '</div>'
+       + '<div class="vswipe"><div class="vswipe-t" id="utrack" onscroll="uWrap()">'
        + set + set + set + '</div><div class="rpager"><div class="vdots" id="udots">' + dots + '</div>'
-       + '<span class="clpg" id="upg">1 / 4 · LONG BUILDUP</span></div></div>';
+       + '<span class="clpg" id="upg">1 / 8 · LONG BUILDUP</span></div></div>';
 }
 /* cc#1431: buildupDeck() is embedded once inside render()'s big template literal (the whole page's
    render, not independently re-callable without re-rendering everything else on the page too) —
@@ -985,16 +997,21 @@ function buildupDeck(){
    content (buildupDeck's own infinite-scroll trick) leaves scrollLeft untouched: row COUNTS per
    state are unchanged by a sort (only row ORDER within each already-selected 5), so the track's
    scrollWidth is identical before and after — nothing for the browser to clamp scrollLeft against. */
-function buRepaint(){
+function radarRepaint(){
+  /* cc#1458: any card family's repaint rebuilds the WHOLE merged track (same tripled content,
+     same scrollWidth — cc#1431's scrollLeft reasoning carries over) plus the chips row. */
   var el = document.getElementById('utrack');
-  if (!el) return;
-  var cards = BU_STATES.map(buCard);
-  var set = cards.join('');
-  el.innerHTML = set + set + set;
+  if (el){
+    var cards = radarCards(), set = cards.join('');
+    el.innerHTML = set + set + set;
+  }
+  var ch = document.getElementById('vfchiprow');
+  if (ch) ch.innerHTML = vfChips();
 }
+function buRepaint(){ radarRepaint(); }
 function uLabel(i){
-  var el = document.getElementById('upg'), st = BU_STATES[i || 0];
-  if (el && st) el.textContent = ((i || 0) + 1) + ' / ' + BU_STATES.length + ' · ' + st.t;
+  var el = document.getElementById('upg');
+  if (el) el.textContent = ((i || 0) + 1) + ' / ' + RADAR_PAGES.length + ' · ' + (RADAR_PAGES[i || 0] || '');
 }
 function uWrap(){ dkWrap('utrack'); uLabel(dkDots('utrack')); }
 function uPark(){ dkPark('utrack'); uLabel(dkDots('utrack')); }
@@ -1098,38 +1115,20 @@ function qbCard(st){
            + pool.length + ' QUALIFY</button>'
          : '');
   }
+  /* cc#1458: h3 renamed Quality Bullish -> Basis (badge carries the specific state); the busub
+     funnel one-liner is REMOVED — qbGuide()'s (i) sheet explains the full funnel now. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Quality Bullish</h3>'
+    + '<div class="grp"><h3>Basis</h3>'
     + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button>'
     + '<span class="asof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</span></div>'
     + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' '
-    + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span>'
-    + '<span class="busub">' + st.sub + '</span></div>'
+    + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span></div>'
     + body + '</div></div>';
 }
 
-function qbbDeck(){
-  var cards = QBB_STATES.map(qbCard);
-  DK.qtrack.n = cards.length;
-  var set = cards.join('');
-  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
-  return '<div class="vswipe"><div class="vswipe-t" id="qtrack" onscroll="qWrap()">'
-       + set + set + set + '</div><div class="rpager"><div class="vdots" id="qdots">' + dots + '</div>'
-       + '<span class="clpg" id="qpg">1 / 2 · BASIS POSITIVE</span></div></div>';
-}
-function qbRepaint(){
-  var el = document.getElementById('qtrack');
-  if (!el) return;
-  var cards = QBB_STATES.map(qbCard);
-  var set = cards.join('');
-  el.innerHTML = set + set + set;
-}
-function qLabel(i){
-  var el = document.getElementById('qpg');
-  if (el) el.textContent = ((i || 0) + 1) + ' / 2 · ' + ((i || 0) === 0 ? 'BASIS POSITIVE' : 'BASIS NEGATIVE');
-}
-function qWrap(){ dkWrap('qtrack'); qLabel(dkDots('qtrack')); }
-function qPark(){ dkPark('qtrack'); qLabel(dkDots('qtrack')); }
+/* cc#1458: qbbDeck()/qtrack and its qWrap/qPark/qLabel wrappers are RETIRED — the two Basis
+   pages live inside the merged utrack deck (radarCards). qbRepaint keeps its name for qbSort. */
+function qbRepaint(){ radarRepaint(); }
 
 /* cc#1393: THE RECORD's whole rc-function family (RC_SEGS/RC_SEG/RC_PER/RC_PAGES state, rcLeg/
    rcMatch/rcList/rcStat/rcMoney/rcBig/rcPrice/rcDay/rcNote/rcChips/rcBox/rcStrip/rcRow/rcDeck/
@@ -1307,9 +1306,9 @@ function vfChips(){
 
 function vfCard(side){
   /* cc#1457: RETURNS the page html (the buCard/qbCard contract) instead of writing a fixed div —
-     the deck assembler owns the DOM now. The ticks chips MOVED OUT of the bullish head into
-     flowDeck()'s own row above the swipe: they drive BOTH pages' data, so they must stay visible
-     whichever page is in view. */
+     the deck assembler owns the DOM now. The ticks chips live in the merged deck's own row above
+     the swipe (cc#1458: buildupDeck's #vfchiprow): they drive BOTH Flow pages' data, so they
+     must stay visible whichever of the 8 pages is in view. */
   var head = '<div class="vfhd"><h3>' + (side === 'bullish' ? 'Bullish Flow' : 'Bearish Flow')
     + '</h3><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="vfGuide()" aria-label="How to read this card">i</button></div>';
@@ -1336,35 +1335,10 @@ function vfCard(side){
     + '</div></div>';
 }
 
-function flowDeck(){
-  /* cc#1457: the same vswipe/triple-set/DK shape buildupDeck() and qbbDeck() use — Volume Flow
-     was the one deck on this page still stacked. Chips row sits ABOVE the swipe, outside it. */
-  var cards = ['bullish', 'bearish'].map(vfCard);
-  DK.ftrack.n = cards.length;
-  var set = cards.join('');
-  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
-  return '<div id="vfchiprow">' + vfChips() + '</div>'
-       + '<div class="vswipe"><div class="vswipe-t" id="ftrack" onscroll="fWrap()">'
-       + set + set + set + '</div><div class="rpager"><div class="vdots" id="fdots">' + dots + '</div>'
-       + '<span class="clpg" id="fpg">1 / 2 · BULLISH FLOW</span></div></div>';
-}
-
-function vfPaint(){
-  /* cc#1457: deck-rebuild (the buRepaint/qbRepaint contract) — track + chips row, both live. */
-  var el = document.getElementById('ftrack');
-  if (el){
-    var cards = ['bullish', 'bearish'].map(vfCard), set = cards.join('');
-    el.innerHTML = set + set + set;
-  }
-  var ch = document.getElementById('vfchiprow');
-  if (ch) ch.innerHTML = vfChips();
-}
-function fLabel(i){
-  var el = document.getElementById('fpg');
-  if (el) el.textContent = ((i || 0) + 1) + ' / 2 · ' + ((i || 0) === 0 ? 'BULLISH FLOW' : 'BEARISH FLOW');
-}
-function fWrap(){ dkWrap('ftrack'); fLabel(dkDots('ftrack')); }
-function fPark(){ dkPark('ftrack'); fLabel(dkDots('ftrack')); }
+/* cc#1458: flowDeck()/ftrack and its fWrap/fPark/fLabel wrappers are RETIRED — the two Flow
+   pages live inside the merged utrack deck (radarCards). vfPaint keeps its name for every
+   existing caller (vfLoad, vfSetTicks, vfSort, render) and rebuilds the merged track. */
+function vfPaint(){ radarRepaint(); }
 
 var VF_SHEET = { open: false, scrollY: 0 };
 
@@ -1477,22 +1451,20 @@ function render(){
 
   <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
   ${buildupDeck()}
-  <div class="eyebrow">QUALITY BULLISH · FLOW + BASIS</div>
-  ${qbbDeck()}
   ${SHOW_DIVERGENCE ? `<div class="card">
     <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±${D.div&&D.div.threshold!=null?D.div.threshold:1}%</span></div>
     ${dv.length?dv.map(drow).join(''):'<div class="unavail">No divergence signals above threshold</div>'}
   </div>` : ''}
 
-  <div class="eyebrow">VOLUME FLOW · GREEN vs RED</div>
-  ${flowDeck()}`;
-  /* cc#1457: flowDeck() renders from the current VF state directly inside the template, so a
-     5-minute render() rebuild never blanks the deck while a fetch is out; fPark() below re-parks
-     the fresh track on the middle set (render() reset its scroll). */
-  fPark();
+`;
+  /* cc#1458: the Flow + Basis pages render inside the merged buildupDeck() above — their old
+     eyebrows and separate decks are gone. uPark() re-parks the fresh merged track on the middle
+     set (render() reset its scroll); the deck template already carries current VF/QBB state, so
+     a 5-minute rebuild never blanks a page while a fetch is out. */
+  uPark();
 }
 
-async function boot(){ await loadAll(); render(); vPark(); uPark(); qPark(); fPark(); vfLoad(); }   /* cc#1455: qPark · cc#1457: fPark — every deck parks on the middle set */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
+async function boot(){ await loadAll(); render(); vPark(); uPark(); vfLoad(); }   /* cc#1458: one merged radar deck — qPark/fPark retired with their tracks */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
