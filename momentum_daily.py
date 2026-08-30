@@ -195,6 +195,38 @@ def _vol_trend(g: pd.DataFrame, target_ts) -> Optional[float]:
     return round(avg20 / avg60, 4)
 
 
+def _accumulation_21d(g: pd.DataFrame, target_ts) -> Optional[float]:
+    """cc#1446 push 2 (founder order 30-Aug-2026): EXACT batch replica of deriv_metrics._ad_21d —
+    the canonical Deriv Cockpit 21-day Accumulation. Last 22 sessions (close IS NOT NULL), up-day
+    volume as % of decided (up+down) volume, 0-dp rounded, 0..100 or None.
+
+    Parity notes, deliberate: (a) uses RAW close, NOT this file's px (adjusted-close-preferring) —
+    _ad_21d reads raw_prices.close, and an adjusted series can flip an up/down day around a
+    corporate action; (b) null volume counts as 0, exactly as _ad_21d's `_f(r[1]) or 0.0`;
+    (c) rows with null close are dropped BEFORE pairing, which equals _ad_21d's SQL filter.
+    Conceptual note for the record: this REPLACES what parameter 8 measures — vol_trend asked
+    "is participation building over weeks", Accumulation asks "who is doing the volume, buyers
+    or sellers". Deliberate founder pivot, confirmed twice; not an oversight.
+    NOT wired into scoring yet — push 5 does that after the push-3 band sign-off and the push-4
+    weekend-console DDL land."""
+    sub = g[g["price_date"] <= target_ts]
+    sub = sub[sub["close"].notna()].tail(22)
+    if len(sub) < 3:
+        return None
+    closes = sub["close"].astype(float).values
+    vols = pd.to_numeric(sub["volume"], errors="coerce").fillna(0.0).astype(float).values
+    up_vol = dn_vol = 0.0
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i - 1]:
+            up_vol += vols[i]
+        elif closes[i] < closes[i - 1]:
+            dn_vol += vols[i]
+    tot = up_vol + dn_vol
+    if tot <= 0:
+        return None
+    return round(up_vol / tot * 100.0, 0)
+
+
 def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame:
     target_ts = pd.Timestamp(target_date)
     d1m = target_ts - pd.Timedelta(days=30)
