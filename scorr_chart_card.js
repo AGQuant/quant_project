@@ -762,17 +762,21 @@ var _full = false;                // cc#779: fullscreen state
     var pal = _pal();
     var html = "";
     var chipBg = (_theme === "dark" ? "rgba(18,24,36,.72)" : "rgba(255,255,255,.78)");
-    var pivShown = false;
-    // pivot chip strip — one row, top-left; R green / PP gray / S red; semi-transparent bg.
+    // cc#1491 (session_log 34237): the top-left pivot chip strip is GONE — each level's label now
+    // floats directly above its own dashed line, placed in _positionFx via priceToCoordinate,
+    // the same pattern as the .sc-fibr ratio tags. Rendered hidden here; colour matches the line.
     if (_ov.pivot && _pivOk()) {
       var f = _fibCache[_sym];
       if (f && f.pivots) {
         var P = f.pivots;
-        var chips = [["R2", P.r2, "#0a9e63"], ["R1", P.r1, "#0a9e63"], ["PP", P.pp, "#8a94ad"], ["S1", P.s1, "#dd3a4a"], ["S2", P.s2, "#dd3a4a"]]
+        [["R2", P.r2, "#0a9e63"], ["R1", P.r1, "#0a9e63"], ["PP", P.pp, "#8a94ad"], ["S1", P.s1, "#dd3a4a"], ["S2", P.s2, "#dd3a4a"]]
           .filter(function (r) { return r[1] != null; })
-          .map(function (r) { return '<span style="color:' + r[2] + ';font-weight:700">' + r[0] + '</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span>'; })
-          .join('<span style="color:' + pal.sub + ';margin:0 5px">|</span>');
-        if (chips) { html += '<div class="sc-pivchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + chips + '</div>'; pivShown = true; }
+          .forEach(function (r) {
+            html += '<div class="sc-pivl" data-pv="' + (+r[1]) + '" style="position:absolute;left:4px;display:none;' +
+              'transform:translateY(-100%);font:700 9.5px/1.2 -apple-system,Segoe UI,sans-serif;color:' + r[2] +
+              ';white-space:nowrap;text-shadow:0 0 3px ' + chipBg + ',0 0 3px ' + chipBg + '">' + r[0] + ' ' +
+              Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</div>';
+          });
       }
     }
     // cc#807: VWAP + VPOC value chips — one row, top-left, below the pivot strip if present. 5m only,
@@ -784,7 +788,9 @@ var _full = false;                // cc#779: fullscreen state
         .filter(function (r) { return r[1] != null && isFinite(r[1]); })
         .map(function (r) { return '<span style="color:' + r[2] + ';font-weight:800">' + r[0] + '</span>&nbsp;<span style="color:' + pal.txt + '">' + Number(r[1]).toLocaleString("en-IN", { maximumFractionDigits: 1 }) + '</span>'; })
         .join('<span style="color:' + pal.sub + ';margin:0 5px">|</span>');
-      html += '<div class="sc-vwapchip" style="position:absolute;left:0;top:' + (pivShown ? "26px" : "0") + ';font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + ilChips + '</div>';
+      /* cc#1491: the pivot strip above is gone, so the VWAP/VPOC chip row always sits at top:0
+         now (the 26px drop existed only to clear that strip). The chip itself is untouched. */
+      html += '<div class="sc-vwapchip" style="position:absolute;left:0;top:0;font:600 10.5px/1.2 -apple-system,Segoe UI,sans-serif;background:' + chipBg + ';border:1px solid ' + pal.line + ';border-radius:7px;padding:3px 7px;white-space:nowrap;backdrop-filter:blur(2px)">' + ilChips + '</div>';
     }
     // fib zone bands (positioned in _positionFx); one label per band, right-inside vertical stack.
     if (_ov.fib && _fibBand) {
@@ -826,6 +832,27 @@ var _full = false;                // cc#779: fullscreen state
     var plotW = Math.max(0, box.clientWidth - 16 - rightW);   // 16 = fx left+right inset (8+8)
     var plotH = Math.max(0, box.clientHeight - 8 - botH);     // 8 = fx top inset
     fx.style.width = plotW + "px"; fx.style.height = plotH + "px";
+    /* cc#1491: pivot labels ride their own lines (left side; fib ratio tags own the right
+       gutter, so the two ladders never meet). Same drop-don't-nudge collision rule as the fib
+       tags, own busy ladder: the live-price row is seeded first and always wins; then DOM order
+       (R2→S2, high to low) so on a compressed scale the lower label hides, never overlaps. */
+    var pbusy = [];
+    var lastPC = (_lastData && _lastData.length) ? _lastData[_lastData.length - 1].close : null;
+    if (lastPC != null && isFinite(lastPC)) {
+      var ypc = _series.priceToCoordinate(lastPC);
+      if (ypc != null) pbusy.push([ypc - 9, ypc + 9]);
+    }
+    fx.querySelectorAll(".sc-pivl").forEach(function (el) {
+      var y = _series.priceToCoordinate(parseFloat(el.getAttribute("data-pv")));
+      /* y<12: the label sits ABOVE its line (translateY(-100%), ~11px tall) — a line hugging the
+         top edge would push its label out of the plot, so it hides instead. */
+      if (y == null || y < 12 || y > plotH - 3) { el.style.display = "none"; return; }
+      for (var i = 0; i < pbusy.length; i++) {
+        if (y >= pbusy[i][0] && y <= pbusy[i][1]) { el.style.display = "none"; return; }
+      }
+      el.style.display = "block"; el.style.top = y + "px";
+      pbusy.push([y - 12, y + 12]);
+    });
     if (!(_ov.fib && _fibBand)) return;
     var lo = _fibBand.lo, rng = _fibBand.rng;
     fx.querySelectorAll(".sc-fibz").forEach(function (el) {
