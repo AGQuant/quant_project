@@ -4263,7 +4263,7 @@ function renderRaw(){
   // cc#235: +4 S1B/SO filter columns (Fall%, Rec2D%, Intra%, WkLow%). Live-only, --
   // before ~10:15 IST / missing bars (same as Hour%). Parity: math matches the engine
   // (_load_intraday_bars fyers_eq single-pass) computed server-side in /metrics/all.
-  const METRIC_KEYS=['gvm_score','day_1d','week_return','month_return','dma_50','dma_200','rsi_month','rsi_weekly','week_index_52','vol_ratio','sector_week','sector_month','mom_2d','fall_from_day_high','recovery_2d','day_ret','week_low_pct'];
+  const METRIC_KEYS=['gvm_score','day_1d','week_return','month_return','dma_50','dma_200','rsi_month','rsi_weekly','week_index_52','rvol','sector_week','sector_month','mom_2d','fall_from_day_high','recovery_2d','day_ret','week_low_pct'];
   const allNull=x=>METRIC_KEYS.every(k=>x[k]==null);
   const IDX=new Set(['NIFTY50','BANKNIFTY']);
   const pinned=all.filter(x=>IDX.has(x.symbol));                    // ADDITION_1: pinned on top, GVM shows --, never dropped
@@ -4278,7 +4278,7 @@ function renderRaw(){
       <td>${num(x.rsi_month,0)}</td><td>${num(x.rsi_weekly,0)}</td>
       <td>${num(x.daily_rsi,0)}</td><td>${num(x.true_weekly_rsi,0)}</td>
       <td>${num(x.week_index_52,0)}</td>
-      <td>${num(x.vol_ratio,2)}</td>
+      <td>${num(x.rvol,2)}</td>
       <td class="${cls(x.sector_week)}">${sign(x.sector_week)}%</td><td class="${cls(x.sector_month)}">${sign(x.sector_month)}%</td>
       <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td class="${cls(x.fall_from_day_high)}">${sign(x.fall_from_day_high)}%</td>
@@ -4290,7 +4290,7 @@ function renderRaw(){
   return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
     `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">24 signal-driving columns (full six-basket coverage) — Symbol pinned; indices (NIFTY50/BANKNIFTY) on top. RSI(D)=daily, tRSI(W)=true calendar-weekly; vs-PP%=CMP vs pivot PP; ROOM%=side-aware room to R1 (above PP) / S1·S2 (below), hover names the level; &#10003; in vs-PP% = day high touched R1 (SOB trigger). Hour%/Fall%/Rec2D%/Intra%/WkLow%/vs-PP%/ROOM%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:20 (cc#1201 engine freeze; NSE itself trades to 15:30).</div>`+
     sortTbl('raw',
-    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(D)"],["true_weekly_rsi","tRSI(W)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"],["vs_pp","vs-PP%"],["room_pct","ROOM%"]],
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(D)"],["true_weekly_rsi","tRSI(W)"],["week_index_52","52W idx"],["rvol","Vol R"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"],["vs_pp","vs-PP%"],["room_pct","ROOM%"]],
     rest,row,
     {sortKey:'mom_2d',dir:-1,empty:"No metrics",pinned,wrapClass:'',scrollCls:'rawscroll'});
 }
