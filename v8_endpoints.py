@@ -1160,9 +1160,16 @@ def metrics_all():
         # cc#233: live-join hourly_pct + cc#235 fall_from_day_high (fyers_fut path, not
         # v8_metrics columns). NULL before ~10:15 IST (needs 12 fut bars), not an error.
         v21 = _load_v21_live_metrics(conn, [s["symbol"] for s in rows])
+        # cc#1452 push 2: serve Vol R (RVOL, rvol_engine's live profile read — the canon pace
+        # metric) BESIDE the legacy vol_ratio column. The /filters + V13 client-side screens and
+        # the dashboard's Vol R column read this key; vol_ratio stays in the payload for legacy
+        # readers per the 30-Aug founder ruling (written-but-legacy, cc#1441/cc#1451).
+        from rvol_engine import live_rvol_batch
+        _rvl = live_rvol_batch(cur, [s["symbol"] for s in rows])
         for s in rows:
             s["hourly_pct"]         = v21.get(s["symbol"], {}).get("hourly_pct")
             s["fall_from_day_high"] = v21.get(s["symbol"], {}).get("fall_from_day_high")  # cc#235: free
+            s["rvol"]               = _rvl.get(s["symbol"])                               # cc#1452: Vol R
         # cc#235: recovery_2d / day_ret / week_low_pct — originally S1B/SO filter inputs (both
         # retired cc#502); kept as general Raw Data / Master-tab display columns. Single-pass CTE
         # + formulas copied from the ENGINE (_load_intraday_bars: fyers_eq pinned per cc#140,
