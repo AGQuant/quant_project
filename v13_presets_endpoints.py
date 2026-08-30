@@ -197,7 +197,10 @@ _FIELD_MAP = {
     "week_index_52": ("u", "week_index_52"), "month_index": ("u", "month_index"),
     "mom_2d": ("u", "mom_2d"),
     "rvol": ("v", "rvol"), "vol_p": ("v", "vol_p"), "vol_gate": ("v", None),
-    "vol_ratio": ("m", "vol_ratio"), "day_1d": ("m", "day_1d"),
+    # cc#1452 push 2: the bare "vol_ratio" m-key is RETIRED (was v8_metrics' 10d day ratio,
+    # futures-only). Saved presets carrying it (Momentum Kings, id 11) are shimmed onto "rvol"
+    # below with their min/max preserved — same 1.x scale, canon derivation, full universe.
+    "day_1d": ("m", "day_1d"),
     "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
     "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
     "m_score": ("g", "m_score"), "market_cap": ("g", "market_cap"),
@@ -245,6 +248,10 @@ def _screen_sql(filters, sort_key=None, sort_dir=-1):
     if "vol_ratio_21" in filters:
         filters.pop("vol_ratio_21")
         filters.setdefault("vol_gate", {})
+    # cc#1452 push 2 compat shim: the bare vol_ratio key runs as rvol, min/max carried over
+    # (both are ~1.0-centred ratios; Vol R is the canon read of the same question).
+    if "vol_ratio" in filters:
+        filters.setdefault("rvol", filters.pop("vol_ratio"))
     unknown = [k for k in filters if k not in _FIELD_MAP]
     if unknown:
         raise ValueError("unknown filter key(s): " + ", ".join(unknown))

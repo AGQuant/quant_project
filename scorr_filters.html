@@ -161,7 +161,7 @@ const GROUPS=[
   {name:'Trade Check',filters:[
     {key:'mas_above',    label:'MAs Above (0-3)',min:0,    max:3,  derived:true},
     {key:'eod_chg',      label:'EOD Change %',   min:-10,  max:10},
-    {key:'vol_ratio',    label:'Vol Ratio',      min:0,    max:10},
+    {key:'rvol',         label:'Vol R',          min:0,    max:10},   /* cc#1452: canon RVOL, was vol_ratio */
     {key:'room_r1',      label:'Room to R1 %',   min:0,    max:20, derived:true},
     {key:'room_s1',      label:'Room from S1 %', min:0,    max:20, derived:true},
     {key:'basis_pct_now',label:'Basis % (now)',  min:-5,   max:5},
@@ -452,7 +452,7 @@ async function loadData(){
         daily_rsi: n(m.daily_rsi), dma_20: dma20, dma_50: dma50, dma_200: dma200,
         week_return: n(m.week_return), month_return: n(m.month_return), year_return: n(m.year_return),
         mom_2d: n(m.mom_2d), sector_week: n(m.sector_week), sector_month: n(m.sector_month),
-        week_index_52: n(m.week_index_52), eod_chg: n(m.eod_chg), vol_ratio: n(m.vol_ratio),
+        week_index_52: n(m.week_index_52), eod_chg: n(m.eod_chg), rvol: n(m.rvol),
         cmp: cmp, day_pct: n(lv.day_pct), hourly_pct: n(lv.hourly_pct),
         recovery_low: recoveryLow, fall_high: fallHigh, mas_above: masAbove,
         room_r1: roomR1, room_s1: roomS1,
