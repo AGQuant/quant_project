@@ -1,8 +1,24 @@
 """
-Time-adjusted intraday volume ratio for Trade Check R6/R7 Volume rules
-(cc_task #145, 01-Jul-2026). Supersedes the old 30-day up-day/down-day average
-volume comparison.
+Trade Check R6/R7 volume rules.
 
+cc#1441 push 3 (VOLUME_METRICS_CANON_V2, session_log 33843): R6 (native trade check) and R7
+(V4 endpoints) are now the canon 3-TIER read — r6_read() + r6_state() below. The linear
+T-factor formula that used to be R6/R7 is RETAINED FURTHER DOWN as volume_ratio() ONLY because
+the founder-locked V4-dual rulebook vol tests (cc#934 / session_log 18062: tc_v4_dual +
+tc_v4_scan, thresholds locked on the T-factor scale) still read it — swapping the metric under
+a locked threshold without sign-off would silently change locked card scores. Its full
+retirement is a QUESTION in the cc#1441 task log; do not add new consumers.
+
+THE CANON 3-TIER (R6/R7):
+  RVOL   = live slot-normalized pace (rvol_engine.live_rvol — today's cumulative volume ÷ the
+           21-session average cumulative volume at the same 5-min slot).
+  VOL P  = the last completed session's closing RVOL (rvol_engine.eod_rvol_pair raw form —
+           full universe, no profile row needed, per the profile build's anchor property).
+  PASS   if BOTH clear their thresholds; WATCH if exactly one; FAIL if neither.
+  Partial data never PASSes: with only one side known, clearing it earns WATCH, failing it
+  FAILs; both unknown = no data (None), never fabricated.
+
+── the LEGACY formula kept for the locked 18062 tests only ──────────────────────────────────
 FORMULA:
   Baseline     = AVG(raw_prices.volume) over the last 5 trading days (simple mean).
   T_factor     = elapsed_market_minutes / 375  (market_start=09:15 IST, full day=375min).
@@ -148,16 +164,47 @@ def volume_ratio(cur, symbol: str) -> dict:
     return out
 
 
-def r6_state(ratio):
-    """True=PASS, "watch"=WATCH, False=FAIL, None=no data. Same for LONG/SHORT."""
-    if ratio is None:
+# ── cc#1441 push 3: the canon R6/R7 read + 3-tier ────────────────────────────────────────────
+R6_RVOL_X = 1.2   # PLACEHOLDER — awaiting founder sign-off (cc#1441 backtest tables, 30-Aug)
+R6_VOLP_Y = 1.0   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+
+
+def r6_read(cur, symbol: str) -> dict:
+    """Canon volume read: {'rvol', 'vol_p', 'vol_p_asof', 'partial'}. rvol = live profile read
+    (None when the symbol has no rvol_profile with enough sessions — never fabricated). vol_p =
+    the last COMPLETED raw_prices session's closing RVOL: during a live session that row IS
+    yesterday; off-market after the EOD write it is the just-closed session — the same semantic
+    rvol_engine.closing_rvol uses. Both derivations live in rvol_engine (one registry)."""
+    from rvol_engine import live_rvol, eod_rvol_pair
+    lv = live_rvol(cur, symbol)
+    rvol = lv.get("rvol") if lv else None
+    pair = eod_rvol_pair(cur, symbol)
+    vol_p = pair.get("rvol") if pair else None      # latest completed day's closing RVOL
+    return {"rvol": rvol, "vol_p": vol_p,
+            "vol_p_asof": (pair.get("asof") if pair else None),
+            "partial": (rvol is None) != (vol_p is None)}
+
+
+def r6_state(vr):
+    """3-tier on the r6_read dict: True=PASS (both clear), 'watch'=exactly one clears,
+    False=neither, None=no data at all. Same for LONG/SHORT — participation confirms either
+    way. Partial data never PASSes (see module docstring)."""
+    if not vr:
         return None
-    if ratio > 1.2:
-        return True
-    if ratio >= 1.0:
-        return "watch"
-    return False
+    rv, vp = vr.get("rvol"), vr.get("vol_p")
+    if rv is None and vp is None:
+        return None
+    rv_hit = rv is not None and rv >= R6_RVOL_X
+    vp_hit = vp is not None and vp >= R6_VOLP_Y
+    if rv is not None and vp is not None:
+        return True if (rv_hit and vp_hit) else ("watch" if (rv_hit or vp_hit) else False)
+    return "watch" if (rv_hit or vp_hit) else False
 
 
-def r6_label(ratio) -> str:
-    return f"Time Vol x{ratio:.2f}" if ratio is not None else "Time Vol —"
+def r6_label(vr) -> str:
+    if not vr or (vr.get("rvol") is None and vr.get("vol_p") is None):
+        return "RVOL —"
+    rv, vp = vr.get("rvol"), vr.get("vol_p")
+    a = f"x{rv:.2f}" if rv is not None else "—"
+    b = f"x{vp:.2f}" if vp is not None else "—"
+    return f"RVOL {a} · prev {b}"

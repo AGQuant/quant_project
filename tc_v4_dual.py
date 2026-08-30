@@ -448,7 +448,9 @@ def _load_one(cur, symbol):
 
     d["nifty_day"], d["nifty_wk"], d["nifty_mo"], d["nifty_source"] = live_nifty_dwm(cur)
 
-    vr = volume_ratio(cur, symbol)          # R6 — time-adjusted intraday volume
+    # cc#1441: LEGACY T-factor read — kept ONLY because the vol tests below are founder-locked
+    # on this scale (cc#934 / 18062). R6/R7 moved to r6_read (canon V2); ruling pending on these.
+    vr = volume_ratio(cur, symbol)
     d["vol_ratio_today"] = vr["ratio"]
 
     # cc#1173: ma9_vs_ma21 joins the select. Both locked SELL rulebooks read it — SELL-REV wants

@@ -48,7 +48,7 @@ from datetime import datetime, date, timedelta
 import psycopg
 
 from nifty_dwm import live_nifty_dwm
-from r6_volume import volume_ratio, r6_state, r6_label
+from r6_volume import r6_read, r6_state, r6_label   # cc#1441: canon 3-tier (RVOL + VOL P)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -457,10 +457,10 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
             basis_rows = cur.fetchall()
             basis = [_f(r[0]) for r in basis_rows]
 
-            # cc#145: time-adjusted intraday volume ratio, replaces 30-day up/dn.
-            r6_vol = volume_ratio(cur, symbol)
-            r6_ok = r6_state(r6_vol["ratio"])
-            r6_val = r6_label(r6_vol["ratio"])
+            # cc#1441 (canon V2): RVOL + VOL P 3-tier, replaces the cc#145 T-factor ratio.
+            r6_vol = r6_read(cur, symbol)
+            r6_ok = r6_state(r6_vol)
+            r6_val = r6_label(r6_vol)
             r10_ok, r10_val = _r10_intraday(cur, symbol, side)
             r12_ok, r12_val = _r12_pattern(cur, symbol, side)
             r13_ok, r13_val = _r13_atr_ignition(cur, symbol)
@@ -547,9 +547,9 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 rules.append(row("R5 Trend", "2of3 MAs below + RSI M/W<=50",
                                  f"{n}/3 MAs · RSI M {_f(rsi_m):.1f}/W {_f(rsi_w):.1f}", r5_state))
 
-            # R6 Volume — cc#145: time-adjusted intraday volume vs 5-day baseline,
-            # same threshold for LONG and SHORT (high volume confirms either direction).
-            rules.append(row("R6 Volume", "intraday vol/expected(5d,T-adj) >1.2 PASS / 1.0-1.2 WATCH",
+            # R6 Volume — cc#1441 (canon V2): RVOL + prev-close RVOL, 3-tier — both clear PASS /
+            # one WATCH / neither FAIL. Same for LONG and SHORT (participation confirms either way).
+            rules.append(row("R6 Volume", "RVOL & prev-close RVOL: both clear PASS / one WATCH / none FAIL",
                              r6_val, r6_ok))
 
             # R7 Returns — cc#120 change_3 (graded) + fix_9 (-0.0% display fix).
