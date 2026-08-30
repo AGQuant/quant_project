@@ -183,12 +183,12 @@
       // cc#630: TRAJECTORY block — score deltas + sector rank path (below the GVM pillars/sector box)
       if(g&&g.trajectory) h+=trajHtml(g.trajectory);
       // (2) VOLUME — cc#674: three adjacent tiles via the shared _volTilesHtml, each tap-to-explain.
-      // cc#1438 (VOLUME_METRICS_CANON_V1.1): the shared tiles now render RVOL | VOL P | VOL TREND,
-      // so the no-data guard checks the fields the tiles actually read.
+      // cc#1445: the shared tiles render RVOL | VOL P | ACCUM (Deriv Cockpit _ad_21d) — the
+      // no-data guard checks the fields the tiles actually read.
       const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
-      const vp=(E.vol_p||{}).value,vt=(E.vol_trend||{}).value,rv=E.rvol;
+      const vp=(E.vol_p||{}).value,adp=(E.ad_21d||{}).up_vol_pct,rv=E.rvol;
       h+=secLbl('Volume');
-      if(vp==null&&vt==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
+      if(vp==null&&adp==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
       else{ h+=_volTilesHtml(E,M); }
       // (3) DELIVERY — deliv% vs own 21d avg + conviction/churn + 30d sparkline
       const dv=E.delivery||{};

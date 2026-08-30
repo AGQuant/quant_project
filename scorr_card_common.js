@@ -161,8 +161,11 @@
   /* ── volume tiles — one component behind the Analysis "Volume" section and cockpit
      section 01 (verbatim, v8_dashboard.html) ────────────────────────────────────────────── */
   function _volCol(v){ if(v==null)return 'var(--mut)'; return v>=1.5?'var(--grn)':v>=0.8?'var(--txt)':'#d68a1e'; }
-  function _volTile(cap,val,sub,tipKey,badge){
-    var col=_volCol(val), vs=(val==null)?'--':(Number(val).toFixed(1)+'&times;');
+  function _volTile(cap,val,sub,tipKey,badge,ovr){
+    /* cc#1445: optional ovr {vs,col} lets a tile carry a non-ratio shape (the Accumulation
+       tile is a 0-100% share, not a x-ratio) without forking the button markup. */
+    var col=(ovr&&ovr.col)||_volCol(val),
+        vs=(ovr&&ovr.vs!=null)?ovr.vs:((val==null)?'--':(Number(val).toFixed(1)+'&times;'));
     return '<button onclick="qaVolExplain(\''+tipKey+'\')" style="flex:1;min-width:0;text-align:left;'
       +'background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px;cursor:pointer;font:inherit">'
       +'<div style="font-size:10px;color:var(--dim);font-weight:700;display:flex;align-items:center;gap:5px">'+cap+(badge||'')+'</div>'
@@ -171,10 +174,11 @@
   }
   /* cc#1438 swapped tiles 2/3 to the canon; cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843)
      REDEFINES tile 2's VOL P: yesterday's RVOL at the closing slot (same profile formula as
-     tile 1's live RVOL, read once for the last completed session) -- no longer the v8_metrics T-1
-     vol_ratio row. Tile 3 VOL TREND (momentum_scores 20d/60d, GVM p8 input, read never
-     recomputed) and tile 1 RVOL are unchanged. E.vol_p/E.vol_trend arrive as {value, asof} from
-     /api/deriv-metrics. */
+     tile 1's live RVOL, read once for the last completed session). cc#1445 (founder order
+     30-Aug): tile 3 VOL TREND (momentum_scores 20d/60d) is RETIRED from the tiles — tile 3 is
+     now ACCUM, deriv_metrics._ad_21d's up-day-volume share, exactly as the Deriv Cockpit shows
+     it (E.ad_21d {up_vol_pct,label,days}, already in the payload; colour follows the function's
+     OWN label, thresholds never re-hardcoded here). E.vol_p arrives as {value, asof}. */
   function _volTilesHtml(E,M){
     E=E||{}; M=M||{}; var rv=E.rvol||{};
     var rvv=(rv&&rv.rvol!=null)?rv.rvol:null;
@@ -182,17 +186,20 @@
               : rv&&rv.closed?('last session \u00b7 '+newsEsc(rv.asof||''))
               : rv&&rv.slot?('vs typical by '+newsEsc(rv.slot)+' IST'):'vs typical pace';
     var rvBadge = rv&&rv.early?'<span style="font-size:8px;font-weight:800;background:var(--amber, #d68a1e);color:#fff;padding:1px 4px;border-radius:4px">EARLY</span>':'';
-    var vp=E.vol_p||{}, vt=E.vol_trend||{};
+    var vp=E.vol_p||{}, ad=E.ad_21d||{};
+    var adv=(ad&&ad.up_vol_pct!=null)?ad.up_vol_pct:null;
+    var adOvr={vs:(adv==null?'--':(Math.round(adv)+'%')),
+               col:(ad.label==='Accumulation'?'var(--grn)':ad.label==='Distribution'?'var(--red)':'var(--txt)')};
     return '<div style="display:flex;gap:6px">'
       + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
       + _volTile('VOL P',(vp.value!=null?vp.value:null),'prev close RVOL'+(vp.asof?(' \u00b7 '+newsEsc(vp.asof)):''),'volp','')
-      + _volTile('VOL TREND',(vt.value!=null?vt.value:null),'20d vs 60d avg volume','voltrend','')
+      + _volTile('ACCUM',adv,(ad.label||'Accumulation')+' \u00b7 up-day vol share ('+(ad.days||21)+'d)','accum','',adOvr)
       + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
   }
   function qaVolExplain(k){
     var t={rvol:'RVOL = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
            volp:'VOL P = yesterday\u2019s RVOL read at the close \u2014 the prior session\u2019s full-day volume \u00f7 the 21-session average full-day volume. One fixed number per day; same maths as RVOL, read at yesterday\u2019s close instead of live.',
-           voltrend:'VOL TREND = 20-day average volume \u00f7 60-day average volume. Is participation building or fading over weeks \u2014 the same input GVM Momentum scores.'}[k]||'';
+           accum:'ACCUM = of the last 21 sessions\u2019 up-day + down-day volume, the share that traded on UP days \u2014 who is doing the volume, buyers or sellers. The verdict label (Accumulation / Neutral / Distribution) is the Deriv Cockpit\u2019s own, from the same shared formula.'}[k]||'';
     var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
   }
 
