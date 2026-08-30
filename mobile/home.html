@@ -169,6 +169,16 @@ body[data-theme]{
 .hchips .hc.slab.vixc{--panel:transparent;--line:var(--line2)}
 .hchips .hc.slab.vixc.bad{--panel:transparent;--line:rgba(255,92,108,.45)}
 .hchips .hc.slab.vixc.vixmid{--panel:transparent;--line:rgba(255,159,69,.45)}
+/* cc#1433: PCR and VIX read as touching in row 2 (MO/PCR/VIX). The shared .hchips gap is now
+   var(--space-4) (cc#1373/1375's own sequence: 9->6->4, deliberately shrunk to hold Card 1 level
+   with Card 2's height) and cc#1360 grew the chip font to --type-12 in the same breath — both
+   moves that make the row read tighter, not looser, which is what the founder is flagging.
+   Uniformly raising the shared gap would refight the exact height-matching work those two cards
+   spent real effort on, so this is a SURGICAL nudge on the one boundary the founder actually
+   named — VIX's own left margin — not a gap raise that costs all five chip-to-chip pairs at every
+   width. Small on purpose (4px): not independently re-verified against the 360px wrap count from
+   this sandbox (network-blocked from scorr.in) — flagging for a live check at 360/390/430. */
+.hc.vixc{margin-left:var(--space-4)}
 .hc.vixc{background:transparent;border-color:var(--line2)}
 .hc.vixc.bad{background:transparent;border-color:rgba(255,92,108,.45);color:var(--red)}
 /* cc#1123: the middle tier — VIX moved less than 5% either way. Same #FF9F45 as the tape's .neu
