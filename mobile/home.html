@@ -673,12 +673,29 @@ body[data-theme]{
 .oispot{position:absolute;top:0;bottom:0;width:0;border-left:var(--bw-1) dashed var(--cyan);pointer-events:none}
 .oiwall{position:absolute;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
   letter-spacing:var(--track-px8);white-space:nowrap;transform:translateX(-50%);pointer-events:none}
+/* cc#1474: mirrors cc#1471 on the signal page — PUT WALL's word-tag joins the unified TOP row
+   (the put BARS still grow down, the put strike number stays at the bottom); .stack is the
+   shared second rung (top:13px) any of the three drops to on a collision — see the builder. */
 .oiwall.cw{top:0;color:var(--red)}
-.oiwall.pw{bottom:0;color:var(--grn)}
+.oiwall.pw{top:0;color:var(--grn)}
+.oiwall.mpw{top:0;color:#FF9F45}
+.oiwall.bw{top:0;color:var(--txt,#E9EEFB)}   /* both walls on ONE strike — merged tag (cc#1475) */
+.oiwall.stack{top:13px}
 .oichg{position:absolute;transform:translateX(-50%);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
   letter-spacing:var(--track-px8);white-space:nowrap;pointer-events:none}
 .oichg.ce{top:13px;color:var(--red)}
 .oichg.pe{bottom:13px;color:var(--grn)}
+/* cc#1474 (mirrors cc#1468+cc#1471): the Spot label just under the bars — three stacked rows,
+   "Spot" / the number / "(live)", in the dashed line's cyan, anchored to the same interpolated
+   x, edge-clamped like .oix.lo/.hi. */
+.oisplb{position:relative;height:36px;margin-top:var(--space-2)}
+.oisplb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);letter-spacing:var(--track-px8);
+  color:var(--cyan);pointer-events:none;text-align:center}
+.oisplb span i{display:block;font-style:normal}
+.oisplb span b{display:block;font-size:var(--type-10);font-weight:800}
+.oisplb span.lo{transform:none;left:0;text-align:left}
+.oisplb span.hi{transform:none;left:auto;right:0;text-align:right}
 .oixs{position:relative;height:12px;margin-top:var(--space-3)}
 .oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);letter-spacing:var(--track-px8);
@@ -695,7 +712,12 @@ body[data-theme]{
 .asof.stale{color:#FF9F45}
 /* cc#1361 · this card's own text chrome, one type step up from the shared classes */
 .oiasof{font-size:var(--type-10)}
-.oird.oifacts{font-size:var(--type-105)}
+/* cc#1474: .oird.oifacts is gone with the footer it styled — the facts live on the chart now,
+   same as the signal page after cc#1468. .oiib is the how-to-read button beside the stamp. */
+.oiib{min-width:22px;min-height:22px;border-radius:50%;border:var(--bw-1) solid var(--line);
+  background:transparent;color:var(--txt,#E9EEFB);font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-weight:800;font-size:var(--type-10);display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;padding:0;flex:none}
 /* cc#1381 · .bkrow/.bk1/.bkleg/.bkside(+.bull/.bear)/.bkpnl/.bk2/.bkbar(+.zr/.zg/.ben/.bdot)/
    .bklb(+its span/b/em/.lbL/.lbR/.lb-stop/.lb-entry/.lb-cmp/.lb-tgt)/.bkopen/.bkfoot are REMOVED
    with the markup they styled. They existed only for bookRow()/bookCard() (the FUTURES/OPTIONS
@@ -2485,10 +2507,17 @@ function oiCard(name, oi, mp, bare){
       +   (isMp ? '' : bri(r.pe_chg, thCls.pe, PE_COL)) + '"></i></div>'
       + '</div>';
   }).join('');
-  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '';
+  /* cc#1474: the Spot label mirrors cc#1468+cc#1471 — three stacked rows on the interpolated x,
+     the (live)/(prev close) conditional the old footer carried, number with no comma. */
+  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '', spotLb = '';
   if (oi.spot != null && hi > lo){
     var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
     spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+    spotLb = '<div class="oisplb"><span'
+      + (f * 100 < 8 ? ' class="lo"' : f * 100 > 92 ? ' class="hi"'
+         : ' style="left:' + (f * 100).toFixed(2) + '%"')
+      + '><i>Spot</i><b>' + Math.round(Number(oi.spot)) + '</b><i>(' + basis + ')</i></span></div>';
   }
   var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
   var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
@@ -2497,14 +2526,42 @@ function oiCard(name, oi, mp, bare){
     if(!hasCh || !w || w[key] == null) return '';
     return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
   };
-  if (cwI >= 0 && !ceDead) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL'
-    + wallWord(callWall, 'ce_chg', thCls.ce) + '</div>';
-  if (pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL'
-    + wallWord(putWall, 'pe_chg', thCls.pe) + '</div>';
+  /* cc#1474 (mirrors cc#1471, plus the cc#1475 finding): ONE unified top row for the word tags.
+     When the call wall and the put wall are the SAME strike — real market structure, e.g.
+     BANKNIFTY 28-Aug with 18.7L CE and 18.7L PE both at 57,500 — they merge into one
+     CALL+PUT WALL tag rather than one of them being silently dropped by the collision rule.
+     Otherwise: place CALL WALL → MAX PAIN → PUT WALL; a clash within the 18% legibility rule
+     drops a tag to the second rung (top:13px); both rungs blocked drops the tag. ce deltas step
+     aside within 8% of a second-rung tag. Put bars still grow DOWN; .oix.pw stays at the bottom. */
+  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
+  var topPlaced = [[], []];
+  var placeTop = function(i, cls, text){
+    if(i < 0) return;
+    var pct = Number(colPct(i));
+    for(var rung = 0; rung < 2; rung++){
+      var clash = topPlaced[rung].some(function(p){ return Math.abs(p - pct) < 18; });
+      if(!clash){
+        topPlaced[rung].push(pct);
+        tags += '<div class="oiwall ' + cls + (rung ? ' stack' : '') + '" style="left:'
+          + pct.toFixed(2) + '%">' + text + '</div>';
+        return;
+      }
+    }
+  };
+  var wallsMerged = (cwI >= 0 && cwI === pwI && !ceDead && !peDead);
+  if(wallsMerged){
+    placeTop(cwI, 'bw', '<span style="color:var(--red)">CALL</span>+<span style="color:var(--grn)">PUT</span> WALL');
+  } else {
+    placeTop(ceDead ? -1 : cwI, 'cw', 'CALL WALL' + wallWord(callWall, 'ce_chg', thCls.ce));
+  }
+  placeTop(mpI, 'mpw', 'MAX PAIN');
+  if(!wallsMerged) placeTop(peDead ? -1 : pwI, 'pw', 'PUT WALL' + wallWord(putWall, 'pe_chg', thCls.pe));
   if(hasCh){
     [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
       rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
           .filter(function(m){ return m.c != null && Math.abs(m.c) >= sd[1]; })
+          .filter(function(m){ return !(sd[2] === 'ce' && topPlaced[1].some(function(p){
+              return Math.abs(p - Number(colPct(m.i))) < 8; })); })
           .sort(function(a, b){ return Math.abs(b.c) - Math.abs(a.c); })
           .slice(0, 3)
           .forEach(function(m){
@@ -2512,8 +2569,7 @@ function oiCard(name, oi, mp, bare){
           });
     });
   }
-  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
-  var picked = [], xs = '';
+  var picked = [], xs = '';   /* mpI already found above for the MAX PAIN tag */
   [[peDead ? -1 : pwI, 'pw'], [mpI, 'mp'], [ceDead ? -1 : cwI, 'cw']].forEach(function(p){
     if (p[0] < 0) return;
     var v = Number(rows[p[0]].strike);
@@ -2532,16 +2588,15 @@ function oiCard(name, oi, mp, bare){
   });
   xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
   var ao = chainAsOf(oi.chain_tick);
-  /* cc#1355 · the as-of line carries the whole context: tick · vs open · PCR (32043) */
-  /* cc#1361 · short stamp: '26-Aug 15:35 · vs 09:20 · PCR 1.05' (founder 08:43) — falls back to
-     the long chainAsOf text only when the tick is missing entirely. */
+  /* cc#1361 · short stamp — falls back to the long chainAsOf text only when the tick is missing.
+     cc#1474 (mirrors cc#1468): the '· vs 09:20' segment is GONE from the stamp — text only; the
+     baseline data and the brightness encoding it drives are untouched. */
   var aoTxt = (function(){
     var t = String(oi.chain_tick || '');
     if(t.length < 16) return ao.txt;
     var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
   })()
-    + (oi.baseline_tick && hasCh ? ' · vs ' + String(oi.baseline_tick).slice(11, 16) : '')
     + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
   var story = '';
   if(hasCh){
@@ -2593,32 +2648,64 @@ function oiCard(name, oi, mp, bare){
     /* 32043 honesty rule 3: no baseline -> deltas omitted AND the card says so */
     story = '<div class="oird">no 09:20 baseline this session — OI change hidden</div>';
   }
-  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
   /* cc#1382: bare mode drops .vpage/.card AND the .grp/h3 title row (the caller supplies its own
-     .chd header, so a second title row here would duplicate it) -- but the .asof freshness stamp
-     is real information (the OI CHAIN's own as-of time, distinct from anything Card 1/2's header
-     shows), so it is NOT dropped, just relocated: it renders as its own standalone line, first in
-     the body, still carrying the identical .asof.oiasof class and stale styling. */
+     .chd header) -- but the .asof freshness stamp is real information, so it is NOT dropped, just
+     relocated as its own line first in the body.
+     cc#1474 (mirrors cc#1468): the MP/spot/PW/CW facts footer is REMOVED — every number it
+     carried now lives ON the chart (MAX PAIN tag + amber strike label, the 3-row Spot label,
+     the wall tags with their strike labels). The stamp line gains the (i) → oiGuide() button. */
+  var stamp = '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>';
+  var ib = '<button type="button" class="oiib" onclick="oiGuide()" aria-label="How to read this card">i</button>';
   var header = bare
-    ? '<div class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</div>'
+    ? '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">' + stamp + ib + '</div>'
     : '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-      + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span></div>';
+      + '<span style="display:inline-flex;align-items:center;gap:8px">' + stamp + ib + '</span></div>';
   var body = header
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + spotLb
     + xs
-    /* cc#1361 · footer, founder 08:43: line 1 = the facts one step larger (expiry dropped from
-       the card face — it lives in Index Intel), line 2 = the cc#1355 story, then the shortened
-       gap note only on a one-sided tick. Em-dash honesty (cc#1354) unchanged. */
-    + '<div class="oird oifacts">'
-    + 'MP <b class="num">' + (mpStrike != null ? num(mpStrike) : '—') + '</b>'
-    + ' · spot <b class="num">' + (oi.spot != null ? num(oi.spot) : '—') + '</b><span style="font-size:.8em"> (' + basis + ')</span>'
-    + ' · PW <b class="num">' + (peDead ? '—' : num(putWall.strike)) + '</b>'
-    + ' · CW <b class="num">' + (ceDead ? '—' : num(callWall.strike)) + '</b>'
-    + '</div>'
     + story
     + (oi.one_sided ? '<div class="oird" style="color:var(--amber,#f5b94a)">'
         + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '');
   return bare ? body : '<div class="vpage"><div class="card">' + body + '</div></div>';
+}
+
+/* cc#1474 · Max Pain's how-to-read sheet — the cc#1465 pf-sheet shell reused verbatim (same
+   classes, same close function, same overflow save/restore), content ported from the signal
+   page's cc#1468 guide. The baseline/09:20 concept gets exactly one clause, same reasoning. */
+function oiGuide(){
+  v10PfSheetClose();
+  PF_SHEET.prevOverflow = document.body.style.overflow;
+  var veil = document.createElement('div');
+  veil.className = 'pfveil';
+  var sheet = document.createElement('div');
+  sheet.className = 'pfsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="pfgrab"></div><div class="pfsb">'
+    + '<div class="pfsh">How to read Max Pain</div><div class="pffx">'
+    + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
+    + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
+    + 'brightness shows change since the morning\'s opening levels.</p>'
+    + '<p><b>MAX PAIN.</b> The amber bar and tag. The strike where an expiry right now would pay '
+    + 'option holders the least — the point of least total payout by option writers.</p>'
+    + '<p><b>CALL WALL / PUT WALL.</b> The single biggest open-interest strike on the call side '
+    + 'and on the put side. When both sit on ONE strike the tag reads CALL+PUT WALL.</p>'
+    + '<p><b>Spot.</b> The dashed line — where the index trades now, or the previous close when '
+    + 'the live feed is off. The label under it says which.</p>'
+    + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
+    + 'contracts are open than calls.</p>'
+    + '</div></div>';
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  PF_SHEET.open = true;
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = v10PfSheetClose;
+    var g = sheet.querySelector('.pfgrab');
+    if (g) g.onclick = v10PfSheetClose;
+  });
 }
 
 /* cc#1381 · posSide()/bookDir()/bookRange()/bookRow()/bookCard() are REMOVED with the FUTURES/
