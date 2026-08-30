@@ -974,12 +974,30 @@ function buCard(st){
            + pool.length + ' QUALIFY</button>'
          : '');
   }
+  /* cc#1460: header follows vfCard's EXACT pattern — dedicated .vfhd row (h3, spacer, i button)
+     wired to buGuide(); the session stamp moves to the bottom .vfasof line, same as Flow. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Build Up</h3>'   /* cc#1458: the badge chip carries the state name */
-    + '<span class="asof">' + esc(bd.session || 'LIVE 5-MIN') + '</span></div>'
+    + '<div class="vfhd"><h3>Build Up</h3><span class="sp"></span>'   /* cc#1458: badge carries the state name */
+    + '<button type="button" class="vfib" onclick="buGuide()" aria-label="How to read this card">i</button></div>'
     + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' ' + st.t + '</span>'
     + '<span class="busub">' + st.sub + '</span></div>'
-    + body + '</div></div>';
+    + body
+    + '<div class="vfasof">' + esc(bd.session || 'LIVE 5-MIN') + '</div>'
+    + '</div></div>';
+}
+
+function buGuide(){
+  /* cc#1460: the RVOL / VOL P / VOL D paragraphs are vfGuide()'s wording VERBATIM (labels
+     aside) — one metric, one description, never two competing texts on the same page. */
+  vfSheet('<div class="vfsh">How to read Build Up</div><div class="vfg">'
+    + '<p><b>The idea.</b> Price direction and open-interest direction together say WHO is acting. Four combinations, four states — each card is one of them.</p>'
+    + '<p><b>Long Buildup.</b> Price up + OI up — fresh longs entering. <b>Short Covering.</b> Price up + OI down — shorts closing out. <b>Short Buildup.</b> Price down + OI up — fresh shorts entering. <b>Long Unwinding.</b> Price down + OI down — longs exiting.</p>'
+    + '<p><b>CMP.</b> The futures price at the last tick, with the day change vs yesterday\'s close beside it in parentheses.</p>'
+    + '<p><b>OI Δ%.</b> Open-interest change day-over-day — the last tick of this session vs the last tick of the prior one.</p>'
+    + '<p><b>RVOL.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>VOL P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
+    + '<p><b>VOL D.</b> The last 3 days\' average delivered quantity vs the 20 trading days before that (windows don\'t overlap, so a fresh spike can\'t hide inside its own baseline). Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
+    + '</div>');
 }
 function buildupDeck(){
   var cards = BU_STATES.map(buCard);
@@ -1112,14 +1130,17 @@ function qbCard(st){
          : '');
   }
   /* cc#1458: h3 renamed Quality Bullish -> Basis (badge carries the specific state); the busub
-     funnel one-liner is REMOVED — qbGuide()'s (i) sheet explains the full funnel now. */
+     funnel one-liner is REMOVED — qbGuide()'s (i) sheet explains the full funnel now.
+     cc#1460: the (i) moves out of the squeezed .grp into vfCard's clean .vfhd row (h3, spacer,
+     button); the as-of stamp moves to the bottom .vfasof line, same as Flow and Build Up. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="grp"><h3>Basis</h3>'
-    + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button>'
-    + '<span class="asof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</span></div>'
+    + '<div class="vfhd"><h3>Basis</h3><span class="sp"></span>'
+    + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button></div>'
     + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' '
     + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span></div>'
-    + body + '</div></div>';
+    + body
+    + '<div class="vfasof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</div>'
+    + '</div></div>';
 }
 
 function qbbDeck(){
