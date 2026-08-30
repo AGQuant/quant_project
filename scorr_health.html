@@ -757,17 +757,19 @@ html,body{margin:0;padding:0;background:var(--bg);}
     }
     set('hr-val-note', v.insight||'');
 
-    // sector strip -> cc#663 two-row TOP-10 bar (row1 ranks 1-5, row2 ranks 6-10 + true-tail Others).
+    // sector strip -> cc#663 two-row TOP-10 bar, widened to three-row TOP-15 by cc#1485
+    // (row1 ranks 1-5, row2 ranks 6-10, row3 ranks 11-15 + true-tail Others). Fewer sectors
+    // degrade gracefully: an empty row renders nothing, same as the 2-row version did under 10.
     // Narrow segments (<~56px) drop their in-bar label into a legend chip row so nothing truncates.
     var sec=d.sector||{};
     var strip=(sec.strip||[]).slice().sort(function(a,b){return (b.weight||0)-(a.weight||0);});
-    var top10=strip.slice(0,10);
-    var top10Sum=top10.reduce(function(a,x){return a+(x.weight||0);},0);
-    var tail=strip.slice(10).reduce(function(a,x){return a+(x.weight||0);},0);
-    set('hr-conc', 'top 10 hold '+Math.round(top10Sum)+'%');
+    var top15=strip.slice(0,15);
+    var top15Sum=top15.reduce(function(a,x){return a+(x.weight||0);},0);
+    var tail=strip.slice(15).reduce(function(a,x){return a+(x.weight||0);},0);
+    set('hr-conc', 'top 15 hold '+Math.round(top15Sum)+'%');
     var stripEl=$('hr-strip');
     if(stripEl){
-      var segStyle='display:flex;align-items:center;padding:0 7px;font-size:11px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;';
+      var segStyle='display:flex;align-items:center;padding:0 7px;font-size:12.5px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;';
       function segCell(sg, gi, sub){
         var isOth=(sg.segment==='__OTHERS__');
         var color=isOth?'#8892AA':SEG_COLORS[gi%SEG_COLORS.length];
@@ -779,16 +781,18 @@ html,body{margin:0;padding:0;background:var(--bg);}
       function buildRow(items, startGi){
         var sub=items.reduce(function(a,x){return a+(x.weight||0);},0);
         if(sub<=0) return '';
-        return '<div style="display:flex;height:18px;border:1px solid var(--rule);border-radius:3px;overflow:hidden;">'
+        return '<div style="display:flex;height:28px;border:1px solid var(--rule);border-radius:3px;overflow:hidden;">'
           +items.map(function(sg,j){return segCell(sg,startGi+j,sub);}).join('')+'</div>';
       }
-      var row1=top10.slice(0,5), row2=top10.slice(5,10).slice();
-      if(tail>0.5) row2.push({segment:'__OTHERS__', weight:tail});
-      stripEl.innerHTML=buildRow(row1,0)+buildRow(row2,5);
-      // label-overflow pass: any segment too narrow for its label -> blank it, add to the legend row
+      var row1=top15.slice(0,5), row2=top15.slice(5,10), row3=top15.slice(10,15).slice();
+      if(tail>0.5) row3.push({segment:'__OTHERS__', weight:tail});
+      stripEl.innerHTML=buildRow(row1,0)+buildRow(row2,5)+buildRow(row3,10);
+      // label-overflow pass: any segment too narrow for its label -> blank it, add to the legend
+      // row. cc#1485: the fixed 56px floor missed labels that clip at the new 12.5px font (e.g.
+      // "Hospitals 4%"), so a real scrollWidth>offsetWidth overflow check now backs it up.
       var narrow=[];
       stripEl.querySelectorAll('.secseg').forEach(function(el){
-        if(el.offsetWidth>0 && el.offsetWidth<56){
+        if(el.offsetWidth>0 && (el.offsetWidth<56 || el.scrollWidth>el.offsetWidth+1)){
           narrow.push({name:el.getAttribute('data-name'),pct:el.getAttribute('data-pct'),color:el.getAttribute('data-color')});
           el.textContent='';
         }
