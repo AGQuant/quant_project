@@ -4650,8 +4650,11 @@ async def _scheduler_loop():
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
         # off nse_holidays like its neighbours; the job's own registry gate and
         # day-guard decide whether it actually does anything.
-        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 55:
-            _spawn(_bg_qsr_scan)
+        # cc#1442 (30-Aug-2026, session_log 33844): QSR RETIRED by founder order — dispatch
+        # unmounted AND the registry rows set active=false (belt and braces). Code + tables
+        # preserved intact for a possible future rebuild; nothing deleted.
+        # if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 55:
+        #     _spawn(_bg_qsr_scan)
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
             _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
@@ -4681,7 +4684,7 @@ async def _scheduler_loop():
         # cc#1175: QSR exits at 01:45, FIFTEEN MINUTES BEHIND the GVM recompute
         # above, because the quality-break exit reads that recompute. Before it,
         # the sweep would test yesterday's GVM and report it as tonight's.
-        if h == 1 and m == 45:  _spawn(_bg_qsr_exits)
+        # if h == 1 and m == 45:  _spawn(_bg_qsr_exits)   # cc#1442: QSR retired (see 15:55 note)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
