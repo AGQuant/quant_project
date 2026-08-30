@@ -2089,10 +2089,17 @@ function tapeRow(x, i){
      data does not say. */
   var sgn = (x.chg_pct == null || isNaN(Number(x.chg_pct))) ? ''
           : (Number(x.chg_pct) >= 0 ? ' up' : ' dn');
+  /* cc#1469: Gold/Silver read in the Indian convention first — the server ships inr_price/
+     inr_unit (₹ per 10g / per kg, converted from the SAME prints this row shows) and the raw
+     USD/oz stays as the small second line. The % beside it is untouched: a linear conversion
+     moves the number, never the percent. Rows without the fields render exactly as before. */
+  var lv = (x.inr_price != null && x.inr_unit)
+    ? inr(x.inr_price) + '<div class="s2">per ' + esc(x.inr_unit) + ' · $' + px(x.usd_ref) + '/oz</div>'
+    : px(x.price);
   return '<div class="tpr' + sgn + '">'
     + '<span class="nm2"><div class="s1">' + esc(x.name) + '</div>'
     + '<div class="s2">' + (x.live ? 'live' : esc(x.as_of || '--')) + '</div></span>'
-    + '<span class="lv ' + cls(x.chg_pct) + '">' + px(x.price) + '</span>'
+    + '<span class="lv ' + cls(x.chg_pct) + '">' + lv + '</span>'
     + '<span class="cg ' + cls(x.chg_pct) + '">' + pct(x.chg_pct) + '</span>'
     + chart + '</div>'
     + (TAPE.open[i] ? '<div class="tpchart" id="tpc_' + i + '"></div>' : '');
