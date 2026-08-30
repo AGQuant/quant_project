@@ -364,6 +364,9 @@ async function loadAll(){
        slices each cover the whole 208-symbol universe and their union is every row. This is a query
        parameter, not a read-path change — the endpoint already classifies all four states. */
     async()=>{D.build=await gj('/api/v10/buildup?limit=250')},
+    /* cc#1455: Quality Bullish + Basis — funnel computed server-side on volume_flow's own
+       50-bar flow derivation; a failed fetch degrades to the deck's honest empty states. */
+    async()=>{D.qbb=await gj('/api/quality-bullish-basis').catch(()=>null)},
     async()=>{D.div=await gj('/api/v10/divergence')},
   ];
   await Promise.all(T.map(f=>f().catch(e=>console.warn('[intel]',e.message))));
@@ -418,7 +421,8 @@ var SHOW_VOL_TILES = false;
    wants a shared module. That is raised in the forum as its own card, not smuggled in here.) */
 /* cc#1393: btrack/ctrack are gone with THE BOOK · V10 and The Record, the two decks that used
    them — vtrack (VOLATILITY & FLOW) and utrack (buildup states) are untouched. */
-var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null} };
+var DK = { vtrack:{dots:'vdots', n:0, tmr:null}, utrack:{dots:'udots', n:0, tmr:null},
+           qtrack:{dots:'qdots', n:0, tmr:null} };   /* cc#1455: Quality Bullish · Basis deck */
 var VDECK = 0;   /* kept: cc#1242's volDeck() assigns it, and it mirrors DK.vtrack.n */
 /* PITCH COMES FROM LAYOUT OFFSETS, NOT FROM A MEASURED WIDTH PLUS THE GAP, and cc#1245 is where
    that stopped being academic. getBoundingClientRect().width returns a SUB-PIXEL number — 324.484
@@ -990,6 +994,123 @@ function uLabel(i){
 function uWrap(){ dkWrap('utrack'); uLabel(dkDots('utrack')); }
 function uPark(){ dkPark('utrack'); uLabel(dkDots('utrack')); }
 
+/* ══ cc#1455 · QUALITY BULLISH + BASIS, 2-CARD DECK ═══════════════════════════════════════════
+   The funnel (50-bar flow >= 0.60, Day > 0, Month > 0, Sector Month > 0, split by basis sign)
+   is computed SERVER-SIDE on volume_flow's own flow derivation — this deck only renders. Sort +
+   VIEW MORE follow cc#1454's Buildup pattern exactly (shared table renderer, per-card sort
+   state, Buildup-style sheet through the untouched vfSheet shell). A zero-row card is a
+   legitimate market outcome (basis_neg was 0 the day this shipped) and says so honestly. */
+var QBB_STATES = [
+  {k:'pos', t:'QUALITY BULLISH · BASIS POSITIVE', sub:'FLOW 50 ≥ 60% · DAY, MONTH, SECTOR ALL UP · FUT PREMIUM', cls:'w', mark:'▲'},
+  {k:'neg', t:'QUALITY BULLISH · BASIS NEGATIVE', sub:'SAME QUALITY FUNNEL · FUTURES AT A DISCOUNT', cls:'l', mark:'▼'}
+];
+var QB_SORT = {};
+QBB_STATES.forEach(function(st){ QB_SORT[st.k] = { key: null, dir: 1 }; });
+var QB_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  FLOW:   function(r){ return r.flow50; },
+  DAY:    function(r){ return r.day_pct; },
+  MO:     function(r){ return r.month_return; },
+  SECMO:  function(r){ return r.sector_month; },
+  BASIS:  function(r){ return r.basis; },
+};
+var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, FLOW: -1, DAY: -1, MO: -1, SECMO: -1, BASIS: -1 };
+var QB_SHEET = { k: null };
+
+function qbPool(k){
+  var d = D.qbb || {};
+  var list = (k === 'pos' ? d.quality_bullish_basis_pos : d.quality_bullish_basis_neg) || [];
+  /* default rank |basis| desc — the server sends it this way; re-assert so a tap-sorted then
+     re-rendered card falls back to the same default, mirroring buPool's contract. */
+  return list.slice().sort(function(a, b){ return Math.abs(b.basis || 0) - Math.abs(a.basis || 0); });
+}
+
+function qbSort(k, key){
+  var s = QB_SORT[k];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = QB_SORT_DEFAULT_DIR[key]; }
+  qbRepaint();
+  if (document.querySelector('.vfsheet') && QB_SHEET.k === k) qbMore(k);
+}
+
+function qbTh(label, key, k){
+  return _sortTh(label, key, QB_SORT[k], "qbSort('" + k + "','" + key + "')");
+}
+
+function qbTable(rows, k){
+  return '<table class="butbl vftbl"><thead><tr>'
+    + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('FLOW', 'FLOW', k) + qbTh('DAY%', 'DAY', k)
+    + qbTh('MO%', 'MO', k) + qbTh('SEC MO', 'SECMO', k) + qbTh('BASIS', 'BASIS', k)
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+          + (r.flow50 == null ? '<td>—</td>'
+             : '<td class="am">' + Math.round(r.flow50 * 100) + '%</td>')
+          + buNum(r.day_pct, 2, '%', true)
+          + buNum(r.month_return, 1, '%', true)
+          + buNum(r.sector_month, 1, '%', true)
+          + buNum(r.basis, 2, '', true)
+          + '</tr>';
+      }).join('') + '</tbody></table>';
+}
+
+function qbMore(k){
+  var pool = _sortByState(qbPool(k), QB_SORT[k], QB_SORT_GETTERS);
+  if (!pool.length) return;
+  QB_SHEET.k = k;
+  var st = QBB_STATES.filter(function(s){ return s.k === k; })[0] || {};
+  vfSheet('<div class="vfsh">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
+    + qbTable(pool, k)
+    + '<div class="vfasof">' + esc((D.qbb && D.qbb.as_of) || '') + '</div>');
+}
+
+function qbCard(st){
+  var pool = qbPool(st.k), rows = _sortByState(pool.slice(0, 5), QB_SORT[st.k], QB_SORT_GETTERS);
+  var body;
+  if (!D.qbb){
+    body = '<div class="unavail">Quality Bullish data not available — fetch failed, nothing is guessed.</div>';
+  } else if (!rows.length){
+    body = '<div class="unavail">No stocks currently qualify — the funnel is strict and basis '
+         + 'flips with market conditions. A zero here is the market’s answer, not a bug.</div>';
+  } else {
+    body = qbTable(rows, st.k)
+      + (pool.length > 5
+         ? '<button type="button" class="vfmore" onclick="qbMore(\'' + st.k + '\')">VIEW MORE · '
+           + pool.length + ' QUALIFY</button>'
+         : '');
+  }
+  return '<div class="vpage"><div class="card">'
+    + '<div class="grp"><h3>Quality Bullish</h3>'
+    + '<span class="asof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</span></div>'
+    + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' '
+    + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span>'
+    + '<span class="busub">' + st.sub + '</span></div>'
+    + body + '</div></div>';
+}
+
+function qbbDeck(){
+  var cards = QBB_STATES.map(qbCard);
+  DK.qtrack.n = cards.length;
+  var set = cards.join('');
+  var dots = cards.map(function(_, j){ return '<i class="' + (j ? '' : 'on') + '"></i>'; }).join('');
+  return '<div class="vswipe"><div class="vswipe-t" id="qtrack" onscroll="qWrap()">'
+       + set + set + set + '</div><div class="rpager"><div class="vdots" id="qdots">' + dots + '</div>'
+       + '<span class="clpg" id="qpg">1 / 2 · BASIS POSITIVE</span></div></div>';
+}
+function qbRepaint(){
+  var el = document.getElementById('qtrack');
+  if (!el) return;
+  var cards = QBB_STATES.map(qbCard);
+  var set = cards.join('');
+  el.innerHTML = set + set + set;
+}
+function qLabel(i){
+  var el = document.getElementById('qpg');
+  if (el) el.textContent = ((i || 0) + 1) + ' / 2 · ' + ((i || 0) === 0 ? 'BASIS POSITIVE' : 'BASIS NEGATIVE');
+}
+function qWrap(){ dkWrap('qtrack'); qLabel(dkDots('qtrack')); }
+function qPark(){ dkPark('qtrack'); qLabel(dkDots('qtrack')); }
+
 /* cc#1393: THE RECORD's whole rc-function family (RC_SEGS/RC_SEG/RC_PER/RC_PAGES state, rcLeg/
    rcMatch/rcList/rcStat/rcMoney/rcBig/rcPrice/rcDay/rcNote/rcChips/rcBox/rcStrip/rcRow/rcDeck/
    rcPick/rcLabel and the ctrack wrappers cWrap/cPark) and THE BOOK · V10's book-function family
@@ -1306,6 +1427,8 @@ function render(){
 
   <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
   ${buildupDeck()}
+  <div class="eyebrow">QUALITY BULLISH · FLOW + BASIS</div>
+  ${qbbDeck()}
   ${SHOW_DIVERGENCE ? `<div class="card">
     <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±${D.div&&D.div.threshold!=null?D.div.threshold:1}%</span></div>
     ${dv.length?dv.map(drow).join(''):'<div class="unavail">No divergence signals above threshold</div>'}
@@ -1319,7 +1442,7 @@ function render(){
   vfPaint();
 }
 
-async function boot(){ await loadAll(); render(); vPark(); uPark(); vfLoad(); }   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
+async function boot(){ await loadAll(); render(); vPark(); uPark(); qPark(); vfLoad(); }   /* cc#1455: qPark parks the new deck */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
