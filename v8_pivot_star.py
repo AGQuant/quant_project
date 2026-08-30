@@ -88,11 +88,15 @@ STAB_SELL = (-2.0, 1.0)     # mirrored band, sell side
 GLYPH = {"BUY": "star", "SELL": "star"}
 
 # ── cc#933 GREEN_STAR_ACTIVITY_V1 — founder-locked in session_log 18053 ───────────────────────
-# Same open-positions scope as V2. Fires when EITHER leg trips:
-#   (a) vol_ratio > 1.5   — latest v8_metrics, day volume vs its 21-day average
-#   (b) |OI day-over-day| > 25%  — futures_basis, last tick of the day vs last tick of the prior
-#       session. 25% is deliberately RARE: typical DoD is 1-5%, so this leg fires only on a true
-#       event or a rollover, and it is expected to be silent most days.
+# cc#1441 push 4 (VOLUME_METRICS_CANON_V2, session_log 33843): the volume side moves off
+# v8_metrics.vol_ratio (which was a 10-DAY-average day ratio — the old "(a) 21-day average"
+# comment here was stale, verified 30-Aug) onto the canon pair. Same open-positions scope as V2.
+# Fires when ANY leg trips:
+#   (a) RVOL  > ACTIVITY_RVOL_X  — today's slot-normalized pace (rvol_engine, profile read)
+#   (b) VOL P > ACTIVITY_VOLP_Y  — the prior session's closing RVOL (same formula, prior day)
+#   (c) |OI day-over-day| > 25%  — futures_basis, last tick of the day vs last tick of the prior
+#       session. UNTOUCHED. 25% is deliberately RARE: typical DoD is 1-5%, so this leg fires only
+#       on a true event or a rollover, and it is expected to be silent most days.
 #
 # READ 18053 CAREFULLY — two of its keys look contradictory and are not. `founder_amendment_08aug`
 # says there is NO side split; `founder_final_08aug` says BUY shows a star and SELL a circle. They
@@ -106,8 +110,12 @@ GLYPH = {"BUY": "star", "SELL": "star"}
 # at all — volume and OI say "something is happening", not "up" or "down". So the only side it can
 # honestly take is the side you are on. DO NOT unify these two side rules later; they answer
 # different questions.
-ACTIVITY_VOL_X       = 1.5
-ACTIVITY_OI_DOD_PCT  = 25.0
+# cc#1441: 1.5 is the like-for-like carry-over of the retired vol_ratio>1.5 bar (closing-RVOL
+# >= 1.5 selects ~15% of symbol-days, comparable selectivity — backtest in the task log). Both
+# ride the same sign-off batch as the V13 / R6 thresholds; PLACEHOLDER until that lands.
+ACTIVITY_RVOL_X      = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+ACTIVITY_VOLP_Y      = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+ACTIVITY_OI_DOD_PCT  = 25.0  # untouched (18053)
 
 # cc#1024 MARKER_GLYPH_V5 (founder-locked, session_log 22296): the activity marker is a LIGHTNING
 # BOLT, U+26A1, on both sides. This retires BOTH earlier forms — the circle-for-short of 18053 and
@@ -344,10 +352,16 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
             return []
         syms = [x[0] for x in pos]
 
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, vol_ratio FROM v8_metrics
-                       WHERE symbol = ANY(%s) AND score_date <= %s
-                       ORDER BY symbol, score_date DESC""", (syms, d))
-        volx = {r[0]: _f(r[1]) for r in cur.fetchall()}
+        # cc#1441 push 4 (canon V2): RVOL for the latest session <= d, VOL P = the session before —
+        # both through rvol_engine's one derivation. Date-aware so a replayed tick for a past date
+        # reads that date's ratios, exactly as the old score_date<=d read did.
+        from rvol_engine import day_rvol_batch
+        cur.execute("""SELECT DISTINCT ts::date AS sd FROM intraday_prices
+                       WHERE source = 'fyers_eq' AND ts::date <= %s
+                       ORDER BY sd DESC LIMIT 2""", (d,))
+        _days = [r[0] for r in cur.fetchall()]
+        rvl = day_rvol_batch(cur, syms, _days[0]) if _days else {}
+        vpl = day_rvol_batch(cur, syms, _days[1]) if len(_days) > 1 else {}
 
         # OI day-over-day: LAST tick of each session, this session vs the one before it.
         cur.execute("""
@@ -366,21 +380,26 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
 
     out = []
     for sym, side in pos:
-        vx, od = volx.get(sym), oidod.get(sym)
-        vol_hit = vx is not None and vx > ACTIVITY_VOL_X
+        rv, vp, od = rvl.get(sym), vpl.get(sym), oidod.get(sym)
+        rv_hit = rv is not None and rv > ACTIVITY_RVOL_X
+        vp_hit = vp is not None and vp > ACTIVITY_VOLP_Y
+        vol_hit = rv_hit or vp_hit
         oi_hit = od is not None and abs(od) > ACTIVITY_OI_DOD_PCT
         if not (vol_hit or oi_hit):
             continue
         facts = []
-        if vol_hit:
-            facts.append(f"volume {vx:.1f}x its 21-day average")
+        if rv_hit:
+            facts.append(f"RVOL {rv:.1f}x its usual pace")
+        if vp_hit:
+            facts.append(f"prev close RVOL {vp:.1f}x")
         if oi_hit:
             facts.append(f"OI {od:+.0f}% day-over-day")
         out.append({
             "symbol": sym, "side": side,
             "star_color": "GREEN",
             "glyph": GLYPH_SIDE.get(side, "star"),
-            "vol_ratio": round(vx, 2) if vx is not None else None,
+            "rvol": round(rv, 2) if rv is not None else None,
+            "vol_p": round(vp, 2) if vp is not None else None,
             "oi_dod_pct": round(od, 2) if od is not None else None,
             "trigger": "VOL" if vol_hit and not oi_hit else ("OI" if oi_hit and not vol_hit else "VOL+OI"),
             # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
@@ -462,7 +481,11 @@ def run_tick(conn=None) -> Dict[str, Any]:
                     VALUES (%s,%s,%s,%s,'ACTIVITY','GREEN',%s,%s,NULL,NULL)
                     ON CONFLICT (symbol, star_date, direction) DO NOTHING
                 """, (d, ts, a["symbol"], None, a["trigger"],
-                      a["vol_ratio"] if a["trigger"] != "OI" else a["oi_dod_pct"]))
+                      # cc#1441: level_value carries the vol value that fired (RVOL first, else
+                      # VOL P) for VOL / VOL+OI triggers, the OI figure for pure OI — the row
+                      # stays self-describing under the amended legs.
+                      (a["rvol"] if a["rvol"] is not None else a["vol_p"])
+                      if a["trigger"] != "OI" else a["oi_dod_pct"]))
                 awrote += cur.rowcount
         conn.commit()
         log.info("cc#856/933 pivot_star tick: %d pivot markers (%d new), %d activity (%d new)%s",
@@ -537,7 +560,8 @@ def pivot_star(star_date: Optional[str] = None):
             # silently drop whichever came second.
             # cc#1008: read GREEN markers for DISPLAY from the LOG (persisted at first fire), NOT a
             # live re-evaluation. run_tick() still DETECTS and WRITES green rows via
-            # evaluate_activity() (untouched, locked 18053) — but a live re-eval at render time can
+            # evaluate_activity() (18053 scope/side rules intact; volume legs amended to the canon
+            # RVOL/VOL P pair by cc#1441 per session_log 33843) — but a live re-eval at render time can
             # fade intra-day and drop a marker the log still holds, so the surface would disagree
             # with v8_pivot_star_log. Reading the log makes what BOTH surfaces render match the table
             # exactly (the founder's own verify + DISPLAY_PARITY 16202). cc#1024: the glyph is a
@@ -562,8 +586,10 @@ def pivot_star(star_date: Optional[str] = None):
                         lv = _f(lval)
                         trig = (lname or "").upper()
                         facts = []
+                        # cc#1441: "usual pace" wording is honest for BOTH eras of logged rows —
+                        # old rows hold the retired v8_metrics day ratio, new rows hold RVOL/VOL P.
                         if trig in ("VOL", "VOL+OI") and lv is not None:
-                            facts.append(f"volume {lv:.1f}x its 21-day average")
+                            facts.append(f"volume {lv:.1f}x its usual pace")
                         if trig == "OI" and lv is not None:
                             facts.append(f"OI {lv:+.0f}% day-over-day")
                         elif trig == "VOL+OI":

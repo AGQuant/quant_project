@@ -231,6 +231,13 @@ def live_rvol_batch(cur, symbols):
     return _day_ratios(cur, symbols, days[0]) if days else {}
 
 
+def day_rvol_batch(cur, symbols, day):
+    """cc#1441: public batch read for an EXPLICIT session date — {symbol: ratio-or-None} at that
+    day's last stored bar (for a completed day, the closing slot). Lets date-aware engines (the
+    V8 bolt marker replaying a given date) read the same derivation as the live forms."""
+    return _day_ratios(cur, symbols, day)
+
+
 def closing_rvol_batch(cur, symbols):
     """VOL P (canon V2): {symbol: {'value': ratio, 'asof': 'YYYY-MM-DD'}-or-None} — yesterday's
     RVOL at the close. 'Yesterday' = the most recent session whose close has PASSED: during a live
