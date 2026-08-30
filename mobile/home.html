@@ -3563,24 +3563,23 @@ function v10OptCard(t){
    the time (Cards 4/5 became a structurally different live-position UI that has no use for a
    trades/win-rate/net aggregate). It is not stale to bring back: v10Log()'s own .v10sum strip
    below is a genuine SECOND, independent need for the identical computation, confirmed by reading
-   the endpoint fresh this session — d.by_leg[leg] (trades/open/net_pnl) is real per-leg data, and
-   win_rate has no server equivalent so it is folded here over d.trades' own per-trade `win` flag,
-   filtered to the leg and to closed trades (0 closed trades is a dash, never a fabricated 0% —
-   the cc#912 rule, same as the original). ONE caller today (v10Log(), directly below) — kept as
+   the endpoint fresh this session — d.by_leg[leg] (trades/open/net_pnl) is real per-leg data.
+   cc#1464: the WIN RATE slot is now PROFIT FACTOR (founder 30-Aug — 45% reads as alarming on a
+   book that is net profitable; gross profit / gross loss carries the real economics). The old
+   client-side win fold is gone with its only consumer; profit_factor ships per leg on by_leg
+   (server-side, _cut_stats' formula), so this reads the field rather than recomputing. Null when
+   the leg has never taken a loss — an em-dash, never a fabricated number (the cc#912 rule,
+   inherited from _segment_stats). ONE caller today (v10Log(), directly below) — kept as
    its own named function rather than inlined, both because that is what the number IS (a leg's
    trade/win-rate/net/open summary, a real concept worth naming) and because Card 4/5's own
    preview box is exactly the kind of place a second caller could reappear if that UI ever needs
    an aggregate view again; inlining would mean re-deriving this same formula a third time. */
 function v10LegStats(d, leg){
   var bl = (d.by_leg && d.by_leg[leg]) || {};
-  var closed = (d.trades || []).filter(function(t){
-    return (t.leg || 'FUT') === leg && !t.open && t.win != null;
-  });
-  var wins = closed.filter(function(t){ return t.win; }).length;
   return {
     trades: bl.trades || 0, open: bl.open || 0,
     net: (bl.net_pnl == null ? null : bl.net_pnl),
-    winRate: closed.length ? Math.round(wins / closed.length * 100) : null
+    pf: (bl.profit_factor == null ? null : bl.profit_factor)
   };
 }
 function v10Log(d){
@@ -3618,7 +3617,7 @@ function v10Log(d){
   var st = v10LegStats(d, view);
   var h = '<div class="v10sum">'
     + '<div><b>' + st.trades + '</b><span>trades</span></div>'
-    + '<div><b>' + (st.winRate == null ? '&mdash;' : st.winRate + '%') + '</b><span>win rate</span></div>'
+    + '<div><b>' + (st.pf == null ? '&mdash;' : Number(st.pf).toFixed(2) + '×') + '</b><span>profit factor</span></div>'
     + '<div><b class="' + cls(st.net) + '">' + (st.net == null ? '&mdash;'
         : (st.net >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(Math.round(st.net)).toLocaleString('en-IN'))
       + '</b><span>net</span></div>'
