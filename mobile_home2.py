@@ -754,15 +754,25 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
     # per-leg totals so each log section can state its own real numbers
     by_leg = {}
     for t in trades:
-        b = by_leg.setdefault(t["leg"], {"trades": 0, "open": 0, "net_pnl": 0.0})
+        b = by_leg.setdefault(t["leg"], {"trades": 0, "open": 0, "net_pnl": 0.0,
+                                         "_gp": 0.0, "_gl": 0.0})
         if t["open"]:
             b["open"] += 1
         else:
             b["trades"] += 1
             if t["pnl"] is not None:
                 b["net_pnl"] += t["pnl"]
+                if t["pnl"] > 0:
+                    b["_gp"] += t["pnl"]
+                elif t["pnl"] < 0:
+                    b["_gl"] += t["pnl"]
     for b in by_leg.values():
         b["net_pnl"] = round(b["net_pnl"], 2)
+        # cc#1464: profit factor per leg — _cut_stats' own formula (gross profit / |gross loss|),
+        # folded over this leg's closed rupee P&L, the exact set the popup's log lists. None when
+        # the leg has never taken a loss: the denominator is zero, not small (_segment_stats rule).
+        gp, gl = b.pop("_gp"), b.pop("_gl")
+        b["profit_factor"] = round(gp / abs(gl), 2) if gl != 0 else None
 
     closed = [t for t in trades if not t["open"] and t["pnl"] is not None]
     net = round(sum(t["pnl"] for t in closed), 2) if closed else None
