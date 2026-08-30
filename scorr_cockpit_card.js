@@ -342,9 +342,11 @@
         <button onclick="dcFetchStrikes('${sym}')" style="margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:.5px;border:1px solid var(--c-bd);background:var(--c-panel);color:var(--c-tx);border-radius:7px;padding:5px 10px;cursor:pointer">&#8862; FETCH STRIKES</button></div>
       <div id="dcStrikeChain" style="font-size:11px;color:var(--c-mut);line-height:1.5">ATM &plusmn;10 CE/PE &middot; live ltp vs Black-Scholes fair (&sigma;=RV20) &middot; tap FETCH STRIKES.</div></div>`;
     const foot=`<div class="foot">DERIVATIVE COCKPIT v3 &middot; live from deriv_metrics${d.data_ts?(' &middot; options '+_dcFmtTs(d.data_ts)+' IST'):''}</div>`;
-    // cc#674: section 01 VOLUME restored as the shared 3-tile row (RVOL | VolX | Vol 3D/21D) — same
+    // cc#674: section 01 VOLUME restored as the shared 3-tile row — same
+    // (cc#1438: the shared tiles now render RVOL | VOL P | VOL TREND per VOLUME_METRICS_CANON_V1.1;
+    // this label row follows them.)
     // component as the Analysis modal (cc#624 removed the old 2-tile; this is the new RVOL-led row).
-    const s1=`<div class="sec"><div class="lbl"><span class="n">01</span> VOLUME <span class="n">RVOL · VolX · 3D/21D</span></div>`+_volTilesHtml(E,M)+`</div>`;
+    const s1=`<div class="sec"><div class="lbl"><span class="n">01</span> VOLUME <span class="n">RVOL · VOL P · VOL TREND</span></div>`+_volTilesHtml(E,M)+`</div>`;
     return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+s6+foot;
   }
 
