@@ -200,7 +200,8 @@ def _load_bulk(cur):
         a3, n3, a21, n21 = dlv.get(s, (None, 0, None, 0))
         D[s].update({"deliv_3d": a3, "deliv_n3": n3, "deliv_21d": a21, "deliv_n21": n21})
 
-    # R6 — time-adjusted intraday volume ratio (shared helper, per symbol, for exact parity)
+    # cc#1441: LEGACY T-factor read for the LOCKED 18062 dual-rulebook vol tests (exact parity
+    # with tc_v4_dual). R6/R7 themselves moved to r6_read (canon V2); ruling pending on these.
     for s in syms:
         try:
             D[s]["vol_ratio_today"] = volume_ratio(cur, s)["ratio"]

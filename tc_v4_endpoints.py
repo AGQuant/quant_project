@@ -49,7 +49,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from nifty_dwm import live_nifty_dwm
-from r6_volume import volume_ratio, r6_state, r6_label
+from r6_volume import r6_read, r6_state, r6_label   # cc#1441: canon 3-tier (RVOL + VOL P)
 
 router = APIRouter()
 
@@ -159,11 +159,13 @@ def _load(cur, symbol):
     # original EOD formula outside market hours.
     d["nifty_day"], d["nifty_wk"], d["nifty_mo"], d["nifty_source"] = live_nifty_dwm(cur)
 
-    # cc#145: R7 Volume -- time-adjusted intraday volume vs 5-day baseline.
-    r7_vr = volume_ratio(cur, symbol)
-    d["r7_ratio"] = r7_vr["ratio"]
-    d["r7_state"] = r6_state(r7_vr["ratio"])
-    d["r7_source"] = r7_vr["source"]
+    # cc#1441 (canon V2): R7 Volume -- RVOL + VOL P 3-tier, replaces the cc#145 T-factor ratio.
+    r7_vr = r6_read(cur, symbol)
+    d["r7_ratio"] = r7_vr["rvol"]           # live RVOL (kept under the old key for readers)
+    d["r7_volp"] = r7_vr["vol_p"]
+    d["r7_state"] = r6_state(r7_vr)
+    d["r7_label"] = r6_label(r7_vr)
+    d["r7_source"] = "rvol_engine"
 
     cur.execute("""SELECT dma_20, dma_50, dma_200, daily_rsi,
                           sector_week, sector_month, day_1d
@@ -353,14 +355,12 @@ def _tier1(d, direction):
                        cnt >= 2))
 
     # R7 — Volume pattern. cc#145: time-adjusted intraday volume vs 5-day
-    # baseline, replaces the old 30-day up/down-day average comparison. Same
-    # threshold for LONG and SHORT (high volume confirms conviction either way).
-    # >1.2 PASS(1.0) / 1.0-1.2 WATCH(0.5) / <1.0 or no data FAIL(0.0).
+    # cc#1441 (canon V2): 3-tier — RVOL and prev-close RVOL both clear PASS(1.0) /
+    # exactly one WATCH(0.5) / neither FAIL(0.0). Same for LONG and SHORT.
     r7_state = d.get("r7_state")
-    r7_ratio = d.get("r7_ratio")
     r7_credit = 1.0 if r7_state is True else (0.5 if r7_state == "watch" else 0.0)
-    rules.append(_rule("R7", "Volume pattern", "intraday vol/expected(5d,T-adj) >1.2 PASS / 1.0-1.2 WATCH",
-                       r6_label(r7_ratio), r7_state is True, credit=r7_credit))
+    rules.append(_rule("R7", "Volume pattern", "RVOL & prev-close RVOL: both clear PASS / one WATCH / none FAIL",
+                       d.get("r7_label") or "RVOL —", r7_state is True, credit=r7_credit))
 
     # R8 — RSI month + weekly (LIVE from raw_prices)
     rsi_w = _rsi(closes)                       # "RSI weekly" = RSI14 on daily closes
