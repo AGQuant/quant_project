@@ -206,12 +206,17 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    — and the remainder goes to SYMBOL, which is the only column whose content is a name rather than
    a number. GMRAIRPORT and CUMMINSIND are the longest in the F&O list at ten characters and both
    fit. Percentages rather than pixels so the same allocation holds from 360 to 430. */
-.butbl th:nth-child(1),.butbl td:nth-child(1){width:27%}
-.butbl th:nth-child(2),.butbl td:nth-child(2){width:15%}
-.butbl th:nth-child(3),.butbl td:nth-child(3){width:15%}
-.butbl th:nth-child(4),.butbl td:nth-child(4){width:18%}
-.butbl th:nth-child(5),.butbl td:nth-child(5){width:12%}
+/* cc#1440: both .butbl tables (Volume Flow AND Futures Buildup) are SEVEN columns now — the
+   RVOL/VOL P pair everywhere per canon V2. SYMBOL keeps the remainder; the six numeric columns
+   split evenly. Flagged for the live 360px check — GMRAIRPORT/CUMMINSIND at 22% is tighter than
+   the 27% the original comment measured. */
+.butbl th:nth-child(1),.butbl td:nth-child(1){width:22%}
+.butbl th:nth-child(2),.butbl td:nth-child(2){width:13%}
+.butbl th:nth-child(3),.butbl td:nth-child(3){width:13%}
+.butbl th:nth-child(4),.butbl td:nth-child(4){width:13%}
+.butbl th:nth-child(5),.butbl td:nth-child(5){width:13%}
 .butbl th:nth-child(6),.butbl td:nth-child(6){width:13%}
+.butbl th:nth-child(7),.butbl td:nth-child(7){width:13%}
 .butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
  font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .butbl tr:last-child td{border-bottom:none}
@@ -806,8 +811,9 @@ function volDeck(){
 /* ══ cc#1248 · FUTURES BUILDUP, FOUR CARDS ══════════════════════════════════════════════════
    THE SCOPE 3 GATE DOES NOT TRIP AND NOTHING WAS EXTENDED. /api/v10/buildup already classifies all
    four states in its own _row() — LONG_BUILD, SHORT_BUILD, SHORT_COVER, LONG_UNWIND — and already
-   serves every column R1 asks for: symbol, price, day_1d, oi_chg, vol_ratio (populated since
-   cc#819 bug_2) and basis, plus an oi_feed_pending flag. The only change is the limit above.
+   serves every column R1 asks for: symbol, price, day_1d, oi_chg, the volume read (cc#819 bug_2
+   established it as vol_ratio; cc#1440/canon V2 replaced it with the rvol + vol_p pair) and
+   basis, plus an oi_feed_pending flag. The only change is the limit above.
 
    THE OI-PENDING RULE IS KEPT AND IT MATTERS THAT IT IS NOT NEEDED TODAY. The endpoint classifies
    ONLY when oi_chg is present and returns NEUTRAL otherwise, so a symbol can never be labelled a
@@ -860,10 +866,11 @@ var BU_SORT_GETTERS = {
   FUT:    function(r){ return r.price; },
   DAY:    function(r){ return r.day_1d; },
   OI:     function(r){ return r.oi_chg_pct; },
-  VOL:    function(r){ return r.vol_p; },   /* cc#1438: T-1 vol_p (was vol_ratio, latest row) */
+  RVOL:   function(r){ return r.rvol; },    /* cc#1440 (canon V2): the pair replaces the single VOL column */
+  VOLP:   function(r){ return r.vol_p; },
   BASIS:  function(r){ return r.basis; },
 };
-var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, VOL: -1, BASIS: -1 };
+var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, RVOL: -1, VOLP: -1, BASIS: -1 };
 
 function buSort(k, key){
   var s = BU_SORT[k];
@@ -889,10 +896,12 @@ function buCard(st){
   } else {
     body = '<table class="butbl"><thead><tr>'
       + buTh('SYMBOL', 'SYMBOL', st.k) + buTh('FUT', 'FUT', st.k) + buTh('DAY%', 'DAY', st.k)
-      /* cc#1438 (VOLUME_METRICS_CANON_V1.1): VOL× -> VOL P — the endpoint now serves vol_p, the
-         v8_metrics T-1 read (previous completed day vs its own 10-day avg) instead of the latest
-         row, which the live writer refreshes with a partial today-so-far value intraday. */
-      + buTh('OI Δ%', 'OI', st.k) + buTh('VOL P', 'VOL', st.k) + buTh('BASIS', 'BASIS', st.k)
+      /* cc#1440 (VOLUME_METRICS_CANON_V2, 33843): the single volume column becomes the
+         RVOL + VOL P pair — one formula at two read points (today live / yesterday's close),
+         served by rvol_engine's batch reads through /api/v10/buildup. Supersedes cc#1438's
+         v8_metrics T-1 read on this card. */
+      + buTh('OI Δ%', 'OI', st.k) + buTh('RVOL', 'RVOL', st.k) + buTh('VOL P', 'VOLP', st.k)
+      + buTh('BASIS', 'BASIS', st.k)
       + '</tr></thead><tbody>'
       + rows.map(function(r){
           return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
@@ -901,6 +910,8 @@ function buCard(st){
             // cc#1431: OI Δ shown as % (oi_chg_pct — same formula scanner_endpoints.day_range_oi
             // already uses off futures_basis.oi_chg/oi_prev), not the raw absolute contract count.
             + buNum(r.oi_chg_pct, 3, '%', true)
+            + (r.rvol == null ? '<td>—</td>'
+               : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
             + (r.vol_p == null ? '<td>—</td>'
                : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
             + buNum(r.basis, 1, '', true)
@@ -1073,9 +1084,10 @@ var VF_SORT_GETTERS = {
   WK:     function(r){ return r.week_chg_pct; },
   FUT:    function(r){ return r.fut_chg_pct; },
   RVOL:   function(r){ return r.rvol; },
+  VOLP:   function(r){ return r.vol_p; },   /* cc#1440 (canon V2): yesterday's RVOL at close */
   DELIV:  function(r){ return r.deliv_ratio; },
 };
-var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, RVOL: -1, DELIV: -1 };
+var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, RVOL: -1, VOLP: -1, DELIV: -1 };
 
 function vfSortList(list, side){
   return _sortByState(list, VF_SORT[side], VF_SORT_GETTERS);
@@ -1098,12 +1110,13 @@ function vfRows(list, n, side){
   var rows = (n ? sorted.slice(0, n) : sorted).map(function(r){
     return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
       + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1) + vfCell(r.fut_chg_pct, 1)
-      + vfCell(r.rvol, 0) + vfCell(r.deliv_ratio, 0) + '</tr>';
+      + vfCell(r.rvol, 0) + vfCell(r.vol_p, 0) + vfCell(r.deliv_ratio, 0) + '</tr>';
   }).join('');
   var head = side
     ? (vfTh('SYMBOL', 'SYMBOL', side) + vfTh('DAY', 'DAY', side) + vfTh('WK', 'WK', side)
-       + vfTh('FUT', 'FUT', side) + vfTh('RVOL', 'RVOL', side) + vfTh('DELIV', 'DELIV', side))
-    : '<th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th><th>RVOL</th><th>DELIV</th>';
+       + vfTh('FUT', 'FUT', side) + vfTh('RVOL', 'RVOL', side) + vfTh('VOL P', 'VOLP', side)
+       + vfTh('DELIV', 'DELIV', side))
+    : '<th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th><th>RVOL</th><th>VOL P</th><th>DELIV</th>';
   return '<table class="butbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
@@ -1206,6 +1219,7 @@ function vfGuide(){
     + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks. Bearish = 60% or more on red ticks. Names in between are noise and are left out.</p>'
     + '<p><b>DAY / WK / FUT.</b> Price change vs yesterday\'s close, vs the close 5 trading days back, and the same day change on the stock\'s futures.</p>'
     + '<p><b>RVOL.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>VOL P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
     + '<p><b>DELIV.</b> The latest day\'s delivered quantity vs its own 20-day average. Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
     + '<p><b>Ticks filter.</b> How far back we look: 25 ≈ 2 hours, 50 ≈ 4 hours, 100 ≈ 1.3 trading days, 500 ≈ 1 week. The filter on the top card drives both lists.</p>'
     + '<p><b>Honesty.</b> This is a volume read only — we do not see the order book, so it is never called order flow. A dash means the data is missing; we never fill it in.</p>'

@@ -1282,20 +1282,14 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             recent3d = _safe("recent3d_vol_ratio", lambda: _recent3d_vol_ratio(cur, sym))
             # cc#674: time-of-day-adjusted RVOL (today cum-vol / 21-session avg cum-vol at the same slot)
             rvol = _safe("rvol", lambda: __import__("rvol_engine").live_rvol(cur, sym))
-            # cc#1438 (VOLUME_METRICS_CANON_V1.1, session_log 33832/33833): the two new A-card tile
-            # reads. READS ONLY -- no engine writes, no recompute; both values already exist.
-            #   vol_p     = v8_metrics.vol_ratio at score_date T-1 (the row STRICTLY BEFORE the
-            #               latest row -- the latest row is refreshed intraday with today-so-far by
-            #               the live writer, so T-1 is the honest completed-day read; verified
-            #               against the canon's own CAMS spot-check: T 2.65 / T-1 0.63, 28-Aug).
-            #   vol_trend = momentum_scores.vol_trend latest row (20d avg vol / 60d avg vol, the
-            #               LOCKED GVM Momentum p8 input -- read, never recomputed here).
-            def _vol_p():
-                cur.execute("""SELECT score_date, vol_ratio FROM v8_metrics WHERE symbol=%s
-                               ORDER BY score_date DESC OFFSET 1 LIMIT 1""", (sym,))
-                r = cur.fetchone()
-                return {"value": float(r[1]), "asof": str(r[0])} if r and r[1] is not None else None
-            vol_p = _safe("vol_p", _vol_p)
+            # cc#1438 added these two tile reads; cc#1440 (VOLUME_METRICS_CANON_V2, session_log
+            # 33843) REDEFINES vol_p: no longer the v8_metrics T-1 vol_ratio row -- VOL P is now
+            # yesterday's RVOL at the closing slot (same profile formula as live RVOL, read once
+            # for the last completed session), served by rvol_engine.closing_rvol -- one shared
+            # derivation across every ex-VolX surface. vol_trend is unchanged from V1:
+            # momentum_scores latest row (20d/60d avg vol, the LOCKED GVM Momentum p8 input --
+            # read, never recomputed here).
+            vol_p = _safe("vol_p", lambda: __import__("rvol_engine").closing_rvol(cur, sym))
             def _vol_trend():
                 cur.execute("""SELECT score_date, vol_trend FROM momentum_scores WHERE symbol=%s
                                ORDER BY score_date DESC LIMIT 1""", (sym,))

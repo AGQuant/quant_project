@@ -132,6 +132,18 @@ def build_profiles(conn=None):
             conn.close()
 
 
+def _cum_total(vols):
+    """cc#680 cumulative-aware day total, extracted at cc#1440 so live_rvol, live_rvol_batch and
+    closing_rvol_batch share ONE detection: a majority non-decreasing series is a cumulative
+    counter → total = the latest (max) bar; else per-bar → total = SUM. Behaviour identical to the
+    inline form live_rvol carried since cc#680."""
+    if len(vols) >= 3:
+        nondec = sum(1 for a, b in zip(vols, vols[1:]) if b >= a)
+        if (nondec / max(len(vols) - 1, 1)) >= 0.6:
+            return max(vols)
+    return sum(vols)
+
+
 def live_rvol(cur, symbol):
     """On-demand RVOL. Today's cumulative volume is CUMULATIVE-AWARE (cc#680): if today's bars are a
     majority non-decreasing series they are a cumulative counter → today_cum = the latest bar; else
@@ -152,13 +164,7 @@ def live_rvol(cur, symbol):
         return None
     slot = bars[-1][0]
     vols = [float(v or 0) for _, v in bars]
-    # cumulative if the series is majority non-decreasing (tolerates a few feed dips).
-    if len(vols) >= 3:
-        nondec = sum(1 for a, b in zip(vols, vols[1:]) if b >= a)
-        is_cum = (nondec / max(len(vols) - 1, 1)) >= 0.6
-    else:
-        is_cum = False
-    cum_vol = max(vols) if is_cum else sum(vols)
+    cum_vol = _cum_total(vols)
     slot_s = str(slot)
     cur.execute("SELECT avg_cum_vol, sessions_used FROM rvol_profiles WHERE symbol=%s AND slot_time=%s",
                 (sym, slot))
@@ -174,3 +180,75 @@ def live_rvol(cur, symbol):
     avg_cv = float(p[0])
     base["rvol"] = round(cum_vol / avg_cv, 2) if avg_cv > 0 else None
     return base
+
+
+# ── cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843) · batch reads ─────────────────────────
+# RVOL and VOL P are ONE formula (cum volume at slot T / 21-session avg cum volume at slot T)
+# read at two points: RVOL = today at the live slot, VOL P = the last COMPLETED session at its
+# closing slot (15:25 — the final stored bucket, whose bar covers trade through 15:30). These
+# batch forms live HERE, beside the profile math they read, so every display surface imports one
+# derivation instead of growing its own copy (the Sprint A volume-flow SQL SUM is retired for
+# this cumulative-aware read).
+
+def _day_ratios(cur, symbols, day):
+    """One query for `day`: per symbol, cumulative-aware total ÷ profile at that symbol's own
+    last-bar slot. Returns {symbol: ratio-or-None}. MIN_SESSIONS gates sufficiency, same as
+    live_rvol; missing bars/profile → None, never fabricated."""
+    cur.execute("""
+        SELECT q.symbol, array_agg(q.volume ORDER BY q.ts) AS vols, MAX(q.ts)::time AS slot
+        FROM (
+            SELECT DISTINCT ON (symbol, ts) symbol, ts, volume FROM intraday_prices
+            WHERE symbol = ANY(%s) AND source IN ('fyers_eq','fyers_hist') AND ts::date = %s
+            ORDER BY symbol, ts, CASE source WHEN 'fyers_eq' THEN 0 ELSE 1 END
+        ) q GROUP BY q.symbol
+    """, (list(symbols), day))
+    rows = cur.fetchall()
+    if not rows:
+        return {}
+    slots = {r[0]: r[2] for r in rows}
+    cur.execute("""SELECT symbol, slot_time, avg_cum_vol, sessions_used FROM rvol_profiles
+                   WHERE symbol = ANY(%s)""", ([r[0] for r in rows],))
+    prof = {(p[0], p[1]): (float(p[2]) if p[2] is not None else None, int(p[3] or 0))
+            for p in cur.fetchall()}
+    out = {}
+    for sym, vols, slot in rows:
+        total = _cum_total([float(v or 0) for v in vols])
+        avg, sess = prof.get((sym, slots[sym]), (None, 0))
+        out[sym] = (round(total / avg, 2)
+                    if (avg and avg > 0 and sess >= MIN_SESSIONS and total > 0) else None)
+    return out
+
+
+def _sessions(cur, n=2):
+    cur.execute("""SELECT DISTINCT ts::date AS d FROM intraday_prices
+                   WHERE source = 'fyers_eq' ORDER BY d DESC LIMIT %s""", (n,))
+    return [r[0] for r in cur.fetchall()]
+
+
+def live_rvol_batch(cur, symbols):
+    """{symbol: rvol-or-None} for the latest session — batch form of live_rvol's read."""
+    days = _sessions(cur, 1)
+    return _day_ratios(cur, symbols, days[0]) if days else {}
+
+
+def closing_rvol_batch(cur, symbols):
+    """VOL P (canon V2): {symbol: {'value': ratio, 'asof': 'YYYY-MM-DD'}-or-None} — yesterday's
+    RVOL at the close. 'Yesterday' = the most recent session whose close has PASSED: during a live
+    session the latest date is still trading, so step back one; off-market the latest date is the
+    completed session itself. One fixed number per symbol per day, not time-sliced."""
+    days = _sessions(cur, 2)
+    if not days:
+        return {}
+    now = _ist_now()
+    live_today = _is_market_hours(now) and days[0] == now.date()
+    day = days[1] if (live_today and len(days) > 1) else days[0]
+    if live_today and len(days) < 2:
+        return {}
+    ratios = _day_ratios(cur, symbols, day)
+    return {s: ({"value": r, "asof": str(day)} if r is not None else None)
+            for s, r in ratios.items()}
+
+
+def closing_rvol(cur, symbol):
+    """Single-symbol VOL P — thin wrapper over the batch read (one derivation)."""
+    return closing_rvol_batch(cur, [symbol]).get((symbol or "").upper())

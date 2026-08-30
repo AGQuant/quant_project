@@ -463,7 +463,8 @@ function mapBuild(r){
   return { sym:r.symbol, price:Number(r.price)||0, day:Number(r.day_1d)||0,
            oi:r.oi!=null?Number(r.oi):null, oiChg:r.oi_chg!=null?Number(r.oi_chg):null,
            basis:r.basis!=null?Number(r.basis):null,
-           volR:r.vol_p!=null?Number(r.vol_p):null, sig:r.signal||'NEUTRAL' };  /* cc#1438: T-1 vol_p (was vol_ratio latest row) */
+           rv:r.rvol!=null?Number(r.rvol):null,
+           volR:r.vol_p!=null?Number(r.vol_p):null, sig:r.signal||'NEUTRAL' };  /* cc#1440 (canon V2): RVOL live + VOL P at yesterday's close, the pair */
 }
 async function loadBuildup(){
   const b = await getJSON('/api/v10/buildup?limit=15');
@@ -893,15 +894,16 @@ function buildupTable(title, rows, accent, pending){
   // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
   // of NEUTRAL tags is misleading. Show price-direction columns only.
   const head = pending
-    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL P','BASIS']
-    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL P','BASIS','SIGNAL'];
-  const colspan = pending?7:8;
+    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','RVOL','VOL P','BASIS']
+    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','RVOL','VOL P','BASIS','SIGNAL'];
+  const colspan = pending?8:9;   /* cc#1440: +1 for the RVOL column */
   const body = rows.length ? rows.map(r=>`<tr>
     <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
     <td class="td-mono">${num(r.price,2)}</td>
     <td class="td-mono" style="font-weight:700;color:${cx(r.day)}">${pct(r.day)}</td>
     <td class="td-mono" style="color:${r.oi!=null?C.txt:'var(--dim)'}">${r.oi!=null?fK(r.oi):'—'}</td>
     <td class="td-mono" style="color:${r.oiChg!=null?cx(r.oiChg):'var(--dim)'}">${r.oiChg!=null?sgn(r.oiChg/1e5,1)+'L':'—'}</td>
+    <td class="td-mono" style="color:var(--dim)">${r.rv!=null?r.rv.toFixed(2):'—'}</td>
     <td class="td-mono" style="color:var(--dim)">${r.volR!=null?r.volR.toFixed(2):'—'}</td>
     <td class="td-mono" style="color:${r.basis!=null?cx(r.basis):'var(--dim)'}">${r.basis!=null?sgn(r.basis,1):'—'}</td>
     ${pending?'':`<td>${bdg(r.sig.replace('_',' '),sigClr(r.sig),true)}</td>`}</tr>`).join('')

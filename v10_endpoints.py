@@ -805,17 +805,11 @@ def v10_buildup(limit: int = 15):
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
                 ),
-                -- cc#819 bug_2 established this join (vol_ratio was hardcoded None before it).
-                -- cc#1438 (VOLUME_METRICS_CANON_V1.1): the read moves from the LATEST score_date
-                -- to the row STRICTLY BEFORE it (T-1) and is served as vol_p — the live writer
-                -- refreshes the latest row intraday with today-so-far, so during a session the
-                -- old read showed a partial-day ratio that climbs mechanically; T-1 is the honest
-                -- completed-day read (same rule as the A-card VOL P tile, one definition).
-                v AS (
-                    SELECT symbol, vol_ratio FROM v8_metrics
-                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics
-                                        WHERE score_date < (SELECT MAX(score_date) FROM v8_metrics))
-                )
+                -- cc#819 bug_2 established a v8_metrics volume join here; cc#1438 moved it to
+                -- T-1; cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843) RETIRES the
+                -- v8_metrics read entirely — the volume pair now comes from rvol_engine's own
+                -- batch reads below (RVOL live + VOL P at yesterday's close), one formula at two
+                -- points, shared with every other ex-VolX surface.
                 SELECT l.symbol, l.c AS price,
                        ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
                        l.oi, l.oi_chg,
@@ -824,17 +818,21 @@ def v10_buildup(limit: int = 15):
                        -- derivation, reused verbatim, so the Futures Buildup card's OI% and the
                        -- screener's OI% can never disagree for the same symbol on the same day.
                        ROUND(l.oi_chg::numeric / NULLIF(l.oi_prev,0) * 100, 3) AS oi_chg_pct,
-                       l.basis, v.vol_ratio
+                       l.basis
                 FROM l JOIN pf USING(symbol)
-                LEFT JOIN v ON v.symbol = l.symbol
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
             rows = cur.fetchall()
+            # cc#1440: the RVOL/VOL P pair, both via rvol_engine's batch reads (one derivation).
+            from rvol_engine import live_rvol_batch, closing_rvol_batch
+            _syms = [r[0] for r in rows]
+            rvl = live_rvol_batch(cur, _syms) if _syms else {}
+            vpb = closing_rvol_batch(cur, _syms) if _syms else {}
     except Exception as e:
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
-        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis, vol_ratio = r
+        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis = r
         day_1d = float(day_1d) if day_1d is not None else None
         oi_chg = int(oi_chg) if oi_chg is not None else None
         # true buildup needs price + OI; classify only when oi_chg is present
@@ -845,12 +843,14 @@ def v10_buildup(limit: int = 15):
                 sig = "LONG_BUILD" if up else "SHORT_BUILD"
             elif oi_chg < 0:
                 sig = "SHORT_COVER" if up else "LONG_UNWIND"
+        _vp = vpb.get(sym)
         return {"symbol": sym, "price": float(price) if price is not None else None,
                 "day_1d": day_1d, "oi": int(oi) if oi is not None else None,
                 "oi_chg": oi_chg,
                 "oi_chg_pct": float(oi_chg_pct) if oi_chg_pct is not None else None,   # cc#1431
                 "basis": float(basis) if basis is not None else None,
-                "vol_p": float(vol_ratio) if vol_ratio is not None else None,   # cc#1438: T-1 read (was vol_ratio, latest row)
+                "rvol": rvl.get(sym),                                # cc#1440: live RVOL
+                "vol_p": (_vp["value"] if _vp else None),            # cc#1440 (V2): yesterday's RVOL at close
                 "signal": sig}
 
     data = [_row(r) for r in rows if r[2] is not None]
