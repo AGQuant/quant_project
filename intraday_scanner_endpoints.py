@@ -125,6 +125,34 @@ def _bucket_pass_count(row: dict, config: dict) -> int:
     )
 
 
+# cc#1452 push 6: the s1b volume check moves off bare v8_metrics vol_ratio (10d ratio) onto the
+# canon compound gate Vol R >= X OR Vol P >= Y, matching the QSR/V13/R6-R7/V8-bolt pattern.
+# 1.75/1.75 is the backtested like-for-like of the old >= 1.5 bar: 30 sessions x futures
+# universe, old leg passed 12.71% of symbol-days, OR 1.75/1.75 passes 14.78% at 88.65%
+# day-level agreement (1.5/1.5 would loosen to 19.95%; 2.0/2.0 tightens to 11.34%). One leg of
+# a 7-check n-2 soft bucket, so low-risk per the card's own gate — shipped flagged for founder
+# review, adjustable without ceremony.
+S1B_VOLR_X = 1.75
+S1B_VOLP_Y = 1.75
+
+
+def _enrich_vol_canon(cur, rows):
+    """Attach rvol (Vol R, live pace) + vol_p (Vol P, prior close) via rvol_engine's batch
+    reads — one derivation, never recomputed here. Missing profile → None → the check fails
+    honestly rather than passing on absent data."""
+    if not rows:
+        return rows
+    from rvol_engine import live_rvol_batch, closing_rvol_batch
+    syms = [r["symbol"] for r in rows]
+    rvl = live_rvol_batch(cur, syms)
+    vpb = closing_rvol_batch(cur, syms)
+    for r in rows:
+        r["rvol"] = rvl.get(r["symbol"])
+        _v = vpb.get(r["symbol"])
+        r["vol_p"] = _v["value"] if _v else None
+    return rows
+
+
 def _s1b_filters_eval(row: dict, nifty_rsi: Optional[float]) -> int:
     """buy_s1_bounce: 7 filters (clarifying_answers). Returns pass count."""
     cmp = _f(row.get("live_close"))
@@ -141,7 +169,8 @@ def _s1b_filters_eval(row: dict, nifty_rsi: Optional[float]) -> int:
         nifty_rsi is not None and nifty_rsi >= 55.0,                       # 1 market gate
         _passes_filter(row.get("week_return"), 0.0, 3.0),                  # 2
         _passes_filter(row.get("dma_50"), 0.0, None),                      # 3
-        _passes_filter(row.get("vol_ratio"), 1.5, None),                   # 4
+        (_passes_filter(row.get("rvol"), S1B_VOLR_X, None)
+         or _passes_filter(row.get("vol_p"), S1B_VOLP_Y, None)),           # 4 cc#1452: Vol R OR Vol P
         _passes_filter(recovery_2d, 2.0, 8.0),                             # 5
         _passes_filter(day_ret, 0.5, None),                                # 6
         week_low is not None and s1 is not None and week_low <= s1,        # 7
@@ -589,6 +618,7 @@ def scanner_intraday(limit: int = 40):
         cur.execute(_SCAN_SQL)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        _enrich_vol_canon(cur, rows)   # cc#1452 push 6: Vol R / Vol P for the s1b compound check
 
     scored = [_evaluate(r, reversal_cfg, nifty_rsi, adr) for r in rows]
     signals = [s for s in scored if s["signal"]]
@@ -674,6 +704,7 @@ def scanner_intraday_tc(symbol: str, side: str = "long"):
         if not row:
             raise HTTPException(404, f"No live metrics for {symbol} today")
         row = dict(zip(cols, row))
+        _enrich_vol_canon(cur, [row])   # cc#1452 push 6: Vol R / Vol P for the s1b compound check
 
     res = _evaluate_short(row, adr) if side == "short" else _evaluate(row, reversal_cfg, nifty_rsi, adr)
     return {
