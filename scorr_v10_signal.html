@@ -840,18 +840,20 @@ var BU_STATES = [
   {k:'SHORT_BUILD', t:'SHORT BUILDUP',  sub:'PRICE DOWN · OI UP',   cls:'l', mark:'▼'},
   {k:'LONG_UNWIND', t:'LONG UNWINDING', sub:'PRICE DOWN · OI DOWN', cls:'l', mark:'▼'}
 ];
-function buRows(k){
+function buPool(k){
   var bd = D.build || {};
   /* the two slices overlap, so dedupe by symbol before bucketing — otherwise a symbol appearing in
-     both lists would be counted twice inside its own state. */
+     both lists would be counted twice inside its own state. cc#1454: the DEFAULT (untapped)
+     ranking is now |OI change %| descending — the biggest OI movers within a state, not the
+     biggest price movers; per-column tap-to-sort (BU_SORT) is unchanged on top of this. */
   var seen = {}, all = [];
   (bd.long_buildup || []).concat(bd.short_buildup || []).forEach(function(r){
     if (r && r.symbol && !seen[r.symbol]) { seen[r.symbol] = 1; all.push(r); }
   });
   return all.filter(function(r){ return r.signal === k; })
-            .sort(function(a, b){ return Math.abs(b.day_1d || 0) - Math.abs(a.day_1d || 0); })
-            .slice(0, 5);
+            .sort(function(a, b){ return Math.abs(b.oi_chg_pct || 0) - Math.abs(a.oi_chg_pct || 0); });
 }
+function buRows(k){ return buPool(k).slice(0, 5); }
 function buNum(v, dp, suffix, colour){
   if (v === null || v === undefined) return '<td>—</td>';
   var n = Number(v);
@@ -873,23 +875,68 @@ var BU_SORT_GETTERS = {
   OI:     function(r){ return r.oi_chg_pct; },
   RVOL:   function(r){ return r.rvol; },    /* cc#1440 (canon V2): the pair replaces the single VOL column */
   VOLP:   function(r){ return r.vol_p; },
-  BASIS:  function(r){ return r.basis; },
+  VOLD:   function(r){ return r.vol_d; },   /* cc#1454: Vol D (Delivery Ratio) replaces BASIS */
 };
-var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, RVOL: -1, VOLP: -1, BASIS: -1 };
+var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, RVOL: -1, VOLP: -1, VOLD: -1 };
 
 function buSort(k, key){
   var s = BU_SORT[k];
   if (s.key === key) s.dir = -s.dir;
   else { s.key = key; s.dir = BU_SORT_DEFAULT_DIR[key]; }
   buRepaint();
+  /* cc#1454: mirror cc#1430's rule — a sheet open on THIS state re-renders sorted too. DOM
+     presence is the truth (vfSheetClose clears the shared sheet without knowing about us). */
+  if (document.querySelector('.vfsheet') && BU_SHEET.k === k) buMore(k);
 }
 
 function buTh(label, key, k){
   return _sortTh(label, key, BU_SORT[k], "buSort('" + k + "','" + key + "')");
 }
 
+function buTable(rows, k){
+  /* cc#1454: ONE table renderer for the card's top-5 AND the VIEW MORE sheet — the vfRows
+     pattern. cc#1431's OI Δ is now 1dp (founder: 3dp read as noise); BASIS column replaced by
+     VOL D (Delivery Ratio via the shared deliv_ratio_batch — same number as Volume Flow's
+     DELIV for the same symbol, by construction). */
+  return '<table class="butbl"><thead><tr>'
+    + buTh('SYMBOL', 'SYMBOL', k) + buTh('FUT', 'FUT', k) + buTh('DAY%', 'DAY', k)
+    /* cc#1440 (VOLUME_METRICS_CANON_V2, 33843): the single volume column becomes the
+       RVOL + VOL P pair — one formula at two read points (today live / yesterday's close),
+       served by rvol_engine's batch reads through /api/v10/buildup. */
+    + buTh('OI Δ%', 'OI', k) + buTh('RVOL', 'RVOL', k) + buTh('VOL P', 'VOLP', k)
+    + buTh('VOL D', 'VOLD', k)
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+          + '<td>' + (r.price != null ? num(r.price) : '—') + '</td>'
+          + buNum(r.day_1d, 2, '%', true)
+          + buNum(r.oi_chg_pct, 1, '%', true)
+          + (r.rvol == null ? '<td>—</td>'
+             : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
+          + (r.vol_p == null ? '<td>—</td>'
+             : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
+          + (r.vol_d == null ? '<td>—</td>'
+             : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
+          + '</tr>';
+      }).join('') + '</tbody></table>';
+}
+
+var BU_SHEET = { k: null };
+function buMore(k){
+  var pool = _sortByState(buPool(k), BU_SORT[k], BU_SORT_GETTERS);
+  if (!pool.length) return;
+  BU_SHEET.k = k;
+  var st = BU_STATES.filter(function(s){ return s.k === k; })[0] || {};
+  /* reuses the generic vfSheet/vfSheetClose shell as-is (cc#1312 close-race fix travels with
+     it); this is Buildup's OWN sheet instance — vfMore itself is untouched. */
+  vfSheet('<div class="vfsh">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
+    + buTable(pool, k)
+    + '<div class="vfasof">' + esc((D.build && D.build.session) || '') + '</div>');
+}
+
 function buCard(st){
-  var rows = _sortByState(buRows(st.k), BU_SORT[st.k], BU_SORT_GETTERS), bd = D.build || {};
+  var pool = buPool(st.k), rows = _sortByState(pool.slice(0, 5), BU_SORT[st.k], BU_SORT_GETTERS),
+      bd = D.build || {};
   var body;
   if (bd.oi_feed_pending){
     /* the 6055 rule, literally: with OI pending there IS no buildup state, so nothing is classified
@@ -899,29 +946,11 @@ function buCard(st){
   } else if (!rows.length){
     body = '<div class="unavail">No ' + esc(st.t.toLowerCase()) + ' on this session.</div>';
   } else {
-    body = '<table class="butbl"><thead><tr>'
-      + buTh('SYMBOL', 'SYMBOL', st.k) + buTh('FUT', 'FUT', st.k) + buTh('DAY%', 'DAY', st.k)
-      /* cc#1440 (VOLUME_METRICS_CANON_V2, 33843): the single volume column becomes the
-         RVOL + VOL P pair — one formula at two read points (today live / yesterday's close),
-         served by rvol_engine's batch reads through /api/v10/buildup. Supersedes cc#1438's
-         v8_metrics T-1 read on this card. */
-      + buTh('OI Δ%', 'OI', st.k) + buTh('RVOL', 'RVOL', st.k) + buTh('VOL P', 'VOLP', st.k)
-      + buTh('BASIS', 'BASIS', st.k)
-      + '</tr></thead><tbody>'
-      + rows.map(function(r){
-          return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
-            + '<td>' + (r.price != null ? num(r.price) : '—') + '</td>'
-            + buNum(r.day_1d, 2, '%', true)
-            // cc#1431: OI Δ shown as % (oi_chg_pct — same formula scanner_endpoints.day_range_oi
-            // already uses off futures_basis.oi_chg/oi_prev), not the raw absolute contract count.
-            + buNum(r.oi_chg_pct, 3, '%', true)
-            + (r.rvol == null ? '<td>—</td>'
-               : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
-            + (r.vol_p == null ? '<td>—</td>'
-               : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
-            + buNum(r.basis, 1, '', true)
-            + '</tr>';
-        }).join('') + '</tbody></table>';
+    body = buTable(rows, st.k)
+      + (pool.length > 5
+         ? '<button type="button" class="vfmore" onclick="buMore(\'' + st.k + '\')">VIEW MORE · '
+           + pool.length + ' QUALIFY</button>'
+         : '');
   }
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Futures Buildup</h3>'
