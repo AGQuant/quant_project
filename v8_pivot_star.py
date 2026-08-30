@@ -111,10 +111,12 @@ GLYPH = {"BUY": "star", "SELL": "star"}
 # honestly take is the side you are on. DO NOT unify these two side rules later; they answer
 # different questions.
 # cc#1441: 1.5 is the like-for-like carry-over of the retired vol_ratio>1.5 bar (closing-RVOL
-# >= 1.5 selects ~15% of symbol-days, comparable selectivity — backtest in the task log). Both
-# ride the same sign-off batch as the V13 / R6 thresholds; PLACEHOLDER until that lands.
-ACTIVITY_RVOL_X      = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
-ACTIVITY_VOLP_Y      = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+# >= 1.5 selects ~15% of symbol-days, comparable selectivity — backtest + before/after fire
+# rates in the task log: open book 4->5 of 21, universe 12.71%->19.95%). Shipped values stood
+# through the 30-Aug founder sign-off round (cc_task_logs, task 1441) — FINAL with the V13/R6
+# batch; change only via a new sign-off.
+ACTIVITY_RVOL_X      = 1.5   # FINAL — 30-Aug-2026 sign-off round (cc#1441)
+ACTIVITY_VOLP_Y      = 1.5   # FINAL — 30-Aug-2026 sign-off round (cc#1441)
 ACTIVITY_OI_DOD_PCT  = 25.0  # untouched (18053)
 
 # cc#1024 MARKER_GLYPH_V5 (founder-locked, session_log 22296): the activity marker is a LIGHTNING
