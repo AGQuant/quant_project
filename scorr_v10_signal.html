@@ -222,6 +222,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    room for the GMRAIRPORT-length names the 22% split was tight on), five numerics 14.6% each. */
 .butbl.vftbl th:nth-child(1),.butbl.vftbl td:nth-child(1){width:27%}
 .butbl.vftbl th:nth-child(n+2),.butbl.vftbl td:nth-child(n+2){width:14.6%}
+/* cc#1455: the Quality Bullish tables are FIVE columns — SYMBOL keeps generous room, four
+   numerics split the rest evenly. Scoped like .vftbl so the 7-col buildup split is untouched. */
+.butbl.qbtbl th:nth-child(1),.butbl.qbtbl td:nth-child(1){width:28%}
+.butbl.qbtbl th:nth-child(n+2),.butbl.qbtbl td:nth-child(n+2){width:18%}
 .butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
  font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .butbl tr:last-child td{border-bottom:none}
@@ -1006,15 +1010,17 @@ var QBB_STATES = [
 ];
 var QB_SORT = {};
 QBB_STATES.forEach(function(st){ QB_SORT[st.k] = { key: null, dir: 1 }; });
+/* cc#1455 refinement (task log 11:39): displayed columns are CMP / DAY / SECTOR DAY / OI Δ% —
+   the qualifying values (flow50, month/sector-month, basis) still gate + default-sort but are
+   explained in the (i) sheet instead of shown raw. */
 var QB_SORT_GETTERS = {
   SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
-  FLOW:   function(r){ return r.flow50; },
+  CMP:    function(r){ return r.cmp; },
   DAY:    function(r){ return r.day_pct; },
-  MO:     function(r){ return r.month_return; },
-  SECMO:  function(r){ return r.sector_month; },
-  BASIS:  function(r){ return r.basis; },
+  SECDAY: function(r){ return r.sector_day; },
+  OI:     function(r){ return r.oi_chg_pct; },
 };
-var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, FLOW: -1, DAY: -1, MO: -1, SECMO: -1, BASIS: -1 };
+var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, DAY: -1, SECDAY: -1, OI: -1 };
 var QB_SHEET = { k: null };
 
 function qbPool(k){
@@ -1038,20 +1044,32 @@ function qbTh(label, key, k){
 }
 
 function qbTable(rows, k){
-  return '<table class="butbl vftbl"><thead><tr>'
-    + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('FLOW', 'FLOW', k) + qbTh('DAY%', 'DAY', k)
-    + qbTh('MO%', 'MO', k) + qbTh('SEC MO', 'SECMO', k) + qbTh('BASIS', 'BASIS', k)
+  return '<table class="butbl qbtbl"><thead><tr>'
+    + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('CMP', 'CMP', k) + qbTh('DAY%', 'DAY', k)
+    + qbTh('SEC DAY', 'SECDAY', k) + qbTh('OI Δ%', 'OI', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
-          + (r.flow50 == null ? '<td>—</td>'
-             : '<td class="am">' + Math.round(r.flow50 * 100) + '%</td>')
+          + '<td>' + (r.cmp != null ? num(r.cmp) : '—') + '</td>'
           + buNum(r.day_pct, 2, '%', true)
-          + buNum(r.month_return, 1, '%', true)
-          + buNum(r.sector_month, 1, '%', true)
-          + buNum(r.basis, 2, '', true)
+          + buNum(r.sector_day, 2, '%', true)
+          + buNum(r.oi_chg_pct, 1, '%', true)
           + '</tr>';
       }).join('') + '</tbody></table>';
+}
+
+function qbGuide(){
+  /* cc#1455 refinement: the funnel is no longer visible as raw columns, so the (i) sheet
+     carries it in plain language. Reuses the generic vfSheet shell — no second sheet build. */
+  vfSheet('<div class="vfsh">How to read Quality Bullish · Basis</div><div class="vfg">'
+    + '<p><b>The idea.</b> A short list of stocks where the tape, the trend and the futures market all agree. Every name here passed FIVE checks — the checks pick the names, the columns describe them.</p>'
+    + '<p><b>The five checks.</b> 1) Over the last 50 five-minute ticks, 60%+ of the traded volume was on rising ticks — buyers doing the volume. 2) The stock is UP today. 3) It is up over the last month. 4) Its own sector is up this month too. 5) Its futures trade at a premium to the stock (Basis Positive card) or a discount (Basis Negative card). Names are ordered by the size of that premium/discount.</p>'
+    + '<p><b>CMP.</b> The futures price at the last tick — the same price frame the Futures Buildup card uses.</p>'
+    + '<p><b>DAY%.</b> Price change vs yesterday’s close.</p>'
+    + '<p><b>SEC DAY.</b> The stock’s own sector peers’ average move today — is the whole group moving, or just this name.</p>'
+    + '<p><b>OI Δ%.</b> Open-interest change day-over-day, the same formula the Futures Buildup card shows — rising OI with a rising price is fresh money, not short-covering.</p>'
+    + '<p><b>Honesty.</b> A card with no rows means nothing qualifies right now — basis flips with market conditions, and zero is the market’s answer, not a bug.</p>'
+    + '</div>');
 }
 
 function qbMore(k){
@@ -1081,6 +1099,7 @@ function qbCard(st){
   }
   return '<div class="vpage"><div class="card">'
     + '<div class="grp"><h3>Quality Bullish</h3>'
+    + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button>'
     + '<span class="asof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</span></div>'
     + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' '
     + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span>'
