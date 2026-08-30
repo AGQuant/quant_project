@@ -1308,7 +1308,9 @@ function vfAsof(){
 function vfCell(v, pct){
   if (v == null) return '<td class="am">—</td>';
   if (pct) return '<td class="' + (v >= 0 ? 'up' : 'dn') + '">' + sgn(v) + '%</td>';
-  return '<td>' + Number(v).toFixed(2) + 'x</td>';
+  /* cc#1470: the ratio branch joins buNum()/qbTable()'s convention — .am + the × sign. Volume
+     Flow was the outlier ("1.24x", plain white) against the other two cards' amber "1.2×". */
+  return '<td class="am">' + Number(v).toFixed(2) + '×</td>';
 }
 
 /* cc#1430/1431 · TAP-TO-SORT — ONE shared sort mechanism (per cc#1431's own instruction: the two
