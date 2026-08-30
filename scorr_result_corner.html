@@ -483,8 +483,8 @@ async function rcCard(kind,sym){
       const _vp=(E.vol_p||{}).value, _ad=E.ad_21d||{}, _adp=_ad.up_vol_pct;
       const _adc=_ad.label==='Accumulation'?'var(--grn)':_ad.label==='Distribution'?'var(--red)':'var(--txt)';
       h+=`<div class="rc-lbl">Volume</div><div style="display:flex;gap:6px">
-        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">VOL P · prev close RVOL</div><div style="font-size:20px;font-weight:800;color:${_vp>=1?'var(--grn)':'var(--txt)'}">${_vp==null?'—':Number(_vp).toFixed(1)}×</div></div>
-        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">ACCUM · ${_ad.label||'up-day vol share'}</div><div style="font-size:20px;font-weight:800;color:${_adc}">${_adp==null?'—':Math.round(_adp)+'%'}</div></div></div>`;
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Vol P · prev close Vol R</div><div style="font-size:20px;font-weight:800;color:${_vp>=1?'var(--grn)':'var(--txt)'}">${_vp==null?'—':Number(_vp).toFixed(1)}×</div></div>
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Vol AD · ${_ad.label||'up-day vol share'}</div><div style="font-size:20px;font-weight:800;color:${_adc}">${_adp==null?'—':Math.round(_adp)+'%'}</div></div></div>`;
       const dv=E.delivery||{};
       if(dv.deliv_pct!=null){ const lc=dv.label==='conviction'?'var(--grn)':dv.label==='churn'?'var(--red)':'var(--mut)';
         h+=`<div class="rc-lbl">Delivery</div><div class="rc-tile"><span style="font-size:20px;font-weight:800">${Number(dv.deliv_pct).toFixed(1)}%</span> <span style="font-size:11px;color:var(--dim)">vs 21d ${dv.avg21==null?'—':Number(dv.avg21).toFixed(1)}%</span><span style="float:right;font-size:10px;font-weight:800;color:${lc}">${(dv.label||'neutral').toUpperCase()}</span></div>`; }

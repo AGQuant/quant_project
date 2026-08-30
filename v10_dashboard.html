@@ -894,8 +894,8 @@ function buildupTable(title, rows, accent, pending){
   // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
   // of NEUTRAL tags is misleading. Show price-direction columns only.
   const head = pending
-    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','RVOL','VOL P','BASIS']
-    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','RVOL','VOL P','BASIS','SIGNAL'];
+    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','Vol R','Vol P','BASIS']
+    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','Vol R','Vol P','BASIS','SIGNAL'];
   const colspan = pending?8:9;   /* cc#1440: +1 for the RVOL column */
   const body = rows.length ? rows.map(r=>`<tr>
     <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>

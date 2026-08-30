@@ -191,15 +191,15 @@
     var adOvr={vs:(adv==null?'--':(Math.round(adv)+'%')),
                col:(ad.label==='Accumulation'?'var(--grn)':ad.label==='Distribution'?'var(--red)':'var(--txt)')};
     return '<div style="display:flex;gap:6px">'
-      + _volTile('RVOL',rvv,rvSub,'rvol',rvBadge)
-      + _volTile('VOL P',(vp.value!=null?vp.value:null),'prev close RVOL'+(vp.asof?(' \u00b7 '+newsEsc(vp.asof)):''),'volp','')
-      + _volTile('ACCUM',adv,(ad.label||'Accumulation')+' \u00b7 up-day vol share ('+(ad.days||21)+'d)','accum','',adOvr)
+      + _volTile('Vol R',rvv,rvSub,'rvol',rvBadge)
+      + _volTile('Vol P',(vp.value!=null?vp.value:null),'prev close Vol R'+(vp.asof?(' \u00b7 '+newsEsc(vp.asof)):''),'volp','')
+      + _volTile('Vol AD',adv,(ad.label||'Accumulation')+' \u00b7 up-day vol share ('+(ad.days||21)+'d)','accum','',adOvr)
       + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
   }
   function qaVolExplain(k){
-    var t={rvol:'RVOL = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
-           volp:'VOL P = yesterday\u2019s RVOL read at the close \u2014 the prior session\u2019s full-day volume \u00f7 the 21-session average full-day volume. One fixed number per day; same maths as RVOL, read at yesterday\u2019s close instead of live.',
-           accum:'ACCUM = of the last 21 sessions\u2019 up-day + down-day volume, the share that traded on UP days \u2014 who is doing the volume, buyers or sellers. The verdict label (Accumulation / Neutral / Distribution) is the Deriv Cockpit\u2019s own, from the same shared formula.'}[k]||'';
+    var t={rvol:'Vol R = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
+           volp:'Vol P = yesterday\u2019s Vol R read at the close \u2014 the prior session\u2019s full-day volume \u00f7 the 21-session average full-day volume. One fixed number per day; same maths as Vol R, read at yesterday\u2019s close instead of live.',
+           accum:'Vol AD = of the last 21 sessions\u2019 up-day + down-day volume, the share that traded on UP days \u2014 who is doing the volume, buyers or sellers. The verdict label (Accumulation / Neutral / Distribution) is the Deriv Cockpit\u2019s own, from the same shared formula.'}[k]||'';
     var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
   }
 
