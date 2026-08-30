@@ -43,6 +43,8 @@ import psycopg
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# cc#1478: these module-level constants are the NIFTY DEFAULTS, kept so any caller that still
+# reads them gets NIFTY values — the per-index truth lives in INDEX_CFG below.
 TF_MAIN   = "10min"
 TF_GATE   = "30min"
 ST_PERIOD = 150
@@ -55,13 +57,30 @@ TGT_PTS   = 200
 TABLE       = "nifty_5m_test_data"
 FEED_SYMBOL = "NIFTY50"
 
-# feed_symbol -> (5m table, lot, option_chain underlying tag, per-index SL/TGT)
+# feed_symbol -> full per-index engine config (cc#1478, V10_BANKNIFTY_SPEC_V2_20M_LOCKED 34192):
+# the signal path (timeframes, SuperTrend, EMA gate) is now per index, not module-global.
+# NIFTY is UNCHANGED per 34179 (ST150/3.0 10m, EMA3/10 30m gate, SL100/T200 — byte-identical
+# signals, verified old-vs-new on the same data before shipping). BANKNIFTY cuts over DIRECT
+# (founder decision, no paper trial) to ST150/4.0 on 20m, EMA5/13 with the 30m gate, SL150/T150.
 INDEX_CFG = {
     "NIFTY50":   {"table": "nifty_5m_test_data",     "lot": 65, "oc": "NIFTY",
+                  "tf_main": "10min", "tf_gate": "30min",
+                  "st_period": 150, "st_mult": 3.0, "ema_fast": 3, "ema_slow": 10,
                   "sl_pts": 100, "tgt_pts": 200},
     "BANKNIFTY": {"table": "banknifty_5m_test_data", "lot": 30, "oc": "BANKNIFTY",
-                  "sl_pts": 150, "tgt_pts": 300},
+                  "tf_main": "20min", "tf_gate": "30min",
+                  "st_period": 150, "st_mult": 4.0, "ema_fast": 5, "ema_slow": 13,
+                  "sl_pts": 150, "tgt_pts": 150},
 }
+
+
+def _spec_str(cfg):
+    """cc#1478: ONE spec-string builder for current_signal and get_summary — per index, never a
+    module-global echo. NIFTY renders exactly the pre-refactor string."""
+    tfm = cfg["tf_main"].replace("min", "m")
+    tfg = cfg["tf_gate"].replace("min", "m")
+    return (f"ST{cfg['st_period']}/{cfg['st_mult']} {tfm} + EMA{cfg['ema_fast']}/{cfg['ema_slow']} "
+            f"{tfg} gate, SL{cfg['sl_pts']}/T{cfg['tgt_pts']}")
 
 
 # ---------- db helpers (psycopg v3) ----------
@@ -219,20 +238,23 @@ def _load_5m(table):
     return df
 
 
-def _zone_series(df5):
-    g = _resample(df5, TF_GATE)
-    ef, es = _ema(g["close"].values, EMA_FAST), _ema(g["close"].values, EMA_SLOW)
+def _zone_series(df5, cfg):
+    g = _resample(df5, cfg["tf_gate"])
+    ef, es = _ema(g["close"].values, cfg["ema_fast"]), _ema(g["close"].values, cfg["ema_slow"])
     return pd.Series(np.where(ef > es, 1, -1), index=g["ts"])
 
 
-def _signal_for(table):
-    df5 = _load_5m(table)
-    g10 = _resample(df5, TF_MAIN)
-    if len(g10) < ST_PERIOD + 5:
+def _signal_for(cfg):
+    """cc#1478: takes the per-index cfg, not a bare table — timeframes, ST and the EMA gate all
+    come from it. `g10` keeps its name though BANKNIFTY resamples to 20m: renaming every local
+    would have widened this diff for zero behaviour."""
+    df5 = _load_5m(cfg["table"])
+    g10 = _resample(df5, cfg["tf_main"])
+    if len(g10) < cfg["st_period"] + 5:
         return {"status": "insufficient_data", "bars": len(g10)}
     o, h, l, c = (g10[x].values for x in ["open", "high", "low", "close"])
-    st, st_line = _supertrend(o, h, l, c, ST_PERIOD, ST_MULT)
-    zone = _zone_series(df5).reindex(g10["ts"], method="ffill").values
+    st, st_line = _supertrend(o, h, l, c, cfg["st_period"], cfg["st_mult"])
+    zone = _zone_series(df5, cfg).reindex(g10["ts"], method="ffill").values
     last = len(g10) - 1
     flipped = st[last] != st[last-1]
     direction = int(st[last])
@@ -251,7 +273,7 @@ def _signal_for(table):
 def current_signal(feed_symbol="NIFTY50"):
     cfg = INDEX_CFG.get(feed_symbol, INDEX_CFG[FEED_SYMBOL])
     sl = cfg.get("sl_pts", SL_PTS); tgt = cfg.get("tgt_pts", TGT_PTS)
-    s = _signal_for(cfg["table"])
+    s = _signal_for(cfg)
     if s.get("status") != "ok":
         return {**s, "symbol": feed_symbol}
     px = s["price"]; signal = s["signal"]
@@ -262,7 +284,7 @@ def current_signal(feed_symbol="NIFTY50"):
         "gate_zone": "buy" if s["zone"] == 1 else "sell", "signal": signal,
         "stop": round(px - sl, 1) if signal == "BUY" else (round(px + sl, 1) if signal == "SELL" else None),
         "target": round(px + tgt, 1) if signal == "BUY" else (round(px - tgt, 1) if signal == "SELL" else None),
-        "spec": f"ST{ST_PERIOD}/{ST_MULT} 10m + EMA{EMA_FAST}/{EMA_SLOW} 30m gate, SL{sl}/T{tgt}",
+        "spec": _spec_str(cfg),   # cc#1478: per index — NIFTY's string is byte-identical to before
     }
 
 
@@ -320,8 +342,14 @@ def _close_leg(cur, pid, reason, exit_px_or_ltp):
     return {"leg": leg, "reason": reason, "points": round(pts, 2), "pnl": round(pnl, 2)}
 
 
-def _paper_step(cur, feed_symbol, table, lot, oc, sl_pts, tgt_pts):
-    s = _signal_for(table)
+def _paper_step(cur, feed_symbol, cfg):
+    """cc#1478: takes the per-index cfg whole — the signal path below needs the timeframes and
+    ST/EMA params, not just the table. Open rows keep THEIR OWN stored stop/target (read from the
+    row further down, never from cfg) — the live BANKNIFTY pair entered 28-Aug keeps its
+    SL150/T300 exactly as entered; only entries AFTER this cutover take the new SL150/T150."""
+    table, lot, oc = cfg["table"], cfg["lot"], cfg["oc"]
+    sl_pts, tgt_pts = cfg["sl_pts"], cfg["tgt_pts"]
+    s = _signal_for(cfg)
     if s.get("status") != "ok":
         return {"feed": feed_symbol, "status": s.get("status", "err")}
     px = s["price"]; sig = s["signal"]; events = []
@@ -390,8 +418,7 @@ def paper_run(conn=None):
         with c.cursor() as cur:
             for feed_symbol, cfg in INDEX_CFG.items():
                 try:
-                    out.append(_paper_step(cur, feed_symbol, cfg["table"], cfg["lot"],
-                                           cfg["oc"], cfg["sl_pts"], cfg["tgt_pts"]))
+                    out.append(_paper_step(cur, feed_symbol, cfg))
                 except Exception as e:
                     out.append({"feed": feed_symbol, "status": "error", "error": str(e)})
         c.commit()
@@ -539,13 +566,21 @@ def get_summary():
             by_leg = {r[0]: {"trades": r[1], "wins": r[2], "pnl": float(r[3])} for r in cur.fetchall()}
     finally:
         conn.close()
+    # cc#1478: the spec line is PER INDEX now (a one-string NIFTY line under-described the book
+    # the moment BANKNIFTY ran different parameters), and the stale hand-carried backtest block
+    # (+5936 / 49.3 / 1.88, plus a derived rupee figure) is REPLACED by the honest no-lookahead
+    # replay numbers — NIFTY per session_log 34179 (bt4), BANKNIFTY per 34192 (the cfg this card
+    # cut over to). Never restate these from memory: they are the logged replay outputs.
     return {
-        "spec": f"ST{ST_PERIOD}/{ST_MULT} 10m + EMA{EMA_FAST}/{EMA_SLOW} 30m gate, NIFTY SL{SL_PTS}/T{TGT_PTS}",
+        "spec": {sym: _spec_str(cfg) for sym, cfg in INDEX_CFG.items()},
         "lots": {"NIFTY50": INDEX_CFG["NIFTY50"]["lot"], "BANKNIFTY": INDEX_CFG["BANKNIFTY"]["lot"]},
         "live_paper": by_leg,
-        "backtest_nifty_fut": {"points": 5936, "annual_rs_per_lot": 445000, "win_rate": 49.3,
-                               "profit_factor": 1.88, "trades": 150, "max_dd_pts": -1138,
-                               "note": "1yr NIFTY, after Rs1000/trade (harshest cost)"},
+        "backtest_nifty_fut": {"points": 4030, "win_rate": 42.6, "profit_factor": 1.48,
+                               "trades": 148, "max_dd_pts": -778,
+                               "note": "no-lookahead replay 28-Aug-25..28-Aug-26 (34179)"},
+        "backtest_bnf_fut": {"points": 5883, "win_rate": 59.2, "profit_factor": 2.05,
+                             "trades": 76, "max_dd_pts": -573,
+                             "note": "no-lookahead replay 28-Aug-25..28-Aug-26 (34192)"},
     }
 
 
