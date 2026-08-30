@@ -124,6 +124,10 @@ var _full = false;                // cc#779: fullscreen state
     { key: "BREAKDOWN",          lo: 0,    hi: 23.6,  col: "#dd3a4a" }
   ];
   var _fibBand = null;   // cc#750: {lo, rng} of the loaded-range swing, for priceToCoordinate band placement
+  // cc#1492: pan/zoom history auto-backfill state. _bfDays = the days window currently loaded for
+  // this symbol+TF (reset in _load); _histStart flags sym|tf combos whose FULL stored history is
+  // already on screen, so repeated pans past the true start can never re-fire the fetch.
+  var _bfTimer = null, _bfBusy = false, _bfDays = 0, _histStart = {};
   function _readOv() {
     // cc#807: `vwap` is GONE from the overlay state. VWAP is no longer a user decision — it renders
     // automatically on 5m and does not exist anywhere else, so there is nothing to persist. The old
@@ -891,6 +895,60 @@ var _full = false;                // cc#779: fullscreen state
     });
   }
 
+  /* ── cc#1492 (session_log 34239): pan/zoom toward the loaded-history edge auto-backfills older
+     candles. Daily bounded TFs only — 5m has no daily history to extend, ALL already loads the
+     full stored history (cc#806). /api/candles supports only a from-latest `days` window (no
+     older-range param — checked before inventing one), so each backfill refetches a DOUBLED
+     window and prepends the strictly-older bars; the superset overlap guarantees no gap and the
+     dedup guarantees no doubles. Debounced 200ms; single-flight; stale-response guarded
+     (cc#947 rule); the visible logical range is shifted by the prepend count so the user's
+     position never jumps. A fetch that yields nothing older — or the 1825-day endpoint cap —
+     flags sym|tf in _histStart and the handler goes quiet for good. */
+  function _maybeBackfill(range) {
+    if (!range) return;
+    if (_bfTimer) clearTimeout(_bfTimer);
+    _bfTimer = setTimeout(function () { _backfillCheck(range); }, 200);
+  }
+  function _backfillCheck(range) {
+    if (!_chart || !_series || _bfBusy) return;
+    var span = TF[_tf];
+    if (span == null || span >= 1825) return;          // 5m (null) and ALL (1825) are out of scope
+    if (_histStart[_sym + "|" + _tf]) return;
+    if (!_lastData || !_lastData.length) return;
+    /* The initial fitContent puts the left edge AT bar 0, which must NOT count as intent — it
+       would cost an extra fetch on every open. Real intent is a pan past the edge (from < -2,
+       lightweight-charts lets the range go negative) or a zoom-in approaching it (left edge
+       near 0 while showing fewer bars than are loaded). */
+    var zoomedIn = (range.to - range.from) < (_lastData.length - 5);
+    if (!(range.from < -2 || (range.from < 10 && zoomedIn))) return;
+    if (_bfDays >= 1825) { _histStart[_sym + "|" + _tf] = true; return; }
+    _bfBusy = true;
+    var wantSym = _sym, wantTf = _tf;
+    var newDays = Math.min(1825, _bfDays * 2);
+    _getJSON("/api/candles/" + encodeURIComponent(wantSym) + "?days=" + newDays)
+      .then(function (rows) {
+        _bfBusy = false;
+        if (_sym !== wantSym || _tf !== wantTf || !_series) return;
+        _bfDays = newDays;
+        var have = {};
+        _lastData.forEach(function (d) { have[d.time] = true; });
+        var first = _lastData[0].time;
+        var older = (rows || [])
+          .map(function (r) { return { time: r.date, open: +r.open, high: +r.high, low: +r.low, close: +r.close }; })
+          .filter(function (d) { return isFinite(d.close) && !have[d.time] && d.time < first; })
+          .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+        if (!older.length) { _histStart[wantSym + "|" + wantTf] = true; return; }
+        var vr = null;
+        try { vr = _chart.timeScale().getVisibleLogicalRange(); } catch (e) {}
+        _lastData = older.concat(_lastData);
+        _series.setData(_lastData);
+        if (vr) { try { _chart.timeScale().setVisibleLogicalRange({ from: vr.from + older.length, to: vr.to + older.length }); } catch (e) {} }
+        _setHL(_lastData);   // the H/L/% readout describes the loaded series — keep it honest
+        _renderFx();   // pivot labels re-place; fib stays anchored to its original loaded swing
+      })
+      .catch(function () { _bfBusy = false; });
+  }
+
   function _autoscale() { return null; }
 
   function _setHL(data, hoverTxt) {
@@ -919,6 +977,7 @@ var _full = false;                // cc#779: fullscreen state
 
   function _load(tf) {
     _tf = tf;
+    _bfDays = TF[tf] || 0;   // cc#1492: the freshly-loaded window; backfill escalates from here
     var box = document.getElementById("scorrChartBox"), msg = document.getElementById("scorrChartMsg");
     _paintChrome();
     if (!window.LightweightCharts) { msg.textContent = "Chart library unavailable."; return; }
@@ -976,6 +1035,7 @@ var _full = false;                // cc#779: fullscreen state
       _applyGvm();        // cc#779: GVM quality-trend line (secondary fixed 0-10 axis; no-op on 5m)
       _loadVerdict();     // cc#779: trend-strength badge, recomputed for THIS timeframe
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
+      try { c.timeScale().subscribeVisibleLogicalRangeChange(_maybeBackfill); } catch (e) {}   // cc#1492: own handler, never merged into _positionFx
       msg.textContent = isIntraday
         ? "5-min · last 5 sessions · IST (F&O feed)"
         : tf + " · daily · raw_prices (IST)";
