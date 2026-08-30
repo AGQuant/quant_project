@@ -47,6 +47,32 @@ def _conn():
 _ALLOWED_TICKS = (25, 50, 100, 500)
 
 
+def _flow_window(cur, symbols, ticks):
+    """cc#1455: the green/red flow window, extracted from volume_flow() so the Quality Bullish
+    deck reuses THIS derivation at ticks=50 instead of a second copy. Last `ticks` 5-min bars
+    per symbol, one set-based pass. {symbol: {bars, last_ts, last_close, green, red, total}}."""
+    cur.execute("""
+        WITH b AS (
+            SELECT symbol, ts, open, close, volume,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+            FROM intraday_prices
+            WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
+        )
+        SELECT symbol,
+               COUNT(*)                                        AS bars,
+               MAX(ts)                                         AS last_ts,
+               MAX(close) FILTER (WHERE rn = 1)                AS last_close,
+               COALESCE(SUM(volume) FILTER (WHERE close > open), 0) AS green_vol,
+               COALESCE(SUM(volume) FILTER (WHERE close < open), 0) AS red_vol,
+               COALESCE(SUM(volume), 0)                        AS total_vol
+        FROM b WHERE rn <= %(n)s
+        GROUP BY symbol
+    """, {"syms": list(symbols), "n": ticks})
+    return {r[0]: {"bars": r[1], "last_ts": r[2], "last_close": r[3],
+                   "green": int(r[4]), "red": int(r[5]), "total": int(r[6])}
+            for r in cur.fetchall()}
+
+
 def deliv_ratio_batch(cur, symbols):
     """cc#1452 push 5: the cc#1444 Delivery Ratio derivation, extracted so other surfaces (the
     GVM/CIO VolumePanel) reuse THIS function instead of growing a copy. {symbol: ratio-or-None} —
@@ -105,27 +131,8 @@ def volume_flow(ticks: int = 100):
             today = dts[0] if dts else None
             prev_d = dts[1] if len(dts) > 1 else None
 
-            # ── flow window: last N bars per symbol, one set-based pass ──────────────────────
-            cur.execute("""
-                WITH b AS (
-                    SELECT symbol, ts, open, close, volume,
-                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
-                    FROM intraday_prices
-                    WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
-                )
-                SELECT symbol,
-                       COUNT(*)                                        AS bars,
-                       MAX(ts)                                         AS last_ts,
-                       MAX(close) FILTER (WHERE rn = 1)                AS last_close,
-                       COALESCE(SUM(volume) FILTER (WHERE close > open), 0) AS green_vol,
-                       COALESCE(SUM(volume) FILTER (WHERE close < open), 0) AS red_vol,
-                       COALESCE(SUM(volume), 0)                        AS total_vol
-                FROM b WHERE rn <= %(n)s
-                GROUP BY symbol
-            """, {"syms": syms, "n": ticks})
-            flow = {r[0]: {"bars": r[1], "last_ts": r[2], "last_close": r[3],
-                           "green": int(r[4]), "red": int(r[5]), "total": int(r[6])}
-                    for r in cur.fetchall()}
+            # ── flow window via the shared helper (cc#1455 extracted it — one derivation) ────
+            flow = _flow_window(cur, syms, ticks)
 
             as_of = max((v["last_ts"] for v in flow.values() if v["last_ts"]), default=None)
 
@@ -230,3 +237,90 @@ def volume_flow(ticks: int = 100):
         raise
     except Exception as e:
         raise HTTPException(500, f"volume_flow failed: {e}")
+
+
+@router.get("/api/quality-bullish-basis")
+def quality_bullish_basis():
+    """cc#1455 — Quality Bullish + Basis, two lists for the /m/v10 2-card deck.
+
+    Funnel (founder-validated against live data before the card was filed):
+      50-bar flow_ratio >= 0.60 (the SAME _flow_window derivation volume_flow uses — no copy)
+      AND day_chg_pct > 0 (same prev-close basis as volume_flow's DAY)
+      AND v8_metrics.month_return > 0
+      AND v8_metrics.sector_month > 0 (ABSOLUTE positivity, not vs Nifty)
+      then split by futures_basis latest-tick basis sign. basis NULL or exactly 0 joins NEITHER
+      list (missing/flat never counts as a direction). A zero-row list is a legitimate outcome
+      (basis_neg was 0 on the day this shipped) — the card renders that honestly.
+    Rows: {symbol, flow50, day_pct, month_return, sector_month, basis}."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT symbol FROM futures_universe WHERE is_active ORDER BY symbol")
+            syms = [r[0] for r in cur.fetchall()]
+            if not syms:
+                return {"as_of": None, "quality_bullish_basis_pos": [],
+                        "quality_bullish_basis_neg": [], "universe": 0}
+
+            flow = _flow_window(cur, syms, 50)
+            as_of = max((v["last_ts"] for v in flow.values() if v["last_ts"]), default=None)
+
+            # prev-session close for day% — same anchor volume_flow's DAY column uses
+            cur.execute("""
+                SELECT symbol, close FROM (
+                    SELECT symbol, close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                    FROM raw_prices WHERE symbol = ANY(%(syms)s) AND price_date < CURRENT_DATE
+                ) z WHERE rn = 1
+            """, {"syms": syms})
+            prevs = {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
+
+            cur.execute("""
+                SELECT DISTINCT ON (symbol) symbol, month_return, sector_month
+                FROM v8_metrics WHERE symbol = ANY(%(syms)s)
+                ORDER BY symbol, score_date DESC
+            """, {"syms": syms})
+            mets = {r[0]: {"mo": (float(r[1]) if r[1] is not None else None),
+                           "sec": (float(r[2]) if r[2] is not None else None)}
+                    for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT DISTINCT ON (symbol) symbol, basis
+                FROM futures_basis WHERE symbol = ANY(%(syms)s)
+                ORDER BY symbol, ts DESC
+            """, {"syms": syms})
+            basis = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+
+        pos, neg = [], []
+        for sym in syms:
+            f = flow.get(sym)
+            if not f or f["bars"] < 25 or f["total"] == 0:   # same thin-window honesty as volume_flow (n/2)
+                continue
+            decided = f["green"] + f["red"]
+            if decided == 0:
+                continue
+            fr = f["green"] / decided
+            if fr < 0.60:
+                continue
+            lc = float(f["last_close"]) if f["last_close"] is not None else None
+            pv = prevs.get(sym)
+            day = ((lc / pv - 1) * 100) if (lc and pv) else None
+            if day is None or day <= 0:
+                continue
+            m = mets.get(sym) or {}
+            if m.get("mo") is None or m["mo"] <= 0 or m.get("sec") is None or m["sec"] <= 0:
+                continue
+            b = basis.get(sym)
+            if b is None or b == 0:
+                continue
+            row = {"symbol": sym, "flow50": round(fr, 4), "day_pct": round(day, 2),
+                   "month_return": round(m["mo"], 2), "sector_month": round(m["sec"], 2),
+                   "basis": round(b, 2)}
+            (pos if b > 0 else neg).append(row)
+
+        pos.sort(key=lambda r: -abs(r["basis"]))
+        neg.sort(key=lambda r: -abs(r["basis"]))
+        return {"as_of": as_of.isoformat() if as_of else None, "universe": len(syms),
+                "quality_bullish_basis_pos": pos, "quality_bullish_basis_neg": neg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"quality_bullish_basis failed: {e}")
