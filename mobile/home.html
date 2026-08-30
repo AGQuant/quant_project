@@ -416,6 +416,29 @@ body[data-theme]{
 .v10sum b{display:block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800;white-space:nowrap}
 .v10sum span{display:block;font-size:var(--type-95);color:var(--txt,#E9EEFB);text-transform:uppercase;
   letter-spacing:var(--track-px6);margin-top:var(--space-2)}
+/* cc#1465 — PROFIT FACTOR (i) sheet. The vfSheet/vfib pattern from scorr_v10_signal.html
+   (cc#1459), ported not reinvented: veil + bottom sheet + grab handle, veil/grab tap closes,
+   bound one frame late (the cc#1312 close-race fix travels with the pattern). Restyled with
+   THIS page's tokens — the web page's --hi/--edge/--chalk/Archivo Black do not exist here, and
+   a tokened page never gets eyeballed hexes. z 80/81 clears the .tpo overlay (z 60) hosting the
+   V10 popup. The i itself rides the VALUE line (nowrap, ~65px used of an 83px cell at 360px) —
+   on the label line it would wrap "PROFIT FACTOR" at every phone width, measured not assumed. */
+.pfveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.pfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
+  background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);border-radius:var(--radius-18,18px) var(--radius-18,18px) 0 0}
+.pfgrab{width:38px;height:4px;border-radius:var(--radius-2,2px);background:var(--line);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
+.pfsb{overflow-y:auto;padding:var(--space-4) var(--space-16) 26px;-webkit-overflow-scrolling:touch}
+.pfsh{font-size:var(--type-14);font-weight:800;letter-spacing:var(--track-em15);text-transform:uppercase;
+  color:var(--txt,#E9EEFB);margin-bottom:var(--space-10)}
+.pfrow{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);
+  padding:var(--space-8) 0;border-bottom:var(--bw-1) solid var(--line);font-size:var(--type-12);color:var(--txt,#E9EEFB)}
+.pfrow b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;white-space:nowrap}
+.pffx{margin-top:var(--space-10);font-size:var(--type-12);line-height:1.6;color:var(--txt,#E9EEFB)}
+.pffx b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800}
+.v10sum i.pfib{min-width:16px;height:16px;border-radius:50%;border:var(--bw-1) solid var(--line);
+  font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:var(--type-9);
+  color:var(--txt,#E9EEFB);display:inline-flex;align-items:center;justify-content:center;
+  vertical-align:2px;text-transform:none;margin-left:var(--space-2)}
 /* cc#948 — TWO-ZONE ANATOMY, restoring what the old .tr2 row had and cc#941 lost.
    The founder's complaint is that results no longer SCAN: cc#941 put the net P&L on line 3 on the
    LEFT, so every card's headline number sits at a different x depending on how long the line
@@ -3574,6 +3597,99 @@ function v10OptCard(t){
    trade/win-rate/net/open summary, a real concept worth naming) and because Card 4/5's own
    preview box is exactly the kind of place a second caller could reappear if that UI ever needs
    an aggregate view again; inlining would mean re-deriving this same formula a third time. */
+/* cc#1465 — the PROFIT FACTOR explainer, folded over the SAME leg-filtered closed rows the log
+   below lists (d.trades), so the sheet and the list cannot disagree. Verified against v10_trades
+   before building: NIFTY50 FUT is 31 closed = 14 profitable + 17 loss + 0 flat — the counts add
+   up exactly, so the flat line renders only when a flat trade actually exists (a third line the
+   moment the numbers would otherwise not add up, per the card). Points figures go em-dash if ANY
+   closed row in the bucket is missing points — a partial sum shown as a gross would be a
+   fabricated number. The formula line divides the same rupee grosses the by_leg profit_factor
+   divides server-side (same rows, same filter), so it restates the headline stat, never a second
+   opinion of it. */
+function v10PfBreakdown(d, leg){
+  var closed = (d.trades || []).filter(function(t){
+    return (t.leg || 'FUT') === leg && !t.open && t.pnl != null;
+  });
+  var wins = [], losses = [], flat = 0, gp = 0, gl = 0;
+  closed.forEach(function(t){
+    if (t.pnl > 0){ wins.push(t); gp += t.pnl; }
+    else if (t.pnl < 0){ losses.push(t); gl += t.pnl; }
+    else flat++;
+  });
+  function pts(a){
+    var s = 0, miss = 0;
+    a.forEach(function(t){ if (t.points == null) miss++; else s += t.points; });
+    return miss ? null : s;
+  }
+  var gpts = pts(wins), lpts = pts(losses);
+  return {
+    closed: closed.length, wins: wins.length, losses: losses.length, flat: flat,
+    winRate: closed.length ? Math.round(wins.length / closed.length * 100) : null,
+    gpts: gpts, lpts: (lpts == null ? null : Math.abs(lpts)),
+    avgW: (wins.length && gpts != null) ? gpts / wins.length : null,
+    avgL: (losses.length && lpts != null) ? Math.abs(lpts) / losses.length : null,
+    gp: gp, gl: Math.abs(gl), pf: (gl !== 0 ? gp / Math.abs(gl) : null)
+  };
+}
+var PF_SHEET = {open: false, prevOverflow: ''};
+function v10PfSheet(){
+  var d = V10.data; if (!d) return;
+  var leg = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
+  var b = v10PfBreakdown(d, leg);
+  function fp(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 1}) + ' pts'; }
+  function fr(v){ return '₹' + Math.abs(Math.round(v)).toLocaleString('en-IN'); }
+  var rows = [
+    ['Total trades', String(b.closed)],
+    ['Profitable trades', String(b.wins)],
+    ['Loss trades', String(b.losses)]];
+  if (b.flat) rows.push(['Flat (breakeven) trades', String(b.flat)]);
+  rows.push(
+    ['Win rate', (b.winRate == null ? '—' : b.winRate + '%')],
+    ['Gross points won', fp(b.gpts)],
+    ['Gross points lost', fp(b.lpts)],
+    ['Avg profit per winning trade', fp(b.avgW)],
+    ['Avg loss per losing trade', fp(b.avgL)]);
+  var fx = (b.pf == null)
+    ? (b.closed
+        ? 'No profit factor here: this side has never taken a loss, so the divisor is zero.'
+        : 'No closed trades yet, so there is nothing to divide.')
+    : 'Profit factor = gross profit ÷ gross loss = <b>' + fr(b.gp) + ' ÷ ' + fr(b.gl)
+      + ' = ' + Number(b.pf).toFixed(2) + '×</b>. Above 1× the wins outweigh the losses.';
+  v10PfSheetClose();
+  PF_SHEET.prevOverflow = document.body.style.overflow;   /* the .tpo popup behind this sheet has
+     already locked the body — the web shell's close resets to '', which would UNLOCK the page
+     UNDER the still-open popup. Save and restore instead: the one deliberate deviation from the
+     ported pattern, because here the sheet opens above another overlay. */
+  var veil = document.createElement('div');
+  veil.className = 'pfveil';
+  var sheet = document.createElement('div');
+  sheet.className = 'pfsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="pfgrab"></div><div class="pfsb">'
+    + '<div class="pfsh">Profit factor · ' + (leg === 'OPT' ? 'options' : 'futures') + '</div>'
+    + rows.map(function(r){ return '<div class="pfrow"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('')
+    + '<div class="pffx">' + fx + '</div></div>';
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  PF_SHEET.open = true;
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = v10PfSheetClose;
+    var g = sheet.querySelector('.pfgrab');
+    if (g) g.onclick = v10PfSheetClose;
+  });
+}
+function v10PfSheetClose(){
+  var v = document.querySelector('.pfveil'), s = document.querySelector('.pfsheet');
+  if (v) v.remove();
+  if (s) s.remove();
+  if (PF_SHEET.open){
+    document.body.style.overflow = PF_SHEET.prevOverflow;
+    PF_SHEET.open = false;
+  }
+}
 function v10LegStats(d, leg){
   var bl = (d.by_leg && d.by_leg[leg]) || {};
   return {
@@ -3617,7 +3733,9 @@ function v10Log(d){
   var st = v10LegStats(d, view);
   var h = '<div class="v10sum">'
     + '<div><b>' + st.trades + '</b><span>trades</span></div>'
-    + '<div><b>' + (st.pf == null ? '&mdash;' : Number(st.pf).toFixed(2) + '×') + '</b><span>profit factor</span></div>'
+    + '<div onclick="v10PfSheet()" role="button" aria-label="Profit factor breakdown" style="cursor:pointer">'
+      + '<b>' + (st.pf == null ? '&mdash;' : Number(st.pf).toFixed(2) + '×') + '<i class="pfib">i</i></b>'
+      + '<span>profit factor</span></div>'
     + '<div><b class="' + cls(st.net) + '">' + (st.net == null ? '&mdash;'
         : (st.net >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(Math.round(st.net)).toLocaleString('en-IN'))
       + '</b><span>net</span></div>'
