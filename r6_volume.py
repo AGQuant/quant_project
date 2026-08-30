@@ -165,8 +165,10 @@ def volume_ratio(cur, symbol: str) -> dict:
 
 
 # ── cc#1441 push 3: the canon R6/R7 read + 3-tier ────────────────────────────────────────────
-R6_RVOL_X = 1.2   # PLACEHOLDER — awaiting founder sign-off (cc#1441 backtest tables, 30-Aug)
-R6_VOLP_Y = 1.0   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+# Thresholds FOUNDER-SIGNED FINAL 30-Aug-2026 (cc_task_logs, task 1441): PASS/WATCH/FAIL lands
+# 12.3 / 26.2 / 61.6 over 30 sessions x full universe. Change only via a new sign-off.
+R6_RVOL_X = 1.2   # FINAL — founder-signed 30-Aug-2026 (cc#1441)
+R6_VOLP_Y = 1.0   # FINAL — founder-signed 30-Aug-2026 (cc#1441)
 
 
 def r6_read(cur, symbol: str) -> dict:

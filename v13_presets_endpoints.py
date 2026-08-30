@@ -206,12 +206,12 @@ _FIELD_MAP = {
     "pe": ("s", "pe"), "roce": ("s", "roce"),
 }
 
-# cc#1441 push 2: the OR-gate thresholds. PLACEHOLDER values pending founder sign-off — the
-# backtest tables are in cc_task_logs (task 1441, 30-Aug); these two constants are the ONLY
-# thing the sign-off push changes. Candidate posted: 1.2/1.5 (closest breadth to the retired
-# vol_ratio_21>=1.0 gate at 88.6% day-level agreement).
-V13_VOL_GATE_RVOL_X = 1.2   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
-V13_VOL_GATE_VOLP_Y = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+# cc#1441: the OR-gate thresholds — FOUNDER-SIGNED FINAL 30-Aug-2026 (relayed in cc_task_logs,
+# task 1441). RVOL >= 1.2 OR VOL P >= 1.5: closest breadth to the retired vol_ratio_21>=1.0
+# gate (30/41 vs 29/41 on the live 52W-Breakout preset; 88.6% day-level agreement over 30
+# sessions x full universe — backtest tables in the task log). Change only via a new sign-off.
+V13_VOL_GATE_RVOL_X = 1.2   # FINAL — founder-signed 30-Aug-2026 (cc#1441)
+V13_VOL_GATE_VOLP_Y = 1.5   # FINAL — founder-signed 30-Aug-2026 (cc#1441)
 
 
 def _col_expr(src, col, native=None):
