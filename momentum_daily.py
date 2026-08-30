@@ -95,12 +95,29 @@ def score_rsi_month_absolute(rsi):
 def score_vol_trend(ratio):
     """Volume trend: 20d avg / 60d avg. Confirms or denies price momentum.
     <0.8 = volume drying up (weak). >=1.2 = strong surge (confirming).
-    """
+    RETIRING (cc#1446): parameter 8's slot moves to score_accumulation() below at push 5, once
+    the founder-approved ADD COLUMN DDL lands. This scorer stays live until that cutover."""
     if ratio is None or (isinstance(ratio, float) and np.isnan(ratio)):
         return None
     if ratio < 0.8:  return 2.5
     if ratio < 1.0:  return 5.0
     if ratio < 1.2:  return 7.5
+    return 10.0
+
+
+def score_accumulation(up_pct):
+    """cc#1446 — parameter 8's NEW scorer, bands FOUNDER-SIGNED FINAL 30-Aug-2026 (Candidate A,
+    cc_task_logs task 1446). Input: _accumulation_21d's up-day-volume share, 0..100. The 45/55
+    edges are deriv_metrics._ad_21d's OWN Distribution/Neutral/Accumulation label edges, so a
+    score band means exactly what the cockpit label already says; 65 splits mild from strong
+    accumulation. Backtested split over 30 sessions x full universe: 25.9 / 20.2 / 20.7 / 33.2
+    (vol_trend's for comparison: 37.4 / 18.3 / 14.0 / 30.3). Higher is better, like every other
+    M parameter. NOT wired into compute_momentum until push 5 (post-DDL cutover)."""
+    if up_pct is None or (isinstance(up_pct, float) and np.isnan(up_pct)):
+        return None
+    if up_pct < 45:  return 2.5
+    if up_pct < 55:  return 5.0
+    if up_pct < 65:  return 7.5
     return 10.0
 
 
