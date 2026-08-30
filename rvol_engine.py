@@ -252,3 +252,69 @@ def closing_rvol_batch(cur, symbols):
 def closing_rvol(cur, symbol):
     """Single-symbol VOL P — thin wrapper over the batch read (one derivation)."""
     return closing_rvol_batch(cur, [symbol]).get((symbol or "").upper())
+
+
+# ── cc#1441 · EOD full-universe form (VOLUME_METRICS_CANON_V2, session_log 33843) ──────────────
+# The profile build ANCHORS the 15:25-slot average to the symbol's 21-session average raw volume
+# (_BUILD_SQL: prof scaled by raw21/p1525). So the CLOSING read of the one formula is, by that
+# anchoring, algebraically identical to: raw day volume ÷ trailing-21-session average raw volume
+# (excluding the day itself) — readable straight from raw_prices for the whole ~1,800-symbol
+# universe, no profile row needed. EOD gates (the V13 preset OR-gate, R6/R7's VOL P side) read
+# THIS form; live intraday pace reads stay on the profile form above. Both forms live in this
+# file so no gate or surface grows its own copy of the derivation.
+#
+# In the raw form, the latest raw_prices row is by definition the last COMPLETED session, so
+# rvol = that session's closing RVOL and vol_p = the session before it — the (RVOL, VOL P) pair
+# as an EOD gate sees it.
+EOD_MIN_SESSIONS = 15   # history floor for the raw window — same honesty role as MIN_SESSIONS
+
+# Self-contained (no params): per symbol, the latest completed session's closing RVOL (rvol)
+# and the prior session's (vol_p). 60 calendar days ≈ 40 sessions, so the 21-back window behind
+# the rn=1 row is always fully populated when the symbol has the history at all.
+EOD_RVOL_PAIR_SQL = f"""
+SELECT symbol, rv AS rvol, vp AS vol_p, price_date AS asof FROM (
+  SELECT symbol, price_date,
+         CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END AS rv,
+         LAG(CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END)
+           OVER (PARTITION BY symbol ORDER BY price_date) AS vp,
+         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+  FROM (
+    SELECT symbol, price_date, volume::numeric AS vol,
+           AVG(volume::numeric) OVER (PARTITION BY symbol ORDER BY price_date
+                                      ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS a21,
+           COUNT(volume)        OVER (PARTITION BY symbol ORDER BY price_date
+                                      ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS n21
+    FROM raw_prices
+    WHERE price_date >= CURRENT_DATE - 60 AND volume IS NOT NULL
+  ) b
+) z WHERE rn = 1
+"""
+
+
+def eod_rvol_pair(cur, symbol):
+    """Single-symbol EOD read: {'rvol':…, 'vol_p':…, 'asof': 'YYYY-MM-DD'} or None. Same raw
+    form as EOD_RVOL_PAIR_SQL, scoped to one symbol (cheap: one symbol's 60-day slice)."""
+    sym = (symbol or "").upper()
+    cur.execute(f"""
+        SELECT rv, vp, price_date FROM (
+          SELECT price_date,
+                 CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END AS rv,
+                 LAG(CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END)
+                   OVER (ORDER BY price_date) AS vp,
+                 ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
+          FROM (
+            SELECT price_date, volume::numeric AS vol,
+                   AVG(volume::numeric) OVER (ORDER BY price_date
+                                              ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS a21,
+                   COUNT(volume)        OVER (ORDER BY price_date
+                                              ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS n21
+            FROM raw_prices
+            WHERE symbol = %s AND price_date >= CURRENT_DATE - 60 AND volume IS NOT NULL
+          ) b
+        ) z WHERE rn = 1""", (sym,))
+    r = cur.fetchone()
+    if not r or (r[0] is None and r[1] is None):
+        return None
+    return {"rvol": (round(float(r[0]), 2) if r[0] is not None else None),
+            "vol_p": (round(float(r[1]), 2) if r[1] is not None else None),
+            "asof": str(r[2])}
