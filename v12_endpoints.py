@@ -234,6 +234,14 @@ def v12_screen(
                     params + [size, offset])
         cols = [d[0] for d in cur.description]
         stocks = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # cc#1452 push 3: Vol R (canon live RVOL) rides beside the legacy vol_ratio field for
+        # the returned page only (<= 200 rows, one batch read). vol_ratio stays served per the
+        # 30-Aug written-but-legacy ruling; surfaces should read/label rvol as "Vol R".
+        if stocks:
+            from rvol_engine import live_rvol_batch
+            _rvl = live_rvol_batch(cur, [s["symbol"] for s in stocks])
+            for s in stocks:
+                s["rvol"] = _rvl.get(s["symbol"])
 
     return {
         "page": page,
