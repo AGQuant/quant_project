@@ -22,6 +22,9 @@ from fastapi import APIRouter
 # dropped it) — falls back to Scorr's own segment peer-avg PE, honestly labelled. See
 # segment_pe_fallback.py.
 from segment_pe_fallback import segment_pe_map, lookup as _pe_lookup
+# cc#1484: the Breakup tab's BFSI Interest-Coverage skip must use the SAME segment set the
+# nightly engine scores with — importing it keeps the two gates one definition, not a copy.
+from gvm_nightly import BFSI_SEGMENTS
 
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
@@ -267,6 +270,50 @@ def _sector_ratings(cur, segments):
     return {r[0]: {"score": _f(r[1]), "verdict": r[2]} for r in cur.fetchall()}
 
 
+# ── cc#1484: Breakup tab — the 21 scored parameters per holding, read from gvm_scores ────────────
+# (plain-English label, gvm_scores column), in the exact order api_g_score / api_v_score /
+# api_m_score build their breakdowns (session_log 34218). promoter_rating is NOT a scoring input
+# (it feeds the pledge red-flag only) and is deliberately excluded.
+RATING_PARAMS = {
+    "Growth": [
+        ("Sales Growth 5Y", "sales_5y_rating"), ("Sales Growth 3Y", "sales_3y_rating"),
+        ("Profit Growth 5Y", "profit_5y_rating"), ("Profit Growth 3Y", "profit_3y_rating"),
+        ("YoY Sales Growth", "qoq_sales_rating"), ("YoY Profit Growth", "qoq_profit_rating"),
+        ("OPM", "opm_rating"), ("OPM Expansion", "opm_exp_rating"),
+        ("Fixed Asset Growth", "fa_growth_rating"), ("Inst Holding Abs", "inst_abs_rating"),
+        ("Inst Holding Change", "inst_change_rating"), ("ROCE", "roce_rating"),
+        ("Dividend Yield", "div_yield_rating"), ("Interest Coverage", "int_cov_rating"),
+    ],
+    "Value": [("PE Ratio", "pe_rating"), ("Potential Upside", "upside_rating")],
+    "Momentum": [
+        ("1Y Return", "ret_1y_rating"), ("3Y Return", "ret_3y_rating"),
+        ("DMA 50", "dma_50_rating"), ("DMA 200", "dma_200_rating"),
+        ("52W vs Index", "ret_52w_idx_rating"),
+    ],
+}
+
+
+def _load_rating_breakup(cur, syms):
+    """cc#1484: latest gvm_scores row per symbol (read-only) → {symbol: {bfsi, params:{label: rating}}}.
+    Interest Coverage is forced to None for BFSI segments — the engine skips it there, so a number
+    would be fabricated."""
+    pairs = RATING_PARAMS["Growth"] + RATING_PARAMS["Value"] + RATING_PARAMS["Momentum"]
+    cols = ", ".join(c for _, c in pairs)
+    cur.execute(f"""
+        SELECT DISTINCT ON (symbol) symbol, segment, {cols}
+        FROM gvm_scores WHERE symbol = ANY(%s) ORDER BY symbol, score_date DESC
+    """, (syms,))
+    out = {}
+    for row in cur.fetchall():
+        sym, seg = row[0], row[1]
+        bfsi = seg in BFSI_SEGMENTS
+        params = {}
+        for (label, _col), val in zip(pairs, row[2:]):
+            params[label] = None if (bfsi and label == "Interest Coverage") else _r(val)
+        out[sym] = {"bfsi": bfsi, "params": params}
+    return out
+
+
 def _replacements(cur, avoid_segments, held_syms):
     """Top-2 GVM peers per segment (latest gvm_history), excluding held names."""
     if not avoid_segments:
@@ -393,6 +440,16 @@ def build_report(cur, pid):
     # weights
     for h in holdings:
         h["weight"] = round((h["current"] or 0) / total_current * 100, 2) if total_current > 0 else 0.0
+
+    # ---- cc#1484: rating breakup (Breakup tab) — weight-desc, one entry per holding ----
+    _rb = _load_rating_breakup(cur, syms)
+    rating_breakup = []
+    for h in sorted(holdings, key=lambda x: x["weight"] or 0, reverse=True):
+        e = _rb.get(h["symbol"])
+        rating_breakup.append({
+            "symbol": h["symbol"], "company_name": h["company_name"], "weight": h["weight"],
+            "bfsi": bool(e and e["bfsi"]), "params": e["params"] if e else {},
+        })
 
     def _wpairs(key):
         return [(h[key], h["current"]) for h in holdings]
@@ -689,6 +746,7 @@ def build_report(cur, pid):
         "results_yet_to_report": results_yet_to_report,  # cc#662 V1.1 footnote
         "red_flags": red_flags,
         "holdings": holdings,
+        "rating_breakup": rating_breakup,   # cc#1484 Breakup tab (21 params × holdings)
         "highlights": highlights,
         "expert_take": expert_take,
     }

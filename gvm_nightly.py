@@ -635,8 +635,11 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
         )
         scr = pd.read_sql_query("SELECT * FROM screener_raw", conn)
         # latest momentum on/before target date
+        # cc#1484: the 5 per-parameter M ratings ride along so gvm_scores can persist the full
+        # 21-parameter rating set (Breakup heatmap source). m_score itself is unchanged.
         mom = pd.read_sql_query(
-            "SELECT DISTINCT ON (symbol) symbol, m_score FROM momentum_scores "
+            "SELECT DISTINCT ON (symbol) symbol, m_score, ret_1y_rating, ret_3y_rating, "
+            "dma_50_rating, dma_200_rating, ret_52w_idx_rating FROM momentum_scores "
             "WHERE score_date <= %s ORDER BY symbol, score_date DESC",
             conn, params=(target_date,),
         )
@@ -789,6 +792,37 @@ def sync_gvm_cache(cur) -> Dict:
     return {"gvm_cache": n_cache, "peer_averages": n_peers}
 
 
+# ── cc#1484: per-parameter rating persistence ────────────────────────────────────────────────────
+# The scorer below ALREADY computes every G and V parameter rating (api_g_score / api_v_score
+# breakdowns) and used to throw them away — gvm_scores' *_rating columns were only ever filled
+# lazily by gvm_company_report on a page open (2/1794 symbols) and wiped by the nightly DELETE.
+# Persisting them here makes gvm_scores the real batched source for the 21-parameter Breakup view
+# (hr_report.RATING_PARAMS mirrors this mapping). M's five ratings are copied from momentum_scores
+# via the merge above. Interest Coverage is absent from a BFSI breakdown -> NULL, never a number.
+_GV_RATING_COLS = [
+    ("sales_5y_rating", "Sales Growth 5Y"), ("sales_3y_rating", "Sales Growth 3Y"),
+    ("profit_5y_rating", "Profit Growth 5Y"), ("profit_3y_rating", "Profit Growth 3Y"),
+    ("qoq_sales_rating", "YoY Sales Growth"), ("qoq_profit_rating", "YoY Profit Growth"),
+    ("opm_rating", "OPM"), ("opm_exp_rating", "OPM Expansion"),
+    ("fa_growth_rating", "Fixed Asset Growth"), ("inst_abs_rating", "Inst Holding Abs"),
+    ("inst_change_rating", "Inst Holding Change"), ("roce_rating", "ROCE"),
+    ("div_yield_rating", "Dividend Yield"), ("int_cov_rating", "Interest Coverage"),
+    ("pe_rating", "PE Ratio"), ("upside_rating", "Potential Upside"),
+]
+_M_RATING_COLS = ["ret_1y_rating", "ret_3y_rating", "dma_50_rating", "dma_200_rating",
+                  "ret_52w_idx_rating"]
+_ALL_RATING_COLS = [c for c, _ in _GV_RATING_COLS] + _M_RATING_COLS
+
+
+def _rating_val(x):
+    """float rounded 2dp, or None — never NaN into the DB."""
+    try:
+        xf = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(xf) else round(xf, 2)
+
+
 def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = True) -> Dict:
     target_date = target_date or date.today()
 
@@ -813,8 +847,15 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
     for _, row in df.iterrows():
         try:
             sd = _stock_dict(row, peer_avgs)
-            g = api_g_score(sd)["score"]
-            vv = api_v_score(sd)["score"]
+            gres = api_g_score(sd)
+            vres = api_v_score(sd)
+            g = gres["score"]
+            vv = vres["score"]
+            # cc#1484: keep the per-parameter breakdowns the two calls above just computed.
+            _bd = dict(gres["breakdown"])
+            _bd.update(vres["breakdown"])
+            rating_vals = [_rating_val(_bd.get(lbl)) for _c, lbl in _GV_RATING_COLS]
+            rating_vals += [_rating_val(row.get(c)) for c in _M_RATING_COLS]
             # M from daily momentum_scores; neutral 5.0 fallback if missing.
             m_raw = row.get("m_score_daily")
             if m_raw is None or (isinstance(m_raw, float) and pd.isna(m_raw)):
@@ -839,7 +880,8 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
             upside_val = float(upside_val) if pd.notna(upside_val) else None
 
             history_rows.append((sym, target_date, g, vv, m, total, verd, seg))
-            latest_rows.append((sym, cname, seg, price, g, vv, m, total, verd, punch, mcap, target_date, upside_val))
+            latest_rows.append((sym, cname, seg, price, g, vv, m, total, verd, punch, mcap, target_date,
+                                upside_val, *rating_vals))
         except Exception as e:
             errors += 1
             log.warning(f"GVM score {row.get('nse_code','?')}: {e}")
@@ -853,11 +895,12 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
                 gvm_score=EXCLUDED.gvm_score, verdict=EXCLUDED.verdict, segment=EXCLUDED.segment
         """, history_rows)
         cur.execute("DELETE FROM gvm_scores")
+        # cc#1484: + the 21 per-parameter rating columns (see _GV_RATING_COLS/_M_RATING_COLS above).
         cur.executemany("""
             INSERT INTO gvm_scores
-                (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date, upside_raw)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, latest_rows)
+                (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date, upside_raw,
+                 """ + ", ".join(_ALL_RATING_COLS) + """)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,""" + ",".join(["%s"] * len(_ALL_RATING_COLS)) + ")", latest_rows)
         # cc#406: keep gvm_cache + peer_averages in lock-step with gvm_scores (same txn) so the
         # Max/query cache can never drift a month behind again.
         cache_result = sync_gvm_cache(cur)
