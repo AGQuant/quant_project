@@ -333,7 +333,12 @@ def store_metrics(conn, m: Dict):
                 year_return=EXCLUDED.year_return,
                 mom_2d=COALESCE(v8_metrics.mom_2d, EXCLUDED.mom_2d),
                 day_1d=COALESCE(v8_metrics.day_1d, EXCLUDED.day_1d), eod_chg=EXCLUDED.eod_chg,
-                sector_day=EXCLUDED.sector_day,
+                -- cc#1461: sector_day gets the SAME guard its two siblings below already have.
+                -- This EOD pass computes sector_day=None (it is a live-only metric, written by
+                -- v8_signal_writer every 5-min per cc#1102's theme grouping) and runs AFTER the
+                -- writer's last tick — the bare EXCLUDED overwrite here wiped the live value back
+                -- to null every single trading day.
+                sector_day=COALESCE(v8_metrics.sector_day, EXCLUDED.sector_day),
                 sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
                 sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
