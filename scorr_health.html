@@ -72,6 +72,20 @@ html,body{margin:0;padding:0;background:var(--bg);}
 .phr .kv span:last-child{font-weight:600;}
 .phr button{cursor:pointer;}
 
+/* cc#1484 — Contributors / Breakup views under the Rating Parameters bars */
+.phr .rp-tab{padding:5px 14px;border:1px solid var(--rule);background:none;color:var(--muted);
+  font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.4px;border-radius:2px;}
+.phr .rp-tab.on{border-color:var(--blu);color:var(--blu);background:var(--blu-t);}
+.phr .rp-wrap{overflow-x:auto;margin-top:12px;}
+.phr table.rp-hm{width:auto;min-width:100%;}
+.phr table.rp-hm thead th{padding:6px 8px;text-align:center;}
+.phr table.rp-hm thead th:first-child{text-align:left;position:sticky;left:0;background:var(--bg);}
+.phr table.rp-hm td.rp-lb{font-size:12.5px;color:var(--muted);text-align:left;white-space:nowrap;
+  position:sticky;left:0;background:var(--bg);padding:6px 8px;}
+.phr table.rp-hm td.rp-cell{font-size:12px;font-weight:600;text-align:center;padding:6px 8px;}
+.phr table.rp-hm tr.rp-grp td{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;
+  color:var(--faint);text-align:left;padding:12px 8px 4px;position:sticky;left:0;}
+
 /* masthead is pill-safe: extra right padding clears the fixed theme/logout pills */
 .phr .mast{background:var(--mast);color:#fff;padding:28px 120px 24px 32px;
   display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;}
@@ -189,6 +203,15 @@ html,body{margin:0;padding:0;background:var(--bg);}
         <div class="rrow"><span class="rl">Quality mix</span><div class="btrack"><div class="bfill" style="width:77%;background:#5340C2;"></div></div><span class="rv">7.70</span></div>
       </div>
       <div class="note" id="hr-params-note">Momentum is the softest leg — <b>quality-heavy but late-trend.</b></div>
+      <!-- cc#1484: Contributors / Breakup. The 4-bar block above is UNTOUCHED; both panels render
+           from the SAME report payload (holdings[] + rating_breakup) — no extra fetch. Default
+           closed, so screen-print of an untouched report is unchanged; buttons are no-print. -->
+      <div class="no-print" id="hr-rp-tabs" style="display:none;gap:8px;margin-top:14px;">
+        <button type="button" class="rp-tab" id="hr-rp-tab-c">Contributors</button>
+        <button type="button" class="rp-tab" id="hr-rp-tab-b">Breakup</button>
+      </div>
+      <div id="hr-rp-contrib" style="display:none;"></div>
+      <div id="hr-rp-breakup" style="display:none;"></div>
     </div>
 
     <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
@@ -633,6 +656,89 @@ html,body{margin:0;padding:0;background:var(--bg);}
       if(rv) rv.textContent=f2(pv[i]);
     }
     set('hr-params-note', rt.insight||'');
+
+    /* ── cc#1484: Contributors / Breakup under the bars. Toggle behaviour: click opens a panel
+       (closing the other), click again closes it. Lazy-built once per report load, entirely from
+       this render's payload. Labels are the plain-English parameter strings only — no internal
+       column names, no brand words, so white-label needs no extra handling here. */
+    (function(){
+      var tabs=$('hr-rp-tabs'), tc=$('hr-rp-tab-c'), tb=$('hr-rp-tab-b'),
+          pc=$('hr-rp-contrib'), pb=$('hr-rp-breakup');
+      if(!tabs||!tc||!tb||!pc||!pb) return;
+      var H=(d.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); });
+      var RB=d.rating_breakup||[];
+      if(!H.length){ tabs.style.display='none'; return; }
+      tabs.style.display='flex';
+      /* Amendment 4131: both views cap at the TOP 25 holdings by weight, with an honest
+         "+N more" line when truncated — never a silent cut. <=25 holdings: no cap, no note. */
+      var SHOW=H.slice(0,25), extra=H.length-25, extraW=0;
+      for(var xw=25;xw<H.length;xw++) extraW+=(H[xw].weight||0);
+      var moreNote = extra>0
+        ? '<div class="note">+ '+extra+' more holding'+(extra>1?'s':'')+', '+extraW.toFixed(1)+'% of portfolio</div>' : '';
+      /* Amendment 4134: a holding with NO ratings row at all (ETF/index fund) is "not rated",
+         never rated-zero — cells stay em-dash and the row says why. */
+      var NOTRATED={};
+      for(var nr=0;nr<RB.length;nr++){ if(RB[nr].rated===false) NOTRATED[RB[nr].symbol]=true; }
+      /* GVM colour bands are the page's existing rating tokens: >=7 grn, 5-7 amb, <5 red. */
+      function band(v){ if(v===null||v===undefined||isNaN(v)) return ['transparent','var(--faint)'];
+        return v>=7?['var(--grn-t)','var(--grn)']:(v>=5?['var(--amb-t)','var(--amb)']:['var(--red-t)','var(--red)']); }
+      function f1(v){ return (v===null||v===undefined||isNaN(v))?'—':Number(v).toFixed(1); }
+      function ncell(v){ return '<td style="font-weight:600;color:'+gvmColor(v)+';">'+f2(v)+'</td>'; }
+      /* Row order/grouping mirrors hr_report.RATING_PARAMS (session_log 34218). Cells look up by
+         label, so a missing label renders an em-dash — never a misplaced number. */
+      var GROUPS=[
+        ['Growth',['Sales Growth 5Y','Sales Growth 3Y','Profit Growth 5Y','Profit Growth 3Y',
+                   'YoY Sales Growth','YoY Profit Growth','OPM','OPM Expansion','Fixed Asset Growth',
+                   'Inst Holding Abs','Inst Holding Change','ROCE','Dividend Yield','Interest Coverage']],
+        ['Value',['PE Ratio','Potential Upside']],
+        ['Momentum',['1Y Return','3Y Return','DMA 50','DMA 200','52W vs Index']]];
+      var built={c:false,b:false};
+      function buildContrib(){
+        var h='<table style="margin-top:12px;"><thead><tr><th>Company</th><th>Weight</th>'
+             +'<th>Growth</th><th>Value</th><th>Momentum</th><th>Overall</th></tr></thead><tbody>';
+        for(var i=0;i<SHOW.length;i++){ var x=SHOW[i];
+          var unrated = NOTRATED[x.symbol] || (x.g==null&&x.v==null&&x.m==null&&x.gvm==null);
+          h+='<tr><td style="font-weight:600;">'+esc(x.company_name||x.symbol)
+            +(unrated?' <span style="color:var(--faint);font-weight:400;font-size:11px;">· not rated (ETF/index)</span>':'')
+            +'</td><td>'+(x.weight!=null?Number(x.weight).toFixed(1)+'%':'—')+'</td>'
+            +ncell(x.g)+ncell(x.v)+ncell(x.m)+ncell(x.gvm)+'</tr>'; }
+        pc.innerHTML=h+'</tbody></table>'+moreNote;
+      }
+      function buildBreakup(){
+        if(!RB.length){ pb.innerHTML='<div class="note">Parameter ratings unavailable for this portfolio.</div>'; return; }
+        var h='<div class="rp-wrap"><table class="rp-hm"><thead><tr><th>Parameter</th>';
+        for(var i=0;i<RB.length;i++) h+='<th>'+esc(RB[i].symbol)+'</th>';
+        h+='</tr></thead><tbody>';
+        for(var g=0;g<GROUPS.length;g++){
+          h+='<tr class="rp-grp"><td colspan="'+(RB.length+1)+'">'+GROUPS[g][0]+'</td></tr>';
+          var labs=GROUPS[g][1];
+          for(var r=0;r<labs.length;r++){
+            h+='<tr><td class="rp-lb">'+labs[r]+'</td>';
+            for(var c=0;c<RB.length;c++){
+              var v=(RB[c].params||{})[labs[r]], bd=band(v);
+              h+='<td class="rp-cell" style="background:'+bd[0]+';color:'+bd[1]+';">'+f1(v)+'</td>';
+            }
+            h+='</tr>';
+          }
+        }
+        pb.innerHTML=h+'</tbody></table></div>'+moreNote;
+      }
+      function show(which){
+        var open=(which==='c')?pc:pb, other=(which==='c')?pb:pc,
+            btn=(which==='c')?tc:tb, obtn=(which==='c')?tb:tc;
+        if(open.style.display!=='none'){ open.style.display='none'; btn.classList.remove('on'); return; }
+        if(which==='c'&&!built.c){ buildContrib(); built.c=true; }
+        if(which==='b'&&!built.b){ buildBreakup(); built.b=true; }
+        open.style.display='block'; other.style.display='none';
+        btn.classList.add('on'); obtn.classList.remove('on');
+      }
+      /* re-render (e.g. hr-refresh): a panel left open rebuilds from the fresh payload at once,
+         so it can never keep showing the previous load's numbers. */
+      if(pc.style.display!=='none'){ buildContrib(); built.c=true; }
+      if(pb.style.display!=='none'){ buildBreakup(); built.b=true; }
+      tc.onclick=function(){ show('c'); };
+      tb.onclick=function(){ show('b'); };
+    })();
 
     // benchmark bars
     var br=document.querySelectorAll('#hr-bench .rrow'), bv=[b.portfolio_1y,b.nifty50_1y,b.nifty500_1y];
