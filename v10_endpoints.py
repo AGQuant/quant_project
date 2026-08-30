@@ -829,6 +829,7 @@ def v10_buildup(limit: int = 15):
             rvl = live_rvol_batch(cur, _syms) if _syms else {}
             vpb = closing_rvol_batch(cur, _syms) if _syms else {}
     except Exception as e:
+        _log_buildup_error(e)   # cc#1448: capture the real traceback — see helper below
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
@@ -853,13 +854,39 @@ def v10_buildup(limit: int = 15):
                 "vol_p": (_vp["value"] if _vp else None),            # cc#1440 (V2): yesterday's RVOL at close
                 "signal": sig}
 
-    data = [_row(r) for r in rows if r[2] is not None]
-    longs = sorted(data, key=lambda x: x["day_1d"], reverse=True)[:limit]
-    shorts = sorted(data, key=lambda x: x["day_1d"])[:limit]
-    oi_pending = all(d["oi"] is None for d in data) if data else True
-    return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
-            "oi_feed_pending": oi_pending,
-            "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
+    # cc#1448: the post-query half now sits under the SAME labeled guard — before this, an
+    # exception in _row()/sorting produced a BARE 500 with no v10_buildup label and no capture,
+    # which is exactly the observability gap that made the LONG-BUILDUP-empty regression hard to
+    # pin from the outside (perf_request_log shows the 500, nothing shows the traceback).
+    try:
+        data = [_row(r) for r in rows if r[2] is not None]
+        longs = sorted(data, key=lambda x: x["day_1d"], reverse=True)[:limit]
+        shorts = sorted(data, key=lambda x: x["day_1d"])[:limit]
+        oi_pending = all(d["oi"] is None for d in data) if data else True
+        return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
+                "oi_feed_pending": oi_pending,
+                "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
+    except Exception as e:
+        _log_buildup_error(e)
+        raise HTTPException(500, f"v10_buildup failed: {e}")
+
+
+def _log_buildup_error(e):
+    """cc#1448: best-effort traceback capture to ops_log (category v10 / v10_buildup_error) on its
+    own short-lived connection — the request connection may be mid-transaction or already closed.
+    Never raises; diagnosis must not be able to break the endpoint further."""
+    try:
+        import json as _json
+        import traceback
+        with _conn() as c2, c2.cursor() as k:
+            k.execute(
+                "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                "VALUES (CURRENT_DATE, NOW(), 'v10', 'v10_buildup_error', %s::jsonb)",
+                (_json.dumps({"error": f"{type(e).__name__}: {e}",
+                              "traceback": traceback.format_exc()[-3000:]}),))
+            c2.commit()
+    except Exception:
+        pass
 
 
 @router.get("/divergence")
