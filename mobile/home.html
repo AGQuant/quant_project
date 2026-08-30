@@ -2229,8 +2229,11 @@ function tapeChart(i){
    pre-filled. */
 var TREND_RANGE = {};
 /* The belt to that braces: even with the map filled, a kind added later with no entry must never
-   put the string "undefined" into a query. One fallback here closes the class, not just the case. */
-var TREND_RANGE_DEFAULT = 15;
+   put the string "undefined" into a query. One fallback here closes the class, not just the case.
+   cc#1434: 15 -> 1 -- every capsule now opens on 1D by default (was a flat 15D), per the founder's
+   own explicit ask. Still only the FALLBACK: an explicit in-session tap (TREND_RANGE[kind] set by
+   setRange()) still wins over this constant unchanged, see togTrend's own days computation below. */
+var TREND_RANGE_DEFAULT = 1;
 
 /* WHAT CHANGED AT cc#908. 1D used to request days=2 and draw the last two DAILY prints, because
    a one-point line would have been a fabricated shape. It no longer has to fake anything: the
@@ -2276,10 +2279,16 @@ function togTrend(ev, kind){
        Number() is the second half of the belt: an entry that ever arrives as a string still
        reaches the pills as a number, so `r[0] === c.days` can match and a pill renders selected. */
     days: (function(){
-      /* A daily-only series DEFAULTS to 7D per the card, not to the shared 15D default — and a
-         remembered 1D from before this change cannot survive onto it, because 1D is no longer one
-         of its pills and the selected pill would match nothing. A remembered 7/15/30 is still
-         honoured: the founder's own choice outranks the default, it just cannot be 1D here. */
+      /* A daily-only series DEFAULTS to 7D (its own nearest available pill to 1D, which it does
+         not have) — a remembered 1D from before this change cannot survive onto it, because 1D is
+         no longer one of its pills and the selected pill would match nothing. A remembered 7/15/30
+         is still honoured: the founder's own EXPLICIT choice this session outranks the opening
+         default, it just cannot be 1D here.
+         cc#1434: the shared default (TREND_RANGE_DEFAULT) is now 1, so every OTHER capsule opens
+         on 1D — "regardless of which range was last viewed" reaches only a fresh open with no
+         explicit tap yet (rem falsy); an explicit tap this session still wins below, unchanged, so
+         cc#1231's repeat-render restore (a background refresh must not yank an open chart back to
+         a different range) is untouched. */
       var rem = Number(TREND_RANGE[kind] || 0);
       if (daily) return (rem && rem !== 1) ? rem : 7;
       return rem || Number(TREND_RANGE_DEFAULT);
