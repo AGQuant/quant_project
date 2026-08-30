@@ -1286,9 +1286,10 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             # 33843) REDEFINES vol_p: no longer the v8_metrics T-1 vol_ratio row -- VOL P is now
             # yesterday's RVOL at the closing slot (same profile formula as live RVOL, read once
             # for the last completed session), served by rvol_engine.closing_rvol -- one shared
-            # derivation across every ex-VolX surface. vol_trend is unchanged from V1:
-            # momentum_scores latest row (20d/60d avg vol, the LOCKED GVM Momentum p8 input --
-            # read, never recomputed here).
+            # derivation across every ex-VolX surface. vol_trend (momentum_scores latest row,
+            # 20d/60d avg vol) STAYS IN THE PAYLOAD but the A-card tiles no longer read it --
+            # cc#1445 swapped tile 3 to ad_21d (Accumulation); vol_trend retires wholesale with
+            # the GVM param-8 reformulation (cc#1446, gated).
             vol_p = _safe("vol_p", lambda: __import__("rvol_engine").closing_rvol(cur, sym))
             def _vol_trend():
                 cur.execute("""SELECT score_date, vol_trend FROM momentum_scores WHERE symbol=%s
