@@ -851,11 +851,13 @@ function volDeck(){
    Card order is the founder's, locked in R1 @ 31d9a02, and it is NOT the order the enum happens to
    produce: long buildup, short covering, short buildup, long unwinding. */
 var SHOW_DIVERGENCE = false;
+/* cc#1460 (rewritten spec): `h` is the ONE-LINE heading — the full state name replaces the old
+   generic h3 + badge-chip double heading; `t` stays for the pager label and empty-state text. */
 var BU_STATES = [
-  {k:'LONG_BUILD',  t:'LONG BUILDUP',   sub:'PRICE UP · OI UP',     cls:'w', mark:'▲'},
-  {k:'SHORT_COVER', t:'SHORT COVERING', sub:'PRICE UP · OI DOWN',   cls:'w', mark:'▲'},
-  {k:'SHORT_BUILD', t:'SHORT BUILDUP',  sub:'PRICE DOWN · OI UP',   cls:'l', mark:'▼'},
-  {k:'LONG_UNWIND', t:'LONG UNWINDING', sub:'PRICE DOWN · OI DOWN', cls:'l', mark:'▼'}
+  {k:'LONG_BUILD',  t:'LONG BUILDUP',   h:'Long Build Up',   sub:'PRICE UP · OI UP',     cls:'w', mark:'▲'},
+  {k:'SHORT_COVER', t:'SHORT COVERING', h:'Short Covering',  sub:'PRICE UP · OI DOWN',   cls:'w', mark:'▲'},
+  {k:'SHORT_BUILD', t:'SHORT BUILDUP',  h:'Short Buildup',   sub:'PRICE DOWN · OI UP',   cls:'l', mark:'▼'},
+  {k:'LONG_UNWIND', t:'LONG UNWINDING', h:'Long Unwinding',  sub:'PRICE DOWN · OI DOWN', cls:'l', mark:'▼'}
 ];
 function buPool(k){
   var bd = D.build || {};
@@ -974,13 +976,15 @@ function buCard(st){
            + pool.length + ' QUALIFY</button>'
          : '');
   }
-  /* cc#1460: header follows vfCard's EXACT pattern — dedicated .vfhd row (h3, spacer, i button)
-     wired to buGuide(); the session stamp moves to the bottom .vfasof line, same as Flow. */
+  /* cc#1460 (rewritten spec): ONE heading line — the full state name with its triangle + colour
+     inline, in vfCard's .vfhd row (h3, spacer, i button) — replacing the old generic h3 +
+     badge-chip double heading the founder screenshotted. The PRICE UP · OI UP sub-text stays
+     under it; the session stamp lives on the bottom .vfasof line, same as Flow. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="vfhd"><h3>Build Up</h3><span class="sp"></span>'   /* cc#1458: badge carries the state name */
+    + '<div class="vfhd"><h3><span style="color:' + (st.cls === 'w' ? 'var(--volt)' : 'var(--heat)') + '">'
+    + st.mark + '</span> ' + st.h + '</h3><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="buGuide()" aria-label="How to read this card">i</button></div>'
-    + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' ' + st.t + '</span>'
-    + '<span class="busub">' + st.sub + '</span></div>'
+    + '<div class="bustate"><span class="busub">' + st.sub + '</span></div>'
     + body
     + '<div class="vfasof">' + esc(bd.session || 'LIVE 5-MIN') + '</div>'
     + '</div></div>';
@@ -1037,9 +1041,9 @@ function uPark(){ dkPark('utrack'); uLabel(dkDots('utrack')); }
    state, Buildup-style sheet through the untouched vfSheet shell). A zero-row card is a
    legitimate market outcome (basis_neg was 0 the day this shipped) and says so honestly. */
 var QBB_STATES = [
-  {k:'pos', t:'QUALITY BULLISH · BASIS POSITIVE', sub:'FLOW 50 ≥ 60% · DAY, MONTH, SECTOR ALL UP · FUT PREMIUM', cls:'w', mark:'▲'},
-  {k:'neg', t:'QUALITY BULLISH · BASIS NEGATIVE', sub:'SAME QUALITY FUNNEL · FUTURES AT A DISCOUNT', cls:'l', mark:'▼'}
-];
+  {k:'pos', t:'QUALITY BULLISH · BASIS POSITIVE', h:'Basis Positive', cls:'w', mark:'▲'},
+  {k:'neg', t:'QUALITY BULLISH · BASIS NEGATIVE', h:'Basis Negative', cls:'l', mark:'▼'}
+];   /* cc#1460 (rewritten spec): `h` = the one-line heading; the sub field died with cc#1458 */
 var QB_SORT = {};
 QBB_STATES.forEach(function(st){ QB_SORT[st.k] = { key: null, dir: 1 }; });
 /* cc#1455 refinement (task log 11:39): displayed columns are CMP / DAY / SECTOR DAY / OI Δ% —
@@ -1129,15 +1133,14 @@ function qbCard(st){
            + pool.length + ' QUALIFY</button>'
          : '');
   }
-  /* cc#1458: h3 renamed Quality Bullish -> Basis (badge carries the specific state); the busub
-     funnel one-liner is REMOVED — qbGuide()'s (i) sheet explains the full funnel now.
-     cc#1460: the (i) moves out of the squeezed .grp into vfCard's clean .vfhd row (h3, spacer,
-     button); the as-of stamp moves to the bottom .vfasof line, same as Flow and Build Up. */
+  /* cc#1460 (rewritten spec): ONE heading line — "Basis Positive" / "Basis Negative" with the
+     triangle + colour inline in vfCard's .vfhd row — replacing the generic h3 + badge-chip
+     double heading. The funnel sub-text stays removed (cc#1458; the (i) sheet explains it);
+     the as-of stamp lives on the bottom .vfasof line, same as Flow and Build Up. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="vfhd"><h3>Basis</h3><span class="sp"></span>'
+    + '<div class="vfhd"><h3><span style="color:' + (st.cls === 'w' ? 'var(--volt)' : 'var(--heat)') + '">'
+    + st.mark + '</span> ' + st.h + '</h3><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button></div>'
-    + '<div class="bustate"><span class="chip ' + st.cls + ' bubadge">' + st.mark + ' '
-    + (st.k === 'pos' ? 'BASIS POSITIVE' : 'BASIS NEGATIVE') + '</span></div>'
     + body
     + '<div class="vfasof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</div>'
     + '</div></div>';
