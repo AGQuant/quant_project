@@ -424,6 +424,20 @@ body[data-theme]{
    V10 popup. The i itself rides the VALUE line (nowrap, ~65px used of an 83px cell at 360px) —
    on the label line it would wrap "PROFIT FACTOR" at every phone width, measured not assumed. */
 .pfveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+/* cc#1483 (34212): the View Logs overlay's (i) — 44px tap target like .tpo-x, small circled
+   glyph inside — and the Engine spec sheet's own blocks (per-index name, spec string, note).
+   The sheet body reuses the pf shell + .pfrow below unchanged. */
+.tpo-i{min-width:44px;min-height:44px;background:none;border:0;cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;font-family:inherit;padding:0}
+.tpo-i i{width:22px;height:22px;border-radius:50%;border:var(--bw-1) solid var(--line2);
+  font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;
+  font-size:var(--type-10);color:var(--txt,#E9EEFB);display:inline-flex;align-items:center;justify-content:center}
+.specblk{margin-bottom:var(--space-14)}
+.specnm{font-size:var(--type-11);font-weight:800;letter-spacing:1px;margin-bottom:var(--space-2)}
+.specstr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--cyan);
+  margin-bottom:var(--space-4)}
+.specnote{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
+  margin-top:var(--space-4)}
 .pfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
   background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);border-radius:var(--radius-18,18px) var(--radius-18,18px) 0 0}
 .pfgrab{width:38px;height:4px;border-radius:var(--radius-2,2px);background:var(--line);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
@@ -1543,7 +1557,9 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 <!-- cc#906: the V10 trade log as a chart. 3 months of daily candles with every FUT-leg paper
      trade pinned on the session it happened in, plus the log itself underneath. -->
 <div class="tpo" id="v10ov">
+  <!-- cc#1483: the (i) opens the Engine spec sheet — 44px tap target, same rule as .tpo-x. -->
   <div class="tpo-hd"><h2 id="v10ttl">V10 Trades</h2>
+    <button class="tpo-i" onclick="v10SpecSheet()" aria-label="Engine spec"><i>i</i></button>
     <button class="tpo-x" onclick="closeV10()" aria-label="Close">&#10005;</button></div>
   <div class="tpo-bd" id="v10bd"></div>
 </div>
@@ -3799,6 +3815,66 @@ function v10PfSheetClose(){
     document.body.style.overflow = PF_SHEET.prevOverflow;
     PF_SHEET.open = false;
   }
+}
+/* cc#1483 (V10_LOGS_INFO_BUTTON_V1, session_log 34212) · the Engine spec sheet — the cc#1465
+   pf-sheet shell reused verbatim (same classes, close, overflow save/restore), display-only.
+   ONE fetch of /api/v10/summary per open; EVERY figure comes off that payload — the per-index
+   spec dict and the two backtest blocks — so a cc#1482-style relock reaches this sheet with no
+   front-end change, and grep finds no literal backtest number in this file. A missing field is
+   an em-dash, never 0 and never a typed value. The spec string equals what /api/v10/signal
+   serves by construction: both read v10_st_ema._spec_str on the same INDEX_CFG. */
+function v10SpecSheet(){
+  v10PfSheetClose();
+  PF_SHEET.prevOverflow = document.body.style.overflow;
+  var veil = document.createElement('div');
+  veil.className = 'pfveil';
+  var sheet = document.createElement('div');
+  sheet.className = 'pfsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.innerHTML = '<div class="pfgrab"></div><div class="pfsb">'
+    + '<div class="pfsh">Engine spec</div>'
+    + '<div id="v10SpecBody" class="unavail">Loading&hellip;</div></div>';
+  document.body.appendChild(veil);
+  document.body.appendChild(sheet);
+  document.body.style.overflow = 'hidden';
+  PF_SHEET.open = true;
+  requestAnimationFrame(function(){
+    if (!veil.parentNode) return;
+    veil.onclick = v10PfSheetClose;
+    var g = sheet.querySelector('.pfgrab');
+    if (g) g.onclick = v10PfSheetClose;
+  });
+  fetchWithTimeout('/api/v10/summary')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var host = document.getElementById('v10SpecBody');
+      if (!host) return;
+      var dash = '—';
+      var fi = function(v){ return v == null ? dash : Math.round(Number(v)).toLocaleString('en-IN'); };
+      host.className = '';
+      host.innerHTML = [['NIFTY', 'NIFTY50', d.backtest_nifty_fut || {}],
+                        ['BANKNIFTY', 'BANKNIFTY', d.backtest_bnf_fut || {}]].map(function(b){
+        var bt = b[2];
+        var rows = [
+          ['Trades', fi(bt.trades)],
+          ['Win rate', bt.win_rate == null ? dash : Number(bt.win_rate).toFixed(1) + '%'],
+          ['Points (1y)', fi(bt.points)],
+          ['Profit factor', bt.profit_factor == null ? dash : Number(bt.profit_factor).toFixed(2)],
+          ['Max DD', bt.max_dd_pts == null ? dash : fi(bt.max_dd_pts) + ' pts']];
+        return '<div class="specblk"><div class="specnm">' + b[0] + '</div>'
+          + '<div class="specstr">' + esc((d.spec && d.spec[b[1]]) || dash) + '</div>'
+          + rows.map(function(r2){
+              return '<div class="pfrow"><span>' + r2[0] + '</span><b>' + r2[1] + '</b></div>';
+            }).join('')
+          + (bt.note ? '<div class="specnote">' + esc(bt.note) + '</div>' : '')
+          + '</div>';
+      }).join('');
+    })
+    .catch(function(e){
+      var host = document.getElementById('v10SpecBody');
+      if (host) host.innerHTML = 'Spec unavailable: ' + esc(e.message);
+    });
 }
 function v10LegStats(d, leg){
   var bl = (d.by_leg && d.by_leg[leg]) || {};
