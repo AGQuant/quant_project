@@ -598,7 +598,11 @@ function DelivSpark({ series }) {
   );
 }
 
-function VolumePanel({ va, vc, deliv }) {
+/* cc#1495: the cc#1452 push-5 param was named `vc` — colliding with the verdict-colour
+   `const vc` four lines down. A duplicate declaration is a Babel PARSE error, and this page is
+   one babel block, so the entire /cio2 React body (every model) rendered blank from 11:21 IST.
+   Renamed to `vcanon` here and at the one call site. */
+function VolumePanel({ va, vcanon, deliv }) {
   if (!va || !va.bars || !va.bars.length) return (
     <div style={{ fontSize: 13.5, color: C.muted, padding: 12 }}>No volume data.</div>
   );
@@ -622,12 +626,12 @@ function VolumePanel({ va, vc, deliv }) {
       </div>
       {/* cc#1452 push 5: the four canon volume metrics replace the retired vol 10/30d single
           number — same shared derivations as Volume Flow / Deriv Cockpit / the A-card. */}
-      {vc && (
+      {vcanon && (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 13, color: C.muted, fontFamily: "monospace", marginBottom: 8 }}>
-          <span>Vol R {vc.vol_r != null ? Number(vc.vol_r).toFixed(2) + "×" : "—"}</span>
-          <span>Vol P {vc.vol_p != null ? Number(vc.vol_p).toFixed(2) + "×" : "—"}</span>
-          <span>Vol D {vc.vol_d != null ? Number(vc.vol_d).toFixed(2) + "×" : "—"}</span>
-          <span>Vol AD {vc.vol_ad != null ? Math.round(vc.vol_ad) + "%" : "—"}</span>
+          <span>Vol R {vcanon.vol_r != null ? Number(vcanon.vol_r).toFixed(2) + "×" : "—"}</span>
+          <span>Vol P {vcanon.vol_p != null ? Number(vcanon.vol_p).toFixed(2) + "×" : "—"}</span>
+          <span>Vol D {vcanon.vol_d != null ? Number(vcanon.vol_d).toFixed(2) + "×" : "—"}</span>
+          <span>Vol AD {vcanon.vol_ad != null ? Math.round(vcanon.vol_ad) + "%" : "—"}</span>
         </div>
       )}
       <div style={{ position: "relative", height: 72, overflow: "hidden" }}>
@@ -2603,7 +2607,7 @@ function GvmReport({ r, hist }) {
         </div>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>21-Day Volume · Accumulation / Distribution</div>
-          <VolumePanel va={x.volume} vc={x.vol_canon} deliv={x.delivery} />
+          <VolumePanel va={x.volume} vcanon={x.vol_canon} deliv={x.delivery} />
         </div>
       </div>
 
