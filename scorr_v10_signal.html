@@ -226,6 +226,12 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    numerics split the rest evenly. Scoped like .vftbl so the 7-col buildup split is untouched. */
 .butbl.qbtbl th:nth-child(1),.butbl.qbtbl td:nth-child(1){width:28%}
 .butbl.qbtbl th:nth-child(n+2),.butbl.qbtbl td:nth-child(n+2){width:18%}
+/* cc#1459: the Buildup tables are SIX columns now (FUT+DAY% merged into CMP). CMP carries two
+   numbers ("12,017 (+1.99%)") so it gets the most room; the bare 7-col .butbl split above stays
+   for any legacy 7-col table. */
+.butbl.b6tbl th:nth-child(1),.butbl.b6tbl td:nth-child(1){width:19%}
+.butbl.b6tbl th:nth-child(2),.butbl.b6tbl td:nth-child(2){width:25%}
+.butbl.b6tbl th:nth-child(n+3),.butbl.b6tbl td:nth-child(n+3){width:14%}
 .butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
  font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .butbl tr:last-child td{border-bottom:none}
@@ -881,14 +887,16 @@ var BU_SORT = {};
 BU_STATES.forEach(function(st){ BU_SORT[st.k] = { key: null, dir: 1 }; });
 var BU_SORT_GETTERS = {
   SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
-  FUT:    function(r){ return r.price; },
-  DAY:    function(r){ return r.day_1d; },
+  /* cc#1459: FUT and DAY%% merged into ONE CMP column ("132 (+1.2%)"). CMP sorts by DAY% —
+     the decision-relevant number for a buildup read — exactly as the old DAY column did; the
+     separate FUT (raw price) sort is retired with its column. */
+  CMP:    function(r){ return r.day_1d; },
   OI:     function(r){ return r.oi_chg_pct; },
   RVOL:   function(r){ return r.rvol; },    /* cc#1440 (canon V2): the pair replaces the single VOL column */
   VOLP:   function(r){ return r.vol_p; },
   VOLD:   function(r){ return r.vol_d; },   /* cc#1454: Vol D (Delivery Ratio) replaces BASIS */
 };
-var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, RVOL: -1, VOLP: -1, VOLD: -1 };
+var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, RVOL: -1, VOLP: -1, VOLD: -1 };
 
 function buSort(k, key){
   var s = BU_SORT[k];
@@ -906,11 +914,11 @@ function buTh(label, key, k){
 
 function buTable(rows, k){
   /* cc#1454: ONE table renderer for the card's top-5 AND the VIEW MORE sheet — the vfRows
-     pattern. cc#1431's OI Δ is now 1dp (founder: 3dp read as noise); BASIS column replaced by
-     VOL D (Delivery Ratio via the shared deliv_ratio_batch — same number as Volume Flow's
-     DELIV for the same symbol, by construction). */
-  return '<table class="butbl"><thead><tr>'
-    + buTh('SYMBOL', 'SYMBOL', k) + buTh('FUT', 'FUT', k) + buTh('DAY%', 'DAY', k)
+     pattern. cc#1459: FUT + DAY% merge into ONE CMP cell, "132 (+1.2%)" — price neutral, the
+     percent keeps the up/dn colour; 7 columns -> 6 (.b6tbl width split below). cc#1431's OI Δ
+     stays 1dp; VOL D per cc#1454. */
+  return '<table class="butbl b6tbl"><thead><tr>'
+    + buTh('SYMBOL', 'SYMBOL', k) + buTh('CMP', 'CMP', k)
     /* cc#1440 (VOLUME_METRICS_CANON_V2, 33843): the single volume column becomes the
        RVOL + VOL P pair — one formula at two read points (today live / yesterday's close),
        served by rvol_engine's batch reads through /api/v10/buildup. */
@@ -918,9 +926,12 @@ function buTable(rows, k){
     + buTh('VOL D', 'VOLD', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
+        var d = r.day_1d, cmp = (r.price != null ? num(r.price) : '—');
+        var dtxt = d == null ? ''
+          : ' (<span class="' + (d > 0 ? 'up' : d < 0 ? 'dn' : '') + '">'
+            + (d > 0 ? '+' : '') + Number(d).toFixed(2) + '%</span>)';
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
-          + '<td>' + (r.price != null ? num(r.price) : '—') + '</td>'
-          + buNum(r.day_1d, 2, '%', true)
+          + '<td>' + cmp + dtxt + '</td>'
           + buNum(r.oi_chg_pct, 1, '%', true)
           + (r.rvol == null ? '<td>—</td>'
              : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
