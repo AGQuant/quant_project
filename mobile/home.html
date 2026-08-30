@@ -1310,13 +1310,26 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
   min-width:24px;min-height:24px;cursor:pointer}
 .legwrap{margin-top:var(--space-12)}
 .leghd{display:flex;justify-content:space-between;align-items:center}
+/* cc#1479: flex:none — the index name never shrinks/clips whatever its row-mates do (the
+   founder's screenshot showed NIFTY/BANKNIFTY partially hidden behind an oversized chip). */
 .leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
-  font-weight:800;letter-spacing:1px;color:var(--txt,#E9EEFB)}
+  font-weight:800;letter-spacing:1px;color:var(--txt,#E9EEFB);flex:none}
 .dirbadge{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
   font-weight:700;letter-spacing:1px;border:var(--bw-1) solid;
   padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
-.dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
-.dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
+/* cc#1479: the BULLISH/BEARISH chip gets its OWN class. .viewtag exists NOWHERE else in the
+   repo (grep-confirmed across every stylesheet the /m/ pages load — mobile_app.css source,
+   scorr_themes.css, pwa_endpoints.py, this file), so no shared-sheet rule can collide with it.
+   Every sizing property is a hardcoded px LITERAL, never a --type-N/--space-N var: a stale
+   cached token sheet leaving var() unresolved makes font-size INVALID and the chip inherit a
+   large size — the one mechanism that reproduces the founder's screenshot, since no committed
+   rule anywhere renders .dirbadge big (grep findings in the card result). Colours reuse
+   .dirbadge's own two blocks below — one colour truth, two consumers. */
+.viewtag{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
+  letter-spacing:1px;border:1px solid;padding:2px 7px;border-radius:9px;flex:none;
+  line-height:1.4;white-space:nowrap}
+.dirbadge.bull,.viewtag.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
+.dirbadge.bear,.viewtag.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
 /* cc#1477: .posbar/.poslb (the FUT range bar, cc#1386/cc#1404) removed with posRangeBar() —
    the writing card shows options only. .decwrap onward is the OPTIONS decay bar, untouched. */
 .decwrap{margin:var(--space-12) 2px var(--space-4)}
@@ -2950,7 +2963,8 @@ function renderHeroPositions(){
           pill = dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
             + (opt.side === 'SELL' ? ' · wrt' : ' · bot'));
           var bullish = (opt.side === 'SELL') === (opt.opt_type === 'PE');
-          chip = '<span class="dirbadge ' + (bullish ? 'bull' : 'bear') + '">'
+          /* cc#1479: .viewtag, never .dirbadge — the chip's own collision-proof class. */
+          chip = '<span class="viewtag ' + (bullish ? 'bull' : 'bear') + '">'
             + (bullish ? 'BULLISH' : 'BEARISH') + '</span>';
         }
         return '<div class="legwrap"><div class="leghd"><span class="nm">' + s.label + '</span>'
