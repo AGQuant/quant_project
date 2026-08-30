@@ -24,6 +24,7 @@ import psycopg
 from fastapi import APIRouter, Request, HTTPException
 
 from scorr_auth import _is_authed
+from rvol_engine import EOD_RVOL_PAIR_SQL   # cc#1441: the ONE EOD RVOL/VOL P derivation
 
 router = APIRouter()
 _log = logging.getLogger("scorr.v13_presets")   # cc#879
@@ -182,13 +183,20 @@ def delete_preset(request: Request, pid: int):
 # Whitelist: key -> (table alias, column). m=v8_metrics(latest), g=gvm_scores(latest), s=screener_raw.
 # cc#558: base moved v8_metrics (~212 futures) -> universe_technicals u (~1,811 GVM-scored syms).
 # Technicals now source "u"; futures-only fields (vol_ratio/sector_*/day_1d) stay "m" via LEFT JOIN
-# (NULL for non-futures). Added month_index + vol_ratio_21 (both "u") for the true 52W-breakout preset.
+# (NULL for non-futures).
+# cc#1441 push 2 (VOLUME_METRICS_CANON_V2, session_log 33843): the vol_ratio_21 KEY is RETIRED.
+# The volume read is now the canon pair from rvol_engine's EOD raw form ("v" source, full
+# universe): rvol = latest completed session's closing RVOL, vol_p = the session before. The
+# preset volume check is the OR-gate key "vol_gate" (RVOL >= X OR VOL P >= Y — constants below);
+# rvol / vol_p are also individually filterable. Saved presets still carrying vol_ratio_21 are
+# shimmed onto vol_gate in _screen_sql so nothing saved breaks.
 _FIELD_MAP = {
     "dma_20": ("u", "dma_20"), "dma_50": ("u", "dma_50"), "dma_200": ("u", "dma_200"),
     "rsi_month": ("u", "rsi_month"), "rsi_weekly": ("u", "rsi_weekly"), "daily_rsi": ("u", "daily_rsi"),
     "week_return": ("u", "week_return"), "month_return": ("u", "month_return"), "year_return": ("u", "year_return"),
     "week_index_52": ("u", "week_index_52"), "month_index": ("u", "month_index"),
-    "mom_2d": ("u", "mom_2d"), "vol_ratio_21": ("u", "vol_ratio_21"),
+    "mom_2d": ("u", "mom_2d"),
+    "rvol": ("v", "rvol"), "vol_p": ("v", "vol_p"), "vol_gate": ("v", None),
     "vol_ratio": ("m", "vol_ratio"), "day_1d": ("m", "day_1d"),
     "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
     "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
@@ -197,6 +205,13 @@ _FIELD_MAP = {
     "return_52w_vs_index": ("s", "return_52w_vs_index", "return_52w_vs_index"),
     "pe": ("s", "pe"), "roce": ("s", "roce"),
 }
+
+# cc#1441 push 2: the OR-gate thresholds. PLACEHOLDER values pending founder sign-off — the
+# backtest tables are in cc_task_logs (task 1441, 30-Aug); these two constants are the ONLY
+# thing the sign-off push changes. Candidate posted: 1.2/1.5 (closest breadth to the retired
+# vol_ratio_21>=1.0 gate at 88.6% day-level agreement).
+V13_VOL_GATE_RVOL_X = 1.2   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
+V13_VOL_GATE_VOLP_Y = 1.5   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
 
 
 def _col_expr(src, col, native=None):
@@ -222,7 +237,14 @@ def _screen_sql(filters, sort_key=None, sort_dir=-1):
     real engine. Returns (where_sql, params, join_sql, order_sql, uses_screener, uses_fut) or raises
     ValueError on an unknown key.
     """
-    filters = filters or {}
+    filters = dict(filters or {})
+    # cc#1441 push 2 compat shim: saved presets carrying the RETIRED vol_ratio_21 key (e.g. the
+    # 52-Week Breakout preset, id 13) run as the canon OR-gate instead of erroring. The old
+    # {min: 1.0} bound is dropped deliberately — the gate's thresholds are the engine constants,
+    # signed off once for everyone, not per-preset numbers.
+    if "vol_ratio_21" in filters:
+        filters.pop("vol_ratio_21")
+        filters.setdefault("vol_gate", {})
     unknown = [k for k in filters if k not in _FIELD_MAP]
     if unknown:
         raise ValueError("unknown filter key(s): " + ", ".join(unknown))
@@ -230,6 +252,12 @@ def _screen_sql(filters, sort_key=None, sort_dir=-1):
     where = ["u.score_date=(SELECT MAX(score_date) FROM universe_technicals)"]
     params = []
     for k, crit in filters.items():
+        if k == "vol_gate":
+            # cc#1441: the canon volume check — OR, not min/max. Any crit value enables it;
+            # thresholds are the module constants (founder-signed, not user-entered).
+            where.append('(v."rvol" >= %s OR v."vol_p" >= %s)')
+            params.extend([V13_VOL_GATE_RVOL_X, V13_VOL_GATE_VOLP_Y])
+            continue
         expr = _col_expr(*_FIELD_MAP[k])
         if isinstance(crit, dict):
             if crit.get("min") is not None:
@@ -240,10 +268,13 @@ def _screen_sql(filters, sort_key=None, sort_dir=-1):
     uses_fut = any(_FIELD_MAP[k][0] == "m" for k in filters) or (sort_key and _FIELD_MAP.get(sort_key, ("",))[0] == "m")
     # g (gvm) is INNER (every u row is GVM-scored); s + m are LEFT (m = futures-only fields, NULL for
     # the ~1,600 non-futures names — a filter on an m-field therefore narrows back to the futures set).
+    # v (cc#1441) is LEFT: rvol_engine's EOD raw form — full universe, NULL only when a symbol lacks
+    # the 15-session history floor, so the OR-gate honestly excludes thin-history names.
     join = ("JOIN gvm_scores g ON g.symbol=u.symbol AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores) "
             "LEFT JOIN screener_raw s ON UPPER(s.nse_code)=UPPER(u.symbol) "
-            "LEFT JOIN v8_metrics m ON m.symbol=u.symbol AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)")
-    if sort_key and sort_key in _FIELD_MAP:
+            "LEFT JOIN v8_metrics m ON m.symbol=u.symbol AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics) "
+            f"LEFT JOIN ({EOD_RVOL_PAIR_SQL}) v ON v.symbol=u.symbol")
+    if sort_key and sort_key in _FIELD_MAP and sort_key != "vol_gate":   # vol_gate is a predicate, not a column
         order = f"ORDER BY {_col_expr(*_FIELD_MAP[sort_key])} {'ASC' if sort_dir == 1 else 'DESC'} NULLS LAST"
     else:
         order = "ORDER BY g.gvm_score DESC NULLS LAST"
@@ -262,7 +293,8 @@ def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
     count = int(cur.fetchone()[0])
     cur.execute(f"""SELECT u.symbol, ROUND(g.gvm_score::numeric,2) gvm_score,
                     ROUND(u.month_return::numeric,1) month_return, ROUND(u.week_index_52::numeric,0) week_index_52,
-                    ROUND(u.month_index::numeric,0) month_index, ROUND(u.vol_ratio_21::numeric,2) vol_ratio_21,
+                    ROUND(u.month_index::numeric,0) month_index,
+                    ROUND(v.rvol::numeric,2) rvol, ROUND(v.vol_p::numeric,2) vol_p,
                     ROUND(u.dma_50::numeric,1) dma_50, ROUND(u.dma_200::numeric,1) dma_200
                     FROM universe_technicals u {join} WHERE {wsql} {order} LIMIT {lim}""", params)
     cols = [d[0] for d in cur.description]
