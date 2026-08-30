@@ -804,12 +804,15 @@ def v10_buildup(limit: int = 15):
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
-                ),
+                )
                 -- cc#819 bug_2 established a v8_metrics volume join here; cc#1438 moved it to
                 -- T-1; cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843) RETIRES the
                 -- v8_metrics read entirely — the volume pair now comes from rvol_engine's own
-                -- batch reads below (RVOL live + VOL P at yesterday's close), one formula at two
-                -- points, shared with every other ex-VolX surface.
+                -- batch reads below. cc#1448: cc#1440's removal of that CTE left a TRAILING
+                -- COMMA here ("),") with only comments before the SELECT — a promised CTE that
+                -- never came, so Postgres threw "syntax error at or near SELECT" and every
+                -- /api/v10/buildup call 500d (all four buildup cards went empty). The comma is
+                -- the whole bug.
                 SELECT l.symbol, l.c AS price,
                        ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
                        l.oi, l.oi_chg,
