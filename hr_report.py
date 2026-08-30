@@ -398,6 +398,18 @@ def _risk_metrics(cur, holdings, port_1y):
     }
 
 
+# ── cc#1494: screener_raw.return_1y died in a CSV re-import (0/1,872 rows, found 30-Aug during
+# cc#1488 — same class as cc#1426's segment_pe). Holdings 1y returns now come from
+# momentum_scores.ret_1y: plain point-to-point, computed daily off ADJUSTED closes (so splits /
+# bonuses can't reintroduce the cc#657 cliff bug a fresh raw-close calc would risk), 1837/1837
+# coverage. Fable-decided 30-Aug (cc_task_logs 4156). NIFTY50/NIFTY500 benchmark lines stay on
+# their own raw_prices path — indices have no corporate actions. ──────────────────────────────────
+def _load_ret1y(cur, syms):
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, ret_1y FROM momentum_scores
+                   WHERE symbol = ANY(%s) ORDER BY symbol, score_date DESC""", (syms,))
+    return {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+
 def _replacements(cur, avoid_segments, held_syms):
     """Top-2 GVM peers per segment (latest gvm_history), excluding held names."""
     if not avoid_segments:
@@ -473,6 +485,7 @@ def build_report(cur, pid):
     scr = _load_screener(cur, syms)
     inp = _load_input(cur, syms)
     ath = _load_ath(cur, syms)
+    r1y = _load_ret1y(cur, syms)   # cc#1494: adjusted-close 1y returns (screener column is dead)
     # cc#1426: ONE batched segment_pe_map query for this whole report, reused per holding below —
     # a portfolio-sized loop, never a per-symbol query.
     pe_map = segment_pe_map(cur)
@@ -513,7 +526,7 @@ def build_report(cur, pid):
             "verdict": verdict, "action": _action_for(verdict),
             "gvm_trend": g.get("gvm_trend"), "gvm_trend_delta": g.get("gvm_trend_delta"),
             "pe": s.get("pe"), "segment_pe": _seg_pe, "segment_pe_basis": _seg_pe_basis, "yield": s.get("yield"),
-            "return_1y": s.get("return_1y"), "from_ath": from_ath,
+            "return_1y": r1y.get(sym) if r1y.get(sym) is not None else s.get("return_1y"), "from_ath": from_ath,
             "fwd_growth": i.get("fy27_growth"),
             "result_analysis": i.get("result_analysis"),
             "result_chip": _strength_chip(i.get("result_analysis")),
