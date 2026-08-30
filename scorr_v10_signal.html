@@ -1062,15 +1062,17 @@ function _sortTh(label, key, state, onclickExpr){
    SYMBOL defaults ascending on first tap; the five numeric columns default descending (highest
    first — the qualifying-flow reason the row is on the card at all). */
 var VF_SORT = { bullish: { key: null, dir: 1 }, bearish: { key: null, dir: 1 } };
+/* cc#1438 (VOLUME_METRICS_CANON_V1.1): VOLX/VOLD columns become RVOL/DELIV — the sort keys, the
+   getters and the payload fields all follow the endpoint's new rvol/deliv_ratio keys. */
 var VF_SORT_GETTERS = {
   SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
   DAY:    function(r){ return r.day_chg_pct; },
   WK:     function(r){ return r.week_chg_pct; },
   FUT:    function(r){ return r.fut_chg_pct; },
-  VOLX:   function(r){ return r.vol_x; },
-  VOLD:   function(r){ return r.vol_d; },
+  RVOL:   function(r){ return r.rvol; },
+  DELIV:  function(r){ return r.deliv_ratio; },
 };
-var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, VOLX: -1, VOLD: -1 };
+var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, FUT: -1, RVOL: -1, DELIV: -1 };
 
 function vfSortList(list, side){
   return _sortByState(list, VF_SORT[side], VF_SORT_GETTERS);
@@ -1093,12 +1095,12 @@ function vfRows(list, n, side){
   var rows = (n ? sorted.slice(0, n) : sorted).map(function(r){
     return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
       + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1) + vfCell(r.fut_chg_pct, 1)
-      + vfCell(r.vol_x, 0) + vfCell(r.vol_d, 0) + '</tr>';
+      + vfCell(r.rvol, 0) + vfCell(r.deliv_ratio, 0) + '</tr>';
   }).join('');
   var head = side
     ? (vfTh('SYMBOL', 'SYMBOL', side) + vfTh('DAY', 'DAY', side) + vfTh('WK', 'WK', side)
-       + vfTh('FUT', 'FUT', side) + vfTh('VOLX', 'VOLX', side) + vfTh('VOLD', 'VOLD', side))
-    : '<th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th><th>VOLX</th><th>VOLD</th>';
+       + vfTh('FUT', 'FUT', side) + vfTh('RVOL', 'RVOL', side) + vfTh('DELIV', 'DELIV', side))
+    : '<th>SYMBOL</th><th>DAY</th><th>WK</th><th>FUT</th><th>RVOL</th><th>DELIV</th>';
   return '<table class="butbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
@@ -1200,8 +1202,8 @@ function vfGuide(){
     + '<p><b>Flow ratio.</b> Green volume as a share of green + red volume. 0.70 means 70% of the volume traded on rising ticks — buyers were doing the volume. The lists are ranked by this.</p>'
     + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks. Bearish = 60% or more on red ticks. Names in between are noise and are left out.</p>'
     + '<p><b>DAY / WK / FUT.</b> Price change vs yesterday\'s close, vs the close 5 trading days back, and the same day change on the stock\'s futures.</p>'
-    + '<p><b>VOLX.</b> Today\'s volume so far vs yesterday\'s volume up to the same clock time. 2.00x means twice the usual pace.</p>'
-    + '<p><b>VOLD.</b> Yesterday\'s full-day volume vs the day before. Above 1.00x means volume was already building.</p>'
+    + '<p><b>RVOL.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>DELIV.</b> The latest day\'s delivered quantity vs its own 20-day average. Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
     + '<p><b>Ticks filter.</b> How far back we look: 25 ≈ 2 hours, 50 ≈ 4 hours, 100 ≈ 1.3 trading days, 500 ≈ 1 week. The filter on the top card drives both lists.</p>'
     + '<p><b>Honesty.</b> This is a volume read only — we do not see the order book, so it is never called order flow. A dash means the data is missing; we never fill it in.</p>'
     + '</div>');

@@ -10,13 +10,22 @@ DATA HONESTY RULES BUILT IN:
     (ENGINE_LIVENESS_RULE corollary).
   * A symbol with fewer than N/2 bars in the window, or zero total volume across it, is
     EXCLUDED — a flow ratio over a thin or dead window is a fabricated signal.
-  * vol_x compares today's cumulative volume TILL THE LATEST TICK against the previous
-    session's cumulative volume till the SAME clock time; when the same-time base is absent or
-    zero, vol_x is null — never a fake pace.
-  * vol_d = previous full session's volume / the session before that; null when either is absent.
+  * rvol (cc#1438, VOLUME_METRICS_CANON_V1.1): today's cumulative volume at the symbol's latest
+    tick ÷ rvol_profiles.avg_cum_vol at that SAME slot — the rvol_engine profile read, batch
+    form. The profile math itself is NOT reimplemented (build_profiles owns it); a symbol whose
+    profile is missing or has < MIN_SESSIONS sessions is null — never a fake pace. One stated
+    deviation from live_rvol's per-symbol read: no per-symbol cumulative-counter detection here —
+    this endpoint's own existing volume maths already SUM per-bar fyers_eq volume, and the batch
+    read stays consistent with that.
+  * deliv_ratio (cc#1438): latest delivery_eod.deliv_qty ÷ its trailing 20-day average — the
+    EXACT QSR vold derivation (qsr_engine dl CTE, extracted verbatim: rn=1 vs AVG rn 2..21),
+    not a third copy of the formula. Null when either side is absent.
+  * (killed by cc#1438: vol_x same-clock pace vs yesterday, vol_d D-1/D-2 — both retired by
+    VOLUME_METRICS_CANON_V1's kill list.)
   * as_of is the latest tick actually used, so a surface can never present stale as live.
 
-Read-only on intraday_prices + raw_prices + futures_universe. No engine, no scheduler, no writes.
+Read-only on intraday_prices + raw_prices + futures_universe + rvol_profiles + delivery_eod.
+No engine, no scheduler, no writes.
 """
 
 import os
@@ -40,10 +49,11 @@ def volume_flow(ticks: int = 100):
     """Bullish/bearish volume-flow lists over the last `ticks` 5-min bars per symbol.
 
     Response: {as_of, ticks, universe, shown, excluded_thin, bullish: [...], bearish: [...]}
-    Each row: {symbol, flow_ratio, day_chg_pct, week_chg_pct, fut_chg_pct, vol_x, vol_d,
+    Each row: {symbol, flow_ratio, day_chg_pct, week_chg_pct, fut_chg_pct, rvol, deliv_ratio,
                green_vol, red_vol}. Qualifiers: bullish flow_ratio >= 0.60 (desc),
     bearish flow_ratio <= 0.40 (asc). Symbols between the bands are computed but not listed —
-    a 50/50 tape is noise, not signal.
+    a 50/50 tape is noise, not signal. (cc#1438: vol_x/vol_d keys retired for rvol/deliv_ratio
+    per VOLUME_METRICS_CANON_V1.1; response shape otherwise unchanged.)
     """
     if ticks not in _ALLOWED_TICKS:
         raise HTTPException(400, f"ticks must be one of {_ALLOWED_TICKS}")
@@ -56,15 +66,16 @@ def volume_flow(ticks: int = 100):
                 return {"as_of": None, "ticks": ticks, "universe": 0, "shown": 0,
                         "bullish": [], "bearish": []}
 
-            # the eq sessions the pace/day maths anchor on: today + the two prior trading dates
+            # the eq sessions the day/futures maths anchor on: today + the prior trading date.
+            # (cc#1438: the D-2 date died with vol_d — only rvol/day/fut reads remain, and none
+            # of them look further back than the previous session.)
             cur.execute("""
                 SELECT DISTINCT ts::date AS d FROM intraday_prices
-                WHERE source = 'fyers_eq' ORDER BY d DESC LIMIT 3
+                WHERE source = 'fyers_eq' ORDER BY d DESC LIMIT 2
             """)
             dts = [r[0] for r in cur.fetchall()]
             today = dts[0] if dts else None
             prev_d = dts[1] if len(dts) > 1 else None
-            prev2_d = dts[2] if len(dts) > 2 else None
 
             # ── flow window: last N bars per symbol, one set-based pass ──────────────────────
             cur.execute("""
@@ -126,25 +137,51 @@ def volume_flow(ticks: int = 100):
                 """, {"syms": syms, "today": today, "prev": prev_d})
                 fut = {r[0]: {"now": r[1], "prev": r[2]} for r in cur.fetchall()}
 
-            # ── volume pace: today-till-tick vs prev-session same clock time, and D-1 vs D-2 ─
-            pace = {}
-            if today is not None and as_of is not None:
+            # ── cc#1438 RVOL: today's cum volume at each symbol's own latest slot ÷ the
+            # rvol_profiles avg at that SAME slot. Batch form of rvol_engine.live_rvol's read —
+            # the profile math is the engine's (read from its table), never recomputed here.
+            # MIN_SESSIONS is imported from the engine so the sufficiency gate cannot drift.
+            from rvol_engine import MIN_SESSIONS
+            rvl = {}
+            if today is not None:
                 cur.execute("""
-                    SELECT symbol,
-                           COALESCE(SUM(volume) FILTER (WHERE ts::date = %(today)s), 0)   AS v_today,
-                           COALESCE(SUM(volume) FILTER (WHERE ts::date = %(prev)s
-                                                        AND ts::time <= %(t)s), 0)        AS v_prev_same,
-                           COALESCE(SUM(volume) FILTER (WHERE ts::date = %(prev)s), 0)    AS v_prev_full,
-                           COALESCE(SUM(volume) FILTER (WHERE ts::date = %(prev2)s), 0)   AS v_prev2_full
-                    FROM intraday_prices
-                    WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
-                      AND ts::date IN (%(today)s, %(prev)s, %(prev2)s)
-                    GROUP BY symbol
-                """, {"syms": syms, "today": today, "prev": prev_d, "prev2": prev2_d,
-                      "t": as_of.time()})
-                pace = {r[0]: {"today": int(r[1]), "prev_same": int(r[2]),
-                               "prev_full": int(r[3]), "prev2_full": int(r[4])}
-                        for r in cur.fetchall()}
+                    WITH cum AS (
+                        SELECT symbol, SUM(volume) AS today_cum, MAX(ts)::time AS slot
+                        FROM intraday_prices
+                        WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
+                          AND ts::date = %(today)s
+                        GROUP BY symbol
+                    )
+                    SELECT c.symbol, c.today_cum, p.avg_cum_vol, p.sessions_used
+                    FROM cum c
+                    LEFT JOIN rvol_profiles p
+                           ON p.symbol = c.symbol AND p.slot_time = c.slot
+                """, {"syms": syms, "today": today})
+                for r in cur.fetchall():
+                    _cumv, _avg, _sess = (float(r[1] or 0), float(r[2]) if r[2] is not None else None,
+                                          int(r[3] or 0))
+                    rvl[r[0]] = (round(_cumv / _avg, 2)
+                                 if (_avg and _avg > 0 and _sess >= MIN_SESSIONS and _cumv > 0)
+                                 else None)
+
+            # ── cc#1438 DELIV: latest deliv_qty ÷ trailing 20-day avg — the EXACT QSR vold
+            # derivation (qsr_engine dl CTE, rn=1 vs AVG rn 2..21), extracted, not re-derived.
+            cur.execute("""
+                SELECT symbol,
+                       MAX(CASE WHEN rn = 1 THEN deliv_qty END)::numeric AS d0,
+                       AVG(deliv_qty) FILTER (WHERE rn BETWEEN 2 AND 21)  AS d20avg
+                FROM (
+                    SELECT symbol, deliv_qty,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
+                    FROM delivery_eod
+                    WHERE deliv_qty IS NOT NULL AND symbol = ANY(%(syms)s)
+                ) y WHERE rn <= 21 GROUP BY symbol
+            """, {"syms": syms})
+            dlv = {}
+            for r in cur.fetchall():
+                d0, d20 = (float(r[1]) if r[1] is not None else None,
+                           float(r[2]) if r[2] is not None else None)
+                dlv[r[0]] = round(d0 / d20, 2) if (d0 is not None and d20 and d20 > 0) else None
 
         rows, thin = [], 0
         for sym in syms:
@@ -164,19 +201,14 @@ def volume_flow(ticks: int = 100):
             fu = fut.get(sym) or {}
             fchg = ((float(fu["now"]) / float(fu["prev"]) - 1) * 100
                     if (fu.get("now") and fu.get("prev")) else None)
-            pc = pace.get(sym) or {}
-            vol_x = (pc["today"] / pc["prev_same"]
-                     if pc.get("prev_same") else None)
-            vol_d = (pc["prev_full"] / pc["prev2_full"]
-                     if pc.get("prev2_full") else None)
             rows.append({
                 "symbol": sym,
                 "flow_ratio": round(ratio, 4),
                 "day_chg_pct": round(day, 2) if day is not None else None,
                 "week_chg_pct": round(week, 2) if week is not None else None,
                 "fut_chg_pct": round(fchg, 2) if fchg is not None else None,
-                "vol_x": round(vol_x, 2) if vol_x is not None else None,
-                "vol_d": round(vol_d, 2) if vol_d is not None else None,
+                "rvol": rvl.get(sym),               # cc#1438: canon metric 1 (was vol_x)
+                "deliv_ratio": dlv.get(sym),        # cc#1438: canon metric 4 (was vol_d)
                 "green_vol": f["green"], "red_vol": f["red"],
             })
 
