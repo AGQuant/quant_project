@@ -805,13 +805,16 @@ def v10_buildup(limit: int = 15):
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
                 ),
-                -- cc#819 bug_2: vol_ratio was hardcoded None in _row(), so the Vol column could
-                -- never populate — on-market or off. v8_metrics.vol_ratio is the same futures
-                -- universe and is already frozen at the last completed session, which is the
-                -- cc#719 freeze behaviour the rest of this row follows.
+                -- cc#819 bug_2 established this join (vol_ratio was hardcoded None before it).
+                -- cc#1438 (VOLUME_METRICS_CANON_V1.1): the read moves from the LATEST score_date
+                -- to the row STRICTLY BEFORE it (T-1) and is served as vol_p — the live writer
+                -- refreshes the latest row intraday with today-so-far, so during a session the
+                -- old read showed a partial-day ratio that climbs mechanically; T-1 is the honest
+                -- completed-day read (same rule as the A-card VOL P tile, one definition).
                 v AS (
                     SELECT symbol, vol_ratio FROM v8_metrics
-                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics
+                                        WHERE score_date < (SELECT MAX(score_date) FROM v8_metrics))
                 )
                 SELECT l.symbol, l.c AS price,
                        ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
@@ -847,7 +850,7 @@ def v10_buildup(limit: int = 15):
                 "oi_chg": oi_chg,
                 "oi_chg_pct": float(oi_chg_pct) if oi_chg_pct is not None else None,   # cc#1431
                 "basis": float(basis) if basis is not None else None,
-                "vol_ratio": float(vol_ratio) if vol_ratio is not None else None,   # cc#819 bug_2
+                "vol_p": float(vol_ratio) if vol_ratio is not None else None,   # cc#1438: T-1 read (was vol_ratio, latest row)
                 "signal": sig}
 
     data = [_row(r) for r in rows if r[2] is not None]

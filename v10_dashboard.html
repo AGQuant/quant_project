@@ -463,7 +463,7 @@ function mapBuild(r){
   return { sym:r.symbol, price:Number(r.price)||0, day:Number(r.day_1d)||0,
            oi:r.oi!=null?Number(r.oi):null, oiChg:r.oi_chg!=null?Number(r.oi_chg):null,
            basis:r.basis!=null?Number(r.basis):null,
-           volR:r.vol_ratio!=null?Number(r.vol_ratio):null, sig:r.signal||'NEUTRAL' };
+           volR:r.vol_p!=null?Number(r.vol_p):null, sig:r.signal||'NEUTRAL' };  /* cc#1438: T-1 vol_p (was vol_ratio latest row) */
 }
 async function loadBuildup(){
   const b = await getJSON('/api/v10/buildup?limit=15');
@@ -893,8 +893,8 @@ function buildupTable(title, rows, accent, pending){
   // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
   // of NEUTRAL tags is misleading. Show price-direction columns only.
   const head = pending
-    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS']
-    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS','SIGNAL'];
+    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL P','BASIS']
+    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL P','BASIS','SIGNAL'];
   const colspan = pending?7:8;
   const body = rows.length ? rows.map(r=>`<tr>
     <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>

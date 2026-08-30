@@ -860,7 +860,7 @@ var BU_SORT_GETTERS = {
   FUT:    function(r){ return r.price; },
   DAY:    function(r){ return r.day_1d; },
   OI:     function(r){ return r.oi_chg_pct; },
-  VOL:    function(r){ return r.vol_ratio; },
+  VOL:    function(r){ return r.vol_p; },   /* cc#1438: T-1 vol_p (was vol_ratio, latest row) */
   BASIS:  function(r){ return r.basis; },
 };
 var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, FUT: -1, DAY: -1, OI: -1, VOL: -1, BASIS: -1 };
@@ -889,7 +889,10 @@ function buCard(st){
   } else {
     body = '<table class="butbl"><thead><tr>'
       + buTh('SYMBOL', 'SYMBOL', st.k) + buTh('FUT', 'FUT', st.k) + buTh('DAY%', 'DAY', st.k)
-      + buTh('OI Δ%', 'OI', st.k) + buTh('VOL×', 'VOL', st.k) + buTh('BASIS', 'BASIS', st.k)
+      /* cc#1438 (VOLUME_METRICS_CANON_V1.1): VOL× -> VOL P — the endpoint now serves vol_p, the
+         v8_metrics T-1 read (previous completed day vs its own 10-day avg) instead of the latest
+         row, which the live writer refreshes with a partial today-so-far value intraday. */
+      + buTh('OI Δ%', 'OI', st.k) + buTh('VOL P', 'VOL', st.k) + buTh('BASIS', 'BASIS', st.k)
       + '</tr></thead><tbody>'
       + rows.map(function(r){
           return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
@@ -898,8 +901,8 @@ function buCard(st){
             // cc#1431: OI Δ shown as % (oi_chg_pct — same formula scanner_endpoints.day_range_oi
             // already uses off futures_basis.oi_chg/oi_prev), not the raw absolute contract count.
             + buNum(r.oi_chg_pct, 3, '%', true)
-            + (r.vol_ratio == null ? '<td>—</td>'
-               : '<td class="am">' + Number(r.vol_ratio).toFixed(1) + '×</td>')
+            + (r.vol_p == null ? '<td>—</td>'
+               : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
             + buNum(r.basis, 1, '', true)
             + '</tr>';
         }).join('') + '</tbody></table>';
