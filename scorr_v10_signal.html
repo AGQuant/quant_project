@@ -102,12 +102,13 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    first or last strike. */
 .oiwall{position:absolute;font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
  white-space:nowrap;transform:translateX(-50%);pointer-events:none}
+/* cc#1471: PUT WALL's word-tag joins the unified TOP row (the put BARS still grow down and the
+   put strike number stays at the bottom — only the tag moved). .stack is the shared second rung
+   (top:13px, the ce-delta line) any of the three drops to on a collision — see the builder. */
 .oiwall.cw{top:0;color:var(--heat)}
-.oiwall.pw{bottom:0;color:var(--volt)}
-/* cc#1468: MAX PAIN rides the top strip in the bar's own amber; .stack is the collision rung
-   (top:13px, the ce-delta line) for when max pain sits beside the call wall — see the builder. */
+.oiwall.pw{top:0;color:var(--volt)}
 .oiwall.mpw{top:0;color:var(--amber,#f5b94a)}
-.oiwall.mpw.stack{top:13px}
+.oiwall.stack{top:13px}
 .oichg{position:absolute;transform:translateX(-50%);font-family:'JetBrains Mono';font-size:var(--type-8);
   letter-spacing:var(--track-px8);white-space:nowrap;pointer-events:none}
 .oichg.ce{top:13px;color:var(--heat)}
@@ -117,14 +118,18 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
    Same absolute positioning and the same (i+0.5)/count centring the wall tags use, so a number
    sits on the column it belongs to rather than half a column off. Sparse by construction: only
    the three strikes that carry meaning, deduped and thinned — see the builder. */
-/* cc#1468: the Spot label's own row just under the bars — .oix's grammar (absolute, centred,
-   type-8 mono, edge-clamped) in the dashed line's aqua, anchored to the same interpolated x. */
-.oisplb{position:relative;height:12px;margin-top:var(--space-2)}
+/* cc#1468: the Spot label just under the bars — .oix's grammar (absolute, centred, type-8 mono,
+   edge-clamped) in the dashed line's aqua, anchored to the same interpolated x.
+   cc#1471: three stacked rows — "Spot" / the number / "(live)". The number gets one step up and
+   the weight so the level reads first; word and basis stay type-8. */
+.oisplb{position:relative;height:36px;margin-top:var(--space-2)}
 .oisplb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
  font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
- color:var(--aqua);pointer-events:none}
-.oisplb span.lo{transform:none;left:0}
-.oisplb span.hi{transform:none;left:auto;right:0}
+ color:var(--aqua);pointer-events:none;text-align:center}
+.oisplb span i{display:block;font-style:normal}
+.oisplb span b{display:block;font-size:var(--type-10);font-weight:800}
+.oisplb span.lo{transform:none;left:0;text-align:left}
+.oisplb span.hi{transform:none;left:auto;right:0;text-align:right}
 .oixs{position:relative;height:12px;margin-top:var(--space-3)}
 .oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
  font-family:'JetBrains Mono';font-size:var(--type-8);letter-spacing:var(--track-px8);
@@ -141,6 +146,12 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .asof.stale{color:var(--amber)}
 /* cc#1361 · this card's own text chrome, one type step up from the shared classes */
 .oiasof{font-size:var(--type-10)}
+/* cc#1471: the Max Pain header may wrap as a ROW, never mid-text — the stamp is nowrap, and when
+   heading + stamp + i don't fit one line the stamp and the i move whole to a second line, pushed
+   right, instead of the date/PCR being squeezed into fragments (founder screenshot: "PCR / 1.10"
+   split across two lines). Scoped to this card's header; the shared .vfhd is untouched. */
+.oihd{flex-wrap:wrap}
+.oihd .oiasof{white-space:nowrap;margin-left:auto}
 /* cc#1468: .oird.oifacts is gone with the footer it styled — the facts live on the chart now. */
 /* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
 .plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
@@ -596,10 +607,13 @@ function oiCard(name, oi, mp){
   if(oi.spot != null && hi > lo){
     var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
     spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+    /* cc#1471: three stacked rows — the word, the number (no comma, cc#1466's own price
+       convention), the (live)/(prev close) conditional. The conditional survives the
+       restructure untouched. */
     spotLb = '<div class="oisplb"><span'
       + (f * 100 < 8 ? ' class="lo"' : f * 100 > 92 ? ' class="hi"'
          : ' style="left:' + (f * 100).toFixed(2) + '%"')
-      + '>Spot ' + num(oi.spot) + ' (' + basis + ')</span></div>';
+      + '><i>Spot</i><b>' + Math.round(Number(oi.spot)) + '</b><i>(' + basis + ')</i></span></div>';
   }
   /* the two wall tags, placed on their own columns. The x of column i is the centre of its share
      of the track, which is (i + 0.5) / count — not i / count, or every tag would sit a half-column
@@ -611,27 +625,38 @@ function oiCard(name, oi, mp){
     if(!hasCh || !w || w[key] == null) return '';
     return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
   };
-  if(cwI >= 0 && !ceDead) tags += '<div class="oiwall cw" style="left:' + colPct(cwI) + '%">CALL WALL'
-    + wallWord(callWall, 'ce_chg', thCls.ce) + '</div>';
-  if(pwI >= 0 && !peDead) tags += '<div class="oiwall pw" style="left:' + colPct(pwI) + '%">PUT WALL'
-    + wallWord(putWall, 'pe_chg', thCls.pe) + '</div>';
-  /* cc#1468: MAX PAIN tag above the amber bar — CALL WALL's own convention (colPct centring,
-     .oiwall grammar) in the bar's own amber. Max pain very often IS the call wall's neighbour,
-     so when the two top tags would land closer than the page's 18% legibility rule the MAX PAIN
-     tag drops to the second rung (the ce delta labels' top:13px), and any ce delta on that
-     column steps aside — one label per spot, same principle as the strike-label thinning. */
+  /* cc#1468 put MAX PAIN on the top strip with a two-rung collision rule against the call wall;
+     cc#1471 moves the PUT WALL word-tag up too — ONE unified top row — so the rule generalises.
+     Tags place in order CALL WALL → MAX PAIN → PUT WALL: a tag landing within the page's 18%
+     legibility rule of one already on its rung drops to the second rung (the ce-delta line,
+     top:13px); with both rungs blocked it is dropped entirely — fewer legible tags beat three
+     that smear, the strike-label thinning's own principle. ONLY the word tag moves: the put bars
+     still grow DOWN (spec 6055) and the put strike NUMBER (.oix.pw) stays at the bottom with
+     them. ce delta labels step aside from any column within 8% of a second-rung tag. */
   var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
-  var mpTagStack = false;
-  if(mpI >= 0){
-    mpTagStack = (cwI >= 0 && !ceDead && Math.abs(Number(colPct(mpI)) - Number(colPct(cwI))) < 18);
-    tags += '<div class="oiwall mpw' + (mpTagStack ? ' stack' : '') + '" style="left:'
-      + colPct(mpI) + '%">MAX PAIN</div>';
-  }
+  var topPlaced = [[], []];   /* rung -> the pct positions already claimed on it */
+  var placeTop = function(i, cls, text){
+    if(i < 0) return;
+    var pct = Number(colPct(i));
+    for(var rung = 0; rung < 2; rung++){
+      var clash = topPlaced[rung].some(function(p){ return Math.abs(p - pct) < 18; });
+      if(!clash){
+        topPlaced[rung].push(pct);
+        tags += '<div class="oiwall ' + cls + (rung ? ' stack' : '') + '" style="left:'
+          + pct.toFixed(2) + '%">' + text + '</div>';
+        return;
+      }
+    }
+  };
+  placeTop(ceDead ? -1 : cwI, 'cw', 'CALL WALL' + wallWord(callWall, 'ce_chg', thCls.ce));
+  placeTop(mpI, 'mpw', 'MAX PAIN');
+  placeTop(peDead ? -1 : pwI, 'pw', 'PUT WALL' + wallWord(putWall, 'pe_chg', thCls.pe));
   if(hasCh){
     [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
       rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
           .filter(function(m){ return m.c != null && Math.abs(m.c) >= sd[1]; })
-          .filter(function(m){ return !(sd[2] === 'ce' && mpTagStack && m.i === mpI); })
+          .filter(function(m){ return !(sd[2] === 'ce' && topPlaced[1].some(function(p){
+              return Math.abs(p - Number(colPct(m.i))) < 8; })); })
           .sort(function(a, b){ return Math.abs(b.c) - Math.abs(a.c); })
           .slice(0, 3)
           .forEach(function(m){
@@ -732,7 +757,10 @@ function oiCard(name, oi, mp){
      before deleting: nothing else on this page read it. The header gains the page's vfib →
      oiGuide() sheet, in the established .vfhd row; the as-of stamp stays, ahead of the i. */
   return '<div class="vpage"><div class="card">'
-    + '<div class="vfhd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
+    /* cc#1471: .oihd on the shared row — the stamp never wraps mid-text; when heading + stamp +
+       i genuinely do not fit one line, the stamp and the i move WHOLE to a second right-aligned
+       line instead of the date/PCR being squeezed into fragments. */
+    + '<div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
     + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
     + '<button type="button" class="vfib" onclick="oiGuide()" aria-label="How to read this card">i</button></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
