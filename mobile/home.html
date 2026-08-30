@@ -1144,19 +1144,14 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    not guessed. flex-start pulls the mood word tight under the header, same as Cards 4/5's own
    fix. */
 #heroTrack > .c:nth-child(2) > .c2body{justify-content:flex-start}
-/* cc#1384 · CARD 3's NIFTY/BankNifty toggle, in .chd's own .rgt slot. Same visual language as the
-   V10 modal's .v10tg/v10Toggle() -- a bordered pill, blue border+tint when active -- scaled down
-   from .v10tg's full-width 34px-min-height modal row to fit inline in a 30px-min-height card
-   header instead of inventing a second toggle grammar. #heroCard3Toggle is IDed rather than a
-   bare .rgt rule so this can never leak onto Card 1/2's own .rgt (a plain date stamp, no buttons)
-   even though nothing about .rgt's own shared styling would collide either way. */
-#heroCard3Toggle{gap:var(--space-4)}
-#heroCard3Toggle button{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
-  font-weight:800;letter-spacing:var(--track-em7);color:var(--mut);background:transparent;
-  border:var(--bw-1) solid var(--line2);border-radius:var(--radius-5);
-  padding:var(--space-2) var(--space-6);cursor:pointer;white-space:nowrap}
-#heroCard3Toggle button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);
-  background:rgba(77,124,254,.12)}
+/* cc#1432 (founder ruling, relayed in this task's log 30-Aug) · CARD 3's NIFTY/BankNifty toggle
+   CONVERGES onto the Index Positions gold-fill pill: the container now carries class
+   "rgt pstg" (see heroCard3() below), so the .pstg rules — anchored to the founder-facing
+   design ref scorr_index_positions_R1.html @ 685cc6e — govern it entirely. cc#1384's blue-pill
+   ID rules are deleted, not overridden: an ID rule left here (even just the gap) would outrank
+   .pstg's own 1px pill grouping and quietly fork the grammar this ruling exists to unify. The
+   V10 modal's own .v10tg stays as-is — explicitly out of scope per the ruling; Card 3's old
+   parity with it is broken deliberately, not by oversight. */
 /* cc#1385's CARD 3 INTERNAL TRIM is REMOVED (cc#1387) — it existed to make room for adrBar's
    block, which has now moved OUT of this card entirely (Card3 -> Card1, this task). Card 3 reverts
    to its pre-cc#1385 spacing (shared .oib/.oird/.chd/CTA-floor rules, untouched below). This is
@@ -4143,7 +4138,7 @@ function heroCard3(d){
      back to land the deck exactly on its pre-task height — see that comment for the full account
      and this task's own result for the exact before/after numbers. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t" id="heroCard3Title">Max Pain NIFTY</div>'
-    + '<div class="rgt ibktg" id="heroCard3Toggle">' + ibkToggleHtml() + '</div></div>'
+    + '<div class="rgt pstg" id="heroCard3Toggle">' + ibkToggleHtml() + '</div></div>'
     + '<div id="heroCard3Body"><div class="unavail">Loading&hellip;</div></div>'
     + '</div>'
     + '<a class="digl slab" href="/m/v10">INDEX INTEL &#8594;</a>'
