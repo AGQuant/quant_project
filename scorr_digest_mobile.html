@@ -2539,8 +2539,12 @@ async function boot(){
 
   <div class="eyebrow">LATEST RESULT ANALYSIS</div>
   <div class="card slab">
-    <div class="grp"><h3>${raList().shown.length} of ${ra.total!=null?ra.total:'—'} analysed</h3>
-      <span class="note">${raTally(raT)}${raLatest?` · latest ${esc(raLatest)}`:''}</span></div>
+    <!-- cc#1436: the "N of M analysed" headline + beat-both/beat-one/beat-neither/no-dot/latest
+         summary line is removed here, founder ask -- the card goes straight from the eyebrow to
+         the filter tabs (raChips) and the per-company deck (raDeck), both untouched below.
+         raTally()/raLatest/ra.total/raList().shown.length are NOT deleted -- the underlying
+         figures still compute exactly as before (do_not_touch: this is a display removal on this
+         one card, not a request to stop computing them), just no longer rendered on this line. -->
     <div id="rawrap">${raChips()}${raDeck()}</div>
   </div>
 
