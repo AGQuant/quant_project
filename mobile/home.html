@@ -3649,17 +3649,23 @@ function v10PfSheet(){
      Reward : risk goes in — avg profit per winning trade ÷ avg loss per losing trade, the
      payoff shape those two rows only hinted at. Loss count stays derivable (total − profitable)
      and the win-rate fold stays in v10PfBreakdown for any future reader. Em-dash when either
-     side cannot be computed — no losses is a dash, never infinity. */
+     side cannot be computed — no losses is a dash, never infinity.
+     cc#1473 (founder 30-Aug): the two AVG rows read in ₹, not points — gross rupee P&L over the
+     trade count, the same gp/gl the PF formula line divides — and Reward : risk derives from
+     THESE displayed rupee averages, so the sheet's own rows always reproduce its ratio. The
+     Gross POINTS rows stay in points as filed. */
+  var avgWr = b.wins ? b.gp / b.wins : null;
+  var avgLr = b.losses ? b.gl / b.losses : null;
   var rows = [
     ['Total trades', String(b.closed)],
     ['Profitable trades', String(b.wins)]];
   if (b.flat) rows.push(['Flat (breakeven) trades', String(b.flat)]);
   rows.push(
-    ['Reward : risk', (b.avgW != null && b.avgL) ? (b.avgW / b.avgL).toFixed(2) + ' : 1' : '—'],
+    ['Reward : risk', (avgWr != null && avgLr) ? (avgWr / avgLr).toFixed(2) + ' : 1' : '—'],
     ['Gross points won', fp(b.gpts)],
     ['Gross points lost', fp(b.lpts)],
-    ['Avg profit per winning trade', fp(b.avgW)],
-    ['Avg loss per losing trade', fp(b.avgL)]);
+    ['Avg profit per winning trade', (avgWr == null ? '—' : fr(avgWr))],
+    ['Avg loss per losing trade', (avgLr == null ? '—' : fr(avgLr))]);
   var fx = (b.pf == null)
     ? (b.closed
         ? 'No profit factor here: this side has never taken a loss, so the divisor is zero.'
