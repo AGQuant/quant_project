@@ -172,16 +172,20 @@ R6_VOLP_Y = 1.0   # PLACEHOLDER — awaiting founder sign-off (cc#1441)
 def r6_read(cur, symbol: str) -> dict:
     """Canon volume read: {'rvol', 'vol_p', 'vol_p_asof', 'partial'}. rvol = live profile read
     (None when the symbol has no rvol_profile with enough sessions — never fabricated). vol_p =
-    the last COMPLETED raw_prices session's closing RVOL: during a live session that row IS
-    yesterday; off-market after the EOD write it is the just-closed session — the same semantic
-    rvol_engine.closing_rvol uses. Both derivations live in rvol_engine (one registry)."""
+    the closing RVOL of the session immediately BEFORE the one rvol anchors to (cc#1449 ruling:
+    the pair must always be two DIFFERENT sessions). The raw eod pair's latest row is yesterday
+    during a live session but the JUST-CLOSED session off-market — so when its date equals the
+    live anchor's, step back to the pair's LAG side. Both derivations live in rvol_engine."""
     from rvol_engine import live_rvol, eod_rvol_pair
     lv = live_rvol(cur, symbol)
     rvol = lv.get("rvol") if lv else None
-    pair = eod_rvol_pair(cur, symbol)
-    vol_p = pair.get("rvol") if pair else None      # latest completed day's closing RVOL
-    return {"rvol": rvol, "vol_p": vol_p,
-            "vol_p_asof": (pair.get("asof") if pair else None),
+    anchor = lv.get("asof") if lv else None
+    pair = eod_rvol_pair(cur, symbol) or {}
+    if pair.get("asof") is not None and anchor is not None and str(pair["asof"]) == str(anchor):
+        vol_p, vol_p_asof = pair.get("vol_p"), pair.get("prev_asof")
+    else:
+        vol_p, vol_p_asof = pair.get("rvol"), pair.get("asof")
+    return {"rvol": rvol, "vol_p": vol_p, "vol_p_asof": vol_p_asof,
             "partial": (rvol is None) != (vol_p is None)}
 
 

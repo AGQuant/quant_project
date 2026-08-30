@@ -239,18 +239,18 @@ def day_rvol_batch(cur, symbols, day):
 
 
 def closing_rvol_batch(cur, symbols):
-    """VOL P (canon V2): {symbol: {'value': ratio, 'asof': 'YYYY-MM-DD'}-or-None} — yesterday's
-    RVOL at the close. 'Yesterday' = the most recent session whose close has PASSED: during a live
-    session the latest date is still trading, so step back one; off-market the latest date is the
-    completed session itself. One fixed number per symbol per day, not time-sliced."""
+    """VOL P (canon V2; day rule fixed cc#1449): {symbol: {'value': ratio, 'asof': 'YYYY-MM-DD'}
+    or None} — the closing RVOL of the session immediately BEFORE the one live RVOL anchors to.
+    live_rvol/live_rvol_batch anchor UNCONDITIONALLY to the latest intraday session (days[0]), so
+    VOL P anchors UNCONDITIONALLY to days[1] — market open or closed. The pair must always be two
+    DIFFERENT sessions; cc#1449's bug was a live/off-market branch here that collapsed both reads
+    onto days[0] whenever the market was closed (every evening, weekend and holiday), so RVOL and
+    VOL P printed identical numbers across every surface. {} only when history holds fewer than
+    2 sessions — an honesty gate, never a market-hours one."""
     days = _sessions(cur, 2)
-    if not days:
+    if len(days) < 2:
         return {}
-    now = _ist_now()
-    live_today = _is_market_hours(now) and days[0] == now.date()
-    day = days[1] if (live_today and len(days) > 1) else days[0]
-    if live_today and len(days) < 2:
-        return {}
+    day = days[1]
     ratios = _day_ratios(cur, symbols, day)
     return {s: ({"value": r, "asof": str(day)} if r is not None else None)
             for s, r in ratios.items()}
@@ -299,15 +299,18 @@ SELECT symbol, rv AS rvol, vp AS vol_p, price_date AS asof FROM (
 
 
 def eod_rvol_pair(cur, symbol):
-    """Single-symbol EOD read: {'rvol':…, 'vol_p':…, 'asof': 'YYYY-MM-DD'} or None. Same raw
-    form as EOD_RVOL_PAIR_SQL, scoped to one symbol (cheap: one symbol's 60-day slice)."""
+    """Single-symbol EOD read: {'rvol','vol_p','asof','prev_asof'} or None. Same raw form as
+    EOD_RVOL_PAIR_SQL, scoped to one symbol (cheap: one symbol's 60-day slice). cc#1449 adds
+    prev_asof (the prior session's date) so a caller pairing against a LIVE anchor can label
+    the vol_p side honestly."""
     sym = (symbol or "").upper()
     cur.execute(f"""
-        SELECT rv, vp, price_date FROM (
+        SELECT rv, vp, price_date, prev_d FROM (
           SELECT price_date,
                  CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END AS rv,
                  LAG(CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END)
                    OVER (ORDER BY price_date) AS vp,
+                 LAG(price_date) OVER (ORDER BY price_date) AS prev_d,
                  ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
           FROM (
             SELECT price_date, volume::numeric AS vol,
@@ -324,4 +327,5 @@ def eod_rvol_pair(cur, symbol):
         return None
     return {"rvol": (round(float(r[0]), 2) if r[0] is not None else None),
             "vol_p": (round(float(r[1]), 2) if r[1] is not None else None),
-            "asof": str(r[2])}
+            "asof": str(r[2]),
+            "prev_asof": (str(r[3]) if r[3] is not None else None)}
