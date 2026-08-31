@@ -1345,15 +1345,17 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
        /intraday page (endpoints unchanged) via an iframe; ?embed=1 + Sec-Fetch-Dest:iframe make the
        auth_gate skip the injected site nav so there is no double nav. -->
   <div id="pane-tcscan" style="display:none">
-    <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
-    <!-- cc#1289 (founder ask 24-Aug): the iframe above is the V1.1 GATED score/100 scanner.
-         TC13 is a DIFFERENT engine (the 13-check binary scanner, tc_scanner_holds table) with no
-         page anywhere rendering it — founder confusion between the two engines is exactly what
-         this session surfaced, so the label below is deliberately loud about which engine this
-         is. Pure render: the payload from /api/scanners/tc/holds already carries entry/target/
-         sl/exit/pnl/stats, this box computes nothing (one-computation-two-renderers, same
-         discipline as Wall of Trades). Read-only; tc_scanner_endpoints.py is untouched. -->
-    <div id="tc13Box" style="padding:16px 2px 30px"></div>
+    <!-- cc#1530 (TC_SCANNER_R1_V1, 35016): the TC13 books render FIRST — Open Book, then Closed
+         Book — with the V1.1 screener frame below them. The old order put the frame on top with a
+         fixed calc(100vh - 150px) height, which reserved a viewport of space over its short
+         content and pushed tc13Box below the fold behind a dead gap (founder screenshot 31-Aug).
+         The frame now sizes itself from the embedded page's own postMessage
+         ({type:'tcscan-resize', h}) with a 200px floor before the first message lands.
+         cc#1289's engine note still holds: the frame is the V1.1 GATED score/100 scanner, the
+         box is TC13 (13-check binary, tc_scanner_holds) — two engines, badged apart (lock 7).
+         Pure render either way: /api/scanners/tc/holds computes, this pane formats. -->
+    <div id="tc13Box" style="padding:8px 2px 10px"></div>
+    <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1282 (founder 24-Aug): Digest and Wall of Trades join the shell the same way TC Scanner
        did in cc#740 — an embed=1 iframe pane, lazy-loaded on first open. embed=1 strips every
@@ -7583,35 +7585,46 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 </script>
 <style>
 /* cc#1289 — TC13 open/closed box. Own namespace, theme-token colours only (push gate ratchet). */
-.tc13-wrap{border-top:1px solid var(--line);padding-top:16px;margin-top:4px}
-.tc13-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
-.tc13-hd .t{font-size:15px;font-weight:800;color:var(--txt)}
-.tc13-hd .sub{font-size:10.5px;color:var(--mut)}
-.tc13-datepick{margin-left:auto;display:flex;align-items:center;gap:6px}
-.tc13-datepick input{font-family:var(--mono,inherit);font-size:11.5px;padding:5px 8px;border-radius:6px;
-  border:1px solid var(--line);background:var(--card);color:var(--txt)}
-/* cc#1296 scope 3: was a 2-col BUY/SELL grid (.tc13-sides), now two full-width STACKED tables
-   split by status (Open then Closed) instead, each mixing both sides with a per-row side badge. */
-.tc13-block{margin-top:16px}
-.tc13-block .sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.tc13-block .sh .t{font-size:12.5px;font-weight:800;color:var(--txt)}
-.tc13-side-badge{font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid}
-.tc13-side-badge.buy{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
-.tc13-side-badge.sell{color:var(--red);border-color:var(--red);background:var(--red-d)}
-.tc13-stats{display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono,inherit);font-size:10px;color:var(--mut)}
-.tc13-stats b{color:var(--txt);font-weight:700}
-.tc13-tbl{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
-.tc13-tbl th{text-align:left;padding:6px 7px;font-size:9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
-  color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
-.tc13-tbl td{padding:6px 7px;border-bottom:1px solid var(--line2);white-space:nowrap;font-family:var(--mono,inherit)}
-.tc13-tbl .sym{font-weight:800;font-family:inherit}
-.tc13-tbl .num{text-align:right;font-variant-numeric:tabular-nums}
-.tc13-pos{color:var(--grn)} .tc13-neg{color:var(--red)}
-.tc13-pill{font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:5px;border:1px solid}
-.tc13-pill.target{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
-.tc13-pill.sl{color:var(--red);border-color:var(--red);background:var(--red-d)}
-.tc13-pill.open{color:var(--blu);border-color:var(--blu);background:var(--blu-row,rgba(77,124,254,.12))}
-.tc13-empty{padding:16px;text-align:center;color:var(--mut);font-size:11.5px}
+/* cc#1530 (TC_SCANNER_R1_V1): the TC13 box takes the R1 mock's grammar — .tbl/.side/.pill
+   tables, section badges, LIVE badge, stat chips, per-row proximity rail — with every R1 class
+   SCOPED under .tc13-wrap (this file has been bitten by short bare class names before; the R1
+   names stay, the reach does not). Tokens are the injected contract's (--tx aliases live in
+   scorr_web_tokens.css since cc#1203/1521). */
+.tc13-wrap{padding-top:10px}
+.tc13-wrap section{margin-top:22px}
+.tc13-wrap section:first-child{margin-top:4px}
+.tc13-wrap .sh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.tc13-wrap .sh h2{font:700 17px var(--f-d);letter-spacing:-.01em;color:var(--tx)}
+.tc13-wrap .badge{font:600 9.5px var(--f-m);letter-spacing:.13em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-flex;align-items:center;gap:6px}
+.tc13-wrap .b-live{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
+.tc13-wrap .b-eng{color:var(--cy);border-color:rgba(var(--cy-rgb),.4);background:rgba(var(--cy-rgb),.10)}
+.tc13-wrap .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:idxpdot 2s infinite}
+.tc13-wrap .stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap;align-items:center}
+.tc13-wrap .stats b{color:var(--tx2);font-weight:600}
+.tc13-wrap .rcard{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tc13-wrap .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tc13-wrap .tbl th{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:9px 12px;border-bottom:1px solid var(--line)}
+.tc13-wrap .tbl th:first-child,.tc13-wrap .tbl th:nth-child(2),.tc13-wrap .tbl td:first-child,.tc13-wrap .tbl td:nth-child(2){text-align:left}
+.tc13-wrap .tbl td{padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+.tc13-wrap .tbl tr:last-child td{border-bottom:none}
+.tc13-wrap .tbl tr:hover td{background:var(--raise)}
+.tc13-wrap .tbl .sym{font:700 12.5px var(--f-d);font-family:var(--f-d)!important}
+.tc13-wrap .side{font:700 9px var(--f-m);letter-spacing:.1em;padding:3px 7px;border-radius:4px;border:1px solid}
+.tc13-wrap .side.buy{color:var(--gr);border-color:rgba(var(--gr-rgb),.45)}
+.tc13-wrap .side.sell{color:var(--rd);border-color:rgba(var(--rd-rgb),.45)}
+.tc13-wrap .pill{font:700 9px var(--f-m);letter-spacing:.08em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-block}
+.tc13-wrap .pill.target{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
+.tc13-wrap .pill.sl{color:var(--rd);border-color:rgba(var(--rd-rgb),.45);background:rgba(var(--rd-rgb),.12)}
+.tc13-wrap .prox{width:96px;display:inline-block}
+.tc13-wrap .prail{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--rd-rgb),.4),var(--line2) 46%,var(--line2) 54%,rgba(var(--gr-rgb),.4))}
+.tc13-wrap .pdot{position:absolute;top:50%;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);background:var(--cy);box-shadow:0 0 6px var(--cy)}
+.tc13-wrap .pos{color:var(--gr)} .tc13-wrap .neg{color:var(--rd)} .tc13-wrap .flat{color:var(--tx2)}
+.tc13-wrap .empty-row td{text-align:center;color:var(--tx3);font-family:var(--f-d);padding:22px 12px}
+.tc13-datepick{display:flex;align-items:center;gap:6px}
+.tc13-datepick input{font-family:var(--f-m);font-size:11.5px;padding:5px 8px;border-radius:6px;
+  border:1px solid var(--line2);background:var(--panel);color:var(--tx)}
+/* cc#1530: the pre-R1 tc13-* table/pill/stat rules are DELETED with the renderers that emitted
+   them — the R1 grammar above is the one set of rules this box renders through now. */
 </style>
 <script>
 (function(){
@@ -7642,46 +7655,82 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return {closed:closed.length,wins:wins.length,wr_pct:wr,net_pts_pct:net};
   }
 
-  function openTable(rows){
-    var stripHtml='<div class="tc13-stats"><span>Open <b>'+rows.length+'</b></span></div>';
+  // cc#1530 (TC_SCANNER_R1_V1): the R1 renderers. Open Book first, Closed Book second, each in
+  // the mock's .sh + .rcard/.tbl grammar (scoped under .tc13-wrap). The proximity rail is the
+  // mock's prox() VERBATIM — side-aware: SELL runs Target..SL, BUY runs SL..Target, dot at
+  // clamp((cmp-lo)/(hi-lo)*100, 0, 100). closedStats() above is unchanged and still feeds the
+  // Closed Book stat chips (the spec's own instruction).
+  function prox(target,sl,cmp,side){
+    if(target==null||sl==null||cmp==null) return '<span style="color:var(--tx3)">—</span>';
+    var lo=side==='SELL'?target:sl, hi=side==='SELL'?sl:target;
+    if(hi===lo) return '<span style="color:var(--tx3)">—</span>';
+    var p=Math.max(0,Math.min(100,(cmp-lo)/(hi-lo)*100));
+    return '<div class="prox"><div class="prail"><div class="pdot" style="left:'+p.toFixed(1)+'%"></div></div></div>';
+  }
+  function dShort(ts){
+    if(!ts) return '—';
+    var t=String(ts);
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var mo=parseInt(t.slice(5,7),10);
+    return parseInt(t.slice(8,10),10)+' '+(M[mo-1]||'');
+  }
+  function pnlTxt(v){ return v!=null?((v>=0?'+':'')+v+'%'):'—'; }
+  function cl2(v){ return v==null?'':(v>0?'pos':(v<0?'neg':'flat')); }
+  // the LIVE badge is a STATE, not a sticker: it renders only while NSE is open by the same
+  // clock test the shell uses; off-hours the Open Book badges the payload's own date instead.
+  function nseOpen(){
+    var n=new Date(), ist=new Date(n.getTime()+(n.getTimezoneOffset()*60000)+19800000);
+    var m=ist.getHours()*60+ist.getMinutes(), d=ist.getDay();
+    return d>=1&&d<=5&&m>=555&&m<=930;
+  }
+
+  function openTable(rows, dateStr){
+    var live = nseOpen();
     var body=rows.length ? rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
-        +'<td>'+sideBadge(r.side)+'</td>'
-        +'<td class="num">'+n2(r.entry_price)+'</td>'
-        +'<td class="num">'+n2(r.target)+'</td>'
-        +'<td class="num">'+n2(r.sl)+'</td>'
-        +'<td class="num">'+n2(r.cmp)+'</td>'
-        +'<td class="num '+pnlCls(r.pnl_pct)+'">'+(r.pnl_pct!=null?(r.pnl_pct>=0?'+':'')+r.pnl_pct+'%':'—')+'</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="tc13-empty">No open TC13 positions</td></tr>';
-    return '<div class="tc13-block"><div class="sh"><span class="t">Open Positions</span></div>'
-      +stripHtml
-      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Entry</th>'
-      +'<th class="num">Target</th><th class="num">SL</th><th class="num">CMP</th><th class="num">P&amp;L %</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div>';
+        +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
+        +'<td>'+n2(r.entry_price)+'</td>'
+        +'<td>'+n2(r.target)+'</td>'
+        +'<td>'+n2(r.sl)+'</td>'
+        +'<td>'+n2(r.cmp)+'</td>'
+        +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+        +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="8">No open TC13 positions</td></tr>';
+    return '<section><div class="sh"><h2>Open Book</h2>'
+      +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
+            :'<span class="badge b-eng">'+esc(dateStr||'')+'</span>')
+      +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
+      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Date</label>'
+      +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'"></span></div></div>'
+      +'<div class="rcard"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th></tr></thead>'
+      +'<tbody>'+body+'</tbody></table></div></section>';
   }
 
   function closedTable(rows){
     var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
     var stats=closedStats(rows);
-    var stripHtml='<div class="tc13-stats">'
+    var body=closed.length ? closed.map(function(r){
+      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+        +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
+        +'<td>'+n2(r.entry_price)+'</td>'
+        +'<td>'+n2(r.exit_price)+'</td>'
+        +'<td><span class="pill '+(r.exit_reason==='TARGET'?'target':'sl')+'">'+esc(r.exit_reason)+'</span></td>'
+        +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+        +'<td>'+dShort(r.exit_ts)+'</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions for this date</td></tr>';
+    return '<section><div class="sh"><h2>Closed Book</h2>'
+      +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +'<div class="stats">'
       +'<span>Closed <b>'+stats.closed+'</b></span>'
       +'<span>Wins <b>'+stats.wins+'</b></span>'
       +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
-      +'<span>Net <b class="'+pnlCls(stats.net_pts_pct)+'">'
-        +(stats.closed?(stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%':'—')+'</b></span></div>';
-    var body=closed.length ? closed.map(function(r){
-      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
-        +'<td>'+sideBadge(r.side)+'</td>'
-        +'<td class="num">'+n2(r.entry_price)+'</td>'
-        +'<td class="num">'+n2(r.exit_price)+'</td>'
-        +'<td>'+pill(r.exit_reason)+'</td>'
-        +'<td class="num '+pnlCls(r.pnl_pct)+'">'+(r.pnl_pct!=null?(r.pnl_pct>=0?'+':'')+r.pnl_pct+'%':'—')+'</td></tr>';
-    }).join('') : '<tr><td colspan="6" class="tc13-empty">No closed TC13 positions for this date</td></tr>';
-    return '<div class="tc13-block"><div class="sh"><span class="t">Closed Positions</span></div>'
-      +stripHtml
-      +'<table class="tc13-tbl"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Entry</th>'
-      +'<th class="num">Exit</th><th>Result</th><th class="num">P&amp;L %</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div>';
+      +'<span>Net <b class="'+cl2(stats.net_pts_pct)+'">'
+        +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span></div></div>'
+      +'<div class="rcard"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th>Date</th></tr></thead>'
+      +'<tbody>'+body+'</tbody></table></div></section>';
   }
 
   function render(d){
@@ -7689,11 +7738,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var allRows=(d.buy||[]).concat(d.sell||[]);
     var openRows=allRows.filter(function(r){return r.exit_reason==='OPEN';});
     box.innerHTML='<div class="tc13-wrap">'
-      +'<div class="tc13-hd"><span class="t">TC13 &middot; Open &amp; Closed Positions</span>'
-      +'<span class="sub">13-check binary scanner &mdash; a separate engine from the V1.1 gated scanner above</span>'
-      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--mut)">Date</label>'
-      +'<input type="date" id="tc13Date" value="'+esc(d.date)+'"></span></div>'
-      +openTable(openRows)
+      +openTable(openRows, d.date)
       +closedTable(allRows)
       +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
@@ -7709,6 +7754,19 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   }
 
   window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null); };
+
+  // cc#1530 scope 4: the V1.1 screener frame sizes itself from the embedded page's own
+  // postMessage ({type:'tcscan-resize', h}) — sent on load and after every height-changing
+  // repaint (side toggle, Near Miss expand). Source-checked against the frame's contentWindow
+  // so no other frame or origin can drive it; 200px floor so the frame never collapses before
+  // the first message lands.
+  window.addEventListener('message', function(ev){
+    var f=document.getElementById('tcscanFrame');
+    if(!f || !ev.data || ev.data.type!=='tcscan-resize') return;
+    if(ev.source !== f.contentWindow) return;
+    var h=Number(ev.data.h);
+    if(h>0) f.style.height=Math.max(200,Math.ceil(h))+'px';
+  });
 
   // Same self-boot-on-deep-link guard as the BT module above: a direct #tcscan link can show the
   // pane before this script (loaded later in document order) has defined tc13Boot.
