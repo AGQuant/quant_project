@@ -3280,6 +3280,20 @@ def run(auth_code=None):
         finally:
             _closed.set()
 
+    def _record_worker_heartbeat(status, error=None, duration_ms=None):
+        """cc#1511: the watchdog's OWN liveness row in scheduler_master — last_run_at /
+        last_status / last_duration_ms on every health pass, via the app's record_run helper
+        (one update logic app-wide; it opens its own short conn and never raises). Extra
+        try/except here anyway: telemetry must never be able to touch the feed. Lazy import —
+        scheduler_master lives at repo root (already on sys.path for nse_holidays), pulls
+        fastapi at import; if that import ever fails in this container the heartbeat is lost
+        and the feed is not."""
+        try:
+            import scheduler_master
+            scheduler_master.record_run("fyers_feed_watchdog", status, error, duration_ms)
+        except Exception as e:
+            log.warning(f"cc#1511 watchdog heartbeat write failed (telemetry only, feed unaffected): {e}")
+
     def _log_feed_incident(kind, detail):
         """cc_task #112: record each watchdog action to ops_log (category=alert)
         so every recurrence is visible after the fact. cc#156: telemetry categories
@@ -4268,6 +4282,15 @@ def run(auth_code=None):
                 # recovery paths. Suppressed for STARTUP_GRACE_MINS after 09:15 so the
                 # first bar cycle has time to form.
                 #
+                # cc#1511: the watchdog's own liveness heartbeat -> scheduler_master. The row
+                # existed since registration but NO writer ever did (registration without run
+                # data — 13829 in reverse). Uses the app's OWN record_run helper (no second
+                # copy of the update logic); record_run stamps last_run_at=NOW() IN SQL, so the
+                # base is TRUE UTC identical to every app row by construction. Runs in THIS
+                # housekeeping thread only — never the streaming path — and fresh-conn-per-pass
+                # is this loop's own established pattern (cc#497 gave the health read its own
+                # fresh conn deliberately). Wrapped so a failed heartbeat can never touch the
+                # feed: telemetry is worth strictly less than the feed it describes.
                 # cc#497 root_cause_3_HOTFIX_FIRST (verified live 10:27 IST): mins_open is
                 # wall-clock-relative to 09:15, NOT boot-relative — a MID-MARKET boot got ZERO
                 # grace (mins_open was already >> STARTUP_GRACE_MINS the instant it started), so
@@ -4283,10 +4306,15 @@ def run(auth_code=None):
                         and (last_health_log is None or
                              (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60)):
                     last_health_log = now_dt
+                    _hb_t0 = time.time()   # cc#1511: the pass's own duration for the heartbeat
                     src_counts = _recent_symbol_counts_by_source(HEARTBEAT_STALE_MINS)
                     eq, fut = src_counts.get('fyers_eq', -1), src_counts.get('fyers_fut', -1)
                     if eq < 0 or fut < 0:
                         log.warning("Watchdog check skipped — DB read failed (no false action on a bad read)")
+                        # cc#1511: an unreadable health pass is an ERROR on the watchdog's own
+                        # row — this is precisely the state the heartbeat exists to surface.
+                        _record_worker_heartbeat("error", "health DB read failed (no false action taken)",
+                                                 int((time.time() - _hb_t0) * 1000))
                     else:
                         ext = src_counts.get(EXT_SOURCE, -1)   # cc#1017: extended leg now part of health
                         uni_ext = len(ext_fyers_syms)          # cc#1017: registry-derived expected count
@@ -4305,6 +4333,11 @@ def run(auth_code=None):
                                  f"fut={fut}/{len(futures_fyers_syms)} ext={ext}/{uni_ext} "
                                  f"(core_floor={WATCHDOG_MIN_SYMBOLS}, ext_frac>={EXT_MIN_TICK_FRACTION}, "
                                  f"core_ok={core_ok} ext_ok={ext_ok})")
+                        # cc#1511: heartbeat BEFORE the action ladder — rung 2 os._exit(1)s, and
+                        # a pass that dies acting must still have proven it ran. 'ok' means THE
+                        # WATCHDOG ran and measured; what it found lives in the log line above
+                        # and in _log_feed_incident, not in this row's status.
+                        _record_worker_heartbeat("ok", None, int((time.time() - _hb_t0) * 1000))
                         if not core_ok:
                             # CORE (eq/fut) failure keeps its proven ladder: reconnect, then os._exit(1).
                             if watchdog_rung == 0:
