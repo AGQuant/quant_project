@@ -25,6 +25,9 @@
   text-overflow:ellipsis;white-space:nowrap}
 .tw-when{margin-left:auto;flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:10.5px;color:var(--dim);text-align:right}
+/* cc#1532: QB Basket only — the batch-write clock time, honestly labelled "computed" so it is
+   never mistaken for a market entry time. Sits under the existing date, smaller/dimmer. */
+.tw-computed{display:block;font-size:9px;opacity:.75}
 .tw-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
 .tw-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
   letter-spacing:.07em;padding:2px 6px;border-radius:5px;border:1px solid var(--line2);
@@ -202,7 +205,11 @@ function card(e){
       + '<span class="tw-ev ' + evClass(e) + '">' + esc(e.status.toUpperCase()) + '</span>'
       + '<span class="tw-sym">' + esc(e.symbol) + '</span>'
       /* day-precision (quant baskets, investment scanner) prints a date only, no invented clock time */
-      + '<span class="tw-when">' + esc(isClosed ? (e.exit.when_full || '--') : (e.entry.when_full || '--')) + '</span>'
+      + '<span class="tw-when">' + esc(isClosed ? (e.exit.when_full || '--') : (e.entry.when_full || '--'))
+        /* cc#1532: entry.computed only exists on the entry side (a QB Basket batch-inception
+           timestamp) — shown only when this line is actually displaying the entry date. */
+        + (!isClosed && e.entry.computed ? '<span class="tw-computed">computed ' + esc(e.entry.computed.when) + '</span>' : '')
+        + '</span>'
     + '</div>'
     + '<div class="tw-meta">'
       + '<span class="tw-chip ' + sideCls + '">' + esc(e.side || '--') + '</span>'
