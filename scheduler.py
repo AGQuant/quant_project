@@ -1024,6 +1024,30 @@ def _bg_v10_tick():
     except Exception as e: log.error(f"v10_tick: {e}")
     finally: _v10_running = False
 
+def _bg_trade_alerts_check():
+    """cc#1504 — manual trade-alert price triggers (MANUAL_TRADE_ALERTS_V1, session_log 34521).
+
+    Every 5 minutes during market hours: scan trade_alerts pending rows, resolve live prices
+    through the SHARED cmp_resolver batch path, and flip pending -> triggered where the
+    condition is met (ABOVE: live >= trigger; BELOW: live <= trigger). The logic lives in
+    trade_alerts_endpoints.check_triggers — one file owns trade_alerts, this stays a
+    dispatcher (the v10_st_ema.tick pattern). FLIPS STATUS ONLY: approval is a human click
+    (cc#1505), nothing is auto-placed. Registry-gated so an UPDATE, not a deploy, silences it.
+    """
+    if _job_active("bg_trade_alerts_check") is not True:
+        return _Skip.disabled()
+    import trade_alerts_endpoints
+    with _conn() as conn:
+        res = trade_alerts_endpoints.check_triggers(conn)
+    if not res.get("pending"):
+        return _SKIPPED                     # no pending alerts — a no-op tick, not a healthy "ok"
+    if res.get("triggered"):
+        log.info("trade_alerts_check: %d triggered (%s)", len(res["triggered"]),
+                 ", ".join("#%s %s@%s" % (f["id"], f["symbol"], f["cmp"]) for f in res["triggered"]))
+    return {"pending": res["pending"], "triggered": len(res["triggered"]),
+            "skipped_not_live": res.get("skipped_not_live", 0)}
+
+
 def _bg_pcr_intraday():
     """cc#1194 scope 4. On 21-Aug this job recorded last_status='ok' on every tick of a trading
     day that produced ZERO pcr_intraday rows, because it returned None whatever happened and
@@ -4642,6 +4666,7 @@ async def _scheduler_loop():
             _spawn(_bg_pcr_intraday)
             _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
             _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
+            _spawn(_bg_trade_alerts_check)    # cc#1504: manual trade_alerts pending->triggered price sweep
             _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:

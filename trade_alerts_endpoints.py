@@ -54,6 +54,51 @@ def _row(r):
     }
 
 
+def check_triggers(conn):
+    """cc#1504 — the scheduled price-trigger pass. Called by scheduler.py's
+    _bg_trade_alerts_check every 5 minutes during market hours; kept here so ONE file owns
+    trade_alerts logic (the v10_st_ema.tick pattern — scheduler stays a dispatcher).
+
+    Prices come from cmp_resolver.resolve_cmp_many — the SAME batch path every list surface
+    uses, deliberately: it omits the one-at-a-time Yahoo network tier, which has no place in a
+    scheduled sweep. LIVE-ONLY FIRING: an alert fires only on a price marked live (a tick from
+    the current session, or a fresh cache entry). A symbol sitting on a stale EOD close is
+    SKIPPED and counted, never fired — triggering an intraday price alert off yesterday's close
+    would be a false trigger, the badge running ahead of the data.
+
+    Condition semantics (spec): ABOVE fires when live price >= trigger_price; BELOW fires when
+    live price <= trigger_price. Independent of direction. This pass ONLY flips
+    pending -> triggered (+ triggered_at); approval is a human-clicked action (cc#1505),
+    nothing is auto-placed."""
+    import cmp_resolver
+    with conn.cursor() as cur:
+        cur.execute("""SELECT id, symbol, trigger_price, trigger_condition
+                       FROM trade_alerts WHERE status = 'pending' ORDER BY id""")
+        rows = cur.fetchall()
+        if not rows:
+            return {"pending": 0, "triggered": [], "skipped_not_live": 0}
+        live = cmp_resolver.resolve_cmp_many(cur, sorted({r[1] for r in rows}))
+        fired, not_live = [], 0
+        for aid, sym, tp, cond in rows:
+            lv = live.get(sym) or {}
+            cmp_v = lv.get("cmp")
+            if cmp_v is None or not lv.get("live"):
+                not_live += 1
+                continue
+            tp_f = float(tp)
+            hit = (cmp_v >= tp_f) if cond == "ABOVE" else (cmp_v <= tp_f) if cond == "BELOW" else False
+            if not hit:
+                continue
+            # status guarded in the WHERE — a dismiss racing this sweep wins, the flip loses.
+            cur.execute("""UPDATE trade_alerts SET status = 'triggered', triggered_at = NOW()
+                           WHERE id = %s AND status = 'pending' RETURNING id""", (aid,))
+            if cur.fetchone():
+                fired.append({"id": aid, "symbol": sym, "cmp": cmp_v,
+                              "trigger_price": tp_f, "condition": cond})
+    conn.commit()
+    return {"pending": len(rows), "triggered": fired, "skipped_not_live": not_live}
+
+
 @router.post("/api/alerts/create")
 async def create_alert(req: Request):
     body = await req.json()
