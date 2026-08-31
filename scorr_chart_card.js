@@ -975,6 +975,30 @@ var _full = false;                // cc#779: fullscreen state
       .catch(function () { _futCache[sym] = false; return false; });
   }
 
+  // cc#1500: futures-tradability for the ^ marker — futures_universe(is_active) via the SAME
+  // endpoint the card strip's D-button reads, cached once per page load. This is a DIFFERENT
+  // concept from _futCache/_probeFutures above (5m-data availability for the 1D pill) and the
+  // two must never be merged.
+  var _futUni = null, _futUniReq = null;
+  function _futuresUniverse() {
+    if (_futUni) return Promise.resolve(_futUni);
+    if (_futUniReq) return _futUniReq;
+    _futUniReq = _getJSON("/api/v8/futures/list?active_only=true")
+      .then(function (d) {
+        var set = {};
+        ((d && d.stocks) || []).forEach(function (r) {
+          if (r && r.symbol) set[String(r.symbol).toUpperCase()] = true;
+        });
+        _futUni = set;
+        return set;
+      })
+      .catch(function () { _futUniReq = null; return {}; });   // not cached — a later open may retry
+    return _futUniReq;
+  }
+  function _futCaret(p) {
+    return '<span style="color:' + p.btnOn + ';font-weight:800">^</span>';
+  }
+
   function _load(tf) {
     _tf = tf;
     _bfDays = TF[tf] || 0;   // cc#1492: the freshly-loaded window; backfill escalates from here
@@ -1256,7 +1280,8 @@ var _full = false;                // cc#779: fullscreen state
       var symBg = r.is_self ? stickSelfBg : ('background-color:' + p.panel);
       return '<tr data-sym="' + r.symbol + '" style="' + selfBg + '">' +
         '<td style="' + td + ';text-align:left;' + stick + symBg + '">' +
-          '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + p.txt + '">' + r.symbol +
+          '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + p.txt + '">' +
+            (r.is_futures ? _futCaret(p) : '') + r.symbol +
             (r.is_self ? ' <span style="font-size:9px;opacity:.7">THIS</span>' : '') + '</div>' +
           '<div style="font-size:10px;color:' + p.sub + ';max-width:' + (nar ? "76px" : "200px") +
             ';overflow:hidden;text-overflow:ellipsis">' + (r.company_name || "") + '</div>' +
@@ -1375,8 +1400,17 @@ var _full = false;                // cc#779: fullscreen state
       'style="color:var(--pulse, #4d7cfe);font-weight:700;text-decoration:none">Open full Trade Check →</a>';
   }
 
+  // cc#1500: drawer ^ looked up from the ALREADY-FETCHED peers payload — one data source per
+  // card, never a second fetch to answer a question the table has already answered.
+  function _peerIsFut(sym) {
+    var ps = (_peers && _peers.peers) || [];
+    for (var i = 0; i < ps.length; i++) if (ps[i].symbol === sym) return !!ps[i].is_futures;
+    return false;
+  }
+
   function _drawerHtml(sym, t) {
     var p = _pal();
+    var symHtml = (_peerIsFut(sym) ? _futCaret(p) : '') + sym;   // cc#1500
     t = t || {};
     // Every value is server-derived (/api/chart/tradecard) so the arithmetic lives in ONE place.
     // A cash peer legitimately has no lot size, so LOT/REWARD/RISK render as em dashes rather than
@@ -1391,14 +1425,14 @@ var _full = false;                // cc#779: fullscreen state
     if (t.reason || (t.error && t.entry == null)) {
       return '<div style="margin:2px 8px 10px;padding:10px 12px;border:1px solid ' + p.line +
         ';border-radius:10px;background:' + p.btn + ';font-size:11.5px;color:' + p.mut + '">' +
-        '<b style="color:' + p.txt + '">' + sym + '</b> — ' + (t.reason || t.error) +
+        '<b style="color:' + p.txt + '">' + symHtml + '</b> — ' + (t.reason || t.error) +
         '<div style="margin-top:8px;font-size:10px">' + _fullLink(sym) + '</div></div>';
     }
     var vch = t.verdict ? '<span style="margin-left:8px;font-size:9.5px;font-weight:800;padding:2px 6px;' +
       'border-radius:6px;border:1px solid ' + p.line + ';color:' + p.mut + '">' + t.verdict + '</span>' : '';
     return '<div style="margin:2px 8px 10px;padding:10px 12px;border:1px solid ' + p.line +
       ';border-radius:10px;background:' + p.btn + '">' +
-      '<div style="font-weight:800;color:' + p.txt + ';margin-bottom:6px;font-size:12px">' + sym +
+      '<div style="font-weight:800;color:' + p.txt + ';margin-bottom:6px;font-size:12px">' + symHtml +
         ' · Trade card' + vch + '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;font-size:11.5px">' +
         pair("entry", "ENTRY") + pair("lot_size", "LOT SIZE") +
@@ -1424,6 +1458,20 @@ var _full = false;                // cc#779: fullscreen state
     ov.style.display = "flex";
     document.getElementById("scorrChartTitle").textContent =
       (opts.label || _sym) + " · Price";
+    // cc#1500 item 5: raw-symbol fallback title gets the ^ marker from the SAME
+    // futures_universe-backed source as the Peers table — never _futCache (that is 5m-data
+    // availability, a different question). A caller-supplied label is left alone. The set
+    // resolves async, so the prefix lands on a stale-guarded second write; textContent keeps
+    // the title plain text (no accent span here — flagged for founder on-glass judgment).
+    if (!opts.label) {
+      var wantTitle = _sym;
+      _futuresUniverse().then(function (u) {
+        if (_sym !== wantTitle || !u[wantTitle]) return;
+        var tEl = document.getElementById("scorrChartTitle");
+        var ovEl = document.getElementById("scorrChartOv");
+        if (tEl && ovEl && ovEl.style.display !== "none") tEl.textContent = "^" + wantTitle + " · Price";
+      });
+    }
     document.getElementById("scorrChartHL").textContent = "";
     document.addEventListener("keydown", _esc);
     _tf = "3M";

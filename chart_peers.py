@@ -95,6 +95,12 @@ def build_peers(cur, symbol: str) -> Dict[str, Any]:
 
     syms = [x[0] for x in rows]
 
+    # cc#1500: futures-tradability marker. futures_universe.is_active is the ONE source — the same
+    # table the trade card's lot_size and the strip's D-button already read. NOT inferred from
+    # v8_metrics presence (a lagging metrics run would strip the markers).
+    cur.execute("SELECT symbol FROM futures_universe WHERE is_active AND symbol = ANY(%s)", (syms,))
+    fut_set = {x[0] for x in cur.fetchall()}
+
     # ── raw_prices fallback, computed per symbol over ITS OWN bars ────────────────────────────
     cur.execute("""
         WITH ranked AS (
@@ -144,6 +150,7 @@ def build_peers(cur, symbol: str) -> Dict[str, Any]:
             "market_cap": _f(mcap),
             "day_pct": day, "week_pct": week, "month_pct": month,
             "ret_src": src,
+            "is_futures": s_ in fut_set,   # cc#1500
             "cmp": lv.get("cmp"), "cmp_live": bool(lv.get("live")),
             "as_of": str(f.get("as_of")) if f.get("as_of") else None,
             "is_self": s_ == sym,
