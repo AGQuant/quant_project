@@ -57,31 +57,10 @@ h1 span{color:var(--cy)}
    dim fill) — one live-status meaning, one look. */
 .mkt.open{border-color:rgba(52,211,153,.45);color:var(--gr);background:var(--grDim)}
 
-/* SESSION RAIL — signature element */
-.rail{position:relative;margin:22px 0 0;padding:0 0 16px}
-.railline{position:relative;height:3px;background:var(--line);border-radius:2px}
-.railfill{position:absolute;inset:0 auto 0 0;width:14.2%;
-  background:linear-gradient(90deg,rgba(34,211,238,.25),var(--cy));border-radius:2px}
-.railnow{position:absolute;top:50%;left:14.2%;transform:translate(-50%,-50%);
-  width:11px;height:11px;border-radius:50%;background:var(--cy);
-  box-shadow:0 0 0 4px rgba(34,211,238,.18),0 0 16px rgba(34,211,238,.55)}
-.tick{position:absolute;top:-6px;width:1px;height:15px;background:var(--line2)}
-.tlab{position:absolute;top:20px;transform:translateX(-50%);text-align:center;white-space:nowrap}
-/* cc#1276 scope 1: CAS (15:15) and CLOSE (15:30) sit 2.3% of the rail apart — centred labels
-   collide at every real width ("15:1515:30", founder screenshot 24-Aug). Anchoring CAS to grow
-   LEFT of its tick and CLOSE to grow RIGHT separates them at ANY width, instead of a margin
-   tuned to one viewport. The other three labels stay centred. */
-.tlab.te{transform:translateX(calc(-100% + 6px));text-align:right}
-.tlab.ts{transform:translateX(-6px);text-align:left}
-.tlab .t{font-family:var(--f-m);font-size:10.5px;color:var(--tx2);font-weight:500;display:block}
-.tlab .l{font-size:9px;letter-spacing:.12em;color:var(--tx3);text-transform:uppercase}
-.tlab.hot .t{color:var(--am)} .tlab.hot .l{color:var(--am);opacity:.75}
-.tlab.now .t{color:var(--cy)} .tlab.now .l{color:var(--cy)}
-.railpins{display:flex;gap:8px;margin-top:44px;flex-wrap:wrap}
-.pin{font-family:var(--f-m);font-size:10.5px;padding:4px 9px;border-radius:3px;
-  border:1px solid var(--line2);color:var(--tx2);background:var(--panel)}
-.pin b{color:var(--tx);font-weight:600}
-.pin.warn{border-color:rgba(251,191,36,.4);color:var(--am);background:var(--amDim)}
+/* cc#1521 (R4): the SESSION RAIL is GONE — founder brief 31-Aug, "drop the session rail and
+   redundant text". The head keeps brand + h1 + clock/pill + dateline; the bias headline in the
+   hero below is now the page's opening statement. */
+.head{padding-bottom:16px}
 
 /* ── SECTION SHELL ─────────────────────────────── */
 section{margin-top:26px}
@@ -89,8 +68,8 @@ section{margin-top:26px}
 .snum{font-family:var(--f-m);font-size:10px;color:var(--tx3);border:1px solid var(--line2);
   width:22px;height:22px;display:grid;place-items:center;border-radius:3px;flex:none}
 .st{font-size:15px;font-weight:700;letter-spacing:-.01em}
-.badge{font-family:var(--f-m);font-size:9.5px;letter-spacing:.13em;padding:3px 8px;border-radius:3px;
-  border:1px solid;font-weight:600}
+.badge{font-family:var(--f-m);font-size:9.5px;letter-spacing:.13em;padding:3px 8px;border-radius:4px;
+  border:1px solid;font-weight:600;display:inline-flex;align-items:center;gap:6px}
 .b-live{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
 .b-eod{color:var(--cy);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.09)}
 .b-static{color:var(--tx3);border-color:var(--line2)}
@@ -99,129 +78,110 @@ section{margin-top:26px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .asof{margin-left:auto;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)}
 .asof b{color:var(--tx2);font-weight:500}
-.card{background:var(--well);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.card{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .read{font-size:12.5px;color:var(--tx2);padding:10px 14px;border-top:1px solid var(--line);
   background:var(--panel);line-height:1.55}
 .read b{color:var(--tx);font-weight:600}
 .read .tag{font-family:var(--f-m);font-size:9.5px;letter-spacing:.14em;color:var(--cy);
   margin-right:9px;font-weight:600}
 
-/* ── THE READ (hero) ───────────────────────────── */
-.hero{background:linear-gradient(135deg,var(--panel),var(--well));
-  border:1px solid var(--line2);border-radius:7px;padding:20px 22px;margin-top:24px;
-  position:relative;overflow:hidden}
-.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:linear-gradient(180deg,var(--gr),var(--cy))}
-.hlab{font-family:var(--f-m);font-size:10px;letter-spacing:.28em;color:var(--cy);font-weight:600}
-.hbody{font-size:16px;line-height:1.62;margin-top:9px;max-width:78ch;color:var(--chalk, #DCE6F5);font-weight:300}
-.hbody b{font-weight:600;color:#fff}
-.hstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
-  margin-top:18px;background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden}
-.hs{background:var(--well);padding:11px 14px}
-.hs .k{font-size:9.5px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
-.hs .v{font-family:var(--f-m);font-size:19px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
-.hs .n{font-size:10.5px;color:var(--tx3);margin-top:1px}
+/* ── THE READ (hero) — cc#1521 R4: bias is the HEADLINE, stats are glowing segment tiles.
+   Ported from design_refs/scorr_digest_v3_R4.html; tints ride the contract's --*-rgb triplets. */
+.hero{margin-top:24px;position:relative;overflow:hidden;border-radius:14px;
+  border:1px solid var(--line2);padding:26px 28px 24px;
+  background:radial-gradient(900px 340px at 8% -40%,rgba(var(--cy-rgb),.16),transparent 65%),
+             linear-gradient(160deg,var(--panel),var(--well))}
+.hero::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,var(--rd) 0%,var(--am) 55%,var(--cy) 100%)}
+.hkick{display:flex;align-items:center;gap:14px;font-family:var(--f-m);font-size:10.5px;font-weight:600;
+  letter-spacing:.14em;color:var(--tx3);text-transform:uppercase;flex-wrap:wrap}
+.hkick .sep{width:1px;height:12px;background:var(--line2)}
+.hkick .live{color:var(--gr);display:inline-flex;align-items:center;gap:6px}
+.hero h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);line-height:1.06;font-weight:800;
+  letter-spacing:-.025em;max-width:22ch}
+.hsub{margin-top:10px;font-size:15px;line-height:1.55;color:var(--tx2);max-width:70ch}
+.hsub b{color:var(--tx);font-weight:600}
+.segs{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:24px}
+.seg{position:relative;overflow:hidden;background:var(--well);border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px 11px}
+.seg::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tx3)}
+.seg.up::before{background:var(--gr);box-shadow:0 0 12px var(--gr)}
+.seg.dn::before{background:var(--rd);box-shadow:0 0 12px var(--rd)}
+.seg.cy::before{background:var(--cy);box-shadow:0 0 12px var(--cy)}
+.seg .k{font-family:var(--f-m);font-size:9.5px;font-weight:600;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.seg .v{font-family:var(--f-m);font-size:20px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.seg .n{font-size:11px;color:var(--tx3);margin-top:2px}
 
-/* ── HEAT STRIP · compact horizontal colour-box run (R3) ── */
-.striprow{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
-.striprow:last-child{border-bottom:none}
-/* RENAMED FROM .slab BY cc#1090 P8, and it was a live defect, not tidying. Sprint 4 P1 put a
-   .slab CLASS in the shared sheet scorr_theme_r5.css, which main.py injects into /digest as well
-   as the app. This page's own .slab was a 52px DAY/WEEK label in the heat strip and the two names
-   collided. Measured before renaming: the label computed background 23,23,27, radius 13px,
-   padding 13/15 and a 5px gold ledge inside a 52px box — 30px of the 52 eaten by padding. The web
-   digest is explicitly OUT of Sprint 4's scope, so the shell reaching it is the bug. Renaming the
-   local class is the smallest fix that keeps the shell where it belongs; the shared class is not
-   narrowed, because a page could always adopt it deliberately later. */
-.striplab{width:52px;flex:none;display:flex;align-items:center;justify-content:center;
-  font-family:var(--f-m);font-size:9px;letter-spacing:.16em;color:var(--tx3);
-  border-right:1px solid var(--line);background:var(--panel)}
-.tiles{display:flex;flex:1;flex-wrap:wrap}
-.tile{flex:1 1 0;min-width:64px;padding:6px 7px 7px;text-align:center;
-  border-right:1px solid rgba(10,15,30,.55);transition:filter .12s}
-.tile:last-child{border-right:none}
-.tile:hover{filter:brightness(1.4)}
-/* cc#1276 scope 4: names may wrap to TWO lines before clamping ("Natural Gas" was ellipsizing
-   to "Natural…" on every real width — the hover title with the full name was already there and
-   stays). Width-independent: any future long name gets the same treatment, no per-name alias. */
-.tile .n{font-size:9.5px;letter-spacing:.04em;color:var(--tx2);opacity:.72;
-  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.2}
-.tile .c{font-family:var(--f-m);font-size:12px;font-weight:600;margin-top:1px;
-  font-variant-numeric:tabular-nums;line-height:1.2}
-.gap{flex:none;width:1px;background:var(--line2);margin:4px 0}
-.g3{background:rgba(52,211,153,.30)} .g2{background:rgba(52,211,153,.18)} .g1{background:rgba(52,211,153,.08)}
-.r3{background:rgba(248,113,113,.30)} .r2c{background:rgba(248,113,113,.18)} .r1c{background:rgba(248,113,113,.08)}
-.fl{background:rgba(148,163,184,.07)}
+/* ── GLOBAL TAPE · cc#1521 R4: ONE coloured magnitude grid (day big / week small per tile),
+   grouped by category. The R3 two-row heat strip is gone. Magnitude carries in the FILL via the
+   contract's --*-rgb triplets, so the bands are legible in dark AND light; the sign stays on the
+   number. The cc#1294 white-box override is DELETED — founder reversed it 31-Aug with this
+   redesign, which restores the at-a-glance magnitude signal that ruling traded away. */
+.tape{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
+.tgrp{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-family:var(--f-m);
+  font-size:9.5px;font-weight:600;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase;margin-top:6px}
+.tgrp:first-child{margin-top:0}
+.tgrp::after{content:'';flex:1;height:1px;background:var(--line)}
+.tile{border-radius:9px;padding:11px 12px 10px;border:1px solid var(--line);
+  transition:border-color .12s,transform .12s;position:relative}
+.tile:hover{transform:translateY(-1px)}
+.tile .n{font-size:11px;font-weight:600;color:var(--tx2);display:flex;align-items:center;gap:6px;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tile .d{font-family:var(--f-m);font-size:20px;font-weight:700;margin-top:6px;
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1}
+.tile .w{font-family:var(--f-m);font-size:10.5px;font-weight:500;color:var(--tx3);margin-top:6px}
+.tile .w span{font-weight:500}
+.tile .pc{position:absolute;top:8px;right:8px;font-family:var(--f-m);font-size:8px;font-weight:600;
+  letter-spacing:.1em;color:var(--am);border:1px solid rgba(var(--am-rgb),.45);border-radius:3px;padding:1px 4px}
+/* magnitude bands — fill intensity, sign colour on the number */
+.g1{background:rgba(var(--gr-rgb),.09)} .g2{background:rgba(var(--gr-rgb),.18)} .g3{background:rgba(var(--gr-rgb),.30)}
+.r1{background:rgba(var(--rd-rgb),.09)} .r2{background:rgba(var(--rd-rgb),.18)} .r3{background:rgba(var(--rd-rgb),.30)}
+.f0{background:var(--panel)}
+.tnote{padding:8px 16px;font-family:var(--f-m);font-size:10px;font-weight:500;color:var(--tx3);
+  border-top:1px solid var(--line);background:var(--panel)}
+.tnote b{color:var(--am);font-weight:600}
 .pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
-/* cc#1294 (founder 24-Aug): Global Tape tiles get a plain white box regardless of magnitude band.
-   .g1/.g2/.g3/.r1c/.r2c/.r3/.fl are left untouched above — cc#853 already notes they are shared
-   with unrelated markup elsewhere on this page (the hero stat-strip) — so this is scoped to
-   .gtile, the class tapeTiles() puts on every Global Tape tile only, at higher specificity.
-   KNOWN TRADEOFF, flagged for the record: the tile background used to carry a second, at-a-glance
-   magnitude signal independent of the pos/neg text colour; after this it is gone and only the
-   sign (colour on the number) remains. Founder asked for this directly, not an oversight.
-   Text is a fixed dark ink, not a theme token: var(--tx) is near-white "chalk" in this page's
-   default DARK theme (R5/Telemetry Drop) and would be invisible on a permanently-white box.
-   .pos/.neg get the same treatment for the same reason — var(--gr)/var(--rd) resolve to a bright
-   lime/pink-red in dark theme (tuned to pop on a dark tile), too light to read as text on white.
-   The two fixed values below are not invented: they are the exact green/red Fable already tuned
-   for a white surface (the :root[data-theme="light"] pair in mobile.css), applied here
-   unconditionally since this tile is white in both themes now. */
-.gtile.g1,.gtile.g2,.gtile.g3,.gtile.r1c,.gtile.r2c,.gtile.r3,.gtile.fl{background:#fff}
-.gtile .n{color:#0a0f1e;opacity:1}
-.gtile .pos{color:#0FA968} .gtile .neg{color:#E0405A} .gtile .flat{color:#5B6B94}
 .eodnote{padding:6px 11px;background:rgba(251,191,36,.05);border-top:1px solid var(--line);
   font-family:var(--f-m);font-size:9.5px;color:var(--am);letter-spacing:.02em}
 
 /* ── PIVOT LADDER ──────────────────────────────── */
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.idx{padding:16px 18px}
-.idxhead{display:flex;align-items:baseline;gap:10px}
+.idx{padding:18px 20px 22px}
+.idxhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .idxname{font-size:13px;font-weight:700;letter-spacing:.06em}
-.idxpx{font-family:var(--f-m);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;
-  letter-spacing:-.01em}
+.idxpx{font-family:var(--f-m);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em}
 .idxchg{font-family:var(--f-m);font-size:12.5px;font-weight:600}
 .idxsub{font-family:var(--f-m);font-size:10.5px;color:var(--tx3);margin-top:2px}
-.ladder{margin-top:15px;position:relative}
-/* cc#1227: the dashed row separators are gone (founder choice 23-Aug). The gray track bars,
-   the coloured fills, the labels, the values, the pct column and the CMP highlight band all stay
-   exactly as they were. Padding goes 5px to 6px in the same change: dropping the 1px rule made
-   every rung a pixel SHORTER, and 6px both restores the rhythm and lines the normal rungs up with
-   the CMP band, which already sat at 6px.
-   The old `.rung:last-child{border-bottom:none}` companion is removed rather than left behind.
-   It is not just redundant now — it was quietly stripping the CMP band's own bottom border on the
-   layouts where CMP renders last (cmp_slot === rungs.length), because .rung.cmp's `border:1px
-   solid` is a four-side border and that rule cancelled one side of it. */
-.rung{display:grid;grid-template-columns:34px 1fr 74px 56px;align-items:center;gap:9px;
-  padding:6px 0;font-family:var(--f-m);font-size:11px}
-.rung .k{font-size:9.5px;letter-spacing:.1em;color:var(--tx3);font-weight:600}
-.rung .bar{height:4px;border-radius:2px;background:var(--line);position:relative}
-.rung .bar i{position:absolute;inset:0 auto 0 0;border-radius:2px;display:block}
-.rung .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx)}
-.rung .d{text-align:right;font-size:10px;color:var(--tx3)}
-.rung.res .k{color:var(--rd)} .rung.res .bar i{background:rgba(248,113,113,.55)}
-.rung.sup .k{color:var(--gr)} .rung.sup .bar i{background:rgba(52,211,153,.55)}
-.rung.pp .k{color:var(--cy)} .rung.pp .bar i{background:rgba(34,211,238,.6)}
-.rung.cmp{background:rgba(34,211,238,.07);margin:2px -8px;padding:6px 8px;border-radius:4px;
-  border:1px solid rgba(34,211,238,.28)}
-.rung.cmp .k{color:var(--cy)}
-/* cc#1276 scope 2: the CMP value was a hardcoded #fff — fine on the dark ground it was written
-   against, near-invisible on the light theme's pale cyan band (founder screenshot 24-Aug, both
-   ladders). The token carries the right ink in both themes; weight/size keep the emphasis.
-   Checked against cc#1275's cards first: NOT the same component — the pane badges render off
-   bdg()/.vix-band in v8_dashboard.html and have no colour defect at HEAD; this is this page's
-   own one-line hardcode. */
-.rung.cmp .v{color:var(--tx);font-weight:600;font-size:12px}
+/* cc#1521 R4: the rung LIST becomes a PIVOT RAIL — one horizontal band from the lowest support
+   to the highest resistance, a tick per rung, the live CMP as a pulsing dot on the band. The old
+   .rung grid CSS is deleted with the markup it styled. */
+.rail-wrap{margin-top:34px;padding:0 10px 30px}
+.rail{position:relative;height:6px;border-radius:3px;
+  background:linear-gradient(90deg,rgba(var(--gr-rgb),.55),rgba(var(--gr-rgb),.16) 42%,rgba(var(--rd-rgb),.16) 58%,rgba(var(--rd-rgb),.55))}
+.rail .tick{position:absolute;top:-5px;width:2px;height:16px;background:var(--tx3);border-radius:1px;transform:translateX(-50%)}
+.rail .tick.pp{background:var(--cy);height:20px;top:-7px}
+.rail .tl{position:absolute;top:16px;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.rail .tl .a{font-family:var(--f-m);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--tx3)}
+.rail .tl .b{font-family:var(--f-m);font-size:11px;font-weight:600;color:var(--tx2);margin-top:1px}
+.rail .tl.sup .a{color:var(--gr)} .rail .tl.res .a{color:var(--rd)} .rail .tl.pp .a{color:var(--cy)}
+.cmpdot{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;
+  background:var(--cy);box-shadow:0 0 0 3px rgba(var(--cy-rgb),.25),0 0 16px var(--cy);animation:pulse 1.6s infinite}
+.cmptag{position:absolute;top:-30px;transform:translateX(-50%);font-family:var(--f-m);font-size:10.5px;
+  font-weight:600;color:var(--cy);white-space:nowrap}
+.idxfoot{display:flex;gap:18px;margin-top:8px;font-family:var(--f-m);font-size:11px;font-weight:500;
+  color:var(--tx3);flex-wrap:wrap}
+.idxfoot b{color:var(--tx2);font-weight:500}
 
 /* ── BREADTH / PCR ─────────────────────────────── */
 .three{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
-.mini{padding:14px 16px}
+.mini{padding:16px 18px}
 .mk{font-size:10px;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
-.mv{font-family:var(--f-m);font-size:28px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+.mv{font-family:var(--f-m);font-size:30px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 .mn{font-size:11px;color:var(--tx3);margin-top:2px}
-.adbar{display:flex;height:7px;border-radius:4px;overflow:hidden;margin-top:11px;background:var(--line)}
+.adbar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:14px;background:var(--line)}
 .adbar i{display:block}
-.spark{display:flex;align-items:flex-end;gap:4px;height:44px;margin-top:11px}
+.spark{display:flex;align-items:flex-end;gap:4px;height:46px;margin-top:14px}
 .spark i{flex:1;background:var(--line2);border-radius:2px 2px 0 0}
 .spark i.hi{background:rgba(34,211,238,.55)}
 .spark i.last{background:var(--cy)}
@@ -229,29 +189,29 @@ section{margin-top:26px}
   color:var(--tx3);margin-top:5px}
 
 /* ── RESULTS CHIPS ─────────────────────────────── */
-.chips{display:flex;flex-wrap:wrap;gap:7px;padding:14px 16px}
-.chip{font-family:var(--f-m);font-size:11px;padding:5px 10px;border-radius:3px;
+.chips{display:flex;flex-wrap:wrap;gap:8px;padding:14px 16px}
+.chip{font-family:var(--f-m);font-size:11.5px;padding:6px 11px;border-radius:5px;
   border:1px solid var(--line2);background:var(--panel);color:var(--tx);white-space:nowrap}
 .chip b{color:var(--cy);font-weight:600}
 .chip.more{color:var(--tx3);border-style:dashed}
 
 /* ── NEWS ──────────────────────────────────────── */
-.nrow{display:flex;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+.nrow{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
 .nrow:last-child{border-bottom:none}
 .sdot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
 .s-bull{background:var(--gr)} .s-bear{background:var(--rd)}
 .s-neu{background:var(--tx3)} .s-cau{background:var(--am)}
-.nh{font-size:13px;font-weight:600;line-height:1.4}
-.ns{font-size:11.5px;color:var(--tx3);margin-top:2px}
+.nh{font-size:13.5px;font-weight:600;line-height:1.4}
+.ns{font-size:12px;color:var(--tx3);margin-top:3px}
 .nsent{margin-left:auto;font-family:var(--f-m);font-size:9.5px;letter-spacing:.1em;color:var(--tx3);
   flex:none;padding-top:2px}
 
 /* ── RESULTS TABLE ─────────────────────────────── */
 .rtab{width:100%;border-collapse:collapse}
 .rtab th{font-size:9.5px;letter-spacing:.15em;color:var(--tx3);text-transform:uppercase;
-  text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
+  text-align:left;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
 .rtab th.r{text-align:right} .rtab th.c{text-align:center}
-.rtab td{padding:11px 14px;border-bottom:1px solid rgba(30,42,68,.6);vertical-align:top}
+.rtab td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
 .rtab tr:last-child td{border-bottom:none}
 .rtab tbody tr:hover{background:rgba(34,211,238,.035)}
 .rtab td.r{text-align:right} .rtab td.c{text-align:center;white-space:nowrap}
@@ -261,7 +221,7 @@ section{margin-top:26px}
 .rtab td b{font-size:12.5px;font-weight:600;display:block;line-height:1.35}
 .sub{font-size:11px;color:var(--tx3);display:block;margin-top:3px;line-height:1.45}
 .pend{font-size:11.5px;color:var(--tx3);font-style:italic}
-.pill{font-family:var(--f-m);font-size:9px;letter-spacing:.11em;padding:3px 8px;border-radius:3px;
+.pill{font-family:var(--f-m);font-size:9px;letter-spacing:.11em;padding:3px 8px;border-radius:4px;
   border:1px solid;font-weight:600}
 .p-bull{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
 .p-cau{color:var(--am);border-color:rgba(251,191,36,.4);background:var(--amDim)}
@@ -275,11 +235,14 @@ section{margin-top:26px}
 /* ── FOOT ──────────────────────────────────────── */
 .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);
   font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
+/* cc#1521 R4 breakpoints: the tape grid narrows 8 -> 6 -> 4 -> 3 columns; hero segs 5 -> 2 -> 1. */
+@media(max-width:1000px){.tape{grid-template-columns:repeat(6,1fr)}}
 @media(max-width:860px){
-  .two,.three{grid-template-columns:1fr}
+  .two,.three{grid-template-columns:1fr} .segs{grid-template-columns:repeat(2,1fr)}
+  .tape{grid-template-columns:repeat(4,1fr)}
   h1{font-size:23px} .clockbox{width:100%;justify-content:flex-start;margin:8px 0 0}
-  .striplab{width:42px} .hbody{font-size:14.5px} .tile{min-width:56px}
 }
+@media(max-width:560px){.tape{grid-template-columns:repeat(3,1fr)} .segs{grid-template-columns:1fr}}
 
 /* ── cc#849 ADDITIONS (not in the static R3 reference) ──────────────── */
 /* ── cc#849 GLOBAL TILES + CHART DRAWER ────────────── */
@@ -357,15 +320,8 @@ section{margin-top:26px}
     </div>
   </div>
   <div class="dateline" id="dateline">—</div>
-
-  <!-- SESSION RAIL — NOW marker position computed from the live IST clock, not assumed. -->
-  <div class="rail">
-    <div class="railline"><div class="railfill" id="railFill"></div><div class="railnow" id="railNow"></div>
-      <div id="railTicks"></div>
-    </div>
-    <div id="railLabs"></div>
-    <div class="railpins" id="railPins"></div>
-  </div>
+  <!-- cc#1521 R4: the session rail lived here. Removed with its CSS and paint code — the clock
+       and #mktPill above carry the only session state the founder kept. -->
 </div>
 
 <div id="digest"><div class="card" style="margin-top:20px">Loading the ledger…</div></div>
@@ -386,7 +342,6 @@ section{margin-top:26px}
 <div class="foot">
   <span>SCORR DAILY DIGEST V3</span>
   <span id="footStats"></span>
-  <span>SOURCES: global_indices · raw_prices · v8_paper_pivots · adr_daily · pcr_daily · earnings_calendar · polished_news · result_analysis_v2</span>
   <span>ALL TIMES IST</span>
 </div>
 </div>
@@ -417,27 +372,14 @@ function tIST(iso){ if(!iso) return '—';
   if(isNaN(d)) return String(iso).slice(0,16);
   return d.toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
 
-/* ── SESSION RAIL + CLOCK (must TICK, not be static text) ───────────────────────── */
-/* cc#1276 scope 1: a=anchor — 'e' grows left of the tick, 's' grows right (see .tlab.te/.ts). */
-var RAIL=[{m:360,t:'06:00',l:'FEEDS UP'},{m:555,t:'09:15',l:'OPEN'},{m:750,t:'12:30',l:'MID'},
-          {m:915,t:'15:15',l:'CAS',a:'e'},{m:930,t:'15:30',l:'CLOSE',a:'s'}];
-var R0=330, R1=990;   /* 05:30 → 16:30 window */
-function railPct(m){ return Math.max(0,Math.min(100,(m-R0)/(R1-R0)*100)); }
+/* ── CLOCK (must TICK, not be static text) ──────────────────────────────────────
+   cc#1521 R4: the session rail is gone; this is the clock alone. The #mktPill state comes from
+   the payload in render(), untouched. */
 function paintRail(){
   var now=new Date();
   var ist=new Date(now.getTime()+(now.getTimezoneOffset()*60000)+(5.5*3600000));
-  var mins=ist.getHours()*60+ist.getMinutes();
   document.getElementById('clk').textContent=
     String(ist.getHours()).padStart(2,'0')+':'+String(ist.getMinutes()).padStart(2,'0')+':'+String(ist.getSeconds()).padStart(2,'0');
-  var p=railPct(mins);
-  document.getElementById('railFill').style.width=p+'%';
-  document.getElementById('railNow').style.left=p+'%';
-  if(!document.getElementById('railTicks').innerHTML){
-    document.getElementById('railTicks').innerHTML=RAIL.map(function(r){
-      return '<div class="tick" style="left:'+railPct(r.m)+'%"></div>'; }).join('');
-    document.getElementById('railLabs').innerHTML=RAIL.map(function(r){
-      return '<div class="tlab'+(r.a==='e'?' te':r.a==='s'?' ts':'')+'" style="left:'+railPct(r.m)+'%"><span class="t">'+r.t+'</span><span class="l">'+r.l+'</span></div>'; }).join('');
-  }
 }
 setInterval(paintRail,1000); paintRail();
 
@@ -476,12 +418,11 @@ function ageWords(m){
 }
 var LIVE_DOT_MAX_MIN = 15;   /* the tab's own threshold for the live dot */
 
-/* ── cc#853 HEAT STRIP · R3 COMPACT HORIZONTAL COLOUR-BOX RUN ─────────────────────
-   Ported from design_refs/scorr_digest_v3_R3.html. The R2-era wrapped pill groups are gone:
-   one continuous horizontal run per LEVEL (a DAY row and a WEEK row), each prefixed by a .striplab
-   label, tiles flush against each other with no pill chrome, and a thin .gap divider between
-   category groups instead of separate stacked blocks. Colour intensity carries magnitude via
-   R3's band classes; the sign colour on the number is separate from the box tint.
+/* ── cc#1521 GLOBAL TAPE · R4 COLOURED MAGNITUDE GRID ─────────────────────────────
+   Ported from design_refs/scorr_digest_v3_R4.html. R3's DAY row / WEEK row strips are gone: ONE
+   grid, one tile per market, day large and week small inside the same tile, grouped by category
+   with a .tgrp rule between groups. Colour intensity carries magnitude via the band classes
+   (fills off the contract's --*-rgb triplets); the sign colour on the number is separate.
 
    TIMESTAMP HONESTY IS NOT TRADED FOR SPACE (founder-locked). The per-tile as-of no longer has
    room to print inline, so it moves to the tile's title= — visible on hover and on tap — and the
@@ -491,25 +432,29 @@ var LIVE_DOT_MAX_MIN = 15;   /* the tab's own threshold for the live dot */
    cc#849 survives: every tile keeps .gtile + data-sym, so the click/Enter handlers and the
    Lightweight Charts drawer are untouched. */
 
-/* R3 band classes. Inversion flips the SIGN before banding, so a +2% VIX box is as red as a
-   -2% equity box — the same rule pcInv() applies to the number. */
+/* R4 band classes (cc#1521: r1c/r2c renamed r1/r2, fl renamed f0 — CSS renamed with them).
+   Inversion flips the SIGN before banding, so a +2% VIX box is as red as a -2% equity box — the
+   same rule pcInv() applies to the number. */
 function bandCls(v,inv){
-  if(v==null) return 'fl';
+  if(v==null) return 'f0';
   var e = inv ? -v : v;
   if(e>=1.5) return 'g3';
   if(e>=0.5) return 'g2';
   if(e>0)    return 'g1';
-  if(e===0)  return 'fl';
+  if(e===0)  return 'f0';
   if(e<=-1.5) return 'r3';
-  if(e<=-0.5) return 'r2c';
-  return 'r1c';
+  if(e<=-0.5) return 'r2';
+  return 'r1';
 }
-/* R3 prints a true minus (U+2212) and no % inside the box — the row label carries the unit. */
-function tileNum(v,inv){
-  if(v==null) return '<span class="c flat">—</span>';
-  var e = inv ? -v : v, c = e>0?'pos':(e<0?'neg':'flat');
-  var t = (v>0?'+':(v<0?'−':'')) + Math.abs(Number(v)).toFixed(2);
-  return '<span class="c '+c+'">'+t+'</span>';
+/* R4 keeps the true minus (U+2212); the DAY number carries no % (the tile is the unit), the
+   small week line prints its own %. */
+function signCls(v,inv){
+  if(v==null) return 'flat';
+  var e = inv ? -v : v; return e>0?'pos':(e<0?'neg':'flat');
+}
+function signNum(v){
+  if(v==null) return '—';
+  return (v>0?'+':(v<0?'−':'')) + Math.abs(Number(v)).toFixed(2);
 }
 
 function tileTitle(t,level){
@@ -522,51 +467,58 @@ function tileTitle(t,level){
   return nm+' · PREV CLOSE '+tIST(t.as_of)+' — no intraday feed for this market';
 }
 
-function tapeTiles(tiles,level){
+/* cc#1521 R4: ONE tile carries the market — day_chg_pct large, week_chg_pct small — instead of
+   the R3 day-row/week-row pair. Every tile KEEPS gtile + data-sym + tabindex + title, so the
+   cc#849 drawer click/Enter handlers and refreshAges() work byte-unchanged. data-level stays
+   'day' (the week reading now lives inside the same tile). */
+function tapeTiles(tiles){
   return tiles.map(function(t){
-    var v = level==='week'? t.week_chg_pct : t.day_chg_pct;
     var am = t.as_of_is_live ? ageMin(t.tick_ts) : null;
     var fresh = (am!=null && am<=LIVE_DOT_MAX_MIN);
-    return '<div class="tile gtile '+bandCls(v,t.inverted)+(fresh?' fresh':'')+'" '+
-      'data-sym="'+esc(t.symbol)+'" data-level="'+level+'" tabindex="0" role="button" '+
-      'title="'+esc(tileTitle(t,level))+'">'+
+    return '<div class="tile gtile '+bandCls(t.day_chg_pct,t.inverted)+(fresh?' fresh':'')+'" '+
+      'data-sym="'+esc(t.symbol)+'" data-level="day" tabindex="0" role="button" '+
+      'title="'+esc(tileTitle(t,'day'))+'">'+
+      (t.as_of_is_live?'':'<span class="pc">PREV CLOSE</span>')+
       '<div class="n">'+(t.as_of_is_live?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</div>'+
-      tileNum(v,t.inverted)+'</div>';
+      '<div class="d '+signCls(t.day_chg_pct,t.inverted)+'">'+signNum(t.day_chg_pct)+'</div>'+
+      '<div class="w">wk <span class="'+signCls(t.week_chg_pct,t.inverted)+'">'+
+      (t.week_chg_pct==null?'—':signNum(t.week_chg_pct)+'%')+'</span></div></div>';
   }).join('');
 }
 
-/* One continuous run, ordered by category, with a thin divider between groups (R3 .gap). */
-function tapeRun(tiles,order,level){
+/* Grouped grid: an R4 .tgrp rule opens each category, tiles flow in the shared .tape grid. */
+function tapeRun(tiles,order){
   var byCat={}; tiles.forEach(function(t){ (byCat[t.category]=byCat[t.category]||[]).push(t); });
   var cats=(order||[]).filter(function(c){return byCat[c]&&byCat[c].length;});
   Object.keys(byCat).forEach(function(c){ if(cats.indexOf(c)<0) cats.push(c); });
-  return cats.map(function(c){ return tapeTiles(byCat[c],level); }).join('<div class="gap"></div>');
+  return cats.map(function(c){
+    return '<div class="tgrp">'+esc(c)+'</div>'+tapeTiles(byCat[c]);
+  }).join('');
 }
 
 function secTape(s){
   if(!s) return '';
   var live=s.tiles||[], eod=s.eod_tiles||[], all=live.concat(eod);
   var n=all.length;
-  /* R3 header: number chip + title + tier badge + right-aligned as-of. The badge counts how many
-     of the tiles are genuinely live rather than asserting the whole section is. */
+  /* R4 header keeps the honest live count — the badge says how many tiles are genuinely live. */
   var h = '<div class="sh"><span class="snum">01</span><span class="st">Global Tape</span>'+
           '<span class="badge b-live"><span class="dot"></span>LIVE · '+live.length+' OF '+n+'</span>'+
-          '<span class="asof">day / week · as of <b>'+
+          '<span class="asof">as of <b>'+
           esc(s.freshest_tick? tIST(s.freshest_tick)+' IST' : '—')+'</b></span></div>';
   h += '<div class="card">';
   if(s.error||s.live_error){
     h += '<div class="eodnote">Live ticks unavailable ('+esc(s.live_error||s.error)+
          ') — every tile is showing its last stored close.</div>';
   }
-  /* EOD symbols ride the SAME run as the live ones (R3 shows all 17 in one strip); their own
-     as-of and PREV CLOSE state are carried in the tile title and the amber note below. */
-  h += '<div class="striprow"><div class="striplab">DAY</div><div class="tiles">'+
-       tapeRun(all,s.category_order,'day')+'</div></div>';
-  h += '<div class="striprow"><div class="striplab">WEEK</div><div class="tiles">'+
-       tapeRun(all,s.category_order,'week')+'</div></div>';
-  if(s.eod_note) h += '<div class="eodnote">◷ '+esc(s.eod_note)+'</div>';
-  if(s.disclosure) h += '<div class="eodnote">'+esc(s.disclosure)+'</div>';
-  h += read(s.read)+'</div>';
+  h += '<div class="tape" style="padding:14px 16px">'+tapeRun(all,s.category_order)+'</div>';
+  /* cc#1521 scope 6: eod_note + disclosure collapse into ONE .tnote line; the section READ is
+     dropped for the tape only (founder: redundant beside the grid). Both texts still come from
+     the payload — nothing is invented here. */
+  var notes=[];
+  if(s.eod_note) notes.push('<b>PREV CLOSE</b> '+esc(s.eod_note));
+  if(s.disclosure) notes.push(esc(s.disclosure));
+  if(notes.length) h += '<div class="tnote">'+notes.join(' · ')+'</div>';
+  h += '</div>';
   return '<section>'+h+'</section>';
 }
 
@@ -586,16 +538,11 @@ setInterval(refreshAges,30000);
 
 function secLadders(s){
   if(!s) return '';
-  var h = sh('02','Index Ladders',s.tier||'EOD','pivots + live CMP');
-  /* cc#853 — ported to R3 exactly. Three divergences from the shipped version were fixed here:
-       1. the grid: R3 puts .two OUTSIDE and gives each index its OWN .card idx. The old code
-          emitted <div class="card"><div class="g2">, and .g2 is R3's green colour-band class,
-          not a grid — which is why this section rendered as one green-tinted block.
-       2. the rungs: R3 uses .rung with .k/.bar/.v/.d and the res/sup/pp/cmp modifiers that colour
-          the key and the bar fill. The old code emitted .nrow (a NEWS row: flex, 11px padding,
-          bottom border) with .hlab (the hero label class), so the ladder had no grid columns and
-          no support/resistance colouring at all.
-       3. the READ: R3 hangs it in its own .card below the grid, not inside a wrapper card. */
+  var h = sh('02','Index Ladders',s.tier||'EOD','pivots + last CMP');
+  /* cc#1521 R4: the rung LIST becomes a horizontal PIVOT RAIL — the band spans the lowest to the
+     highest rung, a tick per rung (PP in cyan), the CMP as a pulsing dot at its proportional
+     position. Distances in the .idxfoot come from the rungs' OWN dist_pct values, never
+     recomputed. The pend fallback for an empty ladder is unchanged. */
   h += '<div class="two">';
   (s.indexes||[]).forEach(function(ix){
     h += '<div class="card idx"><div class="idxhead">'+
@@ -604,26 +551,33 @@ function secLadders(s){
          (ix.chg_pct!=null?'<span class="idxchg">'+pc(ix.chg_pct)+'</span>':'')+
          '</div>'+
          '<div class="idxsub">'+badge(ix.tier)+' as of '+esc(tIST(ix.as_of))+'</div>';
-    if(!(ix.rungs||[]).length){ h += '<div class="pend">'+esc(ix.reason||'no ladder')+'</div></div>'; return; }
-    h += '<div class="ladder">';
-    function cmpRung(){
-      return '<div class="rung cmp"><span class="k">CMP</span>'+
-             '<span class="bar"><i style="width:0"></i></span>'+
-             '<span class="v">'+num(ix.cmp,2)+'</span><span class="d">—</span></div>';
-    }
-    ix.rungs.forEach(function(r,i){
-      if(i===ix.cmp_slot) h += cmpRung();
-      /* R3 colours the rung by what the level IS: resistance red, support green, pivot cyan. */
+    var rungs=(ix.rungs||[]);
+    if(!rungs.length){ h += '<div class="pend">'+esc(ix.reason||'no ladder')+'</div></div>'; return; }
+    var vals=rungs.map(function(r){return Number(r.value);}).filter(function(v){return !isNaN(v);});
+    var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals);
+    var span=(hi-lo)||1;
+    function pctOf(v){ return Math.max(0,Math.min(100,(v-lo)/span*100)).toFixed(2)+'%'; }
+    var s1=null, r1=null;
+    h += '<div class="rail-wrap"><div class="rail">';
+    rungs.forEach(function(r){
       var lab=String(r.label||'').toUpperCase();
       var mod = lab.charAt(0)==='R' ? 'res' : (lab.charAt(0)==='S' ? 'sup' : 'pp');
-      var w = Math.min(100, Math.abs(r.dist_pct||0)*22);
-      h += '<div class="rung '+mod+'"><span class="k">'+esc(r.label)+'</span>'+
-           '<span class="bar"><i style="width:'+w+'%"></i></span>'+
-           '<span class="v">'+num(r.value,2)+'</span>'+
-           '<span class="d">'+pc(r.dist_pct)+'</span></div>';
+      if(lab==='S1') s1=r; if(lab==='R1') r1=r;
+      h += '<div class="tick'+(mod==='pp'?' pp':'')+'" style="left:'+pctOf(r.value)+'"></div>'+
+           '<div class="tl '+mod+'" style="left:'+pctOf(r.value)+'"><div class="a">'+esc(r.label)+'</div>'+
+           '<div class="b">'+num(r.value,2)+'</div></div>';
     });
-    if(ix.cmp_slot===(ix.rungs||[]).length) h += cmpRung();
+    if(ix.cmp!=null){
+      h += '<div class="cmptag" style="left:'+pctOf(ix.cmp)+'">CMP '+num(ix.cmp,2)+'</div>'+
+           '<div class="cmpdot" style="left:'+pctOf(ix.cmp)+'"></div>';
+    }
     h += '</div></div>';
+    var foot=[];
+    if(s1&&s1.dist_pct!=null) foot.push('<span>to S1 <b>'+pc(s1.dist_pct)+'</b></span>');
+    if(r1&&r1.dist_pct!=null) foot.push('<span>to R1 <b>'+pc(r1.dist_pct)+'</b></span>');
+    if(s1&&r1) foot.push('<span>S1–R1 band <b>'+num(s1.value,2)+' – '+num(r1.value,2)+'</b></span>');
+    if(foot.length) h += '<div class="idxfoot">'+foot.join('')+'</div>';
+    h += '</div>';
   });
   h += '</div>';
   if(s.read) h += '<div class="card" style="margin-top:12px">'+
@@ -765,20 +719,15 @@ function secResults(s){
   return '<section>'+h+'</section>';
 }
 
-/* cc#853 — THE READ IS THE HERO, AND IT SITS AT THE TOP.
-   R3 opens the page with a standalone .hero (gradient panel, 3px left gradient rule via
-   .hero::before, .hlab kicker, .hbody prose, then a .hstats strip of five figures) BEFORE section
-   01, and has no section 08 at all. The shipped version rendered Market Read LAST, as a numbered
-   section, with .hero nested inside a .card (so the left gradient rule was clipped by the card's
-   overflow:hidden) and the supporting bits pushed through .nsent — the right-aligned sentiment
-   label, which is why that line rendered as a thin grey strip instead of body copy.
-
-   THE FIVE HERO FIGURES ARE NOT NEW DATA. Each is lifted from a section already on the page, so
-   the hero can never disagree with what is below it, and any tile whose source is missing is
-   simply omitted rather than shown as a dash. */
-function heroStat(k,v,n,cls){
-  return '<div class="hs"><div class="k">'+esc(k)+'</div>'+
-         '<div class="v'+(cls?' '+cls:'')+'">'+v+'</div>'+
+/* THE READ IS THE HERO, AND IT SITS AT THE TOP (cc#853 established this; cc#1521 R4 makes the
+   BIAS the page's headline — .hkick kicker, bias as <h1>, support sentences as .hsub prose. */
+/* cc#1521 R4: the five hero figures render as glowing .seg tiles with a direction class on the
+   left rail — pivot=cy, first-resistance=up, breadth up/dn by ADR, VIX=cy, results plain. Still
+   lifted from sections already on the page, so the hero can never disagree with what is below;
+   a missing source omits its tile. The m.note footnote line is GONE (scope 4). */
+function heroSeg(k,v,n,cls){
+  return '<div class="seg'+(cls?' '+cls:'')+'"><div class="k">'+esc(k)+'</div>'+
+         '<div class="v">'+v+'</div>'+
          '<div class="n">'+esc(n||'')+'</div></div>';
 }
 function secHero(d){
@@ -791,31 +740,34 @@ function secHero(d){
       var lab=String(r.label||'').toUpperCase();
       if(lab==='PP') pp=r; if(lab==='R1') r1=r;
     });
-    if(pp) stats+=heroStat(ix.symbol+' pivot',num(pp.value,2),
+    if(pp) stats+=heroSeg(ix.symbol+' pivot',num(pp.value,2),
                   (ix.cmp!=null&&pp.value!=null)?('CMP sits '+num(Math.abs(ix.cmp-pp.value),0)+
-                    (ix.cmp>=pp.value?' above PP':' below PP')):'');
-    if(r1) stats+=heroStat('First resistance',num(r1.value,2),
-                  (r1.dist_pct!=null?Number(r1.dist_pct).toFixed(2)+'% room to R1':''),'pos');
+                    (ix.cmp>=pp.value?' above PP':' below PP')):'','cy');
+    if(r1) stats+=heroSeg('First resistance',num(r1.value,2),
+                  (r1.dist_pct!=null?Number(r1.dist_pct).toFixed(2)+'% room to R1':''),'up');
   }
   var a=(S.internals||{}).adr;
-  if(a&&a.adr!=null) stats+=heroStat('Breadth ADR',num(a.adr,2),
-        num(a.advances)+' adv / '+num(a.declines)+' dec',(a.adr>=1?'pos':'neg'));
+  if(a&&a.adr!=null) stats+=heroSeg('Breadth ADR',
+        '<span class="'+(a.adr>=1?'pos':'neg')+'">'+num(a.adr,2)+'</span>',
+        num(a.advances)+' adv / '+num(a.declines)+' dec',(a.adr>=1?'up':'dn'));
   /* India VIX comes off the SAME tape tile the strip renders, not a second lookup. */
   var tp=(S.global_tape||{});
   var vx=((tp.tiles||[]).concat(tp.eod_tiles||[])).filter(function(t){return t.symbol==='INDIAVIX';})[0];
-  if(vx&&vx.price!=null) stats+=heroStat('India VIX',num(vx.price,2),
-        (vx.day_chg_pct!=null?(vx.day_chg_pct>0?'+':'')+Number(vx.day_chg_pct).toFixed(2)+'% on the day':''));
+  if(vx&&vx.price!=null) stats+=heroSeg('India VIX',num(vx.price,2),
+        (vx.day_chg_pct!=null?(vx.day_chg_pct>0?'+':'')+Number(vx.day_chg_pct).toFixed(2)+'% on the day':''),'cy');
   var rep=(S.reporting_today||{});
-  if(rep.count!=null) stats+=heroStat('Results today',String(rep.count),
+  if(rep.count!=null) stats+=heroSeg('Results today',String(rep.count),
         ((S.yesterday_results||{}).reported_total!=null
           ? (S.yesterday_results.reported_total+' reported yesterday') : ''));
 
   var body = (m.support||[]).length ? (m.support||[]).join(' · ') : (m.note||'');
   return '<div class="hero">'+
-    '<div class="hlab">THE READ · '+esc(String(d.date_ist||'').toUpperCase())+'</div>'+
-    '<div class="hbody"><b>'+esc(m.bias||'—')+'.</b> '+esc(body)+'</div>'+
-    (stats?'<div class="hstats">'+stats+'</div>':'')+
-    (m.note?'<div class="sparklab" style="margin-top:10px"><span>'+esc(m.note)+'</span></div>':'')+
+    '<div class="hkick"><span>Daily Digest</span><span class="sep"></span>'+
+    '<span>'+esc(String(d.date_ist||''))+'</span><span class="sep"></span>'+
+    '<span class="live"><span class="dot"></span>Generated '+esc(tIST(d.generated_at))+' IST</span></div>'+
+    '<h1>'+esc(m.bias||'—')+'</h1>'+
+    (body?'<div class="hsub">'+esc(body)+'</div>':'')+
+    (stats?'<div class="segs">'+stats+'</div>':'')+
     '</div>';
 }
 
