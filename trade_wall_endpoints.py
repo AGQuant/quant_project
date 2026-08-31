@@ -181,7 +181,8 @@ WITH ev AS (
          qty::numeric qty,
          entry_ts::timestamp entry_ts, 'min'::text entry_prec, entry_price::numeric entry_price,
          COALESCE(exit_ts, closed_at)::timestamp exit_ts, 'min'::text exit_prec, exit_price::numeric exit_price,
-         pnl::numeric pnl, NULL::numeric pnl_pct, result, basket::text note
+         pnl::numeric pnl, NULL::numeric pnl_pct, result, basket::text note,
+         NULL::timestamp computed_ts   -- cc#1532: QB Basket only, see the quant branch below
   FROM v8_paper_trades WHERE entry_ts IS NOT NULL
 
   -- V8 · still-open positions live in a SEPARATE table with no exit columns at all.
@@ -191,7 +192,8 @@ WITH ev AS (
          qty::numeric,
          entry_ts::timestamp, 'min', entry_price::numeric,
          NULL::timestamp, NULL::text, NULL::numeric,
-         NULL::numeric, NULL::numeric, NULL::text, basket
+         NULL::numeric, NULL::numeric, NULL::text, basket,
+         NULL::timestamp
   FROM v8_paper_positions WHERE status = 'OPEN' AND entry_ts IS NOT NULL
 
   -- INDEX INTEL (v10_trades, renamed from "Index") · timestamptz -> converted in SQL. Instrument
@@ -207,7 +209,8 @@ WITH ev AS (
          (entry_ts AT TIME ZONE 'Asia/Kolkata')::timestamp, 'min', entry_price::numeric,
          (exit_ts AT TIME ZONE 'Asia/Kolkata')::timestamp, 'min', exit_price::numeric,
          pnl::numeric, NULL::numeric, exit_reason,
-         NULLIF(CONCAT_WS(' ', leg, opt_type, opt_strike::text), '')
+         NULLIF(CONCAT_WS(' ', leg, opt_type, opt_strike::text), ''),
+         NULL::timestamp
   FROM v10_trades WHERE entry_ts IS NOT NULL
 
   -- TC SCANNER (tc_scanner_holds) — NEW, cc#1295. entry_ts/exit_ts NAIVE IST -> read raw, same
@@ -229,7 +232,8 @@ WITH ev AS (
               THEN ROUND(((exit_price - entry_price) / entry_price * 100
                           * CASE WHEN UPPER(side)='BUY' THEN 1 ELSE -1 END)::numeric, 2)
          END,
-         exit_reason, style::text
+         exit_reason, style::text,
+         NULL::timestamp
   FROM tc_scanner_holds WHERE entry_ts IS NOT NULL
 
   -- cc#1000: OPTIONS (options_trades, the stock-options engine) is EXCLUDED from the wall — never
@@ -245,7 +249,12 @@ WITH ev AS (
          qty::numeric,
          entry_date::timestamp, 'day', entry_price::numeric,
          exit_date::timestamp, 'day', exit_price::numeric,
-         pnl::numeric, pnl_pct::numeric, status, basket_name
+         pnl::numeric, pnl_pct::numeric, status, basket_name,
+         -- cc#1532: created_at is naive UTC (a third convention this file's own header does not
+         -- document — confirmed live, not assumed). Double AT TIME ZONE, NOT the single-conversion
+         -- naive-IST-table pattern used elsewhere in this union — a single conversion silently
+         -- misreads this column. Honest batch-write timestamp, never a market entry time.
+         (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::timestamp computed_ts
   FROM quant_paper_positions WHERE entry_date IS NOT NULL
 
   -- INVESTMENT SCANNER (investment_scanner_state) — NEW, cc#1295/1297. No qty (signal-only
@@ -266,7 +275,8 @@ WITH ev AS (
                    AND exit_price IS NOT NULL
               THEN ROUND(((exit_price - entry_price) / entry_price * 100)::numeric, 2)
          END,
-         exit_reason, entry_track
+         exit_reason, entry_track,
+         NULL::timestamp
   FROM investment_scanner_state WHERE entered_at IS NOT NULL
 
   -- MANUAL ALERT (trade_alerts) — NEW bucket, cc#1505 (MANUAL_TRADE_ALERTS_V1, 34521). Only
@@ -291,7 +301,8 @@ WITH ev AS (
          NULL::numeric,
          (approved_at AT TIME ZONE 'Asia/Kolkata')::timestamp, 'min', approved_price::numeric,
          NULL::timestamp, NULL::text, NULL::numeric,
-         NULL::numeric, NULL::numeric, NULL::text, notes
+         NULL::numeric, NULL::numeric, NULL::text, notes,
+         NULL::timestamp
   FROM trade_alerts a WHERE status = 'approved' AND approved_at IS NOT NULL
 
   -- cc#1000: V9 PAIRS (v9_paper_trades) is EXCLUDED — never on the founder's list, would be a
@@ -363,6 +374,14 @@ def _shape(r):
     entry = stamp(r["entry_ts"], r["entry_prec"])
     exitd = stamp(r["exit_ts"], r["exit_prec"])
     ts = r["ts"]
+    # cc#1532: QB Basket only (every other branch emits NULL for computed_ts in the union above).
+    # entry_date/exit_date stay day-precision, untouched — this is a SEPARATE field: the real
+    # batch-write clock time, honestly labelled "computed" so it is never mistaken for a market
+    # entry/execution time. entry.when/when_full/day above are unchanged.
+    computed_raw = r["computed_ts"]
+    entry["computed"] = ({"ts": computed_raw.strftime("%Y-%m-%d %H:%M:%S"),
+                           "when": computed_raw.strftime("%H:%M")}
+                          if computed_raw else None)
     return {
         "id": r["sk"],
         "src": r["src"],

@@ -52,6 +52,9 @@
   .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
   .tw-tag{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut)}
+  /* cc#1532: QB Basket only — the batch-write clock time, honestly labelled "computed" so it is
+     never mistaken for a market entry time. Sits under the existing date, smaller/dimmer. */
+  .tw-computed{display:block;font-family:ui-monospace,monospace;font-size:9px;color:var(--dim)}
   .tw-day{font-family:ui-monospace,monospace;font-size:10px;font-weight:800;letter-spacing:.12em;
           text-transform:uppercase;color:var(--dim);background:var(--card2)}
   .tw-more{padding:16px;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:var(--mut)}
@@ -217,7 +220,9 @@ function rowsHtml(list){
       + '<td class="sym">' + esc(e.symbol) + '</td>'
       + '<td class="' + sideCls(e.side) + '">' + esc(e.side || '') + '</td>'
       + '<td>' + esc(e.engine) + '</td>'
-      + '<td class="tw-tag">' + esc(e.entry.when_full || '--') + '</td>'
+      + '<td class="tw-tag">' + esc(e.entry.when_full || '--')
+        + (e.entry.computed ? '<span class="tw-computed">computed ' + esc(e.entry.computed.when) + '</span>' : '')
+        + '</td>'
       + '<td class="num">' + px(e.entry_price) + '</td>'
       + (STATE.status === 'closed'
           ? '<td class="tw-tag">' + esc(e.exit.when_full || '--') + '</td>'
