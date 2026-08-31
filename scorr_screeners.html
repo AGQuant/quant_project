@@ -65,7 +65,10 @@
     as long as it remains a member.
   </div>
 
+  <!-- cc#1519: two stacked strips — Scorr (algorithmic) first, FINZ (imported baskets) second.
+       Same .tabs CSS, each row scrolls horizontally on its own (MOBILE_UX_STANDARD_V1). -->
   <div class="tabs" id="tabs"></div>
+  <div class="tabs" id="tabs2"></div>
   <div class="card">
     <div class="meta" id="meta"></div>
     <div class="scroll"><table id="tbl">
@@ -107,10 +110,16 @@ function fmtDate(d){
 }
 
 function renderTabs(){
-  document.getElementById('tabs').innerHTML = SCREENS.map(function(s){
+  // cc#1519: row 1 = source 'scorr', row 2 = source 'finz'. The endpoint already serves the
+  // array grouped scorr-then-finz; a screen with no source (old cached payload) lands in row 1.
+  var tab = function(s){
     return '<button class="tab'+(CUR===s.id?' on':'')+'" onclick="pick('+s.id+')">'
       + esc(s.name) + '<span class="n">'+(s.members||0)+'</span></button>';
-  }).join('');
+  };
+  document.getElementById('tabs').innerHTML =
+    SCREENS.filter(function(s){ return s.source!=='finz'; }).map(tab).join('');
+  document.getElementById('tabs2').innerHTML =
+    SCREENS.filter(function(s){ return s.source==='finz'; }).map(tab).join('');
 }
 
 function pick(id){
