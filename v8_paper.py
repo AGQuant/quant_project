@@ -277,18 +277,26 @@ def _passes(metric_row: Dict, bands: Dict) -> bool:
         if mx is not None and v > mx: return False
     return True
 
-def qualified_set(conn) -> Dict[str, Dict]:
+def qualified_set(conn, dropped_sink: Optional[list] = None) -> Dict[str, Dict]:
     """
     Read score-based qualified set from v8_qualified table (15-Jun-2026).
     Replaces strict all-pass recompute — v8_qualified is the single source of truth,
     populated every 5-min by v8_signal_writer with score-based + pivot-room gate.
     Latch semantics: a stock that qualified once today stays in the table all session.
+
+    cc#1513: `dropped_sink`, when given, receives (symbol, basket, side) for every
+    (symbol, basket) row the one-basket-per-symbol pick DISCARDS, so paper_tick can ledger
+    them as claimed_by_other_basket instead of the drop being invisible. THE PICK ITSELF IS
+    UNCHANGED (GATE 2 — founder ruling pending on whether latest-signal_ts-wins is intended):
+    the DISTINCT ON (symbol) ... ORDER BY symbol, signal_ts DESC semantics are reproduced
+    exactly — same query ordering, first row per symbol wins — the only difference is that
+    the discarded rows are now SEEN rather than never fetched.
     """
     from v8_endpoints import BASKET_META
     _SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT DISTINCT ON (symbol) symbol, basket
+            SELECT symbol, basket
             FROM v8_qualified
             WHERE signal_date = CURRENT_DATE
               AND basket != 'sell_overbought'
@@ -303,7 +311,10 @@ def qualified_set(conn) -> Dict[str, Dict]:
     for sym, basket in rows:
         meta_side = BASKET_META.get(basket, {}).get("side", "BUY")
         side = _SIDE_MAP.get(meta_side, "LONG")
-        out[sym] = {"basket": basket, "side": side}
+        if sym not in out:
+            out[sym] = {"basket": basket, "side": side}   # first per symbol = DISTINCT ON pick
+        elif dropped_sink is not None:
+            dropped_sink.append((sym, basket, side))
     return out
 
 
@@ -679,12 +690,32 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     if not piv:
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
-    qual = qualified_set(conn)
+    _basket_drops: list = []   # cc#1513: (symbol, basket, side) rows the one-basket pick discarded
+    qual = qualified_set(conn, dropped_sink=_basket_drops)
     so_sig = _sell_overbought_signals(conn, for_date=d)
 
     _long_syms  = {s for s, q in qual.items() if q["side"] == "LONG"}
     _short_syms = {s for s, q in qual.items() if q["side"] == "SHORT"} | set(so_sig.keys())
     _tick_conflict = _long_syms & _short_syms
+
+    # cc#1513: ledger the dropped baskets as claimed_by_other_basket so "held via sell_reversal"
+    # can be SAID instead of guessed. Logging only — the pick and the entry loop are untouched;
+    # UNIQUE(miss_date,symbol,side) means a symbol's first reason of the day still wins.
+    for _dsym, _dbasket, _dside in _basket_drops:
+        _dpv = piv.get(_dsym)
+        _dtl = _two_latest_closes(conn, _dsym, d) if _dpv else None
+        if not _dpv or not _dtl:
+            continue
+        _, _dcur, _ = _dtl
+        try:
+            if _dside == "LONG":
+                _log_missed(conn, d, _dsym, "LONG", _dbasket, _dcur, _dpv["r1"],
+                            _dcur - (_dpv["r1"] - _dcur), "claimed_by_other_basket")
+            else:
+                _log_missed(conn, d, _dsym, "SHORT", _dbasket, _dcur, _dpv["s1"],
+                            _dcur + (_dcur - _dpv["s1"]), "claimed_by_other_basket")
+        except Exception as _de:
+            log.warning(f"cc#1513 claimed_by_other_basket ledger {_dsym}: {_de}")
 
     exits, entries = [], []
 
@@ -829,6 +860,15 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"slot_full"); continue
                 entries.append(_open_short(conn,sym,basket,entry,_ts(cur_ts),target,stop,pp,d))
                 short_open+=1
+            # cc#1513: the 179 zone/room condition was the IF that OPENED each branch above, so a
+            # room failure fell through with NOTHING logged — the exact gap that made "no room to
+            # target" unanswerable from data (the MUTHOOTFIN case). Ledger it with the levels the
+            # 179 entry would have used: target S1/R1, stop the 1:1 mirror. Logging only — the
+            # condition itself is byte-identical above.
+            elif side=="LONG":
+                _log_missed(conn,d,sym,"LONG",basket,cur_close,r1,cur_close-(r1-cur_close),"no_room")
+            elif side=="SHORT":
+                _log_missed(conn,d,sym,"SHORT",basket,cur_close,s1,cur_close+(cur_close-s1),"no_room")
 
         # ---- 3b) SELL_OVERBOUGHT ENTRIES ----
         for sym, sig in so_sig.items():
