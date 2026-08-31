@@ -54,6 +54,37 @@
   font-size:12px}
 .tw-ov-row:last-child{border-bottom:none}
 .tw-ov-close{margin-top:12px;width:100%}
+
+/* cc#1526 · TRADE_CONTROL_V1 (session_log 35003): Approve/Alert on OPEN engine-signal cards,
+   44px tap floors (MOBILE_UX_STANDARD_V1). The alert form is the app's bottom-sheet shape
+   (alerts.html's al-sheet dialect, tw- prefixed here — this page's own .tw-ov shell is a
+   centered info modal, not a form sheet). */
+.twa-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}
+.twa-btn{min-height:44px;padding:10px 16px;border-radius:10px;border:1px solid var(--line2);
+  background:var(--panel2);color:var(--txt);font:700 11.5px 'IBM Plex Mono',ui-monospace,monospace;
+  letter-spacing:.06em;cursor:pointer}
+.twa-btn.pri{background:var(--txt);color:var(--bg)}
+.twa-btn[disabled]{opacity:.5}
+.twa-ok{font:700 11px 'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
+.twa-chip2{font:600 10px 'IBM Plex Mono',ui-monospace,monospace;color:var(--amber,#F5B94A);
+  border:1px solid var(--amber,#F5B94A);border-radius:6px;padding:3px 7px}
+.twa-err{font:600 10.5px 'IBM Plex Mono',ui-monospace,monospace;color:var(--red);line-height:1.4;width:100%}
+.twa-veil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.twa-sheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;z-index:81;
+  background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0}
+.twa-grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 6px;flex-shrink:0}
+.twa-sb{overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
+.twa-sh{font-size:14px;font-weight:800;letter-spacing:.06em;margin-bottom:4px}
+.twa-lb{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;letter-spacing:.1em;
+  color:var(--dim);text-transform:uppercase;margin:12px 0 6px}
+.twa-tg{display:flex;gap:8px}
+.twa-tg .chip{flex:1;justify-content:center;text-align:center;min-height:44px}
+.twa-in{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line2);background:var(--bg,#0A0F1E);
+  color:var(--txt);font-family:inherit;font-size:13px;padding:10px 12px;box-sizing:border-box}
+.twa-go{width:100%;min-height:48px;margin-top:16px;border-radius:12px;border:1px solid var(--line2);
+  background:var(--txt);color:var(--bg);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer}
+.twa-go[disabled]{opacity:.5}
+.twa-formerr{margin-top:10px;font-size:11.5px;color:var(--red);line-height:1.5}
 </style>
 </head>
 <body>
@@ -183,6 +214,7 @@ function card(e){
       + pnlHtml
     + '</div>';
   if (e.note) h += '<div class="tw-note">' + esc(e.note) + '</div>';
+  h += twRow(e);   /* cc#1526: Approve/Alert cluster — open engine cards only */
   return h + '</div>';
 }
 
@@ -374,6 +406,7 @@ function boot(keepCounts){
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
       render();
+      twLoadApproved();   /* cc#1526: paint APPROVED before the founder touches anything */
     })
     .catch(function(e){
       document.getElementById('body').innerHTML =
@@ -408,8 +441,166 @@ function openOther(){
 }
 function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
 document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape') closeOther();
+  if (e.key === 'Escape'){ closeOther(); if (typeof twSheetClose === 'function') twSheetClose(); }
 });
+
+/* ══ cc#1526 · TRADE_CONTROL_V1 (session_log 35003 locks 3/5/8) — Approve + Alert on every OPEN
+   engine-signal card. The rules, same as the web wall (cc#1525):
+     * open cards only, never on an approval-record card (src === 'alert' — those ARE approvals);
+     * source_ref = symbol + '@' + entry.ts AS SERVED — the ONE key across web and app, so
+       approved_map matches whichever surface the founder clicked on;
+     * direction mapped LONG/SHORT -> BUY/SELL (the API vocabulary);
+     * a failure prints the server's own message on the card, never a silent no-op;
+     * EXIT-alert price prefill falls back to the entry price — the wall rows serve no
+       target/stop (row columns are do_not_touch); the founder edits the price in the sheet. */
+var TWA = { approved: {}, state: {}, busy: {}, form: null };
+function twFind(id){
+  for (var i = 0; i < STATE.events.length; i++) if (STATE.events[i].id === id) return STATE.events[i];
+  return null;
+}
+function twRef(e){ return e.symbol + '@' + ((e.entry && e.entry.ts) || ''); }
+function twDir(s){ return s === 'SHORT' ? 'SELL' : 'BUY'; }
+function twTime(ts){
+  if (!ts) return '';
+  var d = new Date(String(ts).replace(' ', 'T'));
+  if (isNaN(d)) return String(ts).slice(11, 16);
+  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
+  return ('0' + i.getHours()).slice(-2) + ':' + ('0' + i.getMinutes()).slice(-2);
+}
+function twCluster(e){
+  if (e.status !== 'open' || e.src === 'alert') return '';
+  var st = TWA.state[e.id] || {};
+  var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
+  var ap = st.ok || (mapHit ? { at: mapHit.approved_at, prev: false } : null);
+  var idE = encodeURIComponent(e.id);
+  var h = '';
+  if (ap) h += '<span class="twa-ok">APPROVED · ' + twTime(ap.at) + (ap.prev ? ' · prev close' : '') + '</span>';
+  else h += '<button type="button" class="twa-btn pri" onclick="twApprove(\'' + idE + '\')"'
+    + (TWA.busy[e.id] ? ' disabled' : '') + '>Approve</button>';
+  h += '<button type="button" class="twa-btn" onclick="twSheet(\'' + idE + '\')">Alert</button>';
+  if (st.chip) h += '<span class="twa-chip2">ALERT SET · ' + esc(st.chip) + '</span>';
+  if (st.err) h += '<span class="twa-err">' + esc(st.err) + '</span>';
+  return h;
+}
+function twRow(e){
+  var c = twCluster(e);
+  return c ? '<div class="twa-row" data-twa="' + esc(e.id) + '">' + c + '</div>' : '';
+}
+function twPaint(id){
+  var els = document.querySelectorAll('.twa-row');
+  var e = twFind(id);
+  if (!e) return;
+  for (var i = 0; i < els.length; i++)
+    if (els[i].getAttribute('data-twa') === id) els[i].innerHTML = twCluster(e);
+}
+function twLoadApproved(){
+  if (STATE.status !== 'open') return;
+  (BUCKETS[STATE.instrument] || []).forEach(function(eng){
+    fetchWithTimeout('/api/alerts/approved_map?engine=' + encodeURIComponent(eng))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        TWA.approved[eng] = d.map || {};
+        STATE.events.forEach(function(e){ if (e.engine === eng) twPaint(e.id); });
+      })
+      .catch(function(){ /* the map is a paint optimisation — a miss just means no stamps yet */ });
+  });
+}
+function twPost(u, body){
+  return fetchWithTimeout(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); });
+}
+function twApprove(idEnc){
+  var id = decodeURIComponent(idEnc), e = twFind(id);
+  if (!e || TWA.busy[id]) return;
+  TWA.busy[id] = true;
+  TWA.state[id] = TWA.state[id] || {};
+  delete TWA.state[id].err;
+  twPaint(id);
+  twPost('/api/alerts/approve_signal', { source_engine: e.engine, source_ref: twRef(e),
+      symbol: e.symbol, direction: twDir(e.side), kind: 'entry', approved_via: 'app-wall' })
+    .then(function(res){
+      TWA.busy[id] = false;
+      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'approve failed');
+      var a = res.d.alert || {};
+      TWA.state[id].ok = { at: a.approved_at, prev: res.d.live === false };
+      twPaint(id);
+    })
+    .catch(function(err){
+      TWA.busy[id] = false;
+      TWA.state[id].err = err.message;
+      twPaint(id);
+    });
+}
+function twPrefill(e, kind){
+  var dir = kind === 'exit' ? (twDir(e.side) === 'BUY' ? 'SELL' : 'BUY') : twDir(e.side);
+  return { kind: kind, dir: dir, cond: dir === 'BUY' ? 'ABOVE' : 'BELOW',
+           price: e.entry_price != null ? e.entry_price : '', err: null };
+}
+function twSheet(idEnc){
+  var id = decodeURIComponent(idEnc), e = twFind(id);
+  if (!e) return;
+  TWA.form = twPrefill(e, 'entry');
+  TWA.form.id = id;
+  twSheetPaint();
+}
+function twSheetPaint(){
+  twSheetClose();
+  var id = TWA.form && TWA.form.id, e = id && twFind(id);
+  if (!e) return;
+  var f = TWA.form;
+  var seg = function(host, val, opts){
+    return '<div class="twa-tg">' + opts.map(function(o){
+      return '<button type="button" class="chip' + (val === o[0] ? ' on' : '') + '" '
+        + 'onclick="twSheetSet(\'' + host + '\',\'' + o[0] + '\')">' + o[1] + '</button>';
+    }).join('') + '</div>';
+  };
+  var el = document.createElement('div');
+  el.id = 'twaWrap';
+  el.innerHTML =
+    '<div class="twa-veil" onclick="twSheetClose()"></div>'
+    + '<div class="twa-sheet"><div class="twa-grab"></div><div class="twa-sb">'
+    + '<div class="twa-sh">Price alert · ' + esc(e.symbol) + ' · ' + esc(e.engine) + '</div>'
+    + '<div class="twa-lb">Kind</div>' + seg('kind', f.kind, [['entry','ENTRY'], ['exit','EXIT']])
+    + '<div class="twa-lb">Direction</div>' + seg('dir', f.dir, [['BUY','BUY'], ['SELL','SELL']])
+    + '<div class="twa-lb">Trigger</div>' + seg('cond', f.cond, [['ABOVE','crosses ABOVE'], ['BELOW','crosses BELOW']])
+    + '<div class="twa-lb">Trigger price</div>'
+    + '<input class="twa-in" id="twaPx" type="number" inputmode="decimal" step="0.05" value="' + esc(f.price) + '">'
+    + '<div class="twa-lb">Notes (optional)</div>'
+    + '<input class="twa-in" id="twaNotes" type="text" maxlength="200">'
+    + (f.err ? '<div class="twa-formerr">' + esc(f.err) + '</div>' : '')
+    + '<button type="button" class="twa-go" onclick="twSheetGo()">Set alert</button>'
+    + '</div></div>';
+  document.body.appendChild(el);
+}
+function twSheetClose(){ var w = document.getElementById('twaWrap'); if (w) w.remove(); }
+function twSheetSet(field, v){
+  var f = TWA.form; if (!f) return;
+  if (field === 'kind'){ var e = twFind(f.id); if (!e) return; TWA.form = twPrefill(e, v); TWA.form.id = f.id; }
+  else { f[field] = v; if (field === 'dir') f.cond = v === 'BUY' ? 'ABOVE' : 'BELOW'; }
+  twSheetPaint();
+}
+function twSheetGo(){
+  var f = TWA.form, e = f && twFind(f.id);
+  if (!e) return;
+  var px2 = parseFloat((document.getElementById('twaPx') || {}).value);
+  var notes = ((document.getElementById('twaNotes') || {}).value || '').trim() || null;
+  if (!(px2 > 0)){ f.err = 'Trigger price must be a positive number.'; twSheetPaint(); return; }
+  twPost('/api/alerts/create', { symbol: e.symbol, direction: f.dir, trigger_condition: f.cond,
+      trigger_price: px2, notes: notes, source_engine: e.engine, source_ref: twRef(e),
+      kind: f.kind, approved_via: 'app-wall' })
+    .then(function(res){
+      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'alert not created');
+      TWA.state[f.id] = TWA.state[f.id] || {};
+      TWA.state[f.id].chip = f.kind + ' ' + f.cond + ' ' + px2;
+      delete TWA.state[f.id].err;
+      var id = f.id;
+      TWA.form = null;
+      twSheetClose();
+      twPaint(id);
+    })
+    .catch(function(err){ f.err = err.message; twSheetPaint(); });
+}
 
 boot(false);
 </script>

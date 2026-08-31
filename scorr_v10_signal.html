@@ -154,6 +154,26 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .oihd{flex-wrap:wrap}
 .oihd .oiasof{white-space:nowrap;margin-left:auto}
 /* cc#1468: .oird.oifacts is gone with the footer it styled — the facts live on the chart now. */
+/* ── cc#1526 · TRADE_CONTROL_V1 (35003 locks 3/6): approve/alert row on the live V10 state ── */
+.iic{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:var(--space-8);
+ background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:12px}
+.iic .nm{font-weight:800;font-size:var(--type-125)}
+.iic .dir{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;letter-spacing:.06em}
+.iic .dir.up{color:var(--volt)} .iic .dir.dn{color:var(--heat)}
+.iic .sp{flex:1}
+.iic button{min-height:44px;padding:10px 14px;border-radius:10px;border:var(--bw-1) solid var(--edge);
+ background:transparent;color:var(--chalk);font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:700;cursor:pointer}
+.iic button.pri{background:var(--chalk);color:var(--ink)}
+.iic button[disabled]{opacity:.5}
+.iic .ok{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;color:var(--volt)}
+.iic .chip2{font-family:'JetBrains Mono';font-size:var(--type-9);font-weight:700;color:var(--amber);
+ border:var(--bw-1) solid var(--amber);border-radius:6px;padding:3px 7px}
+.iic .err{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--heat);width:100%}
+.iicf .lb{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:.1em;color:var(--muted);margin:12px 0 6px}
+.iicin{width:100%;min-height:44px;border-radius:10px;border:var(--bw-1) solid var(--edge);background:transparent;
+ color:var(--chalk);font-family:'JetBrains Mono';font-size:var(--type-115);padding:10px 12px;box-sizing:border-box}
+.iicgo{width:100%;min-height:48px;margin-top:14px;border-radius:12px;border:var(--bw-1) solid var(--edge);
+ background:var(--chalk);color:var(--ink);font-weight:800;font-family:inherit;font-size:var(--type-125);cursor:pointer}
 /* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
 .plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
 .prg{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-5) var(--space-8);
@@ -1642,6 +1662,7 @@ function render(){
   ${sigCard('BANKNIFTY','B')}
   ` : ''}
   <div class="eyebrow">VOLATILITY &amp; FLOW</div>
+  <div id="iictl">${iicHtml()}</div>
   ${volDeck()}
   ${SHOW_VOL_TILES ? `<div class="card">
     <div class="vitals">
@@ -1679,7 +1700,148 @@ function render(){
   radarAsofFill();   /* cc#1512: the template just recreated #radarAsof — restamp it */
 }
 
-async function boot(){ await loadAll(); render(); vPark(); uPark(); fPark(); qPark(); vfLoad(); }   /* cc#1458 correction: three separate decks stand — all four tracks park */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
+/* ══ cc#1526 · TRADE_CONTROL_V1 (session_log 35003 locks 3/6) — approve/alert on the LIVE V10
+   state. One compact row per index under the VOLATILITY & FLOW eyebrow, rendered ONLY while the
+   signal is a live BUY/SELL — FLAT has nothing to approve, so the row hides entirely
+   (SHOW_SIGNAL_TILES stays false; this is not a revival of the hidden tiles).
+   source_engine='Index Intel'; source_ref = feed symbol + '@' + flip_ts — the signal's own
+   identity, so a NEW flip is a NEW approvable signal and a double-tap on the same flip returns
+   the existing approval; approved_via='app-intel'. The alert form rides the page's ONE sheet
+   shell (vfSheet) — never a second dialect. EXIT-alert price prefills from the signal's own
+   target (falling back to its stop) — this page HAS those numbers, unlike the wall rows. */
+var IIC = { map: null, state: {}, busy: {}, form: null };
+var IIC_KEYS = [['NIFTY', 'N', 'NIFTY50'], ['BANKNIFTY', 'B', 'BANKNIFTY']];
+function iicSig(k){
+  var s = D.sig[k];
+  return (s && s.status === 'ok' && (s.signal === 'BUY' || s.signal === 'SELL')) ? s : null;
+}
+function iicRef(feed, s){ return feed + '@' + (s.flip_ts || ''); }
+function iicTime(ts){
+  if (!ts) return '';
+  var d = new Date(String(ts).replace(' ', 'T'));
+  if (isNaN(d)) return String(ts).slice(11, 16);
+  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
+  return ('0' + i.getHours()).slice(-2) + ':' + ('0' + i.getMinutes()).slice(-2);
+}
+function iicOne(cfg){
+  var name = cfg[0], k = cfg[1], feed = cfg[2], s = iicSig(k);
+  if (!s) return '';
+  var st = IIC.state[k] || {};
+  var mapHit = IIC.map ? IIC.map[iicRef(feed, s)] : null;
+  var ap = st.ok || (mapHit ? { at: mapHit.approved_at, prev: false } : null);
+  var dir = s.signal === 'BUY' ? 'LONG' : 'SHORT';
+  var h = '<div class="iic"><span class="nm">' + name + '</span>'
+    + '<span class="dir ' + (dir === 'LONG' ? 'up' : 'dn') + '">V10 ' + dir + '</span><span class="sp"></span>';
+  if (ap) h += '<span class="ok">APPROVED · ' + iicTime(ap.at) + (ap.prev ? ' · prev close' : '') + '</span>';
+  else h += '<button type="button" class="pri" onclick="iicApprove(\'' + k + '\')"'
+    + (IIC.busy[k] ? ' disabled' : '') + '>Approve</button>';
+  h += '<button type="button" onclick="iicAlert(\'' + k + '\')">Alert</button>';
+  if (st.chip) h += '<span class="chip2">ALERT SET · ' + esc(st.chip) + '</span>';
+  if (st.err) h += '<span class="err">' + esc(st.err) + '</span>';
+  return h + '</div>';
+}
+function iicHtml(){ return IIC_KEYS.map(iicOne).join(''); }
+function iicRepaint(){ var el = document.getElementById('iictl'); if (el) el.innerHTML = iicHtml(); }
+function iicLoad(){
+  fetch('/api/alerts/approved_map?engine=' + encodeURIComponent('Index Intel'))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ IIC.map = (d && d.map) || {}; iicRepaint(); })
+    .catch(function(){ /* paint optimisation only — a miss just means no stamps yet */ });
+}
+function iicPost(u, body){
+  return fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); });
+}
+function iicApprove(k){
+  var cfg = IIC_KEYS.filter(function(c){ return c[1] === k; })[0], s = iicSig(k);
+  if (!cfg || !s || IIC.busy[k]) return;
+  IIC.busy[k] = true;
+  IIC.state[k] = IIC.state[k] || {};
+  delete IIC.state[k].err;
+  iicRepaint();
+  iicPost('/api/alerts/approve_signal', { source_engine: 'Index Intel', source_ref: iicRef(cfg[2], s),
+      symbol: cfg[2], direction: s.signal, kind: 'entry', approved_via: 'app-intel' })
+    .then(function(res){
+      IIC.busy[k] = false;
+      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'approve failed');
+      IIC.state[k].ok = { at: res.d.alert && res.d.alert.approved_at, prev: res.d.live === false };
+      iicRepaint();
+    })
+    .catch(function(e){ IIC.busy[k] = false; IIC.state[k].err = e.message; iicRepaint(); });
+}
+function iicPrefill(s, kind){
+  var dir = kind === 'exit' ? (s.signal === 'BUY' ? 'SELL' : 'BUY') : s.signal;
+  var price = kind === 'exit' ? (s.target != null ? s.target : s.stop) : s.price;
+  return { kind: kind, dir: dir, cond: dir === 'BUY' ? 'ABOVE' : 'BELOW',
+           price: price != null ? price : '', err: null };
+}
+function iicAlert(k){
+  var s = iicSig(k);
+  if (!s) return;
+  IIC.form = iicPrefill(s, 'entry');
+  IIC.form.k = k;
+  iicSheet();
+}
+function iicSheet(){
+  var k = IIC.form && IIC.form.k, s = k && iicSig(k);
+  var cfg = IIC_KEYS.filter(function(c){ return c[1] === k; })[0];
+  if (!cfg || !s){ vfSheetClose(); return; }
+  var f = IIC.form;
+  var chip = function(on, label, click){
+    return '<button type="button" class="vfchip' + (on ? ' on' : '') + '" onclick="' + click + '">' + label + '</button>';
+  };
+  vfSheet('<div class="vfsh">Price alert · ' + cfg[0] + ' · V10 ' + (s.signal === 'BUY' ? 'LONG' : 'SHORT') + '</div>'
+    + '<div class="iicf">'
+    + '<div class="lb">KIND</div><div class="vfchips">'
+    + chip(f.kind === 'entry', 'ENTRY', "iicKind('entry')") + chip(f.kind === 'exit', 'EXIT', "iicKind('exit')") + '</div>'
+    + '<div class="lb">DIRECTION</div><div class="vfchips">'
+    + chip(f.dir === 'BUY', 'BUY', "iicSet('dir','BUY')") + chip(f.dir === 'SELL', 'SELL', "iicSet('dir','SELL')") + '</div>'
+    + '<div class="lb">TRIGGER</div><div class="vfchips">'
+    + chip(f.cond === 'ABOVE', 'crosses ABOVE', "iicSet('cond','ABOVE')")
+    + chip(f.cond === 'BELOW', 'crosses BELOW', "iicSet('cond','BELOW')") + '</div>'
+    + '<div class="lb">PRICE</div><input class="iicin" id="iicPx" type="number" inputmode="decimal" step="0.05" value="' + esc(f.price) + '">'
+    + '<div class="lb">NOTES (OPTIONAL)</div><input class="iicin" id="iicNotes" type="text" maxlength="200">'
+    + (f.err ? '<div class="err" style="color:var(--heat);font-family:\'JetBrains Mono\';font-size:var(--type-105);margin-top:8px">' + esc(f.err) + '</div>' : '')
+    + '<button type="button" class="iicgo" onclick="iicSubmit()">Set alert</button>'
+    + '</div>');
+}
+function iicKind(kind){
+  var k = IIC.form && IIC.form.k, s = k && iicSig(k);
+  if (!s) return;
+  IIC.form = iicPrefill(s, kind);
+  IIC.form.k = k;
+  iicSheet();
+}
+function iicSet(field, v){
+  if (!IIC.form) return;
+  IIC.form[field] = v;
+  if (field === 'dir') IIC.form.cond = v === 'BUY' ? 'ABOVE' : 'BELOW';
+  iicSheet();
+}
+function iicSubmit(){
+  var f = IIC.form, k = f && f.k, s = k && iicSig(k);
+  var cfg = IIC_KEYS.filter(function(c){ return c[1] === k; })[0];
+  if (!cfg || !s) return;
+  var px = parseFloat((document.getElementById('iicPx') || {}).value);
+  var notes = ((document.getElementById('iicNotes') || {}).value || '').trim() || null;
+  if (!(px > 0)){ f.err = 'Trigger price must be a positive number.'; iicSheet(); return; }
+  iicPost('/api/alerts/create', { symbol: cfg[2], direction: f.dir, trigger_condition: f.cond,
+      trigger_price: px, notes: notes, source_engine: 'Index Intel', source_ref: iicRef(cfg[2], s),
+      kind: f.kind, approved_via: 'app-intel' })
+    .then(function(res){
+      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'alert not created');
+      IIC.state[k] = IIC.state[k] || {};
+      IIC.state[k].chip = f.kind + ' ' + f.cond + ' ' + px;
+      delete IIC.state[k].err;
+      IIC.form = null;
+      vfSheetClose();
+      iicRepaint();
+    })
+    .catch(function(e){ f.err = e.message; iicSheet(); });
+}
+
+async function boot(){ await loadAll(); render(); vPark(); uPark(); fPark(); qPark(); vfLoad(); iicLoad(); }   /* cc#1526: + approved-map paint */   /* cc#1458 correction: three separate decks stand — all four tracks park */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
