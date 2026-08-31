@@ -47,19 +47,30 @@
   .info-box{background:var(--panel);border:1px solid var(--line2);border-radius:12px;max-width:480px;width:100%;padding:18px 20px;position:relative;max-height:85vh;overflow:auto}
   .info-close{position:absolute;top:11px;right:11px;width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:14px}
 
-  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow)}
-  .card .k{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
-  .card .v{font-size:22px;font-weight:700;font-family:var(--mono);font-variant-numeric:tabular-nums;line-height:1}
-  .card .vs{font-size:10px;color:var(--dim);margin-top:3px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  /* cc#1530 (TC_SCANNER_R1_V1): the four stat tiles take the R1 seg grammar — 10px radius card
+     on --well with a glowing left rail per tile (cyan Scanned / green Qualified / plain Buy /
+     red Sell). Same ids, same data, new clothes. */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
+  .card{background:var(--well,var(--panel));border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    position:relative;overflow:hidden;box-shadow:var(--shadow)}
+  .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dim)}
+  .card.cy::before{background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  .card.gr::before{background:var(--grn);box-shadow:0 0 10px var(--grn)}
+  .card.rd::before{background:var(--red);box-shadow:0 0 10px var(--red)}
+  .card .k{font-size:9.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.12em;margin-bottom:5px;font-weight:600}
+  .card .v{font-size:22px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;line-height:1}
+  .card .vs{font-size:10.5px;color:var(--dim);margin-top:3px;font-family:var(--mono);font-variant-numeric:tabular-nums}
 
-  .tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin-bottom:0;padding-bottom:0}
-  .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;padding:9px 16px;
-    border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;
-    position:relative;top:1px;transition:.15s}
+  /* cc#1530: the Buy/Sell switch takes the R1 filled-pill toggle — one bordered group, the
+     active side solid --blu with knocked-out text. Same ids/onclick, no behaviour change. */
+  .tabs{display:flex;align-items:center;gap:0;margin-bottom:0}
+  .tabgrp{display:inline-flex;border-radius:9px;overflow:hidden;border:1px solid var(--line2)}
+  .tab{font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;padding:9px 18px;
+    background:var(--panel);display:flex;align-items:center;gap:6px;transition:.15s}
   .tab:hover{color:var(--txt)}
-  .tab.active{color:var(--txt);background:var(--panel);border-color:var(--line);
-    box-shadow:0 -2px 0 var(--violet) inset}
+  .tab .n{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:10px;opacity:.75;font-weight:600}
+  .tab.active{color:#fff;background:var(--blu)}
   .panel{display:none;animation:fade .2s ease;padding-top:16px}
   .panel.active{display:block}
   @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
@@ -92,6 +103,24 @@
   .b-sl{background:var(--red-d);color:var(--red);border:1px solid var(--red-bd)}
   .b-open{background:var(--panel2);color:var(--mut);border:1px solid var(--line2)}
   .empty{padding:28px;text-align:center;color:var(--dim);font-size:12px;font-family:var(--font)}
+  /* cc#1530: score mini-bar + pass/fail gate chips (R1), and Near Miss as a native <details>
+     closed by default — the chevron is the summary's own ::before, no JS toggle to keep in sync. */
+  .score{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+  .sbar{width:52px;height:5px;border-radius:3px;background:var(--line2);position:relative;overflow:hidden}
+  .sbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--cyan)}
+  .gate{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;
+    border-radius:4px;padding:0 3px;margin-right:3px;font-size:8.5px;font-weight:800;
+    font-family:var(--mono)}
+  .gate.pass{background:var(--grn-d);color:var(--grn)}
+  .gate.fail{background:var(--red-d);color:var(--red)}
+  .gate.na{background:var(--panel2);color:var(--dim)}
+  .nm{margin-top:18px}
+  .nm summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;
+    font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase}
+  .nm summary::-webkit-details-marker{display:none}
+  .nm summary::before{content:'\25B8';font-size:10px;transition:transform .15s}
+  .nm[open] summary::before{transform:rotate(90deg)}
+  .nm .scroll{margin-top:10px}
 
   .mob-cards{display:none;flex-direction:column;gap:8px;margin-top:10px}
   .mob-card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
@@ -123,7 +152,10 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="logo">TC <b>Scanner</b><span class="ibtn" onclick="openInfo()" title="How this works">i</span></div>
+      <div class="logo">TC <b>Scanner</b><span class="ibtn" onclick="openInfo()" title="How this works">i</span>
+        <span id="hdrBadge" style="display:none;vertical-align:middle;margin-left:8px;font-family:var(--mono);
+          font-size:9.5px;font-weight:600;letter-spacing:.13em;padding:3px 8px;border-radius:4px;
+          border:1px solid var(--amber);color:var(--amber);background:var(--amber-bg,rgba(245,185,74,.10))"></span></div>
       <div class="tag" id="hdrTag">Full Futures Universe</div>
     </div>
     <div class="spacer"></div>
@@ -138,15 +170,17 @@
        nothing and printing it next to real scan counts, which is the one thing a surface must
        never do. So the tiles report what a screener actually knows. -->
   <div class="cards" id="summaryCards">
-    <div class="card"><div class="k">Scanned</div><div class="v" id="sScanned">—</div><div class="vs" id="sUniverse">—</div></div>
-    <div class="card"><div class="k">Qualified</div><div class="v pos" id="sQual">—</div><div class="vs" id="sQualOf">—</div></div>
-    <div class="card"><div class="k">Buy Qualified</div><div class="v" id="sBuyQ">—</div></div>
-    <div class="card"><div class="k">Sell Qualified</div><div class="v" id="sSellQ">—</div></div>
+    <div class="card cy"><div class="k">Scanned</div><div class="v" id="sScanned">—</div><div class="vs" id="sUniverse">—</div></div>
+    <div class="card gr"><div class="k">Qualified</div><div class="v pos" id="sQual">—</div><div class="vs" id="sQualOf">—</div></div>
+    <div class="card"><div class="k">Buy Qualified</div><div class="v" id="sBuyQ">—</div><div class="vs" id="sBuyOf">—</div></div>
+    <div class="card rd"><div class="k">Sell Qualified</div><div class="v" id="sSellQ">—</div><div class="vs" id="sSellOf">—</div></div>
   </div>
 
   <div class="tabs" style="align-items:center">
-    <div class="tab active" id="tabBUY" onclick="selectTab('BUY')">▲ Buy</div>
-    <div class="tab" id="tabSELL" onclick="selectTab('SELL')">▼ Sell</div>
+    <div class="tabgrp">
+      <div class="tab active" id="tabBUY" onclick="selectTab('BUY')">▲ Buy <span class="n" id="tabBuyN"></span></div>
+      <div class="tab" id="tabSELL" onclick="selectTab('SELL')">▼ Sell <span class="n" id="tabSellN"></span></div>
+    </div>
     <!-- cc#772: page-level quick-switch across every registered scanner strategy (reads /api/scanners/registry) -->
     <button id="otherStratBtn" onclick="openStrategies()" title="Jump to another scanner strategy"
             style="margin-left:auto;margin-bottom:6px;font-family:var(--mono);font-size:11.5px;font-weight:600;
@@ -185,16 +219,10 @@ let data = null;
 let currentSide = 'BUY';
 const AUTO_MS = 30000;
 
-// cc#1296 scope 1: Near Miss collapse toggle, one instance per side (BUY/SELL each carry their
-// own ptitle header + table, rendered independently in renderPanel()).
-function toggleMiss(side){
-  var el = document.getElementById('missTbl' + side);
-  var chev = document.getElementById('missChev' + side);
-  if (!el) return;
-  var isOpen = el.style.display !== 'none';
-  el.style.display = isOpen ? 'none' : '';
-  if (chev) chev.innerHTML = isOpen ? '&#9656;' : '&#9662;';
-}
+// cc#1530: cc#1296's hand-rolled toggleMiss() is retired — Near Miss is a native <details>
+// element now (closed by default), so the open/closed state and the chevron are the browser's
+// own and there is no JS state to fall out of sync. The postMessage below keeps the embed
+// frame sized when it opens.
 
 function tick(){
   const ist = new Date(Date.now() + (5*60+30)*60000);
@@ -259,6 +287,7 @@ function selectTab(side){
     document.getElementById('panel'+s).className = 'panel' + (side===s?' active':'');
   });
   paintSpecText();
+  if (typeof postSize === 'function') postSize();   /* cc#1530: the two sides differ in height */
 }
 
 /* cc#1226 established the mechanism and cc#1229 re-pointed its source: the header sub-line and
@@ -282,6 +311,10 @@ function paintSpecText(){
   const bars = (j.buckets||Object.keys(t)).map(b => b + ' ' + t[b]).join(' · ');
   const tag = document.getElementById('hdrTag');
   if (tag) tag.textContent = 'Score /100 · Gated · Config ' + c.version + ' · Full Futures Universe';
+  /* cc#1530: the R1 header badge — engine name is the page's own (like TC13's), the config
+     version comes from the payload, never typed. Hidden until the config has actually loaded. */
+  const hb = document.getElementById('hdrBadge');
+  if (hb){ hb.textContent = 'V1.1 · GATED · CONFIG ' + c.version; hb.style.display = 'inline-block'; }
   const leg = document.getElementById('footerLegend');
   if (leg) leg.textContent = 'TC Scanner · full futures universe · score /100 per bucket, bars ' +
       bars + ' · entry gates on sector and monthly RSI · max ' + (c.caps||{}).per_bucket_per_day +
@@ -330,8 +363,16 @@ function renderSummary(){
   set('sUniverse', 'of ' + (data.universe || '—') + ' in universe');
   set('sQual', cfg.would_qualify);
   set('sQualOf', 'of ' + cfg.total + ' scored');
-  set('sBuyQ', q('BUY-MOM') + q('BUY-REV'));
-  set('sSellQ', q('SELL-MOM') + q('SELL-REV'));
+  const buyQ = q('BUY-MOM') + q('BUY-REV'), sellQ = q('SELL-MOM') + q('SELL-REV');
+  set('sBuyQ', buyQ);
+  set('sSellQ', sellQ);
+  /* cc#1530: the R1 sub-lines and toggle counts — counted from the SAME results array the
+     panels render, so tile, toggle and table can never disagree. */
+  const sideN = p => (data.results || []).filter(r => String(r.best_label || '').indexOf(p) === 0).length;
+  set('sBuyOf', sideN('BUY') + ' scored on this side');
+  set('sSellOf', sideN('SELL') + ' scored on this side');
+  set('tabBuyN', buyQ);
+  set('tabSellN', sellQ);
   set('liveTs', data.as_of || data.computed_at || '—');
 }
 
@@ -340,12 +381,13 @@ const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI' };
 function gateStrip(x){
   const g = x && x.gate;
   if (!g || !g.gates || !g.gates.length) return '<span style="color:var(--dim)">—</span>';
+  /* cc#1530: the R1 gate-chip pair — filled pass/fail boxes. The gate KEY stays on the chip and
+     the full text stays in the tooltip: a bare tick tells the reader THAT a gate failed, the key
+     tells them WHICH, and dropping that would be a restyle costing information. */
   return g.gates.map(function(one){
-    const col = one.pass === true ? 'var(--grn)' : (one.pass === false ? 'var(--red)' : 'var(--dim)');
+    const cls = one.pass === true ? 'pass' : (one.pass === false ? 'fail' : 'na');
     const sh  = GATE_SHORT[one.key] || String(one.key || '?').slice(0,3).toUpperCase();
-    return '<span title="' + esc(one.text) + '" style="display:inline-block;min-width:20px;padding:0 3px;'
-         + 'margin-right:3px;border-radius:4px;border:1px solid var(--line2);font-size:8.5px;'
-         + 'font-weight:800;color:' + col + '">' + sh + '</span>';
+    return '<span class="gate ' + cls + '" title="' + esc(one.text) + '">' + sh + '</span>';
   }).join('');
 }
 
@@ -365,8 +407,14 @@ function missReason(x){
 function scoreCell(x){
   if (x.best_score100 == null) return '<span style="color:var(--dim)">—</span>';
   const col = x.bar_met === true ? 'var(--grn)' : (x.bar_met === false ? 'var(--mut)' : 'var(--dim)');
-  return '<b style="color:' + col + '">' + Number(x.best_score100).toFixed(1) + '</b>'
-       + '<span style="color:var(--dim);font-size:10px"> / ' + (x.bar != null ? x.bar : '—') + '</span>';
+  /* cc#1530: R1 mini-bar beside the number — fill = score against its own bucket bar, capped at
+     100%. No bar value -> no bar drawn (nothing is measured against an unknown threshold). */
+  const bar = (x.bar != null && x.bar > 0)
+    ? '<div class="sbar"><i style="width:' + Math.min(100, x.best_score100 / x.bar * 100).toFixed(0) + '%"></i></div>'
+    : '';
+  return '<div class="score"><span><b style="color:' + col + '">' + Number(x.best_score100).toFixed(1) + '</b>'
+       + '<span style="color:var(--dim);font-size:10px"> / ' + (x.bar != null ? x.bar : '—') + '</span></span>'
+       + bar + '</div>';
 }
 
 function renderPanel(side){
@@ -405,18 +453,17 @@ function renderPanel(side){
        + ' signal clears both its score bar and its gates right now</td></tr>')
     + '</tbody></table></div>';
 
-  // cc#1296 scope 1: Near Miss starts collapsed, expandable via its own header. Per-side DOM ids
-  // since BUY and SELL panels both stay in the DOM at once (.panel{display:none} on the inactive
-  // one, not removed) — colliding ids would make one side's toggle move the other side's table.
-  const missSection = '<div class="ptitle mistoggle" style="margin-top:18px;cursor:pointer" '
-    + 'onclick="toggleMiss(\'' + side + '\')">'
-    + '<span class="miss-chev" id="missChev' + side + '">&#9656;</span> Near miss <span class="ct">'
-    + miss.length + ' shown, strongest first</span></div>'
-    + '<div class="scroll desktop-tbl" id="missTbl' + side + '" style="display:none"><table><thead><tr>'
+  // cc#1530: Near Miss is a native <details> (closed by default) with the existing "N shown,
+  // strongest first" chip kept verbatim. Per-side elements as before — both panels stay in the
+  // DOM at once. The ontoggle hook keeps the embed frame's height honest when it opens.
+  const missSection = '<details class="nm" id="missTbl' + side + '" ontoggle="postSize()">'
+    + '<summary>Near miss <span class="ct">'
+    + miss.length + ' shown, strongest first</span></summary>'
+    + '<div class="scroll desktop-tbl"><table><thead><tr>'
     + '<th>Symbol</th><th>Bucket</th><th>Score / bar</th><th>Gates</th><th>Why not</th>'
     + '</tr></thead><tbody>'
     + (miss.map(missRow).join('') || '<tr><td colspan="5" class="empty">Nothing scored on this side</td></tr>')
-    + '</tbody></table></div>';
+    + '</tbody></table></div></details>';
 
   const mob = qual.map(x => '<div class="mob-card">'
     + '<div class="mob-card-head"><span class="mob-sym">' + esc(x.symbol) + '</span>'
@@ -432,6 +479,23 @@ function renderPanel(side){
        + missSection;
 }
 
+/* cc#1530 scope 4: when this page runs EMBEDDED (the V8 Dashboard TC Scanner tab, or any
+   embed=1 frame), it reports its own rendered height to the parent after every repaint that can
+   change it — first load, the Buy/Sell toggle, a Near Miss expand, the 30s refresh. The parent
+   sizes the frame from these messages, so the tab never reserves a viewport of dead space over
+   short content (the founder's 31-Aug gap) and never clips tall content either. rAF-debounced;
+   a no-op when standalone. */
+var _psRaf = null;
+function postSize(){
+  if (window.self === window.top && !new URLSearchParams(location.search).has('embed')) return;
+  if (_psRaf) return;
+  _psRaf = requestAnimationFrame(function(){
+    _psRaf = null;
+    try { parent.postMessage({ type: 'tcscan-resize', h: document.body.scrollHeight }, '*'); } catch(e){}
+  });
+}
+window.addEventListener('load', postSize);
+
 function render(){
   if(!data) return;
   renderSummary();
@@ -439,6 +503,7 @@ function render(){
   document.getElementById('panelSELL').innerHTML = renderPanel('SELL');
   selectTab(currentSide);
   document.getElementById('footerRefresh').textContent = 'Last refreshed ' + new Date().toLocaleTimeString('en-IN',{hour12:false});
+  postSize();
 }
 
 async function load(silent){
