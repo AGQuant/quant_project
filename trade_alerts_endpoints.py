@@ -274,11 +274,14 @@ async def approve_alert(req: Request):
 async def approve_signal(req: Request):
     """cc#1524 (TRADE_CONTROL_V1, session_log 35003 lock 2) — ONE-CLICK APPROVE of an engine
     signal. Creates a trade_alerts row straight into status=approved: approved_price is the LIVE
-    resolver price at the moment of the click (never the signal's entry price), trigger fields
-    NULL (nothing to watch — the decision is already taken). Idempotent on
-    (source_engine, source_ref, kind): a second click returns the EXISTING row with
-    already_approved=true and HTTP 200 — a double-tap is not an error. This endpoint sits BESIDE
-    cc#1505's /api/alerts/approve (triggered -> approved), which is untouched."""
+    resolver price at the moment of the click (never the signal's entry price). trigger_price and
+    trigger_condition are NOT NULL columns on this table, so nothing to watch is recorded as an
+    honest sentinel rather than NULL — see the INSERT below (cc#1531 fix: the original NULL,NULL
+    insert violated the NOT NULL constraint and 500'd every call; never shipped-verified against
+    the live schema). Idempotent on (source_engine, source_ref, kind): a second click returns the
+    EXISTING row with already_approved=true and HTTP 200 — a double-tap is not an error. This
+    endpoint sits BESIDE cc#1505's /api/alerts/approve (triggered -> approved), which is
+    untouched."""
     body = await req.json()
     source_engine = str(body.get("source_engine") or "").strip()
     source_ref = str(body.get("source_ref") or "").strip()
@@ -306,15 +309,21 @@ async def approve_signal(req: Request):
         live = bool((res or {}).get("live"))
         # the partial unique index arbitrates the race: first INSERT wins, the second returns
         # nothing here and falls through to the existing-row read.
+        # cc#1531: trigger_price/trigger_condition are NOT NULL on trade_alerts — NULL,NULL 500'd
+        # every call. Sentinel here, not fabricated: trigger_price is the SAME live price already
+        # resolved for approved_price (not a made-up watch level); trigger_condition is 'N/A'
+        # (not one of CONDITIONS) so it can never be misread as a real ABOVE/BELOW threshold.
+        # check_triggers() only ever reads status='pending' rows, so this row is never watched —
+        # the UI (mobile/alerts.html card()) suppresses the Trigger line for these rows instead.
         cur.execute(
             f"""INSERT INTO trade_alerts
                     (symbol, direction, trigger_price, trigger_condition, status,
                      approved_at, approved_price, source_engine, source_ref, kind, approved_via)
-                VALUES (%s, %s, NULL, NULL, 'approved', NOW(), %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, 'N/A', 'approved', NOW(), %s, %s, %s, %s, %s)
                 ON CONFLICT (source_engine, source_ref, kind) WHERE source_engine IS NOT NULL
                 DO NOTHING
                 RETURNING {_COLS}""",
-            (sym, direction, price, source_engine, source_ref, kind, approved_via))
+            (sym, direction, price, price, source_engine, source_ref, kind, approved_via))
         r = cur.fetchone()
         if r:
             out, already = _row(r), False
