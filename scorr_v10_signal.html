@@ -268,7 +268,10 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .butbl td{padding:var(--space-8) var(--space-2);text-align:right;border-bottom:var(--bw-1) solid var(--edge);
  font-family:'JetBrains Mono';overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .butbl tr:last-child td{border-bottom:none}
-.butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif}
+/* cc#1502: symbol column reads 2 notches up the --type scale (was inheriting .butbl's
+   --type-105; 105 -> 11 -> 115). Font-size ONLY — column widths and the td ellipsis rule are
+   untouched, so a name that no longer fits truncates rather than moving a column. */
+.butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif;font-size:var(--type-115)}
 .butbl .up{color:var(--volt)} .butbl .dn{color:var(--heat)} .butbl .am{color:var(--amber)}
 /* cc#1430: Volume Flow's own sort-header state — scoped to .vfsort so the Futures Buildup .butbl
    (a plain, unsorted table sharing the same class for its column widths) is untouched. */
