@@ -7,6 +7,44 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
+<style>
+/* cc#1507 — create-alert flow. All classes namespaced al- (this app has collided four times on
+   short class names — the intel.html nc- lesson). The sheet is home.html's .pfveil/.pfsheet
+   shape (veil z-80, bottom sheet z-81, grab handle), re-declared here because those classes are
+   page-local CSS, not shared. The + button: the app has NO existing floating-action convention
+   (checked before inventing — closest is the chip/sheet grammar), so a chat-style compose
+   button pinned above the bar is used, sized 52px against the 44px tap floor. */
+.al-fab{position:fixed;right:16px;bottom:calc(74px + env(safe-area-inset-bottom,0px));z-index:70;
+  width:52px;height:52px;border-radius:50%;border:var(--bw-1) solid var(--line2);cursor:pointer;
+  background:var(--panel,#161F33);color:var(--txt,#E9EEFB);font-size:26px;line-height:1;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+.al-veil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.al-sheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;z-index:81;
+  background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);
+  border-radius:var(--radius-18,18px) var(--radius-18,18px) 0 0}
+.al-grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 6px;flex-shrink:0}
+.al-sb{overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
+.al-sh{font-size:var(--type-14);font-weight:800;letter-spacing:var(--track-em15);text-transform:uppercase;
+  color:var(--txt,#E9EEFB);margin-bottom:10px}
+.al-lb{font-size:var(--type-10);font-weight:700;letter-spacing:1px;color:var(--dim,#8A97B0);
+  text-transform:uppercase;margin:12px 0 6px}
+.al-in{width:100%;min-height:44px;border-radius:10px;border:var(--bw-1) solid var(--line2);
+  background:var(--bg,#0A0F1E);color:var(--txt,#E9EEFB);font-family:inherit;font-size:var(--type-13);
+  padding:10px 12px;box-sizing:border-box}
+.al-res{border:var(--bw-1) solid var(--line);border-radius:10px;margin-top:6px;overflow:hidden}
+.al-ri{display:flex;justify-content:space-between;gap:10px;align-items:baseline;padding:11px 12px;
+  border-bottom:var(--bw-1) solid var(--line);cursor:pointer;min-height:44px;box-sizing:border-box}
+.al-ri:last-child{border-bottom:none}
+.al-ri b{font-size:var(--type-125);color:var(--txt,#E9EEFB)}
+.al-ri span{font-size:var(--type-10);color:var(--dim,#8A97B0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.al-tg{display:flex;gap:8px}
+.al-tg .chip{flex:1;justify-content:center;text-align:center;min-height:44px}
+.al-err2{margin-top:10px;font-size:var(--type-115);color:var(--heat,#FF4D6D);line-height:1.5}
+.al-go{width:100%;min-height:48px;margin-top:16px;border-radius:12px;border:var(--bw-1) solid var(--line2);
+  background:var(--txt,#E9EEFB);color:var(--bg,#0A0F1E);font-weight:800;font-size:var(--type-13);
+  font-family:inherit;cursor:pointer}
+.al-go[disabled]{opacity:.5}
+</style>
 </head>
 <body>
 <!--
@@ -35,6 +73,8 @@
     <div class="loading">Loading alerts…</div>
   </div>
 </div>
+
+<button class="al-fab" id="alFab" aria-label="New alert" onclick="alOpen()">＋</button>
 
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
@@ -156,6 +196,110 @@ load(true);
 /* the engine sweeps every 5 minutes (cc#1504); refreshing on the same cadence keeps a
    just-triggered card from waiting on a manual reload. In-place, no scroll jump. */
 setInterval(function(){ load(false); }, 300000);
+
+/* ══ cc#1507 · CREATE-ALERT FLOW ═══════════════════════════════════════════════════════════
+   Symbol search reuses /api/gvm/search — the app's ONE autocomplete (GVM page pattern, symbol
+   or company name, ~1,800-name universe), never a new search built here. The server stays the
+   validator of record: an unresolvable symbol is rejected by /api/alerts/create with the real
+   reason, which is shown VERBATIM — the form never pre-blocks what the server would allow. */
+var FORM = { sym: null, dir: 'BUY', cond: 'ABOVE', busy: false };
+
+function alOpen(){
+  FORM = { sym: null, dir: 'BUY', cond: 'ABOVE', busy: false };
+  var el = document.createElement('div');
+  el.id = 'alWrap';
+  el.innerHTML =
+    '<div class="al-veil" onclick="alClose()"></div>' +
+    '<div class="al-sheet"><div class="al-grab"></div><div class="al-sb">' +
+      '<div class="al-sh">New alert</div>' +
+      '<div class="al-lb">Symbol</div>' +
+      '<input class="al-in" id="alQ" type="search" placeholder="Search any stock — RELIANCE, TCS, LODHA…" autocomplete="off">' +
+      '<div id="alRes"></div>' +
+      '<div class="al-lb">Direction</div>' +
+      '<div class="al-tg" id="alDir">' +
+        '<button class="chip on" data-v="BUY" onclick="alPick(\'dir\',\'BUY\')">BUY</button>' +
+        '<button class="chip" data-v="SELL" onclick="alPick(\'dir\',\'SELL\')">SELL</button></div>' +
+      '<div class="al-lb">Trigger</div>' +
+      '<div class="al-tg" id="alCond">' +
+        '<button class="chip on" data-v="ABOVE" onclick="alPick(\'cond\',\'ABOVE\')">crosses ABOVE</button>' +
+        '<button class="chip" data-v="BELOW" onclick="alPick(\'cond\',\'BELOW\')">crosses BELOW</button></div>' +
+      '<div class="al-lb">Trigger price</div>' +
+      '<input class="al-in" id="alPx" type="number" inputmode="decimal" step="0.05" min="0" placeholder="0.00">' +
+      '<div class="al-lb">Notes (optional)</div>' +
+      '<input class="al-in" id="alNotes" type="text" maxlength="200" placeholder="why this level…">' +
+      '<div class="al-err2" id="alErr" style="display:none"></div>' +
+      '<button class="al-go" id="alGo" onclick="alSubmit()">Create alert</button>' +
+    '</div></div>';
+  document.body.appendChild(el);
+  var t2 = null;
+  document.getElementById('alQ').addEventListener('input', function(e){
+    clearTimeout(t2);
+    FORM.sym = null;   /* typing invalidates the previous pick — no stale symbol under new text */
+    var v = e.target.value.trim();
+    t2 = setTimeout(function(){ alSearch(v); }, 300);
+  });
+  document.getElementById('alQ').focus();
+}
+function alClose(){ var w = document.getElementById('alWrap'); if (w) w.remove(); }
+
+function alSearch(q){
+  var box = document.getElementById('alRes');
+  if (!box) return;
+  if (!q){ box.innerHTML = ''; return; }
+  fetchWithTimeout('/api/gvm/search?q=' + encodeURIComponent(q) + '&limit=8')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var res = d.results || [];
+      var b2 = document.getElementById('alRes'); if (!b2) return;
+      b2.innerHTML = res.length
+        ? '<div class="al-res">' + res.map(function(x){
+            return '<div class="al-ri" onclick="alSym(\'' + esc(x.symbol).replace(/'/g, "\\'") + '\')">' +
+              '<b>' + esc(x.symbol) + '</b><span>' + esc(x.company_name || '') + '</span></div>';
+          }).join('') + '</div>'
+        : '<div class="al-res"><div class="al-ri"><span>No match — the server still decides, you can submit the typed symbol.</span></div></div>';
+    })
+    .catch(function(){ /* search is a convenience; the create call validates for real */ });
+}
+function alSym(s){
+  FORM.sym = s;
+  var q = document.getElementById('alQ'); if (q) q.value = s;
+  var box = document.getElementById('alRes'); if (box) box.innerHTML = '';
+}
+function alPick(k, v){
+  FORM[k === 'dir' ? 'dir' : 'cond'] = v;
+  var host = document.getElementById(k === 'dir' ? 'alDir' : 'alCond');
+  if (host) Array.prototype.forEach.call(host.querySelectorAll('.chip'), function(b){
+    b.classList.toggle('on', b.getAttribute('data-v') === v);
+  });
+}
+function alSubmit(){
+  if (FORM.busy) return;
+  var err = document.getElementById('alErr'), go = document.getElementById('alGo');
+  var sym = FORM.sym || (document.getElementById('alQ').value || '').trim().toUpperCase();
+  var px = parseFloat(document.getElementById('alPx').value);
+  function fail(msg){ err.style.display = ''; err.textContent = msg; }
+  err.style.display = 'none';
+  if (!sym) return fail('Pick or type a symbol first.');
+  if (!(px > 0)) return fail('Trigger price must be a positive number.');
+  FORM.busy = true; go.disabled = true; go.textContent = 'Creating…';
+  fetchWithTimeout('/api/alerts/create', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym, direction: FORM.dir, trigger_condition: FORM.cond,
+                             trigger_price: px, notes: (document.getElementById('alNotes').value || '').trim() || null }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok) throw new Error((x.d && x.d.detail) || 'create failed');
+      alClose();
+      /* the new pending card belongs at the bottom of the chat — reload and go there */
+      load(true);
+    })
+    .catch(function(e){
+      FORM.busy = false; go.disabled = false; go.textContent = 'Create alert';
+      /* the SERVER's reason verbatim (e.g. "XYZ does not resolve to any price…") — an honest
+         rejection, never a generic error */
+      fail(e.message);
+    });
+}
 </script>
 </body>
 </html>
