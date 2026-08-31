@@ -306,6 +306,8 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .vfchip.on{border-color:var(--aqua);color:var(--aqua)}
 .vfasof{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--muted);letter-spacing:var(--track-px8);
  margin-top:var(--space-8)}
+/* cc#1510: amber staleness on the footer stamps — the EXISTING token, same as .asof.stale */
+.vfasof.stale{color:var(--amber)}
 .vfmore{width:100%;min-height:40px;margin-top:var(--space-8);font-family:'JetBrains Mono';font-size:var(--type-10);
  font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--hi);
  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);cursor:pointer}
@@ -1232,7 +1234,9 @@ function qbMore(k){
   var st = QBB_STATES.filter(function(s){ return s.k === k; })[0] || {};
   vfSheet('<div class="vfsh">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
     + qbTable(pool, k)
-    + '<div class="vfasof">' + esc((D.qbb && D.qbb.as_of) || '') + '</div>');
+    /* cc#1510: same helper as the card footer — sheet and card can never disagree */
+    + (function(){ var st2 = scorrAsofStamp(D.qbb && D.qbb.as_of);
+        return '<div class="vfasof' + (st2.amber ? ' stale' : '') + '">' + esc(st2.txt) + '</div>'; })());
 }
 
 function qbCard(st){
@@ -1259,7 +1263,10 @@ function qbCard(st){
     + st.mark + '</span> ' + st.h + '</h3><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="qbGuide()" aria-label="How to read this card">i</button></div>'
     + body
-    + '<div class="vfasof">' + esc((D.qbb && D.qbb.as_of ? String(D.qbb.as_of).slice(0, 16).replace('T', ' ') : 'LIVE 5-MIN')) + '</div>'
+    /* cc#1510 (34535): the stamp is the DATA's as-of via the shared helper — the 'LIVE 5-MIN'
+       fallback is gone; a payload with no as_of renders NO stamp, never a static claim. */
+    + (function(){ var st2 = scorrAsofStamp(D.qbb && D.qbb.as_of);
+        return '<div class="vfasof' + (st2.amber ? ' stale' : '') + '">' + esc(st2.txt) + '</div>'; })()
     + '</div></div>';
 }
 
