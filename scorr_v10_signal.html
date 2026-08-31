@@ -455,6 +455,15 @@ var SHOW_SIGNAL_TILES = false;
    of the payload and holds no expanded/collapsed flag at all, so there is nothing a swipe could
    carry from one card to the next. */
 var SHOW_VOL_TILES = false;
+/* cc#1499 · GATE CHIP HIDDEN (founder 31-Aug, session_log 34393). Same shape of hide as the
+   three flags around it: markup, the /api/v8/market_mood fetch and the gate/fails text+class
+   computation in render() all keep running untouched — only the chip's display toggles. One
+   line to restore. */
+var SHOW_GATE_CHIP = false;
+/* applied immediately as well as in render() — without this the static "GATE · —" placeholder
+   would flash from first paint until the first data render. The header markup is above this
+   script, so the element exists here. */
+if (!SHOW_GATE_CHIP){ var _gc = document.getElementById('gatechip'); if (_gc) _gc.style.display = 'none'; }
 
 /* cc#1244 · THE HELPERS TAKE A TRACK ID NOW. cc#1242 wrote them for one deck with 'vtrack' baked
    in; this card adds a second deck to the same page and 1245/1248 add more. Copying them per deck
@@ -1581,6 +1590,7 @@ function render(){
   const gate=(m.mood||'—').toUpperCase(), fails=m.fails!=null?m.fails:'—';
   $('gatechip').textContent=`GATE · ${gate} · ${fails}F`;
   $('gatechip').className='chip '+(/BEAR/i.test(gate)?'l':/BULL/i.test(gate)?'w':'n');
+  $('gatechip').style.display=SHOW_GATE_CHIP?'':'none';   /* cc#1499: hide, not delete — text/class above still computed */
   $('asof').textContent=IST().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+' IST';
 
   const vix=D.vix||{}, vc=vix.cur!=null?Number(vix.cur):null;
