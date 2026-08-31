@@ -77,6 +77,13 @@
   --on-accent    : #0A0F1E;
   --bull         : #2FD48B;
   --bear         : #FF5C6C;
+  /* cc#1521 (DAILY_DIGEST_R4_V1, 34993): rgb TRIPLETS for rgba(var(--x-rgb),.N) tints. R4's
+     magnitude bands and glows need alpha over a theme accent, and rgba() cannot take a hex
+     var — so the triplet rides alongside. Values are the accent hexes above, decomposed. */
+  --cy-rgb       : 55,211,232;
+  --gr-rgb       : 47,212,139;
+  --rd-rgb       : 255,92,108;
+  --am-rgb       : 245,185,74;
 }
 
 /* ── LIGHT · 43 tokens, verbatim from v8_dashboard.html html[data-theme="light"] ──────── */
@@ -136,6 +143,12 @@ html[data-theme="light"] {
   --card2        : #EEF1F8;
   --bull         : #0E9F62;
   --bear         : #DE3A52;
+  /* cc#1521: light-side rgb triplets — the R4 spec's own light accent pair (session_log 34993),
+     matched to the approved mock so the tints stay legible on white. */
+  --cy-rgb       : 15,168,196;
+  --gr-rgb       : 15,169,104;
+  --rd-rgb       : 224,64,90;
+  --am-rgb       : 201,138,18;
 }
 
 /* ── THE TINT SCALE, one recipe for every accent (founder ruling (a)) ────────────────────────────
