@@ -237,12 +237,19 @@ def run_scan():
 
 
 def check_exits():
-    """Check every OPEN hold (today) against the current futures LTP for target/SL touch."""
+    """Check every OPEN hold against the current futures LTP for target/SL touch.
+
+    cc#1529 (P0): the SELECT used to add scan_date=CURRENT_DATE. scan_date is the ENTRY day,
+    fixed at insert — so the moment the calendar rolled past it, the row was excluded from this
+    check forever and could never close, however far price breached (founder report 31-Aug:
+    zero multi-day closes ever; every historical TARGET/SL exit was same-day). Every OPEN row
+    is in scope now, whatever day it was entered; the LTP lookup below stays CURRENT_DATE
+    because a live check prices against today's tape by definition."""
     now = _ist_now()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT id, symbol, side, entry_price, target, sl FROM tc_scanner_holds
-            WHERE scan_date=CURRENT_DATE AND exit_reason='OPEN'
+            WHERE exit_reason='OPEN'
         """)
         open_rows = cur.fetchall()
         if not open_rows:
