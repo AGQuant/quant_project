@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorr · TC Scanner · R1 mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* TC SCANNER R1 — DESIGN MOCK, DUMMY DATA (real symbols/prices from tc_scanner_holds, a healthy
+   post-fix snapshot, not today's broken one — see cc#1529). Founder brief 31-Aug: design weak,
+   reorder to Open Book / Closed Book / Near Miss. Same token contract as Digest R4 + Index Intel R1
+   — all three V8 tabs now read as one product. */
+:root{
+  --bg:#0A0F1E; --well:#0D1428; --panel:#121A33; --raise:#182241;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
+  --tx:#E9EEFB; --tx2:#8C99BD; --tx3:#5E6B8F;
+  --cy:#37D3E8; --gr:#2FD48B; --rd:#FF5C6C; --am:#F5B94A; --bl:#4D7CFE;
+  --cy-rgb:55,211,232; --gr-rgb:47,212,139; --rd-rgb:255,92,108; --am-rgb:245,185,74;
+  --f-d:'Sora',system-ui,sans-serif; --f-m:'IBM Plex Mono',ui-monospace,monospace;
+}
+:root[data-theme="light"]{
+  --bg:#F4F7FE; --well:#EDF1FA; --panel:#FFFFFF; --raise:#E7ECF8;
+  --line:rgba(20,35,80,.10); --line2:rgba(20,35,80,.20);
+  --tx:#0E1630; --tx2:#5B6B94; --tx3:#8A97BC;
+  --cy:#0FA8C4; --gr:#0FA968; --rd:#E0405A; --am:#C98A12; --bl:#3D6BEC;
+  --cy-rgb:15,168,196; --gr-rgb:15,169,104; --rd-rgb:224,64,90; --am-rgb:201,138,18;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1220px;margin:0 auto;padding:0 20px 60px}
+.num{font-family:var(--f-m);font-variant-numeric:tabular-nums}
+.pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:pulse 2s infinite}
+
+.bar{display:flex;align-items:center;gap:22px;height:52px;border-bottom:1px solid var(--line)}
+.bar .wm{font:800 17px var(--f-d)} .bar .wm b{color:var(--bl)}
+.bar .tabs{display:flex;gap:2px;margin-left:8px}
+.bar .tabs a{padding:0 14px;height:52px;display:flex;align-items:center;font:600 12.5px var(--f-d);color:var(--tx2);border-bottom:2px solid transparent}
+.bar .tabs a.on{color:var(--bl);border-bottom-color:var(--bl)}
+.bar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.clock{font:600 13px var(--f-m)} .clock small{color:var(--tx3);font-size:10px;margin-left:5px}
+.mkt{font:700 10px var(--f-m);letter-spacing:.14em;padding:5px 10px;border-radius:4px;border:1px solid;color:var(--am);border-color:rgba(var(--am-rgb),.45);background:rgba(var(--am-rgb),.12)}
+.tbtn{font:600 11px var(--f-m);padding:5px 11px;border-radius:14px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer}
+
+.head{margin-top:22px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.head h1{font:800 24px var(--f-d);letter-spacing:-.01em}
+.head h1 b{color:var(--bl)}
+.head .ib{min-width:20px;min-height:20px;border-radius:50%;border:1px solid var(--line2);color:var(--tx3);font:700 10px var(--f-m);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.head .sub{font:600 10px var(--f-m);letter-spacing:.12em;color:var(--tx3);width:100%}
+.head .asof{margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);white-space:nowrap}
+
+section{margin-top:28px}
+.sh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.sh h2{font:700 17px var(--f-d);letter-spacing:-.01em}
+.badge{font:600 9.5px var(--f-m);letter-spacing:.13em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-flex;align-items:center;gap:6px}
+.b-live{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
+.b-eng{color:var(--cy);border-color:rgba(var(--cy-rgb),.4);background:rgba(var(--cy-rgb),.10)}
+.b-eng2{color:var(--am);border-color:rgba(var(--am-rgb),.4);background:rgba(var(--am-rgb),.10)}
+.stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap}
+.stats b{color:var(--tx2);font-weight:600}
+.card{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+
+/* Open / Closed book tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:9px 12px;border-bottom:1px solid var(--line)}
+.tbl th:first-child,.tbl th:nth-child(2),.tbl td:first-child,.tbl td:nth-child(2){text-align:left}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:var(--raise)}
+.sym{font:700 12.5px var(--f-d);font-family:var(--f-d)!important}
+.side{font:700 9px var(--f-m);letter-spacing:.1em;padding:3px 7px;border-radius:4px;border:1px solid}
+.side.buy{color:var(--gr);border-color:rgba(var(--gr-rgb),.45)} .side.sell{color:var(--rd);border-color:rgba(var(--rd-rgb),.45)}
+.pill{font:700 9px var(--f-m);letter-spacing:.08em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-block}
+.pill.target{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
+.pill.sl{color:var(--rd);border-color:rgba(var(--rd-rgb),.45);background:rgba(var(--rd-rgb),.12)}
+.pill.open{color:var(--bl);border-color:rgba(77,124,254,.4);background:rgba(77,124,254,.12)}
+/* proximity rail — mini version of the Index Intel pivot rail, one per row */
+.prox{width:96px}
+.prail{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--rd-rgb),.4),var(--line2) 46%,var(--line2) 54%,rgba(var(--gr-rgb),.4))}
+.pdot{position:absolute;top:50%;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);background:var(--cy);box-shadow:0 0 6px var(--cy)}
+.empty-row td{text-align:center;color:var(--tx3);font-family:var(--f-d);padding:22px 12px}
+
+/* screener stat tiles */
+.segs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.seg{background:var(--well);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative;overflow:hidden}
+.seg::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tx3)}
+.seg.cy::before{background:var(--cy);box-shadow:0 0 10px var(--cy)}
+.seg.gr::before{background:var(--gr);box-shadow:0 0 10px var(--gr)}
+.seg.rd::before{background:var(--rd);box-shadow:0 0 10px var(--rd)}
+.seg .k{font:600 9.5px var(--f-m);letter-spacing:.12em;color:var(--tx3);text-transform:uppercase}
+.seg .v{font:600 22px var(--f-m);margin-top:4px}
+.seg .n{font-size:10.5px;color:var(--tx3);margin-top:2px}
+
+.toggle{display:inline-flex;border-radius:9px;overflow:hidden;border:1px solid var(--line2);margin:16px 0 0}
+.toggle button{font:700 12.5px var(--f-d);padding:9px 18px;background:var(--panel);color:var(--tx2);border:none;cursor:pointer;display:flex;align-items:center;gap:6px}
+.toggle button.on{background:var(--bl);color:#fff}
+.toggle button .n{font:600 10px var(--f-m);opacity:.75}
+.qhd{display:flex;align-items:center;gap:10px;margin:16px 0 10px;flex-wrap:wrap}
+.qhd .t{font:700 11px var(--f-m);letter-spacing:.06em;color:var(--cy)}
+.qhd .chip{font:500 10.5px var(--f-m);color:var(--tx3);padding:4px 9px;border-radius:12px;border:1px solid var(--line2)}
+.qtbl th{text-align:right} .qtbl th:first-child{text-align:left}
+.score{display:flex;align-items:center;gap:8px}
+.sbar{width:52px;height:5px;border-radius:3px;background:var(--line2);position:relative;overflow:hidden}
+.sbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--cy)}
+.gate{width:16px;height:16px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font:700 9px var(--f-m)}
+.gate.pass{background:rgba(var(--gr-rgb),.18);color:var(--gr)} .gate.fail{background:rgba(var(--rd-rgb),.18);color:var(--rd)}
+
+.nm{margin-top:14px}
+.nm summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px 16px;font:700 12.5px var(--f-d);color:var(--cy)}
+.nm summary::-webkit-details-marker{display:none}
+.nm summary::before{content:'▸';font-size:10px;transition:transform .15s}
+.nm[open] summary::before{transform:rotate(90deg)}
+.nm summary .chip{margin-left:auto;font:500 10px var(--f-m);color:var(--tx3);font-weight:500}
+
+.foot{margin-top:14px;padding:12px 16px;font:500 10.5px var(--f-m);color:var(--tx3);line-height:1.7;border-top:1px solid var(--line)}
+.foot b{color:var(--am);font-weight:600}
+.foot2{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font:500 10.5px var(--f-m);color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
+
+@media(max-width:900px){.segs{grid-template-columns:repeat(2,1fr)} .bar .tabs{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="bar">
+  <div class="wm">V8 <b>Dashboard</b></div>
+  <div class="tabs"><a>V8</a><a>Index Intel</a><a class="on">TC Scanner</a><a>Daily Digest</a><a>Wall of Trades</a></div>
+  <div class="right"><span class="clock"><span id="clk">--:--:--</span><small>IST</small></span><span class="mkt"><span class="dot"></span>NSE OPEN</span><button class="tbtn" id="themeBtn" type="button">Light</button></div>
+</div>
+
+<div class="head">
+  <h1>TC <b>Scanner</b></h1><span class="ib">i</span>
+  <span class="asof">15-min cadence · last tick 11:45 IST</span>
+  <div class="sub">TWO ENGINES ON THIS PAGE — TC13 13-check binary (Open/Closed Book below) and the V1.1 gated score/100 screener (Near Miss further down)</div>
+</div>
+
+<!-- OPEN BOOK -->
+<section>
+  <div class="sh"><h2>Open Book</h2><span class="badge b-eng">TC13 · 13-CHECK</span><span class="badge b-live"><span class="dot"></span>LIVE</span>
+    <div class="stats"><span>Open <b id="ob-n"></b></span></div></div>
+  <div class="card"><table class="tbl" id="ob-tbl"></table></div>
+</section>
+
+<!-- CLOSED BOOK -->
+<section>
+  <div class="sh"><h2>Closed Book</h2><span class="badge b-eng">TC13 · 13-CHECK</span>
+    <div class="stats"><span>Closed <b id="cb-closed"></b></span><span>Wins <b id="cb-wins"></b></span><span>WR <b id="cb-wr"></b></span><span>Net <b id="cb-net"></b></span></div></div>
+  <div class="card"><table class="tbl" id="cb-tbl"></table></div>
+</section>
+
+<!-- SCREENER + NEAR MISS -->
+<section>
+  <div class="sh"><h2>Screener</h2><span class="badge b-eng2">V1.1 · GATED · CONFIG 1.1</span>
+    <div class="stats"><span>as of 11:45 IST</span></div></div>
+  <div class="segs">
+    <div class="seg cy"><div class="k">Scanned</div><div class="v">207</div><div class="n">of 208 in universe</div></div>
+    <div class="seg gr"><div class="k">Qualified</div><div class="v">3</div><div class="n">of 207 scored</div></div>
+    <div class="seg"><div class="k">Buy qualified</div><div class="v">0</div><div class="n">101 scored on this side</div></div>
+    <div class="seg rd"><div class="k">Sell qualified</div><div class="v">3</div><div class="n">106 scored on this side</div></div>
+  </div>
+
+  <div class="toggle" id="bstoggle">
+    <button class="on" data-s="buy" type="button">▲ Buy <span class="n">0</span></button>
+    <button data-s="sell" type="button">▼ Sell <span class="n">3</span></button>
+  </div>
+
+  <div class="card" style="margin-top:10px;padding:14px 16px">
+    <div class="qhd"><span class="t">QUALIFIED</span><span class="chip" id="qchip"></span></div>
+    <table class="tbl qtbl" id="q-tbl"></table>
+
+    <details class="nm">
+      <summary>Near Miss<span class="chip">25 shown, strongest first</span></summary>
+      <table class="tbl qtbl" id="nm-tbl"></table>
+    </details>
+
+    <div class="foot">score /100 per bucket, bars BUY-MOM 65 · BUY-REV 60 · SELL-MOM 80 · SELL-REV 80 · entry gates on sector and monthly RSI · max 5 per bucket per day · target <b>+2% / SL -2%</b> · screener only, not a live signal</div>
+  </div>
+</section>
+
+<div class="foot2"><span>TC SCANNER</span><span>Last refreshed 11:45:32</span><span>All times IST</span><span style="margin-left:auto">R1 mock · dummy data</span></div>
+</div>
+
+<script>
+function fmt(v){return Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function sg(v){return (v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(2)}
+function cl(v){return v>0?'pos':v<0?'neg':'flat'}
+function prox(entry,target,sl,cmp,side){
+  var lo=side==='SELL'?target:sl, hi=side==='SELL'?sl:target;
+  var p=Math.max(0,Math.min(100,(cmp-lo)/(hi-lo)*100));
+  return '<div class="prox"><div class="prail"><div class="pdot" style="left:'+p.toFixed(1)+'%"></div></div></div>';
+}
+
+/* OPEN BOOK — real, currently in-band TC13 rows (tc_scanner_holds, 31-Aug) */
+var OPEN=[
+ {sym:'ANGELONE',side:'SELL',entry:285.05,target:279.35,sl:290.75,cmp:288.5},
+ {sym:'OBEROIRLTY',side:'SELL',entry:1867,target:1829.66,sl:1904.34,cmp:1873.3},
+ {sym:'MOTILALOFS',side:'BUY',entry:1042.8,target:1063.66,sl:1021.94,cmp:1044.0},
+ {sym:'PNB',side:'SELL',entry:115.38,target:113.07,sl:117.69,cmp:114.9},
+ {sym:'SIEMENS',side:'BUY',entry:4093.1,target:4174.96,sl:4011.24,cmp:4040.0},
+ {sym:'CONCOR',side:'BUY',entry:518.5,target:528.87,sl:508.13,cmp:514.25},
+ {sym:'GAIL',side:'BUY',entry:175.85,target:179.37,sl:172.33,cmp:172.7},
+ {sym:'INDHOTEL',side:'BUY',entry:733.45,target:748.12,sl:718.78,cmp:726.85}
+];
+document.getElementById('ob-n').textContent=OPEN.length;
+document.getElementById('ob-tbl').innerHTML='<thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL · Target</th></tr></thead><tbody>'
+ +OPEN.map(function(r){
+   var pnl=((r.cmp-r.entry)/r.entry*100*(r.side==='SELL'?-1:1));
+   return '<tr><td class="sym">'+r.sym+'</td><td><span class="side '+(r.side==='BUY'?'buy':'sell')+'">'+r.side+'</span></td>'
+    +'<td>'+fmt(r.entry)+'</td><td>'+fmt(r.target)+'</td><td>'+fmt(r.sl)+'</td><td>'+fmt(r.cmp)+'</td>'
+    +'<td class="'+cl(pnl)+'">'+sg(pnl)+'%</td><td>'+prox(r.entry,r.target,r.sl,r.cmp,r.side)+'</td></tr>';
+ }).join('')+'</tbody>';
+
+/* CLOSED BOOK — real closed rows from tc_scanner_holds, last 10 */
+var CLOSED=[
+ {sym:'OFSS',side:'BUY',entry:12081,exit:12330,reason:'TARGET',date:'28 Aug'},
+ {sym:'PREMIERENE',side:'SELL',entry:996.1,exit:1021,reason:'SL',date:'28 Aug'},
+ {sym:'FORTIS',side:'BUY',entry:922.1,exit:945.35,reason:'TARGET',date:'28 Aug'},
+ {sym:'KALYANKJIL',side:'BUY',entry:616.5,exit:635.4,reason:'TARGET',date:'27 Aug'},
+ {sym:'MOTILALOFS',side:'BUY',entry:951.7,exit:981.1,reason:'TARGET',date:'20 Aug'},
+ {sym:'LTF',side:'SELL',entry:309.1,exit:320.2,reason:'SL',date:'18 Aug'},
+ {sym:'PHOENIXLTD',side:'SELL',entry:1888.6,exit:1949.2,reason:'SL',date:'17 Aug'},
+ {sym:'MOTHERSON',side:'BUY',entry:154.25,exit:149.32,reason:'SL',date:'4 Aug'},
+ {sym:'ABB',side:'BUY',entry:7432,exit:7190,reason:'SL',date:'31 Jul'},
+ {sym:'CHOLAFIN',side:'BUY',entry:1790.8,exit:1723.6,reason:'SL',date:'28 Jul'}
+];
+var wins=CLOSED.filter(function(r){return r.reason==='TARGET'}).length;
+var net=CLOSED.reduce(function(s,r){return s+((r.exit-r.entry)/r.entry*100*(r.side==='SELL'?-1:1))},0);
+document.getElementById('cb-closed').textContent=CLOSED.length;
+document.getElementById('cb-wins').textContent=wins;
+document.getElementById('cb-wr').textContent=Math.round(wins/CLOSED.length*100)+'%';
+var netEl=document.getElementById('cb-net'); netEl.textContent=sg(net)+'%'; netEl.className=cl(net);
+document.getElementById('cb-tbl').innerHTML='<thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>P&amp;L%</th><th>Date</th></tr></thead><tbody>'
+ +CLOSED.map(function(r){
+   var pnl=((r.exit-r.entry)/r.entry*100*(r.side==='SELL'?-1:1));
+   return '<tr><td class="sym">'+r.sym+'</td><td><span class="side '+(r.side==='BUY'?'buy':'sell')+'">'+r.side+'</span></td>'
+    +'<td>'+fmt(r.entry)+'</td><td>'+fmt(r.exit)+'</td><td><span class="pill '+r.reason.toLowerCase()+'">'+r.reason+'</span></td>'
+    +'<td class="'+cl(pnl)+'">'+sg(pnl)+'%</td><td>'+r.date+'</td></tr>';
+ }).join('')+'</tbody>';
+
+/* SCREENER — Sell qualified (3, matching the live header today) + illustrative near-miss rows */
+var QUAL={buy:[],sell:[
+ {sym:'HINDPETRO',bucket:'SELL-MOM',score:82,bar:80,gates:[1,1],rank:1,cmp:361,day:-1.8,sector:'Oil & Gas'},
+ {sym:'SHREECEM',bucket:'SELL-REV',score:83,bar:80,gates:[1,1],rank:2,cmp:23900,day:-1.2,sector:'Cement'},
+ {sym:'ITC',bucket:'SELL-MOM',score:81,bar:80,gates:[1,1],rank:3,cmp:267,day:-0.9,sector:'FMCG'}
+]};
+var NEARMISS={buy:[
+ {sym:'BHARATFORG',bucket:'BUY-MOM',score:61,bar:65,gates:[1,0],rank:1,cmp:2059,day:1.4,sector:'Auto Ancl'},
+ {sym:'SONACOMS',bucket:'BUY-MOM',score:58,bar:65,gates:[1,1],rank:2,cmp:821,day:2.1,sector:'Auto Ancl'},
+ {sym:'SUNPHARMA',bucket:'BUY-REV',score:57,bar:60,gates:[1,1],rank:3,cmp:1934,day:0.8,sector:'Pharma'}
+],sell:[
+ {sym:'AMBUJACEM',bucket:'SELL-REV',score:78,bar:80,gates:[1,1],rank:4,cmp:413,day:-1.1,sector:'Cement'},
+ {sym:'ICICIPRULI',bucket:'SELL-MOM',score:76,bar:80,gates:[1,1],rank:5,cmp:512,day:-0.7,sector:'Insurance'},
+ {sym:'WIPRO',bucket:'SELL-REV',score:75,bar:80,gates:[0,1],rank:6,cmp:177,day:-0.5,sector:'IT'}
+]};
+var SIDE='buy';
+function qrow(r){
+  var pct=Math.min(100,r.score/r.bar*100);
+  return '<tr><td class="sym">'+r.sym+'</td><td>'+r.bucket+'</td>'
+   +'<td><div class="score">'+r.score+'/'+r.bar+'<div class="sbar"><i style="width:'+pct+'%"></i></div></div></td>'
+   +'<td><span class="gate '+(r.gates[0]?'pass':'fail')+'">'+(r.gates[0]?'✓':'✕')+'</span> <span class="gate '+(r.gates[1]?'pass':'fail')+'">'+(r.gates[1]?'✓':'✕')+'</span></td>'
+   +'<td>'+r.rank+'</td><td>'+fmt(r.cmp)+'</td><td class="'+cl(r.day)+'">'+sg(r.day)+'%</td><td>'+r.sector+'</td></tr>';
+}
+function paint(){
+  document.querySelectorAll('#bstoggle button').forEach(function(b){b.classList.toggle('on',b.dataset.s===SIDE)});
+  var q=QUAL[SIDE], nm=NEARMISS[SIDE];
+  document.getElementById('qchip').textContent=q.length+' qualified · '+(SIDE==='buy'?101:106)+' scored on this side';
+  document.getElementById('q-tbl').innerHTML='<thead><tr><th>Symbol</th><th>Bucket</th><th>Score / Bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th></tr></thead><tbody>'
+   +(q.length?q.map(qrow).join(''):'<tr class="empty-row"><td colspan="8">No '+SIDE.toUpperCase()+' signal clears both its score bar and its gates right now</td></tr>')+'</tbody>';
+  document.getElementById('nm-tbl').innerHTML='<thead><tr><th>Symbol</th><th>Bucket</th><th>Score / Bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th></tr></thead><tbody>'
+   +nm.map(qrow).join('')+'</tbody>';
+}
+document.getElementById('bstoggle').addEventListener('click',function(e){
+  var b=e.target.closest('button'); if(!b)return; SIDE=b.dataset.s; paint();
+});
+paint();
+
+function tick(){var n=new Date(),i=new Date(n.getTime()+(n.getTimezoneOffset()*60000)+19800000);
+  document.getElementById('clk').textContent=[i.getHours(),i.getMinutes(),i.getSeconds()].map(function(x){return String(x).padStart(2,'0')}).join(':')}
+setInterval(tick,1000);tick();
+var root=document.documentElement,btn=document.getElementById('themeBtn');
+btn.onclick=function(){var l=root.getAttribute('data-theme')==='light';if(l){root.removeAttribute('data-theme');btn.textContent='Light'}else{root.setAttribute('data-theme','light');btn.textContent='Dark'}};
+</script>
+</body>
+</html>
