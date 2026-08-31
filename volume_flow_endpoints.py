@@ -50,23 +50,32 @@ _ALLOWED_TICKS = (25, 50, 100, 500)
 def _flow_window(cur, symbols, ticks):
     """cc#1455: the green/red flow window, extracted from volume_flow() so the Quality Bullish
     deck reuses THIS derivation at ticks=50 instead of a second copy. Last `ticks` 5-min bars
-    per symbol, one set-based pass. {symbol: {bars, last_ts, last_close, green, red, total}}."""
+    per symbol. {symbol: {bars, last_ts, last_close, green, red, total}}.
+
+    cc#1497 PERF REWRITE (session_log 34383): the original full-partition ROW_NUMBER scanned and
+    disk-sorted every fyers_eq row (~697K over 13 months) on every call — idx_intraday_symbol_ts
+    (symbol, ts DESC) was unusable by that shape. This per-symbol LATERAL walks that index top-N
+    per symbol instead: EXPLAIN ANALYZE on the live table went from a parallel seq scan + 12MB
+    external merge sort at ~695ms to 208 index searches at ~69ms, and the output was proven
+    IDENTICAL by a full-outer-join diff on all six fields, all 207 active symbols, at ticks=50
+    and 500 (0 mismatches). last_close is the max-ts row's close, exactly what rn=1 selected."""
     cur.execute("""
-        WITH b AS (
-            SELECT symbol, ts, open, close, volume,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+        SELECT s.sym                                              AS symbol,
+               COUNT(*)                                           AS bars,
+               MAX(x.ts)                                          AS last_ts,
+               (array_agg(x.close ORDER BY x.ts DESC))[1]         AS last_close,
+               COALESCE(SUM(x.volume) FILTER (WHERE x.close > x.open), 0) AS green_vol,
+               COALESCE(SUM(x.volume) FILTER (WHERE x.close < x.open), 0) AS red_vol,
+               COALESCE(SUM(x.volume), 0)                         AS total_vol
+        FROM unnest(%(syms)s::text[]) AS s(sym)
+        CROSS JOIN LATERAL (
+            SELECT ts, open, close, volume
             FROM intraday_prices
-            WHERE source = 'fyers_eq' AND symbol = ANY(%(syms)s)
-        )
-        SELECT symbol,
-               COUNT(*)                                        AS bars,
-               MAX(ts)                                         AS last_ts,
-               MAX(close) FILTER (WHERE rn = 1)                AS last_close,
-               COALESCE(SUM(volume) FILTER (WHERE close > open), 0) AS green_vol,
-               COALESCE(SUM(volume) FILTER (WHERE close < open), 0) AS red_vol,
-               COALESCE(SUM(volume), 0)                        AS total_vol
-        FROM b WHERE rn <= %(n)s
-        GROUP BY symbol
+            WHERE symbol = s.sym AND source = 'fyers_eq'
+            ORDER BY ts DESC
+            LIMIT %(n)s
+        ) x
+        GROUP BY s.sym
     """, {"syms": list(symbols), "n": ticks})
     return {r[0]: {"bars": r[1], "last_ts": r[2], "last_close": r[3],
                    "green": int(r[4]), "red": int(r[5]), "total": int(r[6])}
