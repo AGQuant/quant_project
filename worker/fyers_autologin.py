@@ -615,9 +615,23 @@ def try_relogin(conn):
     cc#883: 'skipped' now covers the whole ladder — the 90s spacing breaker, the
     escalating sleep, the day halt and the permanent block. All of them mean the same
     thing to the caller (we did not contact Fyers, do not treat it as a broker failure),
-    so they are reported the same way."""
+    so they are reported the same way.
+
+    cc#1511: this wrapper is ALSO where the fyers_token_relogin scheduler_master row gets
+    its run data — the one choke point every call site passes through, so one copy. The
+    row records ONLY when Fyers was actually contacted: a 'skipped' ladder result means we
+    never attempted, and per the card an event job that has never fired is CORRECT, not
+    stale — recording a skip would fabricate an attempt. Uses the app's record_run (its
+    own short conn, never raises), wrapped again so telemetry can never affect auth."""
+    def _record(status, err=None):
+        try:
+            import scheduler_master
+            scheduler_master.record_run("fyers_token_relogin", status, err, None)
+        except Exception as e2:
+            log.warning(f"cc#1511 relogin heartbeat write failed (telemetry only): {e2}")
     try:
         tok = auto_login(conn)
+        _record('ok')
         return {'ok': True, 'token': tok, 'skipped': False, 'error': None}
     except SystemExit as e:
         msg = str(e)
@@ -625,8 +639,11 @@ def try_relogin(conn):
         skipped = any(w in low for w in
                       ('skipped', 'cooldown', 'block protection', 'sleeping',
                        'stopped for today', 'halted', 'db wedge'))
+        if not skipped:
+            _record('error', msg)   # a real attempt that failed; a skip is not an attempt
         return {'ok': False, 'token': None, 'skipped': skipped, 'error': msg}
     except Exception as e:
+        _record('error', str(e))
         return {'ok': False, 'token': None, 'skipped': False, 'error': str(e)}
 
 
