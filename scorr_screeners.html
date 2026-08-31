@@ -45,6 +45,10 @@
   .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
             margin-left:5px;vertical-align:middle}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* cc#1516: tap-to-sort headers — same convention as the v10 cards (cc#1430/1437): neutral ↕ on
+     every sortable header so a touch reader knows it is tappable, single ▲/▼ on the active one. */
+  thead th.srt{cursor:pointer;user-select:none}
+  thead th.srt.on{color:var(--txt)}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
   @media(max-width:760px){
     .wrap{padding:12px 10px 64px}
@@ -111,6 +115,9 @@ function renderTabs(){
 
 function pick(id){
   CUR = id; renderTabs();
+  // cc#1516 scope 5: sort state does NOT carry across screens — a fresh tab starts in its own
+  // server default order.
+  SORT.key = null; SORT.dir = 1; VIEW = null;
   document.getElementById('body').innerHTML =
     '<tr><td colspan="20" class="empty">Loading…</td></tr>';
   fetchWithTimeout('/api/screeners/'+id,{headers:{Accept:'application/json'}})
@@ -121,15 +128,77 @@ function pick(id){
     });
 }
 
+/* cc#1516 (session_log 34683 SCREENERS_TABLE_SORT_V1): tap-to-sort on every column, client-side
+   over the already-fetched rows — no network call per sort. The sort core is the app's existing
+   pattern (scorr_v10_signal.html cc#1430/1437, itself reused from scorr_result_corner): one
+   {key, dir} state, nulls always last, ▲/▼ on the active header, neutral ↕ elsewhere. Symbol
+   defaults ascending on first tap; every numeric column and Added On default descending. The
+   INITIAL order is untouched — SORT.key stays null until the first tap, and _sortByState passes
+   the list through unchanged, so first render is exactly the server rank. */
+var SORT = { key: null, dir: 1 }, VIEW = null;
+
+function _sortByState(list, state, getters){
+  if (!state || !state.key) return list;
+  var get = getters[state.key];
+  return list.slice().sort(function(a, b){
+    var av = get(a), bv = get(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;    // nulls sort last regardless of direction — never implies zero
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * state.dir;
+    return (av - bv) * state.dir;
+  });
+}
+function scrTh(label, key, extraCls){
+  var on = SORT.key === key;
+  var arrow = on ? (SORT.dir === 1 ? ' ▲' : ' ▼') : ' ↕';
+  return '<th class="srt'+(extraCls?' '+extraCls:'')+(on?' on':'')
+    +'" onclick="scrSort(\''+key+'\')">'+esc(label)+arrow+'</th>';
+}
+function scrSort(key){
+  if(!VIEW) return;
+  if(SORT.key===key) SORT.dir = -SORT.dir;
+  else { SORT.key = key; SORT.dir = VIEW.defDir[key] != null ? VIEW.defDir[key] : -1; }
+  paintScreen();
+}
+
 function renderScreen(d){
   if(!d || d.status!=='ok'){ return; }
   var cols = d.columns || [];
-  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · <screen's own fields> · Added On
-  var head = ['<th>Sr</th>','<th>Symbol</th>','<th class="num">CMP</th>','<th class="num">Day%</th>',
-              '<th class="num">GVM</th>'];
   var shown = cols.filter(function(c){ return c.key!=='gvm_score'; });   // GVM already has its column
-  shown.forEach(function(c){ head.push('<th class="num">'+esc(c.label)+'</th>'); });
-  head.push('<th>Added On</th>');
+  // Getters return the raw comparable value — numbers as numbers, Added On as the real epoch of
+  // first_seen (never the formatted display string, so date order survives a year boundary).
+  var getters = {
+    SYMBOL: function(r){ return (r.symbol||'').toUpperCase(); },
+    CMP:    function(r){ return (r.cmp==null||isNaN(Number(r.cmp)))?null:Number(r.cmp); },
+    DAY:    function(r){ return (r.day_pct==null||isNaN(Number(r.day_pct)))?null:Number(r.day_pct); },
+    GVM:    function(r){ var v=(r.metrics||{}).gvm_score;
+                         return (v==null||isNaN(Number(v)))?null:Number(v); },
+    ADDED:  function(r){ if(!r.first_seen) return null;
+                         var t=new Date(r.first_seen+'T00:00:00').getTime();
+                         return isNaN(t)?null:t; }
+  };
+  var defDir = { SYMBOL:1, CMP:-1, DAY:-1, GVM:-1, ADDED:-1 };
+  var labels = { SYMBOL:'Symbol', CMP:'CMP', DAY:'Day%', GVM:'GVM', ADDED:'Added On' };
+  shown.forEach(function(c){
+    var k = 'm_'+c.key;   // prefixed so a screen field can never collide with a fixed key
+    getters[k] = (function(key){ return function(r){
+      var v=(r.metrics||{})[key];
+      return (v==null||v===''||isNaN(Number(v)))?null:Number(v);
+    };})(c.key);
+    defDir[k] = -1; labels[k] = c.label;
+  });
+  VIEW = { d:d, shown:shown, getters:getters, defDir:defDir, labels:labels };
+  paintScreen();
+}
+
+function paintScreen(){
+  var d = VIEW.d, shown = VIEW.shown;
+  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · <screen's own fields> · Added On
+  var head = ['<th>Sr</th>', scrTh('Symbol','SYMBOL',''), scrTh('CMP','CMP','num'),
+              scrTh('Day%','DAY','num'), scrTh('GVM','GVM','num')];
+  shown.forEach(function(c){ head.push(scrTh(c.label,'m_'+c.key,'num')); });
+  head.push(scrTh('Added On','ADDED',''));
   document.getElementById('head').innerHTML = head.join('');
 
   var rows = d.rows || [];
@@ -140,6 +209,7 @@ function renderScreen(d){
     document.getElementById('meta').textContent = d.name + ' · 0 members';
     return;
   }
+  rows = _sortByState(rows, SORT, VIEW.getters);
   document.getElementById('body').innerHTML = rows.map(function(r,i){
     var m = r.metrics||{};
     var tds = ['<td class="num">'+(i+1)+'</td>'];
@@ -158,8 +228,12 @@ function renderScreen(d){
     tds.push('<td>'+fmtDate(r.first_seen)+'</td>');
     return '<tr>'+tds.join('')+'</tr>';
   }).join('');
+  // The meta line must never claim an order the table is not in: server sort_key until the reader
+  // sorts, then the active column + direction.
   document.getElementById('meta').textContent =
-    d.name + ' · ' + rows.length + ' stocks · sorted by ' + (d.sort_key||'GVM');
+    d.name + ' · ' + rows.length + ' stocks · sorted by '
+    + (SORT.key ? (VIEW.labels[SORT.key]||SORT.key) + (SORT.dir===1?' ▲':' ▼')
+                : (d.sort_key||'GVM'));
 }
 
 fetchWithTimeout('/api/screeners',{headers:{Accept:'application/json'}})
