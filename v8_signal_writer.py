@@ -1361,25 +1361,33 @@ def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: flo
 
 
 def _entry_guards(conn, sym: str, paper_side: str, basket: str, d: date, cmp: float,
-                  sim_ts=None, basket_scoped: bool = False) -> bool:
+                  sim_ts=None, basket_scoped: bool = False) -> Optional[str]:
     """cc#217 P2: shared pre-entry gate for all three auto-entry fns — the ~70%-duplicated
     guard block. In order (identical to the old inline sequence): earnings blackout ->
     same-side OPEN -> traded-today (basket-scoped for the SO/S1B dedicated pools, generic
     trades+positions for standard baskets) -> founder-locked opposite-side conflict policy.
-    Returns True to PROCEED, False to SKIP. Fail-closed (any guard-query error => SKIP)."""
+
+    cc#1513: returns None to PROCEED, else the BLOCK REASON — same decision order, same
+    fail-closed outcomes, only the boolean became a name so the caller can write the
+    v8_paper_missed row the locked spec (session_log 37) always defined. Two reasons the
+    caller must NOT ledger: 'conflict' (v8_paper._resolve_conflict already wrote its own
+    opposite_open / conflict_exit_blocked row — the one writer path that ever did) and
+    'guard_error' (an infra fail-closed is not a decline reason)."""
     try:
         if guards.blackout(conn, sym, _today(sim_ts)):
             log.debug(f"auto_paper {sym}: skipped -- blackout")
-            return False
+            return "blackout"
         if guards.has_open(conn, sym, paper_side):
-            return False
+            return "has_open"
         if guards.traded_today(conn, sym, paper_side, d, basket=(basket if basket_scoped else None)):
-            return False
+            return "traded_today"
     except Exception as e:
         log.warning(f"entry guards {sym} {paper_side}: {e} — skipping entry (fail-closed)")
-        return False
+        return "guard_error"
     # opposite-side conflict policy (block same-day / CONFLICT_EXIT next-day); own try inside
-    return _conflict_ok(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts)
+    if not _conflict_ok(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
+        return "conflict"
+    return None
 
 
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
@@ -1401,16 +1409,58 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     except Exception as e:
         log.debug(f"auto_paper {sym}: fo_ban check skipped ({e})")
 
-    now_ist = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
-    if not guards.in_entry_window(now_ist):   # cc#217 P2: was inline 09:15-15:20 block
-        log.debug(f"auto_paper {sym}: skipped -- outside market hours {now_ist.strftime('%H:%M')} IST")
-        return
-
     paper_side = _PAPER_SIDE_MAP.get(side, "LONG")
     pp, r1, s1 = pv["pp"], pv["r1"], pv["s1"]
 
+    # cc#1513: the WOULD-BE levels, computed here (pure reads, no side effects — this is the
+    # exact block that used to sit below the guards, MOVED not duplicated) so every decline
+    # below can write an honest v8_paper_missed row with the levels the entry would have used.
+    # Which symbols enter is untouched: every check below short-circuits exactly as before.
+    _m_entry = round(cmp, 2)
+    if target is not None and stop is not None:
+        # cc#378: caller-supplied FROZEN levels (sell_reversal V5-D: S1/S2-dynamic target + 1:1
+        # mirror stop, computed in the dedicated handler) — used verbatim, no basket recompute.
+        _m_target, _m_stop = round(target, 2), round(stop, 2)
+    elif basket == "buy_momentum":
+        # cc#359 V2 (spec id=2834): fixed +/-3.0% 1:1, frozen at entry (replaces R1/mirror).
+        _m_target, _m_stop = round(_m_entry * 1.03, 2), round(_m_entry * 0.97, 2)
+    elif basket == "sell_momentum":
+        # cc#380 V3 (spec id=2901): fixed -/+3.0% 1:1 SHORT (target below, stop above).
+        _m_target, _m_stop = round(_m_entry * 0.97, 2), round(_m_entry * 1.03, 2)
+    elif basket == "buy_reversal":
+        # cc#502 BUY_REVERSAL_V5: fixed +3.0%/-3.0% 1:1, frozen at entry.
+        _m_target, _m_stop = round(_m_entry * 1.03, 2), round(_m_entry * 0.97, 2)
+    elif paper_side == "LONG":
+        _m_target, _m_stop = round(r1, 2), round(_m_entry - (r1 - _m_entry), 2)
+    else:
+        _m_target, _m_stop = round(s1, 2), round(_m_entry + (_m_entry - s1), 2)
+
+    def _miss(reason):
+        # cc#1513: reuse v8_paper._log_missed (the one insert; UNIQUE(miss_date,symbol,side)
+        # means the day's FIRST reason wins and later ticks land on DO NOTHING — accepted per
+        # the card). Never allowed to break the entry path.
+        try:
+            import v8_paper
+            v8_paper._log_missed(conn, d, sym, paper_side, basket, _m_entry, _m_target, _m_stop, reason)
+        except Exception as e:
+            log.warning(f"cc#1513 miss-ledger write {sym} {reason}: {e} — entry path unaffected")
+
+    now_ist = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
+    if not guards.in_entry_window(now_ist):   # cc#217 P2: was inline 09:15-15:20 block
+        log.debug(f"auto_paper {sym}: skipped -- outside market hours {now_ist.strftime('%H:%M')} IST")
+        # cc#1513: name the true timing reason — before the 09:30 cool-off vs after the cut.
+        # The window itself is unchanged (guards.in_entry_window is still the choke point).
+        _miss("before_cooloff" if now_ist.time() < time(9, 30) else "after_cutoff")
+        return
+
     # cc#217 P2: shared blackout + same-side-open + traded-today (generic) + conflict policy
-    if not _entry_guards(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
+    _g_reason = _entry_guards(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts)
+    if _g_reason is not None:
+        # 'conflict' rows are written by _resolve_conflict itself (opposite_open /
+        # conflict_exit_blocked — the ledger's one historically-live path); 'guard_error' is
+        # infra fail-closed, not a decline. Everything else is ledgered here.
+        if _g_reason not in ("conflict", "guard_error"):
+            _miss(_g_reason)
         return
 
     # cc#714: the s1_reclaim_obs observation basket is RING-FENCED — its dedicated 2-concurrent cap
@@ -1435,37 +1485,20 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         short_open = counts.get("SHORT", 0)
         if paper_side == "LONG"  and long_open  >= buy_slots:
             log.info(f"auto_paper {sym}: slot_full LONG ({long_open}/{buy_slots})")
+            _miss("slot_full")   # cc#1513: the burst accumulator alerts; the ledger answers WHY
             _record_slot_block("LONG", sym, long_open, buy_slots); return   # cc#256
         if paper_side == "SHORT" and short_open >= sell_slots:
             log.info(f"auto_paper {sym}: slot_full SHORT ({short_open}/{sell_slots})")
+            _miss("slot_full")   # cc#1513
             _record_slot_block("SHORT", sym, short_open, sell_slots); return   # cc#256
       except Exception as e:
         log.warning(f"auto_paper slot check {sym}: {e}"); return
 
-    entry = round(cmp, 2)
-    if target is not None and stop is not None:
-        # cc#378: caller-supplied FROZEN levels (sell_reversal V5-D: S1/S2-dynamic target + 1:1
-        # mirror stop, computed in the dedicated handler) — used verbatim, no basket recompute.
-        target = round(target, 2)
-        stop   = round(stop, 2)
-    elif basket == "buy_momentum":
-        # cc#359 V2 (spec id=2834): fixed +/-3.0% 1:1, frozen at entry (replaces R1/mirror).
-        target = round(entry * 1.03, 2)
-        stop   = round(entry * 0.97, 2)
-    elif basket == "sell_momentum":
-        # cc#380 V3 (spec id=2901): fixed -/+3.0% 1:1 SHORT (target below, stop above); replaces V2 pivot.
-        target = round(entry * 0.97, 2)
-        stop   = round(entry * 1.03, 2)
-    elif basket == "buy_reversal":
-        # cc#502 BUY_REVERSAL_V5: fixed +3.0%/-3.0% 1:1, frozen at entry (replaces R1-target/mirror).
-        target = round(entry * 1.03, 2)
-        stop   = round(entry * 0.97, 2)
-    elif paper_side == "LONG":
-        target = round(r1, 2)
-        stop   = round(entry - (r1 - entry), 2)
-    else:
-        target = round(s1, 2)
-        stop   = round(entry + (entry - s1), 2)
+    # cc#1513: the level derivation MOVED above the guards (so declines can be ledgered with
+    # the levels the entry would have used) — these are the SAME values, assigned not
+    # recomputed. The per-basket comments travel with the block above: cc#378 caller-frozen,
+    # cc#359 V2 / cc#380 V3 / cc#502 V5 fixed ±3.0%, else pivot target + 1:1 mirror.
+    entry, target, stop = _m_entry, _m_target, _m_stop
 
     try:
         with conn.cursor() as cur:
