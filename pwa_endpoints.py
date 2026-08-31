@@ -367,7 +367,10 @@ PWA_JS = """
     // is deliberately not an entry. cc#846 had re-added it here; the founder has since placed it.
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     ['/v13', '\\u25a4', 'V13'],
-    ['/health', '\\u2695', 'Health'],
+    // cc#1520 (founder 31-Aug): Health REMOVED from the nav, same pattern as cc#822 Holdings —
+    // the /health route is UNCHANGED and still loads by typed URL; its one visible entry point
+    // is now a masthead button on the Adaptive Dashboard (scorr_adaptive.html). Recorded as
+    // typed-url in main.py NAV_REGISTRY (rule id=2987).
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     // cc#822: Holdings REMOVED from the nav. The /holdings route is UNCHANGED and still loads by
