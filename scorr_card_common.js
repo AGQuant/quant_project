@@ -357,7 +357,11 @@
     { href: '/m/v8',     icon: '\u25b3', label: 'V8' },
     { href: '/m/gvm',    icon: '\u25c8', label: 'GVM' },
     { href: '/m/check',  icon: '\u25ce', label: 'Check' },
-    { href: '/m/intel',  icon: '\u25a4', label: 'Intel' }
+    /* cc#1506 (MANUAL_TRADE_ALERTS_V1, 34521): slot 5 Intel -> Alerts. /m/intel (news) stays
+       fully live via the More sheet and Home links; only its NAV SLOT moved. This block is the
+       nav's single owner, so this line IS the live change \u2014 the per-template .bnav edits in the
+       same card are the no-JS fallback kept consistent. */
+    { href: '/m/alerts', icon: '\u25ec', label: 'Alerts' }
   ];
   /* deeper screens highlight their parent slot. cc#897: the three that pointed at /m/models were
      REPOINTED to /m/home — a parent that is no longer a slot highlights nothing, which reads as a

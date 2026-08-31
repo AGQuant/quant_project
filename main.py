@@ -276,6 +276,11 @@ PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # 
 PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
 PROTECTED.add("/m/trades")   # cc#991: Wall of Trades, app screen
 PROTECTED.add("/m/v10")      # cc#1069: V10 signal view — gated like every other /m/ screen
+# cc#1506: Alerts feed. PROTECTED only, deliberately NOT _PWA_INJECT_PATHS — the cc#874 rule
+# above: /m/ screens carry their own 5-slot bottom nav, and injecting pwa.js's would put two
+# navigations on one screen. (The card's checklist named both sets; this file's own doctrine
+# for every sibling /m/ screen is PROTECTED-only, and that is what is followed.)
+PROTECTED.add("/m/alerts")
 PROTECTED.add("/m/models")   # cc#886 slot 5
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
@@ -1348,6 +1353,9 @@ NAV_REGISTRY = {
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     # APP_QA_R4 P11: mirrors the NAV array entry added in pwa_endpoints.py (rule 2987).
     "/m/v10":        ("Index Intel (mobile)",  "nav-mobile"),
+    # cc#1506: Alerts takes the app bar's 4th slot (was Intel); /m/intel and /m/v10 both stay
+    # reachable via the More sheet entries above — nothing stranded (rule 2987).
+    "/m/alerts":     ("Alerts (mobile)",       "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
     "/m/models":     ("Models — de-listed, reachable by typed URL", "typed-url"),   # cc#995: removed from nav (route + ScorrModels stay)
     # cc#991: Wall of Trades. TWO routes, one endpoint. Neither carries a NAV-array entry, and

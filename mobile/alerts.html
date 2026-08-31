@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alerts · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<script src="/scorr_card_common.js"></script>
+</head>
+<body>
+<!--
+  cc#1506 — ALERTS FEED (MANUAL_TRADE_ALERTS_V1, session_log 34521). The app's manual
+  trade-alert channel: the founder sets price triggers (create flow is cc#1507), the 5-min
+  engine flips them to triggered (cc#1504), and this feed is where they land.
+
+  CHAT ORDER, DELIBERATELY: cards render OLDEST-first top-to-bottom with the NEWEST at the
+  BOTTOM, and the page auto-scrolls there on load — the one deliberate departure from this
+  app's newest-first convention, per 34521 ("like a chat with the engine"). The raw API
+  (/api/alerts/list) stays newest-first; the reversal is DISPLAY-ONLY, done here.
+
+  Approve on a TRIGGERED card posts to /api/alerts/approve — live since cc#1505 (main 2a7de67),
+  so this is a real wire, not a stub. approved_price comes back from the server (the resolver
+  price at the click, never the trigger) and is rendered as the confirmation. Deeper approve UX
+  belongs to cc#1508 and is not built ahead here.
+-->
+<div class="screen">
+
+  <div class="head">
+    <h1>Alerts</h1>
+    <div class="s" id="sub">loading…</div>
+  </div>
+
+  <div class="body" id="body">
+    <div class="loading">Loading alerts…</div>
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn on" href="/m/alerts"><span class="i">◬</span>Alerts</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+
+<script>
+var STATE = { alerts: [] };
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* status -> the shared sentiment-chip colours: pending waits (neutral), triggered demands a
+   decision (cautious), approved is action taken (bull), dismissed is closed (bear). */
+function stClass(s){
+  return s === 'approved' ? 'bull' : s === 'triggered' ? 'caut' : s === 'dismissed' ? 'bear' : 'neut';
+}
+
+/* API timestamps are "YYYY-MM-DD HH:MM:SS...+00:00" (UTC). Rendered as IST date+time, minute
+   precision — never a raw offset string on glass. */
+function istStamp(ts){
+  if (!ts) return '';
+  var d = new Date(String(ts).replace(' ', 'T'));
+  if (isNaN(d)) return String(ts).slice(0, 16);
+  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
+  var mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i.getMonth()];
+  var hh = ('0' + i.getHours()).slice(-2), mm = ('0' + i.getMinutes()).slice(-2);
+  return i.getDate() + ' ' + mo + ' · ' + hh + ':' + mm;
+}
+
+function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+
+function card(a){
+  var st = String(a.status || 'pending');
+  var dirCls = a.direction === 'BUY' ? 'bull' : 'bear';
+  var line2 = 'Trigger ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price);
+  var when = '';
+  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price);
+  else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
+  else when = 'set ' + istStamp(a.created_at);
+  /* Approve renders ONLY on a triggered card — the server enforces the same rule (409 from any
+     other status), the button just does not offer what cannot happen. */
+  var act = st === 'triggered'
+    ? '<div class="al-act"><button class="chip" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve ›</button></div>'
+    : '';
+  return '<div class="c slab dense" id="al-' + a.id + '">'
+    + '<div class="meta">'
+      + '<span class="tag ' + dirCls + '">' + esc(a.direction) + '</span>'
+      + '<span class="tag ' + stClass(st) + '">' + esc(st.toUpperCase()) + '</span>'
+      + '<span class="when">' + esc(when) + '</span>'
+    + '</div>'
+    + '<div class="hl">' + esc(a.symbol) + '</div>'
+    + '<div class="sum">' + esc(line2) + (a.notes ? ' · ' + esc(a.notes) : '') + '</div>'
+    + act
+    + '</div>';
+}
+
+function render(scrollToEnd){
+  /* the API is newest-first (its own contract); the chat view reverses for display only */
+  var list = STATE.alerts.slice().reverse();
+  var n = { pending: 0, triggered: 0, approved: 0, dismissed: 0 };
+  STATE.alerts.forEach(function(a){ if (n[a.status] != null) n[a.status]++; });
+  document.getElementById('sub').textContent = STATE.alerts.length
+    ? (STATE.alerts.length + ' alerts · ' + n.pending + ' pending · ' + n.triggered + ' triggered')
+    : 'no alerts yet';
+  document.getElementById('body').innerHTML = list.length
+    ? list.map(card).join('')
+    : '<div class="empty"><b>No alerts yet</b>Set a price trigger and it lands here.</div>';
+  if (scrollToEnd) {
+    /* newest sits at the bottom — open the page there, like a chat */
+    requestAnimationFrame(function(){ window.scrollTo(0, document.body.scrollHeight); });
+  }
+}
+
+function approve(id){
+  var btn = document.getElementById('ap-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+  fetchWithTimeout('/api/alerts/approve', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok) throw new Error((x.d && x.d.detail) || 'approve failed');
+      for (var i = 0; i < STATE.alerts.length; i++)
+        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
+      render(false);   /* in-place update — the reader's scroll position stays put */
+    })
+    .catch(function(e){
+      if (btn) { btn.disabled = false; btn.textContent = 'Approve ›'; }
+      /* the server's reason, on glass — a silent failure would read as a dead button */
+      var cardEl = document.getElementById('al-' + id);
+      if (cardEl && !cardEl.querySelector('.al-err')) {
+        var err = document.createElement('div');
+        err.className = 'sum al-err';
+        err.textContent = 'Could not approve — ' + e.message;
+        cardEl.appendChild(err);
+      }
+    });
+}
+
+function load(first){
+  fetchWithTimeout('/api/alerts/list?status=all&limit=200')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      STATE.alerts = d.alerts || [];
+      render(!!first);
+    })
+    .catch(function(e){
+      document.getElementById('body').innerHTML =
+        '<div class="empty"><b>Could not load alerts</b>' + esc(e.message) +
+        '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+      document.getElementById('sub').textContent = 'failed to load';
+    });
+}
+load(true);
+/* the engine sweeps every 5 minutes (cc#1504); refreshing on the same cadence keeps a
+   just-triggered card from waiting on a manual reload. In-place, no scroll jump. */
+setInterval(function(){ load(false); }, 300000);
+</script>
+</body>
+</html>

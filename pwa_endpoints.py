@@ -401,6 +401,10 @@ PWA_JS = """
     // package names the label "Index Intel", and that is the label the APP shows; this array
     // is the DESKTOP navbar, where the suffix is what distinguishes it from the web page.
     ['/m/v10', '\\u25d0', 'Index Intel (mobile)', 'm'],
+    // cc#1506: the Alerts feed (trade alerts, 34521). The APP BAR's Intel slot now points here;
+    // /m/intel and /m/v10 keep these More-sheet entries as their secondary access (rule 2987 —
+    // nothing stranded).
+    ['/m/alerts', '\\u25ec', 'Alerts (mobile)', 'm'],
     ['/m/results', '\\u25f7', 'Results (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
@@ -432,7 +436,8 @@ PWA_JS = """
   // is the More sheet, and Models sits INSIDE the app's own five-slot bar on every /m/* template.
   // The sheet is kept rather than replaced by a Models button, because it is what guarantees
   // nothing is stranded (rule 2987) on the legacy pages this bar renders on.
-  var PRIMARY = ['/m/home', '/m/gvm', '/m/check', '/m/intel'];
+  // cc#1506: the Intel slot becomes Alerts — same swap as every /m/ template's own bnav.
+  var PRIMARY = ['/m/home', '/m/gvm', '/m/check', '/m/alerts'];
   if (!document.getElementById('pwa-mobile-nav')) {
     var nav = document.createElement('div');
     nav.className = 'pwa-mnav'; nav.id = 'pwa-mobile-nav';

@@ -26,9 +26,17 @@ import logging
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 log = logging.getLogger("scorr.trade_alerts")
 router = APIRouter()
+
+
+# cc#1506: the Alerts feed screen — mobile/alerts.html via the shared promoted-template reader.
+@router.get("/m/alerts", response_class=HTMLResponse)
+def m_alerts():
+    from mobile_endpoints import _page
+    return _page("alerts")
 
 DIRECTIONS = ("BUY", "SELL")
 CONDITIONS = ("ABOVE", "BELOW")
