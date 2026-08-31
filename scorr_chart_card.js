@@ -71,6 +71,15 @@ var _full = false;                // cc#779: fullscreen state
   var _land = false;                // cc#959: CSS-rotation landscape fallback is active (iOS / lock refused)
   var _fsBound = false;             // cc#959: fullscreenchange listeners attached once
   var GVM_COL = "#7b6bd6";          // muted violet — distinct from price/pivot/fib/VWAP palettes
+  // cc#1501: pillar sub-toggle for the GVM overlay line. One line, four selectable fields — the
+  // /api/gvm/history payload already carries all four, so a mode switch is a re-render, never a
+  // refetch. Colours are the app's EXISTING pillar colours (scorr_cio_dashboard.html C.gPillar/
+  // vPillar/mPillar), not new ones; GVM keeps its violet.
+  var _gvmMode = "gvm";             // gvm | g | v | m — resets to "gvm" on every open()
+  var GVM_FIELDS = { gvm: "gvm_score", g: "g_score", v: "v_score", m: "m_score" };
+  var GVM_MODE_COL = { gvm: GVM_COL, g: "#2FD48B", v: "#F5B94A", m: "#4D7CFE" };
+  var GVM_MODE_TIP = { gvm: "Full GVM score", g: "G — Growth (profitability)", v: "V — Value (valuation)", m: "M — Momentum (price returns)" };
+  var _gvmCache = null, _gvmCacheKey = null;   // last /api/gvm/history payload, keyed sym|days
   // cc#800: the GVM axis bounds live here so the pin has ONE source. The scale is conceptually
   // 0-10 and must never be derived from the data — that is the bug this fixes.
   var GVM_MIN = 0, GVM_MAX = 10;
@@ -534,6 +543,38 @@ var _full = false;                // cc#779: fullscreen state
       if (!gBlocked) b.onclick = function () { _toggleOv("gvm"); };
       host.appendChild(b);
     })();
+    // cc#1501: pillar sub-toggle row — GVM / G / V / M. Rendered ONLY while the GVM overlay chip
+    // is on and not blocked (nothing to switch between otherwise); its own secondary row above the
+    // chart, same visual grammar as the chips, just smaller. A tap re-renders the line from the
+    // cached payload — see _applyGvm().
+    var mrow = document.getElementById("scorrGvmModes");
+    var gvmRowOn = !_index && _ov.gvm && _tf !== "5m";
+    if (!gvmRowOn) { if (mrow) mrow.remove(); }
+    else {
+      if (!mrow) {
+        mrow = document.createElement("div");
+        mrow.id = "scorrGvmModes";
+        var boxEl = document.getElementById("scorrChartBox");
+        boxEl.parentNode.insertBefore(mrow, boxEl);
+      }
+      mrow.style.cssText = "display:flex;gap:4px;justify-content:flex-end;align-items:center;padding:6px 16px 0";
+      mrow.innerHTML = "";
+      [["gvm", "GVM"], ["g", "G"], ["v", "V"], ["m", "M"]].forEach(function (o) {
+        var mb = document.createElement("button");
+        mb.textContent = o[1];
+        var mOn = (_gvmMode === o[0]);
+        mb.style.cssText = "padding:3px 8px;border-radius:6px;font:700 10px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
+          ";background:" + (mOn ? GVM_MODE_COL[o[0]] : p.btn) + ";color:" + (mOn ? "#fff" : p.mut);
+        mb.title = GVM_MODE_TIP[o[0]];
+        mb.onclick = function () {
+          if (_gvmMode === o[0]) return;
+          _gvmMode = o[0];
+          _paintChrome();
+          _applyGvm();
+        };
+        mrow.appendChild(mb);
+      });
+    }
   }
   function _toggleOv(kind) {
     _ov[kind] = !_ov[kind];
@@ -556,14 +597,25 @@ var _full = false;                // cc#779: fullscreen state
     if (!_ov.gvm || _tf === "5m") return;
     var days = TF[_tf] || 365;
     var sym = _sym;
+    // cc#1501: the payload carries all four pillar fields, so a mode switch on the same
+    // symbol+window re-renders from the cache — one fetch per symbol per timeframe, not per tap.
+    var cacheKey = sym + "|" + days;
+    if (_gvmCache && _gvmCacheKey === cacheKey) { _renderGvmLine(_gvmCache); return; }
     _getJSON("/api/gvm/history/" + encodeURIComponent(sym) + "?days=" + Math.min(days + 5, 2500))
       .then(function (d) {
         if (!_chart || _sym !== sym || !_ov.gvm) return;           // modal closed / symbol changed mid-flight
-        var pts = ((d && d.points) || []).filter(function (r) { return r.gvm_score != null; })
-          .map(function (r) { return { time: String(r.score_date).slice(0, 10), value: +r.gvm_score }; })
-          .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
-        if (!pts.length) return;
-        if (GVM_SMOOTH) pts = _ema(pts, 5);
+        _gvmCache = d; _gvmCacheKey = cacheKey;
+        _renderGvmLine(d);
+      })
+      .catch(function () { /* quality line is additive — never break the price chart */ });
+  }
+  function _renderGvmLine(d) {
+    var field = GVM_FIELDS[_gvmMode] || "gvm_score";               // cc#1501
+    var pts = ((d && d.points) || []).filter(function (r) { return r[field] != null; })
+      .map(function (r) { return { time: String(r.score_date).slice(0, 10), value: +r[field] }; })
+      .sort(function (a, b) { return a.time < b.time ? -1 : 1; });
+    if (!pts.length) return;
+    if (GVM_SMOOTH) pts = _ema(pts, 5);
         // cc#800 FIX — the 0-10 axis was not actually pinned, for TWO reasons, and BOTH had to go:
         //
         // 1. autoscaleInfoProvider was applied via applyOptions AFTER addLineSeries. In
@@ -578,7 +630,8 @@ var _full = false;                // cc#779: fullscreen state
         // stretched across the full height and read as violently price-correlated (the PETRONET
         // screenshot). With this, that symbol occupies a narrow band in the upper-middle instead.
         _gvmSeries = _chart.addLineSeries({
-          color: GVM_COL, lineWidth: 2, priceScaleId: "gvm",
+          color: GVM_MODE_COL[_gvmMode] || GVM_COL,   // cc#1501: line colour follows the pillar
+          lineWidth: 2, priceScaleId: "gvm",
           priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
           priceFormat: { type: "price", precision: 2, minMove: 0.01 },
           autoscaleInfoProvider: function () {
@@ -594,8 +647,6 @@ var _full = false;                // cc#779: fullscreen state
             autoScale: true
           });
         } catch (e) {}
-      })
-      .catch(function () { /* quality line is additive — never break the price chart */ });
   }
   // cc#807: intraday session LEVELS — VWAP and VPOC. Both are automatic on 5m and absent on every
   // other timeframe; there is no toggle (cc#755's pill is gone).
@@ -1475,6 +1526,7 @@ var _full = false;                // cc#779: fullscreen state
     document.getElementById("scorrChartHL").textContent = "";
     document.addEventListener("keydown", _esc);
     _tf = "3M";
+    _gvmMode = "gvm"; _gvmCache = null; _gvmCacheKey = null;   // cc#1501: every open starts on full GVM
     _tab = "chart"; _peers = null; _peerOpen = null;
     // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
     _peerSortCol = null; _peerSortDir = -1; _peerCards = {};   // cc#845: every open starts on Chart
@@ -1493,6 +1545,7 @@ var _full = false;                // cc#779: fullscreen state
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
     _ilLines = []; _vwapLast = null; _vpocLast = null;   // cc#807 (price lines are owned by _series, removed with it)
     _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
+    _gvmCache = null; _gvmCacheKey = null;  // cc#1501
     _tab = "chart"; _peers = null; _peerOpen = null;
     // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
     _peerSortCol = null; _peerSortDir = -1; _peerCards = {};   // cc#845
