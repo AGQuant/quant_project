@@ -115,7 +115,8 @@ function card(a){
   var dirCls = a.direction === 'BUY' ? 'bull' : 'bear';
   var line2 = 'Trigger ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price);
   var when = '';
-  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price);
+  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price)
+    + (a.approved_via ? ' · via ' + a.approved_via : '');   /* cc#1526: where the click came from */
   else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
   else when = 'set ' + istStamp(a.created_at);
   /* Approve renders ONLY on a triggered card — the server enforces the same rule (409 from any
@@ -127,6 +128,9 @@ function card(a){
     + '<div class="meta">'
       + '<span class="tag ' + dirCls + '">' + esc(a.direction) + '</span>'
       + '<span class="tag ' + stClass(st) + '">' + esc(st.toUpperCase()) + '</span>'
+      /* cc#1526: the originating engine as a small tag — a V8 approval reads differently from a
+         manual alert. Manual rows (source_engine NULL) show no tag, per lock 4. */
+      + (a.source_engine ? '<span class="tag neut">' + esc(a.source_engine) + '</span>' : '')
       + '<span class="when">' + esc(when) + '</span>'
     + '</div>'
     + '<div class="hl">' + esc(a.symbol) + '</div>'

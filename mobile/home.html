@@ -5034,7 +5034,11 @@ function renderHome(d, pv){
   var tools = document.createElement('div');
   tools.className = 'tools';
   tools.innerHTML =
-      '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
+      /* cc#1526 (TRADE_CONTROL_V1, founder 31-Aug): Wall of Trades moves from tile 15 to tile 1 \u2014
+         the approve/alert surface leads the grid. Same tile, same /m/trades route (cc#991),
+         nothing else in the grid changes order. */
+      '<a class="tool slab dense" href="/m/trades"><span>\u2637\ufe0e</span>Wall of Trades</a>'
+    + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
     + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
     + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
     + '<a class="tool slab dense" href="/m/results"><span>\u2263</span>Results</a>'
@@ -5061,11 +5065,8 @@ function renderHome(d, pv){
        tile above in user terms, so it keeps its own route but stops being called "V10". */
     + '<a class="tool slab dense" href="/v10"><span>\u25d1</span>V10 Desk \u00b7 Web</a>'
     + '<a class="tool slab dense" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
-    // cc#991 (founder 10-Aug, grid_final amendment): APPEND the Wall of Trades tile. The grid was
-    // never capped at 12 — it already held 14 and the last row had an empty third slot — so this
-    // is the 15th tile filling that slot, not a reflow and not a displacement. It opens the APP
-    // screen /m/trades, unlike the web-page tiles above it.
-    + '<a class="tool slab dense" href="/m/trades"><span>\u2637\uFE0E</span>Wall of Trades</a>';
+    // cc#991 appended Wall of Trades as tile 15; cc#1526 moved it to tile 1 (top of this list).
+    ;
   document.getElementById('body').appendChild(tools);
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
