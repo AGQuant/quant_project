@@ -17,22 +17,15 @@
    NOT touching main.py's injection: those pills are shared with the app, and per the founder's
    20-Aug directive a shared surface is not edited as a side-effect of a web push. */
 try{ if(localStorage.getItem('scorr_theme')==='light'){ document.documentElement.dataset.theme='light'; } }catch(e){}
-function iiToggleTheme(){
-  var lit = document.documentElement.dataset.theme === 'light';
-  document.documentElement.dataset.theme = lit ? '' : 'light';
-  try{ localStorage.setItem('scorr_theme', lit ? 'dark' : 'light'); }catch(e){}
-  iiPaintThemePill();
-  /* the lightweight-charts instances take colours as plain strings at construction, so they cannot
-     follow a CSS variable. Anything already drawn re-reads the tokens through this hook. */
+/* cc#1528: iiToggleTheme()/iiPaintThemePill() and the #iiThemeBtn pill are deleted — the canonical
+   top-nav pill (ScorrTheme.toggle) is the one theme control. The chart-repaint side effect they
+   carried moves to the 'scorr:theme' CustomEvent scorr_theme_boot.js dispatches on every set(),
+   so the remaining pill drives the repaint the same way the deleted one did. The lightweight-charts
+   instances take colours as plain strings at construction and cannot follow a CSS variable;
+   anything already drawn re-reads the tokens through this hook. */
+window.addEventListener('scorr:theme', function(){
   if(typeof window.iiRepaintCharts === 'function'){ try{ window.iiRepaintCharts(); }catch(e){} }
-}
-function iiPaintThemePill(){
-  var b = document.getElementById('iiThemeBtn'); if(!b) return;
-  var lit = document.documentElement.dataset.theme === 'light';
-  b.innerHTML = lit ? 'Theme <b>LIGHT</b>' : 'Theme <b>DARK</b>';
-  b.setAttribute('aria-pressed', lit ? 'true' : 'false');
-}
-document.addEventListener('DOMContentLoaded', iiPaintThemePill);
+});
 /* cc#1168 push 1 — DEFECT A. MOVE the injected pills into the tabs row rather than re-creating
    them, so Logout keeps its own href and the global theme button keeps its own handler; nothing is
    reimplemented and nothing can drift from the shared original.
@@ -1185,12 +1178,10 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          itself stays live for typed URLs and the /m/intel app screen is untouched. -->
     <button class="v8toptab" data-pane="intel" onclick="showV8Pane('intel')">Intel</button>
 
-    <!-- cc#1149: theme switch. Sits in the tabs row exactly where the ref puts it, pushed right by
-         the spacer so it never crowds the tabs when they wrap. -->
+    <!-- cc#1528: the cc#1149 tabs-row theme pill (#iiThemeBtn) is REMOVED — the canonical top-nav
+         pill (pwa_endpoints.py PWA_JS) is the one theme control; two pills disagreeing on one
+         screen was the founder's 31-Aug screenshot. The spacer stays for the docked pills. -->
     <span class="v8sp"></span>
-    <button type="button" class="pill tgl" id="iiThemeBtn" aria-pressed="false"
-            title="Switch dark / light. Remembered on this device — same setting as the site-wide switch."
-            onclick="iiToggleTheme()">Theme <b>DARK</b></button>
     <!-- cc#1168 push 1: the auth-gate pills are RELOCATED into this row, not duplicated. -->
     <span id="pane-index-docked-controls"></span>
   </div>
