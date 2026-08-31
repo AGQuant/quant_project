@@ -282,7 +282,10 @@ WITH ev AS (
   SELECT 'alert', id::text, 'open',
          symbol,
          CASE WHEN UPPER(direction)='BUY' THEN 'LONG' WHEN UPPER(direction)='SELL' THEN 'SHORT' ELSE UPPER(direction) END,
-         'Manual Alert',
+         -- cc#1524 scope 6: an approved ENGINE signal files under its own engine (V8 etc), so
+         -- the wall shows it where the signal lives; only a truly manual alert (no source link)
+         -- stays in the Manual Alert bucket. COALESCE, no new branch, no new bucket.
+         COALESCE(a.source_engine, 'Manual Alert'),
          CASE WHEN EXISTS (SELECT 1 FROM futures_universe f
                            WHERE f.symbol = a.symbol AND f.is_active) THEN 'FUTURES' ELSE 'EQUITY' END,
          NULL::numeric,
