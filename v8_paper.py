@@ -277,6 +277,17 @@ def _passes(metric_row: Dict, bands: Dict) -> bool:
         if mx is not None and v > mx: return False
     return True
 
+# cc#1515 · SAME_SIDE_BASKET_PRIORITY_V1 (session_log 34624, Fable ruling, founder-delegated).
+# When a symbol qualifies in more than one SAME-SIDE basket on one day, the basket with the
+# stronger fresh-era record takes it, deterministically — sell_momentum over sell_reversal
+# (since the Jul-26 rebuild: 29tr/56.5% WR/+108,284 vs 18tr/50.0%/-102,146; the signal_ts
+# coin-flip put HINDPETRO in the losing basket AND thereby under the zone-S1 exit model instead
+# of fixed ±3%). LONG is an EMPTY list ON PURPOSE — 4 fresh-era buy trades is not evidence
+# (GATE 2: do not invent a buy order); an empty list falls back to the existing signal_ts DESC
+# tiebreak unchanged. ONE definition, importable. Revisit at the ~05-Sep checkpoint.
+SAME_SIDE_PRIORITY = {"SHORT": ["sell_momentum", "sell_reversal"], "LONG": []}
+
+
 def qualified_set(conn, dropped_sink: Optional[list] = None) -> Dict[str, Dict]:
     """
     Read score-based qualified set from v8_qualified table (15-Jun-2026).
@@ -307,14 +318,32 @@ def qualified_set(conn, dropped_sink: Optional[list] = None) -> Dict[str, Dict]:
             ORDER BY symbol, signal_ts DESC
         """)
         rows = cur.fetchall()
+    def _side_of(b):
+        return _SIDE_MAP.get(BASKET_META.get(b, {}).get("side", "BUY"), "LONG")
+
+    by_sym: Dict[str, list] = {}
+    for sym, basket in rows:                 # fetch order = symbol, signal_ts DESC
+        by_sym.setdefault(sym, []).append(basket)
     out = {}
-    for sym, basket in rows:
-        meta_side = BASKET_META.get(basket, {}).get("side", "BUY")
-        side = _SIDE_MAP.get(meta_side, "LONG")
-        if sym not in out:
-            out[sym] = {"basket": basket, "side": side}   # first per symbol = DISTINCT ON pick
-        elif dropped_sink is not None:
-            dropped_sink.append((sym, basket, side))
+    for sym, baskets in by_sym.items():
+        pick = baskets[0]                    # existing rule: latest signal_ts wins
+        # cc#1515 (34624): a SAME-SIDE multi-basket day resolves by SAME_SIDE_PRIORITY instead
+        # of the ts coin-flip. Mixed-side sets and sides with an empty priority list keep the
+        # existing rule byte-for-byte. Single-basket symbols never reach this branch — the rule
+        # is inert on them by construction.
+        if len(baskets) > 1:
+            side0 = _side_of(pick)
+            if all(_side_of(b) == side0 for b in baskets):
+                order = SAME_SIDE_PRIORITY.get(side0) or []
+                if order:
+                    pick = sorted(baskets,
+                                  key=lambda b: (order.index(b) if b in order
+                                                 else len(order) + baskets.index(b)))[0]
+        out[sym] = {"basket": pick, "side": _side_of(pick)}
+        if dropped_sink is not None:
+            for b in baskets:
+                if b != pick:
+                    dropped_sink.append((sym, b, _side_of(b)))   # -> claimed_by_other_basket (cc#1513)
     return out
 
 
