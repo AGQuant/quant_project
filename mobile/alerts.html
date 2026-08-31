@@ -113,7 +113,13 @@ function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', 
 function card(a){
   var st = String(a.status || 'pending');
   var dirCls = a.direction === 'BUY' ? 'bull' : 'bear';
-  var line2 = 'Trigger ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price);
+  /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
+     trigger_price/trigger_condition, not a real watch level — showing "Trigger >= px" on it would
+     read as an active threshold that was never set. Suppress the line for those rows only; a
+     manual alert that went pending -> triggered -> approved keeps its real trigger context. */
+  var isSignalApproval = st === 'approved' && !a.triggered_at;
+  var line2 = isSignalApproval ? ''
+    : ('Trigger ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price));
   var when = '';
   if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price)
     + (a.approved_via ? ' · via ' + a.approved_via : '');   /* cc#1526: where the click came from */
@@ -134,7 +140,8 @@ function card(a){
       + '<span class="when">' + esc(when) + '</span>'
     + '</div>'
     + '<div class="hl">' + esc(a.symbol) + '</div>'
-    + '<div class="sum">' + esc(line2) + (a.notes ? ' · ' + esc(a.notes) : '') + '</div>'
+    + '<div class="sum">' + (line2 ? esc(line2) : '')
+      + (a.notes ? (line2 ? ' · ' : '') + esc(a.notes) : '') + '</div>'
     + act
     + '</div>';
 }
