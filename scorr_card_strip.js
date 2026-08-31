@@ -208,6 +208,46 @@
     try { if (window.ScorrCockpitCard && window.ScorrCockpitCard.close) window.ScorrCockpitCard.close(); } catch (e) {}
   }
 
+  /* cc#1498 · SELF-HEAL A MISSED SCRIPT LOAD BEFORE DEEP-LINKING.
+   * The founder's 30-Aug "/m/v10 A navigated away" was NOT a code fault in the card scripts —
+   * both execute cleanly on that page (proven in a Chromium harness against the real files) —
+   * it was a TRANSIENT ASSET LOSS: perf_request_log for that session shows card_strip.js and
+   * card_common.js served while analysis_card.js/cockpit_card.js (the last two deferred tags)
+   * never arrived. The globals were simply absent, so _fallback() deep-linked, which on a phone
+   * reads as being thrown off the page. So before giving up, re-load the missing shared file
+   * (plus scorr_card_common.js first if IT is missing — A and D bail without it) and open in
+   * page. The deep link remains strictly the last resort (its wholesale redesign is a separate
+   * founder decision — flagged on cc#1498, not changed here). One in-flight flag per URL so a
+   * tap-storm cannot inject the same script twice. */
+  var _healing = {};
+  function _loadOnce(src, cb) {
+    if (_healing[src]) { _healing[src].push(cb); return; }
+    _healing[src] = [cb];
+    var s = document.createElement('script');
+    s.src = src + (window.__SCORR_BUILD ? '?v=' + window.__SCORR_BUILD : '');
+    var fin = function (ok) {
+      var q = _healing[src] || []; _healing[src] = null;
+      q.forEach(function (f) { try { f(ok); } catch (e) {} });
+    };
+    s.onload = function () { fin(true); };
+    s.onerror = function () { try { s.parentNode.removeChild(s); } catch (e) {} fin(false); };
+    (document.head || document.documentElement).appendChild(s);
+  }
+  function _healThenOpen(cardSrc, globalName, sym, deepLink) {
+    var openIt = function () {
+      var g = window[globalName];
+      if (g && g.open) { g.open(sym); return true; }
+      return false;
+    };
+    var loadCard = function () {
+      _loadOnce(cardSrc, function () {
+        if (!openIt()) window.open(deepLink + encodeURIComponent(sym), '_blank');
+      });
+    };
+    if (window.ScorrCardCommon) loadCard();
+    else _loadOnce('/scorr_card_common.js', function () { loadCard(); });
+  }
+
   /* Site-wide fallbacks, used when a page registers no opener for a letter. These are the
    * globals every page already loads (results_card.js, scorr_chart_card.js). */
   function _fallback(k, sym) {
@@ -219,17 +259,18 @@
        * cloning it here would have recreated the duplication cc#789 existed to kill. cc#805 moved
        * that tail into scorr_card_common.js + scorr_analysis_card.js, so A now opens the SAME modal
        * IN PAGE on every surface. The deep link stays only as a degradation path for a context where
-       * the shared file did not load (embeds), so the strip never becomes a dead button. */
+       * the shared file did not load (embeds), so the strip never becomes a dead button.
+       * cc#1498: and before that degradation fires, the missed load is retried once — see above. */
       if (window.ScorrAnalysisCard) { window.ScorrAnalysisCard.open(sym); return; }
-      window.open('/dashboard?qa=' + encodeURIComponent(sym), '_blank');
+      _healThenOpen('/scorr_analysis_card.js', 'ScorrAnalysisCard', sym, '/dashboard?qa=');
       return;
     }
     if (k === 'R') { if (window.ScorrRCard) window.ScorrRCard.open(sym); return; }
     if (k === 'D') {
       /* cc#805 — same story as A: the Derivative Cockpit is now scorr_cockpit_card.js, opened in
-       * page. ?dc= remains the degradation path only. */
+       * page. ?dc= remains the degradation path only (cc#1498: after one reload attempt). */
       if (window.ScorrCockpitCard) { window.ScorrCockpitCard.open(sym); return; }
-      window.open('/dashboard?dc=' + encodeURIComponent(sym), '_blank');
+      _healThenOpen('/scorr_cockpit_card.js', 'ScorrCockpitCard', sym, '/dashboard?dc=');
       return;
     }
   }
