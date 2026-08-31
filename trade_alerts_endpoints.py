@@ -154,6 +154,48 @@ def list_alerts(status: str = "all", limit: int = 200):
     return {"status_filter": status, "count": len(rows), "alerts": rows}
 
 
+@router.post("/api/alerts/approve")
+async def approve_alert(req: Request):
+    """cc#1505 — the human click. Only a TRIGGERED alert can be approved (a pending one has not
+    crossed yet; a dismissed/approved one is a decision already taken). approved_price is the
+    CURRENT resolver price at the moment of approval — an honest record of what it actually was
+    when the founder clicked, NEVER the trigger_price copied over. If no price path can see the
+    symbol right now the approval is refused rather than a number fabricated."""
+    body = await req.json()
+    try:
+        alert_id = int(body.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "id required")
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT symbol, status FROM trade_alerts WHERE id = %s", (alert_id,))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"alert {alert_id} not found")
+        sym, cur_status = r
+        if cur_status != "triggered":
+            raise HTTPException(409, f"alert {alert_id} is '{cur_status}' — "
+                                     "only a triggered alert can be approved")
+        import cmp_resolver
+        res = cmp_resolver.resolve_cmp(cur, sym)
+        price = (res or {}).get("cmp")
+        if price is None:
+            raise HTTPException(422, f"{sym} has no resolvable price right now — "
+                                     "approval refused rather than recording a fabricated approved_price")
+        cur.execute(
+            f"""UPDATE trade_alerts
+                SET status = 'approved', approved_at = NOW(), approved_price = %s
+                WHERE id = %s AND status = 'triggered'
+                RETURNING {_COLS}""", (price, alert_id))
+        row = cur.fetchone()
+        if not row:   # racing dismiss won between the SELECT and here — report the truth
+            conn.commit()
+            raise HTTPException(409, f"alert {alert_id} changed state mid-approval — re-read it")
+        out = _row(row)
+        conn.commit()
+    return {"status": "ok", "alert": out, "price_source": (res or {}).get("source"),
+            "price_live": bool((res or {}).get("live"))}
+
+
 @router.post("/api/alerts/dismiss")
 async def dismiss_alert(req: Request):
     body = await req.json()
