@@ -1179,6 +1179,12 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          one. One entry app-wide. -->
     <button class="v8toptab" data-pane="trades" onclick="showV8Pane('trades')">Wall of Trades</button>  <!-- cc#1282: in-shell pane, was location.href -->
 
+    <!-- cc#1523 (founder 30-Aug): Intel joins the row as an embed=1 iframe pane, the cc#1282
+         Digest/Trades pattern verbatim. /news is de-listed from the site NAV in the same change —
+         this tab is now the single Intel entry on the web surface (rule 2987); the /news route
+         itself stays live for typed URLs and the /m/intel app screen is untouched. -->
+    <button class="v8toptab" data-pane="intel" onclick="showV8Pane('intel')">Intel</button>
+
     <!-- cc#1149: theme switch. Sits in the tabs row exactly where the ref puts it, pushed right by
          the spacer so it never crowds the tabs when they wrap. -->
     <span class="v8sp"></span>
@@ -1366,6 +1372,10 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   </div>
   <div id="pane-trades" style="display:none">
     <iframe id="tradesFrame" title="Wall of Trades" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+  </div>
+  <!-- cc#1523: Intel pane — the same embed frame pattern. -->
+  <div id="pane-intel" style="display:none">
+    <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#544: V6 BT playground pane (read-mostly wrapper over the existing bt6 engine) -->
   <div id="pane-bt" style="display:none">
@@ -7400,7 +7410,7 @@ window.v14Boot=function(){
 function showV8Pane(name){
   /* cc#1282: digest + trades join the pane map as embed frames (cc#740 tcscan pattern). */
   var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',
-             digest:'pane-digest',trades:'pane-trades'};
+             digest:'pane-digest',trades:'pane-trades',intel:'pane-intel'};  /* cc#1523 */
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
@@ -7412,18 +7422,19 @@ function showV8Pane(name){
   if(name==='tcscan'&&window.tc13Boot)window.tc13Boot();  // cc#1289: TC13 open/closed box, lazy on first open
   if(name==='digest'){var fd=document.getElementById('digestFrame');if(fd&&!fd.src)fd.src='/digest?embed=1';}  // cc#1282
   if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
+  if(name==='intel'){var fi=document.getElementById('intelFrame');if(fi&&!fi.src)fi.src='/news?embed=1';}  // cc#1523
 }
 /* cc#851 kept its promise a different way now: a saved /dashboard#digest bookmark opens the
    digest INSIDE the shell (cc#1282) instead of redirecting away — the link still means "the
    digest", it just no longer costs the V8 nav to follow it. */
-(function(){var TABS=['index','v14','tcscan','bt','digest','trades'];var h=(location.hash||'').replace('#','');
+(function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel'];var h=(location.hash||'').replace('#','');
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
   if(h==='v14'){var _vt=document.getElementById('v14tab'); if(_vt) _vt.style.display='';}
   // cc#1293: same reveal-on-direct-link pattern for the now-hidden V6 BT tab.
   if(h==='bt'){var _bt=document.getElementById('bttab'); if(_bt) _bt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades'];var h=(location.hash||'').replace('#','');
+window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel'];var h=(location.hash||'').replace('#','');
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 </script>
 <style>

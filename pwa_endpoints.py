@@ -365,7 +365,10 @@ PWA_JS = """
     // cc#853 (founder 04-Aug): Digest REMOVED from the main nav. It now lives in the V8 tab row,
     // immediately after V6 BT (v8_dashboard.html). Exactly ONE Digest entry app-wide — this line
     // is deliberately not an entry. cc#846 had re-added it here; the founder has since placed it.
-    ['/news', '\\ud83d\\udcf0', 'Intel'],
+    // cc#1523 (founder 30-Aug): Intel REMOVED from the nav — /news now lives in the V8 tab row
+    // as an embed pane after Wall of Trades (/dashboard#intel), the cc#853 Digest placement
+    // pattern. The /news route is UNCHANGED (typed URL + iframe still serve it) and the /m/intel
+    // app entry below stays. Recorded as v8-tab in main.py NAV_REGISTRY (rule id=2987).
     ['/v13', '\\u25a4', 'V13'],
     // cc#1520 (founder 31-Aug): Health REMOVED from the nav, same pattern as cc#822 Holdings —
     // the /health route is UNCHANGED and still loads by typed URL; its one visible entry point
