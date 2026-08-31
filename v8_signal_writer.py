@@ -2713,10 +2713,18 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     # cannot abort the other three or the rest of the tick. On a handler exception, rollback the
     # aborted txn so the next handler + the end-of-tick heartbeat can still commit ("tick advances
     # on partial failure"). The compute loop + metrics upsert are already per-symbol guarded.
+    # cc#1515 (SAME_SIDE_BASKET_PRIORITY_V1, 34624): sell_momentum now runs BEFORE sell_reversal.
+    # This tuple's order IS the live writer's same-tick multi-basket resolution — each handler
+    # enters via _auto_paper_entry and _has_open/UNIQUE(symbol,side,status) blocks the later one,
+    # so on a same-tick dual qualification the first handler claims the symbol. It ran
+    # sell_reversal first, the exact opposite of the ruling (HINDPETRO 31-Aug went to the losing
+    # basket and thereby to the zone-S1 exit model instead of fixed ±3%). Attribution only: the
+    # same single position opens either way (GATE 3); the later basket's decline is now ledgered
+    # has_open by cc#1513. Buy order untouched (GATE 2).
     for _handler, _bname in (
         (_write_buy_reversal_v6_qualified,  "buy_reversal_v6"),
-        (_write_sell_reversal_v7b_qualified, "sell_reversal"),
         (_write_sell_momentum_v4_qualified,  "sell_momentum_v4"),
+        (_write_sell_reversal_v7b_qualified, "sell_reversal"),
         (_write_buy_momentum_v3_qualified,   "buy_momentum_v3"),
         (_write_s1_reclaim_obs_qualified,    "s1_reclaim_obs"),   # cc#714: ring-fenced observation (enable-gated)
     ):
