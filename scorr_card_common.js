@@ -339,6 +339,47 @@
   API.SCORR_BASKET_ORDER = SCORR_BASKET_ORDER;
 })();
 
+/* ── cc#1510 · SHARED AS-OF STAMP (APP_TABLE_ASOF_STAMP_V1, session_log 34535) ────────────────
+   ONE formatter for every app table's freshness stamp — the founder's 31-Aug ruling replacing
+   static "LIVE 5-MIN"-style labels with the DATA's own as-of. Kept here because this is the one
+   script every screen loads; writing the format inline per card is how it drifts (the rule the
+   spec states). Generalises cc#1258's digest shape + cc#1261's amber convention.
+
+   scorrAsofStamp(asof) -> {txt, amber}
+     asof   'YYYY-MM-DD HH:MM[:SS]' (T or space) in NAIVE IST — the caller passes its own
+            table's max(ts), already on the IST base. Never the render clock, never Date.now().
+     txt    'LIVE · HH:MM' when the as-of date is today (IST); 'DD MON HH:MM' otherwise
+            (a 15:20 stamp on a Sunday shows its date and reads correct, not stale).
+     amber  true only when the as-of is >10 min old AND it is 09:15–15:30 IST on a weekday.
+            10 min = the health_feeds writer-stall threshold. STATED LIMIT: NSE holidays are
+            not client-knowable, so a weekday holiday would amber a correct stamp — the same
+            approximation every existing staleness read on the app lives with.
+   The caller styles amber via an EXISTING token class (.asof.stale / var(--amber)) — this
+   helper never touches the DOM. Empty/absent input returns {txt:'', amber:false}: a missing
+   as-of renders NOTHING, never a fabricated stamp (the 34535 gate). */
+window.scorrAsofStamp = function (asof) {
+  if (asof == null || asof === '') return { txt: '', amber: false };
+  var s = String(asof).replace('T', ' ');
+  var d = s.slice(0, 10), hm = s.slice(11, 16);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{2}:\d{2}$/.test(hm)) return { txt: '', amber: false };
+  var n = new Date();
+  var ist = new Date(n.getTime() + (330 + n.getTimezoneOffset()) * 60000);   // getters read IST wall-clock
+  var today = ist.getFullYear() + '-' + ('0' + (ist.getMonth() + 1)).slice(-2) + '-' + ('0' + ist.getDate()).slice(-2);
+  var MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  var txt = (d === today)
+    ? 'LIVE · ' + hm
+    : parseInt(d.slice(8, 10), 10) + ' ' + MON[parseInt(d.slice(5, 7), 10) - 1] + ' ' + hm;
+  var amber = false;
+  var dow = ist.getDay(), mins = ist.getHours() * 60 + ist.getMinutes();
+  if (dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930) {
+    /* both sides interpreted in the same local frame, so the difference IS the IST wall-clock
+       age — the cc#844 phantom-330-minute trap is impossible by construction here */
+    var asofD = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), +hm.slice(0, 2), +hm.slice(3, 5));
+    amber = (ist - asofD) / 60000 > 10;
+  }
+  return { txt: txt, amber: amber };
+};
+
 /* ── FIVE-SLOT MOBILE NAV (cc#897; was six) — ONE SOURCE (founder 08-Aug: "show V8 in nav, it is the most
    important model"). Appended by Fable (ROLE_CHARTER_V3, session_log 17868).
    Every /m/* template carries a five-slot .bnav in its own markup; editing thirteen files for
