@@ -444,11 +444,11 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .tb-pnl{text-align:right}
 #pane-index .tb-pnl .lbl{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
 #pane-index .tb-pnl .val{font-family:var(--mono);font-size:15px;font-weight:800}
-#pane-index .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:14px;box-shadow:var(--shadow)}
+#pane-index .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:14px;box-shadow:var(--shadow)}  /* cc#1522: 12->10, the R4 card radius */
 #pane-index .card-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
-#pane-index .card-hd .t{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.8px;font-weight:700}
-#pane-index .card-hd .s{font-size:8px;color:var(--dim);margin-top:2px}
+#pane-index .card-hd .t{font:600 9.5px var(--f-m);color:var(--mut);text-transform:uppercase;letter-spacing:.14em}  /* cc#1522: R4 label token */
+#pane-index .card-hd .s{font-size:9px;color:var(--dim);margin-top:2px}
 /* cc#1168 push 8 · RHYTHM. The ref's .row is gap 16 / margin-bottom 16 (index_intel_R2 @ f5a31dd),
    and its .stack is gap 16. This file had .row at 10 while the stack below it was already at 16,
    so the tab ran on TWO vertical rhythms: 10px between the rows at the top and 16px between the
@@ -457,9 +457,9 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .r-2-16{grid-template-columns:3fr 1.6fr}
 #pane-index .r-3{grid-template-columns:1fr 1.4fr 1fr}
 @media(max-width:900px){#pane-index .r-2-16, #pane-index .r-3{grid-template-columns:1fr}}
-#pane-index .bdg{display:inline-flex;align-items:center;border-radius:5px;padding:2px 8px;
-    font-size:10px;font-weight:700;font-family:var(--mono);white-space:nowrap;
-    border:1px solid;line-height:1.4}
+#pane-index .bdg{display:inline-flex;align-items:center;border-radius:4px;padding:3px 8px;
+    font-size:9.5px;font-weight:600;font-family:var(--mono);letter-spacing:.13em;white-space:nowrap;
+    border:1px solid;line-height:1.4}  /* cc#1522: R4 badge token */
 #pane-index .bdg.sm{padding:1px 6px;font-size:9px}
 /* cc#1150: the .mood HERO, per the ref. The old rule had border:1px solid with no colour and an
    inline border-colour written per render; the ref gives it a fixed --line2 edge and a panel
@@ -511,176 +511,8 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
 #pane-index .slot{border-radius:6px;padding:5px 13px;text-align:center;border:1px solid}
 #pane-index .slot .n{font-family:var(--mono);font-size:15px;font-weight:900}
 #pane-index .slot .l{font-size:8px;color:var(--mut);margin-top:1px}
-/* cc#1151 sprint 3/7: LEVELS SPINE. Transplanted verbatim from design_refs/index_intel_R2.html
-   @ f5a31dd (.spine/.axis/.lvl/.spotdot/.mp-edge/.spine-hd), namespaced under #pane-index. */
-#pane-index .spine{position:relative;height:330px;margin:8px 0 2px}
-#pane-index .axis{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
-#pane-index .lvl{position:absolute;left:0;right:0;height:0}
-#pane-index .lvl .ln{position:absolute;top:0;height:1px}
-/* cc#1167: the ref sets white-space:nowrap here. NAMED DEVIATION, and the reason is measured:
-   at 2x accessibility text scaling a nowrap tag on pixel-fixed geometry runs past the card edge
-   with overflow-x:visible, so the price is not clipped-but-scrollable, it is GONE. The tag may now
-   fold; the PRICE span keeps nowrap so a number never splits across lines. Bounded so a long tag
-   can never reach the opposite half of the axis. */
-#pane-index .lvl .tag{position:absolute;font-family:var(--mono);font-size:10px;font-weight:600;top:-7px;
-    white-space:normal;overflow-wrap:break-word;line-height:1.2}
-#pane-index .lvl.piv .tag,#pane-index .lvl.mpl .tag{max-width:calc(50% - 96px)}
-#pane-index .lvl.wall .tag{max-width:calc(50% - 14px)}
-#pane-index .lvl .px{white-space:nowrap}
-#pane-index .lvl .px{font-weight:700;font-size:11.5px;color:var(--txt)}
-#pane-index .lvl.piv .ln{left:50%;width:84px;background:var(--line2)}
-#pane-index .lvl.piv .tag{left:calc(50% + 94px);color:var(--mut)}
-#pane-index .lvl.piv.pp .ln{background:var(--amber);opacity:.7}
-#pane-index .lvl.piv.pp .tag,#pane-index .lvl.piv.pp .px{color:var(--amber)}
-/* cc#1280 (founder 24-Aug): the wall bar spanned the whole left half as a SOLID strip, and the
-   tag paints on top of it — dark price text on a red bar (founder screenshot, both indices).
-   The bar now anchors solid at the axis (where the strike lives) and fades toward its outer end,
-   so the tag sits over the faded zone; the tag itself becomes a small chip so it is readable over
-   anything. Geometry, values and colours-by-side unchanged. */
-#pane-index .lvl.wall .ln{right:50%;height:8px;top:-4px;border-radius:4px 0 0 4px;opacity:.9;
-    background:linear-gradient(90deg,transparent 0%,currentColor 45%,currentColor 100%)}
-#pane-index .lvl.wall .tag{right:calc(50% + 12px);text-align:right;color:currentColor;top:-9px;
-    background:var(--card2);border:1px solid var(--line2);border-radius:4px;padding:1px 7px}
-#pane-index .lvl.wall.put{color:var(--grn)}
-#pane-index .lvl.wall.call{color:var(--red)}
-#pane-index .lvl.mpl .ln{left:50%;width:84px;background:var(--amber)}
-#pane-index .lvl.mpl .tag{left:calc(50% + 94px);color:var(--amber)}
-#pane-index .lvl.spotl{z-index:3}
-#pane-index .lvl.spotl .ln{left:5%;right:5%;border-top:1.5px dashed var(--spotc);background:none}
-#pane-index .spotdot{position:absolute;left:50%;top:-4px;width:9px;height:9px;margin-left:-4px;border-radius:50%;
-    background:var(--spotc);box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot);
-    animation:pulse 2.2s ease-in-out infinite}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 4px var(--spot-ring),0 0 14px var(--glow-spot)}
-    50%{box-shadow:0 0 0 9px var(--spot-ring2),0 0 22px var(--glow-spot)}}
-#pane-index .lvl.spotl .tag{left:5%;top:-20px;color:var(--spotc);background:var(--spot-chip-bg);
-    padding:1px 8px;border-radius:4px;border:1px solid var(--spot-chip-bd)}
-/* cc#1167: when spot is a PREVIOUS CLOSE rather than a live tick, the pulsing dot is exactly the
-   part that says "this is moving right now", so it stops pulsing and the chip drops to muted.
-   Same reasoning as the cc#238 frozen mood hero. */
-#pane-index .lvl.spotl.stale .spotdot{animation:none;background:var(--mut);box-shadow:0 0 0 3px var(--line2)}
-#pane-index .lvl.spotl.stale .ln{border-top-style:dotted;border-top-color:var(--mut)}
-#pane-index .lvl.spotl.stale .tag{color:var(--mut);background:none;border-color:var(--line2)}
-#pane-index .mp-edge{display:flex;align-items:center;gap:8px;margin-top:9px;padding:5px 11px;width:max-content;max-width:100%;
-    background:var(--amber-bg);border:1px dashed var(--amber-bd);border-radius:6px;
-    font-family:var(--mono);font-size:9.5px;color:var(--amber)}
-#pane-index .spine-hd{display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:10px;color:var(--dim)}
-#pane-index .spine-hd .big2{font-size:19px;font-weight:700;color:var(--txt)}
-#pane-index .spine-hd .cap{font-size:10px;color:var(--dim)}
-/* cc#1300: PP + MAX PAIN promoted next to the price, bigger font than the old inline chart tags
-   (was 10px/11.5px on the axis; now 13px, matching "bigger fonts" from the founder directly). */
-#pane-index .spine-hd-top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
-#pane-index .ppmax{display:flex;gap:16px;flex-wrap:wrap}
-#pane-index .ppmax-item{font-size:13px;font-weight:600}
-#pane-index .ppmax-item .l{font-size:10px;color:var(--dim);font-weight:700;letter-spacing:.04em;margin-right:3px}
-#pane-index .ppmax-item .px{font-weight:700}
-#pane-index .ppmax-item .d{font-size:11px;margin-left:3px}
-#pane-index .ppmax-item.pp{color:var(--amber)}
-#pane-index .ppmax-item.mp{color:var(--amber)}
-#pane-index .ppmax-item.na{color:var(--dim);font-weight:400;font-size:11px}
-/* cc#1344 (founder direct 26-Aug, replacing cc#1300's chip-row ladder — see the long comment
-   above rSpine()'s ladder-building code for why): one continuous horizontal line spanning the
-   card width, with 6 small dots positioned along it in ascending price order S2→R2. Dot role
-   sets the style — S1/S2 hollow red (support), R1/R2 hollow green (resistance), PP solid amber,
-   CMP the LARGEST solid dot, the you-are-here marker. Labels alternate above/below the line
-   (set per-dot in the JS, matching the mobile reference) so two adjacent labels never collide. */
-#pane-index .spine-line-wrap{position:relative;height:2px;margin:34px 6px 40px}
-#pane-index .spine-line{position:absolute;left:0;right:0;top:0;height:2px;background:var(--line2);border-radius:1px}
-#pane-index .spine-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;
-    border-radius:50%;z-index:1}
-#pane-index .spine-dot.hollow{background:var(--card2,var(--bg));border:2px solid var(--line2)}
-#pane-index .spine-dot.s1,#pane-index .spine-dot.s2{border-color:var(--red)}
-#pane-index .spine-dot.r1,#pane-index .spine-dot.r2{border-color:var(--grn)}
-#pane-index .spine-dot.pp{background:var(--amber);border:none}
-/* CMP is the you-are-here marker — largest dot on the line, on purpose, and never hollow. */
-#pane-index .spine-dot.cmp{background:var(--spotc,var(--grn));border:none;width:16px;height:16px;
-    box-shadow:0 0 0 4px var(--spot-ring,transparent)}
-#pane-index .spine-dot.cmp.stale{background:var(--mut);box-shadow:none}
-#pane-index .spine-lbl{position:absolute;top:50%;transform:translate(-50%,-50%);text-align:center;
-    font-family:var(--mono);white-space:nowrap;pointer-events:none}
-#pane-index .spine-lbl.above{margin-top:-26px}
-#pane-index .spine-lbl.below{margin-top:26px}
-#pane-index .spine-lbl .c{display:block;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--dim)}
-#pane-index .spine-lbl .v{display:block;font-size:12.5px;font-weight:700;color:var(--txt);margin-top:1px}
-#pane-index .spine-lbl.s1 .v,#pane-index .spine-lbl.s2 .v{color:var(--red)}
-#pane-index .spine-lbl.r1 .v,#pane-index .spine-lbl.r2 .v{color:var(--grn)}
-#pane-index .spine-lbl.pp .v{color:var(--amber)}
-#pane-index .spine-lbl.cmp .v{color:var(--spotc)}
-#pane-index .spine-lbl.cmp.stale .v{color:var(--mut)}
-@media(max-width:560px){#pane-index .spine-line-wrap{margin:30px 4px 36px}
-  #pane-index .spine-lbl .v{font-size:11px}
-  #pane-index .spine-lbl.above{margin-top:-22px} #pane-index .spine-lbl.below{margin-top:22px}}
-#pane-index .r-levels{grid-template-columns:1fr 1fr}
-@media(max-width:920px){#pane-index .r-levels{grid-template-columns:1fr}}
-/* the pulsing spot dot is decorative; the dot must still be findable without it */
-@media(prefers-reduced-motion:reduce){#pane-index .spotdot{animation:none}}
-/* cc#1167: the spine's geometry is fixed in PIXELS - an 84px pivot rule plus a tag offset of
-   50% + 94px, with the tag on white-space:nowrap. On a desktop card that fits; at 412px the
-   right-hand tags ran 103px past the card edge with overflow-x:visible, so there was no way to
-   scroll to them - the text was simply gone.
-
-   HOW THIS WAS MISSED, worth writing down. The cc#1151 probe reported PASS at 412px, but that run
-   was the one where a broken harness rendered NOTHING. After the harness was fixed I checked tag
-   OVERLAP and found none - and never re-ran the overflow check on the working page. Two different
-   checks: overlap asks whether tags collide, overflow asks whether they fit. Passing one is not
-   passing the other.
-
-   The fix shrinks the geometry rather than clipping it. overflow:hidden here would delete the
-   prices instead of showing them, which is the cc#1127 mistake. */
-@media(max-width:560px){
-  #pane-index .spine{height:300px}
-  #pane-index .lvl .tag{font-size:9px}
-  #pane-index .lvl .px{font-size:10px}
-  #pane-index .lvl.piv .ln,#pane-index .lvl.mpl .ln{width:34px}
-  #pane-index .lvl.piv .tag,#pane-index .lvl.mpl .tag{left:calc(50% + 40px);max-width:calc(50% - 42px);white-space:normal;line-height:1.15}
-  #pane-index .lvl.wall .tag{right:calc(50% + 8px);max-width:calc(50% - 10px);white-space:normal;line-height:1.15}
-  #pane-index .lvl.spotl .tag{left:2%}
-}
-/* SPINE | LADDER switch in the card head (scope 6). Not a ref class - the ref shows the two
-   components side by side to demonstrate both, and the card asks for a per-index toggle instead.
-   Built on the ref's .pill grammar so it does not read as a new control type. */
-#pane-index .vsw{display:flex;gap:2px}
-#pane-index .vsw button{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em;
-    padding:3px 9px;border:1px solid var(--line2);background:none;color:var(--dim);cursor:pointer;border-radius:5px}
-#pane-index .vsw button.on{color:var(--blu);border-color:var(--blu);background:var(--blu-chip)}
-/* cc#1152 sprint 4/7: OI RUNG LADDER. Transplanted verbatim from design_refs/index_intel_R2.html
-   @ f5a31dd (.rung/.side/.bar/.stk/.oi-heads/.wallchips/.wc), namespaced under #pane-index.
-   The old card put 15 strikes on a HORIZONTAL axis, where fixed-width labels cannot fit and run
-   together into 23,75023,80023,850. No styling fixes that — the axis has to rotate 90 degrees.
-   Strikes become rows, so a label has a whole row to itself and collision is structurally
-   impossible rather than merely avoided. */
-#pane-index .rung{display:grid;grid-template-columns:1fr 78px 1fr;align-items:center;height:21px}
-#pane-index .rung:nth-child(odd){background:var(--bg2)}
-#pane-index .rung.atm{background:var(--blu-row)}
-#pane-index .rung.atm .stk{color:var(--blu);font-weight:800}
-#pane-index .rung.mp .stk{color:var(--amber);font-weight:800;background:var(--amber-row);border-radius:4px}
-#pane-index .side{position:relative;height:12px}
-#pane-index .bar{position:absolute;top:0;height:12px;border-radius:3px}
-#pane-index .side.p .bar{right:0;background:var(--grn);opacity:.32}
-#pane-index .side.c .bar{left:0;background:var(--red);opacity:.32}
-#pane-index .rung.pw .side.p .bar,#pane-index .rung.cw .side.c .bar{opacity:.9}
-#pane-index .stk{text-align:center;font-family:var(--mono);font-size:11px;font-weight:600}
-#pane-index .oi-heads{display:grid;grid-template-columns:1fr 78px 1fr;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--dim);margin-bottom:4px}
-#pane-index .oi-heads .l{text-align:right;padding-right:10px;color:var(--grn)}
-#pane-index .oi-heads .c{text-align:center}
-#pane-index .oi-heads .r{padding-left:10px;color:var(--red)}
-#pane-index .wallchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
-#pane-index .wc{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:5px}
-#pane-index .wc.p{background:var(--grn-d);color:var(--grn)}
-#pane-index .wc.c{background:var(--red-d);color:var(--red)}
-#pane-index .wc.a{background:var(--amber-row);color:var(--amber)}
-/* scope 4: the OI number is always in the DOM as a title, and .lad.vals reveals it inline. Tap
-   toggles it on touch, where there is no hover to reveal anything. Not a ref class - the ref is a
-   static page and never had to answer "how does a phone see this number". */
-#pane-index .ladwrap{position:relative}
-#pane-index .rung .oiv{position:absolute;top:-1px;font-family:var(--mono);font-size:8.5px;font-weight:700;
-    color:var(--dim);opacity:0;transition:opacity .12s;pointer-events:none}
-#pane-index .side.p .oiv{right:4px}
-#pane-index .side.c .oiv{left:4px}
-#pane-index .rung:hover .oiv,#pane-index .ladwrap.vals .oiv{opacity:1}
-/* scope 5: spot as a thin dashed line crossing the rungs at its interpolated position */
-#pane-index .lad-spot{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--spotc);z-index:2;pointer-events:none}
-#pane-index .lad-spot .lbl{position:absolute;right:0;top:-14px;font-family:var(--mono);font-size:8.5px;font-weight:700;
-    color:var(--spotc);background:var(--spot-chip-bg);border:1px solid var(--spot-chip-bd);border-radius:4px;padding:0 5px}
+/* cc#1522: the LEVELS SPINE / OI RUNG LADDER / SPINE|LADDER-switch CSS (cc#1151/1152/1300/1344)
+   is DELETED with its renderers - the Index Position rails below replace those cards. */
 /* cc#1154 sprint 6/7: TAIL CARDS. Transplanted from design_refs/index_intel_R2.html @ f5a31dd
    (.tag2/.skel/.lockchip/.set-cell/.stat-grid/.stat/.stack/.foot/.notpulled), namespaced.
    ONE RULE DELIBERATELY NOT COPIED, and it is the trap this card warns about: the ref's
@@ -916,6 +748,146 @@ document.addEventListener('DOMContentLoaded', iiPaintThemePill);
    space rather than a rule line, and the footer TEXT is untouched. */
 #pane-index .loading{padding:60px 20px;text-align:center;color:var(--mut);font-size:13px}
 #pane-index svg.spark{display:block;width:100%;height:auto}
+/* ══ cc#1522 · INDEX INTEL WEB R1 (design_refs/scorr_indexintel_web_R1.html @ 386065f) ═══════
+   The mock's classes on the injected token contract (scorr_web_tokens.css) - the rgb triplets
+   landed in cc#1521, the --tx/--gr/--rd/--cy/--am/--f-d/--f-m aliases in cc#1203. Namespaced. */
+#pane-index .iisec{margin:8px 0 16px}
+#pane-index .sh{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+#pane-index .st{font:700 16px var(--f-d);letter-spacing:-.01em;color:var(--tx)}
+#pane-index .badge{font:600 9.5px var(--f-m);letter-spacing:.13em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-flex;align-items:center;gap:6px}
+#pane-index .b-live{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
+#pane-index .b-eod{color:var(--cy);border-color:rgba(var(--cy-rgb),.4);background:rgba(var(--cy-rgb),.10)}
+#pane-index .b-static{color:var(--tx3);border-color:var(--line2)}
+#pane-index .badge.stale{color:var(--am);border-color:rgba(var(--am-rgb),.45);background:rgba(var(--am-rgb),.10)}
+#pane-index .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:idxpdot 2s infinite}
+#pane-index .sh .asof{margin-left:auto}
+#pane-index .asof{font:500 10.5px var(--f-m);color:var(--tx3)}
+#pane-index .asof.stale{color:var(--am)}
+#pane-index .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+#pane-index .four{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:1100px){#pane-index .four{grid-template-columns:1fr 1fr}}
+@media(max-width:860px){#pane-index .two{grid-template-columns:1fr}}
+@media(max-width:600px){#pane-index .four{grid-template-columns:1fr}}
+#pane-index .ib{min-width:26px;min-height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--raise);color:var(--cy);font:700 11px var(--f-m);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+#pane-index .pos{color:var(--gr)} #pane-index .neg{color:var(--rd)} #pane-index .am{color:var(--am)}
+/* index position */
+#pane-index .ip{padding:18px 20px 20px;display:flex;flex-direction:column;gap:16px}
+#pane-index .iph{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+#pane-index .iph .nm{font:700 13px var(--f-d);letter-spacing:.06em;color:var(--am)}
+#pane-index .iph .px{font:600 30px var(--f-m);letter-spacing:-.02em;color:var(--tx)}
+#pane-index .iph .chg{font:600 13px var(--f-m)}
+#pane-index .iph .badge{margin-left:auto}
+#pane-index .rail-wrap{padding:34px 10px 30px}
+#pane-index .rail{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(var(--gr-rgb),.55),rgba(var(--gr-rgb),.16) 42%,rgba(var(--rd-rgb),.16) 58%,rgba(var(--rd-rgb),.55))}
+#pane-index .rail .tick{position:absolute;top:-5px;width:2px;height:16px;background:var(--tx3);border-radius:1px;transform:translateX(-50%)}
+#pane-index .rail .tick.pp{background:var(--cy);height:20px;top:-7px}
+#pane-index .rail .tick.mp{background:var(--am);height:20px;top:-7px}
+#pane-index .rail .tl{position:absolute;top:16px;transform:translateX(-50%);text-align:center;white-space:nowrap}
+#pane-index .rail .tl .a{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3)}
+#pane-index .rail .tl .b{font:600 11px var(--f-m);color:var(--tx2);margin-top:1px}
+#pane-index .rail .tl.sup .a{color:var(--gr)} #pane-index .rail .tl.res .a{color:var(--rd)} #pane-index .rail .tl.pp .a{color:var(--cy)} #pane-index .rail .tl.mp .a{color:var(--am)}
+#pane-index .rail .tl.mp{top:-32px}
+#pane-index .cmp{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:var(--cy);box-shadow:0 0 0 3px rgba(var(--cy-rgb),.25),0 0 16px var(--cy);animation:idxpulse 1.6s infinite;z-index:1}
+@keyframes idxpulse{0%,100%{opacity:1}50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){#pane-index .cmp,#pane-index .badge .dot{animation:none}}
+#pane-index .cmptag{position:absolute;top:-30px;transform:translateX(-50%);font:600 10.5px var(--f-m);color:var(--cy);white-space:nowrap}
+#pane-index .legs{display:flex;flex-direction:column;gap:8px}
+#pane-index .leg{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:11px 14px;border-radius:9px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
+#pane-index .leg::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+#pane-index .leg.short::before{background:var(--rd);box-shadow:0 0 10px var(--rd)}
+#pane-index .leg.long::before{background:var(--gr);box-shadow:0 0 10px var(--gr)}
+#pane-index .leg .side{font:700 10px var(--f-m);letter-spacing:.12em;padding:4px 8px;border-radius:4px;border:1px solid}
+#pane-index .leg.short .side{color:var(--rd);border-color:rgba(var(--rd-rgb),.45)}
+#pane-index .leg.long .side{color:var(--gr);border-color:rgba(var(--gr-rgb),.45)}
+#pane-index .leg .what{font:600 12.5px var(--f-d);color:var(--tx)}
+#pane-index .leg .what small{font:500 10.5px var(--f-m);color:var(--tx3);margin-left:6px}
+#pane-index .leg .kv{display:flex;gap:16px;font:500 10.5px var(--f-m);color:var(--tx3);margin-top:3px;flex-wrap:wrap}
+#pane-index .leg .kv b{color:var(--tx2);font-weight:500}
+#pane-index .leg .pnl{text-align:right;font:600 15px var(--f-m)}
+#pane-index .leg .pnl small{display:block;font-size:10.5px;font-weight:500}
+#pane-index .empty,#pane-index .unavail{padding:12px 14px;border-radius:9px;border:1px dashed var(--line2);color:var(--tx3);font:500 11.5px var(--f-m);line-height:1.6}
+#pane-index .ipf{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#pane-index .btn{font:700 11px var(--f-m);letter-spacing:.06em;padding:9px 14px;min-height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+#pane-index .btn.pri{border-color:var(--blu);color:var(--bg);background:var(--blu)}
+#pane-index .ipf .sig{margin-left:auto;font:500 10.5px var(--f-m);color:var(--tx3)}
+#pane-index .ipf .sig b{color:var(--tx2);font-weight:600}
+/* record strip */
+#pane-index .rec{display:grid;grid-template-columns:auto auto auto 1fr auto;gap:22px;align-items:center;padding:14px 18px}
+#pane-index .rec .k{font:600 9.5px var(--f-m);letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+#pane-index .rec .v{font:600 20px var(--f-m);margin-top:3px;color:var(--tx)}
+#pane-index .rec .last{display:flex;gap:6px;flex-wrap:wrap}
+#pane-index .rec .t{font:600 10.5px var(--f-m);padding:5px 9px;border-radius:5px;border:1px solid var(--line2);background:var(--panel);display:inline-flex;gap:8px;align-items:center;color:var(--tx2)}
+#pane-index .rec .t i{font-style:normal;color:var(--tx3);font-size:9.5px}
+@media(max-width:860px){#pane-index .rec{grid-template-columns:1fr 1fr}}
+/* max pain histogram - the app oiCard's classes, web sizes, contract colours */
+#pane-index .oi{padding:16px 18px}
+#pane-index .vfhd{display:flex;align-items:center;gap:10px}
+#pane-index .vfhd h3{font:700 14px var(--f-d);color:var(--tx)}
+#pane-index .vfhd .sp{flex:1}
+#pane-index .oihd{flex-wrap:wrap}
+#pane-index .oihd .oiasof{white-space:nowrap;margin-left:auto}
+#pane-index .oib{position:relative;display:flex;align-items:stretch;gap:3px;height:170px;margin-top:12px;padding:26px 0}
+#pane-index .oic{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+#pane-index .oic .up{flex:1;display:flex;align-items:flex-end}
+#pane-index .oic .dn{flex:1;display:flex;align-items:flex-start}
+#pane-index .oic .up i,#pane-index .oic .dn i{display:block;width:100%;background:var(--rd);opacity:.85;border-radius:2px}
+#pane-index .oic .dn i{background:var(--gr)}
+#pane-index .oic.mp .up i,#pane-index .oic.mp .dn i{background:var(--am);opacity:1}
+#pane-index .oiax{height:1px;background:var(--line2)}
+#pane-index .oispot{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--cy);pointer-events:none}
+#pane-index .oiwall{position:absolute;font-family:var(--f-m);font-size:8.5px;letter-spacing:.08em;white-space:nowrap;transform:translateX(-50%);pointer-events:none}
+#pane-index .oiwall.cw{top:0;color:var(--rd)}
+#pane-index .oiwall.pw{top:0;color:var(--gr)}
+#pane-index .oiwall.mpw{top:0;color:var(--am)}
+#pane-index .oiwall.bw{top:0;color:var(--tx)}
+#pane-index .oiwall.stack{top:13px}
+#pane-index .oichg{position:absolute;transform:translateX(-50%);font-family:var(--f-m);font-size:8.5px;letter-spacing:.08em;white-space:nowrap;pointer-events:none}
+#pane-index .oichg.ce{top:13px;color:var(--rd)}
+#pane-index .oichg.pe{bottom:13px;color:var(--gr)}
+#pane-index .oisplb{position:relative;height:38px;margin-top:2px}
+#pane-index .oisplb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font-family:var(--f-m);font-size:8.5px;letter-spacing:.08em;color:var(--cy);pointer-events:none;text-align:center}
+#pane-index .oisplb span i{display:block;font-style:normal}
+#pane-index .oisplb span b{display:block;font-size:10.5px;font-weight:800}
+#pane-index .oisplb span.lo{transform:none;left:0;text-align:left}
+#pane-index .oisplb span.hi{transform:none;left:auto;right:0;text-align:right}
+#pane-index .oixs{position:relative;height:12px;margin-top:3px}
+#pane-index .oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font-family:var(--f-m);font-size:8.5px;letter-spacing:.08em;pointer-events:none}
+#pane-index .oix.pw{color:var(--gr)}
+#pane-index .oix.cw{color:var(--rd)}
+#pane-index .oix.mp{color:var(--am)}
+#pane-index .oix.lo{transform:none;left:0}
+#pane-index .oix.hi{transform:none;left:auto;right:0}
+#pane-index .oird{font-family:var(--f-m);font-size:11px;color:var(--tx3);margin-top:10px;line-height:1.6}
+#pane-index .oird b{color:var(--tx2)}
+/* small stock tables (buildup / flow / basis) */
+#pane-index .sc{padding:14px 16px 12px}
+#pane-index .sch{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+#pane-index .sch h3{font:700 13.5px var(--f-d);color:var(--tx)}
+#pane-index .sch .sub{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3)}
+#pane-index .sch .ib{margin-left:auto}
+#pane-index .tb{width:100%;border-collapse:collapse;font:500 11.5px var(--f-m)}
+#pane-index .tb th{font:600 8.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-align:right;padding:4px 3px;border-bottom:1px solid var(--line);text-transform:none}
+#pane-index .tb th:first-child,#pane-index .tb td:first-child{text-align:left;padding-left:0}
+#pane-index .tb td{padding:7px 3px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+#pane-index .tb tr:last-child td{border-bottom:none}
+#pane-index .tb td.sym{font:700 12px var(--f-d)}
+#pane-index .tb .vfsort{cursor:pointer;user-select:none}
+#pane-index .tb .vfsort.on{color:var(--tx)}
+#pane-index .cmpct{font-size:10px}
+#pane-index .more{width:100%;margin-top:8px;min-height:32px;font:700 10px var(--f-m);letter-spacing:.08em;border-radius:7px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer}
+#pane-index .scf{font:500 10px var(--f-m);color:var(--tx3);margin-top:8px}
+#pane-index .scf.stale{color:var(--am)}
+#pane-index .ticks{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;margin-left:auto}
+#pane-index .ticks button{font:700 10.5px var(--f-m);padding:5px 12px;background:transparent;color:var(--tx2);border:none;cursor:pointer}
+#pane-index .ticks button.on{background:var(--blu);color:var(--bg)}
+/* ONE sheet shell - every (i) guide, every VIEW MORE, and the Record's full list (scope 8) */
+#pane-index .iiveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9990}
+#pane-index .iisheet{position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);background:var(--card);border-left:1px solid var(--line2);z-index:9991;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+#pane-index .iisheet .iix{position:absolute;top:10px;right:12px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;font-size:13px;z-index:1}
+#pane-index .iisb{overflow-y:auto;padding:18px 18px 24px;flex:1}
+#pane-index .iish{font:700 14px var(--f-d);color:var(--tx);margin:4px 36px 12px 0}
+#pane-index .vfg p{font:500 12px var(--f-d);color:var(--tx2);line-height:1.65;margin:0 0 10px}
+#pane-index .vfg b{color:var(--tx)}
 /* ===== cc#543 V14 pane (namespaced) ===== */
 #pane-v14 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}
 #pane-v14 .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
@@ -5487,19 +5459,19 @@ async function loadMaxPain(){
     D.maxpain = { status:'no_data', strike:0, spot:0, distance:0, distance_pct:0, expiry:null };
   }
 }
-function mapBuild(r){
-  return { sym:r.symbol, price:Number(r.price)||0, day:Number(r.day_1d)||0,
-           oi:r.oi!=null?Number(r.oi):null, oiChg:r.oi_chg!=null?Number(r.oi_chg):null,
-           basis:r.basis!=null?Number(r.basis):null,
-           rv:r.rvol!=null?Number(r.rvol):null,
-           volR:r.vol_p!=null?Number(r.vol_p):null, sig:r.signal||'NEUTRAL' };  /* cc#1440 (canon V2): RVOL live + VOL P at yesterday's close, the pair */
-}
+/* cc#1522: mapBuild() deleted - the old two-table rBuildup was its only consumer; the ported
+   deck below reads the endpoint's own field names raw. */
 async function loadBuildup(){
-  const b = await getJSON('/api/v10/buildup?limit=15');
+  /* cc#1522: stored RAW (the app page's D.build contract) and limit 15 -> 250, so the VIEW MORE
+     pool is the real qualifying set rather than a preview of it. */
+  const b = await getJSON('/api/v10/buildup?limit=250');
   D.loaded.buildup = true;   // cc#1154
-  D.buildup = { long:(b.long_buildup||[]).map(mapBuild),
-                short:(b.short_buildup||[]).map(mapBuild),
-                pending: !!b.oi_feed_pending };
+  D.build = b;
+}
+async function loadQbb(){
+  /* cc#1522: Quality Bullish x Basis - the app's own fetch, null on failure so the card can say
+     "fetch failed, nothing is guessed" instead of rendering an empty market as an error. */
+  try{ D.qbb = await getJSON('/api/quality-bullish-basis'); }catch(e){ D.qbb = null; }
 }
 async function loadDivergence(){
   const d = await getJSON('/api/v10/divergence');
@@ -5541,41 +5513,23 @@ function durSince(ts){
   return h>0?`${h}h ${mins}m`:`${mins}m`;
 }
 async function loadClosed(){
-  /* V10 trade log ONLY — no V8 fallback */
+  /* cc#1522: PAIRED, not per-leg (the cc#941 rule; same derivation the mobile cards read -
+     v10_endpoints.paired_trades, DISPLAY_PARITY 16202). The Record strip shows a trade's NET
+     P&L beside its exit reason, and a per-leg row has neither: one trade appeared as two rows
+     (futures leg + option leg) with the net stated nowhere. Dates and the holding duration come
+     IST from the server; nothing is re-zoned here. Server order is newest-first exit. */
   let rows=[];
-  try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=500')); }catch(e){}   // cc#463 fix3: load ALL legs (was capped at 10)
-  rows = rows.filter(idxOnly);
-  D.loaded.closed = true;   // cc#1154: same - after the await, not before it
-  D.closed = rows.map((x,i)=>{
-    const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
-    const dir=normSide(x.direction||x.side);
-    const lot=Number(x.lot_size||x.qty)||0;
-    const pnl=Number(x.pnl)||0;
-    // cc#463 fix2: P&L% must be SIGNED = pnl / (entry × lot) × 100 — the raw (exit-entry)/entry
-    // price-change % contradicted the pnl sign on SELL legs (id=42: +25.28% vs Rs -5,112).
-    const pPct=(entry&&lot)?(pnl/(entry*lot)*100):0;
-    // cc#434 fix_5: carry leg + option strike/type so each leg (FUT / OPT-write) renders with its own strike.
-    return { id:Number(x.id)||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct, entryTs:x.entry_ts||null,
-             leg:(x.leg||'').toUpperCase(), str:x.opt_strike||null, opt:x.opt_type||null,
-             rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
-             dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
-             // cc#818: carry the RAW exit timestamp. `dt` is already run through fmtDate, and
-             // sorting on a display string ("09 Jun") orders alphabetically, not chronologically.
-             exitTs:(x.exit_ts||x.exit_time||x.trade_date||x.exit_date||null),
-             eng:'V10' };
-  }).sort((a,b)=>{
-    // cc#818: sort by WHEN THE TRADE CLOSED, newest first. cc#463 sorted by id DESC on the
-    // assumption that a higher id is a later trade — that holds only while rows are inserted in
-    // chronological order, and it stopped holding (backfilled//re-inserted legs), which is why the
-    // founder saw 09 Jun sitting at the top. Worse, rClosed() slices the first 15 off this array and
-    // labels them "last 15", so a wrong order silently showed the OLDEST 15 under that label.
-    // id DESC remains the tie-break for legs closed at the same timestamp, and the fallback when a
-    // row carries no usable date at all.
-    const ta=Date.parse(a.exitTs||''), tb=Date.parse(b.exitTs||'');
-    if(isFinite(ta)&&isFinite(tb)&&ta!==tb) return tb-ta;
-    if(isFinite(tb)&&!isFinite(ta)) return 1;    // undated rows sink, never displace a real date
-    if(isFinite(ta)&&!isFinite(tb)) return -1;
-    return b.id-a.id;
+  try{ const r = await getJSON('/api/v10/trades/paired?limit=500'); rows=(r&&r.trades)||[];
+       D.pairedSummary=(r&&r.summary)||{}; }catch(e){ D.pairedSummary={}; }
+  D.loaded.closed = true;   // cc#1154: after the await, not before it
+  D.closed = rows.filter(x=>idxOnly({symbol:x.symbol})).map((x,i)=>{
+    const entry=Number(x.entry_price)||0, ex=Number(x.exit_price)||0;
+    const net=(x.net_pnl==null)?null:Number(x.net_pnl);
+    return { id:Number(x.id)||i, sym:x.symbol, side:x.direction, entry, exit:ex,
+             pnl:(net==null?0:net), netKnown:(net!=null),
+             hedge:x.hedge||null, held:x.held||'', pts:x.points,
+             rsn:(x.reason||'').toUpperCase()||'EXIT',
+             dt:(x.exit_ist||x.entry_ist||''), eng:'V10' };
   });
 }
 async function loadPerf(){
@@ -5897,66 +5851,9 @@ function skelRows(cols, n){
   return out;
 }
 
-function rOpen(){
-  const tot=D.open.reduce((a,p)=>a+p.pnl,0);
-  const head=['ENG','SYMBOL','SIDE','TYPE','ENTRY','CMP','TARGET','STOP','QTY','P&L','P&L%'];
-  const body = D.open.length ? D.open.map(p=>`<tr>
-    <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
-    <td class="td-mono" style="font-weight:800">${v10RowIcon(p.sym,p.entryTs)}${esc(p.sym)}${p.str?`<span style="color:var(--mut);font-size:10px"> ${p.str} ${p.opt}${p.type==='OPT'?' wrt':''}</span>`:''}</td>
-    <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
-    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.type==='OPT'?'OPT·wrt':p.type}</td>
-    <td class="td-mono">${num(p.entry)}</td>
-    <td class="td-mono" style="font-weight:700;color:${C.blu}">${p.cmp?num(p.cmp):'—'}</td>
-    <td class="td-mono" style="color:${UP}">${p.tgt?num(p.tgt):'—'}</td>
-    <td class="td-mono" style="color:${DN}">${p.sl?num(p.sl):'—'}</td>
-    <td class="td-mono" style="color:var(--mut)">${p.qty}</td>
-    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">${p.pnl!=null?'₹'+num(p.pnl):'—'}</td>
-    <td class="td-mono" style="color:${cx(p.pPct)}">${p.cmp?pct(p.pPct):'—'}</td></tr>`).join('')
-    : (D.loaded.open
-        ? `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`
-        : skelRows(11, 2));
-  return `<div class="card">
-    <div class="card-hd"><div class="t">Open Positions (${D.open.length})<span class="scrollhint">SCROLL →</span></div>
-      <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
-    <div class="tbl-hold"><div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
-  </div>`;
-}
-
-let CLOSED_ALL=false;   // cc#463 fix3: last-15 vs View-All toggle
-function rClosed(){
-  const all=D.closed;   // all legs = all-time scope
-  const tot=all.reduce((a,p)=>a+p.pnl,0);
-  const wr=all.length?(all.filter(p=>p.pnl>0).length/all.length*100).toFixed(0):0;
-  const shown=CLOSED_ALL?all:all.slice(0,15);   // cc#463 fix3: default LAST 15 (most-recent first)
-  const head=['DATE','ENG','SYMBOL','LEG','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
-  const body = shown.length ? shown.map(p=>`<tr>
-    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.dt}</td>
-    <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
-    <td class="td-mono" style="font-weight:800">${v10RowIcon(p.sym,p.entryTs)}${esc(p.sym)}</td>
-    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.leg==='OPT'?`${p.str||''} ${p.opt||''} wrt`:(p.leg||'FUT')}</td>
-    <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
-    <td class="td-mono">${num(p.entry)}</td>
-    <td class="td-mono">${num(p.exit)}</td>
-    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
-    <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
-    <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
-    : (D.loaded.closed
-        ? `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`
-        : skelRows(10, 3));
-  // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
-  /* cc#1168 push 5: the expander was a bare span carrying five inline styles and no affordance —
-     nothing said it was pressable except its colour. It is now a real button on the ref's chip
-     grammar, with the state it will move TO named in the label, so the reader is never guessing
-     which way it goes. */
-  const more = all.length>15 ? `<div class="moreline"><button type="button" class="morebtn" onclick="idxToggleClosed()">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</button></div>` : '';
-  return `<div class="card">
-    <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})<span class="scrollhint">SCROLL →</span></div>
-      <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
-        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
-    <div class="tbl-hold"><div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>${more}
-  </div>`;
-}
-
+/* cc#1522: rOpen() and rClosed() (with CLOSED_ALL) are DELETED, not left dangling - the Index
+   Position cards carry the open legs and the Record strip carries the closed book. Every call
+   site traced: render() (rewired below) and window.idxToggleClosed (removed with them). */
 function rSettings(){
   const {stP,stM,stTf,emaF,emaS,emaTf,entry,cut,lotN,lotB,legs,gapExit}=D.cfg;
   const p=[['Engine','V10 ST + EMA'],['Symbols','NIFTY · BANKNIFTY'],
@@ -6016,68 +5913,9 @@ function rPerf(){
   </div>`;
 }
 
-function buildupTable(title, rows, accent, pending){
-  const sigClr = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
-                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?C.amber : C.mut;  /* cc#1149: token swap only - the literal #F5B94A is exactly the dark --amber, so this is the same colour it always was. NOTE for cc#1154: that means SHORT_COVER and LONG_UNWIND render identically today. The ref skeletons this card and does not rule on a fourth buildup colour, so I am not inventing one here. */
-  // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
-  // of NEUTRAL tags is misleading. Show price-direction columns only.
-  const head = pending
-    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','Vol R','Vol P','BASIS']
-    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','Vol R','Vol P','BASIS','SIGNAL'];
-  const colspan = pending?8:9;   /* cc#1440: +1 for the RVOL column */
-  const body = rows.length ? rows.map(r=>`<tr>
-    <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
-    <td class="td-mono">${num(r.price,2)}</td>
-    <td class="td-mono" style="font-weight:700;color:${cx(r.day)}">${pct(r.day)}</td>
-    <td class="td-mono" style="color:${r.oi!=null?C.txt:'var(--dim)'}">${r.oi!=null?fK(r.oi):'—'}</td>
-    <td class="td-mono" style="color:${r.oiChg!=null?cx(r.oiChg):'var(--dim)'}">${r.oiChg!=null?sgn(r.oiChg/1e5,1)+'L':'—'}</td>
-    <td class="td-mono" style="color:var(--dim)">${r.rv!=null?r.rv.toFixed(2):'—'}</td>
-    <td class="td-mono" style="color:var(--dim)">${r.volR!=null?r.volR.toFixed(2):'—'}</td>
-    <td class="td-mono" style="color:${r.basis!=null?cx(r.basis):'var(--dim)'}">${r.basis!=null?sgn(r.basis,1):'—'}</td>
-    ${pending?'':`<td class="td-sig">${bdg(r.sig.replace('_',' '),sigClr(r.sig),true)}</td>`}</tr>`).join('')
-    : `<tr class="empty-row"><td colspan="${colspan}">No data</td></tr>`;
-  /* cc#1168 push 6 · DEFECT C. The eyebrow token replaces the hand-written 10px/.6px label, but
-     KEEPS the accent colour: green for long buildup, red for short, which is the only thing
-     telling the two tables apart at a glance and is direction, not decoration.
-     The table is wrapped in the SAME tbl-hold measured-scroll wrapper as Open Positions rather
-     than a second mechanism, and carries its own hint because this card holds two tables under
-     one header. Seven or eight columns inside a 300px-floor flex column is the widest table on
-     the tab -- measured at 640px against a 579px half-card at 1280, which is precisely the OI
-     CHANGE column the founder saw cut mid-value in the PDF. */
-  return `<div style="flex:1;min-width:300px">
-    <div class="eyebrow" style="color:${accent}">${title}<span class="scrollhint">SCROLL →</span></div>
-    <div class="tbl-hold"><div class="tbl-scroll"><table class="bld-tbl"><thead><tr>${head.map(h=>`<th${h==='SIGNAL'?' class="th-sig"':''}>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>
-  </div>`;
-}
-// cc#1303 (founder direct 24-Aug): "too much data in 1 table instead of show long and short
-// build up parallel show in switch button and keep default long build up" — was rendering BOTH
-// tables side by side (8 columns x ~15 rows each, twice) in one card. Default LONG per the ask.
-D.buildupView = 'long';
-function setBuildupView(v){ D.buildupView = (v==='short') ? 'short' : 'long'; try{ render(); }catch(e){} }
-window.setBuildupView = setBuildupView;
-function rBuildup(){
-  const b=D.buildup;
-  const note = b.pending
-    ? `<div class="note" style="color:var(--amber)">⚠ OI data not available — showing price direction only. Signal classification disabled.</div>`
-    : '';
-  const view = D.buildupView==='short' ? 'short' : 'long';
-  const table = view==='long'
-    ? buildupTable('▲ Long Buildup', b.long, UP, b.pending)
-    : buildupTable('▼ Short Buildup', b.short, DN, b.pending);
-  return `<div class="card">
-    <div class="card-hd"><div><div class="t">Futures Buildup — Stock F&O</div>
-      <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div>
-      <div class="vsw">
-        <button class="${view==='long'?'on':''}" onclick="setBuildupView('long')">LONG</button>
-        <button class="${view==='short'?'on':''}" onclick="setBuildupView('short')">SHORT</button>
-      </div></div>
-    <div style="display:flex;gap:16px;flex-wrap:wrap">
-      ${table}
-    </div>
-    ${note}
-  </div>`;
-}
-
+/* cc#1522: buildupTable() / D.buildupView / setBuildupView() / rBuildup() (the LONG|SHORT
+   switch card, cc#1303) are DELETED - the four-state ported deck below (buCard) replaces them,
+   and it shows all four states at once, so the switch dies with the card it steered. */
 /* ── cc#124: Futures-vs-Equity Divergence scanner ── */
 function rDivergence(){
   const d = D.divergence, rows = d.rows||[];
@@ -6276,254 +6114,12 @@ async function loadPivots(){
     }
   }catch(e){}
 }
-/* ══ cc#1151 sprint 3/7 · LEVELS SPINE ══════════════════════════════════════════════════════
-   Pivots, OI walls and spot are all PRICES. The old build showed them as three separate readings
-   and left the founder to merge them in his head. One vertical axis answers what is above me,
-   what is below me, and how far, in one look.
-
-   SCALE. pos(price) = (R2 - price) / (R2 - S2) * 100, clamped to [2,98] so a tag at either end
-   still has room to print. Unit-checked against today's real NIFTY pivots below.               */
-D.levelsView = { NIFTY:'spine', BANKNIFTY:'spine' };   // scope 6 default
-
-function spinePos(price, r2, s2){
-  if(!(r2>s2) || !price) return null;
-  const raw = (r2 - price) / (r2 - s2) * 100;
-  return Math.max(2, Math.min(98, raw));
-}
-/* TRUE position, unclamped - used to decide whether a level is off the visible scale at all.
-   Max pain must never be clamped onto the axis: off-scale is a truthful state and clamping it
-   would draw a notch at the edge that looks like a real level sitting there. */
-function spinePosRaw(price, r2, s2){
-  if(!(r2>s2) || !price) return null;
-  return (r2 - price) / (r2 - s2) * 100;
-}
-/* Collision nudge (verify D). Tags are absolutely positioned at their level's percentage, so two
-   levels a few points apart print on top of each other. Walk the levels on ONE side in axis order
-   and push a tag down by up to 10px when it lands inside 14px of the tag above it. Same side only
-   - pivots and max pain tag right, walls tag left, so they cannot collide with each other. */
-function nudgeTags(levels, heightPx){
-  const MIN_GAP = 14, MAX_NUDGE = 10;
-  const bySide = { L:[], R:[] };
-  levels.forEach(l => { if(l.pos!=null) bySide[l.side].push(l); });
-  Object.values(bySide).forEach(list => {
-    list.sort((a,b)=>a.pos-b.pos);
-    let lastPx = -Infinity;
-    list.forEach(l => {
-      const px = l.pos/100*heightPx;
-      const want = Math.max(px, lastPx + MIN_GAP);
-      l.nudge = Math.min(MAX_NUDGE, Math.round(want - px));
-      lastPx = px + l.nudge;
-    });
-  });
-}
-/* Top-2 put strikes and top-2 call strikes by OI in the window the chain already returns.
-   A strike that is BOTH a top put wall and a top call wall collapses to one row tagged WALL x2 -
-   two walls at one price is a pin, and showing it as two rows hides that. */
-function wallLevels(strikes){
-  if(!strikes || !strikes.length) return [];
-  const top = (key) => strikes.filter(s=>Number(s[key])>0)
-    .sort((a,b)=>Number(b[key])-Number(a[key])).slice(0,2);
-  const puts = top('put_oi'), calls = top('call_oi');
-  const maxOI = Math.max(1, ...puts.map(s=>Number(s.put_oi)), ...calls.map(s=>Number(s.call_oi)));
-  const out = new Map();
-  const add = (s, side, oi) => {
-    const k = Number(s.strike);
-    if(out.has(k)){ const e=out.get(k); e.both=true; e.oi=Math.max(e.oi,oi); return; }
-    /* bar width maps OI onto 20%-42% of the half width, per the scale spec */
-    out.set(k, {strike:k, side, oi, both:false, w: 20 + (oi/maxOI)*22});
-  };
-  puts.forEach(s=>add(s,'put',Number(s.put_oi)));
-  calls.forEach(s=>add(s,'call',Number(s.call_oi)));
-  return [...out.values()];
-}
-const oiLakh = v => (Number(v)/100000);
-
-/* cc#1300 (founder direct 24-Aug): "instead of showing PP and Max pain inside chart show it on
-   top adjacent to nifty bank nifty price bigger fonts and followed by a horizontal ladder
-   positioning s1 s2 cmp pp r1 r2 and max pain followed by vertical ladder spine not required."
-   Replaces the vertical price-axis spine (R2/R1/PP/S1/S2 + OI walls, positioned by percentage on
-   a 330px axis) with: (1) PP + MAX PAIN promoted next to the spot price, bigger font, and (2) a
-   single horizontal row of chips — S2, S1, CMP, PP, R1, R2, MAX PAIN — in ascending price order
-   (S1/S2 as literally typed would put S1 above S2 on the low side, which does not match either
-   number; ascending order is what the two values themselves require, CMP/PP sit in the middle
-   near each other, MAX PAIN keeps the founder's trailing position since it is not a pivot and its
-   price can land anywhere in the range). OI walls are DROPPED from this view — not lost: the
-   card's own OI-strike LADDER toggle already shows every put/call wall in full, untouched by this
-   card. spinePos()/spinePosRaw()/nudgeTags()/wallLevels() above are no longer called from here
-   (kept only because fitSpineTags()'s .spine selector is now permanently empty and harmless) —
-   flagged for whoever next touches this file, not deleted here to keep this diff to the redesign
-   itself. */
-function rSpine(key, name){
-  const pvt = D.pivots[key];
-  const oi  = D.strikeOI[key];
-  const mp  = D.maxpainAll[key];
-  if(!pvt || !(pvt.r2>pvt.s2))
-    return `<div class="mp-pending">Pivots pending for ${esc(name)} — the ladder needs R2 and S2 at minimum.</div>`;
-  const {r2,s2,r1,pp,s1} = pvt;
-  /* spot: the chain's own spot first, same source discipline as before (cc#1141/cc#1167) — one
-     price, stated basis, never a live number sitting beside a stale one with no distinction. */
-  const spot = Number(oi&&oi.spot) || Number(D.idx[key]&&D.idx[key].cmp) || 0;
-  const spotBasis = (oi && oi.spot_basis) || null;
-  const spotLive = spotBasis === 'live';
-  const dpc = v => spot&&v ? ((v-spot)/spot*100) : null;
-  const sgn = v => v==null ? '' : (v>=0?'+':'') + v.toFixed(2) + '%';
-
-  const mpS = (mp&&mp.status==='ok'&&mp.max_pain_strike!=null)?Number(mp.max_pain_strike):null;
-
-  // headline chips, bigger font, next to the price — PP and MAX PAIN only, per the ask.
-  const headline = (label,v,cls)=> v==null ? '' :
-    `<span class="ppmax-item ${cls}"><span class="l">${label}</span> <span class="px">${num(v)}</span> <span class="d">${sgn(dpc(v))}</span></span>`;
-  const headlineHtml = mpS!=null
-    ? headline('PP',pp,'pp') + headline('MAX PAIN',mpS,'mp')
-    : headline('PP',pp,'pp') + '<span class="ppmax-item mp na">MAX PAIN unavailable</span>';
-
-  /* cc#1344 (founder direct 26-Aug, mobile app screenshot as reference): the cc#1300 chip-row
-     ladder (.hladder/.hl-item) WRAPPED onto multiple lines at desktop width — a grid of boxes,
-     not the single connected line the founder actually wanted (his verbal ask both times was
-     "horizontal ladder"; the wrapping row is what produced the "not this" screenshot). Replaced
-     with one line + 6 positioned dots, in ascending price order S2→R2 left to right, per the
-     mobile reference. MAX PAIN is NOT one of the 6 — the reference shows exactly six points —
-     it stays in the headline chips above, untouched. A 7th max-pain marker ON this line, when it
-     falls inside S2..R2, is flagged in the card as a lower-priority bonus; left out here so the
-     primary six-point layout ships correct and uncomplicated, not to save time.
-     Positioning reuses spinePos()'s existing clamped-percentage math (defined above, kept alive
-     since cc#1300 specifically for this future reuse) — but INVERTED. spinePos() was built for a
-     vertical axis with R2 at the TOP (0%) and S2 at the BOTTOM (100%); used as-is for a
-     horizontal `left` position that would put R2 on the LEFT and S2 on the RIGHT, backwards from
-     the ascending left-to-right order the reference explicitly shows. 100-spinePos(...) restores
-     ascending order (S2 near 0%, R2 near 100%) while keeping the identical clamped linear
-     interpolation. */
-  const leftPct = v => { const p = spinePos(v, r2, s2); return p==null ? null : 100 - p; };
-  // label sits ABOVE for S2/PP/R1, BELOW for S1/CMP/R2 — alternating, per the reference, so
-  // adjacent labels never collide on one row. hollow=true draws an outline-only marker (support/
-  // resistance); false draws a solid filled dot (PP, and CMP largest of all six).
-  const dots = [
-    ['S2', s2, 's2', 'above', true], ['S1', s1, 's1', 'below', true],
-    ['PP', pp, 'pp', 'above', false], ['CMP', spot, 'cmp', 'below', false],
-    ['R1', r1, 'r1', 'above', true], ['R2', r2, 'r2', 'below', true],
-  ];
-  const lineHtml = dots.map(([label,v,cls,labelPos,hollow])=>{
-    if(v==null) return '';
-    const pct = leftPct(v); if(pct==null) return '';
-    const live = label==='CMP' && !spotLive ? ' stale' : '';
-    return `<div class="spine-dot ${cls}${hollow?' hollow':''}${live}" style="left:${pct}%"></div>`
-      + `<div class="spine-lbl ${cls} ${labelPos}${live}" style="left:${pct}%">`
-      +   `<span class="c">${label}</span><span class="v">${num(v)}</span></div>`;
-  }).join('');
-
-  const expTxt = (mp&&mp.expiry)?' · EXP '+esc(String(mp.expiry)):'';
-  const basisTxt = spotLive
-    ? (oi&&oi.spot_asof ? ' · spot live '+esc(String(oi.spot_asof).slice(11,16))+' IST' : ' · spot live')
-    : (spotBasis ? ' · spot = PREVIOUS CLOSE'+(oi&&oi.spot_asof?' '+esc(String(oi.spot_asof)):'')+', distances measured from it' : '');
-  /* cc#1344: "relative position vs PP as a coloured percentage" from the reference — the ONE new
-     fact this caption line did not already carry. No countdown-to-bell exists anywhere in this
-     file (grepped for one before writing this — the closest things are a static "figures frozen
-     until 09:15" string and the Replay Day RP_START/RP_END constants, neither is a live timer),
-     so the reference's "2h 42m TO BELL" is deliberately NOT reproduced here rather than invented
-     — this caption keeps the live/previous-close state it already had instead. */
-  const vsPpPct = (spot && pp) ? ((spot-pp)/pp*100) : null;
-  const vsPpHtml = vsPpPct==null ? '' :
-    ` · <span style="color:${vsPpPct>=0?'var(--grn)':'var(--red)'}">${vsPpPct>=0?'above':'below'} PP ${Math.abs(vsPpPct).toFixed(2)}%</span>`;
-
-  return `<div class="spine-hd">
-      <div class="spine-hd-top"><span class="big2">${spot?num(spot):'—'}</span><span class="ppmax">${headlineHtml}</span></div>
-      <span class="cap">rolling-5d pivots${expTxt}${basisTxt}${vsPpHtml}</span></div>
-    <div class="spine-line-wrap"><div class="spine-line"></div>${lineHtml}</div>`;
-}
-
-/* cc#1167: POST-LAYOUT tag fitting. nudgeTags() runs while the HTML is still a string, so it is
-   guessing at tag height with a fixed 14px gap — a number that was right for a single-line 10px
-   tag and badly wrong once a tag wraps to two lines at accessibility text scaling, where the
-   measured collisions were 112x19px of shared text. This pass runs AFTER the DOM lands, reads the
-   real rects, and pushes overlapping tags apart on their own side of the axis. Measurement, not
-   arithmetic about a font we cannot see. Cheap: two sorted walks over ~10 nodes per spine. */
-function fitSpineTags(root){
-  var host = root || document;
-  Array.prototype.forEach.call(host.querySelectorAll('.spine'), function(sp){
-    ['piv','wall'].forEach(function(side){
-      /* cc#1171: .lvl.spotl JOINS THE WALL GROUP, and this is the actual residual defect.
-         The old comment on nudgeTags says pivots tag right and walls tag left "so they cannot
-         collide with each other". True of those two. But the SPOT chip is a third thing and its
-         CSS puts it at left:5% — in the wall column, not the pivot one — while this function
-         listed only .piv/.mpl and .wall, so the spot tag was never fitted against anything at
-         all. Measured on the real 21-Aug BANKNIFTY board: at 360px the only overlapping pair on
-         the whole spine was "WALL x2 57,500" against "SPOT 57,413", 72x8px, and at 412px 47x8px.
-         Grouping it where it actually renders lets the existing same-side push separate the two. */
-      var sel = side==='wall' ? '.lvl.wall, .lvl.spotl' : '.lvl.piv, .lvl.mpl';
-      var tags = Array.prototype.slice.call(sp.querySelectorAll(sel))
-        .map(function(l){ return l.querySelector('.tag'); }).filter(Boolean);
-      tags.forEach(function(t){ t.style.marginTop = ''; });        // start from the CSS position
-      tags.sort(function(a,b){ return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
-      /* cc#1171: TO A FIXED POINT, and every number MEASURED.
-         The single pass this replaces got two things wrong, and both only showed up at 2x text
-         scaling. It PREDICTED the pushed tag's new bottom as r.bottom + push, using the height it
-         had before the push; and the tags share a flow, so pushing one moves the ones under it,
-         which made the very next tag's rect stale in the same walk. At 1x the tags are short
-         enough that neither error is visible. At 2x they wrap to two lines and the residue was
-         ten overlaps about 9px tall.
-         Now: after each push the tag's own bottom is READ BACK, so the value carried forward is
-         the one the browser actually laid out, not arithmetic about it. And the whole side is
-         re-walked until a pass moves nothing.
-         BOUNDED AT 3. This converges in one or two passes because every push is downward and the
-         list is sorted; the cap is there so a pathological layout costs a wasted frame instead of
-         a hung tab. If it ever leaves the loop still moving, the tags are merely as separated as
-         three passes could get them — never worse than where it started. */
-      for(var pass = 0; pass < 3; pass++){
-        var moved = false, prevBottom = -Infinity;
-        for(var i = 0; i < tags.length; i++){
-          var t = tags[i], r = t.getBoundingClientRect();
-          if(r.top < prevBottom + 2){
-            var cur = parseFloat(t.style.marginTop) || 0;
-            t.style.marginTop = Math.round(cur + (prevBottom + 2 - r.top)) + 'px';
-            moved = true;
-            prevBottom = t.getBoundingClientRect().bottom;   /* read back, never predicted */
-          } else {
-            prevBottom = r.bottom;
-          }
-        }
-        if(!moved) break;
-      }
-    });
-    /* Re-fit whenever the spine's own box changes size. A window resize listener is not enough:
-       text scaling changes the RENDERED size without any window event at all — the OS/browser
-       accessibility setting, a user zoom, or a late webfont swap all land that way. A
-       ResizeObserver on the element sees the thing that actually matters. Guarded and attached
-       once per spine, so re-renders do not stack observers. */
-    if(!sp._fitRO && typeof ResizeObserver === 'function'){
-      var raf = false;
-      sp._fitRO = new ResizeObserver(function(){
-        if(raf) return; raf = true;
-        requestAnimationFrame(function(){ raf = false;
-          try{ fitSpineTags(sp.parentNode || document); }catch(e){} });
-      });
-      /* Observe a TAG, not the spine. The spine's own box is a fixed height and a fluid width, so
-         scaling the text inside it changes nothing the observer would see — measured: the box was
-         identical at 1x and 2x while the tags inside had doubled. The tag's box is the one that
-         moves with font size, so that is the one worth watching. */
-      try{
-        sp._fitRO.observe(sp);
-        var probe = sp.querySelector('.lvl .tag');
-        if(probe) sp._fitRO.observe(probe);
-      }catch(e){}
-    }
-  });
-}
-
-function rLevelsCard(key, name){
-  const view = D.levelsView[key]==='ladder' ? 'ladder' : 'spine';
-  const body = view==='spine' ? rSpine(key,name)
-                              : oiLadder(name, D.strikeOI[key], D.maxpainAll[key]);   /* cc#1152 */
-  return `<div class="card">
-    <div class="card-hd"><div><div class="t">Levels · ${esc(name)}</div>
-      <div class="s">${view==='spine'?'pivots + max pain · S1&rarr;R2 ladder':'strike-wise OI · ATM ±7'}</div></div>
-      <div class="vsw">
-        <button class="${view==='spine'?'on':''}" onclick="idxSetLevelsView('${key}','spine')">SPINE</button>
-        <button class="${view==='ladder'?'on':''}" onclick="idxSetLevelsView('${key}','ladder')">LADDER</button>
-      </div></div>
-    ${body}</div>`;
-}
-function idxSetLevelsView(key, view){ D.levelsView[key]=view; render(); }
-
+/* cc#1522: the LEVELS SPINE machinery (D.levelsView, spinePos/spinePosRaw, nudgeTags,
+   wallLevels, oiLakh, rSpine - cc#1151/1300/1344) is DELETED with rLevelsCard below. The Index
+   Position rail replaces the spine; its positioning is its own clamped (v-lo)/(hi-lo) map. */
+/* cc#1522: fitSpineTags(), rLevelsCard() and idxSetLevelsView() (the SPINE|LADDER toggle) are
+   DELETED - the card asks for the toggle retired, and a dead renderer that still looks callable
+   is how a later card revives what this one retired (the cc#1151 verify-E rule). */
 /* cc#1151 verify E: pivotLadder() and rPivots() REMOVED, not left dangling. The spine replaces
    the pivots list outright, and a dead renderer that still looks callable is how a later card
    ends up reviving the thing this one retired. */
@@ -6537,103 +6133,836 @@ async function loadStrikeOI(){
     try{ D.maxpainAll[s]=await getJSON('/api/v10/maxpain?symbol='+s); }catch(e){ D.maxpainAll[s]=null; }
   }));
 }
-/* ══ cc#1152 sprint 4/7 · OI RUNG LADDER ════════════════════════════════════════════════════
-   Replaces the horizontal histogram. That chart put 15 strikes on an x-axis where the labels are
-   wider than the columns, so they concatenated into 23,75023,80023,850 - unreadable, and not a
-   styling problem. Rotating the axis 90 degrees gives every strike its own row, which makes label
-   collision structurally impossible instead of merely unlikely. Higher strikes sit higher, so the
-   ladder reads like price.                                                                      */
-function oiLadder(name, oi, mp){
-  if(!oi || oi.status!=='ok' || !(oi.strikes && oi.strikes.length))
-    return `<div class="mp-pending">Option chain OI pending for ${esc(name)}</div>`;
-  /* descending strikes, top to bottom - the whole point is that it reads like a price axis */
-  const rows=[...oi.strikes].sort((a,b)=>Number(b.strike)-Number(a.strike));
-  const spot=Number(oi.spot)||0;
-  const atm=oi.atm_strike!=null?Number(oi.atm_strike):null;
-  const mpStrike=(mp&&mp.status==='ok'&&mp.max_pain_strike!=null)?Number(mp.max_pain_strike):null;
-  /* ONE shared scale across BOTH sides (scope 1). A per-side scale would make a 3L call bar look
-     the same length as a 20L put bar, which is the opposite of what this card is for. */
-  const maxOI=Math.max(1,...rows.map(r=>Math.max(Number(r.put_oi)||0,Number(r.call_oi)||0)));
-  const maxPut=Math.max(0,...rows.map(r=>Number(r.put_oi)||0));
-  const maxCall=Math.max(0,...rows.map(r=>Number(r.call_oi)||0));
-  const putWall=rows.find(r=>Number(r.put_oi)===maxPut&&maxPut>0);
-  const callWall=rows.find(r=>Number(r.call_oi)===maxCall&&maxCall>0);
-  const L=v=>(Number(v)/100000).toFixed(1);
+/* ══ cc#1522 · INDEX INTEL WEB R1 (INDEX_INTEL_WEB_R1_V1, session_log 34998) ═════════════════
+   Ref: design_refs/scorr_indexintel_web_R1.html @ 386065f (byte-equal to forum log 4243).
+   The app's Index Intel decks (scorr_v10_signal.html) ported to web: the DATA handling, honesty
+   rules, 32095 read phrases and (i) guide texts are the app's VERBATIM; only the card shells are
+   the web mock's. ONE sheet shell (iiSheet) serves every (i) guide, every VIEW MORE and the
+   Record's full list (scope 8). Sort core: _sortByState/_sortTh reused from cc#1430, not forked
+   (scope 6). */
 
-  const rungs=rows.map(r=>{
-    const k=Number(r.strike), po=Number(r.put_oi)||0, co=Number(r.call_oi)||0;
-    const cls=['rung'];
-    if(atm!=null&&Math.abs(k-atm)<0.5) cls.push('atm');
-    if(mpStrike!=null&&Math.abs(k-mpStrike)<0.5) cls.push('mp');
-    if(maxPut>0&&po===maxPut) cls.push('pw');
-    if(maxCall>0&&co===maxCall) cls.push('cw');
-    const tags=[];
-    if(atm!=null&&Math.abs(k-atm)<0.5) tags.push('A');
-    if(mpStrike!=null&&Math.abs(k-mpStrike)<0.5) tags.push('MP');
-    return `<div class="${cls.join(' ')}" data-strike="${k}">
-      <div class="side p" title="PUT OI ${L(po)}L"><span class="bar" style="width:${(po/maxOI*100).toFixed(1)}%"></span><span class="oiv">${L(po)}L</span></div>
-      <div class="stk">${num(k)}${tags.length?' ·'+tags.join('·')+'·':''}</div>
-      <div class="side c" title="CALL OI ${L(co)}L"><span class="bar" style="width:${(co/maxOI*100).toFixed(1)}%"></span><span class="oiv">${L(co)}L</span></div>
-    </div>`;
+/* ── the one sheet shell ── */
+var II_SHEET = { open:false, kind:null, key:null };
+function iiSheet(html){
+  iiSheetClose();
+  var host = document.getElementById('pane-index') || document.body;
+  var veil = document.createElement('div'); veil.className='iiveil';
+  var sh = document.createElement('div'); sh.className='iisheet';
+  sh.setAttribute('role','dialog'); sh.setAttribute('aria-modal','true');
+  sh.innerHTML = '<button type="button" class="iix" onclick="iiSheetClose()" aria-label="Close">&#10005;</button>'
+    + '<div class="iisb">' + html + '</div>';
+  host.appendChild(veil); host.appendChild(sh);
+  document.body.style.overflow='hidden';
+  II_SHEET.open = true;
+  /* cc#1312's close-race fix travels with the pattern it fixed: a veil inserted under the finger
+     mid-event can catch the SAME tap's synthesized click - bind the close one frame later. */
+  requestAnimationFrame(function(){ if(veil.parentNode) veil.onclick = iiSheetClose; });
+}
+function iiSheetClose(){
+  var v=document.querySelector('.iiveil'), s=document.querySelector('.iisheet');
+  if(v) v.remove();
+  if(s) s.remove();
+  if(II_SHEET.open){ document.body.style.overflow=''; II_SHEET.open=false; II_SHEET.kind=null; II_SHEET.key=null; }
+}
+document.addEventListener('keydown', function(e){ if(II_SHEET.open && e.key==='Escape') iiSheetClose(); });
+
+/* ── shared sort core, cc#1430/1431 verbatim ── */
+function _sortByState(list, state, getters){
+  if (!state || !state.key) return list;
+  var get = getters[state.key];
+  return list.slice().sort(function(a, b){
+    var av = get(a), bv = get(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;    // nulls sort last regardless of direction — never implies zero
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * state.dir;
+    return (av - bv) * state.dir;
+  });
+}
+function _sortTh(label, key, state, onclickExpr){
+  var on = state && state.key === key;
+  // cc#1437: a persistent neutral ↕ says the header is tappable; the active column gets ▲/▼.
+  var arrow = on ? (state.dir === 1 ? ' ▲' : ' ▼') : ' ↕';
+  return '<th class="vfsort' + (on ? ' on' : '') + '" onclick="' + onclickExpr + '">' + label + arrow + '</th>';
+}
+function iiStamp(asof){
+  /* scope 9: the DATA's as-of via the one shared helper (cc#1510) - no static LIVE labels.
+     Empty as-of renders NOTHING, never a fabricated stamp. */
+  var st = scorrAsofStamp(asof);
+  return st.txt ? '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + '</div>' : '';
+}
+
+/* ── as-of honesty (the app's chainAsOf, cc#844 class of bug) ──
+   The chain tick is a NAIVE IST timestamp, so nothing here computes an age in minutes. It
+   compares DATES only and says plainly whether the chain predates the last session. */
+function chainAsOf(tick){
+  if(!tick) return {txt:'chain tick unknown', stale:true};
+  var d = String(tick).slice(0, 10), t = String(tick).slice(11, 16);
+  var n = istNow();
+  var today = n.getFullYear() + '-' + ('0'+(n.getMonth()+1)).slice(-2) + '-' + ('0'+n.getDate()).slice(-2);
+  return {txt:'OI as of ' + d + (t ? ' ' + t : '') + ' IST', stale:(d < today), day:d};
+}
+function oiUnavail(name, why){
+  return '<div class="card oi"><div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3></div>'
+    + '<div class="unavail">' + esc(why) + '</div></div>';
+}
+
+/* ── MAX PAIN histogram - the app's oiCard (spec 6055 section 7) ported verbatim; colours
+   retokened per scope 5: heat->--rd, volt->--gr, aqua->--cy (CSS), amber->--am. ── */
+function oiCard(name, oi, mp){
+  if(!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
+    return oiUnavail(name, 'No option chain for this expiry yet — nothing is drawn in its place.');
+  var rows = oi.strikes, mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
+  /* cc#1354 · one-sided tick: the card keeps drawing the side that exists, suppresses the dead
+     side's WALL tag, axis label and footer value, and states the gap in one line. */
+  var peDead = oi.one_sided === 'PE_MISSING', ceDead = oi.one_sided === 'CE_MISSING';
+  /* cc#1355 · change since open + PCR (session_log 32043). Bar HEIGHT stays the OI level;
+     BRIGHTNESS carries the change. No delta (no 09:20 baseline, or a dead side) keeps the
+     stylesheet default — no signal is not a signal. */
+  var CE_COL = 'var(--rd)', PE_COL = 'var(--gr)';
+  var hasCh = rows.some(function(r){ return r.ce_chg != null || r.pe_chg != null; });
+  var maxCe = Math.max.apply(null, rows.map(function(r){ return r.call_oi || 0; })) || 1;
+  var maxPe = Math.max.apply(null, rows.map(function(r){ return r.put_oi || 0; })) || 1;
+  var thLab = { ce: Math.max(25000, .02 * maxCe), pe: Math.max(25000, .02 * maxPe) };
+  var thCls = { ce: Math.max(10000, .005 * maxCe), pe: Math.max(10000, .005 * maxPe) };
+  var bri = function(chg, th, glow){
+    if(!hasCh || chg == null) return '';
+    if(chg >= th)  return 'opacity:1;box-shadow:0 0 8px ' + glow + ';';
+    if(chg <= -th) return 'opacity:.35;';
+    return 'opacity:.55;';
+  };
+  var fCh = function(v){ var a = Math.abs(v), s = v > 0 ? '+' : '-';
+    return s + (a >= 1e5 ? (a / 1e5).toFixed(1) + 'L' : a >= 1e3 ? Math.round(a / 1e3) + 'k' : String(a)); };
+  var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
+  var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
+  var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
+  var cols = rows.map(function(r){
+    var isMp = (mpStrike != null && Number(r.strike) === mpStrike);
+    return '<div class="oic' + (isMp ? ' mp' : '') + '" title="' + r.strike + '">'
+      + '<div class="up"><i style="height:' + (100 * (r.call_oi || 0) / peak).toFixed(1) + '%;'
+      +   (isMp ? '' : bri(r.ce_chg, thCls.ce, CE_COL)) + '"></i></div>'
+      + '<div class="oiax"></div>'
+      + '<div class="dn"><i style="height:' + (100 * (r.put_oi || 0) / peak).toFixed(1) + '%;'
+      +   (isMp ? '' : bri(r.pe_chg, thCls.pe, PE_COL)) + '"></i></div>'
+      + '</div>';
   }).join('');
+  /* the dashed spot line, interpolated across the strike span, never snapped to a column;
+     cc#1468/1471: the three-row label under it keeps the (live)/(prev close) conditional. */
+  var basis = oi.spot_basis === 'live' ? 'live' : 'prev close';
+  var lo = Number(rows[0].strike), hi = Number(rows[rows.length - 1].strike), spotLine = '', spotLb = '';
+  if(oi.spot != null && hi > lo){
+    var f = Math.max(0, Math.min(1, (Number(oi.spot) - lo) / (hi - lo)));
+    spotLine = '<div class="oispot" style="left:' + (f * 100).toFixed(2) + '%"></div>';
+    spotLb = '<div class="oisplb"><span'
+      + (f * 100 < 8 ? ' class="lo"' : f * 100 > 92 ? ' class="hi"'
+         : ' style="left:' + (f * 100).toFixed(2) + '%"')
+      + '><i>Spot</i><b>' + Math.round(Number(oi.spot)) + '</b><i>(' + basis + ')</i></span></div>';
+  }
+  /* wall tags on their own columns - (i + 0.5) / count centres a tag on its bar */
+  var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
+  var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
+  var wallWord = function(w, key, th){
+    if(!hasCh || !w || w[key] == null) return '';
+    return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
+  };
+  /* cc#1468/1471: ONE unified top row, two rungs, 18% legibility rule - a tag landing within 18%
+     of one on its rung drops to the second rung; both blocked = dropped entirely. */
+  var mpI = mpStrike == null ? -1 : rows.findIndex(function(r){ return Number(r.strike) === mpStrike; });
+  var topPlaced = [[], []];
+  var placeTop = function(i, cls, text){
+    if(i < 0) return;
+    var pct = Number(colPct(i));
+    for(var rung = 0; rung < 2; rung++){
+      var clash = topPlaced[rung].some(function(p){ return Math.abs(p - pct) < 18; });
+      if(!clash){
+        topPlaced[rung].push(pct);
+        tags += '<div class="oiwall ' + cls + (rung ? ' stack' : '') + '" style="left:'
+          + pct.toFixed(2) + '%">' + text + '</div>';
+        return;
+      }
+    }
+  };
+  /* cc#1475: call wall and put wall on the SAME strike merge into one CALL+PUT WALL tag */
+  var wallsMerged = (cwI >= 0 && cwI === pwI && !ceDead && !peDead);
+  if(wallsMerged){
+    placeTop(cwI, 'bw', '<span style="color:var(--rd)">CALL</span>+<span style="color:var(--gr)">PUT</span> WALL');
+  } else {
+    placeTop(ceDead ? -1 : cwI, 'cw', 'CALL WALL' + wallWord(callWall, 'ce_chg', thCls.ce));
+  }
+  placeTop(mpI, 'mpw', 'MAX PAIN');
+  if(!wallsMerged) placeTop(peDead ? -1 : pwI, 'pw', 'PUT WALL' + wallWord(putWall, 'pe_chg', thCls.pe));
+  if(hasCh){
+    [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
+      rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
+          .filter(function(m){ return m.c != null && Math.abs(m.c) >= sd[1]; })
+          .filter(function(m){ return !(sd[2] === 'ce' && topPlaced[1].some(function(p){
+              return Math.abs(p - Number(colPct(m.i))) < 8; })); })
+          .sort(function(a, b){ return Math.abs(b.c) - Math.abs(a.c); })
+          .slice(0, 3)
+          .forEach(function(m){
+            tags += '<span class="oichg ' + sd[2] + '" style="left:' + colPct(m.i) + '%">' + fCh(m.c) + '</span>';
+          });
+    });
+  }
+  /* cc#1261 · the three strikes that carry meaning, deduped and thinned (18% rule) */
+  var picked = [], xs = '';
+  [[peDead ? -1 : pwI, 'pw'], [mpI, 'mp'], [ceDead ? -1 : cwI, 'cw']].forEach(function(p){
+    if(p[0] < 0) return;
+    var v = Number(rows[p[0]].strike);
+    for(var k = 0; k < picked.length; k++) if(picked[k].v === v) return;
+    picked.push({ i: p[0], v: v, cls: p[1] });
+  });
+  picked.sort(function(a, b){ return a.i - b.i; });
+  var lastPct = null;
+  picked.forEach(function(q){
+    var pct = Number(colPct(q.i));
+    if(lastPct != null && Math.abs(pct - lastPct) < 18) return;
+    lastPct = pct;
+    var edge = pct < 8 ? ' lo' : (pct > 92 ? ' hi' : '');
+    var pos = edge ? '' : ' style="left:' + pct.toFixed(2) + '%"';
+    xs += '<span class="oix ' + q.cls + edge + '"' + pos + '>' + num(q.v) + '</span>';
+  });
+  xs = xs ? '<div class="oixs">' + xs + '</div>' : '';
+  var ao = chainAsOf(oi.chain_tick);
+  /* cc#1361 short stamp; falls back to the long chainAsOf text only when the tick is missing */
+  var aoTxt = (function(){
+    var t = String(oi.chain_tick || '');
+    if(t.length < 16) return ao.txt;
+    var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
+  })()
+    + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
+  var story = '';
+  if(hasCh){
+    /* cc#1363 · plain-words read after the fact (session_log 32095, phrases VERBATIM). A read is
+       flow description, never prediction: it renders only at the LABEL threshold, and a BUILD
+       read additionally needs its strike on the writers' side of spot — CE above, PE below;
+       32095 defines no phrase for the other positions, so none is invented. Both outer builds in
+       one tick collapse into the single range read. */
+    var READS = { ceB: 'resistance forming — cautious', peB: 'support forming — bullish',
+                  ceU: 'ceiling weakening — bullish tilt', peU: 'floor weakening — bearish tilt',
+                  range: 'range forming — sellers boxing both sides' };
+    var spotN = oi.spot != null ? Number(oi.spot) : null;
+    var sideBits = function(key, wall, thC, thL, isCe){
+      var mv = rows.filter(function(r){ return r[key] != null; });
+      if(!mv.length) return null;
+      var bld = mv.reduce(function(a, b){ return b[key] > a[key] ? b : a; });
+      var unw = mv.reduce(function(a, b){ return b[key] < a[key] ? b : a; });
+      var o = { bTxt: '', uTxt: '', bRead: false, uRead: false };
+      if(bld[key] >= thC){
+        o.bTxt = 'build ' + num(bld.strike) + ' ' + fCh(bld[key]);
+        o.bRead = bld[key] >= thL && spotN != null
+          && (isCe ? Number(bld.strike) > spotN : Number(bld.strike) < spotN);
+      }
+      if(unw[key] <= -thC){
+        o.uTxt = 'unwind ' + num(unw.strike) + ' ' + fCh(unw[key])
+          + (wall && Number(unw.strike) === Number(wall.strike) ? ' — wall weakening' : '');
+        o.uRead = -unw[key] >= thL;
+      }
+      return (o.bTxt || o.uTxt) ? o : null;
+    };
+    var ce = ceDead ? null : sideBits('ce_chg', callWall, thCls.ce, thLab.ce, true);
+    var pe = peDead ? null : sideBits('pe_chg', putWall, thCls.pe, thLab.pe, false);
+    var rangeOn = !!(ce && pe && ce.bRead && pe.bRead);
+    var sideTxt = function(label, o, bWord, uWord){
+      if(!o) return '';
+      var bits = [];
+      if(o.bTxt) bits.push(o.bTxt + (o.bRead && !rangeOn ? ' · ' + bWord : ''));
+      if(o.uTxt) bits.push(o.uTxt + (o.uRead ? ' · ' + uWord : ''));
+      return bits.length ? label + ' ' + bits.join(' · ') : '';
+    };
+    var st = [sideTxt('calls', ce, READS.ceB, READS.ceU),
+              sideTxt('puts', pe, READS.peB, READS.peU)]
+             .filter(Boolean).join(' &nbsp;·&nbsp; ')
+             + (rangeOn ? ' &nbsp;·&nbsp; ' + READS.range : '');
+    if(st) story = '<div class="oird">' + st + '</div>';
+  } else if(oi.baseline_tick == null && !oi.one_sided){
+    /* 32043 honesty rule 3: no baseline -> deltas omitted AND the card says so */
+    story = '<div class="oird">no 09:20 baseline this session — OI change hidden</div>';
+  }
+  return '<div class="card oi">'
+    + '<div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
+    + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
+    + '<button type="button" class="ib" onclick="iiOiGuide()" aria-label="How to read this card">i</button></div>'
+    + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + spotLb
+    + xs
+    + story
+    + (oi.one_sided ? '<div class="oird" style="color:var(--am)">'
+        + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '')
+    + '</div>';
+}
+function oiGuide(){
+  iiSheet('<div class="iish">How to read Max Pain</div><div class="vfg">'
+    + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
+    + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
+    + 'brightness shows change since the morning\'s opening levels.</p>'
+    + '<p><b>MAX PAIN.</b> The amber bar and tag. The strike where an expiry right now would pay '
+    + 'option holders the least — the point of least total payout by option writers.</p>'
+    + '<p><b>CALL WALL / PUT WALL.</b> The single biggest open-interest strike on the call side '
+    + 'and on the put side. When both sit on ONE strike the tag reads CALL+PUT WALL.</p>'
+    + '<p><b>Spot.</b> The dashed line — where the index trades now, or the previous close when '
+    + 'the live feed is off. The label under it says which.</p>'
+    + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
+    + 'contracts are open than calls.</p>'
+    + '</div>');
+}
+function rMaxPainSec(){
+  var mpN = D.maxpainAll.NIFTY;
+  var exp = (mpN && mpN.expiry) ? ' · EXP ' + esc(String(mpN.expiry)) : '';
+  var tick = D.strikeOI.NIFTY && D.strikeOI.NIFTY.chain_tick;
+  var badge = '';
+  if(tick){
+    var ao = chainAsOf(tick);
+    badge = '<span class="badge ' + (ao.stale ? 'stale' : 'b-live') + '">'
+      + (ao.stale ? '' : '<span class="dot"></span>') + 'OI ' + esc(String(tick).slice(11, 16)) + '</span>';
+  }
+  return '<section class="iisec"><div class="sh"><span class="st">Max Pain</span>' + badge
+    + '<span class="asof">option chain' + exp + '</span></div>'
+    + '<div class="two">'
+    + oiCard('NIFTY', D.strikeOI.NIFTY, D.maxpainAll.NIFTY)
+    + oiCard('BANKNIFTY', D.strikeOI.BANKNIFTY, D.maxpainAll.BANKNIFTY)
+    + '</div></section>';
+}
 
-  /* scope 5: spot as a dashed line at its INTERPOLATED position between the two rungs that
-     bracket it - a spot of 24,212 is not at the 24,200 rung, it is a fifth of the way to 24,250.
-     Rung height is 21px, fixed by the ref. */
-  const RUNG=21;
-  let spotLine='';
-  if(spot){
-    const hi=rows.findIndex(r=>Number(r.strike)<=spot);   /* rows descend */
-    if(hi>0){
-      const up=Number(rows[hi-1].strike), dn=Number(rows[hi].strike);
-      const frac=(up-spot)/(up-dn);                        /* 0 at the higher rung */
-      const top=((hi-1)+frac+0.5)*RUNG;
-      spotLine=`<div class="lad-spot" style="top:${top.toFixed(1)}px"><span class="lbl">SPOT ${num(spot)}</span></div>`;
+/* ── INDEX POSITION - two .ip cards replacing the LEVELS cards + the OPEN POSITIONS table ── */
+function ipCard(key){
+  var feed = key === 'NIFTY' ? 'NIFTY50' : 'BANKNIFTY';
+  var d = D.idx[key] || {}, pvt = D.pivots[key], mp = D.maxpainAll[key], sig = D.sig[key] || {};
+  var legs = D.open.filter(function(p){ return (p.sym || '').toUpperCase() === feed; });
+  var mpS = (mp && mp.status === 'ok' && mp.max_pain_strike != null) ? Number(mp.max_pain_strike) : null;
+  var badge = legs.length
+    ? '<span class="badge b-live"><span class="dot"></span>IN POSITION</span>'
+    : '<span class="badge b-static">NO POSITION</span>';
+  var head = '<div class="iph"><span class="nm">' + key + '</span>'
+    + '<span class="px">' + (d.cmp ? num(d.cmp) : '—') + '</span>'
+    + '<span class="chg" style="color:' + (d.chg >= 0 ? 'var(--gr)' : 'var(--rd)') + '">'
+    + (d.cmp ? sgn(d.chg, 2) + '%' : '') + '</span>' + badge + '</div>';
+  /* the rail - rungs by VALUE, lowest support to highest resistance; a level outside the span is
+     STATED, never clamped onto the axis as if it sat there (the spine's own cc#1151 rule). */
+  var rail, mpNote = '';
+  if(pvt && pvt.r2 > pvt.s2){
+    var rungs = [['S2', pvt.s2, 'sup'], ['S1', pvt.s1, 'sup'], ['PP', pvt.pp, 'pp'],
+                 ['R1', pvt.r1, 'res'], ['R2', pvt.r2, 'res']].filter(function(r){ return r[1]; });
+    var vals = rungs.map(function(r){ return r[1]; });
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var pRaw = function(v){ return (v - lo) / (hi - lo) * 100; };
+    var p = function(v){ return Math.max(0, Math.min(100, pRaw(v))).toFixed(2) + '%'; };
+    var ticks = rungs.map(function(r){
+      return '<div class="tick ' + (r[2] === 'pp' ? 'pp' : '') + '" style="left:' + p(r[1]) + '"></div>'
+        + '<div class="tl ' + r[2] + '" style="left:' + p(r[1]) + '"><div class="a">' + r[0] + '</div>'
+        + '<div class="b">' + num(r[1]) + '</div></div>';
+    }).join('');
+    var mpT = '';
+    if(mpS != null){
+      if(pRaw(mpS) >= 0 && pRaw(mpS) <= 100){
+        mpT = '<div class="tick mp" style="left:' + p(mpS) + '"></div>'
+          + '<div class="tl mp" style="left:' + p(mpS) + '"><div class="a">MAX PAIN ' + num(mpS) + '</div></div>';
+      } else {
+        mpNote = '<div class="scf">MAX PAIN ' + num(mpS) + ' sits ' + (mpS > hi ? 'above' : 'below')
+          + ' the pivot span — off this rail, not on its edge</div>';
+      }
+    }
+    var cmpT = '';
+    if(d.cmp){
+      var off = pRaw(d.cmp) < 0 ? '◂ ' : (pRaw(d.cmp) > 100 ? ' ▸' : '');
+      cmpT = '<div class="cmptag" style="left:' + p(d.cmp) + '">' + (off === '◂ ' ? '◂ CMP' : (off ? 'CMP ▸' : 'CMP')) + '</div>'
+        + '<div class="cmp" style="left:' + p(d.cmp) + '"></div>';
+    }
+    rail = '<div class="rail-wrap"><div class="rail">' + ticks + mpT + cmpT + '</div></div>' + mpNote;
+  } else {
+    rail = '<div class="empty">Pivots pending for ' + esc(key) + ' — the rail needs the day\'s S/R levels.</div>';
+  }
+  /* the open legs - side is the app's cc#1244 lesson: the payload field is side BUY/SELL, mapped
+     by normSide in loadOpen (SELL->SHORT, BUY->LONG), never a `direction` field it never had. */
+  var legsHtml;
+  if(legs.length){
+    legsHtml = legs.map(function(l){
+      var cls = l.side === 'SHORT' ? 'short' : 'long';
+      var what = esc(l.sym) + (l.str ? '<small>' + l.str + ' ' + esc(l.opt || '') + ' wrt</small>' : (l.type === 'FUT' ? '<small>FUT</small>' : ''));
+      var kv = '<span>entry <b>' + num(l.entry) + '</b></span>'
+        + '<span>cmp <b>' + (l.cmp ? num(l.cmp) : '—') + '</b></span>'
+        + (l.sl ? '<span>stop <b>' + num(l.sl) + '</b></span>' : '')
+        + (l.tgt ? '<span>target <b>' + num(l.tgt) + '</b></span>' : '')
+        + '<span>qty <b>' + l.qty + '</b></span>';
+      return '<div class="leg ' + cls + '"><span class="side">' + cls.toUpperCase() + '</span>'
+        + '<div><div class="what">' + what + '</div><div class="kv">' + kv + '</div></div>'
+        + '<div class="pnl ' + (l.pnl >= 0 ? 'pos' : 'neg') + '">' + (l.pnl < 0 ? '−' : '+') + '₹' + num(Math.abs(l.pnl))
+        + '<small>' + sgn(l.pPct, 2) + '%</small></div></div>';
+    }).join('');
+  } else if(sig.dir === 'LONG' || sig.dir === 'SHORT'){
+    legsHtml = '<div class="empty">Live ' + sig.dir + ' signal — no open leg.</div>';
+  } else if(sig.dir === 'FLAT'){
+    legsHtml = '<div class="empty">No open leg. Engine flat — next entry only on an aligned ST + EMA flip inside 09:20–15:20.</div>';
+  } else {
+    legsHtml = '<div class="empty">Engine snapshot not available yet — first tick lands after the bell.</div>';
+  }
+  /* footer: the shared chart card (cc#706/803 - never a second chart implementation), the open
+     total, and the engine state with the vs-PP read. */
+  var dir = (legs.find(function(l){ return l.type === 'FUT'; }) || {}).side || sig.dir || '—';
+  var tot = legs.reduce(function(a, l){ return a + (l.pnl || 0); }, 0);
+  var vsPp = (d.cmp && pvt && pvt.pp)
+    ? ' · <span style="color:' + (d.cmp >= pvt.pp ? 'var(--gr)' : 'var(--rd)') + '">'
+      + (d.cmp >= pvt.pp ? 'above' : 'below') + ' PP ' + Math.abs((d.cmp - pvt.pp) / pvt.pp * 100).toFixed(2) + '%</span>'
+    : '';
+  var since = sig.flipTs ? ' since ' + esc(String(sig.flipTs).slice(5, 16).replace('T', ' ')) : '';
+  var foot = '<div class="ipf"><button type="button" class="btn pri" onclick="iiIpChart(\'' + feed + '\')">View on chart</button>'
+    + (legs.length ? '<span class="' + (tot >= 0 ? 'pos' : 'neg') + '" style="font:600 13px var(--f-m)">'
+        + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>' : '')
+    + '<span class="sig">V10 · ST+EMA <b>' + esc(dir) + '</b>' + since + vsPp + '</span></div>';
+  return '<div class="card ip">' + head + rail + '<div class="legs">' + legsHtml + '</div>' + foot + '</div>';
+}
+function ipGuide(){
+  iiSheet('<div class="iish">How to read Index Position</div><div class="vfg">'
+    + '<p><b>The rail.</b> The day\'s reference levels from rolling-5-day pivots, lowest to '
+    + 'highest. Supports (S1, S2) are green, resistances (R1, R2) red, the pivot point PP cyan. '
+    + 'MAX PAIN, in amber, is where an expiry right now would pay option holders the least.</p>'
+    + '<p><b>The dot.</b> Where the index trades now. Its place between the levels is the '
+    + 'position read — above PP with room to R1 is a very different day from sitting on S1.</p>'
+    + '<p><b>The legs.</b> The V10 paper book\'s open legs on this index — entry, stop, target, '
+    + 'lot size and live P&amp;L. Each V10 signal fires a futures leg and an option write; they '
+    + 'are peers, not a hedge.</p>'
+    + '<p><b>View on chart.</b> Opens the same shared chart every symbol on Scorr opens — '
+    + '5-minute candles with the V10 trade markers.</p>'
+    + '</div>');
+}
+function rIndexPos(){
+  var mpN = D.maxpainAll.NIFTY;
+  var exp = (mpN && mpN.expiry) ? ' · EXP ' + esc(String(mpN.expiry)) : '';
+  var oiN = D.strikeOI.NIFTY;
+  var spotTxt = (oiN && oiN.spot_basis === 'live')
+    ? ' · spot live' + (oiN.spot_asof ? ' ' + esc(String(oiN.spot_asof).slice(11, 16)) + ' IST' : '')
+    : (oiN && oiN.spot_basis ? ' · spot = prev close' : '');
+  var live = isMarketHours();
+  return '<section class="iisec"><div class="sh"><span class="st">Index Position</span>'
+    + (live ? '<span class="badge b-live"><span class="dot"></span>LIVE</span>'
+            : '<span class="badge b-eod">EOD</span>')
+    + '<button type="button" class="ib" onclick="iiIpGuide()" aria-label="How to read this section">i</button>'
+    + '<span class="asof">rolling-5d pivots' + exp + spotTxt + '</span></div>'
+    + '<div class="two">' + ipCard('NIFTY') + ipCard('BANKNIFTY') + '</div></section>';
+}
+
+/* ── THE RECORD - the closed book collapses to one strip (scope 4) ── */
+function rRecord(){
+  var p = D.perf || {}, list = D.closed || [];
+  var n = p.total_trades != null ? p.total_trades : list.length;
+  var wr = p.win_rate != null ? p.win_rate + '%' : '—';
+  var pnl = p.total_pnl != null ? Number(p.total_pnl) : null;
+  var pf = p.profit_factor != null ? Number(p.profit_factor).toFixed(2) : '—';
+  var chips = list.slice(0, 5).map(function(t){
+    return '<span class="t"><i>' + esc(String(t.dt || '').slice(0, 6)) + '</i>' + esc(t.sym)
+      + ' <span class="' + (t.pnl >= 0 ? 'pos' : 'neg') + '">'
+      + (t.netKnown ? (t.pnl < 0 ? '−' : '+') + num(Math.abs(Math.round(t.pnl))) : '—')
+      + '</span><i>' + esc(t.rsn) + '</i></span>';
+  }).join('');
+  return '<section class="iisec"><div class="sh"><span class="st">The Record</span>'
+    + '<span class="badge b-static">' + n + ' CLOSED</span>'
+    + '<span class="asof">V10 · all-time · WR + P&amp;L + PF from /api/v10/performance</span></div>'
+    + '<div class="card rec">'
+    + '<div><div class="k">Win rate</div><div class="v">' + wr + '</div></div>'
+    + '<div><div class="k">Net P&amp;L</div><div class="v ' + (pnl != null && pnl < 0 ? 'neg' : 'pos') + '">'
+    + (pnl != null ? (pnl < 0 ? '−' : '') + '₹' + fK(Math.abs(pnl)) : '—') + '</div></div>'
+    + '<div><div class="k">Profit factor</div><div class="v">' + pf + '</div></div>'
+    + '<div class="last">' + (chips || '<span class="scf" style="margin:0">' + (D.loaded.closed ? 'no closed trades yet' : 'loading…') + '</span>') + '</div>'
+    + '<button type="button" class="btn" onclick="iiRecordAll()">View all ' + list.length + '</button>'
+    + '</div></section>';
+}
+function iiRecordAll(){
+  var list = D.closed || [];
+  if(!list.length) return;
+  II_SHEET.kind = 'rec';
+  /* the cc#941 paired columns - DATE / SYMBOL / DIR / ENTRY / EXIT / POINTS / OPT / NET P&L /
+     EXIT. The OPT column is the option leg riding the same trade - a PEER, not a hedge (cc#954). */
+  var rows = list.map(function(t){
+    return '<tr><td>' + esc(t.dt) + (t.held ? ' <span style="opacity:.65">· ' + esc(t.held) + '</span>' : '') + '</td>'
+      + '<td class="sym">' + esc(t.sym) + '</td>'
+      + '<td class="' + (t.side === 'LONG' ? 'pos' : 'neg') + '">' + esc(t.side || '') + '</td>'
+      + '<td>' + num(t.entry) + '</td>'
+      + '<td>' + (t.exit ? num(t.exit) : '—') + '</td>'
+      + '<td class="' + (t.pts != null ? (t.pts >= 0 ? 'pos' : 'neg') : '') + '">' + (t.pts != null ? sgn(t.pts, 0) : '—') + '</td>'
+      + '<td>' + (t.hedge ? esc(t.hedge.label || '') + ' <span class="' + ((t.hedge.pnl || 0) >= 0 ? 'pos' : 'neg') + '">₹' + Math.round(t.hedge.pnl || 0) + '</span>' : '—') + '</td>'
+      + '<td class="' + (t.pnl >= 0 ? 'pos' : 'neg') + '" style="font-weight:700">' + (t.netKnown ? '₹' + num(Math.round(t.pnl)) : '—') + '</td>'
+      + '<td>' + esc(t.rsn) + '</td></tr>';
+  }).join('');
+  iiSheet('<div class="iish">The Record · ' + list.length + ' paired trades · all-time</div>'
+    + '<table class="tb"><thead><tr><th>DATE (IST)</th><th>SYMBOL</th><th>DIR</th><th>ENTRY</th><th>EXIT</th>'
+    + '<th>POINTS</th><th>OPT</th><th>NET P&L</th><th>EXIT</th></tr></thead><tbody>' + rows + '</tbody></table>');
+}
+
+/* ── OI BUILD UPS - the app's buCard family (cc#1431/1454/1460), four cards in one row ── */
+var BU_STATES = [
+  {k:'LONG_BUILD',  t:'LONG BUILDUP',   h:'Long Build Up',   sub:'PRICE UP · OI UP',     cls:'w', mark:'▲'},
+  {k:'SHORT_COVER', t:'SHORT COVERING', h:'Short Covering',  sub:'PRICE UP · OI DOWN',   cls:'w', mark:'▲'},
+  {k:'SHORT_BUILD', t:'SHORT BUILDUP',  h:'Short Buildup',   sub:'PRICE DOWN · OI UP',   cls:'l', mark:'▼'},
+  {k:'LONG_UNWIND', t:'LONG UNWINDING', h:'Long Unwinding',  sub:'PRICE DOWN · OI DOWN', cls:'l', mark:'▼'}
+];
+function buPool(k){
+  var bd = D.build || {};
+  /* the two slices overlap, so dedupe by symbol before bucketing; default rank |OI change %|
+     descending (cc#1454) - the biggest OI movers within a state, not the biggest price movers. */
+  var seen = {}, all = [];
+  (bd.long_buildup || []).concat(bd.short_buildup || []).forEach(function(r){
+    if (r && r.symbol && !seen[r.symbol]) { seen[r.symbol] = 1; all.push(r); }
+  });
+  return all.filter(function(r){ return r.signal === k; })
+            .sort(function(a, b){ return Math.abs(b.oi_chg_pct || 0) - Math.abs(a.oi_chg_pct || 0); });
+}
+function buNum(v, dp, suffix, colour){
+  if (v === null || v === undefined) return '<td>—</td>';
+  var n2 = Number(v);
+  var cls = colour ? (n2 > 0 ? ' class="pos"' : n2 < 0 ? ' class="neg"' : '') : '';
+  return '<td' + cls + '>' + (colour && n2 > 0 ? '+' : '') + n2.toFixed(dp) + (suffix || '') + '</td>';
+}
+var BU_SORT = {};
+BU_STATES.forEach(function(st){ BU_SORT[st.k] = { key: null, dir: 1 }; });
+var BU_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  CMP:    function(r){ return r.day_1d; },   /* cc#1459: CMP sorts by DAY% - the number it shows */
+  OI:     function(r){ return r.oi_chg_pct; },
+  RVOL:   function(r){ return r.rvol; },
+  VOLP:   function(r){ return r.vol_p; },
+  VOLD:   function(r){ return r.vol_d; },
+};
+var BU_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, RVOL: -1, VOLP: -1, VOLD: -1 };
+function buSort(k, key){
+  var s = BU_SORT[k];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = BU_SORT_DEFAULT_DIR[key]; }
+  render();
+  if (II_SHEET.open && II_SHEET.kind === 'bu' && II_SHEET.key === k) buMore(k);
+}
+function buTh(label, key, k){
+  return _sortTh(label, key, BU_SORT[k], "iiBuSort('" + k + "','" + key + "')");
+}
+function buTable(rows, k, full){
+  /* founder default (34998): the card face carries SYMBOL / CMP+day% / OI Δ% / Vol R only;
+     Vol P + Vol D live in the VIEW MORE sheet. cc#1466's CMP cell convention kept: price with
+     no comma and no brackets, the MINUS stays, percent one type step down. */
+  return '<table class="tb"><thead><tr>'
+    + buTh('SYMBOL', 'SYMBOL', k) + buTh('CMP', 'CMP', k)
+    + buTh('OI Δ%', 'OI', k) + buTh('Vol R', 'RVOL', k)
+    + (full ? buTh('Vol P', 'VOLP', k) + buTh('Vol D', 'VOLD', k) : '')
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        var d = r.day_1d, cmp = (r.price != null ? String(Math.round(Number(r.price))) : '—');
+        var dtxt = d == null ? ''
+          : ' <span class="cmpct ' + (d > 0 ? 'pos' : d < 0 ? 'neg' : '') + '">'
+            + Number(d).toFixed(2) + '%</span>';
+        return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+          + '<td>' + cmp + dtxt + '</td>'
+          /* cc#1509 (32043): OI Δ% is SINCE-OPEN at 2dp - same field the sorts read */
+          + buNum(r.oi_chg_pct, 2, '%', true)
+          + (r.rvol == null ? '<td>—</td>' : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
+          + (full ? (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
+                  + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>') : '')
+          + '</tr>';
+      }).join('') + '</tbody></table>';
+}
+function buMore(k){
+  var pool = _sortByState(buPool(k), BU_SORT[k], BU_SORT_GETTERS);
+  if (!pool.length) return;
+  II_SHEET.kind = 'bu'; II_SHEET.key = k;
+  var st = BU_STATES.filter(function(s){ return s.k === k; })[0] || {};
+  iiSheet('<div class="iish">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
+    + buTable(pool, k, true)
+    + iiStamp(D.build && D.build.as_of));
+}
+function buCard(st){
+  var pool = buPool(st.k), rows = _sortByState(pool.slice(0, 5), BU_SORT[st.k], BU_SORT_GETTERS),
+      bd = D.build || {};
+  var body;
+  if (bd.oi_feed_pending){
+    /* the 6055 rule, literally: with OI pending there IS no buildup state, so nothing is
+       classified and the card says why instead of a price-only list under a buildup badge. */
+    body = '<div class="unavail">OI feed pending — buildup state needs open interest, and it is not '
+         + 'being guessed from the price move.</div>';
+  } else if (!rows.length){
+    body = '<div class="unavail">' + (D.loaded.buildup ? 'No ' + esc(st.t.toLowerCase()) + ' on this session.' : 'Loading…') + '</div>';
+  } else {
+    body = buTable(rows, st.k, false)
+      + (pool.length > 5
+         ? '<button type="button" class="more" onclick="iiBuMore(\'' + st.k + '\')">VIEW MORE · '
+           + pool.length + ' QUALIFY</button>'
+         : '');
+  }
+  return '<div class="card sc">'
+    + '<div class="sch"><h3><span class="' + (st.cls === 'w' ? 'pos' : 'neg') + '">' + st.mark + '</span> ' + st.h + '</h3>'
+    + '<span class="sub">' + st.sub + '</span>'
+    + '<button type="button" class="ib" onclick="iiBuGuide()" aria-label="How to read this card">i</button></div>'
+    + body
+    + iiStamp(bd.as_of)
+    + '</div>';
+}
+function buGuide(){
+  /* cc#1460: the RVOL / VOL P / VOL D paragraphs are vfGuide()'s wording VERBATIM (labels
+     aside) - one metric, one description, never two competing texts on the same page. */
+  iiSheet('<div class="iish">How to read Build Up</div><div class="vfg">'
+    + '<p><b>The idea.</b> Price direction and open-interest direction together say WHO is acting. Four combinations, four states — each card is one of them.</p>'
+    + '<p><b>Long Buildup.</b> Price up + OI up — fresh longs entering. <b>Short Covering.</b> Price up + OI down — shorts closing out. <b>Short Buildup.</b> Price down + OI up — fresh shorts entering. <b>Long Unwinding.</b> Price down + OI down — longs exiting.</p>'
+    + '<p><b>CMP.</b> The futures price at the last tick, with the day change vs yesterday\'s close beside it — green up, red down.</p>'
+    + '<p><b>OI Δ%.</b> Open-interest change day-over-day — the last tick of this session vs the last tick of the prior one.</p>'
+    + '<p><b>Vol R.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>Vol P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
+    + '<p><b>Vol D.</b> The last 3 days\' average delivered quantity vs the 20 trading days before that (windows don\'t overlap, so a fresh spike can\'t hide inside its own baseline). Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
+    + '</div>');
+}
+function rBuildUps(){
+  var st = scorrAsofStamp(D.build && D.build.as_of);
+  var badge = st.txt
+    ? '<span class="badge ' + (st.amber ? 'stale' : 'b-live') + '">'
+      + (st.amber ? '' : '<span class="dot"></span>') + esc(st.txt) + '</span>'
+    : '';
+  return '<section class="iisec"><div class="sh"><span class="st">OI Build Ups</span>' + badge
+    + '<span class="asof">OI Δ% since open · top 5 by |OI Δ%|</span></div>'
+    + '<div class="four">' + BU_STATES.map(buCard).join('') + '</div></section>';
+}
+
+/* ── VOLUME FLOW - the app's vfCard family (cc#1368/1430), ticks chips ONCE on the section
+   header driving both lists, exactly one fetch per change (scope 7). ── */
+var VF = { ticks: 100, data: null, err: null, loading: false };
+var VF_TICKS = [25, 50, 100, 500];
+function vfLoad(){
+  VF.loading = true; VF.err = null;
+  getJSON('/api/volume-flow?ticks=' + VF.ticks)
+    .then(function(d){ VF.data = d; VF.loading = false; render(); })
+    .catch(function(e){ VF.err = e.message; VF.loading = false; render(); });
+}
+function vfSetTicks(n2){
+  if (VF.ticks === n2 || VF.loading) return;
+  VF.ticks = n2;
+  render();     /* the chip flips .on immediately… */
+  vfLoad();     /* …and exactly ONE fetch follows per change */
+}
+var VF_SORT = { bullish: { key: null, dir: 1 }, bearish: { key: null, dir: 1 } };
+var VF_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  DAY:    function(r){ return r.day_chg_pct; },
+  WK:     function(r){ return r.week_chg_pct; },
+  RVOL:   function(r){ return r.rvol; },
+  VOLP:   function(r){ return r.vol_p; },
+  DELIV:  function(r){ return r.deliv_ratio; },
+};
+var VF_SORT_DEFAULT_DIR = { SYMBOL: 1, DAY: -1, WK: -1, RVOL: -1, VOLP: -1, DELIV: -1 };
+function vfSort(side, key){
+  var s = VF_SORT[side];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = VF_SORT_DEFAULT_DIR[key]; }
+  render();
+  if (II_SHEET.open && II_SHEET.kind === 'vf' && II_SHEET.key === side) vfMore(side);
+}
+function vfTh(label, key, side){
+  return _sortTh(label, key, VF_SORT[side], "iiVfSort('" + side + "','" + key + "')");
+}
+function vfCell(v, isPct){
+  if (v == null) return '<td class="am">—</td>';
+  if (isPct) return '<td class="' + (v >= 0 ? 'pos' : 'neg') + '">' + sgn(v, 2) + '%</td>';
+  return '<td class="am">' + Number(v).toFixed(2) + '×</td>';
+}
+function vfRows(list, n2, side, full){
+  var sorted = _sortByState(list, VF_SORT[side], VF_SORT_GETTERS);
+  var rows = (n2 ? sorted.slice(0, n2) : sorted).map(function(r){
+    return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+      + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1)
+      + vfCell(r.rvol, 0)
+      + (full ? vfCell(r.vol_p, 0) + vfCell(r.deliv_ratio, 0) : '')
+      + '</tr>';
+  }).join('');
+  var head = vfTh('SYMBOL', 'SYMBOL', side) + vfTh('DAY', 'DAY', side) + vfTh('WK', 'WK', side)
+    + vfTh('Vol R', 'RVOL', side)
+    + (full ? vfTh('Vol P', 'VOLP', side) + vfTh('Vol D', 'DELIV', side) : '');
+  return '<table class="tb"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+function vfAsofHtml(){
+  var d = VF.data;
+  if (!d || !d.as_of) return '<div class="scf">no tick yet' + (VF.loading ? ' · updating…' : '') + '</div>';
+  var st = scorrAsofStamp(d.as_of);
+  return '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + d.shown + ' of '
+    + d.universe + ' scanned' + (VF.loading ? ' · updating…' : '') + '</div>';
+}
+function vfCard(side){
+  var up = side === 'bullish';
+  var body;
+  if (VF.err){
+    body = '<div class="unavail">Volume flow unavailable: ' + esc(VF.err) + '</div>';
+  } else if (!VF.data){
+    body = '<div class="unavail">Loading volume flow…</div>';
+  } else {
+    var list = VF.data[side] || [];
+    if (!list.length){
+      body = '<div class="unavail">No symbol has 60%+ of its volume on '
+        + (up ? 'green' : 'red') + ' ticks in this window.</div>';
+    } else {
+      body = vfRows(list, 5, side, false)
+        + (list.length > 5
+           ? '<button type="button" class="more" onclick="iiVfMore(\'' + side + '\')">VIEW MORE · '
+             + list.length + ' QUALIFY</button>'
+           : '');
     }
   }
-
-  /* scope 3: PCR over the VISIBLE window only, and labelled as such, because a PCR over a
-     different strike set is a different number and the chip must not imply the chain-wide one. */
-  const sumPut=rows.reduce((a,r)=>a+(Number(r.put_oi)||0),0);
-  const sumCall=rows.reduce((a,r)=>a+(Number(r.call_oi)||0),0);
-  const pcrW=sumCall>0?(sumPut/sumCall):null;
-  const chips=[
-    putWall?`<span class="wc p">PUT WALL ${num(Number(putWall.strike))} · ${L(maxPut)}L</span>`:'',
-    callWall?`<span class="wc c">CALL WALL ${num(Number(callWall.strike))} · ${L(maxCall)}L</span>`:'',
-    pcrW!=null?`<span class="wc a">PCR ±7 · ${pcrW.toFixed(2)}</span>`:''
-  ].join('');
-
-  /* scope 5, same rule as cc#1151: max pain off the visible window gets a chip, never a row that
-     is not there. Here "window" is the ATM±7 strike list itself. */
-  const lo=Math.min(...rows.map(r=>Number(r.strike))), hi2=Math.max(...rows.map(r=>Number(r.strike)));
-  let edge='';
-  if(mpStrike!=null&&(mpStrike<lo||mpStrike>hi2)){
-    const above=mpStrike>hi2;
-    const dpc=spot?((mpStrike-spot)/spot*100):null;
-    edge=`<div class="mp-edge">${above?'▴':'▾'} MAX PAIN ${num(mpStrike)} · ${above?'above':'below'} the ATM±7 window`
-        +(dpc!=null?` · ${(dpc>=0?'+':'')+dpc.toFixed(2)}% from spot`:'')+` · cc#1155 audits this</div>`;
-  }else if(mpStrike==null){
-    edge=`<div class="mp-edge">MAX PAIN unavailable — endpoint returned no strike</div>`;
-  }
-
-  /* scope 6: the header pattern is kept, all four values live */
-  /* cc#1167: same basis label as the spine — the ladder's spot line and its ATM row both depend
-     on this number, so it must not read as live when it is a previous close. */
-  const _lbasis = (oi && oi.spot_basis) || null;
-  const _lLive = _lbasis === 'live';
-  const _lTxt = _lLive ? '' : (_lbasis ? ' · SPOT = PREVIOUS CLOSE' : '');
-  const head=`<div class="spine-hd" style="margin-bottom:8px"><span class="big2">${spot?num(spot):'—'}</span>
-    <span>MP ${mpStrike!=null?num(mpStrike):'—'} · ATM ${atm!=null?num(atm):'—'} · EXP ${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}${_lTxt}</span></div>`;
-
-  return head
-    + `<div class="oi-heads"><span class="l">PUT OI</span><span class="c">STRIKE</span><span class="r">CALL OI</span></div>`
-    + `<div class="ladwrap" onclick="idxToggleOiVals(this)" title="Tap to show every OI value">${rungs}${spotLine}</div>`
-    + `<div class="wallchips">${chips}</div>` + edge;
+  return '<div class="card sc">'
+    + '<div class="sch"><h3><span class="' + (up ? 'pos' : 'neg') + '">' + (up ? '▲' : '▼') + '</span> '
+    + (up ? 'Bullish Flow' : 'Bearish Flow') + '</h3>'
+    + '<button type="button" class="ib" onclick="iiVfGuide()" aria-label="How to read this card">i</button></div>'
+    + body
+    + vfAsofHtml()
+    + '</div>';
 }
-/* scope 4: on a phone there is no hover, so a tap on the ladder reveals every OI number at once. */
-function idxToggleOiVals(el){ if(el&&el.classList) el.classList.toggle('vals'); }
-/* cc#1151 verify E: rStrikeOI() REMOVED. cc#1152 verify D: oiHisto() - the horizontal histogram
-   itself - is now REMOVED too, replaced by oiLadder(). Nothing calls it and nothing renders it. */
+function vfMore(side){
+  if (!VF.data) return;
+  var list = VF.data[side] || [];
+  if (!list.length) return;
+  II_SHEET.kind = 'vf'; II_SHEET.key = side;
+  iiSheet('<div class="iish">' + (side === 'bullish' ? 'Bullish' : 'Bearish') + ' Flow · '
+    + list.length + ' qualify · ' + VF.ticks + ' ticks</div>'
+    + vfRows(list, 0, side, true)
+    + vfAsofHtml());
+}
+function vfGuide(){
+  iiSheet('<div class="iish">How to read Volume Flow</div><div class="vfg">'
+    + '<p><b>The idea.</b> Every 5 minutes is one tick. A green tick closes above its open. A red tick closes below. We add up the traded volume on each side.</p>'
+    + '<p><b>Flow ratio.</b> Green volume as a share of green + red volume. 0.70 means 70% of the volume traded on rising ticks — buyers were doing the volume. The lists are ranked by this.</p>'
+    + '<p><b>The two lists.</b> Bullish = 60% or more of the volume on green ticks AND both the Day and Week returns positive. Bearish = 60% or more on red ticks AND both returns negative. The flow window can cross days, so the price returns must agree with the direction — a heavy-green name that is red today does not make the bullish list. Names in between are noise and are left out.</p>'
+    + '<p><b>DAY / WK.</b> Price change vs yesterday\'s close, and vs the close 5 trading days back.</p>'
+    + '<p><b>Vol R.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>Vol P.</b> Yesterday\'s RVOL read at the close — one fixed number for the whole prior session. Above 1.00x means yesterday finished a heavier-than-typical day. Same maths as RVOL, just read at yesterday\'s close instead of live.</p>'
+    + '<p><b>Vol D.</b> The last 3 days\' average delivered quantity vs the 20 trading days before that (windows don\'t overlap, so a fresh spike can\'t hide inside its own baseline). Above 1.00x means more shares actually changed hands for keeps — conviction, not churn. Delivery data lands after close, so this is yesterday\'s read during a live session.</p>'
+    + '<p><b>Ticks filter.</b> How far back we look: 25 ≈ 2 hours, 50 ≈ 4 hours, 100 ≈ 1.3 trading days, 500 ≈ 1 week. The filter on the section header drives both lists.</p>'
+    + '<p><b>Honesty.</b> This is a volume read only — we do not see the order book, so it is never called order flow. A dash means the data is missing; we never fill it in.</p>'
+    + '</div>');
+}
+
+/* ── QUALITY BULLISH · BASIS - the app's qbCard family (cc#1455) ── */
+var QBB_STATES = [
+  {k:'pos', t:'QUALITY BULLISH · BASIS POSITIVE', h:'Basis Positive', cls:'w', mark:'▲'},
+  {k:'neg', t:'QUALITY BULLISH · BASIS NEGATIVE', h:'Basis Negative', cls:'l', mark:'▼'}
+];
+var QB_SORT = {};
+QBB_STATES.forEach(function(st){ QB_SORT[st.k] = { key: null, dir: 1 }; });
+var QB_SORT_GETTERS = {
+  SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
+  CMP:    function(r){ return r.cmp; },
+  DAY:    function(r){ return r.day_pct; },
+  SECDAY: function(r){ return r.sector_day; },
+  OI:     function(r){ return r.oi_chg_pct; },
+  VOLR:   function(r){ return r.rvol; },
+};
+var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, DAY: -1, SECDAY: -1, OI: -1, VOLR: -1 };
+function qbPool(k){
+  var d = D.qbb || {};
+  var list = (k === 'pos' ? d.quality_bullish_basis_pos : d.quality_bullish_basis_neg) || [];
+  /* default rank |basis| desc - re-assert the server's own order so a tap-sorted then
+     re-rendered card falls back to the same default (the app's qbPool contract). */
+  return list.slice().sort(function(a, b){ return Math.abs(b.basis || 0) - Math.abs(a.basis || 0); });
+}
+function qbSort(k, key){
+  var s = QB_SORT[k];
+  if (s.key === key) s.dir = -s.dir;
+  else { s.key = key; s.dir = QB_SORT_DEFAULT_DIR[key]; }
+  render();
+  if (II_SHEET.open && II_SHEET.kind === 'qb' && II_SHEET.key === k) qbMore(k);
+}
+function qbTh(label, key, k){
+  return _sortTh(label, key, QB_SORT[k], "iiQbSort('" + k + "','" + key + "')");
+}
+function qbTable(rows, k, full){
+  /* card face: SYMBOL / CMP / DAY / OI Δ% (34998 founder default). The VIEW MORE sheet adds
+     SEC DAY + Vol R — the payload's own remaining columns. The card asked for Vol P / Vol D
+     there, but /api/quality-bullish-basis does not serve them (verified in
+     volume_flow_endpoints.py), and a column the payload does not carry is not invented. */
+  return '<table class="tb"><thead><tr>'
+    + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('CMP', 'CMP', k) + qbTh('DAY%', 'DAY', k)
+    + (full ? qbTh('SEC DAY', 'SECDAY', k) : '')
+    + qbTh('OI Δ%', 'OI', k)
+    + (full ? qbTh('Vol R', 'VOLR', k) : '')
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+          + '<td>' + (r.cmp != null ? num(r.cmp) : '—') + '</td>'
+          + buNum(r.day_pct, 2, '%', true)
+          + (full ? buNum(r.sector_day, 2, '%', true) : '')
+          + buNum(r.oi_chg_pct, 1, '%', true)
+          + (full ? (r.rvol == null ? '<td>—</td>' : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>') : '')
+          + '</tr>';
+      }).join('') + '</tbody></table>';
+}
+function qbGuide(){
+  iiSheet('<div class="iish">How to read Quality Bullish · Basis</div><div class="vfg">'
+    + '<p><b>The idea.</b> A short list of stocks where the tape, the trend and the futures market all agree. Every name here passed FIVE checks — the checks pick the names, the columns describe them.</p>'
+    + '<p><b>The five checks.</b> 1) Over the last 50 five-minute ticks, 60%+ of the traded volume was on rising ticks — buyers doing the volume. 2) The stock is UP today. 3) It is up over the last month. 4) Its own sector is up this month too. 5) Its futures trade at a premium to the stock (Basis Positive card) or a discount (Basis Negative card). Names are ordered by the size of that premium/discount.</p>'
+    + '<p><b>CMP.</b> The futures price at the last tick — the same price frame the Build Up cards use.</p>'
+    + '<p><b>DAY%.</b> Price change vs yesterday’s close.</p>'
+    + '<p><b>SEC DAY.</b> The stock’s own sector peers’ average move today — is the whole group moving, or just this name.</p>'
+    + '<p><b>OI Δ%.</b> Open-interest change day-over-day, the same formula the Build Up cards show — rising OI with a rising price is fresh money, not short-covering.</p>'
+    + '<p><b>Vol R.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
+    + '<p><b>Honesty.</b> A card with no rows means nothing qualifies right now — basis flips with market conditions, and zero is the market’s answer, not a bug.</p>'
+    + '</div>');
+}
+function qbMore(k){
+  var pool = _sortByState(qbPool(k), QB_SORT[k], QB_SORT_GETTERS);
+  if (!pool.length) return;
+  II_SHEET.kind = 'qb'; II_SHEET.key = k;
+  var st = QBB_STATES.filter(function(s){ return s.k === k; })[0] || {};
+  iiSheet('<div class="iish">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
+    + qbTable(pool, k, true)
+    + iiStamp(D.qbb && D.qbb.as_of));
+}
+function qbCard(st){
+  var pool = qbPool(st.k), rows = _sortByState(pool.slice(0, 5), QB_SORT[st.k], QB_SORT_GETTERS);
+  var body;
+  if (!D.qbb){
+    body = '<div class="unavail">Quality Bullish data not available — fetch failed, nothing is guessed.</div>';
+  } else if (!rows.length){
+    body = '<div class="unavail">No stocks currently qualify — the funnel is strict and basis '
+         + 'flips with market conditions. A zero here is the market’s answer, not a bug.</div>';
+  } else {
+    body = qbTable(rows, st.k, false)
+      + (pool.length > 5
+         ? '<button type="button" class="more" onclick="iiQbMore(\'' + st.k + '\')">VIEW MORE · '
+           + pool.length + ' QUALIFY</button>'
+         : '');
+  }
+  return '<div class="card sc">'
+    + '<div class="sch"><h3><span class="' + (st.cls === 'w' ? 'pos' : 'neg') + '">' + st.mark + '</span> ' + st.h + '</h3>'
+    + '<button type="button" class="ib" onclick="iiQbGuide()" aria-label="How to read this card">i</button></div>'
+    + body
+    + (D.qbb ? iiStamp(D.qbb.as_of) : '')
+    + '</div>';
+}
+function rFlowBasis(){
+  var st = scorrAsofStamp(VF.data && VF.data.as_of);
+  var badge = st.txt
+    ? '<span class="badge ' + (st.amber ? 'stale' : 'b-live') + '">'
+      + (st.amber ? '' : '<span class="dot"></span>') + esc(st.txt) + '</span>'
+    : '';
+  var chips = VF_TICKS.map(function(n2){
+    return '<button type="button" class="' + (n2 === VF.ticks ? 'on' : '') + '" onclick="iiVfTicks(' + n2 + ')">' + n2 + '</button>';
+  }).join('');
+  return '<section class="iisec"><div class="sh"><span class="st">Volume Flow &amp; Basis</span>' + badge
+    + '<div class="ticks">' + chips + '</div></div>'
+    + '<div class="four">' + vfCard('bullish') + vfCard('bearish')
+    + qbCard(QBB_STATES[0]) + qbCard(QBB_STATES[1]) + '</div></section>';
+}
+
+/* inline-onclick handlers - the pane is an IIFE, so every handler the HTML strings name is
+   published under an ii* name (never bare, to keep this pane's globals from colliding). */
+window.iiSheetClose = iiSheetClose;
+window.iiOiGuide = oiGuide;
+window.iiIpGuide = ipGuide;
+window.iiBuGuide = buGuide;
+window.iiVfGuide = vfGuide;
+window.iiQbGuide = qbGuide;
+window.iiBuSort = buSort;
+window.iiVfSort = vfSort;
+window.iiQbSort = qbSort;
+window.iiBuMore = buMore;
+window.iiVfMore = vfMore;
+window.iiQbMore = qbMore;
+window.iiVfTicks = vfSetTicks;
+window.iiRecordAll = iiRecordAll;
+window.iiIpChart = function(k){ openIdxChart(k); };   /* the shared chart card, index mode (cc#1059) */
+
+/* cc#1151 verify E: rStrikeOI() REMOVED. cc#1152 verify D: oiHisto() REMOVED. cc#1522: their
+   successor oiLadder() is now removed too — the ported oiCard() above renders the chain. */
 /* new render() for the Index Intel pane (adds pivots + strike-OI vs the V10 page) */
 // cc#1058: fill the tape slots after the pane's innerHTML lands, and re-fill on every
 // re-render — render() replaces the DOM wholesale, so the mounted listeners go with it.
@@ -6685,15 +7014,14 @@ function render(){
     /* cc#1280 (founder direct 24-Aug 12:57): the F&O ban strip drops BELOW the PCR/ADR row — the
        two aligned index/breadth rows stay together, the ban list reads as a footnote to them. */
     `<div class="row">${rFoBan()}</div>` +                       // cc#681: F&O ban (MWPL) today
-    /* cc#1151 verify E: the old pivots list card and the standalone strike-OI card are REPLACED,
-       not duplicated. One row, one card per index, each holding both views behind the SPINE|LADDER
-       switch. rPivots and rStrikeOI are no longer called from render(); rStrikeOI's content is
-       reachable as the LADDER view, and cc#1152 rebuilds that view to the ref's rung ladder. */
-    `<div class="row r-levels">${rLevelsCard('NIFTY','NIFTY')}${rLevelsCard('BANKNIFTY','BANKNIFTY')}</div>` +
-    /* cc#1154 scope 6: the tail cards sit in the ref's .stack, which owns the gap between them.
-       They used to carry margin-bottom:10px each, so spacing was a property of every card rather
-       than of the column holding them. */
-    `<div class="stack">` + rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() + `</div>` +
+    /* cc#1522 (INDEX_INTEL_WEB_R1_V1, session_log 34998): the LEVELS spine cards, the OPEN
+       POSITIONS table and the CLOSED TRADES table are REPLACED by the R1 sections - Index
+       Position rails (pivots + max pain + open legs in one card, shared chart button), the
+       Record strip, and the app's Max Pain / Build Ups / Flow / Basis decks ported to web.
+       Settings, Performance and Divergence stay below: the R1 mock and the card are silent on
+       them, and removing content unasked is a scope guess (choice logged in the forum). */
+    rIndexPos() + rRecord() + rMaxPainSec() + rBuildUps() + rFlowBasis() +
+    `<div class="stack">` + rSettings() + rPerf() + rDivergence() + `</div>` +
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
@@ -6706,7 +7034,7 @@ function render(){
   }
   host.innerHTML = html;
   mountIdxTapes();   // cc#1058
-  try{ fitSpineTags(host); }catch(e){ console.warn('[spine fit]', e && e.message); }   // cc#1167
+  /* cc#1522: fitSpineTags() left with the spine */
   try{ idxMarkScroll(host); }catch(e){ console.warn('[tbl scroll]', e && e.message); } // cc#1168
 }
 
@@ -6746,7 +7074,7 @@ function idxMarkScroll(host){
 /* extend loaders with pivots + strike OI */
 var _origLoadLive=loadLive;
 loadLive=async function(){
-  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI];
+  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI,loadQbb];   /* cc#1522: + quality-bullish */
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[idx]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 };
@@ -6769,18 +7097,16 @@ window.openV10Chart=openV10Chart;
    earlier <script> tag -- a separate top-level scope from this IIFE, so v10ChartIcon needs the
    same window export openV10Chart already gets here, not just its own local declaration. */
 window.v10ChartIcon=v10ChartIcon;
-window.idxSetLevelsView=idxSetLevelsView;   // cc#1151: SPINE|LADDER switch, called from inline onclick
-window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values, inline onclick
+/* cc#1522: idxSetLevelsView / idxToggleOiVals exports removed with the spine + ladder */
 /* cc#1167: the fit depends on rendered text size, so it must re-run when that can change.
    rAF-debounced so a drag-resize does not run it per pixel. */
 (function(){
   var q=false;
   function again(){ if(q) return; q=true;
     requestAnimationFrame(function(){ q=false;
-      try{ fitSpineTags(document.getElementById('idx-app')); }catch(e){}
       // cc#1168: a table that fits at 1280 clips at 900. Whether there is more to the right is a
-      // function of the width, so it is re-measured on the same signal the spine fit uses rather
-      // than only at render time.
+      // function of the width, so it is re-measured on resize rather than only at render time.
+      // (cc#1522: the fitSpineTags call left with the spine.)
       try{ idxMarkScroll(document.getElementById('idx-app')); }catch(e){} }); }
   window.addEventListener('resize', again);
   window.addEventListener('orientationchange', again);
@@ -6788,7 +7114,7 @@ window.idxToggleOiVals=idxToggleOiVals;     // cc#1152: tap-to-reveal OI values,
 window.setV10Sym=setV10Sym;
 window.closeV10Chart=closeV10Chart;
 window.openV10ChartAt=function(sym,ts){ _v10pendingScroll=(ts||null); openV10Chart(sym); };
-window.idxToggleClosed=function(){ CLOSED_ALL=!CLOSED_ALL; render(); };
+/* cc#1522: idxToggleClosed removed with the Closed Trades table */
 
 /* lazy boot on first Index-Intel tab activation */
 var _idxBooted=false;
@@ -6798,12 +7124,12 @@ window.idxBoot=function(){
   // tab could not retry because _idxBooted was already true. Latch only on success; a failed
   // boot leaves the flag down so the next tab activation tries again.
   if(_idxBooted) return;
-  loadLive().then(render).then(function(){ _idxBooted=true; })
+  loadLive().then(render).then(function(){ _idxBooted=true; vfLoad(); })
     .catch(function(e){ console.warn('[idx boot]',e); });
   setInterval(function(){ var p=document.getElementById('pane-index'); if(!p||p.style.display==='none')return;
     var el=p.querySelector('.topbar'); if(el) el.outerHTML=rTopBar(); },1000);
   setInterval(function(){ var p=document.getElementById('pane-index'); if(!p||p.style.display==='none')return;
-    if(isMarketHours()) loadLive().then(render); },300000);
+    if(isMarketHours()){ loadLive().then(render); vfLoad(); } },300000);
 };
 
 })();
