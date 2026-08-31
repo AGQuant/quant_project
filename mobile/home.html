@@ -2911,6 +2911,9 @@ function posToggleHtml(){
 /* cc#1386: naming/no-op-guard mirrors ibkSetSym()'s own identical pattern (cc#1384), which itself
    mirrors setV10()'s -- one reader who knows any of the three knows all of them. */
 function posSetSym(sym){
+  POS.userSet = true;   /* cc#1496: records "a human chose", BEFORE the no-op guard — even re-tapping
+                           the current tab is a choice; the load-time default pick never overrides one.
+                           Toggle behaviour itself is unchanged. */
   if (POS.sym === sym) return;
   POS.sym = sym;
   renderHeroPositions();
@@ -2927,6 +2930,21 @@ function posCmp(symKey){
 function posPnl(v){
   if (v == null) return '&mdash;';
   return (v >= 0 ? '+' : '−') + '₹' + Math.abs(Math.round(v)).toLocaleString('en-IN');
+}
+/* cc#1496 · ONE pnl derivation per leg, shared by the bar renderers below AND the load-time
+   default-tab pick in loadHeroPositions(). Each returns exactly the number its bar already
+   displayed (posRangeBar's footer / posDecayBar's legfoot), or null when that bar would not
+   have shown one — a null is never turned into a manufactured 0 here; the caller decides. */
+function _futPnl(fut, cmp){
+  if (!fut || fut.stop == null || fut.target == null) return null;  // posRangeBar's own unavail guard
+  if (cmp == null || fut.lot_size == null) return null;
+  var points = (fut.side === 'BUY') ? (cmp - Number(fut.entry_price)) : (Number(fut.entry_price) - cmp);
+  return points * fut.lot_size;
+}
+function _optPnl(opt){
+  if (!opt || opt.live_premium == null) return null;                // posDecayBar's own unavail guard
+  var written = Number(opt.entry_price), now = Number(opt.live_premium);
+  return ((opt.side === 'SELL') ? (written - now) : (now - written)) * (opt.lot_size || 0);
 }
 /* cc#1386 · FUT LEG -- live open-position range bar (stop-entry-cmp-target). Zones are derived
    from stop/target ALONE, never a hardcoded LONG/SHORT shape: for a LONG, lo=stop/hi=target, so
@@ -2986,7 +3004,7 @@ function posRangeBar(fut, cmp){
   if (cmpRaw != null && !beyondStop && !beyondTarget && !tooClose) labels += lbl(cmpClamped, cmp, 'cmp');
   labels += lbl(targetPct, target, 'target');
   var points = (cmp == null) ? null : (isLong ? (cmp - entry) : (entry - cmp));
-  var pnl = (points == null || fut.lot_size == null) ? null : points * fut.lot_size;
+  var pnl = _futPnl(fut, cmp);   // cc#1496: same number as before, now from the shared helper
   var footLeft;
   if (cmp == null){
     footLeft = '<span style="color:var(--mut)">cmp unavailable</span>';
@@ -3030,8 +3048,7 @@ function posDecayBar(opt){
       : 'Live premium unavailable for this leg.') + '</div>';
   }
   var written = Number(opt.entry_price), now = Number(opt.live_premium);
-  var isSell = opt.side === 'SELL';
-  var pnl = (isSell ? (written - now) : (now - written)) * (opt.lot_size || 0);
+  var pnl = _optPnl(opt);   // cc#1496: same number as before, now from the shared helper (guard above matches its null case)
   var moved = written === 0 ? 0 : Math.abs(now - written) / written * 100;
   var decayed = now < written, loss = pnl < 0;
   var label = (decayed ? 'decayed' : 'grown') + (loss ? ' (loss)' : '');
@@ -3121,7 +3138,27 @@ function loadHeroPositions(){
       })
       .catch(function(){ POS.data[symKey] = { fut: null, opt: null, error: true }; });
   }
-  Promise.all([leg('NIFTY50'), leg('BANKNIFTY')]).then(renderHeroPositions);
+  Promise.all([leg('NIFTY50'), leg('BANKNIFTY')]).then(function(){
+    /* cc#1496 · DEFAULT TAB BY PNL (session_log 34378, HOME_POS_DEFAULT_TAB_BY_PNL_V1). Runs ONCE,
+       here, before the first real render — no polling, no later re-evaluation. Skipped entirely if
+       the founder already tapped the toggle while the fetches were in flight (POS.userSet — the
+       toggle is live from the initial paint). An index with NO open leg gets null, never a
+       manufactured 0, so a real loss on the one open index still wins over "nothing open". */
+    if (!POS.userSet){
+      var open = {}, total = {};
+      POS_SYMS.forEach(function(s){
+        var rec = POS.data[s.key] || {};
+        open[s.key] = !!(rec.fut || rec.opt);
+        total[s.key] = open[s.key]
+          ? ((_futPnl(rec.fut, posCmp(s.key)) || 0) + (_optPnl(rec.opt) || 0)) : null;
+      });
+      if (open.NIFTY50 && !open.BANKNIFTY) POS.sym = 'NIFTY50';
+      else if (open.BANKNIFTY && !open.NIFTY50) POS.sym = 'BANKNIFTY';
+      else if (open.NIFTY50 && open.BANKNIFTY && total.BANKNIFTY > total.NIFTY50) POS.sym = 'BANKNIFTY';
+      /* neither open, or an exact tie → the existing NIFTY50 default stands */
+    }
+    renderHeroPositions();
+  });
 }
 
 /* ══ cc#928: WINDOWED CHART + THUMB PAN ════════════════════════════════════════════════════
