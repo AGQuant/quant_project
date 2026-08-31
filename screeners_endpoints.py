@@ -54,17 +54,25 @@ def screeners_list():
     """Tab strip: every global preset with its stored member count and last run date."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # cc#1519: source discriminates the two tab rows — 'scorr' (algorithmic, real filters)
+            # vs 'finz' (static Finkhoz imports, filters={} by construction, cc#1517/1518). Derived
+            # from filters because the planned `source` COLUMN is an ALTER TABLE, which the
+            # MAINTENANCE_LOCK_RULE holds for a weekend Railway-console run — when that lands,
+            # this CASE becomes COALESCE(p.source, ...) with identical output. The page renders
+            # the scorr block first, then finz, alphabetical within each.
             cur.execute("""
                 SELECT p.id, p.name, p.sort_key, p.sort_dir,
-                       COALESCE(r.n, 0) AS members, r.last_seen
+                       COALESCE(r.n, 0) AS members, r.last_seen,
+                       CASE WHEN p.filters = '{}'::jsonb THEN 'finz' ELSE 'scorr' END AS source
                 FROM v13_presets p
                 LEFT JOIN (SELECT screen_id, COUNT(*) AS n, MAX(last_seen) AS last_seen
                            FROM v13_screen_results GROUP BY screen_id) r ON r.screen_id = p.id
                 WHERE COALESCE(p.scope,'global')='global'
-                ORDER BY p.name
+                ORDER BY CASE WHEN p.filters = '{}'::jsonb THEN 1 ELSE 0 END, p.name
             """)
             rows = [{"id": r[0], "name": r[1], "sort_key": r[2], "sort_dir": r[3],
-                     "members": int(r[4] or 0), "last_run": str(r[5]) if r[5] else None}
+                     "members": int(r[4] or 0), "last_run": str(r[5]) if r[5] else None,
+                     "source": r[6]}
                     for r in cur.fetchall()]
         # never_run is the honest state for a fresh deploy: the tab exists, the table is empty, and
         # the page says why rather than rendering an ambiguous blank.
