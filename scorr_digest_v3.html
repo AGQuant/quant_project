@@ -40,7 +40,7 @@ body{background:var(--bg);color:var(--tx);font-family:var(--f-d);font-size:14px;
 /* ── LEDGER HEAD ───────────────────────────────── */
 .head{border-bottom:1px solid var(--line);background:
   radial-gradient(1200px 300px at 15% -60%,rgba(34,211,238,.10),transparent 70%),var(--well);
-  padding:18px 0 0}
+  padding:18px 0 16px}
 .headtop{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
 .brand{font-size:11px;letter-spacing:.32em;color:var(--tx3);font-weight:600}
 .brand b{color:var(--cy)}
@@ -58,9 +58,8 @@ h1 span{color:var(--cy)}
 .mkt.open{border-color:rgba(52,211,153,.45);color:var(--gr);background:var(--grDim)}
 
 /* cc#1521 (R4): the SESSION RAIL is GONE — founder brief 31-Aug, "drop the session rail and
-   redundant text". The head keeps brand + h1 + clock/pill + dateline; the bias headline in the
-   hero below is now the page's opening statement. */
-.head{padding-bottom:16px}
+   redundant text". The head keeps brand + h1 + clock/pill + dateline (bottom padding folded into
+   the .head shorthand above); the bias headline in the hero below opens the page. */
 
 /* ── SECTION SHELL ─────────────────────────────── */
 section{margin-top:26px}
