@@ -804,6 +804,23 @@ def v10_buildup(limit: int = 15):
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
+                ),
+                -- cc#1509 (OI_CHANGE_SINCE_OPEN_V1, session_log 32043): the session-OPEN OI
+                -- baseline. futures_basis.oi_chg is a BAR-OVER-BAR delta, and at 5-min
+                -- granularity that is noise (ONGC 31-Aug flips sign every few bars; the whole
+                -- 10:25 population sat in a 0.03-band that rendered +0.0 on every row). The
+                -- locked basis is SINCE OPEN: latest bar's oi vs the symbol's own FIRST bar of
+                -- the session. Baseline is confined to the 09:15-09:30 OPENING WINDOW (the
+                -- cc#1355 grace-tick idea on the options card, same ruling): a symbol whose
+                -- first bar arrived later has no opening bar, and a "since open" measured from
+                -- mid-morning would be a fabricated number — LEFT JOIN, delta NULL, never 0.
+                -- futures_basis.oi_chg/oi_prev columns are untouched for their other consumers.
+                o AS (
+                    SELECT DISTINCT ON (symbol) symbol, oi AS oi_open
+                    FROM futures_basis, sess
+                    WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '09:30'
+                      AND oi IS NOT NULL
+                    ORDER BY symbol, ts ASC
                 )
                 -- cc#819 bug_2 established a v8_metrics volume join here; cc#1438 moved it to
                 -- T-1; cc#1440 (VOLUME_METRICS_CANON_V2, session_log 33843) RETIRES the
@@ -815,14 +832,17 @@ def v10_buildup(limit: int = 15):
                 -- the whole bug.
                 SELECT l.symbol, l.c AS price,
                        ROUND(((l.c-pf.pc)/NULLIF(pf.pc,0)*100)::numeric,2) AS day_1d,
-                       l.oi, l.oi_chg,
-                       -- cc#1431: SAME formula scanner_endpoints.day_range_oi already computes for
-                       -- the /filters screener (oi_chg_pct = oi_chg/NULLIF(oi_prev,0)*100, 3dp) — one
-                       -- derivation, reused verbatim, so the Futures Buildup card's OI% and the
-                       -- screener's OI% can never disagree for the same symbol on the same day.
-                       ROUND(l.oi_chg::numeric / NULLIF(l.oi_prev,0) * 100, 3) AS oi_chg_pct,
+                       -- cc#1509: oi_chg + oi_chg_pct are now BOTH since-open (32043) — one
+                       -- basis per payload row, so the displayed pct, the sort key and the
+                       -- classification sign can never mix bases. 2dp per the card: the
+                       -- smallest real movers sit near 0.19, non-zero at 2dp.
+                       -- (cc#1431's parity note with the /filters screener is SUPERSEDED on
+                       -- this card by 32043: the screener still reads bar-over-bar and is
+                       -- inventoried in cc#1509's log as a separate surface, not changed here.)
+                       l.oi, (l.oi - o.oi_open) AS oi_chg,
+                       ROUND((l.oi - o.oi_open)::numeric / NULLIF(o.oi_open,0) * 100, 2) AS oi_chg_pct,
                        l.basis
-                FROM l JOIN pf USING(symbol)
+                FROM l JOIN pf USING(symbol) LEFT JOIN o USING(symbol)
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
             rows = cur.fetchall()

@@ -1039,7 +1039,10 @@ function buTable(rows, k){
             + Number(d).toFixed(2) + '%</span>';
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
           + '<td>' + cmp + dtxt + '</td>'
-          + buNum(r.oi_chg_pct, 1, '%', true)
+          /* cc#1509 (32043): OI Δ% is now SINCE-OPEN from the endpoint, at 2dp — the smallest
+             real movers sit near 0.19, and 1dp rendered the whole population +0.0. Same field
+             the sorts read (BU_SORT_GETTERS.OI / buPool), so display and rank stay one number. */
+          + buNum(r.oi_chg_pct, 2, '%', true)
           + (r.rvol == null ? '<td>—</td>'
              : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
           + (r.vol_p == null ? '<td>—</td>'
