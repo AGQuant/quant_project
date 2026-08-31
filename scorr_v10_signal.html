@@ -1065,7 +1065,9 @@ function buMore(k){
      it); this is Buildup's OWN sheet instance — vfMore itself is untouched. */
   vfSheet('<div class="vfsh">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
     + buTable(pool, k)
-    + '<div class="vfasof">' + esc((D.build && D.build.session) || '') + '</div>');
+    /* cc#1512: same helper as the card footer (D.build.session never existed in the payload) */
+    + (function(){ var st2 = scorrAsofStamp(D.build && D.build.as_of);
+        return '<div class="vfasof' + (st2.amber ? ' stale' : '') + '">' + esc(st2.txt) + '</div>'; })());
 }
 
 function buCard(st){
@@ -1100,7 +1102,10 @@ function buCard(st){
     + '<span class="busub">' + st.sub + '</span><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="buGuide()" aria-label="How to read this card">i</button></div>'
     + body
-    + '<div class="vfasof">' + esc(bd.session || 'LIVE 5-MIN') + '</div>'
+    /* cc#1512 (34535): the payload now carries as_of (max futures_basis ts of the served
+       rows) — the shared helper renders it; the 'LIVE 5-MIN' static fallback is gone. */
+    + (function(){ var st2 = scorrAsofStamp(bd.as_of);
+        return '<div class="vfasof' + (st2.amber ? ' stale' : '') + '">' + esc(st2.txt) + '</div>'; })()
     + '</div></div>';
 }
 
@@ -1140,6 +1145,17 @@ function buRepaint(){
   var cards = BU_STATES.map(buCard);
   var set = cards.join('');
   el.innerHTML = set + set + set;
+  radarAsofFill();
+}
+/* cc#1512: the radar eyebrow's stamp — same payload as-of the card footers use, same helper,
+   prefixed with the eyebrow's own separator. Amber via the existing token. Called from BOTH
+   paints: render() (which rebuilds the eyebrow from the template) and buRepaint() (sort taps). */
+function radarAsofFill(){
+  var ra = document.getElementById('radarAsof');
+  if (!ra) return;
+  var st2 = scorrAsofStamp(D.build && D.build.as_of);
+  ra.textContent = st2.txt ? ' · ' + st2.txt : '';
+  ra.style.color = st2.amber ? 'var(--amber)' : '';
 }
 function uLabel(i){
   var el = document.getElementById('upg'), st = BU_STATES[i || 0];
@@ -1640,7 +1656,10 @@ function render(){
     <div style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono';margin-top:6px">7-day daily PCR${(pN.gaps+pB.gaps)?` · ${pN.gaps+pB.gaps} day(s) no reading — gaps stated, never zero`:''}</div>
   </div>` : ''}
 
-  <div class="eyebrow">STOCK F&amp;O RADAR · LIVE 5-MIN</div>
+  <!-- cc#1512 (34535): the static "LIVE 5-MIN" claim is replaced by the DATA's as-of, filled
+       by buRepaint() from the buildup payload's as_of (max futures_basis ts of the served
+       rows). Empty until the payload lands — a blank is honest, a constant claim was not. -->
+  <div class="eyebrow">STOCK F&amp;O RADAR<span id="radarAsof"></span></div>
   ${buildupDeck()}
   ${SHOW_DIVERGENCE ? `<div class="card">
     <div class="grp"><h3>Fut ⇄ Equity Divergence</h3><span class="note">FLAG &gt; ±${D.div&&D.div.threshold!=null?D.div.threshold:1}%</span></div>
@@ -1657,6 +1676,7 @@ function render(){
      state, so a 5-minute rebuild never blanks a page while a fetch is out; the parks below
      re-park every fresh track on its middle set. */
   uPark(); fPark(); qPark();
+  radarAsofFill();   /* cc#1512: the template just recreated #radarAsof — restamp it */
 }
 
 async function boot(){ await loadAll(); render(); vPark(); uPark(); fPark(); qPark(); vfLoad(); }   /* cc#1458 correction: three separate decks stand — all four tracks park */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */

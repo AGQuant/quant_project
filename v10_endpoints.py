@@ -800,7 +800,11 @@ def v10_buildup(limit: int = 15):
                     ORDER BY symbol, ts DESC
                 ),
                 l AS (
-                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, oi_prev, basis
+                    -- cc#1512: ts carried through so the payload can state the as-of of the
+                    -- rows it actually served (max over the l rows, below) — APP_TABLE_ASOF_
+                    -- STAMP_V1's gate found this payload had no timestamp at all, which is why
+                    -- the card's footer could only ever render its static fallback.
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, oi_prev, basis, ts
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
@@ -841,7 +845,7 @@ def v10_buildup(limit: int = 15):
                        -- inventoried in cc#1509's log as a separate surface, not changed here.)
                        l.oi, (l.oi - o.oi_open) AS oi_chg,
                        ROUND((l.oi - o.oi_open)::numeric / NULLIF(o.oi_open,0) * 100, 2) AS oi_chg_pct,
-                       l.basis
+                       l.basis, l.ts
                 FROM l JOIN pf USING(symbol) LEFT JOIN o USING(symbol)
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
@@ -861,7 +865,7 @@ def v10_buildup(limit: int = 15):
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
-        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis = r
+        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis, _ts = r
         day_1d = float(day_1d) if day_1d is not None else None
         oi_chg = int(oi_chg) if oi_chg is not None else None
         # true buildup needs price + OI; classify only when oi_chg is present
@@ -892,7 +896,11 @@ def v10_buildup(limit: int = 15):
         longs = sorted(data, key=lambda x: x["day_1d"], reverse=True)[:limit]
         shorts = sorted(data, key=lambda x: x["day_1d"])[:limit]
         oi_pending = all(d["oi"] is None for d in data) if data else True
+        # cc#1512 (34535 gate closure): the as-of of the rows ACTUALLY SERVED — max futures_basis
+        # ts across the served set, naive IST as stored. Never NOW(), never the request clock.
+        as_of = max((r[7] for r in rows if r[7] is not None), default=None)
         return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
+                "as_of": str(as_of) if as_of is not None else None,
                 "oi_feed_pending": oi_pending,
                 "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
     except Exception as e:
