@@ -637,24 +637,35 @@ def _load_signal_refs(basket: str) -> dict:
                 SELECT DISTINCT ON (q.symbol)
                        q.symbol, q.signal_ts, q.cmp AS ref_entry,
                        (CURRENT_DATE - q.signal_date) AS days,
-                       c.cmp AS cmp_now,
+                       -- cc#1514: CMP is the live fyers_eq close — THE SAME SERIES THE ENGINE
+                       -- GATES ON — never cmp_prices (whose tier can serve a cached/stale quote)
+                       -- and never raw_prices (the 31-Aug screenshot's Friday-close-as-CMP).
+                       -- cmp_basis states what the number is: 'live' when the bar is today's
+                       -- session, 'prev close' otherwise (the cc#1167 rule — a previous close
+                       -- is legitimate outside market hours but must be LABELLED).
+                       c.close AS cmp_now,
                        -- cc#1145 scope 2/3 · the CMP's own as-of, so a signal row states when its
                        -- P&L was last true instead of looking permanently fresh.
                        -- TIMEZONE BASIS, MEASURED NOT ASSUMED (cc#844 trap): BOTH timestamps on
-                       -- this row are NAIVE IST. v8_qualified.signal_ts is documented as such,
-                       -- and cmp_prices.updated_at proved to be as well — at 10:40 IST its newest
-                       -- row read 10:39, which is 1 minute old read as IST and MINUS 329 minutes
-                       -- read as UTC. That -329 is the phantom 5.5-hour offset, not an outage.
-                       -- So NOTHING here converts either column, and the age is computed against
+                       -- this row are NAIVE IST — v8_qualified.signal_ts by doc, and
+                       -- intraday_prices.ts by the same convention every engine read uses. So
+                       -- NOTHING here converts either column, and the age is computed against
                        -- IST wall-clock.
-                       c.updated_at AS cmp_asof,
-                       CASE WHEN c.updated_at IS NOT NULL
+                       c.ts AS cmp_asof,
+                       CASE WHEN c.ts IS NOT NULL
                             THEN ROUND(EXTRACT(EPOCH FROM
-                                 ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.updated_at))/60)
+                                 ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.ts))/60)
                        END AS cmp_age_min,
+                       CASE WHEN c.ts IS NULL THEN NULL
+                            WHEN c.ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date THEN 'live'
+                            ELSE 'prev close' END AS cmp_basis,
                        f.lot_size
                 FROM v8_qualified q
-                LEFT JOIN cmp_prices c      ON c.symbol = q.symbol
+                LEFT JOIN LATERAL (
+                    SELECT close, ts FROM intraday_prices
+                    WHERE symbol = q.symbol AND source = 'fyers_eq' AND close IS NOT NULL
+                    ORDER BY ts DESC LIMIT 1
+                ) c ON TRUE
                 LEFT JOIN futures_universe f ON f.symbol = q.symbol
                 WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
                 ORDER BY q.symbol, q.signal_ts ASC
@@ -726,41 +737,59 @@ def _load_conflict_syms(basket: str) -> set:
 
 
 def _load_missed_reasons(basket: str) -> dict:
-    """Engine missed-reasons for today (IST) -> {symbol: raw_reason}. Canonical SIGNAL source."""
+    """Engine missed-reasons for today (IST) -> {symbol: {reason, via}}. Canonical SIGNAL source.
+
+    cc#1514: `via` is filled only for claimed_by_other_basket rows — the basket that actually
+    took the symbol (the qualified_set pick: latest signal_ts today), so the tag can SAY
+    "held via sell reversal" instead of the surface guessing."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute(f"""SELECT symbol, reason FROM v8_paper_missed
-                            WHERE basket=%s AND miss_date = {_ist_today_sql()}""", (basket,))
-            return {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute(f"""SELECT m.symbol, m.reason,
+                                   CASE WHEN m.reason = 'claimed_by_other_basket' THEN (
+                                       SELECT q.basket FROM v8_qualified q
+                                       WHERE q.symbol = m.symbol
+                                         AND q.signal_date = {_ist_today_sql()}
+                                         AND q.basket <> m.basket
+                                       ORDER BY q.signal_ts DESC LIMIT 1)
+                                   END AS via_basket
+                            FROM v8_paper_missed m
+                            WHERE m.basket=%s AND m.miss_date = {_ist_today_sql()}""", (basket,))
+            return {r[0]: {"reason": r[1], "via": r[2]} for r in cur.fetchall()}
     except Exception:
         return {}
 
 
+# cc#1514: the full closed set cc#1513's writer now ledgers, mapped to display suffixes. The
+# render-time GUESS CHAIN this map used to back up (slot_full set -> 'slots', signal_ts-hour ->
+# 'cutoff', default 'slots') is DELETED: it told the founder "-slots" while the same screen's
+# header showed slots free. A reason now comes from v8_paper_missed or it is 'pending'.
 _MISS_REASON_MAP = {
     'slot_full': 'slots', 'slots': 'slots', 'slot_burst': 'slots',
+    'has_open': 'held',
+    'traded_today': 'traded',
     'blackout': 'blackout', 'earnings': 'blackout',
-    'conflict': 'conflict', 'opposite_open': 'conflict', 'has_open': 'conflict',
+    'conflict': 'conflict', 'opposite_open': 'conflict', 'conflict_exit_blocked': 'conflict',
+    'before_cooloff': 'cooloff',
     'after_cutoff': 'cutoff', 'cutoff': 'cutoff',
+    'no_room': 'no room',
 }
 
 
 def _signal_reason(sym, signal_ts, slot_full, missed, conflict_syms) -> str:
-    """Resolve the gate that blocked entry for a today-qualified, non-OPEN, non-traded-today row.
-    Priority: conflict (opposite-side open) > explicit engine missed-reason > slots > cutoff > slots."""
-    if sym in conflict_syms:
-        return 'conflict'
-    raw = missed.get(sym)
-    if raw and raw in _MISS_REASON_MAP:
-        return _MISS_REASON_MAP[raw]
-    if sym in slot_full:
-        return 'slots'
-    try:
-        if signal_ts is not None and hasattr(signal_ts, 'hour'):
-            if signal_ts.hour > 15 or (signal_ts.hour == 15 and signal_ts.minute >= 20):
-                return 'cutoff'
-    except Exception:
-        pass
-    return 'slots'   # slots is the dominant gate; a valid signal that didn't enter was slot-gated
+    """cc#1514: the gate tag reads the TRUE reason from the v8_paper_missed ledger (cc#1513) and
+    NOTHING is recomputed at render time. No ledger row means the evaluation is not recorded —
+    'pending' — because absent beats wrong (the 31-Aug screenshot showed -slots against a header
+    proving slots were free; that tag was this function's old fallback chain, now gone).
+    signal_ts / slot_full / conflict_syms params are kept for signature stability but unused."""
+    rec = missed.get(sym)
+    if not rec:
+        return 'pending'
+    raw = rec.get("reason")
+    if raw == 'claimed_by_other_basket':
+        via = rec.get("via")
+        return ('held via ' + str(via).replace('_', ' ')) if via else 'held'
+    # an unmapped reason renders as itself (the cc#1145 degradation rule) — never a guess
+    return _MISS_REASON_MAP.get(raw, raw or 'pending')
 
 
 def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set,
@@ -840,6 +869,9 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         s["cmp_asof"] = _asof.strftime("%H:%M") if _asof is not None else None
         s["cmp_age_min"] = int(_age) if _age is not None else None
         s["cmp_stale"] = (_age is not None and _age > 5)
+        # cc#1514: the basis travels with the number (cc#1167 rule) — 'live' = today's fyers_eq
+        # bar, 'prev close' = the series' last bar predates today (legitimate off-hours, labelled).
+        s["cmp_basis"] = ref.get("cmp_basis")
         # LONG (cmp - ref) * lot; SHORT (ref - cmp) * lot. Any missing input leaves BOTH the
         # rupee figure and the percentage null — never a zero, which would read as a flat trade.
         if r_entry is not None and r_cmp is not None and r_lot:

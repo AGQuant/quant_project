@@ -2918,11 +2918,20 @@ function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mi
 // emit (_MISS_REASON_MAP: slots, blackout, conflict, cutoff), so this map is complete rather than
 // a best-effort — an unmapped reason still renders its tag, just without a tooltip, so a new gate
 // name added server-side degrades to today's behaviour instead of disappearing.
+// cc#1514: the vocabulary is now the cc#1513 LEDGER's closed set — the server reads
+// v8_paper_missed and never recomputes a reason; 'pending' means the engine's evaluation is
+// not recorded yet (absent beats wrong). 'held via <basket>' arrives composed server-side and
+// degrades to a tooltip-less tag here, per the cc#1145 unmapped-reason rule.
 const SIG_REASON_TEXT={
   slots:'Qualified, but no free slot on this side.',
+  held:'Already holding this stock on this side, so a second entry is blocked.',
+  traded:'Already traded this stock on this side today. One round per day.',
   conflict:'Already holding this stock the other way, so the engine skipped it.',
+  cooloff:'Qualified before the 09:30 entry cool-off. Entries open at 09:30.',
   cutoff:'Qualified too late in the day. Entries close at 15:15.',
-  blackout:'Results are due. The engine stays out around earnings.'
+  blackout:'Results are due. The engine stays out around earnings.',
+  'no room':'Price is already past the room-to-target gate — too close to (or beyond) the level.',
+  pending:'Engine evaluation not recorded yet for this signal. The reason appears once the ledger has it.'
 };
 function statusBadge(status,reason){
   if(status==='OPEN')return`<span class="badge b-open">&#9679; OPEN</span>`;
@@ -3724,7 +3733,15 @@ const V8_COLS=[
   ["dma_50","DMA50",      x=>`<td class="${cls(x.dma_50)}">${_cD(x.dma_50,v=>num(v,0))}</td>`],
   ["rsi_month","RSIm",    x=>`<td>${_cD(x.rsi_month,v=>num(v,0))}</td>`],
   ["gvm_score","GVM",     x=>`<td class="${bkGvmCls(x)}">${_cD(x.gvm_score,v=>num(v,1))}</td>`],
-  ["cmp","CMP",           x=>`<td style="text-align:right;${V8_COL_MONO}">${_cD(x.cmp,v=>num(v,1))}</td>`],
+  // cc#1514: on a SIGNAL row the basis travels with the number (cc#1167 rule) — 'prev close'
+  // is labelled instead of reading as live; the as-of rides the title either way.
+  ["cmp","CMP",           x=>{
+      if(x.notional===true&&x.cmp!=null){
+        const _pv=x.cmp_basis==='prev close';
+        const _t=`fyers_eq ${_pv?'previous session close':'live 5-min close'}${x.cmp_asof?` · as of ${x.cmp_asof}`:''}`;
+        return `<td style="text-align:right;${V8_COL_MONO}${_pv?';color:var(--dim)':''}" title="${_t}">${num(x.cmp,1)}${_pv?'<span style="font-size:9px;color:var(--dim)"> prev close</span>':''}</td>`;
+      }
+      return `<td style="text-align:right;${V8_COL_MONO}">${_cD(x.cmp,v=>num(v,1))}</td>`;}],
   ["pp","PP",             x=>`<td style="color:var(--mut);text-align:right;${V8_COL_MONO}">${_cD(x.pp,v=>num(v,0))}</td>`],
   ["r1","R1",             x=>`<td class="pos" style="text-align:right;${V8_COL_MONO}">${_cD(x.r1,v=>num(v,0))}</td>`],
   ["s1","S1",             x=>`<td class="neg" style="text-align:right;${V8_COL_MONO}">${_cD(x.s1,v=>num(v,0))}</td>`],
@@ -3732,7 +3749,17 @@ const V8_COLS=[
   // paid and it must not move. The title says what the LEVELS are set off, because target and SL
   // are cash-derived and reading them against this number is what made the row contradict its own
   // tab header. Any pre-existing _futGap note is preserved and the basis line appended to it.
-  ["entry_price","Entry", x=>{const _b=x.cash_entry!=null?`Futures fill. Levels are set off the cash close of ${num(x.cash_entry,2)}.`:'';const _t=[x._futGap,_b].filter(Boolean).join(' · ');return `<td style="text-align:right;${V8_COL_MONO}${x._futGap?';color:var(--dim)':''}"${_t?` title="${String(_t).replace(/"/g,'&quot;')}"`:''}>${_cD(x.entry_price,v=>num(v,1))}</td>`;}],
+  ["entry_price","Entry", x=>{
+      // cc#1514: a SIGNAL row has no entry — nothing was bought or sold. The cell shows the
+      // signal-time close as "SIG @ HH:MM" (the fyers_eq close the engine gated on, from
+      // v8_qualified.cmp at first fire), unmistakably a reference, never a fill.
+      if(x.notional===true){
+        if(x.ref_entry==null)return `<td style="text-align:right;${V8_COL_MONO}">--</td>`;
+        const _st=x.signal_ts?(_parseISTNaive(x.signal_ts)||null):null;
+        const _tm=_st?`${String(_st.hr).padStart(2,'0')}:${String(_st.min).padStart(2,'0')}`:'--:--';
+        return `<td style="text-align:right;${V8_COL_MONO};color:var(--dim);font-style:italic" title="SIGNAL @ ${_tm} — the close the engine gated on (fyers_eq at signal time). NOT an entry; nothing was bought or sold.">${num(x.ref_entry,1)}<span style="font-size:9px;font-style:normal"> SIG@${_tm}</span></td>`;
+      }
+      const _b=x.cash_entry!=null?`Futures fill. Levels are set off the cash close of ${num(x.cash_entry,2)}.`:'';const _t=[x._futGap,_b].filter(Boolean).join(' · ');return `<td style="text-align:right;${V8_COL_MONO}${x._futGap?';color:var(--dim)':''}"${_t?` title="${String(_t).replace(/"/g,'&quot;')}"`:''}>${_cD(x.entry_price,v=>num(v,1))}</td>`;}],
   // cc#1141: the percentage beside each level is DERIVED SERVER-SIDE off cash_entry =
   // (target+stop_loss)/2, never off entry_price and never from a hardcoded 3%. That matters
   // because the four baskets do not share one rule — sell_reversal is pivot-S1 with a mirrored
@@ -3801,9 +3828,14 @@ function v8NormRow(x,ctx){
     if(ctx.surface==='basket'&&x.notional===true){
       x.days=x.days!=null?x.days:(x.signal_ts?holdDays(x.signal_ts):null);
       x.entry_ts=x.signal_ts||null;
-      // ENTRY shows the frozen reference, so the row reads like a position that opened there.
-      if(x.entry_price==null&&x.ref_entry!=null)x.entry_price=Number(x.ref_entry);
-      if(x.cmp==null&&x.cmp_now!=null)x.cmp=Number(x.cmp_now);
+      // cc#1514: an un-entered signal has NO entry — ref_entry no longer masquerades in the
+      // ENTRY column (the 31-Aug screenshot read it as a fill). The ENTRY cell renders it as
+      // "SIG @ <time>" instead, clearly a reference. And CMP is ALWAYS the payload's live
+      // fyers_eq close (cmp_now) — the base row's qualification-time cmp must never render as
+      // CMP; the old null-guard here is exactly how Friday's close survived onto a live
+      // Monday screen while the P&L two cells over used the live quote.
+      x.entry_price=null;
+      x.cmp=(x.cmp_now!=null)?Number(x.cmp_now):null;
       // target/sl stay null until cc#1142's engine-level STOP is ruled on; levels_reason from the
       // payload is what the cell titles explain, rather than a bare dash with no cause.
     }
@@ -4001,7 +4033,7 @@ function renderFunnel(b){
   const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
     <span class="badge b-open">&#9679; OPEN</span><span style="color:var(--dim)">Position live</span>
     <span style="color:var(--dim);margin:0 4px">·</span>
-    <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (&middot;slots / &middot;conflict / &middot;cutoff / &middot;blackout)</span>
+    <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (&middot;slots / &middot;held / &middot;held via basket / &middot;traded / &middot;conflict / &middot;cooloff / &middot;cutoff / &middot;blackout / &middot;no room / &middot;pending)</span>
   </div>`;
   // cc#379: ONE canonical column set across all six baskets (Buy Momentum reference layout).
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
