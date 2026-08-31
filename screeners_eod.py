@@ -123,8 +123,14 @@ def run_all(conn=None, run_date=None):
     try:
         with conn.cursor() as cur:
             ensure_tables(cur)
+            # cc#1517: static imported baskets (Finkhoz lists) are global presets with EMPTY filters
+            # — there are no criteria to recompute. Running them through _screen_sql would replace
+            # the hand-curated membership with a whole-universe scan on the next EOD, so the batch
+            # runner skips any preset whose filters are {}. Their rows keep first_seen/last_seen as
+            # imported; membership changes for them are founder edits, not nightly recomputes.
             cur.execute("SELECT id, name, filters, sort_key, sort_dir FROM v13_presets "
-                        "WHERE COALESCE(scope,'global')='global' ORDER BY id")
+                        "WHERE COALESCE(scope,'global')='global' "
+                        "AND filters <> '{}'::jsonb ORDER BY id")
             presets = cur.fetchall()
         for pid, pname, filters, sort_key, sort_dir in presets:
             try:
