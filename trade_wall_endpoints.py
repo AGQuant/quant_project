@@ -269,6 +269,28 @@ WITH ev AS (
          exit_reason, entry_track
   FROM investment_scanner_state WHERE entered_at IS NOT NULL
 
+  -- MANUAL ALERT (trade_alerts) — NEW bucket, cc#1505 (MANUAL_TRADE_ALERTS_V1, 34521). Only
+  -- APPROVED alerts reach the wall: pending/triggered are intent, approved is the founder's
+  -- click, and the wall shows positions taken, not positions considered. approved_at is
+  -- timestamptz -> converted in SQL (the cc#887 doctrine above). entry_price is approved_price
+  -- (the resolver price AT approval, never the trigger). Instrument reuses the app's ONE
+  -- bare-symbol classifier — futures_universe WHERE is_active (the same source the trade card's
+  -- lot_size, the strip's D-button and cc#1500's caret already read) — not a new rule. No exit
+  -- concept on a manual alert yet, so every row is 'open' with no exit columns; no qty (no
+  -- position sizing in V1).
+  UNION ALL
+  SELECT 'alert', id::text, 'open',
+         symbol,
+         CASE WHEN UPPER(direction)='BUY' THEN 'LONG' WHEN UPPER(direction)='SELL' THEN 'SHORT' ELSE UPPER(direction) END,
+         'Manual Alert',
+         CASE WHEN EXISTS (SELECT 1 FROM futures_universe f
+                           WHERE f.symbol = a.symbol AND f.is_active) THEN 'FUTURES' ELSE 'EQUITY' END,
+         NULL::numeric,
+         (approved_at AT TIME ZONE 'Asia/Kolkata')::timestamp, 'min', approved_price::numeric,
+         NULL::timestamp, NULL::text, NULL::numeric,
+         NULL::numeric, NULL::numeric, NULL::text, notes
+  FROM trade_alerts a WHERE status = 'approved' AND approved_at IS NOT NULL
+
   -- cc#1000: V9 PAIRS (v9_paper_trades) is EXCLUDED — never on the founder's list, would be a
   -- sixth bucket. Empty today; when the pairs engine goes live it re-enters via a NEW card.
 
