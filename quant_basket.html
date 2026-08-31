@@ -221,8 +221,8 @@
 
 <script>
 const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap',breakout_52w:'52W Breakout',contra_value:'Contra Value',
-  // cc#1533: FINZ baskets — Finkhoz-curated fixed lists, distinct from Scorr's own 6 algorithmic screens above.
-  finz_stable:'FINZ Stable',finz_wcb:'FINZ Wealth Compounder',finz_helios:'FINZ Helios',finz_dividend:'FINZ Dividend',finz_defence:'FINZ Defence'};
+  // cc#1533/1534: FINZ baskets — Finkhoz-curated fixed lists, distinct from Scorr's own 6 algorithmic screens above.
+  finz_stable:'FINZ Stable',finz_wcb:'FINZ Wealth Compounder',finz_helios:'FINZ Helios',finz_dividend:'FINZ Dividend',finz_defence:'FINZ Defence',finz_etf:'FINZ ETF Basket'};
 const BRULE  = {
   large_cap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.0 · ΔGVM(180d) > +0.5 · Mcap Top 100 · Monthly',
   mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · Top-20 by M-Score · Rank 101–250 · Monthly',
@@ -231,27 +231,29 @@ const BRULE  = {
   breakout_52w:'GVM ≥ 7.5 · Near 52W high · At month high · Vol ≥ 21d avg · Top-10 by 1Y return · Monthly',
   contra_value:'G ≥ 7 · V ≥ 7.5 · M ≤ 6.5 · Sector GVM > 6 · Above 20DMA · Top-10 by Value · Monthly',
   // cc#1533: fixed lists, not a live GVM screen — the "rule" is which committee list, not a gate.
+  // cc#1534: corrected from "equal weight" (cc#1533's stated fallback) to the real weights.
   finz_stable:'Finkhoz committee list · real portfolio weights (uneven) · 14 holdings · Monthly',
-  finz_wcb:'Finkhoz committee list · equal weight · 12 holdings · Quarterly',
-  finz_helios:'Finkhoz committee list · equal weight · 10 of 11 confirmed · Monthly',
-  finz_dividend:'Finkhoz committee list · equal weight · 8 of 9 confirmed · Monthly',
-  finz_defence:'Finkhoz committee list · equal weight · 6 of 7 confirmed · Monthly'
+  finz_wcb:'Finkhoz committee list · real weights (2.7%–13.1%, uneven) · 12 holdings · Quarterly',
+  finz_helios:'Finkhoz committee list · real weights (5.5%–9.6%, uneven) · 7 holdings + LIQUIDCASE cash · Monthly',
+  finz_dividend:'Finkhoz committee list · real weights (8.9%–19.3%, uneven) · 8 holdings · Monthly',
+  finz_defence:'Finkhoz committee list · real weights (6.9%–21.5%, uneven) · 6 holdings + LIQUIDCASE cash · Monthly',
+  finz_etf:'Finkhoz committee list · real weights (17.6%–43.3%, uneven) · 4 ETFs · Monthly'
 };
 // cc#561 R1: top-border colors — Contra orange, Breakout cyan, Alpha violet, Large green, Mid blue, Small amber
 const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8',contra_value:'#FF8A5C',
-  // cc#1533: FINZ baskets get their own colors, distinct from the 6 above.
-  finz_stable:'#5CC8FF',finz_wcb:'#B0E85C',finz_helios:'#FFD15C',finz_dividend:'#E85CB0',finz_defence:'#8A8FFF'};
+  // cc#1533/1534: FINZ baskets get their own colors, distinct from the 6 above.
+  finz_stable:'#5CC8FF',finz_wcb:'#B0E85C',finz_helios:'#FFD15C',finz_dividend:'#E85CB0',finz_defence:'#8A8FFF',finz_etf:'#5CFFD1'};
 // cc#561 R1: card grid order reads as the market cycle — Contra, Breakout, Alpha / Large, Mid, Small
-// cc#1533: FINZ baskets appended after Scorr's own 6, in protocol order (Stable, WCB, Helios, Dividend, Defence).
+// cc#1533/1534: FINZ baskets appended after Scorr's own 6, in protocol order (Stable, WCB, Helios, Dividend, Defence, ETF).
 const BASKETS = ['contra_value','breakout_52w','alpha_multicap','large_cap','mid_cap','small_cap',
-  'finz_stable','finz_wcb','finz_helios','finz_dividend','finz_defence'];
+  'finz_stable','finz_wcb','finz_helios','finz_dividend','finz_defence','finz_etf'];
 // cc#561 R1: role tag [label, css-class] — Turn / Confirmation / Trend
 const BROLE = {contra_value:['Turn','role-turn'],breakout_52w:['Confirmation','role-confirm'],
   alpha_multicap:['Trend','role-trend'],large_cap:['Trend · Anchor','role-trend'],
   mid_cap:['Trend','role-trend'],small_cap:['Trend · Themes','role-trend'],
-  // cc#1533: FINZ baskets are committee-curated, not a Scorr algorithmic role — labelled plainly.
+  // cc#1533/1534: FINZ baskets are committee-curated, not a Scorr algorithmic role — labelled plainly.
   finz_stable:['Finkhoz','role-trend'],finz_wcb:['Finkhoz','role-trend'],finz_helios:['Finkhoz','role-trend'],
-  finz_dividend:['Finkhoz','role-trend'],finz_defence:['Finkhoz','role-trend']};
+  finz_dividend:['Finkhoz','role-trend'],finz_defence:['Finkhoz','role-trend'],finz_etf:['Finkhoz','role-trend']};
 // cc#561 R1: special-exit chips appended to the Exit criteria of the two new baskets
 const BCHIPS = {contra_value:'<span class="chip profit">PROFIT-TAKE</span><span class="chip nightly">NIGHTLY</span>',
   breakout_52w:'<span class="chip nightly">NIGHTLY</span>'};
@@ -290,19 +292,23 @@ const BCRITERIA = {
     exit:  'Follows the committee holding changes at the next monthly review — not a Scorr GVM/stop-loss mechanism'
   },
   finz_wcb: {
-    entry: 'Fixed 12-holding list, Finkhoz Wealth Compounder Basket (committee-curated) · Equal weight, ₹5L/12 ≈ ₹41.7k/slot · Seeded 31-Aug-2026 at EOD close',
+    entry: 'Fixed 12-holding list, Finkhoz Wealth Compounder Basket (committee-curated) · Real weights from the live portfolio (uneven, 2.7%–13.1%), NOT equal weight — corrected 31-Aug-2026 (cc#1534) from the cc#1533 equal-weight fallback',
     exit:  'Follows the committee holding changes at the next quarterly review — not a Scorr GVM/stop-loss mechanism'
   },
   finz_helios: {
-    entry: 'Fixed holding list, Finkhoz Helios Basket (committee-curated) · Protocol approves 11 names, only 10 confirmed as of seed — the 11th is not invented · Equal weight, ₹5L/10 = ₹50k/slot · Seeded 31-Aug-2026 at EOD close',
+    entry: 'Fixed holding list, Finkhoz Helios Basket (committee-curated, rebalanced 31-Aug-2026) · 7 holdings at real weights (uneven, 5.5%–9.6%) + LIQUIDCASE 46.1% held as unallocated cash (unresolved symbol, not renormalized into the 7) · Corrected 31-Aug-2026 (cc#1534) — the cc#1533 original 10 holdings were wrong (a stale source)',
     exit:  'Follows the committee holding changes at the next monthly review — not a Scorr GVM/stop-loss mechanism'
   },
   finz_dividend: {
-    entry: 'Fixed holding list, Finkhoz Dividend Basket (committee-curated) · Protocol approves 9 names, only 8 confirmed as of seed — the 9th is not invented · Equal weight, ₹5L/8 = ₹62.5k/slot · Seeded 31-Aug-2026 at EOD close',
+    entry: 'Fixed 8-holding list, Finkhoz "DIVIDEND ON FINKHOZ" table (committee-curated) · Real weights from the live portfolio (uneven, 8.9%–19.3%), fully deployed, NOT equal weight — corrected 31-Aug-2026 (cc#1534) from the cc#1533 equal-weight fallback',
     exit:  'Follows the committee holding changes at the next monthly review — not a Scorr GVM/stop-loss mechanism'
   },
   finz_defence: {
-    entry: 'Fixed holding list, Finkhoz Defence Basket (committee-curated) · Protocol approves 7 names, only 6 confirmed as of seed — the 7th is not invented · Equal weight, ₹5L/6 ≈ ₹83.3k/slot · Seeded 31-Aug-2026 at EOD close',
+    entry: 'Fixed holding list, Finkhoz Defence Basket (committee-curated) · 6 holdings at real weights (uneven, 6.9%–21.5%) + LIQUIDCASE 12.9% held as unallocated cash (unresolved symbol, not renormalized into the 6) · Corrected 31-Aug-2026 (cc#1534) from the cc#1533 equal-weight fallback',
+    exit:  'Follows the committee holding changes at the next monthly review — not a Scorr GVM/stop-loss mechanism'
+  },
+  finz_etf: {
+    entry: 'Fixed 4-ETF list, Finkhoz ETF Basket (committee-curated) · MID150BEES / GOLDBEES / NIFTYBEES / SILVERBEES at real weights (17.6%–43.3%), fully deployed · A 5th ETF (LTGILTBEES) was dropped from the original Dec-2025 build, not held · Unblocked + seeded 31-Aug-2026 (cc#1534) at EOD close',
     exit:  'Follows the committee holding changes at the next monthly review — not a Scorr GVM/stop-loss mechanism'
   }
 };
@@ -329,7 +335,7 @@ async function init(){
 
     const tot=qb.total_pnl||0;
     const alp=alpha.total?.alpha;
-    document.getElementById('s-cap').textContent='₹55,00,000';   // cc#1533: 11 baskets × ₹5L (was 6 pre-FINZ)
+    document.getElementById('s-cap').textContent='₹60,00,000';   // cc#1534: 12 baskets × ₹5L (finz_etf unblocked)
     document.getElementById('s-pnl').innerHTML=`<span class="${c(tot)}">${f(tot)}</span>`;
     document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${pct(alp)} vs N500</span>`;
     document.getElementById('s-pos').textContent=qb.total_positions||'—';
