@@ -332,27 +332,25 @@ body[data-theme]{
    all: unknown is not flat. */
 .tpr.up{background:rgba(47,212,139,.07)}
 .tpr.dn{background:rgba(255,92,108,.07)}
-/* cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE. Own row/header classes rather than force-fitting
-   .tpr/.tph's 3-column geometry (Symbol/Last/Chg%) onto a genuinely 4-column shape (Symbol/Day%/
-   Sector/Sector Day%) — same visual language throughout (border-bottom rows, the sticky sortable
-   header with the identical arrow glyph, the same faint up/dn tint at 7% alpha), sized for a 4th
-   column instead of reused verbatim. */
+/* cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE. Own row/header classes rather than reusing
+   .tpr/.tph verbatim — same visual language throughout (border-bottom rows, the sticky sortable
+   header with the identical arrow glyph, the same faint up/dn tint at 7% alpha).
+   cc#1553: back down to 2 columns (Symbol, Day %) — Sector and Sector Day were dropped, founder
+   request. br-sym now takes br-sec's old flex:1 slot (mirrors Tape's own nm2-flex/lv-right split,
+   .tpr above) so Day % still sits flush right instead of the row collapsing left-heavy with two
+   fixed-width cells and empty space trailing. */
 .brr{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-10) var(--space-2);
   border-bottom:var(--bw-1) solid var(--line);min-height:46px}
-.brr .br-sym{flex:0 0 auto;min-width:78px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-11);font-weight:800}
+.brr .br-sym{flex:1;min-width:0;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-11);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brr .br-day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
-  font-weight:700;text-align:right;min-width:54px}
-.brr .br-sec{flex:1;min-width:0;font-size:var(--type-9);color:var(--txt,#E9EEFB);opacity:.85;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.brr .br-sday{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
   font-weight:700;text-align:right;min-width:54px}
 /* cls()'s own pos/neg classes have no colour rule anywhere else in this file (checked before
    writing this — .tpr .lv.pos / .cg.pos are never actually styled, a pre-existing gap in Tape's
    own CSS this task does not touch, per do_not_touch). A breadth table's whole point is reading
-   green/red at a glance, so these two ARE explicitly coloured, scoped to just these new cells. */
-.brr .br-day.pos, .brr .br-sday.pos{color:var(--grn)}
-.brr .br-day.neg, .brr .br-sday.neg{color:var(--red)}
+   green/red at a glance, so this one IS explicitly coloured, scoped to just this cell. */
+.brr .br-day.pos{color:var(--grn)}
+.brr .br-day.neg{color:var(--red)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
   border-bottom:var(--bw-1) solid var(--line)}
@@ -361,10 +359,8 @@ body[data-theme]{
   color:var(--txt,#E9EEFB);cursor:pointer;display:flex;align-items:center;gap:var(--space-3);
   min-height:38px}
 .brh button.on{color:var(--txt,#E8EDF7)}
-.brh .h-bsym{flex:0 0 auto;min-width:78px}
+.brh .h-bsym{flex:1;min-width:0}
 .brh .h-bday{justify-content:flex-end;text-align:right;min-width:54px}
-.brh .h-bsec{flex:1;min-width:0}
-.brh .h-bsday{justify-content:flex-end;text-align:right;min-width:54px}
 .brh .ar{font-size:var(--type-9);opacity:.9}
 .brr.up{background:rgba(47,212,139,.07)}
 .brr.dn{background:rgba(255,92,108,.07)}
@@ -2165,22 +2161,18 @@ var BREADTH = { rows: [], view: [], loaded: false, loading: false };
 var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
 var BREADTH_COLS = [
   { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
-  { key: 'day',  label: 'Day %',      cls: 'h-bday' },
-  { key: 'sec',  label: 'Sector',     cls: 'h-bsec' },
-  { key: 'sday', label: 'Sector Day', cls: 'h-bsday' }
+  { key: 'day',  label: 'Day %',      cls: 'h-bday' }
 ];
 function breadthSortView(){
   var col = BREADTH_SORT.col, dir = BREADTH_SORT.dir;
   var order = BREADTH.rows.map(function(_, i){ return i; });
   order.sort(function(a, b){
     var ra = BREADTH.rows[a], rb = BREADTH.rows[b];
-    if (col === 'sym' || col === 'sec'){
-      var f = col === 'sym' ? 'symbol' : 'theme';
-      var cmp = String(ra[f] || '').localeCompare(String(rb[f] || ''));
+    if (col === 'sym'){
+      var cmp = String(ra.symbol || '').localeCompare(String(rb.symbol || ''));
       return cmp * dir || (a - b);
     }
-    var field = col === 'day' ? 'day_chg_pct' : 'sector_day_chg_pct';
-    var va = tapeNum(ra[field]), vb = tapeNum(rb[field]);
+    var va = tapeNum(ra.day_chg_pct), vb = tapeNum(rb.day_chg_pct);
     if (va == null && vb == null) return a - b;
     if (va == null) return 1;      // nulls last, whichever way the arrow points
     if (vb == null) return -1;
@@ -2211,8 +2203,6 @@ function breadthRow(x){
   return '<div class="brr' + sgn + '">'
     + '<span class="br-sym">' + esc(x.symbol) + '</span>'
     + '<span class="br-day ' + cls(x.day_chg_pct) + '">' + pct(x.day_chg_pct) + '</span>'
-    + '<span class="br-sec">' + esc(x.theme) + '</span>'
-    + '<span class="br-sday ' + cls(x.sector_day_chg_pct) + '">' + pct(x.sector_day_chg_pct) + '</span>'
     + '</div>';
 }
 function renderBreadth(){
