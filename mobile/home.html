@@ -1553,9 +1553,11 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 <!-- cc#906: the V10 trade log as a chart. 3 months of daily candles with every FUT-leg paper
      trade pinned on the session it happened in, plus the log itself underneath. -->
 <div class="tpo" id="v10ov">
-  <!-- cc#1483: the (i) opens the Engine spec sheet — 44px tap target, same rule as .tpo-x. -->
+  <!-- cc#1483: the (i) opens the Engine spec sheet — 44px tap target, same rule as .tpo-x.
+       cc#1554: id added so renderV10() can hide it while the OPTIONS leg is on screen — the
+       sheet only ever shows the FUTURES backtest (v10SpecSheet(), untouched by this card). -->
   <div class="tpo-hd"><h2 id="v10ttl">V10 Trades</h2>
-    <button class="tpo-i" onclick="v10SpecSheet()" aria-label="Engine spec"><i>i</i></button>
+    <button class="tpo-i" id="v10SpecBtn" onclick="v10SpecSheet()" aria-label="Engine spec"><i>i</i></button>
     <button class="tpo-x" onclick="closeV10()" aria-label="Close">&#10005;</button></div>
   <div class="tpo-bd" id="v10bd"></div>
 </div>
@@ -4053,6 +4055,11 @@ function v10Months(items, dateOf, pnlOf, cardOf){
 }
 
 function renderV10(){
+  // cc#1554: same condition v10Log() already uses for its own FUT/OPT view -- not a re-derived
+  // rule that could drift from it. Evaluated ahead of the data-readiness check below so the
+  // button reacts to the leg the modal was opened/switched to, not to whether the fetch landed.
+  var specBtn = document.getElementById('v10SpecBtn');
+  if (specBtn) specBtn.style.display = (V10.leg === 'OPT') ? 'none' : '';
   var d = V10.data, bd = document.getElementById('v10bd');
   if (!d || !bd) return;
   var t = document.getElementById('v10ttl');
