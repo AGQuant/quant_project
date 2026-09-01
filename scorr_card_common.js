@@ -1253,10 +1253,14 @@ window.scorrAsofStamp = function (asof) {
    file every screen already loads, so a third page never hand-rolls its own copy button or (worse)
    its own idea of what "Fyers format" means.
 
-   FORMAT: comma-separated `NSE:{SYMBOL}-EQ` — this is not invented here, it is this codebase's OWN
-   Fyers equity-symbol convention, read verbatim from worker/fyers_feed.py (every 5-min equity
-   subscription is built as 'NSE:'+code+'-EQ', and the REST quote self-test literally hits
-   NSE:SBIN-EQ). A blank/whitespace-only symbol is dropped rather than emitted as 'NSE:-EQ'.
+   FORMAT (corrected cc#1546 P0 — read this before touching the format again): bare comma-separated
+   symbols, NO exchange prefix, NO -EQ suffix — e.g. RELIANCE,TCS,INFY. This is what the Fyers APP's
+   own watchlist/marketwatch "add symbol" paste box actually accepts, confirmed by the founder
+   against his live Fyers app. cc#1545's original NSE:{SYMBOL}-EQ format was WRONG for this surface —
+   that convention is real, but it is worker/fyers_feed.py's WebSocket DATA-FEED subscription format,
+   a completely different concern from what a human pastes into the Fyers app's UI. Do not reapply
+   the NSE:/-EQ convention here on the strength of that file again; the founder's live-app test is
+   the authority for THIS format, not the feed API. A blank/whitespace-only symbol is still dropped.
 
    COPY MECHANICS + VISUAL FEEDBACK are ported verbatim from scorr_news.html's copyStory() (the
    "Copy for LinkedIn" button) — navigator.clipboard.writeText first, a hidden-textarea
@@ -1285,13 +1289,14 @@ window.scorrAsofStamp = function (asof) {
     }catch(e){ return false; }
   }
 
-  // Raw NSE codes (e.g. ['RELIANCE','TCS']) -> 'NSE:RELIANCE-EQ,NSE:TCS-EQ'. Trims + uppercases
-  // each symbol (paper/basket data is already NSE-uppercase, but a screener metrics blob is not
-  // guaranteed to be) and drops anything blank after trimming.
+  // Raw NSE codes (e.g. ['RELIANCE','TCS']) -> 'RELIANCE,TCS' — bare, no exchange prefix, no
+  // -EQ suffix (cc#1546 P0: this is the format the Fyers app's OWN paste box accepts, founder-
+  // confirmed against the live app; NOT worker/fyers_feed.py's WebSocket subscription format).
+  // Trims + uppercases each symbol (paper/basket data is already NSE-uppercase, but a screener
+  // metrics blob is not guaranteed to be) and drops anything blank after trimming.
   window.ScorrFyersSymbolList = function (symbols) {
     return (symbols || []).map(function (s) { return String(s || '').trim().toUpperCase(); })
       .filter(Boolean)
-      .map(function (s) { return 'NSE:' + s + '-EQ'; })
       .join(',');
   };
 
