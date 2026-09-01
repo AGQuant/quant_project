@@ -3375,20 +3375,21 @@ def _bg_cleanup_perf_log():
     except Exception as e:
         log.error(f"perf_cleanup: {e}")
 
-def _bg_tc_score_daily():
-    """cc#1540: once-daily Trade Check score series + AMBER marker over the open V8 book.
-    Runs AFTER the close (15:52 IST, behind v8_eod 15:45 and adr_pcr 15:50) on its OWN cadence —
-    compute_trade_check is ~15 DB queries per symbol, far too heavy for the 5-min pivot_star
-    tick. The series (v8_tc_score_daily) and the fire log (v8_pivot_star_log, direction
-    TC_STRONG) both live in v8_pivot_star.run_tc_score_daily()."""
+def _bg_tc_score_tick():
+    """cc#1540 (founder cadence amendment, cc_task_logs 4292): Trade Check score TICKS every
+    5 minutes during market hours + the AMBER marker, over the open V8 book. Kept as its OWN job
+    (not folded into _bg_pivot_star) so its cost shows separately in scheduler_master timings —
+    compute_trade_check is ~15 DB queries per symbol and the run reports elapsed_ms per tick.
+    Series (v8_tc_score_ticks, 30-day retention inside the job) and the fire log
+    (v8_pivot_star_log, direction TC_STRONG) both live in v8_pivot_star.run_tc_score_tick()."""
     try:
         import v8_pivot_star
-        res = v8_pivot_star.run_tc_score_daily()
+        res = v8_pivot_star.run_tc_score_tick()
         if not res.get("ok"):
-            raise RuntimeError(res.get("error", "tc_score_daily failed"))
-        log.info(f"tc_score_daily: {res}")
+            raise RuntimeError(res.get("error", "tc_score_tick failed"))
+        log.info(f"tc_score_tick: {res}")
     except Exception as e:
-        log.error(f"tc_score_daily: {e}")
+        log.error(f"tc_score_tick: {e}")
         raise
 
 def _bg_inv_scanner_universe():
@@ -4646,6 +4647,10 @@ async def _scheduler_loop():
         # only v8_pivot_star_log and can never create a qualification or a paper entry.
         if _is_cash_continuous(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_pivot_star)
+            # cc#1540 (amended cadence, log 4292): TC score ticks ride the same 5-min
+            # market-hours beat but as their OWN job, so the heavy compute_trade_check sweep
+            # is timed separately in scheduler_master and can be silenced independently.
+            _spawn(_bg_tc_score_tick)
             _spawn(_bg_guardian_tick)          # cc#660: 5-min market-hours per-leg detect->repair (feed_guardian)
             # cc#1201 (V10_TICK_WINDOW_V1.1, session_log 29067): Index Intel stops when V8 stops.
             # It was on _is_market_hours and ran to 15:30, three ticks past the writer. Same
@@ -4724,11 +4729,6 @@ async def _scheduler_loop():
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 45:
             _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
-        # cc#1540: Trade Check daily series + AMBER marker, once per trading day after the close
-        # (same trading-day gate as v8_eod above — a score computed on a holiday would poison the
-        # 3-day trailing average with a duplicate of the prior session).
-        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 52:
-            _spawn(_bg_tc_score_daily)
         # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
         # off nse_holidays like its neighbours; the job's own registry gate and

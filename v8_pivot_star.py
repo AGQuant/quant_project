@@ -195,22 +195,27 @@ def ensure_schema(conn):
               CONSTRAINT v8_pivot_star_log_uniq UNIQUE (symbol, star_date, direction)
             )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pivot_star_date ON v8_pivot_star_log(star_date DESC)")
-        # cc#1540: the Trade Check DAILY SERIES. Unlike v8_pivot_star_log (a fire-event log),
-        # every open symbol gets ONE row per day regardless of its score — the amber marker's
-        # 3-day trailing average needs the full series, not only the days a score was high.
+        # cc#1540 (founder cadence amendment, cc_task_logs 4292): the Trade Check TICK SERIES —
+        # every 5 minutes during market hours, NOT once daily as the card first said. Multiple
+        # ticks per day are expected and wanted, so the key is (symbol, ts, side) with no daily
+        # uniqueness. The amber marker's 3-day trailing average DERIVES a daily series from this
+        # (each day's representative = that day's LAST tick — stated choice, applied
+        # consistently). 30-day rolling retention runs inside the same job.
         # CREATE TABLE only, same MAINTENANCE_LOCK_RULE governance as the log above.
+        # (v8_tc_score_daily, the amendment-superseded daily table, exists empty in the live DB
+        # from the first cut of this card — flagged for a weekend console DROP, never written.)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS v8_tc_score_daily (
+            CREATE TABLE IF NOT EXISTS v8_tc_score_ticks (
               symbol TEXT NOT NULL,
-              score_date DATE NOT NULL,
+              ts TIMESTAMPTZ NOT NULL,
               side TEXT NOT NULL,
               score NUMERIC,
               total NUMERIC,
               score_pct NUMERIC,
               verdict_class TEXT,
-              computed_at TIMESTAMPTZ DEFAULT NOW(),
-              PRIMARY KEY (symbol, score_date, side)
+              PRIMARY KEY (symbol, ts, side)
             )""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_tc_score_ticks_day ON v8_tc_score_ticks((ts::date) , symbol)")
     conn.commit()
 
 
@@ -531,30 +536,38 @@ def evaluate_dma_cross(conn, target_date: Optional[date] = None) -> List[Dict[st
     return out
 
 
-# ── cc#1540 TC_STRONG_V1 (founder direct 31-Aug) — the FOURTH marker family ───────────────────
+# ── cc#1540 TC_STRONG_V1 (founder direct 31-Aug; cadence amended same day, log 4292) ──────────
 # An AMBER star when Trade Check's score is above 80% AND rising against its own 3-day trailing
-# average. Unlike the other three families this needs HISTORY: no daily persistence of a Trade
-# Check score existed anywhere (checked — the tc_score_* tables belong to TC SCANNER's replay
-# engine, a different "TC"), so run_tc_score_daily() builds the series in v8_tc_score_daily and
-# fires the marker off it. compute_trade_check() is HEAVY (~15 DB queries per symbol — its own
-# comment calls a 50-symbol sweep on-demand-only), which is why this runs ONCE DAILY on its own
-# scheduler cadence (bg_tc_score_daily, after the close), never on the 5-min pivot_star tick.
-TC_STRONG_PCT = 80.0     # today's score_pct must exceed this…
-TC_TRAIL_DAYS = 3        # …and exceed the average of the 3 most recent PRIOR logged days
+# average. Unlike the other three families this needs HISTORY: no persistence of a Trade Check
+# score existed anywhere (checked — the tc_score_* tables belong to TC SCANNER's replay engine,
+# a different "TC"), so run_tc_score_tick() builds a 5-MINUTE series in v8_tc_score_ticks (the
+# founder's amended cadence — market hours, same 5-min beat as run_tick) and fires the marker
+# off a DAILY series derived from it: each day's representative score_pct is that day's LAST
+# tick. 30-day rolling retention keeps the tick table bounded.
+#
+# PERF, measured not assumed: compute_trade_check is ~15 DB queries per symbol; at the current
+# open book (~12 positions) a tick costs ~180 lightweight reads. The job logs its own elapsed_ms
+# every run so a growing book shows up in scheduler_master timings, not as a silent slow tick.
+TC_STRONG_PCT = 80.0     # the current tick's score_pct must exceed this…
+TC_TRAIL_DAYS = 3        # …and exceed the average of the 3 most recent PRIOR days' last ticks
+TC_RETENTION_DAYS = 30   # rolling window on the tick table (founder amendment)
 
 
-def run_tc_score_daily(conn=None) -> Dict[str, Any]:
-    """Once-daily: score every open-book position with Trade Check, persist the series, then
-    fire AMBER (direction='TC_STRONG') into v8_pivot_star_log where the condition holds.
+def run_tc_score_tick(conn=None) -> Dict[str, Any]:
+    """One 5-min market-hours tick: score every open-book position with Trade Check, append to
+    the tick series, apply 30-day retention, then fire AMBER (direction='TC_STRONG') into
+    v8_pivot_star_log where the condition holds (first-fire-only per symbol per day).
 
     SIDE IS THE POSITION'S OWN SIDE — deliberately unlike the pivot star (which tests both sides
     regardless of position). Trade Check inherently asks "does this LONG/SHORT setup validate",
     so the only honest reading for a marker on a position's own card is that position's side.
 
-    The 3-day gate is FORWARD-LOOKING: a symbol with fewer than TC_TRAIL_DAYS prior logged days
-    skips the amber evaluation entirely (never a partial average, never a backfilled one) — so
-    the marker cannot fire for ANY symbol until 3+ trading days after this ships. That silence
-    is correct, not a defect."""
+    The 3-day gate is FORWARD-LOOKING and reads the DERIVED daily series (last tick per prior
+    day): fewer than TC_TRAIL_DAYS prior days with ticks skips the amber evaluation entirely
+    (never a partial average, never a backfilled one) — so the marker cannot fire for ANY symbol
+    until 3+ trading days after this ships. That silence is correct, not a defect."""
+    import time as _t
+    t0 = _t.monotonic()
     own = conn is None
     if own:
         conn = _conn()
@@ -590,28 +603,39 @@ def run_tc_score_daily(conn=None) -> Dict[str, Any]:
             pct = round(score / total * 100.0, 1)
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO v8_tc_score_daily
-                      (symbol, score_date, side, score, total, score_pct, verdict_class)
+                    INSERT INTO v8_tc_score_ticks
+                      (symbol, ts, side, score, total, score_pct, verdict_class)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT (symbol, score_date, side) DO NOTHING
-                """, (sym, d, side, score, total, pct, res.get("verdict_class")))
+                    ON CONFLICT (symbol, ts, side) DO NOTHING
+                """, (sym, ts, side, score, total, pct, res.get("verdict_class")))
                 wrote += cur.rowcount
             scored += 1
+        # 30-day rolling retention, same job (founder amendment) — 5-min ticks accumulate far
+        # faster than one row/day, so the table is kept bounded here rather than left to grow.
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM v8_tc_score_ticks WHERE ts < NOW() - INTERVAL '30 days'")
+            purged = cur.rowcount
         conn.commit()
 
-        # AMBER evaluation — from the SERIES, today vs the 3 most recent PRIOR days.
+        # AMBER — the current tick vs the derived daily series. Today's value is each symbol's
+        # LATEST tick today; each prior day's representative is that day's LAST tick (the stated
+        # choice, applied consistently in both places). Rule unchanged: >80 AND rising vs the
+        # 3-day trailing average, 3 full prior days required.
         amber, awrote = [], 0
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT t.symbol, t.side, t.score_pct, h.trail_avg, h.n_prior
-                FROM v8_tc_score_daily t
+                FROM (SELECT DISTINCT ON (symbol, side) symbol, side, score_pct
+                      FROM v8_tc_score_ticks WHERE ts::date = %s
+                      ORDER BY symbol, side, ts DESC) t
                 JOIN LATERAL (
-                    SELECT AVG(score_pct) AS trail_avg, COUNT(*) AS n_prior
-                    FROM (SELECT score_pct FROM v8_tc_score_daily
-                          WHERE symbol = t.symbol AND side = t.side AND score_date < t.score_date
-                          ORDER BY score_date DESC LIMIT %s) p
-                ) h ON TRUE
-                WHERE t.score_date = %s""", (TC_TRAIL_DAYS, d))
+                    SELECT AVG(rep) AS trail_avg, COUNT(*) AS n_prior
+                    FROM (SELECT DISTINCT ON (ts::date) score_pct AS rep
+                          FROM v8_tc_score_ticks
+                          WHERE symbol = t.symbol AND side = t.side AND ts::date < %s
+                          ORDER BY ts::date DESC, ts DESC
+                          LIMIT %s) p
+                ) h ON TRUE""", (d, d, TC_TRAIL_DAYS))
             for sym, side, pct, trail, n_prior in cur.fetchall():
                 pct, trail = _f(pct), _f(trail)
                 if n_prior < TC_TRAIL_DAYS or pct is None or trail is None:
@@ -619,10 +643,12 @@ def run_tc_score_daily(conn=None) -> Dict[str, Any]:
                 if pct > TC_STRONG_PCT and pct > trail:
                     amber.append((sym, pct, trail))
             for sym, pct, trail in amber:
-                # COLUMN REUSE, STATED: level_value carries today's score_pct and pp the 3-day
-                # trailing average — the same reuse cc#1539 documents for its two SMAs; the row
-                # stays self-describing through level_name='tc_score_pct'. cmp_at_star/day_1d
-                # are NULL: a score marker has no price of its own.
+                # COLUMN REUSE, STATED: level_value carries the firing tick's score_pct and pp
+                # the 3-day trailing average — the same reuse cc#1539 documents for its two SMAs;
+                # the row stays self-describing through level_name='tc_score_pct'.
+                # cmp_at_star/day_1d are NULL: a score marker has no price of its own.
+                # First-fire-only PER DAY under the existing unique key — later ticks that still
+                # qualify DO NOTHING, so first_seen_ts records when the condition first held.
                 cur.execute("""
                     INSERT INTO v8_pivot_star_log
                       (star_date, first_seen_ts, symbol, direction, star_color,
@@ -633,15 +659,16 @@ def run_tc_score_daily(conn=None) -> Dict[str, Any]:
                 awrote += cur.rowcount
         conn.commit()
         out = {"ok": True, "date": str(d), "candidates": len(pos), "scored": scored,
-               "score_rows_new": wrote, "failed": failed,
+               "tick_rows_new": wrote, "failed": failed, "purged_30d": purged,
                "amber_fired": len(amber), "amber_new_rows": awrote,
-               # a zero-amber day is VALID — and guaranteed for the first 3 trading days
-               # (the trailing gate cannot be met until the series exists).
-               "zero_amber_day": not amber}
-        log.info("cc#1540 tc_score_daily: %s", out)
+               "elapsed_ms": int((_t.monotonic() - t0) * 1000),
+               # a zero-amber tick is VALID — and guaranteed for the first 3 trading days
+               # (the trailing gate cannot be met until the derived daily series exists).
+               "zero_amber_tick": not amber}
+        log.info("cc#1540 tc_score_tick: %s", out)
         return out
     except Exception as e:
-        log.exception("cc#1540 tc_score_daily failed")
+        log.exception("cc#1540 tc_score_tick failed")
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
     finally:
         if own:
