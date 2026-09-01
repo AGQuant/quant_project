@@ -2829,7 +2829,8 @@ function posTags(x){
   // never on the open-position rows. Inline (not async like the TC star) so they paint with the row;
   // loadPivotStars() repaints the master pane once the maps land. Order: SYMBOL · pivot · activity ·
   // TC · NEW.
-  return pivotStar(x.symbol)+pivotAct(x.symbol)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
+  // cc#1539: the DMA square joins the row. Order: SYMBOL · pivot · activity · dma · TC · NEW.
+  return pivotStar(x.symbol)+pivotAct(x.symbol)+pivotDma(x.symbol)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
 }
 function _tcStarHtml(v,side){
   if(!v)return'';
@@ -3892,17 +3893,19 @@ function _banChip(x){return x&&x.banned?' <span class="badge" style="background:
 // set as a trade rule (9 trades / 55.6% WR, and 53 / 34.0% / -0.75 EV without the Nifty gate), so
 // NO copy here — glyph, title or aria-label — may say buy, sell, entry or target. The tooltip text
 // is built SERVER-SIDE by v8_pivot_star.star_note() so the wording cannot drift on this surface.
-let PIVOT_STARS={}, PIVOT_ACT={}, MK_LEGEND=null;
+let PIVOT_STARS={}, PIVOT_ACT={}, PIVOT_DMA={}, MK_LEGEND=null;
 async function loadPivotStars(){
   try{
     const d=await getJSON('/api/v8/pivot_star');
     // cc#933: activity markers come back as their OWN list, because a symbol can carry a pivot
     // marker AND an activity marker at once — one merged map would drop the second.
     PIVOT_ACT={}; (d.activity||[]).forEach(a=>{PIVOT_ACT[a.symbol]=a;});
+    // cc#1539: the DMA-cross squares, third list for the same reason.
+    PIVOT_DMA={}; (d.dma_cross||[]).forEach(x=>{PIVOT_DMA[x.symbol]=x;});
     MK_LEGEND=d.legend||null;
     const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
     PIVOT_STARS=m;
-  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; }   // a failed marker fetch must never blank a signal table
+  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; PIVOT_DMA={}; }   // a failed marker fetch must never blank a signal table
   // cc#1008: the maps load async, after the open-positions pane has already painted once. Repaint it
   // so the pivot/activity markers appear on the rows without waiting for the 5-min auto-refresh.
   try{ if(cache&&cache.paper&&document.getElementById('panel0')) renderMasterPanels(); }catch(e){}
@@ -3933,6 +3936,17 @@ function pivotAct(sym){
   const note=(a.note||'').replace(/"/g,'&quot;');
   return `<span class="pv-act" title="${note}" aria-label="${note}">\u26A1</span>`;
 }
+
+// cc#1539 DMA_CROSS_V1: the third marker family \u2014 a small square (U+25A0), green when the 5DMA
+// crossed ABOVE the 20DMA this session, red when below. Colour follows the served star_color and
+// the note is the server's own facts-only string \u2014 the pivotStar pattern exactly, nothing
+// re-derived here (DISPLAY_PARITY 16202: /m/v8's dmaMark() does the same).
+function pivotDma(sym){
+  const x=PIVOT_DMA[sym]; if(!x) return '';
+  const col = x.star_color==='GREEN' ? '#0a9e63' : '#f87171';
+  const note=(x.note||'').replace(/"/g,'&quot;');
+  return `<span class="pv-dma" style="color:${col}" title="${note}" aria-label="${note}">\u25A0</span>`;
+}
 // cc#933: the legend footer. Rendered from window.ScorrMarkerLegend — the SAME snippet /m/v8
 // uses — with the copy itself coming from the engine, so neither the layout nor the wording can
 // fork between the two surfaces.
@@ -3957,7 +3971,10 @@ function markerLegendPopover(){
     row('\u2605','#f5b94a','Amber star \u2014 Trade Check STRONG (VALID shows no marker)')+
     row('\u2605','#4d7cfe','Blue star \u2014 held reversal at S1')+
     row('\u2605','#f87171','Red star \u2014 mirror at R1')+
-    row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d');
+    row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d')+
+    // cc#1539: two colours, one meaning-pair \u2014 a green square shows the up-cross glyph; the red
+    // mirror is stated in the text so the popover stays one row per marker family.
+    row('\u25A0','#0a9e63','Green/red square \u2014 fresh 5DMA cross above/below 20DMA');
   // cc#1024: the shape-by-side footer is DELETED. No marker on the board changes shape by side
   // any more, so a footer explaining that rule would be explaining something that never happens.
   const footer='';
