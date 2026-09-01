@@ -410,6 +410,111 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
     return out
 
 
+def _ist_market_hours() -> bool:
+    """cc#1539: NSE Mon-Fri 09:15-15:30 IST — same gate check_endpoint.py's fibcheck uses to
+    exclude today's mid-session partial candle from close-based math."""
+    now = _ist_now()
+    mins = now.hour * 60 + now.minute
+    return (now.weekday() < 5) and (555 <= mins <= 930)
+
+
+# ── cc#1539 DMA_CROSS_V1 (founder direct 31-Aug) — the THIRD marker family ────────────────────
+# A small GREEN/RED SQUARE on the same open-book cards as the star and bolt: the 5-day simple
+# moving average crossing the 20-day. A CROSS, not a STATE — it fires only on the session the
+# relationship flips, so a symbol sitting above its 20DMA for weeks does not relight daily.
+# Both SMAs are computed FRESH from raw_prices closes: there is no dma_5 anywhere in the DB, and
+# the existing dma_20/50/200 columns store PERCENT DISTANCE from the MA, not the MA price level
+# (v13_presets_endpoints.py documents this) — so nothing stored is usable for a crossover test,
+# and computing fresh also avoids MAINTENANCE_LOCK_RULE's ALTER TABLE gate entirely.
+DMA_FAST, DMA_SLOW = 5, 20
+DMA_FETCH = 25          # 5+20 with headroom for a short-history symbol
+
+
+def evaluate_dma_cross(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """GREEN/RED square markers on the OPEN book (cc#1539). PURE READ.
+
+    Same candidate query as evaluate()/evaluate_activity() — the founder's ask is explicitly
+    'just like star and bolt', i.e. the same cards. While the market is open, today's raw_prices
+    row (a mid-session partial candle) is EXCLUDED — a partial close would make the cross fire
+    and un-fire intraday, which is not a real signal. Fewer than DMA_SLOW+1 completed closes
+    (today's AND yesterday's 20DMA both need a full window) skips the symbol — insufficient
+    history, never a guessed cross."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
+        cur.execute("""
+            SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+            FROM v8_paper_positions p
+            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+            WHERE p.status = 'OPEN'
+              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+              AND NOT (p.basket = ANY(%(retired)s))
+            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+
+        # Completed closes only: during market hours today's row is a partial candle and is
+        # excluded (the fibcheck pattern); after the close today's row IS the completed candle.
+        ceiling_op = "<" if _ist_market_hours() else "<="
+        cur.execute(f"""
+            SELECT symbol, close FROM (
+                SELECT symbol, close,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                FROM raw_prices
+                WHERE symbol = ANY(%s) AND close > 0 AND price_date {ceiling_op} %s
+            ) x WHERE rn <= %s
+            ORDER BY symbol, rn""", (syms, d, DMA_FETCH))
+        closes: Dict[str, List[float]] = {}
+        for sym, close in cur.fetchall():
+            closes.setdefault(sym, []).append(float(close))
+
+        live = {}
+        try:
+            import cmp_resolver
+            live = cmp_resolver.resolve_cmp_many(cur, syms)
+        except Exception as e:
+            log.warning("cc#1539 live CMP unavailable, using last close: %s", e)
+
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, day_1d FROM v8_metrics
+                       WHERE symbol = ANY(%s) AND score_date <= %s
+                       ORDER BY symbol, score_date DESC""", (syms, d))
+        met = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+    out = []
+    for sym, basket in cands:
+        c = closes.get(sym) or []          # newest first
+        if len(c) < DMA_SLOW + 1:
+            continue                        # insufficient history — never a guessed cross
+        sma5_t = sum(c[0:DMA_FAST]) / DMA_FAST
+        sma20_t = sum(c[0:DMA_SLOW]) / DMA_SLOW
+        sma5_y = sum(c[1:DMA_FAST + 1]) / DMA_FAST
+        sma20_y = sum(c[1:DMA_SLOW + 1]) / DMA_SLOW
+        if sma5_t > sma20_t and sma5_y <= sma20_y:
+            colour, direction, rel = "GREEN", "DMA_CROSS_UP", "above"
+        elif sma5_t < sma20_t and sma5_y >= sma20_y:
+            colour, direction, rel = "RED", "DMA_CROSS_DOWN", "below"
+        else:
+            continue                        # no FRESH cross this session — nothing to mark
+        cmp_v = (live.get(sym) or {}).get("cmp") if live else None
+        if cmp_v is None:
+            cmp_v = c[0]                    # last completed close — honest fallback
+        out.append({
+            "symbol": sym, "basket": basket,
+            "direction": direction, "star_color": colour,
+            "level_name": "5DMA_X_20DMA",
+            "level_value": round(sma5_t, 2),    # the 5DMA
+            "pp": round(sma20_t, 2),            # the 20DMA — see the column-reuse note in run_tick
+            "cmp_at_star": round(float(cmp_v), 2),
+            "day_1d": met.get(sym),
+            "glyph": "square",
+            # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
+            "note": f"5DMA {sma5_t:,.2f} crossed {rel} 20DMA {sma20_t:,.2f}",
+        })
+    return out
+
+
 def star_note(s: Dict[str, Any]) -> str:
     """Tooltip text. FACTS ONLY — no buy/sell/entry/target wording anywhere, per the card and the
     5646 reasoning. This function is the single place that copy is written, so it cannot drift."""
@@ -490,12 +595,34 @@ def run_tick(conn=None) -> Dict[str, Any]:
                       if a["trigger"] != "OI" else a["oi_dod_pct"]))
                 awrote += cur.rowcount
         conn.commit()
-        log.info("cc#856/933 pivot_star tick: %d pivot markers (%d new), %d activity (%d new)%s",
-                 len(stars), wrote, len(acts), awrote,
-                 " (VALID ZERO-MARKER TICK)" if not stars and not acts else "")
+        # cc#1539: the third family, same first-fire-only pattern. direction values
+        # DMA_CROSS_UP / DMA_CROSS_DOWN cannot collide with BUY/SELL/ACTIVITY rows under the
+        # existing UNIQUE(symbol, star_date, direction) — no ALTER TABLE (cc#351).
+        # COLUMN REUSE, STATED: level_value carries the 5DMA and pp carries the 20DMA. pp is a
+        # pivot-point column by name, but adding a column needs a locked weekend window; the row
+        # stays self-describing through level_name='5DMA_X_20DMA'.
+        dmas = evaluate_dma_cross(conn, d)
+        dwrote = 0
+        with conn.cursor() as cur:
+            for x in dmas:
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, basket, direction, star_color,
+                       level_name, level_value, pp, cmp_at_star, day_1d)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (d, ts, x["symbol"], x["basket"], x["direction"], x["star_color"],
+                      x["level_name"], x["level_value"], x["pp"], x["cmp_at_star"], x["day_1d"]))
+                dwrote += cur.rowcount
+        conn.commit()
+        log.info("cc#856/933/1539 pivot_star tick: %d pivot markers (%d new), %d activity (%d new), "
+                 "%d dma crosses (%d new)%s",
+                 len(stars), wrote, len(acts), awrote, len(dmas), dwrote,
+                 " (VALID ZERO-MARKER TICK)" if not stars and not acts and not dmas else "")
         return {"ok": True, "date": str(d), "evaluated": len(stars), "new_rows": wrote,
                 "activity": len(acts), "activity_new_rows": awrote,
-                "zero_star_tick": not stars and not acts, "scope": EVAL_SCOPE}
+                "dma_cross": len(dmas), "dma_cross_new_rows": dwrote,
+                "zero_star_tick": not stars and not acts and not dmas, "scope": EVAL_SCOPE}
     except Exception as e:
         log.exception("cc#856 pivot_star tick failed")
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -537,10 +664,14 @@ def pivot_star(star_date: Optional[str] = None):
             # pivotStar/pivotMark (which map star_color as BLUE?blue:red) paint every green marker
             # RED on both surfaces (the founder's GRASIM). Filtering them here fixes both copies at
             # the one shared source, with no frontend colour change.
+            # cc#1539: the colour filter alone no longer discriminates marker families — DMA-cross
+            # rows are GREEN/RED too. `direction` is the family key (the table's own doctrine), so
+            # BOTH this read and the activity/dma reads below filter on it; without this, a red
+            # DMA cross would render as a red pivot star.
             cur.execute("""
                 SELECT symbol, basket, direction, star_color, level_name, level_value,
                        pct_from_level, day_1d, near_pp, cmp_at_star, first_seen_ts, touched_dates
-                FROM v8_pivot_star_log WHERE star_date=%s AND star_color IN ('BLUE','RED')
+                FROM v8_pivot_star_log WHERE star_date=%s AND direction IN ('BUY','SELL')
                 ORDER BY star_color, symbol""", (d,))
             # cc#932: `glyph` is DERIVED from the stored direction, so it needs no new column and
             # no ALTER TABLE (MAINTENANCE_LOCK_RULE cc#351 forbids one here). Every existing field
@@ -581,7 +712,7 @@ def pivot_star(star_date: Optional[str] = None):
                             WHERE symbol = g.symbol AND status='OPEN'
                             ORDER BY entry_ts DESC LIMIT 1
                         ) p ON TRUE
-                        WHERE g.star_date=%s AND g.star_color='GREEN'
+                        WHERE g.star_date=%s AND g.direction='ACTIVITY'
                         ORDER BY g.symbol""", (d,))
                     for sym, lname, lval, side in acur.fetchall():
                         side_u = (side or "").upper()
@@ -611,12 +742,42 @@ def pivot_star(star_date: Optional[str] = None):
             except Exception as e:
                 log.warning("cc#1008 activity log-read failed: %s", e)
                 acts = []
+            # cc#1539: DMA crosses are the THIRD list — LOG read, not a live re-eval, for the
+            # exact cc#1008 reason documented above: a render-time re-eval could disagree with
+            # what the log holds (and a cross is only "fresh" on the session it fired, so a later
+            # re-eval would drop a marker the log correctly keeps for the day).
+            dma = []
+            try:
+                with conn.cursor() as dcur:
+                    dcur.execute("""
+                        SELECT symbol, direction, star_color, level_value, pp, cmp_at_star
+                        FROM v8_pivot_star_log
+                        WHERE star_date=%s AND direction IN ('DMA_CROSS_UP','DMA_CROSS_DOWN')
+                        ORDER BY symbol""", (d,))
+                    for sym, dirn, col, lv, ppv, cmpv in dcur.fetchall():
+                        rel = "above" if dirn == "DMA_CROSS_UP" else "below"
+                        lvf, ppf = _f(lv), _f(ppv)
+                        dma.append({
+                            "symbol": sym, "direction": dirn, "star_color": col,
+                            "glyph": "square",
+                            "level_name": "5DMA_X_20DMA",
+                            "level_value": lvf, "pp": ppf,
+                            "cmp_at_star": _f(cmpv),
+                            # FACTS ONLY — same wall as star_note().
+                            "note": (f"5DMA {lvf:,.2f} crossed {rel} 20DMA {ppf:,.2f}"
+                                     if lvf is not None and ppf is not None
+                                     else f"5DMA crossed {rel} 20DMA"),
+                        })
+            except Exception as e:
+                log.warning("cc#1539 dma-cross log-read failed: %s", e)
+                dma = []
             return {
                 # cc#1032: the RESOLVED date, so every surface is honest about which session it is
                 # showing, plus an explicit flag rather than making a reader compare dates.
                 "star_date": d, "as_of_is_last_session": (d != _today),
                 "count": len(rows), "stars": rows,
                 "activity": acts, "activity_count": len(acts),
+                "dma_cross": dma, "dma_cross_count": len(dma),
                 "scope": EVAL_SCOPE,
                 "rule": ("PIVOT_STAR_V2 (session_log 18052) with MARKER_GLYPH_V3 glyphs "
                          "(session_log 21764), evaluated on the OPEN paper book. "
@@ -646,6 +807,7 @@ def pivot_star(star_date: Optional[str] = None):
                     "Blue star = held reversal at S1",
                     "Red star = mirror at R1",
                     "⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day",
+                    "Green/red square = fresh 5DMA cross above/below 20DMA",
                 ],
             }
     except Exception as e:
