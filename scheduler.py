@@ -3375,6 +3375,22 @@ def _bg_cleanup_perf_log():
     except Exception as e:
         log.error(f"perf_cleanup: {e}")
 
+def _bg_tc_score_daily():
+    """cc#1540: once-daily Trade Check score series + AMBER marker over the open V8 book.
+    Runs AFTER the close (15:52 IST, behind v8_eod 15:45 and adr_pcr 15:50) on its OWN cadence —
+    compute_trade_check is ~15 DB queries per symbol, far too heavy for the 5-min pivot_star
+    tick. The series (v8_tc_score_daily) and the fire log (v8_pivot_star_log, direction
+    TC_STRONG) both live in v8_pivot_star.run_tc_score_daily()."""
+    try:
+        import v8_pivot_star
+        res = v8_pivot_star.run_tc_score_daily()
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error", "tc_score_daily failed"))
+        log.info(f"tc_score_daily: {res}")
+    except Exception as e:
+        log.error(f"tc_score_daily: {e}")
+        raise
+
 def _bg_inv_scanner_universe():
     """cc#1283: INVESTMENT SCANNER universe builder (spec 30129) — tagged 3-leg union of basket
     opens + momentum screen + gv_rising screen, one row per symbol per run_date. Runs nightly
@@ -4708,6 +4724,11 @@ async def _scheduler_loop():
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 45:
             _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
+        # cc#1540: Trade Check daily series + AMBER marker, once per trading day after the close
+        # (same trading-day gate as v8_eod above — a score computed on a holiday would poison the
+        # 3-day trailing average with a duplicate of the prior session).
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 52:
+            _spawn(_bg_tc_score_daily)
         # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
         # off nse_holidays like its neighbours; the job's own registry gate and

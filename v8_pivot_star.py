@@ -195,6 +195,22 @@ def ensure_schema(conn):
               CONSTRAINT v8_pivot_star_log_uniq UNIQUE (symbol, star_date, direction)
             )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pivot_star_date ON v8_pivot_star_log(star_date DESC)")
+        # cc#1540: the Trade Check DAILY SERIES. Unlike v8_pivot_star_log (a fire-event log),
+        # every open symbol gets ONE row per day regardless of its score — the amber marker's
+        # 3-day trailing average needs the full series, not only the days a score was high.
+        # CREATE TABLE only, same MAINTENANCE_LOCK_RULE governance as the log above.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS v8_tc_score_daily (
+              symbol TEXT NOT NULL,
+              score_date DATE NOT NULL,
+              side TEXT NOT NULL,
+              score NUMERIC,
+              total NUMERIC,
+              score_pct NUMERIC,
+              verdict_class TEXT,
+              computed_at TIMESTAMPTZ DEFAULT NOW(),
+              PRIMARY KEY (symbol, score_date, side)
+            )""")
     conn.commit()
 
 
@@ -515,6 +531,126 @@ def evaluate_dma_cross(conn, target_date: Optional[date] = None) -> List[Dict[st
     return out
 
 
+# ── cc#1540 TC_STRONG_V1 (founder direct 31-Aug) — the FOURTH marker family ───────────────────
+# An AMBER star when Trade Check's score is above 80% AND rising against its own 3-day trailing
+# average. Unlike the other three families this needs HISTORY: no daily persistence of a Trade
+# Check score existed anywhere (checked — the tc_score_* tables belong to TC SCANNER's replay
+# engine, a different "TC"), so run_tc_score_daily() builds the series in v8_tc_score_daily and
+# fires the marker off it. compute_trade_check() is HEAVY (~15 DB queries per symbol — its own
+# comment calls a 50-symbol sweep on-demand-only), which is why this runs ONCE DAILY on its own
+# scheduler cadence (bg_tc_score_daily, after the close), never on the 5-min pivot_star tick.
+TC_STRONG_PCT = 80.0     # today's score_pct must exceed this…
+TC_TRAIL_DAYS = 3        # …and exceed the average of the 3 most recent PRIOR logged days
+
+
+def run_tc_score_daily(conn=None) -> Dict[str, Any]:
+    """Once-daily: score every open-book position with Trade Check, persist the series, then
+    fire AMBER (direction='TC_STRONG') into v8_pivot_star_log where the condition holds.
+
+    SIDE IS THE POSITION'S OWN SIDE — deliberately unlike the pivot star (which tests both sides
+    regardless of position). Trade Check inherently asks "does this LONG/SHORT setup validate",
+    so the only honest reading for a marker on a position's own card is that position's side.
+
+    The 3-day gate is FORWARD-LOOKING: a symbol with fewer than TC_TRAIL_DAYS prior logged days
+    skips the amber evaluation entirely (never a partial average, never a backfilled one) — so
+    the marker cannot fire for ANY symbol until 3+ trading days after this ships. That silence
+    is correct, not a defect."""
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        ensure_schema(conn)
+        d = _ist_now().date()
+        ts = _ist_now()
+        with conn.cursor() as cur:
+            _retired, _ = retired_baskets(cur)
+            cur.execute("""
+                SELECT DISTINCT ON (p.symbol) p.symbol, p.side
+                FROM v8_paper_positions p
+                LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                WHERE p.status = 'OPEN'
+                  AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                  AND NOT (p.basket = ANY(%(retired)s))
+                ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+            pos = [(r[0], (r[1] or "LONG").upper()) for r in cur.fetchall()]
+
+        from native_trade_check import compute_trade_check
+        scored, failed, wrote = 0, 0, 0
+        for sym, side in pos:
+            try:
+                res = compute_trade_check(sym, side=side)
+            except Exception as e:
+                log.warning("cc#1540 compute_trade_check(%s) raised: %s", sym, e)
+                failed += 1
+                continue
+            if not res.get("ok") or res.get("total") in (None, 0):
+                failed += 1
+                continue
+            score, total = float(res["score"]), float(res["total"])
+            pct = round(score / total * 100.0, 1)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_tc_score_daily
+                      (symbol, score_date, side, score, total, score_pct, verdict_class)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, score_date, side) DO NOTHING
+                """, (sym, d, side, score, total, pct, res.get("verdict_class")))
+                wrote += cur.rowcount
+            scored += 1
+        conn.commit()
+
+        # AMBER evaluation — from the SERIES, today vs the 3 most recent PRIOR days.
+        amber, awrote = [], 0
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT t.symbol, t.side, t.score_pct, h.trail_avg, h.n_prior
+                FROM v8_tc_score_daily t
+                JOIN LATERAL (
+                    SELECT AVG(score_pct) AS trail_avg, COUNT(*) AS n_prior
+                    FROM (SELECT score_pct FROM v8_tc_score_daily
+                          WHERE symbol = t.symbol AND side = t.side AND score_date < t.score_date
+                          ORDER BY score_date DESC LIMIT %s) p
+                ) h ON TRUE
+                WHERE t.score_date = %s""", (TC_TRAIL_DAYS, d))
+            for sym, side, pct, trail, n_prior in cur.fetchall():
+                pct, trail = _f(pct), _f(trail)
+                if n_prior < TC_TRAIL_DAYS or pct is None or trail is None:
+                    continue        # <3 prior days: cannot evaluate — skip, never fabricate
+                if pct > TC_STRONG_PCT and pct > trail:
+                    amber.append((sym, pct, trail))
+            for sym, pct, trail in amber:
+                # COLUMN REUSE, STATED: level_value carries today's score_pct and pp the 3-day
+                # trailing average — the same reuse cc#1539 documents for its two SMAs; the row
+                # stays self-describing through level_name='tc_score_pct'. cmp_at_star/day_1d
+                # are NULL: a score marker has no price of its own.
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, direction, star_color,
+                       level_name, level_value, pp)
+                    VALUES (%s,%s,%s,'TC_STRONG','AMBER','tc_score_pct',%s,%s)
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (d, ts, sym, pct, trail))
+                awrote += cur.rowcount
+        conn.commit()
+        out = {"ok": True, "date": str(d), "candidates": len(pos), "scored": scored,
+               "score_rows_new": wrote, "failed": failed,
+               "amber_fired": len(amber), "amber_new_rows": awrote,
+               # a zero-amber day is VALID — and guaranteed for the first 3 trading days
+               # (the trailing gate cannot be met until the series exists).
+               "zero_amber_day": not amber}
+        log.info("cc#1540 tc_score_daily: %s", out)
+        return out
+    except Exception as e:
+        log.exception("cc#1540 tc_score_daily failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def star_note(s: Dict[str, Any]) -> str:
     """Tooltip text. FACTS ONLY — no buy/sell/entry/target wording anywhere, per the card and the
     5646 reasoning. This function is the single place that copy is written, so it cannot drift."""
@@ -771,6 +907,28 @@ def pivot_star(star_date: Optional[str] = None):
             except Exception as e:
                 log.warning("cc#1539 dma-cross log-read failed: %s", e)
                 dma = []
+            # cc#1540: TC_STRONG amber stars — the fourth list, LOG read like the others.
+            tcs = []
+            try:
+                with conn.cursor() as tcur:
+                    tcur.execute("""
+                        SELECT symbol, level_value, pp FROM v8_pivot_star_log
+                        WHERE star_date=%s AND direction='TC_STRONG'
+                        ORDER BY symbol""", (d,))
+                    for sym, pct, trail in tcur.fetchall():
+                        pctf, trailf = _f(pct), _f(trail)
+                        tcs.append({
+                            "symbol": sym, "direction": "TC_STRONG", "star_color": "AMBER",
+                            "glyph": "star",
+                            "score_pct": pctf, "trail_avg_3d": trailf,
+                            # FACTS ONLY — same wall as every other marker note.
+                            "note": (f"Trade Check {pctf:.0f}%, above its 3-day average {trailf:.0f}%"
+                                     if pctf is not None and trailf is not None
+                                     else "Trade Check above 80% and rising vs its 3-day average"),
+                        })
+            except Exception as e:
+                log.warning("cc#1540 tc_strong log-read failed: %s", e)
+                tcs = []
             return {
                 # cc#1032: the RESOLVED date, so every surface is honest about which session it is
                 # showing, plus an explicit flag rather than making a reader compare dates.
@@ -778,6 +936,7 @@ def pivot_star(star_date: Optional[str] = None):
                 "count": len(rows), "stars": rows,
                 "activity": acts, "activity_count": len(acts),
                 "dma_cross": dma, "dma_cross_count": len(dma),
+                "tc_strong": tcs, "tc_strong_count": len(tcs),
                 "scope": EVAL_SCOPE,
                 "rule": ("PIVOT_STAR_V2 (session_log 18052) with MARKER_GLYPH_V3 glyphs "
                          "(session_log 21764), evaluated on the OPEN paper book. "
@@ -802,8 +961,11 @@ def pivot_star(star_date: Optional[str] = None):
                 # and DELETES the shape-by-side line outright — there is no marker left whose shape
                 # depends on which way you are positioned, so a footer explaining that rule would be
                 # explaining something that no longer happens. Four rows, one per marker.
+                # cc#1540: the amber line now states the REAL implemented condition — the old
+                # "STRONG / VALID" wording described nothing that ran and is replaced, not kept
+                # alongside (the card's own instruction: dead copy must not survive next to live).
                 "legend": [
-                    "Amber star = Trade Check STRONG. VALID shows no marker.",
+                    "Amber star = Trade Check score above 80% and rising vs its 3-day average",
                     "Blue star = held reversal at S1",
                     "Red star = mirror at R1",
                     "⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day",
