@@ -38,6 +38,22 @@ def m_alerts():
     from mobile_endpoints import _page
     return _page("alerts")
 
+
+# cc#1536: the WEB renderer — same relationship to /m/alerts that /trades has to /m/trades.
+@router.get("/alerts", response_class=HTMLResponse)
+def web_alerts():
+    """Served with its own reader rather than mobile_endpoints._page(): that helper is rooted at
+    the mobile template directory, and reaching a repo-root file through it would mean passing
+    "../", which is a path-traversal shape that stays out of route handlers even when the
+    argument is a constant (the web_trades() precedent, verbatim reasoning)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "trade_alerts_web.html"), "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read(), headers={"Cache-Control": "no-store"})
+    except FileNotFoundError:
+        return HTMLResponse("Alerts (web) is not wired yet.", status_code=404,
+                            headers={"Cache-Control": "no-store"})
+
 DIRECTIONS = ("BUY", "SELL")
 CONDITIONS = ("ABOVE", "BELOW")
 STATUSES = ("pending", "triggered", "approved", "dismissed")
