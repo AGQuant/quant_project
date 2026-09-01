@@ -1411,9 +1411,26 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
       }).join('')
     : '<div style="font-size:12px;color:var(--mut)">No marker fired for this row today.</div>';
 
-  var tcHtml = (tc && tc.score_pct != null)
-    ? '<b>TC score:</b> ' + Number(tc.score_pct).toFixed(0) + '%' + (tc.verdict_class ? ' · ' + esc(tc.verdict_class) : '')
-    : '<span style="color:var(--mut)">TC score: no data yet</span>';
+  // cc#1550: verdict_class is written (v8_pivot_star.py run_tc_score_tick) as
+  // "<VERDICT>[ (unweighted)] | <BUCKET>" — e.g. "VALID | SELL-MOM" or "VALID (unweighted) | SELL-MOM".
+  // The " | " separator never appears inside either piece, so a straight split is safe. Older ticks
+  // written before this shipped carry no " | " at all — bucketCode/bucketLabel then stay '' and the
+  // line falls back to exactly the pre-cc#1550 rendering (score + verdict, no bucket segment).
+  var TC_BUCKET_LABELS = { 'BUY-MOM': 'Buy Momentum', 'BUY-REV': 'Buy Reversal',
+                           'SELL-MOM': 'Sell Momentum', 'SELL-REV': 'Sell Reversal' };
+  var tcHtml;
+  if (tc && tc.score_pct != null) {
+    var vc = String(tc.verdict_class || '');
+    var pipeAt = vc.indexOf(' | ');
+    var verdictPart = pipeAt >= 0 ? vc.slice(0, pipeAt) : vc;
+    var bucketCode = pipeAt >= 0 ? vc.slice(pipeAt + 3) : '';
+    var bucketLabel = TC_BUCKET_LABELS[bucketCode] || bucketCode;
+    tcHtml = '<b>TC score:</b> ' + Number(tc.score_pct).toFixed(0) + '%'
+      + (verdictPart ? ' · ' + esc(verdictPart) : '')
+      + (bucketLabel ? ' · ' + esc(bucketLabel) : '');
+  } else {
+    tcHtml = '<span style="color:var(--mut)">TC score: no data yet</span>';
+  }
 
   var legendHtml = window.ScorrMarkerLegend ? window.ScorrMarkerLegend(legendLines) : '';
 

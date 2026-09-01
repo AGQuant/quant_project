@@ -631,6 +631,16 @@ def run_tc_score_tick(conn=None) -> Dict[str, Any]:
             verdict_class = res.get("best_verdict") or "REJECT"
             if not res.get("best_score10_weighted"):
                 verdict_class = f"{verdict_class} (unweighted)"
+            # cc#1550: append the winning bucket (best_label, e.g. "SELL-MOM") to the SAME column —
+            # column-reuse, no ALTER TABLE, same pattern this table already uses (pp reused for the
+            # 3-day trailing average, cc#1539/1540). FIXED FORMAT, stated here so a future reader
+            # never has to reverse-engineer it: "<VERDICT>[ (unweighted)] | <BUCKET>", e.g.
+            # "VALID | SELL-MOM" or "VALID (unweighted) | SELL-MOM". " | " is the separator, it never
+            # appears inside either piece, so a consumer can safely split on it (scorr_card_common.js
+            # ScorrMarkerFlagDetailHtml does exactly that for the marker popover).
+            best_label = res.get("best_label") or ""
+            if best_label:
+                verdict_class = f"{verdict_class} | {best_label}"
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO v8_tc_score_ticks
