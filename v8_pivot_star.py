@@ -215,7 +215,14 @@ def ensure_schema(conn):
               verdict_class TEXT,
               PRIMARY KEY (symbol, ts, side)
             )""")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_tc_score_ticks_day ON v8_tc_score_ticks((ts::date) , symbol)")
+        # cc#1541 P0: the original index here was ON ((ts::date), symbol) — ts is timestamptz and
+        # ts::date is timezone-dependent (STABLE, not IMMUTABLE), so Postgres rejects it as an
+        # index expression and the CREATE INDEX raised on EVERY tick, killing the whole job at
+        # this line before a single row was ever written. Plain immutable columns only; do NOT
+        # reintroduce any expression index here (AT TIME ZONE with a named zone is equally
+        # STABLE). The day-grouping reads stay correct without it — at 30-day retention and one
+        # open book of symbols this table is small.
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_tc_score_ticks_symbol_ts ON v8_tc_score_ticks(symbol, ts DESC)")
     conn.commit()
 
 
