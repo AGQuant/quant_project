@@ -3032,7 +3032,16 @@ function tblSort(uid,k){
   // cc#262: repeat-click on the SAME column toggles direction; a NEW column resets to
   // ASCENDING (dir=+1) — matches the founder-approved demo interaction.
   t.dir=(t.sortKey===k)?-t.dir:1;t.sortKey=k;
-  const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
+  const el=document.getElementById('tw_'+uid);if(!el)return;
+  // cc#1552: drawTbl(uid) returns a BRAND NEW `.scroll` div every call — el.innerHTML=... destroys
+  // the existing one (which holds the browser's scrollLeft for this table) and the replacement
+  // always starts at 0. Save/restore scrollLeft around the swap so a sort click cannot silently
+  // reset horizontal scroll. Shared fix: every table drawn through this uid/SORTREG utility gets it.
+  const prevScroll=el.querySelector('.scroll');
+  const scrollLeft=prevScroll?prevScroll.scrollLeft:0;
+  el.innerHTML=drawTbl(uid);
+  const newScroll=el.querySelector('.scroll');
+  if(newScroll)newScroll.scrollLeft=scrollLeft;
 }
 
 function pivotBar(cmp,pp,r1,s1){
