@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alerts · Scorr</title>
+<style>
+  /* cc#1536 — the WEB renderer of the Alerts feed. Layout grammar copied from
+     trade_wall_web.html (tabs / .card / table / .ov modal / .twa form controls), not invented:
+     the two pages sit adjacent on the nav and must read as one product. Tokens (--bg, --panel,
+     --line, --mut …) come from main.py's injected token sheet, same as every desktop page. */
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px;display:inline-block}
+  .hd-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
+  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:10px}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
+       background:var(--panel);color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;
+       white-space:nowrap;min-height:38px;display:inline-flex;align-items:center;gap:6px}
+  .tab:hover{border-color:var(--blu)}
+  .tab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  .tab .n{font-size:10.5px;font-weight:800;opacity:.72}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
+  .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
+  thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;
+           font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);
+           border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  tbody tr:hover{background:var(--card2)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .sym{font-weight:800}
+  .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
+  .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
+  .al-tag{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut)}
+  .al-st{font:700 10px ui-monospace,monospace;letter-spacing:.06em;border-radius:5px;
+         padding:2px 7px;white-space:nowrap;border:1px solid var(--line2);color:var(--mut)}
+  .al-st.approved{color:var(--grn);border-color:var(--grn)}
+  .al-st.triggered{color:var(--amber);border-color:var(--amber)}
+  .al-st.dismissed{color:var(--red);border-color:var(--red)}
+  .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
+          border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .al-notes{white-space:normal;max-width:260px;font-size:12px;color:var(--mut);line-height:1.45}
+  .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
+          color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
+  .tw-btn:hover{border-color:var(--blu)}
+  /* cc#1525's button grammar, carried over so Approve looks identical on the wall and here */
+  .twa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .twa .btn{font:700 11px ui-monospace,monospace;letter-spacing:.06em;padding:7px 12px;min-height:36px;
+            border-radius:8px;border:1px solid var(--line2);background:var(--card2);color:var(--txt);cursor:pointer}
+  .twa .btn.pri{border-color:var(--blu);background:var(--blu);color:#fff}
+  .twa .btn[disabled]{opacity:.5;cursor:default}
+  .twa-ok{font:700 10.5px ui-monospace,monospace;color:var(--grn);white-space:nowrap}
+  .twa-err{font:600 10px ui-monospace,monospace;color:var(--red);white-space:normal;max-width:220px}
+  /* the wall's .ov modal grammar for the create-alert form (desktop = centred modal, never the
+     mobile bottom sheet) */
+  .ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.55);z-index:9998;
+      align-items:center;justify-content:center;padding:20px}
+  .ov.open{display:flex}
+  .ov-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:460px;
+          width:100%;padding:18px}
+  .ov-box h2{font-size:14px;margin:0 0 4px}
+  .ov-box .s{font-size:11px;color:var(--mut);margin-bottom:12px}
+  .al-lb{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--mut);
+         text-transform:uppercase;margin:12px 0 6px}
+  .al-in{width:100%;min-height:40px;border-radius:8px;border:1px solid var(--line2);
+         background:var(--card2);color:var(--txt);font-family:inherit;font-size:13px;
+         padding:9px 11px}
+  .al-res{border:1px solid var(--line);border-radius:8px;margin-top:6px;overflow:hidden;
+          max-height:220px;overflow-y:auto}
+  .al-ri{display:flex;justify-content:space-between;gap:10px;align-items:baseline;padding:9px 11px;
+         border-bottom:1px solid var(--line2);cursor:pointer}
+  .al-ri:hover{background:var(--card2)}
+  .al-ri:last-child{border-bottom:none}
+  .al-ri b{font-size:12.5px}
+  .al-ri span{font-size:10.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .twa-seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+  .twa-seg button{font:700 10.5px ui-monospace,monospace;padding:6px 12px;border:none;background:transparent;
+            color:var(--mut);cursor:pointer;min-height:34px}
+  .twa-seg button.on{background:var(--blu);color:#fff}
+  .al-segrow{display:flex;gap:12px;flex-wrap:wrap}
+  .al-err2{margin-top:10px;font-size:11.5px;color:var(--red);line-height:1.5}
+  .al-go{width:100%;min-height:42px;margin-top:16px;border-radius:10px;border:1px solid var(--blu);
+         background:var(--blu);color:#fff;font-weight:800;font-size:13px;font-family:inherit;cursor:pointer}
+  .al-go[disabled]{opacity:.5}
+  .ov-close{margin-top:10px;width:100%}
+  @media(max-width:760px){
+    .wrap{padding:12px 10px 64px}
+    thead th,tbody td{padding:7px 6px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<div id="scorr-nav"></div>
+<div class="wrap">
+  <div class="hd-row">
+    <h1>Alerts</h1>
+    <button class="tw-btn" onclick="alOpen()">＋ New alert</button>
+  </div>
+  <div class="sub" id="subline">
+    The approve surface. Price triggers the founder sets, engine signals approved from any
+    surface — all in one book. This page computes nothing of its own — it renders
+    <b>/api/alerts/list</b>, the same endpoint the app screen reads.
+  </div>
+
+  <div class="tabs" id="tabsStatus"></div>
+
+  <div class="card">
+    <div class="meta" id="meta">Loading…</div>
+    <div class="scroll"><table id="tbl">
+      <thead><tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Engine</th><th>Trigger</th>
+        <th>When</th><th>Notes</th><th>Action</th></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="ov" id="alOv" onclick="if(event.target===this)alClose()">
+  <div class="ov-box">
+    <h2>New alert</h2>
+    <div class="s">The server validates the symbol and stays the decider — an unresolvable name
+      is rejected with the real reason.</div>
+    <div class="al-lb">Symbol</div>
+    <input class="al-in" id="alQ" type="search" placeholder="Search any stock — RELIANCE, TCS, LODHA…" autocomplete="off">
+    <div id="alRes"></div>
+    <div class="al-segrow">
+      <div>
+        <div class="al-lb">Direction</div>
+        <span class="twa-seg" id="alDir">
+          <button type="button" class="on" data-v="BUY" onclick="alPick('dir','BUY')">BUY</button>
+          <button type="button" data-v="SELL" onclick="alPick('dir','SELL')">SELL</button>
+        </span>
+      </div>
+      <div>
+        <div class="al-lb">Trigger</div>
+        <span class="twa-seg" id="alCond">
+          <button type="button" class="on" data-v="ABOVE" onclick="alPick('cond','ABOVE')">crosses ABOVE</button>
+          <button type="button" data-v="BELOW" onclick="alPick('cond','BELOW')">crosses BELOW</button>
+        </span>
+      </div>
+    </div>
+    <div class="al-lb">Trigger price</div>
+    <input class="al-in" id="alPx" type="number" inputmode="decimal" step="0.05" min="0" placeholder="0.00">
+    <div class="al-lb">Notes (optional)</div>
+    <input class="al-in" id="alNotes" type="text" maxlength="200" placeholder="why this level…">
+    <div class="al-err2" id="alErr" style="display:none"></div>
+    <button class="al-go" id="alGo" onclick="alSubmit()">Create alert</button>
+    <button class="tw-btn ov-close" onclick="alClose()">Cancel</button>
+  </div>
+</div>
+
+<script src="/scorr_card_common.js"></script>
+<script>
+/* cc#1536 — desktop Alerts. ONE COMPUTATION, TWO RENDERERS (the trade_wall precedent): the app
+   screen (/m/alerts) and this page both read /api/alerts/list, approve through /api/alerts/approve
+   and create through /api/alerts/create. Nothing about an alert is derived here.
+
+   ORDER: NEWEST-first, the API's own contract. The app's chat order (oldest at top, 34521) is a
+   deliberately mobile-only display choice; a desktop table follows the wall's newest-first
+   convention instead. */
+var STATE = { alerts: [], status: 'all' };
+var TABS = ['all', 'pending', 'triggered', 'approved', 'dismissed'];
+
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+/* API timestamps are "YYYY-MM-DD HH:MM:SS...+00:00" (UTC) -> IST, minute precision. Same
+   conversion as the app screen. */
+function istStamp(ts){
+  if (!ts) return '';
+  var d = new Date(String(ts).replace(' ', 'T'));
+  if (isNaN(d)) return String(ts).slice(0, 16);
+  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
+  var mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i.getMonth()];
+  var hh = ('0' + i.getHours()).slice(-2), mm = ('0' + i.getMinutes()).slice(-2);
+  return i.getDate() + ' ' + mo + ' · ' + hh + ':' + mm;
+}
+function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+
+function tabsHtml(){
+  var n = { all: STATE.alerts.length, pending: 0, triggered: 0, approved: 0, dismissed: 0 };
+  STATE.alerts.forEach(function(a){ if (n[a.status] != null) n[a.status]++; });
+  return TABS.map(function(k){
+    return '<button class="tab' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
+      + k.charAt(0).toUpperCase() + k.slice(1) + ' <span class="n">' + n[k] + '</span></button>';
+  }).join('');
+}
+
+function rowHtml(a){
+  var st = String(a.status || 'pending');
+  var dirCls = a.direction === 'BUY' ? 'long' : 'short';
+  /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
+     trigger_price/trigger_condition, not a real watch level. Suppress the trigger cell for those
+     rows only; a manual pending -> triggered -> approved alert keeps its real trigger context. */
+  var isSignalApproval = st === 'approved' && !a.triggered_at;
+  var trig = isSignalApproval ? '—'
+    : ('crosses ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price));
+  var when = '';
+  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price)
+    + (a.approved_via ? ' · via ' + a.approved_via : '');
+  else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
+  else when = 'set ' + istStamp(a.created_at);
+  /* Approve renders ONLY on a triggered card — the server enforces the same rule (409 from any
+     other status); the button just does not offer what cannot happen. */
+  var act = st === 'triggered'
+    ? '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button></div>'
+    : '';
+  return '<tr id="al-' + a.id + '">'
+    + '<td class="sym">' + esc(a.symbol) + '</td>'
+    + '<td class="' + dirCls + '">' + esc(a.direction) + '</td>'
+    + '<td><span class="al-st ' + esc(st) + '">' + esc(st.toUpperCase()) + '</span></td>'
+    + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
+    + '<td class="al-tag">' + esc(trig) + '</td>'
+    + '<td class="al-tag">' + esc(when) + '</td>'
+    + '<td class="al-notes">' + esc(a.notes || '') + '</td>'
+    + '<td>' + act + '</td>'
+    + '</tr>';
+}
+
+function render(){
+  document.getElementById('tabsStatus').innerHTML = tabsHtml();
+  var view = STATE.status === 'all'
+    ? STATE.alerts
+    : STATE.alerts.filter(function(a){ return a.status === STATE.status; });
+  document.getElementById('meta').textContent =
+    'showing ' + view.length + ' of ' + STATE.alerts.length + ' alerts'
+    + (STATE.status === 'all' ? '' : ' · ' + STATE.status) + ' · newest first';
+  document.getElementById('body').innerHTML = view.length
+    ? view.map(rowHtml).join('')
+    : '<tr><td colspan="8" class="empty">No ' + (STATE.status === 'all' ? '' : STATE.status + ' ')
+      + 'alerts.</td></tr>';
+}
+
+function pickStatus(k){
+  if (k === STATE.status) return;
+  STATE.status = k;
+  render();
+}
+
+function approve(id){
+  var btn = document.getElementById('ap-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+  fetchWithTimeout('/api/alerts/approve', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok) throw new Error((x.d && x.d.detail) || 'approve failed');
+      for (var i = 0; i < STATE.alerts.length; i++)
+        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
+      render();
+    })
+    .catch(function(e){
+      if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+      /* the server's reason, on glass — a silent failure would read as a dead button */
+      var row = document.getElementById('al-' + id);
+      if (row && !row.querySelector('.twa-err')) {
+        var cell = row.lastElementChild;
+        var err = document.createElement('span');
+        err.className = 'twa-err';
+        err.textContent = 'Could not approve — ' + e.message;
+        cell.appendChild(err);
+      }
+    });
+}
+
+function load(){
+  fetchWithTimeout('/api/alerts/list?status=all&limit=200')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      STATE.alerts = d.alerts || [];
+      render();
+    })
+    .catch(function(e){
+      document.getElementById('meta').textContent = 'Could not load alerts — ' + e.message;
+      document.getElementById('body').innerHTML =
+        '<tr><td colspan="8" class="empty">Could not load alerts. '
+        + '<button class="tw-btn" onclick="load()">Retry</button></td></tr>';
+    });
+}
+load();
+/* the engine sweeps every 5 minutes (cc#1504); refresh on the same cadence so a just-triggered
+   row does not wait on a manual reload. In-place, filter preserved. */
+setInterval(load, 300000);
+
+/* ══ create-alert flow — the app's cc#1507 form, desktop modal shell. Symbol search reuses
+   /api/gvm/search (the app's ONE autocomplete); the server stays the validator of record. */
+var FORM = { sym: null, dir: 'BUY', cond: 'ABOVE', busy: false };
+var _t2 = null, _wired = false;
+
+function alOpen(){
+  FORM = { sym: null, dir: 'BUY', cond: 'ABOVE', busy: false };
+  document.getElementById('alQ').value = '';
+  document.getElementById('alPx').value = '';
+  document.getElementById('alNotes').value = '';
+  document.getElementById('alRes').innerHTML = '';
+  var err = document.getElementById('alErr'); err.style.display = 'none';
+  var go = document.getElementById('alGo'); go.disabled = false; go.textContent = 'Create alert';
+  alPick('dir', 'BUY'); alPick('cond', 'ABOVE');
+  document.getElementById('alOv').classList.add('open');
+  if (!_wired) {
+    _wired = true;
+    document.getElementById('alQ').addEventListener('input', function(e){
+      clearTimeout(_t2);
+      FORM.sym = null;   /* typing invalidates the previous pick */
+      var v = e.target.value.trim();
+      _t2 = setTimeout(function(){ alSearch(v); }, 300);
+    });
+  }
+  document.getElementById('alQ').focus();
+}
+function alClose(){ document.getElementById('alOv').classList.remove('open'); }
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') alClose(); });
+
+function alSearch(q){
+  var box = document.getElementById('alRes');
+  if (!box) return;
+  if (!q){ box.innerHTML = ''; return; }
+  fetchWithTimeout('/api/gvm/search?q=' + encodeURIComponent(q) + '&limit=8')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var res = d.results || [];
+      box.innerHTML = res.length
+        ? '<div class="al-res">' + res.map(function(x){
+            return '<div class="al-ri" onclick="alSym(\'' + esc(x.symbol).replace(/'/g, "\\'") + '\')">' +
+              '<b>' + esc(x.symbol) + '</b><span>' + esc(x.company_name || '') + '</span></div>';
+          }).join('') + '</div>'
+        : '<div class="al-res"><div class="al-ri"><span>No match — the server still decides, you can submit the typed symbol.</span></div></div>';
+    })
+    .catch(function(){ /* search is a convenience; the create call validates for real */ });
+}
+function alSym(s){
+  FORM.sym = s;
+  document.getElementById('alQ').value = s;
+  document.getElementById('alRes').innerHTML = '';
+}
+function alPick(k, v){
+  FORM[k === 'dir' ? 'dir' : 'cond'] = v;
+  var host = document.getElementById(k === 'dir' ? 'alDir' : 'alCond');
+  if (host) Array.prototype.forEach.call(host.querySelectorAll('button'), function(b){
+    b.classList.toggle('on', b.getAttribute('data-v') === v);
+  });
+}
+function alSubmit(){
+  if (FORM.busy) return;
+  var err = document.getElementById('alErr'), go = document.getElementById('alGo');
+  var sym = FORM.sym || (document.getElementById('alQ').value || '').trim().toUpperCase();
+  var px = parseFloat(document.getElementById('alPx').value);
+  function fail(msg){ err.style.display = ''; err.textContent = msg; }
+  err.style.display = 'none';
+  if (!sym) return fail('Pick or type a symbol first.');
+  if (!(px > 0)) return fail('Trigger price must be a positive number.');
+  FORM.busy = true; go.disabled = true; go.textContent = 'Creating…';
+  fetchWithTimeout('/api/alerts/create', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym, direction: FORM.dir, trigger_condition: FORM.cond,
+                             trigger_price: px, notes: (document.getElementById('alNotes').value || '').trim() || null }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok) throw new Error((x.d && x.d.detail) || 'create failed');
+      alClose();
+      load();
+    })
+    .catch(function(e){
+      FORM.busy = false; go.disabled = false; go.textContent = 'Create alert';
+      /* the SERVER's reason verbatim — an honest rejection, never a generic error */
+      fail(e.message);
+    });
+}
+</script>
+</body>
+</html>

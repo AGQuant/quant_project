@@ -341,6 +341,14 @@ PWA_JS = """
     // below moved WITH the entry each one precedes; none rewritten, none dropped.
     ['/', '\\u2302', 'Home'],
     ['/dashboard', '\\u26a1', 'V8'],
+    // cc#1536 (founder 31-Aug): Alerts (approve surface, NEW desktop page) + Wall of Trades
+    // (display) as ADJACENT desktop tabs, Alerts leading (the cc#1526 approve-surface-leads
+    // precedent). Both 'd'-flagged: the mobile placements are cc#1535's (grid tile / bottom nav),
+    // so these must not also leak into the More sheet as duplicates of /m/alerts and /m/trades.
+    // Placed after V8 as trading-signal-adjacent — a reasonable default, not founder-locked;
+    // flagged back on the card for repositioning if wanted. Icons: the app's established glyphs.
+    ['/alerts', '\\u25ec', 'Alerts', 'd'],
+    ['/trades', '\\u2637\\ufe0e', 'WoT', 'd'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
     // /dashboard#digest). Nav removal only; no route changed, nothing retired.

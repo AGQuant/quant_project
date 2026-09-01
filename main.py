@@ -252,6 +252,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/inv-scanner", # cc#1286: Investment Scanner tab
                      "/digest",      # cc#846
                      "/trades",      # cc#991: Wall of Trades (web renderer)
+                     "/alerts",      # cc#1536: Alerts (web renderer, the approve surface)
                      "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
                      "/room"}       # cc#1086: Fable Room viewer
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
@@ -263,6 +264,7 @@ PROTECTED.add("/screeners")   # cc#824: gate + no-store
 PROTECTED.add("/inv-scanner")   # cc#1286: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
+PROTECTED.add("/alerts")   # cc#1536: Alerts, web — gate + no-store
 # cc#1086: the room carries internal engineering discussion and unreleased spec detail. Gated for
 # that reason, not by habit — a logged-out request must reach login, never the thread.
 PROTECTED.add("/room")
@@ -1353,19 +1355,19 @@ NAV_REGISTRY = {
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     # APP_QA_R4 P11: mirrors the NAV array entry added in pwa_endpoints.py (rule 2987).
     "/m/v10":        ("Index Intel (mobile)",  "nav-mobile"),
-    # cc#1506: Alerts takes the app bar's 4th slot (was Intel); /m/intel and /m/v10 both stay
-    # reachable via the More sheet entries above — nothing stranded (rule 2987).
-    "/m/alerts":     ("Alerts (mobile)",       "nav-mobile"),
+    # cc#1506 gave Alerts the app bar's 4th slot; cc#1535 (founder 31-Aug) moved it to the home
+    # grid tile 1 (the approve surface leads the grid) and gave the slot to WoT. Still in the
+    # More sheet for injected pages — nothing stranded (rule 2987).
+    "/m/alerts":     ("Alerts (mobile)",       "grid+more-sheet"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
     "/m/models":     ("Models — de-listed, reachable by typed URL", "typed-url"),   # cc#995: removed from nav (route + ScorrModels stay)
-    # cc#991: Wall of Trades. TWO routes, one endpoint. Neither carries a NAV-array entry, and
-    # that is the founder's own placement, not an oversight: the amendment put the web page in the
-    # V8 dashboard tab row "alongside Index Intel and TC Scanner", which is exactly the cc#853
-    # Digest precedent (a real page entered from that row, deliberately not in the site nav).
-    # The app screen is reached from the home tools grid and the /m/v8 More stack; the bottom nav
-    # stays at five items per the card's do_not_touch. Both are injected + PROTECTED above.
-    "/m/trades":     ("Wall of Trades (mobile)", "grid+more-stack"),
-    "/trades":       ("Wall of Trades (web)",    "v8-tab-row"),
+    # cc#991: Wall of Trades, TWO routes, one endpoint. cc#1535/cc#1536 (founder 31-Aug) ended
+    # the original off-nav placement: the app screen took the bottom-nav WoT slot (Alerts moved
+    # to the home grid tile 1), and the web page joined the desktop top nav next to the new
+    # /alerts page (Alerts leads, WoT adjacent). Both remain injected + PROTECTED above.
+    "/m/trades":     ("Wall of Trades (mobile)", "bottom-nav"),   # cc#1535: WoT slot
+    "/trades":       ("Wall of Trades (web)",    "nav"),          # cc#1536: adjacent to /alerts
+    "/alerts":       ("Alerts (web)",            "nav"),          # cc#1536: the approve surface
     "/inv-scanner":  ("Invest Scan",              "nav"),   # cc#1286
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
