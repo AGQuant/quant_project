@@ -321,7 +321,7 @@
 <script>
 var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
               mood: null, book: null, group: 'period', instrument: 'equity',
-              sub: {}, pop: null, fold: {}, stars: {}, act: {}, dma: {}, legend: null,
+              sub: {}, pop: null, fold: {}, stars: {}, act: {}, dma: {}, tcs: {}, legend: null,
               gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
               legendOpen: false,           // cc#989: marker legend, on demand behind the (i)
               /* cc#1115: null = the default view (period groups on the open page, newest-exit-first
@@ -695,17 +695,29 @@ function posTap(id){
    here: colour follows star_color, shape follows glyph, and the tooltip is the server's own
    facts-only star_note(), which is the V1 hard wall this card keeps. */
 function pivotMark(sym){
+  /* cc#1540: pivotMark now renders up to TWO stars \u2014 the blue/red pivot star and the AMBER
+     TC_STRONG star (Trade Check >80% and rising vs its 3-day average, served in the tc_strong
+     list). Concatenated, never merged: a symbol can legitimately carry both at once, and one
+     keyed lookup would silently drop the second (the same reasoning that keeps stars/activity
+     as separate lists server-side). */
+  var h = '';
   var s = (STATE.stars || {})[sym];
-  if (!s) return '';
-  var col = s.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
-  /* cc#1018 MARKER_GLYPH_V3 (21764) retires the sell circle: BOTH sides draw a star, the colour
-     alone carries the side. Drawn unconditionally, not read from the server `glyph` field, because
-     a phone holding a CACHED pre-V3 payload still carries glyph='circle' for SELL and the old
-     direction fallback did the same, so either read leaves a path that can still paint a sell circle.
-     No shape variation is left to carry, so there is nothing to fork on; /dashboard's pivotStar()
-     does exactly the same. */
-  return '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">'
-    + '\u2605</span>';
+  if (s){
+    var col = s.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
+    /* cc#1018 MARKER_GLYPH_V3 (21764) retires the sell circle: BOTH sides draw a star, the colour
+       alone carries the side. Drawn unconditionally, not read from the server `glyph` field, because
+       a phone holding a CACHED pre-V3 payload still carries glyph='circle' for SELL and the old
+       direction fallback did the same, so either read leaves a path that can still paint a sell circle.
+       No shape variation is left to carry, so there is nothing to fork on; /dashboard's pivotStar()
+       does exactly the same. */
+    h += '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">\u2605</span>';
+  }
+  var t = (STATE.tcs || {})[sym];
+  if (t){
+    /* same star glyph the legend names, amber token colour; note is the server's facts-only string */
+    h += '<span class="pvm" style="color:#F5B94A" title="' + esc(t.note || '') + '">\u2605</span>';
+  }
+  return h;
 }
 /* cc#1024 MARKER_GLYPH_V5 (session_log 22296): unusual activity is a LIGHTNING BOLT on both
    sides, retiring the cc#933 side-glyph rule and with it the last shape-by-side rule on the
@@ -1575,6 +1587,8 @@ Promise.all([
   if (ps && ps.activity) ps.activity.forEach(function(a){ STATE.act[a.symbol] = a; });
   // cc#1539: the third marker map, same guard — a failed fetch must never blank the book.
   if (ps && ps.dma_cross) ps.dma_cross.forEach(function(x){ STATE.dma[x.symbol] = x; });
+  // cc#1540: the amber TC_STRONG map, same guard.
+  if (ps && ps.tc_strong) ps.tc_strong.forEach(function(t){ STATE.tcs[t.symbol] = t; });
   if (ps && ps.legend) STATE.legend = ps.legend;
   if (d.error) throw new Error(d.error);
   STATE.d = d;

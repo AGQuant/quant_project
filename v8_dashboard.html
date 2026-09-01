@@ -3893,7 +3893,7 @@ function _banChip(x){return x&&x.banned?' <span class="badge" style="background:
 // set as a trade rule (9 trades / 55.6% WR, and 53 / 34.0% / -0.75 EV without the Nifty gate), so
 // NO copy here — glyph, title or aria-label — may say buy, sell, entry or target. The tooltip text
 // is built SERVER-SIDE by v8_pivot_star.star_note() so the wording cannot drift on this surface.
-let PIVOT_STARS={}, PIVOT_ACT={}, PIVOT_DMA={}, MK_LEGEND=null;
+let PIVOT_STARS={}, PIVOT_ACT={}, PIVOT_DMA={}, PIVOT_TCS={}, MK_LEGEND=null;
 async function loadPivotStars(){
   try{
     const d=await getJSON('/api/v8/pivot_star');
@@ -3902,26 +3902,39 @@ async function loadPivotStars(){
     PIVOT_ACT={}; (d.activity||[]).forEach(a=>{PIVOT_ACT[a.symbol]=a;});
     // cc#1539: the DMA-cross squares, third list for the same reason.
     PIVOT_DMA={}; (d.dma_cross||[]).forEach(x=>{PIVOT_DMA[x.symbol]=x;});
+    // cc#1540: the amber TC_STRONG stars, fourth list.
+    PIVOT_TCS={}; (d.tc_strong||[]).forEach(t=>{PIVOT_TCS[t.symbol]=t;});
     MK_LEGEND=d.legend||null;
     const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
     PIVOT_STARS=m;
-  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; PIVOT_DMA={}; }   // a failed marker fetch must never blank a signal table
+  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; PIVOT_DMA={}; PIVOT_TCS={}; }   // a failed marker fetch must never blank a signal table
   // cc#1008: the maps load async, after the open-positions pane has already painted once. Repaint it
   // so the pivot/activity markers appear on the rows without waiting for the 5-min auto-refresh.
   try{ if(cache&&cache.paper&&document.getElementById('panel0')) renderMasterPanels(); }catch(e){}
 }
 function pivotStar(sym){
-  const s=PIVOT_STARS[sym]; if(!s) return '';
-  const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
-  const note = (s.note||'').replace(/"/g,'&quot;');
-  // cc#1018 MARKER_GLYPH_V3 (session_log 21764) supersedes the cc#932 glyph clause: BOTH sides draw
-  // a star, the sell circle is retired. The colour already carries the side (blue S1 / red R1).
-  // Drawn unconditionally rather than read from the server `glyph` field: a browser holding a
-  // CACHED pre-V3 payload still carries glyph='circle' for SELL, and the old direction fallback did
-  // the same, so reading either one leaves a path that can still paint a sell circle. There is no
-  // shape variation left for the server to carry here, so there is nothing to fork on
-  // (DISPLAY_PARITY 16202): /m/v8's pivotMark() does exactly the same.
-  return `<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
+  // cc#1540: renders up to TWO stars \u2014 the blue/red pivot star and the AMBER TC_STRONG star
+  // (Trade Check >80% and rising vs its 3-day average). Concatenated, never merged: a symbol can
+  // carry both at once, and one keyed lookup would drop the second (the same reasoning that
+  // keeps the server lists separate). /m/v8's pivotMark() does exactly the same.
+  let h='';
+  const s=PIVOT_STARS[sym];
+  if(s){
+    const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
+    const note = (s.note||'').replace(/"/g,'&quot;');
+    // cc#1018 MARKER_GLYPH_V3 (session_log 21764) supersedes the cc#932 glyph clause: BOTH sides draw
+    // a star, the sell circle is retired. The colour already carries the side (blue S1 / red R1).
+    // Drawn unconditionally rather than read from the server `glyph` field: a browser holding a
+    // CACHED pre-V3 payload still carries glyph='circle' for SELL, and the old direction fallback did
+    // the same, so reading either one leaves a path that can still paint a sell circle.
+    h+=`<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
+  }
+  const t=PIVOT_TCS[sym];
+  if(t){
+    const tnote=(t.note||'').replace(/"/g,'&quot;');
+    h+=`<span class="pv-star" style="color:#F5B94A" title="${tnote}" aria-label="${tnote}">\u2605</span>`;
+  }
+  return h;
 }
 
 function pivotAct(sym){
@@ -3968,7 +3981,9 @@ function markerLegendPopover(){
   // with the circle itself, and the activity row is a bolt with NO colour override -- it is an
   // emoji and renders in its own.
   const rows=
-    row('\u2605','#f5b94a','Amber star \u2014 Trade Check STRONG (VALID shows no marker)')+
+    // cc#1540: the amber row states the REAL implemented condition (the old STRONG/VALID
+    // wording described nothing that ran), matching the corrected server legend line.
+    row('\u2605','#f5b94a','Amber star \u2014 Trade Check score above 80% and rising vs its 3-day average')+
     row('\u2605','#4d7cfe','Blue star \u2014 held reversal at S1')+
     row('\u2605','#f87171','Red star \u2014 mirror at R1')+
     row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d')+
