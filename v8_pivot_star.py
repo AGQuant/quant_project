@@ -1012,6 +1012,44 @@ def pivot_star(star_date: Optional[str] = None):
                 "error": f"{type(e).__name__}: {str(e)[:200]}"}
 
 
+@router.get("/api/v8/tc_score_latest")
+def tc_score_latest():
+    """cc#1542: the CURRENT Trade Check score for every open-book position — the dashboard's
+    TC % column. Read-only over v8_tc_score_ticks (cc#1540/1541): the most recent tick per
+    (symbol, side), scoped to the same open book every marker evaluator uses. A symbol with no
+    ticks yet is simply ABSENT — never a fabricated value. Distinct from pivot_star's tc_strong
+    list, which only carries symbols where the AMBER condition fired; this returns the raw score
+    for every row, fired or not."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _retired, _ = retired_baskets(cur)
+            cur.execute("""
+                WITH book AS (
+                    SELECT DISTINCT ON (p.symbol) p.symbol, UPPER(COALESCE(p.side,'LONG')) AS side
+                    FROM v8_paper_positions p
+                    LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                    WHERE p.status = 'OPEN'
+                      AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                      AND NOT (p.basket = ANY(%(retired)s))
+                    ORDER BY p.symbol, p.entry_ts DESC
+                )
+                SELECT b.symbol, b.side, t.score_pct, t.verdict_class, t.ts
+                FROM book b
+                JOIN LATERAL (
+                    SELECT score_pct, verdict_class, ts FROM v8_tc_score_ticks
+                    WHERE symbol = b.symbol AND side = b.side
+                    ORDER BY ts DESC LIMIT 1
+                ) t ON TRUE
+                ORDER BY b.symbol""", {"retired": _retired})
+            rows = [{"symbol": r[0], "side": r[1],
+                     "score_pct": _f(r[2]), "verdict_class": r[3],
+                     "ts": str(r[4]) if r[4] else None} for r in cur.fetchall()]
+        return {"rows": rows, "count": len(rows)}
+    except Exception as e:
+        log.exception("cc#1542 tc_score_latest failed")
+        return {"rows": [], "count": 0, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+
 @router.post("/api/v8/pivot_star/run")
 def pivot_star_run():
     """Manual tick (ops/verification). The scheduled 5-min job calls run_tick() directly."""
