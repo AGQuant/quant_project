@@ -310,8 +310,13 @@ window.addEventListener('scorr:theme', function(){
   /* cc#856 pivot star — marker only, no interaction, no entry semantics */
   /* cc#933 marker legend */
   .mk-legend{margin:12px 0 2px;padding:9px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:10.5px;line-height:1.8;color:var(--dim)}
-  .pv-star{margin-left:4px;font-size:11px;cursor:help;vertical-align:middle}
-  .pv-act{margin-left:3px;font-size:11px;cursor:help;vertical-align:middle}
+  /* cc#1547: the consolidated flag replaces .pv-star/.pv-act/.pv-dma (retired with
+     pivotStar/pivotAct/pivotDma) — bigger than the old individual glyphs (founder's own word:
+     11px -> 16px), a real click target via its own padding+border-radius rather than a bare
+     inline character. */
+  .mk-flag{margin-left:4px;font-size:16px;line-height:1;vertical-align:middle;background:transparent;
+    border:0;padding:2px 3px;cursor:pointer}
+  .mk-flag:hover{opacity:.8}
   .sig-reason{font-size:9px;font-weight:600;color:var(--muted, #94a3b8);margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
@@ -2825,13 +2830,12 @@ const _tcStarCache = new Map();          // "SYM|SIDE" -> {verdict, score, max, 
 function posTags(x){
   const key=(x.symbol||'')+'|'+(x.side||'');
   const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
-  // cc#1008: pivot (blue/red) + activity (green) markers on the OPEN book, same maps + endpoint the
-  // basket panels and /m/v8 use — the founder's locked stars were rendering in the funnel panels but
-  // never on the open-position rows. Inline (not async like the TC star) so they paint with the row;
-  // loadPivotStars() repaints the master pane once the maps land. Order: SYMBOL · pivot · activity ·
-  // TC · NEW.
-  // cc#1539: the DMA square joins the row. Order: SYMBOL · pivot · activity · dma · TC · NEW.
-  return pivotStar(x.symbol)+pivotAct(x.symbol)+pivotDma(x.symbol)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
+  // cc#1008: markers on the OPEN book, same maps + endpoint the basket panels and /m/v8 use — the
+  // founder's locked stars were rendering in the funnel panels but never on the open-position
+  // rows. Inline (not async like the TC star) so they paint with the row; loadPivotStars()
+  // repaints the master pane once the maps land. Order: SYMBOL · flag · TC · NEW.
+  // cc#1547: pivot/activity/dma/tc_strong collapse into ONE flag (markerFlag) — see that function.
+  return markerFlag(x)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
 }
 function _tcStarHtml(v,side){
   if(!v)return'';
@@ -3926,53 +3930,28 @@ async function loadPivotStars(){
   // so the pivot/activity markers appear on the rows without waiting for the 5-min auto-refresh.
   try{ if(cache&&cache.paper&&document.getElementById('panel0')) renderMasterPanels(); }catch(e){}
 }
-function pivotStar(sym){
-  // cc#1540: renders up to TWO stars \u2014 the blue/red pivot star and the AMBER TC_STRONG star
-  // (Trade Check >80% and rising vs its 3-day average). Concatenated, never merged: a symbol can
-  // carry both at once, and one keyed lookup would drop the second (the same reasoning that
-  // keeps the server lists separate). /m/v8's pivotMark() does exactly the same.
-  let h='';
-  const s=PIVOT_STARS[sym];
-  if(s){
-    const col = s.star_color==='BLUE' ? '#4d7cfe' : '#f87171';
-    const note = (s.note||'').replace(/"/g,'&quot;');
-    // cc#1018 MARKER_GLYPH_V3 (session_log 21764) supersedes the cc#932 glyph clause: BOTH sides draw
-    // a star, the sell circle is retired. The colour already carries the side (blue S1 / red R1).
-    // Drawn unconditionally rather than read from the server `glyph` field: a browser holding a
-    // CACHED pre-V3 payload still carries glyph='circle' for SELL, and the old direction fallback did
-    // the same, so reading either one leaves a path that can still paint a sell circle.
-    h+=`<span class="pv-star" style="color:${col}" title="${note}" aria-label="${note}">\u2605</span>`;
-  }
-  const t=PIVOT_TCS[sym];
-  if(t){
-    const tnote=(t.note||'').replace(/"/g,'&quot;');
-    h+=`<span class="pv-star" style="color:#F5B94A" title="${tnote}" aria-label="${tnote}">\u2605</span>`;
-  }
-  return h;
-}
-
-function pivotAct(sym){
-  const a=PIVOT_ACT[sym]; if(!a) return '';
-  // cc#1024 MARKER_GLYPH_V5 (session_log 22296): unusual activity is a LIGHTNING BOLT on both
-  // sides. This retires the cc#933 side-glyph rule for this marker and with it the last
-  // shape-by-side rule on the board — volume and OI say "something is happening here", never "up"
-  // or "down", so the one marker with no direction in it was the last one still drawing one.
-  // Drawn unconditionally, never from the served glyph field: a browser holding a cached pre-V5
-  // payload still carries glyph='circle'/'star' — the same defence cc#1018 put on pivotStar.
-  // No colour styling: it is an emoji and renders in its own.
-  const note=(a.note||'').replace(/"/g,'&quot;');
-  return `<span class="pv-act" title="${note}" aria-label="${note}">\u26A1</span>`;
-}
-
-// cc#1539 DMA_CROSS_V1: the third marker family \u2014 a small square (U+25A0), green when the 5DMA
-// crossed ABOVE the 20DMA this session, red when below. Colour follows the served star_color and
-// the note is the server's own facts-only string \u2014 the pivotStar pattern exactly, nothing
-// re-derived here (DISPLAY_PARITY 16202: /m/v8's dmaMark() does the same).
-function pivotDma(sym){
-  const x=PIVOT_DMA[sym]; if(!x) return '';
-  const col = x.star_color==='GREEN' ? '#0a9e63' : '#f87171';
-  const note=(x.note||'').replace(/"/g,'&quot;');
-  return `<span class="pv-dma" style="color:${col}" title="${note}" aria-label="${note}">\u25A0</span>`;
+function markerFlag(x){
+  // cc#1547: ONE consolidated flag, replacing pivotStar/pivotAct/pivotDma (cc#856/933/1539/1540).
+  // Colour + popover content come from the shared functions in scorr_card_common.js
+  // (ScorrMarkerFlagColor/ScorrMarkerFlagDetailHtml) so /m/v8 cannot say something different
+  // (DISPLAY_PARITY 16202) \u2014 the fired object is the SAME four-list shape both surfaces read.
+  const sym=x.symbol, side=String(x.side||'').toUpperCase();
+  const fired={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, tcs:PIVOT_TCS[sym]||null};
+  const col=window.ScorrMarkerFlagColor?window.ScorrMarkerFlagColor(fired):null;
+  if(!col) return '';
+  // cc#1542's own tcScores map, side-keyed \u2014 same lookup v8NormRow already does for the TC %
+  // column (that column is UNTOUCHED by this card; this is a second, independent read of the same
+  // cached data for the popover's TC section, shown regardless of amber per scope 3c).
+  const tc=((cache.tcScores&&cache.tcScores.rows)||[]).find(t=>t&&t.symbol===sym&&String(t.side||'').toUpperCase()===side)||null;
+  const detail=window.ScorrMarkerFlagDetailHtml?window.ScorrMarkerFlagDetailHtml(fired,tc,MK_LEGEND):'';
+  // Anchored popover, the SAME mechanism markerLegendPopover() below already uses (cc#1010/933) \u2014
+  // reused, not reinvented. .mk-flagpop joins .mk-legpop in the shared close-on-outside-click and
+  // Escape listeners further down this file.
+  return `<span class="mk-flagwrap" style="position:relative;display:inline-block;vertical-align:middle;margin-right:2px">`+
+    `<button type="button" class="mk-flag" aria-label="Markers for ${sym} \u2014 tap for detail" title="Markers \u2014 tap for detail" `+
+      `style="color:${col}" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(el){el.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();">\u2691</button>`+
+    `<div class="mk-flagpop" onclick="event.stopPropagation()" style="display:none;position:absolute;top:22px;left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:270px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)">${detail}</div>`+
+  `</span>`;
 }
 // cc#933: the legend footer. Rendered from window.ScorrMarkerLegend — the SAME snippet /m/v8
 // uses — with the copy itself coming from the engine, so neither the layout nor the wording can
@@ -4008,14 +3987,18 @@ function markerLegendPopover(){
   // any more, so a footer explaining that rule would be explaining something that never happens.
   const footer='';
   return `<span style="position:relative;display:inline-block;margin-left:7px;vertical-align:middle">`+
-    `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
+    `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
       `style="width:17px;height:17px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);font:600 10px/1 Sora,sans-serif;cursor:pointer;padding:0;vertical-align:middle">i</button>`+
     `<div class="mk-legpop" onclick="event.stopPropagation()" style="display:none;position:absolute;top:23px;left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:275px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)">${rows}${footer}</div>`+
   `</span>`;
 }
-// cc#1010: any click outside an open marker-legend popover closes it (the (i) button and the popover
-// itself stopPropagation, so their own clicks don't trigger this).
-try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
+// cc#1010: any click outside an open marker popover closes it (the (i)/flag buttons and the
+// popovers themselves stopPropagation, so their own clicks don't trigger this).
+// cc#1547: .mk-flagpop (the new per-row marker-detail popover) joins .mk-legpop here, plus an
+// Escape handler — the flag popover's own verify item asks for it explicitly; .mk-legpop gets it
+// for free rather than staying the one marker popover Escape does not reach.
+try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
+try{ document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ try{document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(p){p.style.display='none';});}catch(e2){} } }); }catch(e){}
 // cc#1028, corrected by cc#1034: bkRow is a thin call into the shared renderer over the basket
 // VIEW. The inline C·A·R·D strip that used to live here is GONE from every table row — the
 // symbol-click popup is the one interaction on both surfaces — and the basket pill renders on

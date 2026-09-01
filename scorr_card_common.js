@@ -1016,6 +1016,9 @@ window.scorrAsofStamp = function (asof) {
     try { if (window.ScorrAnalysisCard && window.ScorrAnalysisCard.close) window.ScorrAnalysisCard.close(); } catch (e) {}
     try { if (window.ScorrCockpitCard && window.ScorrCockpitCard.close) window.ScorrCockpitCard.close(); } catch (e) {}
     try { if (window.ScorrModels && window.ScorrModels.close) window.ScorrModels.close(); } catch (e) {}
+    // cc#1547: the marker-detail sheet joins the uniform dismiss set — tap-outside, Escape and
+    // Android back all reach it exactly like every sheet registered above.
+    try { if (window.ScorrMarkerDetail && window.ScorrMarkerDetail.close) window.ScorrMarkerDetail.close(); } catch (e) {}
   }
   function isBackdrop(el) {
     /* the click landed on the overlay ELEMENT itself (not the dialog inside it):
@@ -1353,4 +1356,130 @@ window.scorrAsofStamp = function (asof) {
   var st = document.createElement('style');
   st.textContent = '.scc-copy-btn:hover{color:var(--blu,#4D7CFE)!important;border-color:var(--blu,#4D7CFE)!important}';
   document.head.appendChild(st);
+})();
+
+
+/* ── cc#1547: ONE FLAG, FOUR MARKER FAMILIES — shared colour rule + detail content ─────────────
+   Founder ask (1-Sep screenshot): the star/bolt/square/amber glyph cluster on an open-position row
+   is cluttered — replace it with ONE bigger flag, amber when TC_STRONG fired, a neutral highlight
+   otherwise, tap for detail. /m/v8 and /dashboard both call these two functions so the colour rule
+   and the popover CONTENT are byte-identical on both surfaces (DISPLAY_PARITY 16202) — exactly how
+   ScorrMarkerLegend above already keeps the legend WORDING from forking. The two surfaces are free
+   to differ in SHEET MECHANISM (mobile bottom sheet vs desktop anchored popover) because that is
+   the established split in this codebase already — ScorrSymbolCard (this file, cc#898) is mobile-
+   only and desktop's own symbol popup is a separate, already-existing mechanism; the same split
+   applies here, just for marker detail instead of the C·A·R·D strip. */
+window.ScorrMarkerFlagColor = function (fired) {
+  // fired = {stars, act, dma, tcs} — each either that marker's row object for this symbol, or
+  // null/undefined. Returns null (render nothing) when none fired; otherwise the flag's colour —
+  // amber when TC_STRONG is among the fired markers (the founder's own "something notable" cue),
+  // the neutral pivot-star blue otherwise.
+  if (!fired || !(fired.stars || fired.act || fired.dma || fired.tcs)) return null;
+  return fired.tcs ? '#F5B94A' : '#4d7cfe';
+};
+
+window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
+  // Builds the popover BODY (fired-marker rows + TC score + full legend) — the container/sheet
+  // chrome is each surface's own concern, not this function's. `tc` is {score_pct, verdict_class}
+  // or null (never fabricated — cc#1547 scope 3c: shown whenever data exists, regardless of amber).
+  var esc = function (s) { return String(s == null ? '' : s)
+    .replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  fired = fired || {};
+  var rows = [];
+  // Labels and colours are the SAME ones the four individual glyphs used before this card —
+  // nothing renamed, nothing re-derived. The note text is each marker's own server-built fact
+  // string (v8_pivot_star.py's *_note()/note fields), the same text that used to live in a
+  // hover title and is now readable on tap instead.
+  if (fired.stars) {
+    var scol = fired.stars.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
+    var slabel = fired.stars.star_color === 'BLUE' ? 'Blue star' : 'Red star';
+    rows.push({ glyph: '★', col: scol, label: slabel, note: fired.stars.note });
+  }
+  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume/OI spurt', note: fired.act.note });
+  if (fired.dma) {
+    var dcol = fired.dma.star_color === 'GREEN' ? '#0a9e63' : '#f87171';
+    var dlabel = fired.dma.star_color === 'GREEN' ? 'Green square' : 'Red square';
+    rows.push({ glyph: '■', col: dcol, label: dlabel, note: fired.dma.note });
+  }
+  if (fired.tcs) rows.push({ glyph: '★', col: '#F5B94A', label: 'Amber star', note: fired.tcs.note });
+
+  var firedHtml = rows.length
+    ? rows.map(function (r) {
+        return '<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0">'
+          + '<span style="color:' + r.col + ';font-size:13px;line-height:1.5;flex-shrink:0;width:16px;text-align:center">' + r.glyph + '</span>'
+          + '<span style="font-size:12px;line-height:1.45;color:var(--txt)"><b>' + esc(r.label) + '</b> — ' + esc(r.note || '') + '</span></div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--mut)">No marker fired for this row today.</div>';
+
+  var tcHtml = (tc && tc.score_pct != null)
+    ? '<b>TC score:</b> ' + Number(tc.score_pct).toFixed(0) + '%' + (tc.verdict_class ? ' · ' + esc(tc.verdict_class) : '')
+    : '<span style="color:var(--mut)">TC score: no data yet</span>';
+
+  var legendHtml = window.ScorrMarkerLegend ? window.ScorrMarkerLegend(legendLines) : '';
+
+  return '<div>' + firedHtml + '</div>'
+    + '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#243049);font-size:12px">' + tcHtml + '</div>'
+    + '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#243049)">' + legendHtml + '</div>';
+};
+
+/* ── cc#1547: MARKER DETAIL SHEET (mobile) — one shared component, reuses the .scorr-ml hook ───
+   /m/v8's markerFlag() calls ScorrMarkerDetail.open() on tap. Uses the .scorr-ml/.scorr-ml-ov/
+   .scorr-ml-x class names the body.mcards responsive block ABOVE this file already anticipates
+   (that block has carried bottom-sheet rules for .scorr-ml since before this card existed — the
+   name reads as "marker legend", reserved for exactly this) — so on /m/* under 767px this sheet
+   gets the SAME rounded-top bottom-sheet treatment every other mobile card uses, for free, no new
+   CSS needed there. The base (non-mobile-width) look is defined here, since nothing sized these
+   classes before now: a small centered dialog with a backdrop. Registered into the site's uniform
+   closeAll()/Escape/backdrop-tap system (cc#917/918/965, this file, above) so tap-outside, Escape
+   and Android back all close it exactly like every other sheet on the page — verified by adding
+   ScorrMarkerDetail.close() into that closeAll() function directly. */
+(function () {
+  if (window.ScorrMarkerDetail) return;
+
+  function ensure() {
+    var el = document.getElementById('scorr-mkdetail');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'scorr-mkdetail';
+    el.className = 'scorr-ml-ov';
+    el.innerHTML = '<div class="scorr-ml" role="dialog" aria-modal="true">'
+      + '<div class="scorr-ml-hd"><b id="scorr-mkdetail-t"></b>'
+      + '<button type="button" class="scorr-ml-x" aria-label="Close">&#10005;</button></div>'
+      + '<div id="scorr-mkdetail-b"></div></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) {
+      var x = e.target.closest ? e.target.closest('.scorr-ml-x') : null;
+      if (e.target === el || x) { close(); }
+    });
+    return el;
+  }
+  function close() {
+    var el = document.getElementById('scorr-mkdetail');
+    if (el) el.classList.remove('open');
+  }
+  function open(sym, fired, tc, legendLines) {
+    var el = ensure();
+    var t = document.getElementById('scorr-mkdetail-t');
+    if (t) t.textContent = (sym || '') + ' — markers';
+    var b = document.getElementById('scorr-mkdetail-b');
+    if (b) b.innerHTML = window.ScorrMarkerFlagDetailHtml ? window.ScorrMarkerFlagDetailHtml(fired, tc, legendLines) : '';
+    el.classList.add('open');
+  }
+  window.ScorrMarkerDetail = { open: open, close: close };
+
+  try {
+    var st2 = document.createElement('style');
+    st2.setAttribute('data-scorr', 'marker-detail');
+    st2.appendChild(document.createTextNode(
+      '.scorr-ml-ov{position:fixed;inset:0;z-index:90000;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(5,9,18,.55);padding:16px}'
+      + '.scorr-ml-ov.open{display:flex}'
+      + '.scorr-ml{background:var(--panel,#0E1526);border:1px solid var(--line,#1E2A44);border-radius:14px;'
+      + 'max-width:340px;width:100%;max-height:80vh;overflow-y:auto;padding:14px 16px;box-shadow:0 20px 50px rgba(0,0,0,.4)}'
+      + '.scorr-ml-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+      + '.scorr-ml-hd b{font:800 14px Sora,sans-serif;letter-spacing:.01em;color:var(--txt,#fff)}'
+      + '.scorr-ml-x{background:none;border:none;color:var(--dim,#5E6B8F);font-size:16px;cursor:pointer;min-width:32px;min-height:32px}'
+    ));
+    (document.head || document.documentElement).appendChild(st2);
+  } catch (e) {}
 })();
