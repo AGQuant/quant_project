@@ -238,6 +238,20 @@ window.addEventListener('scorr:theme', function(){
   .rawscroll tr.row-idx td{background-color:var(--bg2)}
   .rawscroll tr.row-idx td:first-child{background-color:var(--bg2)}
   .rawscroll tr.row-idx:hover td:first-child{background-image:linear-gradient(rgba(148,166,210,.07),rgba(148,166,210,.07))}
+  /* cc#1551: Open Positions (Master) — pin the Symbol column while the row scrolls horizontally
+     underneath it. SAME technique as .rawscroll above (cc#168/1035): opaque sticky background is
+     REQUIRED, not decorative — without it, scrolled column content shows through the frozen cell
+     (cc#1035's own lesson: a translucent hover tint is a window onto whatever is underneath).
+     Deliberately its OWN class, not .rawscroll — rawscroll forces table{min-width:1980px}, which
+     this 13-column master table does not need; this rule only pins column 1, nothing else.
+     td.sym is the Symbol column's own class (v8TableRow's symbol renderer) — targeted directly
+     rather than :first-child for the body cells, since it is already the stable, self-documenting
+     hook; the header row has no per-column class, so :first-child covers it (Symbol is always
+     V8_VIEW_MASTER's first key, master and every basket tab alike). */
+  .openpos-scroll th:first-child,.openpos-scroll td.sym{position:sticky;left:0;background-color:var(--panel);z-index:2;
+    box-shadow:1px 0 0 var(--line2)}
+  .openpos-scroll th:first-child{background-color:var(--panel2);z-index:3}
+  .openpos-scroll tbody tr:hover td.sym{background-image:linear-gradient(rgba(148,166,210,.07),rgba(148,166,210,.07))}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:rgba(148,166,210,.07)}
   tr.row-open{background:rgba(47,212,139,.08)}
@@ -3505,7 +3519,9 @@ function renderMaster(){
   const _mctx=v8RowCtx('master');
   openRows.forEach(x=>v8NormRow(x,_mctx));
   const openPosTable=sortTbl('openpos',_mCols,openRows,x=>v8TableRow(x,_mCols),
-    {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
+    // cc#1551: pin the Symbol column on horizontal scroll — .openpos-scroll CSS above, same
+    // sticky+opaque-background technique as .rawscroll, sized for this table (no forced min-width).
+    {sortKey:'net_pnl',dir:-1,empty:"No open positions",scrollCls:'openpos-scroll'});
   // cc#280: lean bar-only component shared by the desktop Ladder rows and the mobile cards.
   // Direction-aware (LONG: SL-left/TGT-right; SHORT: TGT-left/SL-right). Positions are price-linear
   // between the two boundary prices; the fill runs from the SL side to the CMP dot; entry is a tick
