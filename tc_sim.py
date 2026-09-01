@@ -18,7 +18,7 @@ baskets / paper). It reads only cmp_prices, intraday_prices, futures_universe, a
 import os
 import json
 import psycopg
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from nse_session import force_close_time
 from nse_holidays import is_trading_day
@@ -31,9 +31,27 @@ _STOP = 0.03
 _MAX_TRADING_DAYS = 5              # force-close at the 5th trading-day close, exit_reason=TIME
 _FEED_SOURCES = ("fyers", "fyers_eq")   # intraday_prices feed rows for the hi/lo window
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
 
 def _ist_now():
-    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+    # cc#1559 P0 fix: was `datetime.utcnow() + timedelta(hours=5,minutes=30)` — a NAIVE datetime
+    # whose fields LOOK like IST wall-clock but carry no tzinfo. Two real bugs followed from that:
+    #   1. entry_ts/exit_ts (TIMESTAMPTZ columns) store the naive value as if it were ALREADY UTC,
+    #      double-shifting every stored instant 5.5h into the future (confirmed live: KALYANKJIL's
+    #      13:30 IST entry read back as 19:00 IST via AT TIME ZONE 'Asia/Kolkata').
+    #   2. psycopg returns a TIMESTAMPTZ column's value as a TIMEZONE-AWARE datetime on read —
+    #      confirmed by this file's own SELECT at the top of run_tc_sim_tick() — so `now - entry_ts`
+    #      (line ~188, naive minus aware) raised TypeError on EVERY exit check that reached it,
+    #      caught by the per-position try/except and silently appended to out['errors'] — never
+    #      surfacing as a scheduler failure. Confirmed live via ops_log (scheduler_health,
+    #      title='tc_sim_tick'): every tick since at least 28-Aug shows closed:0 with 116-138
+    #      non-zero errors, growing tick over tick, while open climbs 145->168 — a total, silent
+    #      exit failure, exactly matching 168/168 rows never closing.
+    # Fix: a genuinely timezone-AWARE IST datetime. Its .hour/.minute/.date() still read as true
+    # IST wall-clock (unchanged for at_close / today / out['ts'] elsewhere in this file), but it is
+    # now safely subtractable against another aware datetime, and stores the CORRECT instant.
+    return datetime.now(timezone.utc).astimezone(_IST)
 
 
 # ── schema (app-side ensure; CREATE TABLE is MCP-safe, but the ensure runs on every deploy so the
@@ -177,8 +195,13 @@ def run_tc_sim_tick():
                     rec_hi, rec_lo = _recent_hilo(rcur, sym)
                 ev = _evaluate_exit(entry_price, direction, cmp_now, rec_hi, rec_lo)
                 if ev is None:
-                    # no price exit — check the 5-trading-day TIME cap (force-close at day-5 close)
-                    tdays = _trading_days_between(entry_ts.date(), today)
+                    # no price exit — check the 5-trading-day TIME cap (force-close at day-5 close).
+                    # entry_ts comes back timezone-aware from the TIMESTAMPTZ column but not
+                    # necessarily IST-labelled (psycopg's own read-back tzinfo, typically UTC) — the
+                    # trading-day calendar is IST's, so normalise explicitly before .date() rather
+                    # than rely on every entry happening to fall inside NSE hours (it always does
+                    # today, but that is a coincidence this line should not depend on).
+                    tdays = _trading_days_between(entry_ts.astimezone(_IST).date(), today)
                     time_due = tdays > _MAX_TRADING_DAYS or (tdays >= _MAX_TRADING_DAYS and at_close)
                     if time_due and cmp_now is not None:
                         ev = {"reason": "TIME", "exit_price": round(cmp_now, 2), "ambiguous": False}
