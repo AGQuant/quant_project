@@ -700,9 +700,14 @@ function posTap(id){
    something different (DISPLAY_PARITY 16202) \u2014 nothing about a marker's meaning is re-derived
    here, only the tap wiring is /m/v8's own. Tapping opens ScorrMarkerDetail (scorr_card_common.js),
    a bottom sheet on mobile via the app's existing sheet conventions. */
-function markerFlag(sym){
-  var fired = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
-                dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
+function markerFlag(sym, side){
+  var fired0 = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
+                 dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
+  // cc#1558: ONE filtering step (window.ScorrMarkerFlagFilter) against this row's OWN side, fed
+  // into the colour below AND re-applied in openMarkerFlag() at tap time for the popover \u2014 a marker
+  // whose direction disagrees with the position is simply not there for either. Replaces cc#1557's
+  // pivot-star-wins tie-break (founder rejected).
+  var fired = window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(fired0, side) : fired0;
   var col = window.ScorrMarkerFlagColor ? window.ScorrMarkerFlagColor(fired) : null;
   if (!col) return '';
   return '<button type="button" class="mk-flag" style="color:' + col + '" title="Markers \u2014 tap for detail" '
@@ -712,12 +717,15 @@ function markerFlag(sym){
 // cc#1547: looked up fresh at tap time (not baked into the button's markup) so a flag opened after
 // the maps refresh under it always shows current data, matching the old per-glyph functions' own
 // no-stale-closure discipline. `side` comes off the open position for the TC score lookup
-// (cc#1542's endpoint is keyed symbol+side, same convention /dashboard's ctx.tcScores map uses).
+// (cc#1542's endpoint is keyed symbol+side, same convention /dashboard's ctx.tcScores map uses)
+// AND cc#1558's own position-side filter, so the popover can never show a marker the flag itself
+// filtered out.
 function openMarkerFlag(sym){
-  var fired = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
-                dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
+  var fired0 = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
+                 dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
   var pos = ((STATE.d && STATE.d.open) || []).find(function(p){ return p.symbol === sym; });
   var side = String((pos && pos.side) || '').toUpperCase();
+  var fired = window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(fired0, side) : fired0;
   var tc = (STATE.tcScore || {})[sym + '|' + side] || null;
   if (window.ScorrMarkerDetail) window.ScorrMarkerDetail.open(sym, fired, tc, STATE.legend);
 }
@@ -771,7 +779,7 @@ function posCard(p, mode){
     : '';
   return '<div class="pcard' + (open ? ' openx' : '') + '" onclick="posTap(' + p.id + ')">'
     + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
-    + (realised ? '' : markerFlag(p.symbol))
+    + (realised ? '' : markerFlag(p.symbol, p.side))
     + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
     + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
     + '<div class="pc2"><span class="pnl ' + cls(val) + '">' + inr(val) + '</span>'

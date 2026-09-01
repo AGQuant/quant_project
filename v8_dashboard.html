@@ -3925,7 +3925,11 @@ function markerFlag(x){
   // (ScorrMarkerFlagColor/ScorrMarkerFlagDetailHtml) so /m/v8 cannot say something different
   // (DISPLAY_PARITY 16202) \u2014 the fired object is the SAME four-list shape both surfaces read.
   const sym=x.symbol, side=String(x.side||'').toUpperCase();
-  const fired={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, tcs:PIVOT_TCS[sym]||null};
+  const fired0={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, tcs:PIVOT_TCS[sym]||null};
+  // cc#1558: ONE filtering step (window.ScorrMarkerFlagFilter) against this row's OWN side, fed into
+  // BOTH the colour and the popover below \u2014 a marker whose direction disagrees with the position
+  // is simply not there for either. Replaces cc#1557's pivot-star-wins tie-break (founder rejected).
+  const fired=window.ScorrMarkerFlagFilter?window.ScorrMarkerFlagFilter(fired0,side):fired0;
   const col=window.ScorrMarkerFlagColor?window.ScorrMarkerFlagColor(fired):null;
   if(!col) return '';
   // cc#1542's own tcScores map, side-keyed \u2014 same lookup v8NormRow already does for the TC %

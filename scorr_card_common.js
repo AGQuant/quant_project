@@ -1369,31 +1369,46 @@ window.scorrAsofStamp = function (asof) {
    the established split in this codebase already — ScorrSymbolCard (this file, cc#898) is mobile-
    only and desktop's own symbol popup is a separate, already-existing mechanism; the same split
    applies here, just for marker detail instead of the C·A·R·D strip. */
+// cc#1558 (replaces cc#1557's pivot-star-wins tie-break, which the founder rejected outright — "pls
+// hold don't like task"): a marker only reaches the flag/popover at all if its OWN direction agrees
+// with the POSITION's own side. A LONG position never shows a red/SELL-direction anything; a SHORT
+// position never shows a blue/BUY-direction anything. No colour tie-break is needed once a
+// mismatched marker is simply not there — simpler than cc#1557's invented priority rule, and it is
+// what the founder actually asked for: "if bull side position then bull side star... if not satisfy
+// or reverse satisfy show blank, similarly sell side".
+//
+// fired.act and fired.tcs are NEVER filtered: activity has no direction of its own
+// (v8_pivot_star.py's own comment — "volume and OI say something is happening, never up or down"),
+// and TC_STRONG is already scored on the position's own side by construction (cc#1548:
+// run_tc_score_tick maps LONG->BUY, SHORT->SELL before scoring), so it can never disagree.
+//
+// ONE filtering step. The caller runs this ONCE per row and feeds the SAME filtered object into
+// BOTH ScorrMarkerFlagColor and ScorrMarkerFlagDetailHtml below — never filtered twice, never two
+// functions each guessing the rule their own way. If the flag is blank, the popover (should it
+// somehow still be asked to render) has nothing new to show either, by construction.
+window.ScorrMarkerFlagFilter = function (fired, posSide) {
+  fired = fired || {};
+  var side = String(posSide || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';   // COALESCE(side,'LONG')
+  var starWant = (side === 'LONG') ? 'BUY' : 'SELL';
+  var dmaWant = (side === 'LONG') ? 'DMA_CROSS_UP' : 'DMA_CROSS_DOWN';
+  return {
+    stars: (fired.stars && fired.stars.direction === starWant) ? fired.stars : null,
+    dma: (fired.dma && fired.dma.direction === dmaWant) ? fired.dma : null,
+    act: fired.act || null,
+    tcs: fired.tcs || null
+  };
+};
 window.ScorrMarkerFlagColor = function (fired) {
-  // fired = {stars, act, dma, tcs} — each either that marker's row object for this symbol, or
-  // null/undefined. Returns null (render nothing) when none fired; otherwise the flag's colour.
-  // cc#1557 P1 fix: the flag used to collapse every non-amber case to blue, so a SELL/RED pivot
-  // star or a red DMA-cross-down painted the SAME blue flag as a BUY/BLUE star — dishonest, since
-  // the individual glyph colours one level down (ScorrMarkerFlagDetailHtml) were already correct.
-  // Priority order, exactly as founder-specified:
+  // fired = {stars, act, dma, tcs} — expected to already be filtered through
+  // window.ScorrMarkerFlagFilter (cc#1558) against the position's own side before reaching here, so
+  // fired.stars and fired.dma, if both present, can never disagree in direction — no tie-break
+  // needed. Returns null (render nothing) when none fired; otherwise the flag's colour.
   if (!fired || !(fired.stars || fired.act || fired.dma || fired.tcs)) return null;
   if (fired.tcs) return '#F5B94A';   // amber — highest priority, "something notable", unchanged
-  // PIVOT STAR checked first and wins outright over DMA-cross when both fired and disagree (e.g. a
-  // blue pivot star + a red dma-cross-down on the same symbol/day — rare, the two families evaluate
-  // independently). Checking .stars before .dma, unconditionally, IS that priority rule — not a
-  // bullish-OR-bearish vote, which would let whichever direction happened to be true win regardless
-  // of which family it came from.
-  if (fired.stars) {
-    if (fired.stars.star_color === 'BLUE') return '#4d7cfe';
-    if (fired.stars.star_color === 'RED') return '#f87171';   // SAME red ScorrMarkerFlagDetailHtml already uses
-  }
-  if (fired.dma) {
-    if (fired.dma.star_color === 'GREEN') return '#4d7cfe';
-    if (fired.dma.star_color === 'RED') return '#f87171';
-  }
-  // Neither pivot star nor dma-cross fired a direction (activity/bolt fired alone) — activity has
-  // no side of its own (v8_pivot_star.py: "volume and OI say something is happening, never up or
-  // down"), so it stays the neutral blue rather than being forced into a direction it was never given.
+  if (fired.stars) return fired.stars.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
+  if (fired.dma) return fired.dma.star_color === 'GREEN' ? '#4d7cfe' : '#f87171';
+  // Neither a pivot star nor a dma-cross fired (activity/bolt fired alone) — activity has no
+  // direction of its own, so it stays the neutral blue rather than being forced into one.
   return '#4d7cfe';
 };
 
