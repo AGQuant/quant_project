@@ -71,26 +71,11 @@
           border-bottom:1px solid var(--line2);font-size:12.5px}
   .ov-row:last-child{border-bottom:none}
   .ov-close{margin-top:14px;width:100%}
-  /* cc#1525 · TRADE_CONTROL_V1: Approve/Alert cluster on open engine-signal rows. Button
-     grammar per the R4/R1 refs — mono 11px, 36px min height, .btn/.btn.pri. */
+  /* cc#1525 built an Approve/Alert cluster here; cc#1537 (founder confirmed 31-Aug) removed it —
+     the wall is pure display, /alerts is the sole approve surface. What survives is the
+     read-only APPROVED badge (a GET off approved_map, showing a decision already taken). */
   .twa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-  .twa .btn{font:700 11px ui-monospace,monospace;letter-spacing:.06em;padding:7px 12px;min-height:36px;
-            border-radius:8px;border:1px solid var(--line2);background:var(--card2);color:var(--txt);cursor:pointer}
-  .twa .btn.pri{border-color:var(--blu);background:var(--blu);color:#fff}
   .twa-ok{font:700 10.5px ui-monospace,monospace;color:var(--grn);white-space:nowrap}
-  .twa-chip{font:600 10px ui-monospace,monospace;color:var(--amber);border:1px solid var(--amber);
-            border-radius:5px;padding:2px 6px;white-space:nowrap}
-  .twa-err{font:600 10px ui-monospace,monospace;color:var(--red);white-space:normal;max-width:220px}
-  .twa-pop>td{background:var(--card2);white-space:normal}
-  .twa-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:6px 2px}
-  .twa-form label{font-size:10px;color:var(--mut);display:flex;flex-direction:column;gap:3px;font-weight:700}
-  .twa-form input,.twa-form select{background:var(--panel);border:1px solid var(--line);border-radius:7px;
-            color:var(--txt);font:600 12px ui-monospace,monospace;padding:7px 8px;min-height:34px;width:110px}
-  .twa-form input.notes{width:180px}
-  .twa-seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
-  .twa-seg button{font:700 10.5px ui-monospace,monospace;padding:6px 10px;border:none;background:transparent;
-            color:var(--mut);cursor:pointer;min-height:34px}
-  .twa-seg button.on{background:var(--blu);color:#fff}
   @media(max-width:760px){
     .wrap{padding:12px 10px 64px}
     thead th,tbody td{padding:7px 6px;font-size:12px}
@@ -207,8 +192,8 @@ function pnlCell(e){
 }
 
 function rowsHtml(list){
-  /* cc#1525: open rows gain the Approve/Alert cell, so the row width is status-dependent —
-     the day separators and the popover row must follow it or they misalign the grid. */
+  /* cc#1525/cc#1537: open rows carry a Status cell (the read-only APPROVED badge), so the row
+     width is status-dependent — the day separators must follow it or they misalign the grid. */
   var cols = STATE.status === 'open' ? 10 : 9;
   var h = '', day = null;
   list.forEach(function(e){
@@ -233,7 +218,6 @@ function rowsHtml(list){
         + (e.note ? (e.result ? ' · ' : '') + esc(e.note) : '') + '</td>'
       + twCell(e)
       + '</tr>';
-    if (TWA.open === e.id) h += twPopRow(e, cols);
   });
   return h;
 }
@@ -243,7 +227,7 @@ function theadHtml(){
     ? '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
       + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L</th><th>Detail</th></tr>'
     : '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
-      + '<th class="num">Qty</th><th></th><th class="num">P&amp;L</th><th>Detail</th><th>Action</th></tr>';
+      + '<th class="num">Qty</th><th></th><th class="num">P&amp;L</th><th>Detail</th><th>Status</th></tr>';
 }
 
 function statusTabsHtml(){
@@ -407,25 +391,16 @@ document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') closeOther();
 });
 
-/* ══ cc#1525 · TRADE_CONTROL_V1 (session_log 35003 locks 3/5/8) — Approve + Alert on every open
-   ENGINE-SIGNAL row. Rules built in:
-     * OPEN rows only, and never on an approval-record row (src === 'alert' — those ARE the
-       approvals cc#1524 files back under their engine). Closed rows: no controls.
-     * source_ref = symbol + '@' + entry.ts AS SERVED (the spec's row key) — the same string the
-       app (cc#1526) must send, so one signal has one key on every surface.
-     * direction on the API is BUY/SELL; the wall serves LONG/SHORT — mapped, never passed raw.
-     * a failed call shows the server's own message inline, never a silent no-op.
-     * EXIT-alert price prefill: the wall rows do not serve target/stop (row columns are
-       do_not_touch), so the prefill falls back to the entry price — stated here and in the
-       task log, not fudged. The founder edits the price in the form either way. */
-var TWA = { approved: {}, state: {}, open: null, form: null, busy: {} };
+/* ══ cc#1525 put Approve + Alert clusters on open engine-signal rows; cc#1537 (founder explicit,
+   31-Aug: "wall of trade purely display, on alert tab for approve") REMOVED them. The wall
+   writes NOTHING — approval and alert creation live only on /alerts (cc#1536) and /m/alerts.
+   What survives is the read-only APPROVED badge: /api/alerts/approved_map is a GET, and showing
+   a decision already taken is exactly what a display-only wall should do. source_ref stays
+   symbol + '@' + entry.ts AS SERVED — the one key every approve surface writes, so the badge
+   matches wherever the founder clicked. */
+var TWA = { approved: {} };
 
 function twRef(e){ return e.symbol + '@' + ((e.entry && e.entry.ts) || ''); }
-function twDir(side){ return side === 'SHORT' ? 'SELL' : 'BUY'; }
-function twFind(id){
-  for (var i = 0; i < STATE.events.length; i++) if (STATE.events[i].id === id) return STATE.events[i];
-  return null;
-}
 function twStampTime(sIn){
   try {
     var d = new Date(String(sIn).replace(' ', 'T'));
@@ -436,22 +411,11 @@ function twStampTime(sIn){
 }
 function twCell(e){
   if (STATE.status !== 'open') return '';
-  if (e.src === 'alert') return '<td></td>';   /* an approval row is not approvable again */
-  var st = TWA.state[e.id] || {};
+  if (e.src === 'alert') return '<td></td>';   /* an approval row IS the approval record */
   var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
-  var ap = st.ok || (mapHit ? { at: mapHit.approved_at, prev: false } : null);
-  var h = '<div class="twa">';
-  if (ap){
-    h += '<span class="twa-ok">APPROVED · ' + twStampTime(ap.at) + (ap.prev ? ' · prev close' : '') + '</span>';
-  } else {
-    h += '<button type="button" class="btn pri" onclick="twApprove(\'' + encodeURIComponent(e.id) + '\')"'
-      + (TWA.busy[e.id] ? ' disabled' : '') + '>Approve</button>';
-  }
-  h += '<button type="button" class="btn" onclick="twAlert(\'' + encodeURIComponent(e.id) + '\')">Alert</button>';
-  if (st.chip) h += '<span class="twa-chip">ALERT SET · ' + esc(st.chip) + '</span>';
-  if (st.err) h += '<span class="twa-err">' + esc(st.err) + '</span>';
-  h += '</div>';
-  return '<td>' + h + '</td>';
+  return '<td>' + (mapHit
+    ? '<div class="twa"><span class="twa-ok">APPROVED · ' + twStampTime(mapHit.approved_at) + '</span></div>'
+    : '') + '</td>';
 }
 function twLoadApproved(){
   if (STATE.status !== 'open') return;
@@ -461,103 +425,6 @@ function twLoadApproved(){
       .then(function(d){ TWA.approved[eng] = d.map || {}; render(); })
       .catch(function(_e){ /* the map is a paint optimisation — a miss just means no stamps yet */ });
   });
-}
-function twApprove(idEnc){
-  var id = decodeURIComponent(idEnc), e = twFind(id);
-  if (!e || TWA.busy[id]) return;
-  TWA.busy[id] = true;
-  TWA.state[id] = TWA.state[id] || {};
-  delete TWA.state[id].err;
-  render();
-  fetchWithTimeout('/api/alerts/approve_signal', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ source_engine: e.engine, source_ref: twRef(e), symbol: e.symbol,
-                           direction: twDir(e.side), kind: 'entry', approved_via: 'web-wall' })
-  })
-    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-    .then(function(res){
-      TWA.busy[id] = false;
-      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'approve failed');
-      var a = res.d.alert || {};
-      TWA.state[id].ok = { at: a.approved_at, prev: res.d.live === false };
-      render();
-    })
-    .catch(function(err){
-      TWA.busy[id] = false;
-      TWA.state[id].err = err.message;
-      render();
-    });
-}
-function twPrefill(e, kind){
-  var dir = kind === 'exit' ? (twDir(e.side) === 'BUY' ? 'SELL' : 'BUY') : twDir(e.side);
-  return { kind: kind, direction: dir,
-           condition: dir === 'BUY' ? 'ABOVE' : 'BELOW',
-           price: e.entry_price != null ? e.entry_price : '',
-           notes: '', err: null };
-}
-function twAlert(idEnc){
-  var id = decodeURIComponent(idEnc), e = twFind(id);
-  if (!e) return;
-  if (TWA.open === id){ TWA.open = null; TWA.form = null; render(); return; }
-  TWA.open = id;
-  TWA.form = twPrefill(e, 'entry');
-  render();
-}
-function twKind(idEnc, kind){
-  var id = decodeURIComponent(idEnc), e = twFind(id);
-  if (!e || !TWA.form) return;
-  TWA.form = twPrefill(e, kind);
-  render();
-}
-function twPopRow(e, cols){
-  var f = TWA.form || twPrefill(e, 'entry');
-  var idE = encodeURIComponent(e.id);
-  var seg = '<span class="twa-seg">'
-    + '<button type="button"' + (f.kind === 'entry' ? ' class="on"' : '') + ' onclick="twKind(\'' + idE + '\',\'entry\')">ENTRY</button>'
-    + '<button type="button"' + (f.kind === 'exit' ? ' class="on"' : '') + ' onclick="twKind(\'' + idE + '\',\'exit\')">EXIT</button>'
-    + '</span>';
-  return '<tr class="twa-pop"><td colspan="' + cols + '"><div class="twa-form">'
-    + seg
-    + '<label>DIRECTION<select id="twaDir"><option' + (f.direction === 'BUY' ? ' selected' : '') + '>BUY</option>'
-      + '<option' + (f.direction === 'SELL' ? ' selected' : '') + '>SELL</option></select></label>'
-    + '<label>CONDITION<select id="twaCond"><option' + (f.condition === 'ABOVE' ? ' selected' : '') + '>ABOVE</option>'
-      + '<option' + (f.condition === 'BELOW' ? ' selected' : '') + '>BELOW</option></select></label>'
-    + '<label>PRICE<input id="twaPrice" type="number" step="0.05" value="' + esc(f.price) + '"></label>'
-    + '<label>NOTES<input id="twaNotes" class="notes" type="text" value=""></label>'
-    + '<button type="button" class="btn pri" onclick="twAlertSet(\'' + idE + '\')">Set</button>'
-    + '<button type="button" class="btn" onclick="twAlert(\'' + idE + '\')">Cancel</button>'
-    + (f.err ? '<span class="twa-err">' + esc(f.err) + '</span>' : '')
-    + '</div></td></tr>';
-}
-function twAlertSet(idEnc){
-  var id = decodeURIComponent(idEnc), e = twFind(id);
-  if (!e || !TWA.form) return;
-  var f = TWA.form;
-  var price = parseFloat(document.getElementById('twaPrice') && document.getElementById('twaPrice').value);
-  var dir = (document.getElementById('twaDir') || {}).value || f.direction;
-  var cond = (document.getElementById('twaCond') || {}).value || f.condition;
-  var notes = (document.getElementById('twaNotes') || {}).value || null;
-  if (!(price > 0)){ f.err = 'price must be a positive number'; render(); return; }
-  fetchWithTimeout('/api/alerts/create', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ symbol: e.symbol, direction: dir, trigger_condition: cond,
-                           trigger_price: price, notes: notes,
-                           source_engine: e.engine, source_ref: twRef(e), kind: f.kind,
-                           approved_via: 'web-wall' })
-  })
-    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-    .then(function(res){
-      if (!res.ok) throw new Error((res.d && (res.d.detail || res.d.error)) || 'alert not created');
-      TWA.state[id] = TWA.state[id] || {};
-      TWA.state[id].chip = f.kind + ' ' + cond + ' ' + price;
-      delete TWA.state[id].err;
-      TWA.open = null; TWA.form = null;
-      render();
-    })
-    .catch(function(err){
-      if (TWA.form) TWA.form.err = err.message;
-      render();
-    });
 }
 
 boot(false);
