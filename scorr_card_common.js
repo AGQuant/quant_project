@@ -1371,11 +1371,30 @@ window.scorrAsofStamp = function (asof) {
    applies here, just for marker detail instead of the C·A·R·D strip. */
 window.ScorrMarkerFlagColor = function (fired) {
   // fired = {stars, act, dma, tcs} — each either that marker's row object for this symbol, or
-  // null/undefined. Returns null (render nothing) when none fired; otherwise the flag's colour —
-  // amber when TC_STRONG is among the fired markers (the founder's own "something notable" cue),
-  // the neutral pivot-star blue otherwise.
+  // null/undefined. Returns null (render nothing) when none fired; otherwise the flag's colour.
+  // cc#1557 P1 fix: the flag used to collapse every non-amber case to blue, so a SELL/RED pivot
+  // star or a red DMA-cross-down painted the SAME blue flag as a BUY/BLUE star — dishonest, since
+  // the individual glyph colours one level down (ScorrMarkerFlagDetailHtml) were already correct.
+  // Priority order, exactly as founder-specified:
   if (!fired || !(fired.stars || fired.act || fired.dma || fired.tcs)) return null;
-  return fired.tcs ? '#F5B94A' : '#4d7cfe';
+  if (fired.tcs) return '#F5B94A';   // amber — highest priority, "something notable", unchanged
+  // PIVOT STAR checked first and wins outright over DMA-cross when both fired and disagree (e.g. a
+  // blue pivot star + a red dma-cross-down on the same symbol/day — rare, the two families evaluate
+  // independently). Checking .stars before .dma, unconditionally, IS that priority rule — not a
+  // bullish-OR-bearish vote, which would let whichever direction happened to be true win regardless
+  // of which family it came from.
+  if (fired.stars) {
+    if (fired.stars.star_color === 'BLUE') return '#4d7cfe';
+    if (fired.stars.star_color === 'RED') return '#f87171';   // SAME red ScorrMarkerFlagDetailHtml already uses
+  }
+  if (fired.dma) {
+    if (fired.dma.star_color === 'GREEN') return '#4d7cfe';
+    if (fired.dma.star_color === 'RED') return '#f87171';
+  }
+  // Neither pivot star nor dma-cross fired a direction (activity/bolt fired alone) — activity has
+  // no side of its own (v8_pivot_star.py: "volume and OI say something is happening, never up or
+  // down"), so it stays the neutral blue rather than being forced into a direction it was never given.
+  return '#4d7cfe';
 };
 
 window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
