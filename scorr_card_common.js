@@ -1245,3 +1245,107 @@ window.scorrAsofStamp = function (asof) {
     }).join('') + '</div>';
   };
 })();
+
+
+/* ── cc#1545: COPY-SYMBOLS-TO-CLIPBOARD, FYERS-PASTE FORMAT — ONE primitive, both surfaces ────
+   QB baskets (quant_basket.html) and Screeners (scorr_screeners.html) both show a symbol list a
+   reader wants to paste straight into Fyers' watchlist/marketwatch import. Built here, in the
+   file every screen already loads, so a third page never hand-rolls its own copy button or (worse)
+   its own idea of what "Fyers format" means.
+
+   FORMAT: comma-separated `NSE:{SYMBOL}-EQ` — this is not invented here, it is this codebase's OWN
+   Fyers equity-symbol convention, read verbatim from worker/fyers_feed.py (every 5-min equity
+   subscription is built as 'NSE:'+code+'-EQ', and the REST quote self-test literally hits
+   NSE:SBIN-EQ). A blank/whitespace-only symbol is dropped rather than emitted as 'NSE:-EQ'.
+
+   COPY MECHANICS + VISUAL FEEDBACK are ported verbatim from scorr_news.html's copyStory() (the
+   "Copy for LinkedIn" button) — navigator.clipboard.writeText first, a hidden-textarea
+   execCommand('copy') fallback for browsers/contexts without the Clipboard API, check-icon 1.5s on
+   success, red-X 1.5s on failure, then back to the copy icon. Not re-derived: the working pattern
+   already existed once in this codebase and is reused, not reinvented. */
+(function () {
+  if (window.ScorrCopySymbols) return;
+
+  var _COPY_SVG  = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+  var _CHECK_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  var _X_SVG     = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
+  function _esc(s){ return String(s == null ? '' : s)
+    .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  function _fallbackCopy(text){
+    try{
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e){ return false; }
+  }
+
+  // Raw NSE codes (e.g. ['RELIANCE','TCS']) -> 'NSE:RELIANCE-EQ,NSE:TCS-EQ'. Trims + uppercases
+  // each symbol (paper/basket data is already NSE-uppercase, but a screener metrics blob is not
+  // guaranteed to be) and drops anything blank after trimming.
+  window.ScorrFyersSymbolList = function (symbols) {
+    return (symbols || []).map(function (s) { return String(s || '').trim().toUpperCase(); })
+      .filter(Boolean)
+      .map(function (s) { return 'NSE:' + s + '-EQ'; })
+      .join(',');
+  };
+
+  // Injects the button's markup. `symbols` is the raw NSE-code array — the Fyers string is built
+  // once at render time and carried in a data attribute, so the click handler never has to touch
+  // page state (a basket card whose data has since refreshed still copies what was on screen when
+  // it was drawn). `opts.title` overrides the default tooltip/aria-label; `opts.style` appends
+  // inline CSS (positioning is the caller's call, same as the existing .bc-chart icon buttons).
+  window.ScorrCopySymbolsBtn = function (symbols, opts) {
+    opts = opts || {};
+    var text = window.ScorrFyersSymbolList(symbols);
+    var title = opts.title || 'Copy symbols · Fyers paste format';
+    var style = 'background:transparent;border:1px solid var(--line,#243049);color:var(--mut,#8a97b0);'
+      + 'border-radius:7px;width:28px;height:28px;display:inline-flex;align-items:center;'
+      + 'justify-content:center;cursor:pointer;flex:0 0 auto;transition:.12s' + (opts.style ? ';' + opts.style : '');
+    return '<button type="button" class="scc-copy-btn" title="' + _esc(title) + '" aria-label="' + _esc(title)
+      + '" data-symlist="' + _esc(text) + '" onclick="ScorrCopySymbolsClick(this,event)" style="' + style + '">'
+      + _COPY_SVG + '</button>';
+  };
+
+  // Low-level primitive: write `text` to the clipboard and paint `btn`'s copied/failed state.
+  // `btn` may be null — a caller that only wants the clipboard write (no icon to paint) passes it.
+  window.ScorrCopySymbols = function (btn, text) {
+    function paint(ok){
+      if (!btn) return;
+      btn.innerHTML = ok ? _CHECK_SVG : _X_SVG;
+      btn.style.color = ok ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)';
+      btn.style.borderColor = ok ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)';
+      setTimeout(function () {
+        btn.innerHTML = _COPY_SVG;
+        btn.style.color = 'var(--mut,#8a97b0)';
+        btn.style.borderColor = 'var(--line,#243049)';
+      }, 1500);
+    }
+    if (!text) { paint(false); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { paint(true); })
+        .catch(function () { paint(_fallbackCopy(text)); });
+    } else {
+      paint(_fallbackCopy(text));
+    }
+  };
+
+  // Wired via the button's own onclick= (see ScorrCopySymbolsBtn above) so callers never bind a
+  // per-row listener by hand.
+  window.ScorrCopySymbolsClick = function (btn, ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    window.ScorrCopySymbols(btn, btn.getAttribute('data-symlist') || '');
+  };
+
+  // Hover state — the button's resting look comes from the inline style above (so it works even if
+  // this file loads before a page's own <style>), but :hover needs a real rule. One-time injection,
+  // guarded like everything else in this file.
+  var st = document.createElement('style');
+  st.textContent = '.scc-copy-btn:hover{color:var(--blu,#4D7CFE)!important;border-color:var(--blu,#4D7CFE)!important}';
+  document.head.appendChild(st);
+})();

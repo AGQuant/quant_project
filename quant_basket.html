@@ -375,6 +375,16 @@ async function init(){
       card.className='bcard';
       card.style.borderTopColor=BCOL[key];
       card.onclick=()=>openModal(key,card);
+      // cc#1545: copy this basket's OPEN symbols to clipboard in Fyers-paste format
+      // (NSE:{SYMBOL}-EQ, comma-separated — shared primitive in scorr_card_common.js). Reads the
+      // same allPos this card's own HS1/HS2 badge math already computed above, so the button and
+      // the "N positions" footer can never disagree on what this basket currently holds. A basket
+      // with zero open positions still gets the button — clicking it just copies nothing and the
+      // shared primitive shows the failed (red X) state rather than silently doing nothing.
+      const copyBtn=window.ScorrCopySymbolsBtn
+        ? window.ScorrCopySymbolsBtn(allPos.map(p=>p.symbol),
+            {title:`Copy ${BNAMES[key]} symbols · Fyers paste format`,style:'margin-left:8px'})
+        : '';
       card.innerHTML=`
         <div class="bc-top">
           <div class="bc-name">${BNAMES[key]}</div>
@@ -383,6 +393,7 @@ async function init(){
             style="margin-left:auto;background:transparent;border:1px solid var(--line,#243049);
                    color:${BCOL[key]};border-radius:7px;width:30px;height:30px;line-height:1;
                    cursor:pointer;font-size:13px;flex:0 0 auto">▤</button>
+          ${copyBtn}
         </div>
         <div class="bc-chartpanel" data-panel="${key}" style="display:none"></div>
         <div class="bc-rule">${BRULE[key]}</div>

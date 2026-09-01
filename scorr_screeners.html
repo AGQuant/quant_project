@@ -70,7 +70,13 @@
   <div class="tabs" id="tabs"></div>
   <div class="tabs" id="tabs2"></div>
   <div class="card">
-    <div class="meta" id="meta"></div>
+    <!-- cc#1545: copy this screen's symbols to clipboard, Fyers paste format. Rebuilt inside
+         paintScreen() from the CURRENTLY DISPLAYED (post-sort) row order, so what the button
+         copies matches what the reader is looking at, not the server's default rank. -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div class="meta" id="meta"></div>
+      <span id="copySymWrap" style="flex:0 0 auto;padding-top:1px"></span>
+    </div>
     <div class="scroll"><table id="tbl">
       <thead><tr id="head"></tr></thead>
       <tbody id="body"></tbody>
@@ -216,6 +222,9 @@ function paintScreen(){
       '<tr><td colspan="'+head.length+'" class="empty">No stocks in this screen yet.<br>'
       + 'Screens fill after the next end-of-day run.</td></tr>';
     document.getElementById('meta').textContent = d.name + ' · 0 members';
+    // cc#1545: nothing to copy — clear the button rather than render one that always fails.
+    var symWrapEmpty = document.getElementById('copySymWrap');
+    if(symWrapEmpty) symWrapEmpty.innerHTML = '';
     return;
   }
   rows = _sortByState(rows, SORT, VIEW.getters);
@@ -243,6 +252,15 @@ function paintScreen(){
     d.name + ' · ' + rows.length + ' stocks · sorted by '
     + (SORT.key ? (VIEW.labels[SORT.key]||SORT.key) + (SORT.dir===1?' ▲':' ▼')
                 : (d.sort_key||'GVM'));
+  // cc#1545: symbols in the SAME order the table is currently sorted in (rows, not d.rows) —
+  // the button copies what the reader is looking at.
+  var symWrap = document.getElementById('copySymWrap');
+  if(symWrap){
+    symWrap.innerHTML = window.ScorrCopySymbolsBtn
+      ? window.ScorrCopySymbolsBtn(rows.map(function(r){ return r.symbol; }),
+          {title:'Copy ' + d.name + ' symbols · Fyers paste format'})
+      : '';
+  }
 }
 
 fetchWithTimeout('/api/screeners',{headers:{Accept:'application/json'}})
