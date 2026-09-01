@@ -375,8 +375,9 @@ async function init(){
       card.className='bcard';
       card.style.borderTopColor=BCOL[key];
       card.onclick=()=>openModal(key,card);
-      // cc#1545: copy this basket's OPEN symbols to clipboard in Fyers-paste format
-      // (NSE:{SYMBOL}-EQ, comma-separated — shared primitive in scorr_card_common.js). Reads the
+      // cc#1545 (format corrected cc#1546 P0): copy this basket's OPEN symbols to clipboard,
+      // bare comma-separated (RELIANCE,TCS,... — no NSE:/-EQ, that's the feed's WebSocket
+      // format not the app's paste format) — shared primitive in scorr_card_common.js. Reads the
       // same allPos this card's own HS1/HS2 badge math already computed above, so the button and
       // the "N positions" footer can never disagree on what this basket currently holds. A basket
       // with zero open positions still gets the button — clicking it just copies nothing and the
