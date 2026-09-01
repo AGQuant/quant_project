@@ -262,6 +262,38 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | POST | `/api/scorr/chat` | chat |
 | GET | `/api/scorr/chat/health` | chat health |
 
+### The three "TC" systems (cc#1549 — read this before touching any Trade Check code)
+
+The name "TC" / "Trade Check" is shared by three unrelated systems. Mixing them up is exactly how
+cc#1540 shipped a live engine drift (cc#1548). Know which one you're in before you edit or call one:
+
+1. **tc_resolver-routed TC v4 (the real primary).** `tc_resolver.py` is the ONE import point —
+   `get_primary_tc()` (single LONG/SHORT verdict, `tc_v4_endpoints.trade_check_v4`) and
+   `get_primary_styles()` (4-bucket BUY/SELL x MOMENTUM/REVERSAL, `tc_v4_dual.trade_check_v4_dual`).
+   This is what `scorr_check.html` (the live `/check` page), the V8 dashboard marker detail, the
+   derivative cockpit TC chip, the position stars, and the v4 screener all read. **Every new Python
+   consumer of Trade Check must import from here — never a versioned `tc_*` module directly** (a
+   direct import is now caught automatically, see `test_tc_resolver_guard.py` below).
+2. **TC Scanner / TC13** (`tc_scanner_endpoints.py`, engine in the same file) — a standalone binary
+   13-check bucket (founder-approved OPTION B, 12-Jul-2026), confirmed by its own docstring: "NOT the
+   TC V4 R1-R16 scoring engine used on the /check page." Two independent buckets (BUY/SELL), scored
+   and stored on its own schedule, nothing to do with tc_resolver. `intraday_scanner_endpoints.py` is
+   the same category. Do not route these through the resolver — they are a different product.
+3. **Deprecated/legacy modules — never a new-consumer import.** `native_trade_check.py` (v3.3/v3.4),
+   `trade_check_v34.py` (v3.5), `trade_check_v36.py` (v3.6) predate tc_resolver and the v4 family.
+   Four call sites still use them directly, each flagged in cc#1549 rather than silently swapped
+   (swapping the engine version is a behaviour change, not import hygiene — it needs a founder call):
+   `check_endpoint.py` (`/api/check`, legacy v3.4 shape, no confirmed live UI caller today),
+   `tc_intraday.py` (dormant phase-1 prototype, not mounted/scheduled),
+   `trade_check_v34_endpoints.py` (`/api/trade-check/v34`/`v36`, deliberately version-scoped legacy
+   routes, no confirmed live UI caller today), and **`native_router.py`** (the Ask Scorr chat's
+   "Trade Check v3.3" trigger — the highest-priority one of the four, since it is a LIVE, user-facing
+   surface answering on the old engine while every dashboard shows v4).
+
+`test_tc_resolver_guard.py` (repo root, `python3 test_tc_resolver_guard.py` or pytest) AST-scans every
+`.py` file for a direct import of a versioned TC scoring entrypoint outside `tc_resolver.py`, fails
+loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), and passes clean today.
+
 ### Trade Check — `trade_check_v34_endpoints.py`
 | Method | Path | Description |
 |---|---|---|

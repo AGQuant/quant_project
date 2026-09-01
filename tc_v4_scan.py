@@ -345,10 +345,10 @@ def _v4_selftest():
             row = cur.fetchone()
             if not row or str(row[0]).strip() != 'run':
                 return
-            from tc_v4_dual import trade_check_v4_dual
+            from tc_resolver import get_primary_styles   # cc#1549: resolver, not a hardcoded tc_v4_dual import
             probe = {}
             for s in ("RELIANCE", "TCS", "HDFCBANK", "TATASTEEL", "SUNPHARMA"):
-                r = trade_check_v4_dual(s, "ALL")
+                r = get_primary_styles()(s, "ALL")
                 probe[s] = {"best_label": r.get("best_label"), "best_score": r.get("best_score"),
                             "verdict": r.get("best_verdict"), "error": r.get("error")}
             sc = scan("ALL", "ALL", None, 250)

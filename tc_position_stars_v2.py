@@ -120,7 +120,8 @@ def run_position_stars_v2(batch_ts=None):
                 failed.append((sym, f"unmapped side {side!r}"))
                 continue
             try:
-                res = tc_v4_dual.trade_check_v4_dual(sym, "ALL")
+                from tc_resolver import get_primary_styles   # cc#1549: resolver, not a hardcoded tc_v4_dual call
+                res = get_primary_styles()(sym, "ALL")
             except Exception as e:                      # one bad symbol must not lose the batch
                 failed.append((sym, f"{type(e).__name__}: {str(e)[:80]}"))
                 continue

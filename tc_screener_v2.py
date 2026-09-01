@@ -42,7 +42,7 @@ import psycopg
 from fastapi import APIRouter, Header, HTTPException
 from typing import Optional
 
-import tc_v4_dual
+from tc_resolver import get_primary_styles   # cc#1549: resolver, not a hardcoded tc_v4_dual import
 
 router = APIRouter()
 log = logging.getLogger("tc_screener_v2")
@@ -109,7 +109,7 @@ def run_tc_screener_v2(limit_symbols: Optional[int] = None):
         failed = []
         for sym in symbols:
             try:
-                res = tc_v4_dual.trade_check_v4_dual(sym, "ALL")
+                res = get_primary_styles()(sym, "ALL")
             except Exception as e:                      # one bad symbol must not lose the run
                 failed.append((sym, f"{type(e).__name__}: {str(e)[:80]}"))
                 continue

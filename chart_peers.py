@@ -232,8 +232,8 @@ def build_trade_card(cur, symbol: str) -> Dict[str, Any]:
 
     verdict = None
     try:
-        import tc_v4_endpoints
-        tc = tc_v4_endpoints.trade_check_v4(sym, "LONG")
+        from tc_resolver import get_primary_tc   # cc#1549: resolver, not a hardcoded tc_v4_endpoints import
+        tc = get_primary_tc()(sym, "LONG")
         verdict = tc.get("final_verdict") if isinstance(tc, dict) else None
     except Exception as e:
         log.warning("cc#845 trade card verdict for %s: %s", sym, e)
