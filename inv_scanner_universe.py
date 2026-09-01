@@ -1,6 +1,6 @@
 """cc#1283 · INVESTMENT SCANNER ENGINE 1/3 — UNIVERSE BUILDER (spec session_log 30129 V1.1).
 
-Builds the tagged 3-leg union the scanner's scoring (cc#1284) and rules (cc#1285) will read:
+Builds the tagged 4-leg union the scanner's scoring (cc#1284) and rules (cc#1285) will read:
 
     LEG 1  quant basket open positions (status='open', notes NOT ILIKE 'Cash residual%'),
            one tag PER MEMBERSHIP: 'basket:<basket_name>' — a symbol held by three baskets
@@ -9,6 +9,14 @@ Builds the tagged 3-leg union the scanner's scoring (cc#1284) and rules (cc#1285
     LEG 3  reversal source (founder-added 24-Aug): gvm_score > 7 AND 90-day dG > 0 AND
            90-day dV > 0 → 'screen:gv_rising' — quality-improving names regardless of price
            position, stocking the reversal pond leg 2 structurally excludes.
+    LEG 4  Screeners-page presets (cc#1538, founder 31-Aug: "Quant screeners all including
+           FINZ"): every member of every global v13 preset — v13_screen_results r JOIN
+           v13_presets p ON p.id = r.screen_id WHERE COALESCE(p.scope,'global') = 'global',
+           the exact query shape the Screeners page itself reads, so the leg and the page can
+           never disagree about membership. One tag PER PRESET: 'screener:<preset name>'
+           (e.g. 'screener:Momentum Kings', 'screener:Stable'). Scorr's algorithmic screens
+           and the FINZ imports are deliberately ONE leg with one tag prefix — the preset
+           name alone distinguishes them if that is ever needed.
 
 DELTA CONVENTION (30129, same as every delta on the platform): closest-on-or-before —
 today's pillar minus the pillar on the latest score_date <= (latest - N days). A name with
@@ -107,9 +115,17 @@ leg3 AS (
     SELECT symbol, 'screen:gv_rising' AS tag FROM base
     WHERE gvm_score > 7 AND dg_90d > 0 AND dv_90d > 0
 ),
+leg4 AS (
+    -- cc#1538: every Screeners-page preset, scorr + finz together (see LEG 4 in the header)
+    SELECT UPPER(r.symbol) AS symbol, 'screener:' || p.name AS tag
+    FROM v13_screen_results r
+    JOIN v13_presets p ON p.id = r.screen_id
+    WHERE COALESCE(p.scope, 'global') = 'global'
+),
 uni AS (
     SELECT symbol, ARRAY_AGG(DISTINCT tag ORDER BY tag) AS tags
-    FROM (SELECT * FROM leg1 UNION ALL SELECT * FROM leg2 UNION ALL SELECT * FROM leg3) x
+    FROM (SELECT * FROM leg1 UNION ALL SELECT * FROM leg2 UNION ALL SELECT * FROM leg3
+          UNION ALL SELECT * FROM leg4) x
     GROUP BY symbol
 )
 INSERT INTO investment_scanner_universe
@@ -150,12 +166,14 @@ def build(conn=None) -> dict:
                        COUNT(*) FILTER (WHERE tags && ARRAY['screen:gv_rising']),
                        COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM UNNEST(tags) t WHERE t LIKE 'basket:%%')),
                        COUNT(*) FILTER (WHERE (SELECT COUNT(*) FROM UNNEST(tags) t WHERE t LIKE 'basket:%%') > 1),
+                       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM UNNEST(tags) t WHERE t LIKE 'screener:%%')),
                        COUNT(*) FILTER (WHERE insufficient_history)
                 FROM investment_scanner_universe WHERE run_date = %s""", (d,))
-            tot, l2, l3, l1, multi_basket, insuff = cur.fetchone()
+            tot, l2, l3, l1, multi_basket, l4, insuff = cur.fetchone()
         conn.commit()
         out = {"status": "ok", "run_date": str(d), "rows_upserted": n, "total": tot,
                "leg1_basket": l1, "leg2_momentum": l2, "leg3_gv_rising": l3,
+               "leg4_screener": l4,
                "multi_basket_names": multi_basket, "insufficient_history": insuff}
         log.info(f"inv_scanner_universe: {out}")
         return out
