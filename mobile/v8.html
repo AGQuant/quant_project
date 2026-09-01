@@ -103,7 +103,11 @@
 .tagx.long{color:var(--grn)}
 .tagx.short{color:var(--red)}
 .pc1 .bk{font-size:10px;color:var(--dim);margin-left:auto;text-align:right;flex:none}
-.pvm{font-size:12px;line-height:1;margin-left:-2px}   /* cc#932 pivot marker */
+/* cc#1547: the consolidated flag replaces .pvm (retired with pivotMark/actMark/dmaMark) — bigger
+   than the old individual glyphs (founder's own word: 12px -> 17px), a real tap target via padding
+   rather than a bare inline character. */
+.mk-flag{background:none;border:0;padding:8px 6px;margin:-8px -2px -8px -6px;font-size:17px;
+  line-height:1;cursor:pointer;vertical-align:middle;min-width:32px;min-height:32px}
 .pc2{display:flex;align-items:baseline;gap:9px;margin:7px 0 2px}
 .pc2 .pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;
   letter-spacing:-.01em}
@@ -322,6 +326,7 @@
 var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
               mood: null, book: null, group: 'period', instrument: 'equity',
               sub: {}, pop: null, fold: {}, stars: {}, act: {}, dma: {}, tcs: {}, legend: null,
+              tcScore: {},   // cc#1547: symbol+'|'+SIDE -> {score_pct, verdict_class} from tc_score_latest
               gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
               legendOpen: false,           // cc#989: marker legend, on demand behind the (i)
               /* cc#1115: null = the default view (period groups on the open page, newest-exit-first
@@ -689,57 +694,32 @@ function posTap(id){
   STATE.pop = (STATE.pop === id) ? null : id;
   renderBook();   /* cc#1110 */
 }
-/* cc#932 PIVOT_STAR_V2 marker (session_log 18052). SAME ENDPOINT as /dashboard —
-   /api/v8/pivot_star — and the SAME server-supplied glyph and note, so the two surfaces cannot
-   disagree (DISPLAY_PARITY 16202, "same component/endpoint, no fork"). Nothing is re-derived
-   here: colour follows star_color, shape follows glyph, and the tooltip is the server's own
-   facts-only star_note(), which is the V1 hard wall this card keeps. */
-function pivotMark(sym){
-  /* cc#1540: pivotMark now renders up to TWO stars \u2014 the blue/red pivot star and the AMBER
-     TC_STRONG star (Trade Check >80% and rising vs its 3-day average, served in the tc_strong
-     list). Concatenated, never merged: a symbol can legitimately carry both at once, and one
-     keyed lookup would silently drop the second (the same reasoning that keeps stars/activity
-     as separate lists server-side). */
-  var h = '';
-  var s = (STATE.stars || {})[sym];
-  if (s){
-    var col = s.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
-    /* cc#1018 MARKER_GLYPH_V3 (21764) retires the sell circle: BOTH sides draw a star, the colour
-       alone carries the side. Drawn unconditionally, not read from the server `glyph` field, because
-       a phone holding a CACHED pre-V3 payload still carries glyph='circle' for SELL and the old
-       direction fallback did the same, so either read leaves a path that can still paint a sell circle.
-       No shape variation is left to carry, so there is nothing to fork on; /dashboard's pivotStar()
-       does exactly the same. */
-    h += '<span class="pvm" style="color:' + col + '" title="' + esc(s.note || '') + '">\u2605</span>';
-  }
-  var t = (STATE.tcs || {})[sym];
-  if (t){
-    /* same star glyph the legend names, amber token colour; note is the server's facts-only string */
-    h += '<span class="pvm" style="color:#F5B94A" title="' + esc(t.note || '') + '">\u2605</span>';
-  }
-  return h;
+/* cc#1547: ONE consolidated flag per row, replacing the separate star/bolt/square glyph cluster
+   (cc#932/933/1539/1540). Colour + detail content come from the shared functions in
+   scorr_card_common.js (ScorrMarkerFlagColor/ScorrMarkerFlagDetailHtml) so /dashboard cannot say
+   something different (DISPLAY_PARITY 16202) \u2014 nothing about a marker's meaning is re-derived
+   here, only the tap wiring is /m/v8's own. Tapping opens ScorrMarkerDetail (scorr_card_common.js),
+   a bottom sheet on mobile via the app's existing sheet conventions. */
+function markerFlag(sym){
+  var fired = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
+                dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
+  var col = window.ScorrMarkerFlagColor ? window.ScorrMarkerFlagColor(fired) : null;
+  if (!col) return '';
+  return '<button type="button" class="mk-flag" style="color:' + col + '" title="Markers \u2014 tap for detail" '
+    + 'aria-label="Markers for ' + esc(sym) + ' \u2014 tap for detail" '
+    + 'onclick="event.stopPropagation();openMarkerFlag(\'' + esc(sym).replace(/'/g, "\\'") + '\')">\u2691</button>';
 }
-/* cc#1024 MARKER_GLYPH_V5 (session_log 22296): unusual activity is a LIGHTNING BOLT on both
-   sides, retiring the cc#933 side-glyph rule and with it the last shape-by-side rule on the
-   board. Volume and OI say "something is happening here", never "up" or "down", so the one
-   marker with no direction in it was the last one still drawing one. Drawn unconditionally,
-   never from the served glyph field -- a phone holding a cached pre-V5 payload still carries
-   glyph='circle'/'star'. No colour styling: it is an emoji and renders in its own. */
-function actMark(sym){
-  var a = (STATE.act || {})[sym];
-  if (!a) return '';
-  return '<span class="pvm" title="' + esc(a.note || '') + '">\u26A1</span>';
-}
-/* cc#1539 DMA_CROSS_V1: the third marker family \u2014 a small square, U+25A0, green when the 5DMA
-   crossed ABOVE the 20DMA this session, red when below. Colour follows the served star_color,
-   note is the server's own facts-only string \u2014 exactly the pivotMark pattern, nothing re-derived
-   here (DISPLAY_PARITY 16202: /dashboard's pivotDma() does the same). */
-function dmaMark(sym){
-  var x = (STATE.dma || {})[sym];
-  if (!x) return '';
-  var col = x.star_color === 'GREEN' ? '#0a9e63' : '#f87171';
-  return '<span class="pvm" style="color:' + col + '" title="' + esc(x.note || '') + '">'
-    + '\u25A0</span>';
+// cc#1547: looked up fresh at tap time (not baked into the button's markup) so a flag opened after
+// the maps refresh under it always shows current data, matching the old per-glyph functions' own
+// no-stale-closure discipline. `side` comes off the open position for the TC score lookup
+// (cc#1542's endpoint is keyed symbol+side, same convention /dashboard's ctx.tcScores map uses).
+function openMarkerFlag(sym){
+  var fired = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
+                dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
+  var pos = ((STATE.d && STATE.d.open) || []).find(function(p){ return p.symbol === sym; });
+  var side = String((pos && pos.side) || '').toUpperCase();
+  var tc = (STATE.tcScore || {})[sym + '|' + side] || null;
+  if (window.ScorrMarkerDetail) window.ScorrMarkerDetail.open(sym, fired, tc, STATE.legend);
 }
 /* cc#943/942 — ONE card renderer, TWO pages. The card explicitly asks for the realised page to
    use the SAME layout so the eye does not have to relearn it, and the way to guarantee that is a
@@ -791,7 +771,7 @@ function posCard(p, mode){
     : '';
   return '<div class="pcard' + (open ? ' openx' : '') + '" onclick="posTap(' + p.id + ')">'
     + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
-    + (realised ? '' : pivotMark(p.symbol) + actMark(p.symbol) + dmaMark(p.symbol))
+    + (realised ? '' : markerFlag(p.symbol))
     + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
     + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
     + '<div class="pc2"><span class="pnl ' + cls(val) + '">' + inr(val) + '</span>'
@@ -1577,9 +1557,12 @@ Promise.all([
   fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; }),
   fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; }),
   fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; })
+  fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; }),
+  // cc#1547: the marker-detail popover shows the row's TC score regardless of amber status
+  // (scope 3c) — the same endpoint /dashboard's TC % column (cc#1542) already reads.
+  fetchWithTimeout('/api/v8/tc_score_latest').then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
-  var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4];
+  var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4], tcs = res[5];
   // cc#932: a failed marker fetch must never blank the book — same guard the web uses.
   if (ps && ps.stars) ps.stars.forEach(function(x){ STATE.stars[x.symbol] = x; });
   // cc#933: activity markers ride in their own list — a symbol can carry a pivot marker AND an
@@ -1590,6 +1573,9 @@ Promise.all([
   // cc#1540: the amber TC_STRONG map, same guard.
   if (ps && ps.tc_strong) ps.tc_strong.forEach(function(t){ STATE.tcs[t.symbol] = t; });
   if (ps && ps.legend) STATE.legend = ps.legend;
+  // cc#1547: symbol+side keyed, same convention /dashboard's ctx.tcScores map uses. A failed
+  // fetch must never blank markers already on screen — same guard as the four lists above.
+  if (tcs && tcs.rows) tcs.rows.forEach(function(t){ if (t && t.symbol) STATE.tcScore[t.symbol + '|' + String(t.side || '').toUpperCase()] = t; });
   if (d.error) throw new Error(d.error);
   STATE.d = d;
   STATE.mood = (mood && !mood.error) ? mood : null;
