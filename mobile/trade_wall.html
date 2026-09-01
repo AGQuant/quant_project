@@ -135,14 +135,15 @@
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
-  <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
+  <a class="bn on" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 
 <script>
-/* The bottom nav stays FIVE items (card do_not_touch). This page is reached from the home tools
-   grid and the /m/v8 More stack, so no tab is marked active — marking one would tell the reader
-   they are somewhere they are not. */
+/* cc#1535 (founder 31-Aug): Wall of Trades joined the bottom nav (WoT slot, replacing Alerts,
+   which moved to the home grid tile 1). The nav stays FIVE items; this page now marks its own
+   tab active like every other nav-reachable page. The old "no active tab" rule applied only
+   while this page was grid-only — that reason no longer applies. */
 /* cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): the wall moved from
    four flat groups + an Entry/Exit event toggle to STATUS (Open|Closed, default Open) ->
    INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is now one POSITION (entry+

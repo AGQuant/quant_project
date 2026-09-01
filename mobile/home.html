@@ -1542,7 +1542,7 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
   <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
-  <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 
@@ -5034,10 +5034,10 @@ function renderHome(d, pv){
   var tools = document.createElement('div');
   tools.className = 'tools';
   tools.innerHTML =
-      /* cc#1526 (TRADE_CONTROL_V1, founder 31-Aug): Wall of Trades moves from tile 15 to tile 1 \u2014
-         the approve/alert surface leads the grid. Same tile, same /m/trades route (cc#991),
-         nothing else in the grid changes order. */
-      '<a class="tool slab dense" href="/m/trades"><span>\u2637\ufe0e</span>Wall of Trades</a>'
+      /* cc#1535 (founder 31-Aug): Alerts takes tile 1 \u2014 the approve surface leads the grid
+         (the cc#1526 rationale, transferred). Wall of Trades left the grid for the bottom nav
+         (labelled WoT), so it has no tile here; nothing else in the grid changes order. */
+      '<a class="tool slab dense" href="/m/alerts"><span>\u25ec</span>Alerts</a>'
     + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
     + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
     + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
