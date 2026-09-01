@@ -592,6 +592,14 @@ function artFull(a, isLead){
     : (a.summary && String(a.summary).trim()
         ? renderMd(a.summary)
         : `<p class="art-soon">Full analysis coming soon.</p>`);
+  // cc#1543 (founder 1-Sep): ALL mentioned symbols close the footer — the tag Domestic's
+  // artCompact() already renders, now on the full-article card too. Same symStr helper, same
+  // .art-sym class, nothing invented. Empty when the article mentions no tracked symbol —
+  // no placeholder, no pill. Lives BESIDE the Stock Views metarow svTag (single symbol, TC
+  // badge pairing), which stays untouched: metarow drives the TC lookup, this is the general
+  // "what this story mentions" list.
+  const footAll = symStr(a);
+  const footSym = footAll ? `<span>·</span><span class="art-sym">${esc(footAll)}</span>` : "";
   return `<article class="art ${impClass}${isLead?' lead':''}">
     ${copyBtn(a, hasFull)}
     <div class="art-head">${esc(a.headline_clean)}</div>
@@ -601,7 +609,7 @@ function artFull(a, isLead){
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
       <span>·</span><b>Source AI CIO</b>
-      <span>·</span><span>${timeAgo(a.published_time)}</span>
+      <span>·</span><span>${timeAgo(a.published_time)}</span>${footSym}
     </div>
   </article>`;
 }
