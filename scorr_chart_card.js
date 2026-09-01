@@ -59,6 +59,7 @@
 
   var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
   var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
+  var _channelUpper = null, _channelLower = null;   // cc#1555: trend-channel line series (primary scale)
   var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
   var _index = false;               // cc#1059: INDEX MODE — NIFTY50 / BANKNIFTY open this same
                                   // popup, but an index has no GVM score, no trend verdict and no
@@ -110,6 +111,9 @@ var _full = false;                // cc#779: fullscreen state
   var _vwapLast = null, _vpocLast = null;     // latest values, surfaced as chips
   var VWAP_COL = "#8a94ad";                   // grey — same family as the PP pivot line
   var VPOC_COL = "#5b7fb3";                   // muted blue — distinct from grey VWAP and the fib palette
+  var CHANNEL_COL = "#17a2b8";                // cc#1555: cyan/teal — the one hue not already in use
+                                               // by pivots (green/grey/red), fib (green->orange->red),
+                                               // GVM (violet) or VWAP/VPOC (grey/blue)
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
@@ -145,12 +149,19 @@ var _full = false;                // cc#779: fullscreen state
     // preference, and a permanently-disabled pill on 6 of 7 timeframes was pure UI noise.
     var gvm = false;    // cc#779: GVM quality-trend line, opt-in, persisted separately (same reason)
     try { gvm = localStorage.getItem("scorr_chart_gvm") === "1"; } catch (e) {}
+    // cc#1555: Channel — its own key too, same reason as GVM. Kept OUT of the pivot+fib string
+    // below on purpose: that encoding is hardcoded for exactly two flags (see _ovStr()) and a third
+    // toggle does not need to force a rewrite of it. Default OFF — an existing page's first-open
+    // chart should not silently gain a third line nobody asked to see yet, unlike pivot/fib which
+    // shipped default-on from the start.
+    var channel = false;
+    try { channel = localStorage.getItem("scorr_chart_channel") === "1"; } catch (e) {}
     try { var s = localStorage.getItem("scorr_chart_overlay");
-      if (s === "none") return { pivot: false, fib: false, gvm: gvm };
-      if (s === "pivot") return { pivot: true, fib: false, gvm: gvm };
-      if (s === "fib") return { pivot: false, fib: true, gvm: gvm };
+      if (s === "none") return { pivot: false, fib: false, gvm: gvm, channel: channel };
+      if (s === "pivot") return { pivot: true, fib: false, gvm: gvm, channel: channel };
+      if (s === "fib") return { pivot: false, fib: true, gvm: gvm, channel: channel };
     } catch (e) {}
-    return { pivot: true, fib: true, gvm: gvm };   // default: pivots + fib on, GVM off
+    return { pivot: true, fib: true, gvm: gvm, channel: channel };   // default: pivots + fib on, GVM/channel off
   }
   function _ovStr() { return _ov.pivot && _ov.fib ? "both" : _ov.pivot ? "pivot" : _ov.fib ? "fib" : "none"; }
   /* cc#960: ratio text. The ratios printed here are read STRAIGHT off FIB_RATIOS / FIB_ZONES above —
@@ -524,6 +535,20 @@ var _full = false;                // cc#779: fullscreen state
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
+    // cc#1555: Channel — third overlay chip, same markup/styling pattern as Pivots and Fib above
+    // (not GVM's custom-colour-when-on treatment below). Available on every timeframe and in both
+    // index and stock mode — it is chart-shaped like pivot/fib, not GVM-shaped, so no TF gate and
+    // no _index gate (cc#1059's own reasoning for why pivot/fib survive index mode).
+    (function () {
+      var b = document.createElement("button");
+      b.textContent = "Channel";
+      var on = _ov.channel;
+      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
+        ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut);
+      b.title = "Price channel — parallel trendlines bounding the loaded range's highs and lows";
+      b.onclick = function () { _toggleOv("channel"); };
+      host.appendChild(b);
+    })();
     // cc#807: the VWAP toggle that used to sit here is DELETED. Session VWAP (and now VPOC) exist only
     // intraday, so the pill was permanently disabled on 6 of the 7 timeframes — noise offering a
     // decision with one right answer. Both levels now render automatically on 5m and are absent
@@ -580,10 +605,12 @@ var _full = false;                // cc#779: fullscreen state
     _ov[kind] = !_ov[kind];
     try {
       if (kind === "gvm") localStorage.setItem("scorr_chart_gvm", _ov.gvm ? "1" : "0");
+      else if (kind === "channel") localStorage.setItem("scorr_chart_channel", _ov.channel ? "1" : "0");
       else localStorage.setItem("scorr_chart_overlay", _ovStr());
     } catch (e) {}
     _paintChrome();
     if (kind === "gvm") { _applyGvm(); }
+    else if (kind === "channel") { _applyChannel(); }
     else { _applyOverlays(); }
   }
 
@@ -647,6 +674,60 @@ var _full = false;                // cc#779: fullscreen state
             autoScale: true
           });
         } catch (e) {}
+  }
+
+  // cc#1555: Channel overlay — two PARALLEL trendlines, computed (not drawn), that literally touch
+  // the loaded range's most extreme high and most extreme low; every other bar sits strictly
+  // between them. Derived from a least-squares regression of CLOSE vs bar index across _lastData
+  // (the SAME source Fib uses), then the regression line is shifted up to the largest
+  // (high[i] - regression[i]) residual and shifted down to the most negative (low[i] - regression[i])
+  // residual — so by construction upperLine(i) >= high[i] and lowerLine(i) <= low[i] for every bar,
+  // with equality at whichever bar set that residual. On the PRIMARY price scale (not a secondary
+  // fixed-range axis like GVM's) — a channel is a price level, exactly like the candles it bounds.
+  function _computeChannel(bars) {
+    var n = bars ? bars.length : 0;
+    if (n < 2) return null;
+    var sumI = 0, sumC = 0, sumII = 0, sumIC = 0, i, b, closes = [];
+    for (i = 0; i < n; i++) {
+      b = bars[i];
+      var c = +b.close;
+      if (!isFinite(c)) return null;   // an unusable bar makes the whole regression unusable
+      closes.push(c);
+      sumI += i; sumC += c; sumII += i * i; sumIC += i * c;
+    }
+    var denom = n * sumII - sumI * sumI;
+    if (!denom) return null;           // degenerate (e.g. n so small the design matrix is singular)
+    var slope = (n * sumIC - sumI * sumC) / denom;
+    var intercept = (sumC - slope * sumI) / n;
+    var upperShift = -Infinity, lowerShift = Infinity;
+    for (i = 0; i < n; i++) {
+      b = bars[i];
+      var reg = slope * i + intercept;
+      var hi = +b.high, lo = +b.low;
+      if (isFinite(hi) && (hi - reg) > upperShift) upperShift = hi - reg;
+      if (isFinite(lo) && (lo - reg) < lowerShift) lowerShift = lo - reg;
+    }
+    if (!isFinite(upperShift) || !isFinite(lowerShift)) return null;   // no finite high/low anywhere
+    var upper = [], lower = [];
+    for (i = 0; i < n; i++) {
+      var reg2 = slope * i + intercept;
+      upper.push({ time: bars[i].time, value: reg2 + upperShift });
+      lower.push({ time: bars[i].time, value: reg2 + lowerShift });
+    }
+    return { upper: upper, lower: lower };
+  }
+  function _applyChannel() {
+    if (!_chart) return;
+    if (_channelUpper) { try { _chart.removeSeries(_channelUpper); } catch (e) {} _channelUpper = null; }
+    if (_channelLower) { try { _chart.removeSeries(_channelLower); } catch (e) {} _channelLower = null; }
+    if (!_ov.channel) return;
+    var pts = _computeChannel(_lastData);
+    if (!pts) return;
+    var opts = { color: CHANNEL_COL, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
+    _channelUpper = _chart.addLineSeries(opts);
+    _channelUpper.setData(pts.upper);
+    _channelLower = _chart.addLineSeries(opts);
+    _channelLower.setData(pts.lower);
   }
   // cc#807: intraday session LEVELS — VWAP and VPOC. Both are automatic on 5m and absent on every
   // other timeframe; there is no toggle (cc#755's pill is gone).
@@ -1108,6 +1189,7 @@ var _full = false;                // cc#779: fullscreen state
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
       _applyIntradayLevels();   // cc#807: flat VWAP + VPOC session levels (5m only; no-op on EOD TFs)
       _applyGvm();        // cc#779: GVM quality-trend line (secondary fixed 0-10 axis; no-op on 5m)
+      _applyChannel();    // cc#1555: trend-channel lines, recomputed against the freshly loaded range
       _loadVerdict();     // cc#779: trend-strength badge, recomputed for THIS timeframe
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_maybeBackfill); } catch (e) {}   // cc#1492: own handler, never merged into _positionFx
@@ -1545,6 +1627,7 @@ var _full = false;                // cc#779: fullscreen state
     _priceLines = []; _lastData = []; _fibBand = null;   // cc#730/#750
     _ilLines = []; _vwapLast = null; _vpocLast = null;   // cc#807 (price lines are owned by _series, removed with it)
     _gvmSeries = null; _verdict = null;     // cc#779 (same — owned by _chart)
+    _channelUpper = null; _channelLower = null;   // cc#1555 (same — owned by _chart, cleared with it)
     _gvmCache = null; _gvmCacheKey = null;  // cc#1501
     _tab = "chart"; _peers = null; _peerOpen = null;
     // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
