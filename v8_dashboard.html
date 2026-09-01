@@ -2832,59 +2832,21 @@ const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 function fmtTs(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return String(ts);return String(p.day).padStart(2,'0')+' '+MON[p.mon]+' '+String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');}
 // cc_task #76 4b: holding days = CURRENT_DATE - entry_ts::date + 1 (Day 1 = entered today)
 function holdDays(ts){if(!ts)return"--";const ed=String(ts).slice(0,10);const t=new Date(Date.now()+(5*60+30)*60000);const td=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');const d1=Date.parse(ed+'T00:00:00Z'),d2=Date.parse(td+'T00:00:00Z');if(isNaN(d1)||isNaN(d2))return"--";return Math.floor((d2-d1)/86400000)+1;}
-// cc#720/cc#728: open-position tags shown right after the symbol (order: SYMBOL · star · NEW). NEW =
-// entered the current/latest trading session (holdDays===1, auto-drops next session — no manual state).
-// Star = this side passes Trade Check: STRONG -> filled ★, anything else (VALID/WATCH/FAIL) -> no
-// marker at all (cc#1018 MARKER_GLYPH_V3, session_log 21764). cc#728: the
-// star now reads the LATEST HOURLY SERVER BATCH (tc_position_stars, scored 09:30-15:30 IST) via ONE
-// endpoint /api/trade-check/position-stars — NO per-symbol live TC call from the render path (the cc#720
-// per-render 15-min cache is retired: it silently aged differently per symbol). data-tckey (not id) so
-// the SAME sym|side across Table + Ladder + mobile all hydrate from the single batch fetch.
-const _tcStarCache = new Map();          // "SYM|SIDE" -> {verdict, score, max, ts}
+// cc#720/cc#728: open-position tags shown right after the symbol (order: SYMBOL \u00b7 flag \u00b7 NEW). NEW =
+// entered the current/latest trading session (holdDays===1, auto-drops next session \u2014 no manual state).
+// cc#1556: the OLD hourly-batch TC star (tc_position_stars via /api/trade-check/position-stars,
+// hydrateTcStars/_fillTcStar/_tcStarHtml/_tcStarCache) is REMOVED here \u2014 it duplicated cc#1547/1548's
+// 5-min consolidated flag (markerFlag, itself sourced from the real primary TC engine as of cc#1548),
+// so two independent amber sources were rendering back-to-back on the same row. One flag, one amber
+// source now. See cc#1556's own completion notes for the repo-wide grep on the now-orphaned endpoint.
 function posTags(x){
-  const key=(x.symbol||'')+'|'+(x.side||'');
   const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
-  // cc#1008: markers on the OPEN book, same maps + endpoint the basket panels and /m/v8 use — the
+  // cc#1008: markers on the OPEN book, same maps + endpoint the basket panels and /m/v8 use \u2014 the
   // founder's locked stars were rendering in the funnel panels but never on the open-position
-  // rows. Inline (not async like the TC star) so they paint with the row; loadPivotStars()
-  // repaints the master pane once the maps land. Order: SYMBOL · flag · TC · NEW.
-  // cc#1547: pivot/activity/dma/tc_strong collapse into ONE flag (markerFlag) — see that function.
-  return markerFlag(x)+'<span class="tc-star" data-tckey="'+key+'" style="white-space:nowrap"></span>'+nw;
-}
-function _tcStarHtml(v,side){
-  if(!v)return'';
-  // cc#1018 MARKER_GLYPH_V3 (founder-locked, session_log 21764): the amber marker is STRONG ONLY.
-  // VALID now returns nothing, exactly like WATCH / FAIL — the outline star is retired, so an amber
-  // marker on a row means one thing only.
-  if(v.verdict!=='STRONG')return'';
-  const title='TC '+Number(v.score).toFixed(1)+'/'+v.max+' '+v.verdict;
-  // V3 also supersedes the cc#933 side-glyph rule FOR THIS MARKER: both sides draw the same filled
-  // star U+2605, no long/short branch. Only the GREEN activity marker still changes shape by side.
-  // Scoring, the verdict itself and the cc#728 hourly batch are untouched; only the drawn character
-  // changes. `side` is kept in the signature — callers pass it and the tooltip contract may want it.
-  return '<span title="'+title+'" style="color:var(--amber,#f5b94a);font-size:13px;line-height:1;margin:0 3px;cursor:default">\u2605</span>';
-}
-function _fillTcStar(key){
-  const v=_tcStarCache.get(key);
-  const side=String(key||'').split('|')[1]||'';   // cc#933: the key is already "SYM|SIDE"
-  try{document.querySelectorAll('.tc-star[data-tckey="'+key+'"]').forEach(el=>{el.innerHTML=v?_tcStarHtml(v,side):'';});}catch(e){}
-}
-// cc#728: ONE call to the hourly-batch endpoint (not one live TC per symbol). Throttled to at most
-// one fetch / 60s so the 60s re-render just re-paints from the cache; the batch only changes hourly.
-let _tcStarsFetchedAt=0;
-function hydrateTcStars(rows){
-  const now=Date.now();
-  const paint=()=>{(rows||[]).forEach(x=>{if(x&&x.symbol&&x.side)_fillTcStar(x.symbol+'|'+x.side);});};
-  if(now-_tcStarsFetchedAt<60000&&_tcStarCache.size){paint();return;}
-  _tcStarsFetchedAt=now;
-  fetchWithTimeout('/api/trade-check/position-stars')
-    .then(r=>r.json()).then(d=>{
-      const map=(d&&d.stars)||{};
-      Object.keys(map).forEach(key=>{const v=map[key];
-        _tcStarCache.set(key,{verdict:v.verdict,score:Number(v.score)||0,max:Number(v.max)||0,ts:now});});
-      paint();
-      Object.keys(map).forEach(_fillTcStar);   // also fill any surface rendered before this landed
-    }).catch(function(){});
+  // rows. Inline (not async) so they paint with the row; loadPivotStars() repaints the master
+  // pane once the maps land. Order: SYMBOL \u00b7 flag \u00b7 NEW.
+  // cc#1547: pivot/activity/dma/tc_strong collapse into ONE flag (markerFlag) \u2014 see that function.
+  return markerFlag(x)+nw;
 }
 // cc_task #76 4c: capitalised basket label + buy=green / sell=red pill
 // cc#880 item 4: the slug -> label map moved to scorr_card_common.js so ONE dictionary answers for
@@ -3511,7 +3473,8 @@ function renderMaster(){
     const day_pnl_pct=(day_pct==null)?null:(isShort?-day_pct:day_pct);
     return{...x,isShort,net_pnl,net_pnl_pct,potential_left,pot_pct,day_pct,day_pnl_pct,sector_seg,sector_day,sector_sd,days:holdDays(x.entry_ts)};
   });
-  setTimeout(function(){hydrateTcStars(openRows);},60);   // cc#720: async TC stars fill after the DOM paints (cached 15m)
+  // cc#1556: the hydrateTcStars(openRows) call that used to sit here is REMOVED along with the
+  // function itself — see posTags() above for the full removal note.
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
@@ -3704,11 +3667,12 @@ const V8_COLS=[
   // cc#1030 — THREE FIXES IN ONE CELL, each with a diagnosis behind it.
   //
   // (1) MARKERS BACK ON MASTER. This cell called pivotStar+pivotAct directly, which QUIETLY DROPPED
-  //     the other half of posTags(): the `.tc-star` span the hourly Trade-Check batch hydrates, and
-  //     the NEW chip. No span, nothing for _fillTcStar to fill — so the amber star could never
-  //     appear on a master row again. My regression, introduced with the cc#1023 registry and
-  //     carried through cc#1028. posTags() is the one place that knows the full marker order
-  //     (pivot · activity · TC · NEW), so the cell calls IT rather than re-listing its parts.
+  //     the other half of posTags(): the `.tc-star` span the hourly Trade-Check batch used to
+  //     hydrate (that whole mechanism is gone, cc#1556 — see posTags() above), and the NEW chip. No
+  //     span, nothing to fill — so the amber star could never appear on a master row again. My
+  //     regression, introduced with the cc#1023 registry and carried through cc#1028. posTags() is
+  //     the one place that knows the full marker order (flag · NEW), so the cell calls IT rather
+  //     than re-listing its parts.
   //
   // (2) THE STRAY "--" PILL, traced not guessed: basketPill -> scorrBasketLabel returns the literal
   //     '--' for a falsy slug, and the /qualified payload does not SELECT q.basket, so every basket
@@ -3985,8 +3949,11 @@ function markerLegend(){
   try{ return window.ScorrMarkerLegend ? window.ScorrMarkerLegend(MK_LEGEND) : ''; }catch(e){ return ''; }
 }
 // cc#1010: OPEN POSITIONS marker legend as an (i) popover. Each row shows the REAL coloured glyph
-// (same character + colour the position rows render via pivotStar/pivotAct/_tcStarHtml), then its
-// meaning — so the legend and the rows can never drift. Click (i) to open; a document click closes it.
+// (same character + colour the position rows render via markerFlag, cc#1556 — pivotStar/pivotAct/
+// _tcStarHtml are retired, this doc comment previously still named them), then its meaning — so the
+// legend and the rows can never drift. Click (i) to open; a document click closes it. Distinct from
+// cc#1547's own per-row flag-tap popover (ScorrMarkerFlagDetailHtml): this (i) is a static legend of
+// every possible glyph in one place, still earning its keep alongside the per-row detail popover.
 function markerLegendPopover(){
   const row=(glyph,col,txt)=>`<div style="display:flex;align-items:center;gap:9px;padding:3px 0">`+
     `<span style="color:${col};font-size:14px;line-height:1;width:16px;text-align:center;flex-shrink:0">${glyph}</span>`+
