@@ -58,7 +58,9 @@ def _safe(label, fn, default=None):
 
 
 # cc#348: TC Score chip — computed on sheet-open via the SAME engine the /check page uses
-# (native_trade_check.compute_trade_check), cached 5 min per (symbol, side). Never reads the
+# (tc_resolver.get_primary_styles(), corrected cc#1549 — was a direct tc_v4_dual import; the
+# comment naming native_trade_check.compute_trade_check was stale, this has always scored the
+# v4 dual family, never the native v3 engine), cached 5 min per (symbol, side). Never reads the
 # stale tc_cache / tc_screener_cache. verdict_class pass/watch/fail -> STRONG/VALID/WEAK.
 _TC_CACHE: Dict[tuple, tuple] = {}
 _TC_TTL = 300.0
@@ -77,8 +79,8 @@ def _tc_score(sym: str, side: Optional[str]) -> Optional[Dict[str, Any]]:
         return c[1]
     res = None
     try:
-        from tc_v4_dual import trade_check_v4_dual
-        r = trade_check_v4_dual(sym, v4side)
+        from tc_resolver import get_primary_styles   # cc#1549: route through the resolver, not tc_v4_dual directly
+        r = get_primary_styles()(sym, v4side)
         b = r.get("best") if (r and not r.get("error")) else None
         if b:
             bside = b.get("side")

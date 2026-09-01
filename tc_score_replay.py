@@ -300,7 +300,7 @@ def selfcheck(symbol="RELIANCE", side="BUY", style="MOMENTUM"):
     Returns a dict rather than asserting, so a caller can post the comparison rather than just a
     pass or fail. RUNS SERVER-SIDE ONLY: it needs DATABASE_URL.
     """
-    from tc_v4_dual import trade_check_v4_dual
+    from tc_resolver import get_primary_styles   # cc#1549: resolver, not a hardcoded tc_v4_dual import
     out = {"symbol": symbol, "bucket": f"{side}-{style[:3]}"}
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""SELECT max(ts) FROM intraday_prices
@@ -311,7 +311,7 @@ def selfcheck(symbol="RELIANCE", side="BUY", style="MOMENTUM"):
         out["at"] = at.isoformat()
         d = _asof_load(cur, symbol, at)
     mine = score_card(d, style, side)
-    live = trade_check_v4_dual(symbol, side)
+    live = get_primary_styles()(symbol, side)
     theirs = None
     for c in (live.get("cards") or []):
         if c.get("style") == style and c.get("side") == side:
