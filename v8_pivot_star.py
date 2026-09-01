@@ -594,27 +594,50 @@ def run_tc_score_tick(conn=None) -> Dict[str, Any]:
                 ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
             pos = [(r[0], (r[1] or "LONG").upper()) for r in cur.fetchall()]
 
-        from native_trade_check import compute_trade_check
+        # cc#1548 P0: native_trade_check is NOT the platform's primary Trade Check engine — it is
+        # one of the older, non-primary scorers tc_resolver.py's own docstring names explicitly.
+        # The real primary is the 4-bucket best-of-side engine behind tc_resolver.get_primary_tc()
+        # (v4.0), reached here via get_primary_styles() (its style-resolving variant, cc#748) so a
+        # position is scored on its OWN side's two style cards (BUY-MOM/BUY-REV or SELL-MOM/
+        # SELL-REV) and best_card() (cc#1033, founder-locked) picks the winner by score/max ratio —
+        # exactly the "position's own side, best-of" behaviour cc#1540 wanted, on the right engine.
+        # cc#728/#738 already lock side-narrowing; this fix only repoints WHICH engine answers it.
+        from tc_resolver import get_primary_styles
+        scorer = get_primary_styles()
         scored, failed, wrote = 0, 0, 0
         for sym, side in pos:
+            # v8_paper_positions speaks LONG/SHORT; tc_v4_dual speaks BUY/SELL — never assumed
+            # interchangeable. `side` (LONG/SHORT) is still what gets STORED, unchanged, since
+            # every downstream reader (tc_score_latest, the amber query below, cc#1547's popover)
+            # joins against the position's own LONG/SHORT side; only the engine CALL is mapped.
+            mapped_side = "BUY" if side == "LONG" else "SELL"
             try:
-                res = compute_trade_check(sym, side=side)
+                res = scorer(sym, side=mapped_side)
             except Exception as e:
-                log.warning("cc#1540 compute_trade_check(%s) raised: %s", sym, e)
+                log.warning("cc#1548 get_primary_styles()(%s, side=%s) raised: %s", sym, mapped_side, e)
                 failed += 1
                 continue
-            if not res.get("ok") or res.get("total") in (None, 0):
+            best = res.get("best") if not res.get("error") else None
+            if not best or best.get("score") is None or best.get("max") in (None, 0) or best.get("score100") is None:
                 failed += 1
                 continue
-            score, total = float(res["score"]), float(res["total"])
-            pct = round(score / total * 100.0, 1)
+            score, total, pct = float(best["score"]), float(best["max"]), float(best["score100"])
+            # cc#1548 critical caveat (founder-flagged, do not silently smooth over): SELL-side
+            # weights in tc_rule_weights are not yet live-calibrated, so a SHORT-mapped SELL tick
+            # carries best_score10_weighted=False. score_pct (the unweighted score/max ratio x100)
+            # is still mathematically valid, but it is NOT on the same calibrated footing as a
+            # weighted BUY/LONG tick — flagged in-band, in the existing verdict_class text column,
+            # rather than a new one (no ALTER TABLE, per this card's own scope).
+            verdict_class = res.get("best_verdict") or "REJECT"
+            if not res.get("best_score10_weighted"):
+                verdict_class = f"{verdict_class} (unweighted)"
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO v8_tc_score_ticks
                       (symbol, ts, side, score, total, score_pct, verdict_class)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (symbol, ts, side) DO NOTHING
-                """, (sym, ts, side, score, total, pct, res.get("verdict_class")))
+                """, (sym, ts, side, score, total, pct, verdict_class))
                 wrote += cur.rowcount
             scored += 1
         # 30-day rolling retention, same job (founder amendment) — 5-min ticks accumulate far
