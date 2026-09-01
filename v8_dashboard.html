@@ -7651,13 +7651,41 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap;align-items:center}
 .tc13-wrap .stats b{color:var(--tx2);font-weight:600}
 .tc13-wrap .rcard{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.tc13-wrap .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-.tc13-wrap .tbl th{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:9px 12px;border-bottom:1px solid var(--line)}
+/* cc#1544 P1: founder screenshot 1-Sep showed the Open Book table cut off mid-column ('SL |
+   TA...') — .rcard's overflow:hidden was clipping any row whose natural nowrap width exceeded
+   the box (an auto-layout table's width:100% is a suggestion Chrome overrides once min-content
+   is wider — confirmed live). Fix follows #pane-index's OWN established convention (cc#1168)
+   instead of inventing a new one: a .tbl-scroll div is now the real horizontal-scroll boundary
+   inside .rcard (which keeps overflow:hidden purely for its rounded corners), .tbl-hold gives
+   the fade-edge affordance, .scrollhint gives the text one, both driven by live measurement
+   (tc13MarkScroll) — never by a width guess, and both go quiet once a table fits or the reader
+   has scrolled to the end. */
+.tc13-wrap .tbl-hold{position:relative}
+.tc13-wrap .tbl-scroll{overflow-x:auto;scrollbar-width:thin;
+    scrollbar-color:var(--line2) transparent;-webkit-overflow-scrolling:touch}
+.tc13-wrap .tbl-scroll::-webkit-scrollbar{height:7px}
+.tc13-wrap .tbl-scroll::-webkit-scrollbar-track{background:transparent}
+.tc13-wrap .tbl-scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+.tc13-wrap .tbl-hold::after{content:'';position:absolute;top:0;right:0;bottom:0;width:36px;
+    pointer-events:none;opacity:0;transition:opacity .18s ease;
+    background:linear-gradient(90deg,transparent,var(--well))}
+.tc13-wrap .tbl-hold.clipped::after{opacity:1}
+.tc13-wrap .scrollhint{font-family:var(--f-m);font-size:9px;font-weight:700;letter-spacing:.08em;
+    color:var(--tx3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+    white-space:nowrap;display:none}
+.tc13-wrap .scrollhint.on{display:inline-block}
+/* cc#1544 legibility pass (founder: "clear and bigger"): modest bump now the box has verified
+   headroom at normal desktop widths (measured live — the table only needs to scroll under ~700px
+   of available width with realistic row data, well below any real desktop viewport this box
+   renders at). 12.5px->13.5px, cell padding +1-2px; still nowhere near forcing a scroll that
+   wasn't already there. */
+.tc13-wrap .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tc13-wrap .tbl th{font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line)}
 .tc13-wrap .tbl th:first-child,.tc13-wrap .tbl th:nth-child(2),.tc13-wrap .tbl td:first-child,.tc13-wrap .tbl td:nth-child(2){text-align:left}
-.tc13-wrap .tbl td{padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+.tc13-wrap .tbl td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
 .tc13-wrap .tbl tr:last-child td{border-bottom:none}
 .tc13-wrap .tbl tr:hover td{background:var(--raise)}
-.tc13-wrap .tbl .sym{font:700 12.5px var(--f-d);font-family:var(--f-d)!important}
+.tc13-wrap .tbl .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
 .tc13-wrap .side{font:700 9px var(--f-m);letter-spacing:.1em;padding:3px 7px;border-radius:4px;border:1px solid}
 .tc13-wrap .side.buy{color:var(--gr);border-color:rgba(var(--gr-rgb),.45)}
 .tc13-wrap .side.sell{color:var(--rd);border-color:rgba(var(--rd-rgb),.45)}
@@ -7746,15 +7774,16 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td></tr>';
     }).join('') : '<tr class="empty-row"><td colspan="8">No open TC13 positions</td></tr>';
     return '<section><div class="sh"><h2>Open Book</h2>'
+      +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
             :'<span class="badge b-eng">'+esc(dateStr||'')+'</span>')
       +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
       +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Date</label>'
       +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'"></span></div></div>'
-      +'<div class="rcard"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<div class="rcard"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div></section>';
+      +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
   function closedTable(rows){
@@ -7770,6 +7799,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
     }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions for this date</td></tr>';
     return '<section><div class="sh"><h2>Closed Book</h2>'
+      +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
       +'<div class="stats">'
       +'<span>Closed <b>'+stats.closed+'</b></span>'
@@ -7777,9 +7807,30 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
       +'<span>Net <b class="'+cl2(stats.net_pts_pct)+'">'
         +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span></div></div>'
-      +'<div class="rcard"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<div class="rcard"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th>Date</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div></section>';
+      +'<tbody>'+body+'</tbody></table></div></div></div></section>';
+  }
+
+  // cc#1544: same measurement convention as #pane-index's idxMarkScroll (cc#1168) — the clipped/
+  // hint classes are driven by scrollWidth vs clientWidth, never a width guess, and go quiet the
+  // moment a table fits or the reader has scrolled to the end. A local copy because TC13's
+  // sections use .rcard/<section>, not #pane-index's .card, so the hint lookup is section-scoped
+  // here instead of card-scoped.
+  function tc13MarkScroll(host){
+    if(!host) return;
+    host.querySelectorAll('.tbl-hold').forEach(function(hold){
+      var sc=hold.querySelector('.tbl-scroll'); if(!sc) return;
+      var section=hold.closest('section');
+      var hint=section?section.querySelector('.scrollhint'):null;
+      var mark=function(){
+        var more = sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 1;
+        hold.classList.toggle('clipped', more);
+        if(hint) hint.classList.toggle('on', more);
+      };
+      mark();
+      if(!sc._ccScrollBound){ sc.addEventListener('scroll', mark, {passive:true}); sc._ccScrollBound=true; }
+    });
   }
 
   function render(d){
@@ -7791,7 +7842,22 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +closedTable(allRows)
       +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
+    try{ tc13MarkScroll(box); }catch(e){ console.warn('[tc13 scroll]', e && e.message); }
   }
+
+  // cc#1544: TC13 has no auto-refresh poll (unlike Index Intel, which re-measures on every
+  // loadLive() tick), so a reader who resizes the window after the tab is already open would
+  // otherwise be stuck with whatever clipped/on state was measured at the ORIGINAL width — a
+  // stale affordance is exactly the silent-cut-off failure mode this card exists to close.
+  // Debounced so a drag-resize doesn't spam layout reads.
+  var _tc13ResizeT=null;
+  window.addEventListener('resize', function(){
+    clearTimeout(_tc13ResizeT);
+    _tc13ResizeT=setTimeout(function(){
+      var box=document.getElementById('tc13Box');
+      if(box && box.querySelector('.tc13-wrap')) tc13MarkScroll(box);
+    }, 150);
+  }, {passive:true});
 
   function load(dateStr){
     var box=document.getElementById('tc13Box');
