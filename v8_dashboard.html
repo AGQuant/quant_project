@@ -1471,6 +1471,7 @@ const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
   segmentDay:"/api/v8/segment_day",          // cc#1102: futures-theme equal-weight day change
+  tcScoreLatest:"/api/v8/tc_score_latest",   // cc#1542: latest Trade Check score per open position
   adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
   paper:"/api/paper/status",
@@ -3704,6 +3705,12 @@ const V8_COLS=[
   ["side","Side",         x=>`<td><span class="badge ${String(x.side||'').toUpperCase()==='SHORT'?'b-short':'b-long'}">${x.side||'--'}</span></td>`],
   ["entry_ts","Entry Time",x=>`<td style="color:var(--mut);${V8_COL_MONO};font-size:11px">${_cD(x.entry_ts,fmtTs)}</td>`],
   ["days","Days",         x=>`<td style="text-align:center">${_cD(x.days,v=>v)}</td>`],
+  // cc#1542: the position's CURRENT Trade Check score off v8_tc_score_ticks (5-min series,
+  // cc#1540/1541), via /api/v8/tc_score_latest. Centered like Days (its neighbour). Neutral
+  // colour on purpose — the amber star already carries the >80%-and-rising judgement; a second
+  // colour rule on the raw number would double-encode it. Dash-on-null per _cD: expected until
+  // a symbol's first tick lands.
+  ["tc_score","TC %",     x=>`<td style="text-align:center">${_cD(x.tc_score,v=>Number(v).toFixed(0)+'%')}</td>`],
   ["day_1d","1D%",        x=>`<td class="${cls(x.day_1d)}">${_cD(x.day_1d,v=>sign(v,1)+'%')}</td>`],
   ["mom_2d","2D Mom%",    x=>`<td class="${cls(x.mom_2d)}">${_cD(x.mom_2d,v=>sign(v,1)+'%')}</td>`],
   ["dma_50","DMA50",      x=>`<td class="${cls(x.dma_50)}">${_cD(x.dma_50,v=>num(v,0))}</td>`],
@@ -3785,6 +3792,8 @@ function v8NormRow(x,ctx){
   // Stock metrics: the basket feed carries its own; the paper book carries none, so master fills
   // them from metricsAll and prints -- for what even that lacks (pivots, which live per basket).
   ['day_1d','mom_2d','dma_50','rsi_month','gvm_score'].forEach(k=>{if(x[k]==null&&m[k]!=null)x[k]=m[k];});
+  // cc#1542: TC % from the tcScores map, side-keyed like ctx.paper. Null stays null — _cD dashes it.
+  if(x.tc_score==null){const _t=(ctx.tcScores||{})[x.symbol+'|'+String(x.side||'').toUpperCase()];if(_t&&_t.score_pct!=null)x.tc_score=_t.score_pct;}
   ['pp','r1','s1'].forEach(k=>{if(x[k]===undefined)x[k]=null;});
   x.sector_seg=seg; x.sector_day=sd?sd.day_pct:null; x.sector_sd=sd||null;
   if(!isOpen){
@@ -3855,7 +3864,10 @@ function v8NormRow(x,ctx){
 function v8RowCtx(surface,extra){
   const met={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)met[m.symbol]=m;});
   const pap={};((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p&&p.symbol)pap[p.symbol+'|'+String(p.side||'').toUpperCase()]=p;});
-  return Object.assign({surface:surface,metrics:met,paper:pap,segDay:(cache.segmentDay&&cache.segmentDay.segments)||{}},extra||{});
+  // cc#1542: latest TC score per position, keyed symbol|SIDE like ctx.paper — a score is
+  // side-specific the way a position is.
+  const tcs={};((cache.tcScores&&cache.tcScores.rows)||[]).forEach(t=>{if(t&&t.symbol)tcs[t.symbol+'|'+String(t.side||'').toUpperCase()]=t;});
+  return Object.assign({surface:surface,metrics:met,paper:pap,tcScores:tcs,segDay:(cache.segmentDay&&cache.segmentDay.segments)||{}},extra||{});
 }
 
 // ── the two VIEWS ───────────────────────────────────────────────────────────────────────────────
@@ -3864,7 +3876,9 @@ function v8RowCtx(surface,extra){
 // both gone, per the cc#1020 lesson about a stale comment outliving the code it described).
 // No Status column: a master row is always OPEN. No signal metrics: master is the book, not the
 // scan. cc#1019 futures purity and the cc#885 FUT labels layer ON TOP of this list, master-only.
-const V8_VIEW_MASTER=["symbol","entry_ts","days","side","entry_price","cmp","target","stop_loss",
+// cc#1542: tc_score sits immediately after days (the founder's stated position). One edit covers
+// master AND every basket tab — V8_VIEW_BASKET mirrors this array by reference (cc#1030).
+const V8_VIEW_MASTER=["symbol","entry_ts","days","tc_score","side","entry_price","cmp","target","stop_loss",
   "net_pnl","net_pnl_pct","potential_left","day_pnl_pct","sector_day"];
 // V8_VIEW_BASKET (22338 wins over 22324 here): the EXACT master mirror — status badge, then the
 // master operational columns in master order. The signal metrics (1D%, 2D Mom%, DMA50, RSIm, GVM,
@@ -5097,6 +5111,7 @@ async function loadAll(){
     }),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
+    run('tcScores',()=>getJSON(EP.tcScoreLatest),()=>{renderMasterPanels();}),  // cc#1542: TC % column
     run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);loadAdrChart();}),   // cc#443/#448: ADR trend row + popout chart
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
