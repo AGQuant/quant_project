@@ -80,6 +80,15 @@
 #v8p .sbar i{display:block;height:100%}
 #v8p .sbar.buy i{background:linear-gradient(90deg,var(--up),var(--up-d))} #v8p .sbar.sell i{background:linear-gradient(90deg,var(--down),var(--down-d))}
 #v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+/* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
+#v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+#v8p .kw{padding:10px 10px 9px}
+#v8p .kw .kl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mute)}
+#v8p .kw .kn{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
+#v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
+#v8p .filters{display:flex;gap:6px;margin:8px 0 10px;overflow-x:auto;scrollbar-width:none}
+#v8p .filters::-webkit-scrollbar{display:none}
+#v8p .filters .chip{flex:none}
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
 #v8p .plist{display:flex;flex-direction:column;gap:8px}
 #v8p .prow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center}
@@ -110,6 +119,8 @@
   <div class="sect">Market mood <span class="r" id="mood-r"></span></div>
   <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
   <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>
+  <div class="kpi" id="open-kpi"></div>
+  <div class="filters" id="open-filters"></div>
   <div class="plist" id="sec-open"><div class="slab dense empty">Loading the open book…</div></div>
   <div class="vmore" id="open-more"></div>
   <div style="height:18px"></div>
@@ -210,7 +221,35 @@ function renderMood(){
   if(r) r.textContent = String(m.checked_at||'');
 }
 /* ── 2 · OPEN POSITIONS ──────────────────────────────────────────────────────────────── */
-var OPEN_LIMIT = 8, openAll = false;
+var OPEN_LIMIT = 8, openAll = false, openFilter = 'all';
+function kpiWell(label, val, cls, sub){ return '<div class="kw well-up"><div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>'; }
+/* wells read the canon keys straight off the payload (rule 13): unrealised / long / short */
+function renderKpi(bk, rows){
+  var el = document.getElementById('open-kpi');
+  if(!bk){ el.innerHTML = ''; return; }
+  var L = bk.long||{}, S = bk.short||{};
+  var sub = num(bk.unrealised_pct) ? pct(bk.unrealised_pct,1)+(num(bk.deployed)?' on '+inrShort(bk.deployed):'') : (num(bk.deployed)?'on '+inrShort(bk.deployed):'—');
+  el.innerHTML =
+    kpiWell('UNREALISED', inr(bk.unrealised), sgn(bk.unrealised), sub) +
+    kpiWell('LONG', inr(L.unrealised), sgn(L.unrealised), (num(L.n)?L.n:0)+' position'+(L.n===1?'':'s')) +
+    kpiWell('SHORT', inr(S.unrealised), sgn(S.unrealised), (num(S.n)?S.n:0)+' position'+(S.n===1?'':'s'));
+}
+/* chips come from the rows themselves: side counts, then one chip per basket seen in the book */
+function renderFilters(rows){
+  var el = document.getElementById('open-filters');
+  if(!rows.length){ el.innerHTML=''; return; }
+  var nL = rows.filter(function(p){ return p.side==='LONG'; }).length, nS = rows.length - nL;
+  var bks = {}; rows.forEach(function(p){ var k = p.basket||'?'; if(!bks[k]) bks[k]={n:0,label:p.basket_label||k}; bks[k].n++; });
+  function chip(key, txt){ return '<span class="chip'+(openFilter===key?' gd':'')+'" data-open-filter="'+esc(key)+'">'+txt+'</span>'; }
+  var h = chip('all','All '+rows.length) + chip('side:LONG','Long '+nL) + chip('side:SHORT','Short '+nS);
+  Object.keys(bks).sort().forEach(function(k){ h += chip('bk:'+k, esc(String(bks[k].label).replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'))+' '+bks[k].n); });
+  el.innerHTML = h;
+}
+function applyFilter(rows){
+  if(openFilter==='all') return rows;
+  var m = openFilter.split(':');
+  return rows.filter(function(p){ return m[0]==='side' ? p.side===m[1] : (p.basket||'?')===m.slice(1).join(':'); });
+}
 /* Track geometry only (no P&L): 0 = stop, 1 = target for both sides. `progress` for the CMP
    marker is the endpoint's own field; the entry marker uses the same normalisation locally. */
 function trkFrac(v, p){
@@ -254,11 +293,13 @@ function renderOpen(){
   var bk = STATE.book, el = document.getElementById('sec-open'), more = document.getElementById('open-more');
   var n = document.getElementById('open-n'), r = document.getElementById('open-r');
   more.innerHTML = '';
-  if(!bk || !bk.positions){ n.textContent=''; r.textContent=''; el.innerHTML='<div class="slab dense" id="open-empty"></div>'; emptyBox('open-empty', 'Open book is not available right now.'); return; }
-  var rows = bk.positions.slice().sort(function(a,b){ return (num(b.unrealised)?b.unrealised:-Infinity) - (num(a.unrealised)?a.unrealised:-Infinity); });
-  n.textContent = String(rows.length);
+  if(!bk || !bk.positions){ n.textContent=''; r.textContent=''; renderKpi(null, []); renderFilters([]); el.innerHTML='<div class="slab dense" id="open-empty"></div>'; emptyBox('open-empty', 'Open book is not available right now.'); return; }
+  var all = bk.positions.slice().sort(function(a,b){ return (num(b.unrealised)?b.unrealised:-Infinity) - (num(a.unrealised)?a.unrealised:-Infinity); });
+  n.textContent = String(all.length);
   r.textContent = num(bk.brokerage_per_trade) ? 'net of ₹'+bk.brokerage_per_trade+'/trade' : '';
-  if(!rows.length){
+  renderKpi(bk, all); renderFilters(all);
+  var rows = applyFilter(all);
+  if(!all.length){
     el.innerHTML = '<div class="slab dense empty">No open positions right now. The engine enters only when a stock clears all 9 checks and a slot is free.</div>'+asofLine(bk.as_of);
     return;
   }
@@ -295,7 +336,8 @@ function load(){
 }
 document.getElementById('v8p').addEventListener('click', function(e){
   var t = e.target.closest('[data-retry]'); if(t){ load(); return; }
-  var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); }
+  var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); return; }
+  var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); }
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
