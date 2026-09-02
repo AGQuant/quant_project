@@ -157,6 +157,20 @@
 #gvp .g-tile .g-tl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)}
 #gvp .g-tile .g-tv{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px}
 #gvp .g-tile .g-ts{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
+/* peers ladder (ref .lad) */
+#gvp .g-lad{display:grid;grid-template-columns:22px 1fr auto auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+#gvp .g-lad:last-child{border-bottom:0}
+#gvp .g-lad .g-rk{font-family:var(--mono);color:var(--dim);font-size:11px}
+#gvp .g-lad .g-ls{font-weight:700}
+#gvp .g-lad .g-lg{font-family:var(--mono);font-weight:800;min-width:34px;text-align:right}
+#gvp .g-lad .g-vd{min-width:64px;text-align:center}
+#gvp .g-lad.me{background:var(--gold-d);margin:0 -8px;padding:7px 8px;border-radius:6px;border-bottom:0}
+#gvp .g-lad.me .g-ls{color:var(--gold)}
+#gvp .g-lad.g-full{grid-template-columns:22px 1fr auto auto auto auto}
+#gvp .g-lad .g-lx{font-family:var(--mono);font-size:10.5px;color:var(--mute);min-width:40px;text-align:right}
+#gvp .g-ladhead{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 12px;font-family:var(--mono);font-size:10.5px;color:var(--mute);margin-bottom:8px}
+#gvp .g-more{margin-top:10px;display:flex;justify-content:center}
+#gvp .g-more .tag{padding:6px 12px;cursor:pointer}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -495,7 +509,45 @@ function secMomentum(d){
   return head+'<section class="slab">'+tiles+(rows?'<div style="margin-top:12px">'+rows+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
 function secMomentum_old(d){ var y=bmRow(d,'ret_1y'), m=bmRow(d,'ret_1m'); return sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1))+sumLine(['1 year <b class="'+(y&&num(y.company)?(y.company>=0?'up':'dn'):'')+'">'+(y?bmVal(y):'—')+'</b>','1 month <b class="'+(m&&num(m.company)?(m.company>=0?'up':'dn'):'')+'">'+(m?bmVal(m):'—')+'</b>']); }
-function secPeers(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
+/* Peers card (36513 cards.peers): ladder top 4, collapsed middle, self highlighted gold, next
+   1-2, collapsed tail; header sector GVM + sector rank; expand to the full ladder with PE / ROE / 1Y. */
+var peersFull = false;
+function vdTag(v){ v = String(v||''); var c = /^(excellent|good)$/i.test(v) ? 'up' : /^weak$/i.test(v) ? 'dn' : 'am'; return '<span class="g-vd tag '+c+'">'+esc(v.toUpperCase()||'—')+'</span>'; }
+function ladRow(r, full){
+  var cls = 'g-lad'+(r.is_self?' me':'')+(full?' g-full':'');
+  var extra = full ? '<span class="g-lx">'+(num(r.pe)?r.pe.toFixed(0)+'×':'—')+'</span><span class="g-lx">'+(num(r.roe)?r.roe.toFixed(0)+'%':'—')+'</span><span class="g-lx '+(num(r.ret_1y)?(r.ret_1y>=0?'up':'dn'):'')+'">'+(num(r.ret_1y)?(r.ret_1y>0?'+':'')+r.ret_1y.toFixed(0)+'%':'—')+'</span>' : '';
+  return '<div class="'+cls+'"><span class="g-rk">'+(num(r.rank)?r.rank:'')+'</span><span class="g-ls">'+esc(r.symbol)+'</span><span class="g-lg'+(r.is_self?' gd':'')+'">'+fx(r.gvm,2)+'</span>'+(full?extra:vdTag(r.verdict))+'</div>';
+}
+function ladGap(n, words, gvmTxt){ return '<div class="g-lad"><span class="g-rk">…</span><span class="g-ls mu">'+n+' more'+(words?' · '+words:'')+'</span><span class="g-lg mu">'+esc(gvmTxt||'')+'</span><span></span></div>'; }
+function secPeers(d){
+  var sg = (d.extras||{}).segment_ctx || {}, lad = (d.ladder||[]).slice().sort(function(a,b){ return (a.rank||0)-(b.rank||0); });
+  var head = sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''));
+  if(!lad.length) return head+'<section class="slab"><div class="g-empty">No peer ladder for this segment yet.</div></section>';
+  var top = '<div class="g-ladhead"><span>Sector GVM '+fx(sg.mcap_wtd_gvm,2)+(num(sg.sector_rank)&&num(sg.sector_total)?' · rank '+sg.sector_rank+' of '+sg.sector_total:'')+'</span><span>sorted by GVM</span></div>';
+  var body = '';
+  if(peersFull || lad.length <= 8){
+    body = '<div class="g-lad g-full" style="border-bottom:1px solid var(--line)"><span class="g-rk">#</span><span class="g-ls mu" style="font-family:var(--mono);font-size:10px;letter-spacing:1px">COMPANY</span><span class="g-lg mu" style="font-size:10px">GVM</span><span class="g-lx">PE</span><span class="g-lx">ROE</span><span class="g-lx">1Y</span></div>';
+    body += lad.map(function(r){ return ladRow(r, true); }).join('');
+  } else {
+    var meIdx = -1; for(var i=0;i<lad.length;i++) if(lad[i].is_self){ meIdx = i; break; }
+    var show = {};
+    for(var k=0;k<4;k++) show[k] = 1;
+    if(meIdx >= 0){ show[meIdx] = 1; if(meIdx-1 >= 0) show[meIdx-1] = 1; if(meIdx+1 < lad.length) show[meIdx+1] = 1; }
+    var i2 = 0;
+    while(i2 < lad.length){
+      if(show[i2]){ body += ladRow(lad[i2], false); i2++; continue; }
+      var j = i2; while(j < lad.length && !show[j]) j++;
+      var seg = lad.slice(i2, j), good = seg.filter(function(r){ return /^(excellent|good)$/i.test(r.verdict||''); }).length;
+      var words = good === seg.length ? 'good' : good === 0 ? 'weak' : 'mixed';
+      var gv = seg.length ? (num(seg[seg.length-1].gvm) && num(seg[0].gvm) ? (j >= lad.length ? '<'+seg[0].gvm.toFixed(1) : seg[seg.length-1].gvm.toFixed(1)+'+') : '') : '';
+      body += ladGap(seg.length, words, gv);
+      i2 = j;
+    }
+  }
+  var more = lad.length > 8 ? '<div class="g-more"><span class="tag mu" data-peers-toggle="1">'+(peersFull ? 'Compact ladder ▴' : 'Full ladder with PE · ROE · 1Y ▾')+'</span></div>' : '';
+  return head+'<section class="slab">'+top+body+more+'<div class="g-asof">score as of '+esc(sg.score_date||d.score_date||'—')+'</div></section>';
+}
+function secPeers_old(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
 function secResults(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
 function secFinancials(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
 function secHolders(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
@@ -559,7 +611,8 @@ function loadLanding(){
 document.getElementById('gvp').addEventListener('click', function(e){
   var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
-  var t = e.target.closest('[data-trend]'); if(t){ openChart(); }
+  var t = e.target.closest('[data-trend]'); if(t){ openChart(); return; }
+  var pt = e.target.closest('[data-peers-toggle]'); if(pt){ peersFull = !peersFull; var pe = document.getElementById('peers'); var sec = pe && pe.nextElementSibling; if(sec){ var tmp = document.createElement('div'); tmp.innerHTML = secPeers(STATE.co); pe.parentNode.replaceChild(tmp.children[1], sec); } }
 });
 /* ── boot ────────────────────────────────────────────────────────────────────────────── */
 var s0 = symFromUrl();
