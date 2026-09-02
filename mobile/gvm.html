@@ -679,7 +679,60 @@ function secFinancials(d){
   return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
 }
 function secFinancials_old(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
-function secHolders(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
+/* Holders card (36513 cards.holders): 4 tiles from financials.shareholding (Promoters, FIIs + DIIs,
+   Public, No. of Shareholders) with plain subs, FII vs DII 12-quarter lines, one plain-words line
+   from the inst_chg benchmark rank. */
+function shRow(sh, re){ if(!sh || !sh.rows) return null; for(var i=0;i<sh.rows.length;i++) if(re.test(sh.rows[i].label||'')) return sh.rows[i]; return null; }
+function lastN(row, n){ if(!row) return []; return row.values.slice(-n); }
+function lastNum(row){ var v = lastN(row, 40); for(var i=v.length-1;i>=0;i--) if(num(v[i])) return v[i]; return null; }
+function firstNum(vals){ for(var i=0;i<vals.length;i++) if(num(vals[i])) return vals[i]; return null; }
+function qLabel(p){ var m = /^(\w{3}) (\d{4})$/.exec(String(p||'')); return m ? m[1]+' '+m[2].slice(2) : String(p||''); }
+function fiiDiiSvg(sh, fii, dii){
+  if(!sh || !sh.periods || !fii || !dii) return '';
+  var n = Math.min(12, sh.periods.length), per = sh.periods.slice(-n), a = lastN(fii, n), b = lastN(dii, n);
+  if(a.filter(num).length < 2 || b.filter(num).length < 2) return '';
+  var W = 360, H = 100, L = 10, R = 350, T = 8, B = 92;
+  var all = a.concat(b).filter(num), hi = Math.max.apply(null, all), lo = Math.min.apply(null, all); if(hi === lo) hi = lo + 1;
+  var y = function(v){ return (B - (v-lo)/(hi-lo)*(B-T)).toFixed(1); }, x = function(i){ return (L + (R-L)*i/(n-1)).toFixed(1); };
+  var pl = function(vals, col){ var pts = []; vals.forEach(function(v,i){ if(num(v)) pts.push(x(i)+','+y(v)); }); return '<polyline fill="none" stroke="'+col+'" stroke-width="2" points="'+pts.join(' ')+'"/>'; };
+  var la = lastNum(fii), lb = lastNum(dii);
+  return '<div class="g-lbl">FII vs DII, '+n+' QUARTERS (%)</div><svg class="g-ch2" viewBox="0 0 '+W+' '+H+'" aria-hidden="true">'+pl(b,'var(--aqua)')+pl(a,'var(--amber)')+
+    (num(lb)?'<text x="'+(R+2)+'" y="'+Math.max(9, parseFloat(y(lb))-6).toFixed(1)+'" font-family="var(--mono)" font-size="9" fill="var(--aqua)" text-anchor="end">DII '+lb.toFixed(1)+'</text>':'')+
+    (num(la)?'<text x="'+(R+2)+'" y="'+Math.min(H-2, parseFloat(y(la))+12).toFixed(1)+'" font-family="var(--mono)" font-size="9" fill="var(--amber)" text-anchor="end">FII '+la.toFixed(1)+'</text>':'')+
+    '</svg><div class="g-cap2"><span>'+esc(qLabel(per[0]))+'</span><span>'+esc(qLabel(per[Math.floor(n/2)]))+'</span><span>'+esc(qLabel(per[n-1]))+'</span></div>';
+}
+function trendWords(vals, unit){
+  var v = vals.filter(num); if(v.length < 2) return '';
+  var a = v[0], b = v[v.length-1], d = b - a;
+  if(Math.abs(d) < 0.15) return 'steady';
+  return (d > 0 ? 'rising' : 'falling')+' · '+a.toFixed(1)+' → '+b.toFixed(1);
+}
+function secHolders(d){
+  var sh = (d.financials||{}).shareholding, per = sh && sh.periods ? sh.periods[sh.periods.length-1] : '';
+  var head = sectHead('holders','Holders', per ? qLabel(per).replace(/(\w{3}) (\d{2})/,'$1 20$2') : '');
+  if(!sh || !sh.rows || !sh.rows.length) return head+'<section class="slab"><div class="g-empty">No shareholding data in this report.</div></section>';
+  var pr = shRow(sh,/^Promoter/i), fii = shRow(sh,/^FII/i), dii = shRow(sh,/^DII/i), pub = shRow(sh,/^Public/i), cnt = shRow(sh,/No\. of Shareholders|Shareholders/i);
+  var pv = lastNum(pr), fv = lastNum(fii), dv = lastNum(dii), pubv = lastNum(pub), cv = lastNum(cnt);
+  var inst = (num(fv)?fv:0) + (num(dv)?dv:0);
+  var prSub = (function(){ var v = lastN(pr, 12).filter(num); if(v.length < 2) return ''; var last = v[v.length-1], i = v.length-1; while(i > 0 && Math.abs(v[i-1]-last) < 0.05) i--; var since = sh.periods.slice(-v.length)[i]; return i === 0 ? 'steady all 3 years' : (Math.abs(v[0]-last) < 0.05 ? 'steady' : 'steady since '+qLabel(since)); })();
+  var cntSub = (function(){ var v = lastN(cnt, 13).filter(num); if(v.length < 2 || !v[0]) return ''; var chg = (v[v.length-1]-v[0])/v[0]*100; return (chg>=0?'+':'−')+Math.abs(Math.round(chg))+'% in '+Math.round((v.length-1)/4)+' years'; })();
+  var tiles = '<div class="g-tiles">'+
+    '<div class="g-tile well-up"><div class="g-tl">PROMOTERS</div><div class="g-tv">'+(num(pv)?pv.toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(prSub||'')+'</div></div>'+
+    '<div class="g-tile well-up"><div class="g-tl">INSTITUTIONS</div><div class="g-tv '+(inst>=30?'up':'')+'">'+(num(fv)||num(dv)?inst.toFixed(1)+'%':'—')+'</div><div class="g-ts">FII '+(num(fv)?fv.toFixed(1):'—')+' · DII '+(num(dv)?dv.toFixed(1):'—')+'</div></div>'+
+    '<div class="g-tile well-up"><div class="g-tl">PUBLIC</div><div class="g-tv">'+(num(pubv)?pubv.toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(trendWords(lastN(pub,12)))+'</div></div>'+
+    '<div class="g-tile well-up"><div class="g-tl">SHAREHOLDERS</div><div class="g-tv">'+(num(cv)?(cv>=1e5?(cv/1e5).toFixed(2)+'L':Math.round(cv).toLocaleString('en-IN')):'—')+'</div><div class="g-ts">'+esc(cntSub)+'</div></div>'+
+  '</div>';
+  var ic = bmRow(d,'inst_chg'), words = '';
+  if(ic && num(ic.company)){
+    var rk = num(ic.rank) && num(ic.peer_n) ? (ic.rank === 1 ? 'best in the segment' : 'rank '+ic.rank+' of '+ic.peer_n+' in the segment') : '';
+    /* the lead sentence reads the 12-quarter move (the chart above), not one quarter's wobble */
+    var fl = lastN(fii,12).filter(num), dl = lastN(dii,12).filter(num), lead = '';
+    if(fl.length>=2 && dl.length>=2){ var df = fl[fl.length-1]-fl[0], dd = dl[dl.length-1]-dl[0]; lead = (dd > 0.5 && df < -0.5) ? 'Over three years domestic funds have been buying what foreign funds sold. ' : (df > 0.5 && dd < -0.5) ? 'Over three years foreign funds have been buying what domestic funds sold. ' : (df > 0.5 && dd > 0.5) ? 'Both foreign and domestic funds have added over three years. ' : (df < -0.5 && dd < -0.5) ? 'Both foreign and domestic funds have trimmed over three years. ' : ''; }
+    words = lead+'Net institutional change this quarter '+(ic.company>0?'+':ic.company<0?'−':'')+Math.abs(ic.company).toFixed(2)+'%'+(rk?', '+rk:'')+'.';
+  }
+  return head+'<section class="slab">'+tiles+fiiDiiSvg(sh, fii, dii)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">'+(per?'quarter '+esc(per):'')+'</div></section>';
+}
+function secHolders_old(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
   return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
 function secTape(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
   sumLine(['entry checks <b>'+(num(t1.passed)?t1.passed:'—')+' of '+(num(t1.total)?t1.total:'—')+'</b>','volume <b>'+esc(vc.vol_ad_label||'—')+'</b>']); }
