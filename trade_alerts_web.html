@@ -46,6 +46,7 @@
   .al-pend{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
   .al-why{font-size:10.5px;color:var(--mut,#8A8A93)}
   .al-dis{margin-left:6px;color:var(--mut,#8A8A93)}
+  .al-ovr{color:var(--amber,#FF9F45);text-decoration:underline dotted}
   .al-pend .al-dis{margin-left:0}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
@@ -225,7 +226,9 @@ function rowHtml(a){
                 : 'live ' + fmtPx(a.cmp) + (a.cmp_live === false ? ' (last close)' : '');
     act = '<div class="twa al-pend"><button type="button" class="btn pri" disabled title="Approve becomes active when the trigger crosses">Approve</button>'
         + dis
-        + '<span class="al-why">waits for cross ' + cond + ' ' + fmtPx(a.trigger_price) + ' (' + esc(liveTxt) + ')</span></div>';
+        + '<span class="al-why">waits for cross ' + cond + ' ' + fmtPx(a.trigger_price) + ' (' + esc(liveTxt) + ')'
+        + (a.cmp == null ? '' : ' · <a href="#" class="al-ovr" onclick="return overrideApprove(' + a.id + ', ' + Number(a.cmp) + ')" title="Founder override: approve before the trigger crosses; the record says so">Approve now</a>')
+        + '</span></div>';
   }
   return '<tr id="al-' + a.id + '">'
     + '<td class="sym">' + esc(a.symbol) + '</td>'
@@ -259,11 +262,18 @@ function pickStatus(k){
   render();
 }
 
-function approve(id){
+/* cc#1586 scope 5: founder override on a PENDING row — behind a confirm that states the live
+   price; the server appends "override before trigger" to the notes and records the live price. */
+function overrideApprove(id, live){
+  if (!window.confirm('Trigger not crossed. Approve at live ' + fmtPx(live) + '?')) return false;
+  approve(id, true);
+  return false;
+}
+function approve(id, override){
   var btn = document.getElementById('ap-' + id);
   if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
   fetchWithTimeout('/api/alerts/approve', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(override ? { id: id, override: true } : { id: id }) })
     .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
     .then(function(x){
       if (!x.ok) throw new Error((x.d && x.d.detail) || 'approve failed');

@@ -272,6 +272,12 @@ async def approve_alert(req: Request):
         alert_id = int(body.get("id"))
     except (TypeError, ValueError):
         raise HTTPException(400, "id required")
+    # cc#1586 scope 5 — FOUNDER OVERRIDE: a PENDING alert may be approved before its trigger
+    # crosses when the caller says so explicitly (override=true, behind a confirm on the page).
+    # The record stays honest: approved_price is still the live price at the click, and the
+    # notes gain "override before trigger". Nothing else changes; a plain call keeps the
+    # triggered-only rule.
+    override = bool(body.get("override"))
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)   # cc#1524: RETURNING reads the source columns
         cur.execute("SELECT symbol, status FROM trade_alerts WHERE id = %s", (alert_id,))
@@ -279,20 +285,31 @@ async def approve_alert(req: Request):
         if not r:
             raise HTTPException(404, f"alert {alert_id} not found")
         sym, cur_status = r
-        if cur_status != "triggered":
+        allowed = ("triggered", "pending") if override else ("triggered",)
+        if cur_status not in allowed:
             raise HTTPException(409, f"alert {alert_id} is '{cur_status}' — "
-                                     "only a triggered alert can be approved")
+                                     + ("only a pending or triggered alert can be approved with override"
+                                        if override else "only a triggered alert can be approved"))
         import cmp_resolver
         res = cmp_resolver.resolve_cmp(cur, sym)
         price = (res or {}).get("cmp")
         if price is None:
             raise HTTPException(422, f"{sym} has no resolvable price right now — "
                                      "approval refused rather than recording a fabricated approved_price")
-        cur.execute(
-            f"""UPDATE trade_alerts
-                SET status = 'approved', approved_at = NOW(), approved_price = %s
-                WHERE id = %s AND status = 'triggered'
-                RETURNING {_COLS}""", (price, alert_id))
+        if override and cur_status == "pending":
+            cur.execute(
+                f"""UPDATE trade_alerts
+                    SET status = 'approved', approved_at = NOW(), approved_price = %s,
+                        notes = CASE WHEN notes IS NULL OR notes = '' THEN 'override before trigger'
+                                     ELSE notes || ' · override before trigger' END
+                    WHERE id = %s AND status = 'pending'
+                    RETURNING {_COLS}""", (price, alert_id))
+        else:
+            cur.execute(
+                f"""UPDATE trade_alerts
+                    SET status = 'approved', approved_at = NOW(), approved_price = %s
+                    WHERE id = %s AND status = 'triggered'
+                    RETURNING {_COLS}""", (price, alert_id))
         row = cur.fetchone()
         if not row:   # racing dismiss won between the SELECT and here — report the truth
             conn.commit()
