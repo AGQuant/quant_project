@@ -304,14 +304,26 @@ def _brief(row: dict) -> str:
         row["scenario"] or ("ONE_SIDED" if row["one_sided"] else "NO_READ"))
 
 
-def run_snapshot(kind: str) -> dict:
-    """The scheduled job body (11:00 mid / 15:25 close). Upserts one row per underlying from the
-    LATEST chain tick; idempotent, so a catch-up re-run only refreshes the same row."""
+LIVE_GRACE_MIN = 10   # a run this close to its slot reads the live chain + live spot
+
+
+def run_snapshot(kind: str, now: Optional[datetime] = None) -> dict:
+    """The scheduled job body (11:00 mid / 15:25 close). Upserts one row per underlying.
+
+    A run inside LIVE_GRACE_MIN of its slot reads the LATEST chain tick + live spot. A LATE run
+    (the cc#841 catch-up sweep re-dispatching a missed daily slot — seen 02-Sep 18:15, when all
+    three jobs fired after a deploy) pins the chain to the slot's own tick and the spot bar at
+    that tick, so a mid row can never be rewritten with the close-time book. Idempotent."""
+    now = now or datetime.now(IST)
+    hh, mm = KIND_TIMES.get(kind, (15, 25))
+    slot = datetime.combine(now.date(), dt_time(hh, mm))
+    late = (now.replace(tzinfo=None) - slot) > timedelta(minutes=LIVE_GRACE_MIN)
     written, briefs = 0, []
     with _conn() as conn, conn.cursor() as cur:
         ensure_table(cur)
         for u in UNDERLYINGS:
-            row = build_snapshot(cur, u, kind, live=True)
+            row = (build_snapshot(cur, u, kind, d=now.date(), at_ts=slot, live=False) if late
+                   else build_snapshot(cur, u, kind, live=True))
             if not row:
                 briefs.append("%s: no chain tick" % u)
                 continue
@@ -319,8 +331,8 @@ def run_snapshot(kind: str) -> dict:
             written += 1
             briefs.append(_brief(row))
         conn.commit()
-    log.info("oi_structure %s: %s", kind, " | ".join(briefs))
-    return {"kind": kind, "written": written, "rows": briefs}
+    log.info("oi_structure %s%s: %s", kind, " (late, pinned to slot)" if late else "", " | ".join(briefs))
+    return {"kind": kind, "written": written, "late": late, "rows": briefs}
 
 
 # ── 4. T+1 FILL ────────────────────────────────────────────────────────────────────────────
