@@ -49,6 +49,10 @@ DOCTRINE = ("spec_locked", "canonical_spec", "decision", "framework", "trading_l
             "ruling", "standing_rule", "mobile_framework", "protocol_one", "architecture",
             "locked_spec", "spec", "memory_rules", "propagation_map",
             "spec_registry", "debug_learnings",
+            # `doctrine` holds the founder rules themselves (28971 CC_QUEUE_DRAIN_RULE_V1, 29164
+            # PRODUCTION_MODE_V3, 36144 MODEL_EFFORT_CACHE_RULE_V1 …). Missing here until cc#1563:
+            # a plain DB-backed regen silently dropped all of them (found on cc#1560).
+            "doctrine",
             # Day and week logs are DATED RECORDS, not specs. They are indexed because the founder
             # asks for entries by id and a day log is a legitimate thing to look up, but they are
             # rendered in their own clearly-labelled section at the end so nobody mistakes one for
