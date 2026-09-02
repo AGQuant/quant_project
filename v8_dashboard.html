@@ -4674,7 +4674,7 @@ async function dlToggleChart(which){
     const d=await dlLoadSeries();
     el.innerHTML=dlRenderPanel(d);
     dlDrawChart(d);
-  }catch(e){el.innerHTML=`<div class="err">P&L series failed: ${e.message}</div>`;}
+  }catch(e){el.innerHTML=`<div style="font-size:11px;color:var(--dim);padding:6px 2px">Chart unavailable - ${e.message}</div>`;}   // cc#1579: an inline line, not a red banner
 }
 function dlCloseChart(){
   const el=document.getElementById('dlChartPanel');if(!el)return;
@@ -4696,12 +4696,21 @@ function dlRenderPanel(d){
     ${body}
   </div>`;
 }
+// cc#1579: colour-token reader for the chart. cc#1561 called `_tok`, which is a `const` inside the
+// Index Intel IIFE in a LATER <script> tag (L5363) — block-private, so this block threw
+// ReferenceError on the first draw. This is the same getComputedStyle/getPropertyValue read the
+// page already uses (L2549), kept local to this block. It never throws: a missing token falls
+// back to the var() string, which the canvas ignores rather than crashing the render.
+function _dlTok(n){
+  try{const v=getComputedStyle(document.documentElement).getPropertyValue(n).trim();if(v)return v;}catch(e){}
+  return 'var('+n+')';
+}
 // Zero line: a plain dashed rule at y=0 so a book that crosses from loss to gain reads at a glance.
 const _dlZeroPlugin={id:'dlZero',afterDatasetsDraw(chart){
   const a=chart.chartArea,y=chart.scales.y,ctx=chart.ctx;if(!a||!y)return;
   if(y.min>0||y.max<0)return;
   const py=y.getPixelForValue(0);
-  ctx.save();ctx.strokeStyle=_tok('--mut')||'#8a94a6';ctx.setLineDash([4,4]);ctx.lineWidth=1;
+  ctx.save();ctx.strokeStyle=_dlTok('--mut');ctx.setLineDash([4,4]);ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(a.left,py);ctx.lineTo(a.right,py);ctx.stroke();ctx.restore();
 }};
 function dlDrawChart(d){
@@ -4715,10 +4724,13 @@ function dlDrawChart(d){
   // never a raw hex): a book that is up draws green, a book that is down draws red.
   const focusVals=DL_FOCUS==='net'?net:gross;
   const lastV=focusVals.length?focusVals[focusVals.length-1]:0;
-  const col=(lastV<0?_tok('--red'):_tok('--grn'))||'#8a94a6';
-  const faint=_tok('--mut')||'#8a94a6';
+  const col=lastV<0?_dlTok('--red'):_dlTok('--grn');
+  const faint=_dlTok('--mut');
+  // The fill is the line colour at ~10% alpha. Only a 6-digit hex token can take the alpha suffix;
+  // anything else (rgb(), a var() fallback) draws no fill rather than an invalid colour.
+  const fillCol=/^#[0-9a-f]{6}$/i.test(col)?col+'1a':'transparent';
   const mk=(label,vals,emph)=>({label,data:vals,borderColor:emph?col:faint,borderWidth:emph?2.5:1,
-    backgroundColor:emph?col+'1a':'transparent',fill:emph,tension:.2,pointRadius:emph?2.5:0,
+    backgroundColor:emph?fillCol:'transparent',fill:emph,tension:.2,pointRadius:emph?2.5:0,
     pointHoverRadius:4,pointBackgroundColor:emph?col:faint,spanGaps:true,order:emph?0:1});
   const byDate={};pts.forEach(p=>{byDate[p.date]=p;});
   DL_CHART=new Chart(cv.getContext('2d'),{
