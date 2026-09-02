@@ -347,8 +347,6 @@ PWA_JS = """
     // so these must not also leak into the More sheet as duplicates of /m/alerts and /m/trades.
     // Placed after V8 as trading-signal-adjacent — a reasonable default, not founder-locked;
     // flagged back on the card for repositioning if wanted. Icons: the app's established glyphs.
-    ['/alerts', '\\u25ec', 'Alerts', 'd'],
-    ['/trades', '\\u2637\\ufe0e', 'WoT', 'd'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
     // /dashboard#digest). Nav removal only; no route changed, nothing retired.
@@ -456,6 +454,9 @@ PWA_JS = """
   // cc#1506: the Intel slot became Alerts. cc#1535 (founder 31-Aug): Alerts and Wall of Trades
   // swap surfaces — Alerts moves to the home grid (the approve surface), WoT takes this slot —
   // same swap as every /m/ template's own bnav, so the two nav systems stay in lockstep.
+  // cc#1609 + cc#1585 (founder 02-Sep): /alerts and /trades left the desktop top nav — both live as
+  // V8 header tabs (Wall of Trades, Alerts) in v8_dashboard.html; the routes stay live for typed
+  // URLs and for the app. The mobile PRIMARY list below is the app's own bnav and is unchanged.
   var PRIMARY = ['/m/home', '/m/gvm', '/m/check', '/m/trades'];
   if (!document.getElementById('pwa-mobile-nav')) {
     var nav = document.createElement('div');
