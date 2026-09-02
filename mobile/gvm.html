@@ -515,7 +515,7 @@ function finCagr(r2, label){
    TTM bar in the lighter gold, earlier years chalk at low opacity, negatives red; values on the
    last two bars only; year labels under every bar. */
 function finBars(sr){
-  var W = 360, H = 118, T = 22, B = 96, n = sr.vals.length, gap = 10, bw = (W - 24 - gap*(n-1))/n;
+  var W = 360, H = 132, T = 22, B = 98, n = sr.vals.length, gap = 10, bw = (W - 24 - gap*(n-1))/n;
   var vs = sr.vals.filter(num); if(!vs.length) return '<div class="g-empty">No values.</div>';
   var hi = Math.max(0, Math.max.apply(null, vs)), lo = Math.min(0, Math.min.apply(null, vs));
   if(hi === lo){ hi = lo + 1; }
@@ -535,7 +535,7 @@ function finBars(sr){
     } else {
       h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y0-6).toFixed(1)+'" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--mute)">—</text>';
     }
-    h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-4)+'" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="'+(sr.ttm[k] ? 'var(--gold)' : 'var(--mute)')+'">'+esc(sr.labels[k])+'</text>';
+    h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="'+(sr.ttm[k] ? 'var(--gold)' : 'var(--mute)')+'">'+esc(sr.labels[k])+'</text>';
   });
   return h+'</svg>';
 }
@@ -603,6 +603,95 @@ function finCF(f){
     div ? finCard('Dividends paid', div, null) : finCard('Financing cash', fin, 'No dividends row; financing cash shown instead')
   ]);
 }
+/* P4 · Ratios: a limited set of small bar-per-year strips (last five FYs + Current where the
+   bucket carries one; Growth = the three served columns TTM / 3Y / 5Y) with the latest value big.
+   Latest bar green when better than the FY average, red when worse - lower is better for PE, PB,
+   EV/EBITDA, MCap/Sales, Debt/Equity and working-capital days. Default = the six strips the card
+   names; the funnel opens a sheet of ratio TYPES with a checkbox per type (ticking a type adds all
+   its strips) and per strip. In-memory only. */
+var RATIO_TYPES = [
+  {k:'prof', t:'Profitability', b:'Profitability', strips:[{n:'ROCE %', re:/^ROCE/}, {n:'ROE %', re:/^ROE/}, {n:'OPM %', re:/^OPM/}, {n:'NPM %', re:/^NPM/}]},
+  {k:'val', t:'Valuation', b:'Valuation', strips:[{n:'PE', re:/^PE$/, lower:true}, {n:'PB', re:/^PB$/, lower:true}, {n:'EV/EBITDA', re:/^EV\/EBITDA/, lower:true}, {n:'MCap/Sales', re:/^MCap\/Sales/, lower:true}]},
+  {k:'lev', t:'Leverage', b:'Solvency', strips:[{n:'Debt/Equity', re:/^Debt \/ Equity/, lower:true}, {n:'Interest cover', re:/^Interest Coverage/}]},
+  {k:'eff', t:'Efficiency', b:'Efficiency', strips:[{n:'Asset turnover', re:/^Asset Turnover/, b:'Profitability'}, {n:'Working-capital days', re:/^Working Capital Days/, lower:true}]},
+  {k:'gro', t:'Growth', b:'Growth', strips:[{n:'Sales growth', re:/^Sales Growth/, served:true}, {n:'Profit growth', re:/^Net Profit Growth/, served:true}]}
+];
+var RATIO_DEFAULT = ['ROCE %','ROE %','OPM %','PE','PB','Debt/Equity'];
+var ratioSel = null;   /* null = the default six; otherwise the set of strip names on */
+function ratioOn(n){ return (ratioSel || RATIO_DEFAULT).indexOf(n) > -1; }
+function ratioSeries(r2, st, typeB){
+  var tbl = finBucket(r2, st.b || typeB); if(!tbl) return null;
+  var idx = st.served ? tbl.periods.map(function(_, i){ return i; }) : finIdx(tbl, 5, true);
+  var sr = finSeries(tbl, st.re, idx); if(!sr) return null;
+  if(st.served) sr.ttm = sr.labels.map(function(){ return false; });
+  return sr;
+}
+function ratioStrip(st, sr){
+  var last = finLast(sr); if(!last) return '';
+  var avg = finAvg(sr), dir = num(avg) ? ((last.v > avg) !== !!st.lower) : null;   /* true = better */
+  var col = dir == null ? 'var(--gold)' : (dir ? 'var(--grn, var(--up))' : 'var(--red)');
+  var W = 200, H = 40, n = sr.vals.length, gap = 4, bw = (W - gap*(n-1))/n;
+  var vs = sr.vals.filter(num), hi = Math.max(0, Math.max.apply(null, vs)), lo = Math.min(0, Math.min.apply(null, vs)); if(hi === lo) hi = lo + 1;
+  function y(v){ return 30 - 26 * (v - lo) / (hi - lo); }
+  var y0 = y(0), svg = '<svg viewBox="0 0 '+W+' '+H+'" style="display:block;width:100%;height:auto" aria-hidden="true">';
+  sr.vals.forEach(function(v, k){
+    var x = k*(bw+gap);
+    if(num(v)){ var top = Math.min(y(v), y0), bh = Math.max(1.5, Math.abs(y(v)-y0));
+      svg += '<rect x="'+x.toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="1.5" fill="'+(k === last.k ? col : 'var(--chalk)')+'" opacity="'+(k === last.k ? '1' : '.3')+'"/>'; }
+    svg += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-1)+'" text-anchor="middle" font-family="var(--mono)" font-size="7.5" fill="var(--mute)">'+esc(sr.labels[k].replace(/ CAGR$/,''))+'</text>';
+  });
+  svg += '</svg>';
+  var unit = sr.unit === 'pct' ? '%' : (sr.unit === 'x' ? '×' : (sr.unit === 'days' ? 'd' : ''));
+  var val = sr.unit === 'x' ? Number(last.v).toFixed(2).replace(/\.?0+$/,'') : (sr.unit === 'pct' ? Number(last.v).toFixed(1).replace(/\.0$/,'') : Math.round(last.v).toLocaleString('en-IN'));
+  return '<div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)">'
+    + '<div><div style="font-family:var(--body);font-weight:700;font-size:12.5px;color:var(--chalk)">'+esc(st.n)+'</div>'
+    + '<div style="font-family:var(--mono);font-size:19px;font-weight:800;letter-spacing:-.3px;line-height:1.15;color:'+col+'">'+esc(val + unit)+'</div>'
+    + '<div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)">'+esc(sr.labels[last.k])+(num(avg) ? ' · avg '+esc((sr.unit === 'x' ? avg.toFixed(2) : (sr.unit === 'pct' ? avg.toFixed(1) : String(Math.round(avg))))) : '')+'</div></div>'
+    + '<div>'+svg+'</div></div>';
+}
+function finRatios(f){
+  var r2 = f.ratios_v2; if(!r2 || !r2.buckets || !r2.buckets.length) return '<div class="g-empty">No ratio table.</div>';
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;padding:0 0 4px"><span style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)">'+(ratioSel ? (ratioSel.length + ' RATIOS') : 'SIX KEY RATIOS')+'</span>'
+    + '<button type="button" data-ratio-filter="1" aria-label="Choose ratios" style="display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 10px;border-radius:8px;border:1px solid var(--line);background:var(--well);color:var(--gold);font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:1px;cursor:pointer"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1 2h14l-5.5 6.5V14l-3-1.5V8.5z" fill="currentColor"/></svg>FILTER</button></div>';
+  var n = 0;
+  RATIO_TYPES.forEach(function(ty){ ty.strips.forEach(function(st){ if(!ratioOn(st.n)) return; var sr = ratioSeries(r2, st, ty.b); if(sr){ h += ratioStrip(st, sr); n++; } }); });
+  if(!n) h += '<div class="g-empty">No ratios picked. Tap FILTER to add some.</div>';
+  return h;
+}
+function refreshFin(){
+  var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling;
+  if(fs && STATE.co){ var tmp = document.createElement('div'); tmp.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp.children[1], fs); }
+}
+function ratioSheetOpen(){
+  ratioSheetClose();
+  var sel = (ratioSel || RATIO_DEFAULT).slice();
+  var el = document.createElement('div'); el.id = 'g-rsheet';
+  var body = RATIO_TYPES.map(function(ty){
+    var on = ty.strips.filter(function(st){ return sel.indexOf(st.n) > -1; }).length;
+    return '<div style="margin-top:12px"><label style="display:flex;align-items:center;gap:10px;min-height:36px;font-family:var(--body);font-weight:800;font-size:13px;color:var(--chalk);cursor:pointer"><input type="checkbox" data-ratio-type="'+ty.k+'"'+(on === ty.strips.length ? ' checked' : '')+' style="width:18px;height:18px;accent-color:var(--gold)">'+esc(ty.t)+'<span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--mute)">'+on+' of '+ty.strips.length+'</span></label>'
+      + ty.strips.map(function(st){ return '<label style="display:flex;align-items:center;gap:10px;min-height:34px;padding-left:28px;font-family:var(--mono);font-size:11.5px;color:var(--mute);cursor:pointer"><input type="checkbox" data-ratio-strip="'+esc(st.n)+'"'+(sel.indexOf(st.n) > -1 ? ' checked' : '')+' style="width:16px;height:16px;accent-color:var(--gold)">'+esc(st.n)+(st.lower ? ' <span style="font-size:9px;letter-spacing:1px">· LOWER IS BETTER</span>' : '')+'</label>'; }).join('')+'</div>';
+  }).join('');
+  el.innerHTML = '<div data-ratio-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div style="position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
+    + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-family:var(--body);font-weight:800;font-size:14px;letter-spacing:.5px;text-transform:uppercase;color:var(--chalk)">Ratios to show</div><button type="button" data-ratio-reset="1" style="min-height:32px;padding:4px 10px;border-radius:8px;border:1px solid var(--line);background:var(--well);color:var(--mute);font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer">DEFAULT SIX</button></div>'
+    + body
+    + '<button type="button" data-ratio-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('change', function(e){
+    var t = e.target.getAttribute('data-ratio-type'), st = e.target.getAttribute('data-ratio-strip');
+    var cur = (ratioSel || RATIO_DEFAULT).slice();
+    if(t){ var ty = RATIO_TYPES.filter(function(x){ return x.k === t; })[0]; ty.strips.forEach(function(x){ var i = cur.indexOf(x.n); if(e.target.checked && i < 0) cur.push(x.n); if(!e.target.checked && i > -1) cur.splice(i, 1); }); }
+    else if(st){ var j = cur.indexOf(st); if(e.target.checked && j < 0) cur.push(st); if(!e.target.checked && j > -1) cur.splice(j, 1); }
+    ratioSel = cur; refreshFin(); ratioSheetOpen();
+  });
+  el.addEventListener('click', function(e){
+    if(e.target.closest('[data-ratio-reset]')){ ratioSel = null; refreshFin(); ratioSheetOpen(); return; }
+    if(e.target.closest('[data-ratio-close]')) ratioSheetClose();
+  });
+}
+function ratioSheetClose(){ var w = document.getElementById('g-rsheet'); if(w) w.remove(); }
 /* dots follow the swipe: scroll does not bubble, so one capturing listener serves every carousel */
 document.addEventListener('scroll', function(e){
   var car = e.target; if(!car || !car.getAttribute || !car.getAttribute('data-car')) return;
@@ -619,11 +708,7 @@ function secFinancials(d){
   if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table returns under see table in P5 */
   else if(finView === 'bs') body = finBS(f);   /* cc#1617 P3 */
   else if(finView === 'cf') body = finCF(f);
-  else {
-    if(r2 && r2.buckets && r2.buckets.length){
-      r2.buckets.forEach(function(b){ var t = finTable(b.table, null, 4); if(t) body += '<div class="g-fbk">'+esc(String(b.title).toUpperCase())+'</div>'+t; });
-    } else body = '<div class="g-empty">No ratio table.</div>';
-  }
+  else body = finRatios(f);   /* cc#1617 P4: strips + filter sheet; the bucket tables return under see table in P5 */
   var de = ratioLatest(r2,'Solvency','Debt / Equity'), ic = ratioLatest(r2,'Solvency','Interest Coverage'), roce = ratioLatest(r2,'Profitability','ROCE %');
   var foot = '<div class="g-ffoot"><span>Debt / equity '+(num(de)?de.toFixed(2):'—')+' · interest cover '+(num(ic)?ic.toFixed(1)+'×':'—')+'</span><span>ROCE '+(num(roce)?Math.round(roce)+'%':'—')+'</span></div>';
   return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
@@ -959,6 +1044,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
+  if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
   var pt = e.target.closest('[data-peers-toggle]'); if(pt){ peersFull = !peersFull; var pe = document.getElementById('peers'); var sec = pe && pe.nextElementSibling; if(sec){ var tmp = document.createElement('div'); tmp.innerHTML = secPeers(STATE.co); pe.parentNode.replaceChild(tmp.children[1], sec); } }
 });
