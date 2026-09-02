@@ -4,316 +4,97 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>V8 · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
-<script src="/scorr_card_strip.js"></script>
-<script src="/scorr_chart_card.js"></script>
-<script src="/scorr_analysis_card.js"></script>
-<script src="/results_card.js"></script>
-<script src="/scorr_cockpit_card.js"></script>
 <style>
-/* cc#915 — this page keeps its own styling, per the cc#900 lesson: a shared-sheet change must
-   never be able to restyle the V8 screen out from under it. */
-
-/* 1 · MARKET MOOD */
-.mood{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  padding:13px 13px 12px 17px;margin:0 12px 9px;position:relative;overflow:hidden}
-.mood::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line2)}
-.mood.bull::before{background:var(--grn)}
-.mood.bear::before{background:var(--red)}
-.mood.caut::before{background:var(--amber)}
-.mood .mv{font-size:19px;font-weight:800;letter-spacing:-.01em}
-.mood .mw{font-size:11.5px;color:var(--mut);margin-top:3px;line-height:1.5}
-.mchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.mchip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
-  padding:4px 8px;border-radius:7px;border:1px solid var(--line2);color:var(--mut);
-  background:var(--panel2)}
-.mchip.ok{color:var(--grn);border-color:rgba(47,212,139,.4)}
-.mchip.bad{color:var(--red);border-color:rgba(255,92,108,.4)}
-.mchip b{color:var(--txt,#E9EEFB);font-weight:800}
-.slotbar{display:flex;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
-.slotbar div{flex:1;text-align:center}
-.slotbar .sk{font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
-.slotbar .sv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:800;margin-top:2px}
-
-/* 2 · BOOK STAT ROW */
-/* cc#976: THREE tiles, not four — one per fact about the active tab. Three cells at 360px get
-   107px each instead of 79px, which is what lets "Long / Short" and "net of Rs16,500" fit. */
-.bstats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin:0 12px 9px}
-.stfade{animation:stf .15s ease}
-@keyframes stf{from{opacity:0}to{opacity:1}}
-/* below ~360px four money cells in a row stop being readable however short the string is, so they
-   become 2x2 instead of being squeezed. A wrap the layout CHOOSES is fine; a number broken in
-   half is not. */
-@media (max-width:339px){.bstats{grid-template-columns:1fr 1fr}}
-.bst{min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-  padding:9px 5px;text-align:center}
-.bst .k{font-size:9px;font-weight:800;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
-/* founder 08-Aug: nowrap, never a number broken across two lines. cc#967 raises this to the Home
-   trio token (.trio .st .v = 13.5px), so the 08-Aug fit calculation is redone here rather than
-   left stale: at 360px the .bstats grid has 336px after the 12px margins, less 3 gaps of 7px,
-   giving 78.75px per cell and 68.75px of content after the 5px side padding. At 13.5px Plex Mono
-   (~0.6em advance) inrShort's widest 8-character output ("−₹99,999" / "₹1.43Cr") is ~65px, so it
-   still fits — verified by measurement, not by this arithmetic alone. Below 360px the rule above
-   already drops the row to 2x2 rather than squeezing. */
-.bst .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:13.5px;
-  margin-top:3px;white-space:nowrap;
-  /* cc#967 — the tiles were clipping their own numbers, and it was NOT the font size.
-     mobile_app.css owns a generic `.v` stat-card class (position:relative, background --panel2,
-     1px border, radius 15, padding 15px 15px 12px 19px, margin-bottom 8, cursor pointer). This
-     rule only out-specified it on font and margin-top, so all of that chrome applied: 34px of
-     horizontal padding plus 2px of border inside a 67px cell left ~31px for the numeral.
-     MEASURED: "Rs20,094" renders 52.7px at the OLD 12.5px and 56.9px at 13.5px — so both sizes
-     were already being cut. This is a pre-existing defect the type-scale work surfaced, the third
-     instance of the same collision (cc#964 found it on the D card, cc#966 on Home news).
-     Reset the chrome, keep the tile's own look. */
-  background:none;border:0;border-radius:0;padding:0;margin-bottom:0;min-height:0;
-  position:static;cursor:inherit;overflow:visible}
-.bst .v:before{content:none}
-.bst .p{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
-  color:var(--dim);margin-top:2px}
-
-/* 3 · INSTRUMENT SWITCH — small, top corner */
-.insw{display:flex;gap:4px;align-items:center}
-.insw button{min-height:26px;padding:0 9px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;font-weight:800;letter-spacing:.07em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line2);border-radius:7px;cursor:pointer}
-.insw button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
-.insw button[disabled]{opacity:.38;cursor:not-allowed}
-
-/* 4 · GROUPING CONTROL */
-.grpb{display:flex;gap:6px;margin:0 12px 8px}
-.grpb button{flex:1;min-height:30px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line2);border-radius:8px;cursor:pointer}
-.grpb button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
-.ghd{display:flex;align-items:baseline;gap:8px;margin:12px 12px 6px}
-.ghd .gn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.13em;text-transform:uppercase;color:var(--dim);flex:1}
-.ghd .gs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10.5px;font-weight:700}
-
-/* 5 · POSITION CARD */
-.pcard{background:var(--panel);border:1px solid var(--line);border-radius:13px;
-  padding:11px 12px 10px;margin:0 12px 8px}
-.pc1{display:flex;align-items:center;gap:7px;min-height:26px}
-.pc1 .sy2{font-size:14px;font-weight:800;letter-spacing:.01em}
-.tagx{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.08em;padding:2px 6px;border-radius:5px;border:1px solid currentColor}
-.tagx.long{color:var(--grn)}
-.tagx.short{color:var(--red)}
-.pc1 .bk{font-size:10px;color:var(--dim);margin-left:auto;text-align:right;flex:none}
-/* cc#1547: the consolidated flag replaces .pvm (retired with pivotMark/actMark/dmaMark) — bigger
-   than the old individual glyphs (founder's own word: 12px -> 17px), a real tap target via padding
-   rather than a bare inline character. */
-.mk-flag{background:none;border:0;padding:8px 6px;margin:-8px -2px -8px -6px;font-size:17px;
-  line-height:1;cursor:pointer;vertical-align:middle;min-width:32px;min-height:32px}
-.pc2{display:flex;align-items:baseline;gap:9px;margin:7px 0 2px}
-.pc2 .pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:18px;font-weight:800;
-  letter-spacing:-.01em}
-.pc2 .ret{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:700}
-.pc2 .day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);
-  margin-left:auto}
-/* the stop -> target rail. 0 = stop, 1 = target, for a long and a short alike. */
-.rail2{position:relative;height:6px;border-radius:3px;background:var(--panel2);
-  border:1px solid var(--line);margin:9px 0 5px;overflow:visible}
-.rail2 .fillx{position:absolute;top:0;bottom:0;left:0;border-radius:3px;opacity:.55}
-.rail2 .ent{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--mut);border-radius:1px}
-.rail2 .dot{position:absolute;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;
-  border-radius:50%;border:2px solid var(--bg,#0A0F1E)}
-.lvls{display:flex;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
-/* ── cc#943/942: two-page book — pills, dots, result badge ────────────────────────────────
-   The pills sit exactly where the eye already is (above the first card) and the dots say which
-   of two pages you are on, because a swipe with no indicator leaves you guessing whether the
-   gesture worked. Both are also the desktop control: a tap toggle, no swipe needed there. */
-.bkpg{display:flex;align-items:center;gap:8px;padding:0 12px 8px}
-.bkpg .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;
-  overflow:hidden;flex:1}
-.bkpg .seg button{flex:1;min-height:38px;background:none;border:0;color:var(--dim);
-  font-family:inherit;font-size:11.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
-  cursor:pointer}
-.bkpg .seg button.on{background:rgba(77,124,254,.16);color:var(--txt,#E9EEFB)}
-.bkdots{display:flex;gap:5px;flex:none}
-.bkdots i{width:6px;height:6px;border-radius:50%;background:var(--line);display:block}
-.bkdots i.on{background:var(--blu,#4D7CFE)}
-.bktot{display:flex;align-items:baseline;gap:8px;padding:0 14px 8px;flex-wrap:wrap}
-.bktot b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:19px;font-weight:800}
-.bktot span{font-size:10.5px;color:var(--dim)}
-.rbadge{margin:0 auto;font-size:9px;font-weight:800;letter-spacing:.4px;padding:1px 5px;
-  border-radius:4px;text-transform:uppercase}
-.rbadge.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
-.rbadge.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
-.rbadge.neut{background:rgba(255,255,255,.07);color:var(--dim)}
-.lvls span:nth-child(2){margin-left:auto}
-.pc4{display:flex;flex-wrap:wrap;gap:9px;margin-top:7px;padding-top:7px;
-  border-top:1px solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;color:var(--dim)}
-.pc4 b{color:var(--mut);font-weight:700}
-.norail{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
-  margin:8px 0 4px;opacity:.7}
-/* ── cc#922 navigation, cc#968 reduced to ONE chip bar ────────────────────────────────────── */
-.navwrap{position:sticky;top:0;z-index:20;background:var(--bg,#0A0F1E);
-  padding:2px 0 6px;margin-bottom:2px}
-/* cc#968: one row that SCROLLS rather than wraps. Seven chips will not fit 360px, and a wrapping
-   bar changes height as chips come and go — which moves the list under the founder's thumb every
-   time he taps one. A fixed-height scroller never does. The scrollbar is hidden but the overflow
-   is real, so a flick still works. */
-.chipbar{display:flex;align-items:center;gap:5px;margin:0 12px 5px;overflow-x:auto;
-  flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch;
-  /* cc#975: pan-x AND pan-y. The card specified pan-x alone, but pan-x literally forbids the
-     browser from panning vertically for a gesture that starts on this element — measured: a
-     vertical flick with the thumb on the bar scrolled the page 0px. That contradicts the card's
-     own requirement that vertical page scroll be unaffected, so both axes are allowed: the bar
-     takes horizontal, the page takes vertical, and neither has to guess.
-     The cc#968 scroll-snap is GONE: proximity snapping fought short flicks near the end of the
-     strip, and a filter bar has no page boundaries worth snapping to. */
-  touch-action:pan-x pan-y}
-.chipbar::-webkit-scrollbar{display:none}
-/* cc#1115: the sort row reuses .chipbar and .sub wholesale — same pill, same mono face, same
-   scroll behaviour — so it reads as one control family with the filter bar above it rather than
-   as a new widget. Only the label needs its own rule. */
-.sortbar{margin-top:0}
-.sortlb{flex:0 0 auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;
-  font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-right:2px}
-.chipbar .sub{flex:0 0 auto}
-/* a trailing spacer, not padding-right: a scroll container's right padding is dropped at the
-   scroll end in several engines, which is exactly how a last chip ends up flush and unreadable. */
-.chipbar::after{content:'';flex:0 0 12px;height:1px}
-/* the fade sits on .navwrap, which is ALREADY position:sticky above — sticky is a containing
-   block for an absolute child, so no position override is added here. Declaring
-   .navwrap{position:relative} would have won on source order and silently un-stuck the bar. */
-.navwrap::after{content:'';position:absolute;right:0;top:0;bottom:0;width:26px;pointer-events:none;
-  opacity:0;transition:opacity .15s;
-  background:linear-gradient(to right,rgba(10,15,30,0),var(--bg,#0A0F1E))}
-.navwrap.hasmore::after{opacity:1}
-.subr{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:0 12px 5px}
-.subk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.12em;color:var(--dim);text-transform:uppercase;min-width:38px}
-.sub{min-height:28px;padding:0 9px;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;font-weight:700;color:var(--mut);background:var(--panel);
-  border:1px solid var(--line);border-radius:14px;cursor:pointer}
-.sub i{font-style:normal;color:var(--dim);margin-left:3px}
-.sub.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.55);background:rgba(77,124,254,.12)}
-.sub.on i{color:var(--blu,#4D7CFE)}
-.sub.clr{color:var(--red);border-color:rgba(255,92,108,.4);letter-spacing:.08em}
-.tierlab{display:flex;align-items:center}
-/* ── cc#989 · marker legend behind an (i) ──────────────────────────────────────────────────
-   `lg-` prefixed on EVERY class, leaves included. cc#986 proved that scoping a short name under
-   a prefixed parent is not protection — the sheet's own generic rules still win. */
-.lg-i{width:44px;height:44px;margin:-10px 0 -10px 6px;flex:none;display:inline-flex;
-  align-items:center;justify-content:center;background:none;border:none;cursor:pointer;
-  color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
-  font-weight:800;line-height:1}
-.lg-i span{display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px;
-  border:1px solid currentColor;border-radius:50%}
-.lg-i.lg-on{color:var(--blu,#4D7CFE)}
-.lg-panel{margin:0 12px 10px;padding:11px 13px;background:var(--panel);border:1px solid var(--line);
-  border-radius:12px}
-.lg-hd{font-size:9.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
-  color:var(--dim);margin-bottom:9px}
-.lg-line{font-size:11.5px;line-height:1.65;color:var(--mut);padding:2px 0}
-.lg-line + .lg-line{border-top:1px solid var(--line);margin-top:2px;padding-top:6px}
-.lg-none{font-size:11.5px;line-height:1.6;color:var(--dim)}
-.ghd{cursor:pointer}
-.ghd .gx{font-size:11px;color:var(--dim);min-width:14px;text-align:right}
-.tl2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);
-  font-weight:600;letter-spacing:0;text-transform:none}
-.finote{margin:0 12px 8px;font-size:10.5px;line-height:1.5;color:var(--dim)}
-/* ── cc#923: lighter card, detail on tap ──────────────────────────────────────────────────── */
-.pcard{cursor:pointer}
-.pcard.openx{border-color:var(--line2)}
-.pc4 .pex{margin-left:auto;color:var(--blu,#4D7CFE);font-weight:700}
-.pmore{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
-
-/* ══ cc#977 — LOWER MODULES, ported from previews/v8_lower_redesign.html ═══════════════════════
-   The preview declared its own :root palette because it was a standalone file. Here the app
-   tokens are used instead (--panel/--panel2/--line/--dim/--mut/--grn/--red/--blu): the preview's
-   values are the same colours by a different name, and a second palette on the page is exactly
-   how a screen starts drifting from the rest of the app. Class names are prefixed `l` — cc#974
-   was the fourth collision with a short generic app class, and `.card`/`.hd`/`.body`/`.seg` from
-   the preview would have been the fifth. */
-.lcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin:0 12px 12px;
-  overflow:hidden}
-.lhd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
-  min-height:52px;cursor:pointer;gap:10px}
-.lhd h2{font-size:17px;font-weight:700;margin:0}
-.lright{display:flex;align-items:center;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.lchev{color:var(--mut);font-size:18px;line-height:1;transition:transform .18s;flex:none;
-  display:inline-block}
-.lcard.open .lchev{transform:rotate(90deg)}
-.lbody{display:none;padding:0 16px 14px;border-top:1px solid var(--line)}
-.lcard.open .lbody{display:block}
-.lnote{font-size:11px;color:var(--mut);margin-top:10px;line-height:1.5}
-.lwarn{font-size:11px;color:var(--amber);margin-top:8px;line-height:1.5}
-.lmore{margin-top:10px;min-height:44px;width:100%;background:none;border:1px dashed var(--line2);
-  border-radius:10px;color:var(--mut);font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;font-weight:700;letter-spacing:.06em;cursor:pointer}
-.lnav{display:flex;justify-content:center;margin-top:12px}
-.lnav a,.lnav button{border:1px solid rgba(77,124,254,.55);color:var(--pulse, #cfd9ff);background:none;
-  border-radius:12px;padding:0 22px;min-height:44px;font-size:13px;text-decoration:none;
-  display:flex;align-items:center;font-family:inherit;cursor:pointer}
-/* module 1 */
-.lspark{display:flex;align-items:flex-end;gap:3px;height:34px;margin:10px 0 4px}
-.lspark i{flex:1;border-radius:2px 2px 0 0;min-height:3px;display:block}
-.ldrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;
-  border-bottom:1px solid var(--line);font-size:13.5px;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.ldrow:last-of-type{border-bottom:0}
-.ldrow .dt{color:var(--dim)}
-.ldrow .tc{color:var(--mut);font-size:12px;margin-left:auto;margin-right:8px}
-.ldrow .pv{font-weight:700;white-space:nowrap}
-/* module 2 */
-.lpills{display:flex;gap:8px;overflow-x:auto;padding:10px 0;scrollbar-width:none;
-  touch-action:pan-x pan-y}
-.lpills::-webkit-scrollbar{display:none}
-.lpill{flex:none;border:1px solid var(--line2);background:var(--panel2);color:var(--dim);
-  border-radius:20px;padding:0 14px;min-height:36px;font-size:12.5px;cursor:pointer;
-  font-family:inherit}
-.lpill.on{background:rgba(77,124,254,.16);border-color:var(--blu);color:var(--pulse, #cfd9ff);font-weight:600}
-.lpill i{font-style:normal;color:var(--mut);margin-left:4px}
-.lfrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
-.lfrow:last-of-type{border-bottom:0}
-.lfrow .rank{width:20px;color:var(--mut);font-size:12px;text-align:right;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.lfrow .sym{font-weight:700;font-size:14px;border-bottom:1px dotted rgba(148,166,210,.45);
-  cursor:pointer}
-.lfrow .why{margin-left:auto;color:var(--dim);font-size:12px;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.lfrow .sc{font-weight:700;font-size:13.5px;width:44px;text-align:right;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-/* module 3 */
-.lseggrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.lseg{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
-  cursor:pointer;min-width:0}
-.lseg .nm{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lseg .v{font-size:15px;font-weight:700;margin-top:2px;
-  font-family:'IBM Plex Mono',ui-monospace,monospace}
-.lseg .n{font-size:10.5px;color:var(--mut);margin-top:1px}
-.lsegwide{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center}
-.lsegwide .v{font-size:17px}
-/* item 5 · the signals line, and the Open Book chevron on the positions header */
-.sigline{margin:0 12px 10px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);
-  border-radius:10px;font-size:12px;color:var(--dim)}
-.sigline b{color:var(--txt,#E9EEFB)}
-.tlgo{margin-left:auto;color:var(--mut);text-decoration:none;font-size:16px;padding:0 6px;
-  min-height:44px;display:inline-flex;align-items:center}
+/* cc#1590 — /m/v8 rebuilt to design_refs/scorr_mobile_v8_R1.html (session_log 36482, founder
+   order 02-Sep-2026): MOOD -> OPEN POSITIONS -> SECTORS -> DAY PERFORMANCE -> CLOSED -> FUNNEL.
+   Shells (.pressed / .slab.dense / .well-up / .well) come from the shared sheet
+   scorr_theme_r5.css, injected by main.py on every /m/* path. Nothing below redeclares them.
+   Tokens: the ref's GOLD NIGHT block, declared on #v8p so they are page-local fallbacks and
+   never reach another page. Money colours (--up / --down) are the app's own and stay untouched.
+   Every rule is scoped under #v8p so the sheet's :root:root guards cannot restyle this page.
+   Inner class names avoid the bare classes the shared sheets already declare (.v .c .g .m .bar
+   .fill .word .row .sym .meta .more .big .pos .kv): a bare rule from mobile_app.css would add
+   its own padding/border to them. So: .cl/.cv, .gword, .sbar, and prefixed names below. */
+#v8p{
+  --field:#0A0A0C; --panel:#17171B; --well:#131316; --sunk:#0C0C0F;
+  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
+  --gold:#D4AF37; --gold-lo:#7A6320; --gold-hi:#F0D070;
+  --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45;
+  --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --gold-d:rgba(212,175,55,.12);
+  --display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
+  --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+  color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45;
+  max-width:430px;margin:0 auto;padding:0 12px 96px;
+}
+#v8p *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+#v8p .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#v8p .up{color:var(--up)} #v8p .dn{color:var(--down)} #v8p .mu{color:var(--mute)} #v8p .gd{color:var(--gold)}
+#v8p .top{display:flex;align-items:center;justify-content:space-between;padding:14px 0 10px}
+#v8p .brand{font-family:var(--display);font-size:20px;letter-spacing:1px;color:var(--chalk)}
+#v8p .brand b{color:var(--gold)}
+#v8p .live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--mute)}
+#v8p .live .dot{width:7px;height:7px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up)}
+#v8p .live .dot.off{background:var(--dim);box-shadow:none}
+#v8p .live .pill{border:1px solid var(--line);padding:3px 8px;color:var(--up);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+#v8p .live .pill.stale{color:var(--amber)}
+#v8p .sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
+#v8p .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+#v8p .sect .n{font-family:var(--mono);color:var(--mute);letter-spacing:0;transform:none;font-size:11px}
+#v8p .sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+#v8p .asof{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;text-align:right}
+#v8p .asof.stale{color:var(--amber)}
+#v8p .empty{font-size:13px;color:var(--mute);line-height:1.5}
+#v8p .empty .chip{margin-top:10px}
+#v8p .seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px}
+#v8p .seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:8px 6px;border-radius:6px;cursor:pointer}
+#v8p .seg button.on{background:var(--gold);color:var(--sunk);box-shadow:0 2px 0 var(--gold-lo)}
+#v8p .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 9px;border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer}
+#v8p .chip.ok{color:var(--up);border-color:rgba(47,212,139,.35);background:var(--up-d)}
+#v8p .chip.bad{color:var(--down);border-color:rgba(255,92,108,.35);background:var(--down-d)}
+#v8p .chip.gd{color:var(--gold);border-color:rgba(212,175,55,.4);background:var(--gold-d)}
+#v8p .tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+#v8p .tag.long{background:var(--up-d);color:var(--up)} #v8p .tag.short{background:var(--down-d);color:var(--down)}
+#v8p .tag.bk{background:var(--gold-d);color:var(--gold)}
+#v8p .tag.res{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+#v8p .tag.res.t{color:var(--up)} #v8p .tag.res.s{color:var(--down)} #v8p .tag.res.g{color:var(--amber)}
+/* 1 · MARKET MOOD hero */
+#v8p .hero .eyebrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--mute);text-transform:uppercase}
+#v8p .hero .gword{font-family:var(--display);font-size:56px;line-height:.95;letter-spacing:-1px;margin:8px 0 6px;transform:skewX(-6deg);transform-origin:left center;color:var(--gold)}
+#v8p .hero .gword.bear{color:var(--down);text-shadow:0 0 28px rgba(255,92,108,.35)}
+#v8p .hero .gword.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
+#v8p .hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
+#v8p .hero .sub b{color:var(--chalk);font-family:var(--mono)}
+#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+#v8p .ck{padding:8px 6px 7px;text-align:center;border:1px solid var(--line);background:var(--well)}
+#v8p .ck .cl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)}
+#v8p .ck .cv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
+#v8p .ck.bad{border-color:rgba(255,92,108,.35)} #v8p .ck.bad .cv{color:var(--down)}
+#v8p .ck.ok{border-color:rgba(47,212,139,.35)} #v8p .ck.ok .cv{color:var(--up)}
+#v8p .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#v8p .slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:5px}
+#v8p .slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
+#v8p .sbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+#v8p .sbar i{display:block;height:100%}
+#v8p .sbar.buy i{background:linear-gradient(90deg,var(--up),var(--up-d))} #v8p .sbar.sell i{background:linear-gradient(90deg,var(--down),var(--down-d))}
+#v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+/* foot note */
+#v8p .tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
+/* bottom nav: markup is the app's own (do_not_touch); the active tab takes the ref's gold */
+#v8p ~ .bnav .bn.on,.bnav .bn.on{color:var(--gold,#D4AF37);text-shadow:0 0 10px rgba(212,175,55,.35)}
+@media (prefers-reduced-motion:reduce){#v8p *{transition:none !important}}
 </style>
 </head>
 <body>
-<div class="screen">
-  <div class="headx">
-    <div class="t">
-      <h1>V8</h1>
-      <div class="s" id="sub">loading…</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-      <span class="gatec" id="gate">GATE --</span>
-      <div class="insw" id="insw"></div>
-    </div>
-  </div>
-  <div id="body"><div class="loading" style="padding:14px">Loading V8…</div></div>
+<div id="v8p">
+  <div class="top"><div class="brand">V<b>8</b></div><div class="live"><span class="dot off" id="tdot"></span><span id="tclock">V8</span> <span class="pill" id="tpill">loading</span></div></div>
+  <div class="sect">Market mood <span class="r" id="mood-r"></span></div>
+  <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
+  <div style="height:18px"></div>
+  <div class="tbl-note" style="text-align:center" id="foot-note">Numbers are the paper book.</div>
 </div>
-
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -321,1289 +102,126 @@
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
-
 <script>
-var STATE = { d: null, open: -1, funnels: {}, ledgerOpen: false, ledger: null, sm: null,
-              mood: null, book: null, group: 'period', instrument: 'equity',
-              sub: {}, pop: null, fold: {}, stars: {}, act: {}, dma: {}, tcs: {}, legend: null,
-              tcScore: {},   // cc#1547: symbol+'|'+SIDE -> {score_pct, verdict_class} from tc_score_latest
-              gates: {}, gateOpen: null,   // cc#986: per-symbol gate detail, and which one is open
-              legendOpen: false,           // cc#989: marker legend, on demand behind the (i)
-              /* cc#1115: null = the default view (period groups on the open page, newest-exit-first
-                 on the realised page). A non-null key switches BOTH pages to ONE FLAT LIST, because
-                 a book sorted by P&L and then chopped into Today/This week buckets is not sorted by
-                 P&L in any useful sense. Direction flips on a repeat tap of the active key. */
-              sortKey: null, sortDir: 'desc',
-              page: 'open' };   // cc#943: which face of the book is showing   // cc#932: pivot markers by symbol
-
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function pxv(v){ if (v==null||isNaN(Number(v))) return '--';
-  var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
-function inr(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return (x < 0 ? '−' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
-}
-/* cc#907's short scale, same rule, because a stat cell here is a quarter of a phone too */
-function inrShort(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v), sign = x < 0 ? '−' : '', a = Math.abs(x);
-  /* decimals shrink as the magnitude grows, so the STRING never does. Measuring the old version
-     caught the case the eye misses: ₹100.00Cr is 9 characters and did not fit a 360px phone.
-     With this ladder the widest possible output is 8 — "−₹99,999" or "−₹14.3Cr" — which fits
-     every cell it is used in, at every viewport down to 320px. */
-  if (a >= 1e7){
-    var cr = a / 1e7;
-    return sign + '₹' + (cr >= 100 ? Math.round(cr) : cr.toFixed(cr >= 10 ? 1 : 2)) + 'Cr';
-  }
-  if (a >= 1e5){
-    var l = a / 1e5;
-    return sign + '₹' + l.toFixed(l >= 10 ? 1 : 2) + 'L';
-  }
-  return sign + '₹' + Math.round(a).toLocaleString('en-IN');
-}
-function pctv(v, dp){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v); return (x >= 0 ? '+' : '') + x.toFixed(dp == null ? 2 : dp) + '%';
-}
-function cls(v){ return v == null ? '' : (Number(v) >= 0 ? 'grn' : 'redx'); }
-function railCls(r){
-  var s = (r && r.state || 'CLOSED').toUpperCase();
-  return s === 'LIVE' ? 'live' : s === 'STALE' ? 'stale' : 'closed';
-}
-function strip(sym){
-  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
-  return '';
-}
-function moodCls(m){
-  m = (m || '').toLowerCase();
-  if (m.indexOf('bull') > -1) return 'bull';
-  if (m.indexOf('bear') > -1) return 'bear';
-  return 'caut';
-}
-
-/* ══ 1 · MARKET MOOD + SLOTS ═══════════════════════════════════════════════════════════════
-   Built from market_mood()'s OWN keys — mood, checks[], fails, buy_slots, sell_slots,
-   total_slots, slot_note, checked_at. cc#887 caught this endpoint being read for verdict /
-   gate_open / as_of, none of which it returns, so the gate card printed three nulls for weeks.
-   Nothing here is invented: a chip exists only because checks[] carried it. */
-function moodBlock(){
-  var m = STATE.mood;
-  if (!m) return '';
-  /* cc#921 — THE REAL KEYS, READ FROM market_mood() THIS TIME. It returns each check as
-     {filter, value, required, pass, indeterminate}. There is no label, no name and no ok — and
-     cc#915 read exactly those three. So every chip printed a NAKED NUMBER with no colour: the
-     bare "0.58" the founder saw is the ADR check. This is the cc#887/888 class of mistake and I
-     made it again; fixed against the source rather than against another guess.
-     Each chip now leads with WHAT the number is, and carries its pass rule in the title.
-     REMOVED: the commentary line under the mood word. It was slot_note, whose literal value is
-     "standard pool only (cc#502) -- no ring-fenced pools" — internal jargon quoting a card
-     number on a retail screen. It told the founder nothing and it is gone. */
-  var chips = (m.checks || []).map(function(c){
-    var k = c.indeterminate ? '' : (c.pass ? ' ok' : ' bad');
-    var v = (c.value == null) ? '--'
-          : (typeof c.value === 'number' ? Number(c.value).toFixed(2) : String(c.value));
-    return '<span class="mchip' + k + '" title="' + esc(String(c.filter || '')
-      + (c.required ? ' · needs ' + c.required : '')) + '">'
-      + '<b>' + esc(c.filter || '--') + '</b> ' + esc(v) + '</span>';
-  }).join('');
-  var slots = (m.buy_slots == null && m.sell_slots == null && m.total_slots == null) ? ''
-    : '<div class="slotbar">'
-      + '<div><div class="sk">Buy slots</div><div class="sv grn">' + (m.buy_slots == null ? '--' : m.buy_slots) + '</div></div>'
-      + '<div><div class="sk">Sell slots</div><div class="sv redx">' + (m.sell_slots == null ? '--' : m.sell_slots) + '</div></div>'
-      + '<div><div class="sk">Total</div><div class="sv">' + (m.total_slots == null ? '--' : m.total_slots) + '</div></div>'
-      + '</div>';
-  return '<div class="mood ' + moodCls(m.mood) + '">'
-    + '<div class="mv">' + esc(m.mood || '--') + '</div>'
-    + (chips ? '<div class="mchips">' + chips + '</div>' : '')
-    + slots
-    + (m.checked_at ? '<div class="mw" style="margin-top:8px;font-size:10px">Checked ' + esc(String(m.checked_at)) + '</div>' : '')
-    + '</div>';
-}
-
-/* ══ 2 · BOOK STAT ROW ═════════════════════════════════════════════════════════════════════
-   Open / Unrealised / Realised / Win-Loss. Realised and W/L come from /api/mobile/trades, which
-   already computes them the web way (net of Rs.500 a trade, W/L = clean TARGET vs SL). They are
-   NOT recomputed here — one computation, one answer, so this page cannot drift from the Home
-   card or the web daylog.
-   W/L RULE (card item 3): counts AND rate, and with no closed trades BOTH render "--", never a
-   0% that reads like a real losing record. */
-function statsBlock(){
-  /* ══ cc#976 — ONE REACTIVE STAT ROW ═══════════════════════════════════════════════════════
-     Was four static tiles ABOVE the tabs mixing both books at once: OPEN and UNREALISED describe
-     the open book, REALISED and WIN/LOSS describe the closed one, and whichever tab you were on,
-     half the row was about the other. Now it is THREE tiles that describe the ACTIVE tab, and it
-     sits UNDER the tabs because that is what it is describing.
-
-     Every figure comes from the cc#970 canon payload. Nothing is computed here — not the rate,
-     not the brokerage netting, not the side split. That is the whole point of rule 13, and it is
-     also why the old W/L rate arithmetic in this function is gone rather than moved. */
-  var b = STATE.book;
-  if (!b) return '';
-  var open = STATE.page === 'open';
-  function cell(k, v, p, c){
-    return '<div class="bst"><div class="k">' + k + '</div>'
-      + '<div class="v ' + (c || '') + '">' + v + '</div>'
-      + '<div class="p">' + (p || '') + '</div></div>';
-  }
-  var cells;
-  if (open){
-    var L = b.long || {}, S = b.short || {};
-    var split = ((L.n || 0) + '/' + (S.n || 0));
-    cells = cell('Open', (b.open != null ? b.open : '--'),
-                 (b.deployed != null ? inrShort(b.deployed) + ' in' : ''))
-          + cell('Unrealised', inrShort(b.unrealised),
-                 (b.unrealised_pct != null ? pctv(b.unrealised_pct) : ''), cls(b.unrealised))
-          + cell('Long / Short', split, 'open per side');
-  } else {
-    /* ACCURACY prints a dash, never 0%, when nothing is decided — the cc#912 rule, and the canon
-       already returns null rather than a zero for exactly this reason. Colour follows the RATE,
-       not the mere presence of a number: a 2W/8L record must not render green. */
-    var r = b.win_rate;
-    cells = cell('Trades', (b.trades != null ? b.trades : '--'), 'closed')
-          + cell('Accuracy', (r == null ? '--' : Math.round(r) + '%'),
-                 (b.decided ? (b.wins + 'W/' + b.losses + 'L') : 'no verdicts'),
-                 r == null ? '' : (r >= 50 ? 'grn' : 'redx'))
-          + cell('Net', inrShort(b.realised),
-                 (b.brokerage ? 'net of \u20B9' + Math.round(b.brokerage).toLocaleString('en-IN') : 'net'),
-                 cls(b.realised));
-  }
-  /* keyed on the page so the browser rebuilds the node on a tab change and the fade actually
-     runs; without the key it would patch text in place and never animate. */
-  return '<div class="bstats stfade" data-page="' + (open ? 'open' : 'realised') + '">' + cells + '</div>';
-}
-
-/* ══ 3 · INSTRUMENT SWITCH ═════════════════════════════════════════════════════════════════
-   Equity is the default and, today, the only real view. The Futures button is rendered but
-   DISABLED with the reason on it, because the data carries no instrument field: v8_paper_positions
-   is (id, symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date,
-   status) and CMP is pinned to the spot bar by design (cc#367). Shipping an enabled Futures tab
-   would be an empty box pretending to be a view. */
-function inswBlock(){
-  /* cc#924: the disabled FUTURES button relied on a hover title, and a phone has no hover — so
-     the reason was invisible and the control was just dead. The button is HIDDEN until the data
-     can back it (futures_available), leaving EQUITY as a plain label, and the reason is printed
-     as a visible line in the book below instead. A control that cannot do anything is worse than
-     no control; the fact still gets stated, just where it can actually be read. */
-  var b = STATE.book;
-  var fa = b ? b.futures_available : false;
-  if (!fa) return '<button class="on" disabled>EQUITY</button>';
-  return ['equity','futures'].map(function(x){
-    return '<button class="' + (STATE.instrument === x ? 'on' : '') + '"'
-      + ' onclick="setInstrument(\'' + x + '\')">' + x.toUpperCase() + '</button>';
-  }).join('');
-}
-function setInstrument(x){ STATE.instrument = x; renderHead(); renderBook(); }   /* cc#1110 */
-
-/* ══ 4 · NAVIGATION — GROUPING x SUBFILTER (cc#922) ════════════════════════════════════════
-   The founder's words: navigation is poor, and the three cuts need a subfilter layer that a
-   retail user gets without instructions. The interaction, stated for sign-off:
-
-     ROW 1  GROUP BY: Period | Type | Side — a segmented control, exactly one active. It decides
-            how the list is SPLIT INTO SECTIONS. Unchanged in meaning from cc#915.
-     ROW 2  NARROW BY: chips for the OTHER TWO dimensions only, because filtering by the same
-            dimension you are grouping by would just hide sections and teach nothing. Each chip
-            carries its own live count. Tap to apply, tap again to clear. At most one chip per
-            dimension, so the combinations stay explainable — "Period, only LONG" or "Type, only
-            this week". A CLEAR chip appears when anything is on.
-
-   THE COUNTS ARE FACETED, which is the part that makes it feel intuitive rather than fiddly:
-   a chip's count is computed with every OTHER dimension's filter applied but NOT its own. So
-   switching LONG to SHORT shows what you would actually get, and a chip never shows a count you
-   cannot reach. A chip that would yield nothing is not rendered at all — no dead ends.
-
-   Client-side throughout: /api/mobile/v8book already ships every field these cuts need, so no
-   endpoint changed. Sticky while the list scrolls, per the observation. */
-/* cc#968: GROUPING IS NOT A USER CHOICE ANY MORE. The PERIOD/TYPE/SIDE meta-buttons put two
-   interaction models on one screen — buttons that changed how the list was SPLIT next to chips
-   that changed which rows SURVIVED — and nothing on screen said which did which. One model now:
-   CHIPS FILTER, PERIOD HEADERS GROUP. GROUPS[] and setGroup() are deleted, not hidden. */
-var DIMS   = { basket: 'Type', side: 'Side' };
-var GROUP_BY = 'period';                      // fixed, the cc#924 grouping
-function setSub(dim, val){
-  STATE.sub = STATE.sub || {};
-  if (STATE.sub[dim] === val) delete STATE.sub[dim]; else STATE.sub[dim] = val;
-  renderBook();   /* cc#1110 */
-}
-function clearSub(){ STATE.sub = {}; renderBook(); }   /* cc#1110 */
-
-function weekStart(d){                        // Monday 00:00 of d's week
-  var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  return x;
-}
-function periodOf(p){
-  if (!p.entry_date) return 'Undated';
-  var now = new Date();
-  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  var q = p.entry_date.split('-');
-  var e = new Date(Number(q[0]), Number(q[1]) - 1, Number(q[2]));
-  if (e.getTime() === today.getTime()) return 'Today';
-  var ws = weekStart(today);
-  if (e >= ws) return 'This week';
-  var lw = new Date(ws); lw.setDate(lw.getDate() - 7);
-  if (e >= lw) return 'Last week';
-  return 'Older';
-}
-var PERIOD_ORDER = ['Today','This week','Last week','Older','Undated'];
-var DIMKEY = {
-  period: periodOf,
-  basket: function(p){ return p.basket_label || p.basket || '--'; },
-  side:   function(p){ return p.side === 'SHORT' ? 'SHORT' : 'LONG'; }
+(function(){
+'use strict';
+/* ── fetch layer ─────────────────────────────────────────────────────────────────────────
+   Every URL here was posted in the cc#1590 P1 discovery log. No endpoint is new, none is
+   computed on the page: the book numbers are the canon's (rule 13 V8_PNL_CANON_V1). */
+var URLS = {
+  mood:   '/api/v8/market_mood',
+  book:   '/api/mobile/v8book'
 };
-
-/* rows passing every active subfilter, optionally ignoring one dimension (for faceted counts) */
-function applySub(list, ignore){
-  var sub = STATE.sub || {};
-  return list.filter(function(p){
-    for (var d in sub){
-      if (!sub.hasOwnProperty(d) || d === ignore) continue;
-      if (DIMKEY[d](p) !== sub[d]) return false;
-    }
-    return true;
-  });
+var STATE = { mood:null, book:null, fetchedAt:null };
+function getJ(url){
+  return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
-/* cc#968 — ONE CHIP BAR. [All n] then the two side chips then the four type chips, in one
-   horizontally scrollable row directly under the headline.
-
-   SELECTION: one SIDE chip and one TYPE chip may be active together (Short + Sell Momentum is a
-   real question), tapping an active chip clears that dimension, and All clears everything. That
-   is applySub()'s existing behaviour — it already ANDs across dimensions and stores one value per
-   dimension — so the rule did not need new logic, only a smaller bar to drive it.
-
-   COUNTS stay FACETED, which is the one thing worth keeping from the old bar: each chip counts
-   with every OTHER dimension's filter applied but not its own, so switching Long to Short shows
-   what you will actually get and a chip never advertises a count you cannot reach. A chip that
-   would yield nothing is not rendered — no dead ends. */
-/* ══ cc#1115 — SORT ═══════════════════════════════════════════════════════════════════════════
-   Three keys, both pages, and the FIELD depends on which page is showing: the unrealised page
-   sorts on unrealised P&L and entry date, the realised page on realised P&L and exit date. Same
-   control, same state, different accessor — so switching pages carries the sort across instead of
-   silently dropping it (card item 5). All three keys translate, so nothing has to be reset.
-
-   NOTHING IS RECOMPUTED HERE. sortVal reads the very fields the rows already display, which are
-   the cc#970 canon values off the payload. Sorting is ordering; it must never become arithmetic. */
-var SORTS = [{k:'pnl', label:'P&L'}, {k:'date', label:'Date'}, {k:'name', label:'Name'}];
-
-function sortVal(p, key){
-  var open = STATE.page === 'open';
-  if (key === 'pnl')  return open ? p.unrealised : p.realised;
-  if (key === 'date') return (open ? (p.entry_date || p.entry_ts) : (p.exit_ts || p.exit_date)) || '';
-  return String(p.symbol || '');
+/* ── format helpers ──────────────────────────────────────────────────────────────────── */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function num(n){ return (typeof n==='number' && isFinite(n)); }
+function inr(n, dp){
+  if(!num(n)) return '—';
+  var neg = n < 0, a = Math.abs(n);
+  var s = a.toFixed(dp==null?0:dp), parts = s.split('.'), x = parts[0];
+  var last3 = x.slice(-3), rest = x.slice(0,-3);
+  if(rest) last3 = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+  return (neg?'−':'') + '₹' + last3 + (parts[1] ? '.'+parts[1] : '');
 }
-
-/* A null P&L is NOT zero — it is a position whose value is unknown, and ranking it as break-even
-   would place it in the middle of the book as if that were a measured fact. Unknowns sink to the
-   bottom in both directions instead. */
-function sortRows(list){
-  var key = STATE.sortKey;
-  if (!key) return list;
-  var dir = STATE.sortDir === 'asc' ? 1 : -1;
-  return list.slice().sort(function(a, b){
-    var x = sortVal(a, key), y = sortVal(b, key);
-    var xn = (x == null || x === ''), yn = (y == null || y === '');
-    if (xn && yn) return 0;
-    if (xn) return 1;               /* unknown last, whichever way the arrow points */
-    if (yn) return -1;
-    if (key === 'name') return String(x).localeCompare(String(y)) * (STATE.sortDir === 'asc' ? 1 : -1);
-    return (x < y ? -1 : x > y ? 1 : 0) * dir;
-  });
+function inrShort(n){
+  if(!num(n)) return '—';
+  var a = Math.abs(n), sign = n<0?'−':'';
+  if(a >= 1e7) return sign+'₹'+(a/1e7).toFixed(2)+'Cr';
+  if(a >= 1e5) return sign+'₹'+(a/1e5).toFixed(2)+'L';
+  if(a >= 1e3) return sign+'₹'+(a/1e3).toFixed(1)+'k';
+  return inr(n);
 }
-
-/* Tap an inactive key to sort by it; tap the active key to flip direction; a third state is not
-   offered here because Clear is its own chip and a three-way cycle hides the way back. */
-function setSort(k){
-  if (STATE.sortKey === k) STATE.sortDir = (STATE.sortDir === 'desc' ? 'asc' : 'desc');
-  else { STATE.sortKey = k; STATE.sortDir = (k === 'name' ? 'asc' : 'desc'); }
-  renderBook();   /* cc#1110: the book section only — never the page */
+function pct(n, dp){ if(!num(n)) return '—'; var s = n.toFixed(dp==null?2:dp)+'%'; return (n>0?'+':n<0?'−':'') + s.replace('-',''); }
+function px(n){ if(!num(n)) return '—'; return n.toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function sgn(n){ return !num(n)?'mu':(n>0?'up':n<0?'dn':'mu'); }
+function pc(cls, txt){ return '<span class="'+cls+'">'+txt+'</span>'; }
+/* IST wall-clock now, as a Date whose getters read IST (same trick as scorrAsofStamp; cc#844:
+   never add 330 to a value that is already IST). */
+function istNow(){ var n = new Date(); return new Date(n.getTime() + (330 + n.getTimezoneOffset())*60000); }
+function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function marketOpen(){ var d = istNow(), dow = d.getDay(), m = d.getHours()*60+d.getMinutes(); return dow>=1 && dow<=5 && m>=555 && m<=930; }
+function asofLine(asof, extra){
+  var st = window.scorrAsofStamp ? scorrAsofStamp(asof) : {txt:String(asof||''),amber:false};
+  if(!st.txt && !extra) return '';
+  return '<div class="asof'+(st.amber?' stale':'')+'">'+(extra?esc(extra)+(st.txt?' · ':''):'')+esc(st.txt)+'</div>';
 }
-function clearSort(){
-  if (!STATE.sortKey) return;
-  STATE.sortKey = null; STATE.sortDir = 'desc';
-  renderBook();   /* cc#1110 */
+function emptyBox(id, words){
+  var el = document.getElementById(id); if(!el) return;
+  el.innerHTML = '<div class="empty">'+esc(words)+'<br><span class="chip" data-retry="1">Retry</span></div>';
 }
-
-function sortBar(){
-  var on = STATE.sortKey;
-  var arrow = STATE.sortDir === 'asc' ? '\u2191' : '\u2193';
-  var h = '<span class="sortlb">Sort</span>';
-  SORTS.forEach(function(x){
-    h += '<button class="sub' + (on === x.k ? ' on' : '') + '" onclick="setSort(\'' + x.k + '\')">'
-       + x.label + (on === x.k ? ' <i>' + arrow + '</i>' : '') + '</button>';
-  });
-  if (on) h += '<button class="sub clr" onclick="clearSort()">Clear</button>';
-  return '<div class="chipbar sortbar">' + h + '</div>';
-}
-
-function chipBar(all){
-  var sub = STATE.sub || {};
-  var anyOn = Object.keys(sub).length > 0;
-  var h = '<button class="sub' + (anyOn ? '' : ' on') + '" onclick="clearSub()">All <i>'
-        + all.length + '</i></button>';
-  ['side', 'basket'].forEach(function(d){
-    var pool = applySub(all, d);               // faceted: this dimension's own filter excluded
-    var counts = {}, order = [];
-    pool.forEach(function(p){
-      var k = DIMKEY[d](p);
-      if (counts[k] == null){ counts[k] = 0; order.push(k); }
-      counts[k]++;
-    });
-    order.sort();
-    order.forEach(function(k){
-      if (!counts[k]) return;                  // a dead end is not offered
-      var on = sub[d] === k;
-      h += '<button class="sub' + (on ? ' on' : '') + '"'
-        + ' onclick="setSub(\'' + d + '\',\'' + esc(k).replace(/'/g, "\\'") + '\')">'
-        + esc(k) + ' <i>' + counts[k] + '</i></button>';
-    });
-  });
-  return '<div class="chipbar">' + h + '</div>';
-}
-
-function groupPositions(list){
-  var keyf = DIMKEY[GROUP_BY] || periodOf;
-  var map = {}, order = [];
-  list.forEach(function(p){
-    var k = keyf(p);
-    if (!map[k]){ map[k] = []; order.push(k); }
-    map[k].push(p);
-  });
-  /* period is the only grouping now, so the canonical period order always applies. A group the
-     filter emptied simply never appears in `map`, so it hides WITH its header by construction. */
-  order = PERIOD_ORDER.filter(function(k){ return map[k]; });
-  return order.map(function(k){ return { key: k, rows: map[k] }; });
-}
-
-/* ══ 5 · POSITION CARD (cc#923) ════════════════════════════════════════════════════════════
-   Lighter by default, complete on tap. The founder does not want a C·A·R·D strip on every card
-   — it repeated 18 times down the screen and competed with the numbers that matter.
-
-   COLLAPSED the card answers "how is this trade doing": symbol, side, basket, P&L, return, day
-   move, the stop->target rail, and FOUR facts — qty, entry, cmp, days held. Those four are the
-   size, the price in, the price now, and how long it has been running.
-   EXPANDED adds the C·A·R·D strip plus what was cut: capital deployed, the exact entry stamp,
-   the target and stop levels, and this position's own price time.
-
-   TAP RULES, and why one tap can never fire both: tapping the CARD expands it (bubble-phase
-   onclick). Tapping the SYMBOL opens the cc#898 sheet — that handler is CAPTURE-phase and calls
-   stopPropagation, so it runs first and the card's own onclick never sees the event. No
-   data-scorr-skip here: putting it on the card would suppress the symbol sheet too, which is the
-   opposite of what is wanted. */
-function posTap(id){
-  STATE.pop = (STATE.pop === id) ? null : id;
-  renderBook();   /* cc#1110 */
-}
-/* cc#1547: ONE consolidated flag per row, replacing the separate star/bolt/square glyph cluster
-   (cc#932/933/1539/1540). Colour + detail content come from the shared functions in
-   scorr_card_common.js (ScorrMarkerFlagColor/ScorrMarkerFlagDetailHtml) so /dashboard cannot say
-   something different (DISPLAY_PARITY 16202) \u2014 nothing about a marker's meaning is re-derived
-   here, only the tap wiring is /m/v8's own. Tapping opens ScorrMarkerDetail (scorr_card_common.js),
-   a bottom sheet on mobile via the app's existing sheet conventions. */
-function markerFlag(sym, side){
-  var fired0 = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
-                 dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
-  // cc#1558: ONE filtering step (window.ScorrMarkerFlagFilter) against this row's OWN side, fed
-  // into the colour below AND re-applied in openMarkerFlag() at tap time for the popover \u2014 a marker
-  // whose direction disagrees with the position is simply not there for either. Replaces cc#1557's
-  // pivot-star-wins tie-break (founder rejected).
-  var fired = window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(fired0, side) : fired0;
-  var col = window.ScorrMarkerFlagColor ? window.ScorrMarkerFlagColor(fired) : null;
-  if (!col) return '';
-  return '<button type="button" class="mk-flag" style="color:' + col + '" title="Markers \u2014 tap for detail" '
-    + 'aria-label="Markers for ' + esc(sym) + ' \u2014 tap for detail" '
-    + 'onclick="event.stopPropagation();openMarkerFlag(\'' + esc(sym).replace(/'/g, "\\'") + '\')">\u2691</button>';
-}
-// cc#1547: looked up fresh at tap time (not baked into the button's markup) so a flag opened after
-// the maps refresh under it always shows current data, matching the old per-glyph functions' own
-// no-stale-closure discipline. `side` comes off the open position for the TC score lookup
-// (cc#1542's endpoint is keyed symbol+side, same convention /dashboard's ctx.tcScores map uses)
-// AND cc#1558's own position-side filter, so the popover can never show a marker the flag itself
-// filtered out.
-function openMarkerFlag(sym){
-  var fired0 = { stars: (STATE.stars || {})[sym] || null, act: (STATE.act || {})[sym] || null,
-                 dma: (STATE.dma || {})[sym] || null, tcs: (STATE.tcs || {})[sym] || null };
-  var pos = ((STATE.d && STATE.d.open) || []).find(function(p){ return p.symbol === sym; });
-  var side = String((pos && pos.side) || '').toUpperCase();
-  var fired = window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(fired0, side) : fired0;
-  var tc = (STATE.tcScore || {})[sym + '|' + side] || null;
-  if (window.ScorrMarkerDetail) window.ScorrMarkerDetail.open(sym, fired, tc, STATE.legend);
-}
-/* cc#943/942 — ONE card renderer, TWO pages. The card explicitly asks for the realised page to
-   use the SAME layout so the eye does not have to relearn it, and the way to guarantee that is a
-   single function, not a second one that starts identical and drifts. `mode` swaps only what has
-   to change: an open position shows CMP, day-move and a progress rail; a closed one shows the
-   exit price, the exit reason and no rail — a finished trade has no progress left to draw, and a
-   full or empty bar would both be a claim the data does not make. Every class name, every line
-   position and the P&L typography are shared. */
-function posCard(p, mode){
-  var realised = (mode === 'realised');
-  var val = realised ? p.realised : p.unrealised;
-  var col = (val == null) ? 'var(--mut)'
-          : (val >= 0 ? 'var(--grn,#2FD48B)' : 'var(--red,#FF5C6C)');
-  var rail;
-  if (realised){
-    /* Same slot as the rail, so the two pages stay the same height per card: the levels line
-       survives (it is still true — this is what the trade was aiming at) with the outcome badge. */
-    var rc = p.result === 'TARGET' ? 'good' : (p.result === 'SL' ? 'bad' : 'neut');
-    rail = '<div class="lvls"><span>SL ' + pxv(p.stop_loss) + '</span>'
-      + '<span class="rbadge ' + rc + '">' + esc(p.result || 'CLOSED') + '</span>'
-      + '<span>T ' + pxv(p.target) + '</span></div>';
-  } else if (p.progress == null){
-    rail = '<div class="norail">no target/stop</div>';   // cc#923: a quiet placeholder, not a sentence
-  } else {
-    var pctW = (p.progress * 100).toFixed(1);
-    var ep = null;
-    if (p.target != null && p.stop_loss != null && p.entry_price != null && p.target !== p.stop_loss){
-      var span = p.side === 'SHORT' ? (p.stop_loss - p.target) : (p.target - p.stop_loss);
-      var trav = p.side === 'SHORT' ? (p.stop_loss - p.entry_price) : (p.entry_price - p.stop_loss);
-      if (span) ep = Math.max(0, Math.min(1, trav / span)) * 100;
-    }
-    rail = '<div class="rail2">'
-      + '<div class="fillx" style="width:' + pctW + '%;background:' + col + '"></div>'
-      + (ep == null ? '' : '<div class="ent" style="left:' + ep.toFixed(1) + '%"></div>')
-      + '<div class="dot" style="left:' + pctW + '%;background:' + col + '"></div></div>'
-      + '<div class="lvls"><span>SL ' + pxv(p.stop_loss) + '</span><span>T ' + pxv(p.target) + '</span></div>';
-  }
-  var open = STATE.pop === p.id;
-  var more = open
-    ? '<div class="pmore">' + strip(p.symbol)
-      + '<div class="pc4" style="border-top:0;margin-top:8px;padding-top:0">'
-      + '<span><b>' + inrShort(p.deployed) + '</b> deployed</span>'
-      + '<span>target <b>' + pxv(p.target) + '</b></span>'
-      + '<span>stop <b>' + pxv(p.stop_loss) + '</b></span>'
-      + '<span>in ' + esc(p.entry_label || '--') + '</span>'
-      + (realised ? '<span>out ' + esc(p.exit_label || '--') + '</span>'
-                  : (p.cmp_at ? '<span>price ' + esc(p.cmp_at) + '</span>' : ''))
-      + '</div></div>'
-    : '';
-  return '<div class="pcard' + (open ? ' openx' : '') + '" onclick="posTap(' + p.id + ')">'
-    + '<div class="pc1"><span class="sy2">' + esc(p.symbol) + '</span>'
-    + (realised ? '' : markerFlag(p.symbol, p.side))
-    + '<span class="tagx ' + (p.side === 'SHORT' ? 'short' : 'long') + '">' + esc(p.side) + '</span>'
-    + '<span class="bk">' + esc(p.basket_label || '') + '</span></div>'
-    + '<div class="pc2"><span class="pnl ' + cls(val) + '">' + inr(val) + '</span>'
-    + '<span class="ret ' + cls(p.return_pct) + '">' + pctv(p.return_pct) + '</span>'
-    + (realised ? '<span class="day">out ' + esc(p.exit_label || '--') + '</span>'
-                : '<span class="day">day ' + pctv(p.day_pct) + '</span>')
-    + '</div>'
-    + rail
-    + '<div class="pc4">'
-    + '<span><b>' + Number(p.qty || 0).toLocaleString('en-IN') + '</b> qty</span>'
-    + '<span>entry <b>' + pxv(p.entry_price) + '</b></span>'
-    + '<span>' + (realised ? 'exit <b>' + pxv(p.exit_price) : 'cmp <b>' + pxv(p.cmp)) + '</b></span>'
-    + '<span><b>' + (p.days_held == null ? '--' : p.days_held + 'd') + '</b> held</span>'
-    + '<span class="pex">' + (open ? 'less ▴' : 'more ▾') + '</span>'
-    + '</div>' + more + '</div>';
-}
-
-/* ══ cc#943 / cc#942 — ONE BOOK, TWO PAGES ════════════════════════════════════════════════════
-   These two cards are the same founder request filed twice on the same day; built once.
-   Page 1 unrealised (open positions), page 2 realised (closed trades), identical layout, reached
-   by a horizontal swipe or by tapping the segmented pills. Both pages come from ONE payload, so
-   they are guaranteed to be the same book at the same instant — a second fetch could land the
-   pages on different scopes, which is exactly the drift cc#894 was filed for. */
-function setBookPage(pg){
-  if (STATE.page === pg) return;
-  STATE.page = pg;
-  STATE.pop = null;          // an expanded card belongs to the page it was opened on
-  renderBook();   /* cc#1110 */
-}
-function bookHeader(b){
-  var open = STATE.page === 'open';
-  var v = open ? b.unrealised : b.realised;
-  var pctv2 = open ? b.unrealised_pct : b.realised_pct;
-  /* cc#968 item 2: with a chip active the headline states the FILTERED subset, because a total
-     that ignores the filter under it is the number the founder would have to mentally undo.
-     UNFILTERED the headline stays the payload's own figure — which on the realised page is the
-     cc#970 canon, NET of brokerage. A filtered realised subtotal is deliberately GROSS of
-     brokerage and labelled `sum`, not `realised`: brokerage is a whole-book cost and slicing it
-     per chip would invent a per-slice fee the book never charged. */
-  var _srcAll = open ? (b.positions || []) : (b.closed || []);
-  var _filtered = Object.keys(STATE.sub || {}).length ? applySub(_srcAll) : null;
-  var _fn = _filtered ? _filtered.length : null;
-  if (_filtered){
-    var _sum = 0, _known = false;
-    _filtered.forEach(function(p){
-      var x = open ? p.unrealised : p.realised;
-      if (x != null){ _sum += x; _known = true; }
-    });
-    v = _known ? _sum : null;
-    pctv2 = null;                       // a % of deployed for a slice is not on the payload
-  }
-  var seg = '<div class="bkpg"><div class="seg">'
-    + '<button class="' + (open ? 'on' : '') + '" onclick="setBookPage(\'open\')">Unrealised</button>'
-    + '<button class="' + (open ? '' : 'on') + '" onclick="setBookPage(\'realised\')">Realised</button>'
-    + '</div><div class="bkdots"><i class="' + (open ? 'on' : '') + '"></i>'
-    + '<i class="' + (open ? '' : 'on') + '"></i></div></div>';
-  /* Same slot, same font on both pages — only the label and the number change (item 2). The win
-     rate appears on the realised page only, because an open book has not won or lost anything
-     yet, and a rate that counts unrealised P&L as a "win" would be a claim about a trade that is
-     still running. A dash, never 0%, when nothing has closed. */
-  /* cc#976 item 3 — THE BIG HEADLINE IS GONE. It printed the same unrealised/realised figure the
-     stat row prints one line below it, so the page stated its own P&L twice. What the headline
-     carried that the tiles do not is the FILTER state, so that survives as a thin line and only
-     when a chip is active: unfiltered, the tiles say it all and this renders nothing.
-     The whole-book win rate / brokerage / side-split tail that cc#968 gated is gone with it —
-     those facts now live in the REALISED tiles, where they belong to the tab that owns them. */
-  var line = '';
-  if (_fn != null){
-    var _sv = _known ? _sum : null;
-    line = '<div class="bktot"><b class="' + cls(_sv) + '">' + inr(_sv) + '</b>'
-      + '<span>' + _fn + (open ? ' open' : ' closed') + ' · filtered</span></div>';
-  }
-  return seg + statsBlock() + line;
-}
-
-function sideSplit(b){
-  var L = b.rec_long || {}, S = b.rec_short || {};
-  if (!L.decided && !S.decided) return '';   // no verdicts either side: say nothing, invent nothing
-  function one(k, r){
-    var rt = (r.rate == null) ? null : Number(r.rate);
-    /* same founder bands as the Home face: >=60 green, 40-60 amber, <40 red; a dash is dim. */
-    var col = (rt == null) ? 'var(--mut)'
-            : (rt >= 60 ? 'var(--grn)' : (rt >= 40 ? 'var(--amber)' : 'var(--red)'));
-    return '<b style="color:' + col + ';font-weight:700">' + k + ' '
-      + (rt == null ? '—' : rt.toFixed(0) + '%') + '</b>'
-      + (r.decided ? ' <span style="opacity:.75">' + r.wins + '/' + r.decided + '</span>' : '');
-  }
-  return '<br>' + one('Long', L) + ' · ' + one('Short', S);
-}
-
-function realisedBlock(b){
-  var all = b.closed || [];
-  if (!all.length)
-    return '<div class="empty" style="margin:0 12px"><b>Nothing closed yet</b>'
-      + 'No trades have been booked in this era.</div>';
-  /* cc#968 item 4: ONE implementation, both pages. Closed trades carry the same `side` and
-     `basket_label` fields the open rows do, so chipBar()/applySub() work here unchanged — the
-     realised page did not need its own filter model, only the same one. */
-  var bar = '<div class="navwrap">' + chipBar(all) + sortBar() + '</div>';
-  var rows = applySub(all);
-  if (!rows.length)
-    return bar + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
-      + 'Clear a filter to see trades again.</div>';
-  /* Default sort: most recent exit first (item 4 / item 3). Sorted HERE on a real date key rather
-     than trusting arrival order — the endpoint orders by exit_ts DESC today, and relying on that
-     silently is how a list ends up in the wrong order the day the query changes. */
-  var g = STATE.sortKey ? sortRows(rows) : rows.slice().sort(function(a, c){
-    var x = a.exit_ts || '', y = c.exit_ts || '';
-    return x < y ? 1 : (x > y ? -1 : (c.id - a.id));
-  });
-  return bar + g.map(function(p){ return posCard(p, 'realised'); }).join('');
-}
-
-function bookBlock(){
-  var b = STATE.book;
-  if (b === 'loading') return '<div class="loading" style="padding:10px 14px">Loading the book…</div>';
-  if (!b) return '<div class="more" style="margin:0 12px">Open book unavailable.</div>';
-
-  var hdr = bookHeader(b);
-  if (STATE.page === 'realised')
-    return '<div id="bookpg" class="bookpg">' + hdr + realisedBlock(b) + '</div>';
-
-  if (!b.positions.length)
-    return '<div id="bookpg" class="bookpg">' + hdr
-      + '<div class="empty" style="margin:0 12px"><b>No open positions</b>The book is flat.</div></div>';
-
-  var all = b.positions;
-  var rows = applySub(all);
-  var h = '<div class="navwrap">' + chipBar(all) + sortBar() + '</div>';
-
-  if (!rows.length)
-    return '<div id="bookpg" class="bookpg">' + hdr + h
-      + '<div class="empty" style="margin:0 12px"><b>Nothing matches</b>'
-      + 'Clear a filter to see positions again.</div></div>';
-
-  /* cc#924 item 3: on a big book the Older bucket starts collapsed — it is history, and it
-     should not push today's positions off the first screen. Threshold is the book size, not the
-     bucket's, because that is what makes the screen long. */
-  /* cc#1115: a sort replaces the period grouping rather than nesting inside it. Group headers
-     carry a per-bucket subtotal, and a bucket subtotal over a P&L-ordered slice describes nothing,
-     so the headers go with the grouping. Clearing the sort brings both back. */
-  if (STATE.sortKey)
-    return '<div id="bookpg" class="bookpg">' + hdr + h
-      + sortRows(rows).map(function(p){ return posCard(p, 'open'); }).join('') + '</div>';
-
-  var bulky = all.length > 12;
-  h += groupPositions(rows).map(function(grp){
-    var sum = 0, known = false;
-    grp.rows.forEach(function(p){ if (p.unrealised != null){ sum += p.unrealised; known = true; } });
-    var collapsed = (STATE.fold[grp.key] != null)
-      ? STATE.fold[grp.key]
-      : (bulky && grp.key === 'Older');
-    return '<div class="ghd" onclick="foldGrp(\'' + esc(grp.key).replace(/'/g, "\\'") + '\')">'
-      + '<span class="gn">' + esc(grp.key) + ' · ' + grp.rows.length + '</span>'
-      + '<span class="gs ' + (known ? cls(sum) : '') + '">' + (known ? inrShort(sum) : '--') + '</span>'
-      + '<span class="gx">' + (collapsed ? '▾' : '▴') + '</span></div>'
-      + (collapsed ? '' : grp.rows.map(function(p){ return posCard(p, 'open'); }).join(''));
+/* ── 1 · MARKET MOOD ─────────────────────────────────────────────────────────────────── */
+function renderMood(){
+  var m = STATE.mood, el = document.getElementById('sec-mood'), r = document.getElementById('mood-r');
+  if(!m || !m.checks){ emptyBox('sec-mood', 'Market gate is not available right now.'); return; }
+  var checks = m.checks || [], fails = num(m.fails) ? m.fails : checks.filter(function(c){ return !c.pass; }).length;
+  var mood = String(m.mood||'—'), cls = /bear/i.test(mood) ? 'bear' : /bull/i.test(mood) ? 'bull' : '';
+  var mode = cls==='bear' ? 'Engine is in sell mode.' : cls==='bull' ? 'Engine is in buy mode.' : 'Engine is balanced.';
+  var bk = STATE.book || {}, usedL = bk.long && num(bk.long.n) ? bk.long.n : null, usedS = bk.short && num(bk.short.n) ? bk.short.n : null;
+  var B = m.buy_slots, S = m.sell_slots;
+  var LBL = {'ADR':'ADR','Nifty Day':'DAY','Nifty Week':'WEEK','Nifty Month':'MONTH'};
+  var ck = checks.map(function(c){
+    var ind = c.indeterminate || !num(c.value);
+    var v = ind ? '—' : (c.filter==='ADR' ? c.value.toFixed(2) : pct(c.value, 2));
+    return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" title="'+esc(c.required||'')+'"><div class="cl">'+esc(LBL[c.filter]||c.filter)+'</div><div class="cv">'+v+'</div></div>';
   }).join('');
-  return '<div id="bookpg" class="bookpg">' + hdr + h + '</div>';
-}
-function foldGrp(k){
-  var cur = STATE.fold[k];
-  var bulky = (STATE.book && STATE.book.positions.length > 12);
-  if (cur == null) cur = (bulky && k === 'Older');
-  STATE.fold[k] = !cur;
-  renderBook();   /* cc#1110 */
-}
-
-/* ── everything below is the screen as it already was: signals stack, ledger, more, legend ── */
-/* ── cc#986 · FILTER FUNNEL ────────────────────────────────────────────────────────────────────
-   What used to be here was a shape-guesser that ended in "funnel shape unrecognised". It never
-   recognised anything because /api/v8/funnel/{basket} was answering 422 — its route decorator had
-   been stranded on the wrong function since cc#424 (fixed in v8_endpoints.py in this same commit).
-   This reads ONE mobile endpoint that serves the WEB's own funnel_detail + stock_passcount, so
-   there is no second funnel implementation and no shape to guess. */
-function funnelBlock(slug){
-  var f = STATE.funnels[slug];
-  if (f === undefined) return '';
-  if (f === 'loading') return '<div class="fun">funnel: loading…</div>';
-  if (!f) return '<div class="fun">funnel unavailable</div>';
-
-  var h = '<div class="fn-wrap">';
-  var st = f.stages || [];
-  if (f.stages_error) {
-    h += '<div class="fun">stage counts unavailable — ' + esc(f.stages_error) + '</div>';
-  } else if (st.length) {
-    var uni = Number(f.universe) || 0;
-    h += '<div class="fn-h">Filter funnel · ' + (uni ? uni + ' in universe' : 'universe --') + '</div>'
-      + '<div class="fn-st">'
-      + st.map(function(s){
-          /* The bar is survivors as a share of the universe. With no universe there is no bar —
-             a full-width bar over an unknown denominator would be a made-up 100%. */
-          var w = (uni && s.survivors != null) ? Math.max(0, Math.min(100, s.survivors / uni * 100)) : null;
-          return '<span class="fn-g">' + esc(s.metric || s.key || '') + '</span>'
-            + '<span class="fn-p">' + (s.survivors == null ? '--' : s.survivors) + '</span>'
-            + '<span class="fn-k">' + (s.killed ? '-' + s.killed : '') + '</span>'
-            + (w == null ? '<span class="fn-bar"></span>'
-                         : '<span class="fn-bar"><i style="width:' + w.toFixed(1) + '%"></i></span>');
-        }).join('')
-      + '</div>';
-    if (f.final != null) h += '<div class="fn-sum"><b>' + f.final + '</b> clear every gate '
-      + '(strict AND)' + (f.as_of ? ' · ' + esc(f.as_of) : '') + '</div>';
+  function slot(name, used, total, kind){
+    var w = (num(used) && num(total) && total>0) ? Math.max(0, Math.min(100, Math.round(used/total*100))) : 0;
+    var lbl = num(used) ? used+' / '+(num(total)?total:'—') : (num(total) ? '— / '+total : '—');
+    return '<div class="slot"><div class="l"><span>'+name+'</span><b>'+lbl+'</b></div><div class="sbar '+kind+'"><i style="width:'+w+'%"></i></div></div>';
   }
-
-  if (f.rows_error) {
-    h += '<div class="fun">pass list unavailable — ' + esc(f.rows_error) + '</div>';
-    return h + '</div>';
-  }
-  var rows = f.rows || [];
-  if (!rows.length) {
-    /* Says WHY it is empty. "None clear every gate" and "all of them are already open" are two
-       different facts and the reader should not have to guess which one this is. */
-    h += '<div class="fn-sum">' + esc(f.message || 'Nothing passing and un-opened right now.') + '</div>';
-    return h + '</div>';
-  }
-  h += '<div class="fn-h" style="padding-top:9px">Passing · not opened yet</div>';
-  rows.forEach(function(r){
-    var key = slug + '|' + r.symbol;
-    var open = STATE.gateOpen === key;
-    h += '<button class="fn-sym" onclick="togGate(event,\'' + esc(slug) + '\',\'' + esc(r.symbol) + '\')">'
-      + '<span class="fn-s">' + esc(r.symbol) + '</span>'
-      + '<span class="fn-b">' + (r.passed == null ? '' : r.passed + '/' + r.total)
-        + (r.gvm == null ? '' : ' · GVM ' + Number(r.gvm).toFixed(2)) + '</span>'
-      + '<span class="fn-x">' + (open ? '▴' : '▾') + '</span></button>';
-    if (open) h += gateBody(key, r.symbol);
-  });
-  if (f.truncated > 0) h += '<div class="more">and ' + f.truncated + ' more passing, not opened</div>';
-  return h + '</div>';
+  var sub = mode + ' ' + (num(usedL) && num(usedS)
+    ? 'Buy side: <b>'+usedL+' of '+(num(B)?B:'—')+'</b> buy slots, <b>'+usedS+' of '+(num(S)?S:'—')+'</b> sell slots in use.'
+    : 'Slots: <b>'+(num(B)?B:'—')+'</b> buy, <b>'+(num(S)?S:'—')+'</b> sell.');
+  var ad = m.adr_detail || {};
+  var footL = 'ADR '+esc(ad.adr_date||m.checked_at||'')+' · Nifty D/W/M vs prev close';
+  var footR = (num(ad.advances)&&num(ad.declines)) ? 'A '+ad.advances+' / D '+ad.declines : esc(m.nifty_source||'');
+  el.innerHTML =
+    '<div class="eyebrow"><span>Market gate</span><span>'+fails+' of '+checks.length+' checks failed</span></div>'+
+    '<div class="gword '+cls+'">'+esc(mood)+'</div>'+
+    '<div class="sub">'+sub+'</div>'+
+    '<div class="checks">'+ck+'</div>'+
+    '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'+
+    '<div class="foot"><span>'+footL+'</span><span>'+footR+'</span></div>'+
+    asofLine(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · '+String(m.breadth_source||''));
+  if(r) r.textContent = String(m.checked_at||'');
 }
-
-function gateBody(key, sym){
-  var g = STATE.gates[key];
-  if (g === undefined || g === 'loading') return '<div class="fn-body"><div class="fun">loading gates…</div></div>';
-  if (!g) return '<div class="fn-body"><div class="fun">gate detail unavailable for ' + esc(sym) + '</div></div>';
-  var rows = g.rows || [];
-  if (!rows.length) return '<div class="fn-body"><div class="fun">no gate rows returned</div></div>';
-  /* ACTUAL vs REQUIRED with a pass mark per gate, exactly as the endpoint returns them. Nothing is
-     recomputed here and nothing is filled in — a gate the engine could not evaluate shows its own
-     "--" rather than a guessed verdict. */
-  return '<div class="fn-body">'
-    + rows.map(function(r){
-        return '<div class="fn-gate">'
-          + '<span class="fn-n">' + esc(String(r.filter || '').replace(/_/g, ' ')) + '</span>'
-          + '<span class="fn-v">' + esc(String(r.actual == null ? '--' : r.actual)) + '</span>'
-          + '<span class="' + (r.pass ? 'fn-ok' : 'fn-no') + '">' + (r.pass ? '✓' : '✕') + '</span>'
-          + (r.required ? '<span class="fn-q">needs ' + esc(String(r.required)) + '</span>' : '')
-          + '</div>';
-      }).join('')
-    + '<div class="fn-sum"><b>' + (g.passed == null ? '--' : g.passed) + '</b> of '
-      + (g.total == null ? '--' : g.total) + ' gates passed'
-      + (g.cmp != null ? ' · CMP ' + Number(g.cmp).toFixed(2) : '') + '</div>'
-    + '<div class="syrow"><span class="sy2">' + esc(sym) + '</span>' + strip(sym) + '</div>'
-    + '</div>';
+/* ── top bar ──────────────────────────────────────────────────────────────────────────── */
+function renderTop(){
+  var d = istNow(), open = marketOpen();
+  document.getElementById('tdot').className = 'dot' + (open?'':' off');
+  document.getElementById('tclock').textContent = (open ? 'Market open' : 'Market closed') + ' · ' + hhmm(d) + ' IST';
+  var bk = STATE.book, pill = document.getElementById('tpill');
+  if(bk && bk.as_of){
+    var st = scorrAsofStamp(bk.as_of);
+    pill.textContent = st.txt ? 'Book ' + st.txt : 'Book';
+    pill.className = 'pill' + (st.amber ? ' stale' : '');
+  } else { pill.textContent = 'Book not loaded'; pill.className = 'pill stale'; }
+  var fn = document.getElementById('foot-note');
+  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
 }
-
-/* cc#986: ONE loader for the funnel payload, used by the lower-section module (the live surface)
-   and by the basket-card path alike, so there is a single place that knows the endpoint. */
-/* cc#989 · the legend is SERVER copy, rendered verbatim. /api/v8/pivot_star ships it (the text
-   lives in v8_pivot_star.py so /dashboard and /m/v8 cannot word it differently — DISPLAY_PARITY
-   16202, cc#932/933 rule) and it already enumerates all four marker families: amber Trade Check,
-   blue/red pivot reversal, green unusual activity, and the shape-is-side rule. I checked before
-   writing anything — no server-side line needed adding, and nothing here is hand-written. */
-function legendPanel(){
-  var L = STATE.legend;
-  if (!L || !L.length)
-    return '<div class="lg-panel"><div class="lg-hd">Marker legend</div>'
-      + '<div class="lg-none">The legend could not be loaded this session. It comes from '
-      + '/api/v8/pivot_star, so the markers on screen are still real \u2014 only this reference '
-      + 'text is missing. Pull to refresh.</div></div>';
-  return '<div class="lg-panel"><div class="lg-hd">Marker legend</div>'
-    + L.map(function(x){ return '<div class="lg-line">' + esc(x) + '</div>'; }).join('')
-    + '</div>';
-}
-function togLegend(ev){
-  if (ev) ev.stopPropagation();          /* the card underneath has its own click handler */
-  STATE.legendOpen = !STATE.legendOpen;
-  renderLegend();   /* cc#1110: the panel node only — never the page under it */
-}
-/* Tap anywhere outside the panel or the (i) closes it. Bound ONCE on the document, not re-bound
-   on every render — render() rewrites this subtree constantly and a per-render listener would
-   stack up one handler per paint. */
-if (!window.__lgBound){
-  window.__lgBound = true;
-  document.addEventListener('click', function(e){
-    if (!STATE.legendOpen) return;
-    var t = e.target;
-    if (t && t.closest && (t.closest('.lg-panel') || t.closest('.lg-i'))) return;
-    STATE.legendOpen = false; renderLegend();   /* cc#1110 */
+/* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
+function renderAll(){ renderTop(); renderMood(); }
+function load(){
+  return Promise.all([
+    getJ(URLS.mood).catch(function(){ return null; }),
+    getJ(URLS.book).catch(function(){ return null; })
+  ]).then(function(res){
+    STATE.mood = res[0]; STATE.book = res[1];
+    var d = istNow();
+    STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);
+    renderAll();
   });
 }
-
-function ensureFunnel(slug){
-  if (!slug || STATE.funnels[slug] !== undefined) return;
-  STATE.funnels[slug] = 'loading';
-  fetchWithTimeout('/api/mobile/v8funnel?basket=' + encodeURIComponent(slug))
-    .then(function(r){ return r.json(); })
-    .then(function(f){
-      var b = (f && f.baskets && f.baskets[0]) || null;
-      STATE.funnels[slug] = (b && !f.error) ? b : null;
-      renderLower();   /* cc#1110 */
-    })
-    .catch(function(){ STATE.funnels[slug] = null; renderLower(); });
-}
-
-function togGate(ev, slug, sym){
-  /* stopPropagation, or the tap bubbles to the basket card's own onclick and collapses the whole
-     basket the instant you try to open a symbol inside it. */
-  if (ev) { ev.stopPropagation(); if (ev.preventDefault) ev.preventDefault(); }
-  var key = slug + '|' + sym;
-  if (STATE.gateOpen === key) { STATE.gateOpen = null; renderLower(); return; }   /* cc#1110 */
-  STATE.gateOpen = key;
-  if (STATE.gates[key] === undefined) {
-    STATE.gates[key] = 'loading';
-    var f = STATE.funnels[slug];
-    /* The path comes from the SERVER payload. There is no generic /stock_detail/{basket} route —
-       the four are per-basket (br_/sr_/sm_/bm_) — so the map is made once, server-side, and the
-       client never guesses which prefix a basket uses. */
-    var base = (f && f.detail_path) || null;
-    if (!base) { STATE.gates[key] = null; renderLower(); return; }   /* cc#1110 */
-    fetchWithTimeout(base + encodeURIComponent(sym))
-      .then(function(r){ return r.json(); })
-      .then(function(d){ STATE.gates[key] = (d && !d.detail && !d.error) ? d : null; renderLower(); })
-      .catch(function(){ STATE.gates[key] = null; renderLower(); });
-  }
-  renderLower();   /* cc#1110 */
-}
-function basketCard(b, i, rcls){
-  var open = STATE.open === i;
-  var buy = String(b.slug || '').indexOf('sell') !== 0;
-  var last = (b.symbols && b.symbols[0] && b.symbols[0].at) ? 'Last new signal ' + esc(b.symbols[0].at) : 'No new signals';
-  var h = '<div class="vc ' + rcls + (open ? ' openx' : '') + '" onclick="tog(event,' + i + ',\'' + esc(b.slug) + '\')">'
-    + '<div class="vrow"><div class="ttl"><div class="n">' + esc(b.label) + '</div>'
-    + '<div class="m">' + last + '</div></div>'
-    + '<div class="val"><div class="v ' + (buy ? 'grn' : 'redx') + '">' + b.signals + '</div>'
-    + '<div class="u">signal' + (b.signals === 1 ? '' : 's') + '</div></div>'
-    + '<div class="v-chev">›</div></div>';
-  if (open){
-    h += funnelBlock(b.slug);
-    h += (b.symbols || []).map(function(s){
-      return '<div class="syrow"><span class="sy2">' + esc(s.symbol) + '</span>'
-        + strip(s.symbol)
-        + '<span class="at">' + esc(s.at || '') + '</span></div>';
-    }).join('');
-    if (b.truncated > 0) h += '<div class="more">and ' + b.truncated + ' more today</div>';
-    if (!(b.symbols || []).length) h += '<div class="more">no symbols recorded</div>';
-  }
-  return h + '</div>';
-}
-function ledgerBlock(){
-  var L = STATE.ledger;
-  if (L === 'loading') return '<div class="more">loading ledger…</div>';
-  if (!L) return '';
-  var h = (L.trades || []).map(function(t){
-    return '<div class="trow"><span class="sy2">' + esc(t.symbol)
-      + ' <span class="mut" style="font-size:9.5px">' + esc(t.side) + ' · ' + esc(t.basket || '') + '</span></span>'
-      + strip(t.symbol)
-      + '<span class="mono2 mut">' + pxv(t.entry) + ' → ' + pxv(t.exit) + '</span>'
-      + '<span class="mono2 ' + ((t.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(t.pnl) + '</span></div>';
-  }).join('');
-  h += '<div class="fun" style="margin-top:12px"><b>DAY LOG</b></div>';
-  h += (L.day_log || []).map(function(d){
-    return '<div class="trow"><span class="sy2">' + esc(d.label) + '</span>'
-      + '<span class="mono2 mut">' + d.n + ' trades · ' + d.wins + 'W/' + d.losses + 'L</span>'
-      + '<span class="mono2 ' + ((d.pnl || 0) >= 0 ? 'grn' : 'redx') + '">' + inr(d.pnl) + '</span></div>';
-  }).join('') || '<div class="more">no closed trades in the window</div>';
-  return h;
-}
-
-/* ══ cc#1110 — SCOPED RENDER ══════════════════════════════════════════════════════════════════
-   render() used to write document.getElementById('body').innerHTML for the WHOLE page, and every
-   one of ~15 handlers called it: expanding a position, folding a group, switching a filter chip,
-   opening a funnel symbol, toggling the legend, and a document-level click-away listener. So a tap
-   on one card rebuilt every card on the screen. That is the shake the founder reported — the
-   browser drops and re-lays-out the entire subtree, the scroll anchor goes with it, and any CSS
-   entry animation on any section replays.
-
-   The page is now five containers created ONCE, each re-rendered on its own:
-     #sec-mood   mood + slots
-     #sec-book   the book: tier label, legend slot, positions/trades
-     #sec-sig    the one-line signal count
-     #sec-lower  the three lower modules (funnel, day-wise, segments)
-     #sec-more   the static More stack — painted at boot and never again
-   A handler now touches only the section it belongs to. render() itself stays as the boot paint
-   and as the one call that repaints everything, so nothing depends on remembering to add a new
-   section to it. */
-function shell(){
-  var b = document.getElementById('body');
-  if (document.getElementById('sec-book')) return;      /* already built — never rebuild it */
-  b.innerHTML = '<div id="sec-mood"></div><div id="sec-book"></div><div id="sec-sig"></div>'
-              + '<div id="sec-lower"></div><div id="sec-more"></div>';
-}
-function put(id, html){
-  var el = document.getElementById(id);
-  if (el) el.innerHTML = html;
-}
-function renderHead(){
-  var d = STATE.d; if (!d) return;
-  document.getElementById('sub').textContent = 'Long-short · ' + d.universe + ' symbols';
-  var g = d.gate || {};
-  var gc = document.getElementById('gate');
-  gc.textContent = g.verdict ? 'GATE · ' + g.verdict.toUpperCase() : 'GATE --';
-  gc.className = 'gatec' + (g.open === true ? ' open' : g.open === false ? ' shut' : '');
-  document.getElementById('insw').innerHTML = inswBlock();
-}
-function renderMood(){ if (STATE.d) put('sec-mood', moodBlock()); }
-function renderBook(){
-  if (!STATE.d) return;
-  put('sec-book', bookSection());
-  bindBookSwipe();      /* both listeners sat on nodes this section just replaced */
-  bindChipBar();
-}
-function renderSig(){
-  var d = STATE.d; if (!d) return;
-  var sigN = d.signals_today || 0;
-  put('sec-sig', '<div class="sigline">' + (sigN
-        ? '<b>' + sigN + '</b> signal' + (sigN === 1 ? '' : 's') + ' today'
-          + ' <span class="m">· see Funnel below</span>'
-        : 'No baskets signalled today.') + '</div>');
-}
-function renderLower(){ if (STATE.d) put('sec-lower', lowerModules()); }
-function renderMore(){
-  put('sec-more', '<div class="tierlab">More</div><div class="stack">'
-    + '<a class="vc ref" href="/m/results"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Results</div><div class="m">Who reports next · blackout risk</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
-    + '<a class="vc ref" href="/m/intel"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Intel</div><div class="m">Polished market news</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
-    /* cc#991: the Wall of Trades — every entry and exit across every engine, not just V8's. It
-       belongs in More rather than in the book above, because the book on this screen is the V8
-       book and the wall deliberately is not. */
-    + '<a class="vc ref" href="/m/trades"><div class="vrow">'
-    + '<div class="ttl"><div class="n">Wall of Trades</div>'
-    + '<div class="m">Every entry &amp; exit · all engines</div></div>'
-    + '<div class="v-chev">›</div></div></a>'
-    + '</div>');
-}
-/* cc#1110 item 3: the legend is inserted and removed as its own node. It used to toggle a flag and
-   repaint the page, which is how an (i) button came to repaint the book under it. */
-function renderLegend(){
-  var slot = document.getElementById('lg-slot');
-  if (slot) slot.innerHTML = STATE.legendOpen ? legendPanel() : '';
-  var btn = document.querySelector('.lg-i');
-  if (btn){
-    btn.className = 'lg-i' + (STATE.legendOpen ? ' lg-on' : '');
-    btn.setAttribute('aria-expanded', STATE.legendOpen ? 'true' : 'false');
-  }
-}
-
-function render(){
-  /* cc#1110 item 5: a failed /api/mobile/v8 leaves STATE.d null while the lower-module fetch is
-     still in flight; when it resolved it called render() and died on d.rail, taking every handler
-     on the page with it. The guard is the whole fix — the error box stays, and nothing throws. */
-  if (!STATE.d) return;
-  shell();
-  renderHead();
-  renderMood();
-  renderBook();
-  renderSig();
-  renderLower();
-  renderMore();
-}
-
-function bookSection(){
-  var d = STATE.d;
-  var rcls = railCls(d.rail);
-
-  /* founder layout, top to bottom: mood+slots, book stats, switch (in the header), positions */
-  /* cc#976 item 2: statsBlock moved OUT of here. It describes the active book page, so it is
-     rendered by bookHeader() directly under the Unrealised/Realised tabs instead of floating
-     above them as a second, unrelated metrics surface. */
-  var h = '';
-  /* cc#923 item 4: ONE as-of for the whole book, from the newest price stamp across positions —
-     it was repeated on every card. cc#924 item 2: the futures reason is printed here, where a
-     phone can actually read it, instead of in a hover title on a dead button. */
-  var bk = STATE.book, asof = '';
-  if (bk && bk.positions && bk.positions.length){
-    var ts = bk.positions.map(function(p){ return p.cmp_at; }).filter(Boolean).sort();
-    if (ts.length) asof = 'prices ' + esc(ts[ts.length - 1]);
-  }
-  /* cc#943: the label follows the page — "Open positions" over a list of closed trades would be
-     the screen contradicting itself. The as-of stamp is a LIVE-PRICE stamp, so it belongs to the
-     unrealised page only; a closed trade's price is its exit, not a quote that can go stale. */
-  var realisedPg = (STATE.page === 'realised');
-  /* cc#977 item 1: the Open Book nav CARD is gone, but its destination is not — the link lives
-     here as a small chevron on the section it actually describes. */
-  /* cc#989: the marker legend comes back as ON-DEMAND reference, not the permanent box cc#977
-     deliberately removed. The (i) sits on the header of the section whose symbols carry the
-     markers. It is never a dead button: with no legend loaded it opens and says so (cc#924). */
-  h += '<div class="tierlab">' + (realisedPg ? 'Realised trades' : 'Open positions')
-    + ((!realisedPg && asof) ? ' <span class="tl2">· ' + asof + '</span>' : '')
-    + '<button class="lg-i' + (STATE.legendOpen ? ' lg-on' : '') + '" onclick="togLegend(event)"'
-    + ' aria-label="What the markers mean" aria-expanded="' + (STATE.legendOpen ? 'true' : 'false')
-    + '"><span>i</span></button>'
-    + '<a class="tlgo" href="/m/positions" aria-label="Open Book, full screen">\u203a</a></div>'
-    /* cc#1110 item 3: a stable slot the legend is inserted into and removed from, so opening it
-       never repaints the book below. */
-    + '<div id="lg-slot">' + (STATE.legendOpen ? legendPanel() : '') + '</div>'
-    /* cc#977 item 1: the instrument_note dev paragraph ("V8 paper positions carry no instrument
-       column...") is GONE. It was an engineering note explaining a schema limitation, rendered as
-       if it were product copy. The FUT/EQ switch already shows the constraint by being disabled. */
-    + bookBlock();
-
-  return h;
-}
-
-/* cc#975: the right-edge fade only appears when there IS something further right, and clears when
-   you reach the end — a fade over nothing is a hint that lies. Re-evaluated on scroll and on
-   every render, because filtering changes how many chips there are. */
-function bindChipBar(){
-  var bar = document.querySelector('.chipbar');
-  if (!bar) return;
-  var sync = function(){
-    var more = bar.scrollWidth - bar.clientWidth - bar.scrollLeft > 2;
-    bar.parentNode.classList.toggle('hasmore', more);
-  };
-  bar.addEventListener('scroll', sync, {passive: true});
-  sync();
-}
-
-/* ══ cc#977 — THE THREE LOWER MODULES ═══════════════════════════════════════════════════════
-   Ported from previews/v8_lower_redesign.html (Fable first-build, ed43948) and wired to real
-   data. The preview file stays untouched as the design record.
-
-   ONE FETCH, /api/mobile/v8lower, because the three modules render together: the funnel is keyed
-   to the newest signal_date and the segments to the newest v8_metrics score_date, so three
-   separate requests could straddle a tick and let the modules disagree about "today".
-
-   EVERY P&L FIGURE IS THE CANON (rule 13). Module 1's header total is book_canon()['realised']
-   itself, not a sum of the rows it lists — so the module headline cannot drift from the stat
-   tiles above it. The payload also ships day_sum, and the module SAYS SO if the two ever differ
-   rather than quietly rendering one of them. Verified against the DB at build time: 11 day rows
-   covering all 33 fresh-era trades, summing to 349,612.45 = the canon realised, exactly. */
-var LOW = { d: null, err: null, open: { m1: true, m2: false, m3: false }, basket: null, segAll: false, dayAll: false };
-
-function loadLower(){
-  fetchWithTimeout('/api/mobile/v8lower')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d && d.error) throw new Error(d.error);
-      LOW.d = d; LOW.err = null;
-      if (!LOW.basket && d.funnel && d.funnel.length) LOW.basket = d.funnel[0].basket;
-      ensureFunnel(LOW.basket);   // cc#986: the selected basket's filter funnel, loaded with it
-      renderLower();   /* cc#1110 */
-    })
-    .catch(function(e){ LOW.err = e.message || 'unavailable'; renderLower(); });   /* cc#1110 */
-}
-function lowTg(k){ LOW.open[k] = !LOW.open[k]; renderLower(); }   /* cc#1110 */
-function lowBasket(b){ LOW.basket = b; ensureFunnel(b); renderLower(); }   /* cc#1110 */
-function lowSegAll(){ LOW.segAll = !LOW.segAll; renderLower(); }   /* cc#1110 */
-function lowDayAll(){ LOW.dayAll = !LOW.dayAll; renderLower(); }   /* cc#1110 */
-
-function lowCard(key, title, right, body){
-  var on = !!LOW.open[key];
-  return '<div class="lcard' + (on ? ' open' : '') + '">'
-    + '<div class="lhd" onclick="lowTg(\'' + key + '\')"><h2>' + title + '</h2>'
-    + '<div class="lright">' + right + '<span class="lchev">\u203a</span></div></div>'
-    + '<div class="lbody">' + body + '</div></div>';
-}
-
-function lowerModules(){
-  if (LOW.err)
-    return '<div class="lcard open"><div class="lhd"><h2>Lower section</h2></div>'
-      + '<div class="lbody"><div class="more">Could not load: ' + esc(LOW.err)
-      + ' <button class="v10rty" onclick="loadLower()">Retry</button></div></div></div>';
-  if (!LOW.d)
-    return '<div class="lcard open"><div class="lhd"><h2>Loading…</h2></div>'
-      + '<div class="lbody"><div class="more">Fetching day log, funnel and segments…</div></div></div>';
-  var d = LOW.d;
-  return m1(d) + m2(d) + m3(d);
-}
-
-/* ── module 1 · day-wise net P&L ───────────────────────────────────────────────────────────── */
-function m1(d){
-  var rows = d.day_rows || [];
-  var total = d.realised;
-  /* the drift line. The header states the CANON total; day_sum is the same book added up a
-     different way. They agree today (both 349,612.45). If they ever stop agreeing, the card says
-     so out loud instead of picking one — a silent mismatch is how two screens start lying. */
-  var drift = (d.day_sum != null && total != null && Math.abs(d.day_sum - total) > 0.5);
-  var shown = LOW.dayAll ? rows : rows.slice(0, 7);
-  var mx = 0;
-  rows.forEach(function(r){ mx = Math.max(mx, Math.abs(r.net || 0)); });
-  var spark = '<div class="lspark">' + rows.slice(0, 24).reverse().map(function(r){
-      var v = r.net || 0, hpx = mx ? Math.max(3, Math.round(Math.abs(v) / mx * 34)) : 3;
-      return '<i style="height:' + hpx + 'px;background:' + (v >= 0 ? 'var(--grn)' : 'var(--red)')
-           + ';opacity:.85"></i>';
-    }).join('') + '</div>';
-  var list = shown.map(function(r){
-    return '<div class="ldrow"><span class="dt">' + esc(r.label) + '</span>'
-      + '<span class="tc">' + r.n + ' trade' + (r.n === 1 ? '' : 's')
-      + (r.wins || r.losses ? ' · ' + r.wins + 'W/' + r.losses + 'L' : '') + '</span>'
-      + '<span class="pv ' + cls(r.net) + '">' + inrShort(r.net) + '</span></div>';
-  }).join('') || '<div class="more">No closed trades in this era yet.</div>';
-  var more = (rows.length > shown.length)
-    ? '<button class="lmore" onclick="lowDayAll()">' + (rows.length - shown.length)
-      + ' more day' + (rows.length - shown.length === 1 ? '' : 's') + '…</button>'
-    : (LOW.dayAll && rows.length > 7 ? '<button class="lmore" onclick="lowDayAll()">show less</button>' : '');
-  var right = '<span class="' + cls(total) + '" style="font-weight:700">' + inrShort(total) + '</span>'
-            + '<span class="m" style="font-size:12px">' + rows.length + ' day'
-            + (rows.length === 1 ? '' : 's') + '</span>';
-  var body = spark + list + more
-    + (drift ? '<div class="lwarn">Day rows sum to ' + inrShort(d.day_sum)
-               + ' against a canon total of ' + inrShort(total) + ' — reporting both.</div>' : '')
-    /* the Trade Ledger destination the nav card used to own (item 1) */
-    + '<div class="lnav"><button onclick="togLedger(event)">Trade ledger \u203a</button></div>'
-    + (STATE.ledgerOpen ? ledgerBlock() : '')
-    + '<div class="lnote">Net of \u20B9500 a closed trade · fresh era · retired baskets excluded.</div>';
-  return lowCard('m1', 'Day-wise Net P&L', right, body);
-}
-
-/* ── module 2 · funnel top 10 ──────────────────────────────────────────────────────────────── */
-function m2(d){
-  var fs = d.funnel || [];
-  if (!fs.length)
-    return lowCard('m2', 'Funnel · Top 10', '<span class="m" style="font-size:12px">0 baskets</span>',
-      '<div class="more">No qualifiers today.</div>');
-  var cur = null;
-  fs.forEach(function(f){ if (f.basket === LOW.basket) cur = f; });
-  if (!cur) cur = fs[0];
-  var pills = '<div class="lpills">' + fs.map(function(f){
-      return '<button class="lpill' + (f.basket === cur.basket ? ' on' : '') + '"'
-        + ' onclick="lowBasket(\'' + esc(f.basket) + '\')">' + esc(f.label)
-        + ' <i>' + f.n + '</i></button>';
-    }).join('') + '</div>';
-  /* cc#985: the qualifying score is metrics->>'filter_score' out of filter_total — how many of
-     THIS basket's own filter rules the symbol passed — which is what the web funnel shows and
-     what "qualified" actually means. It is rendered as 9/10, not as a bare 9.0: the denominator
-     differs per basket (10, 9 and 8 across the three live baskets today), so a lone numerator
-     would silently compare unlike things down the column. cc#977 wrote `score` here, a column
-     that does not exist, and took the whole endpoint down — see cc#985. */
-  var list = (cur.rows || []).map(function(r, i){
-    var sc = (r.score == null) ? '--'
-           : (Number(r.score) + (r.score_total ? '/' + Number(r.score_total) : ''));
-    return '<div class="lfrow"><span class="rank">' + (i + 1) + '</span>'
-      + '<span class="sym" onclick="ScorrSymbolCard&&ScorrSymbolCard.open(\'' + esc(r.symbol) + '\')"'
-      + ' data-sym="' + esc(r.symbol) + '">' + esc(r.symbol) + '</span>'
-      + '<span class="why">' + (r.cmp == null ? '' : '\u20B9' + Math.round(r.cmp).toLocaleString('en-IN'))
-      + (r.gvm == null ? '' : ' \u00b7 GVM ' + Number(r.gvm).toFixed(1)) + '</span>'
-      + '<span class="sc">' + sc + '</span></div>';
-  }).join('') || '<div class="more">No qualifiers today.</div>';
-  var right = '<span class="m mono" style="font-size:12px">' + fs.length + ' basket'
-            + (fs.length === 1 ? '' : 's') + '</span>';
-  /* cc#986: the FILTER FUNNEL for the selected basket — stage counts, then the symbols that
-     clear every gate but have no open position yet. It sits under the qualifier list because it
-     answers the next question: not "what qualified" but "what passed and has not been taken". */
-  var body = pills + list
-    + funnelBlock(cur.basket)
-    + '<div class="lnav"><a href="/m/screeners">Open full funnel \u203a</a></div>'
-    + '<div class="lnote">Qualifiers for ' + esc(d.signal_date || 'the latest session')
-    + ' · score is the basket\u2019s own qualifying score.</div>';
-  return lowCard('m2', 'Funnel · Top 10', right, body);
-}
-
-/* ── module 3 · segments ───────────────────────────────────────────────────────────────────── */
-function m3(d){
-  /* cc#1042: these are the 22 curated Scorr THEMES the website shows, served ready-made by
-     /m/api/v8lower, which calls the very same v8_theme_sectors() the web "All Futures" tab reads.
-     The phone does no grouping of its own any more — it used to build 55 groups off the raw
-     gvm_scores.segment column, 18 of them one stock deep.
-     A theme that failed the server's 3-member guard arrives with day_pct null: it STAYS in the
-     list and renders an em-dash, because dropping it would misreport the group set as smaller
-     than it is, and printing 0.00% would be a lie. */
-  var all  = d.segments || [];
-  var segs = all.filter(function(s){ return s.day_pct != null; });
-  var mute = all.filter(function(s){ return s.day_pct == null; });
-  if (!all.length)
-    return lowCard('m3', 'Segments', '<span class="m" style="font-size:12px">--</span>',
-      '<div class="more">No segment data for the latest session.</div>');
-  /* cc#1042 item 7: 22 tiles is a long scroll on a phone, so the default is the TOP 10 BY ABSOLUTE
-     move — the ten themes that actually did something today, up or down, rather than five winners
-     and five losers taken off the ends of a sorted list. Expand shows every theme, em-dashes too. */
-  var byMove = segs.slice().sort(function(a, b){ return Math.abs(b.day_pct) - Math.abs(a.day_pct); });
-  var shown  = LOW.segAll ? segs.concat(mute) : byMove.slice(0, 10);
-  var nf = d.nifty;
-  var head = nf
-    ? '<div class="lseg lsegwide"><div><div class="nm">NIFTY 50</div>'
-      + '<div class="n">' + (d.segment_count || all.length) + ' themes</div></div>'
-      + '<div class="v ' + cls(nf.chg_pct) + '">' + (nf.chg_pct == null ? '--' : pctv(nf.chg_pct)) + '</div></div>'
-    : '';
-  var grid = '<div class="lseggrid">' + head + shown.map(function(s){
-      var tot = s.members_total || s.n;
-      /* cc#1110 item 1: these tiles used to each carry onclick=location.href='/m/sector'. Ten to
-         twenty-two invisible full-page links sat in the middle of a stats grid, so a tap meant to
-         read a number navigated away instead — the founder's "the page reloads". A grid of stats
-         is not a nav control. The destination is not lost: it is ONE labelled link row at the
-         bottom of this module, the same .lnav pattern modules 1 and 2 already use. */
-      return '<div class="lseg"'
-        + (s.suppressed ? ' title="' + esc(s.suppressed) + '"' : '') + '>'
-        + '<div class="nm">' + esc(s.segment) + '</div>'
-        + '<div class="v ' + (s.day_pct == null ? '' : cls(s.day_pct)) + '">'
-        + (s.day_pct == null ? '—' : pctv(s.day_pct)) + '</div>'
-        + '<div class="n">' + s.n + (s.n === tot ? '' : '/' + tot)
-        + ' stock' + (tot === 1 ? '' : 's') + '</div></div>';
-    }).join('') + '</div>';
-  var right = '<span class="m mono" style="font-size:12px">' + all.length + '</span>';
-  var body = grid
-    + '<button class="lmore" onclick="lowSegAll()">'
-    + (LOW.segAll ? 'show top 10 movers only' : 'show all ' + all.length + ' themes') + '</button>'
-    /* cc#1042: the note here used to claim the move covered "every stock in the segment". It did
-       not — the query behind it started FROM v8_metrics, which holds only the ~209 futures names,
-       so the label described a computation that was not running (cc#1020 moved that wording in the
-       wrong direction). The text below states exactly what runs: the cc#338 equal-weight average
-       over each theme's futures members, which is deliberate — this book trades one lot per name,
-       so the largest stock must not outvote the rest of its theme. */
-    + '<div class="lnote">The 22 Scorr themes — same groups, same numbers as the website. Day move '
-    + 'is the equal-weight average across a theme’s futures members, so one big name cannot carry '
-    + 'the theme. A theme with fewer than 3 priced members shows —, never a number.</div>'
-    /* cc#1110 item 1: the sector-intel destination, once, where it can be seen and chosen. */
-    + '<div class="lnav"><a href="/m/sector">Sector intel ›</a></div>';
-  return lowCard('m3', 'Segments · ' + (d.segment_count || all.length), right, body);
-}
-
-/* ══ cc#943 / cc#942 — HORIZONTAL SWIPE BETWEEN THE TWO PAGES ═════════════════════════════════
-   Bound after every render because render() replaces the node the listeners were on.
-
-   THE GESTURE HAS TO PROVE ITSELF HORIZONTAL FIRST, and this is not a nicety. The book is a tall
-   scrolling list; a swipe handler that claims the touch immediately would fight every attempt to
-   scroll past it. So the axis is decided once, on the first movement past a 10px threshold, and a
-   vertical decision hands the touch straight back to the page and never looks at it again — the
-   same rule the V10 chart drag already uses on Home, deliberately, so the two gestures behave
-   identically. touchmove is passive:false ONLY because a horizontal swipe must be able to cancel
-   the page's own scroll; nothing else is prevented.
-
-   A tap inside a card must still expand it, so a movement under 45px does nothing at all. */
-var BSW = null;
-function bindBookSwipe(){
-  var el = document.getElementById('bookpg');
-  if (!el) return;
-  el.addEventListener('touchstart', function(e){
-    /* cc#975: a touch that STARTS inside a horizontal scroller is that scroller's, not the page
-       deck's. #bookpg wraps the cc#968 chip bar, so without this the swipe handler claimed every
-       horizontal drag on the chips: axis resolved to 'x', preventDefault() cancelled the browser's
-       native scroll of .chipbar, and touchend past 45px flipped Unrealised/Realised instead. The
-       bar was always scrollABLE — scrollWidth exceeded clientWidth the whole time — it was simply
-       never allowed to scroll. Nothing is wrong with the CSS; the gesture was being taken. */
-    if (e.target && e.target.closest && e.target.closest('.chipbar')){ BSW = null; return; }
-    var t = e.touches[0];
-    BSW = { x: t.clientX, y: t.clientY, axis: null };
-  }, {passive: true});
-  el.addEventListener('touchmove', function(e){
-    if (!BSW) return;
-    var t = e.touches[0], dx = t.clientX - BSW.x, dy = t.clientY - BSW.y;
-    /* cc#1110 item 4: the axis was claimed at 10px on a bare |dx| > |dy|, so a thumb scrolling a
-       tall book at a slight angle resolved to 'x' within a few pixels, preventDefault() killed the
-       native scroll for the rest of the gesture, and the list stuck then snapped. The claim now
-       needs 24px of travel AND horizontal dominance of 1.5x — a diagonal scroll stays vertical,
-       and a deliberate page swipe still resolves well inside the 45px commit threshold. Once the
-       axis is 'y' nothing is ever prevented, which was already true and stays true. */
-    if (BSW.axis === null){
-      if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
-      BSW.axis = (Math.abs(dx) > Math.abs(dy) * 1.5) ? 'x' : 'y';
-    }
-    if (BSW.axis === 'x' && e.cancelable) e.preventDefault();
-  }, {passive: false});
-  el.addEventListener('touchend', function(e){
-    if (!BSW || BSW.axis !== 'x'){ BSW = null; return; }
-    var t = (e.changedTouches && e.changedTouches[0]) || null;
-    var dx = t ? t.clientX - BSW.x : 0;
-    BSW = null;
-    if (Math.abs(dx) < 45) return;                       // a tap or a twitch, not a page turn
-    setBookPage(dx < 0 ? 'realised' : 'open');           // left = forward to realised, right = back
-  }, {passive: true});
-}
-
-function tog(ev, i, slug){
-  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
-  STATE.open = (STATE.open === i ? -1 : i);
-  if (STATE.open === i && STATE.funnels[slug] === undefined){
-    ensureFunnel(slug); renderLower();   /* cc#1110 */
-    return;
-  }
-  renderLower();   /* cc#1110 */
-}
-function togLedger(ev){
-  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
-  STATE.ledgerOpen = !STATE.ledgerOpen;
-  renderLower();   /* cc#1110 */
-}
-
-Promise.all([
-  fetchWithTimeout('/api/mobile/v8').then(function(r){ return r.json(); }),
-  fetchWithTimeout('/api/v8/market_mood').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/mobile/trades?limit=20&days=30').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/mobile/v8book').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  fetchWithTimeout('/api/v8/pivot_star').then(function(r){ return r.json(); }).catch(function(){ return null; }),
-  // cc#1547: the marker-detail popover shows the row's TC score regardless of amber status
-  // (scope 3c) — the same endpoint /dashboard's TC % column (cc#1542) already reads.
-  fetchWithTimeout('/api/v8/tc_score_latest').then(function(r){ return r.json(); }).catch(function(){ return null; })
-]).then(function(res){
-  var d = res[0], mood = res[1], L = res[2], bk = res[3], ps = res[4], tcs = res[5];
-  // cc#932: a failed marker fetch must never blank the book — same guard the web uses.
-  if (ps && ps.stars) ps.stars.forEach(function(x){ STATE.stars[x.symbol] = x; });
-  // cc#933: activity markers ride in their own list — a symbol can carry a pivot marker AND an
-  // activity marker, so they are kept in separate maps rather than one that would drop the second.
-  if (ps && ps.activity) ps.activity.forEach(function(a){ STATE.act[a.symbol] = a; });
-  // cc#1539: the third marker map, same guard — a failed fetch must never blank the book.
-  if (ps && ps.dma_cross) ps.dma_cross.forEach(function(x){ STATE.dma[x.symbol] = x; });
-  // cc#1540: the amber TC_STRONG map, same guard.
-  if (ps && ps.tc_strong) ps.tc_strong.forEach(function(t){ STATE.tcs[t.symbol] = t; });
-  if (ps && ps.legend) STATE.legend = ps.legend;
-  // cc#1547: symbol+side keyed, same convention /dashboard's ctx.tcScores map uses. A failed
-  // fetch must never blank markers already on screen — same guard as the four lists above.
-  if (tcs && tcs.rows) tcs.rows.forEach(function(t){ if (t && t.symbol) STATE.tcScore[t.symbol + '|' + String(t.side || '').toUpperCase()] = t; });
-  if (d.error) throw new Error(d.error);
-  STATE.d = d;
-  STATE.mood = (mood && !mood.error) ? mood : null;
-  if (L && !L.error){ STATE.ledger = L; STATE.sm = L.summary || null; }
-  STATE.book = (bk && !bk.error) ? bk : null;
-  render();
-  /* cc#1110 item 5: loadLower() used to be the FIRST line of this callback, above the d.error
-     throw. On a failed /api/mobile/v8 it still fired, and when its fetch resolved it called
-     render() with STATE.d null — a TypeError on d.rail that killed every handler on the page,
-     leaving the error box sitting over a screen where nothing worked. It now starts only after
-     the payload is known good, and render() guards on STATE.d as well, so neither half can
-     reintroduce it alone. The lower modules still fetch alongside and still never block the
-     book — the call is after the paint, not after an await. */
-  loadLower();
-}).catch(function(e){
-  document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load</b>' + esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  document.getElementById('sub').textContent = 'failed to load';
+document.getElementById('v8p').addEventListener('click', function(e){
+  var t = e.target.closest('[data-retry]'); if(t){ load(); }
 });
+load();
+setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
+})();
 </script>
 </body>
 </html>
