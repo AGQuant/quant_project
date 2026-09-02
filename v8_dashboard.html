@@ -7240,14 +7240,17 @@ function render(){
        Position rails (pivots + max pain + open legs in one card, shared chart button), the
        Record strip, and the app's Max Pain / Build Ups / Flow / Basis decks ported to web.
        Settings, Performance and Divergence stay below: the R1 mock and the card are silent on
-       them, and removing content unasked is a scope guess (choice logged in the forum). */
-    rIndexPos() + rRecord() + rMaxPainSec() + rBuildUps() + rFlowBasis() +
+       them, and removing content unasked is a scope guess (choice logged in the forum).
+       cc#1571/1574 (02-Sep-2026): Divergence hidden; Open Positions + The Record are the last two
+       blocks. Final order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position, Max Pain,
+       Build Ups, Flow & Basis, [Settings, Performance], Open Positions, The Record, foot. */
+    rIndexPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() +   /* cc#1571 P4: rRecord() moved to the foot, after rOpenPos() */
     /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
        rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
     `<div class="stack">` + rSettings() + rPerf() + `</div>` +
     /* cc#1571 P3 (founder comment 2, 02-Sep-2026, "V10 Open and Closed shift to last on page"):
        the open legs left the Index Position cards and render here, after every market card. */
-    rOpenPos() +
+    rOpenPos() + rRecord() +   /* cc#1571 P4: the closed book is the last block on the page */
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
