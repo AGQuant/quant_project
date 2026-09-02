@@ -498,7 +498,7 @@ function renderClosed(){
   var rows = bk.closed, n = num(bk.trades) ? bk.trades : rows.length;
   nEl.textContent = n;
   var first = rows.length ? rows[rows.length-1] : null;
-  rEl.textContent = (first && first.exit_ts ? 'since '+dmy(first.exit_ts)+' · ' : '') + 'all baskets';
+  rEl.textContent = ((bk.era_block && bk.era_block.era_label) ? bk.era_block.era_label.toLowerCase() : (first && first.exit_ts ? 'since '+dmy(first.exit_ts) : '')) + ' · all baskets';
   kpi.innerHTML =
     kpiWell('REALISED', inr(bk.realised), sgn(bk.realised), 'gross '+inrShort(bk.gross)+' · brk '+inrShort(bk.brokerage)) +
     kpiWell('WIN / LOSS', (num(bk.wins)?bk.wins:'—')+' / '+(num(bk.losses)?bk.losses:'—'), '',
@@ -592,8 +592,9 @@ function renderTop(){
   } else { pill.textContent = 'Book not loaded'; pill.className = 'pill stale'; }
   var fn = document.getElementById('foot-note'), dl = STATE.daylog;
   var capTxt = (dl && num(dl.capital_base)) ? ' Capital '+inr(dl.capital_base)+'.' : '';
-  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book.'+capTxt+' ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
-  else if(capTxt) fn.textContent = 'Numbers are the paper book.'+capTxt;
+  var eraTxt = (bk && bk.era_block && bk.era_block.era_label) ? ' '+bk.era_block.era_label+'.' : '';
+  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book.'+eraTxt+capTxt+' ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
+  else if(capTxt || eraTxt) fn.textContent = 'Numbers are the paper book.'+eraTxt+capTxt;
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
 function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); renderFunnel(); }

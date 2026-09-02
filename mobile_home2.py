@@ -61,6 +61,7 @@ router = APIRouter()
 
 _SELL_PREFIX = "sell_"          # sign convention for since-%: a short gains when price falls
 from v8_book_canon import book_canon   # cc#970: the ONE book formula (rule 13)
+from v8_era import era_block as _eb_home               # cc#1604 V8_ERA_CUTOVER_ONLY_V1
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 # cc#1123: the tape's colour band comes from the SAME function the Digest tile's does. Imported
 # rather than reimplemented so the VIX thresholds live in exactly one place (card task 4).
@@ -1031,6 +1032,8 @@ def mobile_home2(request: Request):
         #     exactly ONE book formula and Home reads it like every other surface, so a change to
         #     the doctrine cannot reach Home and miss /m/v8, which is the drift that caused this.
         book = book_canon(conn, era="fresh")
+        with conn.cursor() as _ecur:
+            _era_block_home = _eb_home(_ecur)     # cc#1604: caption, served not typed
 
         # 3 · my portfolio (SmartGain) — rows + aggregate. TIMESTAMPTZ converted in SQL.
         cur.execute("""
@@ -1349,6 +1352,7 @@ def mobile_home2(request: Request):
             "rec_long": book["rec_long"],
             "rec_short": book["rec_short"],
             "era": book["era"],
+            "era_block": _era_block_home,       # cc#1604: "Since 18-Jul-2026"
             "canon": book["canon"],
             "retired_baskets": book["retired_baskets"],
         },
