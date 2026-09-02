@@ -482,13 +482,15 @@ function ratioLatest(r2, bucket, label){
    block the tab is named after (finSeries / finSum); captions come from the same block or from
    ratios_v2 Growth (5Y CAGR as served), never recomputed. All sizing is inline so the page adds no
    raw declarations to the theme ratchet (gvm.html sits at 0). Bars are inline SVG, no chart lib. */
-function finIdx(tbl, nFY){
+function finIdx(tbl, nFY, preferCurrent){
   if(!tbl || !tbl.periods) return [];
-  var per = tbl.periods, fy = [], ttm = -1;
-  for(var i=0;i<per.length;i++){ if(/^Mar \d{4}$/.test(per[i])) fy.push(i); else if(per[i]==='TTM' && ttm<0) ttm = i; }
-  var idx = fy.slice(-nFY); if(ttm>=0) idx.push(ttm);
+  var per = tbl.periods, fy = [], ttm = -1, cur = -1;
+  for(var i=0;i<per.length;i++){ if(/^Mar \d{4}$/.test(per[i])) fy.push(i); else if(per[i]==='TTM' && ttm<0) ttm = i; else if(per[i]==='Current') cur = i; }
+  var idx = fy.slice(-nFY);
+  if(preferCurrent && cur>=0) idx.push(cur); else if(ttm>=0) idx.push(ttm);
   return idx;
 }
+function finBucket(r2, title){ if(!r2 || !r2.buckets) return null; var b = r2.buckets.filter(function(x){ return x.title === title; })[0]; return b && b.table ? b.table : null; }
 function finRow(tbl, re){ if(!tbl || !tbl.rows) return null; return tbl.rows.filter(function(r){ return re.test(String(r.label||'')); })[0] || null; }
 function finSeries(tbl, re, idx){
   var r = finRow(tbl, re); if(!r) return null;
@@ -568,6 +570,39 @@ function finPL(f){
     finCard('EPS', eps, null)
   ]);
 }
+/* P3 · Balance: Net Worth (Equity Capital + Reserves) · Total Debt (Borrowings) · Debt / Equity
+   (ratios_v2 Solvency, FY columns + Current) · Cash & Equivalents (the block has no cash row for
+   this report: the card says so instead of substituting a number). Cash: Operating CF · Investing
+   CF (capex lives in it; the block has no capex row) · Free CF · Dividends paid, or Financing CF
+   when the block has no dividends row (amendment 20:28). */
+function finBS(f){
+  var t = f.balance_sheet, r2 = f.ratios_v2; if(!t) return '<div class="g-empty">No balance sheet.</div>';
+  var idx = finIdx(t, 5);
+  var nw = finSum(t, [/^Equity Capital/, /^Reserves/], idx, 'Net Worth'), debt = finSeries(t, /^Borrowings/, idx);
+  var solv = finBucket(r2, 'Solvency'), de = solv ? finSeries(solv, /^Debt \/ Equity/, finIdx(solv, 5, true)) : null;
+  var cash = finSeries(t, /^Cash (and|&) (Cash )?Equivalents|^Cash Equivalents|^Cash$/i, idx);
+  var deNow = ratioLatest(r2, 'Solvency', 'Debt / Equity');
+  var deCap = num(deNow) ? 'Debt / equity now '+deNow.toFixed(2) : null;
+  return finCarousel('bs', [
+    finCard('Net Worth', nw, deCap),
+    finCard('Total Debt', debt, deCap),
+    finCard('Debt / Equity', de, null),
+    finCard('Cash & Equivalents', cash, null, 'No cash row in this report. Net cash flow is on the Cash tab.')
+  ]);
+}
+function finCF(f){
+  var t = f.cash_flow; if(!t) return '<div class="g-empty">No cash flow table.</div>';
+  var idx = finIdx(t, 5);
+  var ocf = finSeries(t, /Operating/, idx), inv = finSeries(t, /Investing/, idx), fcf = finSeries(t, /^Free Cash/, idx);
+  var div = finSeries(t, /^Dividend/, idx), fin = finSeries(t, /Financing/, idx);
+  var fl = fcf ? finLast(fcf) : null;
+  return finCarousel('cf', [
+    finCard('Operating cash', ocf, fl ? 'Free cash flow '+finCell(fl.v, 'cr', '')+' in '+fcf.labels[fl.k] : null),
+    finCard('Investing cash', inv, 'Capex sits inside investing cash'),
+    finCard('Free cash flow', fcf, null),
+    div ? finCard('Dividends paid', div, null) : finCard('Financing cash', fin, 'No dividends row; financing cash shown instead')
+  ]);
+}
 /* dots follow the swipe: scroll does not bubble, so one capturing listener serves every carousel */
 document.addEventListener('scroll', function(e){
   var car = e.target; if(!car || !car.getAttribute || !car.getAttribute('data-car')) return;
@@ -582,8 +617,8 @@ function secFinancials(d){
   var seg = '<div class="g-seg" role="tablist">'+[['pl','P&amp;L'],['bs','Balance'],['cf','Cash'],['ra','Ratios']].map(function(t){ return '<button data-fin="'+t[0]+'"'+(t[0]===finView?' class="g-on"':'')+'>'+t[1]+'</button>'; }).join('')+'</div>';
   var body = '';
   if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table returns under see table in P5 */
-  else if(finView === 'bs') body = finTable(f.balance_sheet, [/^Reserves/, /^Borrowings/, /^Fixed Assets/, /^Total Assets/], 6) || '<div class="g-empty">No balance sheet.</div>';
-  else if(finView === 'cf') body = finTable(f.cash_flow, [/Operating/, /Investing/, /Financing/, /^Free Cash/], 6) || '<div class="g-empty">No cash flow table.</div>';
+  else if(finView === 'bs') body = finBS(f);   /* cc#1617 P3 */
+  else if(finView === 'cf') body = finCF(f);
   else {
     if(r2 && r2.buckets && r2.buckets.length){
       r2.buckets.forEach(function(b){ var t = finTable(b.table, null, 4); if(t) body += '<div class="g-fbk">'+esc(String(b.title).toUpperCase())+'</div>'+t; });
