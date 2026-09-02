@@ -336,6 +336,12 @@ window.addEventListener('scorr:theme', function(){
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
   .score-hi{color:var(--grn)}.score-mid{color:var(--amber)}.score-lo{color:var(--red)}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  /* cc#1578: the Dashboard-tab KPI row is FIVE equal boxes at >=1200px, 3+2 below that, one per
+     row at phone widths. Declared after the 720px .cards override above so this wins on the row
+     it names and nothing else. */
+  .cards.kpi5{grid-template-columns:repeat(5,1fr)}
+  @media(max-width:1199px){.cards.kpi5{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:600px){.cards.kpi5{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
   .card .v{font-size:24px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;margin-top:6px}
