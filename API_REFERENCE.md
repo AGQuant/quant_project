@@ -237,6 +237,11 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | POST | `/api/pcr/intraday/compute` | compute intraday PCR |
 | POST | `/api/pcr/backfill` | backfill PCR |
 
+### PCR mood composer — `pcr_mood.py` (prefix `/api/pcr`, cc#1568, session_log 36200)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/pcr/mood` | ONE mood word for the latest PCR of `underlying` (default NIFTY; BANKNIFTY same bands, same Nifty week). Read by the app hero (`pcr_mood` in `/m/home2` payload), the web Index Intel PCR card and the Digest PCR tile — no surface re-bands. Output: `pcr`, `nifty_week_pct` (Market Gate week via `nifty_dwm.live_nifty_dwm`), `label` (EXTREME FEAR / CAUTIOUS / NEUTRAL / GREED / EXTREME GREED, null when no PCR), `band` 0–4, `label_colour` (token name red/amber/grn), `dial_cuts` `[0,50,80,100,150,200]`, `dial_segments` `[{lo,hi,colour,band}]`, `reason` (plain-words line, set only for the >1.50 CAUTIOUS reading), `note` ("week return unavailable" when the week input is missing at the extreme), `basis` LIVE/EOD, `as_of`, `spec`. Bands: <0.5 EXTREME FEAR · 0.5–0.8 CAUTIOUS · 0.8–1.0 NEUTRAL · 1.00–1.50 GREED · >1.50 → CAUTIOUS if Nifty week ≤ −1.0% else EXTREME GREED. |
+
 ### V8 Replay / Backtest / Backfill
 | Method | Path | Source | Description |
 |---|---|---|---|

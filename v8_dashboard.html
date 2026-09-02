@@ -5584,6 +5584,14 @@ async function loadPCR(){
   ]);
   const P = window.ScorrPcrTrend;
   D.pcr = P ? { NIFTY:P.parse(n), BANKNIFTY:P.parse(b) } : { NIFTY:null, BANKNIFTY:null };
+  // cc#1568: the mood word comes from the ONE server composer (pcr_mood.py, session_log 36200),
+  // the same one the app hero and the digest read. A failed fetch leaves the card without a chip
+  // rather than with a locally-banded one.
+  const [mn,mb] = await Promise.all([
+    getJSON('/api/pcr/mood?underlying=NIFTY').catch(()=>null),
+    getJSON('/api/pcr/mood?underlying=BANKNIFTY').catch(()=>null),
+  ]);
+  D.pcrMood = { NIFTY:mn, BANKNIFTY:mb };
 }
 async function loadIdx(){
   /* cc#434 fix_2: CMP + day change from /api/v8/live_metrics (LAST-TICK anchored, cc#424 — Friday
@@ -5966,10 +5974,18 @@ function rPCR(){
   // single monotonic scale: more puts relative to calls reads MORE bullish (more hedging/put-
   // writing demand, the standard NSE retail reading), not a hump. 0.68 stays BEARISH; 0.71 now
   // correctly joins it instead of flipping to BULLISH three cents later.
-  const pc = v=>v==null?C.mut:v<0.9?DN:v<1.1?C.amber:UP;
-  const pl = v=>v==null?'NO DATA':v<0.9?'BEARISH':v<1.1?'NEUTRAL':'BULLISH';
+  // cc#1568 (session_log 36200): the local pc/pl bands above are GONE. Label, colour token and the
+  // CAUTIOUS reason line all come from /api/pcr/mood — one composer for app, web and digest, so
+  // 1.46 reads GREED here exactly as it does on the app hero. Token names map to this file's own
+  // palette; nothing is re-banded on the client.
+  const tok = t=>t==='red'?DN:t==='amber'?C.amber:t==='grn'?UP:C.mut;
   const one=(name,key,d)=>{
-    const cur=d?d.cur:null, col=pc(cur);
+    const cur=d?d.cur:null;
+    const m=(D.pcrMood&&D.pcrMood[key])||null;
+    const hasLabel=!!(m&&m.label&&cur!=null);
+    const col=hasLabel?tok(m.label_colour):C.mut;
+    const lbl=cur==null?'NO DATA':(hasLabel?m.label:'—');
+    const why=(hasLabel&&(m.reason||m.note))?`<div class="pcr-meta">${m.reason||m.note}</div>`:'';
     const chart = (d&&d.days&&d.days.length&&window.ScorrPcrTrend)
       ? ScorrPcrTrend.placeholder(key,col,55)
       : '<div style="font-size:8px;color:var(--dim)">no data</div>';
@@ -5994,11 +6010,11 @@ function rPCR(){
       ? `7-day ${Math.min(...vals).toFixed(2)}–${Math.max(...vals).toFixed(2)}`
       : 'no readings in window';
     return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(cur),col,true)}</div>
+        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(lbl,col,true)}</div>
       <div class="pcr-top">
         <span class="pcr-big" style="color:${col}">${cur==null?'—':cur.toFixed(2)}</span>
         <span class="td-mono" style="font-size:10px;color:${d&&d.chg!=null?cx(d.chg):C.mut}">${d&&d.chg!=null?sgn(d.chg,2):''}</span></div>
-      <div class="pcr-meta">${meta}${gaps}</div>
+      <div class="pcr-meta">${meta}${gaps}</div>${why}
       ${chart}</div>`;
   };
   return `<div class="card">

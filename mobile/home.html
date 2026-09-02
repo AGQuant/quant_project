@@ -4210,7 +4210,7 @@ function adrBar(hero){
 /* ══ cc#1568: PCR MOOD IS READ FROM THE SERVER COMPOSER, NEVER COMPUTED HERE ═══════════════
    PCR_MOOD_BANDS_V2 (session_log 36200, founder-locked 02-Sep-2026). The mood word now needs a
    CROSS-INPUT — the Nifty week return — because a PCR above 1.50 on a falling week is put COVER
-   (CAUTIOUS), not EXTREME GREED. Only the server has that number (nifty_dwm.live_nifty_dwm, the
+   (CAUTIOUS), not the extreme-greed reading. Only the server has that number (nifty_dwm.live_nifty_dwm, the
    Market Gate source), so the whole mapping moved to pcr_mood.py and this file reads its output:
      hero.pcr_mood = {label, band, dial_cuts, dial_segments:[{lo,hi,colour,band}], label_colour,
                       reason, note}
@@ -4287,7 +4287,7 @@ function pcrGaugeSvg(pcrRaw, mood){
 
   if (hasPcr){
     /* cc#1568: segments come from the composer (dial_cuts 0/50/80/100/150/200). The 150-200
-       segment's colour follows the label — amber for CAUTIOUS, green for EXTREME GREED. */
+       segment's colour follows the label — amber for CAUTIOUS, green for the extreme-greed reading. */
     segs.forEach(function(b, j){
       var p0 = pt(b.lo), p1 = pt(b.hi);
       bands += '<path d="M' + p0.x.toFixed(1) + ',' + p0.y.toFixed(1)
