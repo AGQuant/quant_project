@@ -2468,7 +2468,8 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #brov .ad-foot{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9,9px);color:var(--dim);margin-top:8px}
 #brov .ad-dots{display:flex;gap:5px;align-items:center}
 #brov .ad-dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
-#brov .ad-dots .u{background:var(--grn)} #brov .ad-dots .a{background:var(--amber)} #brov .ad-dots .d{background:var(--red)}
+#brov .ad-dots i{width:7px!important;height:7px!important;min-width:0;padding:0;margin:0;border:0;font-size:0;line-height:0}
+#brov .ad-dots .ad-u{background:var(--grn)} #brov .ad-dots .ad-a{background:var(--amber)} #brov .ad-dots .ad-d{background:var(--red)}
 """
 
 
