@@ -3,11 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Alerts · Scorr</title>
+<title>Ideas · Alerts</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
 <script src="/scorr_card_common.js"></script>
 <style>
+/* cc#1620 — APP_ALERTS_IDEAS_V1 (session_log 37072; design ref design_refs/scorr_mobile_alerts_R1.html).
+   The Alerts tab as CURATED IDEAS: the approved book rendered as premium idea cards, one call to
+   /api/alerts/ideas for every number on the screen. Classes namespaced ia- (the app has collided on
+   short class names before). GOLD NIGHT tokens only; the tag / chip / slab / bnav grammar is the
+   shared mobile_app.css. No engine or basket code anywhere on glass (founder 02-Sep 20:50): the
+   origin tag is EXPERT HANDPICKED and the style tag is plain words — the payload already speaks
+   that way, the page never rebuilds it. */
+.ia-top{display:flex;align-items:flex-end;justify-content:space-between;padding:16px 14px 10px}
+.ia-h1{font-family:var(--display,inherit);font-size:24px;font-weight:800;letter-spacing:.3px;line-height:1;color:var(--chalk,var(--txt))}
+.ia-h1 small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase;white-space:nowrap;font-weight:600}
+.ia-r{font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap}
+.ia-pressed{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px}
+.ia-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.ia-stats>div{padding:6px 4px;text-align:center}
+.ia-stats .k{font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)}
+.ia-stats .v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px;color:var(--chalk,var(--txt))}
+.ia-hon{font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center;line-height:1.5}
+.ia-filters{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:12px 0}
+.ia-filters::-webkit-scrollbar{display:none}
+.ia-chip{flex:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 11px;border:1px solid var(--line);background:var(--well);color:var(--mute);border-radius:0;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer;min-height:36px}
+.ia-chip.on{color:var(--gold);border-color:var(--gold);background:var(--gold-d)}
+.ia-idea{margin-bottom:12px;padding:0;overflow:hidden;position:relative}
+.ia-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px 0}
+.ia-sym{font-family:var(--display,inherit);font-size:22px;font-weight:800;line-height:1;letter-spacing:-.2px;color:var(--chalk,var(--txt))}
+.ia-tags{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+.ia-tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 7px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);white-space:nowrap}
+.ia-tag.up{background:var(--up-d);color:var(--up)}.ia-tag.dn{background:var(--down-d);color:var(--down)}
+.ia-tag.gd{background:var(--gold-d);color:var(--gold)}.ia-tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+.ia-appr{font-family:var(--mono);font-size:10px;color:var(--mute);margin-top:6px;line-height:1.5}
+.ia-appr b{color:var(--chalk,var(--txt));font-weight:600}
+.ia-live{text-align:right;flex:none}
+.ia-rib{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:1.4px;padding:2px 8px;border-radius:4px;margin-bottom:4px;border:1px solid var(--line);color:var(--mute);background:var(--well)}
+.ia-rib.live{background:var(--up-d);color:var(--up);border-color:var(--up)}
+.ia-rib.pend{background:var(--amber-d);color:var(--amber);border-color:var(--amber)}
+.ia-rib.done{background:var(--gold-d);color:var(--gold);border-color:var(--gold)}
+.ia-live .l{font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim)}
+.ia-live .px{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:-.3px;color:var(--chalk,var(--txt))}
+.ia-live .ch{font-family:var(--mono);font-size:13px;font-weight:800}
+.ia-live .ch.mu{color:var(--mute);font-weight:600}
+.up{color:var(--up)}.dn{color:var(--down)}
+.ia-body{padding:10px 16px 14px}
+.ia-foot{text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin:8px 0 14px;line-height:1.5}
+.ia-sect{display:flex;align-items:center;gap:10px;margin:18px 0 10px;font-family:var(--display,inherit);font-size:12px;font-weight:800;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold)}
+.ia-sect::after{content:"";flex:1;height:1px;background:var(--line)}
+.ia-sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;font-weight:600}
+.ia-err{padding:10px 16px 0;font-family:var(--mono);font-size:10.5px;color:var(--down);line-height:1.5}
 /* cc#1507 — create-alert flow. All classes namespaced al- (this app has collided four times on
    short class names — the intel.html nc- lesson). The sheet is home.html's .pfveil/.pfsheet
    shape (veil z-80, bottom sheet z-81, grab handle), re-declared here because those classes are
@@ -48,29 +95,26 @@
 </head>
 <body>
 <!--
-  cc#1506 — ALERTS FEED (MANUAL_TRADE_ALERTS_V1, session_log 34521). The app's manual
-  trade-alert channel: the founder sets price triggers (create flow is cc#1507), the 5-min
-  engine flips them to triggered (cc#1504), and this feed is where they land.
+  cc#1620 — IDEAS (APP_ALERTS_IDEAS_V1, session_log 37072). The Alerts tab is the APPROVED BOOK
+  (WOT_APPROVAL_SURFACE_V1 36394) shown as curated idea cards. Newest first (36394): the cc#1506
+  chat order retires on this view. The manual price-alert create flow (cc#1507, the + button and
+  its sheet) is kept as-is below — 34521 says alerts are set from here.
 
-  CHAT ORDER, DELIBERATELY: cards render OLDEST-first top-to-bottom with the NEWEST at the
-  BOTTOM, and the page auto-scrolls there on load — the one deliberate departure from this
-  app's newest-first convention, per 34521 ("like a chat with the engine"). The raw API
-  (/api/alerts/list) stays newest-first; the reversal is DISPLAY-ONLY, done here.
-
-  Approve on a TRIGGERED card posts to /api/alerts/approve — live since cc#1505 (main 2a7de67),
-  so this is a real wire, not a stub. approved_price comes back from the server (the resolver
-  price at the click, never the trigger) and is rendered as the confirmation. Deeper approve UX
-  belongs to cc#1508 and is not built ahead here.
+  Pushes: P3 skeleton + header strip + filters (this one) · P4 idea cards · P5 waiting cards +
+  actions · P6 sparkline + why lines · P7 theme check + screenshot.
 -->
 <div class="screen">
 
-  <div class="head">
-    <h1>Alerts</h1>
-    <div class="s" id="sub">loading…</div>
+  <div class="ia-top">
+    <div class="ia-h1">Ideas<small>Curated · Equity &amp; Futures</small></div>
+    <div class="ia-r" id="ia-r">loading…</div>
   </div>
 
-  <div class="body" id="body">
-    <div class="loading">Loading alerts…</div>
+  <div class="body">
+    <section class="ia-pressed" id="ia-stats"></section>
+    <div class="ia-filters" id="ia-filters"></div>
+    <div id="ia-list"><div class="loading">Loading ideas…</div></div>
+    <div class="ia-foot" id="ia-foot"></div>
   </div>
 </div>
 
@@ -85,128 +129,104 @@
 </nav>
 
 <script>
-var STATE = { alerts: [] };
+var IA = { data:null, err:null, filter:'all', busy:{} };
+var IA_URL = '/api/alerts/ideas';
+var FILTERS = [ {k:'all', l:'All'}, {k:'live', l:'Live'}, {k:'waiting', l:'Waiting'}, {k:'closed', l:'Closed'}, {k:'long', l:'Long'}, {k:'short', l:'Short'} ];
 
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-
-/* status -> the shared sentiment-chip colours: pending waits (neutral), triggered demands a
-   decision (cautious), approved is action taken (bull), dismissed is closed (bear). */
-function stClass(s){
-  return s === 'approved' ? 'bull' : s === 'triggered' ? 'caut' : s === 'dismissed' ? 'bear' : 'neut';
-}
-
-/* API timestamps are "YYYY-MM-DD HH:MM:SS...+00:00" (UTC). Rendered as IST date+time, minute
-   precision — never a raw offset string on glass. */
-function istStamp(ts){
-  if (!ts) return '';
-  var d = new Date(String(ts).replace(' ', 'T'));
-  if (isNaN(d)) return String(ts).slice(0, 16);
-  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
-  var mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i.getMonth()];
-  var hh = ('0' + i.getHours()).slice(-2), mm = ('0' + i.getMinutes()).slice(-2);
-  return i.getDate() + ' ' + mo + ' · ' + hh + ':' + mm;
-}
-
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+function pctS(v, d){ if (v == null || isNaN(Number(v))) return '—'; var x = Number(v); return (x > 0 ? '+' : (x < 0 ? '−' : '')) + Math.abs(x).toFixed(d == null ? 2 : d) + '%'; }
+function pctCls(v){ return v == null ? 'mu' : (v > 0 ? 'up' : (v < 0 ? 'dn' : 'mu')); }
 
-function card(a){
-  var st = String(a.status || 'pending');
-  var dirCls = a.direction === 'BUY' ? 'bull' : 'bear';
-  /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
-     trigger_price/trigger_condition, not a real watch level — showing "Trigger >= px" on it would
-     read as an active threshold that was never set. Suppress the line for those rows only; a
-     manual alert that went pending -> triggered -> approved keeps its real trigger context. */
-  var isSignalApproval = st === 'approved' && !a.triggered_at;
-  var line2 = isSignalApproval ? ''
-    : ('Trigger ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price));
-  var when = '';
-  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price)
-    + (a.approved_via ? ' · via ' + a.approved_via : '');   /* cc#1526: where the click came from */
-  else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
-  else when = 'set ' + istStamp(a.created_at);
-  /* Approve renders ONLY on a triggered card — the server enforces the same rule (409 from any
-     other status), the button just does not offer what cannot happen. */
-  var act = st === 'triggered'
-    ? '<div class="al-act"><button class="chip" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve ›</button></div>'
-    : '';
-  return '<div class="c slab dense" id="al-' + a.id + '">'
-    + '<div class="meta">'
-      + '<span class="tag ' + dirCls + '">' + esc(a.direction) + '</span>'
-      + '<span class="tag ' + stClass(st) + '">' + esc(st.toUpperCase()) + '</span>'
-      /* cc#1526: the originating engine as a small tag — a V8 approval reads differently from a
-         manual alert. Manual rows (source_engine NULL) show no tag, per lock 4. */
-      + (a.source_engine ? '<span class="tag neut">' + esc(a.source_engine) + '</span>' : '')
-      + '<span class="when">' + esc(when) + '</span>'
-    + '</div>'
-    + '<div class="hl">' + esc(a.symbol) + '</div>'
-    + '<div class="sum">' + (line2 ? esc(line2) : '')
-      + (a.notes ? (line2 ? ' · ' : '') + esc(a.notes) : '') + '</div>'
-    + act
-    + '</div>';
+/* ── header strip: counts + as-of on the right, LIVE · WINNING · AVG SINCE · BEST from the
+   payload's stats (computed server-side on live cards), the honesty line under it ─────────── */
+function renderTop(){
+  var d = IA.data, c = (d && d.counts) || {}, s = (d && d.stats) || {};
+  $('ia-r').innerHTML = d
+    ? esc((c.all || 0) + ' ideas · ' + (c.live || 0) + ' live · ' + (c.waiting || 0) + ' waiting') + '<br>' + esc('as of ' + (d.as_of_ist || '—') + (d.price_basis === 'CLOSE' ? ' · last close' : ''))
+    : (IA.err ? 'could not load' : 'loading…');
+  $('ia-stats').innerHTML = '<div class="ia-stats">'
+    + '<div><div class="k">LIVE</div><div class="v">' + (s.live != null ? s.live : '—') + '</div></div>'
+    + '<div><div class="k">WINNING</div><div class="v ' + (s.winning ? 'up' : '') + '">' + (s.winning != null ? s.winning : '—') + '</div></div>'
+    + '<div><div class="k">AVG SINCE</div><div class="v ' + pctCls(s.avg_since_pct) + '">' + pctS(s.avg_since_pct, 1) + '</div></div>'
+    + '<div><div class="k">BEST</div><div class="v ' + pctCls(s.best_pct) + '">' + pctS(s.best_pct, 1) + '</div></div>'
+    + '</div><div class="ia-hon">' + esc((d && d.honesty) || 'Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.') + '</div>';
+  $('ia-foot').textContent = 'Ideas are the approved book. Prices live. Nothing lands here before it is approved by hand.';
 }
 
-function render(scrollToEnd){
-  /* the API is newest-first (its own contract); the chat view reverses for display only */
-  var list = STATE.alerts.slice().reverse();
-  var n = { pending: 0, triggered: 0, approved: 0, dismissed: 0 };
-  STATE.alerts.forEach(function(a){ if (n[a.status] != null) n[a.status]++; });
-  document.getElementById('sub').textContent = STATE.alerts.length
-    ? (STATE.alerts.length + ' alerts · ' + n.pending + ' pending · ' + n.triggered + ' triggered')
-    : 'no alerts yet';
-  document.getElementById('body').innerHTML = list.length
-    ? list.map(card).join('')
-    : '<div class="empty"><b>No alerts yet</b>Set a price trigger and it lands here.</div>';
-  if (scrollToEnd) {
-    /* newest sits at the bottom — open the page there, like a chat */
-    requestAnimationFrame(function(){ window.scrollTo(0, document.body.scrollHeight); });
+function renderFilters(){
+  var c = (IA.data && IA.data.counts) || {};
+  $('ia-filters').innerHTML = FILTERS.map(function(f){
+    var n = c[f.k]; return '<button type="button" class="ia-chip' + (IA.filter === f.k ? ' on' : '') + '" data-f="' + f.k + '">' + f.l + (n != null ? ' ' + n : '') + '</button>';
+  }).join('');
+}
+
+function matches(c){
+  var f = IA.filter;
+  if (f === 'all') return true;
+  if (f === 'long') return c.direction === 'BUY';
+  if (f === 'short') return c.direction === 'SELL';
+  return c.status === f;
+}
+
+/* P3 card: identity + live block. Plan tiles, track and footer land in P4; waiting actions in
+   P5; sparkline + why in P6. */
+function cardHead(c){
+  var w = c.status === 'waiting', done = c.status === 'closed';
+  var appr = w
+    ? ((c.triggered ? 'triggered <b>' + esc(c.triggered_at_ist || '') + '</b> · ' : 'set <b>' + esc(c.set_at_ist || '') + '</b> · ') + 'triggers ' + (c.trigger_condition === 'ABOVE' ? '≥' : '≤') + ' <b>' + fmtPx(c.trigger_price) + '</b>')
+    : ('approved <b>' + esc(c.approved_at_ist || '—') + '</b> @ <b>' + fmtPx(c.approved_price) + '</b>' + (c.via ? ' · via ' + esc(c.via) : ''));
+  var rib = w ? '<div class="ia-rib pend">WAITING</div>' : (done ? '<div class="ia-rib done">CLOSED</div>' : '<div class="ia-rib live">LIVE</div>');
+  var px = done ? (c.closed && c.closed.price) : c.cmp;
+  var ch = w
+    ? '<div class="ia-live"><div class="l">NOW</div><div class="px">' + fmtPx(c.cmp) + '</div><div class="ch mu">' + (c.distance_pct != null ? Math.abs(c.distance_pct).toFixed(1) + '% away' : '—') + '</div></div>'
+    : '<div class="ia-live"><div class="l">' + (done ? 'CLOSED' : (c.cmp_live === false ? 'LAST' : 'NOW')) + '</div><div class="px">' + fmtPx(px) + '</div><div class="ch ' + pctCls(c.since_pct) + '">' + pctS(c.since_pct) + '</div></div>';
+  return '<div class="ia-hd"><div><div class="ia-sym">' + esc(c.symbol) + '</div>'
+    + '<div class="ia-tags"><span class="ia-tag ' + (c.direction === 'BUY' ? 'up' : 'dn') + '">' + esc(c.side) + '</span>'
+    + '<span class="ia-tag gd">' + esc(c.origin_tag || 'EXPERT HANDPICKED') + '</span>'
+    + (c.style ? '<span class="ia-tag mu">' + esc(c.style) + '</span>' : '')
+    + '<span class="ia-tag mu">' + esc(c.instrument || 'EQ') + '</span></div>'
+    + '<div class="ia-appr">' + appr + '</div></div>'
+    + '<div>' + rib + ch + '</div></div>';
+}
+function card(c){
+  return '<article class="slab ia-idea" id="ia-' + c.id + '" data-status="' + esc(c.status) + '">' + cardHead(c) + '<div class="ia-body"></div></article>';
+}
+
+function renderList(){
+  var d = IA.data;
+  if (!d){
+    $('ia-list').innerHTML = IA.err
+      ? '<div class="empty"><b>Could not load ideas</b>' + esc(IA.err) + '<div style="margin-top:12px"><button class="chip" onclick="load()">Retry</button></div></div>'
+      : '<div class="loading">Loading ideas…</div>';
+    return;
   }
+  var all = (d.ideas || []).filter(matches);
+  var main = all.filter(function(c){ return c.status !== 'waiting'; });
+  var wait = all.filter(function(c){ return c.status === 'waiting'; });
+  var h = main.map(card).join('');
+  if (wait.length) h += '<div class="ia-sect">Waiting for price <span class="r">' + wait.length + (wait.length === 1 ? ' idea' : ' ideas') + '</span></div>' + wait.map(card).join('');
+  if (!all.length) h = '<div class="empty"><b>' + (IA.filter === 'all' ? 'No ideas yet' : 'Nothing under ' + esc(FILTERS.filter(function(f){ return f.k === IA.filter; })[0].l)) + '</b>' + (IA.filter === 'all' ? 'An idea lands here once it is approved by hand.' : 'Try another filter.') + '</div>';
+  $('ia-list').innerHTML = h;
 }
 
-function approve(id){
-  var btn = document.getElementById('ap-' + id);
-  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
-  fetchWithTimeout('/api/alerts/approve', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
-    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-    .then(function(x){
-      if (!x.ok) throw new Error((x.d && x.d.detail) || 'approve failed');
-      for (var i = 0; i < STATE.alerts.length; i++)
-        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
-      render(false);   /* in-place update — the reader's scroll position stays put */
-    })
-    .catch(function(e){
-      if (btn) { btn.disabled = false; btn.textContent = 'Approve ›'; }
-      /* the server's reason, on glass — a silent failure would read as a dead button */
-      var cardEl = document.getElementById('al-' + id);
-      if (cardEl && !cardEl.querySelector('.al-err')) {
-        var err = document.createElement('div');
-        err.className = 'sum al-err';
-        err.textContent = 'Could not approve — ' + e.message;
-        cardEl.appendChild(err);
-      }
-    });
-}
+function render(){ renderTop(); renderFilters(); renderList(); }
 
-function load(first){
-  fetchWithTimeout('/api/alerts/list?status=all&limit=200')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.error) throw new Error(d.error);
-      STATE.alerts = d.alerts || [];
-      render(!!first);
-    })
-    .catch(function(e){
-      document.getElementById('body').innerHTML =
-        '<div class="empty"><b>Could not load alerts</b>' + esc(e.message) +
-        '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-      document.getElementById('sub').textContent = 'failed to load';
-    });
+function load(){
+  fetchWithTimeout(IA_URL).then(function(r){ return r.json(); }).then(function(d){
+    if (!d || d.error) throw new Error((d && d.error) || 'empty reply');
+    IA.data = d; IA.err = null; render();
+  }).catch(function(e){ IA.err = e.message || 'load failed'; if (!IA.data) render(); else $('ia-r').textContent = 'refresh failed · showing ' + (IA.data.as_of_ist || 'earlier'); });
 }
-load(true);
-/* the engine sweeps every 5 minutes (cc#1504); refreshing on the same cadence keeps a
-   just-triggered card from waiting on a manual reload. In-place, no scroll jump. */
-setInterval(function(){ load(false); }, 300000);
+$('ia-filters').addEventListener('click', function(e){
+  var b = e.target.closest('[data-f]'); if (!b) return;
+  IA.filter = b.getAttribute('data-f'); renderFilters(); renderList();
+});
+render();
+load();
+/* the trigger sweep runs every 5 minutes (cc#1504); prices refresh on the same cadence, in place */
+setInterval(load, 300000);
 
 /* ══ cc#1507 · CREATE-ALERT FLOW ═══════════════════════════════════════════════════════════
    Symbol search reuses /api/gvm/search — the app's ONE autocomplete (GVM page pattern, symbol
@@ -302,7 +322,7 @@ function alSubmit(){
       if (!x.ok) throw new Error((x.d && x.d.detail) || 'create failed');
       alClose();
       /* the new pending card belongs at the bottom of the chat — reload and go there */
-      load(true);
+      load();
     })
     .catch(function(e){
       FORM.busy = false; go.disabled = false; go.textContent = 'Create alert';
