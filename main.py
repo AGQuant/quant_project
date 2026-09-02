@@ -1385,8 +1385,8 @@ NAV_REGISTRY = {
     # to the home grid tile 1), and the web page joined the desktop top nav next to the new
     # /alerts page (Alerts leads, WoT adjacent). Both remain injected + PROTECTED above.
     "/m/trades":     ("Wall of Trades (mobile)", "bottom-nav"),   # cc#1535: WoT slot
-    "/trades":       ("Wall of Trades (web)",    "nav"),          # cc#1536: adjacent to /alerts
-    "/alerts":       ("Alerts (web)",            "nav"),          # cc#1536: the approve surface
+    "/trades":       ("Wall of Trades (web)",    "v8-tab"),   # cc#1609: V8 header tab (Wall of Trades), off the top nav
+    "/alerts":       ("Alerts (web)",            "v8-tab"),   # cc#1585: V8 header tab (Alerts), off the top nav
     "/inv-scanner":  ("Invest Scan",              "nav"),   # cc#1286
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
