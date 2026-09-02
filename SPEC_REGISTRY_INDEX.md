@@ -1,7 +1,7 @@
 # Scorr — Spec Registry Index
 
 Generated 02-Sep-2026 from the live `session_log` table by `tools/gen_spec_index.py`
-(678 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
+(680 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
 
 **How to use this.** This is an INDEX, not the specs themselves. The full text of every
 entry lives in the Railway DB and is the authority. To read one:
@@ -618,10 +618,12 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 27933 | PUSH_MODES_V2 — FABLE_APP_DIRECT (founder-approved 20-Aug ~16:20 IST, supersedes PUSH_MODES_V1 mode definitions; ROLE_CHARTER_V3 unchanged) |
 
 
-### `spec` — 30
+### `spec` — 32
 
 | id | Title |
 |---|---|
+| 36294 | PCR_READ_INTERPRET_V1 - PCR card (i) popover: plain-words read of the current PCR band plus a next-day evidence line from pcr_daily x raw_prices; too-few line until 20 scored sessions per band. Founder ask 02-Sep-2026. Extends PCR_MOOD_BANDS_V2 (36200) and pcr_mood.py (cc#1568). |
+| 36283 | OI_STRUCTURE_INTERPRET_V1 - Max Pain card (i) popover: scenario read of max pain + call wall + put wall vs spot, each interpretation carrying its own evidence from a daily structure snapshot; labelled framework-only until >= 20 scored sessions per scenario. Founder ask 02-Sep-2026. |
 | 35016 | TC_SCANNER_R1_V1 |
 | 35003 | TRADE_CONTROL_V1 |
 | 34998 | INDEX_INTEL_WEB_R1_V1 |
