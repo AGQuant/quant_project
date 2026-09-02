@@ -325,21 +325,48 @@ def get_gvm_snapshot(symbol: str):
     return base
 
 
+# cc#1566: the 3Y pill. 1095 calendar days, and the floor of daily sessions a symbol must hold inside
+# that window before the pill is allowed to load — ~2.5 years of trading days. Below it the endpoint
+# says "unavailable" rather than returning a shorter series labelled 3Y (data-honesty doctrine).
+_TF_3Y_DAYS = 1095
+_TF_3Y_MIN_SESSIONS = 620
+_TF_3Y_REASON = "Under 3 years of listed history"
+
+
 @router.get("/api/candles/{symbol}")
-def get_candles(symbol: str, days: int = 90):
+def get_candles(symbol: str, days: int = 90, tf: Optional[str] = None, probe: int = 0):
     """cc#608/cc#669: daily OHLC candles from raw_prices for the price-chart popout (equity symbols;
     /api/v10/candles is index-only). Pairs with /api/intraday/{symbol} for the 5m view. Read-only.
     ``days`` <= 0 => ALL tab: the symbol's COMPLETE stored history (MIN(price_date) per symbol, never
     hardcoded). To keep the payload light (cc#649 pattern), history longer than ~1,500 daily bars is
     downsampled server-side to WEEKLY candles (first-open / max-high / min-low / last-close / sum-vol);
     shorter history returns daily. cc#806: bounded windows are capped at 1825 days (was 365), so the
-    card's 1M/3M/6M/1Y/3Y/ALL pills all pass their full calendar window untruncated."""
+    card's 1M/3M/6M/1Y/3Y/ALL pills all pass their full calendar window untruncated.
+    cc#1566: ``tf=3Y`` sets the window to 1095 days and adds a depth gate — a symbol with fewer than
+    620 sessions in that window gets ``{"kind":"unavailable","reason":...,"sessions_available":N}``
+    instead of a short series. ``probe=1`` (with tf=3Y) answers the gate WITHOUT bars —
+    ``{"kind":"ok"|"unavailable","sessions_available":N,...}`` — so the card can grey the pill at
+    open. Plain ``days=`` calls are untouched: same list shape as before."""
     sym = symbol.upper()
     # cc#673: anchor the window to MAX(price_date) for THIS symbol (not CURRENT_DATE) so the tail is
     # ALWAYS the latest stored bar regardless of server clock / feed lag / holidays — fixes the
     # "chart ends weeks early" class of bug. Then assert the last returned bar == MAX(price_date).
     mx = api_query("SELECT MAX(price_date)::text AS d FROM raw_prices WHERE symbol=%s", (sym,), single=True)
     maxd = mx.get("d") if isinstance(mx, dict) else None
+    if tf and tf.upper() == "3Y":
+        days = _TF_3Y_DAYS
+        n = 0
+        if maxd:
+            c = api_query("""SELECT COUNT(*) AS c FROM raw_prices
+                             WHERE symbol=%s AND price_date > %s::date - %s""", (sym, maxd, days), single=True)
+            n = int((c or {}).get("c") or 0) if isinstance(c, dict) else 0
+        ok = n >= _TF_3Y_MIN_SESSIONS
+        if probe or not ok:
+            out = {"symbol": sym, "tf": "3Y", "kind": "ok" if ok else "unavailable",
+                   "sessions_available": n, "sessions_required": _TF_3Y_MIN_SESSIONS, "days": days}
+            if not ok:
+                out["reason"] = _TF_3Y_REASON
+            return out
     if not maxd:
         return []
     if days <= 0:   # ALL — full stored history, weekly-downsampled above ~1,500 points
