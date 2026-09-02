@@ -7084,7 +7084,7 @@ function oiCard(name, oi, mp){
   return '<div class="card oi">'
     + '<div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
     + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
-    + '<button type="button" class="ib" onclick="iiOiGuide()" aria-label="How to read this card">i</button></div>'
+    + '<button type="button" class="ib" onclick="iiOiRead(\'' + esc(name) + '\')" aria-label="Read this card">i</button></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + spotLb
     + xs
@@ -7093,8 +7093,8 @@ function oiCard(name, oi, mp){
         + (peDead ? 'puts' : 'calls') + ' absent this tick</div>' : '')
     + '</div>';
 }
-function oiGuide(){
-  iiSheet('<div class="iish">How to read Max Pain</div><div class="vfg">'
+function oiGuideHtml(){
+  return '<div class="iish" style="margin-top:14px">How to read Max Pain</div><div class="vfg">'
     + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
     + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
     + 'brightness shows change since the morning\'s opening levels.</p>'
@@ -7106,7 +7106,58 @@ function oiGuide(){
     + 'the live feed is off. The label under it says which.</p>'
     + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
     + 'contracts are open than calls.</p>'
-    + '</div>');
+    + '</div>';
+}
+function oiGuide(){ iiSheet(oiGuideHtml()); }
+/* cc#1575 (OI_STRUCTURE_INTERPRET_V1, 36283): the Max Pain (i) read. ONE composer,
+   /api/oi/structure?underlying=, serves this popover and the app sheet — headline, read, the
+   evidence line, caveats — and the web adds the strike table (ceiling / max pain / spot / support
+   with distances) and the last-10-snapshot history strip so the count has its rows behind it.
+   Nothing is worded or classified here. The how-to-read guide stays underneath. */
+function oiRead(name){
+  var u = (String(name||'').toUpperCase().indexOf('BANK') === 0) ? 'BANKNIFTY' : 'NIFTY';
+  II_SHEET.kind = 'oiread'; II_SHEET.key = u;
+  var head = '<div class="iish">Max Pain ' + esc(u) + ' · the read</div>';
+  iiSheet(head + '<div class="vfg"><p>Loading the read…</p></div>');
+  getJSON('/api/oi/structure?underlying=' + u).then(function(d){
+    if (!II_SHEET.open || II_SHEET.kind !== 'oiread' || II_SHEET.key !== u) return;
+    iiSheet(head + oiReadHtml(d) + oiGuideHtml());
+  }).catch(function(){
+    if (!II_SHEET.open || II_SHEET.kind !== 'oiread' || II_SHEET.key !== u) return;
+    iiSheet(head + '<div class="vfg"><p>The read is not available this tick.</p></div>' + oiGuideHtml());
+  });
+}
+function oiReadHtml(d){
+  if (!d || d.status !== 'ok'){
+    return '<div class="vfg"><p>' + esc((d && d.note) || 'The read is not available this tick.') + '</p></div>';
+  }
+  var spot = d.spot != null ? Number(d.spot) : null;
+  var dist = function(v){ return (v == null || !spot) ? '—' : sgn((v - spot) / spot * 100, 2) + '%'; };
+  var lvl = function(label, v, cls){
+    return '<tr><td class="sym">' + label + '</td><td>' + (v == null ? '—' : num(v, 0)) + '</td><td class="' + (cls||'') + '">' + dist(v) + '</td></tr>';
+  };
+  var rows = [['Ceiling (call wall)', d.call_wall, 'neg'], ['Max pain', d.max_pain, 'am'], ['Spot' + (d.spot_basis ? ' · ' + d.spot_basis : ''), spot, ''], ['Support (put wall)', d.put_wall, 'pos']]
+    .filter(function(r){ return r[1] != null; })
+    .sort(function(a, b){ return Number(b[1]) - Number(a[1]); })
+    .map(function(r){ return lvl(r[0], r[1], r[2]); }).join('');
+  var ev = d.evidence || {};
+  var hist = (d.history || []).map(function(h){
+    return '<tr><td class="sym">' + esc(h.d) + '</td><td>' + esc(h.scenario || (h.one_sided ? 'ONE_SIDED' : '—')) + '</td>'
+      + '<td>' + (h.mp_dist_pct == null ? '—' : sgn(h.mp_dist_pct, 2) + '%') + '</td>'
+      + '<td class="' + (h.next_day_pct == null ? '' : (h.next_day_pct >= 0 ? 'pos' : 'neg')) + '">' + (h.next_day_pct == null ? 'pending' : sgn(h.next_day_pct, 2) + '%') + '</td></tr>';
+  }).join('');
+  return '<div class="vfg">'
+    + '<p><b>' + esc(d.headline || '') + '</b></p>'
+    + '<p>' + esc(d.read_text || (d.read || []).join(' ')) + '</p>'
+    + '<p><b>' + esc(d.evidence_line || '') + '</b>' + (d.scenario ? ' <span style="color:var(--tx3)">(setup: ' + esc(d.scenario) + ')</span>' : '') + '</p>'
+    + ((d.caveats || []).length ? '<p style="color:var(--tx3)">' + d.caveats.map(esc).join(' ') + '</p>' : '')
+    + '<div style="font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);margin:10px 0 4px">LEVELS · ' + esc(d.as_of ? String(d.as_of).replace('T',' ').slice(0,16) : '') + (d.expiry ? ' · expiry ' + esc(d.expiry) + ' (' + esc(d.days_to_expiry) + 'd)' : '') + (d.pcr != null ? ' · PCR ' + esc(d.pcr) : '') + '</div>'
+    + '<table class="tb"><thead><tr><th>LEVEL</th><th>STRIKE</th><th>FROM SPOT</th></tr></thead><tbody>' + rows + '</tbody></table>'
+    + '<div style="font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);margin:10px 0 4px">LAST ' + (d.history || []).length + ' CLOSE SNAPSHOTS · next day = next session close vs that spot</div>'
+    + (hist ? '<table class="tb"><thead><tr><th>DATE</th><th>SETUP</th><th>MAX PAIN DIST</th><th>NEXT DAY</th></tr></thead><tbody>' + hist + '</tbody></table>'
+            : '<div class="unavail">No snapshots yet.</div>')
+    + '<p style="color:var(--tx3);margin-top:8px">' + esc(d.note || 'Descriptive read only. Not a trading signal.') + (ev.scored ? '' : ' Framework read until 20 scored sessions.') + '</p>'
+    + '</div>';
 }
 function rMaxPainSec(){
   var mpN = D.maxpainAll.NIFTY;
@@ -7738,6 +7789,7 @@ function rFlowBasis(){
    published under an ii* name (never bare, to keep this pane's globals from colliding). */
 window.iiSheetClose = iiSheetClose;
 window.iiOiGuide = oiGuide;
+window.iiOiRead = oiRead;   /* cc#1575 */
 window.iiIpGuide = ipGuide;
 window.iiBuGuide = buGuide;
 window.iiVfGuide = vfGuide;
