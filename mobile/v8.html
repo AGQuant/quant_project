@@ -247,6 +247,29 @@ function emptyBox(id, words){
   el.innerHTML = '<div class="empty">'+esc(words)+'<br><span class="chip" data-retry="1">Retry</span></div>';
 }
 /* ── 1 · MARKET MOOD ─────────────────────────────────────────────────────────────────── */
+/* ── cc#1621 · Market Mood as TWO swipeable cards (founder 02-Sep 20:44: "this V8 card is very
+   clumsy - split into 2"). Card 1 VERDICT: eyebrow MARKET GATE · date, the mood word big, the
+   coloured mood bar, ONE plain sentence, footer as-of. Card 2 EVIDENCE: eyebrow N OF 4 CHECKS
+   FAILED, the four check tiles, BUY / SELL slot bars, breadth line, footer gate · Nifty basis.
+   Same height for both (flex row, align stretch), snap scroll, 2 dots, default card 1. Every
+   number is the same payload the one tall card read (market_mood + book); nothing re-derived.
+   Footer status after 15:30 IST reads "close · HH:MM", never LIVE (same rule as cc#1611 / 1607). */
+function sessionStamp(asof){
+  /* the shared stamp says LIVE HH:MM while the page is fresh; on a closed market the honest word
+     is close, with the same time */
+  if(!marketOpen()){
+    var mm = /(\d\d:\d\d)$/.exec(String(asof||''));   /* STATE.fetchedAt is "YYYY-MM-DD HH:MM" in IST */
+    var d = asof instanceof Date ? asof : null;
+    return {txt: 'close · ' + (mm ? mm[1] : (d && !isNaN(d) ? hhmm(d) : String(asof||''))), amber:false};
+  }
+  return window.scorrAsofStamp ? scorrAsofStamp(asof) : {txt:String(asof||''), amber:false};
+}
+function asofSession(asof, extra){
+  var st = sessionStamp(asof);
+  if(!st.txt && !extra) return '';
+  return '<div class="asof'+(st.amber?' stale':'')+'">'+(extra?esc(extra)+(st.txt?' · ':''):'')+esc(st.txt)+'</div>';
+}
+var MOOD_CARD = 'flex:0 0 100%;scroll-snap-align:start;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;padding:0';
 function renderMood(){
   var m = STATE.mood, el = document.getElementById('sec-mood'), r = document.getElementById('mood-r');
   if(!m || !m.checks){ emptyBox('sec-mood', 'Market gate is not available right now.'); return; }
@@ -266,22 +289,44 @@ function renderMood(){
     var lbl = num(used) ? used+' / '+(num(total)?total:'—') : (num(total) ? '— / '+total : '—');
     return '<div class="slot"><div class="l"><span>'+name+'</span><b>'+lbl+'</b></div><div class="sbar '+kind+'"><i style="width:'+w+'%"></i></div></div>';
   }
-  var sub = mode + ' ' + (num(usedL) && num(usedS)
-    ? 'Buy side: <b>'+usedL+' of '+(num(B)?B:'—')+'</b> buy slots, <b>'+usedS+' of '+(num(S)?S:'—')+'</b> sell slots in use.'
+  var sentence = mode + ' ' + (num(usedL) && num(usedS)
+    ? '<b>'+usedL+' of '+(num(B)?B:'—')+'</b> buy slots, <b>'+usedS+' of '+(num(S)?S:'—')+'</b> sell slots in use.'
     : 'Slots: <b>'+(num(B)?B:'—')+'</b> buy, <b>'+(num(S)?S:'—')+'</b> sell.');
   var ad = m.adr_detail || {};
-  var footL = 'ADR '+esc(ad.adr_date||m.checked_at||'')+' · Nifty D/W/M vs prev close';
-  var footR = (num(ad.advances)&&num(ad.declines)) ? 'A '+ad.advances+' / D '+ad.declines : esc(m.nifty_source||'');
+  var passed = checks.length - fails, barCol = cls==='bear' ? 'var(--down)' : cls==='bull' ? 'var(--up)' : 'var(--gold)';
+  var barW = checks.length ? Math.round(passed / checks.length * 100) : 0;
+  var breadth = (num(ad.advances)&&num(ad.declines)) ? 'A '+ad.advances+' / D '+ad.declines : esc(m.nifty_source||'');
+  var adrCk = checks.filter(function(c){ return c.filter==='ADR'; })[0];
+  if(adrCk && num(adrCk.value)) breadth += ' · ADR '+adrCk.value.toFixed(2);
+  if(ad.adr_date) breadth += ' · '+esc(ad.adr_date);
+  var card1 = '<div style="'+MOOD_CARD+'">'
+    + '<div class="eyebrow"><span>Market gate</span><span>'+esc(String(m.checked_at||''))+'</span></div>'
+    + '<div class="gword '+cls+'">'+esc(mood)+'</div>'
+    + '<div style="height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);margin:2px 0 10px"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>'
+    + '<div class="sub" style="margin-bottom:0">'+sentence+'</div>'
+    + '<div style="flex:1"></div>'
+    + asofSession(STATE.fetchedAt, 'gate '+String(m.checked_at||''))
+    + '</div>';
+  var card2 = '<div style="'+MOOD_CARD+'">'
+    + '<div class="eyebrow"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
+    + '<div class="checks" style="margin-top:10px">'+ck+'</div>'
+    + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
+    + '<div class="foot"><span>'+breadth+'</span></div>'
+    + '<div style="flex:1"></div>'
+    + asofSession(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · Nifty D/W/M vs prev close')
+    + '</div>';
   el.innerHTML =
-    '<div class="eyebrow"><span>Market gate</span><span>'+fails+' of '+checks.length+' checks failed</span></div>'+
-    '<div class="gword '+cls+'">'+esc(mood)+'</div>'+
-    '<div class="sub">'+sub+'</div>'+
-    '<div class="checks">'+ck+'</div>'+
-    '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'+
-    '<div class="foot"><span>'+footL+'</span><span>'+footR+'</span></div>'+
-    asofLine(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · '+String(m.breadth_source||''));
+    '<div data-mood-car="1" style="display:flex;align-items:stretch;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px">'+card1+card2+'</div>'
+    + '<div data-mood-dots="1" style="display:flex;justify-content:center;gap:6px;padding-top:8px"><span style="width:6px;height:6px;border-radius:50%;background:var(--gold)"></span><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span></div>';
   if(r) r.textContent = String(m.checked_at||'');
 }
+/* dots follow the swipe (scroll does not bubble: one capturing listener) */
+document.addEventListener('scroll', function(e){
+  var car = e.target; if(!car || !car.getAttribute || !car.getAttribute('data-mood-car')) return;
+  var k = Math.round(car.scrollLeft / (car.clientWidth || 1));
+  var dots = document.querySelector('[data-mood-dots]'); if(!dots) return;
+  Array.prototype.forEach.call(dots.children, function(d, i){ d.style.background = i === k ? 'var(--gold)' : 'var(--line)'; });
+}, true);
 /* ── 2 · OPEN POSITIONS ──────────────────────────────────────────────────────────────── */
 var OPEN_LIMIT = 8, openAll = false, openFilter = 'all';
 function kpiWell(label, val, cls, sub){ return '<div class="kw well-up"><div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>'; }
