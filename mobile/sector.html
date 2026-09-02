@@ -3,79 +3,223 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sector · Scorr</title>
+<title>Sectors</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
 <script src="/scorr_card_common.js"></script>
 </head>
 <body>
-<div class="screen">
-  <div class="head"><h1>Sector</h1><div class="s" id="sub">sector ratings · mcap-weighted GVM</div></div>
-  <div class="body" id="body"><div class="loading">Loading sectors…</div></div>
+<!--
+  cc#1623 — APP_SECTOR_PAGE_V1 (session_log 37158; design ref design_refs/scorr_mobile_sector_R1.html).
+  ONE source for every number on the list: /api/sector/rotation (cc#827 merge layer, GVM is the
+  rating and the order). The old page read /api/sectors, whose rows carry mcap_weighted_gvm, and
+  looked for gvm / gvm_score / score — so every row printed "--". This page binds to the rotation
+  keys only. The detail sheet reads /api/mobile/sector/detail (stocks by GVM + brief). GOLD NIGHT
+  tokens via the shared sheets; all sizing inline (this file sits at 0 on the theme ratchet).
+-->
+<div class="screen" id="secp">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:16px 14px 10px">
+    <div><div style="font-family:var(--display,inherit);font-size:24px;font-weight:800;line-height:1;color:var(--chalk,var(--txt))">Sectors</div><div id="sc-sub" style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase">loading…</div></div>
+    <div id="sc-r" style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap"></div>
+  </div>
+  <div class="body">
+    <div id="sc-rot"></div>
+    <div id="sc-filters"></div>
+    <div id="sc-sort"></div>
+    <div id="sc-list"><div class="loading">Loading sectors…</div></div>
+    <div id="sc-more"></div>
+    <div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin:10px 0 14px;line-height:1.5">Bar = G + V + M stacked to the GVM total. Ticks at 6 · 7 · 8. Tap a sector for its stocks and brief.</div>
+  </div>
 </div>
 <nav class="bnav">
-  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 <script>
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n1(v){ return (v==null||isNaN(Number(v)))?'--':Number(v).toFixed(1); }
-function scoreCol(g){ if(g==null)return 'var(--dim)';
-  return g>=7.5?'var(--grn)':(g>=5?'var(--amber)':'var(--red)'); }
-function arr(d){ return d.sectors||d.ratings||d.results||(Array.isArray(d)?d:[]); }
+var SC = { data:null, err:null, filter:'all', sort:'gvm', all:false, sheet:null, detail:{} };
+var SHOW_N = 20;
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function num(v){ return typeof v === 'number' && isFinite(v); }
+function nv(v){ return v == null ? null : (isFinite(Number(v)) ? Number(v) : null); }
+function f2(v){ v = nv(v); return v == null ? '—' : v.toFixed(2); }
+function f1(v){ v = nv(v); return v == null ? '—' : v.toFixed(1); }
+function pctS(v, d){ v = nv(v); if(v == null) return '—'; return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(v).toFixed(d == null ? 1 : d) + '%'; }
+function sgn(v){ v = nv(v); return v == null ? 'mu' : (v > 0 ? 'up' : (v < 0 ? 'dn' : 'mu')); }
+function crS(v){ v = nv(v); if(v == null) return '—'; if(v >= 100000) return '₹' + (v/100000).toFixed(1) + 'L Cr'; if(v >= 1000) return '₹' + (v/1000).toFixed(v >= 10000 ? 0 : 1) + 'k Cr'; return '₹' + Math.round(v) + ' Cr'; }
+function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? (+m[3]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1] : String(iso||''); }
+function istNow(){ var n = new Date(); return new Date(n.getTime() + (330 + n.getTimezoneOffset())*60000); }
+function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function verdictOf(r){ var g = nv(r.gvm); return r.verdict || (g == null ? '—' : g >= 8 ? 'Excellent' : g >= 7 ? 'Good' : g >= 6 ? 'Average' : 'Weak'); }
+function vCol(r){ var g = nv(r.gvm); return g == null ? 'var(--mute)' : g >= 7 ? 'var(--gold)' : g >= 6 ? 'var(--chalk,var(--txt))' : 'var(--down)'; }
+function nameOf(r){ return r.display_segment || r.segment || '—'; }
+var TONE = { g:'var(--up)', v:'var(--amber)', m:'var(--aqua, var(--blu))' };
 
-function row(s){
-  var name=s.sector||s.segment||s.name||'--';
-  var score=s.gvm!=null?s.gvm:(s.gvm_score!=null?s.gvm_score:s.score);
-  var n=s.companies!=null?s.companies:(s.count!=null?s.count:s.n);
-  var col=scoreCol(score==null?null:Number(score));
-  var w=score==null?0:Math.max(0,Math.min(100,Number(score)*10));
-  /* cc#1090 P7 dense sweep: sector_ratings holds 130 rows, all rendered. */
-  return '<div class="se-srow slab dense"><div style="flex:1;min-width:0"><div class="nm">'+esc(name)+'</div>'
-    + (n!=null?'<div class="sub2">'+n+' companies</div>':'')+'</div>'
-    + '<div class="bar"><div class="fill" style="width:'+w+'%;background:'+col+'"></div></div>'
-    + '<span class="sc" style="color:'+col+'">'+n1(score)+'</span></div>';
+/* ── header + rotation strip ─────────────────────────────────────────────────────────── */
+function renderTop(){
+  var d = SC.data;
+  if(!d){ $('sc-sub').textContent = SC.err ? 'could not load' : 'loading…'; $('sc-r').innerHTML = ''; return; }
+  $('sc-sub').textContent = (d.raw_segments || 0) + ' segments · ' + (d.total_segments || 0) + ' shown';
+  $('sc-r').innerHTML = 'mcap-weighted GVM<br>scores ' + esc(dmy(d.score_date)) + ' · prices ' + esc(hhmm(SC.fetchedAt || istNow()));
 }
-Promise.all([
-  fetchWithTimeout('/api/sectors').then(function(r){return r.json();}),
-  fetchWithTimeout('/api/sector/rotation').then(function(r){return r.json();}).catch(function(){return null;})
-]).then(function(res){
-  var d=res[0], rot=res[1];
-  if (d && d.error) throw new Error(d.error);
-  var list=arr(d).slice();
-  list.sort(function(a,b){
-    var x=(a.gvm!=null?a.gvm:(a.gvm_score!=null?a.gvm_score:a.score))||0;
-    var y=(b.gvm!=null?b.gvm:(b.gvm_score!=null?b.gvm_score:b.score))||0;
-    return y-x;
-  });
-  var h='';
-  if (rot && !rot.error){
-    var rl=rot.rotation||rot.sectors||rot.results||[];
-    var into=rl.filter(function(x){return (x.direction||x.trend||'').toString().toLowerCase().indexOf('in')===0;}).slice(0,3);
-    var out=rl.filter(function(x){return (x.direction||x.trend||'').toString().toLowerCase().indexOf('out')===0;}).slice(0,3);
-    if (into.length||out.length){
-      h+='<div class="sect">ROTATION</div><div class="c">';
-      if (into.length) h+='<div class="meta"><span class="tag bull">MONEY IN</span></div><div class="sum">'
-        + into.map(function(x){return esc(x.sector||x.name);}).join(' · ')+'</div>';
-      if (out.length) h+='<div class="meta" style="margin-top:8px"><span class="tag bear">MONEY OUT</span></div><div class="sum">'
-        + out.map(function(x){return esc(x.sector||x.name);}).join(' · ')+'</div>';
-      h+='</div>';
-    }
+function laneRow(r, cls){ return '<div data-open="' + esc(nameOf(r)) + '" role="button" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.25;cursor:pointer"><span style="color:var(--chalk,var(--txt));min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nameOf(r)) + '</span><b class="' + cls + '" style="font-family:var(--mono);font-weight:800;font-size:12.5px;flex:none">' + f2(r.gvm) + '</b></div>'; }
+function renderRot(){
+  var d = SC.data; if(!d){ $('sc-rot').innerHTML = ''; return; }
+  var hot = (d.top5 || []).slice(0, 5), cold = (d.bottom5 || []).slice(0, 5);
+  $('sc-rot').innerHTML = '<section class="pressed" style="padding:12px 14px">'
+    + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin-bottom:8px"><span>ROTATION</span><span style="letter-spacing:.3px">GVM is the rating and the order</span></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--up);margin-bottom:2px">▲ HOT · TOP 5</div>' + (hot.length ? hot.map(function(r){ return laneRow(r, 'up'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">none today</div>') + '</div>'
+    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--down);margin-bottom:2px">▼ COLD · WEAK</div>' + (cold.length ? cold.map(function(r){ return laneRow(r, 'dn'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">no weak sector today</div>') + '</div>'
+    + '</div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px"><span>Excellent 8+ · Good 7+ · Average 6+ · Weak</span><span>' + (num(d.merged_away) ? d.merged_away + ' one-stock segments merged into families' : '') + '</span></div>'
+    + '</section>';
+}
+
+/* ── filters + sort (in-memory) ──────────────────────────────────────────────────────── */
+var FILTERS = [ {k:'all', l:'All', f:function(){ return true; }}, {k:'good', l:'Good+', f:function(r){ return nv(r.gvm) != null && r.gvm >= 7; }}, {k:'avg', l:'Average', f:function(r){ return nv(r.gvm) != null && r.gvm >= 6 && r.gvm < 7; }}, {k:'weak', l:'Weak', f:function(r){ return nv(r.gvm) != null && r.gvm < 6; }}, {k:'rising', l:'Rising', f:function(r){ return nv(r.gvm_change) != null && r.gvm_change > 0; }}, {k:'falling', l:'Falling', f:function(r){ return nv(r.gvm_change) != null && r.gvm_change < 0; }} ];
+var SORTS = [ {k:'gvm', l:'GVM', v:function(r){ return nv(r.gvm); }}, {k:'delta', l:'Δ 30d', v:function(r){ return nv(r.gvm_change); }}, {k:'inst', l:'Inst', v:function(r){ return nv(r.inst_change); }}, {k:'qoq', l:'QoQ profit', v:function(r){ return nv(r.qoq_profit); }}, {k:'mcap', l:'Mcap', v:function(r){ return nv(r.total_mcap); }} ];
+function rowsAll(){ return (SC.data && SC.data.all) || []; }
+function rankMap(){ var m = {}; rowsAll().forEach(function(r, i){ m[nameOf(r)] = i + 1; }); return m; }
+function visible(){
+  var f = FILTERS.filter(function(x){ return x.k === SC.filter; })[0] || FILTERS[0], s = SORTS.filter(function(x){ return x.k === SC.sort; })[0] || SORTS[0];
+  var rows = rowsAll().filter(f.f);
+  rows.sort(function(a, b){ var x = s.v(a), y = s.v(b); if(x == null && y == null) return 0; if(x == null) return 1; if(y == null) return -1; return y - x; });
+  return rows;
+}
+function renderFilters(){
+  var all = rowsAll();
+  $('sc-filters').innerHTML = '<div style="display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:12px 0 8px">' + FILTERS.map(function(x){
+    var n = all.filter(x.f).length, on = SC.filter === x.k;
+    return '<button type="button" data-f="' + x.k + '" style="flex:none;min-height:34px;font-family:var(--mono);font-size:11px;font-weight:700;padding:6px 11px;border:1px solid ' + (on ? 'var(--gold)' : 'var(--line)') + ';background:' + (on ? 'var(--gold-d, var(--well))' : 'var(--well)') + ';color:' + (on ? 'var(--gold)' : 'var(--mute)') + ';clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer">' + x.l + ' ' + n + '</button>';
+  }).join('') + '</div>';
+  $('sc-sort').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:8px"><span style="flex:none;letter-spacing:1.4px">SORT</span><div style="display:flex;gap:5px;overflow-x:auto;scrollbar-width:none">' + SORTS.map(function(x){
+    var on = SC.sort === x.k;
+    return '<button type="button" data-s="' + x.k + '" style="flex:none;min-height:28px;padding:3px 8px;border:1px solid ' + (on ? 'var(--gold)' : 'var(--line)') + ';background:transparent;color:' + (on ? 'var(--gold)' : 'var(--dim)') + ';font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">' + x.l + '</button>';
+  }).join('') + '</div></div>';
+}
+
+/* ── rows: stacked G + V + M bar scaled so the total width = gvm / 10 ─────────────────── */
+function stackBar(r){
+  var g = nv(r.g_score) || 0, v = nv(r.v_score) || 0, m = nv(r.m_score) || 0, gvm = nv(r.gvm) || 0, sum = g + v + m;
+  var tot = Math.max(0, Math.min(100, gvm * 10)), wg = sum ? tot * g / sum : 0, wv = sum ? tot * v / sum : 0, wm = sum ? tot * m / sum : 0;
+  return '<div style="grid-column:2/span 2;height:6px;margin-top:6px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)">'
+    + '<i style="position:absolute;left:0;top:0;bottom:0;width:' + wg.toFixed(1) + '%;background:' + TONE.g + '"></i>'
+    + '<i style="position:absolute;left:' + wg.toFixed(1) + '%;top:0;bottom:0;width:' + wv.toFixed(1) + '%;background:' + TONE.v + '"></i>'
+    + '<i style="position:absolute;left:' + (wg + wv).toFixed(1) + '%;top:0;bottom:0;width:' + wm.toFixed(1) + '%;background:' + TONE.m + '"></i>'
+    + [60, 70, 80].map(function(t){ return '<i style="position:absolute;top:-2px;left:' + t + '%;width:1px;height:10px;background:var(--dim)"></i>'; }).join('') + '</div>';
+}
+function rowHtml(r, rank){
+  var pick = (r.top_stocks && r.top_stocks[0]) || (r.top_stock ? {symbol:r.top_stock, gvm:r.top_stock_gvm} : null);
+  var dl = nv(r.gvm_change);
+  return '<article class="slab" data-open="' + esc(nameOf(r)) + '" role="button" style="display:grid;grid-template-columns:22px 1fr auto;gap:4px 10px;align-items:center;padding:11px 13px;margin-bottom:8px;cursor:pointer">'
+    + '<span style="font-family:var(--mono);font-size:10px;color:var(--dim);grid-row:1/span 2">' + rank + '</span>'
+    + '<div style="font-weight:700;font-size:14px;line-height:1.2;color:var(--chalk,var(--txt))">' + esc(nameOf(r)) + '</div>'
+    + '<div style="grid-column:3;grid-row:1/span 2;text-align:right"><b style="font-family:var(--mono);font-size:19px;font-weight:800;letter-spacing:-.3px;display:block;line-height:1;color:' + vCol(r) + '">' + f2(r.gvm) + '</b><small style="font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)">' + esc(String(verdictOf(r)).toUpperCase()) + '</small></div>'
+    + stackBar(r)
+    + '<div style="grid-column:2/span 2;display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px"><span style="color:' + TONE.g + '">G <b>' + f1(r.g_score) + '</b></span><span style="color:' + TONE.v + '">V <b>' + f1(r.v_score) + '</b></span><span style="color:' + TONE.m + '">M <b>' + f1(r.m_score) + '</b></span><span style="color:var(--mute)">· ' + (num(r.stocks_count) ? r.stocks_count + ' stocks' : '') + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap) : '') + '</span></div>'
+    + '<div style="grid-column:2/span 2;font-family:var(--mono);font-size:10px;color:var(--mute);display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px">'
+    + '<span class="' + sgn(dl) + '" style="font-weight:700">' + (dl == null ? '— · 30d' : (dl > 0 ? '▲ +' : dl < 0 ? '▼ −' : '') + Math.abs(dl).toFixed(2) + ' · 30d') + '</span>'
+    + (pick ? '<span style="display:inline-flex;gap:5px;align-items:center;padding:1px 6px;border:1px solid var(--line);background:var(--well)">top <b style="color:var(--chalk,var(--txt))">' + esc(pick.symbol) + '</b> ' + f2(pick.gvm) + (nv(pick.day_ret) != null ? ' <span class="' + sgn(pick.day_ret) + '">' + pctS(pick.day_ret) + '</span>' : '') + '</span>' : '')
+    + '</div>'
+    + (r.absorbed && r.absorbed.length > 1 ? '<div style="grid-column:2/span 2;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">includes ' + esc(r.absorbed.filter(function(a){ return a !== nameOf(r); }).join(', ')) + '</div>' : '')
+    + '</article>';
+}
+function renderList(){
+  var d = SC.data;
+  if(!d){
+    $('sc-list').innerHTML = SC.err ? '<div class="empty"><b>Could not load sectors</b>' + esc(SC.err) + '<div style="margin-top:12px"><button class="chip" onclick="load()">Retry</button></div></div>' : '<div class="loading">Loading sectors…</div>';
+    $('sc-more').innerHTML = ''; return;
   }
-  h+='<div class="sect">RATINGS · BEST FIRST</div>';
-  h+= list.length ? list.map(row).join('')
-    : '<div class="empty"><b>No sector ratings</b>The nightly scorer has not produced ratings.</div>';
-  document.getElementById('body').innerHTML=h;
-  document.getElementById('sub').textContent=list.length+' sectors · mcap-weighted GVM';
-}).catch(function(e){
-  document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load</b>'+esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+  var rows = visible(), rk = rankMap();
+  if(!rows.length){ $('sc-list').innerHTML = '<div class="empty"><b>Nothing under this filter</b>Try another chip.</div>'; $('sc-more').innerHTML = ''; return; }
+  var show = SC.all ? rows : rows.slice(0, SHOW_N);
+  $('sc-list').innerHTML = show.map(function(r){ return rowHtml(r, rk[nameOf(r)] || '—'); }).join('');
+  $('sc-more').innerHTML = rows.length > SHOW_N ? '<div style="display:flex;justify-content:center;margin-top:4px"><button type="button" class="chip" data-more="1" style="padding:8px 14px">' + (SC.all ? 'Fewer ▴' : 'Show all ' + rows.length + ' ▾') + '</button></div>' : '';
+}
+function render(){ renderTop(); renderRot(); renderFilters(); renderList(); }
+
+/* ── detail sheet ────────────────────────────────────────────────────────────────────── */
+function sheetClose(){ var w = $('sc-sheet'); if(w) w.remove(); document.body.style.overflow = ''; SC.sheet = null; }
+function pill(k, v, col){ var w = Math.max(0, Math.min(100, (nv(v) || 0) * 10)); return '<div style="padding:9px 10px;background:var(--well);border-radius:7px;border:1px solid var(--line)"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)">' + k + '</div><div style="font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px;color:' + col + '">' + f1(v) + '</div><div style="height:5px;margin-top:6px;background:var(--panel);border:1px solid var(--line)"><i style="display:block;height:100%;width:' + w.toFixed(0) + '%;background:' + col + '"></i></div></div>'; }
+function kv(k, v, cls){ return '<div style="padding:8px 10px;background:var(--well);border:1px solid var(--line);border-radius:7px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">' + k + '</div><div class="' + (cls||'') + '" style="font-family:var(--mono);font-size:14px;font-weight:800;margin-top:1px">' + v + '</div></div>'; }
+function sectHd(t){ return '<div style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;font-family:var(--display,inherit);font-size:11px;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;color:var(--gold)">' + t + '<span style="flex:1;height:1px;background:var(--line)"></span></div>'; }
+function plain(t){ /* first two sentences of the brief, as served (no lookbehind: older WebKit) */ var s = String(t||'').replace(/\s+/g,' ').trim(); var out = [], rest = s; while(rest && out.length < 2){ var m = /^(.*?[.!?])(\s+|$)/.exec(rest); if(!m){ out.push(rest); break; } out.push(m[1]); rest = rest.slice(m[0].length); } return out.join(' '); }
+function stockRow(x){ return '<a href="/m/gvm?sym=' + encodeURIComponent(x.symbol) + '" style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px;text-decoration:none;color:var(--chalk,var(--txt))"><span><b style="font-weight:800">' + esc(x.symbol) + '</b><span style="display:block;font-size:10.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">' + esc(x.company_name || '') + '</span></span><span style="font-family:var(--mono);font-weight:800;color:var(--gold)">' + f2(x.gvm) + '</span><span class="' + sgn(x.day_ret) + '" style="font-family:var(--mono);font-size:12px;min-width:56px;text-align:right">' + pctS(x.day_ret) + '</span></a>'; }
+function sheetBody(r, rank, det){
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-right:36px"><div><div style="font-family:var(--display,inherit);font-size:19px;font-weight:800;line-height:1.05;color:var(--chalk,var(--txt))">' + esc(nameOf(r)) + '</div><div style="font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px;margin-top:4px">' + (num(r.stocks_count) ? r.stocks_count + ' STOCKS' : '') + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap).toUpperCase() : '') + ' · RANK ' + rank + ' OF ' + rowsAll().length + '</div></div>'
+    + '<div style="text-align:right"><b style="font-family:var(--mono);font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1;color:' + vCol(r) + '">' + f2(r.gvm) + '</b><small style="display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)">' + esc(String(verdictOf(r)).toUpperCase()) + ' · 30D ' + (nv(r.gvm_change) == null ? '—' : (r.gvm_change > 0 ? '+' : '') + r.gvm_change.toFixed(2)) + '</small></div></div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0">' + pill('GROWTH', r.g_score, TONE.g) + pill('VALUE', r.v_score, TONE.v) + pill('MOMENTUM', r.m_score, TONE.m) + '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">' + kv('INSTITUTIONS · QTR', pctS(r.inst_change, 2), sgn(r.inst_change)) + kv('QOQ PROFIT · MEDIAN', pctS(r.qoq_profit, 1), sgn(r.qoq_profit)) + kv('UPSIDE TO OWN PE', pctS(r.annual_upside, 0), sgn(r.annual_upside)) + kv('30-DAY GVM', nv(r.gvm_change) == null ? '—' : (r.gvm_change > 0 ? '+' : '') + r.gvm_change.toFixed(2), sgn(r.gvm_change)) + '</div>';
+  h += '<div style="font-family:var(--mono);font-size:9px;color:var(--dim)">scores as of ' + esc(dmy(r.score_date || (SC.data && SC.data.score_date))) + (r.absorbed && r.absorbed.length > 1 ? ' · includes ' + esc(r.absorbed.join(', ')) : '') + '</div>';
+  h += sectHd('Top stocks');
+  if(det === undefined) h += '<div class="loading" style="padding:10px 0">Loading stocks…</div>';
+  else if(!det || det.error) h += '<div class="empty" style="padding:10px 0">Stocks for this sector are not available right now.</div>';
+  else {
+    var st = det.stocks || [], top = SC.sheet.allStocks ? st : st.slice(0, 4);
+    h += (st.length ? top.map(stockRow).join('') : '<div class="empty" style="padding:8px 0">No scored stocks in this sector.</div>');
+    if(st.length > 4) h += '<div style="margin-top:8px;display:flex;justify-content:center"><button type="button" class="chip" data-allstocks="1" style="padding:6px 12px">' + (SC.sheet.allStocks ? 'Top 4 ▴' : 'All ' + st.length + ' stocks ▾') + '</button></div>';
+    h += '<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:6px">day % = last tick vs the close before it' + (det.prices_as_of ? ' · prices ' + esc(String(det.prices_as_of).slice(11, 16)) : '') + ' · scores ' + esc(dmy(det.score_date)) + '</div>';
+    var b = det.brief;
+    if(b){
+      h += sectHd('What this sector is') + '<div style="font-size:13px;line-height:1.5;color:var(--chalk,var(--txt))">' + esc(plain(b.what_is_it)) + '</div>';
+      if(b.growth_drivers && b.growth_drivers.length) h += sectHd('Why it can grow') + b.growth_drivers.map(function(x){ return '<div style="display:flex;gap:8px;padding:4px 0;font-size:13px;line-height:1.45;color:var(--mute)"><span style="color:var(--gold)">·</span><span>' + esc(x) + '</span></div>'; }).join('');
+      if(b.key_risks && b.key_risks.length) h += sectHd('What can go wrong') + b.key_risks.map(function(x){ return '<div style="display:flex;gap:8px;padding:4px 0;font-size:13px;line-height:1.45;color:var(--mute)"><span style="color:var(--gold)">·</span><span>' + esc(x) + '</span></div>'; }).join('');
+      if(b.application_type) h += '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:8px">' + esc(String(b.application_type).replace(/\s*\/\s*/g, ' · ')) + (det.brief_for && det.brief_for !== nameOf(r) ? ' · brief for ' + esc(det.brief_for) : '') + '</div>';
+    } else h += sectHd('Brief') + '<div class="empty" style="padding:8px 0">No brief written for this sector yet.</div>';
+    var topSym = st.length ? st[0].symbol : null;
+    h += '<div style="display:flex;gap:8px;margin-top:14px">' + (topSym ? '<a href="/m/gvm?sym=' + encodeURIComponent(topSym) + '" style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:12px 6px;border-radius:9px;text-decoration:none;background:var(--gold);color:var(--well)">Open ' + esc(topSym) + ' →</a>' : '') + '<button type="button" data-close="1" style="flex:1;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:12px 6px;border-radius:9px;background:var(--well);color:var(--mute);border:1px solid var(--line);cursor:pointer">Close</button></div>';
+  }
+  return h;
+}
+function sheetOpen(name){
+  var r = rowsAll().filter(function(x){ return nameOf(x) === name; })[0]; if(!r) return;
+  var rank = rankMap()[name] || '—';
+  SC.sheet = { name:name, allStocks:false };
+  var el = $('sc-sheet');
+  if(!el){
+    el = document.createElement('div'); el.id = 'sc-sheet';
+    el.innerHTML = '<div data-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:98"></div><div id="sc-sheet-box" role="dialog" aria-modal="true" style="position:fixed;left:0;right:0;bottom:0;z-index:99;background:var(--panel);border:1.5px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;max-height:88vh;overflow:auto;padding:12px 16px max(18px,env(safe-area-inset-bottom))"><div style="width:44px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px"></div><button type="button" data-close="1" aria-label="Close" style="position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--well);color:var(--mute);cursor:pointer">✕</button><div id="sc-sheet-body"></div></div>';
+    el.addEventListener('click', function(e){
+      if(e.target.closest('[data-close]')){ sheetClose(); return; }
+      if(e.target.closest('[data-allstocks]')){ SC.sheet.allStocks = !SC.sheet.allStocks; paintSheet(); return; }
+    });
+    document.body.appendChild(el);
+  }
+  document.body.style.overflow = 'hidden';
+  paintSheet();
+  if(SC.detail[name] === undefined){
+    SC.detail[name] = null;
+    var q = '/api/mobile/sector/detail?segment=' + encodeURIComponent(name) + '&absorbed=' + encodeURIComponent((r.absorbed || []).join('|'));
+    fetchWithTimeout(q).then(function(x){ return x.json(); }).then(function(j){ SC.detail[name] = j || false; paintSheet(); }).catch(function(){ SC.detail[name] = false; paintSheet(); });
+  }
+}
+function paintSheet(){
+  if(!SC.sheet) return;
+  var name = SC.sheet.name, r = rowsAll().filter(function(x){ return nameOf(x) === name; })[0], box = $('sc-sheet-body'); if(!r || !box) return;
+  var det = SC.detail[name]; if(det === null) det = undefined;
+  box.innerHTML = sheetBody(r, rankMap()[name] || '—', det);
+}
+
+/* ── events + load ───────────────────────────────────────────────────────────────────── */
+$('secp').addEventListener('click', function(e){
+  var f = e.target.closest('[data-f]'); if(f){ SC.filter = f.getAttribute('data-f'); SC.all = false; renderFilters(); renderList(); return; }
+  var s = e.target.closest('[data-s]'); if(s){ SC.sort = s.getAttribute('data-s'); SC.all = false; renderFilters(); renderList(); return; }
+  if(e.target.closest('[data-more]')){ SC.all = !SC.all; renderList(); return; }
+  var o = e.target.closest('[data-open]'); if(o){ sheetOpen(o.getAttribute('data-open')); return; }
 });
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') sheetClose(); });
+function load(){
+  fetchWithTimeout('/api/sector/rotation').then(function(r){ return r.json(); }).then(function(d){
+    if(!d || d.error) throw new Error((d && d.error) || 'empty reply');
+    SC.data = d; SC.err = null; SC.fetchedAt = istNow(); render();
+  }).catch(function(e){ SC.err = e.message || 'load failed'; if(!SC.data) render(); });
+}
+render(); load();
 </script>
 </body>
 </html>
