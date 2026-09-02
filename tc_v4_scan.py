@@ -293,6 +293,12 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             # scanner annotations are all expressed on the /100 scale, so it is forwarded here
             # rather than recomputed anywhere downstream.
             "best_score100": best.get("score100"),
+            # cc#1593: the two flags a /100 surface needs beside score100, both already on the
+            # card since cc#1172 — forwarded, not recomputed. verdict10 is None when the bucket is
+            # unweighted, and a surface must print "unweighted" then rather than band a number the
+            # registry did not calibrate.
+            "best_verdict10": best.get("verdict10"),
+            "best_score10_weighted": bool(best.get("score10_weighted")),
             # cc#1033: the ratio the choice was made on, mirroring best_pct in the dual payload.
             "best_pct": (round(best["score"] / best["max"], 4) if best.get("max") else None),
             "scores": {c["label"]: c["score"] for c in cards},

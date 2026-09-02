@@ -88,3 +88,23 @@ def get_primary_styles():
 def primary_styles(symbol, side="ALL"):
     """One-shot convenience: score `symbol` on the canonical style-level scorer (all 4 style cards)."""
     return get_primary_styles()(symbol, side)
+
+# ── cc#1593: the two remaining pieces an app surface needs from the SAME v4 family, exposed here so
+# app_check_endpoints.py imports nothing versioned. Both follow the flip point above.
+def get_primary_style_bands():
+    """The /10 band cuts the style-level scorer verdicts on, as {"watch": 5.0, "valid": 6.5,
+    "strong": 8.4}. Read from the scorer's own constants, never retyped: a surface that draws cut
+    marks on a meter must draw them where the verdict actually changes (TC_SCORE_100_V1, 29138:
+    thresholds live in ONE place and every surface reads them from the payload)."""
+    _resolve_version()
+    from tc_v4_dual import _WATCH_10, _VALID_10, _STRONG_10
+    return {"watch": float(_WATCH_10), "valid": float(_VALID_10), "strong": float(_STRONG_10)}
+
+
+def get_primary_scan():
+    """The canonical universe scan: fn(side='ALL', verdict='ALL', segment=None, limit=250) -> dict
+    whose `results` rows carry best_label / best_score100 / verdict per symbol, scored by the same
+    score_card the style-level scorer uses (tc_v4_scan's shared-module contract)."""
+    _resolve_version()
+    from tc_v4_scan import scan
+    return scan
