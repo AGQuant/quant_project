@@ -1,0 +1,239 @@
+<!-- DESIGN REF scorr_mobile_home_hero_R1 @ bd58ae6 · cc#1567 · 02-Sep-2026
+     Hero deck Card 1 (Market Gate) on mobile/home.html, as SHIPPED at main bd58ae6.
+     This is a READ-ONLY extract of the live template + the CSS that shapes it — the source of truth
+     is mobile/home.html at that sha; this file is the numbered ref chain (R1) per ROLE_CHARTER_V4.
+     Never overwrite this revision; the next change is R2.
+
+     WHAT R1 IS
+     · Card body is a vertical flex column (gap --space-9). Header (.chd), verdict (.hero-verdict),
+       chip grid (.hchips + PCR/VIX chips), #chiptrend stay top-anchored, untouched.
+     · .ixgrp (new in cc#1567) wraps idxFooter() + adrBar() and is the column's only flex:1 child.
+       justify-content:space-around spreads the height-sync surplus around the NIFTY row, the
+       BANKNIFTY row and the A/D bar — no empty band under the card at 1080x2340 / 1080x1920.
+       When Card 1 is itself the tallest card the group collapses to content (min-height:0), so
+       the deck's shared height (syncHeroCardHeights) is unchanged.
+     · Scale (Card-1 scoped, existing tokens only): .ixnm type-115 (+15%), .ixlv type-20 (~1.35x),
+       .ixch type-12 (+20%), .ixpv type-105 (+10%); .adrhd type-105 (+15%), .adrn type-11 (+20%),
+       .adrpipe height --space-15 (1.5x of 10px). Row spacing +1 token each.
+     · Colours: tokens only (--txt, --line, --line2, --grn, --red, --panel2, --blu). No raw hex added.
+     · Data: idxFooter(d) / adrBar(d.hero) read the same fields as before — sources not touched.
+-->
+<section data-ref="scorr_mobile_home_hero_R1" data-sha="bd58ae6">
+
+<!-- ═══ 1. CARD 1 TEMPLATE (mobile/home.html, JS string concat inside the home render) ═══ -->
+<script type="text/plain" id="ref-template">
+  h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
+    + '<div class="c"><div class="chd"><div class="t">The market today</div>'
+    + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
+    /* cc#1352: word and why share one flex row (.hero-verdict); the enhancer's fail meter is
+       inserted after .hero-why and wraps to its own full-width line via the CSS above. */
+    + '<div class="hero-verdict"><div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
+    + '<div class="hero-why">' + esc(hero.why || '') + '</div></div>'
+    /* cc#1068 moved the V10 index line out of this scoreboard into its own INDEX SIGNALS card
+       below the carousel. cc#1158 then replaced that card with the INDEX BOOK strip on founder
+       ruling, so the line and its `v10` builder are gone from this page entirely. Left as a note
+       rather than deleted: a reader looking for where the V10 state went should find the answer
+       here, at the place it used to be, instead of concluding it was never there. */
+    + '<div class="hchips">' + (hero.chips || []).map(function(c){
+        var k = c.indeterminate ? '' : (c.ok ? ' ok' : ' bad');
+        var isAdr = String(c.label).indexOf('ADR') > -1;
+        // cc#998: the Nifty Day/Week/Month mood chips open the NIFTY50 close chart, exactly like ADR.
+        // tapKind ADDS the .tap affordance + togTrend handler; the pass/fail class `k` is untouched.
+        var isNifty = /nifty/i.test(String(c.label));
+        var tapKind = isAdr ? 'adr' : (isNifty ? 'nifty' : '');
+        /* cc#1352: display-only shorthand — the payload label is untouched (tapKind above reads
+           the original), only the printed text compacts. DAY/WK/MO per the approved mock. */
+        var lbl = String(c.label || '').replace(/^Nifty\s+Day$/i, 'DAY')
+                    .replace(/^Nifty\s+Week$/i, 'WK').replace(/^Nifty\s+Month$/i, 'MO');
+        var val = (c.value == null) ? '--'
+                : (isAdr ? Number(c.value).toFixed(2) : pct(c.value));
+        // cc#1184: `slab dense` carries the bevel; `k` and the state CSS carry the colours.
+        return '<button class="hc slab dense' + k
+          + (tapKind ? ' tap" onclick="togTrend(event,\'' + tapKind + '\')"' : '"') + '>'
+          + esc(lbl) + ' ' + esc(val) + '</button>';
+      }).join('')
+    /* founder 08-Aug batch 3: PCR/VIX chips carry colour. PCR >= 1.0 = puts heavy = supportive
+       (green), < 1.0 = red. VIX <= 14 = calm (green), >= 17 = elevated (red), between = neutral.
+       Null stays uncoloured -- with no invented band. */
+    + '<button class="hc slab dense tap' + (hero.pcr == null ? '' : (Number(hero.pcr) >= 1 ? ' ok' : ' bad'))
+    + '" onclick="togTrend(event,\'pcr\')">PCR ' + (hero.pcr == null ? '--' : esc(Number(hero.pcr).toFixed(2))) + '</button>'
+    /* VIX_COLOR_RULE_V1 (cc#1081, executed as APP_QA_R5 P3). A fear gauge must never celebrate.
+       The old logic gave VIX <= 14 the `ok` class — green — so on a calm day with the gate
+       failing 4-of-4 the chip read as good news. `ok` is now unreachable on this chip in every
+       state: red when fear confirms, neutral otherwise, never green.
+       cc#1083 COMPLETED THE RULE. P3 shipped red-on->=17 only, because the payload carried no VIX
+       change field and inventing one client-side was forbidden. mobile_home2 now serves vix_chg
+       and vix_prev_close (live intraday level vs the last close of the PREVIOUS trading session,
+       derived from the bar dates so weekends and holidays skip themselves), so the confirming-fear
+       half is live: red when the VIX is RISING and the gate is failing, or whenever it is >= 17.
+       Still never green in any branch. vix_chg null (no previous session) simply means the rising
+       clause cannot fire — it never counts as a rise. */
+    /* cc#1123 — TWO OF THE THREE TIERS SHIP HERE, AND THE THIRD IS DELIBERATELY NOT SHIPPED.
+       The founder's rule is down 5%+ green, up 5%+ red, in between amber. Red and amber are live
+       below. GREEN IS HELD, and the reason is on the record rather than in my head: cc#1081 and
+       cc#1083 locked VIX_COLOR_RULE_V1 on this exact chip — "`ok` is now unreachable on this chip
+       in every state ... never green in any branch" — because this chip sits in a row of PASS/FAIL
+       check chips, where green does not read as "volatility fell", it reads as "this check
+       passed". That was the original defect: on a calm day with the gate failing 4-of-4, a green
+       VIX chip told the founder the market was fine. A change-based green at 5% is a better rule
+       than the level-based green that caused it, but it lands in the same row and inherits the
+       same reading, so reversing a locked rule is not mine to do quietly. CLAUDE.md rule 12 wants
+       the supersession written to session_log BEFORE it is acted on. Logged as a STOPPED: for
+       Fable with this note; the moment it is recorded, green here is one clause.
+       Nothing is lost meanwhile: the Digest tile and the Home tape both carry the full three
+       tiers today, so a VIX down 6% IS green on this screen — on the tape, one row above.
+       The old level rule (>= 17) stays as an OR, unchanged: an absolutely high VIX is red whatever
+       today's move was, and cc#1123 did not ask for that to go. */
+    + '<button class="hc slab dense vixc tap' + (hero.vix == null ? '' : (
+        (Number(hero.vix) >= 17
+          || (hero.vix_chg_pct != null && Number(hero.vix_chg_pct) >= 5)
+          || (hero.vix_chg != null && Number(hero.vix_chg) > 0
+              && hero.fails != null && Number(hero.fails) > 0)) ? ' bad'
+        : (hero.vix_chg_pct != null ? ' vixmid' : '')))
+    + '" onclick="togTrend(event,\'vix\')">VIX ' + (hero.vix == null ? '--' : esc(Number(hero.vix).toFixed(1))) + '</button>'
+    + '</div><div id="chiptrend"></div>'
+    /* cc#1374: adrBar(hero) MOVES BACK to Card 2 (heroCard2) — founder correction, 28-Aug,
+       reversing cc#1372. idxFooter is now the LAST block in the cc#1134 column, carrying the
+       inline pivot tag it gained this same round. Still top-anchored, same fixed row-gap, no
+       stretch, no auto margins. */
+    /* cc#1567 P2: idxFooter + adrBar are grouped in .ixgrp — the ONE flex:1 child of Card 1's
+       column. The card's height is set by syncHeroCardHeights() (the tallest of the four cards)
+       and Card 1 is usually the stretched face, so the surplus used to collect as an empty band
+       under adrBar. .ixgrp takes that surplus and spreads it around the two index rows and the
+       A/D bar (space-around). Header, verdict, chips: still top-anchored, untouched. */
+    + '<div class="ixgrp">'
+    + idxFooter(d)
+    /* cc#1387: adrBar(d.hero) LANDS HERE — Card2->Card3 (cc#1385) then Card3->Card1 (this task),
+       the founder's own history note. Card 1 has no .c2body/space-between mechanism (cc#1134/1359's
+       top-anchored fixed-gap column, unchanged since cc#1359) so this is simply the next block
+       after idxFooter, same fixed row-gap as everything else in this column — no new distribution
+       logic needed. adrBar()'s own function body is untouched, only this call site moved. */
+    + adrBar(d.hero || {})
+    + '</div>'   /* /.ixgrp (cc#1567) */
+    /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
+       28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
+       The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
+    + '</div>'
+</script>
+
+<!-- ═══ 2. HELPERS THE TEMPLATE CALLS ═══ -->
+<script type="text/plain" id="ref-idxFooter">
+function idxFooter(d){
+  var t = {};
+  (d.ticker || []).forEach(function(x){ if (x && x.name) t[x.name] = x; });
+  /* cc#1159: each cell opens the chart through togTrend(), the SAME opener the ADR and VIX chips
+     already use \u2014 not a second one. `kind` is the TRENDS key, and cc#1159 added a banknifty kind
+     to that map and to /api/mobile/trends, which serves it off the same raw_prices table and the
+     same shape as nifty (1,296 BANKNIFTY closes against NIFTY50's 1,297, verified before wiring).
+     The chart lands in the shared #chiptrend host below the chips, exactly where a chip tap puts
+     it, so tapping a footer index and tapping a Nifty chip behave identically. */
+  /* cc#1374 · pivot-side tag, ADJACENT on the same row (founder correction, 28-Aug -- the first
+     pass put it on its own line under the level, which the founder circled as wrong). Same PIV
+     lookup and >=/< pp math idxCol used to compute this for Card 2 before that card lost the
+     index pair -- nothing recomputed differently, just inlined here since idxCol is gone.
+     `sym` is the PIV/pivots key (NIFTY50 / BANKNIFTY), separate from `key` because the ticker
+     array names NIFTY 'NIFTY' but the pivots endpoint names it 'NIFTY50' -- same mismatch idxCol
+     handled by taking both a name and a sym. Null pivot data prints nothing, never a guess. */
+  var cell = function(label, key, kind, sym){
+    var r = t[key] || {};
+    var lvl = (r.price == null) ? '\u2014' : px(r.price);
+    var chg = (r.chg_pct == null) ? '' :
+      '<span class="ixch ' + cls(r.chg_pct) + '">' + pct(r.chg_pct) + '</span>';
+    var pv = PIV && PIV[sym];
+    var pp = pv ? Number(pv.pp) : null;
+    var side = (r.price == null || pp == null) ? ''
+      : (Number(r.price) >= pp ? 'above pivot' : 'below pivot');
+    return '<button class="ixcell" onclick="togTrend(event,\'' + kind + '\')"'
+      + ' aria-label="' + esc(label) + ', open chart"><span class="ixnm">' + esc(label) + '</span>'
+      + '<span class="ixlv">' + esc(lvl) + '</span>' + chg
+      + (side ? '<span class="ixpv">' + side + '</span>' : '')
+      + '<span class="ixgl">\u25a6</span></button>';
+  };
+  return '<div class="ixrow">' + cell('NIFTY', 'NIFTY', 'nifty', 'NIFTY50')
+       + cell('BANKNIFTY', 'BANKNIFTY', 'banknifty', 'BANKNIFTY') + '</div>';
+}
+</script>
+<script type="text/plain" id="ref-adrBar">
+function adrBar(hero){
+  var d = (hero && hero.adr_detail) || {};
+  var adv = d.advances, dec = d.declines;
+  var have = adv != null && dec != null && (adv + dec) > 0;
+  var advPct = have ? (adv / (adv + dec) * 100) : null;
+  return '<div class="adrwrap" onclick="openBreadth()" style="cursor:pointer"><div class="adrhd"><span>ADVANCE / DECLINE</span>'
+    + '<span class="adrn">' + (have ? (adv + ' / ' + dec) : '—') + '</span></div>'
+    + '<div class="adrpipe">' + (have
+        ? ('<div class="adv" style="width:' + advPct.toFixed(1) + '%"></div>'
+           + '<div class="dec" style="width:' + (100 - advPct).toFixed(1) + '%"></div>')
+        : '<span class="adrempty">breadth pending</span>')
+    + '</div></div>';
+}
+</script>
+
+<!-- ═══ 3. CARD-1 SCOPED CSS (in mobile/home.html <style>) ═══ -->
+<style id="ref-css-card1">
+#heroTrack > .c:first-child{gap:var(--space-9)}
+#heroTrack > .c:first-child > *{margin-top:0;margin-bottom:0}
+#heroTrack > .c:first-child > #chiptrend:empty{display:none}
+#heroTrack > .c:first-child{padding-bottom:var(--space-6)}
+#heroTrack > .c:first-child > .hchips{margin-bottom:var(--space-7)}
+#heroTrack > .c:first-child > .hchips,
+#heroTrack > .c:first-child > .ixrow{margin-top:0}
+#heroTrack > .c:first-child > .ixrow{margin-top:0}
+#heroTrack > .c:first-child > .ixgrp{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-around;row-gap:var(--space-9)}
+#heroTrack > .c:first-child > .ixgrp > .ixrow,
+#heroTrack > .c:first-child > .ixgrp > .adrwrap{margin-top:0;margin-bottom:0}
+#heroTrack > .c:first-child > .ixgrp > .ixrow{row-gap:var(--space-4);padding-top:var(--space-6)}
+#heroTrack > .c:first-child > .ixgrp .ixnm{font-size:var(--type-115)}
+#heroTrack > .c:first-child > .ixgrp .ixlv{font-size:var(--type-20)}
+#heroTrack > .c:first-child > .ixgrp .ixch{font-size:var(--type-12)}
+#heroTrack > .c:first-child > .ixgrp .ixpv{font-size:var(--type-105)}
+#heroTrack > .c:first-child > .ixgrp .adrhd{font-size:var(--type-105)}
+#heroTrack > .c:first-child > .ixgrp .adrn{font-size:var(--type-11)}
+#heroTrack > .c:first-child > .ixgrp .adrpipe{height:var(--space-15);margin-top:var(--space-5)}
+#heroTrack > .c:first-child > .ixgrp .adrempty{line-height:var(--space-15);font-size:var(--type-95)}
+#heroTrack > .c:first-child > .hchips{gap:var(--space-4)}
+#heroTrack > .c:first-child > .hchips .hc.slab.dense{position:relative;padding:var(--space-6) var(--space-10);
+#heroTrack > .c:first-child > .hchips .hc.slab.dense::after{content:'';position:absolute;
+</style>
+
+<!-- ═══ 4. SHARED .ix* / .adr* RULES the card-1 rules override (unchanged by cc#1567) ═══ -->
+<style id="ref-css-shared">
+.ixrow{display:flex;flex-direction:column;row-gap:var(--space-2);padding-top:var(--space-4);border-top:var(--bw-1) solid var(--line)}
+.ixcell{width:100%;min-width:0;display:flex;align-items:baseline;gap:var(--space-6);flex-wrap:nowrap;white-space:nowrap;
+  position:relative;background:none;border:0;padding:0;font:inherit;color:inherit;
+  text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ixcell::after{content:'';position:absolute;left:0;right:0;top:50%;
+  height:40px;transform:translateY(-50%)}
+.ixnm{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em11);color:var(--txt,#E9EEFB);text-transform:uppercase}
+.ixlv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:700;
+  font-variant-numeric:tabular-nums;color:var(--txt,#E9EEFB);
+  /* DASHED UNDERLINE THAT COSTS NO HEIGHT. The obvious border-bottom:1px dashed plus a 1px
+     padding was written first and measured: it grew .ixrow from 41px to 42px at 360 and 24 to 25
+     at 412. The card asks for the affordance AND an unchanged card, and a border cannot give you
+     both because it is part of the box. A repeating background gradient paints the same dashes
+     inside the existing box and adds nothing to it — measured identical to the old row at both
+     widths afterwards.
+     The colour fallback is not decoration either: --line2 chains to --edge, which lives in
+     scorr_themes.css and not in this file, and a var() that resolves to nothing takes the whole
+     declaration down with it. The neighbouring --txt carries a fallback for the same reason. */
+  background-image:linear-gradient(to right,var(--line2,rgba(148,166,210,.26)) 55%,transparent 55%);
+  background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%}
+.ixgl{font-size:var(--type-11);color:var(--txt,#E9EEFB);margin-left:var(--space-1)}
+.ixch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);font-weight:700;
+  font-variant-numeric:tabular-nums}
+.ixpv{font-size:var(--type-95);color:var(--txt,#E9EEFB);margin-left:auto;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:34vw}
+.adrwrap{margin-top:calc(7px * var(--rh,1))}
+.adrhd{display:flex;justify-content:space-between;font-size:var(--type-9);font-weight:800;
+  letter-spacing:var(--track-em11);color:var(--txt)}
+.adrn{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;letter-spacing:0}
+.adrpipe{position:relative;display:flex;height:10px;border-radius:var(--radius-5);
+  border:var(--bw-1) solid var(--line);background:var(--panel2);overflow:hidden;
+  margin-top:calc(3px * var(--rh,1))}   /* cc#1375: 5->3, same item-4 offset */
+.adrpipe .adv{background:var(--grn)}
+.adrpipe .dec{background:var(--red)}
+.adrempty{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);
+  color:var(--txt);opacity:.6;padding-left:var(--space-6);line-height:10px}
+</style>
+
+</section>
