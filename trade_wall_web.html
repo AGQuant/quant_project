@@ -76,6 +76,14 @@
      read-only APPROVED badge (a GET off approved_map, showing a decision already taken). */
   .twa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .twa-ok{font:700 10.5px ui-monospace,monospace;color:var(--grn);white-space:nowrap}
+.twa-no{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--mut,#8A8A93);border:1px solid var(--line,#2A2A31)}
+.twa-via{display:block;font-size:10px;color:var(--mut,#8A8A93);margin-top:2px}
+.twa-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.twa-btn{font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.5px;padding:4px 9px;border-radius:5px;cursor:pointer;border:1px solid var(--line,#2A2A31);background:transparent}
+.twa-approve{color:var(--grn,#2FD48B);border-color:var(--grn,#2FD48B)}
+.twa-dismiss{color:var(--mut,#8A8A93)}
+.twa-btn:disabled{opacity:.5;cursor:default}
+.twa-msg{font-size:10px;color:var(--mut,#8A8A93)}
   @media(max-width:760px){
     .wrap{padding:12px 10px 64px}
     thead th,tbody td{padding:7px 6px;font-size:12px}
@@ -492,14 +500,67 @@ function twStampTime(sIn){
   } catch (_e) {}
   return String(sIn || '').slice(11, 16);
 }
+/* cc#1609 WOT_APPROVAL_SURFACE_V1: the wall is the approval surface. Each open engine row reads
+   its state from the API (state + approval, joined server-side from trade_alerts) and shows
+   APPROVE / DISMISS while pending, or the decision taken. The approved_map paint stays as a
+   fallback for a payload without `state`. */
+function twDirection(e){ return e.side === 'SHORT' ? 'SELL' : 'BUY'; }
 function twCell(e){
   if (STATE.status !== 'open') return '';
   if (e.src === 'alert') return '<td></td>';   /* an approval row IS the approval record */
-  var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
-  return '<td>' + (mapHit
-    ? '<div class="twa"><span class="twa-ok">APPROVED · ' + twStampTime(mapHit.approved_at) + '</span></div>'
-    : '') + '</td>';
+  var st = e.state, ap = e.approval;
+  if (!st){
+    var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
+    if (mapHit){ st = 'approved'; ap = mapHit; } else st = 'pending-approval';
+  }
+  if (st === 'approved'){
+    return '<td><div class="twa"><span class="twa-ok">APPROVED'
+      + (ap && ap.approved_price != null ? ' @ ' + px(ap.approved_price) : '')
+      + (ap && ap.approved_at ? ' · ' + twStampTime(ap.approved_at) : '') + '</span>'
+      + (ap && ap.approved_via ? '<span class="twa-via">via ' + esc(ap.approved_via) + '</span>' : '') + '</div></td>';
+  }
+  if (st === 'dismissed'){
+    return '<td><div class="twa"><span class="twa-no">DISMISSED</span></div></td>';
+  }
+  var k = esc(e.id);
+  return '<td><div class="twa twa-act" data-rowid="' + k + '">'
+    + '<button type="button" class="twa-btn twa-approve" data-act="approve" data-rowid="' + k + '">APPROVE</button>'
+    + '<button type="button" class="twa-btn twa-dismiss" data-act="dismiss" data-rowid="' + k + '">DISMISS</button>'
+    + '<span class="twa-msg" id="twa-msg-' + k + '"></span></div></td>';
 }
+function twFind(id){ for (var i = 0; i < STATE.events.length; i++) if (String(STATE.events[i].id) === String(id)) return STATE.events[i]; return null; }
+function twAct(act, id, btn){
+  var e = twFind(id); if (!e) return;
+  var msg = document.getElementById('twa-msg-' + id);
+  var wrap = btn && btn.parentNode; if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = true; });
+  if (msg) msg.textContent = act === 'approve' ? 'approving at live price…' : 'dismissing…';
+  var body = { source_engine: e.engine, source_ref: twRef(e), symbol: e.symbol, direction: twDirection(e), kind: 'entry' };
+  if (act === 'approve') body.approved_via = 'web-wall'; else body.dismissed_via = 'web-wall';
+  fetchWithTimeout('/api/alerts/' + (act === 'approve' ? 'approve_signal' : 'dismiss_signal'),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, status: r.status, d: d }; }); })
+    .then(function(res){
+      var d = res.d || {};
+      if (!res.ok || d.error || !d.alert){
+        var why = d.detail || d.error || ('HTTP ' + res.status);
+        if (msg) msg.textContent = 'not recorded: ' + why;
+        if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = false; });
+        return;
+      }
+      var a = d.alert;
+      e.state = a.status;
+      e.approval = { id: a.id, approved_price: a.approved_price, approved_at: a.approved_at, approved_via: a.approved_via, notes: a.notes };
+      render();
+    })
+    .catch(function(err){
+      if (msg) msg.textContent = 'not recorded: ' + (err && err.message ? err.message : 'network');
+      if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = false; });
+    });
+}
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest && ev.target.closest('.twa-btn'); if (!b) return;
+  twAct(b.getAttribute('data-act'), b.getAttribute('data-rowid'), b);
+});
 function twLoadApproved(){
   if (STATE.status !== 'open') return;
   (BUCKETS[STATE.instrument] || []).forEach(function(eng){
