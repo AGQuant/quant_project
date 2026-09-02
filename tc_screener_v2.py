@@ -107,6 +107,7 @@ def run_tc_screener_v2(limit_symbols: Optional[int] = None):
 
         rows = []
         failed = []
+        unmapped = {}          # cc#1594 (b): bucket -> {rule_key: [symbols]} — live rules with no registry row
         for sym in symbols:
             try:
                 res = get_primary_styles()(sym, "ALL")
@@ -119,6 +120,8 @@ def run_tc_screener_v2(limit_symbols: Optional[int] = None):
             best_label = res.get("best_label")
             cmp_v = _f(res.get("cmp"))
             for c in (res.get("cards") or []):
+                for rk in (c.get("score10_unmapped_rules") or []):
+                    unmapped.setdefault(c.get("label"), {}).setdefault(rk, []).append(sym)
                 rows.append((run_date, UNIVERSE, sym, c.get("label"), c.get("side"),
                              c.get("score10"), c.get("verdict10"),
                              bool(c.get("score10_weighted")),
@@ -146,6 +149,16 @@ def run_tc_screener_v2(limit_symbols: Optional[int] = None):
             # of this result needs, not a detail to discover later from the rows.
             log.warning("tc_screener_v2 run %s: buckets scored UNWEIGHTED (registry inactive): %s",
                         run_date, uncal)
+        if unmapped:
+            # cc#1594 (b) — TC_SCORE_V1 (session_log 27957) STOP-AND-REPORT: a live rule with no
+            # tc_rule_weights row scored at weight 1 inside the scorer and was NAMED on the card as
+            # score10_unmapped_rules. The screener repeats that by name here, once per run, so an
+            # unregistered rule can never sit silently inside a stored score. Nothing is defaulted
+            # here; the scorer already did the honest thing and this line makes it visible.
+            out["unmapped_rules"] = {b: {rk: len(syms) for rk, syms in rks.items()} for b, rks in unmapped.items()}
+            log.error("STOP-AND-REPORT tc_screener_v2 run %s: live rule(s) with NO tc_rule_weights row "
+                      "(scored at weight 1 by the scorer, TC_SCORE_V1 27957): %s",
+                      run_date, {b: sorted(rks.keys()) for b, rks in unmapped.items()})
         if failed:
             out["failed_sample"] = failed[:10]
             log.warning("tc_screener_v2 run %s: %d symbols failed, sample %s",
