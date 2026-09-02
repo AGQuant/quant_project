@@ -506,6 +506,89 @@ def m_sector():
     return _page("sector")
 
 
+# ── cc#1623 · app Sector page detail sheet: every stock of a display segment (the segment itself
+# plus the raw segments cc#827's merge layer folded into it) ORDER BY gvm_score DESC, with the
+# day move on the SAME basis the rotation's top_stocks picks use (sector_endpoints COMPOSITE_SQL
+# picks CTE, cc#811: last 5-min spot tick vs the close before that tick's own session, EOD close
+# when a symbol has no intraday feed), plus the sector brief. Read-only; the brief falls back to
+# the first absorbed raw segment that has one, because briefs are keyed by raw segment name.
+_SECTOR_DAY_SQL = """
+  COALESCE(
+    (SELECT i.close FROM intraday_prices i WHERE i.symbol = g.symbol
+       AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+       AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1),
+    (SELECT close FROM raw_prices WHERE symbol = g.symbol AND close IS NOT NULL
+       ORDER BY price_date DESC LIMIT 1)) AS last_px,
+  (SELECT close FROM raw_prices WHERE symbol = g.symbol AND close IS NOT NULL
+     AND price_date < COALESCE(
+           (SELECT i.ts::date FROM intraday_prices i WHERE i.symbol = g.symbol
+              AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+              AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1),
+           (SELECT MAX(price_date) FROM raw_prices WHERE symbol = g.symbol))
+     ORDER BY price_date DESC LIMIT 1) AS prev_px,
+  (SELECT i.ts FROM intraday_prices i WHERE i.symbol = g.symbol
+     AND i.source IN ('fyers_eq','fyers_ext','fyers_hist') AND i.timeframe='5m'
+     AND i.close IS NOT NULL ORDER BY i.ts DESC LIMIT 1) AS tick_ts
+"""
+
+
+@router.get("/api/mobile/sector/detail")
+@_json_safe
+def mobile_sector_detail(request: Request, segment: str = "", absorbed: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    seg = (segment or "").strip()
+    if not seg:
+        return {"error": "segment required"}
+    names = [seg] + [a.strip() for a in (absorbed or "").split("|") if a.strip() and a.strip() != seg]
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT g.symbol, g.company_name, g.segment,
+                   ROUND(g.gvm_score::numeric, 2) AS gvm_score,
+                   ROUND(g.g_score::numeric, 2) AS g_score, ROUND(g.v_score::numeric, 2) AS v_score,
+                   ROUND(g.m_score::numeric, 2) AS m_score, g.verdict, g.market_cap, g.score_date,
+                   """ + _SECTOR_DAY_SQL + """
+            FROM gvm_scores g
+            WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+              AND g.segment = ANY(%s)
+            ORDER BY g.gvm_score DESC NULLS LAST, g.symbol""", (names,))
+        rows = _rows(cur)
+        stocks = []
+        for r in rows:
+            last, prev = r.get("last_px"), r.get("prev_px")
+            day = (round((float(last) - float(prev)) / float(prev) * 100.0, 2)
+                   if (last is not None and prev not in (None, 0)) else None)
+            stocks.append({
+                "symbol": r["symbol"], "company_name": r.get("company_name"), "segment": r.get("segment"),
+                "gvm": float(r["gvm_score"]) if r.get("gvm_score") is not None else None,
+                "g": float(r["g_score"]) if r.get("g_score") is not None else None,
+                "v": float(r["v_score"]) if r.get("v_score") is not None else None,
+                "m": float(r["m_score"]) if r.get("m_score") is not None else None,
+                "verdict": r.get("verdict"),
+                "market_cap": float(r["market_cap"]) if r.get("market_cap") is not None else None,
+                "price": float(last) if last is not None else None,
+                "day_ret": day,
+                "tick_ts": str(r["tick_ts"]) if r.get("tick_ts") else None,
+            })
+        score_date = str(rows[0]["score_date"]) if rows else None
+        brief, brief_for = None, None
+        for nm in names:
+            cur.execute("""SELECT what_is_it, growth_drivers, application_type, business_model, key_risks,
+                                  generated_at::text
+                           FROM sector_briefs WHERE segment = %s""", (nm,))
+            b = cur.fetchone()
+            if b:
+                brief = {"what_is_it": b[0], "growth_drivers": b[1] or [], "application_type": b[2],
+                         "business_model": b[3], "key_risks": b[4] or [], "generated_at": b[5]}
+                brief_for = nm
+                break
+    live_ts = max([x["tick_ts"] for x in stocks if x.get("tick_ts")] or [None])
+    return {"segment": seg, "segments": names, "score_date": score_date, "count": len(stocks),
+            "stocks": stocks, "brief": brief, "brief_for": brief_for, "prices_as_of": live_ts,
+            "day_basis": "last 5-min spot tick vs the close before that tick's session (rotation picks basis, cc#811)"}
+
+
 @router.get("/m/holdings", response_class=HTMLResponse)
 def m_holdings():
     return _page("holdings")
