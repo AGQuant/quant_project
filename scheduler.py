@@ -2979,6 +2979,95 @@ def _bg_guardian_eod_oi():
 _JOB_ACTIVE_CACHE = {}          # job_name -> (checked_at_monotonic, active_or_None)
 
 
+
+# ── cc#1575: OI STRUCTURE snapshots (OI_STRUCTURE_INTERPRET_V1, session_log 36283) ─────────
+# Two snapshots per trading session — 11:00 (mid) and 15:25 (close) — of max pain, call/put
+# walls, PCR and the scenario, into oi_structure_daily; 09:20 fills yesterday's next-day move.
+# App scheduler only (worker/** untouched). REGISTRY-GATED like every other job: an explicit
+# active=FALSE in scheduler_master silences a job; an unreadable registry does NOT (these are
+# read-only snapshots, nothing trades on them). Each job records its own run via _run_recorded.
+def _bg_oi_structure_mid():
+    """cc#1575: 11:00 IST OI structure snapshot (kind=mid) for NIFTY + BANKNIFTY."""
+    if _job_active("bg_oi_structure_mid") is False:
+        return _Skip.disabled()
+    if not _is_trading_day(_ist_now().date()):
+        return _Skip.not_trading_day()
+    import oi_structure
+    return oi_structure.run_snapshot("mid")
+
+
+def _bg_oi_structure_close():
+    """cc#1575: 15:25 IST OI structure snapshot (kind=close) for NIFTY + BANKNIFTY."""
+    if _job_active("bg_oi_structure_close") is False:
+        return _Skip.disabled()
+    if not _is_trading_day(_ist_now().date()):
+        return _Skip.not_trading_day()
+    import oi_structure
+    return oi_structure.run_snapshot("close")
+
+
+def _bg_oi_structure_fill():
+    """cc#1575: 09:20 IST — fill next_day_pct/high/low on every oi_structure_daily row whose next
+    session is complete (spot sources only). Idempotent; a row is filled once."""
+    if _job_active("bg_oi_structure_fill") is False:
+        return _Skip.disabled()
+    import oi_structure
+    return oi_structure.run_fill()
+
+
+_oi_backfill_running = False
+
+
+def _bg_oi_structure_backfill():
+    """cc#1575 P3: flag-gated ONE-SHOT backfill of oi_structure_daily from option_chain history
+    (the cc#500 mf_mc_oneshot pattern). app_config oi_structure_backfill_run: 'pending' (or
+    'pending:YYYY-MM-DD' for a from-date) -> run once, then 'done ...' with the counts; anything
+    else -> skip. The counts are ALSO written to cc_task_logs (task 1575) so the first-run
+    evidence lands in the room by itself (ENGINE_LIVENESS_RULE)."""
+    global _oi_backfill_running
+    if _oi_backfill_running:
+        return _Skip.already_running()
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='oi_structure_backfill_run'")
+            r = cur.fetchone()
+        val = (r[0] or "") if r else ""
+        if not val.startswith("pending"):
+            return _Skip.precondition_missing("nothing pending")
+        _oi_backfill_running = True
+        import oi_structure
+        from_d = oi_structure.BACKFILL_FROM
+        if ":" in val:
+            try:
+                from_d = date.fromisoformat(val.split(":", 1)[1].strip())
+            except Exception:
+                pass
+        res = oi_structure.backfill(from_d)
+        summary = "done %s from=%s days=%d written=%d filled=%d" % (
+            _ist_now().strftime("%Y-%m-%d %H:%M"), res["from"], res["days"], res["written"], res["filled"])
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('oi_structure_backfill_run',%s,NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (summary,))
+            cur.execute("INSERT INTO cc_task_logs (task_id, actor, message) VALUES (1575, 'scheduler', %s)",
+                        ("oi_structure backfill %s | rows: %s" % (summary, " || ".join(res["rows"])[:3500]),))
+            conn.commit()
+        log.info("oi_structure backfill: %s", summary)
+        return {"written": res["written"], "filled": res["filled"], "days": res["days"]}
+    except Exception as e:
+        log.error("oi_structure backfill failed: %s", e)
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('oi_structure_backfill_run',%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                            ("error %s: %s" % (_ist_now().strftime("%Y-%m-%d %H:%M"), str(e)[:300]),))
+                conn.commit()
+        except Exception:
+            pass
+        raise
+    finally:
+        _oi_backfill_running = False
+
+
 def _job_active(job_name, ttl=60):
     """Is this job ACTIVE in scheduler_master? True / False / None when the registry is unreadable.
 
@@ -4632,6 +4721,15 @@ async def _scheduler_loop():
         # a market that never opened reports nothing and would bury the ones that matter.
         if _is_trading_day(today) and h == 9 and m == 20:
             _spawn(_bg_protocol_one)
+        # cc#1575: OI structure — 11:00 mid + 15:25 close snapshots, 09:20 next-day fill; the
+        # backfill is armed-flag-only (app_config oi_structure_backfill_run='pending').
+        if _is_trading_day(today) and h == 11 and m == 0:
+            _spawn(_bg_oi_structure_mid)
+        if _is_trading_day(today) and h == 15 and m == 25:
+            _spawn(_bg_oi_structure_close)
+        if _is_trading_day(today) and h == 9 and m == 20:
+            _spawn(_bg_oi_structure_fill)
+        _spawn(_bg_oi_structure_backfill)
         if _is_trading_day(today) and h == 15 and m == 40:
             _spawn(_bg_protocol_one)
         if h == 5 and m == 15:

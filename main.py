@@ -147,6 +147,7 @@ from room_endpoints import router as room_router   # cc#1086: /room + /api/room/
 from ondemand_bars import router as ondemand_bars_router   # cc#1103: /api/bars/{symbol} on-demand 5-min pull
 from tc_screener_v2 import router as tc_screener_v2_router   # cc#1172: four-bucket screener (tc_screener_v2)
 from app_check_endpoints import router as app_check_router   # cc#1593: app Check tab reads (/api/mobile/check/tc|scan|invest)
+from oi_structure import router as oi_structure_router   # cc#1575: OI structure composer (/api/oi/structure)
 from tc_position_stars_v2 import router as tc_position_stars_v2_router   # cc#1172: four-bucket position stars
 from tc_score_replay_endpoints import router as tc_score_replay_router   # cc#1211: TC score entry replay
 from basket_rebalance_endpoints import router as basket_rebalance_router  # cc#1273: per-client basket subscriptions + repair
@@ -815,6 +816,7 @@ app.include_router(room_router)   # cc#1086: /room + /api/room/feed
 app.include_router(ondemand_bars_router)   # cc#1103: /api/bars/{symbol} + /api/bars/_cache/stats
 app.include_router(tc_screener_v2_router)   # cc#1172: /api/trade-check/screen-v2 + /api/admin/run-tc-screener-v2
 app.include_router(app_check_router)   # cc#1593: /api/mobile/check/tc + /scan + /invest (four-bucket + invest v2)
+app.include_router(oi_structure_router)   # cc#1575: /api/oi/structure (Max Pain (i) read, both surfaces)
 app.include_router(tc_position_stars_v2_router)   # cc#1172: /api/trade-check/position-stars-v2 + admin run
 app.include_router(tc_score_replay_router)   # cc#1211: /api/tc/replay/* + one-shot /api/admin/run-tc-replay
 app.include_router(basket_rebalance_router)  # cc#1273: /api/adaptive/baskets/* (available/subscribe/repair)
