@@ -3964,15 +3964,74 @@ function markerFlag(x){
   // cached data for the popover's TC section, shown regardless of amber per scope 3c).
   const tc=((cache.tcScores&&cache.tcScores.rows)||[]).find(t=>t&&t.symbol===sym&&String(t.side||'').toUpperCase()===side)||null;
   const detail=window.ScorrMarkerFlagDetailHtml?window.ScorrMarkerFlagDetailHtml(fired,tc,MK_LEGEND):'';
-  // Anchored popover, the SAME mechanism markerLegendPopover() below already uses (cc#1010/933) \u2014
-  // reused, not reinvented. .mk-flagpop joins .mk-legpop in the shared close-on-outside-click and
-  // Escape listeners further down this file.
-  return `<span class="mk-flagwrap" style="position:relative;display:inline-block;vertical-align:middle;margin-right:2px">`+
+  // cc#1582: the popover used to be an absolute div INSIDE the row (.mk-flagwrap position:relative),
+  // so the table's own scroll box (.tbl-scroll / overflow-x:auto) clipped it \u2014 on the last visible
+  // rows only the top ~20px showed (founder screenshot, BHARATFORG). The detail now renders into a
+  // hidden source div next to the button, and the click copies it into ONE body-level fixed
+  // popover (#mkFlagPop, mkFlagOpen below) placed from the glyph's getBoundingClientRect(), so no
+  // ancestor overflow can cut it. Content is unchanged: same ScorrMarkerFlagDetailHtml, same
+  // cc#1558-filtered fired object.
+  return `<span class="mk-flagwrap" style="display:inline-block;vertical-align:middle;margin-right:2px">`+
     `<button type="button" class="mk-flag" aria-label="Markers for ${sym} \u2014 tap for detail" title="Markers \u2014 tap for detail" `+
-      `style="color:${col}" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(el){el.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();">\u2691</button>`+
-    `<div class="mk-flagpop" onclick="event.stopPropagation()" style="display:none;position:absolute;top:22px;left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:270px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)">${detail}</div>`+
+      `style="color:${col}" onclick="mkFlagOpen(this);event.stopPropagation();">\u2691</button>`+
+    `<div class="mk-flagsrc" style="display:none">${detail}</div>`+
   `</span>`;
 }
+// cc#1582: ONE body-level marker-detail popover, created once and reused by every flag on the page.
+// position:fixed from the clicked glyph; flips above the glyph when there is no room below; follows
+// on scroll/resize; closes on outside click, Escape (shared listeners below), and when the table
+// re-renders underneath it (the anchor button leaves the DOM). z-index 5000 sits above the sticky
+// table header / top bar (<=900) and below every modal on this page (>=9990).
+let _mkPopAnchor=null, _mkPopObs=null;
+function _mkPopEl(){
+  let p=document.getElementById('mkFlagPop');
+  if(p) return p;
+  p=document.createElement('div');
+  p.id='mkFlagPop';
+  p.setAttribute('role','dialog');
+  p.setAttribute('aria-label','Marker detail');
+  p.style.cssText='display:none;position:fixed;top:0;left:0;z-index:5000;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:270px;max-width:calc(100vw - 16px);box-sizing:border-box;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)';
+  p.addEventListener('click',function(e){ e.stopPropagation(); });
+  document.body.appendChild(p);
+  return p;
+}
+function mkFlagClose(){
+  const p=document.getElementById('mkFlagPop');
+  if(p) p.style.display='none';
+  _mkPopAnchor=null;
+  if(_mkPopObs){ try{ _mkPopObs.disconnect(); }catch(e){} _mkPopObs=null; }
+}
+function _mkPopPlace(){
+  const p=document.getElementById('mkFlagPop');
+  if(!p||p.style.display!=='block'||!_mkPopAnchor) return;
+  if(!_mkPopAnchor.isConnected){ mkFlagClose(); return; }   // row re-rendered: nothing to anchor to
+  const r=_mkPopAnchor.getBoundingClientRect(), gap=6, edge=8;
+  const vh=window.innerHeight, vw=window.innerWidth, ph=p.offsetHeight, pw=p.offsetWidth;
+  let top=r.bottom+gap;
+  if(top+ph>vh-edge && r.top-gap-ph>=edge) top=r.top-gap-ph;   // no room below: open above the glyph
+  const left=Math.max(edge,Math.min(r.left,vw-pw-edge));
+  p.style.top=Math.round(top)+'px';
+  p.style.left=Math.round(left)+'px';
+}
+function mkFlagOpen(btn){
+  const p=_mkPopEl();
+  if(_mkPopAnchor===btn&&p.style.display==='block'){ mkFlagClose(); return; }   // same flag again = toggle off
+  try{ document.querySelectorAll('.mk-legpop').forEach(function(el){ el.style.display='none'; }); }catch(e){}
+  const src=btn.nextElementSibling;
+  p.innerHTML=(src&&src.classList.contains('mk-flagsrc'))?src.innerHTML:'';
+  _mkPopAnchor=btn;
+  p.style.display='block';
+  _mkPopPlace();
+  // Watch the table for a repaint while open: the 5-min auto-refresh rebuilds the rows, and a
+  // popover pinned to a button that no longer exists must go, not float.
+  try{
+    if(window.MutationObserver){
+      _mkPopObs=new MutationObserver(function(){ if(_mkPopAnchor&&!_mkPopAnchor.isConnected) mkFlagClose(); });
+      _mkPopObs.observe(document.body,{childList:true,subtree:true});
+    }
+  }catch(e){}
+}
+try{ window.addEventListener('scroll',_mkPopPlace,true); window.addEventListener('resize',_mkPopPlace); }catch(e){}
 // cc#933: the legend footer. Rendered from window.ScorrMarkerLegend — the SAME snippet /m/v8
 // uses — with the copy itself coming from the engine, so neither the layout nor the wording can
 // fork between the two surfaces.
@@ -4010,18 +4069,17 @@ function markerLegendPopover(){
   // any more, so a footer explaining that rule would be explaining something that never happens.
   const footer='';
   return `<span style="position:relative;display:inline-block;margin-left:7px;vertical-align:middle">`+
-    `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(x){x.style.display='none';});p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
+    `<button aria-label="Marker legend" title="Marker legend" onclick="var p=this.nextElementSibling;var wasOpen=p.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(function(x){x.style.display='none';});if(window.mkFlagClose)mkFlagClose();p.style.display=wasOpen?'none':'block';event.stopPropagation();" `+
       `style="width:17px;height:17px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);font:600 10px/1 Sora,sans-serif;cursor:pointer;padding:0;vertical-align:middle">i</button>`+
     `<div class="mk-legpop" onclick="event.stopPropagation()" style="display:none;position:absolute;top:23px;left:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:275px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)">${rows}${footer}</div>`+
   `</span>`;
 }
 // cc#1010: any click outside an open marker popover closes it (the (i)/flag buttons and the
 // popovers themselves stopPropagation, so their own clicks don't trigger this).
-// cc#1547: .mk-flagpop (the new per-row marker-detail popover) joins .mk-legpop here, plus an
-// Escape handler — the flag popover's own verify item asks for it explicitly; .mk-legpop gets it
-// for free rather than staying the one marker popover Escape does not reach.
-try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(p){p.style.display='none';});}catch(e){}}); }catch(e){}
-try{ document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ try{document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(function(p){p.style.display='none';});}catch(e2){} } }); }catch(e){}
+// cc#1547: the per-row marker-detail popover joins .mk-legpop here, plus an Escape handler.
+// cc#1582: that popover is now the single body-level #mkFlagPop, closed via mkFlagClose().
+try{ document.addEventListener('click',function(){try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});mkFlagClose();}catch(e){}}); }catch(e){}
+try{ document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ try{document.querySelectorAll('.mk-legpop').forEach(function(p){p.style.display='none';});mkFlagClose();}catch(e2){} } }); }catch(e){}
 // cc#1028, corrected by cc#1034: bkRow is a thin call into the shared renderer over the basket
 // VIEW. The inline C·A·R·D strip that used to live here is GONE from every table row — the
 // symbol-click popup is the one interaction on both surfaces — and the basket pill renders on
@@ -4802,13 +4860,13 @@ function dlToggleInfo(ev){
   const btn=ev&&ev.currentTarget?ev.currentTarget:null;
   const host=btn?btn.parentElement:null;if(!host)return;
   let pop=host.querySelector('.dl-infopop');
-  if(pop){const was=pop.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(x=>{x.style.display='none';});pop.style.display=was?'none':'block';return;}
+  if(pop){const was=pop.style.display==='block';document.querySelectorAll('.mk-legpop').forEach(x=>{x.style.display='none';});if(window.mkFlagClose)mkFlagClose();pop.style.display=was?'none':'block';return;}
   pop=document.createElement('div');
   pop.className='mk-legpop dl-infopop';
   pop.setAttribute('onclick','event.stopPropagation()');
   pop.style.cssText='display:block;position:absolute;top:34px;right:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:270px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)';
   pop.innerHTML='<div class="loading" style="padding:4px 0">Loading...</div>';
-  document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(x=>{x.style.display='none';});
+  document.querySelectorAll('.mk-legpop').forEach(x=>{x.style.display='none';});if(window.mkFlagClose)mkFlagClose();
   host.appendChild(pop);
   dlLoadSeries().then(d=>{pop.innerHTML=dlInfoHtml(d);}).catch(e=>{pop.innerHTML=`<div class="err">Return facts failed: ${e.message}</div>`;});
 }
