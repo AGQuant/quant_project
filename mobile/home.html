@@ -1024,6 +1024,17 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 #heroTrack > .c:first-child > .ixgrp{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-around;row-gap:var(--space-9)}
 #heroTrack > .c:first-child > .ixgrp > .ixrow,
 #heroTrack > .c:first-child > .ixgrp > .adrwrap{margin-top:0;margin-bottom:0}
+/* cc#1567 P3 · SCALE THE INDEX ROWS — Card 1 only, so the shared .ix* rules above stay as they
+   are for any other caller. Symbol label +15% (type-10 -> type-115), index level ~1.35x
+   (type-15 -> type-20, ~52px rendered at 3x), pct +20% (type-10 -> type-12), pivot side +10%
+   (type-95 -> type-105). Existing type tokens only — no calc multipliers, no raw px. Row spacing
+   grows with the type: the gap between the two index rows and the separator padding step up one
+   token each. Chip grid, mood word, ticker and the card's numbers are not touched. */
+#heroTrack > .c:first-child > .ixgrp > .ixrow{row-gap:var(--space-4);padding-top:var(--space-6)}
+#heroTrack > .c:first-child > .ixgrp .ixnm{font-size:var(--type-115)}
+#heroTrack > .c:first-child > .ixgrp .ixlv{font-size:var(--type-20)}
+#heroTrack > .c:first-child > .ixgrp .ixch{font-size:var(--type-12)}
+#heroTrack > .c:first-child > .ixgrp .ixpv{font-size:var(--type-105)}
 /* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
    surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
    SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
