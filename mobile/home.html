@@ -3157,17 +3157,17 @@ function renderHeroPositions(){
   /* cc#1569 P4 · the symbol word is the toggle's own LABEL (POS_SYMS: NIFTY50 -> "NIFTY"), not the
      internal key — the card must read "No open NIFTY position", the same word the pill shows. */
   var symLabel = (POS_SYMS.filter(function(s){ return s.key === POS.sym; })[0] || {}).label || POS.sym;
-  if (body && futEmpty && optEmpty){
+  /* cc#1598 + V10_DISPLAY_OPTIONS_ONLY_V1 (36703, tightened 4503): this card is the OPTION leg
+     only. The FUTURES section, its badge and its range bar are not rendered — a futures leg is a
+     stored context, never a display. futBadge / posRangeBar stay defined for the spec sheet. */
+  if (body && optEmpty){
     body.innerHTML = posFeedAlertHtml(rec.feed_alert)
       + '<div class="posempty"><span class="msg">No open ' + esc(symLabel) + ' position</span>'
-      + '<span class="sub">Futures or options</span></div>';
+      + '<span class="sub">Options</span></div>';
   } else if (body) body.innerHTML =
       posFeedAlertHtml(rec.feed_alert)
-      + '<div class="legwrap' + (futEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
-      + (futEmpty ? legEmpty('Futures', 'No open futures position') : posRangeBar(fut, cmp)) + '</div>'
-      + '<div class="legdiv"></div>'
-      + '<div class="legwrap' + (optEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
-      + (optEmpty ? legEmpty('Options', 'No open options position') : posDecayBar(opt)) + '</div>';
+      + '<div class="legwrap"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
+      + posDecayBar(opt) + '</div>';
   var tg = document.getElementById('heroPositionsToggle');
   if (tg) tg.innerHTML = posToggleHtml();
   var btn = document.getElementById('heroPositionsBtn');
@@ -3214,9 +3214,9 @@ function loadHeroPositions(){
       var open = {}, total = {};
       POS_SYMS.forEach(function(s){
         var rec = POS.data[s.key] || {};
-        open[s.key] = !!(rec.fut || rec.opt);
-        total[s.key] = open[s.key]
-          ? ((_futPnl(rec.fut, posCmp(s.key)) || 0) + (_optPnl(rec.opt) || 0)) : null;
+        /* cc#1598: option leg only decides "open" and the P&L the default tab is chosen on */
+        open[s.key] = !!rec.opt;
+        total[s.key] = open[s.key] ? (_optPnl(rec.opt) || 0) : null;
       });
       if (open.NIFTY50 && !open.BANKNIFTY) POS.sym = 'NIFTY50';
       else if (open.BANKNIFTY && !open.NIFTY50) POS.sym = 'BANKNIFTY';
@@ -4138,16 +4138,21 @@ function renderV10(){
   if (!d || !bd) return;
   var t = document.getElementById('v10ttl');
   if (t) t.textContent = d.label + ' · V10 trades';
-  var st = d.stats || {};
-  /* cc#1405: the date-range + count/resolution spans ("08-20 15:10 -> 08-28 15:10 · 360 bars ·
-     5-min") are removed per the founder's struck-through screenshot. The OTHER two spans here
-     (closed/win-loss/open, Net P&L) are a different line -- not marked in that screenshot, not
-     named in this task's own scope -- left exactly as they were. */
+  /* cc#1598 (V10_DISPLAY_OPTIONS_ONLY_V1, 36703): this line used to read d.stats — the SIGNAL-level
+     figures netting FUT + OPT legs (65 closed · 33W/32L · Net 1.43L on the founder's screenshot)
+     above a log that showed 30 option trades. It now reads the SAME per-leg source the summary
+     strip and the log rows read: d.by_leg[view] for open/net and the leg-filtered closed rows for
+     the counts, so the two cannot disagree. cc#1405's removal of the date-range span stands. */
+  var view = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
+  var lst = v10LegStats(d, view);
+  var lrows = (d.trades || []).filter(function(t){ return t.leg === view && !t.open; });
+  var lw = lrows.filter(function(t){ return Number(t.net_pnl) > 0; }).length;
+  var ll = lrows.filter(function(t){ return Number(t.net_pnl) < 0; }).length;
   bd.innerHTML = v10Toggle()
     + '<div class="v10st">'
-    + '<span>' + (st.closed || 0) + ' closed · ' + (st.wins || 0) + 'W/' + (st.losses || 0) + 'L'
-    + (st.open ? ' · ' + st.open + ' open' : '') + '</span>'
-    + (st.net_pnl == null ? '' : '<span class="' + cls(st.net_pnl) + '">Net ' + inrShort(st.net_pnl) + '</span>')
+    + '<span>' + lrows.length + ' closed · ' + lw + 'W/' + ll + 'L'
+    + (lst.open ? ' · ' + lst.open + ' open' : '') + '</span>'
+    + (lst.net == null ? '' : '<span class="' + cls(lst.net) + '">Net ' + inrShort(lst.net) + '</span>')
     + '</div>'
     + v10Svg(d)
     + '<div class="sect" style="margin-top:10px">TRADE LOG</div>'
