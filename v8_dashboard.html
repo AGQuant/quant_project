@@ -4593,11 +4593,12 @@ function renderDayLog(data){
   const cards=`<div class="cards">
     <div class="card"><div class="k">Total Opened</div><div class="v">${s.total_opened??'--'}</div></div>
     <div class="card"><div class="k">Total Closed</div><div class="v">${s.total_closed??'--'}</div></div>
-    <div class="card"><div class="k">Gross P&L</div><div class="v ${pnlCls(s.total_gross_pnl)}">${inr(s.total_gross_pnl)}</div></div>
+    <div class="card" style="position:relative"><div class="k">Gross P&L</div><div class="v ${pnlCls(s.total_gross_pnl)}">${inr(s.total_gross_pnl)}</div>${dlGlyph('gross')}</div>
     <div class="card"><div class="k">Total Brokerage</div><div class="v neg">${inr(s.total_brokerage)}</div></div>
-    <div class="card"><div class="k">Net P&L</div><div class="v ${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</div></div>
-    <div class="card"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div></div>
-  </div>`;
+    <div class="card" style="position:relative"><div class="k">Net P&L</div><div class="v ${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</div>${dlGlyph('net')}</div>
+    <div class="card" style="position:relative"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div>${dlInfoGlyph()}</div>
+  </div>
+  <div id="dlChartPanel" style="display:none;margin:-6px 0 16px"></div>`;
   // cc#1019: on the Futures view, say which book this is. The cutover comes back with the payload,
   // so the line can never drift from the filter that produced the rows.
   const _dlNote=(data.view==='futures')
@@ -4633,6 +4634,131 @@ function renderDayLog(data){
     {sortKey:'date',dir:-1,empty:"No trading data yet.",footer:totrow});
   return cards+_dlNote+`<div class="ptitle">Day Log <span class="ct">${days.length} trading days</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>`+table;
+}
+
+// ---- cc#1561: Day Log P&L chart panel + Overall Return info popover -----------------------
+// One endpoint (/api/v8/daylog/series) feeds both. It is the /api/v8/daylog payload folded
+// server-side, so every number here is the same number the KPI boxes print — nothing is
+// recomputed on the page. The panel slides down under the KPI row (no modal); both chart glyphs
+// open the same panel and only change which series is emphasised.
+let DL_SERIES=null, DL_SERIES_KEY=null, DL_CHART=null, DL_FOCUS='net';
+function dlGlyph(which){
+  const t=which==='net'?'Net P&L chart':'Gross P&L chart';
+  return `<span class="info-btn" onclick="dlToggleChart('${which}')" title="${t}" style="position:absolute;top:10px;right:10px">&#128200;</span>`;
+}
+function dlInfoGlyph(){
+  return `<span class="info-btn" onclick="dlToggleInfo(event)" title="How this return is worked out" style="position:absolute;top:10px;right:10px">i</span>`;
+}
+async function dlLoadSeries(){
+  // Follows the Master Futures/Equity basis exactly as loadDayLog does; cached per basis.
+  const key=MASTER_BASIS==='futures'?'futures':'equity';
+  if(DL_SERIES&&DL_SERIES_KEY===key)return DL_SERIES;
+  DL_SERIES=await getJSON(EP.daylog+'/series'+(key==='futures'?'?view=futures':''));
+  DL_SERIES_KEY=key;
+  return DL_SERIES;
+}
+function dlFmtD(d){if(!d)return'--';const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const p=String(d).split('-');return p.length<3?String(d):p[2]+'-'+M[parseInt(p[1],10)-1]+'-'+p[0];}
+async function dlToggleChart(which){
+  const el=document.getElementById('dlChartPanel');if(!el)return;
+  const open=el.style.display!=='none';
+  if(open&&which===DL_FOCUS){dlCloseChart();return;}   // second click on the same glyph closes
+  DL_FOCUS=which;
+  el.style.display='block';
+  if(!open)el.innerHTML='<div class="loading">Loading P&L series...</div>';
+  try{
+    const d=await dlLoadSeries();
+    el.innerHTML=dlRenderPanel(d);
+    dlDrawChart(d);
+  }catch(e){el.innerHTML=`<div class="err">P&L series failed: ${e.message}</div>`;}
+}
+function dlCloseChart(){
+  const el=document.getElementById('dlChartPanel');if(!el)return;
+  el.style.display='none';
+  if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
+}
+function dlRenderPanel(d){
+  const title=`P&L performance - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
+  const pts=(d.points||[]);
+  const body=pts.length
+    ? `<div style="position:relative;height:260px"><canvas id="dlChartCv"></canvas></div>`
+    : `<div class="empty">No closed trades in window.</div>`;
+  return `<div class="card" style="padding:12px 14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      <div class="ptitle" style="margin:0">${title}</div>
+      <span class="info-btn" onclick="dlCloseChart()" title="Close">&#10005;</span>
+    </div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Cumulative by exit date · <b style="color:var(--txt)">${DL_FOCUS==='net'?'Net':'Gross'}</b> emphasised · other series faint · Net is after Rs.500/closed trade brokerage</div>
+    ${body}
+  </div>`;
+}
+// Zero line: a plain dashed rule at y=0 so a book that crosses from loss to gain reads at a glance.
+const _dlZeroPlugin={id:'dlZero',afterDatasetsDraw(chart){
+  const a=chart.chartArea,y=chart.scales.y,ctx=chart.ctx;if(!a||!y)return;
+  if(y.min>0||y.max<0)return;
+  const py=y.getPixelForValue(0);
+  ctx.save();ctx.strokeStyle=_tok('--mut')||'#8a94a6';ctx.setLineDash([4,4]);ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(a.left,py);ctx.lineTo(a.right,py);ctx.stroke();ctx.restore();
+}};
+function dlDrawChart(d){
+  if(!window.Chart)return;
+  const cv=document.getElementById('dlChartCv');if(!cv)return;
+  if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
+  const pts=d.points||[];
+  const labels=pts.map(p=>p.date);
+  const net=pts.map(p=>p.net_cum),gross=pts.map(p=>p.gross_cum);
+  // Colour follows the SIGN of the latest cumulative value of the emphasised series (theme tokens,
+  // never a raw hex): a book that is up draws green, a book that is down draws red.
+  const focusVals=DL_FOCUS==='net'?net:gross;
+  const lastV=focusVals.length?focusVals[focusVals.length-1]:0;
+  const col=(lastV<0?_tok('--red'):_tok('--grn'))||'#8a94a6';
+  const faint=_tok('--mut')||'#8a94a6';
+  const mk=(label,vals,emph)=>({label,data:vals,borderColor:emph?col:faint,borderWidth:emph?2.5:1,
+    backgroundColor:emph?col+'1a':'transparent',fill:emph,tension:.2,pointRadius:emph?2.5:0,
+    pointHoverRadius:4,pointBackgroundColor:emph?col:faint,spanGaps:true,order:emph?0:1});
+  const byDate={};pts.forEach(p=>{byDate[p.date]=p;});
+  DL_CHART=new Chart(cv.getContext('2d'),{
+    type:'line',plugins:[_dlZeroPlugin],
+    data:{labels,datasets:[mk('Net',net,DL_FOCUS==='net'),mk('Gross',gross,DL_FOCUS!=='net')]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      interaction:{intersect:false,mode:'index'},
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index',
+        callbacks:{title:items=>items.length?dlFmtD(items[0].label):'',
+          label:()=>null,
+          afterBody:items=>{const p=items.length?byDate[items[0].label]:null;if(!p)return[];
+            return['Day net: '+inr(p.net_day),'Cum net: '+inr(p.net_cum),'Cum gross: '+inr(p.gross_cum)];}}}},
+      scales:{x:{grid:{display:false,drawTicks:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:8,color:faint,font:{size:9},callback:(v,i)=>{const s=labels[i]||'';return s?dlFmtD(s).slice(0,6):'';}}},
+        y:{grace:'10%',grid:{color:'rgba(138,148,166,.15)'},
+           ticks:{maxTicksLimit:6,color:faint,font:{size:9},callback:v=>inr(v)}}}}});
+}
+// Overall Return (i): the facts behind the box, straight from the series endpoint. Anchored to the
+// box; closes on outside click or Escape by joining the .mk-legpop set the page already closes.
+function dlToggleInfo(ev){
+  if(ev){ev.stopPropagation();}
+  const btn=ev&&ev.currentTarget?ev.currentTarget:null;
+  const host=btn?btn.parentElement:null;if(!host)return;
+  let pop=host.querySelector('.dl-infopop');
+  if(pop){const was=pop.style.display==='block';document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(x=>{x.style.display='none';});pop.style.display=was?'none':'block';return;}
+  pop=document.createElement('div');
+  pop.className='mk-legpop dl-infopop';
+  pop.setAttribute('onclick','event.stopPropagation()');
+  pop.style.cssText='display:block;position:absolute;top:34px;right:0;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.4);padding:11px 13px;width:270px;text-align:left;white-space:normal;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--txt)';
+  pop.innerHTML='<div class="loading" style="padding:4px 0">Loading...</div>';
+  document.querySelectorAll('.mk-legpop,.mk-flagpop').forEach(x=>{x.style.display='none';});
+  host.appendChild(pop);
+  dlLoadSeries().then(d=>{pop.innerHTML=dlInfoHtml(d);}).catch(e=>{pop.innerHTML=`<div class="err">Return facts failed: ${e.message}</div>`;});
+}
+function dlInfoHtml(d){
+  const row=(k,v,cls)=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px"><span style="color:var(--mut)">${k}</span><span class="${cls||''}" style="font-variant-numeric:tabular-nums">${v}</span></div>`;
+  const cagr=d.cagr_pct==null?'n/a (window under 7 days)':sign(d.cagr_pct,2)+'%';
+  return `<div style="font-size:11px;font-weight:700;margin-bottom:6px">How this return is worked out</div>`+
+    row('Since',dlFmtD(d.window_start))+
+    row('Trading days',d.trading_days??'--')+
+    row('Calendar days',d.calendar_days??'--')+
+    row('Capital',inr(d.capital))+
+    row('Net P&L',inr(d.net_total),pnlCls(d.net_total))+
+    row('Return',d.return_pct!=null?sign(d.return_pct,2)+'%':'--',pnlCls(d.return_pct))+
+    row('Annualised (CAGR)',cagr,d.cagr_pct==null?'':pnlCls(d.cagr_pct))+
+    `<div style="font-size:10px;color:var(--dim);margin-top:6px;line-height:1.35">${d.cagr_note||''} Net P&L is after Rs.500 brokerage per closed trade. Return = Net P&L / Capital.</div>`;
 }
 
 // ---- Global Indices tab (cc#264) — lazy load on tab click ------------------
