@@ -2746,7 +2746,9 @@ function oiCard(name, oi, mp, bare){
      carried now lives ON the chart (MAX PAIN tag + amber strike label, the 3-row Spot label,
      the wall tags with their strike labels). The stamp line gains the (i) → oiGuide() button. */
   var stamp = '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>';
-  var ib = '<button type="button" class="oiib" onclick="oiGuide()" aria-label="How to read this card">i</button>';
+  /* cc#1575: the (i) opens the READ sheet (headline, read, evidence line, caveats from
+     /api/oi/structure) with the how-to-read guide underneath — one tap, both. */
+  var ib = '<button type="button" class="oiib" onclick="oiRead(\'' + esc(name) + '\')" aria-label="Read this card">i</button>';
   var header = bare
     ? '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">' + stamp + ib + '</div>'
     : '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
@@ -2764,17 +2766,8 @@ function oiCard(name, oi, mp, bare){
 /* cc#1474 · Max Pain's how-to-read sheet — the cc#1465 pf-sheet shell reused verbatim (same
    classes, same close function, same overflow save/restore), content ported from the signal
    page's cc#1468 guide. The baseline/09:20 concept gets exactly one clause, same reasoning. */
-function oiGuide(){
-  v10PfSheetClose();
-  PF_SHEET.prevOverflow = document.body.style.overflow;
-  var veil = document.createElement('div');
-  veil.className = 'pfveil';
-  var sheet = document.createElement('div');
-  sheet.className = 'pfsheet';
-  sheet.setAttribute('role', 'dialog');
-  sheet.setAttribute('aria-modal', 'true');
-  sheet.innerHTML = '<div class="pfgrab"></div><div class="pfsb">'
-    + '<div class="pfsh">How to read Max Pain</div><div class="pffx">'
+function oiGuideInner(){
+  return '<div class="pfsh">How to read Max Pain</div><div class="pffx">'
     + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
     + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
     + 'brightness shows change since the morning\'s opening levels.</p>'
@@ -2786,7 +2779,19 @@ function oiGuide(){
     + 'the live feed is off. The label under it says which.</p>'
     + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
     + 'contracts are open than calls.</p>'
-    + '</div></div>';
+    + '</div>';
+}
+function oiSheetOpen(inner){
+  v10PfSheetClose();
+  PF_SHEET.prevOverflow = document.body.style.overflow;
+  var veil = document.createElement('div');
+  veil.className = 'pfveil';
+  var sheet = document.createElement('div');
+  sheet.className = 'pfsheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.setAttribute('data-oi-sheet', '1');
+  sheet.innerHTML = '<div class="pfgrab"></div><div class="pfsb">' + inner + '</div>';
   document.body.appendChild(veil);
   document.body.appendChild(sheet);
   document.body.style.overflow = 'hidden';
@@ -2796,6 +2801,32 @@ function oiGuide(){
     veil.onclick = v10PfSheetClose;
     var g = sheet.querySelector('.pfgrab');
     if (g) g.onclick = v10PfSheetClose;
+  });  return sheet;
+}
+function oiGuide(){ oiSheetOpen(oiGuideInner()); }
+/* cc#1575 (OI_STRUCTURE_INTERPRET_V1, 36283): the Max Pain (i) read — headline, read, evidence
+   line, caveats — from the ONE composer /api/oi/structure?underlying= (the web popover reads the
+   same words). Nothing is worded or classified here; the guide sits underneath. */
+function oiRead(name){
+  var u = (String(name || '').toUpperCase().indexOf('BANK') === 0) ? 'BANKNIFTY' : 'NIFTY';
+  var sheet = oiSheetOpen('<div class="pfsh">Max Pain ' + esc(u) + ' · the read</div>'
+    + '<div class="pffx" id="oiReadBody"><p>Loading the read…</p></div>' + oiGuideInner());
+  fetchWithTimeout('/api/oi/structure?underlying=' + u).then(function(r){ return r.json(); }).then(function(d){
+    var body = document.getElementById('oiReadBody');
+    if (!body || !sheet.parentNode) return;
+    if (!d || d.status !== 'ok'){
+      body.innerHTML = '<p>' + esc((d && d.note) || 'The read is not available this tick.') + '</p>';
+      return;
+    }
+    body.innerHTML = '<p><b>' + esc(d.headline || '') + '</b></p>'
+      + '<p>' + esc(d.read_text || (d.read || []).join(' ')) + '</p>'
+      + '<p><b>' + esc(d.evidence_line || '') + '</b></p>'
+      + ((d.caveats || []).length ? '<p style="opacity:.75">' + d.caveats.map(esc).join(' ') + '</p>' : '')
+      + '<p style="opacity:.6;font-size:10px">' + esc(d.note || 'Descriptive read only. Not a trading signal.')
+      + (d.as_of ? ' · as of ' + esc(String(d.as_of).replace('T', ' ').slice(0, 16)) : '') + '</p>';
+  }).catch(function(){
+    var body = document.getElementById('oiReadBody');
+    if (body) body.innerHTML = '<p>The read is not available this tick.</p>';
   });
 }
 
